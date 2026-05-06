@@ -1,0 +1,9 @@
+# Changes here will be overwritten by Copier; DO NOT EDIT
+_commit: 5c1f901
+_src_path: guardrails
+author_email: taylor.a.barnes@gmail.com
+author_name: Taylor Barnes
+language: rust
+project_description: Run molecular dynamics simulations
+project_name: Dynamics
+project_slug: dynamics

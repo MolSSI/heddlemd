@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+
+      "Bash(cargo check:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo run:*)",
+      "Bash(cargo test:*)",
+
+
+      "Skill(plan-feature)"
+    ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-container.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
