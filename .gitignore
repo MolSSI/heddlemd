@@ -17,3 +17,8 @@ target/
 # Generated at runtime by run.sh
 .vscode/settings.json
 .interface.sh
+
+
+# Added by cargo
+
+/target
