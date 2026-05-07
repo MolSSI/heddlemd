@@ -15,11 +15,13 @@ using `nvcc`.
 For each `.cu` file, `build.rs` invokes:
 
 ```
-nvcc --ptx -o <out_dir>/<stem>.ptx <source_path>
+nvcc --ptx -std=c++17 -o <out_dir>/<stem>.ptx <source_path>
 ```
 
 where `<out_dir>` is the value of the `OUT_DIR` environment variable set by
-Cargo and `<stem>` is the file name without the `.cu` extension.
+Cargo and `<stem>` is the file name without the `.cu` extension. The
+`-std=c++17` flag is required so kernels can use `if constexpr` and
+function templates.
 
 `build.rs` emits `cargo:rerun-if-changed=kernels/` so that Cargo reruns the
 build script whenever any file under `kernels/` changes.

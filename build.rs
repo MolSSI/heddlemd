@@ -56,7 +56,11 @@ fn main() {
 
 fn compile_to_ptx(source: &Path, output: &Path) {
     let mut cmd = Command::new("nvcc");
-    cmd.arg("--ptx").arg("-o").arg(output).arg(source);
+    cmd.arg("--ptx")
+        .arg("-std=c++17")
+        .arg("-o")
+        .arg(output)
+        .arg(source);
 
     let output_result = cmd.output();
     match output_result {

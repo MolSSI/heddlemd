@@ -7,8 +7,26 @@ position update, and `vv_kick` performs the second half-velocity update. The
 host sequences these two kernels around a force-evaluation pipeline (which is
 the responsibility of a separate feature).
 
-This feature covers the two CUDA kernels in `kernels/integrate.cu`, their PTX
-loading via `init_device()`, and Rust-side launch helpers that drive them.
+The integrator ships in two modes:
+
+- **Lossy (default).** Uses ordinary IEEE-754 `f32` arithmetic. Each addition
+  may discard low bits to rounding; the trajectory cannot be reversed
+  bit-exactly.
+- **Lossless.** Each per-particle quantity (positions and velocities) is
+  augmented with an `f64` residual buffer that holds the bits the IEEE
+  addition would otherwise discard. The lossless kernels carry out every
+  update with `f64` intermediate precision so that the pair `(f32 high, f64
+  low)` represents the running extended-precision sum to roughly `f64`
+  precision. Because the algorithm is symmetric under negation, a forward
+  run followed by a velocity-flip and another forward run of the same
+  length restores the **observable** `f32` state — positions and velocities
+  — bit-exactly. The `f64` residual buffers are internal compensation
+  bookkeeping; they may drift by O(f64 ULP) per step under round-tripping
+  but that drift never propagates into the observable `f32` state.
+
+This feature covers the four CUDA kernels in `kernels/integrate.cu`, their PTX
+loading via `init_device()`, the host-side `LosslessBuffers` struct, and the
+Rust launch helpers that drive both modes.
 
 ## Algorithm <!-- rq-9f6a73f9 -->
 
@@ -24,14 +42,90 @@ mass `m_i`, a single timestep of size `dt` corresponds to:
 performs step 4. Step 3 is the force pipeline and is out of scope here.
 
 Each particle's update depends only on its own state. There are no inter-thread
-dependencies, no atomics, and no reductions. Both kernels are bit-wise
+dependencies, no atomics, and no reductions. All four kernels are bit-wise
 reproducible by construction: identical inputs yield byte-identical outputs.
+
+### Lossless mode: compensated summation <!-- rq-580fe6f7 -->
+
+In lossless mode, each scalar particle quantity that the integrator mutates
+(positions and velocities, per axis) is represented as a `(high, low)` pair
+where `high` is `f32` and `low` is `f64`. The extended-precision value
+`high + low` (computed in `f64`) approximates the running sum to `f64`
+precision. The lossless kernels promote every operand to `f64` for the
+inner arithmetic and store the result back as a `(f32 high, f64 low)` pair
+such that:
+
+```
+high + low ≈ exact_extended_precision_sum   // accurate to f64 precision
+```
+
+Concretely, an update `(buf, buf_lo) ← (buf, buf_lo) + delta` proceeds as:
+
+```
+extended = (f64) buf + buf_lo + (f64) delta   # all in f64
+new_high = (f32) extended                     # IEEE round-to-nearest
+new_low  = extended - (f64) new_high          # f64 remainder
+```
+
+The drift step in lossless `vv_kick_drift_lossless` uses the
+extended-precision velocity `(v + v_lo)` so that the position update is
+`x ← x + (v + v_lo) · dt`, decomposed into `(x_high_new, x_low_new)`.
+
+The standard reversal protocol is:
+
+1. Run forward integration for `N` steps to reach state `(x, x_lo, v, v_lo)`.
+2. Negate every velocity component: `v ← -v`, `v_lo ← -v_lo`.
+3. Run forward integration for `N` more steps with the same `dt`.
+4. Negate velocity components again to restore direction.
+
+Under this protocol, `positions_x/y/z` and `velocities_x/y/z` (the
+observable `f32` arrays) return to their original byte-identical values on
+the same GPU. The `f64` residual buffers may differ from their initial
+contents by a small number of f64 ULPs per round-tripped step — that drift
+is internal compensation that never propagates back into the observable
+`f32` state, because residuals are bounded by the round-off slack of an
+`f32` addition. In between forward and reverse runs, the force-evaluation
+pipeline must be re-invoked at each step's intermediate position (just as
+in the forward direction); forces themselves are deterministic functions of
+positions so they do not require their own residuals.
 
 ## Feature API <!-- rq-74535c7a -->
 
+### Types <!-- rq-33c0521d -->
+
+- `LosslessBuffers` — host-side wrapper around the six device residual <!-- rq-303211d9 -->
+  buffers used by the lossless integrator. All six `CudaSlice<f64>` fields
+  are `pub` so the lossless launchers can pass them directly to kernel
+  launches; carries an `Arc<CudaDevice>` and a private `particle_count`.
+
+  Fields:
+  - `device: Arc<CudaDevice>`
+  - `positions_x_lo: CudaSlice<f64>`
+  - `positions_y_lo: CudaSlice<f64>`
+  - `positions_z_lo: CudaSlice<f64>`
+  - `velocities_x_lo: CudaSlice<f64>`
+  - `velocities_y_lo: CudaSlice<f64>`
+  - `velocities_z_lo: CudaSlice<f64>`
+  - private `particle_count: usize`
+
+  Constructor:
+
+  - `LosslessBuffers::new(device: Arc<CudaDevice>, particle_count: usize) -> Result<LosslessBuffers, GpuError>`
+    - Allocates six `CudaSlice<f64>` of length `particle_count` via
+      `CudaDevice::alloc_zeros`. Every residual starts at `0.0_f64`,
+      meaning the initial extended-precision state is exactly the value
+      held by the corresponding `ParticleBuffers` field.
+    - A `particle_count` of zero is permitted and yields six length-zero
+      device allocations.
+
+  Accessor:
+
+  - `LosslessBuffers::particle_count(&self) -> usize` — returns the value
+    supplied at construction.
+
 ### CUDA Kernels <!-- rq-10cc8ddf -->
 
-`kernels/integrate.cu` declares two `extern "C"` kernels with these signatures:
+`kernels/integrate.cu` declares four `extern "C"` kernels:
 
 ```c
 extern "C" __global__ void vv_kick_drift(
@@ -48,12 +142,51 @@ extern "C" __global__ void vv_kick(
     const float *masses,
     float dt,
     unsigned int n);
+
+extern "C" __global__ void vv_kick_drift_lossless(
+    float *positions_x, float *positions_y, float *positions_z,
+    float *velocities_x, float *velocities_y, float *velocities_z,
+    double *positions_x_lo, double *positions_y_lo, double *positions_z_lo,
+    double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
+    const float *forces_x, const float *forces_y, const float *forces_z,
+    const float *masses,
+    float dt,
+    unsigned int n);
+
+extern "C" __global__ void vv_kick_lossless(
+    float *velocities_x, float *velocities_y, float *velocities_z,
+    double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
+    const float *forces_x, const float *forces_y, const float *forces_z,
+    const float *masses,
+    float dt,
+    unsigned int n);
 ```
 
 Each thread computes its global index as `blockIdx.x * blockDim.x + threadIdx.x`.
 If the index is `>= n` the thread returns without touching any buffer.
 
-Within `vv_kick_drift`, each thread performs (in this order, on `f32`):
+The four kernel bodies share their per-particle math through a
+`__device__` helper function templated on a `bool LOSSLESS` parameter.
+`if constexpr (LOSSLESS)` selects between plain IEEE addition (lossy mode)
+and the compensated `(high, low)` decomposition described in the algorithm
+section. Each `extern "C"` wrapper instantiates the template with the
+appropriate value:
+
+```c
+template <bool LOSSLESS>
+__device__ inline void vv_kick_drift_body(
+    unsigned int i, /* full argument list including residual pointers */);
+
+extern "C" __global__ void vv_kick_drift(...)            { ... vv_kick_drift_body<false>(...); }
+extern "C" __global__ void vv_kick_drift_lossless(...)   { ... vv_kick_drift_body<true>(...);  }
+```
+
+The lossy wrappers do not pass residual pointers and the lossless code
+path is dead-code-eliminated by `if constexpr`, so the lossy kernels
+incur no FLOP, register, or memory-traffic cost from the lossless
+machinery.
+
+Within `vv_kick_drift` (lossy), each thread performs in this order, on `f32`:
 
 ```
 ax = forces_x[i] / masses[i]
@@ -70,7 +203,7 @@ positions_y[i] += vy * dt
 positions_z[i] += vz * dt
 ```
 
-Within `vv_kick`, each thread performs:
+Within `vv_kick` (lossy), each thread performs:
 
 ```
 ax = forces_x[i] / masses[i]
@@ -81,17 +214,30 @@ velocities_y[i] += ay * (dt * 0.5f)
 velocities_z[i] += az * (dt * 0.5f)
 ```
 
-Neither kernel writes to `forces_*` or to `masses`.
+Within `vv_kick_drift_lossless`, each thread performs the algebraically
+equivalent computation but with every velocity and position update done
+via the compensated `(high, low)` decomposition described in the algorithm
+section. The drift step uses `(v + v_lo)` (computed in the chosen
+intermediate precision) when forming the position increment.
+
+Within `vv_kick_lossless`, each thread performs the velocity update via
+the same compensated decomposition.
+
+None of the four kernels writes to `forces_*` or to `masses`. The lossy
+kernels do not read or write the residual buffers; the lossless kernels
+read and write both the high and the low halves of the quantities they
+mutate.
 
 ### PTX Module Loading <!-- rq-e20b2f39 -->
 
 `init_device()` loads the compiled `kernels/integrate.cu` PTX with module name
-`"integrate"` and registers the function names `"vv_kick_drift"` and
-`"vv_kick"`. The `fill` smoke-test module continues to be loaded alongside it.
+`"integrate"` and registers the function names `"vv_kick_drift"`, `"vv_kick"`,
+`"vv_kick_drift_lossless"`, and `"vv_kick_lossless"`. The `fill` smoke-test
+module continues to be loaded alongside it.
 
 ### Rust Launch Helpers <!-- rq-581ec3ff -->
 
-Two free functions live in `src/gpu/kernels.rs` and are re-exported from
+Four free functions live in `src/gpu/kernels.rs` and are re-exported from
 `crate::gpu`:
 
 - `vv_kick_drift(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>` <!-- rq-f1ba909b -->
@@ -108,9 +254,27 @@ Two free functions live in `src/gpu/kernels.rs` and are re-exported from
   - Same launch configuration and error/empty-state handling as `vv_kick_drift`.
   - Launches the `vv_kick` kernel.
 
-Neither helper inspects mass values or constrains `dt`. NaN, infinite, zero,
-or negative values flow through the kernel arithmetic and produce corresponding
-NaN/Inf outputs.
+- `vv_kick_drift_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, dt: f32) -> Result<(), GpuError>` <!-- rq-7d5e87ee -->
+  - Launches the `vv_kick_drift_lossless` kernel using both the
+    `ParticleBuffers` (for `(high)` halves) and the `LosslessBuffers` (for
+    `(low)` halves).
+  - Same block/grid configuration and empty-state handling as the lossy
+    variant; debug-asserts that `lossless.particle_count()` equals
+    `buffers.particle_count()`.
+  - Panics if the `"integrate"` module is not loaded.
+
+- `vv_kick_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, dt: f32) -> Result<(), GpuError>` <!-- rq-4ea8bbb2 -->
+  - Same configuration and empty-state handling as `vv_kick_drift_lossless`.
+  - Launches the `vv_kick_lossless` kernel.
+
+None of the four helpers inspects mass values or constrains `dt`. NaN,
+infinite, zero, or negative values flow through the kernel arithmetic and
+produce corresponding NaN/Inf outputs.
+
+The lossy launchers (`vv_kick_drift`, `vv_kick`) take only `&mut ParticleBuffers`
+and have signatures byte-identical to their pre-lossless form. Callers who
+do not enable lossless mode never construct a `LosslessBuffers` and pay no
+memory or kernel-launch cost from this feature.
 
 ## Launch Configuration <!-- rq-0540b862 -->
 
@@ -122,13 +286,24 @@ NaN/Inf outputs.
 ## Out of Scope <!-- rq-92f5e5c4 -->
 
 - Force evaluation (pair force kernel, segmented reduction, neighbor lists).
-- Higher-level orchestration of the timestep loop.
+- Higher-level orchestration of the timestep loop, including the
+  input-file flag that selects between lossy and lossless mode at runtime
+  (the simulation-loop feature owns the dispatch; this feature only
+  provides the kernels and buffers).
 - Other integrators (leapfrog, RK4, predictor-corrector).
 - Thermostats, barostats, and constraint algorithms (SHAKE/RATTLE).
 - Energy diagnostics and trajectory output.
 - Numerical validation of inputs (zero/non-finite masses, dt sign).
-- The `f64` precision feature flag.
+- The `f64` precision feature flag for the *primary* particle state
+  (the lossless kernels use `f64` only as an internal intermediate to
+  compute the compensated decomposition; the public state remains `f32`
+  pairs).
 - Multi-stream or multi-GPU launches.
+- Bit-reversibility under variable forces verified through the full
+  force-evaluation pipeline. The lossless integrator kernels are
+  reversibility-correct in isolation; whole-pipeline reversibility is the
+  responsibility of a future end-to-end reversibility test that drives
+  `lj_pair_force` and `reduce_pair_forces` between integrator calls.
 
 ---
 
@@ -303,4 +478,108 @@ Feature: Velocity Verlet time integration
     And vv_kick_drift(&mut buffers, dt=-0.1) is called
     And the buffers are downloaded into a host ParticleState
     Then positions and velocities equal their snapshot values within an absolute tolerance of 1e-6
+
+  # --- Lossless mode: module loading and construction ---
+
+  @rq-70fe268a
+  Scenario: init_device exposes the lossless integrator kernels
+    Given a CUDA-capable GPU is available as device 0
+    When init_device() is called
+    Then the device exposes a function named "vv_kick_drift_lossless" in module "integrate"
+    And the device exposes a function named "vv_kick_lossless" in module "integrate"
+
+  @rq-5bfa5b37
+  Scenario: LosslessBuffers::new allocates six zero-initialised residual buffers
+    Given a CudaDevice obtained from init_device()
+    When LosslessBuffers::new(device, particle_count=4) is called
+    Then it returns Ok(buffers)
+    And buffers.particle_count() is 4
+    And each of positions_{x,y,z}_lo and velocities_{x,y,z}_lo has length 4
+    And every element of every residual buffer equals 0.0_f32 when downloaded
+
+  @rq-b96ce51d
+  Scenario: LosslessBuffers::new with particle_count = 0
+    Given a CudaDevice obtained from init_device()
+    When LosslessBuffers::new(device, particle_count=0) is called
+    Then it returns Ok(buffers)
+    And every residual device buffer has length 0
+
+  # --- Lossless mode: empty-state and bounds handling ---
+
+  @rq-58cac735
+  Scenario: vv_kick_drift_lossless on an empty state is a no-op
+    Given a ParticleBuffers and LosslessBuffers both with particle_count() == 0
+    When vv_kick_drift_lossless(&mut buffers, &mut lossless, dt=0.1) is called
+    Then it returns Ok(())
+
+  @rq-5626dfc6
+  Scenario: vv_kick_lossless on an empty state is a no-op
+    Given a ParticleBuffers and LosslessBuffers both with particle_count() == 0
+    When vv_kick_lossless(&mut buffers, &mut lossless, dt=0.1) is called
+    Then it returns Ok(())
+
+  @rq-5a6d5e9e
+  Scenario: vv_kick_drift_lossless handles a block-non-aligned particle count
+    Given a ParticleBuffers and LosslessBuffers both with particle_count() == 1000
+    And every particle has F=0, v=(1, 0, 0), x_lo=0, v_lo=0
+    When vv_kick_drift_lossless(&mut buffers, &mut lossless, dt=0.1) is called
+    Then no out-of-bounds device-memory write occurs
+    And the high parts of positions_x evolve consistently with the lossless drift
+
+  # --- Lossless mode: side effects ---
+
+  @rq-bb075030
+  Scenario: vv_kick_drift_lossless does not modify forces, masses, or particle_ids
+    Given a ParticleBuffers built from N=4 particles with arbitrary nonzero values
+    And a fresh LosslessBuffers
+    And a snapshot of forces_*, masses, and particle_ids before launch
+    When vv_kick_drift_lossless(&mut buffers, &mut lossless, dt=0.1) is called
+    And particle_buffers is downloaded
+    Then forces_x, forces_y, forces_z, masses, and particle_ids are byte-identical to the snapshot
+
+  @rq-acafdfe4
+  Scenario: vv_kick_lossless does not modify positions, forces, masses, or particle_ids
+    Given a ParticleBuffers built from N=4 particles with arbitrary nonzero values
+    And a fresh LosslessBuffers
+    And a snapshot of positions_*, forces_*, masses, and particle_ids before launch
+    When vv_kick_lossless(&mut buffers, &mut lossless, dt=0.1) is called
+    And particle_buffers is downloaded
+    Then positions_x, positions_y, positions_z, forces_x, forces_y, forces_z, masses, and particle_ids are byte-identical to the snapshot
+
+  # --- Lossless mode: bit-reversibility ---
+
+  @rq-1a504311
+  Scenario: Single-step round-trip restores the observable state bit-exactly under zero force
+    Given a ParticleBuffers built from N=8 particles with F=0 and arbitrary nonzero positions and velocities
+    And a fresh LosslessBuffers (all residuals zero)
+    And a snapshot of the high and low halves of every position and velocity component
+    When vv_kick_drift_lossless(&mut buffers, &mut lossless, dt=0.1) is called
+    And every velocity component (high and low) is negated on the device
+    And vv_kick_drift_lossless(&mut buffers, &mut lossless, dt=0.1) is called
+    And every velocity component (high and low) is negated on the device
+    And buffers and lossless are downloaded
+    Then positions_x, positions_y, positions_z agree with the snapshot byte-for-byte
+    And velocities_x, velocities_y, velocities_z agree with the snapshot byte-for-byte
+    And every residual buffer agrees with the snapshot to within 1e-12
+
+  @rq-b73316ed
+  Scenario: Multi-step round-trip restores the observable state bit-exactly under constant force
+    Given a ParticleBuffers built from N=16 particles with arbitrary nonzero positions, velocities, masses, and forces
+    And a fresh LosslessBuffers (all residuals zero)
+    And a snapshot of all eleven host arrays and all six residual arrays before the loop
+    When the lossless kernels (vv_kick_drift_lossless then vv_kick_lossless) are launched 50 times with dt=0.001
+    And every velocity component (high and low) is negated on the device
+    And the same lossless kernels are launched 50 more times with dt=0.001
+    And every velocity component (high and low) is negated on the device
+    And buffers and lossless are downloaded
+    Then every f32 and u32 observable array agrees with the snapshot byte-for-byte
+    And every residual buffer agrees with the snapshot to within 1e-10
+
+  @rq-2a0e97f5
+  Scenario: Two independent lossless runs produce byte-identical results
+    Given two pairs of ParticleBuffers and LosslessBuffers built from identical inputs at N=64
+    When vv_kick_drift_lossless then vv_kick_lossless is launched 10 times on each pair with dt=0.001
+    And both pairs are downloaded
+    Then every f32 array of run A agrees byte-for-byte with run B
+    And every residual array of run A agrees byte-for-byte with run B
 ```

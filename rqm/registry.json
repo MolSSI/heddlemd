@@ -167,6 +167,13 @@
     "title": "Reject NaN lx",
     "type": "scenario"
   },
+  "rq-1a504311": {
+    "decl": "Scenario: Single-step round-trip restores the observable state bit-exactly under zero force",
+    "file": "integration",
+    "refs": [],
+    "title": "Single-step round-trip restores the observable state bit-exactly under zero force",
+    "type": "scenario"
+  },
   "rq-1bdbd71e": {
     "decl": "Scenario: Reject download when one host array drifts in length",
     "file": "particle-state",
@@ -262,6 +269,13 @@
     "title": "init_device fails when no GPU is available",
     "type": "scenario"
   },
+  "rq-2a0e97f5": {
+    "decl": "Scenario: Two independent lossless runs produce byte-identical results",
+    "file": "integration",
+    "refs": [],
+    "title": "Two independent lossless runs produce byte-identical results",
+    "type": "scenario"
+  },
   "rq-2b7cfbaf": {
     "decl": "## Out of Scope",
     "file": "pair-reduction",
@@ -291,12 +305,32 @@
     "title": "vv_kick leaves velocity unchanged when force is zero",
     "type": "scenario"
   },
+  "rq-303211d9": {
+    "decl": "- `LosslessBuffers` — host-side wrapper around the six device residual",
+    "file": "integration",
+    "refs": [
+      {
+        "file": "src/gpu/lossless_buffers.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "LosslessBuffers",
+    "type": "api-item"
+  },
   "rq-31bd2eee": {
     "decl": "### CUDA Kernel",
     "file": "pair-reduction",
     "level": 3,
     "refs": [],
     "title": "CUDA Kernel",
+    "type": "section"
+  },
+  "rq-33c0521d": {
+    "decl": "### Types",
+    "file": "integration",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
     "type": "section"
   },
   "rq-3766be01": {
@@ -472,6 +506,13 @@
     "title": "CUDA Kernel",
     "type": "section"
   },
+  "rq-4ea8bbb2": {
+    "decl": "- `vv_kick_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, dt: f32) -> Result<(), GpuError>`",
+    "file": "integration",
+    "refs": [],
+    "title": "vv_kick_lossless",
+    "type": "api-item"
+  },
   "rq-4f7dc024": {
     "decl": "Scenario: vv_kick_drift advances position and leaves velocity unchanged when force is zero",
     "file": "integration",
@@ -487,6 +528,13 @@
     "title": "Launch Configuration",
     "type": "section"
   },
+  "rq-5626dfc6": {
+    "decl": "Scenario: vv_kick_lossless on an empty state is a no-op",
+    "file": "integration",
+    "refs": [],
+    "title": "vv_kick_lossless on an empty state is a no-op",
+    "type": "scenario"
+  },
   "rq-56d8375d": {
     "decl": "### PTX Module Loading",
     "file": "pair-reduction",
@@ -498,6 +546,14 @@
       }
     ],
     "title": "PTX Module Loading",
+    "type": "section"
+  },
+  "rq-580fe6f7": {
+    "decl": "### Lossless mode: compensated summation",
+    "file": "integration",
+    "level": 3,
+    "refs": [],
+    "title": "Lossless mode: compensated summation",
     "type": "section"
   },
   "rq-581ec3ff": {
@@ -515,6 +571,13 @@
     "title": "Download from an empty buffers into an empty state",
     "type": "scenario"
   },
+  "rq-58cac735": {
+    "decl": "Scenario: vv_kick_drift_lossless on an empty state is a no-op",
+    "file": "integration",
+    "refs": [],
+    "title": "vv_kick_drift_lossless on an empty state is a no-op",
+    "type": "scenario"
+  },
   "rq-590dcd7e": {
     "decl": "Scenario: Reduction at full max_neighbors capacity",
     "file": "pair-reduction",
@@ -529,6 +592,20 @@
     "refs": [],
     "title": "Fill Kernel",
     "type": "section"
+  },
+  "rq-5a6d5e9e": {
+    "decl": "Scenario: vv_kick_drift_lossless handles a block-non-aligned particle count",
+    "file": "integration",
+    "refs": [],
+    "title": "vv_kick_drift_lossless handles a block-non-aligned particle count",
+    "type": "scenario"
+  },
+  "rq-5bfa5b37": {
+    "decl": "Scenario: LosslessBuffers::new allocates six zero-initialised residual buffers",
+    "file": "integration",
+    "refs": [],
+    "title": "LosslessBuffers::new allocates six zero-initialised residual buffers",
+    "type": "scenario"
   },
   "rq-5cb58365": {
     "decl": "Scenario: NaN pair contributions propagate to NaN net forces",
@@ -638,6 +715,13 @@
     "title": "PairBuffer::new allocates zero-initialised pair-force buffers",
     "type": "scenario"
   },
+  "rq-70fe268a": {
+    "decl": "Scenario: init_device exposes the lossless integrator kernels",
+    "file": "integration",
+    "refs": [],
+    "title": "init_device exposes the lossless integrator kernels",
+    "type": "scenario"
+  },
   "rq-70ff0369": {
     "decl": "## Numerical Behaviour",
     "file": "simulation-box",
@@ -742,6 +826,13 @@
     "refs": [],
     "title": "Reject download when host particle count differs from buffers",
     "type": "scenario"
+  },
+  "rq-7d5e87ee": {
+    "decl": "- `vv_kick_drift_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, dt: f32) -> Result<(), GpuError>`",
+    "file": "integration",
+    "refs": [],
+    "title": "vv_kick_drift_lossless",
+    "type": "api-item"
   },
   "rq-7dfa14cf": {
     "decl": "Scenario: vv_kick_drift does not modify forces or masses",
@@ -1107,6 +1198,13 @@
     "title": "ParticleState",
     "type": "api-item"
   },
+  "rq-acafdfe4": {
+    "decl": "Scenario: vv_kick_lossless does not modify positions, forces, masses, or particle_ids",
+    "file": "integration",
+    "refs": [],
+    "title": "vv_kick_lossless does not modify positions, forces, masses, or particle_ids",
+    "type": "scenario"
+  },
   "rq-add95876": {
     "decl": "## Data Layout",
     "file": "particle-state",
@@ -1190,6 +1288,13 @@
     "title": "Two independent runs produce byte-identical net forces",
     "type": "scenario"
   },
+  "rq-b73316ed": {
+    "decl": "Scenario: Multi-step round-trip restores the observable state bit-exactly under constant force",
+    "file": "integration",
+    "refs": [],
+    "title": "Multi-step round-trip restores the observable state bit-exactly under constant force",
+    "type": "scenario"
+  },
   "rq-b735d0b0": {
     "decl": "## Project Structure",
     "file": "build-pipeline",
@@ -1226,11 +1331,25 @@
     "title": "Constructor",
     "type": "section"
   },
+  "rq-b96ce51d": {
+    "decl": "Scenario: LosslessBuffers::new with particle_count = 0",
+    "file": "integration",
+    "refs": [],
+    "title": "LosslessBuffers::new with particle_count = 0",
+    "type": "scenario"
+  },
   "rq-b9a4e3de": {
     "decl": "Scenario: Non-finite check precedes non-positive check on the same axis",
     "file": "simulation-box",
     "refs": [],
     "title": "Non-finite check precedes non-positive check on the same axis",
+    "type": "scenario"
+  },
+  "rq-bb075030": {
+    "decl": "Scenario: vv_kick_drift_lossless does not modify forces, masses, or particle_ids",
+    "file": "integration",
+    "refs": [],
+    "title": "vv_kick_drift_lossless does not modify forces, masses, or particle_ids",
     "type": "scenario"
   },
   "rq-bc8375ce": {

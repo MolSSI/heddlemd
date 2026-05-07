@@ -1,6 +1,6 @@
 use cudarc::driver::{CudaSlice, DeviceSlice, LaunchAsync, LaunchConfig};
 
-use crate::gpu::{GpuError, PairBuffer, ParticleBuffers};
+use crate::gpu::{GpuError, LosslessBuffers, PairBuffer, ParticleBuffers};
 use crate::pbc::SimulationBox;
 
 const BLOCK_SIZE: u32 = 256;
@@ -182,6 +182,90 @@ pub fn lj_pair_force(
                 params.sigma,
                 params.epsilon,
                 params.cutoff,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+pub fn vv_kick_drift_lossless(
+    buffers: &mut ParticleBuffers,
+    lossless: &mut LosslessBuffers,
+    dt: f32,
+) -> Result<(), GpuError> {
+    let n = buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(lossless.particle_count(), n);
+    let n_u32 = n as u32;
+    let func = buffers
+        .device
+        .get_func("integrate", "vv_kick_drift_lossless")
+        .expect("integrate module is not loaded; init_device() must be called first");
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut buffers.positions_x,
+                &mut buffers.positions_y,
+                &mut buffers.positions_z,
+                &mut buffers.velocities_x,
+                &mut buffers.velocities_y,
+                &mut buffers.velocities_z,
+                &mut lossless.positions_x_lo,
+                &mut lossless.positions_y_lo,
+                &mut lossless.positions_z_lo,
+                &mut lossless.velocities_x_lo,
+                &mut lossless.velocities_y_lo,
+                &mut lossless.velocities_z_lo,
+                &buffers.forces_x,
+                &buffers.forces_y,
+                &buffers.forces_z,
+                &buffers.masses,
+                dt,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+pub fn vv_kick_lossless(
+    buffers: &mut ParticleBuffers,
+    lossless: &mut LosslessBuffers,
+    dt: f32,
+) -> Result<(), GpuError> {
+    let n = buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(lossless.particle_count(), n);
+    let n_u32 = n as u32;
+    let func = buffers
+        .device
+        .get_func("integrate", "vv_kick_lossless")
+        .expect("integrate module is not loaded; init_device() must be called first");
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut buffers.velocities_x,
+                &mut buffers.velocities_y,
+                &mut buffers.velocities_z,
+                &mut lossless.velocities_x_lo,
+                &mut lossless.velocities_y_lo,
+                &mut lossless.velocities_z_lo,
+                &buffers.forces_x,
+                &buffers.forces_y,
+                &buffers.forces_z,
+                &buffers.masses,
+                dt,
                 n_u32,
             ),
         )
