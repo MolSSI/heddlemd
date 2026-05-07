@@ -96,6 +96,25 @@
     "title": "build.rs fails with a clear message when nvcc is missing",
     "type": "scenario"
   },
+  "rq-12657190": {
+    "decl": "- `PairBuffer::max_neighbors(&self) -> u32`",
+    "file": "pair-reduction",
+    "refs": [
+      {
+        "file": "src/gpu/pair_buffer.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PairBuffer",
+    "type": "api-item"
+  },
+  "rq-15e1e995": {
+    "decl": "Scenario: PairBuffer::new with max_neighbors = 0",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "PairBuffer::new with max_neighbors = 0",
+    "type": "scenario"
+  },
   "rq-179ed985": {
     "decl": "- `ParticleBuffers::upload(&mut self, state: &ParticleState) -> Result<(), ParticleStateError>`",
     "file": "particle-state",
@@ -192,11 +211,26 @@
     "title": "init_device fails when no GPU is available",
     "type": "scenario"
   },
+  "rq-2b7cfbaf": {
+    "decl": "## Out of Scope",
+    "file": "pair-reduction",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-2bbc4121": {
     "decl": "Scenario: Construct with matching arrays and explicit unique IDs",
     "file": "particle-state",
     "refs": [],
     "title": "Construct with matching arrays and explicit unique IDs",
+    "type": "scenario"
+  },
+  "rq-2d051b0c": {
+    "decl": "Scenario: Reduction with all zero neighbor counts produces zero net forces",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Reduction with all zero neighbor counts produces zero net forces",
     "type": "scenario"
   },
   "rq-2f52c25e": {
@@ -205,6 +239,14 @@
     "refs": [],
     "title": "vv_kick leaves velocity unchanged when force is zero",
     "type": "scenario"
+  },
+  "rq-31bd2eee": {
+    "decl": "### CUDA Kernel",
+    "file": "pair-reduction",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernel",
+    "type": "section"
   },
   "rq-3766be01": {
     "decl": "- `ParticleState` — host-side SoA state. All eleven per-particle arrays are",
@@ -258,6 +300,18 @@
     "title": "SimulationBox",
     "type": "api-item"
   },
+  "rq-3c42e6bd": {
+    "decl": "- `PairBuffer::particle_count(&self) -> usize`",
+    "file": "pair-reduction",
+    "refs": [
+      {
+        "file": "src/gpu/pair_buffer.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PairBuffer",
+    "type": "api-item"
+  },
   "rq-3e8324c2": {
     "decl": "Scenario: wrap_position leaves a position inside the primary image unchanged",
     "file": "simulation-box",
@@ -272,6 +326,13 @@
     "refs": [],
     "title": "Build Script",
     "type": "section"
+  },
+  "rq-493caf32": {
+    "decl": "Scenario: reduce_pair_forces on an empty state is a no-op",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "reduce_pair_forces on an empty state is a no-op",
+    "type": "scenario"
   },
   "rq-4a3feaf7": {
     "decl": "### Missing nvcc",
@@ -336,6 +397,19 @@
     "title": "vv_kick_drift advances position and leaves velocity unchanged when force is zero",
     "type": "scenario"
   },
+  "rq-56d8375d": {
+    "decl": "### PTX Module Loading",
+    "file": "pair-reduction",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/gpu/device.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PTX Module Loading",
+    "type": "section"
+  },
   "rq-581ec3ff": {
     "decl": "### Rust Launch Helpers",
     "file": "integration",
@@ -351,6 +425,13 @@
     "title": "Download from an empty buffers into an empty state",
     "type": "scenario"
   },
+  "rq-590dcd7e": {
+    "decl": "Scenario: Reduction at full max_neighbors capacity",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Reduction at full max_neighbors capacity",
+    "type": "scenario"
+  },
   "rq-599b2eb4": {
     "decl": "## Fill Kernel",
     "file": "build-pipeline",
@@ -358,6 +439,13 @@
     "refs": [],
     "title": "Fill Kernel",
     "type": "section"
+  },
+  "rq-5cb58365": {
+    "decl": "Scenario: NaN pair contributions propagate to NaN net forces",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "NaN pair contributions propagate to NaN net forces",
+    "type": "scenario"
   },
   "rq-5e0598cb": {
     "decl": "- `ParticleState::new(positions_x: Vec<f32>, positions_y: Vec<f32>, positions_z: Vec<f32>, velocities_x: Vec<f32>, velocities_y: Vec<f32>, velocities_z: Vec<f32>, masses: Vec<f32>, ids: Option<Vec<u32>>) -> Result<ParticleState, ParticleStateError>`",
@@ -386,6 +474,40 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-6690fae9": {
+    "decl": "- `reduce_pair_forces(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, particle_buffers: &mut ParticleBuffers) -> Result<(), GpuError>`",
+    "file": "pair-reduction",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "reduce_pair_forces",
+    "type": "api-item"
+  },
+  "rq-6808532e": {
+    "decl": "Scenario: Per-particle reduction with varying counts",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Per-particle reduction with varying counts",
+    "type": "scenario"
+  },
+  "rq-6f2452d1": {
+    "decl": "### Reduction Launcher",
+    "file": "pair-reduction",
+    "level": 3,
+    "refs": [],
+    "title": "Reduction Launcher",
+    "type": "section"
+  },
+  "rq-6fdefca0": {
+    "decl": "Scenario: PairBuffer::new allocates zero-initialised pair-force buffers",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "PairBuffer::new allocates zero-initialised pair-force buffers",
+    "type": "scenario"
   },
   "rq-70ff0369": {
     "decl": "## Numerical Behaviour",
@@ -418,11 +540,25 @@
     "title": "Reject zero lz",
     "type": "scenario"
   },
+  "rq-74e4bd02": {
+    "decl": "Scenario: PairBuffer::new with particle_count = 0",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "PairBuffer::new with particle_count = 0",
+    "type": "scenario"
+  },
   "rq-7541fd8a": {
     "decl": "Scenario: Validation order is lx then ly then lz",
     "file": "simulation-box",
     "refs": [],
     "title": "Validation order is lx then ly then lz",
+    "type": "scenario"
+  },
+  "rq-77e88745": {
+    "decl": "Scenario: Block-non-aligned particle counts are handled by the bounds check",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Block-non-aligned particle counts are handled by the bounds check",
     "type": "scenario"
   },
   "rq-780d68ea": {
@@ -431,6 +567,25 @@
     "refs": [],
     "title": "Reject ParticleBuffers::new when a host array length is inconsistent",
     "type": "scenario"
+  },
+  "rq-78fc2fbb": {
+    "decl": "Scenario: Slots beyond neighbor_counts[i] are not summed",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Slots beyond neighbor_counts[i] are not summed",
+    "type": "scenario"
+  },
+  "rq-79048663": {
+    "decl": "- `PairBuffer::new(device: Arc<CudaDevice>, particle_count: usize, max_neighbors: u32) -> Result<PairBuffer, GpuError>`",
+    "file": "pair-reduction",
+    "refs": [
+      {
+        "file": "src/gpu/pair_buffer.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PairBuffer",
+    "type": "api-item"
   },
   "rq-7ab80063": {
     "decl": "Scenario: Reject download when host particle count differs from buffers",
@@ -504,12 +659,27 @@
     "title": "NaN forces propagate to NaN velocities and positions",
     "type": "scenario"
   },
+  "rq-8ee33aa0": {
+    "decl": "Scenario: Reduction with a single particle and a single neighbor",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Reduction with a single particle and a single neighbor",
+    "type": "scenario"
+  },
   "rq-9026181d": {
     "decl": "## Host ↔ Device Transfer Semantics",
     "file": "particle-state",
     "level": 2,
     "refs": [],
     "title": "Host ↔ Device Transfer Semantics",
+    "type": "section"
+  },
+  "rq-9197d752": {
+    "decl": "### Types",
+    "file": "pair-reduction",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
     "type": "section"
   },
   "rq-91aa1f1c": {
@@ -548,6 +718,14 @@
     "refs": [],
     "title": "NaN values are accepted at construction",
     "type": "scenario"
+  },
+  "rq-9561f753": {
+    "decl": "## Gherkin Scenarios",
+    "file": "pair-reduction",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-9594de53": {
     "decl": "Scenario: Download overwrites in-place after host mutation",
@@ -610,6 +788,21 @@
     "title": "Reject negative lx",
     "type": "scenario"
   },
+  "rq-9b794cff": {
+    "decl": "Scenario: Reduction does not modify the pair buffer",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Reduction does not modify the pair buffer",
+    "type": "scenario"
+  },
+  "rq-9be271aa": {
+    "decl": "## Launch Configuration",
+    "file": "pair-reduction",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
+    "type": "section"
+  },
   "rq-9cf657ed": {
     "decl": "Scenario: fill kernel writes 1.0 to every element of a block-aligned buffer",
     "file": "build-pipeline",
@@ -632,6 +825,18 @@
     "title": "Reject upload when host particle count differs from buffers",
     "type": "scenario"
   },
+  "rq-a0c0992f": {
+    "decl": "- `PairBuffer` — host-side wrapper around the three device pair-force",
+    "file": "pair-reduction",
+    "refs": [
+      {
+        "file": "src/gpu/pair_buffer.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PairBuffer",
+    "type": "api-item"
+  },
   "rq-a199e0aa": {
     "decl": "Scenario: build.rs fails with a clear message when nvcc rejects the source",
     "file": "build-pipeline",
@@ -639,11 +844,32 @@
     "title": "build.rs fails with a clear message when nvcc rejects the source",
     "type": "scenario"
   },
+  "rq-a1c567b3": {
+    "decl": "Scenario: Infinite pair contributions propagate to infinite net forces",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Infinite pair contributions propagate to infinite net forces",
+    "type": "scenario"
+  },
   "rq-a1fc0841": {
     "decl": "Scenario: wrap_position and minimum_image agree on the same input",
     "file": "simulation-box",
     "refs": [],
     "title": "wrap_position and minimum_image agree on the same input",
+    "type": "scenario"
+  },
+  "rq-a406a35b": {
+    "decl": "# Feature: Pair Buffer and Deterministic Segmented Reduction",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Feature: Pair Buffer and Deterministic Segmented Reduction",
+    "type": "file"
+  },
+  "rq-a43552d5": {
+    "decl": "Scenario: init_device loads the reduce module with the reduction kernel",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "init_device loads the reduce module with the reduction kernel",
     "type": "scenario"
   },
   "rq-a8df30ac": {
@@ -712,6 +938,14 @@
     "title": "ParticleBuffers",
     "type": "api-item"
   },
+  "rq-b0913965": {
+    "decl": "## Reduction Algorithm",
+    "file": "pair-reduction",
+    "level": 2,
+    "refs": [],
+    "title": "Reduction Algorithm",
+    "type": "section"
+  },
   "rq-b13eba96": {
     "decl": "Scenario: Particles evolve independently with their own forces",
     "file": "integration",
@@ -731,6 +965,13 @@
     "file": "particle-state",
     "refs": [],
     "title": "Reject upload when one host array drifts in length",
+    "type": "scenario"
+  },
+  "rq-b4f18ea1": {
+    "decl": "Scenario: Two independent runs produce byte-identical net forces",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Two independent runs produce byte-identical net forces",
     "type": "scenario"
   },
   "rq-b735d0b0": {
@@ -781,6 +1022,14 @@
     "refs": [],
     "title": "Acceleration scales inversely with mass",
     "type": "scenario"
+  },
+  "rq-be5fe064": {
+    "decl": "### Constructor and Accessors",
+    "file": "pair-reduction",
+    "level": 3,
+    "refs": [],
+    "title": "Constructor and Accessors",
+    "type": "section"
   },
   "rq-bec7b519": {
     "decl": "- `ParticleStateError` — error type returned by construction and host↔device",
@@ -847,6 +1096,14 @@
     "title": "Smoke Test",
     "type": "section"
   },
+  "rq-c7420b98": {
+    "decl": "## Feature API",
+    "file": "pair-reduction",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-c8aa7417": {
     "decl": "Scenario: Allocate device buffers from an empty state",
     "file": "particle-state",
@@ -867,6 +1124,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "minimum_image is per-axis independent",
+    "type": "scenario"
+  },
+  "rq-c9da25a7": {
+    "decl": "Scenario: Reduction does not modify positions, velocities, or masses",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Reduction does not modify positions, velocities, or masses",
     "type": "scenario"
   },
   "rq-cc1b997d": {
@@ -950,6 +1214,14 @@
     "title": "PTX Module Loading",
     "type": "section"
   },
+  "rq-e435f271": {
+    "decl": "## Data Layout",
+    "file": "pair-reduction",
+    "level": 2,
+    "refs": [],
+    "title": "Data Layout",
+    "type": "section"
+  },
   "rq-e8be1a1c": {
     "decl": "- `SimulationBox::lengths(&self) -> [f32; 3]`",
     "file": "simulation-box",
@@ -969,6 +1241,13 @@
     "title": "dt=0 leaves state unchanged for vv_kick_drift",
     "type": "scenario"
   },
+  "rq-e950f4e6": {
+    "decl": "Scenario: Reduction sums entries 0..count in left-to-right order",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Reduction sums entries 0..count in left-to-right order",
+    "type": "scenario"
+  },
   "rq-e9a67206": {
     "decl": "## Out of Scope",
     "file": "build-pipeline",
@@ -976,6 +1255,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-eb3a65df": {
+    "decl": "Scenario: Reduction does not modify neighbor_counts",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Reduction does not modify neighbor_counts",
+    "type": "scenario"
   },
   "rq-ef7b719d": {
     "decl": "## Construction Details",
@@ -1041,6 +1327,13 @@
     "file": "particle-state",
     "refs": [],
     "title": "Download reflects device-side changes pushed by an interim re-upload",
+    "type": "scenario"
+  },
+  "rq-f5299d6e": {
+    "decl": "Scenario: Reduction overwrites prior net force values",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Reduction overwrites prior net force values",
     "type": "scenario"
   },
   "rq-f721b7a1": {

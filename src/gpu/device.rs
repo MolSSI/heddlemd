@@ -35,5 +35,11 @@ pub fn init_device() -> Result<Arc<CudaDevice>, GpuError> {
         "integrate",
         &["vv_kick_drift", "vv_kick"],
     )?;
+    // rq-56d8375d
+    device.load_ptx(
+        Ptx::from_src(kernels::REDUCE),
+        "reduce",
+        &["reduce_pair_forces"],
+    )?;
     Ok(device)
 }

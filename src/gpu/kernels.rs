@@ -1,6 +1,6 @@
-use cudarc::driver::{LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaSlice, DeviceSlice, LaunchAsync, LaunchConfig};
 
-use crate::gpu::{GpuError, ParticleBuffers};
+use crate::gpu::{GpuError, PairBuffer, ParticleBuffers};
 
 const BLOCK_SIZE: u32 = 256;
 
@@ -75,6 +75,50 @@ pub fn vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError> {
                 &buffers.forces_z,
                 &buffers.masses,
                 dt,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-6690fae9
+pub fn reduce_pair_forces(
+    pair_buffer: &PairBuffer,
+    neighbor_counts: &CudaSlice<u32>,
+    particle_buffers: &mut ParticleBuffers,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let max_neighbors = pair_buffer.max_neighbors();
+    debug_assert_eq!(pair_buffer.particle_count(), n);
+    debug_assert_eq!(neighbor_counts.len(), n);
+    debug_assert_eq!(
+        pair_buffer.pair_forces_x.len(),
+        n * max_neighbors as usize
+    );
+
+    let n_u32 = n as u32;
+    let func = particle_buffers
+        .device
+        .get_func("reduce", "reduce_pair_forces")
+        .expect("reduce module is not loaded; init_device() must be called first");
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &pair_buffer.pair_forces_x,
+                &pair_buffer.pair_forces_y,
+                &pair_buffer.pair_forces_z,
+                neighbor_counts,
+                max_neighbors,
+                &mut particle_buffers.forces_x,
+                &mut particle_buffers.forces_y,
+                &mut particle_buffers.forces_z,
                 n_u32,
             ),
         )
