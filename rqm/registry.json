@@ -204,6 +204,14 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-24a2b5ef": {
+    "decl": "## Comparison Procedure",
+    "file": "pipeline-reproducibility",
+    "level": 2,
+    "refs": [],
+    "title": "Comparison Procedure",
+    "type": "section"
+  },
   "rq-25afada1": {
     "decl": "### Kernel signature",
     "file": "build-pipeline",
@@ -231,6 +239,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "Construct with positive finite edge lengths",
+    "type": "scenario"
+  },
+  "rq-2846ee8b": {
+    "decl": "Scenario: Bit-exact equality after a 100-step run",
+    "file": "pipeline-reproducibility",
+    "refs": [],
+    "title": "Bit-exact equality after a 100-step run",
     "type": "scenario"
   },
   "rq-29718dcf": {
@@ -361,6 +376,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "wrap_position leaves a position inside the primary image unchanged",
+    "type": "scenario"
+  },
+  "rq-3f46fb2e": {
+    "decl": "Scenario: All output values are finite after the 100-step run",
+    "file": "pipeline-reproducibility",
+    "refs": [],
+    "title": "All output values are finite after the 100-step run",
     "type": "scenario"
   },
   "rq-438b895b": {
@@ -527,6 +549,14 @@
     "title": "ParticleState",
     "type": "api-item"
   },
+  "rq-5ece2ef9": {
+    "decl": "## Gherkin Scenarios",
+    "file": "pipeline-reproducibility",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-61207d82": {
     "decl": "## Feature API",
     "file": "lj-pair-force",
@@ -577,6 +607,14 @@
     "title": "Single-particle state produces only a zero self slot",
     "type": "scenario"
   },
+  "rq-6b6180af": {
+    "decl": "## Velocity-Verlet Loop",
+    "file": "pipeline-reproducibility",
+    "level": 2,
+    "refs": [],
+    "title": "Velocity-Verlet Loop",
+    "type": "section"
+  },
   "rq-6d209943": {
     "decl": "## Algorithm",
     "file": "lj-pair-force",
@@ -615,6 +653,13 @@
     "refs": [],
     "title": "Functions and methods",
     "type": "section"
+  },
+  "rq-72157184": {
+    "decl": "# Feature: End-to-End Pipeline Reproducibility Test",
+    "file": "pipeline-reproducibility",
+    "refs": [],
+    "title": "Feature: End-to-End Pipeline Reproducibility Test",
+    "type": "file"
   },
   "rq-74535c7a": {
     "decl": "## Feature API",
@@ -768,6 +813,14 @@
     "level": 2,
     "refs": [],
     "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-8dfac0eb": {
+    "decl": "## Test Fixture",
+    "file": "pipeline-reproducibility",
+    "level": 2,
+    "refs": [],
+    "title": "Test Fixture",
     "type": "section"
   },
   "rq-8e47334c": {
@@ -935,6 +988,14 @@
     "title": "Launch Configuration",
     "type": "section"
   },
+  "rq-9c94f23b": {
+    "decl": "## Out of Scope",
+    "file": "pipeline-reproducibility",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-9cf657ed": {
     "decl": "Scenario: fill kernel writes 1.0 to every element of a block-aligned buffer",
     "file": "build-pipeline",
@@ -1099,6 +1160,13 @@
     "file": "integration",
     "refs": [],
     "title": "Particles evolve independently with their own forces",
+    "type": "scenario"
+  },
+  "rq-b2314952": {
+    "decl": "Scenario: Bit-exact equality after a single full velocity-Verlet step",
+    "file": "pipeline-reproducibility",
+    "refs": [],
+    "title": "Bit-exact equality after a single full velocity-Verlet step",
     "type": "scenario"
   },
   "rq-b2d67b57": {
@@ -1315,6 +1383,13 @@
     "file": "particle-state",
     "refs": [],
     "title": "Reject when masses has the wrong length",
+    "type": "scenario"
+  },
+  "rq-d0a54b3c": {
+    "decl": "Scenario: Positions visibly evolve over the 100-step run",
+    "file": "pipeline-reproducibility",
+    "refs": [],
+    "title": "Positions visibly evolve over the 100-step run",
     "type": "scenario"
   },
   "rq-d19fc020": {
