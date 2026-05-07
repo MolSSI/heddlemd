@@ -36,6 +36,13 @@
     "title": "Reject zero ly",
     "type": "scenario"
   },
+  "rq-06058b71": {
+    "decl": "Scenario: init_device loads the pair_force module with the LJ kernel",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "init_device loads the pair_force module with the LJ kernel",
+    "type": "scenario"
+  },
   "rq-08066bdf": {
     "decl": "### Types",
     "file": "particle-state",
@@ -108,6 +115,20 @@
     "title": "PairBuffer",
     "type": "api-item"
   },
+  "rq-13c02457": {
+    "decl": "# Feature: Lennard-Jones O(N²) Pair Force Kernel",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "Feature: Lennard-Jones O(N²) Pair Force Kernel",
+    "type": "file"
+  },
+  "rq-14d7a940": {
+    "decl": "Scenario: Kernel does not modify positions, velocities, masses, or net forces",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "Kernel does not modify positions, velocities, masses, or net forces",
+    "type": "scenario"
+  },
   "rq-15e1e995": {
     "decl": "Scenario: PairBuffer::new with max_neighbors = 0",
     "file": "pair-reduction",
@@ -175,6 +196,14 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-20e97464": {
+    "decl": "### Types",
+    "file": "lj-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-25afada1": {
     "decl": "### Kernel signature",
     "file": "build-pipeline",
@@ -188,6 +217,13 @@
     "file": "build-pipeline",
     "refs": [],
     "title": "fill kernel handles a non-block-aligned buffer size",
+    "type": "scenario"
+  },
+  "rq-26ffa053": {
+    "decl": "Scenario: Doubling epsilon doubles the force at the same separation",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "Doubling epsilon doubles the force at the same separation",
     "type": "scenario"
   },
   "rq-27ffd3f4": {
@@ -312,6 +348,14 @@
     "title": "PairBuffer",
     "type": "api-item"
   },
+  "rq-3c98d7a9": {
+    "decl": "## Gherkin Scenarios",
+    "file": "lj-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-3e8324c2": {
     "decl": "Scenario: wrap_position leaves a position inside the primary image unchanged",
     "file": "simulation-box",
@@ -354,6 +398,14 @@
     "title": "ParticleBuffers",
     "type": "api-item"
   },
+  "rq-4a902e65": {
+    "decl": "## Practical Bounds",
+    "file": "lj-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Practical Bounds",
+    "type": "section"
+  },
   "rq-4b38148c": {
     "decl": "Scenario: Reject duplicate explicit IDs",
     "file": "particle-state",
@@ -390,12 +442,28 @@
     "title": "Re-upload after host-side mutation",
     "type": "scenario"
   },
+  "rq-4ddab3c7": {
+    "decl": "### CUDA Kernel",
+    "file": "lj-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernel",
+    "type": "section"
+  },
   "rq-4f7dc024": {
     "decl": "Scenario: vv_kick_drift advances position and leaves velocity unchanged when force is zero",
     "file": "integration",
     "refs": [],
     "title": "vv_kick_drift advances position and leaves velocity unchanged when force is zero",
     "type": "scenario"
+  },
+  "rq-4fd872f5": {
+    "decl": "## Launch Configuration",
+    "file": "lj-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
+    "type": "section"
   },
   "rq-56d8375d": {
     "decl": "### PTX Module Loading",
@@ -459,6 +527,14 @@
     "title": "ParticleState",
     "type": "api-item"
   },
+  "rq-61207d82": {
+    "decl": "## Feature API",
+    "file": "lj-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-61606908": {
     "decl": "## Gherkin Scenarios",
     "file": "build-pipeline",
@@ -493,6 +569,21 @@
     "refs": [],
     "title": "Per-particle reduction with varying counts",
     "type": "scenario"
+  },
+  "rq-681afa90": {
+    "decl": "Scenario: Single-particle state produces only a zero self slot",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "Single-particle state produces only a zero self slot",
+    "type": "scenario"
+  },
+  "rq-6d209943": {
+    "decl": "## Algorithm",
+    "file": "lj-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
   },
   "rq-6f2452d1": {
     "decl": "### Reduction Launcher",
@@ -568,6 +659,19 @@
     "title": "Reject ParticleBuffers::new when a host array length is inconsistent",
     "type": "scenario"
   },
+  "rq-78d9fd1c": {
+    "decl": "### PTX Module Loading",
+    "file": "lj-pair-force",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/gpu/device.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PTX Module Loading",
+    "type": "section"
+  },
   "rq-78fc2fbb": {
     "decl": "Scenario: Slots beyond neighbor_counts[i] are not summed",
     "file": "pair-reduction",
@@ -622,11 +726,25 @@
     "title": "Reject zero lx",
     "type": "scenario"
   },
+  "rq-85192a05": {
+    "decl": "Scenario: At the LJ minimum r = sigma * 2^(1/6), the force is zero",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "At the LJ minimum r = sigma * 2^(1/6), the force is zero",
+    "type": "scenario"
+  },
   "rq-85baad9d": {
     "decl": "Scenario: build.rs reruns when a kernel source file changes",
     "file": "build-pipeline",
     "refs": [],
     "title": "build.rs reruns when a kernel source file changes",
+    "type": "scenario"
+  },
+  "rq-8626ec3c": {
+    "decl": "Scenario: Two particles across the box boundary interact via the minimum image",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "Two particles across the box boundary interact via the minimum image",
     "type": "scenario"
   },
   "rq-89d64ca3": {
@@ -734,6 +852,20 @@
     "title": "Download overwrites in-place after host mutation",
     "type": "scenario"
   },
+  "rq-96fadc6f": {
+    "decl": "Scenario: Slot for a pair beyond cutoff is zero",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "Slot for a pair beyond cutoff is zero",
+    "type": "scenario"
+  },
+  "rq-975b5ae0": {
+    "decl": "Scenario: Newton's third law is bit-exact for non-boundary displacements",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "Newton's third law is bit-exact for non-boundary displacements",
+    "type": "scenario"
+  },
   "rq-987dc616": {
     "decl": "## Out of Scope",
     "file": "simulation-box",
@@ -810,6 +942,14 @@
     "title": "fill kernel writes 1.0 to every element of a block-aligned buffer",
     "type": "scenario"
   },
+  "rq-9d7966f4": {
+    "decl": "## Out of Scope",
+    "file": "lj-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-9f6a73f9": {
     "decl": "## Algorithm",
     "file": "integration",
@@ -843,6 +983,14 @@
     "refs": [],
     "title": "build.rs fails with a clear message when nvcc rejects the source",
     "type": "scenario"
+  },
+  "rq-a1abedca": {
+    "decl": "### Reproducibility",
+    "file": "lj-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Reproducibility",
+    "type": "section"
   },
   "rq-a1c567b3": {
     "decl": "Scenario: Infinite pair contributions propagate to infinite net forces",
@@ -994,6 +1142,14 @@
     "title": "SimulationBox",
     "type": "api-item"
   },
+  "rq-b7bbabd0": {
+    "decl": "### Newton's third law",
+    "file": "lj-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Newton's third law",
+    "type": "section"
+  },
   "rq-b8070abb": {
     "decl": "### Constructor",
     "file": "simulation-box",
@@ -1088,6 +1244,13 @@
     "title": "Functions",
     "type": "section"
   },
+  "rq-c538b29d": {
+    "decl": "Scenario: Two particles at a fixed separation produce the closed-form LJ force",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "Two particles at a fixed separation produce the closed-form LJ force",
+    "type": "scenario"
+  },
   "rq-c669b757": {
     "decl": "## Smoke Test",
     "file": "build-pipeline",
@@ -1140,6 +1303,13 @@
     "title": "Feature: CUDA Build Pipeline and Smoke Test Kernel",
     "type": "file"
   },
+  "rq-cc87744c": {
+    "decl": "Scenario: Self-interaction slots are zero",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "Self-interaction slots are zero",
+    "type": "scenario"
+  },
   "rq-ce89d4a4": {
     "decl": "Scenario: Reject when masses has the wrong length",
     "file": "particle-state",
@@ -1152,6 +1322,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "minimum_image at the -L/2 boundary stays at -L/2",
+    "type": "scenario"
+  },
+  "rq-d1e7cb57": {
+    "decl": "Scenario: Block-non-aligned particle count is handled by the bounds check",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "Block-non-aligned particle count is handled by the bounds check",
     "type": "scenario"
   },
   "rq-d25000c5": {
@@ -1168,6 +1345,18 @@
     "title": "dt=0 leaves state unchanged for vv_kick",
     "type": "scenario"
   },
+  "rq-d3a14184": {
+    "decl": "- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameters) -> Result<(), GpuError>`",
+    "file": "lj-pair-force",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "lj_pair_force",
+    "type": "api-item"
+  },
   "rq-d49c9093": {
     "decl": "- `SimulationBox::minimum_image(&self, displacement: [f32; 3]) -> [f32; 3]`",
     "file": "simulation-box",
@@ -1180,6 +1369,21 @@
     "title": "SimulationBox",
     "type": "api-item"
   },
+  "rq-d6bd915a": {
+    "decl": "Scenario: Pair exactly at cutoff is included",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "Pair exactly at cutoff is included",
+    "type": "scenario"
+  },
+  "rq-d6beaed7": {
+    "decl": "### Rust Launcher",
+    "file": "lj-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Rust Launcher",
+    "type": "section"
+  },
   "rq-d920e446": {
     "decl": "Scenario: fill kernel does not write beyond the buffer",
     "file": "build-pipeline",
@@ -1187,11 +1391,37 @@
     "title": "fill kernel does not write beyond the buffer",
     "type": "scenario"
   },
+  "rq-daf7550b": {
+    "decl": "Scenario: NaN positions propagate to NaN pair forces",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "NaN positions propagate to NaN pair forces",
+    "type": "scenario"
+  },
+  "rq-dafe0fcb": {
+    "decl": "- `LennardJonesParameters` — host-side `Copy` struct carrying the three",
+    "file": "lj-pair-force",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "LennardJonesParameters",
+    "type": "api-item"
+  },
   "rq-de92101c": {
     "decl": "Scenario: build.rs compiles a .cu file to PTX",
     "file": "build-pipeline",
     "refs": [],
     "title": "build.rs compiles a .cu file to PTX",
+    "type": "scenario"
+  },
+  "rq-dfca62d2": {
+    "decl": "Scenario: Two independent runs produce byte-identical pair-force buffers",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "Two independent runs produce byte-identical pair-force buffers",
     "type": "scenario"
   },
   "rq-e1b51bd9": {
@@ -1221,6 +1451,13 @@
     "refs": [],
     "title": "Data Layout",
     "type": "section"
+  },
+  "rq-e564f8e2": {
+    "decl": "Scenario: Kernel does not write slots with k >= n",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "Kernel does not write slots with k >= n",
+    "type": "scenario"
   },
   "rq-e8be1a1c": {
     "decl": "- `SimulationBox::lengths(&self) -> [f32; 3]`",
@@ -1261,6 +1498,13 @@
     "file": "pair-reduction",
     "refs": [],
     "title": "Reduction does not modify neighbor_counts",
+    "type": "scenario"
+  },
+  "rq-ec53799e": {
+    "decl": "Scenario: lj_pair_force followed by reduce_pair_forces produces the correct net force",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "lj_pair_force followed by reduce_pair_forces produces the correct net force",
     "type": "scenario"
   },
   "rq-ef7b719d": {
@@ -1377,6 +1621,13 @@
     "refs": [],
     "title": "Periodic-boundary operations",
     "type": "section"
+  },
+  "rq-fc220d87": {
+    "decl": "Scenario: Empty state is a no-op",
+    "file": "lj-pair-force",
+    "refs": [],
+    "title": "Empty state is a no-op",
+    "type": "scenario"
   },
   "rq-fdf2db79": {
     "decl": "### Types",

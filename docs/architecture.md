@@ -28,6 +28,21 @@ The three invariants that make this work:
 3. **Fixed-topology reduction.** Per-particle force sums are computed with a
    segmented reduction kernel that processes contributions in index order.
 
+### Scope of bit-wise reproducibility
+
+The reproducibility guarantee covers **multiple runs on the same GPU**. It
+does not extend across different hardware: a CPU reference implementation
+and a GPU kernel will not in general agree bit-for-bit, because IEEE-754
+permits implementations to fuse multiply-add operations (FMA) and other
+contractions that the two backends choose differently. CUDA kernels in this
+project are compiled with `nvcc`'s default FMA contraction enabled; the
+performance benefit is real and the cross-hardware match is not a property
+the architecture promises.
+
+Tests that compare a kernel result against a CPU-computed expected value
+should use a small relative tolerance. Tests that compare two GPU runs to
+each other use exact equality — that is the load-bearing invariant.
+
 ## High-level data flow
 
 ```

@@ -1,6 +1,7 @@
 use cudarc::driver::{CudaSlice, DeviceSlice, LaunchAsync, LaunchConfig};
 
 use crate::gpu::{GpuError, PairBuffer, ParticleBuffers};
+use crate::pbc::SimulationBox;
 
 const BLOCK_SIZE: u32 = 256;
 
@@ -119,6 +120,68 @@ pub fn reduce_pair_forces(
                 &mut particle_buffers.forces_x,
                 &mut particle_buffers.forces_y,
                 &mut particle_buffers.forces_z,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-dafe0fcb
+#[derive(Debug, Clone, Copy)]
+pub struct LennardJonesParameters {
+    pub sigma: f32,
+    pub epsilon: f32,
+    pub cutoff: f32,
+}
+
+// rq-d3a14184
+pub fn lj_pair_force(
+    particle_buffers: &ParticleBuffers,
+    pair_buffer: &mut PairBuffer,
+    sim_box: &SimulationBox,
+    params: &LennardJonesParameters,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(pair_buffer.particle_count(), n);
+    debug_assert!(pair_buffer.max_neighbors() as usize >= n);
+
+    let n_u32 = n as u32;
+    let max_neighbors = pair_buffer.max_neighbors();
+    let func = particle_buffers
+        .device
+        .get_func("pair_force", "lj_pair_force")
+        .expect("pair_force module is not loaded; init_device() must be called first");
+
+    let grid_side = n_u32.div_ceil(16);
+    let cfg = LaunchConfig {
+        grid_dim: (grid_side, grid_side, 1),
+        block_dim: (16, 16, 1),
+        shared_mem_bytes: 0,
+    };
+
+    let lengths = sim_box.lengths();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.positions_x,
+                &particle_buffers.positions_y,
+                &particle_buffers.positions_z,
+                &mut pair_buffer.pair_forces_x,
+                &mut pair_buffer.pair_forces_y,
+                &mut pair_buffer.pair_forces_z,
+                max_neighbors,
+                lengths[0],
+                lengths[1],
+                lengths[2],
+                params.sigma,
+                params.epsilon,
+                params.cutoff,
                 n_u32,
             ),
         )

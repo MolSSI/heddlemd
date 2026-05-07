@@ -41,5 +41,11 @@ pub fn init_device() -> Result<Arc<CudaDevice>, GpuError> {
         "reduce",
         &["reduce_pair_forces"],
     )?;
+    // rq-78d9fd1c
+    device.load_ptx(
+        Ptx::from_src(kernels::PAIR_FORCE),
+        "pair_force",
+        &["lj_pair_force"],
+    )?;
     Ok(device)
 }
