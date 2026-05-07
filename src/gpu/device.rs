@@ -29,5 +29,11 @@ impl From<DriverError> for GpuError {
 pub fn init_device() -> Result<Arc<CudaDevice>, GpuError> {
     let device = CudaDevice::new(0)?;
     device.load_ptx(Ptx::from_src(kernels::FILL), "fill", &["fill"])?;
+    // rq-e20b2f39
+    device.load_ptx(
+        Ptx::from_src(kernels::INTEGRATE),
+        "integrate",
+        &["vv_kick_drift", "vv_kick"],
+    )?;
     Ok(device)
 }

@@ -7,6 +7,14 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-0540b862": {
+    "decl": "## Launch Configuration",
+    "file": "integration",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
+    "type": "section"
+  },
   "rq-05691d2f": {
     "decl": "Scenario: init_device succeeds on a machine with a CUDA GPU",
     "file": "build-pipeline",
@@ -22,6 +30,13 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-09a2e15f": {
+    "decl": "# Feature: Velocity Verlet Time Integration",
+    "file": "integration",
+    "refs": [],
+    "title": "Feature: Velocity Verlet Time Integration",
+    "type": "file"
+  },
   "rq-0c3a23bb": {
     "decl": "## GPU Device Module",
     "file": "build-pipeline",
@@ -36,6 +51,14 @@
     "refs": [],
     "title": "Allocate device buffers and perform initial upload",
     "type": "scenario"
+  },
+  "rq-10cc8ddf": {
+    "decl": "### CUDA Kernels",
+    "file": "integration",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernels",
+    "type": "section"
   },
   "rq-123f560e": {
     "decl": "Scenario: build.rs fails with a clear message when nvcc is missing",
@@ -75,6 +98,13 @@
     "title": "Reject download when one host array drifts in length",
     "type": "scenario"
   },
+  "rq-1e2d749d": {
+    "decl": "Scenario: vv_kick_drift on an empty state is a no-op",
+    "file": "integration",
+    "refs": [],
+    "title": "vv_kick_drift on an empty state is a no-op",
+    "type": "scenario"
+  },
   "rq-1e8b3c79": {
     "decl": "Scenario: Reject when positions_y has the wrong length",
     "file": "particle-state",
@@ -105,6 +135,13 @@
     "title": "fill kernel handles a non-block-aligned buffer size",
     "type": "scenario"
   },
+  "rq-29718dcf": {
+    "decl": "Scenario: kick_drift followed by kick reproduces closed-form constant-acceleration kinematics",
+    "file": "integration",
+    "refs": [],
+    "title": "kick_drift followed by kick reproduces closed-form constant-acceleration kinematics",
+    "type": "scenario"
+  },
   "rq-299c69c9": {
     "decl": "Scenario: init_device fails when no GPU is available",
     "file": "build-pipeline",
@@ -119,6 +156,13 @@
     "title": "Construct with matching arrays and explicit unique IDs",
     "type": "scenario"
   },
+  "rq-2f52c25e": {
+    "decl": "Scenario: vv_kick leaves velocity unchanged when force is zero",
+    "file": "integration",
+    "refs": [],
+    "title": "vv_kick leaves velocity unchanged when force is zero",
+    "type": "scenario"
+  },
   "rq-3766be01": {
     "decl": "- `ParticleState` — host-side SoA state. All eleven per-particle arrays are",
     "file": "particle-state",
@@ -130,6 +174,20 @@
     ],
     "title": "ParticleState",
     "type": "api-item"
+  },
+  "rq-37e6f318": {
+    "decl": "Scenario: Two independent runs produce byte-identical outputs",
+    "file": "integration",
+    "refs": [],
+    "title": "Two independent runs produce byte-identical outputs",
+    "type": "scenario"
+  },
+  "rq-386cfae3": {
+    "decl": "Scenario: vv_kick on an empty state is a no-op",
+    "file": "integration",
+    "refs": [],
+    "title": "vv_kick on an empty state is a no-op",
+    "type": "scenario"
   },
   "rq-391cb266": {
     "decl": "Scenario: Reject when explicit IDs have the wrong length",
@@ -187,6 +245,21 @@
     "title": "Re-upload after host-side mutation",
     "type": "scenario"
   },
+  "rq-4f7dc024": {
+    "decl": "Scenario: vv_kick_drift advances position and leaves velocity unchanged when force is zero",
+    "file": "integration",
+    "refs": [],
+    "title": "vv_kick_drift advances position and leaves velocity unchanged when force is zero",
+    "type": "scenario"
+  },
+  "rq-581ec3ff": {
+    "decl": "### Rust Launch Helpers",
+    "file": "integration",
+    "level": 3,
+    "refs": [],
+    "title": "Rust Launch Helpers",
+    "type": "section"
+  },
   "rq-58254790": {
     "decl": "Scenario: Download from an empty buffers into an empty state",
     "file": "particle-state",
@@ -230,6 +303,14 @@
     "title": "Functions and methods",
     "type": "section"
   },
+  "rq-74535c7a": {
+    "decl": "## Feature API",
+    "file": "integration",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-780d68ea": {
     "decl": "Scenario: Reject ParticleBuffers::new when a host array length is inconsistent",
     "file": "particle-state",
@@ -242,6 +323,13 @@
     "file": "particle-state",
     "refs": [],
     "title": "Reject download when host particle count differs from buffers",
+    "type": "scenario"
+  },
+  "rq-7dfa14cf": {
+    "decl": "Scenario: vv_kick_drift does not modify forces or masses",
+    "file": "integration",
+    "refs": [],
+    "title": "vv_kick_drift does not modify forces or masses",
     "type": "scenario"
   },
   "rq-81f4ec9d": {
@@ -266,6 +354,21 @@
     "title": "Edge case: non-block-aligned buffer size",
     "type": "section"
   },
+  "rq-8c220501": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-8e47334c": {
+    "decl": "Scenario: NaN forces propagate to NaN velocities and positions",
+    "file": "integration",
+    "refs": [],
+    "title": "NaN forces propagate to NaN velocities and positions",
+    "type": "scenario"
+  },
   "rq-9026181d": {
     "decl": "## Host ↔ Device Transfer Semantics",
     "file": "particle-state",
@@ -280,6 +383,14 @@
     "refs": [],
     "title": "Construct an empty state with explicit empty IDs",
     "type": "scenario"
+  },
+  "rq-92f5e5c4": {
+    "decl": "## Out of Scope",
+    "file": "integration",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-93367a8f": {
     "decl": "## Dependencies",
@@ -330,6 +441,14 @@
     "title": "fill kernel writes 1.0 to every element of a block-aligned buffer",
     "type": "scenario"
   },
+  "rq-9f6a73f9": {
+    "decl": "## Algorithm",
+    "file": "integration",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
+  },
   "rq-9ff4fd10": {
     "decl": "Scenario: Reject upload when host particle count differs from buffers",
     "file": "particle-state",
@@ -342,6 +461,13 @@
     "file": "build-pipeline",
     "refs": [],
     "title": "build.rs fails with a clear message when nvcc rejects the source",
+    "type": "scenario"
+  },
+  "rq-a93a5b14": {
+    "decl": "Scenario: Block-non-aligned particle counts are handled by the bounds check",
+    "file": "integration",
+    "refs": [],
+    "title": "Block-non-aligned particle counts are handled by the bounds check",
     "type": "scenario"
   },
   "rq-ac035b90": {
@@ -376,6 +502,20 @@
     "title": "ParticleBuffers",
     "type": "api-item"
   },
+  "rq-b13eba96": {
+    "decl": "Scenario: Particles evolve independently with their own forces",
+    "file": "integration",
+    "refs": [],
+    "title": "Particles evolve independently with their own forces",
+    "type": "scenario"
+  },
+  "rq-b2d67b57": {
+    "decl": "Scenario: Forward then negated step returns to the original state for a free particle",
+    "file": "integration",
+    "refs": [],
+    "title": "Forward then negated step returns to the original state for a free particle",
+    "type": "scenario"
+  },
   "rq-b4bb7096": {
     "decl": "Scenario: Reject upload when one host array drifts in length",
     "file": "particle-state",
@@ -390,6 +530,20 @@
     "refs": [],
     "title": "Project Structure",
     "type": "section"
+  },
+  "rq-bc8375ce": {
+    "decl": "Scenario: init_device loads the integrate module with both kernels",
+    "file": "integration",
+    "refs": [],
+    "title": "init_device loads the integrate module with both kernels",
+    "type": "scenario"
+  },
+  "rq-bd149f52": {
+    "decl": "Scenario: Acceleration scales inversely with mass",
+    "file": "integration",
+    "refs": [],
+    "title": "Acceleration scales inversely with mass",
+    "type": "scenario"
   },
   "rq-bec7b519": {
     "decl": "- `ParticleStateError` — error type returned by construction and host↔device",
@@ -470,6 +624,20 @@
     "title": "Reject when masses has the wrong length",
     "type": "scenario"
   },
+  "rq-d25000c5": {
+    "decl": "Scenario: vv_kick_drift produces the exact half-step kinematics under a constant force",
+    "file": "integration",
+    "refs": [],
+    "title": "vv_kick_drift produces the exact half-step kinematics under a constant force",
+    "type": "scenario"
+  },
+  "rq-d28737dd": {
+    "decl": "Scenario: dt=0 leaves state unchanged for vv_kick",
+    "file": "integration",
+    "refs": [],
+    "title": "dt=0 leaves state unchanged for vv_kick",
+    "type": "scenario"
+  },
   "rq-d920e446": {
     "decl": "Scenario: fill kernel does not write beyond the buffer",
     "file": "build-pipeline",
@@ -482,6 +650,26 @@
     "file": "build-pipeline",
     "refs": [],
     "title": "build.rs compiles a .cu file to PTX",
+    "type": "scenario"
+  },
+  "rq-e20b2f39": {
+    "decl": "### PTX Module Loading",
+    "file": "integration",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/gpu/device.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PTX Module Loading",
+    "type": "section"
+  },
+  "rq-e8c21a03": {
+    "decl": "Scenario: dt=0 leaves state unchanged for vv_kick_drift",
+    "file": "integration",
+    "refs": [],
+    "title": "dt=0 leaves state unchanged for vv_kick_drift",
     "type": "scenario"
   },
   "rq-e9a67206": {
@@ -507,6 +695,30 @@
     "title": "Feature: SoA Particle State and GPU Buffers",
     "type": "file"
   },
+  "rq-f1ba909b": {
+    "decl": "- `vv_kick_drift(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>`",
+    "file": "integration",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "vv_kick_drift",
+    "type": "api-item"
+  },
+  "rq-f2e3fa58": {
+    "decl": "- `vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>`",
+    "file": "integration",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "vv_kick",
+    "type": "api-item"
+  },
   "rq-f379e47c": {
     "decl": "### nvcc invocation",
     "file": "build-pipeline",
@@ -520,6 +732,13 @@
     "file": "particle-state",
     "refs": [],
     "title": "Download reflects device-side changes pushed by an interim re-upload",
+    "type": "scenario"
+  },
+  "rq-f721b7a1": {
+    "decl": "Scenario: vv_kick does not modify forces, masses, or positions",
+    "file": "integration",
+    "refs": [],
+    "title": "vv_kick does not modify forces, masses, or positions",
     "type": "scenario"
   },
   "rq-f7fe7f1b": {
