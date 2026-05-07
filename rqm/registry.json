@@ -1,0 +1,533 @@
+{
+  "rq-0087f355": {
+    "decl": "## Out of Scope",
+    "file": "particle-state",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
+  "rq-05691d2f": {
+    "decl": "Scenario: init_device succeeds on a machine with a CUDA GPU",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "init_device succeeds on a machine with a CUDA GPU",
+    "type": "scenario"
+  },
+  "rq-08066bdf": {
+    "decl": "### Types",
+    "file": "particle-state",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
+  "rq-0c3a23bb": {
+    "decl": "## GPU Device Module",
+    "file": "build-pipeline",
+    "level": 2,
+    "refs": [],
+    "title": "GPU Device Module",
+    "type": "section"
+  },
+  "rq-0ffccee0": {
+    "decl": "Scenario: Allocate device buffers and perform initial upload",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Allocate device buffers and perform initial upload",
+    "type": "scenario"
+  },
+  "rq-123f560e": {
+    "decl": "Scenario: build.rs fails with a clear message when nvcc is missing",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "build.rs fails with a clear message when nvcc is missing",
+    "type": "scenario"
+  },
+  "rq-179ed985": {
+    "decl": "- `ParticleBuffers::upload(&mut self, state: &ParticleState) -> Result<(), ParticleStateError>`",
+    "file": "particle-state",
+    "refs": [
+      {
+        "file": "src/gpu/buffers.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ParticleBuffers",
+    "type": "api-item"
+  },
+  "rq-18411920": {
+    "decl": "- `ParticleBuffers::particle_count(&self) -> usize`",
+    "file": "particle-state",
+    "refs": [
+      {
+        "file": "src/gpu/buffers.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ParticleBuffers",
+    "type": "api-item"
+  },
+  "rq-1bdbd71e": {
+    "decl": "Scenario: Reject download when one host array drifts in length",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Reject download when one host array drifts in length",
+    "type": "scenario"
+  },
+  "rq-1e8b3c79": {
+    "decl": "Scenario: Reject when positions_y has the wrong length",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Reject when positions_y has the wrong length",
+    "type": "scenario"
+  },
+  "rq-2093594f": {
+    "decl": "### Types",
+    "file": "build-pipeline",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
+  "rq-25afada1": {
+    "decl": "### Kernel signature",
+    "file": "build-pipeline",
+    "level": 3,
+    "refs": [],
+    "title": "Kernel signature",
+    "type": "section"
+  },
+  "rq-26d8c08c": {
+    "decl": "Scenario: fill kernel handles a non-block-aligned buffer size",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "fill kernel handles a non-block-aligned buffer size",
+    "type": "scenario"
+  },
+  "rq-299c69c9": {
+    "decl": "Scenario: init_device fails when no GPU is available",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "init_device fails when no GPU is available",
+    "type": "scenario"
+  },
+  "rq-2bbc4121": {
+    "decl": "Scenario: Construct with matching arrays and explicit unique IDs",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Construct with matching arrays and explicit unique IDs",
+    "type": "scenario"
+  },
+  "rq-3766be01": {
+    "decl": "- `ParticleState` — host-side SoA state. All eleven per-particle arrays are",
+    "file": "particle-state",
+    "refs": [
+      {
+        "file": "src/state.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ParticleState",
+    "type": "api-item"
+  },
+  "rq-391cb266": {
+    "decl": "Scenario: Reject when explicit IDs have the wrong length",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Reject when explicit IDs have the wrong length",
+    "type": "scenario"
+  },
+  "rq-39a260b5": {
+    "decl": "Scenario: Download into the source state preserves values",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Download into the source state preserves values",
+    "type": "scenario"
+  },
+  "rq-438b895b": {
+    "decl": "## Build Script",
+    "file": "build-pipeline",
+    "level": 2,
+    "refs": [],
+    "title": "Build Script",
+    "type": "section"
+  },
+  "rq-4a3feaf7": {
+    "decl": "### Missing nvcc",
+    "file": "build-pipeline",
+    "level": 3,
+    "refs": [],
+    "title": "Missing nvcc",
+    "type": "section"
+  },
+  "rq-4a8de06c": {
+    "decl": "- `ParticleBuffers` — device-side mirror. Holds a `CudaSlice<f32>` for each",
+    "file": "particle-state",
+    "refs": [
+      {
+        "file": "src/gpu/buffers.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ParticleBuffers",
+    "type": "api-item"
+  },
+  "rq-4b38148c": {
+    "decl": "Scenario: Reject duplicate explicit IDs",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Reject duplicate explicit IDs",
+    "type": "scenario"
+  },
+  "rq-4d226dff": {
+    "decl": "Scenario: Re-upload after host-side mutation",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Re-upload after host-side mutation",
+    "type": "scenario"
+  },
+  "rq-58254790": {
+    "decl": "Scenario: Download from an empty buffers into an empty state",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Download from an empty buffers into an empty state",
+    "type": "scenario"
+  },
+  "rq-599b2eb4": {
+    "decl": "## Fill Kernel",
+    "file": "build-pipeline",
+    "level": 2,
+    "refs": [],
+    "title": "Fill Kernel",
+    "type": "section"
+  },
+  "rq-5e0598cb": {
+    "decl": "- `ParticleState::new(positions_x: Vec<f32>, positions_y: Vec<f32>, positions_z: Vec<f32>, velocities_x: Vec<f32>, velocities_y: Vec<f32>, velocities_z: Vec<f32>, masses: Vec<f32>, ids: Option<Vec<u32>>) -> Result<ParticleState, ParticleStateError>`",
+    "file": "particle-state",
+    "refs": [
+      {
+        "file": "src/state.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ParticleState",
+    "type": "api-item"
+  },
+  "rq-61606908": {
+    "decl": "## Gherkin Scenarios",
+    "file": "build-pipeline",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-7206ab76": {
+    "decl": "### Functions and methods",
+    "file": "particle-state",
+    "level": 3,
+    "refs": [],
+    "title": "Functions and methods",
+    "type": "section"
+  },
+  "rq-780d68ea": {
+    "decl": "Scenario: Reject ParticleBuffers::new when a host array length is inconsistent",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Reject ParticleBuffers::new when a host array length is inconsistent",
+    "type": "scenario"
+  },
+  "rq-7ab80063": {
+    "decl": "Scenario: Reject download when host particle count differs from buffers",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Reject download when host particle count differs from buffers",
+    "type": "scenario"
+  },
+  "rq-81f4ec9d": {
+    "decl": "Scenario: Construct with matching arrays and default IDs",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Construct with matching arrays and default IDs",
+    "type": "scenario"
+  },
+  "rq-85baad9d": {
+    "decl": "Scenario: build.rs reruns when a kernel source file changes",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "build.rs reruns when a kernel source file changes",
+    "type": "scenario"
+  },
+  "rq-89d64ca3": {
+    "decl": "### Edge case: non-block-aligned buffer size",
+    "file": "build-pipeline",
+    "level": 3,
+    "refs": [],
+    "title": "Edge case: non-block-aligned buffer size",
+    "type": "section"
+  },
+  "rq-9026181d": {
+    "decl": "## Host ↔ Device Transfer Semantics",
+    "file": "particle-state",
+    "level": 2,
+    "refs": [],
+    "title": "Host ↔ Device Transfer Semantics",
+    "type": "section"
+  },
+  "rq-91aa1f1c": {
+    "decl": "Scenario: Construct an empty state with explicit empty IDs",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Construct an empty state with explicit empty IDs",
+    "type": "scenario"
+  },
+  "rq-93367a8f": {
+    "decl": "## Dependencies",
+    "file": "build-pipeline",
+    "level": 2,
+    "refs": [],
+    "title": "Dependencies",
+    "type": "section"
+  },
+  "rq-9447dfcf": {
+    "decl": "Scenario: NaN values are accepted at construction",
+    "file": "particle-state",
+    "refs": [],
+    "title": "NaN values are accepted at construction",
+    "type": "scenario"
+  },
+  "rq-9594de53": {
+    "decl": "Scenario: Download overwrites in-place after host mutation",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Download overwrites in-place after host mutation",
+    "type": "scenario"
+  },
+  "rq-9a19bfa3": {
+    "decl": "- `ParticleState::download_from(&mut self, buffers: &ParticleBuffers) -> Result<(), ParticleStateError>`",
+    "file": "particle-state",
+    "refs": [
+      {
+        "file": "src/state.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ParticleState",
+    "type": "api-item"
+  },
+  "rq-9b0aad2c": {
+    "decl": "## Gherkin Scenarios",
+    "file": "particle-state",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-9cf657ed": {
+    "decl": "Scenario: fill kernel writes 1.0 to every element of a block-aligned buffer",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "fill kernel writes 1.0 to every element of a block-aligned buffer",
+    "type": "scenario"
+  },
+  "rq-9ff4fd10": {
+    "decl": "Scenario: Reject upload when host particle count differs from buffers",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Reject upload when host particle count differs from buffers",
+    "type": "scenario"
+  },
+  "rq-a199e0aa": {
+    "decl": "Scenario: build.rs fails with a clear message when nvcc rejects the source",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "build.rs fails with a clear message when nvcc rejects the source",
+    "type": "scenario"
+  },
+  "rq-ac035b90": {
+    "decl": "- `ParticleState::particle_count(&self) -> usize`",
+    "file": "particle-state",
+    "refs": [
+      {
+        "file": "src/state.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ParticleState",
+    "type": "api-item"
+  },
+  "rq-add95876": {
+    "decl": "## Data Layout",
+    "file": "particle-state",
+    "level": 2,
+    "refs": [],
+    "title": "Data Layout",
+    "type": "section"
+  },
+  "rq-b09032cb": {
+    "decl": "- `ParticleBuffers::new(device: Arc<CudaDevice>, state: &ParticleState) -> Result<ParticleBuffers, ParticleStateError>`",
+    "file": "particle-state",
+    "refs": [
+      {
+        "file": "src/gpu/buffers.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ParticleBuffers",
+    "type": "api-item"
+  },
+  "rq-b4bb7096": {
+    "decl": "Scenario: Reject upload when one host array drifts in length",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Reject upload when one host array drifts in length",
+    "type": "scenario"
+  },
+  "rq-b735d0b0": {
+    "decl": "## Project Structure",
+    "file": "build-pipeline",
+    "level": 2,
+    "refs": [],
+    "title": "Project Structure",
+    "type": "section"
+  },
+  "rq-bec7b519": {
+    "decl": "- `ParticleStateError` — error type returned by construction and host↔device",
+    "file": "particle-state",
+    "refs": [
+      {
+        "file": "src/state.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ParticleStateError",
+    "type": "api-item"
+  },
+  "rq-c17ef35f": {
+    "decl": "Scenario: PTX is embedded in the Rust binary",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "PTX is embedded in the Rust binary",
+    "type": "scenario"
+  },
+  "rq-c1cfec9a": {
+    "decl": "### PTX embedding",
+    "file": "build-pipeline",
+    "level": 3,
+    "refs": [],
+    "title": "PTX embedding",
+    "type": "section"
+  },
+  "rq-c22483b4": {
+    "decl": "Scenario: Construct an empty state",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Construct an empty state",
+    "type": "scenario"
+  },
+  "rq-c38c8f3b": {
+    "decl": "### Functions",
+    "file": "build-pipeline",
+    "level": 3,
+    "refs": [],
+    "title": "Functions",
+    "type": "section"
+  },
+  "rq-c669b757": {
+    "decl": "## Smoke Test",
+    "file": "build-pipeline",
+    "level": 2,
+    "refs": [],
+    "title": "Smoke Test",
+    "type": "section"
+  },
+  "rq-c8aa7417": {
+    "decl": "Scenario: Allocate device buffers from an empty state",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Allocate device buffers from an empty state",
+    "type": "scenario"
+  },
+  "rq-c9016748": {
+    "decl": "## Feature API",
+    "file": "particle-state",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
+  "rq-cc1b997d": {
+    "decl": "# Feature: CUDA Build Pipeline and Smoke Test Kernel",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "Feature: CUDA Build Pipeline and Smoke Test Kernel",
+    "type": "file"
+  },
+  "rq-ce89d4a4": {
+    "decl": "Scenario: Reject when masses has the wrong length",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Reject when masses has the wrong length",
+    "type": "scenario"
+  },
+  "rq-d920e446": {
+    "decl": "Scenario: fill kernel does not write beyond the buffer",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "fill kernel does not write beyond the buffer",
+    "type": "scenario"
+  },
+  "rq-de92101c": {
+    "decl": "Scenario: build.rs compiles a .cu file to PTX",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "build.rs compiles a .cu file to PTX",
+    "type": "scenario"
+  },
+  "rq-e9a67206": {
+    "decl": "## Out of Scope",
+    "file": "build-pipeline",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
+  "rq-ef7b719d": {
+    "decl": "## Construction Details",
+    "file": "particle-state",
+    "level": 2,
+    "refs": [],
+    "title": "Construction Details",
+    "type": "section"
+  },
+  "rq-f04e473c": {
+    "decl": "# Feature: SoA Particle State and GPU Buffers",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Feature: SoA Particle State and GPU Buffers",
+    "type": "file"
+  },
+  "rq-f379e47c": {
+    "decl": "### nvcc invocation",
+    "file": "build-pipeline",
+    "level": 3,
+    "refs": [],
+    "title": "nvcc invocation",
+    "type": "section"
+  },
+  "rq-f4ebf12a": {
+    "decl": "Scenario: Download reflects device-side changes pushed by an interim re-upload",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Download reflects device-side changes pushed by an interim re-upload",
+    "type": "scenario"
+  },
+  "rq-f7fe7f1b": {
+    "decl": "### Test procedure",
+    "file": "build-pipeline",
+    "level": 3,
+    "refs": [],
+    "title": "Test procedure",
+    "type": "section"
+  }
+}
