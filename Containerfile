@@ -47,25 +47,6 @@ RUN python -m pip install --upgrade pip setuptools wheel && \
                           pandas \
                           jupyter
 
-COPY .docker/interface.sh /interface.sh
-RUN mkdir -p /.podman
-COPY .podman/interface.sh /.podman/interface.sh
-
-# Copy the entrypoint files into the Docker image
-COPY .podman/entrypoint.sh /.term/entrypoint.sh
-RUN chmod +x /.term/entrypoint.sh
-
-# Set the default command
-CMD ["/.term/entrypoint.sh"]
-
-
-
-
-
-
-
-
-
 
 
 ENV PATH="$PATH:/root/.local/bin"
@@ -85,4 +66,14 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 
 
 
+COPY .podman/interface.sh /interface.sh
+RUN mkdir -p /.podman
 COPY .podman/interface.sh /.podman/interface.sh
+
+# Copy the entrypoint files into the Docker image
+COPY .podman/entrypoint.sh /.term/entrypoint.sh
+RUN chmod +x /.term/entrypoint.sh
+
+# Set the default command
+CMD ["/.term/entrypoint.sh"]
+
