@@ -7,6 +7,13 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-0099ef65": {
+    "decl": "Scenario: Single-step lossless round trip restores observables bit-exactly",
+    "file": "pipeline-reversibility",
+    "refs": [],
+    "title": "Single-step lossless round trip restores observables bit-exactly",
+    "type": "scenario"
+  },
   "rq-03830444": {
     "decl": "# Feature: Simulation Box and Periodic Boundary Conditions",
     "file": "simulation-box",
@@ -49,6 +56,14 @@
     "level": 3,
     "refs": [],
     "title": "Types",
+    "type": "section"
+  },
+  "rq-090b70bb": {
+    "decl": "## Comparison Procedure",
+    "file": "pipeline-reversibility",
+    "level": 2,
+    "refs": [],
+    "title": "Comparison Procedure",
     "type": "section"
   },
   "rq-09a2e15f": {
@@ -174,12 +189,27 @@
     "title": "Single-step round-trip restores the observable state bit-exactly under zero force",
     "type": "scenario"
   },
+  "rq-1b44b5da": {
+    "decl": "Scenario: Lossy 100-step round trip does NOT restore observables",
+    "file": "pipeline-reversibility",
+    "refs": [],
+    "title": "Lossy 100-step round trip does NOT restore observables",
+    "type": "scenario"
+  },
   "rq-1bdbd71e": {
     "decl": "Scenario: Reject download when one host array drifts in length",
     "file": "particle-state",
     "refs": [],
     "title": "Reject download when one host array drifts in length",
     "type": "scenario"
+  },
+  "rq-1d618f18": {
+    "decl": "## Reversal Protocol",
+    "file": "pipeline-reversibility",
+    "level": 2,
+    "refs": [],
+    "title": "Reversal Protocol",
+    "type": "section"
   },
   "rq-1e2d749d": {
     "decl": "Scenario: vv_kick_drift on an empty state is a no-op",
@@ -774,6 +804,14 @@
     "title": "Validation order is lx then ly then lz",
     "type": "scenario"
   },
+  "rq-7600786b": {
+    "decl": "## Test Fixture",
+    "file": "pipeline-reversibility",
+    "level": 2,
+    "refs": [],
+    "title": "Test Fixture",
+    "type": "section"
+  },
   "rq-77e88745": {
     "decl": "Scenario: Block-non-aligned particle counts are handled by the bounds check",
     "file": "pair-reduction",
@@ -786,6 +824,13 @@
     "file": "particle-state",
     "refs": [],
     "title": "Reject ParticleBuffers::new when a host array length is inconsistent",
+    "type": "scenario"
+  },
+  "rq-7822b88b": {
+    "decl": "Scenario: 100-step lossless round trip restores observables bit-exactly",
+    "file": "pipeline-reversibility",
+    "refs": [],
+    "title": "100-step lossless round trip restores observables bit-exactly",
     "type": "scenario"
   },
   "rq-78d9fd1c": {
@@ -826,6 +871,14 @@
     "refs": [],
     "title": "Reject download when host particle count differs from buffers",
     "type": "scenario"
+  },
+  "rq-7b5eef8c": {
+    "decl": "## Lossless Velocity-Verlet Loop",
+    "file": "pipeline-reversibility",
+    "level": 2,
+    "refs": [],
+    "title": "Lossless Velocity-Verlet Loop",
+    "type": "section"
   },
   "rq-7d5e87ee": {
     "decl": "- `vv_kick_drift_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, dt: f32) -> Result<(), GpuError>`",
@@ -1291,7 +1344,12 @@
   "rq-b73316ed": {
     "decl": "Scenario: Multi-step round-trip restores the observable state bit-exactly under constant force",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "rqm/pipeline-reversibility.md",
+        "kind": "code"
+      }
+    ],
     "title": "Multi-step round-trip restores the observable state bit-exactly under constant force",
     "type": "scenario"
   },
@@ -1330,6 +1388,13 @@
     "refs": [],
     "title": "Constructor",
     "type": "section"
+  },
+  "rq-b87fd5e8": {
+    "decl": "Scenario: Positions visibly evolve over the 100-step lossless forward run",
+    "file": "pipeline-reversibility",
+    "refs": [],
+    "title": "Positions visibly evolve over the 100-step lossless forward run",
+    "type": "scenario"
   },
   "rq-b96ce51d": {
     "decl": "Scenario: LosslessBuffers::new with particle_count = 0",
@@ -1422,6 +1487,14 @@
     "refs": [],
     "title": "Construct an empty state",
     "type": "scenario"
+  },
+  "rq-c2bc2592": {
+    "decl": "## Out of Scope",
+    "file": "pipeline-reversibility",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-c38c8f3b": {
     "decl": "### Functions",
@@ -1578,6 +1651,13 @@
     "title": "Rust Launcher",
     "type": "section"
   },
+  "rq-d836d884": {
+    "decl": "# Feature: End-to-End Pipeline Reversibility Test",
+    "file": "pipeline-reversibility",
+    "refs": [],
+    "title": "Feature: End-to-End Pipeline Reversibility Test",
+    "type": "file"
+  },
   "rq-d920e446": {
     "decl": "Scenario: fill kernel does not write beyond the buffer",
     "file": "build-pipeline",
@@ -1646,6 +1726,14 @@
     "title": "Data Layout",
     "type": "section"
   },
+  "rq-e4f403e9": {
+    "decl": "## Gherkin Scenarios",
+    "file": "pipeline-reversibility",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-e564f8e2": {
     "decl": "Scenario: Kernel does not write slots with k >= n",
     "file": "lj-pair-force",
@@ -1699,6 +1787,13 @@
     "file": "lj-pair-force",
     "refs": [],
     "title": "lj_pair_force followed by reduce_pair_forces produces the correct net force",
+    "type": "scenario"
+  },
+  "rq-ed048159": {
+    "decl": "Scenario: All observables are finite after the 100-step lossless forward run",
+    "file": "pipeline-reversibility",
+    "refs": [],
+    "title": "All observables are finite after the 100-step lossless forward run",
     "type": "scenario"
   },
   "rq-ef7b719d": {

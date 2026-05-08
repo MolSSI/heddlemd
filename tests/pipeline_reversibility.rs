@@ -1,0 +1,351 @@
+use std::sync::Arc;
+
+use cudarc::driver::{CudaDevice, CudaSlice};
+use dynamics::gpu::{
+    LennardJonesParameters, LosslessBuffers, PairBuffer, ParticleBuffers, init_device,
+    lj_pair_force, reduce_pair_forces, vv_kick, vv_kick_drift, vv_kick_drift_lossless,
+    vv_kick_lossless,
+};
+use dynamics::pbc::SimulationBox;
+use dynamics::state::ParticleState;
+
+const N: usize = 64;
+const BOX_L: f32 = 8.0;
+const LATTICE_SPACING: f32 = 2.0;
+const LATTICE_ORIGIN: f32 = -3.0;
+const DT: f32 = 0.001;
+const SIGMA: f32 = 1.0;
+const EPSILON: f32 = 1.0;
+const CUTOFF: f32 = 2.5;
+const N_STEPS: usize = 100;
+const RESIDUAL_TOL: f64 = 1e-10;
+
+// rq-7600786b
+fn build_initial_state() -> ParticleState {
+    let mut positions_x = Vec::with_capacity(N);
+    let mut positions_y = Vec::with_capacity(N);
+    let mut positions_z = Vec::with_capacity(N);
+    for ix in 0..4 {
+        for iy in 0..4 {
+            for iz in 0..4 {
+                let i = ix * 16 + iy * 4 + iz;
+                let fi = i as f32;
+                let perturb_x = 0.2 * (fi * 0.7 + 0.0).sin();
+                let perturb_y = 0.2 * (fi * 0.7 + 1.1).sin();
+                let perturb_z = 0.2 * (fi * 0.7 + 2.3).sin();
+                positions_x.push(ix as f32 * LATTICE_SPACING + LATTICE_ORIGIN + perturb_x);
+                positions_y.push(iy as f32 * LATTICE_SPACING + LATTICE_ORIGIN + perturb_y);
+                positions_z.push(iz as f32 * LATTICE_SPACING + LATTICE_ORIGIN + perturb_z);
+            }
+        }
+    }
+    ParticleState::new(
+        positions_x,
+        positions_y,
+        positions_z,
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![0.0; N],
+        vec![1.0; N],
+        None,
+    )
+    .expect("build_initial_state")
+}
+
+#[derive(Clone, Debug)]
+struct FullSnapshot {
+    positions_x: Vec<f32>,
+    positions_y: Vec<f32>,
+    positions_z: Vec<f32>,
+    velocities_x: Vec<f32>,
+    velocities_y: Vec<f32>,
+    velocities_z: Vec<f32>,
+    forces_x: Vec<f32>,
+    forces_y: Vec<f32>,
+    forces_z: Vec<f32>,
+    masses: Vec<f32>,
+    particle_ids: Vec<u32>,
+    positions_x_lo: Vec<f64>,
+    positions_y_lo: Vec<f64>,
+    positions_z_lo: Vec<f64>,
+    velocities_x_lo: Vec<f64>,
+    velocities_y_lo: Vec<f64>,
+    velocities_z_lo: Vec<f64>,
+}
+
+fn capture_snapshot(buffers: &ParticleBuffers, lossless: &LosslessBuffers) -> FullSnapshot {
+    let device = buffers.device.clone();
+    FullSnapshot {
+        positions_x: device.dtoh_sync_copy(&buffers.positions_x).unwrap(),
+        positions_y: device.dtoh_sync_copy(&buffers.positions_y).unwrap(),
+        positions_z: device.dtoh_sync_copy(&buffers.positions_z).unwrap(),
+        velocities_x: device.dtoh_sync_copy(&buffers.velocities_x).unwrap(),
+        velocities_y: device.dtoh_sync_copy(&buffers.velocities_y).unwrap(),
+        velocities_z: device.dtoh_sync_copy(&buffers.velocities_z).unwrap(),
+        forces_x: device.dtoh_sync_copy(&buffers.forces_x).unwrap(),
+        forces_y: device.dtoh_sync_copy(&buffers.forces_y).unwrap(),
+        forces_z: device.dtoh_sync_copy(&buffers.forces_z).unwrap(),
+        masses: device.dtoh_sync_copy(&buffers.masses).unwrap(),
+        particle_ids: device.dtoh_sync_copy(&buffers.particle_ids).unwrap(),
+        positions_x_lo: device.dtoh_sync_copy(&lossless.positions_x_lo).unwrap(),
+        positions_y_lo: device.dtoh_sync_copy(&lossless.positions_y_lo).unwrap(),
+        positions_z_lo: device.dtoh_sync_copy(&lossless.positions_z_lo).unwrap(),
+        velocities_x_lo: device.dtoh_sync_copy(&lossless.velocities_x_lo).unwrap(),
+        velocities_y_lo: device.dtoh_sync_copy(&lossless.velocities_y_lo).unwrap(),
+        velocities_z_lo: device.dtoh_sync_copy(&lossless.velocities_z_lo).unwrap(),
+    }
+}
+
+fn neg_in_place_f32(device: &Arc<CudaDevice>, slice: &mut CudaSlice<f32>) {
+    let host: Vec<f32> = device.dtoh_sync_copy(slice).unwrap();
+    let neg: Vec<f32> = host.into_iter().map(|x| -x).collect();
+    device.htod_sync_copy_into(&neg, slice).unwrap();
+}
+
+fn neg_in_place_f64(device: &Arc<CudaDevice>, slice: &mut CudaSlice<f64>) {
+    let host: Vec<f64> = device.dtoh_sync_copy(slice).unwrap();
+    let neg: Vec<f64> = host.into_iter().map(|x| -x).collect();
+    device.htod_sync_copy_into(&neg, slice).unwrap();
+}
+
+fn negate_velocities_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers) {
+    let device = buffers.device.clone();
+    neg_in_place_f32(&device, &mut buffers.velocities_x);
+    neg_in_place_f32(&device, &mut buffers.velocities_y);
+    neg_in_place_f32(&device, &mut buffers.velocities_z);
+    neg_in_place_f64(&device, &mut lossless.velocities_x_lo);
+    neg_in_place_f64(&device, &mut lossless.velocities_y_lo);
+    neg_in_place_f64(&device, &mut lossless.velocities_z_lo);
+}
+
+fn negate_velocities_lossy(buffers: &mut ParticleBuffers) {
+    let device = buffers.device.clone();
+    neg_in_place_f32(&device, &mut buffers.velocities_x);
+    neg_in_place_f32(&device, &mut buffers.velocities_y);
+    neg_in_place_f32(&device, &mut buffers.velocities_z);
+}
+
+struct PipelineFixture {
+    buffers: ParticleBuffers,
+    pair: PairBuffer,
+    counts: CudaSlice<u32>,
+    sim_box: SimulationBox,
+    params: LennardJonesParameters,
+}
+
+impl PipelineFixture {
+    fn build(device: &Arc<CudaDevice>, state: &ParticleState) -> Self {
+        let buffers = ParticleBuffers::new(device.clone(), state).unwrap();
+        let pair = PairBuffer::new(device.clone(), N, N as u32).unwrap();
+        let counts = device.htod_sync_copy(&vec![N as u32; N]).unwrap();
+        let sim_box = SimulationBox::new_orthorhombic(BOX_L, BOX_L, BOX_L).unwrap();
+        let params = LennardJonesParameters {
+            sigma: SIGMA,
+            epsilon: EPSILON,
+            cutoff: CUTOFF,
+        };
+        Self {
+            buffers,
+            pair,
+            counts,
+            sim_box,
+            params,
+        }
+    }
+
+    fn warm_up(&mut self) {
+        lj_pair_force(&self.buffers, &mut self.pair, &self.sim_box, &self.params).unwrap();
+        reduce_pair_forces(&self.pair, &self.counts, &mut self.buffers).unwrap();
+    }
+}
+
+// rq-7b5eef8c
+fn lossless_step(fixture: &mut PipelineFixture, lossless: &mut LosslessBuffers, dt: f32) {
+    vv_kick_drift_lossless(&mut fixture.buffers, lossless, dt).unwrap();
+    lj_pair_force(&fixture.buffers, &mut fixture.pair, &fixture.sim_box, &fixture.params).unwrap();
+    reduce_pair_forces(&fixture.pair, &fixture.counts, &mut fixture.buffers).unwrap();
+    vv_kick_lossless(&mut fixture.buffers, lossless, dt).unwrap();
+}
+
+fn lossy_step(fixture: &mut PipelineFixture, dt: f32) {
+    vv_kick_drift(&mut fixture.buffers, dt).unwrap();
+    lj_pair_force(&fixture.buffers, &mut fixture.pair, &fixture.sim_box, &fixture.params).unwrap();
+    reduce_pair_forces(&fixture.pair, &fixture.counts, &mut fixture.buffers).unwrap();
+    vv_kick(&mut fixture.buffers, dt).unwrap();
+}
+
+// rq-090b70bb
+fn assert_observables_match(after: &FullSnapshot, before: &FullSnapshot) {
+    assert_eq!(after.positions_x, before.positions_x, "positions_x");
+    assert_eq!(after.positions_y, before.positions_y, "positions_y");
+    assert_eq!(after.positions_z, before.positions_z, "positions_z");
+    assert_eq!(after.velocities_x, before.velocities_x, "velocities_x");
+    assert_eq!(after.velocities_y, before.velocities_y, "velocities_y");
+    assert_eq!(after.velocities_z, before.velocities_z, "velocities_z");
+    assert_eq!(after.forces_x, before.forces_x, "forces_x");
+    assert_eq!(after.forces_y, before.forces_y, "forces_y");
+    assert_eq!(after.forces_z, before.forces_z, "forces_z");
+    assert_eq!(after.masses, before.masses, "masses");
+    assert_eq!(after.particle_ids, before.particle_ids, "particle_ids");
+}
+
+fn assert_residuals_close(after: &FullSnapshot, before: &FullSnapshot, tol: f64) {
+    let pairs = [
+        (&after.positions_x_lo, &before.positions_x_lo, "positions_x_lo"),
+        (&after.positions_y_lo, &before.positions_y_lo, "positions_y_lo"),
+        (&after.positions_z_lo, &before.positions_z_lo, "positions_z_lo"),
+        (&after.velocities_x_lo, &before.velocities_x_lo, "velocities_x_lo"),
+        (&after.velocities_y_lo, &before.velocities_y_lo, "velocities_y_lo"),
+        (&after.velocities_z_lo, &before.velocities_z_lo, "velocities_z_lo"),
+    ];
+    for (left, right, label) in pairs {
+        assert_eq!(left.len(), right.len(), "{label} length");
+        for (i, (&l, &r)) in left.iter().zip(right.iter()).enumerate() {
+            let diff = (l - r).abs();
+            assert!(
+                diff <= tol,
+                "{label}[{i}] differs by {diff} (after={l}, before={r}, tol={tol})"
+            );
+        }
+    }
+}
+
+// rq-1d618f18
+fn lossless_round_trip(n_steps: usize) -> (FullSnapshot, FullSnapshot) {
+    let device = init_device().expect("init_device");
+    let state = build_initial_state();
+    let mut fixture = PipelineFixture::build(&device, &state);
+    let mut lossless = LosslessBuffers::new(device.clone(), N).unwrap();
+
+    fixture.warm_up();
+    let snapshot = capture_snapshot(&fixture.buffers, &lossless);
+
+    for _ in 0..n_steps {
+        lossless_step(&mut fixture, &mut lossless, DT);
+    }
+    negate_velocities_lossless(&mut fixture.buffers, &mut lossless);
+    for _ in 0..n_steps {
+        lossless_step(&mut fixture, &mut lossless, DT);
+    }
+    negate_velocities_lossless(&mut fixture.buffers, &mut lossless);
+
+    let after = capture_snapshot(&fixture.buffers, &lossless);
+    (snapshot, after)
+}
+
+#[test] // rq-0099ef65
+fn single_step_lossless_round_trip_restores_observables_bit_exactly() {
+    let (before, after) = lossless_round_trip(1);
+    assert_observables_match(&after, &before);
+    assert_residuals_close(&after, &before, RESIDUAL_TOL);
+}
+
+#[test] // rq-7822b88b
+fn hundred_step_lossless_round_trip_restores_observables_bit_exactly() {
+    let (before, after) = lossless_round_trip(N_STEPS);
+    assert_observables_match(&after, &before);
+    assert_residuals_close(&after, &before, RESIDUAL_TOL);
+}
+
+#[test] // rq-b87fd5e8
+fn positions_visibly_evolve_over_lossless_forward_run() {
+    let device = init_device().expect("init_device");
+    let state = build_initial_state();
+    let mut fixture = PipelineFixture::build(&device, &state);
+    let mut lossless = LosslessBuffers::new(device.clone(), N).unwrap();
+
+    fixture.warm_up();
+    let initial = capture_snapshot(&fixture.buffers, &lossless);
+
+    for _ in 0..N_STEPS {
+        lossless_step(&mut fixture, &mut lossless, DT);
+    }
+
+    let after = capture_snapshot(&fixture.buffers, &lossless);
+
+    let max_disp = (0..N)
+        .map(|i| {
+            let dx = after.positions_x[i] - initial.positions_x[i];
+            let dy = after.positions_y[i] - initial.positions_y[i];
+            let dz = after.positions_z[i] - initial.positions_z[i];
+            (dx * dx + dy * dy + dz * dz).sqrt()
+        })
+        .fold(0.0_f32, f32::max);
+    assert!(
+        max_disp > 0.001,
+        "max displacement after {N_STEPS} steps was {max_disp} (should exceed 0.001)"
+    );
+}
+
+#[test] // rq-ed048159
+fn all_observables_finite_after_lossless_forward_run() {
+    let device = init_device().expect("init_device");
+    let state = build_initial_state();
+    let mut fixture = PipelineFixture::build(&device, &state);
+    let mut lossless = LosslessBuffers::new(device.clone(), N).unwrap();
+
+    fixture.warm_up();
+    for _ in 0..N_STEPS {
+        lossless_step(&mut fixture, &mut lossless, DT);
+    }
+
+    let after = capture_snapshot(&fixture.buffers, &lossless);
+    let arrays: [(&str, &[f32]); 9] = [
+        ("positions_x", &after.positions_x),
+        ("positions_y", &after.positions_y),
+        ("positions_z", &after.positions_z),
+        ("velocities_x", &after.velocities_x),
+        ("velocities_y", &after.velocities_y),
+        ("velocities_z", &after.velocities_z),
+        ("forces_x", &after.forces_x),
+        ("forces_y", &after.forces_y),
+        ("forces_z", &after.forces_z),
+    ];
+    for (label, arr) in arrays {
+        for (i, &v) in arr.iter().enumerate() {
+            assert!(v.is_finite(), "{label}[{i}] = {v} is not finite");
+        }
+    }
+}
+
+#[test] // rq-1b44b5da
+fn lossy_round_trip_does_not_restore_observables() {
+    let device = init_device().expect("init_device");
+    let state = build_initial_state();
+    let mut fixture = PipelineFixture::build(&device, &state);
+
+    fixture.warm_up();
+    let before_positions_x: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.positions_x).unwrap();
+    let before_positions_y: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.positions_y).unwrap();
+    let before_positions_z: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.positions_z).unwrap();
+    let before_velocities_x: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.velocities_x).unwrap();
+    let before_velocities_y: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.velocities_y).unwrap();
+    let before_velocities_z: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.velocities_z).unwrap();
+
+    for _ in 0..N_STEPS {
+        lossy_step(&mut fixture, DT);
+    }
+    negate_velocities_lossy(&mut fixture.buffers);
+    for _ in 0..N_STEPS {
+        lossy_step(&mut fixture, DT);
+    }
+    negate_velocities_lossy(&mut fixture.buffers);
+
+    let after_positions_x: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.positions_x).unwrap();
+    let after_positions_y: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.positions_y).unwrap();
+    let after_positions_z: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.positions_z).unwrap();
+    let after_velocities_x: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.velocities_x).unwrap();
+    let after_velocities_y: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.velocities_y).unwrap();
+    let after_velocities_z: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.velocities_z).unwrap();
+
+    let differs = before_positions_x != after_positions_x
+        || before_positions_y != after_positions_y
+        || before_positions_z != after_positions_z
+        || before_velocities_x != after_velocities_x
+        || before_velocities_y != after_velocities_y
+        || before_velocities_z != after_velocities_z;
+    assert!(
+        differs,
+        "lossy round trip unexpectedly restored every observable bit-exactly"
+    );
+}
