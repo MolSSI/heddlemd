@@ -59,6 +59,7 @@ trajectory_every = 100
 include_velocities = true
 log_path = "argon.log"
 log_every = 100
+timings_path = "argon.timings"
 ```
 
 ### Units <!-- rq-ed997636 -->
@@ -140,14 +141,20 @@ Same-type pairs are required even when only one type is declared:
   same directory as the config file. Resolved like `trajectory_path`.
 - `log_every: u64` — write one log row every this many integration steps.
   Default `100`. `0` disables the log entirely.
+- `timings_path: String` — output path for the per-stage performance summary
+  file. Default: `<config-stem>.timings` in the same directory as the config
+  file (e.g. `sim.toml` → `sim.timings`). Resolved like `trajectory_path`.
+  See `performance-analysis.md` for the file format. There is no
+  `timings_every` field; the file is written once at end of run.
 
 ### Path resolution and overwrite policy <!-- rq-6d99f9c8 -->
 
-- All file paths (`init`, `output.trajectory_path`, `output.log_path`) are
-  interpreted relative to the **config file's containing directory** when
-  not absolute. The loader resolves them before returning.
-- After resolution, the three paths (init, trajectory, log) must be
-  pairwise distinct.
+- All file paths (`init`, `output.trajectory_path`, `output.log_path`,
+  `output.timings_path`) are interpreted relative to the **config file's
+  containing directory** when not absolute. The loader resolves them
+  before returning.
+- After resolution, the four paths (init, trajectory, log, timings) must
+  be pairwise distinct.
 - The loader does not check whether the resolved output files already
   exist; that check lives in the runner (`simulation-runner.md`) so that
   configs can be loaded for validation without filesystem side effects.
@@ -175,8 +182,8 @@ Beyond per-field validation, the loader checks:
    produces `DuplicatePairInteraction { types: (String, String) }`. The
    reported tuple is normalised so the lexicographically smaller name
    comes first.
-3. After path resolution, the three paths (init, trajectory, log) are
-   pairwise distinct (`PathCollision { kind_a, kind_b, path }`).
+3. After path resolution, the four paths (init, trajectory, log, timings)
+   are pairwise distinct (`PathCollision { kind_a, kind_b, path }`).
 4. **Runner restriction (this feature only):** the number of declared
    `[[particle_types]]` equals `1`. More than one type raises
    `MultiTypeUnsupported { count }`. The schema permits multiple types so
@@ -230,8 +237,9 @@ Beyond per-field validation, the loader checks:
   - `include_velocities: bool`
   - `log_path: PathBuf` — resolved.
   - `log_every: u64`
+  - `timings_path: PathBuf` — resolved.
 
-- `PathRole` — `enum { Init, Trajectory, Log }`. Used in `PathCollision`. <!-- rq-f0084057 -->
+- `PathRole` — `enum { Init, Trajectory, Log, Timings }`. Used in `PathCollision`. <!-- rq-f0084057 -->
 
 - `ConfigError` — error type returned by `load_config`. Variants: <!-- rq-0b9372e8 -->
   - `Io(String)` — failed to read the config file (with the OS error
@@ -577,6 +585,40 @@ Feature: TOML simulation config schema
     Given the Background config with init="run.log" and [output].log_path="run.log"
     When load_config is called
     Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Init, kind_b: PathRole::Log, path: _ })
+
+  @rq-a5c86770
+  Scenario: timings_path defaults to <stem>.timings
+    Given the Background config at "/tmp/sim/sim.toml" with no [output].timings_path
+    When load_config is called
+    Then config.output.timings_path equals "/tmp/sim/sim.timings"
+
+  @rq-fa24a8d1
+  Scenario: timings_path can be overridden in [output]
+    Given the Background config at "/tmp/sim/sim.toml" with
+      [output].timings_path = "custom.timings"
+    When load_config is called
+    Then config.output.timings_path equals "/tmp/sim/custom.timings"
+
+  @rq-7d5915bb
+  Scenario: Reject init = timings_path
+    Given the Background config with init="argon.dat" and
+      [output].timings_path="argon.dat"
+    When load_config is called
+    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Init, kind_b: PathRole::Timings, path: _ })
+
+  @rq-ec8d715d
+  Scenario: Reject trajectory_path = timings_path
+    Given the Background config with [output].trajectory_path="run.dat"
+      and [output].timings_path="run.dat"
+    When load_config is called
+    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Trajectory, kind_b: PathRole::Timings, path: _ })
+
+  @rq-8f665dd0
+  Scenario: Reject log_path = timings_path
+    Given the Background config with [output].log_path="run.dat"
+      and [output].timings_path="run.dat"
+    When load_config is called
+    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Log, kind_b: PathRole::Timings, path: _ })
 
   # --- Multi-type restriction ---
 

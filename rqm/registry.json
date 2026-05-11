@@ -105,6 +105,18 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-037a9326": {
+    "decl": "- `Timings::record_host(&mut self, stage: HostStage, duration: std::time::Duration)`",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Timings",
+    "type": "api-item"
+  },
   "rq-03830444": {
     "decl": "# Feature: Simulation Box and Periodic Boundary Conditions",
     "file": "simulation-box",
@@ -255,6 +267,18 @@
     "title": "Reject unknown schema_version",
     "type": "scenario"
   },
+  "rq-0dab90aa": {
+    "decl": "- `StageStats` — public, `Clone`, `Debug` snapshot for one stage.",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "StageStats",
+    "type": "api-item"
+  },
   "rq-0ec0f65d": {
     "decl": "## Gherkin Scenarios",
     "file": "io/trajectory-output",
@@ -282,6 +306,18 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-105afb1d": {
+    "decl": "Scenario: min <= mean <= max for every row",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "min <= mean <= max for every row",
+    "type": "scenario"
   },
   "rq-106dcabd": {
     "decl": "Scenario: n_steps = 0 is accepted",
@@ -327,6 +363,18 @@
     ],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-11132169": {
+    "decl": "Scenario: Pre-flight refuses to overwrite an existing timings file",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Pre-flight refuses to overwrite an existing timings file",
+    "type": "scenario"
   },
   "rq-11dbe0a5": {
     "decl": "Scenario: Reject positions past -L/2 along y",
@@ -377,6 +425,14 @@
     "refs": [],
     "title": "Feature: Lennard-Jones O(N²) Pair Force Kernel",
     "type": "file"
+  },
+  "rq-1434abd2": {
+    "decl": "## Out of Scope",
+    "file": "performance-analysis",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-14d7a940": {
     "decl": "Scenario: Kernel does not modify positions, velocities, masses, or net forces",
@@ -519,6 +575,14 @@
     "title": "Run a valid minimal config to completion",
     "type": "scenario"
   },
+  "rq-1b34278b": {
+    "decl": "### Row ordering",
+    "file": "performance-analysis",
+    "level": 3,
+    "refs": [],
+    "title": "Row ordering",
+    "type": "section"
+  },
   "rq-1b44b5da": {
     "decl": "Scenario: Lossy 100-step round trip does NOT restore observables",
     "file": "pipeline-reversibility",
@@ -544,6 +608,18 @@
     "title": "RNG",
     "type": "section"
   },
+  "rq-1b8fd2a0": {
+    "decl": "Scenario: Two identical runs produce timings files with the same stage rows and the same counts",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two identical runs produce timings files with the same stage rows and the same counts",
+    "type": "scenario"
+  },
   "rq-1b97afd8": {
     "decl": "Scenario: Log contains header plus step-0 row when n_steps = 0",
     "file": "io/log-output",
@@ -555,6 +631,14 @@
     ],
     "title": "Log contains header plus step-0 row when n_steps = 0",
     "type": "scenario"
+  },
+  "rq-1bd297f4": {
+    "decl": "## Instrumented Stages",
+    "file": "performance-analysis",
+    "level": 2,
+    "refs": [],
+    "title": "Instrumented Stages",
+    "type": "section"
   },
   "rq-1bdbd71e": {
     "decl": "Scenario: Reject download when one host array drifts in length",
@@ -977,6 +1061,18 @@
     "title": "Velocity generation",
     "type": "section"
   },
+  "rq-2cbe0828": {
+    "decl": "Scenario: record_host updates count, total, min, and max",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "record_host updates count, total, min, and max",
+    "type": "scenario"
+  },
   "rq-2cca54cc": {
     "decl": "# Feature: Extended-XYZ Trajectory Output",
     "file": "io/trajectory-output",
@@ -999,6 +1095,18 @@
       }
     ],
     "title": "Reduction with all zero neighbor counts produces zero net forces",
+    "type": "scenario"
+  },
+  "rq-2ebf81fd": {
+    "decl": "Scenario: Timings path equal to init path is rejected",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Timings path equal to init path is rejected",
     "type": "scenario"
   },
   "rq-2ed137d9": {
@@ -1036,6 +1144,14 @@
     ],
     "title": "LosslessBuffers",
     "type": "api-item"
+  },
+  "rq-312e5f8e": {
+    "decl": "### Kernel stages (CUDA-event timed)",
+    "file": "performance-analysis",
+    "level": 3,
+    "refs": [],
+    "title": "Kernel stages (CUDA-event timed)",
+    "type": "section"
   },
   "rq-318cd47d": {
     "decl": "Scenario: log_every = 0 is accepted (disables log output)",
@@ -1102,6 +1218,18 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-34bfc634": {
+    "decl": "Scenario: log_write count equals log rows written",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "log_write count equals log rows written",
+    "type": "scenario"
+  },
   "rq-34db7b7b": {
     "decl": "Scenario: Refuse to run with multiple types",
     "file": "simulation-runner",
@@ -1133,6 +1261,14 @@
     ],
     "title": "Feature: `dynamics run` Simulation Runner",
     "type": "file"
+  },
+  "rq-36105526": {
+    "decl": "### Host stages (Instant-timed)",
+    "file": "performance-analysis",
+    "level": 3,
+    "refs": [],
+    "title": "Host stages (Instant-timed)",
+    "type": "section"
   },
   "rq-3766be01": {
     "decl": "- `ParticleState` — host-side SoA state. All eleven per-particle arrays are",
@@ -1239,6 +1375,18 @@
     "title": "SimulationBox",
     "type": "api-item"
   },
+  "rq-3bd5336c": {
+    "decl": "Scenario: Velocity generation row is absent when init supplies velocities",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Velocity generation row is absent when init supplies velocities",
+    "type": "scenario"
+  },
   "rq-3c17477d": {
     "decl": "Scenario: Total momentum after generation is zero (within f32 round-off)",
     "file": "simulation-runner",
@@ -1319,6 +1467,19 @@
     "title": "TrajectoryWriter",
     "type": "api-item"
   },
+  "rq-410afcd3": {
+    "decl": "## Feature API",
+    "file": "performance-analysis",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-4169d3af": {
     "decl": "Scenario: Reject schema_version = 0",
     "file": "io/config-schema",
@@ -1349,6 +1510,30 @@
       }
     ],
     "title": "Reject too few data rows",
+    "type": "scenario"
+  },
+  "rq-44dfc3da": {
+    "decl": "Scenario: Numeric columns have the documented precision",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Numeric columns have the documented precision",
+    "type": "scenario"
+  },
+  "rq-44e5c930": {
+    "decl": "Scenario: Each single-occurrence host stage has count = 1",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Each single-occurrence host stage has count = 1",
     "type": "scenario"
   },
   "rq-4518fa47": {
@@ -1394,6 +1579,18 @@
     ],
     "title": "compute_temperature",
     "type": "api-item"
+  },
+  "rq-46c317ef": {
+    "decl": "Scenario: trajectory_write count equals frames written",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "trajectory_write count equals frames written",
+    "type": "scenario"
   },
   "rq-47697f4a": {
     "decl": "Scenario: Reject non-positive mass",
@@ -1524,6 +1721,14 @@
     "title": "Wrap Formula",
     "type": "section"
   },
+  "rq-4cf03f96": {
+    "decl": "### Overwrite policy",
+    "file": "performance-analysis",
+    "level": 3,
+    "refs": [],
+    "title": "Overwrite policy",
+    "type": "section"
+  },
   "rq-4d226dff": {
     "decl": "Scenario: Re-upload after host-side mutation",
     "file": "particle-state",
@@ -1550,6 +1755,19 @@
     "refs": [],
     "title": "vv_kick_lossless",
     "type": "api-item"
+  },
+  "rq-4f5643f1": {
+    "decl": "### Types",
+    "file": "performance-analysis",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Types",
+    "type": "section"
   },
   "rq-4f7dc024": {
     "decl": "Scenario: vv_kick_drift advances position and leaves velocity unchanged when force is zero",
@@ -1619,6 +1837,18 @@
     "title": "KE of three particles is summed in particle order",
     "type": "scenario"
   },
+  "rq-56043142": {
+    "decl": "Scenario: Repeated kernel_start/kernel_stop pairs accumulate",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Repeated kernel_start/kernel_stop pairs accumulate",
+    "type": "scenario"
+  },
   "rq-560dffb8": {
     "decl": "Scenario: Reject duplicate type names",
     "file": "io/config-schema",
@@ -1642,6 +1872,19 @@
     ],
     "title": "vv_kick_lossless on an empty state is a no-op",
     "type": "scenario"
+  },
+  "rq-56364532": {
+    "decl": "## Output File Format",
+    "file": "performance-analysis",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Output File Format",
+    "type": "section"
   },
   "rq-56ad97f1": {
     "decl": "Scenario: log_every > n_steps writes only the step-0 row",
@@ -1756,6 +1999,18 @@
     "title": "Download from an empty buffers into an empty state",
     "type": "scenario"
   },
+  "rq-58981e16": {
+    "decl": "- `Timings::kernel_start(&mut self, stage: KernelStage) -> Result<(), TimingsError>`",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Timings",
+    "type": "api-item"
+  },
   "rq-58cac735": {
     "decl": "Scenario: vv_kick_drift_lossless on an empty state is a no-op",
     "file": "integration",
@@ -1824,6 +2079,18 @@
     "title": "RunSummary",
     "type": "api-item"
   },
+  "rq-5c716d48": {
+    "decl": "Scenario: write_timings_file with an empty report writes only the header",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "write_timings_file with an empty report writes only the header",
+    "type": "scenario"
+  },
   "rq-5cb58365": {
     "decl": "Scenario: NaN pair contributions propagate to NaN net forces",
     "file": "pair-reduction",
@@ -1835,6 +2102,14 @@
     ],
     "title": "NaN pair contributions propagate to NaN net forces",
     "type": "scenario"
+  },
+  "rq-5d1f8e8e": {
+    "decl": "### Host wall-clock",
+    "file": "performance-analysis",
+    "level": 3,
+    "refs": [],
+    "title": "Host wall-clock",
+    "type": "section"
   },
   "rq-5ded1806": {
     "decl": "Scenario: Absolute paths are honored unchanged",
@@ -1903,6 +2178,14 @@
     ],
     "title": "Velocities are sampled when init file has no velo column",
     "type": "scenario"
+  },
+  "rq-6289f344": {
+    "decl": "### Example",
+    "file": "performance-analysis",
+    "level": 3,
+    "refs": [],
+    "title": "Example",
+    "type": "section"
   },
   "rq-63f3e0b9": {
     "decl": "## Feature API",
@@ -2163,6 +2446,18 @@
     "title": "PairBuffer::new allocates zero-initialised pair-force buffers",
     "type": "scenario"
   },
+  "rq-6fe2b058": {
+    "decl": "Scenario: device_to_host_download count equals snapshot points reached",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "device_to_host_download count equals snapshot points reached",
+    "type": "scenario"
+  },
   "rq-70e9fd38": {
     "decl": "Scenario: A trajectory frame can be re-parsed by load_init_state",
     "file": "io/trajectory-output",
@@ -2242,6 +2537,18 @@
     ],
     "title": "Progress reporting",
     "type": "section"
+  },
+  "rq-7453115b": {
+    "decl": "- `TimingsReport` — public, `Clone`, `Debug`. Carries an ordered",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "TimingsReport",
+    "type": "api-item"
   },
   "rq-74535c7a": {
     "decl": "## Feature API",
@@ -2332,6 +2639,18 @@
     "title": "Reject trajectory_path = log_path",
     "type": "scenario"
   },
+  "rq-779092ca": {
+    "decl": "- `TimingsError` — error type. Variants:",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "TimingsError",
+    "type": "api-item"
+  },
   "rq-77c1d5d9": {
     "decl": "### Types",
     "file": "simulation-runner",
@@ -2418,6 +2737,18 @@
     "title": "PairBuffer",
     "type": "api-item"
   },
+  "rq-79291197": {
+    "decl": "Scenario: kernel_start followed by kernel_stop and finalize records one sample",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "kernel_start followed by kernel_stop and finalize records one sample",
+    "type": "scenario"
+  },
   "rq-7a26eeae": {
     "decl": "## Feature API",
     "file": "io/log-output",
@@ -2455,6 +2786,14 @@
     "title": "Reject download when host particle count differs from buffers",
     "type": "scenario"
   },
+  "rq-7acbda72": {
+    "decl": "## Gherkin Scenarios",
+    "file": "performance-analysis",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-7af67a7b": {
     "decl": "Scenario: Reject row with NaN position",
     "file": "io/init-state-file",
@@ -2490,6 +2829,18 @@
       }
     ],
     "title": "KE of a single particle with v=(1, 0, 0)",
+    "type": "scenario"
+  },
+  "rq-7d5915bb": {
+    "decl": "Scenario: Reject init = timings_path",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject init = timings_path",
     "type": "scenario"
   },
   "rq-7d5e87ee": {
@@ -2534,6 +2885,26 @@
       }
     ],
     "title": "Usage error messages",
+    "type": "section"
+  },
+  "rq-7e79501b": {
+    "decl": "Scenario: total_runtime is at least as large as the maximum single-stage total",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "total_runtime is at least as large as the maximum single-stage total",
+    "type": "scenario"
+  },
+  "rq-7eb22aad": {
+    "decl": "### Synthetic stages",
+    "file": "performance-analysis",
+    "level": 3,
+    "refs": [],
+    "title": "Synthetic stages",
     "type": "section"
   },
   "rq-7f867e37": {
@@ -2652,6 +3023,18 @@
     "title": "Two particles across the box boundary interact via the minimum image",
     "type": "scenario"
   },
+  "rq-86423766": {
+    "decl": "Scenario: Timings file is absent when run fails before the loop",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Timings file is absent when run fails before the loop",
+    "type": "scenario"
+  },
   "rq-889076d5": {
     "decl": "Scenario: Kernel failure mid-loop returns exit code 2",
     "file": "simulation-runner",
@@ -2696,6 +3079,18 @@
     "refs": [],
     "title": "Edge case: non-block-aligned buffer size",
     "type": "section"
+  },
+  "rq-8a9c44f8": {
+    "decl": "- `Timings::new(device: Arc<CudaDevice>) -> Result<Timings, TimingsError>`",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Timings",
+    "type": "api-item"
   },
   "rq-8b4243e0": {
     "decl": "### Functions and methods",
@@ -2816,6 +3211,18 @@
     "title": "Open refuses to overwrite an existing file",
     "type": "scenario"
   },
+  "rq-8f665dd0": {
+    "decl": "Scenario: Reject log_path = timings_path",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject log_path = timings_path",
+    "type": "scenario"
+  },
   "rq-9021ec4b": {
     "decl": "Scenario: Write a single frame without velocities",
     "file": "io/trajectory-output",
@@ -2879,6 +3286,14 @@
     ],
     "title": "Construct an empty state with explicit empty IDs",
     "type": "scenario"
+  },
+  "rq-91cec484": {
+    "decl": "### CUDA events",
+    "file": "performance-analysis",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA events",
+    "type": "section"
   },
   "rq-925e5583": {
     "decl": "- `LogWriter::flush(&mut self) -> Result<(), LogWriterError>`",
@@ -3024,6 +3439,18 @@
     "title": "trajectory_every = 0 is accepted (disables trajectory output)",
     "type": "scenario"
   },
+  "rq-9818f429": {
+    "decl": "Scenario: total_ms equals mean_us * count / 1000 within reporting precision",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "total_ms equals mean_us * count / 1000 within reporting precision",
+    "type": "scenario"
+  },
   "rq-985230a5": {
     "decl": "Scenario: Loop executes exactly n_steps integration steps",
     "file": "simulation-runner",
@@ -3111,6 +3538,18 @@
     ],
     "title": "Reduction does not modify the pair buffer",
     "type": "scenario"
+  },
+  "rq-9b85fa6c": {
+    "decl": "- `write_timings_file(path: &Path, report: &TimingsReport) -> Result<(), TimingsWriterError>`",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "write_timings_file",
+    "type": "api-item"
   },
   "rq-9baf16d1": {
     "decl": "Scenario: Open fails when the parent directory does not exist",
@@ -3306,6 +3745,18 @@
     "title": "wrap_position and minimum_image agree on the same input",
     "type": "scenario"
   },
+  "rq-a2ebdaaf": {
+    "decl": "Scenario: Timings file path can be overridden in [output]",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Timings file path can be overridden in [output]",
+    "type": "scenario"
+  },
   "rq-a30ac09f": {
     "decl": "Scenario: Reject empty type name",
     "file": "io/config-schema",
@@ -3381,6 +3832,30 @@
     "title": "init_device loads the reduce module with the reduction kernel",
     "type": "scenario"
   },
+  "rq-a555a750": {
+    "decl": "Scenario: Velocity generation row is present when init lacks velocities",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Velocity generation row is present when init lacks velocities",
+    "type": "scenario"
+  },
+  "rq-a5c86770": {
+    "decl": "Scenario: timings_path defaults to <stem>.timings",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "timings_path defaults to <stem>.timings",
+    "type": "scenario"
+  },
   "rq-a5ccc1de": {
     "decl": "- `ParticleTypeConfig`",
     "file": "io/config-schema",
@@ -3392,6 +3867,18 @@
     ],
     "title": "ParticleTypeConfig",
     "type": "api-item"
+  },
+  "rq-a7fdf81f": {
+    "decl": "Scenario: Lossy run includes lossy kick rows and excludes lossless rows",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Lossy run includes lossy kick rows and excludes lossless rows",
+    "type": "scenario"
   },
   "rq-a8df30ac": {
     "decl": "Scenario: minimum_image just past -L/2 wraps by one period",
@@ -3452,6 +3939,18 @@
       }
     ],
     "title": "Lossy mode is the default",
+    "type": "scenario"
+  },
+  "rq-a9b511ea": {
+    "decl": "Scenario: Kernel-stage counts match the runner's launch counts",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Kernel-stage counts match the runner's launch counts",
     "type": "scenario"
   },
   "rq-aa19f894": {
@@ -3515,7 +4014,7 @@
     "type": "scenario"
   },
   "rq-acbbd59a": {
-    "decl": "Scenario: Disabled outputs are not checked",
+    "decl": "Scenario: Disabled trajectory and log outputs are not checked, but timings is",
     "file": "simulation-runner",
     "refs": [
       {
@@ -3523,7 +4022,19 @@
         "kind": "code"
       }
     ],
-    "title": "Disabled outputs are not checked",
+    "title": "Disabled trajectory and log outputs are not checked, but timings is",
+    "type": "scenario"
+  },
+  "rq-ad403fb6": {
+    "decl": "Scenario: Trajectory and log files remain bit-identical between two identical runs",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Trajectory and log files remain bit-identical between two identical runs",
     "type": "scenario"
   },
   "rq-add95876": {
@@ -3582,6 +4093,18 @@
     "title": "SimulationBoxError",
     "type": "api-item"
   },
+  "rq-afb80e25": {
+    "decl": "Scenario: Timings file uses the default path derived from config stem",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Timings file uses the default path derived from config stem",
+    "type": "scenario"
+  },
   "rq-b015ef15": {
     "decl": "### Accessors",
     "file": "simulation-box",
@@ -3622,6 +4145,18 @@
     "title": "Particles evolve independently with their own forces",
     "type": "scenario"
   },
+  "rq-b17e6de6": {
+    "decl": "- `Timings::kernel_stop(&mut self, stage: KernelStage) -> Result<(), TimingsError>`",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Timings",
+    "type": "api-item"
+  },
   "rq-b2314952": {
     "decl": "Scenario: Bit-exact equality after a single full velocity-Verlet step",
     "file": "pipeline-reproducibility",
@@ -3644,6 +4179,18 @@
       }
     ],
     "title": "Forward then negated step returns to the original state for a free particle",
+    "type": "scenario"
+  },
+  "rq-b2fa4a1f": {
+    "decl": "Scenario: Lossless run includes lossless kick rows and excludes lossy rows",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Lossless run includes lossless kick rows and excludes lossy rows",
     "type": "scenario"
   },
   "rq-b4bb7096": {
@@ -3681,6 +4228,14 @@
       }
     ],
     "title": "Types",
+    "type": "section"
+  },
+  "rq-b7317e2d": {
+    "decl": "### Failed runs",
+    "file": "performance-analysis",
+    "level": 3,
+    "refs": [],
+    "title": "Failed runs",
     "type": "section"
   },
   "rq-b73316ed": {
@@ -3795,6 +4350,18 @@
     "title": "File does not exist",
     "type": "scenario"
   },
+  "rq-baf03449": {
+    "decl": "- `Timings` — host-side state for collecting samples. Carries:",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Timings",
+    "type": "api-item"
+  },
   "rq-bafc5900": {
     "decl": "Scenario: Reject a row missing a velocity column",
     "file": "io/init-state-file",
@@ -3830,6 +4397,18 @@
     ],
     "title": "Load a file with velocities",
     "type": "scenario"
+  },
+  "rq-bbb62e9c": {
+    "decl": "# Feature: Performance Analysis and Timings Output",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Performance Analysis and Timings Output",
+    "type": "file"
   },
   "rq-bc442f5b": {
     "decl": "### Particle IDs",
@@ -3880,6 +4459,18 @@
     ],
     "title": "Cross-validation",
     "type": "section"
+  },
+  "rq-bde625cf": {
+    "decl": "Scenario: Empty (N=0) run omits all kernel rows but retains host rows",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Empty (N=0) run omits all kernel rows but retains host rows",
+    "type": "scenario"
   },
   "rq-be5fe064": {
     "decl": "### Constructor and Accessors",
@@ -3988,6 +4579,18 @@
     "refs": [],
     "title": "Functions",
     "type": "section"
+  },
+  "rq-c4845f90": {
+    "decl": "- `Timings::finalize(&mut self) -> Result<TimingsReport, TimingsError>`",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Timings",
+    "type": "api-item"
   },
   "rq-c538b29d": {
     "decl": "Scenario: Two particles at a fixed separation produce the closed-form LJ force",
@@ -4282,6 +4885,18 @@
     "title": "Final summary",
     "type": "section"
   },
+  "rq-d29f2811": {
+    "decl": "- `HostStage` — `enum` covering the host-timed stages. Variants:",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "HostStage",
+    "type": "api-item"
+  },
   "rq-d3a14184": {
     "decl": "- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameters) -> Result<(), GpuError>`",
     "file": "lj-pair-force",
@@ -4414,6 +5029,14 @@
     "title": "Reject missing particle-count line",
     "type": "scenario"
   },
+  "rq-dae150d9": {
+    "decl": "### Functions and methods",
+    "file": "performance-analysis",
+    "level": 3,
+    "refs": [],
+    "title": "Functions and methods",
+    "type": "section"
+  },
   "rq-daf7550b": {
     "decl": "Scenario: NaN positions propagate to NaN pair forces",
     "file": "lj-pair-force",
@@ -4438,6 +5061,31 @@
     "title": "LennardJonesParameters",
     "type": "api-item"
   },
+  "rq-dc8a0ff7": {
+    "decl": "- `KernelStage` — `enum` covering the six instrumented kernel-launch",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "KernelStage",
+    "type": "api-item"
+  },
+  "rq-dcfdb7c9": {
+    "decl": "## Integration with the Runner",
+    "file": "performance-analysis",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Integration with the Runner",
+    "type": "section"
+  },
   "rq-ddec3d72": {
     "decl": "Scenario: f32 positions round-trip through the writer and parser",
     "file": "io/trajectory-output",
@@ -4448,6 +5096,18 @@
       }
     ],
     "title": "f32 positions round-trip through the writer and parser",
+    "type": "scenario"
+  },
+  "rq-de5ca07a": {
+    "decl": "Scenario: write_timings_file refuses to overwrite an existing file",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "write_timings_file refuses to overwrite an existing file",
     "type": "scenario"
   },
   "rq-de92101c": {
@@ -4518,6 +5178,14 @@
     ],
     "title": "LogWriter",
     "type": "api-item"
+  },
+  "rq-e16e72bd": {
+    "decl": "### Sample bookkeeping",
+    "file": "performance-analysis",
+    "level": 3,
+    "refs": [],
+    "title": "Sample bookkeeping",
+    "type": "section"
   },
   "rq-e1b51bd9": {
     "decl": "Scenario: volume returns the product of the edge lengths",
@@ -4690,6 +5358,30 @@
     "title": "Reject non-finite lattice value",
     "type": "scenario"
   },
+  "rq-e93e7ad1": {
+    "decl": "Scenario: write_timings_file fails when the parent directory does not exist",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "write_timings_file fails when the parent directory does not exist",
+    "type": "scenario"
+  },
+  "rq-e946870f": {
+    "decl": "Scenario: Timings::new allocates the documented event pairs",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Timings::new allocates the documented event pairs",
+    "type": "scenario"
+  },
   "rq-e950f4e6": {
     "decl": "Scenario: Reduction sums entries 0..count in left-to-right order",
     "file": "pair-reduction",
@@ -4734,6 +5426,18 @@
     "title": "Reduction does not modify neighbor_counts",
     "type": "scenario"
   },
+  "rq-ec06c8e1": {
+    "decl": "- `TimingsWriterError` — error type. Variants:",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "TimingsWriterError",
+    "type": "api-item"
+  },
   "rq-ec53799e": {
     "decl": "Scenario: lj_pair_force followed by reduce_pair_forces produces the correct net force",
     "file": "lj-pair-force",
@@ -4744,6 +5448,30 @@
       }
     ],
     "title": "lj_pair_force followed by reduce_pair_forces produces the correct net force",
+    "type": "scenario"
+  },
+  "rq-ec5b6cf1": {
+    "decl": "Scenario: Timings path equal to log path is rejected",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Timings path equal to log path is rejected",
+    "type": "scenario"
+  },
+  "rq-ec8d715d": {
+    "decl": "Scenario: Reject trajectory_path = timings_path",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject trajectory_path = timings_path",
     "type": "scenario"
   },
   "rq-ecc664ff": {
@@ -4782,6 +5510,18 @@
     "title": "Construction Details",
     "type": "section"
   },
+  "rq-ef7c2bb9": {
+    "decl": "Scenario: Rows appear in the documented order",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Rows appear in the documented order",
+    "type": "scenario"
+  },
   "rq-ef902cf6": {
     "decl": "## Runner flow",
     "file": "simulation-runner",
@@ -4808,7 +5548,7 @@
     "type": "api-item"
   },
   "rq-f0084057": {
-    "decl": "- `PathRole` — `enum { Init, Trajectory, Log }`. Used in `PathCollision`.",
+    "decl": "- `PathRole` — `enum { Init, Trajectory, Log, Timings }`. Used in `PathCollision`.",
     "file": "io/config-schema",
     "refs": [
       {
@@ -4886,6 +5626,18 @@
     "title": "Reject duplicate pair interaction",
     "type": "scenario"
   },
+  "rq-f1850393": {
+    "decl": "Scenario: Header line has the documented column names in the documented order",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Header line has the documented column names in the documented order",
+    "type": "scenario"
+  },
   "rq-f1ba909b": {
     "decl": "- `vv_kick_drift(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>`",
     "file": "integration",
@@ -4950,6 +5702,18 @@
     "title": "Field semantics",
     "type": "section"
   },
+  "rq-f4780029": {
+    "decl": "Scenario: Stages with count = 0 are absent",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Stages with count = 0 are absent",
+    "type": "scenario"
+  },
   "rq-f4a85dda": {
     "decl": "Scenario: RunSummary reflects what was actually written",
     "file": "simulation-runner",
@@ -4984,6 +5748,18 @@
       }
     ],
     "title": "Reduction overwrites prior net force values",
+    "type": "scenario"
+  },
+  "rq-f5e25186": {
+    "decl": "Scenario: Successful run writes a timings file",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Successful run writes a timings file",
     "type": "scenario"
   },
   "rq-f5e94e6b": {
@@ -5090,6 +5866,18 @@
     "title": "Test procedure",
     "type": "section"
   },
+  "rq-f84e4fa1": {
+    "decl": "Scenario: Timings path equal to trajectory path is rejected",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Timings path equal to trajectory path is rejected",
+    "type": "scenario"
+  },
   "rq-f8df9364": {
     "decl": "Scenario: Velocity generation is deterministic in the seed",
     "file": "simulation-runner",
@@ -5100,6 +5888,18 @@
       }
     ],
     "title": "Velocity generation is deterministic in the seed",
+    "type": "scenario"
+  },
+  "rq-fa24a8d1": {
+    "decl": "Scenario: timings_path can be overridden in [output]",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "timings_path can be overridden in [output]",
     "type": "scenario"
   },
   "rq-fa6f7414": {
@@ -5132,6 +5932,18 @@
       }
     ],
     "title": "Empty state is a no-op",
+    "type": "scenario"
+  },
+  "rq-fc523f30": {
+    "decl": "Scenario: Pre-flight refuses to overwrite existing timings file",
+    "file": "simulation-runner",
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Pre-flight refuses to overwrite existing timings file",
     "type": "scenario"
   },
   "rq-fc58e2c5": {
@@ -5170,6 +5982,14 @@
     ],
     "title": "Append frames in order",
     "type": "scenario"
+  },
+  "rq-fdbb902d": {
+    "decl": "## Timing Methodology",
+    "file": "performance-analysis",
+    "level": 2,
+    "refs": [],
+    "title": "Timing Methodology",
+    "type": "section"
   },
   "rq-fdf2db79": {
     "decl": "### Types",

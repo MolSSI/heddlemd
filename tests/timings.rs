@@ -1,0 +1,820 @@
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use dynamics::gpu::{PairBuffer, ParticleBuffers, init_device, lj_pair_force};
+use dynamics::io::{TrajectoryWriterError, load_init_state};
+use dynamics::pbc::SimulationBox;
+use dynamics::runner::{RunnerError, run_simulation};
+use dynamics::state::ParticleState;
+use dynamics::timings::{
+    HostStage, KernelStage, StageStats, Timings, TimingsReport, TimingsWriterError,
+    write_timings_file,
+};
+
+fn tmp_path(name: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let mut p = std::env::temp_dir();
+    p.push(format!(
+        "dynamics-timings-{}-{}-{}",
+        std::process::id(),
+        name,
+        nanos
+    ));
+    std::fs::create_dir_all(&p).unwrap();
+    p
+}
+
+fn write_pair(
+    dir: &Path,
+    n_steps: u64,
+    traj_every: u64,
+    log_every: u64,
+    temperature: f64,
+    init_velocities: bool,
+    lossless: bool,
+    seed: u64,
+    n_particles: usize,
+) -> PathBuf {
+    let lossless_str = if lossless { "true" } else { "false" };
+    let config = format!(
+        r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = {seed}
+n_steps = {n_steps}
+dt = 1.0e-15
+temperature = {temperature}
+
+[integrator]
+lossless = {lossless_str}
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+
+[output]
+trajectory_every = {traj_every}
+log_every = {log_every}
+"#
+    );
+    let config_path = dir.join("sim.toml");
+    std::fs::write(&config_path, config).unwrap();
+    write_init(dir, n_particles, init_velocities);
+    config_path
+}
+
+fn write_init(dir: &Path, n: usize, include_velocities: bool) {
+    let mut body = String::new();
+    body.push_str(&format!("{n}\n"));
+    let props = if include_velocities {
+        "species:S:1:pos:R:3:velo:R:3"
+    } else {
+        "species:S:1:pos:R:3"
+    };
+    body.push_str(&format!(
+        "Lattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties={props}\n"
+    ));
+    let box_size = 4.0e-9_f64;
+    let usable = box_size * 0.8;
+    let spacing = if n > 1 { usable / (n as f64 - 1.0) } else { 0.0 };
+    let half_n = (n as f64 - 1.0) / 2.0;
+    for i in 0..n {
+        let x = (i as f64 - half_n) * spacing;
+        if include_velocities {
+            body.push_str(&format!("Ar {x:.9e} 0.0 0.0 0.0 0.0 0.0\n"));
+        } else {
+            body.push_str(&format!("Ar {x:.9e} 0.0 0.0\n"));
+        }
+    }
+    std::fs::write(dir.join("init.xyz"), body).unwrap();
+}
+
+fn read_timings(dir: &Path) -> String {
+    let canon = std::fs::canonicalize(dir).unwrap();
+    std::fs::read_to_string(canon.join("sim.timings")).unwrap()
+}
+
+fn stage_row<'a>(body: &'a str, name: &str) -> Option<&'a str> {
+    for line in body.lines().skip(1) {
+        let first = line.split_whitespace().next()?;
+        if first == name {
+            return Some(line);
+        }
+    }
+    None
+}
+
+fn stage_count(body: &str, name: &str) -> Option<u64> {
+    let line = stage_row(body, name)?;
+    let cols: Vec<&str> = line.split_whitespace().collect();
+    Some(cols[1].parse::<u64>().unwrap())
+}
+
+// rq-f5e25186
+#[test]
+fn successful_run_writes_timings_file() {
+    let dir = tmp_path("write_timings");
+    let path = write_pair(&dir, 5, 5, 5, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let canon = std::fs::canonicalize(&dir).unwrap();
+    let timings = canon.join("sim.timings");
+    assert!(timings.exists());
+    let body = std::fs::read_to_string(&timings).unwrap();
+    let header = body.lines().next().unwrap();
+    let cols: Vec<&str> = header.split_whitespace().collect();
+    assert_eq!(
+        cols,
+        vec!["stage", "count", "total_ms", "mean_us", "min_us", "max_us"]
+    );
+}
+
+// rq-86423766
+#[test]
+fn timings_absent_on_setup_failure() {
+    let dir = tmp_path("setup_fail");
+    let path = write_pair(&dir, 1, 0, 0, 0.0, false, false, 1, 1);
+    // Make the init file malformed so init_load fails after config_load.
+    std::fs::write(
+        dir.join("init.xyz"),
+        "1\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3\nAr 3.0e-9 0.0 0.0\n",
+    )
+    .unwrap();
+    let _ = run_simulation(&path);
+    let canon = std::fs::canonicalize(&dir).unwrap();
+    assert!(!canon.join("sim.timings").exists());
+}
+
+// rq-afb80e25
+#[test]
+fn timings_file_uses_default_path() {
+    let dir = tmp_path("timings_default_path");
+    let path = write_pair(&dir, 1, 0, 0, 0.0, true, false, 1, 1);
+    run_simulation(&path).unwrap();
+    let canon = std::fs::canonicalize(&dir).unwrap();
+    assert!(canon.join("sim.timings").exists());
+}
+
+// rq-a2ebdaaf
+#[test]
+fn timings_file_can_be_overridden() {
+    let dir = tmp_path("timings_override");
+    let path = write_pair(&dir, 1, 0, 0, 0.0, true, false, 1, 1);
+    // Rewrite config with a timings_path override.
+    let body = std::fs::read_to_string(&path).unwrap();
+    let body = body.replace(
+        "[output]",
+        "[output]\ntimings_path = \"custom.timings\"",
+    );
+    std::fs::write(&path, body).unwrap();
+    run_simulation(&path).unwrap();
+    let canon = std::fs::canonicalize(&dir).unwrap();
+    assert!(canon.join("custom.timings").exists());
+    assert!(!canon.join("sim.timings").exists());
+}
+
+// rq-11132169
+#[test]
+fn timings_pre_flight_refuses_overwrite() {
+    let dir = tmp_path("timings_overwrite");
+    let path = write_pair(&dir, 1, 0, 0, 0.0, true, false, 1, 1);
+    let canon = std::fs::canonicalize(&dir).unwrap();
+    let timings = canon.join("sim.timings");
+    std::fs::write(&timings, "existing").unwrap();
+    let err = run_simulation(&path).unwrap_err();
+    match err {
+        RunnerError::OutputExists { path: p } => assert_eq!(p, timings),
+        other => panic!("unexpected: {other:?}"),
+    }
+    assert_eq!(std::fs::read_to_string(&timings).unwrap(), "existing");
+}
+
+// rq-a7fdf81f
+#[test]
+fn lossy_includes_lossy_kick_rows() {
+    let dir = tmp_path("lossy_kick");
+    let path = write_pair(&dir, 5, 0, 0, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    assert!(stage_row(&body, "vv_kick_drift").is_some());
+    assert!(stage_row(&body, "vv_kick").is_some());
+    assert!(stage_row(&body, "vv_kick_drift_lossless").is_none());
+    assert!(stage_row(&body, "vv_kick_lossless").is_none());
+}
+
+// rq-b2fa4a1f
+#[test]
+fn lossless_includes_lossless_kick_rows() {
+    let dir = tmp_path("lossless_kick");
+    let path = write_pair(&dir, 5, 0, 0, 0.0, true, true, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    assert!(stage_row(&body, "vv_kick_drift_lossless").is_some());
+    assert!(stage_row(&body, "vv_kick_lossless").is_some());
+    assert!(stage_row(&body, "vv_kick_drift").is_none());
+    assert!(stage_row(&body, "vv_kick").is_none());
+}
+
+// rq-bde625cf
+#[test]
+fn empty_n_zero_omits_kernel_rows() {
+    let dir = tmp_path("empty_n_zero");
+    let path = write_pair(&dir, 3, 0, 0, 0.0, false, false, 1, 0);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    assert!(stage_row(&body, "lj_pair_force").is_none());
+    assert!(stage_row(&body, "reduce_pair_forces").is_none());
+    assert!(stage_row(&body, "vv_kick_drift").is_none());
+    assert!(stage_row(&body, "vv_kick").is_none());
+    assert!(stage_row(&body, "gpu_init").is_some());
+    assert!(stage_row(&body, "total_runtime").is_some());
+}
+
+// rq-3bd5336c
+#[test]
+fn velocity_generation_absent_when_init_supplies_velocities() {
+    let dir = tmp_path("velgen_absent");
+    let path = write_pair(&dir, 1, 0, 0, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    assert!(stage_row(&body, "velocity_generation").is_none());
+}
+
+// rq-a555a750
+#[test]
+fn velocity_generation_present_when_init_lacks_velocities() {
+    let dir = tmp_path("velgen_present");
+    let path = write_pair(&dir, 1, 0, 0, 300.0, false, false, 1, 4);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    let row = stage_row(&body, "velocity_generation").unwrap();
+    let count: u64 = row.split_whitespace().nth(1).unwrap().parse().unwrap();
+    assert_eq!(count, 1);
+}
+
+// rq-a9b511ea
+#[test]
+fn kernel_counts_match_runner_launches() {
+    let dir = tmp_path("kernel_counts");
+    let path = write_pair(&dir, 10, 0, 0, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    assert_eq!(stage_count(&body, "lj_pair_force"), Some(11));
+    assert_eq!(stage_count(&body, "reduce_pair_forces"), Some(11));
+    assert_eq!(stage_count(&body, "vv_kick_drift"), Some(10));
+    assert_eq!(stage_count(&body, "vv_kick"), Some(10));
+}
+
+// rq-46c317ef
+#[test]
+fn trajectory_write_count_matches_frames() {
+    let dir = tmp_path("traj_count");
+    let path = write_pair(&dir, 20, 5, 0, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    assert_eq!(stage_count(&body, "trajectory_write"), Some(5));
+    assert!(stage_row(&body, "log_write").is_none());
+}
+
+// rq-34bfc634
+#[test]
+fn log_write_count_matches_rows() {
+    let dir = tmp_path("log_count");
+    let path = write_pair(&dir, 20, 0, 10, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    assert_eq!(stage_count(&body, "log_write"), Some(3));
+    assert!(stage_row(&body, "trajectory_write").is_none());
+}
+
+// rq-6fe2b058
+#[test]
+fn download_count_matches_snapshot_points() {
+    let dir = tmp_path("download_count");
+    // n_steps=20, trajectory_every=5 hits 5,10,15,20; log_every=10 hits 10,20.
+    // Union of steps with a download: {0, 5, 10, 15, 20} = 5 download events
+    // (step 0 plus four loop steps because steps 10 and 20 share a single
+    // download when traj+log coincide).
+    let path = write_pair(&dir, 20, 5, 10, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    assert_eq!(stage_count(&body, "device_to_host_download"), Some(5));
+}
+
+// rq-44e5c930
+#[test]
+fn single_occurrence_host_stages_have_count_one() {
+    let dir = tmp_path("single_count");
+    let path = write_pair(&dir, 1, 0, 0, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    for stage in &[
+        "config_load",
+        "init_load",
+        "gpu_init",
+        "host_to_device_upload",
+        "total_runtime",
+    ] {
+        assert_eq!(stage_count(&body, stage), Some(1), "stage {stage} count");
+    }
+}
+
+// rq-105afb1d
+#[test]
+fn min_leq_mean_leq_max() {
+    let dir = tmp_path("min_mean_max");
+    let path = write_pair(&dir, 20, 0, 0, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    for line in body.lines().skip(1) {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        let count: u64 = cols[1].parse().unwrap();
+        if count < 2 {
+            continue;
+        }
+        let mean: f64 = cols[3].parse().unwrap();
+        let min: f64 = cols[4].parse().unwrap();
+        let max: f64 = cols[5].parse().unwrap();
+        assert!(min <= mean, "row {line:?}: min {min} > mean {mean}");
+        assert!(mean <= max, "row {line:?}: mean {mean} > max {max}");
+    }
+}
+
+// rq-9818f429
+#[test]
+fn total_ms_matches_mean_us_times_count() {
+    let dir = tmp_path("total_eq_mean_count");
+    let path = write_pair(&dir, 20, 5, 5, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    for line in body.lines().skip(1) {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        let count: f64 = cols[1].parse::<u64>().unwrap() as f64;
+        let total_ms: f64 = cols[2].parse().unwrap();
+        let mean_us: f64 = cols[3].parse().unwrap();
+        let expected = mean_us * count / 1000.0;
+        // Allow precision slack from one-decimal mean and three-decimal total.
+        assert!(
+            (total_ms - expected).abs() < 0.01 * (1.0 + total_ms.abs()),
+            "row {line:?}: total_ms={total_ms} expected≈{expected}"
+        );
+    }
+}
+
+// rq-7e79501b
+#[test]
+fn total_runtime_dominates_other_rows() {
+    let dir = tmp_path("total_runtime_dominates");
+    let path = write_pair(&dir, 20, 5, 5, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    let total_runtime = stage_row(&body, "total_runtime").unwrap();
+    let total_runtime_ms: f64 = total_runtime
+        .split_whitespace()
+        .nth(2)
+        .unwrap()
+        .parse()
+        .unwrap();
+    for line in body.lines().skip(1) {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols[0] == "total_runtime" {
+            continue;
+        }
+        let row_total_ms: f64 = cols[2].parse().unwrap();
+        assert!(
+            total_runtime_ms + 1.0 >= row_total_ms,
+            "stage {} reports {} ms > total_runtime {} ms",
+            cols[0],
+            row_total_ms,
+            total_runtime_ms
+        );
+    }
+}
+
+// rq-f1850393
+#[test]
+fn header_line_uses_documented_columns() {
+    let dir = tmp_path("header_cols");
+    let path = write_pair(&dir, 1, 0, 0, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    let header = body.lines().next().unwrap();
+    let cols: Vec<&str> = header.split_whitespace().collect();
+    assert_eq!(
+        cols,
+        vec!["stage", "count", "total_ms", "mean_us", "min_us", "max_us"]
+    );
+}
+
+// rq-ef7c2bb9
+#[test]
+fn rows_appear_in_documented_order() {
+    let dir = tmp_path("row_order");
+    let path = write_pair(&dir, 10, 5, 5, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    let stages: Vec<&str> = body
+        .lines()
+        .skip(1)
+        .map(|l| l.split_whitespace().next().unwrap())
+        .collect();
+    let expected = vec![
+        "vv_kick_drift",
+        "lj_pair_force",
+        "reduce_pair_forces",
+        "vv_kick",
+        "host_to_device_upload",
+        "device_to_host_download",
+        "trajectory_write",
+        "log_write",
+        "config_load",
+        "init_load",
+        "gpu_init",
+        "total_runtime",
+    ];
+    assert_eq!(stages, expected);
+}
+
+// rq-44dfc3da
+#[test]
+fn numeric_columns_have_expected_precision() {
+    let dir = tmp_path("precision");
+    let path = write_pair(&dir, 5, 0, 0, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    for line in body.lines().skip(1) {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        let total_ms = cols[2];
+        let mean_us = cols[3];
+        let min_us = cols[4];
+        let max_us = cols[5];
+        let decimals = |s: &str| s.split('.').nth(1).unwrap_or("").len();
+        assert_eq!(decimals(total_ms), 3, "total_ms {total_ms:?}");
+        assert_eq!(decimals(mean_us), 1, "mean_us {mean_us:?}");
+        assert_eq!(decimals(min_us), 1, "min_us {min_us:?}");
+        assert_eq!(decimals(max_us), 1, "max_us {max_us:?}");
+    }
+}
+
+// rq-f4780029
+#[test]
+fn zero_count_stages_absent() {
+    let dir = tmp_path("zero_count_absent");
+    let path = write_pair(&dir, 5, 0, 0, 0.0, true, false, 1, 2);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    // With trajectory_every=0 and log_every=0, trajectory_write and log_write
+    // never run; their rows must be absent.
+    assert!(stage_row(&body, "trajectory_write").is_none());
+    assert!(stage_row(&body, "log_write").is_none());
+}
+
+// rq-ad403fb6
+#[test]
+fn trajectory_and_log_remain_bit_identical_with_timings_on() {
+    let dir_a = tmp_path("repro_a");
+    let dir_b = tmp_path("repro_b");
+    let path_a = write_pair(&dir_a, 30, 5, 5, 0.0, true, false, 1, 2);
+    let path_b = write_pair(&dir_b, 30, 5, 5, 0.0, true, false, 1, 2);
+    run_simulation(&path_a).unwrap();
+    run_simulation(&path_b).unwrap();
+    let canon_a = std::fs::canonicalize(&dir_a).unwrap();
+    let canon_b = std::fs::canonicalize(&dir_b).unwrap();
+    assert_eq!(
+        std::fs::read(canon_a.join("sim-traj.xyz")).unwrap(),
+        std::fs::read(canon_b.join("sim-traj.xyz")).unwrap()
+    );
+    assert_eq!(
+        std::fs::read(canon_a.join("sim.log")).unwrap(),
+        std::fs::read(canon_b.join("sim.log")).unwrap()
+    );
+}
+
+// rq-1b8fd2a0
+#[test]
+fn two_runs_produce_same_stage_rows_and_counts() {
+    let dir_a = tmp_path("stages_a");
+    let dir_b = tmp_path("stages_b");
+    let path_a = write_pair(&dir_a, 10, 5, 5, 0.0, true, false, 1, 2);
+    let path_b = write_pair(&dir_b, 10, 5, 5, 0.0, true, false, 1, 2);
+    run_simulation(&path_a).unwrap();
+    run_simulation(&path_b).unwrap();
+    let body_a = read_timings(&dir_a);
+    let body_b = read_timings(&dir_b);
+    let stages_a: Vec<(String, u64)> = body_a
+        .lines()
+        .skip(1)
+        .map(|l| {
+            let mut it = l.split_whitespace();
+            let name = it.next().unwrap().to_string();
+            let count: u64 = it.next().unwrap().parse().unwrap();
+            (name, count)
+        })
+        .collect();
+    let stages_b: Vec<(String, u64)> = body_b
+        .lines()
+        .skip(1)
+        .map(|l| {
+            let mut it = l.split_whitespace();
+            let name = it.next().unwrap().to_string();
+            let count: u64 = it.next().unwrap().parse().unwrap();
+            (name, count)
+        })
+        .collect();
+    assert_eq!(stages_a, stages_b);
+}
+
+// rq-f84e4fa1
+#[test]
+fn timings_path_eq_trajectory_rejected() {
+    let dir = tmp_path("collision_traj_timings");
+    let body = format!(
+        r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 1
+dt = 1.0e-15
+temperature = 0.0
+
+[integrator]
+lossless = false
+
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+
+[output]
+trajectory_path = "out.dat"
+timings_path = "out.dat"
+"#
+    );
+    let path = dir.join("sim.toml");
+    std::fs::write(&path, body).unwrap();
+    write_init(&dir, 0, false);
+    let err = run_simulation(&path).unwrap_err();
+    match err {
+        RunnerError::Config(_) => {}
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-ec5b6cf1
+#[test]
+fn timings_path_eq_log_rejected() {
+    let dir = tmp_path("collision_log_timings");
+    let body = format!(
+        r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 1
+dt = 1.0e-15
+temperature = 0.0
+
+[integrator]
+lossless = false
+
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+
+[output]
+log_path = "out.dat"
+timings_path = "out.dat"
+"#
+    );
+    let path = dir.join("sim.toml");
+    std::fs::write(&path, body).unwrap();
+    write_init(&dir, 0, false);
+    let err = run_simulation(&path).unwrap_err();
+    match err {
+        RunnerError::Config(_) => {}
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-2ebf81fd
+#[test]
+fn timings_path_eq_init_rejected() {
+    let dir = tmp_path("collision_init_timings");
+    let body = format!(
+        r#"schema_version = 1
+init = "particles.dat"
+
+[simulation]
+seed = 1
+n_steps = 1
+dt = 1.0e-15
+temperature = 0.0
+
+[integrator]
+lossless = false
+
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+
+[output]
+timings_path = "particles.dat"
+"#
+    );
+    let path = dir.join("sim.toml");
+    std::fs::write(&path, body).unwrap();
+    let err = run_simulation(&path).unwrap_err();
+    match err {
+        RunnerError::Config(_) => {}
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-de5ca07a
+#[test]
+fn write_timings_refuses_overwrite() {
+    let dir = tmp_path("write_refuse_overwrite");
+    let path = dir.join("run.timings");
+    std::fs::write(&path, "existing").unwrap();
+    let report = TimingsReport {
+        stages: vec![StageStats {
+            name: "stage_a".to_string(),
+            count: 1,
+            total_ns: 1_000_000,
+            min_ns: 1_000_000,
+            max_ns: 1_000_000,
+        }],
+    };
+    match write_timings_file(&path, &report).unwrap_err() {
+        TimingsWriterError::OutputExists { path: p } => assert_eq!(p, path),
+        other => panic!("unexpected: {other:?}"),
+    }
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "existing");
+}
+
+// rq-e93e7ad1
+#[test]
+fn write_timings_fails_when_parent_missing() {
+    let dir = tmp_path("write_no_parent");
+    let path = dir.join("missing").join("run.timings");
+    let report = TimingsReport { stages: Vec::new() };
+    match write_timings_file(&path, &report).unwrap_err() {
+        TimingsWriterError::Io(_) => {}
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-5c716d48
+#[test]
+fn write_timings_empty_report_writes_header_only() {
+    let dir = tmp_path("write_empty");
+    let path = dir.join("run.timings");
+    let report = TimingsReport { stages: Vec::new() };
+    write_timings_file(&path, &report).unwrap();
+    let body = std::fs::read_to_string(&path).unwrap();
+    let lines: Vec<&str> = body.lines().collect();
+    assert_eq!(lines.len(), 1);
+    assert!(lines[0].contains("stage") && lines[0].contains("count"));
+}
+
+// rq-e946870f
+#[test]
+fn timings_new_allocates_event_pairs() {
+    let device = init_device().unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    let report = timings.finalize().unwrap();
+    assert!(report.stages.is_empty());
+}
+
+// rq-79291197
+#[test]
+fn kernel_start_stop_and_finalize_records_one_sample() {
+    let device = init_device().unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    let state = ParticleState::new(
+        vec![0.0_f32, 1.0e-10_f32],
+        vec![0.0_f32; 2],
+        vec![0.0_f32; 2],
+        vec![0.0_f32; 2],
+        vec![0.0_f32; 2],
+        vec![0.0_f32; 2],
+        vec![1.0_f32; 2],
+        None,
+    )
+    .unwrap();
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut pair_buffer = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let params = dynamics::gpu::LennardJonesParameters {
+        sigma: 1.0e-10,
+        epsilon: 1.0,
+        cutoff: 1.0e-9,
+    };
+    let sim_box = SimulationBox::new_orthorhombic(1.0e-9, 1.0e-9, 1.0e-9).unwrap();
+    timings.kernel_start(KernelStage::LjPairForce).unwrap();
+    lj_pair_force(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
+    timings.kernel_stop(KernelStage::LjPairForce).unwrap();
+    let report = timings.finalize().unwrap();
+    let entry = report
+        .stages
+        .iter()
+        .find(|s| s.name == "lj_pair_force")
+        .unwrap();
+    assert_eq!(entry.count, 1);
+}
+
+// rq-56043142
+#[test]
+fn repeated_kernel_starts_stops_accumulate() {
+    let device = init_device().unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    let state = ParticleState::new(
+        vec![0.0_f32, 1.0e-10_f32],
+        vec![0.0_f32; 2],
+        vec![0.0_f32; 2],
+        vec![0.0_f32; 2],
+        vec![0.0_f32; 2],
+        vec![0.0_f32; 2],
+        vec![1.0_f32; 2],
+        None,
+    )
+    .unwrap();
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut pair_buffer = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let params = dynamics::gpu::LennardJonesParameters {
+        sigma: 1.0e-10,
+        epsilon: 1.0,
+        cutoff: 1.0e-9,
+    };
+    let sim_box = SimulationBox::new_orthorhombic(1.0e-9, 1.0e-9, 1.0e-9).unwrap();
+    for _ in 0..10 {
+        timings.kernel_start(KernelStage::LjPairForce).unwrap();
+        lj_pair_force(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
+        timings.kernel_stop(KernelStage::LjPairForce).unwrap();
+    }
+    let report = timings.finalize().unwrap();
+    let entry = report
+        .stages
+        .iter()
+        .find(|s| s.name == "lj_pair_force")
+        .unwrap();
+    assert_eq!(entry.count, 10);
+    assert!(entry.total_ns > 0);
+}
+
+// rq-2cbe0828
+#[test]
+fn record_host_accumulates_count_total_min_max() {
+    let device = init_device().unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    timings.record_host(HostStage::ConfigLoad, Duration::from_micros(100));
+    timings.record_host(HostStage::ConfigLoad, Duration::from_micros(50));
+    timings.record_host(HostStage::ConfigLoad, Duration::from_micros(200));
+    let report = timings.finalize().unwrap();
+    let entry = report
+        .stages
+        .iter()
+        .find(|s| s.name == "config_load")
+        .unwrap();
+    assert_eq!(entry.count, 3);
+    assert_eq!(entry.total_ns, 350_000);
+    assert_eq!(entry.min_ns, 50_000);
+    assert_eq!(entry.max_ns, 200_000);
+}
+
+// Silence unused-import warning when individual tests don't reference these.
+#[test]
+fn _imports_used() {
+    let _ = TrajectoryWriterError::Io(String::new());
+    let _ = load_init_state;
+}

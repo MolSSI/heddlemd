@@ -53,12 +53,13 @@ message.
 1. **Parse CLI.** Confirm the form `run <config-path>`. Capture `<config-path>`.
 2. **Load config.** Call `load_config(&config_path)`
    (`config-schema.md`). Failure → exit 1.
-3. **Pre-flight output checks.** For each enabled output (trajectory and
-   log have separate `_every > 0` predicates), verify the resolved path
-   does not exist. Failure → exit 1 with
-   `OutputExists` reporting the offending path. This check is performed
-   before the init file is read so the runner refuses long, expensive
-   runs early.
+3. **Pre-flight output checks.** Verify each enabled output path does not
+   already exist. Trajectory and log are gated by their respective
+   `_every > 0` predicates; the timings file (see
+   `performance-analysis.md`) is always written and always checked.
+   Failure → exit 1 with `OutputExists` reporting the offending path.
+   This check is performed before the init file is read so the runner
+   refuses long, expensive runs early.
 4. **Build type-name slice.** Construct `type_names: Vec<&str>` from
    `config.particle_types[i].name`, indexed left-to-right.
 5. **Load init state.** Call
@@ -117,7 +118,12 @@ message.
 16. **Flush and close.** Call `flush()` on each open writer. The writers'
     `Drop` impls are best-effort but the runner calls `flush` explicitly
     so flush errors propagate.
-17. **Final summary.** Emit one summary line to stdout (see
+17. **Write timings file.** Capture the total-runtime measurement, drain
+    outstanding CUDA event pairs via `Timings::finalize`, and serialise
+    the resulting report to `config.output.timings_path` via
+    `write_timings_file`. See `performance-analysis.md` for the
+    instrumentation contract and file format.
+18. **Final summary.** Emit one summary line to stdout (see
     *Final summary*). Exit 0.
 
 The `dt` value passed to integrator launches is `config.simulation.dt as
@@ -388,13 +394,23 @@ Feature: dynamics run simulation runner
     And stderr contains "OutputExists" and "sim.log"
 
   @rq-acbbd59a
-  Scenario: Disabled outputs are not checked
+  Scenario: Disabled trajectory and log outputs are not checked, but timings is
     Given tmp/sim.toml has trajectory_every=0 and log_every=0
     And tmp/sim-traj.xyz and tmp/sim.log both already exist with arbitrary content
+    And tmp/sim.timings does not exist
     When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
     Then it exits with code 0
     And tmp/sim-traj.xyz is unchanged
     And tmp/sim.log is unchanged
+    And tmp/sim.timings exists
+
+  @rq-fc523f30
+  Scenario: Pre-flight refuses to overwrite existing timings file
+    Given tmp/sim.toml is valid
+    And tmp/sim.timings already exists with arbitrary content
+    When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
+    Then it exits with code 1
+    And stderr contains "OutputExists" and "sim.timings"
 
   # --- Velocity generation ---
 

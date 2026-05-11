@@ -824,6 +824,84 @@ cutoff = 1.0
     }
 }
 
+// rq-a5c86770
+#[test]
+fn timings_path_defaults_to_stem_timings() {
+    let dir = tmp_path("timings_default");
+    let path = write_config(&dir, &minimal_config());
+    let cfg = load_config(&path).unwrap();
+    let canonical_dir = std::fs::canonicalize(&dir).unwrap();
+    assert_eq!(cfg.output.timings_path, canonical_dir.join("sim.timings"));
+}
+
+// rq-fa24a8d1
+#[test]
+fn timings_path_override() {
+    let dir = tmp_path("timings_override");
+    let body = format!(
+        "{}\n[output]\ntimings_path = \"custom.timings\"\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    let canonical_dir = std::fs::canonicalize(&dir).unwrap();
+    assert_eq!(cfg.output.timings_path, canonical_dir.join("custom.timings"));
+}
+
+// rq-7d5915bb
+#[test]
+fn reject_init_equals_timings() {
+    let dir = tmp_path("init_eq_timings");
+    let body = format!(
+        "{}\n[output]\ntimings_path = \"argon.xyz\"\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::PathCollision { kind_a, kind_b, .. } => {
+            assert_eq!(kind_a, PathRole::Init);
+            assert_eq!(kind_b, PathRole::Timings);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-ec8d715d
+#[test]
+fn reject_trajectory_equals_timings() {
+    let dir = tmp_path("traj_eq_timings");
+    let body = format!(
+        "{}\n[output]\ntrajectory_path = \"run.dat\"\ntimings_path = \"run.dat\"\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::PathCollision { kind_a, kind_b, .. } => {
+            assert_eq!(kind_a, PathRole::Trajectory);
+            assert_eq!(kind_b, PathRole::Timings);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-8f665dd0
+#[test]
+fn reject_log_equals_timings() {
+    let dir = tmp_path("log_eq_timings");
+    let body = format!(
+        "{}\n[output]\nlog_path = \"run.dat\"\ntimings_path = \"run.dat\"\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::PathCollision { kind_a, kind_b, .. } => {
+            assert_eq!(kind_a, PathRole::Log);
+            assert_eq!(kind_b, PathRole::Timings);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
 // rq-97e525d8
 #[test]
 fn trajectory_every_zero_accepted() {

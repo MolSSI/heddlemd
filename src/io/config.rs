@@ -7,6 +7,7 @@ pub enum PathRole {
     Init,
     Trajectory,
     Log,
+    Timings,
 }
 
 impl std::fmt::Display for PathRole {
@@ -15,6 +16,7 @@ impl std::fmt::Display for PathRole {
             PathRole::Init => write!(f, "init"),
             PathRole::Trajectory => write!(f, "trajectory"),
             PathRole::Log => write!(f, "log"),
+            PathRole::Timings => write!(f, "timings"),
         }
     }
 }
@@ -148,6 +150,7 @@ pub struct OutputConfig {
     pub include_velocities: bool,
     pub log_path: PathBuf,
     pub log_every: u64,
+    pub timings_path: PathBuf,
 }
 
 // rq-2a6a51c8
@@ -460,60 +463,73 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         .unwrap_or_else(|| "sim".to_string());
     let default_traj = format!("{stem}-traj.xyz");
     let default_log = format!("{stem}.log");
+    let default_timings = format!("{stem}.timings");
 
-    let (trajectory_path, trajectory_every, include_velocities, log_path, log_every) =
-        match root.get("output") {
-            Some(toml::Value::Table(out_tbl)) => {
-                let tpath = match out_tbl.get("trajectory_path") {
-                    Some(toml::Value::String(s)) => resolve_path(&base_dir, s),
-                    Some(_) => return Err(invalid("output.trajectory_path", "expected a string")),
-                    None => resolve_path(&base_dir, &default_traj),
-                };
-                let tevery = match out_tbl.get("trajectory_every") {
-                    Some(toml::Value::Integer(i)) if *i >= 0 => *i as u64,
-                    Some(toml::Value::Integer(_)) => {
-                        return Err(invalid(
-                            "output.trajectory_every",
-                            "expected a non-negative integer",
-                        ));
-                    }
-                    Some(_) => return Err(invalid("output.trajectory_every", "expected an integer")),
-                    None => 100,
-                };
-                let incv = match out_tbl.get("include_velocities") {
-                    Some(toml::Value::Boolean(b)) => *b,
-                    Some(_) => return Err(invalid("output.include_velocities", "expected a boolean")),
-                    None => true,
-                };
-                let lpath = match out_tbl.get("log_path") {
-                    Some(toml::Value::String(s)) => resolve_path(&base_dir, s),
-                    Some(_) => return Err(invalid("output.log_path", "expected a string")),
-                    None => resolve_path(&base_dir, &default_log),
-                };
-                let levery = match out_tbl.get("log_every") {
-                    Some(toml::Value::Integer(i)) if *i >= 0 => *i as u64,
-                    Some(toml::Value::Integer(_)) => {
-                        return Err(invalid("output.log_every", "expected a non-negative integer"));
-                    }
-                    Some(_) => return Err(invalid("output.log_every", "expected an integer")),
-                    None => 100,
-                };
-                (tpath, tevery, incv, lpath, levery)
-            }
-            Some(_) => return Err(invalid("output", "expected a table")),
-            None => (
-                resolve_path(&base_dir, &default_traj),
-                100,
-                true,
-                resolve_path(&base_dir, &default_log),
-                100,
-            ),
-        };
+    let (
+        trajectory_path,
+        trajectory_every,
+        include_velocities,
+        log_path,
+        log_every,
+        timings_path,
+    ) = match root.get("output") {
+        Some(toml::Value::Table(out_tbl)) => {
+            let tpath = match out_tbl.get("trajectory_path") {
+                Some(toml::Value::String(s)) => resolve_path(&base_dir, s),
+                Some(_) => return Err(invalid("output.trajectory_path", "expected a string")),
+                None => resolve_path(&base_dir, &default_traj),
+            };
+            let tevery = match out_tbl.get("trajectory_every") {
+                Some(toml::Value::Integer(i)) if *i >= 0 => *i as u64,
+                Some(toml::Value::Integer(_)) => {
+                    return Err(invalid(
+                        "output.trajectory_every",
+                        "expected a non-negative integer",
+                    ));
+                }
+                Some(_) => return Err(invalid("output.trajectory_every", "expected an integer")),
+                None => 100,
+            };
+            let incv = match out_tbl.get("include_velocities") {
+                Some(toml::Value::Boolean(b)) => *b,
+                Some(_) => return Err(invalid("output.include_velocities", "expected a boolean")),
+                None => true,
+            };
+            let lpath = match out_tbl.get("log_path") {
+                Some(toml::Value::String(s)) => resolve_path(&base_dir, s),
+                Some(_) => return Err(invalid("output.log_path", "expected a string")),
+                None => resolve_path(&base_dir, &default_log),
+            };
+            let levery = match out_tbl.get("log_every") {
+                Some(toml::Value::Integer(i)) if *i >= 0 => *i as u64,
+                Some(toml::Value::Integer(_)) => {
+                    return Err(invalid("output.log_every", "expected a non-negative integer"));
+                }
+                Some(_) => return Err(invalid("output.log_every", "expected an integer")),
+                None => 100,
+            };
+            let timings = match out_tbl.get("timings_path") {
+                Some(toml::Value::String(s)) => resolve_path(&base_dir, s),
+                Some(_) => return Err(invalid("output.timings_path", "expected a string")),
+                None => resolve_path(&base_dir, &default_timings),
+            };
+            (tpath, tevery, incv, lpath, levery, timings)
+        }
+        Some(_) => return Err(invalid("output", "expected a table")),
+        None => (
+            resolve_path(&base_dir, &default_traj),
+            100,
+            true,
+            resolve_path(&base_dir, &default_log),
+            100,
+            resolve_path(&base_dir, &default_timings),
+        ),
+    };
 
     // rq-6d99f9c8
     let init_path = resolve_path(&base_dir, &init_raw);
 
-    // Path collision checks (init/traj/log pairwise distinct)
+    // Path collision checks (init/traj/log/timings pairwise distinct)
     let check_collision = |kind_a: PathRole, path_a: &PathBuf, kind_b: PathRole, path_b: &PathBuf| {
         if path_a == path_b {
             Some(ConfigError::PathCollision {
@@ -532,6 +548,15 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         return Err(e);
     }
     if let Some(e) = check_collision(PathRole::Init, &init_path, PathRole::Log, &log_path) {
+        return Err(e);
+    }
+    if let Some(e) = check_collision(PathRole::Init, &init_path, PathRole::Timings, &timings_path) {
+        return Err(e);
+    }
+    if let Some(e) = check_collision(PathRole::Trajectory, &trajectory_path, PathRole::Timings, &timings_path) {
+        return Err(e);
+    }
+    if let Some(e) = check_collision(PathRole::Log, &log_path, PathRole::Timings, &timings_path) {
         return Err(e);
     }
 
@@ -555,6 +580,7 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
             include_velocities,
             log_path,
             log_every,
+            timings_path,
         },
         config_path: config_path_canonical,
     })

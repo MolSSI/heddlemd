@@ -211,13 +211,34 @@ fn disabled_outputs_not_checked() {
     let canon = std::fs::canonicalize(&dir).unwrap();
     let traj = canon.join("sim-traj.xyz");
     let log = canon.join("sim.log");
+    let timings = canon.join("sim.timings");
     std::fs::write(&traj, "preexisting_traj").unwrap();
     std::fs::write(&log, "preexisting_log").unwrap();
+    // Timings file MUST NOT exist; the pre-flight check rejects it otherwise.
+    assert!(!timings.exists());
     let summary = run_simulation(&path).unwrap();
     assert_eq!(summary.frames_written, 0);
     assert_eq!(summary.log_rows_written, 0);
     assert_eq!(std::fs::read_to_string(&traj).unwrap(), "preexisting_traj");
     assert_eq!(std::fs::read_to_string(&log).unwrap(), "preexisting_log");
+    // Timings file IS written even when trajectory and log are disabled.
+    assert!(timings.exists());
+}
+
+// rq-fc523f30
+#[test]
+fn preflight_refuses_existing_timings() {
+    let dir = tmp_path("preflight_timings");
+    let path = write_pair(&dir, 1, 5, 5, 0.0, true, false, 1, 1);
+    let canon = std::fs::canonicalize(&dir).unwrap();
+    std::fs::write(canon.join("sim.timings"), "existing").unwrap();
+    let err = run_simulation(&path).unwrap_err();
+    match err {
+        RunnerError::OutputExists { path: p } => {
+            assert_eq!(p.file_name().unwrap(), "sim.timings");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
 }
 
 // rq-621ce7b6

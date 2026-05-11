@@ -1,7 +1,7 @@
 // rq-357909e4 rq-02edd314 rq-77c1d5d9
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use rand::SeedableRng;
 use rand::Rng;
@@ -17,6 +17,9 @@ use crate::io::{
 };
 use crate::io::log_output::{BOLTZMANN_J_PER_K, compute_kinetic_energy, compute_temperature};
 use crate::state::{ParticleState, ParticleStateError};
+use crate::timings::{
+    HostStage, KernelStage, Timings, TimingsError, TimingsWriterError, write_timings_file,
+};
 
 // rq-8ee27e27
 #[derive(Debug)]
@@ -27,6 +30,8 @@ pub enum RunnerError {
     Gpu(crate::gpu::GpuError),
     Trajectory(TrajectoryWriterError),
     Log(LogWriterError),
+    Timings(TimingsError),
+    TimingsWriter(TimingsWriterError),
     MissingArgs,
     OutputExists { path: PathBuf },
 }
@@ -40,6 +45,8 @@ impl std::fmt::Display for RunnerError {
             RunnerError::Gpu(e) => write!(f, "Gpu({e})"),
             RunnerError::Trajectory(e) => write!(f, "Trajectory({e})"),
             RunnerError::Log(e) => write!(f, "Log({e})"),
+            RunnerError::Timings(e) => write!(f, "Timings({e})"),
+            RunnerError::TimingsWriter(e) => write!(f, "TimingsWriter({e})"),
             RunnerError::MissingArgs => write!(f, "MissingArgs"),
             RunnerError::OutputExists { path } => {
                 write!(f, "OutputExists {{ path: {} }}", path.display())
@@ -72,13 +79,26 @@ pub fn run_simulation(config_path: &Path) -> Result<RunSummary, RunnerError> {
     run_simulation_with_phase(config_path).map_err(|(e, _)| e)
 }
 
-// rq-ef902cf6
+fn timed<T>(target: &mut Duration, f: impl FnOnce() -> T) -> T {
+    let started = Instant::now();
+    let value = f();
+    *target = started.elapsed();
+    value
+}
+
+// rq-ef902cf6 rq-dcfdb7c9
 fn run_simulation_with_phase(
     config_path: &Path,
 ) -> Result<RunSummary, (RunnerError, ExitPhase)> {
-    let config = load_config(config_path).map_err(|e| (RunnerError::Config(e), ExitPhase::Setup))?;
+    let total_started = Instant::now();
 
-    // Pre-flight output existence checks (only for enabled outputs).
+    // Time config_load before any other instrumentation exists.
+    let mut config_load_duration = Duration::ZERO;
+    let config = timed(&mut config_load_duration, || load_config(config_path))
+        .map_err(|e| (RunnerError::Config(e), ExitPhase::Setup))?;
+
+    // Pre-flight output existence checks. Trajectory and log are gated by
+    // their `_every > 0` predicates; the timings file is always written.
     if config.output.trajectory_every > 0 && config.output.trajectory_path.exists() {
         return Err((
             RunnerError::OutputExists {
@@ -95,6 +115,14 @@ fn run_simulation_with_phase(
             ExitPhase::Setup,
         ));
     }
+    if config.output.timings_path.exists() {
+        return Err((
+            RunnerError::OutputExists {
+                path: config.output.timings_path.clone(),
+            },
+            ExitPhase::Setup,
+        ));
+    }
 
     let type_name_strings: Vec<String> = config
         .particle_types
@@ -102,13 +130,27 @@ fn run_simulation_with_phase(
         .map(|t| t.name.clone())
         .collect();
     let type_name_refs: Vec<&str> = type_name_strings.iter().map(|s| s.as_str()).collect();
-    let init = load_init_state(&config.init, &type_name_refs)
-        .map_err(|e| (RunnerError::InitState(e), ExitPhase::Setup))?;
+
+    let mut init_load_duration = Duration::ZERO;
+    let init = timed(&mut init_load_duration, || {
+        load_init_state(&config.init, &type_name_refs)
+    })
+    .map_err(|e| (RunnerError::InitState(e), ExitPhase::Setup))?;
 
     let sim_box = init.sim_box;
     let n = init.particle_count;
 
-    let device = init_device().map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?;
+    let mut gpu_init_duration = Duration::ZERO;
+    let device = timed(&mut gpu_init_duration, init_device)
+        .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?;
+
+    // Construct the Timings instance now and replay the three pre-instrumented
+    // host stages.
+    let mut timings = Timings::new(device.clone())
+        .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
+    timings.record_host(HostStage::ConfigLoad, config_load_duration);
+    timings.record_host(HostStage::InitLoad, init_load_duration);
+    timings.record_host(HostStage::GpuInit, gpu_init_duration);
 
     // Build masses array from per-particle type_index lookup.
     let mut masses_f64: Vec<f64> = Vec::with_capacity(n);
@@ -126,12 +168,19 @@ fn run_simulation_with_phase(
             velocities_y,
             velocities_z,
         }) => (velocities_x, velocities_y, velocities_z),
-        None => generate_velocities(
-            n,
-            config.simulation.temperature,
-            config.simulation.seed,
-            &masses_f64,
-        ),
+        None => {
+            let mut velgen = Duration::ZERO;
+            let vs = timed(&mut velgen, || {
+                generate_velocities(
+                    n,
+                    config.simulation.temperature,
+                    config.simulation.seed,
+                    &masses_f64,
+                )
+            });
+            timings.record_host(HostStage::VelocityGeneration, velgen);
+            vs
+        }
     };
 
     let state = ParticleState::new(
@@ -146,11 +195,13 @@ fn run_simulation_with_phase(
     )
     .map_err(|e| (RunnerError::ParticleState(e), ExitPhase::Setup))?;
 
-    let mut buffers = ParticleBuffers::new(device.clone(), &state)
+    let mut upload = Duration::ZERO;
+    let mut buffers = timed(&mut upload, || ParticleBuffers::new(device.clone(), &state))
         .map_err(|e| match e {
             ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Setup),
             other => (RunnerError::ParticleState(other), ExitPhase::Setup),
         })?;
+    timings.record_host(HostStage::HostToDeviceUpload, upload);
 
     let max_neighbors = if n == 0 { 0u32 } else { n as u32 };
     let mut pair_buffer = PairBuffer::new(device.clone(), n, max_neighbors)
@@ -201,10 +252,28 @@ fn run_simulation_with_phase(
     let started = Instant::now();
 
     // Warm-up: populate forces with F(x_0).
+    if n > 0 {
+        timings
+            .kernel_start(KernelStage::LjPairForce)
+            .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
+    }
     lj_pair_force(&buffers, &mut pair_buffer, &sim_box, &lj_params)
         .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?;
+    if n > 0 {
+        timings
+            .kernel_stop(KernelStage::LjPairForce)
+            .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
+        timings
+            .kernel_start(KernelStage::ReducePairForces)
+            .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
+    }
     reduce_pair_forces(&pair_buffer, &neighbor_counts, &mut buffers)
         .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?;
+    if n > 0 {
+        timings
+            .kernel_stop(KernelStage::ReducePairForces)
+            .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
+    }
 
     // Host scratch state for downloads.
     let mut frame: ParticleState = state.clone();
@@ -213,16 +282,20 @@ fn run_simulation_with_phase(
 
     // Step-0 outputs.
     if traj_writer.is_some() || log_writer.is_some() {
-        frame
-            .download_from(&buffers)
-            .map_err(|e| match e {
-                ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Setup),
-                other => (RunnerError::ParticleState(other), ExitPhase::Setup),
-            })?;
+        let mut dl = Duration::ZERO;
+        timed(&mut dl, || frame.download_from(&buffers)).map_err(|e| match e {
+            ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Setup),
+            other => (RunnerError::ParticleState(other), ExitPhase::Setup),
+        })?;
+        timings.record_host(HostStage::DeviceToHostDownload, dl);
     }
     if let Some(writer) = traj_writer.as_mut() {
-        write_traj_frame(writer, 0, config.simulation.dt, &sim_box, &init.type_indices, &frame)
-            .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Setup))?;
+        let mut tw = Duration::ZERO;
+        timed(&mut tw, || {
+            write_traj_frame(writer, 0, config.simulation.dt, &sim_box, &init.type_indices, &frame)
+        })
+        .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Setup))?;
+        timings.record_host(HostStage::TrajectoryWrite, tw);
         frames_written += 1;
     }
     if let Some(writer) = log_writer.as_mut() {
@@ -233,9 +306,10 @@ fn run_simulation_with_phase(
             &frame.velocities_z,
         );
         let t = compute_temperature(ke, n);
-        writer
-            .write_row(0, 0.0, ke, t)
+        let mut lw = Duration::ZERO;
+        timed(&mut lw, || writer.write_row(0, 0.0, ke, t))
             .map_err(|e| (RunnerError::Log(e), ExitPhase::Setup))?;
+        timings.record_host(HostStage::LogWrite, lw);
         log_rows_written += 1;
     }
 
@@ -243,9 +317,24 @@ fn run_simulation_with_phase(
     let n_steps = config.simulation.n_steps;
     let progress_every = (n_steps / 100).max(1);
     let dt_f32 = config.simulation.dt as f32;
+    let kick_drift_stage = if config.integrator.lossless {
+        KernelStage::VvKickDriftLossless
+    } else {
+        KernelStage::VvKickDrift
+    };
+    let kick_stage = if config.integrator.lossless {
+        KernelStage::VvKickLossless
+    } else {
+        KernelStage::VvKick
+    };
 
     // Main loop.
     for step in 1..=n_steps {
+        if n > 0 {
+            timings
+                .kernel_start(kick_drift_stage)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+        }
         if let Some(ll) = lossless.as_mut() {
             vv_kick_drift_lossless(&mut buffers, ll, dt_f32)
                 .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Loop))?;
@@ -253,10 +342,34 @@ fn run_simulation_with_phase(
             vv_kick_drift(&mut buffers, dt_f32)
                 .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Loop))?;
         }
+        if n > 0 {
+            timings
+                .kernel_stop(kick_drift_stage)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+            timings
+                .kernel_start(KernelStage::LjPairForce)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+        }
         lj_pair_force(&buffers, &mut pair_buffer, &sim_box, &lj_params)
             .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Loop))?;
+        if n > 0 {
+            timings
+                .kernel_stop(KernelStage::LjPairForce)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+            timings
+                .kernel_start(KernelStage::ReducePairForces)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+        }
         reduce_pair_forces(&pair_buffer, &neighbor_counts, &mut buffers)
             .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Loop))?;
+        if n > 0 {
+            timings
+                .kernel_stop(KernelStage::ReducePairForces)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+            timings
+                .kernel_start(kick_stage)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+        }
         if let Some(ll) = lossless.as_mut() {
             vv_kick_lossless(&mut buffers, ll, dt_f32)
                 .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Loop))?;
@@ -264,22 +377,31 @@ fn run_simulation_with_phase(
             vv_kick(&mut buffers, dt_f32)
                 .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Loop))?;
         }
+        if n > 0 {
+            timings
+                .kernel_stop(kick_stage)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+        }
 
         let want_traj =
             config.output.trajectory_every > 0 && step % config.output.trajectory_every == 0;
         let want_log = config.output.log_every > 0 && step % config.output.log_every == 0;
         if want_traj || want_log {
-            frame
-                .download_from(&buffers)
-                .map_err(|e| match e {
-                    ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Loop),
-                    other => (RunnerError::ParticleState(other), ExitPhase::Loop),
-                })?;
+            let mut dl = Duration::ZERO;
+            timed(&mut dl, || frame.download_from(&buffers)).map_err(|e| match e {
+                ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Loop),
+                other => (RunnerError::ParticleState(other), ExitPhase::Loop),
+            })?;
+            timings.record_host(HostStage::DeviceToHostDownload, dl);
         }
         if want_traj {
             let writer = traj_writer.as_mut().expect("traj_writer enabled");
-            write_traj_frame(writer, step, config.simulation.dt, &sim_box, &init.type_indices, &frame)
-                .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Loop))?;
+            let mut tw = Duration::ZERO;
+            timed(&mut tw, || {
+                write_traj_frame(writer, step, config.simulation.dt, &sim_box, &init.type_indices, &frame)
+            })
+            .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Loop))?;
+            timings.record_host(HostStage::TrajectoryWrite, tw);
             frames_written += 1;
         }
         if want_log {
@@ -292,9 +414,10 @@ fn run_simulation_with_phase(
             );
             let t = compute_temperature(ke, n);
             let time = (step as f64) * config.simulation.dt;
-            writer
-                .write_row(step, time, ke, t)
+            let mut lw = Duration::ZERO;
+            timed(&mut lw, || writer.write_row(step, time, ke, t))
                 .map_err(|e| (RunnerError::Log(e), ExitPhase::Loop))?;
+            timings.record_host(HostStage::LogWrite, lw);
             log_rows_written += 1;
         }
 
@@ -320,6 +443,18 @@ fn run_simulation_with_phase(
     }
 
     let elapsed_micros = started.elapsed().as_micros();
+
+    // Capture total runtime *before* finalising and writing the timings file
+    // so the value reported in the file reflects everything except the file
+    // write itself.
+    timings.record_host(HostStage::TotalRuntime, total_started.elapsed());
+
+    let report = timings
+        .finalize()
+        .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+    write_timings_file(&config.output.timings_path, &report)
+        .map_err(|e| (RunnerError::TimingsWriter(e), ExitPhase::Loop))?;
+
     Ok(RunSummary {
         n_steps,
         frames_written,
