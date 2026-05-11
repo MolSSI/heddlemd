@@ -1,11 +1,7 @@
-use dynamics::gpu::init_device;
+use std::process::ExitCode;
 
-fn main() {
-    match init_device() {
-        Ok(_device) => println!("CUDA device initialized; fill module loaded."),
-        Err(e) => {
-            eprintln!("failed to initialize CUDA device: {e}");
-            std::process::exit(1);
-        }
-    }
+use dynamics::runner::cli_main;
+
+fn main() -> ExitCode {
+    cli_main(std::env::args().collect())
 }

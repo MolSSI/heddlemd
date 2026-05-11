@@ -2,7 +2,12 @@
   "rq-0051b248": {
     "decl": "Scenario: Reject negative dt",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject negative dt",
     "type": "scenario"
   },
@@ -17,14 +22,24 @@
   "rq-00963c5d": {
     "decl": "Scenario: Reject Lattice with the wrong number of components",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject Lattice with the wrong number of components",
     "type": "scenario"
   },
   "rq-0099ef65": {
     "decl": "Scenario: Single-step lossless round trip restores observables bit-exactly",
     "file": "pipeline-reversibility",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reversibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Single-step lossless round trip restores observables bit-exactly",
     "type": "scenario"
   },
@@ -32,28 +47,48 @@
     "decl": "### Data rows",
     "file": "io/trajectory-output",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Data rows",
     "type": "section"
   },
   "rq-017b6769": {
     "decl": "Scenario: Reject non-positive epsilon",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-positive epsilon",
     "type": "scenario"
   },
   "rq-025b2c3b": {
     "decl": "Scenario: Reject non-positive dt",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-positive dt",
     "type": "scenario"
   },
   "rq-02bde767": {
     "decl": "Scenario: Drop best-effort flushes",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Drop best-effort flushes",
     "type": "scenario"
   },
@@ -61,7 +96,12 @@
     "decl": "## Feature API",
     "file": "simulation-runner",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature API",
     "type": "section"
   },
@@ -75,7 +115,12 @@
   "rq-03ff6434": {
     "decl": "Scenario: Drop best-effort flushes",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Drop best-effort flushes",
     "type": "scenario"
   },
@@ -90,7 +135,12 @@
   "rq-04fda32f": {
     "decl": "Scenario: Explicit init velocities override sampled velocities",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Explicit init velocities override sampled velocities",
     "type": "scenario"
   },
@@ -112,14 +162,24 @@
   "rq-05eb9fbb": {
     "decl": "Scenario: Reject zero ly",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject zero ly",
     "type": "scenario"
   },
   "rq-06058b71": {
     "decl": "Scenario: init_device loads the pair_force module with the LJ kernel",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "init_device loads the pair_force module with the LJ kernel",
     "type": "scenario"
   },
@@ -135,7 +195,12 @@
     "decl": "## Comparison Procedure",
     "file": "pipeline-reversibility",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reversibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Comparison Procedure",
     "type": "section"
   },
@@ -149,14 +214,24 @@
   "rq-0ae304bc": {
     "decl": "Scenario: minimum_image handles many-period displacements",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "minimum_image handles many-period displacements",
     "type": "scenario"
   },
   "rq-0b9372e8": {
     "decl": "- `ConfigError` — error type returned by `load_config`. Variants:",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ConfigError",
     "type": "api-item"
   },
@@ -171,7 +246,12 @@
   "rq-0cb3c41c": {
     "decl": "Scenario: Reject unknown schema_version",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject unknown schema_version",
     "type": "scenario"
   },
@@ -186,7 +266,12 @@
   "rq-0ffccee0": {
     "decl": "Scenario: Allocate device buffers and perform initial upload",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Allocate device buffers and perform initial upload",
     "type": "scenario"
   },
@@ -201,14 +286,24 @@
   "rq-106dcabd": {
     "decl": "Scenario: n_steps = 0 is accepted",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "n_steps = 0 is accepted",
     "type": "scenario"
   },
   "rq-107a7187": {
     "decl": "Scenario: KE of a single particle at rest is zero",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "KE of a single particle at rest is zero",
     "type": "scenario"
   },
@@ -224,14 +319,24 @@
     "decl": "## Feature API",
     "file": "io/config-schema",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature API",
     "type": "section"
   },
   "rq-11dbe0a5": {
     "decl": "Scenario: Reject positions past -L/2 along y",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject positions past -L/2 along y",
     "type": "scenario"
   },
@@ -245,7 +350,12 @@
   "rq-1254cd3a": {
     "decl": "- `OutputConfig`",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "OutputConfig",
     "type": "api-item"
   },
@@ -271,14 +381,24 @@
   "rq-14d7a940": {
     "decl": "Scenario: Kernel does not modify positions, velocities, masses, or net forces",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Kernel does not modify positions, velocities, masses, or net forces",
     "type": "scenario"
   },
   "rq-15647873": {
     "decl": "Scenario: Reject row whose species is not in type_names",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject row whose species is not in type_names",
     "type": "scenario"
   },
@@ -293,7 +413,12 @@
   "rq-15e1e995": {
     "decl": "Scenario: PairBuffer::new with max_neighbors = 0",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PairBuffer::new with max_neighbors = 0",
     "type": "scenario"
   },
@@ -301,14 +426,24 @@
     "decl": "## File Format",
     "file": "io/trajectory-output",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "File Format",
     "type": "section"
   },
   "rq-17666e4f": {
     "decl": "Scenario: Open fails when the parent directory does not exist",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Open fails when the parent directory does not exist",
     "type": "scenario"
   },
@@ -339,35 +474,60 @@
   "rq-18f7fce9": {
     "decl": "Scenario: trajectory_every > n_steps writes only the step-0 frame",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "trajectory_every > n_steps writes only the step-0 frame",
     "type": "scenario"
   },
   "rq-19fe4806": {
     "decl": "Scenario: Reject NaN lx",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject NaN lx",
     "type": "scenario"
   },
   "rq-1a504311": {
     "decl": "Scenario: Single-step round-trip restores the observable state bit-exactly under zero force",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration_lossless.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Single-step round-trip restores the observable state bit-exactly under zero force",
     "type": "scenario"
   },
   "rq-1ae622bb": {
     "decl": "Scenario: Run a valid minimal config to completion",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Run a valid minimal config to completion",
     "type": "scenario"
   },
   "rq-1b44b5da": {
     "decl": "Scenario: Lossy 100-step round trip does NOT restore observables",
     "file": "pipeline-reversibility",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reversibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Lossy 100-step round trip does NOT restore observables",
     "type": "scenario"
   },
@@ -375,21 +535,36 @@
     "decl": "### RNG",
     "file": "simulation-runner",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "RNG",
     "type": "section"
   },
   "rq-1b97afd8": {
     "decl": "Scenario: Log contains header plus step-0 row when n_steps = 0",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Log contains header plus step-0 row when n_steps = 0",
     "type": "scenario"
   },
   "rq-1bdbd71e": {
     "decl": "Scenario: Reject download when one host array drifts in length",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject download when one host array drifts in length",
     "type": "scenario"
   },
@@ -413,7 +588,12 @@
     "decl": "## Reversal Protocol",
     "file": "pipeline-reversibility",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reversibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reversal Protocol",
     "type": "section"
   },
@@ -428,14 +608,24 @@
   "rq-1e1c5f3b": {
     "decl": "Scenario: Missing [[particle_types]] is rejected",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Missing [[particle_types]] is rejected",
     "type": "scenario"
   },
   "rq-1e2d749d": {
     "decl": "Scenario: vv_kick_drift on an empty state is a no-op",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "vv_kick_drift on an empty state is a no-op",
     "type": "scenario"
   },
@@ -450,28 +640,48 @@
   "rq-1e8b3c79": {
     "decl": "Scenario: Reject when positions_y has the wrong length",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject when positions_y has the wrong length",
     "type": "scenario"
   },
   "rq-1fc57c00": {
     "decl": "- `run_simulation(config_path: &Path) -> Result<RunSummary, RunnerError>`",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "run_simulation",
     "type": "api-item"
   },
   "rq-1fcaf334": {
     "decl": "- `TrajectoryWriterError` — error type. Variants:",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "TrajectoryWriterError",
     "type": "api-item"
   },
   "rq-1feec66c": {
     "decl": "Scenario: KE is bit-identical across two host runs with identical f32 inputs",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "KE is bit-identical across two host runs with identical f32 inputs",
     "type": "scenario"
   },
@@ -487,7 +697,12 @@
     "decl": "### Comment-line attributes",
     "file": "io/init-state-file",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Comment-line attributes",
     "type": "section"
   },
@@ -503,21 +718,36 @@
     "decl": "### Types",
     "file": "io/trajectory-output",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Types",
     "type": "section"
   },
   "rq-2214f0a1": {
     "decl": "Scenario: Unrecognised subcommand prints usage and exits 1",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Unrecognised subcommand prints usage and exits 1",
     "type": "scenario"
   },
   "rq-221b1bb4": {
     "decl": "Scenario: Missing [simulation].dt",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Missing [simulation].dt",
     "type": "scenario"
   },
@@ -525,7 +755,12 @@
     "decl": "### Sampling order",
     "file": "simulation-runner",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Sampling order",
     "type": "section"
   },
@@ -533,14 +768,24 @@
     "decl": "## Feature API",
     "file": "io/trajectory-output",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature API",
     "type": "section"
   },
   "rq-2344fcec": {
     "decl": "- `LogWriter` — handle to an open log file. Fields are private; the type",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LogWriter",
     "type": "api-item"
   },
@@ -548,7 +793,12 @@
     "decl": "## Comparison Procedure",
     "file": "pipeline-reproducibility",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reproducibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Comparison Procedure",
     "type": "section"
   },
@@ -570,35 +820,60 @@
   "rq-26ffa053": {
     "decl": "Scenario: Doubling epsilon doubles the force at the same separation",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Doubling epsilon doubles the force at the same separation",
     "type": "scenario"
   },
   "rq-27ffd3f4": {
     "decl": "Scenario: Construct with positive finite edge lengths",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct with positive finite edge lengths",
     "type": "scenario"
   },
   "rq-2846ee8b": {
     "decl": "Scenario: Bit-exact equality after a 100-step run",
     "file": "pipeline-reproducibility",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reproducibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Bit-exact equality after a 100-step run",
     "type": "scenario"
   },
   "rq-28659fbe": {
     "decl": "- `TrajectoryWriter::open(path: &Path, include_velocities: bool, type_names: Vec<String>) -> Result<TrajectoryWriter, TrajectoryWriterError>`",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "TrajectoryWriter",
     "type": "api-item"
   },
   "rq-29718dcf": {
     "decl": "Scenario: kick_drift followed by kick reproduces closed-form constant-acceleration kinematics",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "kick_drift followed by kick reproduces closed-form constant-acceleration kinematics",
     "type": "scenario"
   },
@@ -612,35 +887,60 @@
   "rq-2a0e97f5": {
     "decl": "Scenario: Two independent lossless runs produce byte-identical results",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration_lossless.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two independent lossless runs produce byte-identical results",
     "type": "scenario"
   },
   "rq-2a36b95f": {
     "decl": "Scenario: Missing CLI argument prints usage and exits 1",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Missing CLI argument prints usage and exits 1",
     "type": "scenario"
   },
   "rq-2a6a51c8": {
     "decl": "- `Config` — parsed configuration. All fields are `pub`; field names match",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Config",
     "type": "api-item"
   },
   "rq-2a9acb69": {
     "decl": "Scenario: Temperature of an empty system is zero",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Temperature of an empty system is zero",
     "type": "scenario"
   },
   "rq-2ad32a7b": {
     "decl": "- `TrajectoryWriter::flush(&mut self) -> Result<(), TrajectoryWriterError>`",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "TrajectoryWriter",
     "type": "api-item"
   },
@@ -655,7 +955,12 @@
   "rq-2bbc4121": {
     "decl": "Scenario: Construct with matching arrays and explicit unique IDs",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct with matching arrays and explicit unique IDs",
     "type": "scenario"
   },
@@ -663,35 +968,60 @@
     "decl": "## Velocity generation",
     "file": "simulation-runner",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Velocity generation",
     "type": "section"
   },
   "rq-2cca54cc": {
     "decl": "# Feature: Extended-XYZ Trajectory Output",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: Extended-XYZ Trajectory Output",
     "type": "file"
   },
   "rq-2d051b0c": {
     "decl": "Scenario: Reduction with all zero neighbor counts produces zero net forces",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reduction with all zero neighbor counts produces zero net forces",
     "type": "scenario"
   },
   "rq-2ed137d9": {
     "decl": "Scenario: Reject non-orthorhombic lattice",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-orthorhombic lattice",
     "type": "scenario"
   },
   "rq-2f52c25e": {
     "decl": "Scenario: vv_kick leaves velocity unchanged when force is zero",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "vv_kick leaves velocity unchanged when force is zero",
     "type": "scenario"
   },
@@ -710,7 +1040,12 @@
   "rq-318cd47d": {
     "decl": "Scenario: log_every = 0 is accepted (disables log output)",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_every = 0 is accepted (disables log output)",
     "type": "scenario"
   },
@@ -726,21 +1061,36 @@
     "decl": "## Feature API",
     "file": "io/init-state-file",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature API",
     "type": "section"
   },
   "rq-32fda118": {
     "decl": "Scenario: Load an empty (N=0) file",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Load an empty (N=0) file",
     "type": "scenario"
   },
   "rq-330d6b42": {
     "decl": "Scenario: Reject init = log_path",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject init = log_path",
     "type": "scenario"
   },
@@ -755,7 +1105,12 @@
   "rq-34db7b7b": {
     "decl": "Scenario: Refuse to run with multiple types",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Refuse to run with multiple types",
     "type": "scenario"
   },
@@ -770,7 +1125,12 @@
   "rq-357909e4": {
     "decl": "# Feature: `dynamics run` Simulation Runner",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: `dynamics run` Simulation Runner",
     "type": "file"
   },
@@ -789,28 +1149,48 @@
   "rq-37e6f318": {
     "decl": "Scenario: Two independent runs produce byte-identical outputs",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two independent runs produce byte-identical outputs",
     "type": "scenario"
   },
   "rq-386cfae3": {
     "decl": "Scenario: vv_kick on an empty state is a no-op",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "vv_kick on an empty state is a no-op",
     "type": "scenario"
   },
   "rq-38ebe278": {
     "decl": "Scenario: Load a two-particle file with no velocities",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Load a two-particle file with no velocities",
     "type": "scenario"
   },
   "rq-391cb266": {
     "decl": "Scenario: Reject when explicit IDs have the wrong length",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject when explicit IDs have the wrong length",
     "type": "scenario"
   },
@@ -818,14 +1198,24 @@
     "decl": "### Functions",
     "file": "io/config-schema",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Functions",
     "type": "section"
   },
   "rq-39a260b5": {
     "decl": "Scenario: Download into the source state preserves values",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Download into the source state preserves values",
     "type": "scenario"
   },
@@ -852,7 +1242,12 @@
   "rq-3c17477d": {
     "decl": "Scenario: Total momentum after generation is zero (within f32 round-off)",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Total momentum after generation is zero (within f32 round-off)",
     "type": "scenario"
   },
@@ -879,35 +1274,60 @@
   "rq-3e8324c2": {
     "decl": "Scenario: wrap_position leaves a position inside the primary image unchanged",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "wrap_position leaves a position inside the primary image unchanged",
     "type": "scenario"
   },
   "rq-3ef10542": {
     "decl": "Scenario: Append rows in source order",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Append rows in source order",
     "type": "scenario"
   },
   "rq-3f46fb2e": {
     "decl": "Scenario: All output values are finite after the 100-step run",
     "file": "pipeline-reproducibility",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reproducibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "All output values are finite after the 100-step run",
     "type": "scenario"
   },
   "rq-40a34caa": {
     "decl": "- `TrajectoryWriter` — handle to an open trajectory file. Fields are",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "TrajectoryWriter",
     "type": "api-item"
   },
   "rq-4169d3af": {
     "decl": "Scenario: Reject schema_version = 0",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject schema_version = 0",
     "type": "scenario"
   },
@@ -922,14 +1342,24 @@
   "rq-44ccc1cb": {
     "decl": "Scenario: Reject too few data rows",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject too few data rows",
     "type": "scenario"
   },
   "rq-4518fa47": {
     "decl": "Scenario: Temperature uses k_B = 1.380649e-23",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Temperature uses k_B = 1.380649e-23",
     "type": "scenario"
   },
@@ -944,21 +1374,36 @@
   "rq-45eb243b": {
     "decl": "- `LogWriterError` — error type. Variants:",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LogWriterError",
     "type": "api-item"
   },
   "rq-46a39249": {
     "decl": "- `compute_temperature(kinetic_energy: f64, particle_count: usize) -> f64`",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "compute_temperature",
     "type": "api-item"
   },
   "rq-47697f4a": {
     "decl": "Scenario: Reject non-positive mass",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-positive mass",
     "type": "scenario"
   },
@@ -973,14 +1418,24 @@
   "rq-493caf32": {
     "decl": "Scenario: reduce_pair_forces on an empty state is a no-op",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "reduce_pair_forces on an empty state is a no-op",
     "type": "scenario"
   },
   "rq-4994ba90": {
     "decl": "Scenario: Reject missing comment line",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject missing comment line",
     "type": "scenario"
   },
@@ -996,7 +1451,12 @@
     "decl": "### Number formatting",
     "file": "io/log-output",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Number formatting",
     "type": "section"
   },
@@ -1023,21 +1483,36 @@
   "rq-4b38148c": {
     "decl": "Scenario: Reject duplicate explicit IDs",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject duplicate explicit IDs",
     "type": "scenario"
   },
   "rq-4b63564b": {
     "decl": "Scenario: NaN displacement propagates to NaN output",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "NaN displacement propagates to NaN output",
     "type": "scenario"
   },
   "rq-4b9d059e": {
     "decl": "Scenario: wrap_position wraps a position outside the primary image",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "wrap_position wraps a position outside the primary image",
     "type": "scenario"
   },
@@ -1052,7 +1527,12 @@
   "rq-4d226dff": {
     "decl": "Scenario: Re-upload after host-side mutation",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Re-upload after host-side mutation",
     "type": "scenario"
   },
@@ -1074,7 +1554,12 @@
   "rq-4f7dc024": {
     "decl": "Scenario: vv_kick_drift advances position and leaves velocity unchanged when force is zero",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "vv_kick_drift advances position and leaves velocity unchanged when force is zero",
     "type": "scenario"
   },
@@ -1089,49 +1574,84 @@
   "rq-52c483c0": {
     "decl": "Scenario: Pre-flight refuses to overwrite existing log",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Pre-flight refuses to overwrite existing log",
     "type": "scenario"
   },
   "rq-52c9b17a": {
     "decl": "Scenario: Missing [simulation].temperature",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Missing [simulation].temperature",
     "type": "scenario"
   },
   "rq-53055a5b": {
     "decl": "- `SimulationConfig`",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SimulationConfig",
     "type": "api-item"
   },
   "rq-553f28a3": {
     "decl": "Scenario: KE of three particles is summed in particle order",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "KE of three particles is summed in particle order",
     "type": "scenario"
   },
   "rq-560dffb8": {
     "decl": "Scenario: Reject duplicate type names",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject duplicate type names",
     "type": "scenario"
   },
   "rq-5626dfc6": {
     "decl": "Scenario: vv_kick_lossless on an empty state is a no-op",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration_lossless.rs",
+        "kind": "code"
+      }
+    ],
     "title": "vv_kick_lossless on an empty state is a no-op",
     "type": "scenario"
   },
   "rq-56ad97f1": {
     "decl": "Scenario: log_every > n_steps writes only the step-0 row",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_every > n_steps writes only the step-0 row",
     "type": "scenario"
   },
@@ -1151,35 +1671,60 @@
   "rq-5711e6b2": {
     "decl": "- `load_init_state(path: &Path, type_names: &[&str]) -> Result<InitState, InitStateError>`",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "load_init_state",
     "type": "api-item"
   },
   "rq-57173f96": {
     "decl": "Scenario: Reject non-positive lattice diagonal",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-positive lattice diagonal",
     "type": "scenario"
   },
   "rq-573b650b": {
     "decl": "- `InitStateError` — error type returned by the parser. Variants:",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "InitStateError",
     "type": "api-item"
   },
   "rq-57c1b6a3": {
     "decl": "Scenario: No GPU available",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "No GPU available",
     "type": "scenario"
   },
   "rq-57f8de41": {
     "decl": "Scenario: Malformed TOML",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Malformed TOML",
     "type": "scenario"
   },
@@ -1202,21 +1747,36 @@
   "rq-58254790": {
     "decl": "Scenario: Download from an empty buffers into an empty state",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Download from an empty buffers into an empty state",
     "type": "scenario"
   },
   "rq-58cac735": {
     "decl": "Scenario: vv_kick_drift_lossless on an empty state is a no-op",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration_lossless.rs",
+        "kind": "code"
+      }
+    ],
     "title": "vv_kick_drift_lossless on an empty state is a no-op",
     "type": "scenario"
   },
   "rq-590dcd7e": {
     "decl": "Scenario: Reduction at full max_neighbors capacity",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reduction at full max_neighbors capacity",
     "type": "scenario"
   },
@@ -1231,35 +1791,60 @@
   "rq-5a6d5e9e": {
     "decl": "Scenario: vv_kick_drift_lossless handles a block-non-aligned particle count",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration_lossless.rs",
+        "kind": "code"
+      }
+    ],
     "title": "vv_kick_drift_lossless handles a block-non-aligned particle count",
     "type": "scenario"
   },
   "rq-5bfa5b37": {
     "decl": "Scenario: LosslessBuffers::new allocates six zero-initialised residual buffers",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration_lossless.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LosslessBuffers::new allocates six zero-initialised residual buffers",
     "type": "scenario"
   },
   "rq-5c1cfc93": {
     "decl": "- `RunSummary` fields:",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "RunSummary",
     "type": "api-item"
   },
   "rq-5cb58365": {
     "decl": "Scenario: NaN pair contributions propagate to NaN net forces",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "NaN pair contributions propagate to NaN net forces",
     "type": "scenario"
   },
   "rq-5ded1806": {
     "decl": "Scenario: Absolute paths are honored unchanged",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Absolute paths are honored unchanged",
     "type": "scenario"
   },
@@ -1310,7 +1895,12 @@
   "rq-621ce7b6": {
     "decl": "Scenario: Velocities are sampled when init file has no velo column",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Velocities are sampled when init file has no velo column",
     "type": "scenario"
   },
@@ -1325,35 +1915,60 @@
   "rq-6432ab1f": {
     "decl": "# Feature: TOML Simulation Config Schema",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: TOML Simulation Config Schema",
     "type": "file"
   },
   "rq-6575e627": {
     "decl": "Scenario: Reject non-integer particle count",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-integer particle count",
     "type": "scenario"
   },
   "rq-6606584b": {
     "decl": "Scenario: Config rejected by load_config",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Config rejected by load_config",
     "type": "scenario"
   },
   "rq-661bf664": {
     "decl": "- `IntegratorConfig`",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "IntegratorConfig",
     "type": "api-item"
   },
   "rq-66233215": {
     "decl": "Scenario: Quoted attribute values containing spaces are parsed",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Quoted attribute values containing spaces are parsed",
     "type": "scenario"
   },
@@ -1372,35 +1987,60 @@
   "rq-66bf31c6": {
     "decl": "Scenario: Missing [integrator] section is rejected",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Missing [integrator] section is rejected",
     "type": "scenario"
   },
   "rq-6808532e": {
     "decl": "Scenario: Per-particle reduction with varying counts",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Per-particle reduction with varying counts",
     "type": "scenario"
   },
   "rq-680ab854": {
     "decl": "Scenario: Reject reordered Properties columns",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject reordered Properties columns",
     "type": "scenario"
   },
   "rq-681afa90": {
     "decl": "Scenario: Single-particle state produces only a zero self slot",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Single-particle state produces only a zero self slot",
     "type": "scenario"
   },
   "rq-685006bb": {
     "decl": "Scenario: Accept positions strictly inside the primary cell",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Accept positions strictly inside the primary cell",
     "type": "scenario"
   },
@@ -1415,7 +2055,12 @@
   "rq-69a31102": {
     "decl": "Scenario: Reject missing schema_version",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject missing schema_version",
     "type": "scenario"
   },
@@ -1431,14 +2076,24 @@
     "decl": "## Velocity-Verlet Loop",
     "file": "pipeline-reproducibility",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reproducibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Velocity-Verlet Loop",
     "type": "section"
   },
   "rq-6d087460": {
     "decl": "Scenario: Open creates a new log file with the header line",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Open creates a new log file with the header line",
     "type": "scenario"
   },
@@ -1454,14 +2109,24 @@
     "decl": "### Path resolution and overwrite policy",
     "file": "io/config-schema",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Path resolution and overwrite policy",
     "type": "section"
   },
   "rq-6e51f09c": {
     "decl": "- `compute_kinetic_energy(masses: &[f32], vx: &[f32], vy: &[f32], vz: &[f32]) -> f64`",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "compute_kinetic_energy",
     "type": "api-item"
   },
@@ -1469,7 +2134,12 @@
     "decl": "### `Time`",
     "file": "io/trajectory-output",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`Time`",
     "type": "section"
   },
@@ -1484,21 +2154,36 @@
   "rq-6fdefca0": {
     "decl": "Scenario: PairBuffer::new allocates zero-initialised pair-force buffers",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PairBuffer::new allocates zero-initialised pair-force buffers",
     "type": "scenario"
   },
   "rq-70e9fd38": {
     "decl": "Scenario: A trajectory frame can be re-parsed by load_init_state",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "A trajectory frame can be re-parsed by load_init_state",
     "type": "scenario"
   },
   "rq-70fe268a": {
     "decl": "Scenario: init_device exposes the lossless integrator kernels",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration_lossless.rs",
+        "kind": "code"
+      }
+    ],
     "title": "init_device exposes the lossless integrator kernels",
     "type": "scenario"
   },
@@ -1536,7 +2221,12 @@
   "rq-7306fc6f": {
     "decl": "Scenario: Reject negative particle count",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject negative particle count",
     "type": "scenario"
   },
@@ -1544,7 +2234,12 @@
     "decl": "## Progress reporting",
     "file": "simulation-runner",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Progress reporting",
     "type": "section"
   },
@@ -1559,7 +2254,12 @@
   "rq-74aa3a99": {
     "decl": "Scenario: Reject zero lz",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject zero lz",
     "type": "scenario"
   },
@@ -1574,14 +2274,24 @@
   "rq-74e4bd02": {
     "decl": "Scenario: PairBuffer::new with particle_count = 0",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PairBuffer::new with particle_count = 0",
     "type": "scenario"
   },
   "rq-7541fd8a": {
     "decl": "Scenario: Validation order is lx then ly then lz",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Validation order is lx then ly then lz",
     "type": "scenario"
   },
@@ -1589,21 +2299,36 @@
     "decl": "## Test Fixture",
     "file": "pipeline-reversibility",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reversibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Test Fixture",
     "type": "section"
   },
   "rq-761f26c6": {
     "decl": "Scenario: Unknown top-level key is permitted",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Unknown top-level key is permitted",
     "type": "scenario"
   },
   "rq-765c96c5": {
     "decl": "Scenario: Reject trajectory_path = log_path",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject trajectory_path = log_path",
     "type": "scenario"
   },
@@ -1611,28 +2336,48 @@
     "decl": "### Types",
     "file": "simulation-runner",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Types",
     "type": "section"
   },
   "rq-77e88745": {
     "decl": "Scenario: Block-non-aligned particle counts are handled by the bounds check",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Block-non-aligned particle counts are handled by the bounds check",
     "type": "scenario"
   },
   "rq-780d68ea": {
     "decl": "Scenario: Reject ParticleBuffers::new when a host array length is inconsistent",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject ParticleBuffers::new when a host array length is inconsistent",
     "type": "scenario"
   },
   "rq-7822b88b": {
     "decl": "Scenario: 100-step lossless round trip restores observables bit-exactly",
     "file": "pipeline-reversibility",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reversibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "100-step lossless round trip restores observables bit-exactly",
     "type": "scenario"
   },
@@ -1652,7 +2397,12 @@
   "rq-78fc2fbb": {
     "decl": "Scenario: Slots beyond neighbor_counts[i] are not summed",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Slots beyond neighbor_counts[i] are not summed",
     "type": "scenario"
   },
@@ -1672,28 +2422,48 @@
     "decl": "## Feature API",
     "file": "io/log-output",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature API",
     "type": "section"
   },
   "rq-7a4ed012": {
     "decl": "Scenario: Reject positions at the +L/2 boundary",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject positions at the +L/2 boundary",
     "type": "scenario"
   },
   "rq-7ab80063": {
     "decl": "Scenario: Reject download when host particle count differs from buffers",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject download when host particle count differs from buffers",
     "type": "scenario"
   },
   "rq-7af67a7b": {
     "decl": "Scenario: Reject row with NaN position",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject row with NaN position",
     "type": "scenario"
   },
@@ -1701,14 +2471,24 @@
     "decl": "## Lossless Velocity-Verlet Loop",
     "file": "pipeline-reversibility",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reversibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Lossless Velocity-Verlet Loop",
     "type": "section"
   },
   "rq-7c23d271": {
     "decl": "Scenario: KE of a single particle with v=(1, 0, 0)",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "KE of a single particle with v=(1, 0, 0)",
     "type": "scenario"
   },
@@ -1722,14 +2502,24 @@
   "rq-7df1515f": {
     "decl": "Scenario: Load a valid minimal config",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Load a valid minimal config",
     "type": "scenario"
   },
   "rq-7dfa14cf": {
     "decl": "Scenario: vv_kick_drift does not modify forces or masses",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "vv_kick_drift does not modify forces or masses",
     "type": "scenario"
   },
@@ -1737,42 +2527,72 @@
     "decl": "### Usage error messages",
     "file": "simulation-runner",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Usage error messages",
     "type": "section"
   },
   "rq-7f867e37": {
     "decl": "Scenario: Reject infinite ly",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject infinite ly",
     "type": "scenario"
   },
   "rq-8057cb7e": {
     "decl": "Scenario: Reject row with infinite velocity",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject row with infinite velocity",
     "type": "scenario"
   },
   "rq-81b241e7": {
     "decl": "Scenario: Different seeds produce different velocities",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Different seeds produce different velocities",
     "type": "scenario"
   },
   "rq-81f4ec9d": {
     "decl": "Scenario: Construct with matching arrays and default IDs",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct with matching arrays and default IDs",
     "type": "scenario"
   },
   "rq-8259c9ca": {
     "decl": "Scenario: Reject zero lx",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject zero lx",
     "type": "scenario"
   },
@@ -1780,21 +2600,36 @@
     "decl": "## CLI",
     "file": "simulation-runner",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "CLI",
     "type": "section"
   },
   "rq-8373db52": {
     "decl": "Scenario: Reject unsupported Properties form",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject unsupported Properties form",
     "type": "scenario"
   },
   "rq-85192a05": {
     "decl": "Scenario: At the LJ minimum r = sigma * 2^(1/6), the force is zero",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "At the LJ minimum r = sigma * 2^(1/6), the force is zero",
     "type": "scenario"
   },
@@ -1808,14 +2643,24 @@
   "rq-8626ec3c": {
     "decl": "Scenario: Two particles across the box boundary interact via the minimum image",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two particles across the box boundary interact via the minimum image",
     "type": "scenario"
   },
   "rq-889076d5": {
     "decl": "Scenario: Kernel failure mid-loop returns exit code 2",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Kernel failure mid-loop returns exit code 2",
     "type": "scenario"
   },
@@ -1823,14 +2668,24 @@
     "decl": "### Number formatting",
     "file": "io/trajectory-output",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Number formatting",
     "type": "section"
   },
   "rq-894c16c4": {
     "decl": "Scenario: Defaults populate the output section when [output] is omitted",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Defaults populate the output section when [output] is omitted",
     "type": "scenario"
   },
@@ -1846,14 +2701,24 @@
     "decl": "### Functions and methods",
     "file": "io/log-output",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Functions and methods",
     "type": "section"
   },
   "rq-8c045718": {
     "decl": "Scenario: minimum_image of the zero displacement is zero",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "minimum_image of the zero displacement is zero",
     "type": "scenario"
   },
@@ -1868,7 +2733,12 @@
   "rq-8df7fb0c": {
     "decl": "- `InitState` — the parser's output. Fields:",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "InitState",
     "type": "api-item"
   },
@@ -1876,7 +2746,12 @@
     "decl": "## Test Fixture",
     "file": "pipeline-reproducibility",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reproducibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Test Fixture",
     "type": "section"
   },
@@ -1884,42 +2759,72 @@
     "decl": "### Momentum subtraction",
     "file": "simulation-runner",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Momentum subtraction",
     "type": "section"
   },
   "rq-8e47334c": {
     "decl": "Scenario: NaN forces propagate to NaN velocities and positions",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "NaN forces propagate to NaN velocities and positions",
     "type": "scenario"
   },
   "rq-8ee27e27": {
     "decl": "- `RunnerError` — error type returned from `run_simulation`. Variants:",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "RunnerError",
     "type": "api-item"
   },
   "rq-8ee33aa0": {
     "decl": "Scenario: Reduction with a single particle and a single neighbor",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reduction with a single particle and a single neighbor",
     "type": "scenario"
   },
   "rq-8f31cb78": {
     "decl": "Scenario: Open refuses to overwrite an existing file",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Open refuses to overwrite an existing file",
     "type": "scenario"
   },
   "rq-9021ec4b": {
     "decl": "Scenario: Write a single frame without velocities",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Write a single frame without velocities",
     "type": "scenario"
   },
@@ -1934,7 +2839,12 @@
   "rq-90517bb6": {
     "decl": "Scenario: Write a single row at step 0",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Write a single row at step 0",
     "type": "scenario"
   },
@@ -1949,21 +2859,36 @@
   "rq-9198cc8e": {
     "decl": "Scenario: Write a row at step 100 with non-trivial values",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Write a row at step 100 with non-trivial values",
     "type": "scenario"
   },
   "rq-91aa1f1c": {
     "decl": "Scenario: Construct an empty state with explicit empty IDs",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct an empty state with explicit empty IDs",
     "type": "scenario"
   },
   "rq-925e5583": {
     "decl": "- `LogWriter::flush(&mut self) -> Result<(), LogWriterError>`",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LogWriter",
     "type": "api-item"
   },
@@ -1986,21 +2911,36 @@
   "rq-93be622c": {
     "decl": "Scenario: Unknown attributes in the comment line are ignored",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Unknown attributes in the comment line are ignored",
     "type": "scenario"
   },
   "rq-941c4000": {
     "decl": "Scenario: wrap_position is idempotent",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "wrap_position is idempotent",
     "type": "scenario"
   },
   "rq-9447dfcf": {
     "decl": "Scenario: NaN values are accepted at construction",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "NaN values are accepted at construction",
     "type": "scenario"
   },
@@ -2015,49 +2955,84 @@
   "rq-9594de53": {
     "decl": "Scenario: Download overwrites in-place after host mutation",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Download overwrites in-place after host mutation",
     "type": "scenario"
   },
   "rq-965c3b59": {
     "decl": "Scenario: Implicit IDs equal data-row order",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Implicit IDs equal data-row order",
     "type": "scenario"
   },
   "rq-965c504d": {
     "decl": "# Feature: CSV Diagnostic Log",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: CSV Diagnostic Log",
     "type": "file"
   },
   "rq-96fadc6f": {
     "decl": "Scenario: Slot for a pair beyond cutoff is zero",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Slot for a pair beyond cutoff is zero",
     "type": "scenario"
   },
   "rq-975b5ae0": {
     "decl": "Scenario: Newton's third law is bit-exact for non-boundary displacements",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Newton's third law is bit-exact for non-boundary displacements",
     "type": "scenario"
   },
   "rq-97e525d8": {
     "decl": "Scenario: trajectory_every = 0 is accepted (disables trajectory output)",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "trajectory_every = 0 is accepted (disables trajectory output)",
     "type": "scenario"
   },
   "rq-985230a5": {
     "decl": "Scenario: Loop executes exactly n_steps integration steps",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Loop executes exactly n_steps integration steps",
     "type": "scenario"
   },
@@ -2084,7 +3059,12 @@
   "rq-9a9523d9": {
     "decl": "Scenario: minimum_image at the +L/2 boundary maps to -L/2",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "minimum_image at the +L/2 boundary maps to -L/2",
     "type": "scenario"
   },
@@ -2111,21 +3091,36 @@
   "rq-9b1f8a7c": {
     "decl": "Scenario: Reject negative lx",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject negative lx",
     "type": "scenario"
   },
   "rq-9b794cff": {
     "decl": "Scenario: Reduction does not modify the pair buffer",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reduction does not modify the pair buffer",
     "type": "scenario"
   },
   "rq-9baf16d1": {
     "decl": "Scenario: Open fails when the parent directory does not exist",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Open fails when the parent directory does not exist",
     "type": "scenario"
   },
@@ -2140,7 +3135,12 @@
   "rq-9bfc2c1d": {
     "decl": "Scenario: Missing [simulation].seed",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Missing [simulation].seed",
     "type": "scenario"
   },
@@ -2162,7 +3162,12 @@
   "rq-9d0ea87b": {
     "decl": "Scenario: Flush is idempotent",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Flush is idempotent",
     "type": "scenario"
   },
@@ -2177,21 +3182,36 @@
   "rq-9e4d8944": {
     "decl": "Scenario: Reject duplicate pair under different orderings",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject duplicate pair under different orderings",
     "type": "scenario"
   },
   "rq-9e5d6525": {
     "decl": "Scenario: type_indices reflects the order of type_names",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "type_indices reflects the order of type_names",
     "type": "scenario"
   },
   "rq-9eb167f0": {
     "decl": "Scenario: Lossless mode selects the lossless integrator kernels",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Lossless mode selects the lossless integrator kernels",
     "type": "scenario"
   },
@@ -2206,7 +3226,12 @@
   "rq-9f596df3": {
     "decl": "Scenario: Reject missing Properties attribute",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject missing Properties attribute",
     "type": "scenario"
   },
@@ -2221,7 +3246,12 @@
   "rq-9ff4fd10": {
     "decl": "Scenario: Reject upload when host particle count differs from buffers",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject upload when host particle count differs from buffers",
     "type": "scenario"
   },
@@ -2255,21 +3285,36 @@
   "rq-a1c567b3": {
     "decl": "Scenario: Infinite pair contributions propagate to infinite net forces",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Infinite pair contributions propagate to infinite net forces",
     "type": "scenario"
   },
   "rq-a1fc0841": {
     "decl": "Scenario: wrap_position and minimum_image agree on the same input",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "wrap_position and minimum_image agree on the same input",
     "type": "scenario"
   },
   "rq-a30ac09f": {
     "decl": "Scenario: Reject empty type name",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject empty type name",
     "type": "scenario"
   },
@@ -2284,21 +3329,36 @@
   "rq-a35ca20b": {
     "decl": "Scenario: Accept the lower boundary -L/2 along an axis",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Accept the lower boundary -L/2 along an axis",
     "type": "scenario"
   },
   "rq-a3a5905d": {
     "decl": "Scenario: Reject unknown potential",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject unknown potential",
     "type": "scenario"
   },
   "rq-a403f778": {
     "decl": "Scenario: Open creates a new trajectory file",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Open creates a new trajectory file",
     "type": "scenario"
   },
@@ -2312,35 +3372,60 @@
   "rq-a43552d5": {
     "decl": "Scenario: init_device loads the reduce module with the reduction kernel",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "init_device loads the reduce module with the reduction kernel",
     "type": "scenario"
   },
   "rq-a5ccc1de": {
     "decl": "- `ParticleTypeConfig`",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ParticleTypeConfig",
     "type": "api-item"
   },
   "rq-a8df30ac": {
     "decl": "Scenario: minimum_image just past -L/2 wraps by one period",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "minimum_image just past -L/2 wraps by one period",
     "type": "scenario"
   },
   "rq-a93a5b14": {
     "decl": "Scenario: Block-non-aligned particle counts are handled by the bounds check",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Block-non-aligned particle counts are handled by the bounds check",
     "type": "scenario"
   },
   "rq-a94d2c13": {
     "decl": "Scenario: Missing [[pair_interactions]] is rejected",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Missing [[pair_interactions]] is rejected",
     "type": "scenario"
   },
@@ -2348,35 +3433,60 @@
     "decl": "### Types",
     "file": "io/init-state-file",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Types",
     "type": "section"
   },
   "rq-a97789e6": {
     "decl": "Scenario: Lossy mode is the default",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Lossy mode is the default",
     "type": "scenario"
   },
   "rq-aa19f894": {
     "decl": "Scenario: Reject non-positive sigma",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-positive sigma",
     "type": "scenario"
   },
   "rq-ab40fe6d": {
     "decl": "Scenario: Reject non-blank content after the last data row",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-blank content after the last data row",
     "type": "scenario"
   },
   "rq-abd761d4": {
     "decl": "- `InitVelocities`",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "InitVelocities",
     "type": "api-item"
   },
@@ -2395,14 +3505,24 @@
   "rq-acafdfe4": {
     "decl": "Scenario: vv_kick_lossless does not modify positions, forces, masses, or particle_ids",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration_lossless.rs",
+        "kind": "code"
+      }
+    ],
     "title": "vv_kick_lossless does not modify positions, forces, masses, or particle_ids",
     "type": "scenario"
   },
   "rq-acbbd59a": {
     "decl": "Scenario: Disabled outputs are not checked",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Disabled outputs are not checked",
     "type": "scenario"
   },
@@ -2417,21 +3537,36 @@
   "rq-ae65c293": {
     "decl": "Scenario: Reject non-positive cutoff",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-positive cutoff",
     "type": "scenario"
   },
   "rq-ae6d5db8": {
     "decl": "Scenario: Reject missing pair interaction",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject missing pair interaction",
     "type": "scenario"
   },
   "rq-ae7f8045": {
     "decl": "Scenario: File does not exist",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "File does not exist",
     "type": "scenario"
   },
@@ -2478,35 +3613,60 @@
   "rq-b13eba96": {
     "decl": "Scenario: Particles evolve independently with their own forces",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Particles evolve independently with their own forces",
     "type": "scenario"
   },
   "rq-b2314952": {
     "decl": "Scenario: Bit-exact equality after a single full velocity-Verlet step",
     "file": "pipeline-reproducibility",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reproducibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Bit-exact equality after a single full velocity-Verlet step",
     "type": "scenario"
   },
   "rq-b2d67b57": {
     "decl": "Scenario: Forward then negated step returns to the original state for a free particle",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Forward then negated step returns to the original state for a free particle",
     "type": "scenario"
   },
   "rq-b4bb7096": {
     "decl": "Scenario: Reject upload when one host array drifts in length",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject upload when one host array drifts in length",
     "type": "scenario"
   },
   "rq-b4f18ea1": {
     "decl": "Scenario: Two independent runs produce byte-identical net forces",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two independent runs produce byte-identical net forces",
     "type": "scenario"
   },
@@ -2514,7 +3674,12 @@
     "decl": "### Types",
     "file": "io/config-schema",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Types",
     "type": "section"
   },
@@ -2524,6 +3689,10 @@
     "refs": [
       {
         "file": "rqm/pipeline-reversibility.md",
+        "kind": "code"
+      },
+      {
+        "file": "tests/integration_lossless.rs",
         "kind": "code"
       }
     ],
@@ -2541,7 +3710,12 @@
   "rq-b746e796": {
     "decl": "Scenario: Config does not exist",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Config does not exist",
     "type": "scenario"
   },
@@ -2576,49 +3750,84 @@
   "rq-b87fd5e8": {
     "decl": "Scenario: Positions visibly evolve over the 100-step lossless forward run",
     "file": "pipeline-reversibility",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reversibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Positions visibly evolve over the 100-step lossless forward run",
     "type": "scenario"
   },
   "rq-b96ce51d": {
     "decl": "Scenario: LosslessBuffers::new with particle_count = 0",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration_lossless.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LosslessBuffers::new with particle_count = 0",
     "type": "scenario"
   },
   "rq-b9a4e3de": {
     "decl": "Scenario: Non-finite check precedes non-positive check on the same axis",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Non-finite check precedes non-positive check on the same axis",
     "type": "scenario"
   },
   "rq-ba380d56": {
     "decl": "Scenario: File does not exist",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "File does not exist",
     "type": "scenario"
   },
   "rq-bafc5900": {
     "decl": "Scenario: Reject a row missing a velocity column",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject a row missing a velocity column",
     "type": "scenario"
   },
   "rq-bb075030": {
     "decl": "Scenario: vv_kick_drift_lossless does not modify forces, masses, or particle_ids",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration_lossless.rs",
+        "kind": "code"
+      }
+    ],
     "title": "vv_kick_drift_lossless does not modify forces, masses, or particle_ids",
     "type": "scenario"
   },
   "rq-bb807252": {
     "decl": "Scenario: Load a file with velocities",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Load a file with velocities",
     "type": "scenario"
   },
@@ -2626,21 +3835,36 @@
     "decl": "### Particle IDs",
     "file": "io/init-state-file",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Particle IDs",
     "type": "section"
   },
   "rq-bc8375ce": {
     "decl": "Scenario: init_device loads the integrate module with both kernels",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "init_device loads the integrate module with both kernels",
     "type": "scenario"
   },
   "rq-bd149f52": {
     "decl": "Scenario: Acceleration scales inversely with mass",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Acceleration scales inversely with mass",
     "type": "scenario"
   },
@@ -2648,7 +3872,12 @@
     "decl": "### Cross-validation",
     "file": "io/config-schema",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Cross-validation",
     "type": "section"
   },
@@ -2663,7 +3892,12 @@
   "rq-be899bef": {
     "decl": "- `TrajectoryWriter::write_frame(&mut self, step: u64, dt: f64, box: &SimulationBox, type_indices: &[u32], positions_x: &[f32], positions_y: &[f32], positions_z: &[f32], velocities: Option<(&[f32], &[f32], &[f32])>) -> Result<(), TrajectoryWriterError>`",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "TrajectoryWriter",
     "type": "api-item"
   },
@@ -2682,7 +3916,12 @@
   "rq-bfb3b9d8": {
     "decl": "Scenario: minimum_image leaves a displacement strictly inside the primary image unchanged",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "minimum_image leaves a displacement strictly inside the primary image unchanged",
     "type": "scenario"
   },
@@ -2690,7 +3929,12 @@
     "decl": "### Types",
     "file": "io/log-output",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Types",
     "type": "section"
   },
@@ -2720,7 +3964,12 @@
   "rq-c22483b4": {
     "decl": "Scenario: Construct an empty state",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct an empty state",
     "type": "scenario"
   },
@@ -2743,7 +3992,12 @@
   "rq-c538b29d": {
     "decl": "Scenario: Two particles at a fixed separation produce the closed-form LJ force",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two particles at a fixed separation produce the closed-form LJ force",
     "type": "scenario"
   },
@@ -2751,14 +4005,24 @@
     "decl": "### `Lattice`",
     "file": "io/trajectory-output",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`Lattice`",
     "type": "section"
   },
   "rq-c5e00a28": {
     "decl": "Scenario: Write a single frame with velocities",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Write a single frame with velocities",
     "type": "scenario"
   },
@@ -2781,14 +4045,24 @@
   "rq-c88dde28": {
     "decl": "Scenario: Reject too many data rows",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject too many data rows",
     "type": "scenario"
   },
   "rq-c8aa7417": {
     "decl": "Scenario: Allocate device buffers from an empty state",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Allocate device buffers from an empty state",
     "type": "scenario"
   },
@@ -2803,42 +4077,72 @@
   "rq-c9618bdd": {
     "decl": "Scenario: minimum_image is per-axis independent",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "minimum_image is per-axis independent",
     "type": "scenario"
   },
   "rq-c9da25a7": {
     "decl": "Scenario: Reduction does not modify positions, velocities, or masses",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reduction does not modify positions, velocities, or masses",
     "type": "scenario"
   },
   "rq-c9e83e73": {
     "decl": "Scenario: Blank trailing lines are tolerated",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Blank trailing lines are tolerated",
     "type": "scenario"
   },
   "rq-c9fa5cda": {
     "decl": "Scenario: Reject pair referencing an unknown type",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject pair referencing an unknown type",
     "type": "scenario"
   },
   "rq-ca6f69f2": {
     "decl": "Scenario: Reject row with unparseable position",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject row with unparseable position",
     "type": "scenario"
   },
   "rq-cc12f2d8": {
     "decl": "Scenario: Zero temperature is accepted",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Zero temperature is accepted",
     "type": "scenario"
   },
@@ -2852,7 +4156,12 @@
   "rq-cc87744c": {
     "decl": "Scenario: Self-interaction slots are zero",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Self-interaction slots are zero",
     "type": "scenario"
   },
@@ -2867,56 +4176,96 @@
   "rq-ce89d4a4": {
     "decl": "Scenario: Reject when masses has the wrong length",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject when masses has the wrong length",
     "type": "scenario"
   },
   "rq-d065447f": {
     "decl": "Scenario: Run an empty (N=0) simulation",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Run an empty (N=0) simulation",
     "type": "scenario"
   },
   "rq-d0a54b3c": {
     "decl": "Scenario: Positions visibly evolve over the 100-step run",
     "file": "pipeline-reproducibility",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reproducibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Positions visibly evolve over the 100-step run",
     "type": "scenario"
   },
   "rq-d148149f": {
     "decl": "Scenario: Explicit [output] values override defaults",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Explicit [output] values override defaults",
     "type": "scenario"
   },
   "rq-d19fc020": {
     "decl": "Scenario: minimum_image at the -L/2 boundary stays at -L/2",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "minimum_image at the -L/2 boundary stays at -L/2",
     "type": "scenario"
   },
   "rq-d1e7cb57": {
     "decl": "Scenario: Block-non-aligned particle count is handled by the bounds check",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Block-non-aligned particle count is handled by the bounds check",
     "type": "scenario"
   },
   "rq-d25000c5": {
     "decl": "Scenario: vv_kick_drift produces the exact half-step kinematics under a constant force",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "vv_kick_drift produces the exact half-step kinematics under a constant force",
     "type": "scenario"
   },
   "rq-d28737dd": {
     "decl": "Scenario: dt=0 leaves state unchanged for vv_kick",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "dt=0 leaves state unchanged for vv_kick",
     "type": "scenario"
   },
@@ -2924,7 +4273,12 @@
     "decl": "## Final summary",
     "file": "simulation-runner",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Final summary",
     "type": "section"
   },
@@ -2943,7 +4297,12 @@
   "rq-d3d4b6b3": {
     "decl": "Scenario: Pair `between` normalisation when both types are declared",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Pair `between` normalisation when both types are declared",
     "type": "scenario"
   },
@@ -2962,14 +4321,24 @@
   "rq-d5085350": {
     "decl": "Scenario: Pair `between` is normalised to lexicographic order",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Pair `between` is normalised to lexicographic order",
     "type": "scenario"
   },
   "rq-d6bd915a": {
     "decl": "Scenario: Pair exactly at cutoff is included",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Pair exactly at cutoff is included",
     "type": "scenario"
   },
@@ -2992,7 +4361,12 @@
     "decl": "### Data rows",
     "file": "io/init-state-file",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Data rows",
     "type": "section"
   },
@@ -3006,7 +4380,12 @@
   "rq-d9a98e51": {
     "decl": "Scenario: Pre-flight refuses to overwrite existing trajectory",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Pre-flight refuses to overwrite existing trajectory",
     "type": "scenario"
   },
@@ -3014,21 +4393,36 @@
     "decl": "### Functions",
     "file": "io/init-state-file",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Functions",
     "type": "section"
   },
   "rq-dad92a8c": {
     "decl": "Scenario: Reject missing particle-count line",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject missing particle-count line",
     "type": "scenario"
   },
   "rq-daf7550b": {
     "decl": "Scenario: NaN positions propagate to NaN pair forces",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "NaN positions propagate to NaN pair forces",
     "type": "scenario"
   },
@@ -3047,7 +4441,12 @@
   "rq-ddec3d72": {
     "decl": "Scenario: f32 positions round-trip through the writer and parser",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "f32 positions round-trip through the writer and parser",
     "type": "scenario"
   },
@@ -3062,21 +4461,36 @@
     "decl": "### `Step`",
     "file": "io/trajectory-output",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`Step`",
     "type": "section"
   },
   "rq-dfca62d2": {
     "decl": "Scenario: Two independent runs produce byte-identical pair-force buffers",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two independent runs produce byte-identical pair-force buffers",
     "type": "scenario"
   },
   "rq-dffdd81c": {
     "decl": "Scenario: Reject NaN dt",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject NaN dt",
     "type": "scenario"
   },
@@ -3084,21 +4498,36 @@
     "decl": "### `Properties`",
     "file": "io/trajectory-output",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`Properties`",
     "type": "section"
   },
   "rq-e0ef1221": {
     "decl": "- `LogWriter::open(path: &Path) -> Result<LogWriter, LogWriterError>`",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LogWriter",
     "type": "api-item"
   },
   "rq-e1b51bd9": {
     "decl": "Scenario: volume returns the product of the edge lengths",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "volume returns the product of the edge lengths",
     "type": "scenario"
   },
@@ -3126,7 +4555,12 @@
   "rq-e409ce75": {
     "decl": "- `LogWriter::write_row(&mut self, step: u64, time: f64, kinetic_energy: f64, temperature: f64) -> Result<(), LogWriterError>`",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LogWriter",
     "type": "api-item"
   },
@@ -3149,14 +4583,24 @@
   "rq-e553c05b": {
     "decl": "Scenario: Reject init = trajectory_path",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject init = trajectory_path",
     "type": "scenario"
   },
   "rq-e564f8e2": {
     "decl": "Scenario: Kernel does not write slots with k >= n",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Kernel does not write slots with k >= n",
     "type": "scenario"
   },
@@ -3164,7 +4608,12 @@
     "decl": "### Functions",
     "file": "simulation-runner",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Functions",
     "type": "section"
   },
@@ -3172,21 +4621,36 @@
     "decl": "### Empty init velocities",
     "file": "simulation-runner",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Empty init velocities",
     "type": "section"
   },
   "rq-e7ddefaf": {
     "decl": "Scenario: Flush is idempotent",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Flush is idempotent",
     "type": "scenario"
   },
   "rq-e8259ee5": {
     "decl": "- `load_config(path: &Path) -> Result<Config, ConfigError>`",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "load_config",
     "type": "api-item"
   },
@@ -3205,21 +4669,36 @@
   "rq-e8c21a03": {
     "decl": "Scenario: dt=0 leaves state unchanged for vv_kick_drift",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "dt=0 leaves state unchanged for vv_kick_drift",
     "type": "scenario"
   },
   "rq-e8d29f08": {
     "decl": "Scenario: Reject non-finite lattice value",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-finite lattice value",
     "type": "scenario"
   },
   "rq-e950f4e6": {
     "decl": "Scenario: Reduction sums entries 0..count in left-to-right order",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reduction sums entries 0..count in left-to-right order",
     "type": "scenario"
   },
@@ -3234,21 +4713,36 @@
   "rq-ea3bef6c": {
     "decl": "Scenario: Reject positions past +L/2",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject positions past +L/2",
     "type": "scenario"
   },
   "rq-eb3a65df": {
     "decl": "Scenario: Reduction does not modify neighbor_counts",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reduction does not modify neighbor_counts",
     "type": "scenario"
   },
   "rq-ec53799e": {
     "decl": "Scenario: lj_pair_force followed by reduce_pair_forces produces the correct net force",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "lj_pair_force followed by reduce_pair_forces produces the correct net force",
     "type": "scenario"
   },
@@ -3263,7 +4757,12 @@
   "rq-ed048159": {
     "decl": "Scenario: All observables are finite after the 100-step lossless forward run",
     "file": "pipeline-reversibility",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pipeline_reversibility.rs",
+        "kind": "code"
+      }
+    ],
     "title": "All observables are finite after the 100-step lossless forward run",
     "type": "scenario"
   },
@@ -3287,28 +4786,48 @@
     "decl": "## Runner flow",
     "file": "simulation-runner",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Runner flow",
     "type": "section"
   },
   "rq-f001eaf8": {
     "decl": "- `PairInteractionConfig`",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PairInteractionConfig",
     "type": "api-item"
   },
   "rq-f0084057": {
     "decl": "- `PathRole` — `enum { Init, Trajectory, Log }`. Used in `PathCollision`.",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PathRole",
     "type": "api-item"
   },
   "rq-f009e02b": {
     "decl": "Scenario: Reject negative temperature",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject negative temperature",
     "type": "scenario"
   },
@@ -3334,21 +4853,36 @@
   "rq-f0e3b004": {
     "decl": "Scenario: Missing init field",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Missing init field",
     "type": "scenario"
   },
   "rq-f114c560": {
     "decl": "Scenario: Reject multi-type configs in this feature version",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject multi-type configs in this feature version",
     "type": "scenario"
   },
   "rq-f11e9d4c": {
     "decl": "Scenario: Reject duplicate pair interaction",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject duplicate pair interaction",
     "type": "scenario"
   },
@@ -3367,7 +4901,12 @@
   "rq-f20e017d": {
     "decl": "Scenario: Open refuses to overwrite an existing file",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Open refuses to overwrite an existing file",
     "type": "scenario"
   },
@@ -3386,7 +4925,12 @@
   "rq-f357fe5a": {
     "decl": "Scenario: Reject a row with an extra column",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject a row with an extra column",
     "type": "scenario"
   },
@@ -3409,42 +4953,72 @@
   "rq-f4a85dda": {
     "decl": "Scenario: RunSummary reflects what was actually written",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "RunSummary reflects what was actually written",
     "type": "scenario"
   },
   "rq-f4ebf12a": {
     "decl": "Scenario: Download reflects device-side changes pushed by an interim re-upload",
     "file": "particle-state",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/particle_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Download reflects device-side changes pushed by an interim re-upload",
     "type": "scenario"
   },
   "rq-f5299d6e": {
     "decl": "Scenario: Reduction overwrites prior net force values",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reduction overwrites prior net force values",
     "type": "scenario"
   },
   "rq-f5e94e6b": {
     "decl": "Scenario: Write a frame for an empty state",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Write a frame for an empty state",
     "type": "scenario"
   },
   "rq-f6927716": {
     "decl": "Scenario: Init file rejected by load_init_state",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Init file rejected by load_init_state",
     "type": "scenario"
   },
   "rq-f721b7a1": {
     "decl": "Scenario: vv_kick does not modify forces, masses, or positions",
     "file": "integration",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "vv_kick does not modify forces, masses, or positions",
     "type": "scenario"
   },
@@ -3463,28 +5037,48 @@
   "rq-f76b6cde": {
     "decl": "Scenario: Render multiple type names from indices",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Render multiple type names from indices",
     "type": "scenario"
   },
   "rq-f7b922df": {
     "decl": "Scenario: minimum_image just past +L/2 wraps by one period",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/simulation_box.rs",
+        "kind": "code"
+      }
+    ],
     "title": "minimum_image just past +L/2 wraps by one period",
     "type": "scenario"
   },
   "rq-f7e279ee": {
     "decl": "- `main(args: Vec<String>) -> ExitCode` (in `src/main.rs`)",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "main",
     "type": "api-item"
   },
   "rq-f7e2d0f1": {
     "decl": "Scenario: temperature=0 yields exactly zero velocities and skips momentum subtraction",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "temperature=0 yields exactly zero velocities and skips momentum subtraction",
     "type": "scenario"
   },
@@ -3499,14 +5093,24 @@
   "rq-f8df9364": {
     "decl": "Scenario: Velocity generation is deterministic in the seed",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Velocity generation is deterministic in the seed",
     "type": "scenario"
   },
   "rq-fa6f7414": {
     "decl": "Scenario: KE of empty input is zero",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "KE of empty input is zero",
     "type": "scenario"
   },
@@ -3521,7 +5125,12 @@
   "rq-fc220d87": {
     "decl": "Scenario: Empty state is a no-op",
     "file": "lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Empty state is a no-op",
     "type": "scenario"
   },
@@ -3529,21 +5138,36 @@
     "decl": "### Schema version handling",
     "file": "io/config-schema",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Schema version handling",
     "type": "section"
   },
   "rq-fc6700b5": {
     "decl": "Scenario: Reject missing Lattice attribute",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject missing Lattice attribute",
     "type": "scenario"
   },
   "rq-fd593357": {
     "decl": "Scenario: Append frames in order",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Append frames in order",
     "type": "scenario"
   },
@@ -3558,21 +5182,36 @@
   "rq-fe1eaade": {
     "decl": "Scenario: Reproducibility byte-for-byte across two identical runs",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reproducibility byte-for-byte across two identical runs",
     "type": "scenario"
   },
   "rq-ff707382": {
     "decl": "Scenario: n_steps = 0 writes only step-0 outputs",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "n_steps = 0 writes only step-0 outputs",
     "type": "scenario"
   },
   "rq-ff8e283d": {
     "decl": "# Feature: Extended-XYZ Initial-State File",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: Extended-XYZ Initial-State File",
     "type": "file"
   }

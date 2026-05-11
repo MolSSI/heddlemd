@@ -1,0 +1,848 @@
+use std::path::{Path, PathBuf};
+
+use dynamics::io::{ConfigError, PathRole, load_config};
+
+fn tmp_path(name: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let mut p = std::env::temp_dir();
+    p.push(format!(
+        "dynamics-cfg-{}-{}-{}",
+        std::process::id(),
+        name,
+        nanos
+    ));
+    std::fs::create_dir_all(&p).unwrap();
+    p
+}
+
+fn minimal_config() -> String {
+    r#"schema_version = 1
+init = "argon.xyz"
+
+[simulation]
+seed = 12345
+n_steps = 10
+dt = 1.0e-15
+temperature = 300.0
+
+[integrator]
+lossless = false
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#
+    .to_string()
+}
+
+fn write_config(dir: &Path, contents: &str) -> PathBuf {
+    let path = dir.join("sim.toml");
+    std::fs::write(&path, contents).unwrap();
+    path
+}
+
+// rq-7df1515f
+#[test]
+fn load_valid_minimal_config() {
+    let dir = tmp_path("load_valid_minimal_config");
+    let path = write_config(&dir, &minimal_config());
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.schema_version, 1);
+    assert_eq!(cfg.simulation.seed, 12345);
+    assert_eq!(cfg.simulation.n_steps, 10);
+    assert_eq!(cfg.simulation.dt, 1.0e-15);
+    assert_eq!(cfg.simulation.temperature, 300.0);
+    assert!(!cfg.integrator.lossless);
+    assert_eq!(cfg.particle_types.len(), 1);
+    assert_eq!(cfg.particle_types[0].name, "Ar");
+    assert_eq!(cfg.particle_types[0].mass, 6.6335e-26);
+    assert_eq!(cfg.pair_interactions.len(), 1);
+    assert_eq!(cfg.pair_interactions[0].between, ("Ar".to_string(), "Ar".to_string()));
+    let canonical_dir = std::fs::canonicalize(&dir).unwrap();
+    assert_eq!(cfg.init, canonical_dir.join("argon.xyz"));
+    assert_eq!(cfg.config_path, canonical_dir.join("sim.toml"));
+}
+
+// rq-894c16c4
+#[test]
+fn defaults_populate_output_section() {
+    let dir = tmp_path("defaults_populate_output");
+    let path = write_config(&dir, &minimal_config());
+    let cfg = load_config(&path).unwrap();
+    let canonical_dir = std::fs::canonicalize(&dir).unwrap();
+    assert_eq!(cfg.output.trajectory_path, canonical_dir.join("sim-traj.xyz"));
+    assert_eq!(cfg.output.trajectory_every, 100);
+    assert!(cfg.output.include_velocities);
+    assert_eq!(cfg.output.log_path, canonical_dir.join("sim.log"));
+    assert_eq!(cfg.output.log_every, 100);
+}
+
+// rq-d148149f
+#[test]
+fn explicit_output_overrides_defaults() {
+    let dir = tmp_path("explicit_output");
+    let body = format!(
+        "{}\n[output]\ntrajectory_path = \"custom-traj.xyz\"\ntrajectory_every = 50\nlog_path = \"custom.log\"\nlog_every = 25\ninclude_velocities = false\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    let canonical_dir = std::fs::canonicalize(&dir).unwrap();
+    assert_eq!(cfg.output.trajectory_path, canonical_dir.join("custom-traj.xyz"));
+    assert_eq!(cfg.output.trajectory_every, 50);
+    assert!(!cfg.output.include_velocities);
+    assert_eq!(cfg.output.log_path, canonical_dir.join("custom.log"));
+    assert_eq!(cfg.output.log_every, 25);
+}
+
+// rq-5ded1806
+#[test]
+fn absolute_paths_honored() {
+    let dir = tmp_path("absolute_paths");
+    let abs_init = dir.join("abs-init.xyz");
+    let abs_traj = dir.join("abs-traj.xyz");
+    let abs_log = dir.join("abs.log");
+    let body = format!(
+        "schema_version = 1\ninit = \"{}\"\n[simulation]\nseed=1\nn_steps=1\ndt=1.0e-15\ntemperature=0.0\n[integrator]\nlossless=false\n[[particle_types]]\nname=\"Ar\"\nmass=1.0\n[[pair_interactions]]\nbetween=[\"Ar\",\"Ar\"]\npotential=\"lennard-jones\"\nsigma=1.0\nepsilon=1.0\ncutoff=1.0\n[output]\ntrajectory_path=\"{}\"\nlog_path=\"{}\"\n",
+        abs_init.display(),
+        abs_traj.display(),
+        abs_log.display(),
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.init, abs_init);
+    assert_eq!(cfg.output.trajectory_path, abs_traj);
+    assert_eq!(cfg.output.log_path, abs_log);
+}
+
+// rq-d5085350
+#[test]
+fn pair_unknown_type_under_normalisation() {
+    let dir = tmp_path("pair_unknown_normalised");
+    let body = minimal_config().replace(
+        "between = [\"Ar\", \"Ar\"]",
+        "between = [\"Kr\", \"Ar\"]",
+    );
+    let path = write_config(&dir, &body);
+    let err = load_config(&path).unwrap_err();
+    match err {
+        ConfigError::UnknownTypeInPair { name, pair_index } => {
+            assert_eq!(name, "Kr");
+            assert_eq!(pair_index, 0);
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+// rq-d3d4b6b3
+#[test]
+fn pair_between_normalisation_with_both_declared() {
+    let dir = tmp_path("pair_normalisation_full");
+    // Two types and all three pairs — but multi-type is rejected at the end.
+    // We invoke the normalisation logic via the duplicate-pair scenario
+    // (pair entries with reversed `between` order are rejected as duplicates).
+    let body = r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 1
+dt = 1.0e-15
+temperature = 0.0
+
+[integrator]
+lossless = false
+
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+
+[[particle_types]]
+name = "Kr"
+mass = 2.0
+
+[[pair_interactions]]
+between = ["Kr", "Ar"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+
+[[pair_interactions]]
+between = ["Kr", "Kr"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+"#;
+    let path = write_config(&dir, body);
+    let err = load_config(&path).unwrap_err();
+    // Multi-type rejection comes last; verify it.
+    match err {
+        ConfigError::MultiTypeUnsupported { count } => assert_eq!(count, 2),
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+
+// rq-106dcabd
+#[test]
+fn n_steps_zero_is_accepted() {
+    let dir = tmp_path("n_steps_zero");
+    let body = minimal_config().replace("n_steps = 10", "n_steps = 0");
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.simulation.n_steps, 0);
+}
+
+// rq-69a31102
+#[test]
+fn missing_schema_version() {
+    let dir = tmp_path("missing_schema_version");
+    let body = minimal_config().replace("schema_version = 1\n", "");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "schema_version"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-0cb3c41c
+#[test]
+fn unknown_schema_version() {
+    let dir = tmp_path("unknown_schema_version");
+    let body = minimal_config().replace("schema_version = 1", "schema_version = 2");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnsupportedSchemaVersion { actual, supported } => {
+            assert_eq!(actual, 2);
+            assert_eq!(supported, 1);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-4169d3af
+#[test]
+fn reject_schema_version_zero() {
+    let dir = tmp_path("schema_version_zero");
+    let body = minimal_config().replace("schema_version = 1", "schema_version = 0");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnsupportedSchemaVersion { actual, supported } => {
+            assert_eq!(actual, 0);
+            assert_eq!(supported, 1);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-ae7f8045
+#[test]
+fn file_does_not_exist() {
+    let dir = tmp_path("missing_file");
+    let path = dir.join("nope.toml");
+    match load_config(&path).unwrap_err() {
+        ConfigError::Io(_) => {}
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-57f8de41
+#[test]
+fn malformed_toml() {
+    let dir = tmp_path("malformed_toml");
+    let path = write_config(&dir, "schema_version = [");
+    match load_config(&path).unwrap_err() {
+        ConfigError::Parse(_) => {}
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-761f26c6
+#[test]
+fn unknown_top_level_key_permitted() {
+    let dir = tmp_path("unknown_top_level");
+    let body = format!("{}unknown_key = \"x\"\n", minimal_config());
+    let path = write_config(&dir, &body);
+    load_config(&path).unwrap();
+}
+
+// rq-f0e3b004
+#[test]
+fn missing_init_field() {
+    let dir = tmp_path("missing_init");
+    let body = minimal_config().replace("init = \"argon.xyz\"\n", "");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "init"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-9bfc2c1d
+#[test]
+fn missing_seed() {
+    let dir = tmp_path("missing_seed");
+    let body = minimal_config().replace("seed = 12345\n", "");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "simulation.seed"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-221b1bb4
+#[test]
+fn missing_dt() {
+    let dir = tmp_path("missing_dt");
+    let body = minimal_config().replace("dt = 1.0e-15\n", "");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "simulation.dt"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-52c9b17a
+#[test]
+fn missing_temperature() {
+    let dir = tmp_path("missing_temperature");
+    let body = minimal_config().replace("temperature = 300.0\n", "");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "simulation.temperature"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-66bf31c6
+#[test]
+fn missing_integrator_section() {
+    let dir = tmp_path("missing_integrator");
+    let body = minimal_config().replace("[integrator]\nlossless = false\n", "");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "integrator"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-1e1c5f3b
+#[test]
+fn missing_particle_types() {
+    let dir = tmp_path("missing_particle_types");
+    let body = r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 1
+dt = 1.0e-15
+temperature = 0.0
+
+[integrator]
+lossless = false
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+"#;
+    let path = write_config(&dir, body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "particle_types"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-a94d2c13
+#[test]
+fn missing_pair_interactions() {
+    let dir = tmp_path("missing_pair");
+    let body = r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 1
+dt = 1.0e-15
+temperature = 0.0
+
+[integrator]
+lossless = false
+
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+"#;
+    let path = write_config(&dir, body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingPairInteraction { types } => {
+            assert_eq!(types, ("Ar".to_string(), "Ar".to_string()));
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-025b2c3b
+#[test]
+fn reject_zero_dt() {
+    let dir = tmp_path("zero_dt");
+    let body = minimal_config().replace("dt = 1.0e-15", "dt = 0.0");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "simulation.dt"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-0051b248
+#[test]
+fn reject_negative_dt() {
+    let dir = tmp_path("neg_dt");
+    let body = minimal_config().replace("dt = 1.0e-15", "dt = -1.0e-15");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "simulation.dt"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-dffdd81c
+#[test]
+fn reject_nan_dt() {
+    let dir = tmp_path("nan_dt");
+    let body = minimal_config().replace("dt = 1.0e-15", "dt = nan");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "simulation.dt"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-f009e02b
+#[test]
+fn reject_negative_temperature() {
+    let dir = tmp_path("neg_temp");
+    let body = minimal_config().replace("temperature = 300.0", "temperature = -1.0");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "simulation.temperature"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-cc12f2d8
+#[test]
+fn zero_temperature_accepted() {
+    let dir = tmp_path("zero_temp");
+    let body = minimal_config().replace("temperature = 300.0", "temperature = 0.0");
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.simulation.temperature, 0.0);
+}
+
+// rq-47697f4a
+#[test]
+fn reject_nonpositive_mass() {
+    let dir = tmp_path("zero_mass");
+    let body = minimal_config().replace("mass = 6.6335e-26", "mass = 0.0");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "particle_types[0].mass"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-aa19f894
+#[test]
+fn reject_nonpositive_sigma() {
+    let dir = tmp_path("zero_sigma");
+    let body = minimal_config().replace("sigma = 3.40e-10", "sigma = 0.0");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "pair_interactions[0].sigma"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-017b6769
+#[test]
+fn reject_nonpositive_epsilon() {
+    let dir = tmp_path("neg_epsilon");
+    let body = minimal_config().replace("epsilon = 1.65e-21", "epsilon = -1.0");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "pair_interactions[0].epsilon");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-ae65c293
+#[test]
+fn reject_nonpositive_cutoff() {
+    let dir = tmp_path("zero_cutoff");
+    let body = minimal_config().replace("cutoff = 1.0e-9", "cutoff = 0.0");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "pair_interactions[0].cutoff"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-a3a5905d
+#[test]
+fn reject_unknown_potential() {
+    let dir = tmp_path("unknown_potential");
+    let body = minimal_config().replace("potential = \"lennard-jones\"", "potential = \"morse\"");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "pair_interactions[0].potential");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-a30ac09f
+#[test]
+fn reject_empty_type_name() {
+    let dir = tmp_path("empty_type_name");
+    let body = minimal_config().replace("name = \"Ar\"", "name = \"\"");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "particle_types[0].name"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-560dffb8
+#[test]
+fn reject_duplicate_type_names() {
+    let dir = tmp_path("duplicate_type_names");
+    let body = r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 1
+dt = 1.0e-15
+temperature = 0.0
+
+[integrator]
+lossless = false
+
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+
+[[particle_types]]
+name = "Ar"
+mass = 2.0
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+"#;
+    let path = write_config(&dir, body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::DuplicateTypeName { name } => assert_eq!(name, "Ar"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-c9fa5cda
+#[test]
+fn reject_pair_unknown_type() {
+    let dir = tmp_path("pair_unknown_type");
+    let body = format!(
+        "{}\n[[pair_interactions]]\nbetween = [\"Ar\", \"Xe\"]\npotential = \"lennard-jones\"\nsigma = 1.0\nepsilon = 1.0\ncutoff = 1.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownTypeInPair { name, pair_index } => {
+            assert_eq!(name, "Xe");
+            assert_eq!(pair_index, 1);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-ae6d5db8
+#[test]
+fn reject_missing_pair() {
+    let dir = tmp_path("missing_pair_interaction");
+    let body = r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 1
+dt = 1.0e-15
+temperature = 0.0
+
+[integrator]
+lossless = false
+
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+
+[[particle_types]]
+name = "Kr"
+mass = 2.0
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+
+[[pair_interactions]]
+between = ["Kr", "Kr"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+"#;
+    let path = write_config(&dir, body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingPairInteraction { types } => {
+            assert_eq!(types, ("Ar".to_string(), "Kr".to_string()));
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-f11e9d4c
+#[test]
+fn reject_duplicate_pair() {
+    let dir = tmp_path("dup_pair");
+    let body = format!(
+        "{}\n[[pair_interactions]]\nbetween = [\"Ar\", \"Ar\"]\npotential = \"lennard-jones\"\nsigma = 1.0\nepsilon = 1.0\ncutoff = 1.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::DuplicatePairInteraction { types } => {
+            assert_eq!(types, ("Ar".to_string(), "Ar".to_string()));
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-9e4d8944
+#[test]
+fn reject_duplicate_pair_reversed() {
+    let dir = tmp_path("dup_pair_reversed");
+    let body = r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 1
+dt = 1.0e-15
+temperature = 0.0
+
+[integrator]
+lossless = false
+
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+
+[[particle_types]]
+name = "Kr"
+mass = 2.0
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+
+[[pair_interactions]]
+between = ["Kr", "Kr"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+
+[[pair_interactions]]
+between = ["Ar", "Kr"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+
+[[pair_interactions]]
+between = ["Kr", "Ar"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+"#;
+    let path = write_config(&dir, body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::DuplicatePairInteraction { types } => {
+            assert_eq!(types, ("Ar".to_string(), "Kr".to_string()));
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-e553c05b
+#[test]
+fn reject_init_equals_trajectory() {
+    let dir = tmp_path("init_eq_traj");
+    let body = format!(
+        "{}\n[output]\ntrajectory_path = \"argon.xyz\"\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::PathCollision { kind_a, kind_b, .. } => {
+            assert_eq!(kind_a, PathRole::Init);
+            assert_eq!(kind_b, PathRole::Trajectory);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-765c96c5
+#[test]
+fn reject_trajectory_equals_log() {
+    let dir = tmp_path("traj_eq_log");
+    let body = format!(
+        "{}\n[output]\ntrajectory_path = \"run.dat\"\nlog_path = \"run.dat\"\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::PathCollision { kind_a, kind_b, .. } => {
+            assert_eq!(kind_a, PathRole::Trajectory);
+            assert_eq!(kind_b, PathRole::Log);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-330d6b42
+#[test]
+fn reject_init_equals_log() {
+    let dir = tmp_path("init_eq_log");
+    let body = format!(
+        "{}\n[output]\nlog_path = \"argon.xyz\"\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::PathCollision { kind_a, kind_b, .. } => {
+            assert_eq!(kind_a, PathRole::Init);
+            assert_eq!(kind_b, PathRole::Log);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-f114c560
+#[test]
+fn reject_multi_type() {
+    let dir = tmp_path("multi_type");
+    let body = r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 1
+dt = 1.0e-15
+temperature = 0.0
+
+[integrator]
+lossless = false
+
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+
+[[particle_types]]
+name = "Kr"
+mass = 2.0
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+
+[[pair_interactions]]
+between = ["Ar", "Kr"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+
+[[pair_interactions]]
+between = ["Kr", "Kr"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+"#;
+    let path = write_config(&dir, body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MultiTypeUnsupported { count } => assert_eq!(count, 2),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-97e525d8
+#[test]
+fn trajectory_every_zero_accepted() {
+    let dir = tmp_path("traj_every_zero");
+    let body = format!(
+        "{}\n[output]\ntrajectory_every = 0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.output.trajectory_every, 0);
+}
+
+// rq-318cd47d
+#[test]
+fn log_every_zero_accepted() {
+    let dir = tmp_path("log_every_zero");
+    let body = format!("{}\n[output]\nlog_every = 0\n", minimal_config());
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.output.log_every, 0);
+}
