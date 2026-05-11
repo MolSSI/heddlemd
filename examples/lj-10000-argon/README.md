@@ -1,0 +1,40 @@
+# 10,000-atom Lennard-Jones argon
+
+A small example that exercises the full simulation pipeline at 10⁴ particles
+for 100 timesteps.
+
+## Layout
+
+- `sim.toml` — simulation config (SI units; 1 fs timestep; 100 steps at 100 K)
+- `init.xyz` — 10,000 argon atoms on a 20 × 20 × 25 simple-cubic lattice with
+  4.0 Å spacing, centred at the origin in an 8 × 8 × 10 nm box.
+- `generate_init.py` — regenerates `init.xyz` deterministically.
+
+## Run
+
+From this directory:
+
+```
+cargo run --release -- run sim.toml
+```
+
+Or with the debug binary already built:
+
+```
+../../target/debug/dynamics run sim.toml
+```
+
+A run produces three files in this directory:
+
+- `sim-traj.xyz` — 11 trajectory frames (steps 0, 10, …, 100), extended-XYZ
+- `sim.log` — 21 CSV rows of step, time, kinetic energy, temperature
+- `sim.timings` — per-stage timing summary (kernels and host I/O)
+
+## Notes
+
+- The `[[pair_interactions]]` table uses standard LJ-argon parameters
+  (σ = 3.4 Å, ε ≈ 120 k_B). Initial velocities are generated from a
+  Maxwell-Boltzmann distribution at 100 K with the centre-of-mass drift
+  removed (RNG seed = 1; deterministic across runs on the same GPU).
+- The runner uses the O(N²) pair-force kernel; the pair buffer for this
+  example occupies ~1.2 GB of GPU memory.

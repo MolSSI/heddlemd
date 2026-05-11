@@ -1,102 +1,151 @@
 # Dynamics
 
-Run molecular dynamics simulations
+A GPU-accelerated molecular dynamics engine in Rust + CUDA, designed for
+**bit-wise reproducibility**: identical inputs produce byte-identical
+trajectory and log files across runs on the same GPU.
 
-## Getting Started
+## What it does
 
-### Prerequisites
+- Lennard-Jones pair forces (O(N²) kernel) with the minimum-image convention
+  for periodic boundary conditions.
+- Velocity Verlet integration in either an ordinary `f32` mode (lossy) or a
+  compensated `(f32, f64)` mode (lossless) that supports bit-exact time
+  reversal.
+- Single-stream CUDA execution and a deterministic segmented reduction so
+  that floating-point sums are performed in the same order on every run.
+- Extended-XYZ trajectory output, CSV diagnostic log (step, time, KE, T),
+  and a per-stage performance summary measured with CUDA events plus
+  host wall-clocks.
 
-Install Podman by following the official [installation instructions](https://podman.io/docs/installation).
+See [`docs/architecture.md`](docs/architecture.md) for the data flow,
+reproducibility strategy, and per-kernel design. Every behaviour the engine
+ships with is canonically described under [`rqm/`](rqm/); the source tree
+references those entities by stable IDs (`rq-XXXXXXXX`).
 
-You will also need a Claude subscription.
+## Prerequisites
 
-### Launching the development environment
+- **An NVIDIA GPU** with a recent driver.
+- **CUDA Toolkit 11.8 or newer** on `PATH` so `nvcc` can compile the
+  device kernels at build time.
+- **Rust** (the project uses Cargo edition 2024; install via
+  [rustup](https://rustup.rs/)).
 
-All development **must** take place within a Podman container.
-The template includes a hook that prevents Claude from answering any prompts unless you are running in a containerized environment.
-
-Run `bash run.sh` on Linux/Mac, or `run.bat` on Windows.
-When prompted, select whether you want to work in Neovim or VS Code.
-
-- **VS Code**: open a terminal and run `claude`.
-- **Neovim**: a terminal is already open in the lower panel.
-  Navigate between panels with `<alt+h/j/k/l>`.
-  Force-exit Neovim with `:qall!`.
-
-### Initializing the project
-
-
-Initialize a Rust project in the repository root:
-
-```
-cargo init
-```
-
-
-
-## Development Workflow
-
-### 1. Write a requirements document
-
-Before generating code, create a requirements document in the `rqm/` directory.
-Use the built-in skill by prompting:
+## Build
 
 ```
-Help me plan <feature description>. Place the requirements document in rqm/<feature>.md.
+cargo build --release
 ```
 
-Or invoke the skill explicitly:
+The build script invokes `nvcc` for each `.cu` file under `kernels/`,
+embeds the resulting PTX, and produces the `dynamics` binary at
+`target/release/dynamics`.
+
+## Run the example
+
+A complete 10,000-atom Lennard-Jones argon example lives at
+[`examples/lj-10000-argon/`](examples/lj-10000-argon/). It runs 100
+integration timesteps in roughly a second on a recent NVIDIA GPU.
+
+From the project root:
 
 ```
-/plan-feature Help me plan <feature description>. Place the requirements document in rqm/<feature>.md.
+./target/release/dynamics run examples/lj-10000-argon/sim.toml
 ```
 
-Claude will ask clarifying questions and write a complete requirements file including Gherkin scenarios.
+(Or `cargo run --release -- run examples/lj-10000-argon/sim.toml`.)
 
-### 2. Implement the feature
+A run produces three files alongside the config:
+
+- **`sim-traj.xyz`** — 11 trajectory frames (steps 0, 10, …, 100) in
+  extended-XYZ format. Each frame is self-describing (lattice vectors,
+  column layout, simulation time). The trajectory frames can be re-loaded
+  as an init file.
+- **`sim.log`** — CSV with `step,time,kinetic_energy,temperature`; one
+  header line plus 21 data rows.
+- **`sim.timings`** — a fixed-width text table with one row per
+  instrumented stage: per-kernel timings (CUDA events) and host stages
+  (`config_load`, `init_load`, `gpu_init`, `host_to_device_upload`,
+  `device_to_host_download`, `trajectory_write`, `log_write`,
+  `velocity_generation`, `total_runtime`). Columns: `count`,
+  `total_ms`, `mean_us`, `min_us`, `max_us`.
+
+The example's [`README.md`](examples/lj-10000-argon/README.md) describes
+the lattice layout and how to regenerate `init.xyz`.
+
+## Writing your own simulation
+
+A simulation is fully specified by two files:
+
+- A **TOML config** that pins everything affecting the trajectory:
+  RNG seed, `n_steps`, `dt`, target temperature, integrator mode
+  (lossy or lossless), particle-type masses, and per-pair Lennard-Jones
+  coefficients. SI units throughout (metres, kilograms, seconds, joules,
+  kelvin). Output paths and cadences live in the optional `[output]`
+  section; see [`rqm/io/config-schema.md`](rqm/io/config-schema.md) for
+  the full field reference.
+- An **extended-XYZ init file** carrying the particle count, simulation
+  box (orthorhombic `Lattice="lx 0 0 0 ly 0 0 0 lz"`), per-particle
+  type names, positions, and optionally velocities. Positions must lie
+  inside the primary cell `[-L/2, L/2)` per axis. Velocities are
+  optional; absent velocities are sampled from a Maxwell-Boltzmann
+  distribution at the configured temperature using a deterministic
+  ChaCha8 RNG seeded by the config seed, with the centre-of-mass drift
+  removed. See [`rqm/io/init-state-file.md`](rqm/io/init-state-file.md).
+
+The runner currently accepts one particle type per simulation; the
+schema is forward-compatible with multi-type runs once the kernel
+supports them.
+
+## Reproducibility
+
+`sim-traj.xyz` and `sim.log` are byte-identical across two runs of the
+same config on the same GPU. `sim.timings` is intentionally **not**
+reproducible: wall-clock measurements vary run-to-run and would
+corrupt the comparison if mixed with the deterministic outputs.
+Cross-hardware reproducibility is not a goal; CUDA permits FMA
+contraction differences between GPUs.
+
+## Project structure
 
 ```
-Implement the feature in rqm/<feature>.md
+src/                Rust host code: I/O, runner, GPU buffer wrappers
+kernels/            CUDA C source for the device kernels (compiled to PTX)
+docs/architecture.md  System design and data flow
+rqm/                Canonical requirements, by feature
+examples/           Ready-to-run input bundles
+tests/              Integration tests (one per requirements file)
 ```
 
-### 3. Iterate
+## Development workflow
 
-If the output is incorrect or incomplete, **modify the requirements file first**, then ask Claude to update the implementation:
+This repository follows a **requirements-driven** workflow: every
+feature has a canonical description under `rqm/` with Gherkin scenarios,
+and every type, function, and test in `src/` and `tests/` carries the
+stable `rq-XXXXXXXX` ID of the requirement it implements. The traceability
+registry at `rqm/registry.json` is rebuilt by
+`./.claude/skills/plan-feature/rqm.sh index`.
 
-```
-I have updated rqm/<feature>.md. Update the implementation to match.
-```
+Two skills assist this loop:
 
-### 4. Verify understanding with quizzes
+- **`/plan-feature`** drafts or extends a requirements file, asks
+  clarifying questions, and stamps stable IDs on every heading, API
+  item, and scenario.
+- **`/implement`** writes the code and tests for an existing
+  requirements file. One test per Gherkin scenario, annotated with the
+  scenario's `rq-` ID.
 
-```
-/quiz
-```
+When iterating on a feature, edit the requirements file first, then ask
+the assistant to update the implementation. This keeps `rqm/` as the
+source of truth: if `src/` were deleted, the requirements files would
+be enough to reproduce the engine.
 
-Claude will ask you a multiple-choice question about the implementation to help ensure you understand the code.
+## Safety notes for AI-assisted development
 
-## Key Rules
+LLMs are susceptible to prompt injection and data poisoning. When using
+this repo with an agentic assistant:
 
-### Only ever use agentic AI inside a Podman container
-
-LLMs are susceptible to prompt injection and data poisoning.
-This repository includes a hook that blocks Claude unless it is running inside a container.
-Even inside a container, you should:
-
-- Never share private SSH keys or other sensitive credentials.
-- Never give the LLM write access to remote repositories.
-- Never push LLM-generated code without reviewing it carefully first.
-
-### Treat requirements documents as the source of truth
-
-The `rqm/` directory should contain a complete, version-controlled description of every intended behavior of the project.
-If you delete everything in `src/`, it should be possible to reproduce your code from the requirements files alone.
-**Never write code that isn't directly necessitated by a requirements file.**
-
-### Use memory-safe languages and modern tooling
-
-
-Rust's compiler catches a large class of bugs at compile time.
-Always resolve all compiler errors and warnings before considering a feature complete.
-
-
+- Run the assistant inside a sandboxed container (the included Podman
+  setup blocks the assistant from running outside one).
+- Never expose private SSH keys, credentials, or write access to remote
+  repositories.
+- Review every generated change before pushing.

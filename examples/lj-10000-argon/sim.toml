@@ -1,0 +1,27 @@
+schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 100
+dt = 1.0e-15        # 1 fs
+temperature = 100.0 # K (sampled if init lacks velocities; ignored otherwise)
+
+[integrator]
+lossless = false
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26   # kg (argon)
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10    # m
+epsilon = 1.65e-21  # J  (~120 K * k_B)
+cutoff = 8.5e-10    # m  (2.5 sigma)
+
+[output]
+trajectory_every = 10
+include_velocities = true
+log_every = 5
