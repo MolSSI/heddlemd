@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use dynamics::io::{ConfigError, PathRole, load_config};
+use dynamics::io::{ConfigError, NeighborListConfig, PathRole, load_config};
 
 fn tmp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -1382,4 +1382,162 @@ fn log_every_zero_accepted() {
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
     assert_eq!(cfg.output.log_every, 0);
+}
+
+// --- Neighbor list ---
+
+#[test]
+fn neighbor_list_defaults_to_cell_list_when_section_omitted() {
+    let dir = tmp_path("nl_default");
+    let path = write_config(&dir, &minimal_config());
+    let cfg = load_config(&path).unwrap();
+    match cfg.neighbor_list {
+        NeighborListConfig::CellList { max_neighbors, r_skin } => {
+            assert_eq!(max_neighbors, 256);
+            // cutoff = 1.0e-9, default r_skin = 0.3 * cutoff = 3.0e-10
+            assert!((r_skin - 3.0e-10).abs() < 1.0e-20);
+        }
+        other => panic!("expected CellList, got {other:?}"),
+    }
+}
+
+#[test]
+fn neighbor_list_cell_list_explicit_parameters() {
+    let dir = tmp_path("nl_explicit");
+    let body = format!(
+        "{}\n[neighbor_list]\nmode = \"cell-list\"\nmax_neighbors = 128\nr_skin = 2.0e-10\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(
+        cfg.neighbor_list,
+        NeighborListConfig::CellList { max_neighbors: 128, r_skin: 2.0e-10 }
+    );
+}
+
+#[test]
+fn neighbor_list_cell_list_default_max_neighbors() {
+    let dir = tmp_path("nl_default_max");
+    let body = format!(
+        "{}\n[neighbor_list]\nmode = \"cell-list\"\nr_skin = 2.0e-10\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(
+        cfg.neighbor_list,
+        NeighborListConfig::CellList { max_neighbors: 256, r_skin: 2.0e-10 }
+    );
+}
+
+#[test]
+fn neighbor_list_cell_list_default_r_skin() {
+    let dir = tmp_path("nl_default_rskin");
+    let body = format!(
+        "{}\n[neighbor_list]\nmode = \"cell-list\"\nmax_neighbors = 128\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    match cfg.neighbor_list {
+        NeighborListConfig::CellList { max_neighbors, r_skin } => {
+            assert_eq!(max_neighbors, 128);
+            assert!((r_skin - 3.0e-10).abs() < 1.0e-20);
+        }
+        other => panic!("got {other:?}"),
+    }
+}
+
+#[test]
+fn neighbor_list_all_pairs_mode() {
+    let dir = tmp_path("nl_all_pairs");
+    let body = format!(
+        "{}\n[neighbor_list]\nmode = \"all-pairs\"\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.neighbor_list, NeighborListConfig::AllPairs);
+}
+
+#[test]
+fn neighbor_list_unknown_mode_rejected() {
+    let dir = tmp_path("nl_unknown_mode");
+    let body = format!(
+        "{}\n[neighbor_list]\nmode = \"kd-tree\"\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let err = load_config(&path).unwrap_err();
+    match err {
+        ConfigError::UnknownNeighborListMode { actual } => assert_eq!(actual, "kd-tree"),
+        other => panic!("got {other:?}"),
+    }
+}
+
+#[test]
+fn neighbor_list_all_pairs_rejects_max_neighbors() {
+    let dir = tmp_path("nl_all_pairs_rejects_max");
+    let body = format!(
+        "{}\n[neighbor_list]\nmode = \"all-pairs\"\nmax_neighbors = 64\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let err = load_config(&path).unwrap_err();
+    match err {
+        ConfigError::UnknownNeighborListField { mode, field } => {
+            assert_eq!(mode, "all-pairs");
+            assert_eq!(field, "max_neighbors");
+        }
+        other => panic!("got {other:?}"),
+    }
+}
+
+#[test]
+fn neighbor_list_cell_list_rejects_unknown_field() {
+    let dir = tmp_path("nl_cell_unknown_field");
+    let body = format!(
+        "{}\n[neighbor_list]\nmode = \"cell-list\"\nstencil = \"huge\"\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let err = load_config(&path).unwrap_err();
+    match err {
+        ConfigError::UnknownNeighborListField { mode, field } => {
+            assert_eq!(mode, "cell-list");
+            assert_eq!(field, "stencil");
+        }
+        other => panic!("got {other:?}"),
+    }
+}
+
+#[test]
+fn neighbor_list_rejects_zero_max_neighbors() {
+    let dir = tmp_path("nl_zero_max");
+    let body = format!(
+        "{}\n[neighbor_list]\nmode = \"cell-list\"\nmax_neighbors = 0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let err = load_config(&path).unwrap_err();
+    assert!(matches!(
+        err,
+        ConfigError::InvalidValue { ref field, .. } if field == "neighbor_list.max_neighbors"
+    ), "got {err:?}");
+}
+
+#[test]
+fn neighbor_list_rejects_non_positive_r_skin() {
+    let dir = tmp_path("nl_zero_rskin");
+    let body = format!(
+        "{}\n[neighbor_list]\nmode = \"cell-list\"\nr_skin = 0.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let err = load_config(&path).unwrap_err();
+    assert!(matches!(
+        err,
+        ConfigError::InvalidValue { ref field, .. } if field == "neighbor_list.r_skin"
+    ), "got {err:?}");
 }

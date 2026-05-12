@@ -95,9 +95,21 @@ must carry valid zeros there.)
   per-step methods are dispatched through `PotentialSlot`'s inherent
   impl.
 
-- `LennardJonesState` — owns the slot's `PairBuffer`, `neighbor_counts` <!-- rq-af2d1628 -->
-  device slice, `LennardJonesParameters`, the `ExclusionList` device
-  representation (see `bonds.md`), and the three accumulator slices.
+- `LennardJonesState` — owns the slot's `PairBuffer`, `LennardJonesParameters`, <!-- rq-af2d1628 -->
+  the `DeviceExclusionList` (see `bonds.md`), and the three accumulator
+  slices. The internal state is one of two variants determined at
+  construction time by the parsed `NeighborListConfig`:
+  - `AllPairs` — additionally carries a `neighbor_counts` device slice
+    with every entry equal to `N`. `max_neighbors == N`.
+  - `CellList` — additionally carries a `NeighborListState` (see
+    `neighbor-list.md`) that owns the cell list, neighbor list,
+    reference positions, and overflow flag. `max_neighbors` comes from
+    the config; `neighbor_counts` is populated per-rebuild by the
+    neighbor-list build kernel.
+
+  In either variant, the slot's reduction reads `neighbor_counts` (so
+  the existing segmented `reduce_pair_forces` kernel works without
+  branching).
 
 - `MorseBondedState` — owns the slot's `BondPairBuffer`, the bond <!-- rq-2361f2b8 -->
   index/offset tables, per-bond-type parameter table, and the three
@@ -116,13 +128,20 @@ must carry valid zeros there.)
   - `Gpu(GpuError)` — CUDA driver / kernel-launch failure from any
     slot's kernel or the combiner.
   - `Timings(TimingsError)` — CUDA event recording failure.
+  - `NeighborList(NeighborListError)` — surfaces failures from the
+    cell-list pipeline (see `neighbor-list.md`), including the
+    `NeighborListOverflow` and `BoxTooSmallForCells` cases.
 
 ### Functions and methods <!-- rq-17abcb76 -->
 
-- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], bond_list: &BondList, exclusion_list: &ExclusionList) -> Result<ForceField, ForceFieldError>` <!-- rq-79938dbf -->
+- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], bond_list: &BondList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>` <!-- rq-79938dbf -->
   - Constructs every slot in evaluation order. The `LennardJones` slot
     is always added; the `MorseBonded` slot is added when `bond_list`
     is non-empty.
+  - The `LennardJones` slot is built in `AllPairs` or `CellList` mode
+    according to `neighbor_list_config`. In `CellList` mode, the
+    construction may return `ForceFieldError::NeighborList(_)` when the
+    box is too small for the requested cell layout.
   - Allocates per-slot private accumulators of length `particle_count`
     on `device`.
   - When `particle_count == 0`, allocations have length zero; the slot

@@ -12,6 +12,7 @@ use crate::forces::{
 };
 use crate::gpu::{ParticleBuffers, init_device};
 use crate::integrator::{Integrator, IntegratorError};
+use crate::io::config::NeighborListConfig;
 use crate::io::{
     ConfigError, InitStateError, InitVelocities, LogWriter, LogWriterError, TrajectoryWriter,
     TrajectoryWriterError, load_config, load_init_state,
@@ -38,6 +39,11 @@ pub enum RunnerError {
     TimingsWriter(TimingsWriterError),
     MissingArgs,
     OutputExists { path: PathBuf },
+    CellListBoxTooSmall {
+        axis: &'static str,
+        length: f32,
+        required: f32,
+    },
 }
 
 impl std::fmt::Display for RunnerError {
@@ -58,6 +64,14 @@ impl std::fmt::Display for RunnerError {
             RunnerError::OutputExists { path } => {
                 write!(f, "OutputExists {{ path: {} }}", path.display())
             }
+            RunnerError::CellListBoxTooSmall {
+                axis,
+                length,
+                required,
+            } => write!(
+                f,
+                "CellListBoxTooSmall {{ axis: {axis:?}, length: {length}, required: {required} }}"
+            ),
         }
     }
 }
@@ -147,6 +161,30 @@ fn run_simulation_with_phase(
     let sim_box = init.sim_box;
     let n = init.particle_count;
 
+    // Cell-list box-compatibility check (uses the init file's box).
+    if let NeighborListConfig::CellList { r_skin, .. } = &config.neighbor_list {
+        let cutoff_max: f64 = config
+            .pair_interactions
+            .iter()
+            .map(|p| p.cutoff)
+            .fold(0.0, f64::max);
+        let required = (3.0 * (cutoff_max + r_skin)) as f32;
+        let lengths = sim_box.lengths();
+        let axis_names: [&'static str; 3] = ["x", "y", "z"];
+        for a in 0..3 {
+            if lengths[a] < required {
+                return Err((
+                    RunnerError::CellListBoxTooSmall {
+                        axis: axis_names[a],
+                        length: lengths[a],
+                        required,
+                    },
+                    ExitPhase::Setup,
+                ));
+            }
+        }
+    }
+
     let mut gpu_init_duration = Duration::ZERO;
     let device = timed(&mut gpu_init_duration, init_device)
         .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?;
@@ -231,6 +269,7 @@ fn run_simulation_with_phase(
         &config.bond_types,
         &bond_list,
         &exclusion_list,
+        &config.neighbor_list,
     )
     .map_err(|e| (RunnerError::ForceField(e), ExitPhase::Setup))?;
 

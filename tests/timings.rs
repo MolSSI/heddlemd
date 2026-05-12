@@ -67,6 +67,9 @@ sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
 
+[neighbor_list]
+mode = "all-pairs"
+
 [output]
 trajectory_every = {traj_every}
 log_every = {log_every}

@@ -50,7 +50,7 @@ pub fn init_device() -> Result<Arc<CudaDevice>, GpuError> {
     device.load_ptx(
         Ptx::from_src(kernels::PAIR_FORCE),
         "pair_force",
-        &["lj_pair_force"],
+        &["lj_pair_force", "lj_pair_force_neighbor"],
     )?;
     device.load_ptx(
         Ptx::from_src(kernels::LANGEVIN),
@@ -66,6 +66,16 @@ pub fn init_device() -> Result<Arc<CudaDevice>, GpuError> {
         Ptx::from_src(kernels::FORCES),
         "forces",
         &["accumulate_forces"],
+    )?;
+    // rq-0469400b
+    device.load_ptx(
+        Ptx::from_src(kernels::NEIGHBOR),
+        "neighbor",
+        &[
+            "neighbor_displacement_squared",
+            "neighbor_list_build",
+            "copy_positions_into_reference",
+        ],
     )?;
     Ok(device)
 }

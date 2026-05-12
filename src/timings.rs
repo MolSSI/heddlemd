@@ -19,6 +19,7 @@ pub enum KernelStage {
     VvKickDriftLossless,
     VvKickLossless,
     LjPairForce,
+    LjPairForceNeighbor,
     ReducePairForces,
     LangevinKickHalf,
     LangevinDriftHalf,
@@ -26,7 +27,12 @@ pub enum KernelStage {
     MorseBondForce,
     ReduceBondForces,
     AccumulateForces,
+    NeighborDisplacementSquared,
+    NeighborListBuild,
+    CopyPositionsIntoReference,
 }
+
+const N_KERNEL_STAGES: usize = 16;
 
 impl KernelStage {
     fn name(self) -> &'static str {
@@ -36,6 +42,7 @@ impl KernelStage {
             KernelStage::VvKickDriftLossless => "vv_kick_drift_lossless",
             KernelStage::VvKickLossless => "vv_kick_lossless",
             KernelStage::LjPairForce => "lj_pair_force",
+            KernelStage::LjPairForceNeighbor => "lj_pair_force_neighbor",
             KernelStage::ReducePairForces => "reduce_pair_forces",
             KernelStage::LangevinKickHalf => "langevin_kick_half",
             KernelStage::LangevinDriftHalf => "langevin_drift_half",
@@ -43,6 +50,9 @@ impl KernelStage {
             KernelStage::MorseBondForce => "morse_bond_force",
             KernelStage::ReduceBondForces => "reduce_bond_forces",
             KernelStage::AccumulateForces => "accumulate_forces",
+            KernelStage::NeighborDisplacementSquared => "neighbor_displacement_squared",
+            KernelStage::NeighborListBuild => "neighbor_list_build",
+            KernelStage::CopyPositionsIntoReference => "copy_positions_into_reference",
         }
     }
 
@@ -53,13 +63,17 @@ impl KernelStage {
             KernelStage::VvKickDriftLossless => 2,
             KernelStage::VvKickLossless => 3,
             KernelStage::LjPairForce => 4,
-            KernelStage::ReducePairForces => 5,
-            KernelStage::LangevinKickHalf => 6,
-            KernelStage::LangevinDriftHalf => 7,
-            KernelStage::LangevinOuStep => 8,
-            KernelStage::MorseBondForce => 9,
-            KernelStage::ReduceBondForces => 10,
-            KernelStage::AccumulateForces => 11,
+            KernelStage::LjPairForceNeighbor => 5,
+            KernelStage::ReducePairForces => 6,
+            KernelStage::LangevinKickHalf => 7,
+            KernelStage::LangevinDriftHalf => 8,
+            KernelStage::LangevinOuStep => 9,
+            KernelStage::MorseBondForce => 10,
+            KernelStage::ReduceBondForces => 11,
+            KernelStage::AccumulateForces => 12,
+            KernelStage::NeighborDisplacementSquared => 13,
+            KernelStage::NeighborListBuild => 14,
+            KernelStage::CopyPositionsIntoReference => 15,
         }
     }
 }
@@ -75,8 +89,11 @@ pub enum HostStage {
     DeviceToHostDownload,
     TrajectoryWrite,
     LogWrite,
+    NeighborListRebuild,
     TotalRuntime,
 }
+
+const N_HOST_STAGES: usize = 10;
 
 impl HostStage {
     fn name(self) -> &'static str {
@@ -89,6 +106,7 @@ impl HostStage {
             HostStage::DeviceToHostDownload => "device_to_host_download",
             HostStage::TrajectoryWrite => "trajectory_write",
             HostStage::LogWrite => "log_write",
+            HostStage::NeighborListRebuild => "neighbor_list_rebuild",
             HostStage::TotalRuntime => "total_runtime",
         }
     }
@@ -103,7 +121,8 @@ impl HostStage {
             HostStage::DeviceToHostDownload => 5,
             HostStage::TrajectoryWrite => 6,
             HostStage::LogWrite => 7,
-            HostStage::TotalRuntime => 8,
+            HostStage::NeighborListRebuild => 8,
+            HostStage::TotalRuntime => 9,
         }
     }
 }
@@ -206,11 +225,11 @@ impl Accumulator {
 // rq-baf03449
 pub struct Timings {
     device: Arc<CudaDevice>,
-    kernel_starts: [CUevent; 12],
-    kernel_stops: [CUevent; 12],
-    outstanding_stop: [bool; 12],
-    kernel_acc: [Accumulator; 12],
-    host_acc: [Accumulator; 9],
+    kernel_starts: [CUevent; N_KERNEL_STAGES],
+    kernel_stops: [CUevent; N_KERNEL_STAGES],
+    outstanding_stop: [bool; N_KERNEL_STAGES],
+    kernel_acc: [Accumulator; N_KERNEL_STAGES],
+    host_acc: [Accumulator; N_HOST_STAGES],
 }
 
 impl std::fmt::Debug for Timings {
@@ -225,9 +244,9 @@ impl std::fmt::Debug for Timings {
 impl Timings {
     // rq-8a9c44f8
     pub fn new(device: Arc<CudaDevice>) -> Result<Self, TimingsError> {
-        let mut kernel_starts = [std::ptr::null_mut(); 12];
-        let mut kernel_stops = [std::ptr::null_mut(); 12];
-        for i in 0..12 {
+        let mut kernel_starts = [std::ptr::null_mut(); N_KERNEL_STAGES];
+        let mut kernel_stops = [std::ptr::null_mut(); N_KERNEL_STAGES];
+        for i in 0..N_KERNEL_STAGES {
             kernel_starts[i] = event::create(CUevent_flags::CU_EVENT_DEFAULT)?;
             kernel_stops[i] = event::create(CUevent_flags::CU_EVENT_DEFAULT)?;
         }
@@ -235,9 +254,9 @@ impl Timings {
             device,
             kernel_starts,
             kernel_stops,
-            outstanding_stop: [false; 12],
-            kernel_acc: [Accumulator::default(); 12],
-            host_acc: [Accumulator::default(); 9],
+            outstanding_stop: [false; N_KERNEL_STAGES],
+            kernel_acc: [Accumulator::default(); N_KERNEL_STAGES],
+            host_acc: [Accumulator::default(); N_HOST_STAGES],
         })
     }
 
@@ -290,7 +309,7 @@ impl Timings {
 
     // rq-c4845f90
     pub fn finalize(&mut self) -> Result<TimingsReport, TimingsError> {
-        for idx in 0..12 {
+        for idx in 0..N_KERNEL_STAGES {
             if self.outstanding_stop[idx] {
                 self.drain_pair(idx)?;
             }
@@ -298,13 +317,17 @@ impl Timings {
 
         // Build the report in the documented row order, omitting count==0.
         let mut stages: Vec<StageStats> = Vec::new();
-        let kernel_order: [KernelStage; 12] = [
+        let kernel_order: [KernelStage; N_KERNEL_STAGES] = [
             KernelStage::VvKickDrift,
             KernelStage::VvKickDriftLossless,
             KernelStage::LangevinKickHalf,
             KernelStage::LangevinDriftHalf,
             KernelStage::LangevinOuStep,
+            KernelStage::NeighborDisplacementSquared,
+            KernelStage::CopyPositionsIntoReference,
+            KernelStage::NeighborListBuild,
             KernelStage::LjPairForce,
+            KernelStage::LjPairForceNeighbor,
             KernelStage::ReducePairForces,
             KernelStage::MorseBondForce,
             KernelStage::ReduceBondForces,
@@ -312,9 +335,10 @@ impl Timings {
             KernelStage::VvKick,
             KernelStage::VvKickLossless,
         ];
-        let host_order: [HostStage; 9] = [
+        let host_order: [HostStage; N_HOST_STAGES] = [
             HostStage::HostToDeviceUpload,
             HostStage::DeviceToHostDownload,
+            HostStage::NeighborListRebuild,
             HostStage::TrajectoryWrite,
             HostStage::LogWrite,
             HostStage::VelocityGeneration,
@@ -354,7 +378,7 @@ impl Timings {
 
 impl Drop for Timings {
     fn drop(&mut self) {
-        for i in 0..12 {
+        for i in 0..N_KERNEL_STAGES {
             unsafe {
                 let _ = event::destroy(self.kernel_starts[i]);
                 let _ = event::destroy(self.kernel_stops[i]);

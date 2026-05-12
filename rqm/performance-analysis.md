@@ -28,8 +28,21 @@ launch and the stop event immediately after. Stages:
 
 Lennard-Jones potential slot (always present in the `ForceField`):
 
-- `lj_pair_force`
+- `lj_pair_force` — all-pairs kernel; recorded only when
+  `NeighborListConfig::AllPairs` is selected.
+- `lj_pair_force_neighbor` — neighbor-list-driven kernel; recorded
+  only when `NeighborListConfig::CellList` is selected.
 - `reduce_pair_forces`
+
+Neighbor list (present when `NeighborListConfig::CellList` is selected;
+see `forces/neighbor-list.md`):
+
+- `neighbor_displacement_squared` — per-atom displacement² versus the
+  reference positions. Launched once per timestep.
+- `neighbor_list_build` — full cell-list neighbor search. Launched
+  once per rebuild.
+- `copy_positions_into_reference` — refresh of the reference positions
+  array. Launched once per rebuild.
 
 Morse-bonded potential slot (present when the config supplies a `bonds`
 file and at least one bond exists):
@@ -86,6 +99,12 @@ per occurrence. Stages:
   call. One sample per written frame.
 - `log_write` — duration of one `LogWriter::write_row` call. One sample
   per written row.
+- `neighbor_list_rebuild` — wall-clock duration of one full neighbor
+  list rebuild, covering the device-to-host download of cell indices,
+  the host-side stable sort, the upload of the sorted ordering, and
+  the kernel launches that run inside the rebuild (sample is recorded
+  by the runner around the entire rebuild block). Present only when
+  `NeighborListConfig::CellList` is selected. One sample per rebuild.
 
 ### Synthetic stages <!-- rq-7eb22aad -->
 
@@ -190,21 +209,25 @@ Rows appear in this fixed order, with absent stages skipped:
 2. `langevin_kick_half` (B step, pre and post)
 3. `langevin_drift_half` (A step)
 4. `langevin_ou_step` (O step)
-5. `lj_pair_force`
-6. `reduce_pair_forces`
-7. `morse_bond_force`
-8. `reduce_bond_forces`
-9. `accumulate_forces`
-10. `vv_kick` or `vv_kick_lossless` (whichever is present)
-11. `host_to_device_upload`
-12. `device_to_host_download`
-13. `trajectory_write`
-14. `log_write`
-15. `velocity_generation`
-16. `config_load`
-17. `init_load`
-18. `gpu_init`
-19. `total_runtime`
+5. `neighbor_displacement_squared`
+6. `copy_positions_into_reference`
+7. `neighbor_list_build`
+8. `lj_pair_force` or `lj_pair_force_neighbor` (whichever is present)
+9. `reduce_pair_forces`
+10. `morse_bond_force`
+11. `reduce_bond_forces`
+12. `accumulate_forces`
+13. `vv_kick` or `vv_kick_lossless` (whichever is present)
+14. `host_to_device_upload`
+15. `device_to_host_download`
+16. `neighbor_list_rebuild`
+17. `trajectory_write`
+18. `log_write`
+19. `velocity_generation`
+20. `config_load`
+21. `init_load`
+22. `gpu_init`
+23. `total_runtime`
 
 ### Example <!-- rq-6289f344 -->
 
@@ -245,15 +268,18 @@ partial timings are discarded).
 
 - `KernelStage` — `enum` covering the instrumented kernel-launch <!-- rq-dc8a0ff7 -->
   helpers. Variants: `VvKickDrift`, `VvKick`, `VvKickDriftLossless`,
-  `VvKickLossless`, `LjPairForce`, `ReducePairForces`, `LangevinKickHalf`,
-  `LangevinDriftHalf`, `LangevinOuStep`, `MorseBondForce`,
-  `ReduceBondForces`, `AccumulateForces`. Implements `Copy`,
-  `Eq`, `Hash` so it can index a fixed-size accumulator.
+  `VvKickLossless`, `LjPairForce`, `LjPairForceNeighbor`,
+  `ReducePairForces`, `LangevinKickHalf`, `LangevinDriftHalf`,
+  `LangevinOuStep`, `MorseBondForce`, `ReduceBondForces`,
+  `AccumulateForces`, `NeighborDisplacementSquared`,
+  `NeighborListBuild`, `CopyPositionsIntoReference`. Implements
+  `Copy`, `Eq`, `Hash` so it can index a fixed-size accumulator.
 
 - `HostStage` — `enum` covering the host-timed stages. Variants: <!-- rq-d29f2811 -->
   `ConfigLoad`, `InitLoad`, `GpuInit`, `VelocityGeneration`,
   `HostToDeviceUpload`, `DeviceToHostDownload`, `TrajectoryWrite`,
-  `LogWrite`, `TotalRuntime`. Implements `Copy`, `Eq`, `Hash`.
+  `LogWrite`, `NeighborListRebuild`, `TotalRuntime`. Implements
+  `Copy`, `Eq`, `Hash`.
 
 - `Timings` — host-side state for collecting samples. Carries: <!-- rq-baf03449 -->
   - one `(CudaEvent, CudaEvent)` pair per `KernelStage`
@@ -512,6 +538,43 @@ Feature: Performance analysis and timings output
       or "accumulate_forces"
     And tmp/sim.timings has a row whose stage column equals "gpu_init"
     And tmp/sim.timings has a row whose stage column equals "total_runtime"
+
+  @rq-62300a18
+  Scenario: All-pairs neighbor mode records lj_pair_force and omits neighbor-list rows
+    Given a valid config with [neighbor_list] mode="all-pairs" and n_steps=5
+    When dynamics run sim.toml is invoked
+    Then tmp/sim.timings has a row whose stage column equals "lj_pair_force"
+    And tmp/sim.timings has no row whose stage column equals "lj_pair_force_neighbor"
+    And tmp/sim.timings has no row whose stage column equals "neighbor_displacement_squared"
+    And tmp/sim.timings has no row whose stage column equals "neighbor_list_build"
+    And tmp/sim.timings has no row whose stage column equals "copy_positions_into_reference"
+    And tmp/sim.timings has no row whose stage column equals "neighbor_list_rebuild"
+
+  @rq-ef918dc6
+  Scenario: Cell-list neighbor mode records the neighbor stages and omits lj_pair_force
+    Given a valid config with [neighbor_list] mode="cell-list" and n_steps=10
+    When dynamics run sim.toml is invoked
+    Then tmp/sim.timings has a row whose stage column equals "lj_pair_force_neighbor"
+    And tmp/sim.timings has no row whose stage column equals "lj_pair_force"
+    And tmp/sim.timings has a row whose stage column equals "neighbor_displacement_squared"
+    And tmp/sim.timings has a row whose stage column equals "neighbor_list_build"
+    And tmp/sim.timings has a row whose stage column equals "copy_positions_into_reference"
+    And tmp/sim.timings has a row whose stage column equals "neighbor_list_rebuild"
+
+  @rq-75746f64
+  Scenario: neighbor_displacement_squared count equals one warm-up plus per-step launches
+    Given a valid cell-list config with n_steps=10
+    When dynamics run sim.toml is invoked
+    Then the row for neighbor_displacement_squared has count = 10
+
+  @rq-7f2310ac
+  Scenario: neighbor_list_build and copy_positions_into_reference counts match rebuilds
+    Given a valid cell-list config with n_steps=10 and r_skin chosen so that exactly
+      one rebuild fires after the initial build (i.e. two builds total: warm-up + one)
+    When dynamics run sim.toml is invoked
+    Then the row for neighbor_list_build has count = 2
+    And the row for copy_positions_into_reference has count = 2
+    And the row for neighbor_list_rebuild has count = 2
 
   @rq-3bd5336c
   Scenario: Velocity generation row is absent when init supplies velocities

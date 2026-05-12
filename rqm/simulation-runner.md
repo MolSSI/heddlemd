@@ -67,7 +67,15 @@ message.
    `load_init_state(&config.init, &type_names)`
    (`init-state-file.md`). Failure → exit 1.
 6. **Build SimulationBox.** From `init_state.box`. This is the box the
-   simulation uses; the config does not specify a box.
+   simulation uses; the config does not specify a box. Immediately
+   after the box is known, verify the cell-list compatibility check:
+   when `config.neighbor_list` is `NeighborListConfig::CellList { r_skin, .. }`,
+   every box edge must satisfy `L >= 3 * (cutoff_max + r_skin)` where
+   `cutoff_max` is the largest cutoff among `config.pair_interactions`.
+   A violation surfaces as
+   `RunnerError::CellListBoxTooSmall { axis, length, required }` and
+   exits with code `1`. `NeighborListConfig::AllPairs` skips this
+   check.
 6a. **Load bonds file (if supplied).** When `config.bonds.is_some()`,
     build the slice of bond type names from `config.bond_types`,
     call `load_bonds_file(path, particle_count, &bond_type_names)`
@@ -98,11 +106,14 @@ message.
     parameters for `Integrator::LangevinBaoab`).
 12. **Construct the force field.** Call `ForceField::new(device.clone(),
     N, &sim_box, &config.pair_interactions, &config.bond_types,
-    &bond_list, &exclusion_list)` (see `forces/framework.md`). The
-    resulting `ForceField` owns the LJ slot (always) and the
-    `MorseBonded` slot (when the bond list is non-empty); the runner
-    no longer manipulates the `PairBuffer`, neighbor-counts, or
-    Lennard-Jones parameter struct directly.
+    &bond_list, &exclusion_list, &config.neighbor_list)` (see
+    `forces/framework.md`). The resulting `ForceField` owns the LJ
+    slot (always) and the `MorseBonded` slot (when the bond list is
+    non-empty); when `config.neighbor_list` selects `CellList`, the
+    LJ slot's sub-state owns the cell-list and neighbor-list buffers
+    described in `forces/neighbor-list.md`. The runner no longer
+    manipulates the `PairBuffer`, neighbor-counts, or Lennard-Jones
+    parameter struct directly.
 13. **Open output writers.** Open `TrajectoryWriter` and/or `LogWriter`
     depending on the `_every` settings. Failure → exit 1.
 14. **Warm up forces.** Call `force_field.step(&mut buffers, &sim_box,
@@ -279,6 +290,11 @@ wrapper that calls into the library.
   - `OutputExists { path: PathBuf }` — pre-flight check before the init
     file is read; surfaces the same condition the writers detect at
     open time, but earlier.
+  - `CellListBoxTooSmall { axis: &'static str, length: f32, required: f32 }`
+    — when `config.neighbor_list` is `CellList`, the box read from the
+    init file has an edge shorter than `3 * (cutoff_max + r_skin)`,
+    where `cutoff_max` is the largest cutoff among
+    `config.pair_interactions`. `axis` is one of `"x"`, `"y"`, `"z"`.
 
 ### Functions <!-- rq-e5e4b048 -->
 
@@ -565,6 +581,25 @@ Feature: dynamics run simulation runner
     Then it exits with code 0
     And the trajectory contains 6 frames each with N=0 data rows
     And every log row has kinetic_energy=0 and temperature=0
+
+  # --- Neighbor list / box-size compatibility ---
+
+  @rq-4b4f85c7
+  Scenario: Box too small for cell-list rejected before forces are constructed
+    Given tmp/sim.toml has [neighbor_list] mode="cell-list" r_skin=1.0e-10
+      and one [[pair_interactions]] with cutoff=1.0e-9
+    And tmp/init.xyz has box edges (2.0e-9, 5.0e-9, 5.0e-9)
+    When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
+    Then it exits with code 1
+    And stderr contains "CellListBoxTooSmall" and "x" and "2"
+
+  @rq-21d27f06
+  Scenario: All-pairs mode skips the box-too-small check
+    Given tmp/sim.toml has [neighbor_list] mode="all-pairs"
+      and one [[pair_interactions]] with cutoff=1.0e-9
+    And tmp/init.xyz has box edges (2.0e-9, 2.0e-9, 2.0e-9)
+    When dynamics is invoked
+    Then it exits with code 0
 
   # --- GPU initialisation failure ---
 

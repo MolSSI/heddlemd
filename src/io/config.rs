@@ -79,6 +79,13 @@ pub enum ConfigError {
     DuplicateBondTypeName {
         name: String,
     },
+    UnknownNeighborListMode {
+        actual: String,
+    },
+    UnknownNeighborListField {
+        mode: String,
+        field: String,
+    },
 }
 
 impl std::fmt::Display for ConfigError {
@@ -147,6 +154,13 @@ impl std::fmt::Display for ConfigError {
             ConfigError::DuplicateBondTypeName { name } => {
                 write!(f, "DuplicateBondTypeName {{ name: {name:?} }}")
             }
+            ConfigError::UnknownNeighborListMode { actual } => {
+                write!(f, "UnknownNeighborListMode {{ actual: {actual:?} }}")
+            }
+            ConfigError::UnknownNeighborListField { mode, field } => write!(
+                f,
+                "UnknownNeighborListField {{ mode: {mode:?}, field: {field:?} }}"
+            ),
         }
     }
 }
@@ -210,6 +224,13 @@ impl BondTypeConfig {
     }
 }
 
+// rq-060b1fab
+#[derive(Debug, Clone, PartialEq)]
+pub enum NeighborListConfig {
+    AllPairs,
+    CellList { max_neighbors: u32, r_skin: f64 },
+}
+
 // rq-1254cd3a
 #[derive(Debug, Clone)]
 pub struct OutputConfig {
@@ -232,6 +253,7 @@ pub struct Config {
     pub particle_types: Vec<ParticleTypeConfig>,
     pub pair_interactions: Vec<PairInteractionConfig>,
     pub bond_types: Vec<BondTypeConfig>,
+    pub neighbor_list: NeighborListConfig,
     pub output: OutputConfig,
     pub config_path: PathBuf,
 }
@@ -626,6 +648,84 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         }
     }
 
+    // Neighbor list (optional table)
+    // rq-060b1fab
+    let max_cutoff: f64 = pair_interactions
+        .iter()
+        .map(|p| p.cutoff)
+        .fold(0.0_f64, f64::max);
+    let neighbor_list = match root.get("neighbor_list") {
+        None => NeighborListConfig::CellList {
+            max_neighbors: 256,
+            r_skin: 0.3 * max_cutoff,
+        },
+        Some(toml::Value::Table(nl_tbl)) => {
+            let mode = match nl_tbl.get("mode") {
+                Some(toml::Value::String(s)) => s.clone(),
+                Some(_) => return Err(invalid("neighbor_list.mode", "expected a string")),
+                None => "cell-list".to_string(),
+            };
+            match mode.as_str() {
+                "all-pairs" => {
+                    for key in nl_tbl.keys() {
+                        if key != "mode" {
+                            return Err(ConfigError::UnknownNeighborListField {
+                                mode: "all-pairs".to_string(),
+                                field: key.clone(),
+                            });
+                        }
+                    }
+                    NeighborListConfig::AllPairs
+                }
+                "cell-list" => {
+                    for key in nl_tbl.keys() {
+                        if !matches!(key.as_str(), "mode" | "max_neighbors" | "r_skin") {
+                            return Err(ConfigError::UnknownNeighborListField {
+                                mode: "cell-list".to_string(),
+                                field: key.clone(),
+                            });
+                        }
+                    }
+                    let max_neighbors = match nl_tbl.get("max_neighbors") {
+                        Some(toml::Value::Integer(i)) if *i > 0 => *i as u32,
+                        Some(toml::Value::Integer(_)) => {
+                            return Err(invalid(
+                                "neighbor_list.max_neighbors",
+                                "expected a strictly positive integer",
+                            ));
+                        }
+                        Some(_) => {
+                            return Err(invalid(
+                                "neighbor_list.max_neighbors",
+                                "expected an integer",
+                            ));
+                        }
+                        None => 256u32,
+                    };
+                    let r_skin = match nl_tbl.get("r_skin") {
+                        Some(toml::Value::Float(v)) => *v,
+                        Some(toml::Value::Integer(i)) => *i as f64,
+                        Some(_) => {
+                            return Err(invalid("neighbor_list.r_skin", "expected a float"));
+                        }
+                        None => 0.3 * max_cutoff,
+                    };
+                    require_finite_positive("neighbor_list.r_skin", r_skin)?;
+                    NeighborListConfig::CellList {
+                        max_neighbors,
+                        r_skin,
+                    }
+                }
+                other => {
+                    return Err(ConfigError::UnknownNeighborListMode {
+                        actual: other.to_string(),
+                    });
+                }
+            }
+        }
+        Some(_) => return Err(invalid("neighbor_list", "expected a table")),
+    };
+
     // Output section with defaults
     let config_path_canonical = std::fs::canonicalize(path)
         .map_err(|e| ConfigError::Io(format!("canonicalize {}: {}", path.display(), e)))?;
@@ -768,6 +868,7 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         particle_types,
         pair_interactions,
         bond_types,
+        neighbor_list,
         output: OutputConfig {
             trajectory_path,
             trajectory_every,

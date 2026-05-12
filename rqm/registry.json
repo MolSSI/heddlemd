@@ -92,6 +92,18 @@
     "title": "lan_ou_step on empty state is a no-op",
     "type": "scenario"
   },
+  "rq-0181787c": {
+    "decl": "Scenario: Build kernel signals overflow when an atom exceeds max_neighbors",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Build kernel signals overflow when an atom exceeds max_neighbors",
+    "type": "scenario"
+  },
   "rq-025b2c3b": {
     "decl": "Scenario: Reject non-positive dt",
     "file": "io/config-schema",
@@ -172,6 +184,19 @@
     "title": "Drop best-effort flushes",
     "type": "scenario"
   },
+  "rq-0469400b": {
+    "decl": "### CUDA Kernels",
+    "file": "forces/neighbor-list",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/gpu/device.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "CUDA Kernels",
+    "type": "section"
+  },
   "rq-0485e79f": {
     "decl": "## Determinism guarantees",
     "file": "simulation-runner",
@@ -237,6 +262,18 @@
     ],
     "title": "init_device loads the pair_force module with the LJ kernel",
     "type": "scenario"
+  },
+  "rq-060b1fab": {
+    "decl": "- `NeighborListConfig` — value of the parsed `[neighbor_list]` table.",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NeighborListConfig",
+    "type": "api-item"
   },
   "rq-06c0e11a": {
     "decl": "Scenario: Exclusion row with non-numeric scale",
@@ -569,6 +606,18 @@
     "title": "Reject positions past -L/2 along y",
     "type": "scenario"
   },
+  "rq-1217c816": {
+    "decl": "- `NeighborListState::pre_step(&mut self, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NeighborListState",
+    "type": "api-item"
+  },
   "rq-123f560e": {
     "decl": "Scenario: build.rs fails with a clear message when nvcc is missing",
     "file": "build-pipeline",
@@ -623,10 +672,10 @@
     "type": "scenario"
   },
   "rq-13c02457": {
-    "decl": "# Feature: Lennard-Jones O(N²) Pair Force Kernel",
+    "decl": "# Feature: Lennard-Jones Pair Force Kernel",
     "file": "forces/lj-pair-force",
     "refs": [],
-    "title": "Feature: Lennard-Jones O(N²) Pair Force Kernel",
+    "title": "Feature: Lennard-Jones Pair Force Kernel",
     "type": "file"
   },
   "rq-13e15b90": {
@@ -635,6 +684,18 @@
     "refs": [],
     "title": "Bond row with atom index out of range",
     "type": "scenario"
+  },
+  "rq-14033af1": {
+    "decl": "- `NeighborListState::new(device: Arc<CudaDevice>, sim_box: SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>`",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NeighborListState",
+    "type": "api-item"
   },
   "rq-1434abd2": {
     "decl": "## Out of Scope",
@@ -661,6 +722,13 @@
       }
     ],
     "title": "Kernel does not modify positions, velocities, masses, or net forces",
+    "type": "scenario"
+  },
+  "rq-151cb099": {
+    "decl": "Scenario: Cell index of a position at the +L/2 boundary clamps inside the grid",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Cell index of a position at the +L/2 boundary clamps inside the grid",
     "type": "scenario"
   },
   "rq-15647873": {
@@ -892,6 +960,18 @@
     "title": "Log contains header plus step-0 row when n_steps = 0",
     "type": "scenario"
   },
+  "rq-1b9c474c": {
+    "decl": "Scenario: Reject configurations whose box admits fewer than 3 cells per axis",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject configurations whose box admits fewer than 3 cells per axis",
+    "type": "scenario"
+  },
   "rq-1bd297f4": {
     "decl": "## Instrumented Stages",
     "file": "performance-analysis",
@@ -1060,6 +1140,14 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-1f38d78a": {
+    "decl": "## Displacement Check",
+    "file": "forces/neighbor-list",
+    "level": 2,
+    "refs": [],
+    "title": "Displacement Check",
+    "type": "section"
+  },
   "rq-1fc57c00": {
     "decl": "- `run_simulation(config_path: &Path) -> Result<RunSummary, RunnerError>`",
     "file": "simulation-runner",
@@ -1152,6 +1240,13 @@
     "refs": [],
     "title": "Empty State",
     "type": "section"
+  },
+  "rq-21d27f06": {
+    "decl": "Scenario: All-pairs mode skips the box-too-small check",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "All-pairs mode skips the box-too-small check",
+    "type": "scenario"
   },
   "rq-2214f0a1": {
     "decl": "Scenario: Unrecognised subcommand prints usage and exits 1",
@@ -1277,6 +1372,26 @@
     "level": 3,
     "refs": [],
     "title": "Box-Muller transform",
+    "type": "section"
+  },
+  "rq-25faef11": {
+    "decl": "Scenario: Neighbor list applies minimum-image PBC",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Neighbor list applies minimum-image PBC",
+    "type": "scenario"
+  },
+  "rq-267941a2": {
+    "decl": "## Configuration",
+    "file": "forces/neighbor-list",
+    "level": 2,
+    "refs": [],
+    "title": "Configuration",
     "type": "section"
   },
   "rq-2680918c": {
@@ -1492,6 +1607,18 @@
     "title": "Construct with matching arrays and explicit unique IDs",
     "type": "scenario"
   },
+  "rq-2bc559ec": {
+    "decl": "Scenario: Each atom's neighbor list is sorted by partner index after build",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Each atom's neighbor list is sorted by partner index after build",
+    "type": "scenario"
+  },
   "rq-2be8ef35": {
     "decl": "## Velocity generation",
     "file": "simulation-runner",
@@ -1559,6 +1686,14 @@
     "refs": [],
     "title": "Atom with one bond receives the bond's force directly",
     "type": "scenario"
+  },
+  "rq-2e15fed7": {
+    "decl": "## Launch Configuration",
+    "file": "forces/neighbor-list",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
+    "type": "section"
   },
   "rq-2e4e70b4": {
     "decl": "Scenario: Two atoms at equilibrium distance produce zero force",
@@ -1738,6 +1873,14 @@
     "title": "Bond entries",
     "type": "section"
   },
+  "rq-33aa3e1d": {
+    "decl": "## Neighbor List Construction",
+    "file": "forces/neighbor-list",
+    "level": 2,
+    "refs": [],
+    "title": "Neighbor List Construction",
+    "type": "section"
+  },
   "rq-33c0521d": {
     "decl": "### Types",
     "file": "integration/velocity-verlet",
@@ -1745,6 +1888,18 @@
     "refs": [],
     "title": "Types",
     "type": "section"
+  },
+  "rq-344f7af0": {
+    "decl": "- `copy_positions_into_reference(particle_buffers, reference_x, reference_y, reference_z) -> Result<(), GpuError>`",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "copy_positions_into_reference",
+    "type": "api-item"
   },
   "rq-345d7784": {
     "decl": "## Feature API",
@@ -1790,6 +1945,14 @@
     "title": "Morse bond_type rejects non-positive re",
     "type": "scenario"
   },
+  "rq-3553aab2": {
+    "decl": "### Functions",
+    "file": "forces/neighbor-list",
+    "level": 3,
+    "refs": [],
+    "title": "Functions",
+    "type": "section"
+  },
   "rq-35722a66": {
     "decl": "## Out of Scope",
     "file": "io/config-schema",
@@ -1827,6 +1990,18 @@
       }
     ],
     "title": "lan_drift_half advances positions by v * dt/2",
+    "type": "scenario"
+  },
+  "rq-35981c27": {
+    "decl": "Scenario: First displacement_check call always rebuilds (needs_rebuild starts true)",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "First displacement_check call always rebuilds (needs_rebuild starts true)",
     "type": "scenario"
   },
   "rq-36105526": {
@@ -2079,6 +2254,14 @@
     ],
     "title": "Construct a ForceField with LennardJones and MorseBonded",
     "type": "scenario"
+  },
+  "rq-3e744fed": {
+    "decl": "## Feature API",
+    "file": "forces/neighbor-list",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-3e8324c2": {
     "decl": "Scenario: wrap_position leaves a position inside the primary image unchanged",
@@ -2461,6 +2644,20 @@
     "title": "Reject duplicate explicit IDs",
     "type": "scenario"
   },
+  "rq-4b40604b": {
+    "decl": "Scenario: Cell-list mode and all-pairs mode produce identical forces (within f32 tolerance)",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Cell-list mode and all-pairs mode produce identical forces (within f32 tolerance)",
+    "type": "scenario"
+  },
+  "rq-4b4f85c7": {
+    "decl": "Scenario: Box too small for cell-list rejected before forces are constructed",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Box too small for cell-list rejected before forces are constructed",
+    "type": "scenario"
+  },
   "rq-4b63564b": {
     "decl": "Scenario: NaN displacement propagates to NaN output",
     "file": "simulation-box",
@@ -2483,6 +2680,18 @@
       }
     ],
     "title": "wrap_position wraps a position outside the primary image",
+    "type": "scenario"
+  },
+  "rq-4bc8028f": {
+    "decl": "Scenario: NeighborListState with particle_count = 0 builds successfully",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NeighborListState with particle_count = 0 builds successfully",
     "type": "scenario"
   },
   "rq-4c245ce7": {
@@ -2521,11 +2730,11 @@
     "type": "scenario"
   },
   "rq-4ddab3c7": {
-    "decl": "### CUDA Kernel",
+    "decl": "### CUDA Kernels",
     "file": "forces/lj-pair-force",
     "level": 3,
     "refs": [],
-    "title": "CUDA Kernel",
+    "title": "CUDA Kernels",
     "type": "section"
   },
   "rq-4ea8bbb2": {
@@ -2635,6 +2844,18 @@
     "title": "Missing [simulation].temperature",
     "type": "scenario"
   },
+  "rq-52f547fd": {
+    "decl": "Scenario: NeighborListState with particle_count = 1 produces an empty neighbor list",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NeighborListState with particle_count = 1 produces an empty neighbor list",
+    "type": "scenario"
+  },
   "rq-53055a5b": {
     "decl": "- `SimulationConfig`",
     "file": "io/config-schema",
@@ -2646,6 +2867,26 @@
     ],
     "title": "SimulationConfig",
     "type": "api-item"
+  },
+  "rq-53ae77a4": {
+    "decl": "Scenario: Displacement check on reference positions equal to current returns 0",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Displacement check on reference positions equal to current returns 0",
+    "type": "scenario"
+  },
+  "rq-54a28837": {
+    "decl": "## Performance Notes",
+    "file": "forces/neighbor-list",
+    "level": 2,
+    "refs": [],
+    "title": "Performance Notes",
+    "type": "section"
   },
   "rq-553f28a3": {
     "decl": "Scenario: KE of three particles is summed in particle order",
@@ -2894,6 +3135,14 @@
     "title": "Timings",
     "type": "api-item"
   },
+  "rq-58acf788": {
+    "decl": "## Out of Scope",
+    "file": "forces/neighbor-list",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-58cac735": {
     "decl": "Scenario: vv_kick_drift_lossless on an empty state is a no-op",
     "file": "integration/velocity-verlet",
@@ -3011,6 +3260,14 @@
     "title": "NaN pair contributions propagate to NaN net forces",
     "type": "scenario"
   },
+  "rq-5cbab27f": {
+    "decl": "## Empty State",
+    "file": "forces/neighbor-list",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State",
+    "type": "section"
+  },
   "rq-5d1f8e8e": {
     "decl": "### Host wall-clock",
     "file": "performance-analysis",
@@ -3042,6 +3299,13 @@
     ],
     "title": "ParticleState",
     "type": "api-item"
+  },
+  "rq-5e5f9917": {
+    "decl": "Scenario: neighbor_list all-pairs mode rejects max_neighbors",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "neighbor_list all-pairs mode rejects max_neighbors",
+    "type": "scenario"
   },
   "rq-5e8125ac": {
     "decl": "Scenario: lan_drift_half leaves velocities, forces, masses unchanged",
@@ -3097,6 +3361,13 @@
       }
     ],
     "title": "Velocities are sampled when init file has no velo column",
+    "type": "scenario"
+  },
+  "rq-62300a18": {
+    "decl": "Scenario: All-pairs neighbor mode records lj_pair_force and omits neighbor-list rows",
+    "file": "performance-analysis",
+    "refs": [],
+    "title": "All-pairs neighbor mode records lj_pair_force and omits neighbor-list rows",
     "type": "scenario"
   },
   "rq-6289f344": {
@@ -3362,6 +3633,18 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-693ce6fa": {
+    "decl": "# Feature: Cell-List Neighbor List",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Cell-List Neighbor List",
+    "type": "file"
+  },
   "rq-696caf8e": {
     "decl": "Scenario: Two independent calls produce byte-identical accumulators",
     "file": "forces/morse-bonded",
@@ -3414,6 +3697,18 @@
     "title": "Velocity-Verlet Loop",
     "type": "section"
   },
+  "rq-6bf3709c": {
+    "decl": "Scenario: Two independent rebuilds with identical positions produce identical lists",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two independent rebuilds with identical positions produce identical lists",
+    "type": "scenario"
+  },
   "rq-6cb9ab62": {
     "decl": "Scenario: bonds field is optional and defaults to None",
     "file": "io/config-schema",
@@ -3464,6 +3759,14 @@
       }
     ],
     "title": "Path resolution and overwrite policy",
+    "type": "section"
+  },
+  "rq-6e11554f": {
+    "decl": "## Rebuild Policy",
+    "file": "forces/neighbor-list",
+    "level": 2,
+    "refs": [],
+    "title": "Rebuild Policy",
     "type": "section"
   },
   "rq-6e51f09c": {
@@ -3703,6 +4006,13 @@
     "title": "Validation order is lx then ly then lz",
     "type": "scenario"
   },
+  "rq-75746f64": {
+    "decl": "Scenario: neighbor_displacement_squared count equals one warm-up plus per-step launches",
+    "file": "performance-analysis",
+    "refs": [],
+    "title": "neighbor_displacement_squared count equals one warm-up plus per-step launches",
+    "type": "scenario"
+  },
   "rq-7600786b": {
     "decl": "## Test Fixture",
     "file": "pipeline-reversibility",
@@ -3878,7 +4188,7 @@
     "type": "scenario"
   },
   "rq-79938dbf": {
-    "decl": "- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], bond_list: &BondList, exclusion_list: &ExclusionList) -> Result<ForceField, ForceFieldError>`",
+    "decl": "- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], bond_list: &BondList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>`",
     "file": "forces/framework",
     "refs": [],
     "title": "ForceField",
@@ -4013,6 +4323,18 @@
     "title": "vv_kick_drift_lossless",
     "type": "api-item"
   },
+  "rq-7db97132": {
+    "decl": "- `NeighborListState::rebuild(&mut self, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NeighborListState",
+    "type": "api-item"
+  },
   "rq-7df1515f": {
     "decl": "Scenario: Load a valid minimal config",
     "file": "io/config-schema",
@@ -4062,6 +4384,13 @@
     "title": "total_runtime is at least as large as the maximum single-stage total",
     "type": "scenario"
   },
+  "rq-7e902717": {
+    "decl": "Scenario: neighbor_list cell-list rejects unknown field",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "neighbor_list cell-list rejects unknown field",
+    "type": "scenario"
+  },
   "rq-7eb22aad": {
     "decl": "### Synthetic stages",
     "file": "performance-analysis",
@@ -4069,6 +4398,13 @@
     "refs": [],
     "title": "Synthetic stages",
     "type": "section"
+  },
+  "rq-7f2310ac": {
+    "decl": "Scenario: neighbor_list_build and copy_positions_into_reference counts match rebuilds",
+    "file": "performance-analysis",
+    "refs": [],
+    "title": "neighbor_list_build and copy_positions_into_reference counts match rebuilds",
+    "type": "scenario"
   },
   "rq-7f867e37": {
     "decl": "Scenario: Reject infinite ly",
@@ -4182,6 +4518,13 @@
     "title": "Reject unsupported Properties form",
     "type": "scenario"
   },
+  "rq-838acdee": {
+    "decl": "Scenario: sorted_particle_ids sorts particles by (cell_index, particle_id)",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "sorted_particle_ids sorts particles by (cell_index, particle_id)",
+    "type": "scenario"
+  },
   "rq-85192a05": {
     "decl": "Scenario: At the LJ minimum r = sigma * 2^(1/6), the force is zero",
     "file": "forces/lj-pair-force",
@@ -4256,6 +4599,18 @@
     ],
     "title": "Two end-to-end Langevin runs with identical configs produce byte-identical outputs",
     "type": "scenario"
+  },
+  "rq-884b5cd6": {
+    "decl": "- `neighbor_displacement_squared(particle_buffers, reference_x, reference_y, reference_z, sim_box, disp_sq) -> Result<(), GpuError>`",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "neighbor_displacement_squared",
+    "type": "api-item"
   },
   "rq-889076d5": {
     "decl": "Scenario: Kernel failure mid-loop returns exit code 2",
@@ -4516,6 +4871,18 @@
     "title": "Write a single row at step 0",
     "type": "scenario"
   },
+  "rq-90524f5d": {
+    "decl": "Scenario: Sub-skin movement does not trigger a rebuild",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Sub-skin movement does not trigger a rebuild",
+    "type": "scenario"
+  },
   "rq-9197d752": {
     "decl": "### Types",
     "file": "pair-reduction",
@@ -4593,6 +4960,13 @@
       }
     ],
     "title": "Langevin BAOAB missing seed is rejected",
+    "type": "scenario"
+  },
+  "rq-931f1ab8": {
+    "decl": "Scenario: neighbor_list all-pairs mode is accepted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "neighbor_list all-pairs mode is accepted",
     "type": "scenario"
   },
   "rq-93367a8f": {
@@ -5091,6 +5465,18 @@
     "title": "Reject missing Properties attribute",
     "type": "scenario"
   },
+  "rq-9f63a183": {
+    "decl": "Scenario: Over-skin movement triggers a rebuild",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Over-skin movement triggers a rebuild",
+    "type": "scenario"
+  },
   "rq-9f658edf": {
     "decl": "Scenario: Exclusion scale greater than 1 rejected",
     "file": "forces/bonds",
@@ -5118,6 +5504,14 @@
     "title": "Reject upload when host particle count differs from buffers",
     "type": "scenario"
   },
+  "rq-a060036e": {
+    "decl": "## Cell List Construction",
+    "file": "forces/neighbor-list",
+    "level": 2,
+    "refs": [],
+    "title": "Cell List Construction",
+    "type": "section"
+  },
   "rq-a0c0992f": {
     "decl": "- `PairBuffer` — host-side wrapper around the three device pair-force",
     "file": "pair-reduction",
@@ -5128,6 +5522,18 @@
       }
     ],
     "title": "PairBuffer",
+    "type": "api-item"
+  },
+  "rq-a1262872": {
+    "decl": "- `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, cell_size, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>`",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "neighbor_list_build",
     "type": "api-item"
   },
   "rq-a199e0aa": {
@@ -5311,7 +5717,12 @@
     "decl": "## Slot Integration",
     "file": "forces/lj-pair-force",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/lj.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Slot Integration",
     "type": "section"
   },
@@ -5357,6 +5768,13 @@
     ],
     "title": "Lossy run includes lossy kick rows and excludes lossless rows",
     "type": "scenario"
+  },
+  "rq-a8320030": {
+    "decl": "- `NeighborListConfig` — tagged enum selecting the algorithm used by",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "NeighborListConfig",
+    "type": "api-item"
   },
   "rq-a8df30ac": {
     "decl": "Scenario: minimum_image just past -L/2 wraps by one period",
@@ -5417,6 +5835,13 @@
       }
     ],
     "title": "Lossy mode is the default for velocity-Verlet",
+    "type": "scenario"
+  },
+  "rq-a99ca751": {
+    "decl": "Scenario: Cell index of a position outside the primary cell wraps before binning",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Cell index of a position outside the primary cell wraps before binning",
     "type": "scenario"
   },
   "rq-a9b511ea": {
@@ -5552,6 +5977,14 @@
     "title": "Trajectory and log files remain bit-identical between two identical runs",
     "type": "scenario"
   },
+  "rq-ad7eb40f": {
+    "decl": "### Types",
+    "file": "forces/neighbor-list",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-adc3a32f": {
     "decl": "Scenario: Equilibrium kinetic energy approaches 1.5 * N * k_B * T after many steps",
     "file": "integration/langevin-baoab",
@@ -5633,7 +6066,7 @@
     "type": "api-item"
   },
   "rq-af2d1628": {
-    "decl": "- `LennardJonesState` — owns the slot's `PairBuffer`, `neighbor_counts`",
+    "decl": "- `LennardJonesState` — owns the slot's `PairBuffer`, `LennardJonesParameters`,",
     "file": "forces/framework",
     "refs": [],
     "title": "LennardJonesState",
@@ -5715,6 +6148,13 @@
     "title": "Timings",
     "type": "api-item"
   },
+  "rq-b1f33ea4": {
+    "decl": "Scenario: neighbor_list cell-list with explicit parameters is accepted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "neighbor_list cell-list with explicit parameters is accepted",
+    "type": "scenario"
+  },
   "rq-b2314952": {
     "decl": "Scenario: Bit-exact equality after a single full velocity-Verlet step",
     "file": "pipeline-reproducibility",
@@ -5739,6 +6179,18 @@
     "title": "Forward then negated step returns to the original state for a free particle",
     "type": "scenario"
   },
+  "rq-b2d68288": {
+    "decl": "- `NeighborListState` — host-side wrapper carrying the device buffers",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NeighborListState",
+    "type": "api-item"
+  },
   "rq-b2fa4a1f": {
     "decl": "Scenario: Lossless run includes lossless kick rows and excludes lossy rows",
     "file": "performance-analysis",
@@ -5749,6 +6201,13 @@
       }
     ],
     "title": "Lossless run includes lossless kick rows and excludes lossy rows",
+    "type": "scenario"
+  },
+  "rq-b39d3be7": {
+    "decl": "Scenario: Displacement check uses minimum-image displacement",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Displacement check uses minimum-image displacement",
     "type": "scenario"
   },
   "rq-b41d8d36": {
@@ -5902,6 +6361,13 @@
       }
     ],
     "title": "Non-finite check precedes non-positive check on the same axis",
+    "type": "scenario"
+  },
+  "rq-ba0724dc": {
+    "decl": "Scenario: neighbor_list all-pairs mode rejects r_skin",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "neighbor_list all-pairs mode rejects r_skin",
     "type": "scenario"
   },
   "rq-ba380d56": {
@@ -6138,6 +6604,18 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-c0cfc5d6": {
+    "decl": "Scenario: Cell counts are floor(L / (r_cut + r_skin))",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Cell counts are floor(L / (r_cut + r_skin))",
+    "type": "scenario"
+  },
   "rq-c0f98145": {
     "decl": "### Combiner Kernel",
     "file": "forces/framework",
@@ -6224,6 +6702,19 @@
     "title": "Functions",
     "type": "section"
   },
+  "rq-c4645fa6": {
+    "decl": "## Gherkin Scenarios",
+    "file": "forces/neighbor-list",
+    "level": 2,
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-c4845f90": {
     "decl": "- `Timings::finalize(&mut self) -> Result<TimingsReport, TimingsError>`",
     "file": "performance-analysis",
@@ -6234,6 +6725,18 @@
       }
     ],
     "title": "Timings",
+    "type": "api-item"
+  },
+  "rq-c49b2fe6": {
+    "decl": "- `NeighborListState::displacement_check(&mut self, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<f32, NeighborListError>`",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NeighborListState",
     "type": "api-item"
   },
   "rq-c525ee79": {
@@ -6284,6 +6787,14 @@
     ],
     "title": "Write a single frame with velocities",
     "type": "scenario"
+  },
+  "rq-c62bb861": {
+    "decl": "## Determinism",
+    "file": "forces/neighbor-list",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
   },
   "rq-c669b757": {
     "decl": "## Smoke Test",
@@ -6385,6 +6896,13 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-c921ba22": {
+    "decl": "Scenario: Unknown neighbor_list mode is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Unknown neighbor_list mode is rejected",
+    "type": "scenario"
   },
   "rq-c9618bdd": {
     "decl": "Scenario: minimum_image is per-axis independent",
@@ -6501,6 +7019,13 @@
     "title": "Per-Slot Private Accumulators",
     "type": "section"
   },
+  "rq-cd50d861": {
+    "decl": "Scenario: cell_offsets contains the prefix sum of cell occupancies",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "cell_offsets contains the prefix sum of cell occupancies",
+    "type": "scenario"
+  },
   "rq-cdd5dc6d": {
     "decl": "## File Format",
     "file": "io/init-state-file",
@@ -6508,6 +7033,13 @@
     "refs": [],
     "title": "File Format",
     "type": "section"
+  },
+  "rq-cde6e114": {
+    "decl": "Scenario: neighbor_list cell-list mode omitting r_skin uses 0.3 * max cutoff",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "neighbor_list cell-list mode omitting r_skin uses 0.3 * max cutoff",
+    "type": "scenario"
   },
   "rq-ce445e13": {
     "decl": "## RNG",
@@ -6682,6 +7214,10 @@
     "file": "forces/lj-pair-force",
     "refs": [
       {
+        "file": "src/forces/lj.rs",
+        "kind": "code"
+      },
+      {
         "file": "src/gpu/kernels.rs",
         "kind": "code"
       }
@@ -6700,6 +7236,22 @@
     ],
     "title": "Pair `between` normalisation when both types are declared",
     "type": "scenario"
+  },
+  "rq-d46a89d5": {
+    "decl": "- `lj_pair_force_neighbor(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameters, exclusions: &DeviceExclusionList, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>`",
+    "file": "forces/lj-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/lj.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "lj_pair_force_neighbor",
+    "type": "api-item"
   },
   "rq-d49c9093": {
     "decl": "- `SimulationBox::minimum_image(&self, displacement: [f32; 3]) -> [f32; 3]`",
@@ -6783,6 +7335,18 @@
     ],
     "title": "Data rows",
     "type": "section"
+  },
+  "rq-d8e4407a": {
+    "decl": "- `NeighborListError` — error type. Variants:",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NeighborListError",
+    "type": "api-item"
   },
   "rq-d920e446": {
     "decl": "Scenario: fill kernel does not write beyond the buffer",
@@ -7031,6 +7595,14 @@
     "title": "step() on a ForceField with both slots sums LJ and Morse",
     "type": "scenario"
   },
+  "rq-dfad7218": {
+    "decl": "## Cell Layout",
+    "file": "forces/neighbor-list",
+    "level": 2,
+    "refs": [],
+    "title": "Cell Layout",
+    "type": "section"
+  },
   "rq-dfca62d2": {
     "decl": "Scenario: Two independent runs produce byte-identical pair-force buffers",
     "file": "forces/lj-pair-force",
@@ -7147,6 +7719,13 @@
       }
     ],
     "title": "Different step_indices give different velocity outputs",
+    "type": "scenario"
+  },
+  "rq-e2f32af0": {
+    "decl": "Scenario: neighbor_list defaults to cell-list with derived r_skin when [neighbor_list] is omitted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "neighbor_list defaults to cell-list with derived r_skin when [neighbor_list] is omitted",
     "type": "scenario"
   },
   "rq-e34d764e": {
@@ -7297,6 +7876,13 @@
     "title": "Functions",
     "type": "section"
   },
+  "rq-e643b070": {
+    "decl": "Scenario: neighbor_list cell-list mode omitting max_neighbors uses default 256",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "neighbor_list cell-list mode omitting max_neighbors uses default 256",
+    "type": "scenario"
+  },
   "rq-e6552df6": {
     "decl": "### Empty init velocities",
     "file": "simulation-runner",
@@ -7317,6 +7903,18 @@
     "refs": [],
     "title": "Functions",
     "type": "section"
+  },
+  "rq-e75b24e7": {
+    "decl": "Scenario: Neighbor list excludes the self atom",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Neighbor list excludes the self atom",
+    "type": "scenario"
   },
   "rq-e7c05140": {
     "decl": "Scenario: Langevin-BAOAB kind rejects velocity-Verlet fields",
@@ -7465,6 +8063,18 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-ea0ee5ef": {
+    "decl": "Scenario: Neighbor list contains every particle within r_cut + r_skin",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Neighbor list contains every particle within r_cut + r_skin",
+    "type": "scenario"
+  },
   "rq-ea3bef6c": {
     "decl": "Scenario: Reject positions past +L/2",
     "file": "io/init-state-file",
@@ -7507,6 +8117,13 @@
     "refs": [],
     "title": "MorseBondedState",
     "type": "api-item"
+  },
+  "rq-ec28cbfb": {
+    "decl": "Scenario: neighbor_list rejects non-finite r_skin",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "neighbor_list rejects non-finite r_skin",
+    "type": "scenario"
   },
   "rq-ec53799e": {
     "decl": "Scenario: lj_pair_force followed by reduce_pair_forces produces the correct net force",
@@ -7642,6 +8259,13 @@
     ],
     "title": "Runner flow",
     "type": "section"
+  },
+  "rq-ef918dc6": {
+    "decl": "Scenario: Cell-list neighbor mode records the neighbor stages and omits lj_pair_force",
+    "file": "performance-analysis",
+    "refs": [],
+    "title": "Cell-list neighbor mode records the neighbor stages and omits lj_pair_force",
+    "type": "scenario"
   },
   "rq-f001eaf8": {
     "decl": "- `PairInteractionConfig`",
@@ -7996,6 +8620,13 @@
     "title": "Render multiple type names from indices",
     "type": "scenario"
   },
+  "rq-f7856bcc": {
+    "decl": "Scenario: neighbor_list rejects non-positive r_skin",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "neighbor_list rejects non-positive r_skin",
+    "type": "scenario"
+  },
   "rq-f79657d2": {
     "decl": "Scenario: Compressed bond produces a repulsive force",
     "file": "forces/morse-bonded",
@@ -8081,6 +8712,18 @@
       }
     ],
     "title": "Velocity generation is deterministic in the seed",
+    "type": "scenario"
+  },
+  "rq-f94ee5cd": {
+    "decl": "Scenario: Displacement check returns the maximum across all particles",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Displacement check returns the maximum across all particles",
     "type": "scenario"
   },
   "rq-fa24a8d1": {
@@ -8214,6 +8857,21 @@
       }
     ],
     "title": "Reproducibility byte-for-byte across two identical runs",
+    "type": "scenario"
+  },
+  "rq-fec7ae1c": {
+    "decl": "### Rust Launch Helpers",
+    "file": "forces/neighbor-list",
+    "level": 3,
+    "refs": [],
+    "title": "Rust Launch Helpers",
+    "type": "section"
+  },
+  "rq-fedef74d": {
+    "decl": "Scenario: neighbor_list rejects zero max_neighbors",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "neighbor_list rejects zero max_neighbors",
     "type": "scenario"
   },
   "rq-ff46e833": {

@@ -77,3 +77,82 @@ extern "C" __global__ void lj_pair_force(
   pair_forces_y[slot] = fy;
   pair_forces_z[slot] = fz;
 }
+
+// rq-d46a89d5
+extern "C" __global__ void lj_pair_force_neighbor(
+    const float *positions_x,
+    const float *positions_y,
+    const float *positions_z,
+    float *pair_forces_x,
+    float *pair_forces_y,
+    float *pair_forces_z,
+    unsigned int max_neighbors,
+    float lx, float ly, float lz,
+    float sigma,
+    float epsilon,
+    float cutoff,
+    const unsigned int *atom_excl_offsets,
+    const unsigned int *atom_excl_partners,
+    const float *atom_excl_scales,
+    const unsigned int *neighbor_list,
+    const unsigned int *neighbor_counts,
+    unsigned int n)
+{
+  unsigned int i = blockIdx.y * blockDim.y + threadIdx.y;
+  unsigned int k = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= n || k >= max_neighbors) {
+    return;
+  }
+  unsigned int slot = i * max_neighbors + k;
+  if (k >= neighbor_counts[i]) {
+    pair_forces_x[slot] = 0.0f;
+    pair_forces_y[slot] = 0.0f;
+    pair_forces_z[slot] = 0.0f;
+    return;
+  }
+  unsigned int j = neighbor_list[slot];
+
+  float dx = positions_x[i] - positions_x[j];
+  float dy = positions_y[i] - positions_y[j];
+  float dz = positions_z[i] - positions_z[j];
+
+  dx = dx - lx * floorf((dx + lx * 0.5f) / lx);
+  dy = dy - ly * floorf((dy + ly * 0.5f) / ly);
+  dz = dz - lz * floorf((dz + lz * 0.5f) / lz);
+
+  float r2 = dx * dx + dy * dy + dz * dz;
+  if (r2 > cutoff * cutoff) {
+    pair_forces_x[slot] = 0.0f;
+    pair_forces_y[slot] = 0.0f;
+    pair_forces_z[slot] = 0.0f;
+    return;
+  }
+
+  float inv_r2 = 1.0f / r2;
+  float sigma2 = sigma * sigma;
+  float sr2 = sigma2 * inv_r2;
+  float sr6 = sr2 * sr2 * sr2;
+  float sr12 = sr6 * sr6;
+  float factor = 24.0f * epsilon * inv_r2 * (2.0f * sr12 - sr6);
+
+  float fx = factor * dx;
+  float fy = factor * dy;
+  float fz = factor * dz;
+
+  unsigned int start = atom_excl_offsets[i];
+  unsigned int end = atom_excl_offsets[i + 1];
+  float scale = 1.0f;
+  for (unsigned int m = start; m < end; ++m) {
+    if (atom_excl_partners[m] == j) {
+      scale = atom_excl_scales[m];
+      break;
+    }
+  }
+  fx *= scale;
+  fy *= scale;
+  fz *= scale;
+
+  pair_forces_x[slot] = fx;
+  pair_forces_y[slot] = fy;
+  pair_forces_z[slot] = fz;
+}

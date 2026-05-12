@@ -1,13 +1,14 @@
 pub mod bonds;
 pub mod lj;
 pub mod morse;
+pub mod neighbor_list;
 
 use std::sync::Arc;
 
 use cudarc::driver::CudaDevice;
 
 use crate::gpu::{GpuError, ParticleBuffers, accumulate_forces};
-use crate::io::config::{BondTypeConfig, PairInteractionConfig};
+use crate::io::config::{BondTypeConfig, NeighborListConfig, PairInteractionConfig};
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
 
@@ -17,6 +18,7 @@ pub use bonds::{
 };
 pub use lj::LennardJonesState;
 pub use morse::MorseBondedState;
+pub use neighbor_list::{NeighborListError, NeighborListState};
 
 #[derive(Debug)]
 pub enum PotentialSlot {
@@ -28,6 +30,7 @@ pub enum PotentialSlot {
 pub enum ForceFieldError {
     Gpu(GpuError),
     Timings(TimingsError),
+    NeighborList(NeighborListError),
 }
 
 impl std::fmt::Display for ForceFieldError {
@@ -35,6 +38,7 @@ impl std::fmt::Display for ForceFieldError {
         match self {
             ForceFieldError::Gpu(e) => write!(f, "Gpu({e})"),
             ForceFieldError::Timings(e) => write!(f, "Timings({e})"),
+            ForceFieldError::NeighborList(e) => write!(f, "NeighborList({e})"),
         }
     }
 }
@@ -53,6 +57,12 @@ impl From<TimingsError> for ForceFieldError {
     }
 }
 
+impl From<NeighborListError> for ForceFieldError {
+    fn from(e: NeighborListError) -> Self {
+        ForceFieldError::NeighborList(e)
+    }
+}
+
 #[derive(Debug)]
 pub struct ForceField {
     pub device: Arc<CudaDevice>,
@@ -63,11 +73,12 @@ impl ForceField {
     pub fn new(
         device: Arc<CudaDevice>,
         particle_count: usize,
-        _sim_box: &SimulationBox,
+        sim_box: &SimulationBox,
         pair_interactions: &[PairInteractionConfig],
         bond_types: &[BondTypeConfig],
         bond_list: &BondList,
         exclusion_list: &ExclusionList,
+        neighbor_list_config: &NeighborListConfig,
     ) -> Result<Self, ForceFieldError> {
         let mut slots: Vec<PotentialSlot> = Vec::new();
 
@@ -83,8 +94,10 @@ impl ForceField {
         let lj_state = LennardJonesState::new(
             device.clone(),
             particle_count,
+            *sim_box,
             lj_params,
             exclusion_list,
+            neighbor_list_config,
         )?;
         slots.push(PotentialSlot::LennardJones(lj_state));
 

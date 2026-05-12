@@ -2,7 +2,7 @@ use dynamics::forces::{
     Bond, BondList, ExclusionList, ForceField, PotentialSlot,
 };
 use dynamics::gpu::{ParticleBuffers, init_device};
-use dynamics::io::config::{BondTypeConfig, PairInteractionConfig};
+use dynamics::io::config::{BondTypeConfig, NeighborListConfig, PairInteractionConfig};
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 use dynamics::timings::Timings;
@@ -68,6 +68,7 @@ fn force_field_lj_only() {
         &[],
         &BondList::empty(4),
         &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
     )
     .unwrap();
     assert_eq!(ff.slots.len(), 1);
@@ -93,6 +94,7 @@ fn force_field_lj_and_morse() {
         &bt,
         &bl,
         &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
     )
     .unwrap();
     assert_eq!(ff.slots.len(), 2);
@@ -118,6 +120,7 @@ fn bond_types_declared_no_bonds() {
         &bt,
         &BondList::empty(4),
         &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
     )
     .unwrap();
     assert_eq!(ff.slots.len(), 1);
@@ -135,6 +138,7 @@ fn empty_force_field() {
         &[],
         &BondList::empty(0),
         &ExclusionList::empty(0),
+        &NeighborListConfig::AllPairs,
     )
     .unwrap();
     assert_eq!(ff.slots.len(), 1);
@@ -155,6 +159,7 @@ fn step_lj_only_writes_lj_forces() {
         &[],
         &BondList::empty(2),
         &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
     )
     .unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
@@ -195,6 +200,7 @@ fn step_both_slots_sums_lj_and_morse() {
         &[],
         &BondList::empty(2),
         &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
     )
     .unwrap();
     ff_lj.step(&mut buffers_lj_only, &box_10(), &mut timings_lj).unwrap();
@@ -217,6 +223,7 @@ fn step_both_slots_sums_lj_and_morse() {
         &bt,
         &bl,
         &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
     )
     .unwrap();
     ff_morse.step(&mut buffers_b, &box_10(), &mut timings_b).unwrap();
@@ -232,6 +239,7 @@ fn step_both_slots_sums_lj_and_morse() {
         &bt,
         &bl,
         &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
     )
     .unwrap();
     ff_both.step(&mut buffers_a, &box_10(), &mut timings_a).unwrap();
@@ -268,6 +276,7 @@ fn step_empty_launches_no_kernels() {
         &[],
         &BondList::empty(0),
         &ExclusionList::empty(0),
+        &NeighborListConfig::AllPairs,
     )
     .unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
@@ -292,6 +301,7 @@ fn two_independent_runs_byte_identical() {
         &[],
         &BondList::empty(4),
         &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
     )
     .unwrap();
     let mut ff_b = ForceField::new(
@@ -302,6 +312,7 @@ fn two_independent_runs_byte_identical() {
         &[],
         &BondList::empty(4),
         &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
     )
     .unwrap();
     ff_a.step(&mut buffers_a, &box_10(), &mut timings_a).unwrap();
@@ -330,6 +341,7 @@ fn combiner_idempotent_across_two_calls() {
         &[],
         &BondList::empty(4),
         &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
     )
     .unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();

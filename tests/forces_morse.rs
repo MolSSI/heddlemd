@@ -3,7 +3,7 @@ use dynamics::forces::{BondList, ExclusionList, ForceField, MorseBondedState, Po
 use dynamics::gpu::{
     ParticleBuffers, init_device, morse_bond_force, reduce_bond_forces,
 };
-use dynamics::io::config::{BondTypeConfig, PairInteractionConfig};
+use dynamics::io::config::{BondTypeConfig, NeighborListConfig, PairInteractionConfig};
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 use dynamics::timings::Timings;
@@ -407,6 +407,7 @@ fn diatomic_equilibrium_produces_zero_net_force() {
         &bt,
         &bl,
         &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
     )
     .unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
@@ -440,6 +441,7 @@ fn newtons_third_law_holds_for_combined_force() {
         &bt,
         &bl,
         &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
     )
     .unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
