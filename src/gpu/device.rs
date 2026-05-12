@@ -52,5 +52,10 @@ pub fn init_device() -> Result<Arc<CudaDevice>, GpuError> {
         "pair_force",
         &["lj_pair_force"],
     )?;
+    device.load_ptx(
+        Ptx::from_src(kernels::LANGEVIN),
+        "langevin",
+        &["lan_drift_half", "lan_ou_step"],
+    )?;
     Ok(device)
 }

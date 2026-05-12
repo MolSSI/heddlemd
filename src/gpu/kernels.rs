@@ -235,6 +235,85 @@ pub fn vv_kick_drift_lossless(
     Ok(())
 }
 
+// rq-f00f729e
+pub fn lan_drift_half(
+    buffers: &mut ParticleBuffers,
+    dt: f32,
+) -> Result<(), GpuError> {
+    let n = buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let n_u32 = n as u32;
+    let func = buffers
+        .device
+        .get_func("langevin", "lan_drift_half")
+        .expect("langevin module is not loaded; init_device() must be called first");
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut buffers.positions_x,
+                &mut buffers.positions_y,
+                &mut buffers.positions_z,
+                &buffers.velocities_x,
+                &buffers.velocities_y,
+                &buffers.velocities_z,
+                dt,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-6435723d
+pub fn lan_ou_step(
+    buffers: &mut ParticleBuffers,
+    seed: u64,
+    step_index: u64,
+    alpha: f32,
+    kt: f32,
+) -> Result<(), GpuError> {
+    let n = buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let n_u32 = n as u32;
+    let func = buffers
+        .device
+        .get_func("langevin", "lan_ou_step")
+        .expect("langevin module is not loaded; init_device() must be called first");
+    let cfg = launch_config(n_u32);
+    let seed_lo = (seed & 0xFFFF_FFFF) as u32;
+    let seed_hi = (seed >> 32) as u32;
+    let step_lo = (step_index & 0xFFFF_FFFF) as u32;
+    let step_hi = (step_index >> 32) as u32;
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut buffers.velocities_x,
+                &mut buffers.velocities_y,
+                &mut buffers.velocities_z,
+                &buffers.masses,
+                &buffers.particle_ids,
+                seed_lo,
+                seed_hi,
+                step_lo,
+                step_hi,
+                alpha,
+                kt,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 pub fn vv_kick_lossless(
     buffers: &mut ParticleBuffers,
     lossless: &mut LosslessBuffers,

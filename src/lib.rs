@@ -1,4 +1,5 @@
 pub mod gpu;
+pub mod integrator;
 pub mod io;
 pub mod pbc;
 pub mod runner;

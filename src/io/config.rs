@@ -58,6 +58,13 @@ pub enum ConfigError {
     MultiTypeUnsupported {
         count: usize,
     },
+    UnknownIntegratorKind {
+        actual: String,
+    },
+    UnknownIntegratorField {
+        kind: String,
+        field: String,
+    },
 }
 
 impl std::fmt::Display for ConfigError {
@@ -104,6 +111,13 @@ impl std::fmt::Display for ConfigError {
             ConfigError::MultiTypeUnsupported { count } => {
                 write!(f, "MultiTypeUnsupported {{ count: {count} }}")
             }
+            ConfigError::UnknownIntegratorKind { actual } => {
+                write!(f, "UnknownIntegratorKind {{ actual: {actual:?} }}")
+            }
+            ConfigError::UnknownIntegratorField { kind, field } => write!(
+                f,
+                "UnknownIntegratorField {{ kind: {kind:?}, field: {field:?} }}"
+            ),
         }
     }
 }
@@ -119,10 +133,17 @@ pub struct SimulationConfig {
     pub temperature: f64,
 }
 
-// rq-661bf664
+// rq-661bf664 rq-686b0d37
 #[derive(Debug, Clone)]
-pub struct IntegratorConfig {
-    pub lossless: bool,
+pub enum IntegratorKind {
+    VelocityVerlet {
+        lossless: bool,
+    },
+    LangevinBaoab {
+        friction: f64,
+        temperature: f64,
+        seed: u64,
+    },
 }
 
 // rq-a5ccc1de
@@ -159,7 +180,7 @@ pub struct Config {
     pub schema_version: u64,
     pub init: PathBuf,
     pub simulation: SimulationConfig,
-    pub integrator: IntegratorConfig,
+    pub integrator: IntegratorKind,
     pub particle_types: Vec<ParticleTypeConfig>,
     pub pair_interactions: Vec<PairInteractionConfig>,
     pub output: OutputConfig,
@@ -304,12 +325,55 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
     };
 
     let integ_tbl = get_table(root, "integrator")?;
-    let lossless = match integ_tbl.get("lossless") {
-        Some(toml::Value::Boolean(b)) => *b,
-        Some(_) => return Err(invalid("integrator.lossless", "expected a boolean")),
-        None => false,
+    let kind_str = get_str(integ_tbl, "kind")
+        .map_err(rename_field("integrator.kind".into()))?
+        .to_string();
+    let integrator = match kind_str.as_str() {
+        "velocity-verlet" => {
+            for key in integ_tbl.keys() {
+                if !matches!(key.as_str(), "kind" | "lossless") {
+                    return Err(ConfigError::UnknownIntegratorField {
+                        kind: "velocity-verlet".to_string(),
+                        field: key.clone(),
+                    });
+                }
+            }
+            let lossless = match integ_tbl.get("lossless") {
+                Some(toml::Value::Boolean(b)) => *b,
+                Some(_) => return Err(invalid("integrator.lossless", "expected a boolean")),
+                None => false,
+            };
+            IntegratorKind::VelocityVerlet { lossless }
+        }
+        "langevin-baoab" => {
+            for key in integ_tbl.keys() {
+                if !matches!(key.as_str(), "kind" | "friction" | "temperature" | "seed") {
+                    return Err(ConfigError::UnknownIntegratorField {
+                        kind: "langevin-baoab".to_string(),
+                        field: key.clone(),
+                    });
+                }
+            }
+            let friction = get_f64(integ_tbl, "friction")
+                .map_err(rename_field("integrator.friction".into()))?;
+            require_finite_positive("integrator.friction", friction)?;
+            let temperature = get_f64(integ_tbl, "temperature")
+                .map_err(rename_field("integrator.temperature".into()))?;
+            require_finite_positive("integrator.temperature", temperature)?;
+            let seed = get_u64(integ_tbl, "seed")
+                .map_err(rename_field("integrator.seed".into()))?;
+            IntegratorKind::LangevinBaoab {
+                friction,
+                temperature,
+                seed,
+            }
+        }
+        other => {
+            return Err(ConfigError::UnknownIntegratorKind {
+                actual: other.to_string(),
+            });
+        }
     };
-    let integrator = IntegratorConfig { lossless };
 
     let pt_array = root
         .get("particle_types")

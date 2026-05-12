@@ -56,6 +56,18 @@
     "title": "Data rows",
     "type": "section"
   },
+  "rq-00cbbf51": {
+    "decl": "Scenario: Langevin BAOAB runs end-to-end through the runner",
+    "file": "simulation-runner",
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Langevin BAOAB runs end-to-end through the runner",
+    "type": "scenario"
+  },
   "rq-017b6769": {
     "decl": "Scenario: Reject non-positive epsilon",
     "file": "io/config-schema",
@@ -66,6 +78,18 @@
       }
     ],
     "title": "Reject non-positive epsilon",
+    "type": "scenario"
+  },
+  "rq-01813ffa": {
+    "decl": "Scenario: lan_ou_step on empty state is a no-op",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "lan_ou_step on empty state is a no-op",
     "type": "scenario"
   },
   "rq-025b2c3b": {
@@ -158,7 +182,7 @@
   },
   "rq-0540b862": {
     "decl": "## Launch Configuration",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "level": 2,
     "refs": [],
     "title": "Launch Configuration",
@@ -218,7 +242,7 @@
   },
   "rq-09a2e15f": {
     "decl": "# Feature: Velocity Verlet Time Integration",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [],
     "title": "Feature: Velocity Verlet Time Integration",
     "type": "file"
@@ -246,6 +270,18 @@
     ],
     "title": "ConfigError",
     "type": "api-item"
+  },
+  "rq-0c2265eb": {
+    "decl": "Scenario: Langevin kick_half count is 2 N_steps; drift_half is 2 N_steps; ou_step is N_steps",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Langevin kick_half count is 2 N_steps; drift_half is 2 N_steps; ou_step is N_steps",
+    "type": "scenario"
   },
   "rq-0c3a23bb": {
     "decl": "## GPU Device Module",
@@ -279,12 +315,28 @@
     "title": "StageStats",
     "type": "api-item"
   },
+  "rq-0e5ac409": {
+    "decl": "## Algorithm",
+    "file": "integration/langevin-baoab",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
+  },
   "rq-0ec0f65d": {
     "decl": "## Gherkin Scenarios",
     "file": "io/trajectory-output",
     "level": 2,
     "refs": [],
     "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-0f7b8a57": {
+    "decl": "## Empty State",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State",
     "type": "section"
   },
   "rq-0ffccee0": {
@@ -297,6 +349,18 @@
       }
     ],
     "title": "Allocate device buffers and perform initial upload",
+    "type": "scenario"
+  },
+  "rq-100115a0": {
+    "decl": "Scenario: Missing integrator.kind is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Missing integrator.kind is rejected",
     "type": "scenario"
   },
   "rq-1012fb8a": {
@@ -317,6 +381,18 @@
       }
     ],
     "title": "min <= mean <= max for every row",
+    "type": "scenario"
+  },
+  "rq-10652c60": {
+    "decl": "Scenario: Different seeds give different velocity outputs",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Different seeds give different velocity outputs",
     "type": "scenario"
   },
   "rq-106dcabd": {
@@ -343,9 +419,17 @@
     "title": "KE of a single particle at rest is zero",
     "type": "scenario"
   },
+  "rq-10c79bb0": {
+    "decl": "## Slots",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Slots",
+    "type": "section"
+  },
   "rq-10cc8ddf": {
     "decl": "### CUDA Kernels",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "level": 3,
     "refs": [],
     "title": "CUDA Kernels",
@@ -491,6 +575,18 @@
     "title": "File Format",
     "type": "section"
   },
+  "rq-171b99f5": {
+    "decl": "Scenario: pre_force_step on empty state is a no-op",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "pre_force_step on empty state is a no-op",
+    "type": "scenario"
+  },
   "rq-17666e4f": {
     "decl": "Scenario: Open fails when the parent directory does not exist",
     "file": "io/trajectory-output",
@@ -539,6 +635,14 @@
     "title": "trajectory_every > n_steps writes only the step-0 frame",
     "type": "scenario"
   },
+  "rq-198f5ec1": {
+    "decl": "## Step Counter",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Step Counter",
+    "type": "section"
+  },
   "rq-19fe4806": {
     "decl": "Scenario: Reject NaN lx",
     "file": "simulation-box",
@@ -553,7 +657,7 @@
   },
   "rq-1a504311": {
     "decl": "Scenario: Single-step round-trip restores the observable state bit-exactly under zero force",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration_lossless.rs",
@@ -594,6 +698,14 @@
     ],
     "title": "Lossy 100-step round trip does NOT restore observables",
     "type": "scenario"
+  },
+  "rq-1b6324c3": {
+    "decl": "## Parameters",
+    "file": "integration/langevin-baoab",
+    "level": 2,
+    "refs": [],
+    "title": "Parameters",
+    "type": "section"
   },
   "rq-1b7680ad": {
     "decl": "### RNG",
@@ -660,6 +772,18 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-1c729f15": {
+    "decl": "Scenario: Langevin runs through the runner with N=0",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Langevin runs through the runner with N=0",
+    "type": "scenario"
+  },
   "rq-1c7a9cfd": {
     "decl": "## Schema",
     "file": "io/config-schema",
@@ -703,7 +827,7 @@
   },
   "rq-1e2d749d": {
     "decl": "Scenario: vv_kick_drift on an empty state is a no-op",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -732,6 +856,14 @@
     ],
     "title": "Reject when positions_y has the wrong length",
     "type": "scenario"
+  },
+  "rq-1f2f912b": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/langevin-baoab",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-1fc57c00": {
     "decl": "- `run_simulation(config_path: &Path) -> Result<RunSummary, RunnerError>`",
@@ -873,6 +1005,18 @@
     "title": "LogWriter",
     "type": "api-item"
   },
+  "rq-247e3799": {
+    "decl": "Scenario: dt = 0 leaves positions unchanged",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "dt = 0 leaves positions unchanged",
+    "type": "scenario"
+  },
   "rq-24a2b5ef": {
     "decl": "## Comparison Procedure",
     "file": "pipeline-reproducibility",
@@ -892,6 +1036,34 @@
     "level": 3,
     "refs": [],
     "title": "Kernel signature",
+    "type": "section"
+  },
+  "rq-25ba1194": {
+    "decl": "### Box-Muller transform",
+    "file": "integration/langevin-baoab",
+    "level": 3,
+    "refs": [],
+    "title": "Box-Muller transform",
+    "type": "section"
+  },
+  "rq-2680918c": {
+    "decl": "Scenario: lan_drift_half on empty state is a no-op",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "lan_drift_half on empty state is a no-op",
+    "type": "scenario"
+  },
+  "rq-26ba73d0": {
+    "decl": "### CUDA Kernels",
+    "file": "integration/langevin-baoab",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernels",
     "type": "section"
   },
   "rq-26d8c08c": {
@@ -951,7 +1123,7 @@
   },
   "rq-29718dcf": {
     "decl": "Scenario: kick_drift followed by kick reproduces closed-form constant-acceleration kinematics",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -959,6 +1131,18 @@
       }
     ],
     "title": "kick_drift followed by kick reproduces closed-form constant-acceleration kinematics",
+    "type": "scenario"
+  },
+  "rq-2980a672": {
+    "decl": "Scenario: Velocity-Verlet pre_force_step launches vv_kick_drift",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Velocity-Verlet pre_force_step launches vv_kick_drift",
     "type": "scenario"
   },
   "rq-299c69c9": {
@@ -970,7 +1154,7 @@
   },
   "rq-2a0e97f5": {
     "decl": "Scenario: Two independent lossless runs produce byte-identical results",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration_lossless.rs",
@@ -990,6 +1174,18 @@
       }
     ],
     "title": "Missing CLI argument prints usage and exits 1",
+    "type": "scenario"
+  },
+  "rq-2a3f0e9b": {
+    "decl": "Scenario: Different seeds produce different trajectories",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Different seeds produce different trajectories",
     "type": "scenario"
   },
   "rq-2a6a51c8": {
@@ -1027,6 +1223,14 @@
     ],
     "title": "TrajectoryWriter",
     "type": "api-item"
+  },
+  "rq-2b21f93c": {
+    "decl": "### Reproducibility",
+    "file": "integration/langevin-baoab",
+    "level": 3,
+    "refs": [],
+    "title": "Reproducibility",
+    "type": "section"
   },
   "rq-2b7cfbaf": {
     "decl": "## Out of Scope",
@@ -1123,7 +1327,7 @@
   },
   "rq-2f52c25e": {
     "decl": "Scenario: vv_kick leaves velocity unchanged when force is zero",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -1133,9 +1337,21 @@
     "title": "vv_kick leaves velocity unchanged when force is zero",
     "type": "scenario"
   },
+  "rq-30270f03": {
+    "decl": "Scenario: Velocity-Verlet kind rejects Langevin fields",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Velocity-Verlet kind rejects Langevin fields",
+    "type": "scenario"
+  },
   "rq-303211d9": {
     "decl": "- `LosslessBuffers` — host-side wrapper around the six device residual",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "src/gpu/lossless_buffers.rs",
@@ -1212,7 +1428,7 @@
   },
   "rq-33c0521d": {
     "decl": "### Types",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "level": 3,
     "refs": [],
     "title": "Types",
@@ -1262,6 +1478,18 @@
     "title": "Feature: `dynamics run` Simulation Runner",
     "type": "file"
   },
+  "rq-358de3e6": {
+    "decl": "Scenario: lan_drift_half advances positions by v * dt/2",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "lan_drift_half advances positions by v * dt/2",
+    "type": "scenario"
+  },
   "rq-36105526": {
     "decl": "### Host stages (Instant-timed)",
     "file": "performance-analysis",
@@ -1269,6 +1497,18 @@
     "refs": [],
     "title": "Host stages (Instant-timed)",
     "type": "section"
+  },
+  "rq-36382434": {
+    "decl": "Scenario: Velocity-Verlet post_force_step launches vv_kick",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Velocity-Verlet post_force_step launches vv_kick",
+    "type": "scenario"
   },
   "rq-3766be01": {
     "decl": "- `ParticleState` — host-side SoA state. All eleven per-particle arrays are",
@@ -1284,7 +1524,7 @@
   },
   "rq-37e6f318": {
     "decl": "Scenario: Two independent runs produce byte-identical outputs",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -1294,9 +1534,21 @@
     "title": "Two independent runs produce byte-identical outputs",
     "type": "scenario"
   },
+  "rq-385408d0": {
+    "decl": "Scenario: Langevin BAOAB rejects friction=0",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Langevin BAOAB rejects friction=0",
+    "type": "scenario"
+  },
   "rq-386cfae3": {
     "decl": "Scenario: vv_kick on an empty state is a no-op",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -1355,6 +1607,14 @@
     "title": "Download into the source state preserves values",
     "type": "scenario"
   },
+  "rq-39ab439e": {
+    "decl": "## Slot Integration",
+    "file": "integration/velocity-verlet",
+    "level": 2,
+    "refs": [],
+    "title": "Slot Integration",
+    "type": "section"
+  },
   "rq-3adef71d": {
     "decl": "### Functions and methods",
     "file": "io/trajectory-output",
@@ -1386,6 +1646,14 @@
     ],
     "title": "Velocity generation row is absent when init supplies velocities",
     "type": "scenario"
+  },
+  "rq-3bf899d0": {
+    "decl": "### Rust Launch Helpers",
+    "file": "integration/langevin-baoab",
+    "level": 3,
+    "refs": [],
+    "title": "Rust Launch Helpers",
+    "type": "section"
   },
   "rq-3c17477d": {
     "decl": "Scenario: Total momentum after generation is zero (within f32 round-off)",
@@ -1467,6 +1735,18 @@
     "title": "TrajectoryWriter",
     "type": "api-item"
   },
+  "rq-40ed9975": {
+    "decl": "Scenario: Langevin BAOAB missing friction is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Langevin BAOAB missing friction is rejected",
+    "type": "scenario"
+  },
   "rq-410afcd3": {
     "decl": "## Feature API",
     "file": "performance-analysis",
@@ -1479,6 +1759,18 @@
     ],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-41389685": {
+    "decl": "Scenario: lan_ou_step with friction = 0 (alpha = 1) is identity on velocities (sanity)",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "lan_ou_step with friction = 0 (alpha = 1) is identity on velocities (sanity)",
+    "type": "scenario"
   },
   "rq-4169d3af": {
     "decl": "Scenario: Reject schema_version = 0",
@@ -1548,6 +1840,18 @@
     "title": "Temperature uses k_B = 1.380649e-23",
     "type": "scenario"
   },
+  "rq-457b5271": {
+    "decl": "Scenario: Construct LangevinBaoabState",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct LangevinBaoabState",
+    "type": "scenario"
+  },
   "rq-459d8e74": {
     "decl": "## Gherkin Scenarios",
     "file": "simulation-runner",
@@ -1604,6 +1908,18 @@
     "title": "Reject non-positive mass",
     "type": "scenario"
   },
+  "rq-47877631": {
+    "decl": "Scenario: Construct Langevin BAOAB",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct Langevin BAOAB",
+    "type": "scenario"
+  },
   "rq-484ef36b": {
     "decl": "### Empty file",
     "file": "io/init-state-file",
@@ -1611,6 +1927,18 @@
     "refs": [],
     "title": "Empty file",
     "type": "section"
+  },
+  "rq-48fd88ed": {
+    "decl": "Scenario: Construct with particle_count = 0",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct with particle_count = 0",
+    "type": "scenario"
   },
   "rq-493caf32": {
     "decl": "Scenario: reduce_pair_forces on an empty state is a no-op",
@@ -1751,10 +2079,22 @@
   },
   "rq-4ea8bbb2": {
     "decl": "- `vv_kick_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, dt: f32) -> Result<(), GpuError>`",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [],
     "title": "vv_kick_lossless",
     "type": "api-item"
+  },
+  "rq-4f386df8": {
+    "decl": "# Feature: Pluggable Integrator Framework",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Pluggable Integrator Framework",
+    "type": "file"
   },
   "rq-4f5643f1": {
     "decl": "### Types",
@@ -1771,7 +2111,7 @@
   },
   "rq-4f7dc024": {
     "decl": "Scenario: vv_kick_drift advances position and leaves velocity unchanged when force is zero",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -1788,6 +2128,18 @@
     "refs": [],
     "title": "Launch Configuration",
     "type": "section"
+  },
+  "rq-50baca8c": {
+    "decl": "Scenario: Variance scales with sqrt((1 - alpha^2) * kt / m)",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Variance scales with sqrt((1 - alpha^2) * kt / m)",
+    "type": "scenario"
   },
   "rq-52c483c0": {
     "decl": "Scenario: Pre-flight refuses to overwrite existing log",
@@ -1863,7 +2215,7 @@
   },
   "rq-5626dfc6": {
     "decl": "Scenario: vv_kick_lossless on an empty state is a no-op",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration_lossless.rs",
@@ -1973,7 +2325,7 @@
   },
   "rq-580fe6f7": {
     "decl": "### Lossless mode: compensated summation",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "level": 3,
     "refs": [],
     "title": "Lossless mode: compensated summation",
@@ -1981,7 +2333,7 @@
   },
   "rq-581ec3ff": {
     "decl": "### Rust Launch Helpers",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "level": 3,
     "refs": [],
     "title": "Rust Launch Helpers",
@@ -1999,6 +2351,18 @@
     "title": "Download from an empty buffers into an empty state",
     "type": "scenario"
   },
+  "rq-583201cb": {
+    "decl": "Scenario: Langevin BAOAB rejects negative friction",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Langevin BAOAB rejects negative friction",
+    "type": "scenario"
+  },
   "rq-58981e16": {
     "decl": "- `Timings::kernel_start(&mut self, stage: KernelStage) -> Result<(), TimingsError>`",
     "file": "performance-analysis",
@@ -2013,7 +2377,7 @@
   },
   "rq-58cac735": {
     "decl": "Scenario: vv_kick_drift_lossless on an empty state is a no-op",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration_lossless.rs",
@@ -2045,7 +2409,7 @@
   },
   "rq-5a6d5e9e": {
     "decl": "Scenario: vv_kick_drift_lossless handles a block-non-aligned particle count",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration_lossless.rs",
@@ -2057,7 +2421,7 @@
   },
   "rq-5bfa5b37": {
     "decl": "Scenario: LosslessBuffers::new allocates six zero-initialised residual buffers",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration_lossless.rs",
@@ -2090,6 +2454,19 @@
     ],
     "title": "write_timings_file with an empty report writes only the header",
     "type": "scenario"
+  },
+  "rq-5cb33196": {
+    "decl": "## Feature API",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-5cb58365": {
     "decl": "Scenario: NaN pair contributions propagate to NaN net forces",
@@ -2134,6 +2511,18 @@
     ],
     "title": "ParticleState",
     "type": "api-item"
+  },
+  "rq-5e8125ac": {
+    "decl": "Scenario: lan_drift_half leaves velocities, forces, masses unchanged",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "lan_drift_half leaves velocities, forces, masses unchanged",
+    "type": "scenario"
   },
   "rq-5ece2ef9": {
     "decl": "## Gherkin Scenarios",
@@ -2207,6 +2596,18 @@
     "title": "Feature: TOML Simulation Config Schema",
     "type": "file"
   },
+  "rq-6435723d": {
+    "decl": "- `lan_ou_step(buffers: &mut ParticleBuffers, seed: u64, step_index: u64, alpha: f32, kt: f32) -> Result<(), GpuError>`",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "lan_ou_step",
+    "type": "api-item"
+  },
   "rq-6575e627": {
     "decl": "Scenario: Reject non-integer particle count",
     "file": "io/init-state-file",
@@ -2232,7 +2633,7 @@
     "type": "scenario"
   },
   "rq-661bf664": {
-    "decl": "- `IntegratorConfig`",
+    "decl": "- `IntegratorKind` — tagged enum carrying the chosen integrator slot and",
     "file": "io/config-schema",
     "refs": [
       {
@@ -2240,7 +2641,7 @@
         "kind": "code"
       }
     ],
-    "title": "IntegratorConfig",
+    "title": "IntegratorKind",
     "type": "api-item"
   },
   "rq-66233215": {
@@ -2253,6 +2654,18 @@
       }
     ],
     "title": "Quoted attribute values containing spaces are parsed",
+    "type": "scenario"
+  },
+  "rq-662fccc1": {
+    "decl": "Scenario: init_device loads the langevin module",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "init_device loads the langevin module",
     "type": "scenario"
   },
   "rq-6690fae9": {
@@ -2278,6 +2691,31 @@
     ],
     "title": "Missing [integrator] section is rejected",
     "type": "scenario"
+  },
+  "rq-66ec7ee4": {
+    "decl": "Scenario: Velocity-Verlet lossless defaults to false when omitted",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Velocity-Verlet lossless defaults to false when omitted",
+    "type": "scenario"
+  },
+  "rq-67414c32": {
+    "decl": "### Types",
+    "file": "integration/framework",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Types",
+    "type": "section"
   },
   "rq-6808532e": {
     "decl": "Scenario: Per-particle reduction with varying counts",
@@ -2326,6 +2764,18 @@
     ],
     "title": "Accept positions strictly inside the primary cell",
     "type": "scenario"
+  },
+  "rq-686b0d37": {
+    "decl": "- `IntegratorKind` — `enum` carrying the parsed config-level selection",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "IntegratorKind",
+    "type": "api-item"
   },
   "rq-6897be01": {
     "decl": "## Out of Scope",
@@ -2413,6 +2863,18 @@
     "title": "compute_kinetic_energy",
     "type": "api-item"
   },
+  "rq-6e98222c": {
+    "decl": "Scenario: pre_force_step on empty Langevin state is a no-op",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "pre_force_step on empty Langevin state is a no-op",
+    "type": "scenario"
+  },
   "rq-6ec75323": {
     "decl": "### `Time`",
     "file": "io/trajectory-output",
@@ -2458,6 +2920,30 @@
     "title": "device_to_host_download count equals snapshot points reached",
     "type": "scenario"
   },
+  "rq-700c7729": {
+    "decl": "- `Integrator::post_force_step(&mut self, buffers: &mut ParticleBuffers, dt: f32, step_index: u64, timings: &mut Timings) -> Result<(), IntegratorError>`",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Integrator",
+    "type": "api-item"
+  },
+  "rq-706001ec": {
+    "decl": "Scenario: Two independent runs with identical inputs are byte-identical",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two independent runs with identical inputs are byte-identical",
+    "type": "scenario"
+  },
   "rq-70e9fd38": {
     "decl": "Scenario: A trajectory frame can be re-parsed by load_init_state",
     "file": "io/trajectory-output",
@@ -2472,7 +2958,7 @@
   },
   "rq-70fe268a": {
     "decl": "Scenario: init_device exposes the lossless integrator kernels",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration_lossless.rs",
@@ -2552,7 +3038,7 @@
   },
   "rq-74535c7a": {
     "decl": "## Feature API",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "level": 2,
     "refs": [],
     "title": "Feature API",
@@ -2700,6 +3186,18 @@
     "title": "100-step lossless round trip restores observables bit-exactly",
     "type": "scenario"
   },
+  "rq-789b7a33": {
+    "decl": "Scenario: Langevin BAOAB rejects non-positive temperature",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Langevin BAOAB rejects non-positive temperature",
+    "type": "scenario"
+  },
   "rq-78d9fd1c": {
     "decl": "### PTX Module Loading",
     "file": "lj-pair-force",
@@ -2762,6 +3260,14 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-7a4b9cbd": {
+    "decl": "## Construction and Lifetime",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Construction and Lifetime",
+    "type": "section"
+  },
   "rq-7a4ed012": {
     "decl": "Scenario: Reject positions at the +L/2 boundary",
     "file": "io/init-state-file",
@@ -2819,6 +3325,18 @@
     "title": "Lossless Velocity-Verlet Loop",
     "type": "section"
   },
+  "rq-7b9aada4": {
+    "decl": "Scenario: Lossless velocity-Verlet uses the lossless kernels",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Lossless velocity-Verlet uses the lossless kernels",
+    "type": "scenario"
+  },
   "rq-7c23d271": {
     "decl": "Scenario: KE of a single particle with v=(1, 0, 0)",
     "file": "io/log-output",
@@ -2845,7 +3363,7 @@
   },
   "rq-7d5e87ee": {
     "decl": "- `vv_kick_drift_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, dt: f32) -> Result<(), GpuError>`",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [],
     "title": "vv_kick_drift_lossless",
     "type": "api-item"
@@ -2864,7 +3382,7 @@
   },
   "rq-7dfa14cf": {
     "decl": "Scenario: vv_kick_drift does not modify forces or masses",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -3004,6 +3522,14 @@
     "title": "At the LJ minimum r = sigma * 2^(1/6), the force is zero",
     "type": "scenario"
   },
+  "rq-8586776f": {
+    "decl": "### PTX Module Loading",
+    "file": "integration/langevin-baoab",
+    "level": 3,
+    "refs": [],
+    "title": "PTX Module Loading",
+    "type": "section"
+  },
   "rq-85baad9d": {
     "decl": "Scenario: build.rs reruns when a kernel source file changes",
     "file": "build-pipeline",
@@ -3035,6 +3561,30 @@
     "title": "Timings file is absent when run fails before the loop",
     "type": "scenario"
   },
+  "rq-86aa2be7": {
+    "decl": "Scenario: Langevin BAOAB kind with valid parameters is accepted",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Langevin BAOAB kind with valid parameters is accepted",
+    "type": "scenario"
+  },
+  "rq-874dbfec": {
+    "decl": "Scenario: Two end-to-end Langevin runs with identical configs produce byte-identical outputs",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two end-to-end Langevin runs with identical configs produce byte-identical outputs",
+    "type": "scenario"
+  },
   "rq-889076d5": {
     "decl": "Scenario: Kernel failure mid-loop returns exit code 2",
     "file": "simulation-runner",
@@ -3045,6 +3595,18 @@
       }
     ],
     "title": "Kernel failure mid-loop returns exit code 2",
+    "type": "scenario"
+  },
+  "rq-88e3ac79": {
+    "decl": "Scenario: Switching integrator.kind changes the trajectory",
+    "file": "simulation-runner",
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Switching integrator.kind changes the trajectory",
     "type": "scenario"
   },
   "rq-88ec92fc": {
@@ -3119,10 +3681,18 @@
   },
   "rq-8c220501": {
     "decl": "## Gherkin Scenarios",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "level": 2,
     "refs": [],
     "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-8d44fa4d": {
+    "decl": "## Determinism Guarantees",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism Guarantees",
     "type": "section"
   },
   "rq-8df7fb0c": {
@@ -3165,7 +3735,7 @@
   },
   "rq-8e47334c": {
     "decl": "Scenario: NaN forces propagate to NaN velocities and positions",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -3309,11 +3879,23 @@
   },
   "rq-92f5e5c4": {
     "decl": "## Out of Scope",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "level": 2,
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-92f643cb": {
+    "decl": "Scenario: Langevin BAOAB missing seed is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Langevin BAOAB missing seed is rejected",
+    "type": "scenario"
   },
   "rq-93367a8f": {
     "decl": "## Dependencies",
@@ -3379,6 +3961,14 @@
     "title": "Download overwrites in-place after host mutation",
     "type": "scenario"
   },
+  "rq-9605b930": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-965c3b59": {
     "decl": "Scenario: Implicit IDs equal data-row order",
     "file": "io/init-state-file",
@@ -3439,6 +4029,14 @@
     "title": "trajectory_every = 0 is accepted (disables trajectory output)",
     "type": "scenario"
   },
+  "rq-98084bc0": {
+    "decl": "### Counter packing",
+    "file": "integration/langevin-baoab",
+    "level": 3,
+    "refs": [],
+    "title": "Counter packing",
+    "type": "section"
+  },
   "rq-9818f429": {
     "decl": "Scenario: total_ms equals mean_us * count / 1000 within reporting precision",
     "file": "performance-analysis",
@@ -3470,6 +4068,18 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-9922b639": {
+    "decl": "Scenario: Two identical calls produce byte-identical velocities",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two identical calls produce byte-identical velocities",
+    "type": "scenario"
   },
   "rq-9a19bfa3": {
     "decl": "- `ParticleState::download_from(&mut self, buffers: &ParticleBuffers) -> Result<(), ParticleStateError>`",
@@ -3571,6 +4181,14 @@
     "title": "Launch Configuration",
     "type": "section"
   },
+  "rq-9bef7cd0": {
+    "decl": "## Launch Configuration",
+    "file": "integration/langevin-baoab",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
+    "type": "section"
+  },
   "rq-9bfc2c1d": {
     "decl": "Scenario: Missing [simulation].seed",
     "file": "io/config-schema",
@@ -3617,6 +4235,18 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-9d882742": {
+    "decl": "Scenario: Unknown integrator kind is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Unknown integrator kind is rejected",
+    "type": "scenario"
   },
   "rq-9e4d8944": {
     "decl": "Scenario: Reject duplicate pair under different orderings",
@@ -3676,7 +4306,7 @@
   },
   "rq-9f6a73f9": {
     "decl": "## Algorithm",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "level": 2,
     "refs": [],
     "title": "Algorithm",
@@ -3832,6 +4462,30 @@
     "title": "init_device loads the reduce module with the reduction kernel",
     "type": "scenario"
   },
+  "rq-a49bb176": {
+    "decl": "Scenario: post_force_step on empty state is a no-op",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "post_force_step on empty state is a no-op",
+    "type": "scenario"
+  },
+  "rq-a5069572": {
+    "decl": "- `IntegratorError` — error type returned by every integrator method.",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "IntegratorError",
+    "type": "api-item"
+  },
   "rq-a555a750": {
     "decl": "Scenario: Velocity generation row is present when init lacks velocities",
     "file": "performance-analysis",
@@ -3894,7 +4548,7 @@
   },
   "rq-a93a5b14": {
     "decl": "Scenario: Block-non-aligned particle counts are handled by the bounds check",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -3930,7 +4584,7 @@
     "type": "section"
   },
   "rq-a97789e6": {
-    "decl": "Scenario: Lossy mode is the default",
+    "decl": "Scenario: Lossy mode is the default for velocity-Verlet",
     "file": "simulation-runner",
     "refs": [
       {
@@ -3938,7 +4592,7 @@
         "kind": "code"
       }
     ],
-    "title": "Lossy mode is the default",
+    "title": "Lossy mode is the default for velocity-Verlet",
     "type": "scenario"
   },
   "rq-a9b511ea": {
@@ -4003,7 +4657,7 @@
   },
   "rq-acafdfe4": {
     "decl": "Scenario: vv_kick_lossless does not modify positions, forces, masses, or particle_ids",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration_lossless.rs",
@@ -4025,6 +4679,19 @@
     "title": "Disabled trajectory and log outputs are not checked, but timings is",
     "type": "scenario"
   },
+  "rq-ad27732e": {
+    "decl": "### Functions and methods",
+    "file": "integration/framework",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Functions and methods",
+    "type": "section"
+  },
   "rq-ad403fb6": {
     "decl": "Scenario: Trajectory and log files remain bit-identical between two identical runs",
     "file": "performance-analysis",
@@ -4035,6 +4702,18 @@
       }
     ],
     "title": "Trajectory and log files remain bit-identical between two identical runs",
+    "type": "scenario"
+  },
+  "rq-adc3a32f": {
+    "decl": "Scenario: Equilibrium kinetic energy approaches 1.5 * N * k_B * T after many steps",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Equilibrium kinetic energy approaches 1.5 * N * k_B * T after many steps",
     "type": "scenario"
   },
   "rq-add95876": {
@@ -4135,7 +4814,7 @@
   },
   "rq-b13eba96": {
     "decl": "Scenario: Particles evolve independently with their own forces",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -4171,7 +4850,7 @@
   },
   "rq-b2d67b57": {
     "decl": "Scenario: Forward then negated step returns to the original state for a free particle",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -4192,6 +4871,14 @@
     ],
     "title": "Lossless run includes lossless kick rows and excludes lossy rows",
     "type": "scenario"
+  },
+  "rq-b41d8d36": {
+    "decl": "### Types",
+    "file": "integration/langevin-baoab",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
   },
   "rq-b4bb7096": {
     "decl": "Scenario: Reject upload when one host array drifts in length",
@@ -4240,7 +4927,7 @@
   },
   "rq-b73316ed": {
     "decl": "Scenario: Multi-step round-trip restores the observable state bit-exactly under constant force",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "rqm/pipeline-reversibility.md",
@@ -4316,7 +5003,7 @@
   },
   "rq-b96ce51d": {
     "decl": "Scenario: LosslessBuffers::new with particle_count = 0",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration_lossless.rs",
@@ -4376,7 +5063,7 @@
   },
   "rq-bb075030": {
     "decl": "Scenario: vv_kick_drift_lossless does not modify forces, masses, or particle_ids",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration_lossless.rs",
@@ -4410,6 +5097,14 @@
     "title": "Feature: Performance Analysis and Timings Output",
     "type": "file"
   },
+  "rq-bc0e4fd5": {
+    "decl": "## Per-Step Interface",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Step Interface",
+    "type": "section"
+  },
   "rq-bc442f5b": {
     "decl": "### Particle IDs",
     "file": "io/init-state-file",
@@ -4425,7 +5120,7 @@
   },
   "rq-bc8375ce": {
     "decl": "Scenario: init_device loads the integrate module with both kernels",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -4435,9 +5130,21 @@
     "title": "init_device loads the integrate module with both kernels",
     "type": "scenario"
   },
+  "rq-bcb0f58a": {
+    "decl": "- `LangevinBaoabState` — variant payload owned by",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "LangevinBaoabState",
+    "type": "api-item"
+  },
   "rq-bd149f52": {
     "decl": "Scenario: Acceleration scales inversely with mass",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -4542,6 +5249,18 @@
     "file": "build-pipeline",
     "refs": [],
     "title": "PTX is embedded in the Rust binary",
+    "type": "scenario"
+  },
+  "rq-c1c9fe3a": {
+    "decl": "Scenario: Langevin run includes Langevin rows and excludes velocity-Verlet rows",
+    "file": "performance-analysis",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Langevin run includes Langevin rows and excludes velocity-Verlet rows",
     "type": "scenario"
   },
   "rq-c1cfec9a": {
@@ -4776,6 +5495,14 @@
     "title": "File Format",
     "type": "section"
   },
+  "rq-ce445e13": {
+    "decl": "## RNG",
+    "file": "integration/langevin-baoab",
+    "level": 2,
+    "refs": [],
+    "title": "RNG",
+    "type": "section"
+  },
   "rq-ce89d4a4": {
     "decl": "Scenario: Reject when masses has the wrong length",
     "file": "particle-state",
@@ -4787,6 +5514,18 @@
     ],
     "title": "Reject when masses has the wrong length",
     "type": "scenario"
+  },
+  "rq-cf361ff5": {
+    "decl": "- `Integrator::pre_force_step(&mut self, buffers: &mut ParticleBuffers, dt: f32, step_index: u64, timings: &mut Timings) -> Result<(), IntegratorError>`",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Integrator",
+    "type": "api-item"
   },
   "rq-d065447f": {
     "decl": "Scenario: Run an empty (N=0) simulation",
@@ -4810,6 +5549,18 @@
       }
     ],
     "title": "Positions visibly evolve over the 100-step run",
+    "type": "scenario"
+  },
+  "rq-d12c24f0": {
+    "decl": "Scenario: step_index is passed through to the variant",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "step_index is passed through to the variant",
     "type": "scenario"
   },
   "rq-d148149f": {
@@ -4850,7 +5601,7 @@
   },
   "rq-d25000c5": {
     "decl": "Scenario: vv_kick_drift produces the exact half-step kinematics under a constant force",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -4862,7 +5613,7 @@
   },
   "rq-d28737dd": {
     "decl": "Scenario: dt=0 leaves state unchanged for vv_kick",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -4944,6 +5695,13 @@
     ],
     "title": "Pair `between` is normalised to lexicographic order",
     "type": "scenario"
+  },
+  "rq-d5a4f220": {
+    "decl": "# Feature: Langevin BAOAB Integrator",
+    "file": "integration/langevin-baoab",
+    "refs": [],
+    "title": "Feature: Langevin BAOAB Integrator",
+    "type": "file"
   },
   "rq-d6bd915a": {
     "decl": "Scenario: Pair exactly at cutoff is included",
@@ -5061,6 +5819,26 @@
     "title": "LennardJonesParameters",
     "type": "api-item"
   },
+  "rq-db78448e": {
+    "decl": "Scenario: Construct velocity-Verlet (lossless)",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct velocity-Verlet (lossless)",
+    "type": "scenario"
+  },
+  "rq-dc5c70bf": {
+    "decl": "## Feature API",
+    "file": "integration/langevin-baoab",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-dc8a0ff7": {
     "decl": "- `KernelStage` — `enum` covering the six instrumented kernel-launch",
     "file": "performance-analysis",
@@ -5130,6 +5908,18 @@
     "title": "`Step`",
     "type": "section"
   },
+  "rq-df39d15b": {
+    "decl": "- `Integrator::new(device: Arc<CudaDevice>, particle_count: usize, kind: &IntegratorKind) -> Result<Self, IntegratorError>`",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Integrator",
+    "type": "api-item"
+  },
   "rq-dfca62d2": {
     "decl": "Scenario: Two independent runs produce byte-identical pair-force buffers",
     "file": "lj-pair-force",
@@ -5152,6 +5942,18 @@
       }
     ],
     "title": "Reject NaN dt",
+    "type": "scenario"
+  },
+  "rq-e02917c3": {
+    "decl": "Scenario: Construct velocity-Verlet (lossy)",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct velocity-Verlet (lossy)",
     "type": "scenario"
   },
   "rq-e06bcfb0": {
@@ -5199,9 +6001,21 @@
     "title": "volume returns the product of the edge lengths",
     "type": "scenario"
   },
+  "rq-e1dd0625": {
+    "decl": "Scenario: Slot per-step interface launches all six expected kernel calls",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Slot per-step interface launches all six expected kernel calls",
+    "type": "scenario"
+  },
   "rq-e20b2f39": {
     "decl": "### PTX Module Loading",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "level": 3,
     "refs": [
       {
@@ -5211,6 +6025,18 @@
     ],
     "title": "PTX Module Loading",
     "type": "section"
+  },
+  "rq-e2f2de4f": {
+    "decl": "Scenario: Different step_indices give different velocity outputs",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Different step_indices give different velocity outputs",
+    "type": "scenario"
   },
   "rq-e367855a": {
     "decl": "### Field reference",
@@ -5239,6 +6065,26 @@
     "refs": [],
     "title": "Data Layout",
     "type": "section"
+  },
+  "rq-e4ace7d6": {
+    "decl": "## Out of Scope",
+    "file": "integration/langevin-baoab",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
+  "rq-e4c4ff61": {
+    "decl": "- `Integrator` — closed `enum` with one variant per slot. Variants carry",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Integrator",
+    "type": "api-item"
   },
   "rq-e4f403e9": {
     "decl": "## Gherkin Scenarios",
@@ -5298,6 +6144,18 @@
     "title": "Empty init velocities",
     "type": "section"
   },
+  "rq-e7c05140": {
+    "decl": "Scenario: Langevin-BAOAB kind rejects velocity-Verlet fields",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Langevin-BAOAB kind rejects velocity-Verlet fields",
+    "type": "scenario"
+  },
   "rq-e7ddefaf": {
     "decl": "Scenario: Flush is idempotent",
     "file": "io/trajectory-output",
@@ -5336,7 +6194,7 @@
   },
   "rq-e8c21a03": {
     "decl": "Scenario: dt=0 leaves state unchanged for vv_kick_drift",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -5392,6 +6250,18 @@
       }
     ],
     "title": "Reduction sums entries 0..count in left-to-right order",
+    "type": "scenario"
+  },
+  "rq-e9994f86": {
+    "decl": "Scenario: Construct with particle_count = 0",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "tests/langevin.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct with particle_count = 0",
     "type": "scenario"
   },
   "rq-e9a67206": {
@@ -5571,6 +6441,18 @@
     "title": "Reject negative temperature",
     "type": "scenario"
   },
+  "rq-f00f729e": {
+    "decl": "- `lan_drift_half(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>`",
+    "file": "integration/langevin-baoab",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "lan_drift_half",
+    "type": "api-item"
+  },
   "rq-f04e473c": {
     "decl": "# Feature: SoA Particle State and GPU Buffers",
     "file": "particle-state",
@@ -5640,7 +6522,7 @@
   },
   "rq-f1ba909b": {
     "decl": "- `vv_kick_drift(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>`",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "src/gpu/kernels.rs",
@@ -5662,9 +6544,21 @@
     "title": "Open refuses to overwrite an existing file",
     "type": "scenario"
   },
+  "rq-f2431cc4": {
+    "decl": "Scenario: Langevin BAOAB missing temperature is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Langevin BAOAB missing temperature is rejected",
+    "type": "scenario"
+  },
   "rq-f2e3fa58": {
     "decl": "- `vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>`",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "src/gpu/kernels.rs",
@@ -5750,6 +6644,14 @@
     "title": "Reduction overwrites prior net force values",
     "type": "scenario"
   },
+  "rq-f542b61f": {
+    "decl": "## Out of Scope",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-f5e25186": {
     "decl": "Scenario: Successful run writes a timings file",
     "file": "performance-analysis",
@@ -5788,7 +6690,7 @@
   },
   "rq-f721b7a1": {
     "decl": "Scenario: vv_kick does not modify forces, masses, or positions",
-    "file": "integration",
+    "file": "integration/velocity-verlet",
     "refs": [
       {
         "file": "tests/integration.rs",
@@ -6010,6 +6912,14 @@
     ],
     "title": "Reproducibility byte-for-byte across two identical runs",
     "type": "scenario"
+  },
+  "rq-ff46e833": {
+    "decl": "## Per-Step Kernel Sequence",
+    "file": "integration/langevin-baoab",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Step Kernel Sequence",
+    "type": "section"
   },
   "rq-ff707382": {
     "decl": "Scenario: n_steps = 0 writes only step-0 outputs",

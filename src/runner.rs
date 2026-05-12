@@ -8,9 +8,10 @@ use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
 use crate::gpu::{
-    LennardJonesParameters, LosslessBuffers, PairBuffer, ParticleBuffers, init_device, lj_pair_force,
-    reduce_pair_forces, vv_kick, vv_kick_drift, vv_kick_drift_lossless, vv_kick_lossless,
+    LennardJonesParameters, PairBuffer, ParticleBuffers, init_device, lj_pair_force,
+    reduce_pair_forces,
 };
+use crate::integrator::{Integrator, IntegratorError};
 use crate::io::{
     ConfigError, InitStateError, InitVelocities, LogWriter, LogWriterError, TrajectoryWriter,
     TrajectoryWriterError, load_config, load_init_state,
@@ -28,6 +29,7 @@ pub enum RunnerError {
     InitState(InitStateError),
     ParticleState(ParticleStateError),
     Gpu(crate::gpu::GpuError),
+    Integrator(IntegratorError),
     Trajectory(TrajectoryWriterError),
     Log(LogWriterError),
     Timings(TimingsError),
@@ -43,6 +45,7 @@ impl std::fmt::Display for RunnerError {
             RunnerError::InitState(e) => write!(f, "InitState({e})"),
             RunnerError::ParticleState(e) => write!(f, "ParticleState({e})"),
             RunnerError::Gpu(e) => write!(f, "Gpu({e})"),
+            RunnerError::Integrator(e) => write!(f, "Integrator({e})"),
             RunnerError::Trajectory(e) => write!(f, "Trajectory({e})"),
             RunnerError::Log(e) => write!(f, "Log({e})"),
             RunnerError::Timings(e) => write!(f, "Timings({e})"),
@@ -207,14 +210,8 @@ fn run_simulation_with_phase(
     let mut pair_buffer = PairBuffer::new(device.clone(), n, max_neighbors)
         .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?;
 
-    let mut lossless: Option<LosslessBuffers> = if config.integrator.lossless {
-        Some(
-            LosslessBuffers::new(device.clone(), n)
-                .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?,
-        )
-    } else {
-        None
-    };
+    let mut integrator = Integrator::new(device.clone(), n, &config.integrator)
+        .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Setup))?;
 
     let neighbor_counts = device
         .htod_sync_copy(&vec![n as u32; n])
@@ -317,35 +314,13 @@ fn run_simulation_with_phase(
     let n_steps = config.simulation.n_steps;
     let progress_every = (n_steps / 100).max(1);
     let dt_f32 = config.simulation.dt as f32;
-    let kick_drift_stage = if config.integrator.lossless {
-        KernelStage::VvKickDriftLossless
-    } else {
-        KernelStage::VvKickDrift
-    };
-    let kick_stage = if config.integrator.lossless {
-        KernelStage::VvKickLossless
-    } else {
-        KernelStage::VvKick
-    };
 
     // Main loop.
     for step in 1..=n_steps {
+        integrator
+            .pre_force_step(&mut buffers, dt_f32, step, &mut timings)
+            .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Loop))?;
         if n > 0 {
-            timings
-                .kernel_start(kick_drift_stage)
-                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-        }
-        if let Some(ll) = lossless.as_mut() {
-            vv_kick_drift_lossless(&mut buffers, ll, dt_f32)
-                .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Loop))?;
-        } else {
-            vv_kick_drift(&mut buffers, dt_f32)
-                .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Loop))?;
-        }
-        if n > 0 {
-            timings
-                .kernel_stop(kick_drift_stage)
-                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
             timings
                 .kernel_start(KernelStage::LjPairForce)
                 .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
@@ -366,22 +341,10 @@ fn run_simulation_with_phase(
             timings
                 .kernel_stop(KernelStage::ReducePairForces)
                 .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-            timings
-                .kernel_start(kick_stage)
-                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
         }
-        if let Some(ll) = lossless.as_mut() {
-            vv_kick_lossless(&mut buffers, ll, dt_f32)
-                .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Loop))?;
-        } else {
-            vv_kick(&mut buffers, dt_f32)
-                .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Loop))?;
-        }
-        if n > 0 {
-            timings
-                .kernel_stop(kick_stage)
-                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-        }
+        integrator
+            .post_force_step(&mut buffers, dt_f32, step, &mut timings)
+            .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Loop))?;
 
         let want_traj =
             config.output.trajectory_every > 0 && step % config.output.trajectory_every == 0;

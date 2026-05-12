@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use dynamics::io::{BOLTZMANN_J_PER_K, IntegratorConfig, load_config};
+use dynamics::io::{BOLTZMANN_J_PER_K, IntegratorKind, load_config};
 use dynamics::runner::{RunnerError, cli_main_u8, run_simulation};
 
 fn tmp_path(name: &str) -> PathBuf {
@@ -42,6 +42,7 @@ dt = 1.0e-15
 temperature = {temperature}
 
 [integrator]
+kind = "velocity-verlet"
 lossless = {lossless_str}
 
 [[particle_types]]
@@ -434,7 +435,6 @@ fn lossless_mode_completes() {
 #[test]
 fn lossy_is_default() {
     let dir = tmp_path("lossy_default");
-    // Write config without explicit `integrator.lossless`
     let body = r#"schema_version = 1
 init = "init.xyz"
 
@@ -445,6 +445,7 @@ dt = 1.0e-15
 temperature = 0.0
 
 [integrator]
+kind = "velocity-verlet"
 
 [[particle_types]]
 name = "Ar"
@@ -460,8 +461,123 @@ cutoff = 1.0
     let path = dir.join("sim.toml");
     std::fs::write(&path, body).unwrap();
     let cfg = load_config(&path).unwrap();
-    let IntegratorConfig { lossless } = cfg.integrator;
-    assert!(!lossless);
+    match cfg.integrator {
+        IntegratorKind::VelocityVerlet { lossless } => assert!(!lossless),
+        other => panic!("unexpected variant: {other:?}"),
+    }
+}
+
+// rq-00cbbf51
+#[test]
+fn langevin_runs_end_to_end() {
+    let dir = tmp_path("langevin_end_to_end");
+    let cfg = r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 5
+dt = 1.0e-15
+temperature = 300.0
+
+[integrator]
+kind = "langevin-baoab"
+friction = 1.0e12
+temperature = 300.0
+seed = 42
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+
+[output]
+trajectory_every = 1
+log_every = 1
+"#;
+    let path = dir.join("sim.toml");
+    std::fs::write(&path, cfg).unwrap();
+    std::fs::write(
+        dir.join("init.xyz"),
+        "2\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3\n\
+         Ar -5.0e-10 0 0\nAr 5.0e-10 0 0\n",
+    )
+    .unwrap();
+    let summary = run_simulation(&path).unwrap();
+    assert_eq!(summary.n_steps, 5);
+    let canon = std::fs::canonicalize(&dir).unwrap();
+    assert!(canon.join("sim-traj.xyz").exists());
+    assert!(canon.join("sim.log").exists());
+    let timings_body = std::fs::read_to_string(canon.join("sim.timings")).unwrap();
+    assert!(timings_body.contains("langevin_kick_half"));
+    assert!(timings_body.contains("langevin_drift_half"));
+    assert!(timings_body.contains("langevin_ou_step"));
+}
+
+// rq-88e3ac79
+#[test]
+fn switching_integrator_kind_changes_trajectory() {
+    fn make_dir(kind_block: &str, name: &str) -> PathBuf {
+        let dir = tmp_path(name);
+        let cfg = format!(
+            r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 5
+dt = 1.0e-15
+temperature = 300.0
+
+{kind_block}
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+
+[output]
+trajectory_every = 1
+log_every = 1
+"#
+        );
+        let path = dir.join("sim.toml");
+        std::fs::write(&path, cfg).unwrap();
+        std::fs::write(
+            dir.join("init.xyz"),
+            "2\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3\n\
+             Ar -5.0e-10 0 0\nAr 5.0e-10 0 0\n",
+        )
+        .unwrap();
+        dir
+    }
+    let dir_a = make_dir(
+        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false",
+        "switch_vv",
+    );
+    let dir_b = make_dir(
+        "[integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 300.0\nseed = 1",
+        "switch_langevin",
+    );
+    run_simulation(&dir_a.join("sim.toml")).unwrap();
+    run_simulation(&dir_b.join("sim.toml")).unwrap();
+    let traj_a =
+        std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim-traj.xyz")).unwrap();
+    let traj_b =
+        std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim-traj.xyz")).unwrap();
+    assert_ne!(traj_a, traj_b);
 }
 
 // rq-34db7b7b
@@ -478,6 +594,7 @@ dt = 1.0e-15
 temperature = 0.0
 
 [integrator]
+kind = "velocity-verlet"
 lossless = false
 
 [[particle_types]]

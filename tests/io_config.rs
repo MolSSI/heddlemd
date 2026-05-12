@@ -29,6 +29,7 @@ dt = 1.0e-15
 temperature = 300.0
 
 [integrator]
+kind = "velocity-verlet"
 lossless = false
 
 [[particle_types]]
@@ -62,7 +63,10 @@ fn load_valid_minimal_config() {
     assert_eq!(cfg.simulation.n_steps, 10);
     assert_eq!(cfg.simulation.dt, 1.0e-15);
     assert_eq!(cfg.simulation.temperature, 300.0);
-    assert!(!cfg.integrator.lossless);
+    assert!(matches!(
+        cfg.integrator,
+        dynamics::io::IntegratorKind::VelocityVerlet { lossless: false }
+    ));
     assert_eq!(cfg.particle_types.len(), 1);
     assert_eq!(cfg.particle_types[0].name, "Ar");
     assert_eq!(cfg.particle_types[0].mass, 6.6335e-26);
@@ -113,7 +117,7 @@ fn absolute_paths_honored() {
     let abs_traj = dir.join("abs-traj.xyz");
     let abs_log = dir.join("abs.log");
     let body = format!(
-        "schema_version = 1\ninit = \"{}\"\n[simulation]\nseed=1\nn_steps=1\ndt=1.0e-15\ntemperature=0.0\n[integrator]\nlossless=false\n[[particle_types]]\nname=\"Ar\"\nmass=1.0\n[[pair_interactions]]\nbetween=[\"Ar\",\"Ar\"]\npotential=\"lennard-jones\"\nsigma=1.0\nepsilon=1.0\ncutoff=1.0\n[output]\ntrajectory_path=\"{}\"\nlog_path=\"{}\"\n",
+        "schema_version = 1\ninit = \"{}\"\n[simulation]\nseed=1\nn_steps=1\ndt=1.0e-15\ntemperature=0.0\n[integrator]\nkind=\"velocity-verlet\"\nlossless=false\n[[particle_types]]\nname=\"Ar\"\nmass=1.0\n[[pair_interactions]]\nbetween=[\"Ar\",\"Ar\"]\npotential=\"lennard-jones\"\nsigma=1.0\nepsilon=1.0\ncutoff=1.0\n[output]\ntrajectory_path=\"{}\"\nlog_path=\"{}\"\n",
         abs_init.display(),
         abs_traj.display(),
         abs_log.display(),
@@ -161,6 +165,7 @@ dt = 1.0e-15
 temperature = 0.0
 
 [integrator]
+kind = "velocity-verlet"
 lossless = false
 
 [[particle_types]]
@@ -336,7 +341,8 @@ fn missing_temperature() {
 #[test]
 fn missing_integrator_section() {
     let dir = tmp_path("missing_integrator");
-    let body = minimal_config().replace("[integrator]\nlossless = false\n", "");
+    let body = minimal_config()
+        .replace("[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n", "");
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
         ConfigError::MissingField { field } => assert_eq!(field, "integrator"),
@@ -358,6 +364,7 @@ dt = 1.0e-15
 temperature = 0.0
 
 [integrator]
+kind = "velocity-verlet"
 lossless = false
 
 [[pair_interactions]]
@@ -388,6 +395,7 @@ dt = 1.0e-15
 temperature = 0.0
 
 [integrator]
+kind = "velocity-verlet"
 lossless = false
 
 [[particle_types]]
@@ -551,6 +559,7 @@ dt = 1.0e-15
 temperature = 0.0
 
 [integrator]
+kind = "velocity-verlet"
 lossless = false
 
 [[particle_types]]
@@ -607,6 +616,7 @@ dt = 1.0e-15
 temperature = 0.0
 
 [integrator]
+kind = "velocity-verlet"
 lossless = false
 
 [[particle_types]]
@@ -671,6 +681,7 @@ dt = 1.0e-15
 temperature = 0.0
 
 [integrator]
+kind = "velocity-verlet"
 lossless = false
 
 [[particle_types]]
@@ -786,6 +797,7 @@ dt = 1.0e-15
 temperature = 0.0
 
 [integrator]
+kind = "velocity-verlet"
 lossless = false
 
 [[particle_types]]
@@ -900,6 +912,199 @@ fn reject_log_equals_timings() {
         }
         other => panic!("unexpected: {other:?}"),
     }
+}
+
+// rq-100115a0
+#[test]
+fn missing_integrator_kind() {
+    let dir = tmp_path("missing_integrator_kind");
+    let body = minimal_config().replace(
+        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[integrator]\nlossless = false\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "integrator.kind"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-9d882742
+#[test]
+fn unknown_integrator_kind() {
+    let dir = tmp_path("unknown_integrator_kind");
+    let body = minimal_config().replace("kind = \"velocity-verlet\"", "kind = \"custom\"");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownIntegratorKind { actual } => assert_eq!(actual, "custom"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-86aa2be7
+#[test]
+fn langevin_with_valid_parameters_accepted() {
+    let dir = tmp_path("langevin_valid");
+    let body = minimal_config().replace(
+        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 300.0\nseed = 42\n",
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    match cfg.integrator {
+        dynamics::io::IntegratorKind::LangevinBaoab {
+            friction,
+            temperature,
+            seed,
+        } => {
+            assert_eq!(friction, 1.0e12);
+            assert_eq!(temperature, 300.0);
+            assert_eq!(seed, 42);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-40ed9975
+#[test]
+fn langevin_missing_friction() {
+    let dir = tmp_path("langevin_missing_friction");
+    let body = minimal_config().replace(
+        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[integrator]\nkind = \"langevin-baoab\"\ntemperature = 300.0\nseed = 42\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "integrator.friction"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-f2431cc4
+#[test]
+fn langevin_missing_temperature() {
+    let dir = tmp_path("langevin_missing_temperature");
+    let body = minimal_config().replace(
+        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\nseed = 42\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "integrator.temperature"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-92f643cb
+#[test]
+fn langevin_missing_seed() {
+    let dir = tmp_path("langevin_missing_seed");
+    let body = minimal_config().replace(
+        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 300.0\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "integrator.seed"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-385408d0
+#[test]
+fn langevin_friction_zero_rejected() {
+    let dir = tmp_path("langevin_friction_zero");
+    let body = minimal_config().replace(
+        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[integrator]\nkind = \"langevin-baoab\"\nfriction = 0.0\ntemperature = 300.0\nseed = 42\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "integrator.friction"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-583201cb
+#[test]
+fn langevin_friction_negative_rejected() {
+    let dir = tmp_path("langevin_friction_negative");
+    let body = minimal_config().replace(
+        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[integrator]\nkind = \"langevin-baoab\"\nfriction = -1.0\ntemperature = 300.0\nseed = 42\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "integrator.friction"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-789b7a33
+#[test]
+fn langevin_temperature_zero_rejected() {
+    let dir = tmp_path("langevin_temperature_zero");
+    let body = minimal_config().replace(
+        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 0.0\nseed = 42\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "integrator.temperature"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-30270f03
+#[test]
+fn vv_rejects_langevin_fields() {
+    let dir = tmp_path("vv_rejects_langevin");
+    let body = minimal_config().replace(
+        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[integrator]\nkind = \"velocity-verlet\"\nfriction = 1.0e12\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownIntegratorField { kind, field } => {
+            assert_eq!(kind, "velocity-verlet");
+            assert_eq!(field, "friction");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-e7c05140
+#[test]
+fn langevin_rejects_vv_fields() {
+    let dir = tmp_path("langevin_rejects_vv");
+    let body = minimal_config().replace(
+        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 300.0\nseed = 42\nlossless = false\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownIntegratorField { kind, field } => {
+            assert_eq!(kind, "langevin-baoab");
+            assert_eq!(field, "lossless");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-66ec7ee4
+#[test]
+fn vv_lossless_defaults_to_false() {
+    let dir = tmp_path("vv_lossless_default");
+    let body = minimal_config().replace(
+        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[integrator]\nkind = \"velocity-verlet\"\n",
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert!(matches!(
+        cfg.integrator,
+        dynamics::io::IntegratorKind::VelocityVerlet { lossless: false }
+    ));
 }
 
 // rq-97e525d8

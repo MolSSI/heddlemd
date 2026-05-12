@@ -50,6 +50,7 @@ dt = 1.0e-15
 temperature = {temperature}
 
 [integrator]
+kind = "velocity-verlet"
 lossless = {lossless_str}
 
 [[particle_types]]
@@ -223,6 +224,81 @@ fn lossless_includes_lossless_kick_rows() {
     assert!(stage_row(&body, "vv_kick_lossless").is_some());
     assert!(stage_row(&body, "vv_kick_drift").is_none());
     assert!(stage_row(&body, "vv_kick").is_none());
+}
+
+fn write_langevin_config(dir: &Path, n_steps: u64) -> PathBuf {
+    let cfg = format!(
+        r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = {n_steps}
+dt = 1.0e-15
+temperature = 300.0
+
+[integrator]
+kind = "langevin-baoab"
+friction = 1.0e12
+temperature = 300.0
+seed = 42
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+
+[output]
+trajectory_every = 0
+log_every = 0
+"#
+    );
+    let path = dir.join("sim.toml");
+    std::fs::write(&path, cfg).unwrap();
+    std::fs::write(
+        dir.join("init.xyz"),
+        "2\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3\n\
+         Ar -5.0e-10 0 0\nAr 5.0e-10 0 0\n",
+    )
+    .unwrap();
+    path
+}
+
+// rq-c1c9fe3a
+#[test]
+fn langevin_includes_langevin_rows_excludes_vv() {
+    let dir = tmp_path("langevin_rows");
+    let path = write_langevin_config(&dir, 10);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    assert!(stage_row(&body, "langevin_kick_half").is_some());
+    assert!(stage_row(&body, "langevin_drift_half").is_some());
+    assert!(stage_row(&body, "langevin_ou_step").is_some());
+    for line in body.lines().skip(1) {
+        let stage = line.split_whitespace().next().unwrap();
+        assert!(
+            !stage.starts_with("vv_"),
+            "expected no vv_* stage, got {stage}"
+        );
+    }
+}
+
+// rq-0c2265eb
+#[test]
+fn langevin_stage_counts_match() {
+    let dir = tmp_path("langevin_counts");
+    let path = write_langevin_config(&dir, 10);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    assert_eq!(stage_count(&body, "langevin_kick_half"), Some(20));
+    assert_eq!(stage_count(&body, "langevin_drift_half"), Some(20));
+    assert_eq!(stage_count(&body, "langevin_ou_step"), Some(10));
 }
 
 // rq-bde625cf
@@ -549,6 +625,7 @@ dt = 1.0e-15
 temperature = 0.0
 
 [integrator]
+kind = "velocity-verlet"
 lossless = false
 
 [[particle_types]]
@@ -592,6 +669,7 @@ dt = 1.0e-15
 temperature = 0.0
 
 [integrator]
+kind = "velocity-verlet"
 lossless = false
 
 [[particle_types]]
@@ -635,6 +713,7 @@ dt = 1.0e-15
 temperature = 0.0
 
 [integrator]
+kind = "velocity-verlet"
 lossless = false
 
 [[particle_types]]

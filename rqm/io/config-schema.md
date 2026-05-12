@@ -22,7 +22,7 @@ Sections:
 | top-level `schema_version` | yes | format version |
 | top-level `init` | yes | path to initial-state file |
 | `[simulation]` | yes | timestep, step count, RNG seed, temperature |
-| `[integrator]` | yes | lossy vs lossless mode |
+| `[integrator]` | yes | integrator slot + per-kind parameters |
 | `[[particle_types]]` | yes (>= 1) | per-type properties |
 | `[[pair_interactions]]` | yes (covers every pair) | per-pair LJ coefficients |
 | `[output]` | no | trajectory & log paths and cadences |
@@ -40,6 +40,7 @@ dt = 1.0e-15        # s
 temperature = 300.0 # K (used only if init file lacks a `velo` column)
 
 [integrator]
+kind = "velocity-verlet"
 lossless = false
 
 [[particle_types]]
@@ -91,9 +92,32 @@ or unit suffixes are supported in schema v1.
 
 #### `[integrator]`
 
-- `lossless: bool` — selects lossless mode (default `false`). When `true`,
-  the runner allocates `LosslessBuffers` and launches `vv_kick_drift_lossless`
-  / `vv_kick_lossless`. See `integration.md`.
+The integrator section is a tagged variant. A required `kind` field selects
+one of the pluggable integrator slots (see `integration/framework.md` for
+the slot interface). Every other field in this table is kind-specific:
+extra fields not recognised by the chosen `kind` are rejected, and missing
+required fields are rejected.
+
+- `kind: String` — required. One of:
+  - `"velocity-verlet"` — symplectic NVE. See
+    `integration/velocity-verlet.md`.
+  - `"langevin-baoab"` — stochastic NVT via the Leimkuhler-Matthews BAOAB
+    splitting. See `integration/langevin-baoab.md`.
+
+Fields accepted for `kind = "velocity-verlet"`:
+
+- `lossless: bool` — selects the lossless compensated-summation variant.
+  Optional; defaults to `false`. When `true`, the runner allocates
+  `LosslessBuffers` and launches the `*_lossless` kernels.
+
+Fields accepted for `kind = "langevin-baoab"`:
+
+- `friction: f64` — damping coefficient `γ` in inverse seconds. Required.
+  Finite and strictly positive; `0.0` is rejected.
+- `temperature: f64` — bath temperature in kelvin. Required. Finite and
+  strictly positive. Independent of `simulation.temperature`.
+- `seed: u64` — counter-based RNG seed. Required, independent of
+  `simulation.seed`.
 
 #### `[[particle_types]]` (array of tables)
 
@@ -203,7 +227,7 @@ Beyond per-field validation, the loader checks:
   - `schema_version: u64`
   - `init: PathBuf` — resolved against the config file's directory.
   - `simulation: SimulationConfig`
-  - `integrator: IntegratorConfig`
+  - `integrator: IntegratorKind`
   - `particle_types: Vec<ParticleTypeConfig>`
   - `pair_interactions: Vec<PairInteractionConfig>`
   - `output: OutputConfig`
@@ -216,8 +240,14 @@ Beyond per-field validation, the loader checks:
   - `dt: f64`
   - `temperature: f64`
 
-- `IntegratorConfig` <!-- rq-661bf664 -->
-  - `lossless: bool`
+- `IntegratorKind` — tagged enum carrying the chosen integrator slot and <!-- rq-661bf664 -->
+  its parameters. Variants:
+  - `VelocityVerlet { lossless: bool }` — selected by `kind = "velocity-verlet"`.
+  - `LangevinBaoab { friction: f64, temperature: f64, seed: u64 }` —
+    selected by `kind = "langevin-baoab"`.
+
+  Variant-bearing parameters reflect the per-kind fields listed under the
+  `[integrator]` section above.
 
 - `ParticleTypeConfig` <!-- rq-a5ccc1de -->
   - `name: String`
@@ -259,6 +289,10 @@ Beyond per-field validation, the loader checks:
   - `DuplicatePairInteraction { types: (String, String) }`.
   - `PathCollision { kind_a: PathRole, kind_b: PathRole, path: PathBuf }`.
   - `MultiTypeUnsupported { count: usize }`.
+  - `UnknownIntegratorKind { actual: String }` — `[integrator].kind` is
+    not one of the supported strings.
+  - `UnknownIntegratorField { kind: String, field: String }` — a field in
+    the `[integrator]` table is not recognised by the chosen `kind`.
 
 ### Functions <!-- rq-39881bb0 -->
 
@@ -299,7 +333,7 @@ Feature: TOML simulation config schema
   Background:
     Given a valid minimal config containing schema_version = 1, init = "argon.xyz",
       one [simulation] section with seed=12345, n_steps=10, dt=1.0e-15, temperature=300.0,
-      one [integrator] section with lossless=false,
+      one [integrator] section with kind="velocity-verlet" and lossless=false,
       one [[particle_types]] entry with name="Ar" and mass=6.6335e-26,
       one [[pair_interactions]] entry between=["Ar","Ar"], potential="lennard-jones",
         sigma=3.40e-10, epsilon=1.65e-21, cutoff=1.0e-9
@@ -316,7 +350,7 @@ Feature: TOML simulation config schema
     And config.simulation.n_steps equals 10
     And config.simulation.dt equals 1.0e-15
     And config.simulation.temperature equals 300.0
-    And config.integrator.lossless equals false
+    And config.integrator matches IntegratorKind::VelocityVerlet { lossless: false }
     And config.particle_types has length 1
     And config.particle_types[0].name equals "Ar"
     And config.particle_types[0].mass equals 6.6335e-26
@@ -448,6 +482,89 @@ Feature: TOML simulation config schema
     Given the Background config with the [integrator] section removed
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "integrator" })
+
+  @rq-100115a0
+  Scenario: Missing integrator.kind is rejected
+    Given the Background config with [integrator] containing only lossless=false (no kind field)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.kind" })
+
+  @rq-9d882742
+  Scenario: Unknown integrator kind is rejected
+    Given the Background config with [integrator] kind="custom"
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownIntegratorKind { actual: "custom" })
+
+  @rq-86aa2be7
+  Scenario: Langevin BAOAB kind with valid parameters is accepted
+    Given the Background config with [integrator] kind="langevin-baoab",
+      friction=1.0e12, temperature=300.0, seed=42
+    When load_config is called
+    Then it returns Ok(config)
+    And config.integrator matches IntegratorKind::LangevinBaoab { friction: 1.0e12, temperature: 300.0, seed: 42 }
+
+  @rq-40ed9975
+  Scenario: Langevin BAOAB missing friction is rejected
+    Given the Background config with [integrator] kind="langevin-baoab",
+      temperature=300.0, seed=42 (no friction field)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.friction" })
+
+  @rq-f2431cc4
+  Scenario: Langevin BAOAB missing temperature is rejected
+    Given the Background config with [integrator] kind="langevin-baoab",
+      friction=1.0e12, seed=42 (no temperature field)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.temperature" })
+
+  @rq-92f643cb
+  Scenario: Langevin BAOAB missing seed is rejected
+    Given the Background config with [integrator] kind="langevin-baoab",
+      friction=1.0e12, temperature=300.0 (no seed field)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.seed" })
+
+  @rq-385408d0
+  Scenario: Langevin BAOAB rejects friction=0
+    Given the Background config with [integrator] kind="langevin-baoab",
+      friction=0.0, temperature=300.0, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.friction", reason: _ })
+
+  @rq-583201cb
+  Scenario: Langevin BAOAB rejects negative friction
+    Given the Background config with [integrator] kind="langevin-baoab",
+      friction=-1.0, temperature=300.0, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.friction", reason: _ })
+
+  @rq-789b7a33
+  Scenario: Langevin BAOAB rejects non-positive temperature
+    Given the Background config with [integrator] kind="langevin-baoab",
+      friction=1.0e12, temperature=0.0, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.temperature", reason: _ })
+
+  @rq-30270f03
+  Scenario: Velocity-Verlet kind rejects Langevin fields
+    Given the Background config with [integrator] kind="velocity-verlet",
+      friction=1.0e12 (extra field)
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownIntegratorField { kind: "velocity-verlet", field: "friction" })
+
+  @rq-e7c05140
+  Scenario: Langevin-BAOAB kind rejects velocity-Verlet fields
+    Given the Background config with [integrator] kind="langevin-baoab",
+      friction=1.0e12, temperature=300.0, seed=42, lossless=false (extra field)
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownIntegratorField { kind: "langevin-baoab", field: "lossless" })
+
+  @rq-66ec7ee4
+  Scenario: Velocity-Verlet lossless defaults to false when omitted
+    Given the Background config with [integrator] containing only kind="velocity-verlet"
+    When load_config is called
+    Then it returns Ok(config)
+    And config.integrator matches IntegratorKind::VelocityVerlet { lossless: false }
 
   @rq-1e1c5f3b
   Scenario: Missing [[particle_types]] is rejected

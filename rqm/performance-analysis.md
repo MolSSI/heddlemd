@@ -22,20 +22,35 @@ zero samples in a given run are omitted from the output file.
 
 ### Kernel stages (CUDA-event timed) <!-- rq-312e5f8e -->
 
-One CUDA event pair per kernel function. The runner records the start event
-immediately before each launch helper call and the stop event immediately
-after. Stages:
+One CUDA event pair per stage. The runner (or the integrator slot acting
+through the runner) records the start event immediately before each kernel
+launch and the stop event immediately after. Stages:
+
+Force-pipeline stages (every integrator):
+
+- `lj_pair_force`
+- `reduce_pair_forces`
+
+Velocity-Verlet integrator stages (selected by `kind = "velocity-verlet"`):
 
 - `vv_kick_drift`
 - `vv_kick`
 - `vv_kick_drift_lossless`
 - `vv_kick_lossless`
-- `lj_pair_force`
-- `reduce_pair_forces`
 
-A run uses exactly one of `vv_kick_drift` / `vv_kick_drift_lossless` and one
-of `vv_kick` / `vv_kick_lossless`, determined by `config.integrator.lossless`.
-The other two stages have zero samples and are absent from the output.
+Langevin BAOAB integrator stages (selected by `kind = "langevin-baoab"`,
+see `integration/langevin-baoab.md`):
+
+- `langevin_kick_half` — the B step (reuses the `vv_kick` kernel
+  internally; the distinct stage label distinguishes Langevin calls).
+- `langevin_drift_half` — the A step (`lan_drift_half` kernel).
+- `langevin_ou_step` — the O step (`lan_ou_step` kernel).
+
+Only the stages corresponding to the chosen integrator have nonzero
+counts; the others are absent from the output file. The velocity-Verlet
+slot also leaves exactly one of `vv_kick_drift` / `vv_kick_drift_lossless`
+and one of `vv_kick` / `vv_kick_lossless` empty, determined by the
+`lossless` flag.
 
 A kernel-launch helper that early-returns (e.g. when `particle_count == 0`)
 does not record any sample. The CUDA event pair for that stage may still
@@ -161,18 +176,21 @@ than 92 characters.
 Rows appear in this fixed order, with absent stages skipped:
 
 1. `vv_kick_drift` or `vv_kick_drift_lossless` (whichever is present)
-2. `lj_pair_force`
-3. `reduce_pair_forces`
-4. `vv_kick` or `vv_kick_lossless` (whichever is present)
-5. `host_to_device_upload`
-6. `device_to_host_download`
-7. `trajectory_write`
-8. `log_write`
-9. `velocity_generation`
-10. `config_load`
-11. `init_load`
-12. `gpu_init`
-13. `total_runtime`
+2. `langevin_kick_half` (B step, pre and post)
+3. `langevin_drift_half` (A step)
+4. `langevin_ou_step` (O step)
+5. `lj_pair_force`
+6. `reduce_pair_forces`
+7. `vv_kick` or `vv_kick_lossless` (whichever is present)
+8. `host_to_device_upload`
+9. `device_to_host_download`
+10. `trajectory_write`
+11. `log_write`
+12. `velocity_generation`
+13. `config_load`
+14. `init_load`
+15. `gpu_init`
+16. `total_runtime`
 
 ### Example <!-- rq-6289f344 -->
 
@@ -213,7 +231,8 @@ partial timings are discarded).
 
 - `KernelStage` — `enum` covering the six instrumented kernel-launch <!-- rq-dc8a0ff7 -->
   helpers. Variants: `VvKickDrift`, `VvKick`, `VvKickDriftLossless`,
-  `VvKickLossless`, `LjPairForce`, `ReducePairForces`. Implements `Copy`,
+  `VvKickLossless`, `LjPairForce`, `ReducePairForces`, `LangevinKickHalf`,
+  `LangevinDriftHalf`, `LangevinOuStep`. Implements `Copy`,
   `Eq`, `Hash` so it can index a fixed-size accumulator.
 
 - `HostStage` — `enum` covering the host-timed stages. Variants: <!-- rq-d29f2811 -->
@@ -426,18 +445,37 @@ Feature: Performance analysis and timings output
 
   @rq-b2fa4a1f
   Scenario: Lossless run includes lossless kick rows and excludes lossy rows
-    Given a valid config with integrator.lossless=true and n_steps=10
+    Given a valid config with integrator.kind="velocity-verlet" and lossless=true and n_steps=10
     When dynamics run sim.toml is invoked
     Then tmp/sim.timings has a row whose stage column equals "vv_kick_drift_lossless"
     And tmp/sim.timings has a row whose stage column equals "vv_kick_lossless"
     And tmp/sim.timings has no row whose stage column equals "vv_kick_drift"
     And tmp/sim.timings has no row whose stage column equals "vv_kick"
 
+  @rq-c1c9fe3a
+  Scenario: Langevin run includes Langevin rows and excludes velocity-Verlet rows
+    Given a valid config with integrator.kind="langevin-baoab",
+      friction=1.0e12, temperature=300.0, seed=42, n_steps=10
+    When dynamics run sim.toml is invoked
+    Then tmp/sim.timings has a row whose stage column equals "langevin_kick_half"
+    And tmp/sim.timings has a row whose stage column equals "langevin_drift_half"
+    And tmp/sim.timings has a row whose stage column equals "langevin_ou_step"
+    And tmp/sim.timings has no row whose stage column begins with "vv_"
+
+  @rq-0c2265eb
+  Scenario: Langevin kick_half count is 2 N_steps; drift_half is 2 N_steps; ou_step is N_steps
+    Given a valid Langevin config with n_steps=10
+    When dynamics run sim.toml is invoked
+    Then the row for langevin_kick_half has count = 20
+    And the row for langevin_drift_half has count = 20
+    And the row for langevin_ou_step has count = 10
+
   @rq-bde625cf
   Scenario: Empty (N=0) run omits all kernel rows but retains host rows
-    Given a valid config with N=0 particles and n_steps=5
+    Given a valid config with kind="velocity-verlet", N=0 particles, n_steps=5
     When dynamics run sim.toml is invoked
-    Then tmp/sim.timings has no rows whose stage column begins with "vv_" or equals "lj_pair_force" or "reduce_pair_forces"
+    Then tmp/sim.timings has no rows whose stage column begins with "vv_"
+      or "langevin_" or equals "lj_pair_force" or "reduce_pair_forces"
     And tmp/sim.timings has a row whose stage column equals "gpu_init"
     And tmp/sim.timings has a row whose stage column equals "total_runtime"
 

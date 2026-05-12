@@ -4,9 +4,10 @@ The simulation runner is the command-line entry point that turns a TOML
 configuration file into a complete simulation. It reads the config and the
 referenced initial-state file, allocates the GPU pipeline described by
 `build-pipeline.md`, `particle-state.md`, `pair-reduction.md`,
-`lj-pair-force.md`, and `integration.md`, drives the velocity-Verlet loop for
-`simulation.n_steps` timesteps, and writes snapshots and diagnostics at the
-declared cadences using `trajectory-output.md` and `log-output.md`.
+`lj-pair-force.md`, and the integrator slots in `integration/`, drives the
+timestep loop for `simulation.n_steps` iterations, and writes snapshots
+and diagnostics at the declared cadences using `trajectory-output.md` and
+`log-output.md`.
 
 The runner is the only piece in the project that has visibility of every
 subsystem; it is the integration point.
@@ -84,30 +85,35 @@ message.
 10. **Allocate device buffers.** Construct `ParticleBuffers` from the
     host state. Construct a `PairBuffer` with
     `particle_count = N` and `max_neighbors = N` (the runner uses the
-    O(N²) LJ kernel). Construct `LosslessBuffers` when
-    `config.integrator.lossless == true`. Allocate a `CudaSlice<u32>` of
-    length `N` for `neighbor_counts` and initialise every entry to
-    `N as u32` (every particle pairs with every other).
-11. **Build LJ parameters.** Take the sole entry of
+    O(N²) LJ kernel). Allocate a `CudaSlice<u32>` of length `N` for
+    `neighbor_counts` and initialise every entry to `N as u32` (every
+    particle pairs with every other).
+11. **Construct the integrator.** Call `Integrator::new(device.clone(),
+    N, &config.integrator)` to build the variant selected by
+    `IntegratorKind` (see `integration/framework.md`). The integrator
+    owns any per-run state it needs (e.g. `LosslessBuffers` for
+    `Integrator::VelocityVerlet` when `lossless == true`, or stored
+    parameters for `Integrator::LangevinBaoab`).
+12. **Build LJ parameters.** Take the sole entry of
     `config.pair_interactions` and construct
     `LennardJonesParameters { sigma, epsilon, cutoff }` cast from `f64` to
     `f32`.
-12. **Open output writers.** Open `TrajectoryWriter` and/or `LogWriter`
+13. **Open output writers.** Open `TrajectoryWriter` and/or `LogWriter`
     depending on the `_every` settings. Failure → exit 1.
-13. **Warm up forces.** Launch `lj_pair_force` followed by
+14. **Warm up forces.** Launch `lj_pair_force` followed by
     `reduce_pair_forces` once to populate `forces_*` with `F(x_0)`. This
     is the same warm-up pattern used in `pipeline-reproducibility.md`.
-14. **Write step-0 outputs.** When trajectory output is enabled, download
+15. **Write step-0 outputs.** When trajectory output is enabled, download
     the relevant buffers and call `write_frame(step=0, ...)`. When log
     output is enabled, download `velocities_*` and `masses` (the
     `masses` download is cached for the remainder of the run), compute
     KE and T via `compute_kinetic_energy` and `compute_temperature`
     (`log-output.md`), and call `write_row(0, 0.0, ke, t)`.
-15. **Timestep loop.** For each step `s` in `1 ..= n_steps`:
-    a. `vv_kick_drift(buffers, dt)` (or `_lossless` when configured).
+16. **Timestep loop.** For each step `s` in `1 ..= n_steps`:
+    a. `integrator.pre_force_step(&mut buffers, dt, s, &mut timings)`.
     b. `lj_pair_force(buffers, pair_buffer, &sim_box, &params)`.
     c. `reduce_pair_forces(&pair_buffer, &neighbor_counts, &mut buffers)`.
-    d. `vv_kick(buffers, dt)` (or `_lossless` when configured).
+    d. `integrator.post_force_step(&mut buffers, dt, s, &mut timings)`.
     e. If trajectory output is enabled and `s % trajectory_every == 0`,
        download positions (and velocities when configured) and call
        `write_frame(step=s, ...)`.
@@ -115,15 +121,15 @@ message.
        velocities, compute KE and T, and call `write_row(s, s as f64 * dt,
        ke, t)`.
     g. Possibly emit a progress line (see *Progress reporting*).
-16. **Flush and close.** Call `flush()` on each open writer. The writers'
+17. **Flush and close.** Call `flush()` on each open writer. The writers'
     `Drop` impls are best-effort but the runner calls `flush` explicitly
     so flush errors propagate.
-17. **Write timings file.** Capture the total-runtime measurement, drain
+18. **Write timings file.** Capture the total-runtime measurement, drain
     outstanding CUDA event pairs via `Timings::finalize`, and serialise
     the resulting report to `config.output.timings_path` via
     `write_timings_file`. See `performance-analysis.md` for the
     instrumentation contract and file format.
-18. **Final summary.** Emit one summary line to stdout (see
+19. **Final summary.** Emit one summary line to stdout (see
     *Final summary*). Exit 0.
 
 The `dt` value passed to integrator launches is `config.simulation.dt as
@@ -248,10 +254,16 @@ wrapper that calls into the library.
     buffer transfer.
   - `Gpu(GpuError)` — from `init_device`, buffer allocation, or kernel
     launch.
+  - `Integrator(IntegratorError)` — from `Integrator::new` or the per-step
+    methods on the chosen integrator variant (see
+    `integration/framework.md`).
   - `Trajectory(TrajectoryWriterError)` — from trajectory writer
     construction or `write_frame`/`flush`.
   - `Log(LogWriterError)` — from log writer construction or `write_row`/
     `flush`.
+  - `Timings(TimingsError)` — from `Timings::new`, kernel-event
+    recording, or `Timings::finalize`.
+  - `TimingsWriter(TimingsWriterError)` — from `write_timings_file`.
   - `MissingArgs` — CLI invoked without the required `<config-path>` arg.
   - `OutputExists { path: PathBuf }` — pre-flight check before the init
     file is read; surfaces the same condition the writers detect at
@@ -495,16 +507,33 @@ Feature: dynamics run simulation runner
 
   @rq-9eb167f0
   Scenario: Lossless mode selects the lossless integrator kernels
-    Given a config with integrator.lossless=true
+    Given a config with integrator.kind="velocity-verlet" and lossless=true
     When dynamics is invoked
     Then it exits with code 0
     And the simulation completes without GPU error
 
   @rq-a97789e6
-  Scenario: Lossy mode is the default
-    Given a config that omits the integrator.lossless field
+  Scenario: Lossy mode is the default for velocity-Verlet
+    Given a config with [integrator] kind="velocity-verlet" and no lossless field
     When the config is loaded
-    Then config.integrator.lossless equals false
+    Then config.integrator matches IntegratorKind::VelocityVerlet { lossless: false }
+
+  @rq-00cbbf51
+  Scenario: Langevin BAOAB runs end-to-end through the runner
+    Given a valid config with [integrator] kind="langevin-baoab",
+      friction=1.0e12, temperature=300.0, seed=42, n_steps=5
+    When dynamics is invoked
+    Then it exits with code 0
+    And the trajectory and log files exist
+    And the timings file contains rows for KernelStage::LangevinKickHalf,
+      KernelStage::LangevinDriftHalf, and KernelStage::LangevinOuStep
+
+  @rq-88e3ac79
+  Scenario: Switching integrator.kind changes the trajectory
+    Given two configs identical except [integrator] kind="velocity-verlet" vs
+      [integrator] kind="langevin-baoab" (with friction=1.0e12, temperature=300.0, seed=1)
+    When dynamics is invoked on each
+    Then the two trajectory files differ
 
   # --- Multi-type restriction ---
 

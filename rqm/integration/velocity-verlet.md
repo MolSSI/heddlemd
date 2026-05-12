@@ -1,11 +1,15 @@
 # Feature: Velocity Verlet Time Integration <!-- rq-09a2e15f -->
 
-The simulation advances particles in time using velocity Verlet, a second-order
-symplectic integrator. The per-particle arithmetic is split across two CUDA
-kernels: `vv_kick_drift` performs the first half-velocity update followed by the
-position update, and `vv_kick` performs the second half-velocity update. The
-host sequences these two kernels around a force-evaluation pipeline (which is
-the responsibility of a separate feature).
+Velocity Verlet is one of the integrators selected by the pluggable-slot
+framework (see `framework.md`). It is the deterministic, symplectic NVE
+integrator and is chosen via `kind = "velocity-verlet"` in the `[integrator]`
+section of the config.
+
+The per-particle arithmetic is split across two CUDA kernels: `vv_kick_drift`
+performs the first half-velocity update followed by the position update, and
+`vv_kick` performs the second half-velocity update. The runner calls
+`pre_force_step` (which launches `vv_kick_drift`), then the force pipeline,
+then `post_force_step` (which launches `vv_kick`).
 
 The integrator ships in two modes:
 
@@ -271,10 +275,31 @@ None of the four helpers inspects mass values or constrains `dt`. NaN,
 infinite, zero, or negative values flow through the kernel arithmetic and
 produce corresponding NaN/Inf outputs.
 
-The lossy launchers (`vv_kick_drift`, `vv_kick`) take only `&mut ParticleBuffers`
-and have signatures byte-identical to their pre-lossless form. Callers who
-do not enable lossless mode never construct a `LosslessBuffers` and pay no
-memory or kernel-launch cost from this feature.
+The lossy launchers (`vv_kick_drift`, `vv_kick`) take only `&mut ParticleBuffers`.
+A run with `lossless = false` never constructs a `LosslessBuffers` and pays no
+memory or kernel-launch cost from the lossless code path.
+
+## Slot Integration <!-- rq-39ab439e -->
+
+`VelocityVerletState` is one variant of the `Integrator` enum declared in
+`framework.md`. Construction takes the `lossless` flag from the parsed
+`IntegratorKind::VelocityVerlet { lossless }` config variant and, when
+`lossless == true`, allocates a `LosslessBuffers` of the runner's particle
+count on the same `Arc<CudaDevice>`.
+
+The variant implements the framework's per-step interface:
+
+- `pre_force_step(buffers, dt, _step_index, timings)`: launches
+  `vv_kick_drift` (or `vv_kick_drift_lossless`), bracketed by
+  `timings.kernel_start(KernelStage::VvKickDrift)` /
+  `timings.kernel_stop(KernelStage::VvKickDrift)` (or the
+  `*_lossless` stage names — see `performance-analysis.md`).
+- `post_force_step(buffers, dt, _step_index, timings)`: launches
+  `vv_kick` (or `vv_kick_lossless`) with matching timing bracketing.
+
+The `_step_index` parameter is unused by velocity Verlet but is part of the
+common slot interface for integrators that require it (e.g. Langevin
+counter-based RNG).
 
 ## Launch Configuration <!-- rq-0540b862 -->
 
