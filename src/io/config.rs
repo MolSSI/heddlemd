@@ -8,6 +8,7 @@ pub enum PathRole {
     Trajectory,
     Log,
     Timings,
+    Bonds,
 }
 
 impl std::fmt::Display for PathRole {
@@ -17,6 +18,7 @@ impl std::fmt::Display for PathRole {
             PathRole::Trajectory => write!(f, "trajectory"),
             PathRole::Log => write!(f, "log"),
             PathRole::Timings => write!(f, "timings"),
+            PathRole::Bonds => write!(f, "bonds"),
         }
     }
 }
@@ -64,6 +66,18 @@ pub enum ConfigError {
     UnknownIntegratorField {
         kind: String,
         field: String,
+    },
+    UnknownBondPotential {
+        actual: String,
+        bond_type_index: usize,
+    },
+    UnknownBondTypeField {
+        potential: String,
+        field: String,
+        bond_type_index: usize,
+    },
+    DuplicateBondTypeName {
+        name: String,
     },
 }
 
@@ -118,6 +132,21 @@ impl std::fmt::Display for ConfigError {
                 f,
                 "UnknownIntegratorField {{ kind: {kind:?}, field: {field:?} }}"
             ),
+            ConfigError::UnknownBondPotential { actual, bond_type_index } => write!(
+                f,
+                "UnknownBondPotential {{ actual: {actual:?}, bond_type_index: {bond_type_index} }}"
+            ),
+            ConfigError::UnknownBondTypeField {
+                potential,
+                field,
+                bond_type_index,
+            } => write!(
+                f,
+                "UnknownBondTypeField {{ potential: {potential:?}, field: {field:?}, bond_type_index: {bond_type_index} }}"
+            ),
+            ConfigError::DuplicateBondTypeName { name } => {
+                write!(f, "DuplicateBondTypeName {{ name: {name:?} }}")
+            }
         }
     }
 }
@@ -163,6 +192,24 @@ pub struct PairInteractionConfig {
     pub cutoff: f64,
 }
 
+#[derive(Debug, Clone)]
+pub enum BondTypeConfig {
+    Morse {
+        name: String,
+        de: f64,
+        a: f64,
+        re: f64,
+    },
+}
+
+impl BondTypeConfig {
+    pub fn name(&self) -> &str {
+        match self {
+            BondTypeConfig::Morse { name, .. } => name,
+        }
+    }
+}
+
 // rq-1254cd3a
 #[derive(Debug, Clone)]
 pub struct OutputConfig {
@@ -179,10 +226,12 @@ pub struct OutputConfig {
 pub struct Config {
     pub schema_version: u64,
     pub init: PathBuf,
+    pub bonds: Option<PathBuf>,
     pub simulation: SimulationConfig,
     pub integrator: IntegratorKind,
     pub particle_types: Vec<ParticleTypeConfig>,
     pub pair_interactions: Vec<PairInteractionConfig>,
+    pub bond_types: Vec<BondTypeConfig>,
     pub output: OutputConfig,
     pub config_path: PathBuf,
 }
@@ -295,6 +344,11 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
     }
 
     let init_raw = get_str(root, "init")?.to_string();
+    let bonds_raw: Option<String> = match root.get("bonds") {
+        Some(toml::Value::String(s)) => Some(s.clone()),
+        Some(_) => return Err(invalid("bonds", "expected a string")),
+        None => None,
+    };
 
     let sim_tbl = get_table(root, "simulation")?;
     let seed = get_u64(sim_tbl, "seed").map_err(rename_field("simulation.seed".into()))?;
@@ -513,6 +567,65 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         }
     }
 
+    // Bond types (optional)
+    let mut bond_types: Vec<BondTypeConfig> = Vec::new();
+    if let Some(bt_value) = root.get("bond_types") {
+        let bt_array = bt_value
+            .as_array()
+            .ok_or_else(|| invalid("bond_types", "expected an array of tables"))?;
+        let mut seen_names: Vec<String> = Vec::new();
+        for (i, entry) in bt_array.iter().enumerate() {
+            let tbl = entry
+                .as_table()
+                .ok_or_else(|| invalid(&format!("bond_types[{i}]"), "expected a table"))?;
+            let name = get_str(tbl, "name")
+                .map_err(rename_field(format!("bond_types[{i}].name")))?
+                .to_string();
+            if name.is_empty() {
+                return Err(invalid(
+                    &format!("bond_types[{i}].name"),
+                    "name must not be empty",
+                ));
+            }
+            if seen_names.contains(&name) {
+                return Err(ConfigError::DuplicateBondTypeName { name });
+            }
+            let potential = get_str(tbl, "potential")
+                .map_err(rename_field(format!("bond_types[{i}].potential")))?
+                .to_string();
+            match potential.as_str() {
+                "morse" => {
+                    for key in tbl.keys() {
+                        if !matches!(key.as_str(), "name" | "potential" | "de" | "a" | "re") {
+                            return Err(ConfigError::UnknownBondTypeField {
+                                potential: "morse".to_string(),
+                                field: key.clone(),
+                                bond_type_index: i,
+                            });
+                        }
+                    }
+                    let de = get_f64(tbl, "de")
+                        .map_err(rename_field(format!("bond_types[{i}].de")))?;
+                    require_finite_positive(&format!("bond_types[{i}].de"), de)?;
+                    let a = get_f64(tbl, "a")
+                        .map_err(rename_field(format!("bond_types[{i}].a")))?;
+                    require_finite_positive(&format!("bond_types[{i}].a"), a)?;
+                    let re = get_f64(tbl, "re")
+                        .map_err(rename_field(format!("bond_types[{i}].re")))?;
+                    require_finite_positive(&format!("bond_types[{i}].re"), re)?;
+                    seen_names.push(name.clone());
+                    bond_types.push(BondTypeConfig::Morse { name, de, a, re });
+                }
+                other => {
+                    return Err(ConfigError::UnknownBondPotential {
+                        actual: other.to_string(),
+                        bond_type_index: i,
+                    });
+                }
+            }
+        }
+    }
+
     // Output section with defaults
     let config_path_canonical = std::fs::canonicalize(path)
         .map_err(|e| ConfigError::Io(format!("canonicalize {}: {}", path.display(), e)))?;
@@ -592,8 +705,9 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
 
     // rq-6d99f9c8
     let init_path = resolve_path(&base_dir, &init_raw);
+    let bonds_path: Option<PathBuf> = bonds_raw.as_deref().map(|s| resolve_path(&base_dir, s));
 
-    // Path collision checks (init/traj/log/timings pairwise distinct)
+    // Path collision checks (init/traj/log/timings/bonds pairwise distinct)
     let check_collision = |kind_a: PathRole, path_a: &PathBuf, kind_b: PathRole, path_b: &PathBuf| {
         if path_a == path_b {
             Some(ConfigError::PathCollision {
@@ -623,6 +737,20 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
     if let Some(e) = check_collision(PathRole::Log, &log_path, PathRole::Timings, &timings_path) {
         return Err(e);
     }
+    if let Some(b) = bonds_path.as_ref() {
+        if let Some(e) = check_collision(PathRole::Init, &init_path, PathRole::Bonds, b) {
+            return Err(e);
+        }
+        if let Some(e) = check_collision(PathRole::Trajectory, &trajectory_path, PathRole::Bonds, b) {
+            return Err(e);
+        }
+        if let Some(e) = check_collision(PathRole::Log, &log_path, PathRole::Bonds, b) {
+            return Err(e);
+        }
+        if let Some(e) = check_collision(PathRole::Timings, &timings_path, PathRole::Bonds, b) {
+            return Err(e);
+        }
+    }
 
     // Multi-type restriction
     if particle_types.len() != 1 {
@@ -634,10 +762,12 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
     Ok(Config {
         schema_version,
         init: init_path,
+        bonds: bonds_path,
         simulation,
         integrator,
         particle_types,
         pair_interactions,
+        bond_types,
         output: OutputConfig {
             trajectory_path,
             trajectory_every,

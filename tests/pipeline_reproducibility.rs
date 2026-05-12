@@ -1,9 +1,11 @@
+mod common;
+use common::*;
+
 use std::sync::Arc;
 
 use cudarc::driver::CudaDevice;
 use dynamics::gpu::{
-    LennardJonesParameters, PairBuffer, ParticleBuffers, init_device, lj_pair_force,
-    reduce_pair_forces, vv_kick, vv_kick_drift,
+    LennardJonesParameters, PairBuffer, ParticleBuffers, init_device, vv_kick, vv_kick_drift,
 };
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
@@ -63,13 +65,13 @@ fn run_pipeline(device: &Arc<CudaDevice>, n_steps: usize) -> ParticleState {
     };
 
     // Warm-up: populate forces with F(0) before the first kick_drift consumes them.
-    lj_pair_force(&buffers, &mut pair, &sim_box, &params).unwrap();
-    reduce_pair_forces(&pair, &counts, &mut buffers).unwrap();
+    lj_pair_force_no_excl(&buffers, &mut pair, &sim_box, &params).unwrap();
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
 
     for _ in 0..n_steps {
         vv_kick_drift(&mut buffers, DT).unwrap();
-        lj_pair_force(&buffers, &mut pair, &sim_box, &params).unwrap();
-        reduce_pair_forces(&pair, &counts, &mut buffers).unwrap();
+        lj_pair_force_no_excl(&buffers, &mut pair, &sim_box, &params).unwrap();
+        reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
         vv_kick(&mut buffers, DT).unwrap();
     }
 

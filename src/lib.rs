@@ -1,3 +1,4 @@
+pub mod forces;
 pub mod gpu;
 pub mod integrator;
 pub mod io;

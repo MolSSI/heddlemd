@@ -12,6 +12,9 @@ extern "C" __global__ void lj_pair_force(
     float sigma,
     float epsilon,
     float cutoff,
+    const unsigned int *atom_excl_offsets,
+    const unsigned int *atom_excl_partners,
+    const float *atom_excl_scales,
     unsigned int n)
 {
   unsigned int i = blockIdx.y * blockDim.y + threadIdx.y;
@@ -52,7 +55,25 @@ extern "C" __global__ void lj_pair_force(
   float sr12 = sr6 * sr6;
   float factor = 24.0f * epsilon * inv_r2 * (2.0f * sr12 - sr6);
 
-  pair_forces_x[slot] = factor * dx;
-  pair_forces_y[slot] = factor * dy;
-  pair_forces_z[slot] = factor * dz;
+  float fx = factor * dx;
+  float fy = factor * dy;
+  float fz = factor * dz;
+
+  // rq-dddcbf07
+  unsigned int start = atom_excl_offsets[i];
+  unsigned int end = atom_excl_offsets[i + 1];
+  float scale = 1.0f;
+  for (unsigned int m = start; m < end; ++m) {
+    if (atom_excl_partners[m] == k) {
+      scale = atom_excl_scales[m];
+      break;
+    }
+  }
+  fx *= scale;
+  fy *= scale;
+  fz *= scale;
+
+  pair_forces_x[slot] = fx;
+  pair_forces_y[slot] = fy;
+  pair_forces_z[slot] = fz;
 }

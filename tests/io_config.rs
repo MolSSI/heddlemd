@@ -1107,6 +1107,260 @@ fn vv_lossless_defaults_to_false() {
     ));
 }
 
+// rq-6cb9ab62
+#[test]
+fn bonds_field_optional_defaults_none() {
+    let dir = tmp_path("bonds_optional");
+    let path = write_config(&dir, &minimal_config());
+    let cfg = load_config(&path).unwrap();
+    assert!(cfg.bonds.is_none());
+}
+
+// rq-027153d9
+#[test]
+fn bonds_field_resolved_relative() {
+    let dir = tmp_path("bonds_relative");
+    let body = minimal_config().replace(
+        "init = \"argon.xyz\"\n",
+        "init = \"argon.xyz\"\nbonds = \"topology.bonds\"\n",
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    let canonical_dir = std::fs::canonicalize(&dir).unwrap();
+    assert_eq!(cfg.bonds, Some(canonical_dir.join("topology.bonds")));
+}
+
+// rq-576561a2
+#[test]
+fn bonds_absolute_preserved() {
+    let dir = tmp_path("bonds_absolute");
+    let body = minimal_config().replace(
+        "init = \"argon.xyz\"\n",
+        "init = \"argon.xyz\"\nbonds = \"/data/topology.bonds\"\n",
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.bonds, Some(std::path::PathBuf::from("/data/topology.bonds")));
+}
+
+// rq-4186d4f4
+#[test]
+fn reject_bonds_eq_init() {
+    let dir = tmp_path("bonds_eq_init");
+    let body = minimal_config().replace(
+        "init = \"argon.xyz\"\n",
+        "init = \"argon.xyz\"\nbonds = \"argon.xyz\"\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::PathCollision { kind_a, kind_b, .. } => {
+            assert_eq!(kind_a, PathRole::Init);
+            assert_eq!(kind_b, PathRole::Bonds);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-98180119
+#[test]
+fn reject_bonds_eq_trajectory() {
+    let dir = tmp_path("bonds_eq_traj");
+    let body = format!(
+        "{}\n[output]\ntrajectory_path = \"run.dat\"\n",
+        minimal_config().replace(
+            "init = \"argon.xyz\"\n",
+            "init = \"argon.xyz\"\nbonds = \"run.dat\"\n",
+        )
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::PathCollision { kind_a, kind_b, .. } => {
+            assert!(matches!(kind_a, PathRole::Trajectory | PathRole::Bonds));
+            assert!(matches!(kind_b, PathRole::Trajectory | PathRole::Bonds));
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-6ad9a0f8
+#[test]
+fn bond_types_optional_empty() {
+    let dir = tmp_path("bond_types_empty");
+    let path = write_config(&dir, &minimal_config());
+    let cfg = load_config(&path).unwrap();
+    assert!(cfg.bond_types.is_empty());
+}
+
+// rq-f704561b
+#[test]
+fn valid_morse_bond_type_accepted() {
+    let dir = tmp_path("morse_valid");
+    let body = format!(
+        "{}\n[[bond_types]]\nname = \"ArAr\"\npotential = \"morse\"\nde = 1.65e-21\na = 1.9e10\nre = 3.4e-10\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.bond_types.len(), 1);
+    match &cfg.bond_types[0] {
+        dynamics::io::BondTypeConfig::Morse { name, de, a, re } => {
+            assert_eq!(name, "ArAr");
+            assert_eq!(*de, 1.65e-21);
+            assert_eq!(*a, 1.9e10);
+            assert_eq!(*re, 3.4e-10);
+        }
+    }
+}
+
+// rq-c79a1408
+#[test]
+fn bond_type_missing_potential() {
+    let dir = tmp_path("bond_type_missing_potential");
+    let body = format!(
+        "{}\n[[bond_types]]\nname = \"ArAr\"\nde = 1.0\na = 1.0\nre = 1.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "bond_types[0].potential"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-e34d764e
+#[test]
+fn bond_type_unknown_potential() {
+    let dir = tmp_path("bond_type_unknown");
+    let body = format!(
+        "{}\n[[bond_types]]\nname = \"ArAr\"\npotential = \"harmonic\"\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownBondPotential {
+            actual,
+            bond_type_index,
+        } => {
+            assert_eq!(actual, "harmonic");
+            assert_eq!(bond_type_index, 0);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-3b0e8140
+#[test]
+fn morse_bond_type_missing_de() {
+    let dir = tmp_path("morse_missing_de");
+    let body = format!(
+        "{}\n[[bond_types]]\nname = \"X\"\npotential = \"morse\"\na = 1.0\nre = 1.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "bond_types[0].de"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-ecc8f632
+#[test]
+fn morse_bond_type_rejects_zero_de() {
+    let dir = tmp_path("morse_zero_de");
+    let body = format!(
+        "{}\n[[bond_types]]\nname = \"X\"\npotential = \"morse\"\nde = 0.0\na = 1.0\nre = 1.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "bond_types[0].de"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-ae85bf7b
+#[test]
+fn morse_bond_type_rejects_negative_a() {
+    let dir = tmp_path("morse_neg_a");
+    let body = format!(
+        "{}\n[[bond_types]]\nname = \"X\"\npotential = \"morse\"\nde = 1.0\na = -1.0\nre = 1.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "bond_types[0].a"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-3533e8a9
+#[test]
+fn morse_bond_type_rejects_zero_re() {
+    let dir = tmp_path("morse_zero_re");
+    let body = format!(
+        "{}\n[[bond_types]]\nname = \"X\"\npotential = \"morse\"\nde = 1.0\na = 1.0\nre = 0.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "bond_types[0].re"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-e40d2722
+#[test]
+fn morse_bond_type_rejects_extra_field() {
+    let dir = tmp_path("morse_extra_field");
+    let body = format!(
+        "{}\n[[bond_types]]\nname = \"X\"\npotential = \"morse\"\nde = 1.0\na = 1.0\nre = 1.0\nstiffness = 2.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownBondTypeField {
+            potential,
+            field,
+            bond_type_index,
+        } => {
+            assert_eq!(potential, "morse");
+            assert_eq!(field, "stiffness");
+            assert_eq!(bond_type_index, 0);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-ed1d6c71
+#[test]
+fn reject_duplicate_bond_type_name() {
+    let dir = tmp_path("dup_bond_type");
+    let body = format!(
+        "{}\n[[bond_types]]\nname = \"X\"\npotential = \"morse\"\nde = 1.0\na = 1.0\nre = 1.0\n[[bond_types]]\nname = \"X\"\npotential = \"morse\"\nde = 2.0\na = 2.0\nre = 2.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::DuplicateBondTypeName { name } => assert_eq!(name, "X"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-50521f04
+#[test]
+fn empty_bond_type_name_rejected() {
+    let dir = tmp_path("empty_bond_name");
+    let body = format!(
+        "{}\n[[bond_types]]\nname = \"\"\npotential = \"morse\"\nde = 1.0\na = 1.0\nre = 1.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "bond_types[0].name"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
 // rq-97e525d8
 #[test]
 fn trajectory_every_zero_accepted() {

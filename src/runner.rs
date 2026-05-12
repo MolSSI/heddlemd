@@ -7,10 +7,10 @@ use rand::SeedableRng;
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
-use crate::gpu::{
-    LennardJonesParameters, PairBuffer, ParticleBuffers, init_device, lj_pair_force,
-    reduce_pair_forces,
+use crate::forces::{
+    BondList, BondsFileError, ExclusionList, ForceField, ForceFieldError, load_bonds_file,
 };
+use crate::gpu::{ParticleBuffers, init_device};
 use crate::integrator::{Integrator, IntegratorError};
 use crate::io::{
     ConfigError, InitStateError, InitVelocities, LogWriter, LogWriterError, TrajectoryWriter,
@@ -19,7 +19,7 @@ use crate::io::{
 use crate::io::log_output::{BOLTZMANN_J_PER_K, compute_kinetic_energy, compute_temperature};
 use crate::state::{ParticleState, ParticleStateError};
 use crate::timings::{
-    HostStage, KernelStage, Timings, TimingsError, TimingsWriterError, write_timings_file,
+    HostStage, Timings, TimingsError, TimingsWriterError, write_timings_file,
 };
 
 // rq-8ee27e27
@@ -30,6 +30,8 @@ pub enum RunnerError {
     ParticleState(ParticleStateError),
     Gpu(crate::gpu::GpuError),
     Integrator(IntegratorError),
+    BondsFile(BondsFileError),
+    ForceField(ForceFieldError),
     Trajectory(TrajectoryWriterError),
     Log(LogWriterError),
     Timings(TimingsError),
@@ -46,6 +48,8 @@ impl std::fmt::Display for RunnerError {
             RunnerError::ParticleState(e) => write!(f, "ParticleState({e})"),
             RunnerError::Gpu(e) => write!(f, "Gpu({e})"),
             RunnerError::Integrator(e) => write!(f, "Integrator({e})"),
+            RunnerError::BondsFile(e) => write!(f, "BondsFile({e})"),
+            RunnerError::ForceField(e) => write!(f, "ForceField({e})"),
             RunnerError::Trajectory(e) => write!(f, "Trajectory({e})"),
             RunnerError::Log(e) => write!(f, "Log({e})"),
             RunnerError::Timings(e) => write!(f, "Timings({e})"),
@@ -206,23 +210,29 @@ fn run_simulation_with_phase(
         })?;
     timings.record_host(HostStage::HostToDeviceUpload, upload);
 
-    let max_neighbors = if n == 0 { 0u32 } else { n as u32 };
-    let mut pair_buffer = PairBuffer::new(device.clone(), n, max_neighbors)
-        .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?;
-
     let mut integrator = Integrator::new(device.clone(), n, &config.integrator)
         .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Setup))?;
 
-    let neighbor_counts = device
-        .htod_sync_copy(&vec![n as u32; n])
-        .map_err(|e| (RunnerError::Gpu(crate::gpu::GpuError::from(e)), ExitPhase::Setup))?;
-
-    let pair = &config.pair_interactions[0];
-    let lj_params = LennardJonesParameters {
-        sigma: pair.sigma as f32,
-        epsilon: pair.epsilon as f32,
-        cutoff: pair.cutoff as f32,
+    // Load the .bonds file when supplied, otherwise build empty bond / exclusion
+    // lists keyed to `n`.
+    let bond_type_names: Vec<&str> =
+        config.bond_types.iter().map(|bt| bt.name()).collect();
+    let (bond_list, exclusion_list): (BondList, ExclusionList) = match config.bonds.as_ref() {
+        Some(path) => load_bonds_file(path, n, &bond_type_names)
+            .map_err(|e| (RunnerError::BondsFile(e), ExitPhase::Setup))?,
+        None => (BondList::empty(n), ExclusionList::empty(n)),
     };
+
+    let mut force_field = ForceField::new(
+        device.clone(),
+        n,
+        &sim_box,
+        &config.pair_interactions,
+        &config.bond_types,
+        &bond_list,
+        &exclusion_list,
+    )
+    .map_err(|e| (RunnerError::ForceField(e), ExitPhase::Setup))?;
 
     // Open output writers (only the enabled ones).
     let mut traj_writer: Option<TrajectoryWriter> = if config.output.trajectory_every > 0 {
@@ -248,29 +258,10 @@ fn run_simulation_with_phase(
 
     let started = Instant::now();
 
-    // Warm-up: populate forces with F(x_0).
-    if n > 0 {
-        timings
-            .kernel_start(KernelStage::LjPairForce)
-            .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
-    }
-    lj_pair_force(&buffers, &mut pair_buffer, &sim_box, &lj_params)
-        .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?;
-    if n > 0 {
-        timings
-            .kernel_stop(KernelStage::LjPairForce)
-            .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
-        timings
-            .kernel_start(KernelStage::ReducePairForces)
-            .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
-    }
-    reduce_pair_forces(&pair_buffer, &neighbor_counts, &mut buffers)
-        .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?;
-    if n > 0 {
-        timings
-            .kernel_stop(KernelStage::ReducePairForces)
-            .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
-    }
+    // Warm-up: populate forces with F(x_0) via the force-field pipeline.
+    force_field
+        .step(&mut buffers, &sim_box, &mut timings)
+        .map_err(|e| (RunnerError::ForceField(e), ExitPhase::Setup))?;
 
     // Host scratch state for downloads.
     let mut frame: ParticleState = state.clone();
@@ -320,28 +311,9 @@ fn run_simulation_with_phase(
         integrator
             .pre_force_step(&mut buffers, dt_f32, step, &mut timings)
             .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Loop))?;
-        if n > 0 {
-            timings
-                .kernel_start(KernelStage::LjPairForce)
-                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-        }
-        lj_pair_force(&buffers, &mut pair_buffer, &sim_box, &lj_params)
-            .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Loop))?;
-        if n > 0 {
-            timings
-                .kernel_stop(KernelStage::LjPairForce)
-                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-            timings
-                .kernel_start(KernelStage::ReducePairForces)
-                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-        }
-        reduce_pair_forces(&pair_buffer, &neighbor_counts, &mut buffers)
-            .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Loop))?;
-        if n > 0 {
-            timings
-                .kernel_stop(KernelStage::ReducePairForces)
-                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-        }
+        force_field
+            .step(&mut buffers, &sim_box, &mut timings)
+            .map_err(|e| (RunnerError::ForceField(e), ExitPhase::Loop))?;
         integrator
             .post_force_step(&mut buffers, dt_f32, step, &mut timings)
             .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Loop))?;

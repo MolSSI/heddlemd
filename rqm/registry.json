@@ -104,6 +104,18 @@
     "title": "Reject non-positive dt",
     "type": "scenario"
   },
+  "rq-027153d9": {
+    "decl": "Scenario: bonds field is resolved relative to the config directory",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "bonds field is resolved relative to the config directory",
+    "type": "scenario"
+  },
   "rq-02bde767": {
     "decl": "Scenario: Drop best-effort flushes",
     "file": "io/log-output",
@@ -195,6 +207,13 @@
     "title": "init_device succeeds on a machine with a CUDA GPU",
     "type": "scenario"
   },
+  "rq-05d55351": {
+    "decl": "# Feature: Morse Bonded Potential",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "Feature: Morse Bonded Potential",
+    "type": "file"
+  },
   "rq-05eb9fbb": {
     "decl": "Scenario: Reject zero ly",
     "file": "simulation-box",
@@ -209,7 +228,7 @@
   },
   "rq-06058b71": {
     "decl": "Scenario: init_device loads the pair_force module with the LJ kernel",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -217,6 +236,13 @@
       }
     ],
     "title": "init_device loads the pair_force module with the LJ kernel",
+    "type": "scenario"
+  },
+  "rq-06c0e11a": {
+    "decl": "Scenario: Exclusion row with non-numeric scale",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Exclusion row with non-numeric scale",
     "type": "scenario"
   },
   "rq-08066bdf": {
@@ -240,12 +266,26 @@
     "title": "Comparison Procedure",
     "type": "section"
   },
+  "rq-097c7d9c": {
+    "decl": "- `PotentialSlot` — closed `enum`. Variants:",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "PotentialSlot",
+    "type": "api-item"
+  },
   "rq-09a2e15f": {
     "decl": "# Feature: Velocity Verlet Time Integration",
     "file": "integration/velocity-verlet",
     "refs": [],
     "title": "Feature: Velocity Verlet Time Integration",
     "type": "file"
+  },
+  "rq-0a8831b1": {
+    "decl": "- `Bond` — `Debug, Clone, Copy`. Fields: `atom_i: u32`, `atom_j: u32`,",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Bond",
+    "type": "api-item"
   },
   "rq-0ae304bc": {
     "decl": "Scenario: minimum_image handles many-period displacements",
@@ -283,6 +323,14 @@
     "title": "Langevin kick_half count is 2 N_steps; drift_half is 2 N_steps; ou_step is N_steps",
     "type": "scenario"
   },
+  "rq-0c318e64": {
+    "decl": "## Force Accumulation",
+    "file": "forces/morse-bonded",
+    "level": 2,
+    "refs": [],
+    "title": "Force Accumulation",
+    "type": "section"
+  },
   "rq-0c3a23bb": {
     "decl": "## GPU Device Module",
     "file": "build-pipeline",
@@ -290,6 +338,13 @@
     "refs": [],
     "title": "GPU Device Module",
     "type": "section"
+  },
+  "rq-0c717392": {
+    "decl": "- `Exclusion` — `Debug, Clone, Copy`. Fields: `atom_i: u32`,",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Exclusion",
+    "type": "api-item"
   },
   "rq-0cb3c41c": {
     "decl": "Scenario: Reject unknown schema_version",
@@ -302,6 +357,14 @@
     ],
     "title": "Reject unknown schema_version",
     "type": "scenario"
+  },
+  "rq-0da87ca1": {
+    "decl": "## Feature API",
+    "file": "forces/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-0dab90aa": {
     "decl": "- `StageStats` — public, `Clone`, `Debug` snapshot for one stage.",
@@ -330,6 +393,18 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-0f34d11b": {
+    "decl": "Scenario: Construct a ForceField with bond_types declared but no bonds",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct a ForceField with bond_types declared but no bonds",
+    "type": "scenario"
   },
   "rq-0f7b8a57": {
     "decl": "## Empty State",
@@ -362,6 +437,14 @@
     ],
     "title": "Missing integrator.kind is rejected",
     "type": "scenario"
+  },
+  "rq-100f8b5f": {
+    "decl": "## Per-Step Kernel Sequence",
+    "file": "forces/morse-bonded",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Step Kernel Sequence",
+    "type": "section"
   },
   "rq-1012fb8a": {
     "decl": "## Gherkin Scenarios",
@@ -419,6 +502,13 @@
     "title": "KE of a single particle at rest is zero",
     "type": "scenario"
   },
+  "rq-10adebc4": {
+    "decl": "- `reduce_bond_forces(state: &mut MorseBondedState) -> Result<(), GpuError>`",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "reduce_bond_forces",
+    "type": "api-item"
+  },
   "rq-10c79bb0": {
     "decl": "## Slots",
     "file": "integration/framework",
@@ -434,6 +524,13 @@
     "refs": [],
     "title": "CUDA Kernels",
     "type": "section"
+  },
+  "rq-10d1da56": {
+    "decl": "Scenario: Self-bond rejected",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Self-bond rejected",
+    "type": "scenario"
   },
   "rq-110285ae": {
     "decl": "## Feature API",
@@ -503,12 +600,41 @@
     "title": "PairBuffer",
     "type": "api-item"
   },
+  "rq-12872970": {
+    "decl": "## Parameters",
+    "file": "forces/morse-bonded",
+    "level": 2,
+    "refs": [],
+    "title": "Parameters",
+    "type": "section"
+  },
+  "rq-12b7dcb6": {
+    "decl": "- `load_bonds_file(path: &Path, particle_count: usize, bond_type_names: &[&str]) -> Result<(BondList, ExclusionList), BondsFileError>`",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "load_bonds_file",
+    "type": "api-item"
+  },
+  "rq-13b931f8": {
+    "decl": "Scenario: Bond row with non-integer index",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Bond row with non-integer index",
+    "type": "scenario"
+  },
   "rq-13c02457": {
     "decl": "# Feature: Lennard-Jones O(N²) Pair Force Kernel",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Feature: Lennard-Jones O(N²) Pair Force Kernel",
     "type": "file"
+  },
+  "rq-13e15b90": {
+    "decl": "Scenario: Bond row with atom index out of range",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Bond row with atom index out of range",
+    "type": "scenario"
   },
   "rq-1434abd2": {
     "decl": "## Out of Scope",
@@ -518,9 +644,16 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-14b8e042": {
+    "decl": "Scenario: Morse-bonded run records morse_bond_force, reduce_bond_forces, accumulate_forces",
+    "file": "performance-analysis",
+    "refs": [],
+    "title": "Morse-bonded run records morse_bond_force, reduce_bond_forces, accumulate_forces",
+    "type": "scenario"
+  },
   "rq-14d7a940": {
     "decl": "Scenario: Kernel does not modify positions, velocities, masses, or net forces",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -610,6 +743,21 @@
     ],
     "title": "ParticleBuffers",
     "type": "api-item"
+  },
+  "rq-17abcb76": {
+    "decl": "### Functions and methods",
+    "file": "forces/framework",
+    "level": 3,
+    "refs": [],
+    "title": "Functions and methods",
+    "type": "section"
+  },
+  "rq-17ed07e7": {
+    "decl": "Scenario: Exclusion atom out of range",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Exclusion atom out of range",
+    "type": "scenario"
   },
   "rq-18411920": {
     "decl": "- `ParticleBuffers::particle_count(&self) -> usize`",
@@ -784,6 +932,14 @@
     "title": "Langevin runs through the runner with N=0",
     "type": "scenario"
   },
+  "rq-1c794f95": {
+    "decl": "### Empty file",
+    "file": "forces/bonds",
+    "level": 3,
+    "refs": [],
+    "title": "Empty file",
+    "type": "section"
+  },
   "rq-1c7a9cfd": {
     "decl": "## Schema",
     "file": "io/config-schema",
@@ -791,6 +947,30 @@
     "refs": [],
     "title": "Schema",
     "type": "section"
+  },
+  "rq-1ca90a29": {
+    "decl": "Scenario: Atom with no bonds gets zero accumulator",
+    "file": "forces/morse-bonded",
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Atom with no bonds gets zero accumulator",
+    "type": "scenario"
+  },
+  "rq-1ce4ce5a": {
+    "decl": "Scenario: Atom with two bonds receives sum of contributions",
+    "file": "forces/morse-bonded",
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Atom with two bonds receives sum of contributions",
+    "type": "scenario"
   },
   "rq-1d618f18": {
     "decl": "## Reversal Protocol",
@@ -811,6 +991,14 @@
     "level": 2,
     "refs": [],
     "title": "File Format",
+    "type": "section"
+  },
+  "rq-1e1b4e02": {
+    "decl": "### Exclusion list",
+    "file": "forces/bonds",
+    "level": 3,
+    "refs": [],
+    "title": "Exclusion list",
     "type": "section"
   },
   "rq-1e1c5f3b": {
@@ -857,6 +1045,13 @@
     "title": "Reject when positions_y has the wrong length",
     "type": "scenario"
   },
+  "rq-1ed32e10": {
+    "decl": "Scenario: Content before any section header",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Content before any section header",
+    "type": "scenario"
+  },
   "rq-1f2f912b": {
     "decl": "## Gherkin Scenarios",
     "file": "integration/langevin-baoab",
@@ -876,6 +1071,13 @@
     ],
     "title": "run_simulation",
     "type": "api-item"
+  },
+  "rq-1fc667cd": {
+    "decl": "Scenario: Config bond_type with potential != \"morse\" is rejected",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "Config bond_type with potential != \"morse\" is rejected",
+    "type": "scenario"
   },
   "rq-1fcaf334": {
     "decl": "- `TrajectoryWriterError` — error type. Variants:",
@@ -924,7 +1126,7 @@
   },
   "rq-20e97464": {
     "decl": "### Types",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "level": 3,
     "refs": [],
     "title": "Types",
@@ -941,6 +1143,14 @@
       }
     ],
     "title": "Types",
+    "type": "section"
+  },
+  "rq-21acd57c": {
+    "decl": "## Empty State",
+    "file": "forces/morse-bonded",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State",
     "type": "section"
   },
   "rq-2214f0a1": {
@@ -980,6 +1190,14 @@
     "title": "Sampling order",
     "type": "section"
   },
+  "rq-22d0ce50": {
+    "decl": "### Types",
+    "file": "forces/bonds",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-22e4e198": {
     "decl": "## Feature API",
     "file": "io/trajectory-output",
@@ -1005,6 +1223,13 @@
     "title": "LogWriter",
     "type": "api-item"
   },
+  "rq-2361f2b8": {
+    "decl": "- `MorseBondedState` — owns the slot's `BondPairBuffer`, the bond",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "MorseBondedState",
+    "type": "api-item"
+  },
   "rq-247e3799": {
     "decl": "Scenario: dt = 0 leaves positions unchanged",
     "file": "integration/langevin-baoab",
@@ -1028,6 +1253,14 @@
       }
     ],
     "title": "Comparison Procedure",
+    "type": "section"
+  },
+  "rq-24f280af": {
+    "decl": "### Effective exclusions",
+    "file": "forces/bonds",
+    "level": 3,
+    "refs": [],
+    "title": "Effective exclusions",
     "type": "section"
   },
   "rq-25afada1": {
@@ -1075,7 +1308,7 @@
   },
   "rq-26ffa053": {
     "decl": "Scenario: Doubling epsilon doubles the force at the same separation",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -1232,6 +1465,13 @@
     "title": "Reproducibility",
     "type": "section"
   },
+  "rq-2b4a324a": {
+    "decl": "Scenario: Exclusion scale NaN rejected",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Exclusion scale NaN rejected",
+    "type": "scenario"
+  },
   "rq-2b7cfbaf": {
     "decl": "## Out of Scope",
     "file": "pair-reduction",
@@ -1264,6 +1504,18 @@
     ],
     "title": "Velocity generation",
     "type": "section"
+  },
+  "rq-2cb90e10": {
+    "decl": "Scenario: Stretched bond produces an attractive force",
+    "file": "forces/morse-bonded",
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Stretched bond produces an attractive force",
+    "type": "scenario"
   },
   "rq-2cbe0828": {
     "decl": "Scenario: record_host updates count, total, min, and max",
@@ -1301,6 +1553,32 @@
     "title": "Reduction with all zero neighbor counts produces zero net forces",
     "type": "scenario"
   },
+  "rq-2d4efead": {
+    "decl": "Scenario: Atom with one bond receives the bond's force directly",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "Atom with one bond receives the bond's force directly",
+    "type": "scenario"
+  },
+  "rq-2e4e70b4": {
+    "decl": "Scenario: Two atoms at equilibrium distance produce zero force",
+    "file": "forces/morse-bonded",
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two atoms at equilibrium distance produce zero force",
+    "type": "scenario"
+  },
+  "rq-2e98a75d": {
+    "decl": "# ignored.",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "ignored.",
+    "type": "file"
+  },
   "rq-2ebf81fd": {
     "decl": "Scenario: Timings path equal to init path is rejected",
     "file": "performance-analysis",
@@ -1324,6 +1602,13 @@
     ],
     "title": "Reject non-orthorhombic lattice",
     "type": "scenario"
+  },
+  "rq-2f230ccb": {
+    "decl": "- `BondTypeConfig` — tagged enum carrying the chosen bonded-potential",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "BondTypeConfig",
+    "type": "api-item"
   },
   "rq-2f52c25e": {
     "decl": "Scenario: vv_kick leaves velocity unchanged when force is zero",
@@ -1369,6 +1654,13 @@
     "title": "Kernel stages (CUDA-event timed)",
     "type": "section"
   },
+  "rq-31430003": {
+    "decl": "Scenario: Half-strength exclusion (scale=0.5) halves the LJ contribution",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Half-strength exclusion (scale=0.5) halves the LJ contribution",
+    "type": "scenario"
+  },
   "rq-318cd47d": {
     "decl": "Scenario: log_every = 0 is accepted (disables log output)",
     "file": "io/config-schema",
@@ -1402,6 +1694,18 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-32e981cc": {
+    "decl": "Scenario: step() on a ForceField with only LennardJones writes LJ forces to forces_*",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "step() on a ForceField with only LennardJones writes LJ forces to forces_*",
+    "type": "scenario"
+  },
   "rq-32fda118": {
     "decl": "Scenario: Load an empty (N=0) file",
     "file": "io/init-state-file",
@@ -1426,12 +1730,28 @@
     "title": "Reject init = log_path",
     "type": "scenario"
   },
+  "rq-33a054f9": {
+    "decl": "### Bond entries",
+    "file": "forces/bonds",
+    "level": 3,
+    "refs": [],
+    "title": "Bond entries",
+    "type": "section"
+  },
   "rq-33c0521d": {
     "decl": "### Types",
     "file": "integration/velocity-verlet",
     "level": 3,
     "refs": [],
     "title": "Types",
+    "type": "section"
+  },
+  "rq-345d7784": {
+    "decl": "## Feature API",
+    "file": "forces/morse-bonded",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
     "type": "section"
   },
   "rq-34bfc634": {
@@ -1458,6 +1778,18 @@
     "title": "Refuse to run with multiple types",
     "type": "scenario"
   },
+  "rq-3533e8a9": {
+    "decl": "Scenario: Morse bond_type rejects non-positive re",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Morse bond_type rejects non-positive re",
+    "type": "scenario"
+  },
   "rq-35722a66": {
     "decl": "## Out of Scope",
     "file": "io/config-schema",
@@ -1478,6 +1810,13 @@
     "title": "Feature: `dynamics run` Simulation Runner",
     "type": "file"
   },
+  "rq-3579df3b": {
+    "decl": "- `ForceField::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings) -> Result<(), ForceFieldError>`",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "ForceField",
+    "type": "api-item"
+  },
   "rq-358de3e6": {
     "decl": "Scenario: lan_drift_half advances positions by v * dt/2",
     "file": "integration/langevin-baoab",
@@ -1496,6 +1835,14 @@
     "level": 3,
     "refs": [],
     "title": "Host stages (Instant-timed)",
+    "type": "section"
+  },
+  "rq-361623d8": {
+    "decl": "## Data Model",
+    "file": "forces/bonds",
+    "level": 2,
+    "refs": [],
+    "title": "Data Model",
     "type": "section"
   },
   "rq-36382434": {
@@ -1522,6 +1869,14 @@
     "title": "ParticleState",
     "type": "api-item"
   },
+  "rq-37ccfc1f": {
+    "decl": "## Gherkin Scenarios",
+    "file": "forces/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-37e6f318": {
     "decl": "Scenario: Two independent runs produce byte-identical outputs",
     "file": "integration/velocity-verlet",
@@ -1533,6 +1888,13 @@
     ],
     "title": "Two independent runs produce byte-identical outputs",
     "type": "scenario"
+  },
+  "rq-38285db7": {
+    "decl": "# Comments start with '#' and run to end of line. Blank lines are",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Comments start with '#' and run to end of line. Blank lines are",
+    "type": "file"
   },
   "rq-385408d0": {
     "decl": "Scenario: Langevin BAOAB rejects friction=0",
@@ -1615,6 +1977,13 @@
     "title": "Slot Integration",
     "type": "section"
   },
+  "rq-3a1eea58": {
+    "decl": "Scenario: Scale = 1.0 is equivalent to no exclusion",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Scale = 1.0 is equivalent to no exclusion",
+    "type": "scenario"
+  },
   "rq-3adef71d": {
     "decl": "### Functions and methods",
     "file": "io/trajectory-output",
@@ -1622,6 +1991,18 @@
     "refs": [],
     "title": "Functions and methods",
     "type": "section"
+  },
+  "rq-3b0e8140": {
+    "decl": "Scenario: Morse bond_type missing de is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Morse bond_type missing de is rejected",
+    "type": "scenario"
   },
   "rq-3b9ed390": {
     "decl": "- `SimulationBox::volume(&self) -> f32`",
@@ -1681,11 +2062,23 @@
   },
   "rq-3c98d7a9": {
     "decl": "## Gherkin Scenarios",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "level": 2,
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-3de16ce0": {
+    "decl": "Scenario: Construct a ForceField with LennardJones and MorseBonded",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct a ForceField with LennardJones and MorseBonded",
+    "type": "scenario"
   },
   "rq-3e8324c2": {
     "decl": "Scenario: wrap_position leaves a position inside the primary image unchanged",
@@ -1697,6 +2090,13 @@
       }
     ],
     "title": "wrap_position leaves a position inside the primary image unchanged",
+    "type": "scenario"
+  },
+  "rq-3eb8fe40": {
+    "decl": "Scenario: atom_bond_offsets reflects sorted bond list",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "atom_bond_offsets reflects sorted bond list",
     "type": "scenario"
   },
   "rq-3ef10542": {
@@ -1747,6 +2147,18 @@
     "title": "Langevin BAOAB missing friction is rejected",
     "type": "scenario"
   },
+  "rq-40f02b6a": {
+    "decl": "Scenario: Empty [bonds] and [exclusions] sections are valid",
+    "file": "forces/bonds",
+    "refs": [
+      {
+        "file": "tests/forces_bonds.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Empty [bonds] and [exclusions] sections are valid",
+    "type": "scenario"
+  },
   "rq-410afcd3": {
     "decl": "## Feature API",
     "file": "performance-analysis",
@@ -1782,6 +2194,18 @@
       }
     ],
     "title": "Reject schema_version = 0",
+    "type": "scenario"
+  },
+  "rq-4186d4f4": {
+    "decl": "Scenario: Reject bonds = init",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject bonds = init",
     "type": "scenario"
   },
   "rq-438b895b": {
@@ -1920,6 +2344,18 @@
     "title": "Construct Langevin BAOAB",
     "type": "scenario"
   },
+  "rq-4811af60": {
+    "decl": "Scenario: r=0 produces zero force, not NaN",
+    "file": "forces/morse-bonded",
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "r=0 produces zero force, not NaN",
+    "type": "scenario"
+  },
   "rq-484ef36b": {
     "decl": "### Empty file",
     "file": "io/init-state-file",
@@ -1999,10 +2435,18 @@
   },
   "rq-4a902e65": {
     "decl": "## Practical Bounds",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "level": 2,
     "refs": [],
     "title": "Practical Bounds",
+    "type": "section"
+  },
+  "rq-4ae7794c": {
+    "decl": "### Exclusion entries",
+    "file": "forces/bonds",
+    "level": 3,
+    "refs": [],
+    "title": "Exclusion entries",
     "type": "section"
   },
   "rq-4b38148c": {
@@ -2041,6 +2485,13 @@
     "title": "wrap_position wraps a position outside the primary image",
     "type": "scenario"
   },
+  "rq-4c245ce7": {
+    "decl": "Scenario: Unknown section header",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Unknown section header",
+    "type": "scenario"
+  },
   "rq-4ca9b179": {
     "decl": "## Wrap Formula",
     "file": "simulation-box",
@@ -2071,7 +2522,7 @@
   },
   "rq-4ddab3c7": {
     "decl": "### CUDA Kernel",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "level": 3,
     "refs": [],
     "title": "CUDA Kernel",
@@ -2109,6 +2560,13 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-4f78f4a2": {
+    "decl": "Scenario: Duplicate bond rejected (same canonical pair)",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Duplicate bond rejected (same canonical pair)",
+    "type": "scenario"
+  },
   "rq-4f7dc024": {
     "decl": "Scenario: vv_kick_drift advances position and leaves velocity unchanged when force is zero",
     "file": "integration/velocity-verlet",
@@ -2123,11 +2581,23 @@
   },
   "rq-4fd872f5": {
     "decl": "## Launch Configuration",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "level": 2,
     "refs": [],
     "title": "Launch Configuration",
     "type": "section"
+  },
+  "rq-50521f04": {
+    "decl": "Scenario: Empty bond_type name rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Empty bond_type name rejected",
+    "type": "scenario"
   },
   "rq-50baca8c": {
     "decl": "Scenario: Variance scales with sqrt((1 - alpha^2) * kt / m)",
@@ -2187,6 +2657,20 @@
       }
     ],
     "title": "KE of three particles is summed in particle order",
+    "type": "scenario"
+  },
+  "rq-556b7c13": {
+    "decl": "Scenario: Minimum image is applied",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "Minimum image is applied",
+    "type": "scenario"
+  },
+  "rq-55f89976": {
+    "decl": "Scenario: Reduction summation order is sorted bond index",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "Reduction summation order is sorted bond index",
     "type": "scenario"
   },
   "rq-56043142": {
@@ -2250,6 +2734,18 @@
     "title": "log_every > n_steps writes only the step-0 row",
     "type": "scenario"
   },
+  "rq-56c8a238": {
+    "decl": "Scenario: Construct a ForceField with LennardJones only",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct a ForceField with LennardJones only",
+    "type": "scenario"
+  },
   "rq-56d8375d": {
     "decl": "### PTX Module Loading",
     "file": "pair-reduction",
@@ -2292,12 +2788,28 @@
     "file": "io/init-state-file",
     "refs": [
       {
+        "file": "src/forces/bonds.rs",
+        "kind": "code"
+      },
+      {
         "file": "src/io/init_state.rs",
         "kind": "code"
       }
     ],
     "title": "InitStateError",
     "type": "api-item"
+  },
+  "rq-576561a2": {
+    "decl": "Scenario: bonds absolute path is preserved",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "bonds absolute path is preserved",
+    "type": "scenario"
   },
   "rq-57c1b6a3": {
     "decl": "Scenario: No GPU available",
@@ -2363,6 +2875,13 @@
     "title": "Langevin BAOAB rejects negative friction",
     "type": "scenario"
   },
+  "rq-583d3df1": {
+    "decl": "Scenario: Duplicate section header",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Duplicate section header",
+    "type": "scenario"
+  },
   "rq-58981e16": {
     "decl": "- `Timings::kernel_start(&mut self, stage: KernelStage) -> Result<(), TimingsError>`",
     "file": "performance-analysis",
@@ -2417,6 +2936,18 @@
       }
     ],
     "title": "vv_kick_drift_lossless handles a block-non-aligned particle count",
+    "type": "scenario"
+  },
+  "rq-5b097ec0": {
+    "decl": "Scenario: Comments and blank lines are tolerated",
+    "file": "forces/bonds",
+    "refs": [
+      {
+        "file": "tests/forces_bonds.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Comments and blank lines are tolerated",
     "type": "scenario"
   },
   "rq-5bfa5b37": {
@@ -2542,7 +3073,7 @@
   },
   "rq-61207d82": {
     "decl": "## Feature API",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "level": 2,
     "refs": [],
     "title": "Feature API",
@@ -2574,6 +3105,26 @@
     "level": 3,
     "refs": [],
     "title": "Example",
+    "type": "section"
+  },
+  "rq-62e2469f": {
+    "decl": "Scenario: morse_bond_force on zero bonds is a no-op",
+    "file": "forces/morse-bonded",
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "morse_bond_force on zero bonds is a no-op",
+    "type": "scenario"
+  },
+  "rq-637c4fdd": {
+    "decl": "### Rust Launch Helpers",
+    "file": "forces/morse-bonded",
+    "level": 3,
+    "refs": [],
+    "title": "Rust Launch Helpers",
     "type": "section"
   },
   "rq-63f3e0b9": {
@@ -2669,7 +3220,7 @@
     "type": "scenario"
   },
   "rq-6690fae9": {
-    "decl": "- `reduce_pair_forces(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, particle_buffers: &mut ParticleBuffers) -> Result<(), GpuError>`",
+    "decl": "- `reduce_pair_forces(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_x: &mut CudaSlice<f32>, target_y: &mut CudaSlice<f32>, target_z: &mut CudaSlice<f32>, particle_count: usize) -> Result<(), GpuError>`",
     "file": "pair-reduction",
     "refs": [
       {
@@ -2691,6 +3242,13 @@
     ],
     "title": "Missing [integrator] section is rejected",
     "type": "scenario"
+  },
+  "rq-66d80d54": {
+    "decl": "- `morse_bond_force(state: &mut MorseBondedState, particle_buffers: &ParticleBuffers, sim_box: &SimulationBox) -> Result<(), GpuError>`",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "morse_bond_force",
+    "type": "api-item"
   },
   "rq-66ec7ee4": {
     "decl": "Scenario: Velocity-Verlet lossless defaults to false when omitted",
@@ -2716,6 +3274,18 @@
     ],
     "title": "Types",
     "type": "section"
+  },
+  "rq-679282f5": {
+    "decl": "Scenario: init_device loads the morse module",
+    "file": "forces/morse-bonded",
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "init_device loads the morse module",
+    "type": "scenario"
   },
   "rq-6808532e": {
     "decl": "Scenario: Per-particle reduction with varying counts",
@@ -2743,7 +3313,7 @@
   },
   "rq-681afa90": {
     "decl": "Scenario: Single-particle state produces only a zero self slot",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -2752,6 +3322,13 @@
     ],
     "title": "Single-particle state produces only a zero self slot",
     "type": "scenario"
+  },
+  "rq-684a29f1": {
+    "decl": "- `ForceField` — handle owning the ordered slot collection plus the",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "ForceField",
+    "type": "api-item"
   },
   "rq-685006bb": {
     "decl": "Scenario: Accept positions strictly inside the primary cell",
@@ -2785,6 +3362,13 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-696caf8e": {
+    "decl": "Scenario: Two independent calls produce byte-identical accumulators",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "Two independent calls produce byte-identical accumulators",
+    "type": "scenario"
+  },
   "rq-69a31102": {
     "decl": "Scenario: Reject missing schema_version",
     "file": "io/config-schema",
@@ -2795,6 +3379,18 @@
       }
     ],
     "title": "Reject missing schema_version",
+    "type": "scenario"
+  },
+  "rq-6ad9a0f8": {
+    "decl": "Scenario: bond_types is optional and defaults to empty",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "bond_types is optional and defaults to empty",
     "type": "scenario"
   },
   "rq-6aeb039a": {
@@ -2818,6 +3414,25 @@
     "title": "Velocity-Verlet Loop",
     "type": "section"
   },
+  "rq-6cb9ab62": {
+    "decl": "Scenario: bonds field is optional and defaults to None",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "bonds field is optional and defaults to None",
+    "type": "scenario"
+  },
+  "rq-6d06e36e": {
+    "decl": "Scenario: Newton's third law holds for the framework's combined force",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "Newton's third law holds for the framework's combined force",
+    "type": "scenario"
+  },
   "rq-6d087460": {
     "decl": "Scenario: Open creates a new log file with the header line",
     "file": "io/log-output",
@@ -2832,7 +3447,7 @@
   },
   "rq-6d209943": {
     "decl": "## Algorithm",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "level": 2,
     "refs": [],
     "title": "Algorithm",
@@ -3125,6 +3740,14 @@
     "title": "Reject trajectory_path = log_path",
     "type": "scenario"
   },
+  "rq-76cb9922": {
+    "decl": "## Determinism Guarantees",
+    "file": "forces/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism Guarantees",
+    "type": "section"
+  },
   "rq-779092ca": {
     "decl": "- `TimingsError` — error type. Variants:",
     "file": "performance-analysis",
@@ -3160,6 +3783,13 @@
       }
     ],
     "title": "Block-non-aligned particle counts are handled by the bounds check",
+    "type": "scenario"
+  },
+  "rq-77f53d4b": {
+    "decl": "Scenario: atom_excl_offsets reflects sorted exclusion list",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "atom_excl_offsets reflects sorted exclusion list",
     "type": "scenario"
   },
   "rq-780d68ea": {
@@ -3200,7 +3830,7 @@
   },
   "rq-78d9fd1c": {
     "decl": "### PTX Module Loading",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "level": 3,
     "refs": [
       {
@@ -3246,6 +3876,13 @@
     ],
     "title": "kernel_start followed by kernel_stop and finalize records one sample",
     "type": "scenario"
+  },
+  "rq-79938dbf": {
+    "decl": "- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], bond_list: &BondList, exclusion_list: &ExclusionList) -> Result<ForceField, ForceFieldError>`",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "ForceField",
+    "type": "api-item"
   },
   "rq-7a26eeae": {
     "decl": "## Feature API",
@@ -3336,6 +3973,14 @@
     ],
     "title": "Lossless velocity-Verlet uses the lossless kernels",
     "type": "scenario"
+  },
+  "rq-7bab5c1e": {
+    "decl": "## Force Evaluation Pipeline",
+    "file": "forces/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Force Evaluation Pipeline",
+    "type": "section"
   },
   "rq-7c23d271": {
     "decl": "Scenario: KE of a single particle with v=(1, 0, 0)",
@@ -3449,6 +4094,21 @@
     "title": "Reject row with infinite velocity",
     "type": "scenario"
   },
+  "rq-80dcfa97": {
+    "decl": "Scenario: Full exclusion (scale=0) zeros the LJ contribution for the excluded pair",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Full exclusion (scale=0) zeros the LJ contribution for the excluded pair",
+    "type": "scenario"
+  },
+  "rq-81659783": {
+    "decl": "## Feature API",
+    "file": "forces/bonds",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-81b241e7": {
     "decl": "Scenario: Different seeds produce different velocities",
     "file": "simulation-runner",
@@ -3485,6 +4145,18 @@
     "title": "Reject zero lx",
     "type": "scenario"
   },
+  "rq-82acb52f": {
+    "decl": "Scenario: Combiner is a single-threaded write per output element",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Combiner is a single-threaded write per output element",
+    "type": "scenario"
+  },
   "rq-82d0c34a": {
     "decl": "## CLI",
     "file": "simulation-runner",
@@ -3512,7 +4184,7 @@
   },
   "rq-85192a05": {
     "decl": "Scenario: At the LJ minimum r = sigma * 2^(1/6), the force is zero",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -3539,7 +4211,7 @@
   },
   "rq-8626ec3c": {
     "decl": "Scenario: Two particles across the box boundary interact via the minimum image",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -3642,6 +4314,18 @@
     "title": "Edge case: non-block-aligned buffer size",
     "type": "section"
   },
+  "rq-8a16e6d6": {
+    "decl": "Scenario: Load a typical .bonds file",
+    "file": "forces/bonds",
+    "refs": [
+      {
+        "file": "tests/forces_bonds.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Load a typical .bonds file",
+    "type": "scenario"
+  },
   "rq-8a9c44f8": {
     "decl": "- `Timings::new(device: Arc<CudaDevice>) -> Result<Timings, TimingsError>`",
     "file": "performance-analysis",
@@ -3686,6 +4370,13 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-8c786f79": {
+    "decl": "Scenario: Exclusion only applies to the listed pair",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Exclusion only applies to the listed pair",
+    "type": "scenario"
   },
   "rq-8d44fa4d": {
     "decl": "## Determinism Guarantees",
@@ -3865,6 +4556,13 @@
     "title": "CUDA events",
     "type": "section"
   },
+  "rq-922c9a86": {
+    "decl": "# Scale defaults to 0.0 (full exclusion) when omitted.",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Scale defaults to 0.0 (full exclusion) when omitted.",
+    "type": "file"
+  },
   "rq-925e5583": {
     "decl": "- `LogWriter::flush(&mut self) -> Result<(), LogWriterError>`",
     "file": "io/log-output",
@@ -3941,6 +4639,13 @@
     "title": "NaN values are accepted at construction",
     "type": "scenario"
   },
+  "rq-955b55f0": {
+    "decl": "# Atom indices are 0-based and refer to entries in the init file.",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Atom indices are 0-based and refer to entries in the init file.",
+    "type": "file"
+  },
   "rq-9561f753": {
     "decl": "## Gherkin Scenarios",
     "file": "pair-reduction",
@@ -3993,9 +4698,21 @@
     "title": "Feature: CSV Diagnostic Log",
     "type": "file"
   },
+  "rq-966e43ed": {
+    "decl": "Scenario: reduce_bond_forces on zero particles is a no-op",
+    "file": "forces/morse-bonded",
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "reduce_bond_forces on zero particles is a no-op",
+    "type": "scenario"
+  },
   "rq-96fadc6f": {
     "decl": "Scenario: Slot for a pair beyond cutoff is zero",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -4007,7 +4724,7 @@
   },
   "rq-975b5ae0": {
     "decl": "Scenario: Newton's third law is bit-exact for non-boundary displacements",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -4016,6 +4733,14 @@
     ],
     "title": "Newton's third law is bit-exact for non-boundary displacements",
     "type": "scenario"
+  },
+  "rq-976aa4af": {
+    "decl": "### Types",
+    "file": "forces/morse-bonded",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
   },
   "rq-97e525d8": {
     "decl": "Scenario: trajectory_every = 0 is accepted (disables trajectory output)",
@@ -4036,6 +4761,18 @@
     "refs": [],
     "title": "Counter packing",
     "type": "section"
+  },
+  "rq-98180119": {
+    "decl": "Scenario: Reject bonds = trajectory_path",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject bonds = trajectory_path",
+    "type": "scenario"
   },
   "rq-9818f429": {
     "decl": "Scenario: total_ms equals mean_us * count / 1000 within reporting precision",
@@ -4201,6 +4938,18 @@
     "title": "Missing [simulation].seed",
     "type": "scenario"
   },
+  "rq-9c1c58ef": {
+    "decl": "Scenario: Exclusion scale defaults to 0.0 when column omitted",
+    "file": "forces/bonds",
+    "refs": [
+      {
+        "file": "tests/forces_bonds.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Exclusion scale defaults to 0.0 when column omitted",
+    "type": "scenario"
+  },
   "rq-9c94f23b": {
     "decl": "## Out of Scope",
     "file": "pipeline-reproducibility",
@@ -4230,7 +4979,7 @@
   },
   "rq-9d7966f4": {
     "decl": "## Out of Scope",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "level": 2,
     "refs": [],
     "title": "Out of Scope",
@@ -4247,6 +4996,32 @@
     ],
     "title": "Unknown integrator kind is rejected",
     "type": "scenario"
+  },
+  "rq-9da14aa1": {
+    "decl": "Scenario: Sections may appear in either order",
+    "file": "forces/bonds",
+    "refs": [
+      {
+        "file": "tests/forces_bonds.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Sections may appear in either order",
+    "type": "scenario"
+  },
+  "rq-9df1eedb": {
+    "decl": "Scenario: Bond row with wrong column count",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Bond row with wrong column count",
+    "type": "scenario"
+  },
+  "rq-9e1eee68": {
+    "decl": "# Feature: Bond List, Exclusion List, and `.bonds` File",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Feature: Bond List, Exclusion List, and `.bonds` File",
+    "type": "file"
   },
   "rq-9e4d8944": {
     "decl": "Scenario: Reject duplicate pair under different orderings",
@@ -4292,6 +5067,18 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-9f2de58c": {
+    "decl": "Scenario: Construct MorseBondedState",
+    "file": "forces/morse-bonded",
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct MorseBondedState",
+    "type": "scenario"
+  },
   "rq-9f596df3": {
     "decl": "Scenario: Reject missing Properties attribute",
     "file": "io/init-state-file",
@@ -4302,6 +5089,13 @@
       }
     ],
     "title": "Reject missing Properties attribute",
+    "type": "scenario"
+  },
+  "rq-9f658edf": {
+    "decl": "Scenario: Exclusion scale greater than 1 rejected",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Exclusion scale greater than 1 rejected",
     "type": "scenario"
   },
   "rq-9f6a73f9": {
@@ -4345,7 +5139,7 @@
   },
   "rq-a1abedca": {
     "decl": "### Reproducibility",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "level": 3,
     "refs": [],
     "title": "Reproducibility",
@@ -4374,6 +5168,13 @@
     ],
     "title": "wrap_position and minimum_image agree on the same input",
     "type": "scenario"
+  },
+  "rq-a2e20b02": {
+    "decl": "- `ForceFieldError` — error type. Variants:",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "ForceFieldError",
+    "type": "api-item"
   },
   "rq-a2ebdaaf": {
     "decl": "Scenario: Timings file path can be overridden in [output]",
@@ -4405,6 +5206,14 @@
     "level": 2,
     "refs": [],
     "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-a33c1f4f": {
+    "decl": "## File Format",
+    "file": "forces/bonds",
+    "level": 2,
+    "refs": [],
+    "title": "File Format",
     "type": "section"
   },
   "rq-a35ca20b": {
@@ -4496,6 +5305,21 @@
       }
     ],
     "title": "Velocity generation row is present when init lacks velocities",
+    "type": "scenario"
+  },
+  "rq-a5a919df": {
+    "decl": "## Slot Integration",
+    "file": "forces/lj-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Slot Integration",
+    "type": "section"
+  },
+  "rq-a5aa743e": {
+    "decl": "Scenario: Combiner sums slot accumulators in slot order",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Combiner sums slot accumulators in slot order",
     "type": "scenario"
   },
   "rq-a5c86770": {
@@ -4619,6 +5443,22 @@
     "title": "Reject non-positive sigma",
     "type": "scenario"
   },
+  "rq-aa36ee0b": {
+    "decl": "### PTX Module Loading",
+    "file": "forces/morse-bonded",
+    "level": 3,
+    "refs": [],
+    "title": "PTX Module Loading",
+    "type": "section"
+  },
+  "rq-aa52268c": {
+    "decl": "## Empty State",
+    "file": "forces/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State",
+    "type": "section"
+  },
   "rq-ab40fe6d": {
     "decl": "Scenario: Reject non-blank content after the last data row",
     "file": "io/init-state-file",
@@ -4678,6 +5518,14 @@
     ],
     "title": "Disabled trajectory and log outputs are not checked, but timings is",
     "type": "scenario"
+  },
+  "rq-ad0edc95": {
+    "decl": "## Out of Scope",
+    "file": "forces/bonds",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-ad27732e": {
     "decl": "### Functions and methods",
@@ -4760,6 +5608,18 @@
     "title": "File does not exist",
     "type": "scenario"
   },
+  "rq-ae85bf7b": {
+    "decl": "Scenario: Morse bond_type rejects non-positive a",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Morse bond_type rejects non-positive a",
+    "type": "scenario"
+  },
   "rq-aef9888b": {
     "decl": "- `SimulationBoxError` — error type returned by the constructor:",
     "file": "simulation-box",
@@ -4770,6 +5630,13 @@
       }
     ],
     "title": "SimulationBoxError",
+    "type": "api-item"
+  },
+  "rq-af2d1628": {
+    "decl": "- `LennardJonesState` — owns the slot's `PairBuffer`, `neighbor_counts`",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "LennardJonesState",
     "type": "api-item"
   },
   "rq-afb80e25": {
@@ -4811,6 +5678,18 @@
     "refs": [],
     "title": "Reduction Algorithm",
     "type": "section"
+  },
+  "rq-b0c18819": {
+    "decl": "Scenario: Empty .bonds file is valid",
+    "file": "forces/bonds",
+    "refs": [
+      {
+        "file": "tests/forces_bonds.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Empty .bonds file is valid",
+    "type": "scenario"
   },
   "rq-b13eba96": {
     "decl": "Scenario: Particles evolve independently with their own forces",
@@ -4975,7 +5854,7 @@
   },
   "rq-b7bbabd0": {
     "decl": "### Newton's third law",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "level": 3,
     "refs": [],
     "title": "Newton's third law",
@@ -5130,6 +6009,13 @@
     "title": "init_device loads the integrate module with both kernels",
     "type": "scenario"
   },
+  "rq-bca0adbc": {
+    "decl": "- `BondsFileError` — error type returned by the parser. Variants:",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "BondsFileError",
+    "type": "api-item"
+  },
   "rq-bcb0f58a": {
     "decl": "- `LangevinBaoabState` — variant payload owned by",
     "file": "integration/langevin-baoab",
@@ -5211,6 +6097,22 @@
     "title": "ParticleStateError",
     "type": "api-item"
   },
+  "rq-bf62f645": {
+    "decl": "## Gherkin Scenarios",
+    "file": "forces/bonds",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-bf6cc1aa": {
+    "decl": "## Gherkin Scenarios",
+    "file": "forces/morse-bonded",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-bfb3b9d8": {
     "decl": "Scenario: minimum_image leaves a displacement strictly inside the primary image unchanged",
     "file": "simulation-box",
@@ -5236,12 +6138,28 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-c0f98145": {
+    "decl": "### Combiner Kernel",
+    "file": "forces/framework",
+    "level": 3,
+    "refs": [],
+    "title": "Combiner Kernel",
+    "type": "section"
+  },
   "rq-c1308495": {
     "decl": "## Coordinate Conventions",
     "file": "simulation-box",
     "level": 2,
     "refs": [],
     "title": "Coordinate Conventions",
+    "type": "section"
+  },
+  "rq-c1678fe1": {
+    "decl": "## Launch Configuration",
+    "file": "forces/morse-bonded",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
     "type": "section"
   },
   "rq-c17ef35f": {
@@ -5270,6 +6188,13 @@
     "refs": [],
     "title": "PTX embedding",
     "type": "section"
+  },
+  "rq-c1ea073b": {
+    "decl": "# Feature: Pluggable Potential Slot Framework",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Feature: Pluggable Potential Slot Framework",
+    "type": "file"
   },
   "rq-c22483b4": {
     "decl": "Scenario: Construct an empty state",
@@ -5311,9 +6236,21 @@
     "title": "Timings",
     "type": "api-item"
   },
+  "rq-c525ee79": {
+    "decl": "Scenario: Construct an empty (N=0) ForceField",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Construct an empty (N=0) ForceField",
+    "type": "scenario"
+  },
   "rq-c538b29d": {
     "decl": "Scenario: Two particles at a fixed separation produce the closed-form LJ force",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -5364,6 +6301,40 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-c79a1408": {
+    "decl": "Scenario: bond_type missing potential field",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "bond_type missing potential field",
+    "type": "scenario"
+  },
+  "rq-c79e35dc": {
+    "decl": "## Out of Scope",
+    "file": "forces/morse-bonded",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
+  "rq-c7af1f28": {
+    "decl": "Scenario: Diatomic equilibrium gives zero net force on both atoms",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "Diatomic equilibrium gives zero net force on both atoms",
+    "type": "scenario"
+  },
+  "rq-c7df5714": {
+    "decl": "Scenario: Bond-free run omits morse_bond_force and reduce_bond_forces",
+    "file": "performance-analysis",
+    "refs": [],
+    "title": "Bond-free run omits morse_bond_force and reduce_bond_forces",
+    "type": "scenario"
+  },
   "rq-c88dde28": {
     "decl": "Scenario: Reject too many data rows",
     "file": "io/init-state-file",
@@ -5387,6 +6358,25 @@
     ],
     "title": "Allocate device buffers from an empty state",
     "type": "scenario"
+  },
+  "rq-c8e5b14e": {
+    "decl": "Scenario: Two independent runs with identical inputs are byte-identical",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Two independent runs with identical inputs are byte-identical",
+    "type": "scenario"
+  },
+  "rq-c8ea0a96": {
+    "decl": "# Column format: atom_i  atom_j  [scale]",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Column format: atom_i  atom_j  [scale]",
+    "type": "file"
   },
   "rq-c9016748": {
     "decl": "## Feature API",
@@ -5456,6 +6446,14 @@
     "title": "Reject row with unparseable position",
     "type": "scenario"
   },
+  "rq-cbeeea3c": {
+    "decl": "## Algorithm",
+    "file": "forces/morse-bonded",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
+  },
   "rq-cc12f2d8": {
     "decl": "Scenario: Zero temperature is accepted",
     "file": "io/config-schema",
@@ -5475,9 +6473,17 @@
     "title": "Feature: CUDA Build Pipeline and Smoke Test Kernel",
     "type": "file"
   },
+  "rq-cc73f184": {
+    "decl": "## Slots",
+    "file": "forces/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Slots",
+    "type": "section"
+  },
   "rq-cc87744c": {
     "decl": "Scenario: Self-interaction slots are zero",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -5486,6 +6492,14 @@
     ],
     "title": "Self-interaction slots are zero",
     "type": "scenario"
+  },
+  "rq-cd28340e": {
+    "decl": "## Per-Slot Private Accumulators",
+    "file": "forces/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Slot Private Accumulators",
+    "type": "section"
   },
   "rq-cdd5dc6d": {
     "decl": "## File Format",
@@ -5526,6 +6540,13 @@
     ],
     "title": "Integrator",
     "type": "api-item"
+  },
+  "rq-cf456bb4": {
+    "decl": "# Column format: atom_i  atom_j  bond_type_name",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Column format: atom_i  atom_j  bond_type_name",
+    "type": "file"
   },
   "rq-d065447f": {
     "decl": "Scenario: Run an empty (N=0) simulation",
@@ -5589,7 +6610,7 @@
   },
   "rq-d1e7cb57": {
     "decl": "Scenario: Block-non-aligned particle count is handled by the bounds check",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -5623,6 +6644,14 @@
     "title": "dt=0 leaves state unchanged for vv_kick",
     "type": "scenario"
   },
+  "rq-d28ad917": {
+    "decl": "### CUDA Kernels",
+    "file": "forces/morse-bonded",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernels",
+    "type": "section"
+  },
   "rq-d29872e4": {
     "decl": "## Final summary",
     "file": "simulation-runner",
@@ -5649,8 +6678,8 @@
     "type": "api-item"
   },
   "rq-d3a14184": {
-    "decl": "- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameters) -> Result<(), GpuError>`",
-    "file": "lj-pair-force",
+    "decl": "- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameters, exclusions: &DeviceExclusionList) -> Result<(), GpuError>`",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "src/gpu/kernels.rs",
@@ -5703,9 +6732,21 @@
     "title": "Feature: Langevin BAOAB Integrator",
     "type": "file"
   },
+  "rq-d61fa682": {
+    "decl": "Scenario: Force magnitude matches closed-form Morse expression",
+    "file": "forces/morse-bonded",
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Force magnitude matches closed-form Morse expression",
+    "type": "scenario"
+  },
   "rq-d6bd915a": {
     "decl": "Scenario: Pair exactly at cutoff is included",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -5717,7 +6758,7 @@
   },
   "rq-d6beaed7": {
     "decl": "### Rust Launcher",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "level": 3,
     "refs": [],
     "title": "Rust Launcher",
@@ -5748,6 +6789,18 @@
     "file": "build-pipeline",
     "refs": [],
     "title": "fill kernel does not write beyond the buffer",
+    "type": "scenario"
+  },
+  "rq-d998b5c0": {
+    "decl": "Scenario: Bonds are sorted by (atom_i, atom_j)",
+    "file": "forces/bonds",
+    "refs": [
+      {
+        "file": "tests/forces_bonds.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Bonds are sorted by (atom_i, atom_j)",
     "type": "scenario"
   },
   "rq-d9a98e51": {
@@ -5797,7 +6850,7 @@
   },
   "rq-daf7550b": {
     "decl": "Scenario: NaN positions propagate to NaN pair forces",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -5809,7 +6862,7 @@
   },
   "rq-dafe0fcb": {
     "decl": "- `LennardJonesParameters` — host-side `Copy` struct carrying the three",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "src/gpu/kernels.rs",
@@ -5840,7 +6893,7 @@
     "type": "section"
   },
   "rq-dc8a0ff7": {
-    "decl": "- `KernelStage` — `enum` covering the six instrumented kernel-launch",
+    "decl": "- `KernelStage` — `enum` covering the instrumented kernel-launch",
     "file": "performance-analysis",
     "refs": [
       {
@@ -5850,6 +6903,18 @@
     ],
     "title": "KernelStage",
     "type": "api-item"
+  },
+  "rq-dcba6fce": {
+    "decl": "Scenario: Implicit exclusion is added for a bond without explicit entry",
+    "file": "forces/bonds",
+    "refs": [
+      {
+        "file": "tests/forces_bonds.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Implicit exclusion is added for a bond without explicit entry",
+    "type": "scenario"
   },
   "rq-dcfdb7c9": {
     "decl": "## Integration with the Runner",
@@ -5864,6 +6929,14 @@
     "title": "Integration with the Runner",
     "type": "section"
   },
+  "rq-dddcbf07": {
+    "decl": "### Exclusion scaling <!-- inline-edit -->",
+    "file": "forces/lj-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Exclusion scaling <!-- inline-edit -->",
+    "type": "section"
+  },
   "rq-ddec3d72": {
     "decl": "Scenario: f32 positions round-trip through the writer and parser",
     "file": "io/trajectory-output",
@@ -5874,6 +6947,25 @@
       }
     ],
     "title": "f32 positions round-trip through the writer and parser",
+    "type": "scenario"
+  },
+  "rq-ddf51309": {
+    "decl": "- `BondList` — host-side. Fields: `bonds: Vec<Bond>`,",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "BondList",
+    "type": "api-item"
+  },
+  "rq-de47c1ac": {
+    "decl": "Scenario: step() with N=0 launches no kernels",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "step() with N=0 launches no kernels",
     "type": "scenario"
   },
   "rq-de5ca07a": {
@@ -5893,6 +6985,13 @@
     "file": "build-pipeline",
     "refs": [],
     "title": "build.rs compiles a .cu file to PTX",
+    "type": "scenario"
+  },
+  "rq-df10e81f": {
+    "decl": "Scenario: Self-exclusion rejected",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Self-exclusion rejected",
     "type": "scenario"
   },
   "rq-df244549": {
@@ -5920,9 +7019,21 @@
     "title": "Integrator",
     "type": "api-item"
   },
+  "rq-df3a50f6": {
+    "decl": "Scenario: step() on a ForceField with both slots sums LJ and Morse",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "step() on a ForceField with both slots sums LJ and Morse",
+    "type": "scenario"
+  },
   "rq-dfca62d2": {
     "decl": "Scenario: Two independent runs produce byte-identical pair-force buffers",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -6038,6 +7149,18 @@
     "title": "Different step_indices give different velocity outputs",
     "type": "scenario"
   },
+  "rq-e34d764e": {
+    "decl": "Scenario: bond_type unknown potential is rejected",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "bond_type unknown potential is rejected",
+    "type": "scenario"
+  },
   "rq-e367855a": {
     "decl": "### Field reference",
     "file": "io/config-schema",
@@ -6058,12 +7181,47 @@
     "title": "LogWriter",
     "type": "api-item"
   },
+  "rq-e40d2722": {
+    "decl": "Scenario: Morse bond_type rejects extra fields",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Morse bond_type rejects extra fields",
+    "type": "scenario"
+  },
   "rq-e435f271": {
     "decl": "## Data Layout",
     "file": "pair-reduction",
     "level": 2,
     "refs": [],
     "title": "Data Layout",
+    "type": "section"
+  },
+  "rq-e448909a": {
+    "decl": "## Out of Scope",
+    "file": "forces/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
+  "rq-e4563eec": {
+    "decl": "Scenario: Unknown bond type name rejected",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Unknown bond type name rejected",
+    "type": "scenario"
+  },
+  "rq-e4960f89": {
+    "decl": "### Types",
+    "file": "forces/framework",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
     "type": "section"
   },
   "rq-e4ace7d6": {
@@ -6108,7 +7266,7 @@
   },
   "rq-e564f8e2": {
     "decl": "Scenario: Kernel does not write slots with k >= n",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -6117,6 +7275,14 @@
     ],
     "title": "Kernel does not write slots with k >= n",
     "type": "scenario"
+  },
+  "rq-e5ba2e00": {
+    "decl": "## Determinism",
+    "file": "forces/morse-bonded",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
   },
   "rq-e5e4b048": {
     "decl": "### Functions",
@@ -6144,6 +7310,14 @@
     "title": "Empty init velocities",
     "type": "section"
   },
+  "rq-e66012e0": {
+    "decl": "### Functions",
+    "file": "forces/bonds",
+    "level": 3,
+    "refs": [],
+    "title": "Functions",
+    "type": "section"
+  },
   "rq-e7c05140": {
     "decl": "Scenario: Langevin-BAOAB kind rejects velocity-Verlet fields",
     "file": "io/config-schema",
@@ -6166,6 +7340,13 @@
       }
     ],
     "title": "Flush is idempotent",
+    "type": "scenario"
+  },
+  "rq-e80653f1": {
+    "decl": "Scenario: Empty exclusion list leaves all pair forces unchanged",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Empty exclusion list leaves all pair forces unchanged",
     "type": "scenario"
   },
   "rq-e8259ee5": {
@@ -6264,6 +7445,18 @@
     "title": "Construct with particle_count = 0",
     "type": "scenario"
   },
+  "rq-e9a421ef": {
+    "decl": "Scenario: Explicit exclusion overrides the bond's implicit default",
+    "file": "forces/bonds",
+    "refs": [
+      {
+        "file": "tests/forces_bonds.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Explicit exclusion overrides the bond's implicit default",
+    "type": "scenario"
+  },
   "rq-e9a67206": {
     "decl": "## Out of Scope",
     "file": "build-pipeline",
@@ -6308,9 +7501,16 @@
     "title": "TimingsWriterError",
     "type": "api-item"
   },
+  "rq-ec18d174": {
+    "decl": "- `MorseBondedState` — variant payload owned by",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "MorseBondedState",
+    "type": "api-item"
+  },
   "rq-ec53799e": {
     "decl": "Scenario: lj_pair_force followed by reduce_pair_forces produces the correct net force",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",
@@ -6352,6 +7552,18 @@
     "title": "Example",
     "type": "section"
   },
+  "rq-ecc8f632": {
+    "decl": "Scenario: Morse bond_type rejects non-positive de",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Morse bond_type rejects non-positive de",
+    "type": "scenario"
+  },
   "rq-ed048159": {
     "decl": "Scenario: All observables are finite after the 100-step lossless forward run",
     "file": "pipeline-reversibility",
@@ -6364,6 +7576,18 @@
     "title": "All observables are finite after the 100-step lossless forward run",
     "type": "scenario"
   },
+  "rq-ed1d6c71": {
+    "decl": "Scenario: Reject duplicate bond_type names",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reject duplicate bond_type names",
+    "type": "scenario"
+  },
   "rq-ed997636": {
     "decl": "### Units",
     "file": "io/config-schema",
@@ -6371,6 +7595,20 @@
     "refs": [],
     "title": "Units",
     "type": "section"
+  },
+  "rq-eea2f5f8": {
+    "decl": "Scenario: Duplicate exclusion rejected",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Duplicate exclusion rejected",
+    "type": "scenario"
+  },
+  "rq-ef5aa4b7": {
+    "decl": "Scenario: File does not exist",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "File does not exist",
+    "type": "scenario"
   },
   "rq-ef7b719d": {
     "decl": "## Construction Details",
@@ -6418,7 +7656,7 @@
     "type": "api-item"
   },
   "rq-f0084057": {
-    "decl": "- `PathRole` — `enum { Init, Trajectory, Log, Timings }`. Used in `PathCollision`.",
+    "decl": "- `PathRole` — `enum { Init, Trajectory, Log, Timings, Bonds }`. Used in `PathCollision`.",
     "file": "io/config-schema",
     "refs": [
       {
@@ -6459,6 +7697,13 @@
     "refs": [],
     "title": "Feature: SoA Particle State and GPU Buffers",
     "type": "file"
+  },
+  "rq-f0b9b0f5": {
+    "decl": "Scenario: Exclusion scale less than 0 rejected",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Exclusion scale less than 0 rejected",
+    "type": "scenario"
   },
   "rq-f0da71ea": {
     "decl": "- `SimulationBox::new_orthorhombic(lx: f32, ly: f32, lz: f32) -> Result<SimulationBox, SimulationBoxError>`",
@@ -6507,6 +7752,14 @@
     ],
     "title": "Reject duplicate pair interaction",
     "type": "scenario"
+  },
+  "rq-f1210419": {
+    "decl": "### Bond list",
+    "file": "forces/bonds",
+    "level": 3,
+    "refs": [],
+    "title": "Bond list",
+    "type": "section"
   },
   "rq-f1850393": {
     "decl": "Scenario: Header line has the documented column names in the documented order",
@@ -6578,6 +7831,13 @@
       }
     ],
     "title": "Reject a row with an extra column",
+    "type": "scenario"
+  },
+  "rq-f371677d": {
+    "decl": "Scenario: Exclusion row with wrong column count",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Exclusion row with wrong column count",
     "type": "scenario"
   },
   "rq-f379e47c": {
@@ -6688,6 +7948,18 @@
     "title": "Init file rejected by load_init_state",
     "type": "scenario"
   },
+  "rq-f704561b": {
+    "decl": "Scenario: Valid Morse bond_type is accepted",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Valid Morse bond_type is accepted",
+    "type": "scenario"
+  },
   "rq-f721b7a1": {
     "decl": "Scenario: vv_kick does not modify forces, masses, or positions",
     "file": "integration/velocity-verlet",
@@ -6722,6 +7994,18 @@
       }
     ],
     "title": "Render multiple type names from indices",
+    "type": "scenario"
+  },
+  "rq-f79657d2": {
+    "decl": "Scenario: Compressed bond produces a repulsive force",
+    "file": "forces/morse-bonded",
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Compressed bond produces a repulsive force",
     "type": "scenario"
   },
   "rq-f7b922df": {
@@ -6767,6 +8051,13 @@
     "refs": [],
     "title": "Test procedure",
     "type": "section"
+  },
+  "rq-f807cd11": {
+    "decl": "- `ExclusionList` — host-side. Fields: `entries: Vec<Exclusion>`,",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "ExclusionList",
+    "type": "api-item"
   },
   "rq-f84e4fa1": {
     "decl": "Scenario: Timings path equal to trajectory path is rejected",
@@ -6816,6 +8107,18 @@
     "title": "KE of empty input is zero",
     "type": "scenario"
   },
+  "rq-fb608f06": {
+    "decl": "Scenario: Bonds are canonicalised to (min, max)",
+    "file": "forces/bonds",
+    "refs": [
+      {
+        "file": "tests/forces_bonds.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Bonds are canonicalised to (min, max)",
+    "type": "scenario"
+  },
   "rq-fb632dfc": {
     "decl": "### Periodic-boundary operations",
     "file": "simulation-box",
@@ -6826,7 +8129,7 @@
   },
   "rq-fc220d87": {
     "decl": "Scenario: Empty state is a no-op",
-    "file": "lj-pair-force",
+    "file": "forces/lj-pair-force",
     "refs": [
       {
         "file": "tests/lj_pair_force.rs",

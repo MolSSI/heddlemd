@@ -26,10 +26,21 @@ One CUDA event pair per stage. The runner (or the integrator slot acting
 through the runner) records the start event immediately before each kernel
 launch and the stop event immediately after. Stages:
 
-Force-pipeline stages (every integrator):
+Lennard-Jones potential slot (always present in the `ForceField`):
 
 - `lj_pair_force`
 - `reduce_pair_forces`
+
+Morse-bonded potential slot (present when the config supplies a `bonds`
+file and at least one bond exists):
+
+- `morse_bond_force` — per-bond force kernel.
+- `reduce_bond_forces` — per-atom reduction of bond contributions.
+
+Force-field combiner (always run; sums every slot's private accumulator
+into `particle_buffers.forces_*`):
+
+- `accumulate_forces`
 
 Velocity-Verlet integrator stages (selected by `kind = "velocity-verlet"`):
 
@@ -181,16 +192,19 @@ Rows appear in this fixed order, with absent stages skipped:
 4. `langevin_ou_step` (O step)
 5. `lj_pair_force`
 6. `reduce_pair_forces`
-7. `vv_kick` or `vv_kick_lossless` (whichever is present)
-8. `host_to_device_upload`
-9. `device_to_host_download`
-10. `trajectory_write`
-11. `log_write`
-12. `velocity_generation`
-13. `config_load`
-14. `init_load`
-15. `gpu_init`
-16. `total_runtime`
+7. `morse_bond_force`
+8. `reduce_bond_forces`
+9. `accumulate_forces`
+10. `vv_kick` or `vv_kick_lossless` (whichever is present)
+11. `host_to_device_upload`
+12. `device_to_host_download`
+13. `trajectory_write`
+14. `log_write`
+15. `velocity_generation`
+16. `config_load`
+17. `init_load`
+18. `gpu_init`
+19. `total_runtime`
 
 ### Example <!-- rq-6289f344 -->
 
@@ -229,10 +243,11 @@ partial timings are discarded).
 
 ### Types <!-- rq-4f5643f1 -->
 
-- `KernelStage` — `enum` covering the six instrumented kernel-launch <!-- rq-dc8a0ff7 -->
+- `KernelStage` — `enum` covering the instrumented kernel-launch <!-- rq-dc8a0ff7 -->
   helpers. Variants: `VvKickDrift`, `VvKick`, `VvKickDriftLossless`,
   `VvKickLossless`, `LjPairForce`, `ReducePairForces`, `LangevinKickHalf`,
-  `LangevinDriftHalf`, `LangevinOuStep`. Implements `Copy`,
+  `LangevinDriftHalf`, `LangevinOuStep`, `MorseBondForce`,
+  `ReduceBondForces`, `AccumulateForces`. Implements `Copy`,
   `Eq`, `Hash` so it can index a fixed-size accumulator.
 
 - `HostStage` — `enum` covering the host-timed stages. Variants: <!-- rq-d29f2811 -->
@@ -470,12 +485,31 @@ Feature: Performance analysis and timings output
     And the row for langevin_drift_half has count = 20
     And the row for langevin_ou_step has count = 10
 
+  @rq-14b8e042
+  Scenario: Morse-bonded run records morse_bond_force, reduce_bond_forces, accumulate_forces
+    Given a valid config with `bonds = "topology.bonds"` and a non-empty bond list
+    And n_steps = 10
+    When dynamics run sim.toml is invoked
+    Then tmp/sim.timings has rows whose stage columns equal
+      "morse_bond_force", "reduce_bond_forces", and "accumulate_forces"
+    And each row's count equals 11 (one warm-up plus ten loop iterations)
+
+  @rq-c7df5714
+  Scenario: Bond-free run omits morse_bond_force and reduce_bond_forces
+    Given a valid config without a `bonds` field
+    When dynamics run sim.toml is invoked
+    Then tmp/sim.timings has no row whose stage column equals "morse_bond_force"
+    And tmp/sim.timings has no row whose stage column equals "reduce_bond_forces"
+    And tmp/sim.timings has a row whose stage column equals "accumulate_forces"
+      (the combiner runs whenever any slot is present)
+
   @rq-bde625cf
   Scenario: Empty (N=0) run omits all kernel rows but retains host rows
     Given a valid config with kind="velocity-verlet", N=0 particles, n_steps=5
     When dynamics run sim.toml is invoked
     Then tmp/sim.timings has no rows whose stage column begins with "vv_"
-      or "langevin_" or equals "lj_pair_force" or "reduce_pair_forces"
+      or "langevin_" or "morse_" or "reduce_" or equals "lj_pair_force"
+      or "accumulate_forces"
     And tmp/sim.timings has a row whose stage column equals "gpu_init"
     And tmp/sim.timings has a row whose stage column equals "total_runtime"
 

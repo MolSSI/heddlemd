@@ -57,5 +57,15 @@ pub fn init_device() -> Result<Arc<CudaDevice>, GpuError> {
         "langevin",
         &["lan_drift_half", "lan_ou_step"],
     )?;
+    device.load_ptx(
+        Ptx::from_src(kernels::MORSE),
+        "morse",
+        &["morse_bond_force", "reduce_bond_forces"],
+    )?;
+    device.load_ptx(
+        Ptx::from_src(kernels::FORCES),
+        "forces",
+        &["accumulate_forces"],
+    )?;
     Ok(device)
 }

@@ -1,8 +1,11 @@
+mod common;
+use common::*;
+
 use std::path::{Path, PathBuf};
 
 use dynamics::gpu::{
     LennardJonesParameters, PairBuffer, ParticleBuffers, init_device, lan_drift_half,
-    lan_ou_step, lj_pair_force, reduce_pair_forces,
+    lan_ou_step,
 };
 use dynamics::integrator::Integrator;
 use dynamics::io::IntegratorKind;
@@ -313,12 +316,12 @@ fn slot_interface_launches_six_kernel_calls() {
     .unwrap();
 
     // Warm-up force evaluation
-    lj_pair_force(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
-    reduce_pair_forces(&pair_buffer, &neighbor_counts, &mut buffers).unwrap();
+    lj_pair_force_no_excl(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
+    reduce_pair_forces_into_buffers(&pair_buffer, &neighbor_counts, &mut buffers).unwrap();
 
     integrator.pre_force_step(&mut buffers, 1.0e-15, 1, &mut timings).unwrap();
-    lj_pair_force(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
-    reduce_pair_forces(&pair_buffer, &neighbor_counts, &mut buffers).unwrap();
+    lj_pair_force_no_excl(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
+    reduce_pair_forces_into_buffers(&pair_buffer, &neighbor_counts, &mut buffers).unwrap();
     integrator.post_force_step(&mut buffers, 1.0e-15, 1, &mut timings).unwrap();
 
     let report = timings.finalize().unwrap();

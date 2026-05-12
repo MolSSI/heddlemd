@@ -1,10 +1,12 @@
+mod common;
+use common::*;
+
 use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice};
 use dynamics::gpu::{
-    LennardJonesParameters, LosslessBuffers, PairBuffer, ParticleBuffers, init_device,
-    lj_pair_force, reduce_pair_forces, vv_kick, vv_kick_drift, vv_kick_drift_lossless,
-    vv_kick_lossless,
+    LennardJonesParameters, LosslessBuffers, PairBuffer, ParticleBuffers, init_device, vv_kick,
+    vv_kick_drift, vv_kick_drift_lossless, vv_kick_lossless,
 };
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
@@ -154,23 +156,23 @@ impl PipelineFixture {
     }
 
     fn warm_up(&mut self) {
-        lj_pair_force(&self.buffers, &mut self.pair, &self.sim_box, &self.params).unwrap();
-        reduce_pair_forces(&self.pair, &self.counts, &mut self.buffers).unwrap();
+        lj_pair_force_no_excl(&self.buffers, &mut self.pair, &self.sim_box, &self.params).unwrap();
+        reduce_pair_forces_into_buffers(&self.pair, &self.counts, &mut self.buffers).unwrap();
     }
 }
 
 // rq-7b5eef8c
 fn lossless_step(fixture: &mut PipelineFixture, lossless: &mut LosslessBuffers, dt: f32) {
     vv_kick_drift_lossless(&mut fixture.buffers, lossless, dt).unwrap();
-    lj_pair_force(&fixture.buffers, &mut fixture.pair, &fixture.sim_box, &fixture.params).unwrap();
-    reduce_pair_forces(&fixture.pair, &fixture.counts, &mut fixture.buffers).unwrap();
+    lj_pair_force_no_excl(&fixture.buffers, &mut fixture.pair, &fixture.sim_box, &fixture.params).unwrap();
+    reduce_pair_forces_into_buffers(&fixture.pair, &fixture.counts, &mut fixture.buffers).unwrap();
     vv_kick_lossless(&mut fixture.buffers, lossless, dt).unwrap();
 }
 
 fn lossy_step(fixture: &mut PipelineFixture, dt: f32) {
     vv_kick_drift(&mut fixture.buffers, dt).unwrap();
-    lj_pair_force(&fixture.buffers, &mut fixture.pair, &fixture.sim_box, &fixture.params).unwrap();
-    reduce_pair_forces(&fixture.pair, &fixture.counts, &mut fixture.buffers).unwrap();
+    lj_pair_force_no_excl(&fixture.buffers, &mut fixture.pair, &fixture.sim_box, &fixture.params).unwrap();
+    reduce_pair_forces_into_buffers(&fixture.pair, &fixture.counts, &mut fixture.buffers).unwrap();
     vv_kick(&mut fixture.buffers, dt).unwrap();
 }
 

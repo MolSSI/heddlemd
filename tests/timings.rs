@@ -1,7 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use dynamics::gpu::{PairBuffer, ParticleBuffers, init_device, lj_pair_force};
+mod common;
+use common::*;
+
+use dynamics::gpu::{PairBuffer, ParticleBuffers, init_device};
 use dynamics::io::{TrajectoryWriterError, load_init_state};
 use dynamics::pbc::SimulationBox;
 use dynamics::runner::{RunnerError, run_simulation};
@@ -508,6 +511,7 @@ fn rows_appear_in_documented_order() {
         "vv_kick_drift",
         "lj_pair_force",
         "reduce_pair_forces",
+        "accumulate_forces",
         "vv_kick",
         "host_to_device_upload",
         "device_to_host_download",
@@ -821,7 +825,7 @@ fn kernel_start_stop_and_finalize_records_one_sample() {
     };
     let sim_box = SimulationBox::new_orthorhombic(1.0e-9, 1.0e-9, 1.0e-9).unwrap();
     timings.kernel_start(KernelStage::LjPairForce).unwrap();
-    lj_pair_force(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
+    lj_pair_force_no_excl(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
     timings.kernel_stop(KernelStage::LjPairForce).unwrap();
     let report = timings.finalize().unwrap();
     let entry = report
@@ -858,7 +862,7 @@ fn repeated_kernel_starts_stops_accumulate() {
     let sim_box = SimulationBox::new_orthorhombic(1.0e-9, 1.0e-9, 1.0e-9).unwrap();
     for _ in 0..10 {
         timings.kernel_start(KernelStage::LjPairForce).unwrap();
-        lj_pair_force(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
+        lj_pair_force_no_excl(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
         timings.kernel_stop(KernelStage::LjPairForce).unwrap();
     }
     let report = timings.finalize().unwrap();

@@ -1,10 +1,10 @@
+mod common;
+use common::*;
+
 use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice, DeviceSlice};
-use dynamics::gpu::{
-    LennardJonesParameters, PairBuffer, ParticleBuffers, init_device, lj_pair_force,
-    reduce_pair_forces,
-};
+use dynamics::gpu::{LennardJonesParameters, PairBuffer, ParticleBuffers, init_device};
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 
@@ -114,7 +114,7 @@ fn two_particles_at_fixed_separation_produce_closed_form_force() {
     let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
 
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
 
     let expected = lj_force_components(positions[0], positions[1], sim_box.lengths(), params);
@@ -133,7 +133,7 @@ fn newtons_third_law_is_bit_exact_for_non_boundary_displacements() {
     let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
 
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
 
     assert_eq!(px[0 * 2 + 1], -px[1 * 2 + 0]);
@@ -159,7 +159,7 @@ fn self_interaction_slots_are_zero() {
     let mut pair = PairBuffer::new(device.clone(), 4, 4).unwrap();
     fill_pair_forces_with(&mut pair, 999.0);
 
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
     for i in 0..4 {
         let slot = i * 4 + i;
@@ -182,7 +182,7 @@ fn slot_for_pair_beyond_cutoff_is_zero() {
     let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
     fill_pair_forces_with(&mut pair, 999.0);
 
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
     assert_eq!(px[0 * 2 + 1], 0.0_f32);
     assert_eq!(py[0 * 2 + 1], 0.0_f32);
@@ -202,7 +202,7 @@ fn pair_exactly_at_cutoff_is_included() {
     let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
 
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
     let (px, _, _) = download_pair_forces(&pair);
 
     let expected = lj_force_components(positions[0], positions[1], sim_box.lengths(), params);
@@ -224,7 +224,7 @@ fn at_lj_minimum_force_is_near_zero() {
     let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
 
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
 
     let expected = lj_force_components(positions[0], positions[1], sim_box.lengths(), params);
@@ -253,7 +253,7 @@ fn doubling_epsilon_doubles_force() {
         epsilon: 1.0,
         cutoff: 5.0,
     };
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params1).expect("lj1");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params1).expect("lj1");
     let (px1, _, _) = download_pair_forces(&pair);
     let f1 = px1[0 * 2 + 1];
 
@@ -263,7 +263,7 @@ fn doubling_epsilon_doubles_force() {
         epsilon: 2.0,
         cutoff: 5.0,
     };
-    lj_pair_force(&particle_buffers, &mut pair2, &sim_box, &params2).expect("lj2");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair2, &sim_box, &params2).expect("lj2");
     let (px2, _, _) = download_pair_forces(&pair2);
     let f2 = px2[0 * 2 + 1];
 
@@ -287,7 +287,7 @@ fn pbc_minimum_image_used_across_box_boundary() {
     let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
 
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
     let (px, _, _) = download_pair_forces(&pair);
 
     let expected = lj_force_components(positions[0], positions[1], sim_box.lengths(), params);
@@ -309,7 +309,7 @@ fn single_particle_state_only_self_slot() {
     let mut pair = PairBuffer::new(device.clone(), 1, 1).unwrap();
     fill_pair_forces_with(&mut pair, 999.0);
 
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
     assert_eq!(px, vec![0.0_f32]);
     assert_eq!(py, vec![0.0_f32]);
@@ -334,7 +334,7 @@ fn empty_state_is_noop() {
     .unwrap();
     let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut pair = PairBuffer::new(device.clone(), 0, 0).unwrap();
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
 }
 
 // --- Block-non-aligned ---
@@ -355,7 +355,7 @@ fn block_non_aligned_particle_count() {
     let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut pair = PairBuffer::new(device.clone(), n, n as u32).unwrap();
 
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
 
     // The kernel uses FMA where nvcc chooses to; the host helper performs
@@ -417,12 +417,12 @@ fn two_independent_runs_byte_identical() {
 
     let particle_buffers_a = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut pair_a = PairBuffer::new(device.clone(), n, n as u32).unwrap();
-    lj_pair_force(&particle_buffers_a, &mut pair_a, &sim_box, &params).expect("a");
+    lj_pair_force_no_excl(&particle_buffers_a, &mut pair_a, &sim_box, &params).expect("a");
     let (ax, ay, az) = download_pair_forces(&pair_a);
 
     let particle_buffers_b = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut pair_b = PairBuffer::new(device.clone(), n, n as u32).unwrap();
-    lj_pair_force(&particle_buffers_b, &mut pair_b, &sim_box, &params).expect("b");
+    lj_pair_force_no_excl(&particle_buffers_b, &mut pair_b, &sim_box, &params).expect("b");
     let (bx, by, bz) = download_pair_forces(&pair_b);
 
     assert_eq!(ax, bx);
@@ -449,7 +449,7 @@ fn slots_with_k_geq_n_are_untouched() {
     let mut pair = PairBuffer::new(device.clone(), n, 8).unwrap();
     fill_pair_forces_with(&mut pair, 13.5);
 
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
 
     for i in 0..n {
@@ -486,7 +486,7 @@ fn does_not_modify_positions_velocities_masses_or_forces() {
     let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut pair = PairBuffer::new(device.clone(), 4, 4).unwrap();
 
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
 
     let mut downloaded = state.clone();
     downloaded.download_from(&particle_buffers).unwrap();
@@ -516,8 +516,8 @@ fn lj_then_reduce_produces_correct_net_forces() {
     let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
     let counts = upload_counts(&device, &[2u32, 2]);
 
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
 
     let mut downloaded = state.clone();
     downloaded.download_from(&particle_buffers).unwrap();
@@ -551,7 +551,7 @@ fn nan_positions_propagate_to_nan_pair_forces() {
     let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
 
-    lj_pair_force(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &params).expect("lj");
     let (px, _, _) = download_pair_forces(&pair);
     assert!(px[0 * 2 + 1].is_nan());
     assert!(px[1 * 2 + 0].is_nan());

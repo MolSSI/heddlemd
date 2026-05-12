@@ -21,10 +21,12 @@ Sections:
 | ------- | -------- | ------- |
 | top-level `schema_version` | yes | format version |
 | top-level `init` | yes | path to initial-state file |
+| top-level `bonds` | no | path to .bonds topology file |
 | `[simulation]` | yes | timestep, step count, RNG seed, temperature |
 | `[integrator]` | yes | integrator slot + per-kind parameters |
 | `[[particle_types]]` | yes (>= 1) | per-type properties |
 | `[[pair_interactions]]` | yes (covers every pair) | per-pair LJ coefficients |
+| `[[bond_types]]` | no | per-bond-type parameters |
 | `[output]` | no | trajectory & log paths and cadences |
 
 ### Example <!-- rq-ecc664ff -->
@@ -54,6 +56,18 @@ sigma = 3.40e-10    # m
 epsilon = 1.65e-21  # J
 cutoff = 1.0e-9     # m
 
+# Optional: path to a .bonds file declaring bonds and explicit non-bonded
+# exclusions. When omitted, no bonded forces are computed and the LJ kernel
+# sees no exclusions.
+bonds = "argon.bonds"
+
+[[bond_types]]
+name = "ArAr"
+potential = "morse"
+de = 1.65e-21       # J  (well depth)
+a = 1.9e10          # 1/m (width)
+re = 3.40e-10       # m  (equilibrium distance)
+
 [output]
 trajectory_path = "argon-traj.xyz"
 trajectory_every = 100
@@ -76,6 +90,12 @@ or unit suffixes are supported in schema v1.
 - `schema_version: u64` — must equal `1`. See *Schema version handling* below.
 - `init: String` — path to the extended-XYZ initial-state file. Resolved
   relative to the config file's directory; absolute paths are honored as-is.
+- `bonds: String` — optional path to a `.bonds` topology file (see
+  `forces/bonds.md`). Resolved relative to the config file's directory;
+  absolute paths are honored as-is. When omitted, no bonded forces are
+  computed and the LJ kernel sees an empty exclusion list. When supplied,
+  the file is loaded after the init file (so atom-index bounds checking
+  has access to the particle count).
 
 #### `[simulation]`
 
@@ -149,6 +169,34 @@ For `N` declared types the array contains exactly `N * (N + 1) / 2` entries.
 Same-type pairs are required even when only one type is declared:
 `between = ["Ar", "Ar"]` must appear.
 
+#### `[[bond_types]]` (optional array of tables)
+
+Declares the parameter sets for bonded potentials referenced by name from
+the `.bonds` file. The array is optional and may be empty. When supplied,
+every bond type's `name` field appears as the third column of one or more
+rows in the `.bonds` file's `[bonds]` section. Bond types whose `name`
+is never used in the file are permitted (declared-but-unused).
+
+Common fields:
+
+- `name: String` — unique identifier within the `[[bond_types]]` array.
+  Empty strings are rejected. Case-sensitive.
+- `potential: String` — selects the bonded potential. In schema v1 the
+  only supported value is `"morse"`. Future values (`"harmonic"`,
+  `"fene"`, ...) are reserved.
+
+Fields accepted for `potential = "morse"` (see `forces/morse-bonded.md`):
+
+- `de: f64` — Morse well depth in joules. Required. Finite, strictly
+  positive.
+- `a: f64` — Morse width parameter in inverse metres. Required. Finite,
+  strictly positive.
+- `re: f64` — Morse equilibrium distance in metres. Required. Finite,
+  strictly positive.
+
+Names must be unique within the array. Unknown fields for the chosen
+`potential` are rejected.
+
 #### `[output]` (optional table; all fields have defaults)
 
 - `trajectory_path: String` — output trajectory path. Default:
@@ -173,12 +221,14 @@ Same-type pairs are required even when only one type is declared:
 
 ### Path resolution and overwrite policy <!-- rq-6d99f9c8 -->
 
-- All file paths (`init`, `output.trajectory_path`, `output.log_path`,
-  `output.timings_path`) are interpreted relative to the **config file's
-  containing directory** when not absolute. The loader resolves them
-  before returning.
-- After resolution, the four paths (init, trajectory, log, timings) must
-  be pairwise distinct.
+- All file paths (`init`, `bonds`, `output.trajectory_path`,
+  `output.log_path`, `output.timings_path`) are interpreted relative to
+  the **config file's containing directory** when not absolute. The loader
+  resolves them before returning. The `bonds` field is optional; when
+  absent the resolved bonds path is `None` and no bonds file is loaded.
+- After resolution, every supplied path must be pairwise distinct from
+  every other supplied path. When `bonds` is supplied, that path is
+  included in the distinctness check.
 - The loader does not check whether the resolved output files already
   exist; that check lives in the runner (`simulation-runner.md`) so that
   configs can be loaded for validation without filesystem side effects.
@@ -206,8 +256,10 @@ Beyond per-field validation, the loader checks:
    produces `DuplicatePairInteraction { types: (String, String) }`. The
    reported tuple is normalised so the lexicographically smaller name
    comes first.
-3. After path resolution, the four paths (init, trajectory, log, timings)
-   are pairwise distinct (`PathCollision { kind_a, kind_b, path }`).
+3. After path resolution, every supplied path is pairwise distinct from
+   every other supplied path (`PathCollision { kind_a, kind_b, path }`).
+   The set of paths under check is `init`, `output.trajectory_path`,
+   `output.log_path`, `output.timings_path`, and (when supplied) `bonds`.
 4. **Runner restriction (this feature only):** the number of declared
    `[[particle_types]]` equals `1`. More than one type raises
    `MultiTypeUnsupported { count }`. The schema permits multiple types so
@@ -226,10 +278,15 @@ Beyond per-field validation, the loader checks:
   Fields:
   - `schema_version: u64`
   - `init: PathBuf` — resolved against the config file's directory.
+  - `bonds: Option<PathBuf>` — `Some(_)` when the optional top-level
+    `bonds` field is present; resolved against the config file's
+    directory.
   - `simulation: SimulationConfig`
   - `integrator: IntegratorKind`
   - `particle_types: Vec<ParticleTypeConfig>`
   - `pair_interactions: Vec<PairInteractionConfig>`
+  - `bond_types: Vec<BondTypeConfig>` — empty when the `[[bond_types]]`
+    array is absent.
   - `output: OutputConfig`
   - `config_path: PathBuf` — the absolute path of the source config file,
     retained for error messages and default output-path derivation.
@@ -261,6 +318,14 @@ Beyond per-field validation, the loader checks:
   - `epsilon: f64`
   - `cutoff: f64`
 
+- `BondTypeConfig` — tagged enum carrying the chosen bonded-potential <!-- rq-2f230ccb -->
+  parameters. Variants:
+  - `Morse { name: String, de: f64, a: f64, re: f64 }` — selected by
+    `potential = "morse"`.
+
+  The `name` field is the lookup key referenced from the `.bonds` file's
+  `[bonds]` section.
+
 - `OutputConfig` <!-- rq-1254cd3a -->
   - `trajectory_path: PathBuf` — resolved.
   - `trajectory_every: u64`
@@ -269,7 +334,7 @@ Beyond per-field validation, the loader checks:
   - `log_every: u64`
   - `timings_path: PathBuf` — resolved.
 
-- `PathRole` — `enum { Init, Trajectory, Log, Timings }`. Used in `PathCollision`. <!-- rq-f0084057 -->
+- `PathRole` — `enum { Init, Trajectory, Log, Timings, Bonds }`. Used in `PathCollision`. <!-- rq-f0084057 -->
 
 - `ConfigError` — error type returned by `load_config`. Variants: <!-- rq-0b9372e8 -->
   - `Io(String)` — failed to read the config file (with the OS error
@@ -293,6 +358,14 @@ Beyond per-field validation, the loader checks:
     not one of the supported strings.
   - `UnknownIntegratorField { kind: String, field: String }` — a field in
     the `[integrator]` table is not recognised by the chosen `kind`.
+  - `UnknownBondPotential { actual: String, bond_type_index: usize }` —
+    a `[[bond_types]]` entry has a `potential` value that is not one of
+    the supported strings.
+  - `UnknownBondTypeField { potential: String, field: String, bond_type_index: usize }`
+    — a field in a `[[bond_types]]` entry is not recognised by the
+    chosen `potential`.
+  - `DuplicateBondTypeName { name: String }` — two `[[bond_types]]`
+    entries share a `name`.
 
 ### Functions <!-- rq-39881bb0 -->
 
@@ -736,6 +809,111 @@ Feature: TOML simulation config schema
       and [output].timings_path="run.dat"
     When load_config is called
     Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Log, kind_b: PathRole::Timings, path: _ })
+
+  # --- Bonds field ---
+
+  @rq-6cb9ab62
+  Scenario: bonds field is optional and defaults to None
+    Given the Background config without a top-level `bonds` field
+    When load_config is called
+    Then it returns Ok(config)
+    And config.bonds equals None
+
+  @rq-027153d9
+  Scenario: bonds field is resolved relative to the config directory
+    Given the Background config at "/tmp/sim/sim.toml" with bonds="topology.bonds"
+    When load_config is called
+    Then config.bonds equals Some("/tmp/sim/topology.bonds")
+
+  @rq-576561a2
+  Scenario: bonds absolute path is preserved
+    Given the Background config with bonds="/data/topology.bonds"
+    When load_config is called
+    Then config.bonds equals Some("/data/topology.bonds")
+
+  @rq-4186d4f4
+  Scenario: Reject bonds = init
+    Given the Background config with init="argon.xyz" and bonds="argon.xyz"
+    When load_config is called
+    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Init, kind_b: PathRole::Bonds, path: _ })
+
+  @rq-98180119
+  Scenario: Reject bonds = trajectory_path
+    Given the Background config with [output].trajectory_path="run.dat" and bonds="run.dat"
+    When load_config is called
+    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Trajectory, kind_b: PathRole::Bonds, path: _ })
+
+  # --- Bond types ---
+
+  @rq-6ad9a0f8
+  Scenario: bond_types is optional and defaults to empty
+    Given the Background config without a [[bond_types]] array
+    When load_config is called
+    Then it returns Ok(config)
+    And config.bond_types is empty
+
+  @rq-f704561b
+  Scenario: Valid Morse bond_type is accepted
+    Given the Background config plus
+      [[bond_types]] name="ArAr" potential="morse" de=1.65e-21 a=1.9e10 re=3.4e-10
+    When load_config is called
+    Then it returns Ok(config)
+    And config.bond_types has length 1
+    And config.bond_types[0] matches BondTypeConfig::Morse { name: "ArAr", de: 1.65e-21, a: 1.9e10, re: 3.4e-10 }
+
+  @rq-c79a1408
+  Scenario: bond_type missing potential field
+    Given the Background config plus a [[bond_types]] entry with name="X" but no potential
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "bond_types[0].potential" })
+
+  @rq-e34d764e
+  Scenario: bond_type unknown potential is rejected
+    Given a [[bond_types]] entry with potential="harmonic"
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownBondPotential { actual: "harmonic", bond_type_index: 0 })
+
+  @rq-3b0e8140
+  Scenario: Morse bond_type missing de is rejected
+    Given a [[bond_types]] entry with potential="morse", a=1.9e10, re=3.4e-10 (no de)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "bond_types[0].de" })
+
+  @rq-ecc8f632
+  Scenario: Morse bond_type rejects non-positive de
+    Given a [[bond_types]] entry with potential="morse", de=0.0, a=1.9e10, re=3.4e-10
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].de", reason: _ })
+
+  @rq-ae85bf7b
+  Scenario: Morse bond_type rejects non-positive a
+    Given a [[bond_types]] entry with potential="morse", de=1.0, a=-1.0, re=1.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].a", reason: _ })
+
+  @rq-3533e8a9
+  Scenario: Morse bond_type rejects non-positive re
+    Given a [[bond_types]] entry with potential="morse", de=1.0, a=1.0, re=0.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].re", reason: _ })
+
+  @rq-e40d2722
+  Scenario: Morse bond_type rejects extra fields
+    Given a [[bond_types]] entry with potential="morse" and an unknown field stiffness=1.0
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownBondTypeField { potential: "morse", field: "stiffness", bond_type_index: 0 })
+
+  @rq-ed1d6c71
+  Scenario: Reject duplicate bond_type names
+    Given two [[bond_types]] entries with the same name "ArAr"
+    When load_config is called
+    Then it returns Err(ConfigError::DuplicateBondTypeName { name: "ArAr" })
+
+  @rq-50521f04
+  Scenario: Empty bond_type name rejected
+    Given a [[bond_types]] entry with name=""
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].name", reason: _ })
 
   # --- Multi-type restriction ---
 

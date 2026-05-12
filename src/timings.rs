@@ -23,6 +23,9 @@ pub enum KernelStage {
     LangevinKickHalf,
     LangevinDriftHalf,
     LangevinOuStep,
+    MorseBondForce,
+    ReduceBondForces,
+    AccumulateForces,
 }
 
 impl KernelStage {
@@ -37,6 +40,9 @@ impl KernelStage {
             KernelStage::LangevinKickHalf => "langevin_kick_half",
             KernelStage::LangevinDriftHalf => "langevin_drift_half",
             KernelStage::LangevinOuStep => "langevin_ou_step",
+            KernelStage::MorseBondForce => "morse_bond_force",
+            KernelStage::ReduceBondForces => "reduce_bond_forces",
+            KernelStage::AccumulateForces => "accumulate_forces",
         }
     }
 
@@ -51,6 +57,9 @@ impl KernelStage {
             KernelStage::LangevinKickHalf => 6,
             KernelStage::LangevinDriftHalf => 7,
             KernelStage::LangevinOuStep => 8,
+            KernelStage::MorseBondForce => 9,
+            KernelStage::ReduceBondForces => 10,
+            KernelStage::AccumulateForces => 11,
         }
     }
 }
@@ -197,10 +206,10 @@ impl Accumulator {
 // rq-baf03449
 pub struct Timings {
     device: Arc<CudaDevice>,
-    kernel_starts: [CUevent; 9],
-    kernel_stops: [CUevent; 9],
-    outstanding_stop: [bool; 9],
-    kernel_acc: [Accumulator; 9],
+    kernel_starts: [CUevent; 12],
+    kernel_stops: [CUevent; 12],
+    outstanding_stop: [bool; 12],
+    kernel_acc: [Accumulator; 12],
     host_acc: [Accumulator; 9],
 }
 
@@ -216,9 +225,9 @@ impl std::fmt::Debug for Timings {
 impl Timings {
     // rq-8a9c44f8
     pub fn new(device: Arc<CudaDevice>) -> Result<Self, TimingsError> {
-        let mut kernel_starts = [std::ptr::null_mut(); 9];
-        let mut kernel_stops = [std::ptr::null_mut(); 9];
-        for i in 0..9 {
+        let mut kernel_starts = [std::ptr::null_mut(); 12];
+        let mut kernel_stops = [std::ptr::null_mut(); 12];
+        for i in 0..12 {
             kernel_starts[i] = event::create(CUevent_flags::CU_EVENT_DEFAULT)?;
             kernel_stops[i] = event::create(CUevent_flags::CU_EVENT_DEFAULT)?;
         }
@@ -226,8 +235,8 @@ impl Timings {
             device,
             kernel_starts,
             kernel_stops,
-            outstanding_stop: [false; 9],
-            kernel_acc: [Accumulator::default(); 9],
+            outstanding_stop: [false; 12],
+            kernel_acc: [Accumulator::default(); 12],
             host_acc: [Accumulator::default(); 9],
         })
     }
@@ -281,7 +290,7 @@ impl Timings {
 
     // rq-c4845f90
     pub fn finalize(&mut self) -> Result<TimingsReport, TimingsError> {
-        for idx in 0..9 {
+        for idx in 0..12 {
             if self.outstanding_stop[idx] {
                 self.drain_pair(idx)?;
             }
@@ -289,7 +298,7 @@ impl Timings {
 
         // Build the report in the documented row order, omitting count==0.
         let mut stages: Vec<StageStats> = Vec::new();
-        let kernel_order: [KernelStage; 9] = [
+        let kernel_order: [KernelStage; 12] = [
             KernelStage::VvKickDrift,
             KernelStage::VvKickDriftLossless,
             KernelStage::LangevinKickHalf,
@@ -297,6 +306,9 @@ impl Timings {
             KernelStage::LangevinOuStep,
             KernelStage::LjPairForce,
             KernelStage::ReducePairForces,
+            KernelStage::MorseBondForce,
+            KernelStage::ReduceBondForces,
+            KernelStage::AccumulateForces,
             KernelStage::VvKick,
             KernelStage::VvKickLossless,
         ];
@@ -342,7 +354,7 @@ impl Timings {
 
 impl Drop for Timings {
     fn drop(&mut self) {
-        for i in 0..9 {
+        for i in 0..12 {
             unsafe {
                 let _ = event::destroy(self.kernel_starts[i]);
                 let _ = event::destroy(self.kernel_stops[i]);

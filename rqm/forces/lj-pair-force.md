@@ -1,15 +1,18 @@
 # Feature: Lennard-Jones O(N²) Pair Force Kernel <!-- rq-13c02457 -->
 
-The simulation computes pairwise Lennard-Jones forces between every pair of
-particles via a CUDA kernel that writes per-pair contributions into a
-`PairBuffer`. The kernel pairs every `(i, k)` thread against every other
-particle directly (no neighbor list), so the work is O(N²). The result is
-suitable for systems up to a few thousand particles and is the testing
-vehicle for the project's bit-wise reproducibility claim under real physics.
+Lennard-Jones is the non-bonded pairwise potential slot in the pluggable
+potential framework (`framework.md`). The slot is always present; its
+parameters come from the config's `[[pair_interactions]]` array. The
+contribution kernel pairs every `(i, k)` thread against every other particle
+directly (O(N²)), reads any matching scaling factor from the
+`ExclusionList` (see `bonds.md`), and writes per-pair force contributions
+into a `PairBuffer` at deterministic offsets. The slot's reduction kernel
+(`reduce_pair_forces`, see `pair-reduction.md`) sums those contributions
+into the slot's private per-atom accumulator.
 
 This file specifies `LennardJonesParameters` (the host-side parameter
-struct), `kernels/pair_force.cu` (the CUDA kernel), and the Rust launch
-helper that drives it.
+struct), `kernels/pair_force.cu` (the CUDA kernel including its
+exclusion-list query), and the Rust launch helper that drives it.
 
 ## Algorithm <!-- rq-6d209943 -->
 
@@ -102,6 +105,9 @@ extern "C" __global__ void lj_pair_force(
     float sigma,
     float epsilon,
     float cutoff,
+    const unsigned int *atom_excl_offsets,
+    const unsigned int *atom_excl_partners,
+    const float *atom_excl_scales,
     unsigned int n);
 ```
 
@@ -118,6 +124,37 @@ reads `positions_*` and writes only `pair_forces_*` at the indices
 `i * max_neighbors + k` for `0 <= i < n` and `0 <= k < n`. Slots with
 `k >= n` are not written.
 
+### Exclusion scaling <!-- inline-edit --> <!-- rq-dddcbf07 -->
+
+After computing the closed-form Lennard-Jones force `(fx, fy, fz)` for pair
+`(i, k)` and before writing the result to `pair_forces_*[slot]`, the kernel
+queries the exclusion list to scale the force:
+
+```
+start = atom_excl_offsets[i]
+end   = atom_excl_offsets[i + 1]
+scale = 1.0f
+for m in start .. end:
+    if atom_excl_partners[m] == k:
+        scale = atom_excl_scales[m]
+        break
+fx *= scale; fy *= scale; fz *= scale
+```
+
+The lookup is a linear scan over atom `i`'s exclusion partners. The
+partner list is short for typical bonded systems (≤ 12 entries per
+atom). When the exclusion list is empty, every atom's offset range is
+`[k, k]` for some `k`, the loop runs zero iterations, and `scale`
+remains `1.0`, leaving the unscaled LJ force intact.
+
+The kernel must be launched with an exclusion list shaped consistently
+with the particle count: `atom_excl_offsets` has length `N + 1` (where
+the final entry equals the total number of partner entries), and
+`atom_excl_partners` and `atom_excl_scales` have the same length as
+each other. Empty lists are represented by `atom_excl_offsets` of
+length `N + 1` filled with zeros and zero-length partner / scale
+buffers; the kernel handles this case without a separate code path.
+
 ### PTX Module Loading <!-- rq-78d9fd1c -->
 
 `init_device()` loads the compiled `kernels/pair_force.cu` PTX with module
@@ -128,8 +165,9 @@ alongside the existing `fill`, `integrate`, and `reduce` modules.
 
 A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
 
-- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameters) -> Result<(), GpuError>` <!-- rq-d3a14184 -->
-  - Launches the `lj_pair_force` kernel.
+- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameters, exclusions: &DeviceExclusionList) -> Result<(), GpuError>` <!-- rq-d3a14184 -->
+  - Launches the `lj_pair_force` kernel with the per-pair force, simulation
+    box, parameter, and exclusion-list arguments described above.
   - 2D launch: `block_dim = (16, 16, 1)`, `grid_dim = (ceil(n / 16), ceil(n / 16), 1)`.
   - When `particle_buffers.particle_count() == 0`, returns `Ok(())` without
     launching a kernel.
@@ -137,9 +175,18 @@ A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
   - Panics if the `"pair_force"` module is not loaded on the device, since
     this indicates a programming error in `init_device()`.
 
+  The `DeviceExclusionList` argument is a host-side handle holding the three
+  device buffers `atom_excl_offsets`, `atom_excl_partners`, and
+  `atom_excl_scales`. It is constructed from the host-side `ExclusionList`
+  (see `bonds.md`) when the `MorseBonded` slot (or the `LennardJones` slot
+  on its own) is built. An empty exclusion list is represented by a
+  `DeviceExclusionList` whose offsets buffer has length `N + 1` filled with
+  zeros and whose partner / scale buffers have length zero.
+
   The launcher trusts the caller for shape consistency: in debug builds it
-  asserts `pair_buffer.particle_count() == particle_buffers.particle_count()`
-  and `pair_buffer.max_neighbors() as usize >= particle_buffers.particle_count()`.
+  asserts `pair_buffer.particle_count() == particle_buffers.particle_count()`,
+  `pair_buffer.max_neighbors() as usize >= particle_buffers.particle_count()`,
+  and `exclusions.particle_count() == particle_buffers.particle_count()`.
   Release builds skip the asserts for parity with the other kernel
   launchers. The launcher does not validate `params.sigma`, `params.epsilon`,
   or `params.cutoff` and does not check `params.cutoff <= min(lx, ly, lz) / 2`.
@@ -159,6 +206,24 @@ A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
 - `max_neighbors` must be at least `n`; otherwise the kernel writes outside
   the buffer for `k >= max_neighbors`. The launcher's debug assert catches
   this in development.
+
+## Slot Integration <!-- rq-a5a919df -->
+
+`LennardJonesState` is one variant of the `PotentialSlot` enum declared in
+`framework.md`. Construction allocates the per-slot `PairBuffer`, the
+`neighbor_counts` device slice (all entries equal to `N`), the
+`DeviceExclusionList` (uploaded from the host `ExclusionList` produced by
+the bonds parser), and the slot's three private per-atom accumulator
+slices. The slot's per-step methods invoked by `ForceField::step`:
+
+- Contribution: launch `lj_pair_force(particle_buffers, &mut pair_buffer,
+  sim_box, &params, &exclusions)`, bracketed by
+  `timings.kernel_start(KernelStage::LjPairForce) /
+  kernel_stop(KernelStage::LjPairForce)`.
+- Reduction: launch `reduce_pair_forces(&pair_buffer, &neighbor_counts,
+  &mut accumulator_x, &mut accumulator_y, &mut accumulator_z, N)` (see
+  the parameterised launcher in `pair-reduction.md`), bracketed by the
+  `ReducePairForces` stage labels.
 
 ## Out of Scope <!-- rq-9d7966f4 -->
 
@@ -333,6 +398,46 @@ Feature: Lennard-Jones O(N²) pair force kernel
     And particle_buffers is downloaded to a host ParticleState
     Then forces_x[0] equals the closed-form LJ force on particle 0 due to particle 1 at r=1.5
     And forces_x[1] equals -forces_x[0] bitwise
+
+  # --- Exclusion list ---
+
+  @rq-e80653f1
+  Scenario: Empty exclusion list leaves all pair forces unchanged
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5, 0, 0)
+    And an empty DeviceExclusionList
+    When lj_pair_force is called
+    Then pair_forces_x[0*2 + 1] equals the closed-form LJ force at r=1.5
+
+  @rq-80dcfa97
+  Scenario: Full exclusion (scale=0) zeros the LJ contribution for the excluded pair
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5, 0, 0)
+    And a DeviceExclusionList containing the entry (0, 1, 0.0)
+    When lj_pair_force is called
+    Then pair_forces_x[0*2 + 1], pair_forces_y[0*2 + 1], pair_forces_z[0*2 + 1] are all 0.0_f32
+    And pair_forces_x[1*2 + 0], pair_forces_y[1*2 + 0], pair_forces_z[1*2 + 0] are all 0.0_f32
+
+  @rq-31430003
+  Scenario: Half-strength exclusion (scale=0.5) halves the LJ contribution
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5, 0, 0)
+    And a DeviceExclusionList containing the entry (0, 1, 0.5)
+    When lj_pair_force is called
+    Then pair_forces_x[0*2 + 1] equals 0.5 * closed-form LJ force at r=1.5 within f32 round-off
+    And pair_forces_x[1*2 + 0] equals -pair_forces_x[0*2 + 1]
+
+  @rq-8c786f79
+  Scenario: Exclusion only applies to the listed pair
+    Given a ParticleState of N=3 with positions p0=(0,0,0), p1=(1.5,0,0), p2=(3.0,0,0)
+    And a DeviceExclusionList containing only the entry (0, 1, 0.0)
+    When lj_pair_force is called
+    Then pair_forces_x[0*3 + 1] is 0 (the (0,1) pair is scaled by 0.0)
+    And pair_forces_x[0*3 + 2] is non-zero (the (0,2) pair is unscaled)
+    And pair_forces_x[1*3 + 2] is non-zero (the (1,2) pair is unscaled)
+
+  @rq-3a1eea58
+  Scenario: Scale = 1.0 is equivalent to no exclusion
+    Given a ParticleState of N=2 and an exclusion (0, 1, 1.0)
+    When lj_pair_force is called
+    Then pair_forces_x[0*2 + 1] equals the closed-form LJ force at the pair distance
 
   # --- NaN propagation ---
 

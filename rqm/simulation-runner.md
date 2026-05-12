@@ -68,6 +68,12 @@ message.
    (`init-state-file.md`). Failure → exit 1.
 6. **Build SimulationBox.** From `init_state.box`. This is the box the
    simulation uses; the config does not specify a box.
+6a. **Load bonds file (if supplied).** When `config.bonds.is_some()`,
+    build the slice of bond type names from `config.bond_types`,
+    call `load_bonds_file(path, particle_count, &bond_type_names)`
+    (`forces/bonds.md`), and capture the resulting `(BondList,
+    ExclusionList)`. Failure → exit 1. When `config.bonds.is_none()`,
+    use an empty `BondList` and `ExclusionList`.
 7. **Initialise CUDA.** Call `init_device()` (`build-pipeline.md`).
    Failure → exit 1.
 8. **Generate velocities (if absent).** When
@@ -82,27 +88,26 @@ message.
      `config.particle_types[init_state.type_indices[i]].mass` cast to `f32`,
    - `ids = None` (default `0..N`),
    - `forces_*` zero-initialised by the constructor.
-10. **Allocate device buffers.** Construct `ParticleBuffers` from the
-    host state. Construct a `PairBuffer` with
-    `particle_count = N` and `max_neighbors = N` (the runner uses the
-    O(N²) LJ kernel). Allocate a `CudaSlice<u32>` of length `N` for
-    `neighbor_counts` and initialise every entry to `N as u32` (every
-    particle pairs with every other).
+10. **Allocate `ParticleBuffers`.** Construct `ParticleBuffers` from
+    the host state.
 11. **Construct the integrator.** Call `Integrator::new(device.clone(),
     N, &config.integrator)` to build the variant selected by
     `IntegratorKind` (see `integration/framework.md`). The integrator
     owns any per-run state it needs (e.g. `LosslessBuffers` for
     `Integrator::VelocityVerlet` when `lossless == true`, or stored
     parameters for `Integrator::LangevinBaoab`).
-12. **Build LJ parameters.** Take the sole entry of
-    `config.pair_interactions` and construct
-    `LennardJonesParameters { sigma, epsilon, cutoff }` cast from `f64` to
-    `f32`.
+12. **Construct the force field.** Call `ForceField::new(device.clone(),
+    N, &sim_box, &config.pair_interactions, &config.bond_types,
+    &bond_list, &exclusion_list)` (see `forces/framework.md`). The
+    resulting `ForceField` owns the LJ slot (always) and the
+    `MorseBonded` slot (when the bond list is non-empty); the runner
+    no longer manipulates the `PairBuffer`, neighbor-counts, or
+    Lennard-Jones parameter struct directly.
 13. **Open output writers.** Open `TrajectoryWriter` and/or `LogWriter`
     depending on the `_every` settings. Failure → exit 1.
-14. **Warm up forces.** Launch `lj_pair_force` followed by
-    `reduce_pair_forces` once to populate `forces_*` with `F(x_0)`. This
-    is the same warm-up pattern used in `pipeline-reproducibility.md`.
+14. **Warm up forces.** Call `force_field.step(&mut buffers, &sim_box,
+    &mut timings)` once to populate `forces_*` with `F(x_0)`. This is
+    the same warm-up pattern used in `pipeline-reproducibility.md`.
 15. **Write step-0 outputs.** When trajectory output is enabled, download
     the relevant buffers and call `write_frame(step=0, ...)`. When log
     output is enabled, download `velocities_*` and `masses` (the
@@ -111,16 +116,18 @@ message.
     (`log-output.md`), and call `write_row(0, 0.0, ke, t)`.
 16. **Timestep loop.** For each step `s` in `1 ..= n_steps`:
     a. `integrator.pre_force_step(&mut buffers, dt, s, &mut timings)`.
-    b. `lj_pair_force(buffers, pair_buffer, &sim_box, &params)`.
-    c. `reduce_pair_forces(&pair_buffer, &neighbor_counts, &mut buffers)`.
-    d. `integrator.post_force_step(&mut buffers, dt, s, &mut timings)`.
-    e. If trajectory output is enabled and `s % trajectory_every == 0`,
+    b. `force_field.step(&mut buffers, &sim_box, &mut timings)` — runs
+       every potential slot's contribution kernel and reduction, then
+       combines the slots' private accumulators into
+       `particle_buffers.forces_*`.
+    c. `integrator.post_force_step(&mut buffers, dt, s, &mut timings)`.
+    d. If trajectory output is enabled and `s % trajectory_every == 0`,
        download positions (and velocities when configured) and call
        `write_frame(step=s, ...)`.
-    f. If log output is enabled and `s % log_every == 0`, download
+    e. If log output is enabled and `s % log_every == 0`, download
        velocities, compute KE and T, and call `write_row(s, s as f64 * dt,
        ke, t)`.
-    g. Possibly emit a progress line (see *Progress reporting*).
+    f. Possibly emit a progress line (see *Progress reporting*).
 17. **Flush and close.** Call `flush()` on each open writer. The writers'
     `Drop` impls are best-effort but the runner calls `flush` explicitly
     so flush errors propagate.
@@ -257,6 +264,10 @@ wrapper that calls into the library.
   - `Integrator(IntegratorError)` — from `Integrator::new` or the per-step
     methods on the chosen integrator variant (see
     `integration/framework.md`).
+  - `BondsFile(BondsFileError)` — from `load_bonds_file` (see
+    `forces/bonds.md`).
+  - `ForceField(ForceFieldError)` — from `ForceField::new` or
+    `ForceField::step` (see `forces/framework.md`).
   - `Trajectory(TrajectoryWriterError)` — from trajectory writer
     construction or `write_frame`/`flush`.
   - `Log(LogWriterError)` — from log writer construction or `write_row`/

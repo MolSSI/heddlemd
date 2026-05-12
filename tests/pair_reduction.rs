@@ -1,7 +1,10 @@
+mod common;
+use common::*;
+
 use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice, DeviceSlice};
-use dynamics::gpu::{PairBuffer, ParticleBuffers, init_device, reduce_pair_forces};
+use dynamics::gpu::{PairBuffer, ParticleBuffers, init_device};
 use dynamics::state::ParticleState;
 
 fn zero_state(n: usize) -> ParticleState {
@@ -130,7 +133,7 @@ fn reduction_with_all_zero_counts_zeroes_forces() {
 
     let counts = upload_counts(&device, &[0u32, 0, 0, 0]);
 
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, fy, fz) = download_forces(&particle_buffers);
     assert_eq!(fx, vec![0.0_f32; 4]);
     assert_eq!(fy, vec![0.0_f32; 4]);
@@ -148,7 +151,7 @@ fn reduction_with_single_particle_single_neighbor() {
     let mut particle_buffers = zero_particle_buffers(device.clone(), 1);
     let counts = upload_counts(&device, &[1u32]);
 
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, fy, fz) = download_forces(&particle_buffers);
     assert_eq!(fx, vec![1.5_f32]);
     assert_eq!(fy, vec![-2.5_f32]);
@@ -166,7 +169,7 @@ fn reduction_sums_entries_left_to_right() {
     let mut particle_buffers = zero_particle_buffers(device.clone(), 1);
     let counts = upload_counts(&device, &[3u32]);
 
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, _, _) = download_forces(&particle_buffers);
     let expected = (1.0_f32 + 2.0_f32) + 4.0_f32;
     assert_eq!(fx[0], expected);
@@ -186,7 +189,7 @@ fn reduction_ignores_slots_beyond_count() {
     let mut particle_buffers = zero_particle_buffers(device.clone(), 1);
     let counts = upload_counts(&device, &[2u32]);
 
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, _, _) = download_forces(&particle_buffers);
     assert_eq!(fx[0], 30.0_f32);
     assert!(fx[0].is_finite());
@@ -201,7 +204,7 @@ fn reduction_at_full_max_neighbors_capacity() {
     let mut particle_buffers = zero_particle_buffers(device.clone(), 1);
     let counts = upload_counts(&device, &[4u32]);
 
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, _, _) = download_forces(&particle_buffers);
     let expected = ((1.0_f32 + 2.0_f32) + 3.0_f32) + 4.0_f32;
     assert_eq!(fx[0], expected);
@@ -226,7 +229,7 @@ fn per_particle_reduction_with_varying_counts() {
     let mut particle_buffers = zero_particle_buffers(device.clone(), 3);
     let counts = upload_counts(&device, &[2u32, 1, 4]);
 
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, _, _) = download_forces(&particle_buffers);
     assert_eq!(fx[0], 3.0_f32);
     assert_eq!(fx[1], 10.0_f32);
@@ -241,7 +244,7 @@ fn reduce_pair_forces_on_empty_state_is_noop() {
     let pair = PairBuffer::new(device.clone(), 0, 8).expect("PairBuffer::new");
     let mut particle_buffers = zero_particle_buffers(device.clone(), 0);
     let counts = upload_counts(&device, &[]);
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
 }
 
 // --- Bounds handling ---
@@ -262,7 +265,7 @@ fn block_non_aligned_particle_count_is_handled() {
     let mut particle_buffers = zero_particle_buffers(device.clone(), n);
     let counts = upload_counts(&device, &vec![2u32; n]);
 
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, fy, fz) = download_forces(&particle_buffers);
     for i in 0..n {
         assert_eq!(fx[i], 0.0_f32, "fx[{i}]");
@@ -284,7 +287,7 @@ fn reduction_overwrites_prior_force_values() {
 
     let counts = upload_counts(&device, &[0u32, 0, 0, 0]);
 
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, _, _) = download_forces(&particle_buffers);
     assert_eq!(fx, vec![0.0_f32, 0.0, 0.0, 0.0]);
 }
@@ -307,7 +310,7 @@ fn reduction_does_not_modify_pair_buffer() {
     let mut particle_buffers = zero_particle_buffers(device.clone(), 4);
     let counts = upload_counts(&device, &[3u32, 3, 3, 3]);
 
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
 
     assert_eq!(download_pair_x(&pair), snapshot_x);
     assert_eq!(download_pair_y(&pair), snapshot_y);
@@ -333,7 +336,7 @@ fn reduction_does_not_modify_positions_velocities_masses() {
     let mut particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
 
     let counts = upload_counts(&device, &[0u32, 0, 0, 0]);
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
 
     let mut downloaded = state.clone();
     downloaded.download_from(&particle_buffers).unwrap();
@@ -354,7 +357,7 @@ fn reduction_does_not_modify_neighbor_counts() {
     let mut particle_buffers = zero_particle_buffers(device.clone(), 4);
     let counts = upload_counts(&device, &[0u32, 1, 2, 0]);
 
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
 
     let downloaded: Vec<u32> = device.dtoh_sync_copy(&counts).unwrap();
     assert_eq!(downloaded, vec![0u32, 1, 2, 0]);
@@ -389,7 +392,7 @@ fn two_independent_runs_produce_byte_identical_net_forces() {
         upload_pair_z(&mut pair, pair_z);
         let mut particle_buffers = zero_particle_buffers(device.clone(), n);
         let counts_dev = upload_counts(device, counts);
-        reduce_pair_forces(&pair, &counts_dev, &mut particle_buffers).expect("reduce");
+        reduce_pair_forces_into_buffers(&pair, &counts_dev, &mut particle_buffers).expect("reduce");
         download_forces(&particle_buffers)
     }
 
@@ -411,7 +414,7 @@ fn nan_pair_contribution_propagates_to_nan() {
     let mut particle_buffers = zero_particle_buffers(device.clone(), 1);
     let counts = upload_counts(&device, &[3u32]);
 
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, _, _) = download_forces(&particle_buffers);
     assert!(fx[0].is_nan());
 }
@@ -425,7 +428,7 @@ fn infinite_pair_contribution_propagates_to_infinity() {
     let mut particle_buffers = zero_particle_buffers(device.clone(), 1);
     let counts = upload_counts(&device, &[3u32]);
 
-    reduce_pair_forces(&pair, &counts, &mut particle_buffers).expect("reduce");
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, _, _) = download_forces(&particle_buffers);
     assert!(fx[0].is_infinite());
     assert!(fx[0] > 0.0);

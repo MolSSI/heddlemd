@@ -129,21 +129,30 @@ the existing `fill` and `integrate` modules.
 
 A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
 
-- `reduce_pair_forces(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, particle_buffers: &mut ParticleBuffers) -> Result<(), GpuError>` <!-- rq-6690fae9 -->
-  - Launches the `reduce_pair_forces` kernel.
-  - Block size is 256; grid size is `ceil(particle_buffers.particle_count() / 256)`.
-  - When `particle_buffers.particle_count() == 0`, returns `Ok(())` without
-    launching a kernel.
+- `reduce_pair_forces(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_x: &mut CudaSlice<f32>, target_y: &mut CudaSlice<f32>, target_z: &mut CudaSlice<f32>, particle_count: usize) -> Result<(), GpuError>` <!-- rq-6690fae9 -->
+  - Launches the `reduce_pair_forces` kernel against arbitrary target
+    buffers. The target buffers receive the per-particle net force from the
+    pair-buffer reduction (overwriting any prior contents); they need not
+    live inside a `ParticleBuffers`.
+  - Block size is 256; grid size is `ceil(particle_count / 256)`.
+  - When `particle_count == 0`, returns `Ok(())` without launching a
+    kernel.
   - Returns the underlying `GpuError` if the kernel launch fails.
   - Panics if the `"reduce"` module is not loaded on the device, since this
     indicates a programming error in `init_device()`.
 
   The launcher trusts the caller for shape consistency: it asserts (debug
-  builds only) that `pair_buffer.particle_count() == particle_buffers.particle_count()`,
-  that `neighbor_counts.len() == particle_buffers.particle_count()`, and that
+  builds only) that `pair_buffer.particle_count() == particle_count`,
+  that `neighbor_counts.len() == particle_count`, that each of
+  `target_x`, `target_y`, `target_z` has length `particle_count`, and that
   the pair-force slices have length
-  `particle_buffers.particle_count() * pair_buffer.max_neighbors()`. Release
-  builds skip the asserts for parity with the other kernel launchers.
+  `particle_count * pair_buffer.max_neighbors()`. Release builds skip
+  the asserts for parity with the other kernel launchers.
+
+  Within the pluggable potential framework, the `LennardJonesState` slot
+  passes its private accumulator slices as `target_*`. Standalone callers
+  (e.g. existing unit tests) pass `particle_buffers.forces_x/y/z` and
+  `particle_buffers.particle_count()`.
 
 ## Launch Configuration <!-- rq-9be271aa -->
 
