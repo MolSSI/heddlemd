@@ -33,9 +33,16 @@ The runner drives the timestep loop in a fixed pattern:
 
 ```text
 loop step in 1..=n_steps:
-    integrator.step(buffers, sim_box, force_field, dt, step, timings)
+    integrator.step(buffers, sim_box, force_field, dt, timings)
     ...trajectory / log output...
 ```
+
+The runner's `step` value is local to the timestep loop; it gates
+trajectory and log writes via `step % trajectory_every == 0` and
+`step % log_every == 0`, and is not visible to the integrator.
+Integrators that need a monotone counter (for example a stochastic
+integrator that needs reproducible RNG draws) maintain their own
+counter on their state and increment it on every `step()` call.
 
 `step()` is responsible for everything between the previous step's
 output and the current step's output: all velocity and position
@@ -74,14 +81,6 @@ When the runner has `particle_count == 0`, `step()` returns `Ok(())`
 without launching any kernel. The integrator's allocations (if any)
 may have zero-length device slices but must construct successfully.
 
-## Step Counter <!-- rq-198f5ec1 -->
-
-The `step_index` argument to `step()` matches the `step` value the
-runner uses to gate trajectory and log writes. The first call inside
-the timestep loop carries `step_index = 1`. Velocity Verlet ignores it;
-Langevin BAOAB consumes it as part of the Philox counter packing (see
-`langevin-baoab.md`).
-
 ## Feature API <!-- rq-5cb33196 -->
 
 ### Types <!-- rq-67414c32 -->
@@ -97,7 +96,6 @@ Langevin BAOAB consumes it as part of the Philox counter packing (see
           sim_box: &mut SimulationBox,
           force_field: &mut ForceField,
           dt: f32,
-          step_index: u64,
           timings: &mut Timings,
       ) -> Result<(), IntegratorError>;
   }
@@ -207,7 +205,7 @@ Langevin BAOAB consumes it as part of the Philox counter packing (see
   - A `particle_count` of zero is permitted: any per-particle device
     allocations have length zero.
 
-- `Integrator::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, dt: f32, step_index: u64, timings: &mut Timings) -> Result<(), IntegratorError>` <!-- rq-cf361ff5 -->
+- `Integrator::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, dt: f32, timings: &mut Timings) -> Result<(), IntegratorError>` <!-- rq-cf361ff5 -->
   - Runs a single timestep. Calls `force_field.step(...)` at the
     point(s) of the integrator's choice.
   - Returns `Ok(())` without launching any kernel when
@@ -222,9 +220,11 @@ guarantees:
 - All integrator kernels and the force pipeline run on the default
   stream of the same `Arc<CudaDevice>` carried by `ParticleBuffers`.
   No additional streams are introduced.
-- The integrator's `step_index` argument is the only loop-carried
-  state the framework injects; it is deterministic and identical
-  across runs with the same config.
+- The trait surface carries no loop-position parameter; the runner's
+  loop counter stays local to the runner. Integrators that need a
+  monotone, reproducible counter (such as `LangevinBaoab` for its RNG
+  draws) own it on their own state and increment it deterministically
+  per `step()` call.
 - Implementations that draw random numbers (`LangevinBaoab`) document
   the exact RNG scheme so two runs on the same GPU with the same
   `seed` produce byte-identical trajectories.
@@ -318,7 +318,7 @@ Feature: Pluggable integrator framework
   Scenario: step() on empty state is a no-op
     Given a ParticleBuffers with particle_count() == 0
     And any constructed Integrator
-    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=0.1, step_index=1, &mut timings) is called
+    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=0.1, &mut timings) is called
     Then it returns Ok(())
     And no kernel launches are recorded for that call
 
@@ -326,36 +326,37 @@ Feature: Pluggable integrator framework
   Scenario: Velocity-Verlet step() launches vv_kick_drift, force pipeline, and vv_kick
     Given a velocity-Verlet integrator (lossless=false) with particle_count=4
     And a snapshot of buffers.positions_x and buffers.velocities_x before the call
-    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=0.1, step_index=1, &mut timings) is called
+    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=0.1, &mut timings) is called
     Then it returns Ok(())
     And positions_x differs from the snapshot
     And velocities_x differs from the snapshot
-    And timings.finalize() reports count==1 for KernelStage::VvKickDrift
-    And timings.finalize() reports count==1 for KernelStage::VvKick
+    And timings.finalize() reports count==1 for KernelStage::VV_KICK_DRIFT
+    And timings.finalize() reports count==1 for KernelStage::VV_KICK
 
   @rq-7b9aada4
   Scenario: Lossless velocity-Verlet uses the lossless kernels
     Given a velocity-Verlet integrator (lossless=true) with particle_count=4
     When integrator.step(...) is called
-    Then timings.finalize() reports count==1 for KernelStage::VvKickDriftLossless
-    And timings.finalize() reports count==1 for KernelStage::VvKickLossless
-    And KernelStage::VvKickDrift and KernelStage::VvKick have count==0
+    Then timings.finalize() reports count==1 for KernelStage::VV_KICK_DRIFT_LOSSLESS
+    And timings.finalize() reports count==1 for KernelStage::VV_KICK_LOSSLESS
+    And KernelStage::VV_KICK_DRIFT and KernelStage::VV_KICK have count==0
 
   @rq-1b18924f
   Scenario: Integrator owns the force evaluation inside step()
     Given a velocity-Verlet integrator and a ForceField with one LennardJones slot
     When integrator.step(...) is called once
-    Then timings.finalize() reports count==1 for KernelStage::LjPairForce
-    And KernelStage::ReducePairForces has count==1
-    And KernelStage::AccumulateForces has count==1
+    Then timings.finalize() reports count==1 for KernelStage::LJ_PAIR_FORCE
+    And KernelStage::REDUCE_PAIR_FORCES has count==1
+    And KernelStage::ACCUMULATE_FORCES has count==1
 
-  # --- Step counter propagation ---
+  # --- RNG-using integrator state ---
 
   @rq-d12c24f0
-  Scenario: step_index is passed through and affects RNG draws
+  Scenario: Two consecutive step() calls on a Langevin integrator produce different post-call velocities
     Given a Langevin-BAOAB integrator with seed=1, friction=1e12, temperature=300, particle_count=2
-    When step() is called twice on identical inputs with step_index=1 and step_index=2
+    When step() is called twice on the same buffers with identical inputs
     Then the two calls produce different post-call velocities
+    (because the integrator's internal draw_counter advances between calls)
 
   # --- Determinism across two runs ---
 
@@ -363,6 +364,6 @@ Feature: Pluggable integrator framework
   Scenario: Two independent runs with identical inputs are byte-identical
     Given two Integrator instances of the same kind built from identical IntegratorKinds
     And two ParticleBuffers built from byte-identical ParticleStates
-    When each runs N=10 timesteps with the same dt and the same step_index sequence
+    When each runs N=10 timesteps with the same dt
     Then the two final ParticleStates agree byte-for-byte
 ```

@@ -357,7 +357,6 @@ fn run_simulation_with_phase(
                 &mut sim_box,
                 &mut force_field,
                 dt_f32,
-                step,
                 &mut timings,
             )
             .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Loop))?;

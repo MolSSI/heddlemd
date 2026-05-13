@@ -126,12 +126,14 @@ message.
     KE and T via `compute_kinetic_energy` and `compute_temperature`
     (`log-output.md`), and call `write_row(0, 0.0, ke, t)`.
 16. **Timestep loop.** For each step `s` in `1 ..= n_steps`:
-    a. `integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt, s, &mut timings)`
+    a. `integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt, &mut timings)`
        — runs the integrator's full sub-step sequence (kicks, drifts,
        thermostat updates) and calls `force_field.step(...)` internally
        at the integrator's chosen point(s). On return,
        `particle_buffers.forces_*`, `potential_energies`, and `virials`
-       hold the values for the post-step positions.
+       hold the values for the post-step positions. The loop variable
+       `s` is local to the runner and gates trajectory and log writes
+       below; it is not passed to the integrator.
     b. If trajectory output is enabled and `s % trajectory_every == 0`,
        download positions (and velocities when configured) and call
        `write_frame(step=s, ...)`.

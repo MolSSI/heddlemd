@@ -87,22 +87,33 @@ stored on the device.
 
 ### Counter packing <!-- rq-98084bc0 -->
 
-Each per-`(particle, axis)` sample at a given timestep is the output of
-one Philox-4×32-10 invocation with:
+Each per-`(particle, axis)` Langevin draw is the output of one
+Philox-4×32-10 invocation with:
 
 - **Key (2 × u32)**: `(seed_lo, seed_hi)` — the low and high halves of the
   config's `integrator.seed`.
 - **Counter (4 × u32)**:
-  - `counter[0] = step_index_lo` — low 32 bits of `step_index`.
-  - `counter[1] = step_index_hi` — high 32 bits of `step_index`.
+  - `counter[0] = draw_counter_lo` — low 32 bits of the integrator's
+    `draw_counter`.
+  - `counter[1] = draw_counter_hi` — high 32 bits of `draw_counter`.
   - `counter[2] = particle_id` — the particle's `u32` ID from
     `ParticleBuffers::particle_ids` (numerically equal to its index when
     the runner uses default IDs).
   - `counter[3] = axis_id` — `0` for x, `1` for y, `2` for z.
 
-This packing guarantees that every `(seed, step_index, particle_id,
+This packing guarantees that every `(seed, draw_counter, particle_id,
 axis_id)` quadruple maps to a unique Philox counter and therefore an
 independent draw.
+
+The `draw_counter` lives on `LangevinBaoabState` (see *Feature API*
+below). It starts at `0` at construction. Each call to
+`LangevinBaoabState::step` performs `self.draw_counter += 1` before
+launching the OU kernel and passes the post-increment value to
+`lan_ou_step`. The first invocation therefore uses `draw_counter = 1`,
+the second uses `2`, and so on. The integrator's `step()` is the only
+place that touches `draw_counter`; consumers wanting reproducible
+re-runs from a known position set the field directly before any
+`step()` call.
 
 ### Box-Muller transform <!-- rq-25ba1194 -->
 
@@ -129,16 +140,24 @@ contributes no run-to-run drift.
 
 ### Types <!-- rq-b41d8d36 -->
 
-- `LangevinBaoabState` — variant payload owned by <!-- rq-bcb0f58a -->
-  `Integrator::LangevinBaoab` (see `framework.md`). Fields:
+- `LangevinBaoabState` — Langevin-BAOAB integrator state, registered <!-- rq-bcb0f58a -->
+  in the integrator framework under `kind = "langevin-baoab"` (see
+  `framework.md`). Fields:
 
-  - `device: Arc<CudaDevice>`
   - `friction: f64`
   - `temperature: f64`
   - `seed: u64`
+  - `draw_counter: u64` — Philox counter advance for the OU kernel.
+    Initialised to `0` by the builder. `LangevinBaoabState::step`
+    pre-increments this field on every call (`self.draw_counter += 1`)
+    and passes the post-increment value to `lan_ou_step`; the first
+    invocation in a run therefore uses `draw_counter == 1`. The field
+    is public so future restart-from-checkpoint flows can restore it
+    explicitly; in-run code does not modify it from outside `step()`.
 
-  All fields private; construction goes through `Integrator::new` with an
-  `IntegratorKind::LangevinBaoab` config variant.
+  All fields are public for parity with the other registered
+  integrators' state; construction goes through `LangevinBaoabBuilder`
+  with an `IntegratorKind::LangevinBaoab` config variant.
 
 ### CUDA Kernels <!-- rq-26ba73d0 -->
 
@@ -164,7 +183,7 @@ extern "C" __global__ void lan_ou_step(
     const float *masses,
     const unsigned int *particle_ids,
     unsigned int seed_lo, unsigned int seed_hi,
-    unsigned int step_index_lo, unsigned int step_index_hi,
+    unsigned int draw_counter_lo, unsigned int draw_counter_hi,
     float alpha,
     float kt,        // k_B * temperature, in joules
     unsigned int n);
@@ -179,7 +198,7 @@ returns without touching any buffer.
 `lan_ou_step` performs, for axis `a ∈ {0, 1, 2}`:
 
 ```text
-philox4x32_10(seed_lo, seed_hi, step_lo, step_hi, particle_ids[i], a, &o0, &o1, &o2, &o3)
+philox4x32_10(seed_lo, seed_hi, draw_lo, draw_hi, particle_ids[i], a, &o0, &o1, &o2, &o3)
 u1 = (o0 + 0.5) * 2^-32   // f64
 u2 = (o1 + 0.5) * 2^-32   // f64
 xi = sqrt(-2 ln u1) * cos(2 π u2)
@@ -209,9 +228,10 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
     launching.
   - Panics if the `"langevin"` module is not loaded.
 
-- `lan_ou_step(buffers: &mut ParticleBuffers, seed: u64, step_index: u64, alpha: f32, kt: f32) -> Result<(), GpuError>` <!-- rq-6435723d -->
-  - Launches the `lan_ou_step` kernel with the seed/step packed into
-    `(seed_lo, seed_hi, step_lo, step_hi)` u32 pairs.
+- `lan_ou_step(buffers: &mut ParticleBuffers, seed: u64, draw_counter: u64, alpha: f32, kt: f32) -> Result<(), GpuError>` <!-- rq-6435723d -->
+  - Launches the `lan_ou_step` kernel with the seed and draw counter
+    packed into `(seed_lo, seed_hi, draw_counter_lo, draw_counter_hi)`
+    u32 pairs.
   - Block size 256; grid `ceil(n / 256)`.
   - When `buffers.particle_count() == 0`, returns `Ok(())` without
     launching.
@@ -316,7 +336,7 @@ Feature: Langevin BAOAB integrator
   @rq-41389685
   Scenario: lan_ou_step with friction = 0 (alpha = 1) is identity on velocities (sanity)
     Given a ParticleBuffers with N=4 known nonzero velocities
-    When lan_ou_step(&mut buffers, seed=1, step_index=1, alpha=1.0, kt=0.0) is called
+    When lan_ou_step(&mut buffers, seed=1, draw_counter=1, alpha=1.0, kt=0.0) is called
     And buffers are downloaded
     Then velocities match the snapshot byte-for-byte
     # Note: kt=0 is the testable sentinel; the runtime config rejects friction=0
@@ -325,34 +345,34 @@ Feature: Langevin BAOAB integrator
   @rq-01813ffa
   Scenario: lan_ou_step on empty state is a no-op
     Given a ParticleBuffers with particle_count() == 0
-    When lan_ou_step(&mut buffers, seed=1, step_index=1, alpha=0.5, kt=1.0) is called
+    When lan_ou_step(&mut buffers, seed=1, draw_counter=1, alpha=0.5, kt=1.0) is called
     Then it returns Ok(())
 
   @rq-9922b639
   Scenario: Two identical calls produce byte-identical velocities
     Given two independent ParticleBuffers built from identical ParticleStates of N=64
-    When lan_ou_step is called on each with seed=42, step_index=7, identical alpha and kt
+    When lan_ou_step is called on each with seed=42, draw_counter=7, identical alpha and kt
     Then run A's velocities_x, velocities_y, velocities_z agree byte-for-byte with run B's
 
   @rq-10652c60
   Scenario: Different seeds give different velocity outputs
     Given two ParticleBuffers built from identical inputs of N=64
-    When lan_ou_step is called on each with the same step_index and parameters
+    When lan_ou_step is called on each with the same draw_counter and parameters
       but seed=1 and seed=2
     Then the resulting velocities differ on at least 90% of components
 
   @rq-e2f2de4f
-  Scenario: Different step_indices give different velocity outputs
+  Scenario: Different draw_counter values give different velocity outputs
     Given two ParticleBuffers built from identical inputs of N=64
     When lan_ou_step is called on each with the same seed and parameters
-      but step_index=1 and step_index=2
+      but draw_counter=1 and draw_counter=2
     Then the resulting velocities differ on at least 90% of components
 
   @rq-50baca8c
   Scenario: Variance scales with sqrt((1 - alpha^2) * kt / m)
     Given a ParticleBuffers of N=10000 particles all with v=0, m=6.6335e-26 kg
     And alpha = 0.5, kt = 1.380649e-23 * 300.0
-    When lan_ou_step is called with seed=42, step_index=1
+    When lan_ou_step is called with seed=42, draw_counter=1
     And velocities are downloaded
     Then the sample variance of each axis is within 5% of (1 - alpha^2) * kt / m
 
@@ -363,20 +383,37 @@ Feature: Langevin BAOAB integrator
     Given a Langevin-BAOAB integrator with friction=1e12, temperature=300, seed=1
     And a ParticleBuffers with N=4 nonzero values
     And a warm-up force evaluation has populated forces
-    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=1e-15, step_index=1, &mut timings) is called
+    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=1e-15, &mut timings) is called
     And timings.finalize() is queried
-    Then KernelStage::LangevinKickHalf has count == 2  (one before the drifts, one after the force eval)
-    And KernelStage::LangevinDriftHalf has count == 2
-    And KernelStage::LangevinOuStep has count == 1
-    And KernelStage::LjPairForce has count == 1
-    And KernelStage::ReducePairForces has count == 1
+    Then KernelStage::LANGEVIN_KICK_HALF has count == 2  (one before the drifts, one after the force eval)
+    And KernelStage::LANGEVIN_DRIFT_HALF has count == 2
+    And KernelStage::LANGEVIN_OU_STEP has count == 1
+    And KernelStage::LJ_PAIR_FORCE has count == 1
+    And KernelStage::REDUCE_PAIR_FORCES has count == 1
 
   @rq-6e98222c
   Scenario: step() on empty Langevin state is a no-op
     Given a Langevin-BAOAB integrator with friction=1e12, temperature=300, seed=1
     And a ParticleBuffers with particle_count() == 0
-    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=1e-15, step_index=1, &mut timings) is called
+    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=1e-15, &mut timings) is called
     Then it returns Ok(())
+
+  @rq-01784049
+  Scenario: draw_counter starts at 0 and increments per step()
+    Given a freshly built LangevinBaoabState
+    Then state.draw_counter equals 0
+    When integrator.step(...) is called once
+    Then state.draw_counter equals 1
+    When integrator.step(...) is called a second time
+    Then state.draw_counter equals 2
+
+  @rq-e70ee09e
+  Scenario: Two LangevinBaoabState instances at the same draw_counter and seed produce identical OU draws
+    Given LangevinBaoabState A and B built from the same IntegratorKind
+    And A.draw_counter and B.draw_counter both equal 5
+    And identical buffer state and dt
+    When integrator.step(...) is called once on each
+    Then the post-call velocities of A and B agree byte-for-byte
 
   # --- End-to-end determinism ---
 

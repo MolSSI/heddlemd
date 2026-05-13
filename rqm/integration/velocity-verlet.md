@@ -289,12 +289,12 @@ and, when `lossless == true`, allocates a `LosslessBuffers` of the
 runner's particle count on the same `Arc<CudaDevice>`.
 
 The implementation's `step(buffers, sim_box, force_field, dt,
-step_index, timings)` performs the following sequence:
+timings)` performs the following sequence:
 
 1. Launch `vv_kick_drift` (or `vv_kick_drift_lossless`), bracketed by
-   `timings.kernel_start(KernelStage::VvKickDrift)` /
-   `timings.kernel_stop(KernelStage::VvKickDrift)` (or the
-   `*_lossless` stage names — see `performance-analysis.md`). This
+   `timings.kernel_start(KernelStage::VV_KICK_DRIFT)` /
+   `timings.kernel_stop(KernelStage::VV_KICK_DRIFT)` (or the
+   `*_LOSSLESS` stage names — see `performance-analysis.md`). This
    applies the first half-kick using the cached `F(t)` and drifts
    positions to `x(t+dt)`.
 2. Call `force_field.step(buffers, sim_box, timings)`, which writes
@@ -304,9 +304,9 @@ step_index, timings)` performs the following sequence:
    bracketing. This applies the second half-kick using `F(t+dt)`.
 
 `sim_box` is borrowed mutably but velocity-Verlet does not modify it.
-`step_index` is unused by velocity Verlet but is part of the common
-trait interface for integrators that require it (e.g. Langevin
-counter-based RNG).
+Velocity Verlet is deterministic and stateless across `step()` calls
+(beyond the particle buffers themselves); it carries no per-call
+counter.
 
 ## Launch Configuration <!-- rq-0540b862 -->
 

@@ -63,7 +63,6 @@ pub trait Integrator: std::fmt::Debug + Send {
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
         dt: f32,
-        step_index: u64,
         timings: &mut Timings,
     ) -> Result<(), IntegratorError>;
 }
@@ -141,7 +140,6 @@ impl Integrator for VelocityVerletState {
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
         dt: f32,
-        _step_index: u64,
         timings: &mut Timings,
     ) -> Result<(), IntegratorError> {
         if buffers.particle_count() == 0 {
@@ -209,6 +207,7 @@ pub struct LangevinBaoabState {
     pub friction: f64,
     pub temperature: f64,
     pub seed: u64,
+    pub draw_counter: u64,
 }
 
 impl Integrator for LangevinBaoabState {
@@ -218,7 +217,6 @@ impl Integrator for LangevinBaoabState {
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
         dt: f32,
-        step_index: u64,
         timings: &mut Timings,
     ) -> Result<(), IntegratorError> {
         if buffers.particle_count() == 0 {
@@ -236,8 +234,9 @@ impl Integrator for LangevinBaoabState {
 
         let alpha = (-(self.friction as f32) * dt).exp();
         let kt = (BOLTZMANN_J_PER_K * self.temperature) as f32;
+        self.draw_counter += 1;
         timings.kernel_start(KernelStage::LANGEVIN_OU_STEP)?;
-        lan_ou_step(buffers, self.seed, step_index, alpha, kt)?;
+        lan_ou_step(buffers, self.seed, self.draw_counter, alpha, kt)?;
         timings.kernel_stop(KernelStage::LANGEVIN_OU_STEP)?;
 
         timings.kernel_start(KernelStage::LANGEVIN_DRIFT_HALF)?;
@@ -281,6 +280,7 @@ impl IntegratorBuilder for LangevinBaoabBuilder {
                 friction: *friction,
                 temperature: *temperature,
                 seed: *seed,
+                draw_counter: 0,
             })),
             other => Err(IntegratorError::UnknownKind(other.name().to_string())),
         }

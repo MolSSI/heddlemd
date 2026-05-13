@@ -858,7 +858,7 @@ pub fn lan_drift_half(
 pub fn lan_ou_step(
     buffers: &mut ParticleBuffers,
     seed: u64,
-    step_index: u64,
+    draw_counter: u64,
     alpha: f32,
     kt: f32,
 ) -> Result<(), GpuError> {
@@ -874,8 +874,8 @@ pub fn lan_ou_step(
     let cfg = launch_config(n_u32);
     let seed_lo = (seed & 0xFFFF_FFFF) as u32;
     let seed_hi = (seed >> 32) as u32;
-    let step_lo = (step_index & 0xFFFF_FFFF) as u32;
-    let step_hi = (step_index >> 32) as u32;
+    let draw_lo = (draw_counter & 0xFFFF_FFFF) as u32;
+    let draw_hi = (draw_counter >> 32) as u32;
     unsafe {
         func.launch(
             cfg,
@@ -887,8 +887,8 @@ pub fn lan_ou_step(
                 &buffers.particle_ids,
                 seed_lo,
                 seed_hi,
-                step_lo,
-                step_hi,
+                draw_lo,
+                draw_hi,
                 alpha,
                 kt,
                 n_u32,

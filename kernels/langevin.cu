@@ -103,7 +103,7 @@ extern "C" __global__ void lan_ou_step(
     const float *masses,
     const unsigned int *particle_ids,
     unsigned int seed_lo, unsigned int seed_hi,
-    unsigned int step_lo, unsigned int step_hi,
+    unsigned int draw_counter_lo, unsigned int draw_counter_hi,
     float alpha,
     float kt,
     unsigned int n)
@@ -115,9 +115,9 @@ extern "C" __global__ void lan_ou_step(
   float sigma_factor = sqrtf((1.0f - alpha * alpha) * kt / m);
   unsigned int pid = particle_ids[i];
 
-  float xi_x = philox_gaussian(seed_lo, seed_hi, step_lo, step_hi, pid, 0u);
-  float xi_y = philox_gaussian(seed_lo, seed_hi, step_lo, step_hi, pid, 1u);
-  float xi_z = philox_gaussian(seed_lo, seed_hi, step_lo, step_hi, pid, 2u);
+  float xi_x = philox_gaussian(seed_lo, seed_hi, draw_counter_lo, draw_counter_hi, pid, 0u);
+  float xi_y = philox_gaussian(seed_lo, seed_hi, draw_counter_lo, draw_counter_hi, pid, 1u);
+  float xi_z = philox_gaussian(seed_lo, seed_hi, draw_counter_lo, draw_counter_hi, pid, 2u);
 
   velocities_x[i] = alpha * velocities_x[i] + sigma_factor * xi_x;
   velocities_y[i] = alpha * velocities_y[i] + sigma_factor * xi_y;

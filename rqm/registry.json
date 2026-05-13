@@ -48,6 +48,13 @@
     "title": "Langevin BAOAB runs end-to-end through the runner",
     "type": "scenario"
   },
+  "rq-01784049": {
+    "decl": "Scenario: draw_counter starts at 0 and increments per step()",
+    "file": "integration/langevin-baoab",
+    "refs": [],
+    "title": "draw_counter starts at 0 and increments per step()",
+    "type": "scenario"
+  },
   "rq-017b6769": {
     "decl": "Scenario: Reject non-positive epsilon",
     "file": "io/config-schema",
@@ -713,14 +720,6 @@
     "refs": [],
     "title": "trajectory_every > n_steps writes only the step-0 frame",
     "type": "scenario"
-  },
-  "rq-198f5ec1": {
-    "decl": "## Step Counter",
-    "file": "integration/framework",
-    "level": 2,
-    "refs": [],
-    "title": "Step Counter",
-    "type": "section"
   },
   "rq-19fd5b09": {
     "decl": "Scenario: cell_counts is the device-computed per-cell histogram",
@@ -2957,7 +2956,7 @@
     "type": "file"
   },
   "rq-6435723d": {
-    "decl": "- `lan_ou_step(buffers: &mut ParticleBuffers, seed: u64, step_index: u64, alpha: f32, kt: f32) -> Result<(), GpuError>`",
+    "decl": "- `lan_ou_step(buffers: &mut ParticleBuffers, seed: u64, draw_counter: u64, alpha: f32, kt: f32) -> Result<(), GpuError>`",
     "file": "integration/langevin-baoab",
     "refs": [
       {
@@ -5583,7 +5582,7 @@
     "type": "api-item"
   },
   "rq-bcb0f58a": {
-    "decl": "- `LangevinBaoabState` — variant payload owned by",
+    "decl": "- `LangevinBaoabState` — Langevin-BAOAB integrator state, registered",
     "file": "integration/langevin-baoab",
     "refs": [],
     "title": "LangevinBaoabState",
@@ -6085,7 +6084,7 @@
     "type": "scenario"
   },
   "rq-cf361ff5": {
-    "decl": "- `Integrator::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, dt: f32, step_index: u64, timings: &mut Timings) -> Result<(), IntegratorError>`",
+    "decl": "- `Integrator::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, dt: f32, timings: &mut Timings) -> Result<(), IntegratorError>`",
     "file": "integration/framework",
     "refs": [
       {
@@ -6125,10 +6124,10 @@
     "type": "scenario"
   },
   "rq-d12c24f0": {
-    "decl": "Scenario: step_index is passed through and affects RNG draws",
+    "decl": "Scenario: Two consecutive step() calls on a Langevin integrator produce different post-call velocities",
     "file": "integration/framework",
     "refs": [],
-    "title": "step_index is passed through and affects RNG draws",
+    "title": "Two consecutive step() calls on a Langevin integrator produce different post-call velocities",
     "type": "scenario"
   },
   "rq-d148149f": {
@@ -6643,10 +6642,10 @@
     "type": "section"
   },
   "rq-e2f2de4f": {
-    "decl": "Scenario: Different step_indices give different velocity outputs",
+    "decl": "Scenario: Different draw_counter values give different velocity outputs",
     "file": "integration/langevin-baoab",
     "refs": [],
-    "title": "Different step_indices give different velocity outputs",
+    "title": "Different draw_counter values give different velocity outputs",
     "type": "scenario"
   },
   "rq-e2f32af0": {
@@ -6818,6 +6817,13 @@
     "refs": [],
     "title": "Functions",
     "type": "section"
+  },
+  "rq-e70ee09e": {
+    "decl": "Scenario: Two LangevinBaoabState instances at the same draw_counter and seed produce identical OU draws",
+    "file": "integration/langevin-baoab",
+    "refs": [],
+    "title": "Two LangevinBaoabState instances at the same draw_counter and seed produce identical OU draws",
+    "type": "scenario"
   },
   "rq-e75b24e7": {
     "decl": "Scenario: Neighbor list excludes the self atom",

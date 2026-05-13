@@ -5,7 +5,7 @@ use dynamics::forces::{BondList, ExclusionList, ForceField};
 use dynamics::gpu::{ParticleBuffers, init_device};
 use dynamics::integrator::{
     Integrator, IntegratorBuilder, IntegratorError, IntegratorRegistry, LangevinBaoabBuilder,
-    VelocityVerletBuilder,
+    LangevinBaoabState, VelocityVerletBuilder,
 };
 use dynamics::io::IntegratorKind;
 use dynamics::io::config::NeighborListConfig;
@@ -82,7 +82,7 @@ fn construct_vv_lossless_via_registry() {
     let mut timings = Timings::new(device.clone()).unwrap();
     let mut integrator = registry.build(&vv_kind(true), device, 4).unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, 1, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, &mut timings)
         .unwrap();
     // The lossless build is observable through the lossless KernelStage labels.
     let report = timings.finalize().unwrap();
@@ -148,7 +148,6 @@ impl Integrator for StubIntegrator {
         _sim_box: &mut SimulationBox,
         _force_field: &mut ForceField,
         _dt: f32,
-        _step_index: u64,
         _timings: &mut Timings,
     ) -> Result<(), IntegratorError> {
         Ok(())
@@ -170,7 +169,7 @@ fn custom_builder_registered_takes_priority_over_builtin() {
     let mut timings = Timings::new(device.clone()).unwrap();
     let mut integrator = registry.build(&vv_kind(false), device, 4).unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, 1, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     // Stub launches no kernels, so neither vv_kick_drift nor vv_kick should
@@ -197,7 +196,7 @@ fn step_on_empty_state_is_noop() {
         .build(&vv_kind(false), device, 0)
         .unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, 1, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     assert!(report.stages.is_empty());
@@ -221,7 +220,7 @@ fn vv_step_launches_kick_drift_force_and_kick() {
         .unwrap();
     let snap_positions = state.positions_x.clone();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, 1, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, &mut timings)
         .unwrap();
     let mut after = state.clone();
     after.download_from(&buffers).unwrap();
@@ -254,7 +253,7 @@ fn lossless_vv_step_uses_lossless_kernels() {
         .build(&vv_kind(true), device, 4)
         .unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, 1, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let names: Vec<&str> = report.stages.iter().map(|s| s.name.as_str()).collect();
@@ -296,7 +295,7 @@ fn integrator_owns_force_evaluation_inside_step() {
         .build(&vv_kind(false), device, 4)
         .unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 0.001, 1, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count = |name: &str| {
@@ -314,34 +313,27 @@ fn integrator_owns_force_evaluation_inside_step() {
 
 // rq-d12c24f0
 #[test]
-fn step_index_propagates_to_langevin() {
+fn two_consecutive_langevin_steps_produce_different_velocities() {
     let device = init_device().unwrap();
     let state = small_state(2);
-    let mut buffers_a = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut buffers_b = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut sim_box_a = box_10();
-    let mut sim_box_b = box_10();
-    let mut ff_a = empty_force_field(device.clone(), 2);
-    let mut ff_b = empty_force_field(device.clone(), 2);
-    let mut timings_a = Timings::new(device.clone()).unwrap();
-    let mut timings_b = Timings::new(device.clone()).unwrap();
-    let mut integrator_a = IntegratorRegistry::with_builtins()
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut sim_box = box_10();
+    let mut ff = empty_force_field(device.clone(), 2);
+    let mut timings = Timings::new(device.clone()).unwrap();
+    let mut integrator = IntegratorRegistry::with_builtins()
         .build(&langevin_kind(1), device.clone(), 2)
         .unwrap();
-    let mut integrator_b = IntegratorRegistry::with_builtins()
-        .build(&langevin_kind(1), device.clone(), 2)
+    integrator
+        .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
         .unwrap();
-    integrator_a
-        .step(&mut buffers_a, &mut sim_box_a, &mut ff_a, 1.0e-15, 1, &mut timings_a)
+    let mut state_after_first = state.clone();
+    state_after_first.download_from(&buffers).unwrap();
+    integrator
+        .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
         .unwrap();
-    integrator_b
-        .step(&mut buffers_b, &mut sim_box_b, &mut ff_b, 1.0e-15, 2, &mut timings_b)
-        .unwrap();
-    let mut state_a = state.clone();
-    let mut state_b = state.clone();
-    state_a.download_from(&buffers_a).unwrap();
-    state_b.download_from(&buffers_b).unwrap();
-    assert_ne!(state_a.velocities_x, state_b.velocities_x);
+    let mut state_after_second = state.clone();
+    state_after_second.download_from(&buffers).unwrap();
+    assert_ne!(state_after_first.velocities_x, state_after_second.velocities_x);
 }
 
 // rq-706001ec
@@ -365,12 +357,12 @@ fn two_independent_runs_byte_identical() {
         .build(&vv_kind(false), device.clone(), 4)
         .unwrap();
 
-    for step in 1..=10 {
+    for _ in 1..=10 {
         integrator_a
-            .step(&mut buffers_a, &mut sim_box_a, &mut ff_a, 0.001, step, &mut timings_a)
+            .step(&mut buffers_a, &mut sim_box_a, &mut ff_a, 0.001, &mut timings_a)
             .unwrap();
         integrator_b
-            .step(&mut buffers_b, &mut sim_box_b, &mut ff_b, 0.001, step, &mut timings_b)
+            .step(&mut buffers_b, &mut sim_box_b, &mut ff_b, 0.001, &mut timings_b)
             .unwrap();
     }
 
@@ -380,6 +372,72 @@ fn two_independent_runs_byte_identical() {
     state_b.download_from(&buffers_b).unwrap();
     assert_eq!(state_a.positions_x, state_b.positions_x);
     assert_eq!(state_a.velocities_x, state_b.velocities_x);
+}
+
+// rq-01784049
+#[test]
+fn langevin_draw_counter_starts_at_zero_and_increments_per_step() {
+    let device = init_device().unwrap();
+    let state = small_state(2);
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut sim_box = box_10();
+    let mut ff = empty_force_field(device.clone(), 2);
+    let mut timings = Timings::new(device.clone()).unwrap();
+    let mut integrator = LangevinBaoabState {
+        friction: 1.0e12,
+        temperature: 300.0,
+        seed: 42,
+        draw_counter: 0,
+    };
+    assert_eq!(integrator.draw_counter, 0);
+    integrator
+        .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
+        .unwrap();
+    assert_eq!(integrator.draw_counter, 1);
+    integrator
+        .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
+        .unwrap();
+    assert_eq!(integrator.draw_counter, 2);
+}
+
+// rq-e70ee09e
+#[test]
+fn langevin_states_at_same_draw_counter_and_seed_produce_identical_draws() {
+    let device = init_device().unwrap();
+    let state = small_state(4);
+    let mut buffers_a = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers_b = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut sim_box_a = box_10();
+    let mut sim_box_b = box_10();
+    let mut ff_a = empty_force_field(device.clone(), 4);
+    let mut ff_b = empty_force_field(device.clone(), 4);
+    let mut timings_a = Timings::new(device.clone()).unwrap();
+    let mut timings_b = Timings::new(device.clone()).unwrap();
+    let mut a = LangevinBaoabState {
+        friction: 1.0e12,
+        temperature: 300.0,
+        seed: 7,
+        draw_counter: 5,
+    };
+    let mut b = LangevinBaoabState {
+        friction: 1.0e12,
+        temperature: 300.0,
+        seed: 7,
+        draw_counter: 5,
+    };
+    a.step(&mut buffers_a, &mut sim_box_a, &mut ff_a, 1.0e-15, &mut timings_a)
+        .unwrap();
+    b.step(&mut buffers_b, &mut sim_box_b, &mut ff_b, 1.0e-15, &mut timings_b)
+        .unwrap();
+    let mut state_a = state.clone();
+    let mut state_b = state.clone();
+    state_a.download_from(&buffers_a).unwrap();
+    state_b.download_from(&buffers_b).unwrap();
+    assert_eq!(state_a.velocities_x, state_b.velocities_x);
+    assert_eq!(state_a.velocities_y, state_b.velocities_y);
+    assert_eq!(state_a.velocities_z, state_b.velocities_z);
+    assert_eq!(a.draw_counter, 6);
+    assert_eq!(b.draw_counter, 6);
 }
 
 // Silence the unused-name lint for the imported KernelStage variant set.
