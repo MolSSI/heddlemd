@@ -5,8 +5,10 @@ use std::time::Instant;
 use cudarc::driver::{CudaDevice, CudaSlice};
 
 use crate::gpu::{
-    GpuError, ParticleBuffers, copy_positions_into_reference, neighbor_displacement_squared,
-    neighbor_list_build,
+    GpuError, ParticleBuffers, SPATIAL_HASH_MAX_CELLS, SPATIAL_HASH_SCAN_BLOCK_SIZE,
+    compute_cell_indices_and_histogram, copy_positions_into_reference,
+    neighbor_displacement_squared, neighbor_list_build, prefix_scan_cell_counts,
+    scatter_atoms_into_cells, sort_cells_by_particle_id,
 };
 use crate::pbc::SimulationBox;
 use crate::timings::{HostStage, KernelStage, Timings};
@@ -22,6 +24,10 @@ pub enum NeighborListError {
         axis: &'static str,
         length: f32,
         required: f32,
+    },
+    TooManyCells {
+        n_cells_total: usize,
+        max_supported: usize,
     },
 }
 
@@ -39,6 +45,13 @@ impl std::fmt::Display for NeighborListError {
             } => write!(
                 f,
                 "BoxTooSmallForCells {{ axis: {axis:?}, length: {length}, required: {required} }}"
+            ),
+            NeighborListError::TooManyCells {
+                n_cells_total,
+                max_supported,
+            } => write!(
+                f,
+                "TooManyCells {{ n_cells_total: {n_cells_total}, max_supported: {max_supported} }}"
             ),
         }
     }
@@ -69,6 +82,10 @@ pub struct CellListData {
     pub r_skin: f32,
     pub r_search_sq: f32,
     pub cached_generation: u64,
+    pub cell_indices: CudaSlice<u32>,
+    pub cell_counts: CudaSlice<u32>,
+    pub write_cursors: CudaSlice<u32>,
+    pub scan_block_totals: CudaSlice<u32>,
     pub sorted_particle_ids: CudaSlice<u32>,
     pub cell_offsets: CudaSlice<u32>,
     pub reference_positions_x: CudaSlice<f32>,
@@ -126,7 +143,20 @@ impl NeighborListState {
         let (n_cells, cell_size) = compute_cell_layout(sim_box, r_search)?;
         let n_cells_total =
             n_cells[0] as usize * n_cells[1] as usize * n_cells[2] as usize;
+        check_n_cells_total(n_cells_total)?;
 
+        let cell_indices = device
+            .alloc_zeros::<u32>(particle_count.max(1))
+            .map_err(GpuError::from)?;
+        let cell_counts = device
+            .alloc_zeros::<u32>(n_cells_total)
+            .map_err(GpuError::from)?;
+        let write_cursors = device
+            .alloc_zeros::<u32>(n_cells_total)
+            .map_err(GpuError::from)?;
+        let scan_block_totals = device
+            .alloc_zeros::<u32>(scan_blocks_for(n_cells_total))
+            .map_err(GpuError::from)?;
         let sorted_particle_ids = device
             .alloc_zeros::<u32>(particle_count.max(1))
             .map_err(GpuError::from)?;
@@ -168,6 +198,10 @@ impl NeighborListState {
                 r_skin,
                 r_search_sq,
                 cached_generation: sim_box.generation(),
+                cell_indices,
+                cell_counts,
+                write_cursors,
+                scan_block_totals,
                 sorted_particle_ids,
                 cell_offsets,
                 reference_positions_x,
@@ -239,9 +273,19 @@ impl NeighborListState {
         let (new_n_cells, new_cell_size) = compute_cell_layout(sim_box, r_search)?;
         let new_n_cells_total =
             new_n_cells[0] as usize * new_n_cells[1] as usize * new_n_cells[2] as usize;
+        check_n_cells_total(new_n_cells_total)?;
         if new_n_cells_total != cl.n_cells_total {
             cl.cell_offsets = device
                 .alloc_zeros::<u32>(new_n_cells_total + 1)
+                .map_err(GpuError::from)?;
+            cl.cell_counts = device
+                .alloc_zeros::<u32>(new_n_cells_total)
+                .map_err(GpuError::from)?;
+            cl.write_cursors = device
+                .alloc_zeros::<u32>(new_n_cells_total)
+                .map_err(GpuError::from)?;
+            cl.scan_block_totals = device
+                .alloc_zeros::<u32>(scan_blocks_for(new_n_cells_total))
                 .map_err(GpuError::from)?;
         }
         cl.n_cells = new_n_cells;
@@ -323,58 +367,51 @@ impl NeighborListState {
         buffers: &ParticleBuffers,
         timings: &mut Timings,
     ) -> Result<(), NeighborListError> {
-        let n = self.particle_count;
-        let pos_x: Vec<f32> = self
-            .device
-            .dtoh_sync_copy(&buffers.positions_x)
-            .map_err(GpuError::from)?;
-        let pos_y: Vec<f32> = self
-            .device
-            .dtoh_sync_copy(&buffers.positions_y)
-            .map_err(GpuError::from)?;
-        let pos_z: Vec<f32> = self
-            .device
-            .dtoh_sync_copy(&buffers.positions_z)
-            .map_err(GpuError::from)?;
-
-        let lengths = sim_box.lengths();
+        let device = self.device.clone();
         let max_neighbors = self.max_neighbors;
+        let particle_count = self.particle_count;
 
         let cl = match &mut self.mode {
             NeighborListMode::Trivial => return Ok(()),
             NeighborListMode::CellList(cl) => cl,
         };
 
-        let mut entries: Vec<(u32, u32)> = Vec::with_capacity(n);
-        for i in 0..n {
-            let cx = cell_index_axis(pos_x[i], lengths[0], cl.cell_size[0], cl.n_cells[0]);
-            let cy = cell_index_axis(pos_y[i], lengths[1], cl.cell_size[1], cl.n_cells[1]);
-            let cz = cell_index_axis(pos_z[i], lengths[2], cl.cell_size[2], cl.n_cells[2]);
-            let c = (cx * cl.n_cells[1] + cy) * cl.n_cells[2] + cz;
-            entries.push((c, i as u32));
-        }
-        entries.sort_by_key(|&(c, pid)| (c, pid));
+        compute_cell_indices_and_histogram(
+            buffers,
+            sim_box,
+            cl.n_cells,
+            cl.cell_size,
+            &mut cl.cell_indices,
+            &mut cl.cell_counts,
+        )?;
 
-        let sorted_ids: Vec<u32> = entries.iter().map(|&(_, pid)| pid).collect();
-        let mut counts: Vec<u32> = vec![0u32; cl.n_cells_total];
-        for &(c, _) in &entries {
-            counts[c as usize] += 1;
-        }
-        let mut offsets: Vec<u32> = vec![0u32; cl.n_cells_total + 1];
-        for c in 0..cl.n_cells_total {
-            offsets[c + 1] = offsets[c] + counts[c];
-        }
+        prefix_scan_cell_counts(
+            &device,
+            &cl.cell_counts,
+            &mut cl.cell_offsets,
+            &mut cl.scan_block_totals,
+            cl.n_cells_total,
+            particle_count,
+        )?;
 
-        self.device
-            .htod_sync_copy_into(&sorted_ids, &mut cl.sorted_particle_ids)
-            .map_err(GpuError::from)?;
-        self.device
-            .htod_sync_copy_into(&offsets, &mut cl.cell_offsets)
-            .map_err(GpuError::from)?;
+        scatter_atoms_into_cells(
+            &device,
+            &cl.cell_indices,
+            &cl.cell_offsets,
+            &mut cl.write_cursors,
+            &mut cl.sorted_particle_ids,
+            particle_count,
+        )?;
 
-        let zero: [u32; 1] = [0];
-        self.device
-            .htod_sync_copy_into(&zero, &mut cl.overflow_flag)
+        sort_cells_by_particle_id(
+            &device,
+            &cl.cell_offsets,
+            &mut cl.sorted_particle_ids,
+            cl.n_cells_total,
+        )?;
+
+        device
+            .memset_zeros(&mut cl.overflow_flag)
             .map_err(GpuError::from)?;
 
         timings
@@ -485,17 +522,19 @@ fn compute_cell_layout(
     Ok((n_cells, cell_size))
 }
 
-fn cell_index_axis(x: f32, length: f32, cell_size: f32, n_cells: u32) -> u32 {
-    let wrapped = x - length * ((x + length * 0.5) / length).floor();
-    let mut idx = ((wrapped + length * 0.5) / cell_size).floor() as i64;
-    if idx < 0 {
-        idx = 0;
+fn check_n_cells_total(n_cells_total: usize) -> Result<(), NeighborListError> {
+    if n_cells_total > SPATIAL_HASH_MAX_CELLS {
+        return Err(NeighborListError::TooManyCells {
+            n_cells_total,
+            max_supported: SPATIAL_HASH_MAX_CELLS,
+        });
     }
-    let max_idx = (n_cells as i64) - 1;
-    if idx > max_idx {
-        idx = max_idx;
-    }
-    idx as u32
+    Ok(())
+}
+
+fn scan_blocks_for(n_cells_total: usize) -> usize {
+    let block = SPATIAL_HASH_SCAN_BLOCK_SIZE as usize;
+    (n_cells_total + block - 1) / block
 }
 
 fn map_timings_err(e: crate::timings::TimingsError) -> NeighborListError {

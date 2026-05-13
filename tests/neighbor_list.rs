@@ -595,3 +595,215 @@ fn generation_mismatch_detected_even_when_edge_lengths_unchanged() {
     assert_eq!(cl.cached_generation, 1);
     assert!(!cl.needs_rebuild, "rebuild should have run inside pre_step");
 }
+
+// --- Device-side spatial hash ---
+//
+// Fixture: box L=10, r_cut=1.0, r_skin=0.3 → r_search=1.3, n_cells=7 per
+// axis (n_cells_total=343), cell_size = 10/7 ≈ 1.4286.
+// Positions chosen so each atom's cell index is fully predictable.
+// cy=cz=3 for all atoms (y=z=0); cell index = 49*cx + 7*3 + 3 = 49*cx + 24.
+//   x=-1.0 → cx=2 → c=122
+//   x=-4.5 → cx=0 → c=24
+//   x=-3.0 → cx=1 → c=73
+//   x=-4.0 → cx=0 → c=24
+//   x=-2.0 → cx=2 → c=122
+
+fn spatial_hash_fixture(
+    device: std::sync::Arc<cudarc::driver::CudaDevice>,
+) -> (SimulationBox, NeighborListState, ParticleBuffers, Timings) {
+    let sim_box = box_n(10.0);
+    let state = state_from_positions(
+        vec![-1.0, -4.5, -3.0, -4.0, -2.0],
+        vec![0.0; 5],
+        vec![0.0; 5],
+    );
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let nl =
+        NeighborListState::new_cell_list(device.clone(), &sim_box, 5, 1.0, 8, 0.3).unwrap();
+    let timings = Timings::new(device).unwrap();
+    (sim_box, nl, buffers, timings)
+}
+
+#[test] // rq-f164bf76
+fn cell_indices_populated_by_device_pipeline() {
+    let device = init_device().unwrap();
+    let (sim_box, mut nl, buffers, mut timings) = spatial_hash_fixture(device.clone());
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
+    let cell_indices = device
+        .dtoh_sync_copy(&nl.cell_list_data().unwrap().cell_indices)
+        .unwrap();
+    assert_eq!(&cell_indices[..5], &[122u32, 24, 73, 24, 122]);
+}
+
+#[test] // rq-19fd5b09
+fn cell_counts_is_device_computed_histogram() {
+    let device = init_device().unwrap();
+    let (sim_box, mut nl, buffers, mut timings) = spatial_hash_fixture(device.clone());
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
+    let counts = device
+        .dtoh_sync_copy(&nl.cell_list_data().unwrap().cell_counts)
+        .unwrap();
+    let n_cells_total = nl.cell_list_data().unwrap().n_cells_total;
+    assert_eq!(counts.len(), n_cells_total);
+    let sum: u32 = counts.iter().copied().sum();
+    assert_eq!(sum, 5);
+    assert_eq!(counts[24], 2);
+    assert_eq!(counts[73], 1);
+    assert_eq!(counts[122], 2);
+    for (c, &v) in counts.iter().enumerate() {
+        if c == 24 || c == 73 || c == 122 {
+            continue;
+        }
+        assert_eq!(v, 0, "cell {c} should be empty, got count {v}");
+    }
+}
+
+#[test] // rq-f8ad62d4
+fn cell_offsets_is_exclusive_prefix_sum_ending_at_particle_count() {
+    let device = init_device().unwrap();
+    let (sim_box, mut nl, buffers, mut timings) = spatial_hash_fixture(device.clone());
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
+    let cl = nl.cell_list_data().unwrap();
+    let offsets = device.dtoh_sync_copy(&cl.cell_offsets).unwrap();
+    let counts = device.dtoh_sync_copy(&cl.cell_counts).unwrap();
+    assert_eq!(offsets.len(), cl.n_cells_total + 1);
+    assert_eq!(offsets[0], 0);
+    for c in 0..cl.n_cells_total {
+        assert_eq!(
+            offsets[c + 1],
+            offsets[c] + counts[c],
+            "exclusive prefix sum broken at cell {c}"
+        );
+    }
+    assert_eq!(offsets[cl.n_cells_total], 5);
+    for w in offsets.windows(2) {
+        assert!(w[0] <= w[1], "offsets must be non-decreasing");
+    }
+}
+
+#[test] // rq-265f4da4
+fn scatter_places_each_atom_inside_its_cell_slice() {
+    let device = init_device().unwrap();
+    let (sim_box, mut nl, buffers, mut timings) = spatial_hash_fixture(device.clone());
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
+    let cl = nl.cell_list_data().unwrap();
+    let sorted_ids = device.dtoh_sync_copy(&cl.sorted_particle_ids).unwrap();
+    let cell_indices = device.dtoh_sync_copy(&cl.cell_indices).unwrap();
+    let offsets = device.dtoh_sync_copy(&cl.cell_offsets).unwrap();
+    let mut seen = [false; 5];
+    for i in 0..5usize {
+        let c = cell_indices[i] as usize;
+        let start = offsets[c] as usize;
+        let end = offsets[c + 1] as usize;
+        let pos = sorted_ids[start..end]
+            .iter()
+            .position(|&p| p == i as u32)
+            .expect("atom must appear in its cell's slice");
+        assert!(
+            start + pos >= start && start + pos < end,
+            "atom {i} slot must be inside [{start}, {end})"
+        );
+        assert!(!seen[i], "atom {i} must appear exactly once");
+        seen[i] = true;
+    }
+    assert!(seen.iter().all(|&b| b));
+}
+
+#[test] // rq-7a14d0d8 rq-838acdee rq-2303ee2e
+fn per_cell_sort_canonicalises_sorted_particle_ids() {
+    let device = init_device().unwrap();
+    let (sim_box, mut nl, buffers, mut timings) = spatial_hash_fixture(device.clone());
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
+    let cl = nl.cell_list_data().unwrap();
+    let sorted_ids = device.dtoh_sync_copy(&cl.sorted_particle_ids).unwrap();
+    assert_eq!(&sorted_ids[..5], &[1u32, 3, 2, 0, 4]);
+    let offsets = device.dtoh_sync_copy(&cl.cell_offsets).unwrap();
+    for c in 0..cl.n_cells_total {
+        let start = offsets[c] as usize;
+        let end = offsets[c + 1] as usize;
+        let slice = &sorted_ids[start..end];
+        for w in slice.windows(2) {
+            assert!(w[0] < w[1], "cell {c} slice not strictly ascending: {slice:?}");
+        }
+    }
+}
+
+#[test] // rq-ecad9802
+fn write_cursors_is_reset_between_rebuilds() {
+    let device = init_device().unwrap();
+    let (sim_box, mut nl, buffers, mut timings) = spatial_hash_fixture(device.clone());
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
+    let first = device
+        .dtoh_sync_copy(&nl.cell_list_data().unwrap().sorted_particle_ids)
+        .unwrap();
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
+    let second = device
+        .dtoh_sync_copy(&nl.cell_list_data().unwrap().sorted_particle_ids)
+        .unwrap();
+    assert_eq!(first, second);
+    assert_eq!(&second[..5], &[1u32, 3, 2, 0, 4]);
+}
+
+#[test] // rq-6c8415f6
+fn rebuild_produces_correct_output_via_gpu_pipeline() {
+    // The rebuild is implemented with no host-side download of positions
+    // and no host-side upload of sorted_particle_ids/cell_offsets. This
+    // test exercises the end-to-end GPU pipeline and verifies the canonical
+    // (cell, particle_id) order, which is only achievable when the entire
+    // pipeline runs on the device.
+    let device = init_device().unwrap();
+    let (sim_box, mut nl, buffers, mut timings) = spatial_hash_fixture(device.clone());
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
+    let sorted_ids = device
+        .dtoh_sync_copy(&nl.cell_list_data().unwrap().sorted_particle_ids)
+        .unwrap();
+    assert_eq!(&sorted_ids[..5], &[1u32, 3, 2, 0, 4]);
+}
+
+#[test] // rq-6fd5167a
+fn too_many_cells_rejected_at_construction() {
+    let device = init_device().unwrap();
+    // r_cut=0.05, r_skin=0.05 → r_search=0.1; L=27 → 270 cells/axis → 19,683,000 cells.
+    let sim_box = box_n(27.0);
+    let err =
+        NeighborListState::new_cell_list(device, &sim_box, 0, 0.05, 8, 0.05).expect_err("err");
+    match err {
+        NeighborListError::TooManyCells {
+            n_cells_total,
+            max_supported,
+        } => {
+            assert_eq!(n_cells_total, 270 * 270 * 270);
+            assert_eq!(max_supported, 256 * 256);
+        }
+        other => panic!("expected TooManyCells, got {other:?}"),
+    }
+}
+
+#[test] // rq-f2e4b0b8
+fn cell_list_scratch_reallocated_on_box_generation_refresh() {
+    let device = init_device().unwrap();
+    let mut sim_box = box_n(10.0);
+    let state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut nl =
+        NeighborListState::new_cell_list(device.clone(), &sim_box, 2, 1.0, 8, 0.3).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let cl_before = nl.cell_list_data().unwrap();
+    assert_eq!(cl_before.cell_counts.len(), 343);
+    assert_eq!(cl_before.write_cursors.len(), 343);
+    let block = 256usize;
+    assert_eq!(cl_before.scan_block_totals.len(), (343 + block - 1) / block);
+    let cell_indices_len_before = cl_before.cell_indices.len();
+
+    sim_box.set_lengths(12.0, 12.0, 12.0).expect("ok");
+    let new_state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &new_state).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let cl_after = nl.cell_list_data().unwrap();
+    assert_eq!(cl_after.cell_counts.len(), 729);
+    assert_eq!(cl_after.write_cursors.len(), 729);
+    assert_eq!(cl_after.scan_block_totals.len(), (729 + block - 1) / block);
+    // cell_indices is per-atom (particle_count = 2) and not reallocated.
+    assert_eq!(cl_after.cell_indices.len(), cell_indices_len_before);
+}

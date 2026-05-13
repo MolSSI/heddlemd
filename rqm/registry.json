@@ -451,6 +451,13 @@
     "title": "Self-bond rejected",
     "type": "scenario"
   },
+  "rq-10f6f831": {
+    "decl": "- `compute_cell_indices_and_histogram(particle_buffers, sim_box, n_cells, cell_size, cell_indices, cell_counts) -> Result<(), GpuError>`",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "compute_cell_indices_and_histogram",
+    "type": "api-item"
+  },
   "rq-110285ae": {
     "decl": "## Feature API",
     "file": "io/config-schema",
@@ -640,6 +647,13 @@
     "title": "File Format",
     "type": "section"
   },
+  "rq-165c4422": {
+    "decl": "- `sort_cells_by_particle_id(cell_offsets, sorted_particle_ids, n_cells_total) -> Result<(), GpuError>`",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "sort_cells_by_particle_id",
+    "type": "api-item"
+  },
   "rq-171b99f5": {
     "decl": "Scenario: step() on empty state is a no-op",
     "file": "integration/framework",
@@ -707,6 +721,13 @@
     "refs": [],
     "title": "Step Counter",
     "type": "section"
+  },
+  "rq-19fd5b09": {
+    "decl": "Scenario: cell_counts is the device-computed per-cell histogram",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "cell_counts is the device-computed per-cell histogram",
+    "type": "scenario"
   },
   "rq-19fe4806": {
     "decl": "Scenario: Reject NaN lx",
@@ -1117,6 +1138,13 @@
     "title": "Mutating a copy does not affect the original",
     "type": "scenario"
   },
+  "rq-2303ee2e": {
+    "decl": "Scenario: Per-cell sort yields ascending partner indices inside every cell",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Per-cell sort yields ascending partner indices inside every cell",
+    "type": "scenario"
+  },
   "rq-2344fcec": {
     "decl": "- `LogWriter` — handle to an open log file. Fields are private; the type",
     "file": "io/log-output",
@@ -1199,6 +1227,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Neighbor list applies minimum-image PBC",
+    "type": "scenario"
+  },
+  "rq-265f4da4": {
+    "decl": "Scenario: scatter places each atom inside its cell's slice",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "scatter places each atom inside its cell's slice",
     "type": "scenario"
   },
   "rq-267941a2": {
@@ -1489,6 +1524,13 @@
     "refs": [],
     "title": "Two consumers share one neighbor list",
     "type": "scenario"
+  },
+  "rq-2ef5e222": {
+    "decl": "- `prefix_scan_cell_counts(cell_counts, cell_offsets, scan_block_totals, particle_count) -> Result<(), GpuError>` —",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "prefix_scan_cell_counts",
+    "type": "api-item"
   },
   "rq-2f230ccb": {
     "decl": "- `BondTypeConfig` — tagged enum carrying the chosen bonded-potential",
@@ -3161,6 +3203,13 @@
     "title": "Two independent rebuilds with identical positions produce identical lists",
     "type": "scenario"
   },
+  "rq-6c8415f6": {
+    "decl": "Scenario: NeighborListState rebuild performs no host-device particle transfers",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "NeighborListState rebuild performs no host-device particle transfers",
+    "type": "scenario"
+  },
   "rq-6cb9ab62": {
     "decl": "Scenario: bonds field is optional and defaults to None",
     "file": "io/config-schema",
@@ -3250,6 +3299,13 @@
     "refs": [],
     "title": "Reduction Launcher",
     "type": "section"
+  },
+  "rq-6fd5167a": {
+    "decl": "Scenario: Configuration with too many cells is rejected at construction",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Configuration with too many cells is rejected at construction",
+    "type": "scenario"
   },
   "rq-6fdefca0": {
     "decl": "Scenario: PairBuffer::new allocates zero-initialised pair-contribution buffers",
@@ -3580,6 +3636,13 @@
     ],
     "title": "ForceField",
     "type": "api-item"
+  },
+  "rq-7a14d0d8": {
+    "decl": "Scenario: per-cell sort canonicalises sorted_particle_ids",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "per-cell sort canonicalises sorted_particle_ids",
+    "type": "scenario"
   },
   "rq-7a26eeae": {
     "decl": "## Feature API",
@@ -4558,6 +4621,13 @@
     "refs": [],
     "title": "fill kernel writes 1.0 to every element of a block-aligned buffer",
     "type": "scenario"
+  },
+  "rq-9d0cb192": {
+    "decl": "- `scatter_atoms_into_cells(cell_indices, cell_offsets, write_cursors, sorted_particle_ids, particle_count) -> Result<(), GpuError>` —",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "scatter_atoms_into_cells",
+    "type": "api-item"
   },
   "rq-9d0ea87b": {
     "decl": "Scenario: Flush is idempotent",
@@ -6923,6 +6993,13 @@
     "title": "Reject trajectory_path = timings_path",
     "type": "scenario"
   },
+  "rq-ecad9802": {
+    "decl": "Scenario: write_cursors is reset to zero before each rebuild",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "write_cursors is reset to zero before each rebuild",
+    "type": "scenario"
+  },
   "rq-ecc664ff": {
     "decl": "### Example",
     "file": "io/config-schema",
@@ -7107,6 +7184,13 @@
     "title": "Bond list",
     "type": "section"
   },
+  "rq-f164bf76": {
+    "decl": "Scenario: cell_indices is populated by the device pipeline",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "cell_indices is populated by the device pipeline",
+    "type": "scenario"
+  },
   "rq-f1850393": {
     "decl": "Scenario: Header line has the documented column names in the documented order",
     "file": "performance-analysis",
@@ -7151,6 +7235,13 @@
     ],
     "title": "vv_kick",
     "type": "api-item"
+  },
+  "rq-f2e4b0b8": {
+    "decl": "Scenario: Cell-list scratch is reallocated alongside cell_offsets on box generation refresh",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Cell-list scratch is reallocated alongside cell_offsets on box generation refresh",
+    "type": "scenario"
   },
   "rq-f357fe5a": {
     "decl": "Scenario: Reject a row with an extra column",
@@ -7332,6 +7423,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "Timings path equal to trajectory path is rejected",
+    "type": "scenario"
+  },
+  "rq-f8ad62d4": {
+    "decl": "Scenario: cell_offsets is the exclusive prefix sum and ends at particle_count",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "cell_offsets is the exclusive prefix sum and ends at particle_count",
     "type": "scenario"
   },
   "rq-f8df9364": {

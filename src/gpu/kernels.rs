@@ -594,6 +594,187 @@ pub fn copy_positions_into_reference(
     Ok(())
 }
 
+pub const SPATIAL_HASH_SCAN_BLOCK_SIZE: u32 = 256;
+pub const SPATIAL_HASH_MAX_CELLS: usize =
+    (SPATIAL_HASH_SCAN_BLOCK_SIZE as usize) * (SPATIAL_HASH_SCAN_BLOCK_SIZE as usize);
+
+#[allow(clippy::too_many_arguments)]
+pub fn compute_cell_indices_and_histogram(
+    particle_buffers: &ParticleBuffers,
+    sim_box: &SimulationBox,
+    n_cells: [u32; 3],
+    cell_size: [f32; 3],
+    cell_indices: &mut CudaSlice<u32>,
+    cell_counts: &mut CudaSlice<u32>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let n_cells_total = n_cells[0] as usize * n_cells[1] as usize * n_cells[2] as usize;
+    debug_assert_eq!(cell_indices.len(), n);
+    debug_assert_eq!(cell_counts.len(), n_cells_total);
+    particle_buffers
+        .device
+        .memset_zeros(cell_counts)
+        .map_err(GpuError::from)?;
+    let n_u32 = n as u32;
+    let func = particle_buffers
+        .device
+        .get_func("neighbor", "compute_cell_indices_and_histogram")
+        .expect("neighbor module is not loaded; init_device() must be called first");
+    let cfg = launch_config(n_u32);
+    let lengths = sim_box.lengths();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.positions_x,
+                &particle_buffers.positions_y,
+                &particle_buffers.positions_z,
+                lengths[0],
+                lengths[1],
+                lengths[2],
+                cell_size[0],
+                cell_size[1],
+                cell_size[2],
+                n_cells[0],
+                n_cells[1],
+                n_cells[2],
+                cell_indices,
+                cell_counts,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+pub fn prefix_scan_cell_counts(
+    device: &Arc<CudaDevice>,
+    cell_counts: &CudaSlice<u32>,
+    cell_offsets: &mut CudaSlice<u32>,
+    scan_block_totals: &mut CudaSlice<u32>,
+    n_cells_total: usize,
+    particle_count: usize,
+) -> Result<(), GpuError> {
+    if n_cells_total == 0 {
+        return Ok(());
+    }
+    let scan_block_size = SPATIAL_HASH_SCAN_BLOCK_SIZE;
+    let n_blocks =
+        ((n_cells_total + scan_block_size as usize - 1) / scan_block_size as usize) as u32;
+    debug_assert_eq!(cell_counts.len(), n_cells_total);
+    debug_assert_eq!(cell_offsets.len(), n_cells_total + 1);
+    debug_assert_eq!(scan_block_totals.len(), n_blocks as usize);
+    debug_assert!(n_blocks <= scan_block_size);
+
+    let local_cfg = LaunchConfig {
+        grid_dim: (n_blocks, 1, 1),
+        block_dim: (scan_block_size, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let local_func = device
+        .get_func("neighbor", "prefix_scan_local_blocks")
+        .expect("neighbor module is not loaded; init_device() must be called first");
+    let n_cells_total_u32 = n_cells_total as u32;
+    unsafe {
+        local_func
+            .launch(
+                local_cfg,
+                (cell_counts, &mut *cell_offsets, &mut *scan_block_totals, n_cells_total_u32),
+            )
+            .map_err(GpuError::from)?;
+    }
+
+    let totals_cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (scan_block_size, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let totals_func = device
+        .get_func("neighbor", "prefix_scan_block_totals")
+        .expect("neighbor module is not loaded; init_device() must be called first");
+    unsafe {
+        totals_func
+            .launch(totals_cfg, (&mut *scan_block_totals, n_blocks))
+            .map_err(GpuError::from)?;
+    }
+
+    let apply_cfg = LaunchConfig {
+        grid_dim: (n_blocks, 1, 1),
+        block_dim: (scan_block_size, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let apply_func = device
+        .get_func("neighbor", "prefix_scan_apply_block_totals")
+        .expect("neighbor module is not loaded; init_device() must be called first");
+    let particle_count_u32 = particle_count as u32;
+    unsafe {
+        apply_func
+            .launch(
+                apply_cfg,
+                (
+                    &*scan_block_totals,
+                    &mut *cell_offsets,
+                    n_cells_total_u32,
+                    particle_count_u32,
+                ),
+            )
+            .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+pub fn scatter_atoms_into_cells(
+    device: &Arc<CudaDevice>,
+    cell_indices: &CudaSlice<u32>,
+    cell_offsets: &CudaSlice<u32>,
+    write_cursors: &mut CudaSlice<u32>,
+    sorted_particle_ids: &mut CudaSlice<u32>,
+    particle_count: usize,
+) -> Result<(), GpuError> {
+    if particle_count == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(cell_indices.len(), particle_count);
+    debug_assert_eq!(sorted_particle_ids.len(), particle_count);
+    device.memset_zeros(write_cursors).map_err(GpuError::from)?;
+    let n_u32 = particle_count as u32;
+    let func = device
+        .get_func("neighbor", "scatter_atoms_into_cells")
+        .expect("neighbor module is not loaded; init_device() must be called first");
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(cfg, (cell_indices, cell_offsets, write_cursors, sorted_particle_ids, n_u32))
+            .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+pub fn sort_cells_by_particle_id(
+    device: &Arc<CudaDevice>,
+    cell_offsets: &CudaSlice<u32>,
+    sorted_particle_ids: &mut CudaSlice<u32>,
+    n_cells_total: usize,
+) -> Result<(), GpuError> {
+    if n_cells_total == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(cell_offsets.len(), n_cells_total + 1);
+    let n_u32 = n_cells_total as u32;
+    let func = device
+        .get_func("neighbor", "sort_cells_by_particle_id")
+        .expect("neighbor module is not loaded; init_device() must be called first");
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(cfg, (cell_offsets, sorted_particle_ids, n_u32))
+            .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 pub fn vv_kick_drift_lossless(
     buffers: &mut ParticleBuffers,
     lossless: &mut LosslessBuffers,

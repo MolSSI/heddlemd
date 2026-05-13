@@ -75,6 +75,12 @@ pub fn init_device() -> Result<Arc<CudaDevice>, GpuError> {
             "neighbor_displacement_squared",
             "neighbor_list_build",
             "copy_positions_into_reference",
+            "compute_cell_indices_and_histogram",
+            "prefix_scan_local_blocks",
+            "prefix_scan_block_totals",
+            "prefix_scan_apply_block_totals",
+            "scatter_atoms_into_cells",
+            "sort_cells_by_particle_id",
         ],
     )?;
     Ok(device)

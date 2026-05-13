@@ -63,28 +63,68 @@ rather than `n_cells_x`).
 
 ## Cell List Construction <!-- rq-a060036e -->
 
-A cell-list rebuild produces three host-side and three device-side
-artifacts:
+A cell-list rebuild is performed entirely on the device. The pipeline
+operates on five device buffers — three persistent outputs and two
+persistent scratch buffers — without round-tripping through the host:
 
-1. **Per-particle cell indices** (host-side, transient).
-2. **`sorted_particle_ids: Vec<u32>` of length N** (device-uploaded). The
-   particle IDs sorted lexicographically by `(cell_index, particle_id)`;
-   the secondary sort key gives a deterministic in-cell ordering.
-3. **`cell_offsets: Vec<u32>` of length `n_cells_total + 1`** (device-
-   uploaded). `cell_offsets[c]` is the index in `sorted_particle_ids`
-   where cell `c`'s particles begin; `cell_offsets[c+1] -
-   cell_offsets[c]` is the cell's occupancy.
+- **`cell_indices: CudaSlice<u32>` of length `N`** (scratch). Populated
+  by the cell-indexing stage; entry `i` is atom `i`'s cell index.
+- **`cell_counts: CudaSlice<u32>` of length `n_cells_total`** (scratch).
+  Populated by the histogram stage; entry `c` is the number of atoms in
+  cell `c`.
+- **`cell_offsets: CudaSlice<u32>` of length `n_cells_total + 1`**
+  (output). Populated by the exclusive-scan stage from `cell_counts`.
+  `cell_offsets[c]` is the index in `sorted_particle_ids` where cell
+  `c`'s atoms begin; `cell_offsets[c+1] - cell_offsets[c]` is the cell's
+  occupancy; `cell_offsets[n_cells_total]` is `particle_count`.
+- **`write_cursors: CudaSlice<u32>` of length `n_cells_total`** (scratch).
+  Reset to zero at the start of each rebuild; the scatter stage
+  `atomicAdd`s into it to claim per-cell write positions.
+- **`sorted_particle_ids: CudaSlice<u32>` of length `N`** (output). The
+  particle IDs sorted lexicographically by `(cell_index, particle_id)`;
+  the secondary sort key gives a deterministic in-cell ordering.
 
-The sort is performed on the host using `slice::sort_by_key`, which is
-stable. After sorting, the host downloads particle positions, walks them
-in order, and tallies cell occupancy into `cell_offsets`. Total cost:
-one position download (3 N floats), an O(N log N) sort over u32 indices,
-and one upload (N + n_cells_total + 1 u32 values).
+The pipeline runs as a sequence of device kernels:
+
+1. **Cell-index + histogram.** Each thread handles one atom: computes
+   the atom's cell index (using the wrap formula in *Cell Layout*),
+   writes it to `cell_indices[i]`, and performs an `atomicAdd` on
+   `cell_counts[cell_indices[i]]`. Integer `atomicAdd` is deterministic
+   in value because addition is associative; the final `cell_counts`
+   array is identical across runs even though the order of atomic
+   updates is not.
+2. **Exclusive prefix scan.** A multi-block device scan writes the
+   exclusive prefix sum of `cell_counts` into `cell_offsets`. The scan
+   uses a per-block local scan plus a single-block scan of the block
+   totals plus an add-back. The output invariant is
+   `cell_offsets[c] = sum_{c' < c} cell_counts[c']` for `c` in
+   `[0, n_cells_total]`. The implementation supports `n_cells_total` up
+   to one level of block-totals recursion; configurations that would
+   exceed this are rejected at construction time via
+   `NeighborListError::TooManyCells`.
+3. **Scatter.** `write_cursors` is reset to zero. Each thread handles
+   one atom and computes
+   `slot = atomicAdd(&write_cursors[cell_indices[i]], 1)`, then writes
+   `sorted_particle_ids[cell_offsets[cell_indices[i]] + slot] = i`. The
+   within-cell ordering at this stage is non-deterministic (depends on
+   the order in which threads execute their atomic).
+4. **Per-cell sort.** Each thread handles one cell and insertion-sorts
+   the `sorted_particle_ids` slice
+   `[cell_offsets[c] .. cell_offsets[c+1]]` ascending by particle index.
+   This canonicalises the non-deterministic scatter order: after this
+   stage `sorted_particle_ids` is identical across runs given identical
+   inputs on the same GPU, and matches the canonical
+   `(cell_index, particle_id)` lex order.
+
+No host download or upload of particle data occurs in the rebuild. The
+host work per rebuild is six device-side kernel launches plus one
+device memset (zeroing `write_cursors`).
 
 ## Neighbor List Construction <!-- rq-33aa3e1d -->
 
-After the cell list is uploaded, one device kernel builds the per-atom
-neighbor list. The kernel maps one thread to each atom `i`:
+Once the cell list is populated (see *Cell List Construction*), one
+device kernel builds the per-atom neighbor list. The kernel maps one
+thread to each atom `i`:
 
 1. Compute atom `i`'s cell `(cx, cy, cz)` from its current position.
 2. Iterate the 27 adjacent cells `(cx + dx, cy + dy, cz + dz)` for
@@ -163,11 +203,14 @@ state:
    the previous step's force evaluation with the prior box or abort.
 3. Recomputes `cell_size_a = L_a / n_cells_a` per axis and the scalar
    `n_cells_total`.
-4. Reallocates the device `cell_offsets` buffer to length
-   `n_cells_total + 1` if `n_cells_total` differs from the previous value.
-   Other device buffers (`neighbor_list`, `neighbor_counts`,
-   `reference_positions_*`, `disp_sq`, `overflow_flag`) are sized by
-   `particle_count` or are scalar and are not reallocated.
+4. Reallocates the device buffers sized by `n_cells_total` (`cell_offsets`
+   to `n_cells_total + 1`; `cell_counts` and `write_cursors` to
+   `n_cells_total`) if `n_cells_total` differs from the previous value,
+   and reallocates the scan's block-totals scratch when the implied
+   block count changes. Other device buffers (`neighbor_list`,
+   `neighbor_counts`, `reference_positions_*`, `disp_sq`,
+   `overflow_flag`, `cell_indices`) are sized by `particle_count` or are
+   scalar and are not reallocated.
 5. Stores the new `n_cells`, `cell_size`, `n_cells_total`, and replaces
    `cached_generation` with `sim_box.generation()`.
 6. Sets `needs_rebuild = true`. The rebuild that fires after the cache
@@ -199,13 +242,13 @@ Per timestep, after the integrator's pre-force step:
    `max_disp > r_skin / 2`. The displacement check is skipped when
    `needs_rebuild` is already true.
 3. If `needs_rebuild`:
-   a. Download current positions to host.
-   b. Compute cell indices and sort.
-   c. Upload `sorted_particle_ids` and `cell_offsets`.
-   d. Run the neighbor-list-build kernel.
-   e. Check the overflow flag; fail-loud if set.
-   f. Copy current positions into the reference-positions buffers.
-   g. Set `needs_rebuild = false`.
+   a. Run the on-device cell-list pipeline (see *Cell List Construction*)
+      to repopulate `cell_indices`, `cell_counts`, `cell_offsets`, and
+      `sorted_particle_ids` from the current positions.
+   b. Run the neighbor-list-build kernel.
+   c. Check the overflow flag; fail-loud if set.
+   d. Copy current positions into the reference-positions buffers.
+   e. Set `needs_rebuild = false`.
 4. Run downstream contribution kernels (see `framework.md`), which read
    the neighbor list.
 
@@ -299,8 +342,23 @@ lifetime of the run.
     the cell-layout cache was populated. Compared against the live box's
     generation on every `pre_step`; a mismatch refreshes the cache (see
     *Box Generation Tracking*).
+  - `cell_indices: CudaSlice<u32>` (length `N`) — per-atom scratch
+    populated by the cell-indexing stage. Sized by `particle_count`; not
+    reallocated on box-generation refresh.
+  - `cell_counts: CudaSlice<u32>` (length `n_cells_total`) — per-cell
+    occupancy scratch populated by the histogram stage and consumed by
+    the prefix scan. Reallocated when `n_cells_total` changes.
+  - `cell_offsets: CudaSlice<u32>` (length `n_cells_total + 1`) — output
+    of the exclusive prefix scan over `cell_counts`. Reallocated when
+    `n_cells_total` changes.
+  - `write_cursors: CudaSlice<u32>` (length `n_cells_total`) — per-cell
+    atomic write cursors used by the scatter stage. Reset to zero at the
+    start of every rebuild. Reallocated when `n_cells_total` changes.
+  - `scan_block_totals: CudaSlice<u32>` (length
+    `ceil(n_cells_total / scan_block_size)`) — scratch for the
+    multi-block prefix scan. Reallocated when the implied block count
+    changes (in practice, when `n_cells_total` changes).
   - `sorted_particle_ids: CudaSlice<u32>` (length `N`)
-  - `cell_offsets: CudaSlice<u32>` (length `n_cells_total + 1`)
   - `reference_positions_x/y/z: CudaSlice<f32>` (length `N`)
   - `disp_sq: CudaSlice<f32>` (length `N`) — scratch for the
     displacement-check kernel.
@@ -324,7 +382,12 @@ lifetime of the run.
     density.
   - `BoxTooSmallForCells { axis: &'static str, length: f32, required: f32 }`
     — the simulation box is smaller than `3 * (r_cut + r_skin)` along
-    `axis`. Detected at `NeighborListState::new` time.
+    `axis`. Detected at construction and on box-generation refresh.
+  - `TooManyCells { n_cells_total: usize, max_supported: usize }` — the
+    cell layout would produce more cells than the device-side prefix
+    scan supports with one level of block-totals recursion (the
+    practical limit is `scan_block_size²`). Detected at construction
+    and on box-generation refresh.
 
 ### Functions <!-- rq-3553aab2 -->
 
@@ -332,9 +395,12 @@ lifetime of the run.
   - Constructs a `CellList`-mode state.
   - Computes `n_cells` per axis from `floor(L_axis / (r_cut + r_skin))`.
   - Returns `BoxTooSmallForCells` if any axis has `n_cells < 3`.
+  - Returns `TooManyCells` if `n_cells_total` exceeds the device-side
+    scan's supported maximum.
   - Allocates every device buffer described in the *CellList*-mode field
-    list. Reference positions start at zero; `needs_rebuild` starts at
-    `true`.
+    list, including the new persistent scratch buffers (`cell_indices`,
+    `cell_counts`, `write_cursors`, `scan_block_totals`). Reference
+    positions start at zero; `needs_rebuild` starts at `true`.
   - Stores `r_cut` so the cache-refresh path (see *Box Generation
     Tracking*) can recompute `n_cells` and `cell_size` from a mutated
     box. `r_cut` is the largest cutoff across every consumer of the
@@ -365,10 +431,13 @@ lifetime of the run.
     machinery exists).
 
 - `NeighborListState::rebuild(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>` <!-- rq-7db97132 -->
-  - Performs the rebuild pipeline described in *Cell List Construction*
-    and *Neighbor List Construction*, using `(lx, ly, lz)` from `sim_box`
-    for cell-binning and the build kernel's PBC parameters. Updates
-    reference positions.
+  - Runs the device-side cell-list pipeline (see *Cell List
+    Construction*) followed by the neighbor-list-build pipeline (see
+    *Neighbor List Construction*), using `(lx, ly, lz)` from `sim_box`
+    throughout. Updates reference positions.
+  - Performs no host-device transfers of particle data; all
+    intermediates (`cell_indices`, `cell_counts`, `cell_offsets`,
+    `write_cursors`, `sorted_particle_ids`) are populated on the device.
   - Returns `NeighborListOverflow` when the build kernel set the
     overflow flag.
   - Returns `Ok(())` immediately when `particle_count == 0` or when the
@@ -389,7 +458,9 @@ lifetime of the run.
 
 ### CUDA Kernels <!-- rq-0469400b -->
 
-`kernels/neighbor.cu` declares three `extern "C"` kernels:
+`kernels/neighbor.cu` declares the following `extern "C"` kernels.
+
+Neighbor-list-build pipeline:
 
 ```c
 extern "C" __global__ void neighbor_displacement_squared(
@@ -419,37 +490,117 @@ extern "C" __global__ void copy_positions_into_reference(
     unsigned int n);
 ```
 
-The first writes per-atom minimum-image squared displacements. The
-second walks 27 cells, builds the per-atom neighbor list, and
-in-place-sorts it by partner index using insertion sort. The third
-copies positions to reference positions; called after every rebuild.
+Spatial-hash pipeline (cell-list construction):
+
+```c
+extern "C" __global__ void compute_cell_indices_and_histogram(
+    const float *positions_x, const float *positions_y, const float *positions_z,
+    float lx, float ly, float lz,
+    float cell_size_x, float cell_size_y, float cell_size_z,
+    unsigned int n_cells_x, unsigned int n_cells_y, unsigned int n_cells_z,
+    unsigned int *cell_indices,
+    unsigned int *cell_counts,
+    unsigned int n);
+
+extern "C" __global__ void prefix_scan_local_blocks(
+    const unsigned int *cell_counts,
+    unsigned int *cell_offsets,
+    unsigned int *scan_block_totals,
+    unsigned int n_cells_total);
+
+extern "C" __global__ void prefix_scan_block_totals(
+    unsigned int *scan_block_totals,
+    unsigned int n_blocks);
+
+extern "C" __global__ void prefix_scan_apply_block_totals(
+    const unsigned int *scan_block_totals,
+    unsigned int *cell_offsets,
+    unsigned int n_cells_total);
+
+extern "C" __global__ void scatter_atoms_into_cells(
+    const unsigned int *cell_indices,
+    const unsigned int *cell_offsets,
+    unsigned int *write_cursors,
+    unsigned int *sorted_particle_ids,
+    unsigned int n);
+
+extern "C" __global__ void sort_cells_by_particle_id(
+    const unsigned int *cell_offsets,
+    unsigned int *sorted_particle_ids,
+    unsigned int n_cells_total);
+```
+
+`compute_cell_indices_and_histogram` writes each atom's cell index to
+`cell_indices` and increments `cell_counts[cell_idx]` via `atomicAdd`.
+
+`prefix_scan_local_blocks` performs a per-block exclusive scan over
+`cell_counts`, writing the local scan to `cell_offsets` and the
+block-total sums to `scan_block_totals`. `prefix_scan_block_totals`
+exclusive-scans the block totals in place (single block).
+`prefix_scan_apply_block_totals` adds the scanned block totals back into
+`cell_offsets` and writes `cell_offsets[n_cells_total] = particle_count`.
+
+`scatter_atoms_into_cells` writes
+`sorted_particle_ids[cell_offsets[cell_indices[i]] + atomicAdd(&write_cursors[cell_indices[i]], 1)] = i`.
+
+`sort_cells_by_particle_id` runs one thread per cell; each thread
+insertion-sorts the slice `[cell_offsets[c], cell_offsets[c+1])` of
+`sorted_particle_ids` ascending by particle index.
 
 ### Rust Launch Helpers <!-- rq-fec7ae1c -->
 
-Three free functions in `src/gpu/kernels.rs`, re-exported from
-`crate::gpu`:
+Free functions in `src/gpu/kernels.rs`, re-exported from `crate::gpu`.
+Each is a no-op when `particle_count == 0`.
+
+Neighbor-list-build pipeline:
 
 - `neighbor_displacement_squared(particle_buffers, reference_x, reference_y, reference_z, sim_box, disp_sq) -> Result<(), GpuError>` <!-- rq-884b5cd6 -->
 - `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, cell_size, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>` <!-- rq-a1262872 -->
 - `copy_positions_into_reference(particle_buffers, reference_x, reference_y, reference_z) -> Result<(), GpuError>` <!-- rq-344f7af0 -->
 
-Each is a no-op when `particle_count == 0`.
+Spatial-hash pipeline:
+
+- `compute_cell_indices_and_histogram(particle_buffers, sim_box, n_cells, cell_size, cell_indices, cell_counts) -> Result<(), GpuError>` <!-- rq-10f6f831 -->
+- `prefix_scan_cell_counts(cell_counts, cell_offsets, scan_block_totals, particle_count) -> Result<(), GpuError>` — <!-- rq-2ef5e222 -->
+  launches the three scan kernels in sequence. Writes
+  `cell_offsets[n_cells_total] = particle_count` in the apply step.
+- `scatter_atoms_into_cells(cell_indices, cell_offsets, write_cursors, sorted_particle_ids, particle_count) -> Result<(), GpuError>` — <!-- rq-9d0cb192 -->
+  zeroes `write_cursors` before launching the scatter kernel.
+- `sort_cells_by_particle_id(cell_offsets, sorted_particle_ids, n_cells_total) -> Result<(), GpuError>` <!-- rq-165c4422 -->
 
 ## Launch Configuration <!-- rq-2e15fed7 -->
 
-- Block size: 256 threads (all three kernels).
-- Grid: `ceil(n / 256)`.
-- Shared memory: zero.
+- Block size: 256 threads for the per-atom kernels
+  (`neighbor_displacement_squared`, `neighbor_list_build`,
+  `copy_positions_into_reference`,
+  `compute_cell_indices_and_histogram`, `scatter_atoms_into_cells`),
+  with grid `ceil(n / 256)`.
+- Block size: 256 threads for the per-cell kernel
+  (`sort_cells_by_particle_id`), with grid `ceil(n_cells_total / 256)`.
+- Block size: 256 threads for the per-cell scan kernels
+  (`prefix_scan_local_blocks`, `prefix_scan_apply_block_totals`), with
+  grid `ceil(n_cells_total / 256)`. The block-totals kernel
+  (`prefix_scan_block_totals`) runs a single block of 256 threads;
+  `scan_block_totals` has length `ceil(n_cells_total / 256)` and must
+  fit in one block (this is the source of the `TooManyCells`
+  construction-time check).
+- Shared memory: zero, except for the scan kernels, which use one
+  `unsigned int[block_size]` for the local scan.
 - Stream: the default stream carried by `particle_buffers.device`.
 
 ## Determinism <!-- rq-c62bb861 -->
 
-Two-sort approach:
+Two-sort approach.
 
-1. **Sort 1 — particles within each cell.** The host-side stable sort on
-   `(cell_index, particle_id)` ensures that, when the build kernel
-   walks a cell's particles, the order is independent of any
-   non-determinism in cell assignment. **Required for run-to-run
+1. **Sort 1 — particles within each cell.** The spatial-hash pipeline
+   places atoms into cells with an `atomicAdd`-based scatter whose
+   within-cell order is non-deterministic, then runs a per-cell
+   insertion sort over `sorted_particle_ids` keyed on particle index.
+   Atomic integer addition is associative so the histogram and the
+   write-cursor counts are run-to-run identical even though atomic
+   ordering is not; the per-cell sort canonicalises the scatter output.
+   The end-to-end result is identical to a stable lexicographic sort on
+   `(cell_index, particle_id)`. **Required for run-to-run
    reproducibility.**
 
 2. **Sort 2 — per-atom neighbor list by partner index.** The build
@@ -469,11 +620,17 @@ guarantee; it only forfeits the canonical-ordering testability.
 
 ## Performance Notes <!-- rq-54a28837 -->
 
-- Cell-list rebuild dominant cost: one position download (3 N f32
-  values), one host sort of N u32 indices, one upload of `N + n_cells +
-  1` u32 values, one kernel launch. Typical cost at N = 10⁴ is below
-  10 ms; rebuild interval is typically 10–100 timesteps so per-step
-  amortised cost is well under 1 ms.
+- Cell-list rebuild cost is six kernel launches plus one device memset,
+  with no host-device transfers of particle data. Total work is `O(N)`
+  for the per-atom kernels (cell index, histogram, scatter), `O(N · d)`
+  for the per-cell sort at average cell density `d`, and
+  `O(n_cells_total)` for the prefix scan. At N = 10⁴ in liquid density
+  the rebuild completes in roughly tens of microseconds; rebuild
+  interval is typically 10–100 timesteps so amortised per-step cost is
+  well below the contribution kernel cost.
+- Atomic-add contention: each cell sees on the order of `d` serialised
+  `atomicAdd`s in the histogram and `d` in the scatter. Negligible at
+  liquid density (`d` ≈ 5–20).
 - Displacement check: one f32 per atom downloaded each step, a host max
   reduction. Sub-ms at N = 10⁴.
 - The neighbor-list build kernel walks ~27 × density particles per atom
@@ -482,9 +639,11 @@ guarantee; it only forfeits the canonical-ordering testability.
 
 ## Out of Scope <!-- rq-58acf788 -->
 
-- Device-side parallel cell sort (radix sort on GPU). Future work when
-  host-side sort time becomes a bottleneck; the algorithm is identical
-  so the spec moves over unchanged.
+- Recursion in the device-side prefix scan beyond one level of
+  block-totals. The supported `n_cells_total` is bounded by
+  `scan_block_size² = 65536` (at the documented 256-thread block size);
+  beyond that, construction returns `TooManyCells`. Adding further
+  recursion to support larger cell counts is its own feature.
 - Device-side parallel displacement-max reduction. Future work when the
   N-length per-step download becomes a bottleneck.
 - Auto-growing `max_neighbors` on overflow. The current v1 contract is
@@ -818,4 +977,92 @@ Feature: Cell-list neighbor list
     And pre_step is called with the updated box
     Then state.cached_generation equals 1 after the call
     And state.needs_rebuild was set to true and a rebuild was performed
+
+  # --- Device-side spatial hash ---
+
+  @rq-f164bf76
+  Scenario: cell_indices is populated by the device pipeline
+    Given a NeighborListState in CellList mode with n_cells_x=n_cells_y=n_cells_z=7
+    And particles at positions that map to known cell indices c0, c1, c2, ...
+    When NeighborListState::rebuild is called
+    Then downloading cell_indices yields [c0, c1, c2, ...] for atoms [0, 1, 2, ...]
+
+  @rq-19fd5b09
+  Scenario: cell_counts is the device-computed per-cell histogram
+    Given particles placed at positions producing cells [2, 0, 1, 0, 2]
+    When NeighborListState::rebuild is called
+    Then downloading cell_counts yields counts that sum to particle_count
+    And cell_counts[0] equals 2 (particles 1 and 3)
+    And cell_counts[1] equals 1 (particle 2)
+    And cell_counts[2] equals 2 (particles 0 and 4)
+
+  @rq-f8ad62d4
+  Scenario: cell_offsets is the exclusive prefix sum and ends at particle_count
+    Given a NeighborListState in CellList mode with N particles and
+      arbitrary positions
+    When NeighborListState::rebuild is called
+    Then downloading cell_offsets yields a strictly non-decreasing sequence
+    And cell_offsets[0] equals 0
+    And cell_offsets[c+1] equals cell_offsets[c] + cell_counts[c] for every c
+    And cell_offsets[n_cells_total] equals N
+
+  @rq-265f4da4
+  Scenario: scatter places each atom inside its cell's slice
+    Given particles at positions producing cells [2, 0, 1, 0, 2]
+    When NeighborListState::rebuild is called
+    Then for every atom i, sorted_particle_ids contains i exactly once
+    And the slot at which i appears falls in
+      [cell_offsets[cell_indices[i]], cell_offsets[cell_indices[i]+1])
+
+  @rq-7a14d0d8
+  Scenario: per-cell sort canonicalises sorted_particle_ids
+    Given particles placed at positions producing cells [2, 0, 1, 0, 2]
+    When NeighborListState::rebuild is called
+    Then sorted_particle_ids equals [1, 3, 2, 0, 4]
+      (cell 0: particles 1 then 3; cell 1: particle 2; cell 2: particles 0 then 4)
+
+  @rq-ecad9802
+  Scenario: write_cursors is reset to zero before each rebuild
+    Given a NeighborListState in CellList mode just past a rebuild whose
+      write_cursors are populated (one count per cell that received atoms)
+    When NeighborListState::rebuild is called a second time on identical
+      positions
+    Then sorted_particle_ids matches the first rebuild's output exactly
+      (write_cursors did not accumulate across rebuilds)
+
+  @rq-6c8415f6
+  Scenario: NeighborListState rebuild performs no host-device particle transfers
+    Given a NeighborListState in CellList mode
+    When NeighborListState::rebuild is called
+    Then no host-side download of positions_x/y/z occurs
+    And no host-side upload of sorted_particle_ids or cell_offsets occurs
+
+  @rq-6fd5167a
+  Scenario: Configuration with too many cells is rejected at construction
+    Given r_cut + r_skin = 0.1 and lx=ly=lz=27.0 yielding
+      n_cells_per_axis = 270 (n_cells_total = 19683000)
+    When NeighborListState::new_cell_list is called
+    Then it returns Err(NeighborListError::TooManyCells { n_cells_total: 19683000, max_supported })
+      where max_supported equals scan_block_size² (65536 at the
+      documented 256-thread block size)
+
+  @rq-f2e4b0b8
+  Scenario: Cell-list scratch is reallocated alongside cell_offsets on box generation refresh
+    Given a NeighborListState in CellList mode with n_cells_total = 343
+      (cell_counts length 343, write_cursors length 343,
+       scan_block_totals length ceil(343 / scan_block_size))
+    When box.set_lengths is called producing n_cells_total = 729
+    And pre_step is called with the updated box
+    Then cell_counts is reallocated to length 729
+    And write_cursors is reallocated to length 729
+    And scan_block_totals is reallocated to ceil(729 / scan_block_size)
+    And cell_indices is NOT reallocated (its length particle_count is unchanged)
+
+  @rq-2303ee2e
+  Scenario: Per-cell sort yields ascending partner indices inside every cell
+    Given any non-empty system
+    When NeighborListState::rebuild is called
+    Then for every cell c with occupancy k,
+      sorted_particle_ids[cell_offsets[c] .. cell_offsets[c+1]] is a
+      strictly ascending sequence of u32 particle indices
 ```
