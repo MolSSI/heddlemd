@@ -183,6 +183,17 @@ pub enum IntegratorKind {
     },
 }
 
+impl IntegratorKind {
+    /// Lookup key used by `IntegratorRegistry` to dispatch this kind to its
+    /// builder. Matches the `kind` field accepted by the config parser.
+    pub fn name(&self) -> &'static str {
+        match self {
+            IntegratorKind::VelocityVerlet { .. } => "velocity-verlet",
+            IntegratorKind::LangevinBaoab { .. } => "langevin-baoab",
+        }
+    }
+}
+
 // rq-a5ccc1de
 #[derive(Debug, Clone)]
 pub struct ParticleTypeConfig {

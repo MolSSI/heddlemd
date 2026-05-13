@@ -126,19 +126,19 @@ message.
     KE and T via `compute_kinetic_energy` and `compute_temperature`
     (`log-output.md`), and call `write_row(0, 0.0, ke, t)`.
 16. **Timestep loop.** For each step `s` in `1 ..= n_steps`:
-    a. `integrator.pre_force_step(&mut buffers, dt, s, &mut timings)`.
-    b. `force_field.step(&mut buffers, &sim_box, &mut timings)` — runs
-       every potential slot's contribution kernel and reduction, then
-       combines the slots' private accumulators into
-       `particle_buffers.forces_*`.
-    c. `integrator.post_force_step(&mut buffers, dt, s, &mut timings)`.
-    d. If trajectory output is enabled and `s % trajectory_every == 0`,
+    a. `integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt, s, &mut timings)`
+       — runs the integrator's full sub-step sequence (kicks, drifts,
+       thermostat updates) and calls `force_field.step(...)` internally
+       at the integrator's chosen point(s). On return,
+       `particle_buffers.forces_*`, `potential_energies`, and `virials`
+       hold the values for the post-step positions.
+    b. If trajectory output is enabled and `s % trajectory_every == 0`,
        download positions (and velocities when configured) and call
        `write_frame(step=s, ...)`.
-    e. If log output is enabled and `s % log_every == 0`, download
+    c. If log output is enabled and `s % log_every == 0`, download
        velocities, compute KE and T, and call `write_row(s, s as f64 * dt,
        ke, t)`.
-    f. Possibly emit a progress line (see *Progress reporting*).
+    d. Possibly emit a progress line (see *Progress reporting*).
 17. **Flush and close.** Call `flush()` on each open writer. The writers'
     `Drop` impls are best-effort but the runner calls `flush` explicitly
     so flush errors propagate.

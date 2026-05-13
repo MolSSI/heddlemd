@@ -29,10 +29,10 @@ For each timestep of size `dt` with `α = exp(-γ dt)`:
 5. **Force evaluation**: recompute `F(x)` using the new positions.
 6. **B(dt/2)**: `v ← v + (F/m) (dt/2)`
 
-Steps 1–4 run inside `pre_force_step`. Step 5 is the runner's force
-pipeline (`lj_pair_force` + `reduce_pair_forces`). Step 6 runs inside
-`post_force_step`. The initial force evaluation needed to seed step 1 of
-the first iteration is provided by the runner's standard warm-up pass.
+Steps 1–4, step 5 (a call to `force_field.step(...)` for the force
+pipeline), and step 6 all run inside the trait's `step()` method in
+order. The initial force evaluation needed to seed step 1 of the first
+iteration is provided by the runner's standard warm-up pass.
 
 `ξ` is a vector of independent standard normal random variables, one per
 particle per axis, generated as described in *RNG* below.
@@ -42,17 +42,17 @@ by the log-output feature.
 
 ## Per-Step Kernel Sequence <!-- rq-ff46e833 -->
 
-Per timestep, the Langevin slot launches six kernels via its
-`pre_force_step` / `post_force_step` methods:
+Per timestep, the Langevin integrator's `step()` launches six kernels in
+fixed order, interleaved with one call to `force_field.step(...)`:
 
-| Phase             | Step | Kernel name      | Operation                              | Stage label              |
-| ----------------- | ---- | ---------------- | -------------------------------------- | ------------------------ |
-| `pre_force_step`  | B    | `vv_kick`        | `v += (F/m) (dt/2)`                    | `LangevinKickHalf`       |
-| `pre_force_step`  | A    | `lan_drift_half` | `x += v (dt/2)`                        | `LangevinDriftHalf`      |
-| `pre_force_step`  | O    | `lan_ou_step`    | `v ← α v + sqrt((1-α²) k_B T/m) ξ`     | `LangevinOuStep`         |
-| `pre_force_step`  | A    | `lan_drift_half` | `x += v (dt/2)`                        | `LangevinDriftHalf`      |
-| (runner)          | —    | force pipeline   | recompute `F(x)`                       | `LjPairForce`/`ReducePairForces` |
-| `post_force_step` | B    | `vv_kick`        | `v += (F/m) (dt/2)`                    | `LangevinKickHalf`       |
+| Order | Step | Kernel name      | Operation                              | Stage label              |
+| ----- | ---- | ---------------- | -------------------------------------- | ------------------------ |
+| 1     | B    | `vv_kick`        | `v += (F/m) (dt/2)`                    | `LangevinKickHalf`       |
+| 2     | A    | `lan_drift_half` | `x += v (dt/2)`                        | `LangevinDriftHalf`      |
+| 3     | O    | `lan_ou_step`    | `v ← α v + sqrt((1-α²) k_B T/m) ξ`     | `LangevinOuStep`         |
+| 4     | A    | `lan_drift_half` | `x += v (dt/2)`                        | `LangevinDriftHalf`      |
+| 5     | —    | force pipeline   | recompute `F(x)` via `force_field.step` | `LjPairForce`/`ReducePairForces` |
+| 6     | B    | `vv_kick`        | `v += (F/m) (dt/2)`                    | `LangevinKickHalf`       |
 
 `vv_kick` is reused from velocity Verlet because the half-kick operation
 is identical. The reuse is reflected in the timings file by labelling
@@ -359,25 +359,23 @@ Feature: Langevin BAOAB integrator
   # --- Slot integration ---
 
   @rq-e1dd0625
-  Scenario: Slot per-step interface launches all six expected kernel calls
-    Given an Integrator::LangevinBaoab with friction=1e12, temperature=300, seed=1
+  Scenario: step() launches all six expected kernel calls
+    Given a Langevin-BAOAB integrator with friction=1e12, temperature=300, seed=1
     And a ParticleBuffers with N=4 nonzero values
     And a warm-up force evaluation has populated forces
-    When integrator.pre_force_step(&mut buffers, dt=1e-15, step_index=1, &mut timings) is called
-    And lj_pair_force + reduce_pair_forces are launched
-    And integrator.post_force_step(&mut buffers, dt=1e-15, step_index=1, &mut timings) is called
+    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=1e-15, step_index=1, &mut timings) is called
     And timings.finalize() is queried
-    Then KernelStage::LangevinKickHalf has count == 2  (one from pre, one from post)
+    Then KernelStage::LangevinKickHalf has count == 2  (one before the drifts, one after the force eval)
     And KernelStage::LangevinDriftHalf has count == 2
     And KernelStage::LangevinOuStep has count == 1
     And KernelStage::LjPairForce has count == 1
     And KernelStage::ReducePairForces has count == 1
 
   @rq-6e98222c
-  Scenario: pre_force_step on empty Langevin state is a no-op
-    Given an Integrator::LangevinBaoab with friction=1e12, temperature=300, seed=1
+  Scenario: step() on empty Langevin state is a no-op
+    Given a Langevin-BAOAB integrator with friction=1e12, temperature=300, seed=1
     And a ParticleBuffers with particle_count() == 0
-    When integrator.pre_force_step(&mut buffers, dt=1e-15, step_index=1, &mut timings) is called
+    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=1e-15, step_index=1, &mut timings) is called
     Then it returns Ok(())
 
   # --- End-to-end determinism ---

@@ -7,9 +7,9 @@ section of the config.
 
 The per-particle arithmetic is split across two CUDA kernels: `vv_kick_drift`
 performs the first half-velocity update followed by the position update, and
-`vv_kick` performs the second half-velocity update. The runner calls
-`pre_force_step` (which launches `vv_kick_drift`), then the force pipeline,
-then `post_force_step` (which launches `vv_kick`).
+`vv_kick` performs the second half-velocity update. The trait's `step()`
+launches `vv_kick_drift`, then calls `force_field.step(...)` for the new
+force evaluation, then launches `vv_kick`.
 
 The integrator ships in two modes:
 
@@ -281,24 +281,31 @@ memory or kernel-launch cost from the lossless code path.
 
 ## Slot Integration <!-- rq-39ab439e -->
 
-`VelocityVerletState` is one variant of the `Integrator` enum declared in
-`framework.md`. Construction takes the `lossless` flag from the parsed
-`IntegratorKind::VelocityVerlet { lossless }` config variant and, when
-`lossless == true`, allocates a `LosslessBuffers` of the runner's particle
-count on the same `Arc<CudaDevice>`.
+`VelocityVerletState` implements the `Integrator` trait declared in
+`framework.md`. The `velocity-verlet` builder registered in
+`IntegratorRegistry::with_builtins()` takes the `lossless` flag from
+the parsed `IntegratorKind::VelocityVerlet { lossless }` config variant
+and, when `lossless == true`, allocates a `LosslessBuffers` of the
+runner's particle count on the same `Arc<CudaDevice>`.
 
-The variant implements the framework's per-step interface:
+The implementation's `step(buffers, sim_box, force_field, dt,
+step_index, timings)` performs the following sequence:
 
-- `pre_force_step(buffers, dt, _step_index, timings)`: launches
-  `vv_kick_drift` (or `vv_kick_drift_lossless`), bracketed by
-  `timings.kernel_start(KernelStage::VvKickDrift)` /
-  `timings.kernel_stop(KernelStage::VvKickDrift)` (or the
-  `*_lossless` stage names — see `performance-analysis.md`).
-- `post_force_step(buffers, dt, _step_index, timings)`: launches
-  `vv_kick` (or `vv_kick_lossless`) with matching timing bracketing.
+1. Launch `vv_kick_drift` (or `vv_kick_drift_lossless`), bracketed by
+   `timings.kernel_start(KernelStage::VvKickDrift)` /
+   `timings.kernel_stop(KernelStage::VvKickDrift)` (or the
+   `*_lossless` stage names — see `performance-analysis.md`). This
+   applies the first half-kick using the cached `F(t)` and drifts
+   positions to `x(t+dt)`.
+2. Call `force_field.step(buffers, sim_box, timings)`, which writes
+   `F(t+dt)` into `buffers.forces_*` and the per-particle energy /
+   virial buffers.
+3. Launch `vv_kick` (or `vv_kick_lossless`) with matching timing
+   bracketing. This applies the second half-kick using `F(t+dt)`.
 
-The `_step_index` parameter is unused by velocity Verlet but is part of the
-common slot interface for integrators that require it (e.g. Langevin
+`sim_box` is borrowed mutably but velocity-Verlet does not modify it.
+`step_index` is unused by velocity Verlet but is part of the common
+trait interface for integrators that require it (e.g. Langevin
 counter-based RNG).
 
 ## Launch Configuration <!-- rq-0540b862 -->

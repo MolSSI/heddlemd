@@ -634,10 +634,10 @@
     "type": "section"
   },
   "rq-171b99f5": {
-    "decl": "Scenario: pre_force_step on empty state is a no-op",
+    "decl": "Scenario: step() on empty state is a no-op",
     "file": "integration/framework",
     "refs": [],
-    "title": "pre_force_step on empty state is a no-op",
+    "title": "step() on empty state is a no-op",
     "type": "scenario"
   },
   "rq-17666e4f": {
@@ -732,6 +732,13 @@
     "file": "simulation-runner",
     "refs": [],
     "title": "Run a valid minimal config to completion",
+    "type": "scenario"
+  },
+  "rq-1b18924f": {
+    "decl": "Scenario: Integrator owns the force evaluation inside step()",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Integrator owns the force evaluation inside step()",
     "type": "scenario"
   },
   "rq-1b34278b": {
@@ -850,6 +857,18 @@
     "refs": [],
     "title": "Atom with two bonds receives sum of contributions",
     "type": "scenario"
+  },
+  "rq-1d5b5e35": {
+    "decl": "- `IntegratorRegistry` — host-side registry of `IntegratorBuilder`s.",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "IntegratorRegistry",
+    "type": "api-item"
   },
   "rq-1d618f18": {
     "decl": "## Reversal Protocol",
@@ -1232,10 +1251,10 @@
     "type": "scenario"
   },
   "rq-2980a672": {
-    "decl": "Scenario: Velocity-Verlet pre_force_step launches vv_kick_drift",
+    "decl": "Scenario: Velocity-Verlet step() launches vv_kick_drift, force pipeline, and vv_kick",
     "file": "integration/framework",
     "refs": [],
-    "title": "Velocity-Verlet pre_force_step launches vv_kick_drift",
+    "title": "Velocity-Verlet step() launches vv_kick_drift, force pipeline, and vv_kick",
     "type": "scenario"
   },
   "rq-299c69c9": {
@@ -1681,13 +1700,6 @@
     "title": "Data Model",
     "type": "section"
   },
-  "rq-36382434": {
-    "decl": "Scenario: Velocity-Verlet post_force_step launches vv_kick",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Velocity-Verlet post_force_step launches vv_kick",
-    "type": "scenario"
-  },
   "rq-3766be01": {
     "decl": "- `ParticleState` — host-side SoA state. All fourteen per-particle arrays are",
     "file": "particle-state",
@@ -2096,10 +2108,10 @@
     "type": "scenario"
   },
   "rq-47877631": {
-    "decl": "Scenario: Construct Langevin BAOAB",
+    "decl": "Scenario: Construct Langevin BAOAB via the registry",
     "file": "integration/framework",
     "refs": [],
-    "title": "Construct Langevin BAOAB",
+    "title": "Construct Langevin BAOAB via the registry",
     "type": "scenario"
   },
   "rq-4811af60": {
@@ -3150,10 +3162,10 @@
     "type": "api-item"
   },
   "rq-6e98222c": {
-    "decl": "Scenario: pre_force_step on empty Langevin state is a no-op",
+    "decl": "Scenario: step() on empty Langevin state is a no-op",
     "file": "integration/langevin-baoab",
     "refs": [],
-    "title": "pre_force_step on empty Langevin state is a no-op",
+    "title": "step() on empty Langevin state is a no-op",
     "type": "scenario"
   },
   "rq-6ec75323": {
@@ -3190,18 +3202,6 @@
     "refs": [],
     "title": "device_to_host_download count equals snapshot points reached",
     "type": "scenario"
-  },
-  "rq-700c7729": {
-    "decl": "- `Integrator::post_force_step(&mut self, buffers: &mut ParticleBuffers, dt: f32, step_index: u64, timings: &mut Timings) -> Result<(), IntegratorError>`",
-    "file": "integration/framework",
-    "refs": [
-      {
-        "file": "src/integrator.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Integrator",
-    "type": "api-item"
   },
   "rq-706001ec": {
     "decl": "Scenario: Two independent runs with identical inputs are byte-identical",
@@ -3447,6 +3447,13 @@
     ],
     "title": "PTX Module Loading",
     "type": "section"
+  },
+  "rq-78da0ce9": {
+    "decl": "Scenario: Registry without a matching builder reports UnknownKind",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Registry without a matching builder reports UnknownKind",
+    "type": "scenario"
   },
   "rq-78fc2fbb": {
     "decl": "Scenario: Slots beyond neighbor_counts[i] are not summed",
@@ -3839,6 +3846,18 @@
     "title": "Two end-to-end Langevin runs with identical configs produce byte-identical outputs",
     "type": "scenario"
   },
+  "rq-87fdd9b1": {
+    "decl": "- `IntegratorBuilder` — trait describing a registered integrator.",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "IntegratorBuilder",
+    "type": "api-item"
+  },
   "rq-884b5cd6": {
     "decl": "- `neighbor_displacement_squared(particle_buffers, reference_x, reference_y, reference_z, sim_box, disp_sq) -> Result<(), GpuError>`",
     "file": "forces/neighbor-list",
@@ -3883,6 +3902,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Defaults populate the output section when [output] is omitted",
+    "type": "scenario"
+  },
+  "rq-89b4b926": {
+    "decl": "Scenario: Custom builder registered after with_builtins() is selectable",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Custom builder registered after with_builtins() is selectable",
     "type": "scenario"
   },
   "rq-89d64ca3": {
@@ -4691,13 +4717,6 @@
     "title": "init_device loads the reduce module with the reduction kernel",
     "type": "scenario"
   },
-  "rq-a49bb176": {
-    "decl": "Scenario: post_force_step on empty state is a no-op",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "post_force_step on empty state is a no-op",
-    "type": "scenario"
-  },
   "rq-a5069572": {
     "decl": "- `IntegratorError` — error type returned by every integrator method.",
     "file": "integration/framework",
@@ -4926,12 +4945,7 @@
     "decl": "### Functions and methods",
     "file": "integration/framework",
     "level": 3,
-    "refs": [
-      {
-        "file": "src/integrator.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Functions and methods",
     "type": "section"
   },
@@ -5362,12 +5376,7 @@
   "rq-bcb0f58a": {
     "decl": "- `LangevinBaoabState` — variant payload owned by",
     "file": "integration/langevin-baoab",
-    "refs": [
-      {
-        "file": "src/integrator.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "LangevinBaoabState",
     "type": "api-item"
   },
@@ -5862,7 +5871,7 @@
     "type": "scenario"
   },
   "rq-cf361ff5": {
-    "decl": "- `Integrator::pre_force_step(&mut self, buffers: &mut ParticleBuffers, dt: f32, step_index: u64, timings: &mut Timings) -> Result<(), IntegratorError>`",
+    "decl": "- `Integrator::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, dt: f32, step_index: u64, timings: &mut Timings) -> Result<(), IntegratorError>`",
     "file": "integration/framework",
     "refs": [
       {
@@ -5895,10 +5904,10 @@
     "type": "scenario"
   },
   "rq-d12c24f0": {
-    "decl": "Scenario: step_index is passed through to the variant",
+    "decl": "Scenario: step_index is passed through and affects RNG draws",
     "file": "integration/framework",
     "refs": [],
-    "title": "step_index is passed through to the variant",
+    "title": "step_index is passed through and affects RNG draws",
     "type": "scenario"
   },
   "rq-d148149f": {
@@ -6148,10 +6157,10 @@
     "type": "scenario"
   },
   "rq-db78448e": {
-    "decl": "Scenario: Construct velocity-Verlet (lossless)",
+    "decl": "Scenario: Construct velocity-Verlet (lossless) via the registry",
     "file": "integration/framework",
     "refs": [],
-    "title": "Construct velocity-Verlet (lossless)",
+    "title": "Construct velocity-Verlet (lossless) via the registry",
     "type": "scenario"
   },
   "rq-dc5c70bf": {
@@ -6258,7 +6267,7 @@
     "type": "section"
   },
   "rq-df39d15b": {
-    "decl": "- `Integrator::new(device: Arc<CudaDevice>, particle_count: usize, kind: &IntegratorKind) -> Result<Self, IntegratorError>`",
+    "decl": "- `IntegratorRegistry::build(&self, kind: &IntegratorKind, device: Arc<CudaDevice>, particle_count: usize) -> Result<Box<dyn Integrator>, IntegratorError>`",
     "file": "integration/framework",
     "refs": [
       {
@@ -6266,7 +6275,7 @@
         "kind": "code"
       }
     ],
-    "title": "Integrator",
+    "title": "IntegratorRegistry",
     "type": "api-item"
   },
   "rq-df3a50f6": {
@@ -6299,10 +6308,10 @@
     "type": "scenario"
   },
   "rq-e02917c3": {
-    "decl": "Scenario: Construct velocity-Verlet (lossy)",
+    "decl": "Scenario: Construct velocity-Verlet (lossy) via the registry",
     "file": "integration/framework",
     "refs": [],
-    "title": "Construct velocity-Verlet (lossy)",
+    "title": "Construct velocity-Verlet (lossy) via the registry",
     "type": "scenario"
   },
   "rq-e06bcfb0": {
@@ -6346,10 +6355,10 @@
     "type": "scenario"
   },
   "rq-e1dd0625": {
-    "decl": "Scenario: Slot per-step interface launches all six expected kernel calls",
+    "decl": "Scenario: step() launches all six expected kernel calls",
     "file": "integration/langevin-baoab",
     "refs": [],
-    "title": "Slot per-step interface launches all six expected kernel calls",
+    "title": "step() launches all six expected kernel calls",
     "type": "scenario"
   },
   "rq-e20b2f39": {
@@ -6460,7 +6469,7 @@
     "type": "section"
   },
   "rq-e4c4ff61": {
-    "decl": "- `Integrator` — closed `enum` with one variant per slot. Variants carry",
+    "decl": "- `Integrator` — object-safe trait implemented by every concrete",
     "file": "integration/framework",
     "refs": [
       {

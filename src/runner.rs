@@ -11,7 +11,7 @@ use crate::forces::{
     BondList, BondsFileError, ExclusionList, ForceField, ForceFieldError, load_bonds_file,
 };
 use crate::gpu::{ParticleBuffers, init_device};
-use crate::integrator::{Integrator, IntegratorError};
+use crate::integrator::{IntegratorError, IntegratorRegistry};
 use crate::io::config::NeighborListConfig;
 use crate::io::{
     ConfigError, InitStateError, InitVelocities, LogWriter, LogWriterError, TrajectoryWriter,
@@ -158,7 +158,7 @@ fn run_simulation_with_phase(
     })
     .map_err(|e| (RunnerError::InitState(e), ExitPhase::Setup))?;
 
-    let sim_box = init.sim_box;
+    let mut sim_box = init.sim_box;
     let n = init.particle_count;
 
     // Cell-list box-compatibility check (uses the init file's box).
@@ -249,7 +249,9 @@ fn run_simulation_with_phase(
         })?;
     timings.record_host(HostStage::HostToDeviceUpload, upload);
 
-    let mut integrator = Integrator::new(device.clone(), n, &config.integrator)
+    let registry = IntegratorRegistry::with_builtins();
+    let mut integrator = registry
+        .build(&config.integrator, device.clone(), n)
         .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Setup))?;
 
     // Load the .bonds file when supplied, otherwise build empty bond / exclusion
@@ -350,13 +352,14 @@ fn run_simulation_with_phase(
     // Main loop.
     for step in 1..=n_steps {
         integrator
-            .pre_force_step(&mut buffers, dt_f32, step, &mut timings)
-            .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Loop))?;
-        force_field
-            .step(&mut buffers, &sim_box, &mut timings)
-            .map_err(|e| (RunnerError::ForceField(e), ExitPhase::Loop))?;
-        integrator
-            .post_force_step(&mut buffers, dt_f32, step, &mut timings)
+            .step(
+                &mut buffers,
+                &mut sim_box,
+                &mut force_field,
+                dt_f32,
+                step,
+                &mut timings,
+            )
             .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Loop))?;
 
         let want_traj =
