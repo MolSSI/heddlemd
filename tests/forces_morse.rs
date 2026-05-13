@@ -1,5 +1,4 @@
-use cudarc::driver::DeviceSlice;
-use dynamics::forces::{BondList, ExclusionList, ForceField, MorseBondedState, PotentialSlot};
+use dynamics::forces::{BondList, ExclusionList, ForceField, MorseBondedState};
 use dynamics::gpu::{
     ParticleBuffers, init_device, morse_bond_force, reduce_bond_forces,
 };
@@ -300,6 +299,9 @@ fn atom_with_two_bonds_sums_contributions() {
         2,
     )
     .unwrap();
+    let mut acc_x = device.alloc_zeros::<f32>(3).unwrap();
+    let mut acc_y = device.alloc_zeros::<f32>(3).unwrap();
+    let mut acc_z = device.alloc_zeros::<f32>(3).unwrap();
     reduce_bond_forces(
         &device,
         &mb.bond_pair_x,
@@ -307,13 +309,13 @@ fn atom_with_two_bonds_sums_contributions() {
         &mb.bond_pair_z,
         &mb.atom_bond_offsets,
         &mb.atom_bond_indices,
-        &mut mb.accumulator_x,
-        &mut mb.accumulator_y,
-        &mut mb.accumulator_z,
+        &mut acc_x.slice_mut(..),
+        &mut acc_y.slice_mut(..),
+        &mut acc_z.slice_mut(..),
         3,
     )
     .unwrap();
-    let ax = device.dtoh_sync_copy(&mb.accumulator_x).unwrap();
+    let ax = device.dtoh_sync_copy(&acc_x).unwrap();
     // Each bond is at equilibrium (r=1.0=re), so force magnitudes are 0;
     // accumulator should be zero for all atoms.
     for v in &ax {
@@ -340,9 +342,12 @@ fn atom_with_no_bonds_gets_zero_accumulator() {
     // Atom 3 has no bonds. Bond (0,1) only.
     let bl = single_bond_list(4);
     let bt = vec![morse_type(1.0, 2.0, 1.0)];
-    let mut mb = MorseBondedState::new(device.clone(), &bl, &bt).unwrap();
+    let mb = MorseBondedState::new(device.clone(), &bl, &bt).unwrap();
     // Reduction without contribution kernel populating bond_pair_* leaves it
     // zeroed by allocation; accumulator should remain zero.
+    let mut acc_x = device.alloc_zeros::<f32>(4).unwrap();
+    let mut acc_y = device.alloc_zeros::<f32>(4).unwrap();
+    let mut acc_z = device.alloc_zeros::<f32>(4).unwrap();
     reduce_bond_forces(
         &device,
         &mb.bond_pair_x,
@@ -350,13 +355,13 @@ fn atom_with_no_bonds_gets_zero_accumulator() {
         &mb.bond_pair_z,
         &mb.atom_bond_offsets,
         &mb.atom_bond_indices,
-        &mut mb.accumulator_x,
-        &mut mb.accumulator_y,
-        &mut mb.accumulator_z,
+        &mut acc_x.slice_mut(..),
+        &mut acc_y.slice_mut(..),
+        &mut acc_z.slice_mut(..),
         4,
     )
     .unwrap();
-    let ax = device.dtoh_sync_copy(&mb.accumulator_x).unwrap();
+    let ax = device.dtoh_sync_copy(&acc_x).unwrap();
     assert_eq!(ax[3], 0.0);
 }
 
@@ -366,7 +371,10 @@ fn reduce_bond_forces_zero_particles_noop() {
     let device = init_device().unwrap();
     let bl = BondList::empty(0);
     let bt: Vec<BondTypeConfig> = Vec::new();
-    let mut mb = MorseBondedState::new(device.clone(), &bl, &bt).unwrap();
+    let mb = MorseBondedState::new(device.clone(), &bl, &bt).unwrap();
+    let mut acc_x = device.alloc_zeros::<f32>(0).unwrap();
+    let mut acc_y = device.alloc_zeros::<f32>(0).unwrap();
+    let mut acc_z = device.alloc_zeros::<f32>(0).unwrap();
     reduce_bond_forces(
         &device,
         &mb.bond_pair_x,
@@ -374,9 +382,9 @@ fn reduce_bond_forces_zero_particles_noop() {
         &mb.bond_pair_z,
         &mb.atom_bond_offsets,
         &mb.atom_bond_indices,
-        &mut mb.accumulator_x,
-        &mut mb.accumulator_y,
-        &mut mb.accumulator_z,
+        &mut acc_x.slice_mut(..),
+        &mut acc_y.slice_mut(..),
+        &mut acc_z.slice_mut(..),
         0,
     )
     .unwrap();
@@ -455,5 +463,5 @@ fn newtons_third_law_holds_for_combined_force() {
     assert!(sum_z.abs() < 1.0e-5);
     // Verify the ForceField uses the MorseBonded slot when bonds exist.
     assert_eq!(ff.slots.len(), 2);
-    assert!(matches!(ff.slots[1], PotentialSlot::MorseBonded(_)));
+    assert_eq!(ff.slots[1].label(), "morse_bonded");
 }

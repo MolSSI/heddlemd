@@ -8,7 +8,9 @@ use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::bonds::BondList;
+use super::{ForceFieldError, Potential, SlotForceView};
 
+// rq-2361f2b8
 #[derive(Debug)]
 pub struct MorseBondedState {
     pub device: Arc<CudaDevice>,
@@ -21,9 +23,6 @@ pub struct MorseBondedState {
     pub bond_pair_x: CudaSlice<f32>,
     pub bond_pair_y: CudaSlice<f32>,
     pub bond_pair_z: CudaSlice<f32>,
-    pub accumulator_x: CudaSlice<f32>,
-    pub accumulator_y: CudaSlice<f32>,
-    pub accumulator_z: CudaSlice<f32>,
     pub bond_count: usize,
     pub particle_count: usize,
 }
@@ -37,7 +36,6 @@ impl MorseBondedState {
         let bond_count = bond_list.bonds.len();
         let particle_count = bond_list.particle_count;
 
-        // Pack each bond as (atom_i, atom_j, bond_type_index) — 3 u32 per bond.
         let mut bonds_flat: Vec<u32> = Vec::with_capacity(3 * bond_count);
         for b in &bond_list.bonds {
             bonds_flat.push(b.atom_i);
@@ -75,9 +73,6 @@ impl MorseBondedState {
         let bond_pair_z = device
             .alloc_zeros::<f32>(bond_pair_len)
             .map_err(GpuError::from)?;
-        let accumulator_x = device.alloc_zeros::<f32>(particle_count).map_err(GpuError::from)?;
-        let accumulator_y = device.alloc_zeros::<f32>(particle_count).map_err(GpuError::from)?;
-        let accumulator_z = device.alloc_zeros::<f32>(particle_count).map_err(GpuError::from)?;
 
         Ok(MorseBondedState {
             device,
@@ -90,26 +85,27 @@ impl MorseBondedState {
             bond_pair_x,
             bond_pair_y,
             bond_pair_z,
-            accumulator_x,
-            accumulator_y,
-            accumulator_z,
             bond_count,
             particle_count,
         })
     }
+}
 
-    pub(crate) fn contribute(
+impl Potential for MorseBondedState {
+    fn label(&self) -> &'static str {
+        "morse_bonded"
+    }
+
+    fn contribute(
         &mut self,
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
         timings: &mut Timings,
-    ) -> Result<(), GpuError> {
+    ) -> Result<(), ForceFieldError> {
         if self.bond_count == 0 {
             return Ok(());
         }
-        timings
-            .kernel_start(KernelStage::MorseBondForce)
-            .map_err(map_timings_err)?;
+        timings.kernel_start(KernelStage::MorseBondForce)?;
         morse_bond_force(
             buffers,
             &self.bonds,
@@ -122,19 +118,25 @@ impl MorseBondedState {
             &mut self.bond_pair_z,
             self.bond_count,
         )?;
-        timings
-            .kernel_stop(KernelStage::MorseBondForce)
-            .map_err(map_timings_err)?;
+        timings.kernel_stop(KernelStage::MorseBondForce)?;
         Ok(())
     }
 
-    pub(crate) fn reduce(&mut self, timings: &mut Timings) -> Result<(), GpuError> {
+    fn reduce(
+        &mut self,
+        mut output: SlotForceView<'_>,
+        timings: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
         if self.particle_count == 0 {
             return Ok(());
         }
-        timings
-            .kernel_start(KernelStage::ReduceBondForces)
-            .map_err(map_timings_err)?;
+        if self.bond_count == 0 {
+            self.device.memset_zeros(&mut output.x).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.y).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.z).map_err(GpuError::from)?;
+            return Ok(());
+        }
+        timings.kernel_start(KernelStage::ReduceBondForces)?;
         reduce_bond_forces(
             &self.device,
             &self.bond_pair_x,
@@ -142,19 +144,13 @@ impl MorseBondedState {
             &self.bond_pair_z,
             &self.atom_bond_offsets,
             &self.atom_bond_indices,
-            &mut self.accumulator_x,
-            &mut self.accumulator_y,
-            &mut self.accumulator_z,
+            &mut output.x,
+            &mut output.y,
+            &mut output.z,
             self.particle_count,
         )?;
-        timings
-            .kernel_stop(KernelStage::ReduceBondForces)
-            .map_err(map_timings_err)?;
+        timings.kernel_stop(KernelStage::ReduceBondForces)?;
         Ok(())
-    }
-
-    pub(crate) fn accumulator(&self) -> (&CudaSlice<f32>, &CudaSlice<f32>, &CudaSlice<f32>) {
-        (&self.accumulator_x, &self.accumulator_y, &self.accumulator_z)
     }
 }
 
@@ -177,11 +173,5 @@ fn htod_or_empty_f32(
         device.alloc_zeros::<f32>(0).map_err(GpuError::from)
     } else {
         device.htod_sync_copy(data).map_err(GpuError::from)
-    }
-}
-
-fn map_timings_err(e: crate::timings::TimingsError) -> GpuError {
-    match e {
-        crate::timings::TimingsError::Gpu(g) => g,
     }
 }

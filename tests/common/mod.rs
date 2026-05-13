@@ -51,12 +51,8 @@ pub fn reduce_pair_forces_into_buffers(
     particle_buffers: &mut ParticleBuffers,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
-    reduce_pair_forces(
-        pair,
-        counts,
-        &mut particle_buffers.forces_x,
-        &mut particle_buffers.forces_y,
-        &mut particle_buffers.forces_z,
-        n,
-    )
+    let mut vx = particle_buffers.forces_x.slice_mut(..);
+    let mut vy = particle_buffers.forces_y.slice_mut(..);
+    let mut vz = particle_buffers.forces_z.slice_mut(..);
+    reduce_pair_forces(pair, counts, &mut vx, &mut vy, &mut vz, n)
 }

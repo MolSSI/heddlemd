@@ -13,6 +13,7 @@ use crate::timings::{KernelStage, Timings};
 
 use super::bonds::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::{NeighborListError, NeighborListState};
+use super::{ForceFieldError, Potential, SlotForceView};
 
 #[derive(Debug)]
 pub struct LjCommon {
@@ -21,12 +22,10 @@ pub struct LjCommon {
     pub(crate) pair_buffer: PairBuffer,
     pub(crate) params: LennardJonesParameters,
     pub(crate) exclusions: DeviceExclusionList,
-    pub(crate) accumulator_x: CudaSlice<f32>,
-    pub(crate) accumulator_y: CudaSlice<f32>,
-    pub(crate) accumulator_z: CudaSlice<f32>,
     pub(crate) particle_count: usize,
 }
 
+// rq-af2d1628
 #[derive(Debug)]
 pub enum LennardJonesState {
     AllPairs {
@@ -61,21 +60,12 @@ impl LennardJonesState {
                     .htod_sync_copy(&vec![particle_count as u32; particle_count])
                     .map_err(GpuError::from)?;
                 let exclusions = DeviceExclusionList::from_host(&device, exclusion_list)?;
-                let accumulator_x =
-                    device.alloc_zeros::<f32>(particle_count).map_err(GpuError::from)?;
-                let accumulator_y =
-                    device.alloc_zeros::<f32>(particle_count).map_err(GpuError::from)?;
-                let accumulator_z =
-                    device.alloc_zeros::<f32>(particle_count).map_err(GpuError::from)?;
                 Ok(LennardJonesState::AllPairs {
                     common: LjCommon {
                         device,
                         pair_buffer,
                         params,
                         exclusions,
-                        accumulator_x,
-                        accumulator_y,
-                        accumulator_z,
                         particle_count,
                     },
                     neighbor_counts,
@@ -88,12 +78,6 @@ impl LennardJonesState {
                 let pair_buffer =
                     PairBuffer::new(device.clone(), particle_count, *max_neighbors)?;
                 let exclusions = DeviceExclusionList::from_host(&device, exclusion_list)?;
-                let accumulator_x =
-                    device.alloc_zeros::<f32>(particle_count).map_err(GpuError::from)?;
-                let accumulator_y =
-                    device.alloc_zeros::<f32>(particle_count).map_err(GpuError::from)?;
-                let accumulator_z =
-                    device.alloc_zeros::<f32>(particle_count).map_err(GpuError::from)?;
                 let neighbor_list = NeighborListState::new(
                     device.clone(),
                     sim_box,
@@ -108,9 +92,6 @@ impl LennardJonesState {
                         pair_buffer,
                         params,
                         exclusions,
-                        accumulator_x,
-                        accumulator_y,
-                        accumulator_z,
                         particle_count,
                     },
                     neighbor_list,
@@ -119,20 +100,31 @@ impl LennardJonesState {
         }
     }
 
-    pub(crate) fn contribute(
+    pub fn particle_count(&self) -> usize {
+        match self {
+            LennardJonesState::AllPairs { common, .. } => common.particle_count,
+            LennardJonesState::CellList { common, .. } => common.particle_count,
+        }
+    }
+}
+
+impl Potential for LennardJonesState {
+    fn label(&self) -> &'static str {
+        "lennard_jones"
+    }
+
+    fn contribute(
         &mut self,
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
         timings: &mut Timings,
-    ) -> Result<(), NeighborListError> {
+    ) -> Result<(), ForceFieldError> {
         match self {
             LennardJonesState::AllPairs { common, .. } => {
                 if common.particle_count == 0 {
                     return Ok(());
                 }
-                timings
-                    .kernel_start(KernelStage::LjPairForce)
-                    .map_err(map_timings_err)?;
+                timings.kernel_start(KernelStage::LjPairForce)?;
                 lj_pair_force(
                     buffers,
                     &mut common.pair_buffer,
@@ -142,9 +134,7 @@ impl LennardJonesState {
                     &common.exclusions.atom_excl_partners,
                     &common.exclusions.atom_excl_scales,
                 )?;
-                timings
-                    .kernel_stop(KernelStage::LjPairForce)
-                    .map_err(map_timings_err)?;
+                timings.kernel_stop(KernelStage::LjPairForce)?;
                 Ok(())
             }
             LennardJonesState::CellList {
@@ -155,9 +145,7 @@ impl LennardJonesState {
                     return Ok(());
                 }
                 neighbor_list.pre_step(buffers, timings)?;
-                timings
-                    .kernel_start(KernelStage::LjPairForceNeighbor)
-                    .map_err(map_timings_err)?;
+                timings.kernel_start(KernelStage::LjPairForceNeighbor)?;
                 lj_pair_force_neighbor(
                     buffers,
                     &mut common.pair_buffer,
@@ -169,15 +157,17 @@ impl LennardJonesState {
                     &neighbor_list.neighbor_list,
                     &neighbor_list.neighbor_counts,
                 )?;
-                timings
-                    .kernel_stop(KernelStage::LjPairForceNeighbor)
-                    .map_err(map_timings_err)?;
+                timings.kernel_stop(KernelStage::LjPairForceNeighbor)?;
                 Ok(())
             }
         }
     }
 
-    pub(crate) fn reduce(&mut self, timings: &mut Timings) -> Result<(), NeighborListError> {
+    fn reduce(
+        &mut self,
+        mut output: SlotForceView<'_>,
+        timings: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
         let (common, neighbor_counts) = match self {
             LennardJonesState::AllPairs { common, neighbor_counts } => (common, &*neighbor_counts),
             LennardJonesState::CellList { common, neighbor_list } => {
@@ -187,41 +177,16 @@ impl LennardJonesState {
         if common.particle_count == 0 {
             return Ok(());
         }
-        timings
-            .kernel_start(KernelStage::ReducePairForces)
-            .map_err(map_timings_err)?;
+        timings.kernel_start(KernelStage::ReducePairForces)?;
         reduce_pair_forces(
             &common.pair_buffer,
             neighbor_counts,
-            &mut common.accumulator_x,
-            &mut common.accumulator_y,
-            &mut common.accumulator_z,
+            &mut output.x,
+            &mut output.y,
+            &mut output.z,
             common.particle_count,
         )?;
-        timings
-            .kernel_stop(KernelStage::ReducePairForces)
-            .map_err(map_timings_err)?;
+        timings.kernel_stop(KernelStage::ReducePairForces)?;
         Ok(())
-    }
-
-    pub(crate) fn accumulator(&self) -> (&CudaSlice<f32>, &CudaSlice<f32>, &CudaSlice<f32>) {
-        let common = match self {
-            LennardJonesState::AllPairs { common, .. } => common,
-            LennardJonesState::CellList { common, .. } => common,
-        };
-        (&common.accumulator_x, &common.accumulator_y, &common.accumulator_z)
-    }
-
-    pub fn particle_count(&self) -> usize {
-        match self {
-            LennardJonesState::AllPairs { common, .. } => common.particle_count,
-            LennardJonesState::CellList { common, .. } => common.particle_count,
-        }
-    }
-}
-
-fn map_timings_err(e: crate::timings::TimingsError) -> NeighborListError {
-    match e {
-        crate::timings::TimingsError::Gpu(g) => NeighborListError::Gpu(g),
     }
 }

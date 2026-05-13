@@ -1,4 +1,4 @@
-use cudarc::driver::{CudaSlice, DeviceSlice, LaunchAsync, LaunchConfig};
+use cudarc::driver::{CudaSlice, CudaViewMut, DeviceSlice, LaunchAsync, LaunchConfig};
 
 use crate::gpu::{GpuError, LosslessBuffers, PairBuffer, ParticleBuffers};
 use crate::pbc::SimulationBox;
@@ -88,9 +88,9 @@ pub fn vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError> {
 pub fn reduce_pair_forces(
     pair_buffer: &PairBuffer,
     neighbor_counts: &CudaSlice<u32>,
-    target_x: &mut CudaSlice<f32>,
-    target_y: &mut CudaSlice<f32>,
-    target_z: &mut CudaSlice<f32>,
+    target_x: &mut CudaViewMut<'_, f32>,
+    target_y: &mut CudaViewMut<'_, f32>,
+    target_z: &mut CudaViewMut<'_, f32>,
     particle_count: usize,
 ) -> Result<(), GpuError> {
     let n = particle_count;
@@ -332,9 +332,9 @@ pub fn reduce_bond_forces(
     bond_pair_z: &CudaSlice<f32>,
     atom_bond_offsets: &CudaSlice<u32>,
     atom_bond_indices: &CudaSlice<u32>,
-    accumulator_x: &mut CudaSlice<f32>,
-    accumulator_y: &mut CudaSlice<f32>,
-    accumulator_z: &mut CudaSlice<f32>,
+    accumulator_x: &mut CudaViewMut<'_, f32>,
+    accumulator_y: &mut CudaViewMut<'_, f32>,
+    accumulator_z: &mut CudaViewMut<'_, f32>,
     particle_count: usize,
 ) -> Result<(), GpuError> {
     if particle_count == 0 {
@@ -365,49 +365,37 @@ pub fn reduce_bond_forces(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+// rq-c0f98145
 pub fn accumulate_forces(
     particle_buffers: &mut ParticleBuffers,
-    slot0: Option<(&CudaSlice<f32>, &CudaSlice<f32>, &CudaSlice<f32>)>,
-    slot1: Option<(&CudaSlice<f32>, &CudaSlice<f32>, &CudaSlice<f32>)>,
+    slot_forces_x: &CudaSlice<f32>,
+    slot_forces_y: &CudaSlice<f32>,
+    slot_forces_z: &CudaSlice<f32>,
+    num_slots: u32,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
         return Ok(());
     }
     let n_u32 = n as u32;
+    debug_assert_eq!(slot_forces_x.len(), num_slots as usize * n);
+    debug_assert_eq!(slot_forces_y.len(), num_slots as usize * n);
+    debug_assert_eq!(slot_forces_z.len(), num_slots as usize * n);
+
     let func = particle_buffers
         .device
         .get_func("forces", "accumulate_forces")
         .expect("forces module is not loaded; init_device() must be called first");
     let cfg = launch_config(n_u32);
 
-    // Slot pointers default to slot0 (Lennard-Jones) when absent, since the
-    // bitmask blocks dereferencing of empty slots anyway. cudarc requires
-    // valid CudaSlice references for kernel arguments.
-    let (s0x, s0y, s0z) = slot0.ok_or_else(|| GpuError::from(cudarc::driver::DriverError(
-        cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,
-    )))?;
-    let (s1x, s1y, s1z) = slot1.unwrap_or((s0x, s0y, s0z));
-    let mut bitmask: u32 = 0;
-    bitmask |= 1;
-    if slot1.is_some() {
-        bitmask |= 2;
-    }
-    let n_slots: u32 = if slot1.is_some() { 2 } else { 1 };
-
     unsafe {
         func.launch(
             cfg,
             (
-                s0x,
-                s0y,
-                s0z,
-                s1x,
-                s1y,
-                s1z,
-                n_slots,
-                bitmask,
+                slot_forces_x,
+                slot_forces_y,
+                slot_forces_z,
+                num_slots,
                 &mut particle_buffers.forces_x,
                 &mut particle_buffers.forces_y,
                 &mut particle_buffers.forces_z,
