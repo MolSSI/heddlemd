@@ -20,23 +20,31 @@ back into host arrays.
 `particle_count()`:
 
 ```
-positions_x:  Vec<f32>
-positions_y:  Vec<f32>
-positions_z:  Vec<f32>
-velocities_x: Vec<f32>
-velocities_y: Vec<f32>
-velocities_z: Vec<f32>
-forces_x:     Vec<f32>
-forces_y:     Vec<f32>
-forces_z:     Vec<f32>
-masses:       Vec<f32>
-particle_ids: Vec<u32>
+positions_x:   Vec<f32>
+positions_y:   Vec<f32>
+positions_z:   Vec<f32>
+velocities_x:  Vec<f32>
+velocities_y:  Vec<f32>
+velocities_z:  Vec<f32>
+forces_x:      Vec<f32>
+forces_y:      Vec<f32>
+forces_z:      Vec<f32>
+masses:        Vec<f32>
+type_indices:  Vec<u32>
+particle_ids:  Vec<u32>
 ```
 
-`ParticleBuffers` holds the device-side mirror: one `CudaSlice<f32>` per `f32`
-host array and one `CudaSlice<u32>` for `particle_ids`. The two structures
-have identical particle counts; allocation sizes match exactly (no extra
-capacity).
+`type_indices[i]` is the index of particle `i`'s entry in
+`Config::particle_types` (see `io/config-schema.md`); the index is in the
+range `0..config.particle_types.len()`. ParticleState does not carry the
+particle-type table itself; the host enforces that every `type_indices[i]`
+falls within the declared range at the point where the state is built
+from the parsed init file.
+
+`ParticleBuffers` holds the device-side mirror: one `CudaSlice<f32>` per
+`f32` host array, one `CudaSlice<u32>` for `particle_ids`, and one
+`CudaSlice<u32>` for `type_indices`. The two structures have identical
+particle counts; allocation sizes match exactly (no extra capacity).
 
 All arrays of the same particle state must have the same length. This
 invariant is checked at construction time and again at every upload/download
@@ -46,17 +54,17 @@ call.
 
 ### Types <!-- rq-08066bdf -->
 
-- `ParticleState` — host-side SoA state. All eleven per-particle arrays are <!-- rq-3766be01 -->
+- `ParticleState` — host-side SoA state. All twelve per-particle arrays are <!-- rq-3766be01 -->
   declared as `pub` fields so callers may iterate, index, and mutate them
   directly. Length consistency between fields is the caller's responsibility
   while the state is held on the host; it is re-validated at every upload or
   download.
 
 - `ParticleBuffers` — device-side mirror. Holds a `CudaSlice<f32>` for each <!-- rq-4a8de06c -->
-  `f32` host array and a `CudaSlice<u32>` for `particle_ids`. Each buffer is
-  exposed as a `pub` field so kernel launch sites can pass `&CudaSlice`
-  references directly. Also carries an `Arc<CudaDevice>` for upload/download
-  bookkeeping.
+  `f32` host array and a `CudaSlice<u32>` for each of `particle_ids` and
+  `type_indices`. Each buffer is exposed as a `pub` field so kernel launch
+  sites can pass `&CudaSlice` references directly. Also carries an
+  `Arc<CudaDevice>` for upload/download bookkeeping.
 
 - `ParticleStateError` — error type returned by construction and host↔device <!-- rq-bec7b519 -->
   transfer. Variants:
@@ -64,7 +72,7 @@ call.
     — an input array (during construction), a host array (during upload), or
     a host array (during download) has a length other than the established
     particle count. `array` names the offending array (e.g. `"positions_y"`,
-    `"particle_ids"`).
+    `"particle_ids"`, `"type_indices"`).
   - `DuplicateParticleId(u32)` — caller-supplied IDs contain at least one
     duplicate; the variant reports one offending value.
   - `Gpu(GpuError)` — a CUDA driver operation failed during upload or
@@ -72,12 +80,12 @@ call.
 
 ### Functions and methods <!-- rq-7206ab76 -->
 
-- `ParticleState::new(positions_x: Vec<f32>, positions_y: Vec<f32>, positions_z: Vec<f32>, velocities_x: Vec<f32>, velocities_y: Vec<f32>, velocities_z: Vec<f32>, masses: Vec<f32>, ids: Option<Vec<u32>>) -> Result<ParticleState, ParticleStateError>` <!-- rq-5e0598cb -->
+- `ParticleState::new(positions_x: Vec<f32>, positions_y: Vec<f32>, positions_z: Vec<f32>, velocities_x: Vec<f32>, velocities_y: Vec<f32>, velocities_z: Vec<f32>, masses: Vec<f32>, type_indices: Vec<u32>, ids: Option<Vec<u32>>) -> Result<ParticleState, ParticleStateError>` <!-- rq-5e0598cb -->
   - The particle count is taken from `positions_x.len()`.
   - Validates that `positions_y`, `positions_z`, `velocities_x`,
-    `velocities_y`, `velocities_z`, and `masses` all have the same length as
-    `positions_x`. Returns `LengthMismatch` on the first offending array
-    (checked in declaration order).
+    `velocities_y`, `velocities_z`, `masses`, and `type_indices` all have
+    the same length as `positions_x`. Returns `LengthMismatch` on the first
+    offending array (checked in declaration order).
   - If `ids` is `Some(v)`, validates that `v.len()` matches the particle
     count and that `v` contains no duplicates; returns `LengthMismatch` or
     `DuplicateParticleId` accordingly.
@@ -88,7 +96,8 @@ call.
   - A particle count of zero is permitted: the constructor returns a state
     whose every field is an empty `Vec`.
   - Does not validate numerical content (NaN, infinity, sign, magnitude are
-    accepted as-is).
+    accepted as-is) or `type_indices` values (range checks happen in the
+    runner against the parsed `Config::particle_types` length).
 
 - `ParticleState::particle_count(&self) -> usize` <!-- rq-ac035b90 -->
   - Returns `positions_x.len()`. Callers are expected to keep the other
@@ -99,7 +108,7 @@ call.
     `state.particle_count()`.
   - Validates that every host array has length `state.particle_count()`;
     returns `LengthMismatch` otherwise.
-  - Copies all eleven host arrays into the corresponding device buffers.
+  - Copies all twelve host arrays into the corresponding device buffers.
   - Returns the populated `ParticleBuffers` on success.
 
 - `ParticleBuffers::particle_count(&self) -> usize` <!-- rq-18411920 -->
@@ -109,7 +118,7 @@ call.
   - Validates that `state.particle_count()` equals `self.particle_count()`
     and that every host array has that length; returns `LengthMismatch`
     otherwise.
-  - Copies all eleven host arrays into the existing device buffers
+  - Copies all twelve host arrays into the existing device buffers
     in-place.
 
 - `ParticleState::download_from(&mut self, buffers: &ParticleBuffers) -> Result<(), ParticleStateError>` <!-- rq-9a19bfa3 -->
@@ -125,7 +134,7 @@ call.
   host arrays at construction.
 - Length validation is performed in declaration order
   (`positions_y`, `positions_z`, `velocities_x`, `velocities_y`,
-  `velocities_z`, `masses`, then `ids` when `Some`).
+  `velocities_z`, `masses`, `type_indices`, then `ids` when `Some`).
 - Duplicate-ID detection is performed using a hash set; expected complexity
   is O(N) for N particles.
 
@@ -166,19 +175,23 @@ Feature: SoA particle state and GPU buffers
   @rq-81f4ec9d
   Scenario: Construct with matching arrays and default IDs
     Given seven Vec<f32> of length 4 for positions_x/y/z, velocities_x/y/z, and masses
+    And a Vec<u32> type_indices of length 4 with values [0, 0, 0, 0]
     When ParticleState::new(...) is called with ids=None
     Then it returns Ok(state)
     And state.particle_count() is 4
     And state.particle_ids equals [0, 1, 2, 3]
+    And state.type_indices equals [0, 0, 0, 0]
     And state.forces_x, state.forces_y, and state.forces_z are each Vec<f32> of length 4 with every element 0.0
 
   @rq-2bbc4121
   Scenario: Construct with matching arrays and explicit unique IDs
     Given seven Vec<f32> of length 3 for positions_x/y/z, velocities_x/y/z, and masses
+    And a Vec<u32> type_indices with values [0, 1, 0]
     And a Vec<u32> with values [10, 20, 30]
     When ParticleState::new(...) is called with ids=Some([10, 20, 30])
     Then it returns Ok(state)
     And state.particle_ids equals [10, 20, 30]
+    And state.type_indices equals [0, 1, 0]
 
   @rq-c22483b4
   Scenario: Construct an empty state
@@ -207,8 +220,16 @@ Feature: SoA particle state and GPU buffers
   Scenario: Reject when masses has the wrong length
     Given positions_x, positions_y, positions_z, velocities_x, velocities_y, velocities_z each have length 4
     And masses has length 5
+    And type_indices has length 4
     When ParticleState::new(...) is called with ids=None
     Then it returns Err(ParticleStateError::LengthMismatch { array: "masses", expected: 4, actual: 5 })
+
+  @rq-790c1f86
+  Scenario: Reject when type_indices has the wrong length
+    Given positions_x, positions_y, positions_z, velocities_x, velocities_y, velocities_z, masses each have length 4
+    And type_indices has length 3
+    When ParticleState::new(...) is called with ids=None
+    Then it returns Err(ParticleStateError::LengthMismatch { array: "type_indices", expected: 4, actual: 3 })
 
   @rq-391cb266
   Scenario: Reject when explicit IDs have the wrong length
@@ -243,6 +264,7 @@ Feature: SoA particle state and GPU buffers
     And buffers.particle_count() is 4
     And every device buffer has length 4
     And the bytes copied from each device buffer back to the host equal the corresponding state field
+    And the device-side type_indices buffer holds the same values as state.type_indices
 
   @rq-c8aa7417
   Scenario: Allocate device buffers from an empty state

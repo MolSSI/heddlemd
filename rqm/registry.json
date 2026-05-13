@@ -701,6 +701,13 @@
     "title": "Single-step round-trip restores the observable state bit-exactly under zero force",
     "type": "scenario"
   },
+  "rq-1adf5954": {
+    "decl": "- `LennardJonesParameterTable::from_config(device: &Arc<CudaDevice>, <!-- inline -->",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "LennardJonesParameterTable",
+    "type": "api-item"
+  },
   "rq-1ae622bb": {
     "decl": "Scenario: Run a valid minimal config to completion",
     "file": "simulation-runner",
@@ -861,6 +868,13 @@
     "file": "integration/velocity-verlet",
     "refs": [],
     "title": "vv_kick_drift on an empty state is a no-op",
+    "type": "scenario"
+  },
+  "rq-1e7e6aa4": {
+    "decl": "Scenario: Three-type table dispatches correctly per pair",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Three-type table dispatches correctly per pair",
     "type": "scenario"
   },
   "rq-1e7ef382": {
@@ -1067,6 +1081,20 @@
     ],
     "title": "MorseBondedState",
     "type": "api-item"
+  },
+  "rq-23fc870b": {
+    "decl": "Scenario: Mixed-type pair uses the off-diagonal parameter slot",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Mixed-type pair uses the off-diagonal parameter slot",
+    "type": "scenario"
+  },
+  "rq-244fe033": {
+    "decl": "Scenario: Per-pair-type cutoff zeroes only the pair whose cutoff it exceeds",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Per-pair-type cutoff zeroes only the pair whose cutoff it exceeds",
+    "type": "scenario"
   },
   "rq-247e3799": {
     "decl": "Scenario: dt = 0 leaves positions unchanged",
@@ -1628,7 +1656,7 @@
     "type": "scenario"
   },
   "rq-3766be01": {
-    "decl": "- `ParticleState` — host-side SoA state. All eleven per-particle arrays are",
+    "decl": "- `ParticleState` — host-side SoA state. All twelve per-particle arrays are",
     "file": "particle-state",
     "refs": [
       {
@@ -2042,6 +2070,13 @@
     "title": "Reject missing comment line",
     "type": "scenario"
   },
+  "rq-4a14aec3": {
+    "decl": "Scenario: Same-type pair uses the diagonal parameter slot",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Same-type pair uses the diagonal parameter slot",
+    "type": "scenario"
+  },
   "rq-4a3feaf7": {
     "decl": "### Missing nvcc",
     "file": "build-pipeline",
@@ -2292,6 +2327,13 @@
     "file": "io/log-output",
     "refs": [],
     "title": "KE of three particles is summed in particle order",
+    "type": "scenario"
+  },
+  "rq-55640f03": {
+    "decl": "Scenario: Different-type same-pair Newton's third law holds for symmetric tables",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Different-type same-pair Newton's third law holds for symmetric tables",
     "type": "scenario"
   },
   "rq-556b7c13": {
@@ -2588,7 +2630,7 @@
     "type": "scenario"
   },
   "rq-5e0598cb": {
-    "decl": "- `ParticleState::new(positions_x: Vec<f32>, positions_y: Vec<f32>, positions_z: Vec<f32>, velocities_x: Vec<f32>, velocities_y: Vec<f32>, velocities_z: Vec<f32>, masses: Vec<f32>, ids: Option<Vec<u32>>) -> Result<ParticleState, ParticleStateError>`",
+    "decl": "- `ParticleState::new(positions_x: Vec<f32>, positions_y: Vec<f32>, positions_z: Vec<f32>, velocities_x: Vec<f32>, velocities_y: Vec<f32>, velocities_z: Vec<f32>, masses: Vec<f32>, type_indices: Vec<u32>, ids: Option<Vec<u32>>) -> Result<ParticleState, ParticleStateError>`",
     "file": "particle-state",
     "refs": [
       {
@@ -2786,6 +2828,13 @@
     "refs": [],
     "title": "morse_bond_force",
     "type": "api-item"
+  },
+  "rq-66dfc50f": {
+    "decl": "Scenario: Reject a two-type config that omits a pair",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject a two-type config that omits a pair",
+    "type": "scenario"
   },
   "rq-66ec7ee4": {
     "decl": "Scenario: Velocity-Verlet lossless defaults to false when omitted",
@@ -3179,6 +3228,13 @@
     "title": "Validation order is lx then ly then lz",
     "type": "scenario"
   },
+  "rq-75446ddd": {
+    "decl": "Scenario: from_config builds a symmetric parameter table from an unordered pair_interactions",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "from_config builds a symmetric parameter table from an unordered pair_interactions",
+    "type": "scenario"
+  },
   "rq-75746f64": {
     "decl": "Scenario: neighbor_displacement_squared count equals one warm-up plus per-step launches",
     "file": "performance-analysis",
@@ -3308,6 +3364,13 @@
     "title": "PairBuffer",
     "type": "api-item"
   },
+  "rq-790c1f86": {
+    "decl": "Scenario: Reject when type_indices has the wrong length",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Reject when type_indices has the wrong length",
+    "type": "scenario"
+  },
   "rq-79291197": {
     "decl": "Scenario: kernel_start followed by kernel_stop and finalize records one sample",
     "file": "performance-analysis",
@@ -3427,6 +3490,14 @@
     "refs": [],
     "title": "Each slot writes into its own row of the slot-accumulator buffers",
     "type": "scenario"
+  },
+  "rq-7d92b551": {
+    "decl": "### Parameter-table symmetry",
+    "file": "forces/lj-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Parameter-table symmetry",
+    "type": "section"
   },
   "rq-7db97132": {
     "decl": "- `NeighborListState::rebuild(&mut self, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`",
@@ -5670,7 +5741,7 @@
     "type": "api-item"
   },
   "rq-d3a14184": {
-    "decl": "- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameters, exclusions: &DeviceExclusionList) -> Result<(), GpuError>`",
+    "decl": "- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList) -> Result<(), GpuError>`",
     "file": "forces/lj-pair-force",
     "refs": [
       {
@@ -5693,7 +5764,7 @@
     "type": "scenario"
   },
   "rq-d46a89d5": {
-    "decl": "- `lj_pair_force_neighbor(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameters, exclusions: &DeviceExclusionList, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>`",
+    "decl": "- `lj_pair_force_neighbor(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>`",
     "file": "forces/lj-pair-force",
     "refs": [
       {
@@ -5845,7 +5916,7 @@
     "type": "scenario"
   },
   "rq-dafe0fcb": {
-    "decl": "- `LennardJonesParameters` — host-side `Copy` struct carrying the three",
+    "decl": "- `LennardJonesParameterTable` — device-resident per-pair-type parameter",
     "file": "forces/lj-pair-force",
     "refs": [
       {
@@ -5853,7 +5924,7 @@
         "kind": "code"
       }
     ],
-    "title": "LennardJonesParameters",
+    "title": "LennardJonesParameterTable",
     "type": "api-item"
   },
   "rq-db78448e": {
@@ -6584,10 +6655,10 @@
     "type": "scenario"
   },
   "rq-f114c560": {
-    "decl": "Scenario: Reject multi-type configs in this feature version",
+    "decl": "Scenario: Accept a two-type config with a complete pair_interactions table",
     "file": "io/config-schema",
     "refs": [],
-    "title": "Reject multi-type configs in this feature version",
+    "title": "Accept a two-type config with a complete pair_interactions table",
     "type": "scenario"
   },
   "rq-f11e9d4c": {

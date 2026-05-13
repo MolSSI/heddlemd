@@ -305,13 +305,6 @@ Beyond per-field validation, the loader checks:
    every other supplied path (`PathCollision { kind_a, kind_b, path }`).
    The set of paths under check is `init`, `output.trajectory_path`,
    `output.log_path`, `output.timings_path`, and (when supplied) `bonds`.
-4. **Runner restriction (this feature only):** the number of declared
-   `[[particle_types]]` equals `1`. More than one type raises
-   `MultiTypeUnsupported { count }`. The schema permits multiple types so
-   the format is forward-compatible; the runtime restriction is enforced
-   because the present LJ kernel does not consume per-pair parameter
-   tables (see `lj-pair-force.md`). A future feature lifts the
-   restriction without a schema change.
 
 ## Feature API <!-- rq-110285ae -->
 
@@ -415,7 +408,6 @@ Beyond per-field validation, the loader checks:
   - `MissingPairInteraction { types: (String, String) }`.
   - `DuplicatePairInteraction { types: (String, String) }`.
   - `PathCollision { kind_a: PathRole, kind_b: PathRole, path: PathBuf }`.
-  - `MultiTypeUnsupported { count: usize }`.
   - `UnknownIntegratorKind { actual: String }` — `[integrator].kind` is
     not one of the supported strings.
   - `UnknownIntegratorField { kind: String, field: String }` — a field in
@@ -1066,14 +1058,23 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "neighbor_list.r_skin", reason: _ })
 
-  # --- Multi-type restriction ---
+  # --- Multi-type configs ---
 
   @rq-f114c560
-  Scenario: Reject multi-type configs in this feature version
+  Scenario: Accept a two-type config with a complete pair_interactions table
     Given a config with two declared types "Ar" and "Kr"
       and pair_interactions for all three unordered pairs ("Ar","Ar"), ("Ar","Kr"), ("Kr","Kr")
     When load_config is called
-    Then it returns Err(ConfigError::MultiTypeUnsupported { count: 2 })
+    Then it returns Ok(config)
+    And config.particle_types has length 2
+    And config.pair_interactions has length 3
+
+  @rq-66dfc50f
+  Scenario: Reject a two-type config that omits a pair
+    Given a config with two declared types "Ar" and "Kr"
+      and pair_interactions for ("Ar","Ar") and ("Kr","Kr") only
+    When load_config is called
+    Then it returns Err(ConfigError::MissingPairInteraction { types: ("Ar", "Kr") })
 
   # --- Output cadence semantics ---
 
