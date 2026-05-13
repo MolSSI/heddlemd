@@ -50,16 +50,24 @@ in `ForceField::new`.
 
 The runner's force evaluation does the following per step:
 
-1. **Contribution kernels.** For each slot, in slot order, invoke
-   `Potential::contribute`. The slot fills its private intermediate
-   buffers (e.g. a `PairBuffer` or a `BondPairBuffer`); the framework does
-   not inspect them.
-2. **Per-slot reductions.** For each slot, in slot order, invoke
+1. **Shared neighbor-list update.** If `ForceField::neighbor_list` is
+   `Some`, call its `pre_step` method (see `neighbor-list.md`). In
+   cell-list mode this runs the displacement-check kernel and rebuilds
+   the neighbor list when an atom's reference displacement exceeds
+   `r_skin / 2`. In trivial mode and when `neighbor_list` is `None`,
+   this step launches no kernels.
+2. **Contribution kernels.** For each slot, in slot order, invoke
+   `Potential::contribute`, passing a `ForceFieldContext` that carries
+   a reference to the shared `NeighborListState` (when present) and any
+   other shared services. The slot fills its private intermediate
+   buffers (e.g. a `PairBuffer` or a `BondPairBuffer`); the framework
+   does not inspect them.
+3. **Per-slot reductions.** For each slot, in slot order, invoke
    `Potential::reduce`, passing a `SlotForceView` that points to the
    slot's assigned row of the framework's flat slot-accumulator buffers.
    The reduction overwrites that row with the slot's per-particle
    reduced force contribution.
-3. **Combiner.** Run `accumulate_forces` once. The combiner reads the
+4. **Combiner.** Run `accumulate_forces` once. The combiner reads the
    flat slot-accumulator buffers and writes
    `forces_*[i] = sum over k in 0..num_slots of slot_forces_*[k * n + i]`.
    The summation is left-to-right in `k`; each thread handles one `i`.
@@ -114,10 +122,13 @@ slots must carry valid zeros in their row.)
   pub trait Potential: std::fmt::Debug + Send {
       fn label(&self) -> &'static str;
 
+      fn max_cutoff(&self) -> Option<f32>;
+
       fn contribute(
           &mut self,
           buffers: &ParticleBuffers,
           sim_box: &SimulationBox,
+          cx: &ForceFieldContext<'_>,
           timings: &mut Timings,
       ) -> Result<(), ForceFieldError>;
 
@@ -133,15 +144,41 @@ slots must carry valid zeros in their row.)
     example `"lennard_jones"`, `"morse_bonded"`) used in error messages
     and diagnostic output. Two slots in the same `ForceField` must have
     distinct labels.
+  - `max_cutoff` returns the maximum short-range interaction cutoff the
+    potential needs the shared neighbor list to cover, in the same units
+    as `SimulationBox`. Returns `None` if the potential does not consume
+    the neighbor list (bonded potentials, intramolecular potentials
+    keyed by index, etc.). `ForceField::new` aggregates these values to
+    size the shared `NeighborListState`.
   - `contribute` runs the slot's contribution kernel(s) against the
-    current `ParticleBuffers` and `SimulationBox`. Implementations may
-    read from `buffers` but must not write to it.
+    current `ParticleBuffers` and `SimulationBox`. The slot reads any
+    shared resources it needs from `cx`. Implementations may read from
+    `buffers` but must not write to it. Implementations that report
+    `max_cutoff() == Some(_)` may assume `cx.neighbor_list` is
+    `Some(_)`; implementations that report `None` are free to ignore
+    `cx.neighbor_list` (it may be `None` or `Some` depending on whether
+    any other slot needs the list).
   - `reduce` writes exactly `buffers.particle_count()` floats per axis
     into the slices referenced by `output`. After `reduce` returns,
     those slices hold the slot's per-particle force contribution.
 
   Implementations are responsible for emitting their own
   `KernelStage` start/stop events through `timings`.
+
+- `ForceFieldContext<'a>` — bundle of shared services that the framework <!-- inline --> <!-- rq-559783fe -->
+  exposes to every `contribute` call. Constructed by `ForceField::step`
+  for the duration of one step's contribution phase. Fields:
+
+  ```rust
+  pub struct ForceFieldContext<'a> {
+      pub neighbor_list: Option<&'a NeighborListState>,
+  }
+  ```
+
+  - `neighbor_list` is `Some(_)` when at least one slot reports
+    `max_cutoff() == Some(_)` at construction; otherwise `None`. New
+    shared services land here as additional fields without changing the
+    `Potential::contribute` signature.
 
 - `SlotForceView<'a>` — three exclusive references to per-axis output <!-- rq-304b191b -->
   slices, each of length `particle_count`. Constructed by `ForceField`
@@ -185,7 +222,7 @@ slots must carry valid zeros in their row.)
   bond list; see `morse-bonded.md`. Its reduction writes per-particle
   output into the `SlotForceView` it receives.
 
-- `ForceField` — handle owning the slot collection and the flat slot-accumulator buffers. <!-- rq-684a29f1 -->
+- `ForceField` — handle owning the slot collection, the flat slot-accumulator buffers, and the shared neighbor list. <!-- rq-684a29f1 -->
 
   Fields:
   - `device: Arc<CudaDevice>`
@@ -194,6 +231,9 @@ slots must carry valid zeros in their row.)
   - `slot_forces_x: CudaSlice<f32>` — length `slots.len() * N`.
   - `slot_forces_y: CudaSlice<f32>` — length `slots.len() * N`.
   - `slot_forces_z: CudaSlice<f32>` — length `slots.len() * N`.
+  - `neighbor_list: Option<NeighborListState>` — `Some(_)` when at
+    least one slot returns `max_cutoff() == Some(_)`, `None`
+    otherwise (bonded-only and zero-slot configurations).
 
 - `ForceFieldError` — error type. Variants: <!-- rq-a2e20b02 -->
   - `Gpu(GpuError)` — CUDA driver / kernel-launch failure from any
@@ -207,7 +247,7 @@ slots must carry valid zeros in their row.)
 
 ### Functions and methods <!-- rq-17abcb76 -->
 
-- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], bond_list: &BondList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>` <!-- rq-79938dbf -->
+- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], bond_list: &BondList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>` <!-- rq-79938dbf -->
   - Constructs the slot collection in fixed evaluation order:
     - Appends a `LennardJonesState` slot when `pair_interactions` is
       non-empty.
@@ -218,16 +258,31 @@ slots must carry valid zeros in their row.)
   - Allocates the three flat slot-accumulator buffers of length
     `slots.len() * particle_count` on `device`. When either factor is
     zero, the allocations are length-zero.
-  - The `LennardJones` slot is built in `AllPairs` or `CellList` mode
-    according to `neighbor_list_config`. In `CellList` mode, the
-    construction may return `ForceFieldError::NeighborList(_)` when the
-    box is too small for the requested cell layout.
+  - Builds the shared `NeighborListState`:
+    - Computes `r_cut = max(slot.max_cutoff() for slot in slots if
+      slot.max_cutoff().is_some())`. If no slot reports a cutoff,
+      `neighbor_list` is set to `None` and the framework launches no
+      neighbor-list kernels for the lifetime of the run.
+    - Otherwise consults `neighbor_list_config`:
+      - `CellList { max_neighbors, r_skin }`: calls
+        `NeighborListState::new_cell_list(device, *sim_box,
+        particle_count, r_cut, max_neighbors, r_skin as f32)`. May
+        return `ForceFieldError::NeighborList(_)` (e.g.
+        `BoxTooSmallForCells`).
+      - `AllPairs`: calls `NeighborListState::new_trivial(device,
+        *sim_box, particle_count)`.
   - Returns `ForceFieldError::DuplicateLabel(_)` if two slots end up
     with the same `label()`.
 
 - `ForceField::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings) -> Result<(), ForceFieldError>` <!-- rq-3579df3b -->
+  - When `self.neighbor_list` is `Some(nl)`, calls `nl.pre_step(buffers,
+    timings)` to run the displacement check and rebuild as needed.
+    When `None`, this step is skipped.
+  - Constructs a `ForceFieldContext { neighbor_list:
+    self.neighbor_list.as_ref() }` valid for the duration of the
+    contribution phase.
   - For each slot in `self.slots`, in order, calls
-    `slot.contribute(buffers, sim_box, timings)`.
+    `slot.contribute(buffers, sim_box, &cx, timings)`.
   - For each slot in `self.slots`, in order, calls `slot.reduce(view,
     timings)` where `view` is a `SlotForceView` pointing into the row
     `slot_index * particle_count .. (slot_index + 1) * particle_count`
@@ -475,4 +530,40 @@ Feature: Pluggable potential slot framework
     Given a ForceField with two slots whose slot_forces_* rows are known
     When force_field.step(...) is called twice on identical inputs
     Then the resulting forces_* agree byte-for-byte across the two calls
+
+  # --- Shared neighbor list ---
+
+  @rq-b33cf896
+  Scenario: ForceField with a short-range potential owns a shared neighbor list
+    Given a ForceField with one LennardJones slot in CellList mode
+    When ForceField::new completes
+    Then ForceField::neighbor_list is Some(_)
+    And the shared NeighborListState's max_neighbors equals the config value
+
+  @rq-433c972f
+  Scenario: ForceField with only a bonded potential owns no neighbor list
+    Given a ForceField with one MorseBonded slot (and no pair_interactions)
+    When ForceField::new completes
+    Then ForceField::neighbor_list is None
+
+  @rq-81e84c73
+  Scenario: ForceFieldContext exposes the shared neighbor list to contribute
+    Given a ForceField with a LennardJones slot in any mode
+    And a stub Potential whose contribute() records the value of cx.neighbor_list
+    When ForceField::step is called
+    Then the stub records `Some(_)` (the same NeighborListState reference the LJ slot uses)
+
+  @rq-e39d0ed8
+  Scenario: max_cutoff aggregation determines the neighbor-list radius
+    Given two short-range Potential implementations reporting max_cutoff() = Some(2.0) and Some(5.0)
+    And NeighborListConfig::CellList { max_neighbors, r_skin }
+    When ForceField::new constructs the shared neighbor list
+    Then the neighbor list's r_search equals 5.0 + r_skin
+
+  @rq-47540d14
+  Scenario: A bonded-only ForceField step launches no neighbor-list kernels
+    Given a ForceField whose only slot returns max_cutoff() = None
+    When ForceField::step is called
+    Then timings reports zero samples for KernelStage::NeighborDisplacementSquared
+    And timings reports zero samples for KernelStage::NeighborListBuild
 ```

@@ -19,7 +19,6 @@ pub enum KernelStage {
     VvKickDriftLossless,
     VvKickLossless,
     LjPairForce,
-    LjPairForceNeighbor,
     ReducePairForces,
     LangevinKickHalf,
     LangevinDriftHalf,
@@ -32,7 +31,7 @@ pub enum KernelStage {
     CopyPositionsIntoReference,
 }
 
-const N_KERNEL_STAGES: usize = 16;
+const N_KERNEL_STAGES: usize = 15;
 
 impl KernelStage {
     fn name(self) -> &'static str {
@@ -42,7 +41,6 @@ impl KernelStage {
             KernelStage::VvKickDriftLossless => "vv_kick_drift_lossless",
             KernelStage::VvKickLossless => "vv_kick_lossless",
             KernelStage::LjPairForce => "lj_pair_force",
-            KernelStage::LjPairForceNeighbor => "lj_pair_force_neighbor",
             KernelStage::ReducePairForces => "reduce_pair_forces",
             KernelStage::LangevinKickHalf => "langevin_kick_half",
             KernelStage::LangevinDriftHalf => "langevin_drift_half",
@@ -63,17 +61,16 @@ impl KernelStage {
             KernelStage::VvKickDriftLossless => 2,
             KernelStage::VvKickLossless => 3,
             KernelStage::LjPairForce => 4,
-            KernelStage::LjPairForceNeighbor => 5,
-            KernelStage::ReducePairForces => 6,
-            KernelStage::LangevinKickHalf => 7,
-            KernelStage::LangevinDriftHalf => 8,
-            KernelStage::LangevinOuStep => 9,
-            KernelStage::MorseBondForce => 10,
-            KernelStage::ReduceBondForces => 11,
-            KernelStage::AccumulateForces => 12,
-            KernelStage::NeighborDisplacementSquared => 13,
-            KernelStage::NeighborListBuild => 14,
-            KernelStage::CopyPositionsIntoReference => 15,
+            KernelStage::ReducePairForces => 5,
+            KernelStage::LangevinKickHalf => 6,
+            KernelStage::LangevinDriftHalf => 7,
+            KernelStage::LangevinOuStep => 8,
+            KernelStage::MorseBondForce => 9,
+            KernelStage::ReduceBondForces => 10,
+            KernelStage::AccumulateForces => 11,
+            KernelStage::NeighborDisplacementSquared => 12,
+            KernelStage::NeighborListBuild => 13,
+            KernelStage::CopyPositionsIntoReference => 14,
         }
     }
 }
@@ -327,7 +324,6 @@ impl Timings {
             KernelStage::CopyPositionsIntoReference,
             KernelStage::NeighborListBuild,
             KernelStage::LjPairForce,
-            KernelStage::LjPairForceNeighbor,
             KernelStage::ReducePairForces,
             KernelStage::MorseBondForce,
             KernelStage::ReduceBondForces,

@@ -96,10 +96,15 @@ impl Potential for MorseBondedState {
         "morse_bonded"
     }
 
+    fn max_cutoff(&self) -> Option<f32> {
+        None
+    }
+
     fn contribute(
         &mut self,
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
+        _cx: &crate::forces::ForceFieldContext<'_>,
         timings: &mut Timings,
     ) -> Result<(), ForceFieldError> {
         if self.bond_count == 0 {
@@ -125,6 +130,7 @@ impl Potential for MorseBondedState {
     fn reduce(
         &mut self,
         mut output: SlotForceView<'_>,
+        _cx: &crate::forces::ForceFieldContext<'_>,
         timings: &mut Timings,
     ) -> Result<(), ForceFieldError> {
         if self.particle_count == 0 {

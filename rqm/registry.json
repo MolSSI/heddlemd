@@ -544,7 +544,7 @@
     "type": "scenario"
   },
   "rq-14033af1": {
-    "decl": "- `NeighborListState::new(device: Arc<CudaDevice>, sim_box: SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>`",
+    "decl": "- `NeighborListState::new_cell_list(device: Arc<CudaDevice>, sim_box: SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>`",
     "file": "forces/neighbor-list",
     "refs": [
       {
@@ -1409,6 +1409,13 @@
     "title": "Reject non-orthorhombic lattice",
     "type": "scenario"
   },
+  "rq-2ed643ad": {
+    "decl": "Scenario: Two consumers share one neighbor list",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Two consumers share one neighbor list",
+    "type": "scenario"
+  },
   "rq-2f230ccb": {
     "decl": "- `BondTypeConfig` — tagged enum carrying the chosen bonded-potential",
     "file": "io/config-schema",
@@ -1453,6 +1460,13 @@
     ],
     "title": "SlotForceView",
     "type": "api-item"
+  },
+  "rq-30f85829": {
+    "decl": "Scenario: Trivial-mode state has no cell-list fields",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Trivial-mode state has no cell-list fields",
+    "type": "scenario"
   },
   "rq-312e5f8e": {
     "decl": "### Kernel stages (CUDA-event timed)",
@@ -1784,6 +1798,13 @@
     "title": "SimulationBox",
     "type": "api-item"
   },
+  "rq-3bc18e1a": {
+    "decl": "Scenario: Max cutoff is the largest reported by any consumer",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Max cutoff is the largest reported by any consumer",
+    "type": "scenario"
+  },
   "rq-3bd5336c": {
     "decl": "Scenario: Velocity generation row is absent when init supplies velocities",
     "file": "performance-analysis",
@@ -1936,6 +1957,13 @@
     "title": "Reject bonds = init",
     "type": "scenario"
   },
+  "rq-433c972f": {
+    "decl": "Scenario: ForceField with only a bonded potential owns no neighbor list",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "ForceField with only a bonded potential owns no neighbor list",
+    "type": "scenario"
+  },
   "rq-438b895b": {
     "decl": "## Build Script",
     "file": "build-pipeline",
@@ -2023,6 +2051,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "trajectory_write count equals frames written",
+    "type": "scenario"
+  },
+  "rq-47540d14": {
+    "decl": "Scenario: A bonded-only ForceField step launches no neighbor-list kernels",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "A bonded-only ForceField step launches no neighbor-list kernels",
     "type": "scenario"
   },
   "rq-47697f4a": {
@@ -2139,10 +2174,10 @@
     "type": "scenario"
   },
   "rq-4b40604b": {
-    "decl": "Scenario: Cell-list mode and all-pairs mode produce identical forces (within f32 tolerance)",
+    "decl": "Scenario: Cell-list mode and trivial mode produce identical forces (within f32 tolerance)",
     "file": "forces/neighbor-list",
     "refs": [],
-    "title": "Cell-list mode and all-pairs mode produce identical forces (within f32 tolerance)",
+    "title": "Cell-list mode and trivial mode produce identical forces (within f32 tolerance)",
     "type": "scenario"
   },
   "rq-4b4f85c7": {
@@ -2312,6 +2347,13 @@
     "title": "SimulationConfig",
     "type": "api-item"
   },
+  "rq-535c2b1e": {
+    "decl": "Scenario: LJ kernel reads the shared neighbor list from ForceFieldContext",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "LJ kernel reads the shared neighbor list from ForceFieldContext",
+    "type": "scenario"
+  },
   "rq-53ae77a4": {
     "decl": "Scenario: Displacement check on reference positions equal to current returns 0",
     "file": "forces/neighbor-list",
@@ -2347,6 +2389,13 @@
     "refs": [],
     "title": "Minimum image is applied",
     "type": "scenario"
+  },
+  "rq-559783fe": {
+    "decl": "- `ForceFieldContext<'a>` — bundle of shared services that the framework <!-- inline -->",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "ForceFieldContext",
+    "type": "api-item"
   },
   "rq-55f89976": {
     "decl": "Scenario: Reduction summation order is sorted bond index",
@@ -2902,7 +2951,7 @@
     "type": "scenario"
   },
   "rq-684a29f1": {
-    "decl": "- `ForceField` — handle owning the slot collection and the flat slot-accumulator buffers.",
+    "decl": "- `ForceField` — handle owning the slot collection, the flat slot-accumulator buffers, and the shared neighbor list.",
     "file": "forces/framework",
     "refs": [
       {
@@ -2941,7 +2990,7 @@
     "type": "section"
   },
   "rq-693ce6fa": {
-    "decl": "# Feature: Cell-List Neighbor List",
+    "decl": "# Feature: Shared Neighbor List Service",
     "file": "forces/neighbor-list",
     "refs": [
       {
@@ -2949,7 +2998,7 @@
         "kind": "code"
       }
     ],
-    "title": "Feature: Cell-List Neighbor List",
+    "title": "Feature: Shared Neighbor List Service",
     "type": "file"
   },
   "rq-696caf8e": {
@@ -3337,6 +3386,13 @@
     "title": "Langevin BAOAB rejects non-positive temperature",
     "type": "scenario"
   },
+  "rq-789fcec9": {
+    "decl": "Scenario: Trivial-mode contents",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Trivial-mode contents",
+    "type": "scenario"
+  },
   "rq-78d9fd1c": {
     "decl": "### PTX Module Loading",
     "file": "forces/lj-pair-force",
@@ -3384,7 +3440,7 @@
     "type": "scenario"
   },
   "rq-79938dbf": {
-    "decl": "- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], bond_list: &BondList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>`",
+    "decl": "- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], bond_list: &BondList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>`",
     "file": "forces/framework",
     "refs": [
       {
@@ -3608,6 +3664,13 @@
     "title": "Different seeds produce different velocities",
     "type": "scenario"
   },
+  "rq-81e84c73": {
+    "decl": "Scenario: ForceFieldContext exposes the shared neighbor list to contribute",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "ForceFieldContext exposes the shared neighbor list to contribute",
+    "type": "scenario"
+  },
   "rq-81f4ec9d": {
     "decl": "Scenario: Construct with matching arrays and default IDs",
     "file": "particle-state",
@@ -3641,6 +3704,13 @@
     ],
     "title": "CLI",
     "type": "section"
+  },
+  "rq-83312d09": {
+    "decl": "Scenario: Bonded-only ForceField builds no neighbor list",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Bonded-only ForceField builds no neighbor list",
+    "type": "scenario"
   },
   "rq-8373db52": {
     "decl": "Scenario: Reject unsupported Properties form",
@@ -3893,6 +3963,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Reject log_path = timings_path",
+    "type": "scenario"
+  },
+  "rq-9004fd7a": {
+    "decl": "Scenario: LennardJonesState reports its max cutoff to the framework",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "LennardJonesState reports its max cutoff to the framework",
     "type": "scenario"
   },
   "rq-9021ec4b": {
@@ -4936,6 +5013,13 @@
     "title": "Lossless run includes lossless kick rows and excludes lossy rows",
     "type": "scenario"
   },
+  "rq-b33cf896": {
+    "decl": "Scenario: ForceField with a short-range potential owns a shared neighbor list",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "ForceField with a short-range potential owns a shared neighbor list",
+    "type": "scenario"
+  },
   "rq-b39d3be7": {
     "decl": "Scenario: Displacement check uses minimum-image displacement",
     "file": "forces/neighbor-list",
@@ -5100,6 +5184,13 @@
     "file": "integration/velocity-verlet",
     "refs": [],
     "title": "vv_kick_drift_lossless does not modify forces, masses, or particle_ids",
+    "type": "scenario"
+  },
+  "rq-bb3773aa": {
+    "decl": "Scenario: Trivial-mode pre_step does no work",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Trivial-mode pre_step does no work",
     "type": "scenario"
   },
   "rq-bb807252": {
@@ -5527,6 +5618,13 @@
     "title": "minimum_image is per-axis independent",
     "type": "scenario"
   },
+  "rq-c96fd9d2": {
+    "decl": "- `NeighborListState::new_trivial(device: Arc<CudaDevice>, sim_box: SimulationBox, particle_count: usize) -> Result<NeighborListState, NeighborListError>` <!-- inline -->",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "NeighborListState",
+    "type": "api-item"
+  },
   "rq-c9da25a7": {
     "decl": "Scenario: Reduction does not modify positions, velocities, or masses",
     "file": "pair-reduction",
@@ -5746,7 +5844,7 @@
     "type": "api-item"
   },
   "rq-d3a14184": {
-    "decl": "- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList) -> Result<(), GpuError>`",
+    "decl": "- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>`",
     "file": "forces/lj-pair-force",
     "refs": [
       {
@@ -5767,22 +5865,6 @@
     "refs": [],
     "title": "Pair `between` normalisation when both types are declared",
     "type": "scenario"
-  },
-  "rq-d46a89d5": {
-    "decl": "- `lj_pair_force_neighbor(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>`",
-    "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "src/forces/lj.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "lj_pair_force_neighbor",
-    "type": "api-item"
   },
   "rq-d49c9093": {
     "decl": "- `SimulationBox::minimum_image(&self, displacement: [f32; 3]) -> [f32; 3]`",
@@ -6179,6 +6261,13 @@
     "title": "Field reference",
     "type": "section"
   },
+  "rq-e39d0ed8": {
+    "decl": "Scenario: max_cutoff aggregation determines the neighbor-list radius",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "max_cutoff aggregation determines the neighbor-list radius",
+    "type": "scenario"
+  },
   "rq-e409ce75": {
     "decl": "- `LogWriter::write_row(&mut self, step: u64, time: f64, kinetic_energy: f64, temperature: f64) -> Result<(), LogWriterError>`",
     "file": "io/log-output",
@@ -6384,6 +6473,13 @@
     "file": "io/init-state-file",
     "refs": [],
     "title": "Reject non-finite lattice value",
+    "type": "scenario"
+  },
+  "rq-e90c6feb": {
+    "decl": "Scenario: Trivial-mode and cell-list-mode forces agree within tolerance",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Trivial-mode and cell-list-mode forces agree within tolerance",
     "type": "scenario"
   },
   "rq-e93e7ad1": {
@@ -7036,6 +7132,13 @@
     "refs": [],
     "title": "neighbor_list rejects zero max_neighbors",
     "type": "scenario"
+  },
+  "rq-ff424773": {
+    "decl": "- `NeighborListMode` — discriminator. Variants: <!-- inline --> <!-- inline -->",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "NeighborListMode",
+    "type": "api-item"
   },
   "rq-ff46e833": {
     "decl": "## Per-Step Kernel Sequence",

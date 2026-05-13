@@ -20,22 +20,28 @@ pub use bonds::{
 };
 pub use lj::LennardJonesState;
 pub use morse::MorseBondedState;
-pub use neighbor_list::{NeighborListError, NeighborListState};
+pub use neighbor_list::{
+    CellListData, NeighborListError, NeighborListMode, NeighborListState,
+};
 
 // rq-67ebf3b1
 pub trait Potential: std::fmt::Debug + Send {
     fn label(&self) -> &'static str;
 
+    fn max_cutoff(&self) -> Option<f32>;
+
     fn contribute(
         &mut self,
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
+        cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
     ) -> Result<(), ForceFieldError>;
 
     fn reduce(
         &mut self,
         output: SlotForceView<'_>,
+        cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
     ) -> Result<(), ForceFieldError>;
 }
@@ -45,6 +51,11 @@ pub struct SlotForceView<'a> {
     pub x: CudaViewMut<'a, f32>,
     pub y: CudaViewMut<'a, f32>,
     pub z: CudaViewMut<'a, f32>,
+}
+
+// rq-9f7d4b40
+pub struct ForceFieldContext<'a> {
+    pub neighbor_list: Option<&'a NeighborListState>,
 }
 
 // rq-a2e20b02
@@ -95,6 +106,7 @@ pub struct ForceField {
     pub slot_forces_x: CudaSlice<f32>,
     pub slot_forces_y: CudaSlice<f32>,
     pub slot_forces_z: CudaSlice<f32>,
+    pub neighbor_list: Option<NeighborListState>,
     particle_count: usize,
 }
 
@@ -125,14 +137,17 @@ impl ForceField {
                 .iter()
                 .map(|p| p.cutoff as f32)
                 .fold(0.0_f32, f32::max);
+            let max_neighbors = match neighbor_list_config {
+                NeighborListConfig::AllPairs => particle_count as u32,
+                NeighborListConfig::CellList { max_neighbors, .. } => *max_neighbors,
+            };
             let lj_state = LennardJonesState::new(
                 device.clone(),
                 particle_count,
-                *sim_box,
                 params,
                 max_cutoff,
+                max_neighbors,
                 exclusion_list,
-                neighbor_list_config,
             )?;
             slots.push(Box::new(lj_state));
         }
@@ -157,12 +172,40 @@ impl ForceField {
         let slot_forces_y = device.alloc_zeros::<f32>(flat_len).map_err(GpuError::from)?;
         let slot_forces_z = device.alloc_zeros::<f32>(flat_len).map_err(GpuError::from)?;
 
+        // Build the shared NeighborListState when any slot reports a cutoff.
+        let aggregated_cutoff: Option<f32> = slots
+            .iter()
+            .filter_map(|s| s.max_cutoff())
+            .fold(None::<f32>, |acc, c| Some(acc.map_or(c, |a| a.max(c))));
+        let neighbor_list = if let Some(r_cut) = aggregated_cutoff {
+            match neighbor_list_config {
+                NeighborListConfig::CellList { max_neighbors, r_skin } => Some(
+                    NeighborListState::new_cell_list(
+                        device.clone(),
+                        *sim_box,
+                        particle_count,
+                        r_cut,
+                        *max_neighbors,
+                        *r_skin as f32,
+                    )?,
+                ),
+                NeighborListConfig::AllPairs => Some(NeighborListState::new_trivial(
+                    device.clone(),
+                    *sim_box,
+                    particle_count,
+                )?),
+            }
+        } else {
+            None
+        };
+
         Ok(ForceField {
             device,
             slots,
             slot_forces_x,
             slot_forces_y,
             slot_forces_z,
+            neighbor_list,
             particle_count,
         })
     }
@@ -179,8 +222,15 @@ impl ForceField {
             return Ok(());
         }
 
+        // Shared neighbor-list update (no-op in Trivial mode and when absent).
+        if let Some(nl) = self.neighbor_list.as_mut() {
+            nl.pre_step(buffers, timings)?;
+        }
+
+        let nl_ref = self.neighbor_list.as_ref();
         for slot in self.slots.iter_mut() {
-            slot.contribute(buffers, sim_box, timings)?;
+            let cx = ForceFieldContext { neighbor_list: nl_ref };
+            slot.contribute(buffers, sim_box, &cx, timings)?;
         }
 
         let num_slots = self.slots.len();
@@ -196,7 +246,8 @@ impl ForceField {
                 y: sfy.slice_mut(start..end),
                 z: sfz.slice_mut(start..end),
             };
-            slots[k].reduce(view, timings)?;
+            let cx = ForceFieldContext { neighbor_list: nl_ref };
+            slots[k].reduce(view, &cx, timings)?;
         }
 
         timings.kernel_start(KernelStage::AccumulateForces)?;

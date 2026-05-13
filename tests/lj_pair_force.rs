@@ -449,9 +449,13 @@ fn two_independent_runs_byte_identical() {
 // --- Slots beyond N untouched ---
 
 #[test] // rq-e564f8e2
-fn slots_with_k_geq_n_are_untouched() {
+fn slots_beyond_neighbor_counts_are_zeroed() {
+    // Under the unified-kernel design, pair_buffer.max_neighbors equals the
+    // shared neighbor list's max_neighbors. With a cell-list neighbor list
+    // where max_neighbors exceeds the actual neighbor count, the kernel
+    // zeros the unused slots so the segmented reduction sees a clean sum.
     let device = init_device().expect("init_device");
-    let sim_box = default_box();
+    let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
     let params = default_params();
     let table = table_from_scalar(&device, params);
     let n = 4;
@@ -463,18 +467,46 @@ fn slots_with_k_geq_n_are_untouched() {
     ];
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), n, 8).unwrap();
-    fill_pair_forces_with(&mut pair, 13.5);
+    // Cell-list neighbor list with max_neighbors=8 (exceeding any plausible
+    // per-particle neighbor count for N=4).
+    let max_neighbors: u32 = 8;
+    let mut nl = dynamics::forces::NeighborListState::new_cell_list(
+        device.clone(),
+        sim_box,
+        n,
+        params.cutoff,
+        max_neighbors,
+        0.3,
+    )
+    .unwrap();
+    let mut timings = dynamics::timings::Timings::new(device.clone()).unwrap();
+    nl.rebuild(&particle_buffers, &mut timings).unwrap();
+    let counts: Vec<u32> = device.dtoh_sync_copy(&nl.neighbor_counts).unwrap();
 
-    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
+    let mut pair = PairBuffer::new(device.clone(), n, max_neighbors).unwrap();
+    fill_pair_forces_with(&mut pair, 13.5);
+    let excl = empty_exclusions(&device, n);
+    dynamics::gpu::lj_pair_force(
+        &particle_buffers,
+        &mut pair,
+        &sim_box,
+        &table,
+        &excl.atom_excl_offsets,
+        &excl.atom_excl_partners,
+        &excl.atom_excl_scales,
+        &nl.neighbor_list,
+        &nl.neighbor_counts,
+    )
+    .unwrap();
     let (px, py, pz) = download_pair_forces(&pair);
 
+    // Slots in [neighbor_counts[i], max_neighbors) are zeroed by the kernel.
     for i in 0..n {
-        for k in n..8 {
-            let slot = i * 8 + k;
-            assert_eq!(px[slot], 13.5_f32, "px[{i},{k}] should be sentinel");
-            assert_eq!(py[slot], 13.5_f32, "py[{i},{k}] should be sentinel");
-            assert_eq!(pz[slot], 13.5_f32, "pz[{i},{k}] should be sentinel");
+        for k in counts[i] as usize..max_neighbors as usize {
+            let slot = i * max_neighbors as usize + k;
+            assert_eq!(px[slot], 0.0_f32, "px[{i},{k}] should be 0 (beyond count)");
+            assert_eq!(py[slot], 0.0_f32, "py[{i},{k}] should be 0 (beyond count)");
+            assert_eq!(pz[slot], 0.0_f32, "pz[{i},{k}] should be 0 (beyond count)");
         }
     }
 }
@@ -816,4 +848,113 @@ fn lj_param_table_from_config_builds_symmetric_table() {
     assert_eq!(sigma, vec![1.0_f32, 2.0, 2.0, 3.0]);
     assert_eq!(epsilon, vec![1.0_f32, 0.5, 0.5, 2.0]);
     assert_eq!(cutoff, vec![5.0_f32, 5.0, 5.0, 5.0]);
+}
+
+// --- Shared neighbor-list integration ---
+
+#[test] // rq-9004fd7a
+fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
+    // Build a ForceField with one LJ slot whose largest cutoff is 4.0.
+    use dynamics::forces::{
+        BondList, ExclusionList, ForceField, Potential,
+    };
+    use dynamics::io::config::{
+        NeighborListConfig, PairInteractionConfig, ParticleTypeConfig,
+    };
+    let device = init_device().unwrap();
+    let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }];
+    let pair_interactions = vec![PairInteractionConfig {
+        between: ("Ar".to_string(), "Ar".to_string()),
+        potential: "lennard-jones".to_string(),
+        sigma: 1.0,
+        epsilon: 1.0,
+        cutoff: 4.0,
+    }];
+    let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
+    let ff = ForceField::new(
+        device,
+        4,
+        &sim_box,
+        &particle_types,
+        &pair_interactions,
+        &[],
+        &BondList::empty(4),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    let lj_slot = ff.slots[0].as_ref();
+    assert_eq!(lj_slot.max_cutoff(), Some(4.0_f32));
+}
+
+#[test] // rq-e90c6feb
+fn trivial_mode_and_cell_list_mode_forces_agree() {
+    use dynamics::forces::{
+        BondList, ExclusionList, ForceField,
+    };
+    use dynamics::io::config::{
+        NeighborListConfig, PairInteractionConfig, ParticleTypeConfig,
+    };
+    let device = init_device().unwrap();
+    let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
+    let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }];
+    let pair_interactions = vec![PairInteractionConfig {
+        between: ("Ar".to_string(), "Ar".to_string()),
+        potential: "lennard-jones".to_string(),
+        sigma: 1.0,
+        epsilon: 1.0,
+        cutoff: 3.0,
+    }];
+    // 4 particles in a small cluster
+    let positions = [
+        [0.0_f32, 0.0, 0.0],
+        [1.2, 0.0, 0.0],
+        [0.0, 1.3, 0.0],
+        [0.4, 0.5, 0.7],
+    ];
+    let state_a = build_state_xyz(&positions);
+    let state_b = state_a.clone();
+    let mut buffers_a = ParticleBuffers::new(device.clone(), &state_a).unwrap();
+    let mut buffers_b = ParticleBuffers::new(device.clone(), &state_b).unwrap();
+    let mut t_a = dynamics::timings::Timings::new(device.clone()).unwrap();
+    let mut t_b = dynamics::timings::Timings::new(device.clone()).unwrap();
+
+    let mut ff_trivial = ForceField::new(
+        device.clone(),
+        4,
+        &sim_box,
+        &particle_types,
+        &pair_interactions,
+        &[],
+        &BondList::empty(4),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    let mut ff_cell = ForceField::new(
+        device.clone(),
+        4,
+        &sim_box,
+        &particle_types,
+        &pair_interactions,
+        &[],
+        &BondList::empty(4),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::CellList { max_neighbors: 32, r_skin: 0.4 },
+    )
+    .unwrap();
+    ff_trivial.step(&mut buffers_a, &sim_box, &mut t_a).unwrap();
+    ff_cell.step(&mut buffers_b, &sim_box, &mut t_b).unwrap();
+
+    let fx_a = device.dtoh_sync_copy(&buffers_a.forces_x).unwrap();
+    let fx_b = device.dtoh_sync_copy(&buffers_b.forces_x).unwrap();
+    for i in 0..4 {
+        let denom = fx_a[i].abs().max(1.0);
+        assert!(
+            (fx_a[i] - fx_b[i]).abs() / denom < 1.0e-4,
+            "i={i}: trivial {} vs cell {}",
+            fx_a[i],
+            fx_b[i]
+        );
+    }
 }

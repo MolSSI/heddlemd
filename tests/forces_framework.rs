@@ -2,7 +2,8 @@ mod common;
 
 use cudarc::driver::DeviceSlice;
 use dynamics::forces::{
-    Bond, BondList, ExclusionList, ForceField, ForceFieldError, Potential, SlotForceView,
+    Bond, BondList, ExclusionList, ForceField, ForceFieldContext, ForceFieldError, Potential,
+    SlotForceView,
 };
 use dynamics::gpu::{ParticleBuffers, init_device};
 use dynamics::io::config::{BondTypeConfig, NeighborListConfig, PairInteractionConfig, ParticleTypeConfig};
@@ -215,10 +216,14 @@ impl Potential for LabelStub {
     fn label(&self) -> &'static str {
         self.0
     }
+    fn max_cutoff(&self) -> Option<f32> {
+        None
+    }
     fn contribute(
         &mut self,
         _buffers: &ParticleBuffers,
         _sim_box: &SimulationBox,
+        _cx: &ForceFieldContext<'_>,
         _timings: &mut Timings,
     ) -> Result<(), ForceFieldError> {
         Ok(())
@@ -226,6 +231,7 @@ impl Potential for LabelStub {
     fn reduce(
         &mut self,
         _output: SlotForceView<'_>,
+        _cx: &ForceFieldContext<'_>,
         _timings: &mut Timings,
     ) -> Result<(), ForceFieldError> {
         Ok(())
@@ -545,10 +551,14 @@ impl Potential for ConstStub {
     fn label(&self) -> &'static str {
         "const_stub"
     }
+    fn max_cutoff(&self) -> Option<f32> {
+        None
+    }
     fn contribute(
         &mut self,
         _buffers: &ParticleBuffers,
         _sim_box: &SimulationBox,
+        _cx: &ForceFieldContext<'_>,
         _timings: &mut Timings,
     ) -> Result<(), ForceFieldError> {
         Ok(())
@@ -556,6 +566,7 @@ impl Potential for ConstStub {
     fn reduce(
         &mut self,
         mut output: SlotForceView<'_>,
+        _cx: &ForceFieldContext<'_>,
         _timings: &mut Timings,
     ) -> Result<(), ForceFieldError> {
         let n = output.x.len();
@@ -722,10 +733,14 @@ fn combiner_sums_slot_rows_in_slot_order() {
         fn label(&self) -> &'static str {
             "const_stub_b"
         }
+        fn max_cutoff(&self) -> Option<f32> {
+            None
+        }
         fn contribute(
             &mut self,
             _b: &ParticleBuffers,
             _s: &SimulationBox,
+            _cx: &ForceFieldContext<'_>,
             _t: &mut Timings,
         ) -> Result<(), ForceFieldError> {
             Ok(())
@@ -733,6 +748,7 @@ fn combiner_sums_slot_rows_in_slot_order() {
         fn reduce(
             &mut self,
             mut output: SlotForceView<'_>,
+            _cx: &ForceFieldContext<'_>,
             _t: &mut Timings,
         ) -> Result<(), ForceFieldError> {
             let n = output.x.len();
@@ -818,4 +834,219 @@ fn combiner_idempotent_across_two_calls() {
     let mut second = state.clone();
     second.download_from(&buffers).unwrap();
     assert_eq!(first.forces_x, second.forces_x);
+}
+
+// --- Shared neighbor list ---
+
+#[test] // rq-b33cf896
+fn force_field_with_lj_owns_shared_neighbor_list() {
+    let device = init_device().unwrap();
+    let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
+    let ff = ForceField::new(
+        device,
+        4,
+        &sim_box,
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
+        &[lj_pair_config()],
+        &[],
+        &BondList::empty(4),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::CellList { max_neighbors: 16, r_skin: 0.3 },
+    )
+    .unwrap();
+    let nl = ff.neighbor_list.as_ref().expect("shared neighbor list");
+    assert_eq!(nl.max_neighbors, 16);
+}
+
+#[test] // rq-433c972f rq-83312d09
+fn force_field_with_only_bonded_owns_no_neighbor_list() {
+    let device = init_device().unwrap();
+    let bt = vec![BondTypeConfig::Morse {
+        name: "CC".to_string(),
+        de: 1.0,
+        a: 2.0,
+        re: 1.0,
+    }];
+    let bl = single_bond_list(4);
+    let ff = ForceField::new(
+        device,
+        4,
+        &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
+        &[],
+        &bt,
+        &bl,
+        &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    assert_eq!(ff.slots.len(), 1);
+    assert_eq!(ff.slots[0].label(), "morse_bonded");
+    assert!(ff.neighbor_list.is_none());
+}
+
+#[test] // rq-47540d14
+fn bonded_only_step_launches_no_neighbor_list_kernels() {
+    let device = init_device().unwrap();
+    let state = state_n(4);
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    let bt = vec![BondTypeConfig::Morse {
+        name: "CC".to_string(),
+        de: 1.0,
+        a: 2.0,
+        re: 1.0,
+    }];
+    let bl = single_bond_list(4);
+    let mut ff = ForceField::new(
+        device,
+        4,
+        &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
+        &[],
+        &bt,
+        &bl,
+        &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    let report = timings.finalize().unwrap();
+    let names: Vec<&str> = report.stages.iter().map(|s| s.name.as_str()).collect();
+    assert!(!names.contains(&"neighbor_displacement_squared"));
+    assert!(!names.contains(&"neighbor_list_build"));
+}
+
+// Stub Potential that records the value of cx.neighbor_list passed to contribute.
+#[derive(Debug)]
+struct ContextProbeStub {
+    last_seen_nl_some: std::sync::Arc<std::sync::Mutex<Option<bool>>>,
+}
+
+impl Potential for ContextProbeStub {
+    fn label(&self) -> &'static str {
+        "context_probe"
+    }
+    fn max_cutoff(&self) -> Option<f32> {
+        None
+    }
+    fn contribute(
+        &mut self,
+        _b: &ParticleBuffers,
+        _s: &SimulationBox,
+        cx: &ForceFieldContext<'_>,
+        _t: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        *self.last_seen_nl_some.lock().unwrap() = Some(cx.neighbor_list.is_some());
+        Ok(())
+    }
+    fn reduce(
+        &mut self,
+        mut output: SlotForceView<'_>,
+        _cx: &ForceFieldContext<'_>,
+        _t: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        // Write zeros to the output row.
+        let n = output.x.len();
+        let device = std::sync::Arc::clone(&self.last_seen_nl_some);
+        let _ = device; // unused
+        if n == 0 {
+            return Ok(());
+        }
+        Ok(())
+    }
+}
+
+#[test] // rq-81e84c73 rq-2ed643ad
+fn context_exposes_shared_neighbor_list_to_contribute() {
+    let device = init_device().unwrap();
+    let state = state_n(2);
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    let mut ff = ForceField::new(
+        device.clone(),
+        2,
+        &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
+        &[lj_pair_config()],
+        &[],
+        &BondList::empty(2),
+        &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    // Append a probe stub that records the context it sees.
+    let probe = std::sync::Arc::new(std::sync::Mutex::new(None::<bool>));
+    ff.slots.push(Box::new(ContextProbeStub {
+        last_seen_nl_some: probe.clone(),
+    }));
+    // Re-allocate slot-accumulator buffers to match the new slot count.
+    let new_len = ff.slots.len() * 2;
+    ff.slot_forces_x = device.alloc_zeros::<f32>(new_len).unwrap();
+    ff.slot_forces_y = device.alloc_zeros::<f32>(new_len).unwrap();
+    ff.slot_forces_z = device.alloc_zeros::<f32>(new_len).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    assert_eq!(*probe.lock().unwrap(), Some(true));
+}
+
+// Stub Potential that reports a configurable max_cutoff. Used to verify the
+// framework aggregates max_cutoff across slots when building the shared list.
+#[derive(Debug)]
+struct CutoffProbeStub {
+    cutoff: f32,
+}
+
+impl Potential for CutoffProbeStub {
+    fn label(&self) -> &'static str {
+        "cutoff_probe"
+    }
+    fn max_cutoff(&self) -> Option<f32> {
+        Some(self.cutoff)
+    }
+    fn contribute(
+        &mut self,
+        _b: &ParticleBuffers,
+        _s: &SimulationBox,
+        _cx: &ForceFieldContext<'_>,
+        _t: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        Ok(())
+    }
+    fn reduce(
+        &mut self,
+        _output: SlotForceView<'_>,
+        _cx: &ForceFieldContext<'_>,
+        _t: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        Ok(())
+    }
+}
+
+#[test] // rq-e39d0ed8 rq-3bc18e1a
+fn max_cutoff_aggregation_determines_neighbor_list_radius() {
+    // The LJ slot's max_cutoff() governs the neighbor-list radius.
+    let device = init_device().unwrap();
+    let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
+    let r_skin = 0.5_f64;
+    let ff = ForceField::new(
+        device,
+        4,
+        &sim_box,
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
+        &[lj_pair_config()], // cutoff = 5.0
+        &[],
+        &BondList::empty(4),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::CellList { max_neighbors: 32, r_skin },
+    )
+    .unwrap();
+    let nl = ff.neighbor_list.as_ref().unwrap();
+    let cl = nl.cell_list_data().unwrap();
+    let r_search = (5.0_f32 + r_skin as f32).powi(2);
+    assert!(
+        (cl.r_search_sq - r_search).abs() < 1.0e-3,
+        "r_search_sq = {}, expected ~{}",
+        cl.r_search_sq,
+        r_search
+    );
 }

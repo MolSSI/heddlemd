@@ -50,7 +50,7 @@ pub fn init_device() -> Result<Arc<CudaDevice>, GpuError> {
     device.load_ptx(
         Ptx::from_src(kernels::PAIR_FORCE),
         "pair_force",
-        &["lj_pair_force", "lj_pair_force_neighbor"],
+        &["lj_pair_force"],
     )?;
     device.load_ptx(
         Ptx::from_src(kernels::LANGEVIN),

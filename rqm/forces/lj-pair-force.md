@@ -6,40 +6,39 @@ declares at least one `[[pair_interactions]]` entry. Its parameters come
 from the per-pair-type table built from the full
 `[[pair_interactions]]` array (see `io/config-schema.md`).
 
-The slot evaluates pair forces using one of two kernels, selected at
-runtime by the parsed `[neighbor_list].mode` config field:
+The slot evaluates pair forces with a single kernel that reads the
+shared `NeighborListState` owned by `ForceField` (see
+`neighbor-list.md`). Each `(i, k)` thread reads
+`neighbor_list[i * max_neighbors + k]` to find its partner `j`, looks
+up the per-pair-type parameters at `type_indices[i] * n_types +
+type_indices[j]`, applies the per-pair cutoff, and writes the force
+into the `PairBuffer` at slot `i * max_neighbors + k`. Work is O(N ·
+average neighbour count) when the shared list is in cell-list mode and
+O(N²) when it is in trivial mode (every particle's list contains every
+particle). The kernel is the same in both cases; only the contents and
+size of the shared list differ.
 
-- **`all-pairs`**: each `(i, k)` thread evaluates the pair directly,
-  applies the per-pair cutoff, and writes the force into the
-  `PairBuffer` at slot `i * max_neighbors + k`. Work is O(N²);
-  `max_neighbors == N` and `neighbor_counts[i] == N` for every atom.
-- **`cell-list`**: each `(i, k)` thread reads
-  `neighbor_list[i * max_neighbors + k]` to find its partner, then
-  evaluates the pair as in the all-pairs case. Work is O(N · average
-  neighbour count). The neighbor list is built with search radius
-  `max(cutoff_ij) + r_skin` so it includes every candidate for every
-  type pair; the kernel applies the per-pair cutoff at evaluation time.
-
-Both modes read the same per-particle `type_indices` buffer (see
-`particle-state.md`) and the same per-pair-type parameter arrays. Both
-modes read the same `ExclusionList` (see `bonds.md`) and apply per-pair
-scaling factors identically. Both modes write into the same `PairBuffer`
-shape and use the same `reduce_pair_forces` reduction (see
+The kernel reads the per-particle `type_indices` buffer (see
+`particle-state.md`) and the per-pair-type parameter arrays, applies
+the `ExclusionList` (see `bonds.md`) per-pair scaling, and writes into
+the `PairBuffer`. Reduction uses `reduce_pair_forces` (see
 `pair-reduction.md`).
 
 This file specifies `LennardJonesParameterTable` (the device-resident
-per-pair-type parameter table), the two CUDA kernels in
-`kernels/pair_force.cu`, and the Rust launch helpers that drive them.
+per-pair-type parameter table), the `lj_pair_force` CUDA kernel in
+`kernels/pair_force.cu`, and the Rust launch helper that drives it.
 
 ## Algorithm <!-- rq-6d209943 -->
 
-For each ordered pair `(i, k)` with `0 <= i < N` and `0 <= k < N` (or `0 <= k < neighbor_counts[i]` in cell-list mode):
+For each ordered `(i, k)` with `0 <= i < N` and `0 <= k <
+neighbor_counts[i]`:
 
 1. The pair-buffer slot is `slot = i * max_neighbors + k`.
-2. If `i == j` (where `j = k` in all-pairs mode and
-   `j = neighbor_list[slot]` in cell-list mode), write `0.0_f32` to
+2. Read `j = neighbor_list[slot]`. If `i == j`, write `0.0_f32` to
    `pair_forces_x[slot]`, `pair_forces_y[slot]`, and `pair_forces_z[slot]`
-   and stop.
+   and stop. (The kernel encounters `i == j` only when the shared
+   neighbor list is in trivial mode, which lists every particle
+   including self.)
 3. Resolve the per-pair-type parameter slot:
 
    ```
@@ -78,11 +77,11 @@ For each ordered pair `(i, k)` with `0 <= i < N` and `0 <= k < N` (or `0 <= k < 
    pair_forces_z[slot] = factor * dz
    ```
 
-The `(i, k)` slot holds the force on particle `i` due to particle `j` (with
-`j = k` in all-pairs mode and `j = neighbor_list[slot]` in cell-list
-mode). With `neighbor_counts[i] = N` for every `i` in all-pairs mode, the
-segmented reduction kernel sums all `N` slots per particle, including the
-self slot which contributes zero, and produces the correct net force.
+The `(i, k)` slot holds the force on particle `i` due to partner
+`j = neighbor_list[i * max_neighbors + k]`. The segmented reduction
+kernel sums `neighbor_counts[i]` slots per particle, including the
+self slot (which contributes zero) when present in trivial mode, and
+produces the correct net force.
 
 ### Parameter-table symmetry <!-- rq-7d92b551 -->
 
@@ -160,50 +159,12 @@ opposites.
 
 ### CUDA Kernels <!-- rq-4ddab3c7 -->
 
-`kernels/pair_force.cu` declares two `extern "C"` kernels.
+`kernels/pair_force.cu` declares one `extern "C"` kernel.
 
-#### `lj_pair_force` (all-pairs mode)
+#### `lj_pair_force`
 
 ```c
 extern "C" __global__ void lj_pair_force(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
-    const unsigned int *type_indices,
-    float *pair_forces_x,
-    float *pair_forces_y,
-    float *pair_forces_z,
-    unsigned int max_neighbors,
-    float lx, float ly, float lz,
-    unsigned int n_types,
-    const float *type_sigma,
-    const float *type_epsilon,
-    const float *type_cutoff,
-    const unsigned int *atom_excl_offsets,
-    const unsigned int *atom_excl_partners,
-    const float *atom_excl_scales,
-    unsigned int n);
-```
-
-Each thread maps to one ordered `(i, k)` pair via:
-
-```
-i = blockIdx.y * blockDim.y + threadIdx.y;
-k = blockIdx.x * blockDim.x + threadIdx.x;
-if (i >= n || k >= n) return;
-```
-
-The thread executes the algorithm above for its `(i, k)` pair, looking up
-`(σ, ε, cutoff)` at `type_indices[i] * n_types + type_indices[k]`. The
-kernel reads `positions_*`, `type_indices`, and the three `type_*`
-parameter arrays, and writes only `pair_forces_*` at the indices
-`i * max_neighbors + k` for `0 <= i < n` and `0 <= k < n`. Slots with
-`k >= n` are not written.
-
-#### `lj_pair_force_neighbor` (cell-list mode)
-
-```c
-extern "C" __global__ void lj_pair_force_neighbor(
     const float *positions_x,
     const float *positions_y,
     const float *positions_z,
@@ -249,14 +210,14 @@ unsigned int j = neighbor_list[i * max_neighbors + k];
 
 After resolving `j`, the per-pair-type parameter lookup at
 `type_indices[i] * n_types + type_indices[j]`, the per-pair force
-calculation, minimum-image, cutoff check, and exclusion-list scaling are
-identical to the all-pairs kernel. The force is written to
+calculation, minimum-image, cutoff check, and exclusion-list scaling
+proceed as in the *Algorithm* section above. The force is written to
 `pair_forces_*[i * max_neighbors + k]`.
 
-`neighbor_counts[i]` is provided by the cell-list pipeline (see
-`neighbor-list.md`); the segmented `reduce_pair_forces` kernel
-already accepts a `neighbor_counts` buffer, so no separate reduction
-path is required.
+`neighbor_list` and `neighbor_counts` are owned by the shared
+`NeighborListState` on `ForceField` (see `neighbor-list.md` and
+`framework.md`). The framework keeps the list current via its
+`pre_step` invocation before any slot's `contribute` runs.
 
 ### Exclusion scaling <!-- inline-edit --> <!-- rq-dddcbf07 -->
 
@@ -291,60 +252,53 @@ buffers; the kernel handles this case without a separate code path.
 
 ### PTX Module Loading <!-- rq-78d9fd1c -->
 
-`init_device()` loads the compiled `kernels/pair_force.cu` PTX with module
-name `"pair_force"` and registers function names `"lj_pair_force"` and
-`"lj_pair_force_neighbor"`, alongside the existing `fill`, `integrate`,
-and `reduce` modules.
+`init_device()` loads the compiled `kernels/pair_force.cu` PTX with
+module name `"pair_force"` and registers function name `"lj_pair_force"`,
+alongside the existing `fill`, `integrate`, and `reduce` modules.
 
 ### Rust Launcher <!-- rq-d6beaed7 -->
 
 A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
 
-- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList) -> Result<(), GpuError>` <!-- rq-d3a14184 -->
-  - Launches the `lj_pair_force` kernel with the per-pair force, simulation
-    box, parameter-table, type-index, and exclusion-list arguments
-    described above.
-  - 2D launch: `block_dim = (16, 16, 1)`, `grid_dim = (ceil(n / 16), ceil(n / 16), 1)`.
-  - When `particle_buffers.particle_count() == 0`, returns `Ok(())` without
-    launching a kernel.
-  - Returns the underlying `GpuError` if the kernel launch fails.
-  - Panics if the `"pair_force"` module is not loaded on the device, since
-    this indicates a programming error in `init_device()`.
-
-  The `DeviceExclusionList` argument is a host-side handle holding the three
-  device buffers `atom_excl_offsets`, `atom_excl_partners`, and
-  `atom_excl_scales`. It is constructed from the host-side `ExclusionList`
-  (see `bonds.md`) when the `MorseBonded` slot (or the `LennardJones` slot
-  on its own) is built. An empty exclusion list is represented by a
-  `DeviceExclusionList` whose offsets buffer has length `N + 1` filled with
-  zeros and whose partner / scale buffers have length zero.
-
-  The launcher trusts the caller for shape consistency: in debug builds it
-  asserts `pair_buffer.particle_count() == particle_buffers.particle_count()`,
-  `pair_buffer.max_neighbors() as usize >= particle_buffers.particle_count()`,
-  `exclusions.particle_count() == particle_buffers.particle_count()`, and
-  `params.sigma.len() == params.epsilon.len() == params.cutoff.len() ==
-  params.n_types as usize * params.n_types as usize`. Release builds skip
-  the asserts for parity with the other kernel launchers. The launcher
-  does not validate the σ/ε/cutoff entries themselves and does not check
-  any cutoff against `min(lx, ly, lz) / 2`.
-
-- `lj_pair_force_neighbor(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>` <!-- rq-d46a89d5 -->
-  - Launches the `lj_pair_force_neighbor` kernel.
-  - 2D launch: `block_dim = (16, 16, 1)`, `grid_dim = (ceil(n /
-    16), ceil(max_neighbors / 16), 1)` — the y dimension covers atoms,
-    the x dimension covers per-atom neighbour slots.
+- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>` <!-- rq-d3a14184 -->
+  - Launches the `lj_pair_force` kernel with the per-pair force,
+    simulation box, parameter-table, type-index, exclusion-list, and
+    shared neighbor-list arguments described above.
+  - 2D launch: `block_dim = (16, 16, 1)`, `grid_dim = (ceil(max_neighbors
+    / 16), ceil(n / 16), 1)` — the y dimension covers atoms, the x
+    dimension covers per-atom neighbour slots.
   - When `particle_buffers.particle_count() == 0`, returns `Ok(())`
-    without launching.
-  - Debug-asserts `neighbor_list.len() == n * pair_buffer.max_neighbors()`
-    and `neighbor_counts.len() == n` and the parameter-table size
-    invariants documented above.
-  - Panics if the `"pair_force"` module is not loaded.
+    without launching a kernel.
+  - Returns the underlying `GpuError` if the kernel launch fails.
+  - Panics if the `"pair_force"` module is not loaded on the device,
+    since this indicates a programming error in `init_device()`.
+
+  The `DeviceExclusionList` argument is a host-side handle holding the
+  three device buffers `atom_excl_offsets`, `atom_excl_partners`, and
+  `atom_excl_scales`. It is constructed from the host-side
+  `ExclusionList` (see `bonds.md`) when the `MorseBonded` slot (or the
+  `LennardJones` slot on its own) is built. An empty exclusion list is
+  represented by a `DeviceExclusionList` whose offsets buffer has length
+  `N + 1` filled with zeros and whose partner / scale buffers have
+  length zero.
+
+  The launcher trusts the caller for shape consistency: in debug builds
+  it asserts `pair_buffer.particle_count() ==
+  particle_buffers.particle_count()`,
+  `neighbor_list.len() == particle_buffers.particle_count() *
+  pair_buffer.max_neighbors() as usize`,
+  `neighbor_counts.len() == particle_buffers.particle_count()`,
+  `exclusions.particle_count() == particle_buffers.particle_count()`,
+  and `params.sigma.len() == params.epsilon.len() == params.cutoff.len()
+  == params.n_types as usize * params.n_types as usize`. Release builds
+  skip the asserts for parity with the other kernel launchers. The
+  launcher does not validate the σ/ε/cutoff entries themselves and does
+  not check any cutoff against `min(lx, ly, lz) / 2`.
 
 ## Launch Configuration <!-- rq-4fd872f5 -->
 
 - Block size: 16 × 16 × 1 = 256 threads per block.
-- Grid size: `(ceil(n / 16), ceil(n / 16), 1)` blocks.
+- Grid size: `(ceil(max_neighbors / 16), ceil(n / 16), 1)` blocks.
 - Shared memory: zero bytes.
 - Stream: the default stream carried by `pair_buffer.device`.
 
@@ -352,46 +306,41 @@ A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
 
 - `n` is `u32` on the device side. Particle counts up to `u32::MAX` are
   representable.
-- All-pairs mode is O(N²); intended for systems of at most a few thousand
-  particles. `max_neighbors == N` in this mode.
-- Cell-list mode is O(N · avg_neighbors). `max_neighbors` is a
-  user-supplied bound (typically 64–256); the launcher's debug assert
-  ensures the pair buffer is large enough.
+- When the shared `NeighborListState` is in `Trivial` mode, work is
+  O(N²) and `max_neighbors == N`; intended for systems of at most a few
+  thousand particles.
+- When the shared list is in `CellList` mode, work is O(N · avg_neighbors).
+  `max_neighbors` is a user-supplied bound (typically 64–256); the
+  launcher's debug assert ensures the pair buffer is large enough.
 
 ## Slot Integration <!-- rq-a5a919df -->
 
 `LennardJonesState` implements the `Potential` trait declared in
-`framework.md` with `label() == "lennard_jones"`. Construction selects one
-of two internal sub-states based on the parsed `NeighborListConfig` (see
-`neighbor-list.md`):
+`framework.md` with `label() == "lennard_jones"`. It is a single struct
+carrying the `PairBuffer` (sized to `max_neighbors` set by the shared
+`NeighborListState`), the `LennardJonesParameterTable`, and the
+`DeviceExclusionList`. It does not own a neighbor list: the framework's
+shared `NeighborListState` is passed in through `ForceFieldContext` at
+each `contribute` call.
 
-- `LennardJonesState::AllPairs` carries the `PairBuffer` with
-  `max_neighbors = N`, a `neighbor_counts` device slice with every entry
-  equal to `N`, the `LennardJonesParameterTable`, and the
-  `DeviceExclusionList`.
-- `LennardJonesState::CellList` carries the `PairBuffer` with
-  `max_neighbors` from the config, a `NeighborListState` (which owns the
-  `neighbor_list` / `neighbor_counts` / cell-list buffers and the
-  reference positions), the `LennardJonesParameterTable`, and the
-  `DeviceExclusionList`. The `NeighborListState`'s search radius is
-  `max(cutoff_ij) + r_skin` so it captures every candidate for every type
-  pair.
+The slot's `Potential` methods:
 
-The slot's `Potential` methods invoked by `ForceField::step`:
-
-- `contribute` (all-pairs): launch `lj_pair_force(particle_buffers,
-  &mut pair_buffer, sim_box, &params, &exclusions)`, bracketed by the
-  `LjPairForce` `KernelStage` labels.
-- `contribute` (cell-list): first call
-  `neighbor_list_state.pre_step(particle_buffers, timings)` to run the
-  displacement check and (when required) the rebuild. Then launch
-  `lj_pair_force_neighbor(particle_buffers, &mut pair_buffer, sim_box,
-  &params, &exclusions, &neighbor_list, &neighbor_counts)`, bracketed by
-  the `LjPairForceNeighbor` labels.
-- `reduce` (both modes): launch `reduce_pair_forces(&pair_buffer,
-  &neighbor_counts, &mut output.x, &mut output.y, &mut output.z, N)`
-  (see `pair-reduction.md`), writing into the `SlotForceView` supplied by
-  the framework, bracketed by the `ReducePairForces` stage labels.
+- `max_cutoff` returns `Some(max_cutoff)` where `max_cutoff` is the
+  largest cutoff across the slot's pair-interaction configuration,
+  captured at construction time as a plain `f32` field. The trait call
+  requires no device download.
+- `contribute(buffers, sim_box, cx, timings)` launches
+  `lj_pair_force(particle_buffers, &mut pair_buffer, sim_box,
+  &params, &exclusions, &cx.neighbor_list.expect("LJ requires shared
+  neighbor list").neighbor_list, &cx.neighbor_list.unwrap().neighbor_counts)`,
+  bracketed by the `LjPairForce` `KernelStage` labels. The framework
+  has already called `pre_step` on the shared neighbor list before
+  this method runs.
+- `reduce` launches `reduce_pair_forces(&pair_buffer, &neighbor_counts,
+  &mut output.x, &mut output.y, &mut output.z, N)` (see
+  `pair-reduction.md`), where `neighbor_counts` comes from the shared
+  `NeighborListState`. Writes into the `SlotForceView` supplied by the
+  framework, bracketed by the `ReducePairForces` stage labels.
 
 ## Out of Scope <!-- rq-9d7966f4 -->
 
@@ -679,4 +628,28 @@ Feature: Lennard-Jones O(N²) pair force kernel
     And sigma downloaded to the host equals [1.0, 2.0, 2.0, 3.0]
     And epsilon downloaded to the host equals [1.0, 0.5, 0.5, 2.0]
     And cutoff downloaded to the host equals [5.0, 5.0, 5.0, 5.0]
+
+  # --- Shared neighbor list ---
+
+  @rq-9004fd7a
+  Scenario: LennardJonesState reports its max cutoff to the framework
+    Given a LennardJonesState constructed from pair_interactions with cutoffs [5.0, 3.0, 4.0]
+    When max_cutoff() is queried
+    Then it returns Some(5.0)
+
+  @rq-535c2b1e
+  Scenario: LJ kernel reads the shared neighbor list from ForceFieldContext
+    Given a ForceField with one LennardJones slot in CellList mode
+    And a particle configuration that places two atoms within the LJ cutoff
+    When ForceField::step is called
+    Then ForceField::neighbor_list has been pre_step'd once before contribute runs
+    And the LJ kernel reads neighbor_list / neighbor_counts from the shared state
+
+  @rq-e90c6feb
+  Scenario: Trivial-mode and cell-list-mode forces agree within tolerance
+    Given two ForceField instances built from byte-identical particle states
+      one with NeighborListConfig::AllPairs (Trivial shared list)
+      and the other with NeighborListConfig::CellList { max_neighbors, r_skin }
+    When ForceField::step is called on each
+    Then forces_* agree componentwise within 1e-4 relative error
 ```

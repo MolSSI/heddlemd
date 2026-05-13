@@ -6,7 +6,7 @@
 use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice};
-use dynamics::forces::{DeviceExclusionList, ExclusionList};
+use dynamics::forces::{DeviceExclusionList, ExclusionList, NeighborListState};
 use dynamics::gpu::{
     GpuError, LennardJonesParameterTable, PairBuffer, ParticleBuffers, lj_pair_force,
     reduce_pair_forces,
@@ -38,9 +38,21 @@ pub fn single_type_lj_table(
     }
 }
 
-/// Backward-compatible wrapper around `lj_pair_force` that constructs an
-/// empty exclusion list on the fly. Mirrors the function's pre-framework
-/// signature so existing kernel-correctness tests can call it unchanged.
+/// Build a trivial-mode neighbor list (every particle's list = [0..N)).
+/// Used by tests that exercise the LJ kernel directly without going through
+/// the ForceField pipeline.
+pub fn trivial_neighbor_list(
+    device: &Arc<CudaDevice>,
+    sim_box: &SimulationBox,
+    particle_count: usize,
+) -> NeighborListState {
+    NeighborListState::new_trivial(device.clone(), *sim_box, particle_count)
+        .expect("trivial neighbor list")
+}
+
+/// Wrapper around `lj_pair_force` that constructs an empty exclusion list
+/// and a trivial neighbor list on the fly. Kernel-correctness tests use
+/// this to exercise the kernel without standing up a full ForceField.
 pub fn lj_pair_force_no_excl(
     particle_buffers: &ParticleBuffers,
     pair: &mut PairBuffer,
@@ -49,6 +61,7 @@ pub fn lj_pair_force_no_excl(
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     let excl = empty_exclusions(&particle_buffers.device, n);
+    let nl = trivial_neighbor_list(&particle_buffers.device, sim_box, n);
     lj_pair_force(
         particle_buffers,
         pair,
@@ -57,6 +70,8 @@ pub fn lj_pair_force_no_excl(
         &excl.atom_excl_offsets,
         &excl.atom_excl_partners,
         &excl.atom_excl_scales,
+        &nl.neighbor_list,
+        &nl.neighbor_counts,
     )
 }
 

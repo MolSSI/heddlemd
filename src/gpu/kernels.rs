@@ -213,75 +213,6 @@ pub fn lj_pair_force(
     atom_excl_offsets: &CudaSlice<u32>,
     atom_excl_partners: &CudaSlice<u32>,
     atom_excl_scales: &CudaSlice<f32>,
-) -> Result<(), GpuError> {
-    let n = particle_buffers.particle_count();
-    if n == 0 {
-        return Ok(());
-    }
-    debug_assert_eq!(pair_buffer.particle_count(), n);
-    debug_assert!(pair_buffer.max_neighbors() as usize >= n);
-    debug_assert_eq!(atom_excl_offsets.len(), n + 1);
-    debug_assert_eq!(atom_excl_partners.len(), atom_excl_scales.len());
-    let table_len = params.n_types as usize * params.n_types as usize;
-    debug_assert_eq!(params.sigma.len(), table_len);
-    debug_assert_eq!(params.epsilon.len(), table_len);
-    debug_assert_eq!(params.cutoff.len(), table_len);
-
-    let n_u32 = n as u32;
-    let max_neighbors = pair_buffer.max_neighbors();
-    let func = particle_buffers
-        .device
-        .get_func("pair_force", "lj_pair_force")
-        .expect("pair_force module is not loaded; init_device() must be called first");
-
-    let grid_side = n_u32.div_ceil(16);
-    let cfg = LaunchConfig {
-        grid_dim: (grid_side, grid_side, 1),
-        block_dim: (16, 16, 1),
-        shared_mem_bytes: 0,
-    };
-
-    let lengths = sim_box.lengths();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                &particle_buffers.type_indices,
-                &mut pair_buffer.pair_forces_x,
-                &mut pair_buffer.pair_forces_y,
-                &mut pair_buffer.pair_forces_z,
-                max_neighbors,
-                lengths[0],
-                lengths[1],
-                lengths[2],
-                params.n_types,
-                &params.sigma,
-                &params.epsilon,
-                &params.cutoff,
-                atom_excl_offsets,
-                atom_excl_partners,
-                atom_excl_scales,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
-}
-
-// rq-d46a89d5
-#[allow(clippy::too_many_arguments)]
-pub fn lj_pair_force_neighbor(
-    particle_buffers: &ParticleBuffers,
-    pair_buffer: &mut PairBuffer,
-    sim_box: &SimulationBox,
-    params: &LennardJonesParameterTable,
-    atom_excl_offsets: &CudaSlice<u32>,
-    atom_excl_partners: &CudaSlice<u32>,
-    atom_excl_scales: &CudaSlice<f32>,
     neighbor_list: &CudaSlice<u32>,
     neighbor_counts: &CudaSlice<u32>,
 ) -> Result<(), GpuError> {
@@ -303,7 +234,7 @@ pub fn lj_pair_force_neighbor(
     let n_u32 = n as u32;
     let func = particle_buffers
         .device
-        .get_func("pair_force", "lj_pair_force_neighbor")
+        .get_func("pair_force", "lj_pair_force")
         .expect("pair_force module is not loaded; init_device() must be called first");
 
     let grid_y = n_u32.div_ceil(16);

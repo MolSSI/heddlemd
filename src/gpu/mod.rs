@@ -8,7 +8,7 @@ pub use buffers::ParticleBuffers;
 pub use device::{GpuError, init_device};
 pub use kernels::{
     LennardJonesParameterTable, accumulate_forces, copy_positions_into_reference, lan_drift_half,
-    lan_ou_step, lj_pair_force, lj_pair_force_neighbor, morse_bond_force, neighbor_displacement_squared,
+    lan_ou_step, lj_pair_force, morse_bond_force, neighbor_displacement_squared,
     neighbor_list_build, reduce_bond_forces, reduce_pair_forces, vv_kick, vv_kick_drift,
     vv_kick_drift_lossless, vv_kick_lossless,
 };

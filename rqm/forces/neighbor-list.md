@@ -1,16 +1,32 @@
-# Feature: Cell-List Neighbor List <!-- rq-693ce6fa -->
+# Feature: Shared Neighbor List Service <!-- rq-693ce6fa -->
 
-The Lennard-Jones potential slot evaluates non-bonded forces in one of two
-algorithms. When the `[neighbor_list].mode` config field is `"cell-list"`
-(the default) it consumes a per-particle *neighbor list* built from a 3D
-spatial-hash cell list, restricting pair evaluation to particles within
-`r_cut + r_skin`. When the mode is `"all-pairs"` it evaluates every ordered
-`(i, k)` pair directly.
+The `ForceField` owns a single `NeighborListState` shared by every
+short-range pair potential in the slot list. Each consuming potential
+declares its maximum interaction cutoff through the `Potential` trait
+(see `framework.md`); the framework aggregates these into one search
+radius and builds a single neighbor list once per timestep cluster.
+Per-pair cutoff filtering happens inside each consumer's kernel — the
+shared list is sized to the largest cutoff so it captures every
+candidate for every consumer.
 
-This file specifies the cell-list infrastructure: the cell-list build, the
-per-particle neighbor-list build, the per-step displacement check that
-governs rebuilds, and the host-side rebuild policy. The all-pairs mode is
-described in `lj-pair-force.md`.
+The shared state exists in one of two construction modes determined by
+the parsed `NeighborListConfig`:
+
+- **`CellList`** — the spatial-hash-filtered list described in this
+  file. Built lazily on the first step and rebuilt on demand when an
+  atom's reference displacement exceeds `r_skin / 2`.
+- **`Trivial`** — every particle's neighbor list contains every
+  particle (including itself; consumers handle the self slot). The list
+  is materialised once at construction and never rebuilt. Used when the
+  config selects `[neighbor_list].mode = "all-pairs"`.
+
+When no slot in the `ForceField` reports a `max_cutoff` (a bonded-only
+or zero-slot configuration), no `NeighborListState` is built at all and
+no displacement-check kernel runs.
+
+This file specifies both modes, the per-step displacement check and
+rebuild policy that governs `CellList`, the trivial construction path
+used by `Trivial`, and the `NeighborListState` API the framework drives.
 
 ## Cell Layout <!-- rq-dfad7218 -->
 
@@ -154,19 +170,25 @@ Selected from the config's optional `[neighbor_list]` table; see
 - `mode: String` — `"cell-list"` (default) or `"all-pairs"`.
 - For `mode = "cell-list"`:
   - `max_neighbors: u64` — required. Strictly positive.
-  - `r_skin: f64` — optional, defaults to `0.3 * cutoff` where `cutoff`
-    is the maximum of all `pair_interactions[].cutoff` values (in v1
-    only one cutoff exists). Strictly positive.
+  - `r_skin: f64` — optional, defaults to `0.3 * max_cutoff` where
+    `max_cutoff` is the largest cutoff reported by any
+    neighbor-list-consuming potential. Strictly positive.
 
 Validation at config load:
 
 - `r_skin > 0` and finite.
 - `max_neighbors > 0`.
-- For every cutoff `c` in `pair_interactions`, the smallest box edge
-  satisfies `L_min >= 3 * (c + r_skin)`. The init file holds the box;
-  validation therefore happens after the init file is loaded and the
-  effective `r_skin` is known.
+- For every cutoff `c` reported by a consuming potential, the smallest
+  box edge satisfies `L_min >= 3 * (c + r_skin)`. The init file holds
+  the box; validation therefore happens after the init file is loaded
+  and the effective `r_skin` and `max_cutoff` are known.
 - In `mode = "all-pairs"`, `max_neighbors` and `r_skin` are rejected.
+
+The maximum cutoff used to size the neighbor list is the largest
+`max_cutoff` reported by any consuming potential in the `ForceField`
+slot list (see `framework.md`). With one or more consumers, the
+neighbor search radius is `max_cutoff + r_skin` in cell-list mode. The
+trivial mode does not use a search radius.
 
 ## Empty State <!-- rq-5cbab27f -->
 
@@ -177,12 +199,23 @@ When `particle_count == 0`:
 - The neighbor-list build kernel does not launch.
 - The displacement-check kernel does not launch.
 - `needs_rebuild` stays `true` forever but no rebuild work happens.
+- Trivial construction produces empty `neighbor_list` and
+  `neighbor_counts` buffers.
 
 When `particle_count == 1`:
 
 - Cell-list construction works trivially.
 - The neighbor-list build kernel runs for one atom and finds zero
   partners.
+- Trivial construction produces a single-element `neighbor_counts`
+  buffer with value `1`, and a single-element `neighbor_list` buffer
+  containing the self index `0`. Consumers handle the self slot at
+  evaluation time (the LJ kernel zeroes self slots).
+
+When the `ForceField` has zero neighbor-list-consuming potentials, no
+`NeighborListState` is built; the framework's `Option<NeighborListState>`
+is `None` and no displacement-check or build kernel runs over the
+lifetime of the run.
 
 ## Feature API <!-- rq-3e744fed -->
 
@@ -194,27 +227,41 @@ When `particle_count == 1`:
   - `CellList { max_neighbors: u32, r_skin: f64 }`
 
 - `NeighborListState` — host-side wrapper carrying the device buffers <!-- rq-b2d68288 -->
-  and parameters required to run the cell-list pipeline. Fields:
+  and parameters that make up the shared neighbor list. The state is in
+  one of two modes, fixed at construction.
+
+  Fields present in both modes:
   - `device: Arc<CudaDevice>`
+  - `sim_box: SimulationBox`
+  - `particle_count: usize`
+  - `max_neighbors: u32`
+  - `neighbor_list: CudaSlice<u32>` (length `N * max_neighbors`)
+  - `neighbor_counts: CudaSlice<u32>` (length `N`)
+  - `mode: NeighborListMode` — discriminator (`Trivial` or `CellList`).
+
+  Fields present only in `CellList` mode:
   - `n_cells: [u32; 3]`
   - `cell_size: [f32; 3]`
   - `n_cells_total: usize`
-  - `max_neighbors: u32`
   - `r_skin: f32`
   - `r_search_sq: f32` — pre-computed `(r_cut + r_skin)²` for the build
     kernel.
-  - `sim_box: SimulationBox`
   - `sorted_particle_ids: CudaSlice<u32>` (length `N`)
   - `cell_offsets: CudaSlice<u32>` (length `n_cells_total + 1`)
-  - `neighbor_list: CudaSlice<u32>` (length `N * max_neighbors`)
-  - `neighbor_counts: CudaSlice<u32>` (length `N`)
   - `reference_positions_x/y/z: CudaSlice<f32>` (length `N`)
   - `disp_sq: CudaSlice<f32>` (length `N`) — scratch for the
     displacement-check kernel.
   - `overflow_flag: CudaSlice<u32>` (length `1`) — set non-zero by the
     build kernel when any atom exceeds `max_neighbors`.
   - `needs_rebuild: bool` — initial value `true`.
-  - `particle_count: usize`
+
+  In `Trivial` mode the cell-list-specific fields are absent; the
+  `neighbor_list` and `neighbor_counts` buffers are populated once at
+  construction and never modified.
+
+- `NeighborListMode` — discriminator. Variants: <!-- inline --> <!-- inline --> <!-- rq-ff424773 -->
+  - `Trivial`
+  - `CellList`
 
 - `NeighborListError` — error type. Variants: <!-- rq-d8e4407a -->
   - `Gpu(GpuError)` — CUDA driver / kernel-launch failure.
@@ -228,29 +275,50 @@ When `particle_count == 1`:
 
 ### Functions <!-- rq-3553aab2 -->
 
-- `NeighborListState::new(device: Arc<CudaDevice>, sim_box: SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>` <!-- rq-14033af1 -->
+- `NeighborListState::new_cell_list(device: Arc<CudaDevice>, sim_box: SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>` <!-- rq-14033af1 -->
+  - Constructs a `CellList`-mode state.
   - Computes `n_cells` per axis from `floor(L_axis / (r_cut + r_skin))`.
   - Returns `BoxTooSmallForCells` if any axis has `n_cells < 3`.
-  - Allocates every device buffer described above. Reference positions
-    start at zero; `needs_rebuild` starts at `true`.
+  - Allocates every device buffer described in the *CellList*-mode field
+    list. Reference positions start at zero; `needs_rebuild` starts at
+    `true`.
+  - `r_cut` is the largest cutoff across every consumer of the shared
+    list; the framework computes this as the maximum of every
+    `Potential::max_cutoff()` value it observes.
+
+- `NeighborListState::new_trivial(device: Arc<CudaDevice>, sim_box: SimulationBox, particle_count: usize) -> Result<NeighborListState, NeighborListError>` <!-- inline --> <!-- rq-c96fd9d2 -->
+  - Constructs a `Trivial`-mode state.
+  - `max_neighbors = particle_count`.
+  - Allocates `neighbor_list` of length `particle_count *
+    particle_count` and `neighbor_counts` of length `particle_count`.
+  - Fills the buffers on the host so that
+    `neighbor_list[i * particle_count + k] == k` for every `(i, k)` in
+    `[0, particle_count) × [0, particle_count)`, and
+    `neighbor_counts[i] == particle_count` for every `i`. Uploads both
+    buffers once.
+  - When `particle_count == 0`, both buffers have length zero.
 
 - `NeighborListState::displacement_check(&mut self, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<f32, NeighborListError>` <!-- rq-c49b2fe6 -->
   - Launches the displacement-check kernel against current positions and
     the stored reference positions.
   - Downloads the per-atom buffer and returns the maximum displacement.
   - Returns `0.0` when `particle_count == 0`.
+  - Returns `0.0` when the state is in `Trivial` mode (no rebuild
+    machinery exists).
 
 - `NeighborListState::rebuild(&mut self, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>` <!-- rq-7db97132 -->
   - Performs the rebuild pipeline described in *Cell List Construction*
     and *Neighbor List Construction*. Updates reference positions.
   - Returns `NeighborListOverflow` when the build kernel set the
     overflow flag.
-  - Returns `Ok(())` immediately when `particle_count == 0`.
+  - Returns `Ok(())` immediately when `particle_count == 0` or when the
+    state is in `Trivial` mode.
 
 - `NeighborListState::pre_step(&mut self, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>` <!-- rq-1217c816 -->
-  - Glue method called by the LJ slot before each force evaluation.
-    Runs the displacement check (unless `needs_rebuild` is already set),
-    rebuilds if required, then returns.
+  - Called by `ForceField::step` once per timestep before any slot's
+    `contribute` runs. In `CellList` mode runs the displacement check
+    (unless `needs_rebuild` is already set) and rebuilds if required. In
+    `Trivial` mode is a no-op.
 
 ### CUDA Kernels <!-- rq-0469400b -->
 
@@ -366,9 +434,11 @@ guarantee; it only forfeits the canonical-ordering testability.
   implementation always sorts. A future feature may make it
   conditional, but doing so is its own decision-point and is not
   included here.
-- Reusing the cell list across multiple LJ-like potentials. v1 has one
-  cell-list-consuming slot; if a future slot reuses the infrastructure,
-  the `NeighborListState` ownership pattern will be refactored.
+- Per-pair-of-consumers cutoff filtering inside the neighbor-list build
+  itself. The shared list is built once at the maximum cutoff across
+  consumers; each consumer applies its own per-pair cutoff at force
+  evaluation time, reading the list but discarding entries beyond its
+  own cutoff.
 
 ---
 
@@ -520,7 +590,7 @@ Feature: Cell-list neighbor list
 
   @rq-4bc8028f
   Scenario: NeighborListState with particle_count = 0 builds successfully
-    When NeighborListState::new is called with particle_count = 0
+    When NeighborListState::new_cell_list is called with particle_count = 0
     Then it returns Ok(state)
     And rebuild is a no-op
     And displacement_check returns 0.0
@@ -534,9 +604,55 @@ Feature: Cell-list neighbor list
   # --- Determinism ---
 
   @rq-4b40604b
-  Scenario: Cell-list mode and all-pairs mode produce identical forces (within f32 tolerance)
-    Given two LennardJonesState instances with identical particle positions and parameters,
+  Scenario: Cell-list mode and trivial mode produce identical forces (within f32 tolerance)
+    Given two ForceField instances with identical particle positions and parameters,
       one in mode = "cell-list" with r_skin = 0.3, the other in mode = "all-pairs"
     When both run a single force evaluation
     Then the resulting forces_* agree componentwise within 1e-4 relative error
+
+  # --- Trivial mode ---
+
+  @rq-789fcec9
+  Scenario: Trivial-mode contents
+    Given a NeighborListState built via new_trivial with particle_count = 3
+    When neighbor_list and neighbor_counts are downloaded
+    Then neighbor_counts equals [3, 3, 3]
+    And neighbor_list equals [0, 1, 2, 0, 1, 2, 0, 1, 2]
+
+  @rq-bb3773aa
+  Scenario: Trivial-mode pre_step does no work
+    Given a NeighborListState in Trivial mode
+    When pre_step is called
+    Then timings report zero samples for KernelStage::NeighborDisplacementSquared
+    And timings report zero samples for KernelStage::NeighborListBuild
+
+  @rq-30f85829
+  Scenario: Trivial-mode state has no cell-list fields
+    Given a NeighborListState built via new_trivial
+    Then state.mode equals NeighborListMode::Trivial
+    And the cell-list-specific buffers (sorted_particle_ids, cell_offsets,
+      reference_positions_*, disp_sq, overflow_flag) are absent
+
+  # --- Shared-service ownership ---
+
+  @rq-2ed643ad
+  Scenario: Two consumers share one neighbor list
+    Given a ForceField containing two short-range Potential implementations
+      with max_cutoff() reporting 5.0 and 3.0 respectively
+    When ForceField::new builds the shared neighbor list in cell-list mode
+    Then the neighbor list is built with r_search = 5.0 + r_skin
+    And both potentials' contribute() receive the same NeighborListState reference
+
+  @rq-83312d09
+  Scenario: Bonded-only ForceField builds no neighbor list
+    Given a ForceField whose only slot returns max_cutoff() = None
+    When ForceField::new completes
+    Then ForceField::neighbor_list is None
+    And ForceField::step launches no displacement-check kernel and no neighbor-list-build kernel
+
+  @rq-3bc18e1a
+  Scenario: Max cutoff is the largest reported by any consumer
+    Given a ForceField with three short-range slots reporting max_cutoffs 2.0, 4.5, 4.5
+    When the framework computes the neighbor-list search radius
+    Then r_search equals 4.5 + r_skin
 ```

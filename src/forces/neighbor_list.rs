@@ -52,33 +52,64 @@ impl From<GpuError> for NeighborListError {
     }
 }
 
-// rq-b2d68288
+// rq-77754ad1
 #[derive(Debug)]
-pub struct NeighborListState {
-    pub device: Arc<CudaDevice>,
+pub enum NeighborListMode {
+    Trivial,
+    CellList(CellListData),
+}
+
+// rq-77754ad1
+#[derive(Debug)]
+pub struct CellListData {
     pub n_cells: [u32; 3],
     pub cell_size: [f32; 3],
     pub n_cells_total: usize,
-    pub max_neighbors: u32,
     pub r_skin: f32,
     pub r_search_sq: f32,
-    pub sim_box: SimulationBox,
     pub sorted_particle_ids: CudaSlice<u32>,
     pub cell_offsets: CudaSlice<u32>,
-    pub neighbor_list: CudaSlice<u32>,
-    pub neighbor_counts: CudaSlice<u32>,
     pub reference_positions_x: CudaSlice<f32>,
     pub reference_positions_y: CudaSlice<f32>,
     pub reference_positions_z: CudaSlice<f32>,
     pub disp_sq: CudaSlice<f32>,
     pub overflow_flag: CudaSlice<u32>,
     pub needs_rebuild: bool,
+}
+
+// rq-b2d68288
+#[derive(Debug)]
+pub struct NeighborListState {
+    pub device: Arc<CudaDevice>,
+    pub sim_box: SimulationBox,
     pub particle_count: usize,
+    pub max_neighbors: u32,
+    pub neighbor_list: CudaSlice<u32>,
+    pub neighbor_counts: CudaSlice<u32>,
+    pub mode: NeighborListMode,
 }
 
 impl NeighborListState {
+    /// Borrow the cell-list-specific data; returns `None` when the state is
+    /// in `Trivial` mode.
+    pub fn cell_list_data(&self) -> Option<&CellListData> {
+        match &self.mode {
+            NeighborListMode::Trivial => None,
+            NeighborListMode::CellList(cl) => Some(cl),
+        }
+    }
+
+    /// Mutable borrow of the cell-list-specific data; returns `None` when
+    /// the state is in `Trivial` mode.
+    pub fn cell_list_data_mut(&mut self) -> Option<&mut CellListData> {
+        match &mut self.mode {
+            NeighborListMode::Trivial => None,
+            NeighborListMode::CellList(cl) => Some(cl),
+        }
+    }
+
     // rq-14033af1
-    pub fn new(
+    pub fn new_cell_list(
         device: Arc<CudaDevice>,
         sim_box: SimulationBox,
         particle_count: usize,
@@ -114,8 +145,6 @@ impl NeighborListState {
         let sorted_particle_ids = device
             .alloc_zeros::<u32>(particle_count.max(1))
             .map_err(GpuError::from)?;
-        // We allocate at least 1 to keep cudarc happy with zero-length buffers in
-        // some branches; we'll always use exactly `particle_count` entries.
         let cell_offsets = device
             .alloc_zeros::<u32>(n_cells_total + 1)
             .map_err(GpuError::from)?;
@@ -142,33 +171,71 @@ impl NeighborListState {
 
         Ok(NeighborListState {
             device,
-            n_cells,
-            cell_size,
-            n_cells_total,
-            max_neighbors,
-            r_skin,
-            r_search_sq,
             sim_box,
-            sorted_particle_ids,
-            cell_offsets,
+            particle_count,
+            max_neighbors,
             neighbor_list,
             neighbor_counts,
-            reference_positions_x,
-            reference_positions_y,
-            reference_positions_z,
-            disp_sq,
-            overflow_flag,
-            needs_rebuild: true,
-            particle_count,
+            mode: NeighborListMode::CellList(CellListData {
+                n_cells,
+                cell_size,
+                n_cells_total,
+                r_skin,
+                r_search_sq,
+                sorted_particle_ids,
+                cell_offsets,
+                reference_positions_x,
+                reference_positions_y,
+                reference_positions_z,
+                disp_sq,
+                overflow_flag,
+                needs_rebuild: true,
+            }),
         })
     }
 
-    pub fn r_skin(&self) -> f32 {
-        self.r_skin
-    }
+    // rq-77754ad1
+    pub fn new_trivial(
+        device: Arc<CudaDevice>,
+        sim_box: SimulationBox,
+        particle_count: usize,
+    ) -> Result<Self, NeighborListError> {
+        let max_neighbors = particle_count as u32;
+        // Populate neighbor_list[i * N + k] = k and neighbor_counts[i] = N.
+        let nl_len = particle_count * particle_count;
+        let nl_host: Vec<u32> = if nl_len == 0 {
+            Vec::new()
+        } else {
+            let mut v = Vec::with_capacity(nl_len);
+            for _ in 0..particle_count {
+                for k in 0..particle_count {
+                    v.push(k as u32);
+                }
+            }
+            v
+        };
+        let counts_host: Vec<u32> = vec![particle_count as u32; particle_count];
 
-    pub fn max_neighbors(&self) -> u32 {
-        self.max_neighbors
+        let neighbor_list = if nl_host.is_empty() {
+            device.alloc_zeros::<u32>(0).map_err(GpuError::from)?
+        } else {
+            device.htod_sync_copy(&nl_host).map_err(GpuError::from)?
+        };
+        let neighbor_counts = if counts_host.is_empty() {
+            device.alloc_zeros::<u32>(0).map_err(GpuError::from)?
+        } else {
+            device.htod_sync_copy(&counts_host).map_err(GpuError::from)?
+        };
+
+        Ok(NeighborListState {
+            device,
+            sim_box,
+            particle_count,
+            max_neighbors,
+            neighbor_list,
+            neighbor_counts,
+            mode: NeighborListMode::Trivial,
+        })
     }
 
     // rq-c49b2fe6
@@ -180,25 +247,28 @@ impl NeighborListState {
         if self.particle_count == 0 {
             return Ok(0.0);
         }
+        let cl = match &mut self.mode {
+            NeighborListMode::Trivial => return Ok(0.0),
+            NeighborListMode::CellList(cl) => cl,
+        };
         timings
             .kernel_start(KernelStage::NeighborDisplacementSquared)
             .map_err(map_timings_err)?;
         neighbor_displacement_squared(
             buffers,
-            &self.reference_positions_x,
-            &self.reference_positions_y,
-            &self.reference_positions_z,
+            &cl.reference_positions_x,
+            &cl.reference_positions_y,
+            &cl.reference_positions_z,
             &self.sim_box,
-            &mut self.disp_sq,
+            &mut cl.disp_sq,
         )?;
         timings
             .kernel_stop(KernelStage::NeighborDisplacementSquared)
             .map_err(map_timings_err)?;
 
-        // Download disp_sq and compute the max displacement on the host.
         let host: Vec<f32> = self
             .device
-            .dtoh_sync_copy(&self.disp_sq)
+            .dtoh_sync_copy(&cl.disp_sq)
             .map_err(GpuError::from)?;
         let mut max_sq: f64 = 0.0;
         for &v in host[..self.particle_count].iter() {
@@ -217,7 +287,12 @@ impl NeighborListState {
         timings: &mut Timings,
     ) -> Result<(), NeighborListError> {
         if self.particle_count == 0 {
-            self.needs_rebuild = false;
+            if let NeighborListMode::CellList(cl) = &mut self.mode {
+                cl.needs_rebuild = false;
+            }
+            return Ok(());
+        }
+        if matches!(self.mode, NeighborListMode::Trivial) {
             return Ok(());
         }
         let started = Instant::now();
@@ -246,89 +321,91 @@ impl NeighborListState {
             .dtoh_sync_copy(&buffers.positions_z)
             .map_err(GpuError::from)?;
 
-        // Compute (cell_index, particle_id) pairs and stable-sort.
-        let mut entries: Vec<(u32, u32)> = Vec::with_capacity(n);
         let lengths = self.sim_box.lengths();
+        let sim_box = self.sim_box;
+        let max_neighbors = self.max_neighbors;
+
+        let cl = match &mut self.mode {
+            NeighborListMode::Trivial => return Ok(()),
+            NeighborListMode::CellList(cl) => cl,
+        };
+
+        let mut entries: Vec<(u32, u32)> = Vec::with_capacity(n);
         for i in 0..n {
-            let cx = cell_index_axis(pos_x[i], lengths[0], self.cell_size[0], self.n_cells[0]);
-            let cy = cell_index_axis(pos_y[i], lengths[1], self.cell_size[1], self.n_cells[1]);
-            let cz = cell_index_axis(pos_z[i], lengths[2], self.cell_size[2], self.n_cells[2]);
-            let c = (cx * self.n_cells[1] + cy) * self.n_cells[2] + cz;
+            let cx = cell_index_axis(pos_x[i], lengths[0], cl.cell_size[0], cl.n_cells[0]);
+            let cy = cell_index_axis(pos_y[i], lengths[1], cl.cell_size[1], cl.n_cells[1]);
+            let cz = cell_index_axis(pos_z[i], lengths[2], cl.cell_size[2], cl.n_cells[2]);
+            let c = (cx * cl.n_cells[1] + cy) * cl.n_cells[2] + cz;
             entries.push((c, i as u32));
         }
         entries.sort_by_key(|&(c, pid)| (c, pid));
 
         let sorted_ids: Vec<u32> = entries.iter().map(|&(_, pid)| pid).collect();
-        let mut counts: Vec<u32> = vec![0u32; self.n_cells_total];
+        let mut counts: Vec<u32> = vec![0u32; cl.n_cells_total];
         for &(c, _) in &entries {
             counts[c as usize] += 1;
         }
-        let mut offsets: Vec<u32> = vec![0u32; self.n_cells_total + 1];
-        for c in 0..self.n_cells_total {
+        let mut offsets: Vec<u32> = vec![0u32; cl.n_cells_total + 1];
+        for c in 0..cl.n_cells_total {
             offsets[c + 1] = offsets[c] + counts[c];
         }
 
-        // Upload sorted_particle_ids and cell_offsets.
         self.device
-            .htod_sync_copy_into(&sorted_ids, &mut self.sorted_particle_ids)
+            .htod_sync_copy_into(&sorted_ids, &mut cl.sorted_particle_ids)
             .map_err(GpuError::from)?;
         self.device
-            .htod_sync_copy_into(&offsets, &mut self.cell_offsets)
+            .htod_sync_copy_into(&offsets, &mut cl.cell_offsets)
             .map_err(GpuError::from)?;
 
-        // Reset overflow flag.
         let zero: [u32; 1] = [0];
         self.device
-            .htod_sync_copy_into(&zero, &mut self.overflow_flag)
+            .htod_sync_copy_into(&zero, &mut cl.overflow_flag)
             .map_err(GpuError::from)?;
 
-        // Launch the build kernel.
         timings
             .kernel_start(KernelStage::NeighborListBuild)
             .map_err(map_timings_err)?;
         neighbor_list_build(
             buffers,
-            &self.sorted_particle_ids,
-            &self.cell_offsets,
-            &self.sim_box,
-            self.n_cells,
-            self.cell_size,
-            self.r_search_sq,
-            self.max_neighbors,
+            &cl.sorted_particle_ids,
+            &cl.cell_offsets,
+            &sim_box,
+            cl.n_cells,
+            cl.cell_size,
+            cl.r_search_sq,
+            max_neighbors,
             &mut self.neighbor_list,
             &mut self.neighbor_counts,
-            &mut self.overflow_flag,
+            &mut cl.overflow_flag,
         )?;
         timings
             .kernel_stop(KernelStage::NeighborListBuild)
             .map_err(map_timings_err)?;
 
-        // Check overflow flag.
         let flag: Vec<u32> = self
             .device
-            .dtoh_sync_copy(&self.overflow_flag)
+            .dtoh_sync_copy(&cl.overflow_flag)
             .map_err(GpuError::from)?;
         if flag[0] != 0 {
             return Err(NeighborListError::NeighborListOverflow {
-                max: self.max_neighbors,
+                max: max_neighbors,
             });
         }
 
-        // Refresh reference positions.
         timings
             .kernel_start(KernelStage::CopyPositionsIntoReference)
             .map_err(map_timings_err)?;
         copy_positions_into_reference(
             buffers,
-            &mut self.reference_positions_x,
-            &mut self.reference_positions_y,
-            &mut self.reference_positions_z,
+            &mut cl.reference_positions_x,
+            &mut cl.reference_positions_y,
+            &mut cl.reference_positions_z,
         )?;
         timings
             .kernel_stop(KernelStage::CopyPositionsIntoReference)
             .map_err(map_timings_err)?;
 
-        self.needs_rebuild = false;
+        cl.needs_rebuild = false;
         Ok(())
     }
 
@@ -341,13 +418,21 @@ impl NeighborListState {
         if self.particle_count == 0 {
             return Ok(());
         }
-        if !self.needs_rebuild {
+        let (needs_rebuild, r_skin) = match &self.mode {
+            NeighborListMode::Trivial => return Ok(()),
+            NeighborListMode::CellList(cl) => (cl.needs_rebuild, cl.r_skin),
+        };
+        let mut rebuild_required = needs_rebuild;
+        if !rebuild_required {
             let max_disp = self.displacement_check(buffers, timings)?;
-            if max_disp > self.r_skin * 0.5 {
-                self.needs_rebuild = true;
+            if max_disp > r_skin * 0.5 {
+                rebuild_required = true;
             }
         }
-        if self.needs_rebuild {
+        if rebuild_required {
+            if let NeighborListMode::CellList(cl) = &mut self.mode {
+                cl.needs_rebuild = true;
+            }
             self.rebuild(buffers, timings)?;
         }
         Ok(())
