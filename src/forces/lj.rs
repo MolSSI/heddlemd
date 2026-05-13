@@ -11,7 +11,7 @@ use crate::timings::{KernelStage, Timings};
 
 use super::bonds::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::NeighborListError;
-use super::{ForceFieldContext, ForceFieldError, Potential, SlotForceView};
+use super::{ForceFieldContext, ForceFieldError, Potential, SlotOutputView};
 
 // rq-af2d1628
 #[derive(Debug)]
@@ -91,7 +91,7 @@ impl Potential for LennardJonesState {
 
     fn reduce(
         &mut self,
-        mut output: SlotForceView<'_>,
+        mut output: SlotOutputView<'_>,
         cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
     ) -> Result<(), ForceFieldError> {
@@ -105,9 +105,11 @@ impl Potential for LennardJonesState {
         reduce_pair_forces(
             &self.pair_buffer,
             &nl.neighbor_counts,
-            &mut output.x,
-            &mut output.y,
-            &mut output.z,
+            &mut output.force_x,
+            &mut output.force_y,
+            &mut output.force_z,
+            &mut output.energy,
+            &mut output.virial,
             self.particle_count,
         )?;
         timings.kernel_stop(KernelStage::ReducePairForces)?;

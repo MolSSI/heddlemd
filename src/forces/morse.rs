@@ -8,9 +8,9 @@ use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::bonds::BondList;
-use super::{ForceFieldError, Potential, SlotForceView};
+use super::{ForceFieldError, Potential, SlotOutputView};
 
-// rq-2361f2b8
+// rq-2361f2b8 rq-ec18d174
 #[derive(Debug)]
 pub struct MorseBondedState {
     pub device: Arc<CudaDevice>,
@@ -23,6 +23,8 @@ pub struct MorseBondedState {
     pub bond_pair_x: CudaSlice<f32>,
     pub bond_pair_y: CudaSlice<f32>,
     pub bond_pair_z: CudaSlice<f32>,
+    pub bond_pair_energy: CudaSlice<f32>,
+    pub bond_pair_virial: CudaSlice<f32>,
     pub bond_count: usize,
     pub particle_count: usize,
 }
@@ -64,15 +66,13 @@ impl MorseBondedState {
         let bond_re = htod_or_empty_f32(&device, &re_vec)?;
 
         let bond_pair_len = 2 * bond_count;
-        let bond_pair_x = device
-            .alloc_zeros::<f32>(bond_pair_len)
-            .map_err(GpuError::from)?;
-        let bond_pair_y = device
-            .alloc_zeros::<f32>(bond_pair_len)
-            .map_err(GpuError::from)?;
-        let bond_pair_z = device
-            .alloc_zeros::<f32>(bond_pair_len)
-            .map_err(GpuError::from)?;
+        let bond_pair_x = device.alloc_zeros::<f32>(bond_pair_len).map_err(GpuError::from)?;
+        let bond_pair_y = device.alloc_zeros::<f32>(bond_pair_len).map_err(GpuError::from)?;
+        let bond_pair_z = device.alloc_zeros::<f32>(bond_pair_len).map_err(GpuError::from)?;
+        let bond_pair_energy =
+            device.alloc_zeros::<f32>(bond_pair_len).map_err(GpuError::from)?;
+        let bond_pair_virial =
+            device.alloc_zeros::<f32>(bond_pair_len).map_err(GpuError::from)?;
 
         Ok(MorseBondedState {
             device,
@@ -85,6 +85,8 @@ impl MorseBondedState {
             bond_pair_x,
             bond_pair_y,
             bond_pair_z,
+            bond_pair_energy,
+            bond_pair_virial,
             bond_count,
             particle_count,
         })
@@ -121,6 +123,8 @@ impl Potential for MorseBondedState {
             &mut self.bond_pair_x,
             &mut self.bond_pair_y,
             &mut self.bond_pair_z,
+            &mut self.bond_pair_energy,
+            &mut self.bond_pair_virial,
             self.bond_count,
         )?;
         timings.kernel_stop(KernelStage::MorseBondForce)?;
@@ -129,7 +133,7 @@ impl Potential for MorseBondedState {
 
     fn reduce(
         &mut self,
-        mut output: SlotForceView<'_>,
+        mut output: SlotOutputView<'_>,
         _cx: &crate::forces::ForceFieldContext<'_>,
         timings: &mut Timings,
     ) -> Result<(), ForceFieldError> {
@@ -137,9 +141,11 @@ impl Potential for MorseBondedState {
             return Ok(());
         }
         if self.bond_count == 0 {
-            self.device.memset_zeros(&mut output.x).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.y).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.z).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.force_x).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.force_y).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.force_z).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.energy).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.virial).map_err(GpuError::from)?;
             return Ok(());
         }
         timings.kernel_start(KernelStage::ReduceBondForces)?;
@@ -148,11 +154,15 @@ impl Potential for MorseBondedState {
             &self.bond_pair_x,
             &self.bond_pair_y,
             &self.bond_pair_z,
+            &self.bond_pair_energy,
+            &self.bond_pair_virial,
             &self.atom_bond_offsets,
             &self.atom_bond_indices,
-            &mut output.x,
-            &mut output.y,
-            &mut output.z,
+            &mut output.force_x,
+            &mut output.force_y,
+            &mut output.force_z,
+            &mut output.energy,
+            &mut output.virial,
             self.particle_count,
         )?;
         timings.kernel_stop(KernelStage::ReduceBondForces)?;

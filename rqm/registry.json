@@ -157,6 +157,13 @@
     "title": "Explicit init velocities override sampled velocities",
     "type": "scenario"
   },
+  "rq-0519e35c": {
+    "decl": "Scenario: New state has zero-initialised potential_energies and virials",
+    "file": "particle-state",
+    "refs": [],
+    "title": "New state has zero-initialised potential_energies and virials",
+    "type": "scenario"
+  },
   "rq-0540b862": {
     "decl": "## Launch Configuration",
     "file": "integration/velocity-verlet",
@@ -247,6 +254,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "minimum_image handles many-period displacements",
+    "type": "scenario"
+  },
+  "rq-0b71c50a": {
+    "decl": "Scenario: Two-particle pair virial matches r_ij · F_ij",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Two-particle pair virial matches r_ij · F_ij",
     "type": "scenario"
   },
   "rq-0b9372e8": {
@@ -408,7 +422,7 @@
     "type": "scenario"
   },
   "rq-10adebc4": {
-    "decl": "- `reduce_bond_forces(state: &mut MorseBondedState) -> Result<(), GpuError>`",
+    "decl": "- `reduce_bond_forces(state: &mut MorseBondedState, output_force_x: &mut CudaViewMut<'_, f32>, output_force_y: &mut CudaViewMut<'_, f32>, output_force_z: &mut CudaViewMut<'_, f32>, output_energy: &mut CudaViewMut<'_, f32>, output_virial: &mut CudaViewMut<'_, f32>) -> Result<(), GpuError>`",
     "file": "forces/morse-bonded",
     "refs": [],
     "title": "reduce_bond_forces",
@@ -1450,7 +1464,7 @@
     "type": "api-item"
   },
   "rq-304b191b": {
-    "decl": "- `SlotForceView<'a>` — three exclusive references to per-axis output",
+    "decl": "- `SlotOutputView<'a>` — five exclusive references to per-particle output",
     "file": "forces/framework",
     "refs": [
       {
@@ -1458,7 +1472,7 @@
         "kind": "code"
       }
     ],
-    "title": "SlotForceView",
+    "title": "SlotOutputView",
     "type": "api-item"
   },
   "rq-30f85829": {
@@ -1675,7 +1689,7 @@
     "type": "scenario"
   },
   "rq-3766be01": {
-    "decl": "- `ParticleState` — host-side SoA state. All twelve per-particle arrays are",
+    "decl": "- `ParticleState` — host-side SoA state. All fourteen per-particle arrays are",
     "file": "particle-state",
     "refs": [
       {
@@ -1847,6 +1861,13 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-3d38868e": {
+    "decl": "Scenario: Combiner sums slot energies and virials in slot order",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Combiner sums slot energies and virials in slot order",
+    "type": "scenario"
+  },
   "rq-3de16ce0": {
     "decl": "Scenario: Construct a ForceField with LennardJones and MorseBonded",
     "file": "forces/framework",
@@ -1955,6 +1976,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Reject bonds = init",
+    "type": "scenario"
+  },
+  "rq-41d9e514": {
+    "decl": "Scenario: Energy and virial reductions share the same indexing as force",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Energy and virial reductions share the same indexing as force",
     "type": "scenario"
   },
   "rq-433c972f": {
@@ -2346,6 +2374,13 @@
     ],
     "title": "SimulationConfig",
     "type": "api-item"
+  },
+  "rq-531faea9": {
+    "decl": "Scenario: ForceField with N=4 LJ-only step populates potential_energies and virials",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "ForceField with N=4 LJ-only step populates potential_energies and virials",
+    "type": "scenario"
   },
   "rq-535c2b1e": {
     "decl": "Scenario: LJ kernel reads the shared neighbor list from ForceFieldContext",
@@ -2858,7 +2893,7 @@
     "type": "scenario"
   },
   "rq-6690fae9": {
-    "decl": "- `reduce_pair_forces(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_x: &mut CudaSlice<f32>, target_y: &mut CudaSlice<f32>, target_z: &mut CudaSlice<f32>, particle_count: usize) -> Result<(), GpuError>`",
+    "decl": "- `reduce_pair_forces(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_force_x: &mut CudaViewMut<'_, f32>, target_force_y: &mut CudaViewMut<'_, f32>, target_force_z: &mut CudaViewMut<'_, f32>, target_energy: &mut CudaViewMut<'_, f32>, target_virial: &mut CudaViewMut<'_, f32>, particle_count: usize) -> Result<(), GpuError>`",
     "file": "pair-reduction",
     "refs": [
       {
@@ -2951,7 +2986,7 @@
     "type": "scenario"
   },
   "rq-684a29f1": {
-    "decl": "- `ForceField` — handle owning the slot collection, the flat slot-accumulator buffers, and the shared neighbor list.",
+    "decl": "- `ForceField` — handle owning the slot collection, the flat slot-output buffers, and the shared neighbor list.",
     "file": "forces/framework",
     "refs": [
       {
@@ -2988,6 +3023,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-6897ffda": {
+    "decl": "Scenario: Bond-force reduction sums energy and virial alongside forces",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "Bond-force reduction sums energy and virial alongside forces",
+    "type": "scenario"
   },
   "rq-693ce6fa": {
     "decl": "# Feature: Shared Neighbor List Service",
@@ -3136,10 +3178,10 @@
     "type": "section"
   },
   "rq-6fdefca0": {
-    "decl": "Scenario: PairBuffer::new allocates zero-initialised pair-force buffers",
+    "decl": "Scenario: PairBuffer::new allocates zero-initialised pair-contribution buffers",
     "file": "pair-reduction",
     "refs": [],
-    "title": "PairBuffer::new allocates zero-initialised pair-force buffers",
+    "title": "PairBuffer::new allocates zero-initialised pair-contribution buffers",
     "type": "scenario"
   },
   "rq-6fe2b058": {
@@ -3516,6 +3558,13 @@
     "title": "Lossless velocity-Verlet uses the lossless kernels",
     "type": "scenario"
   },
+  "rq-7ba4f321": {
+    "decl": "Scenario: A stretched bond's energy matches the closed-form Morse expression",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "A stretched bond's energy matches the closed-form Morse expression",
+    "type": "scenario"
+  },
   "rq-7bab5c1e": {
     "decl": "## Force Evaluation Pipeline",
     "file": "forces/framework",
@@ -3546,10 +3595,10 @@
     "type": "api-item"
   },
   "rq-7d8485b3": {
-    "decl": "Scenario: Each slot writes into its own row of the slot-accumulator buffers",
+    "decl": "Scenario: Each slot writes into its own row of the slot-output buffers",
     "file": "forces/framework",
     "refs": [],
-    "title": "Each slot writes into its own row of the slot-accumulator buffers",
+    "title": "Each slot writes into its own row of the slot-output buffers",
     "type": "scenario"
   },
   "rq-7d92b551": {
@@ -3635,6 +3684,13 @@
     "title": "Reject infinite ly",
     "type": "scenario"
   },
+  "rq-7fe57a77": {
+    "decl": "Scenario: System total scalar virial equals sum of particle shares",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "System total scalar virial equals sum of particle shares",
+    "type": "scenario"
+  },
   "rq-8057cb7e": {
     "decl": "Scenario: Reject row with infinite velocity",
     "file": "io/init-state-file",
@@ -3704,6 +3760,13 @@
     ],
     "title": "CLI",
     "type": "section"
+  },
+  "rq-82f8d168": {
+    "decl": "Scenario: Self slots carry zero energy and virial",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Self slots carry zero energy and virial",
+    "type": "scenario"
   },
   "rq-83312d09": {
     "decl": "Scenario: Bonded-only ForceField builds no neighbor list",
@@ -4101,6 +4164,13 @@
     "title": "NaN values are accepted at construction",
     "type": "scenario"
   },
+  "rq-9504346c": {
+    "decl": "Scenario: potential_energies and virials round-trip through ParticleBuffers",
+    "file": "particle-state",
+    "refs": [],
+    "title": "potential_energies and virials round-trip through ParticleBuffers",
+    "type": "scenario"
+  },
   "rq-955b55f0": {
     "decl": "# Atom indices are 0-based and refer to entries in the init file.",
     "file": "forces/bonds",
@@ -4123,6 +4193,13 @@
     "title": "Download overwrites in-place after host mutation",
     "type": "scenario"
   },
+  "rq-95c2f543": {
+    "decl": "Scenario: Exclusion scaling applies uniformly to force, energy, and virial",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Exclusion scaling applies uniformly to force, energy, and virial",
+    "type": "scenario"
+  },
   "rq-9605b930": {
     "decl": "## Gherkin Scenarios",
     "file": "integration/framework",
@@ -4130,6 +4207,13 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-961c2ee6": {
+    "decl": "Scenario: Reduction with zero count writes zero to energy and virial targets",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Reduction with zero count writes zero to energy and virial targets",
+    "type": "scenario"
   },
   "rq-965c3b59": {
     "decl": "Scenario: Implicit IDs equal data-row order",
@@ -4390,6 +4474,13 @@
     "title": "Feature: Bond List, Exclusion List, and `.bonds` File",
     "type": "file"
   },
+  "rq-9e487c80": {
+    "decl": "Scenario: Reduction sums pair energies in left-to-right order",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Reduction sums pair energies in left-to-right order",
+    "type": "scenario"
+  },
   "rq-9e4d8944": {
     "decl": "Scenario: Reject duplicate pair under different orderings",
     "file": "io/config-schema",
@@ -4471,7 +4562,7 @@
     "type": "section"
   },
   "rq-a0c0992f": {
-    "decl": "- `PairBuffer` — host-side wrapper around the three device pair-force",
+    "decl": "- `PairBuffer` — host-side wrapper around the five device per-pair",
     "file": "pair-reduction",
     "refs": [
       {
@@ -4619,6 +4710,13 @@
     "title": "IntegratorError",
     "type": "api-item"
   },
+  "rq-a50cb6a1": {
+    "decl": "Scenario: Pair beyond cutoff yields zero energy and virial slots",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Pair beyond cutoff yields zero energy and virial slots",
+    "type": "scenario"
+  },
   "rq-a555a750": {
     "decl": "Scenario: Velocity generation row is present when init lacks velocities",
     "file": "performance-analysis",
@@ -4678,6 +4776,13 @@
     "refs": [],
     "title": "NeighborListConfig",
     "type": "api-item"
+  },
+  "rq-a85e8216": {
+    "decl": "Scenario: Slot-output buffers have five flat arrays sized num_slots * N",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Slot-output buffers have five flat arrays sized num_slots * N",
+    "type": "scenario"
   },
   "rq-a8df30ac": {
     "decl": "Scenario: minimum_image just past -L/2 wraps by one period",
@@ -5049,6 +5154,13 @@
     "title": "Two independent runs produce byte-identical net forces",
     "type": "scenario"
   },
+  "rq-b68b3445": {
+    "decl": "Scenario: Two-particle pair energy matches the closed-form Lennard-Jones expression",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Two-particle pair energy matches the closed-form Lennard-Jones expression",
+    "type": "scenario"
+  },
   "rq-b719c42c": {
     "decl": "### Types",
     "file": "io/config-schema",
@@ -5361,6 +5473,13 @@
     "title": "Cell counts are floor(L / (r_cut + r_skin))",
     "type": "scenario"
   },
+  "rq-c0f2daca": {
+    "decl": "Scenario: Zero-slot step writes zeros to potential_energies and virials",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Zero-slot step writes zeros to potential_energies and virials",
+    "type": "scenario"
+  },
   "rq-c0f98145": {
     "decl": "### Combiner Kernel",
     "file": "forces/framework",
@@ -5646,6 +5765,13 @@
     "title": "Reject pair referencing an unknown type",
     "type": "scenario"
   },
+  "rq-ca49d49a": {
+    "decl": "Scenario: A stretched bond's virial equals r * F_mag",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "A stretched bond's virial equals r * F_mag",
+    "type": "scenario"
+  },
   "rq-ca6f69f2": {
     "decl": "Scenario: Reject row with unparseable position",
     "file": "io/init-state-file",
@@ -5691,11 +5817,11 @@
     "type": "scenario"
   },
   "rq-cd28340e": {
-    "decl": "## Slot Accumulator Buffers",
+    "decl": "## Slot Output Buffers",
     "file": "forces/framework",
     "level": 2,
     "refs": [],
-    "title": "Slot Accumulator Buffers",
+    "title": "Slot Output Buffers",
     "type": "section"
   },
   "rq-cd50d861": {
@@ -6013,6 +6139,13 @@
     ],
     "title": "LennardJonesParameterTable",
     "type": "api-item"
+  },
+  "rq-db3b3d5e": {
+    "decl": "Scenario: System total potential energy equals sum of particle shares",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "System total potential energy equals sum of particle shares",
+    "type": "scenario"
   },
   "rq-db78448e": {
     "decl": "Scenario: Construct velocity-Verlet (lossless)",
@@ -6559,9 +6692,14 @@
     "type": "api-item"
   },
   "rq-ec18d174": {
-    "decl": "- `MorseBondedState` — variant payload owned by",
+    "decl": "- `MorseBondedState` — implements the `Potential` trait with",
     "file": "forces/morse-bonded",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/morse.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MorseBondedState",
     "type": "api-item"
   },
@@ -7116,6 +7254,13 @@
     "file": "simulation-runner",
     "refs": [],
     "title": "Reproducibility byte-for-byte across two identical runs",
+    "type": "scenario"
+  },
+  "rq-fe9f2ebe": {
+    "decl": "Scenario: r == 0 produces zero energy and virial in addition to zero force",
+    "file": "forces/morse-bonded",
+    "refs": [],
+    "title": "r == 0 produces zero energy and virial in addition to zero force",
     "type": "scenario"
   },
   "rq-fec7ae1c": {

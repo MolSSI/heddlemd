@@ -20,19 +20,35 @@ back into host arrays.
 `particle_count()`:
 
 ```
-positions_x:   Vec<f32>
-positions_y:   Vec<f32>
-positions_z:   Vec<f32>
-velocities_x:  Vec<f32>
-velocities_y:  Vec<f32>
-velocities_z:  Vec<f32>
-forces_x:      Vec<f32>
-forces_y:      Vec<f32>
-forces_z:      Vec<f32>
-masses:        Vec<f32>
-type_indices:  Vec<u32>
-particle_ids:  Vec<u32>
+positions_x:        Vec<f32>
+positions_y:        Vec<f32>
+positions_z:        Vec<f32>
+velocities_x:       Vec<f32>
+velocities_y:       Vec<f32>
+velocities_z:       Vec<f32>
+forces_x:           Vec<f32>
+forces_y:           Vec<f32>
+forces_z:           Vec<f32>
+potential_energies: Vec<f32>
+virials:            Vec<f32>
+masses:             Vec<f32>
+type_indices:       Vec<u32>
+particle_ids:       Vec<u32>
 ```
+
+`potential_energies[i]` holds particle `i`'s share of the system's total
+potential energy after a force-evaluation step (the sum of `U_ij / 2` over
+its neighbours plus the sum of `U_k / 2` over the bonds it participates
+in, where `U_ij`/`U_k` are pair/bond potential energies). Summing
+`potential_energies` over all particles yields the system's total
+potential energy with each pair/bond counted exactly once. Initial
+allocation is zero-filled; the buffer is overwritten each step by the
+force pipeline.
+
+`virials[i]` holds particle `i`'s share of the system's total scalar
+virial, `Σ_{ij neighbours} r_ij · F_ij / 2`. Summing `virials` over all
+particles yields the system's total scalar virial. Initial allocation is
+zero-filled; the buffer is overwritten each step by the force pipeline.
 
 `type_indices[i]` is the index of particle `i`'s entry in
 `Config::particle_types` (see `io/config-schema.md`); the index is in the
@@ -54,7 +70,7 @@ call.
 
 ### Types <!-- rq-08066bdf -->
 
-- `ParticleState` — host-side SoA state. All twelve per-particle arrays are <!-- rq-3766be01 -->
+- `ParticleState` — host-side SoA state. All fourteen per-particle arrays are <!-- rq-3766be01 -->
   declared as `pub` fields so callers may iterate, index, and mutate them
   directly. Length consistency between fields is the caller's responsibility
   while the state is held on the host; it is re-validated at every upload or
@@ -72,7 +88,8 @@ call.
     — an input array (during construction), a host array (during upload), or
     a host array (during download) has a length other than the established
     particle count. `array` names the offending array (e.g. `"positions_y"`,
-    `"particle_ids"`, `"type_indices"`).
+    `"particle_ids"`, `"type_indices"`, `"potential_energies"`,
+    `"virials"`).
   - `DuplicateParticleId(u32)` — caller-supplied IDs contain at least one
     duplicate; the variant reports one offending value.
   - `Gpu(GpuError)` — a CUDA driver operation failed during upload or
@@ -91,8 +108,9 @@ call.
     `DuplicateParticleId` accordingly.
   - If `ids` is `None`, the constructor populates `particle_ids` with
     `0..particle_count` cast to `u32`.
-  - Allocates `forces_x`, `forces_y`, and `forces_z` as `Vec<f32>` of length
-    `particle_count`, zero-initialised.
+  - Allocates `forces_x`, `forces_y`, `forces_z`, `potential_energies`,
+    and `virials` as `Vec<f32>` of length `particle_count`,
+    zero-initialised.
   - A particle count of zero is permitted: the constructor returns a state
     whose every field is an empty `Vec`.
   - Does not validate numerical content (NaN, infinity, sign, magnitude are
@@ -108,7 +126,7 @@ call.
     `state.particle_count()`.
   - Validates that every host array has length `state.particle_count()`;
     returns `LengthMismatch` otherwise.
-  - Copies all twelve host arrays into the corresponding device buffers.
+  - Copies all fourteen host arrays into the corresponding device buffers.
   - Returns the populated `ParticleBuffers` on success.
 
 - `ParticleBuffers::particle_count(&self) -> usize` <!-- rq-18411920 -->
@@ -118,7 +136,7 @@ call.
   - Validates that `state.particle_count()` equals `self.particle_count()`
     and that every host array has that length; returns `LengthMismatch`
     otherwise.
-  - Copies all twelve host arrays into the existing device buffers
+  - Copies all fourteen host arrays into the existing device buffers
     in-place.
 
 - `ParticleState::download_from(&mut self, buffers: &ParticleBuffers) -> Result<(), ParticleStateError>` <!-- rq-9a19bfa3 -->
@@ -265,6 +283,25 @@ Feature: SoA particle state and GPU buffers
     And every device buffer has length 4
     And the bytes copied from each device buffer back to the host equal the corresponding state field
     And the device-side type_indices buffer holds the same values as state.type_indices
+
+  @rq-0519e35c
+  Scenario: New state has zero-initialised potential_energies and virials
+    Given seven Vec<f32> of length 4 for positions_x/y/z, velocities_x/y/z, and masses
+    And a Vec<u32> type_indices of length 4 with values [0, 0, 0, 0]
+    When ParticleState::new(...) is called with ids=None
+    Then state.potential_energies equals [0.0, 0.0, 0.0, 0.0]
+    And state.virials equals [0.0, 0.0, 0.0, 0.0]
+
+  @rq-9504346c
+  Scenario: potential_energies and virials round-trip through ParticleBuffers
+    Given a ParticleState A with particle_count() == 4
+    And A.potential_energies has been overwritten with [1.0, -2.0, 3.5, 0.25]
+    And A.virials has been overwritten with [10.0, 20.0, -30.0, 40.0]
+    And a ParticleBuffers built from A
+    And A.potential_energies and A.virials have been zeroed on the host
+    When A.download_from(&buffers) is called
+    Then A.potential_energies equals [1.0, -2.0, 3.5, 0.25]
+    And A.virials equals [10.0, 20.0, -30.0, 40.0]
 
   @rq-c8aa7417
   Scenario: Allocate device buffers from an empty state

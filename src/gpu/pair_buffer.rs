@@ -11,6 +11,8 @@ pub struct PairBuffer {
     pub pair_forces_x: CudaSlice<f32>,
     pub pair_forces_y: CudaSlice<f32>,
     pub pair_forces_z: CudaSlice<f32>,
+    pub pair_energies: CudaSlice<f32>,
+    pub pair_virials: CudaSlice<f32>,
     particle_count: usize,
     max_neighbors: u32,
 }
@@ -26,11 +28,15 @@ impl PairBuffer {
         let pair_forces_x = device.alloc_zeros::<f32>(len).map_err(GpuError::from)?;
         let pair_forces_y = device.alloc_zeros::<f32>(len).map_err(GpuError::from)?;
         let pair_forces_z = device.alloc_zeros::<f32>(len).map_err(GpuError::from)?;
+        let pair_energies = device.alloc_zeros::<f32>(len).map_err(GpuError::from)?;
+        let pair_virials = device.alloc_zeros::<f32>(len).map_err(GpuError::from)?;
         Ok(PairBuffer {
             device,
             pair_forces_x,
             pair_forces_y,
             pair_forces_z,
+            pair_energies,
+            pair_virials,
             particle_count,
             max_neighbors,
         })

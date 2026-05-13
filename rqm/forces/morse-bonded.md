@@ -49,17 +49,25 @@ slot's reduction. See `framework.md` for the slot order.
 ## Force Accumulation <!-- rq-0c318e64 -->
 
 The slot owns a `BondPairBuffer` of length `2 * B` where `B` is the
-number of bonds. Slot `2 * k` holds the force vector applied to
-`atom_i` of bond `k`; slot `2 * k + 1` holds the force on `atom_j`.
+number of bonds. Each slot carries five `f32` quantities: three force
+components, half-energy, and half-virial. Slot `2 * k` holds atom `i`'s
+share of bond `k`; slot `2 * k + 1` holds atom `j`'s share. The
+half-energy and half-virial conventions match the pair-buffer convention
+(see `pair-reduction.md`): each slot writes `U_k / 2` and `W_k / 2` so
+the system total sum over slots equals `Σ_k U_k` and `Σ_k W_k`
+respectively, counting each bond exactly once.
 
 The reduction kernel reads the precomputed `atom_bond_offsets` /
 `atom_bond_indices` tables (see `bonds.md`) and sums each atom's
-contributions in fixed order. For atom `a`:
+contributions in fixed order. For atom `a`, the kernel computes five
+sequential left-to-right sums:
 
 ```text
-slot_acc_x[a] = sum over k in atom_bond_indices[a] of bond_pair_x[k]
-slot_acc_y[a] = same with y
-slot_acc_z[a] = same with z
+slot_force_x[a]  = sum over k in atom_bond_indices[a] of bond_pair_x[k]
+slot_force_y[a]  = same with y
+slot_force_z[a]  = same with z
+slot_energy[a]   = sum over k in atom_bond_indices[a] of bond_pair_energy[k]
+slot_virial[a]   = sum over k in atom_bond_indices[a] of bond_pair_virial[k]
 ```
 
 The `atom_bond_indices` slice for each atom is sorted by underlying
@@ -105,8 +113,8 @@ constructed.
 
 ### Types <!-- rq-976aa4af -->
 
-- `MorseBondedState` — variant payload owned by <!-- rq-ec18d174 -->
-  `PotentialSlot::MorseBonded` (see `framework.md`). Fields:
+- `MorseBondedState` — implements the `Potential` trait with <!-- rq-ec18d174 -->
+  `label() == "morse_bonded"` (see `framework.md`). Fields:
   - `device: Arc<CudaDevice>`
   - `bonds: CudaSlice<u32>` — flat array of `[atom_i, atom_j,
     bond_type_index]` triples, length `3 * B`, sorted to match
@@ -116,14 +124,14 @@ constructed.
   - `bond_de: CudaSlice<f32>` — length `n_bond_types`.
   - `bond_a: CudaSlice<f32>` — length `n_bond_types`.
   - `bond_re: CudaSlice<f32>` — length `n_bond_types`.
-  - `bond_pair_x: CudaSlice<f32>` — length `2 * B`, the per-bond
-    contribution buffer for x components.
+  - `bond_pair_x: CudaSlice<f32>` — length `2 * B`, per-slot force x
+    contribution.
   - `bond_pair_y: CudaSlice<f32>` — length `2 * B`.
   - `bond_pair_z: CudaSlice<f32>` — length `2 * B`.
-  - `accumulator_x: CudaSlice<f32>` — length `N`, the slot's private
-    per-atom accumulator.
-  - `accumulator_y: CudaSlice<f32>` — length `N`.
-  - `accumulator_z: CudaSlice<f32>` — length `N`.
+  - `bond_pair_energy: CudaSlice<f32>` — length `2 * B`, per-slot
+    half-energy contribution (`U_k / 2`).
+  - `bond_pair_virial: CudaSlice<f32>` — length `2 * B`, per-slot
+    half-virial contribution (`W_k / 2`).
   - `bond_count: usize`
   - `particle_count: usize`
 
@@ -137,9 +145,11 @@ constructed.
       uploads their parameters.
     - Uploads `bond_list.bonds`, `bond_list.atom_bond_offsets`, and
       `bond_list.atom_bond_indices` to device memory.
-    - Allocates the per-bond `bond_pair_*` buffers
-      (`3 * 2 * B * 4 bytes`) and the per-atom `accumulator_*`
-      buffers (`3 * N * 4 bytes`).
+    - Allocates the five per-bond `bond_pair_*` buffers (force x/y/z,
+      half-energy, half-virial), each of length `2 * B`. Per-atom
+      output is written into the framework-supplied `SlotOutputView`
+      during `reduce()`; the slot owns no per-atom accumulator buffers
+      of its own.
     - When `bond_list.is_empty()`, this method is not called by the
       `ForceField` — see *Empty State*.
 
@@ -154,13 +164,16 @@ extern "C" __global__ void morse_bond_force(
     const float *bond_de, const float *bond_a, const float *bond_re,
     float lx, float ly, float lz,
     float *bond_pair_x, float *bond_pair_y, float *bond_pair_z,
+    float *bond_pair_energy, float *bond_pair_virial,
     unsigned int n_bonds);
 
 extern "C" __global__ void reduce_bond_forces(
     const float *bond_pair_x, const float *bond_pair_y, const float *bond_pair_z,
+    const float *bond_pair_energy, const float *bond_pair_virial,
     const unsigned int *atom_bond_offsets,
     const unsigned int *atom_bond_indices,
-    float *accumulator_x, float *accumulator_y, float *accumulator_z,
+    float *slot_force_x, float *slot_force_y, float *slot_force_z,
+    float *slot_energy, float *slot_virial,
     unsigned int n);
 ```
 
@@ -178,15 +191,23 @@ One thread per bond. Thread `k`:
 5. Computes `e = exp(-a * (r - re))` and the force magnitude
    `Fmag = 2 * De * a * (1 - e) * e / r` (the trailing `/ r` produces
    the per-component factor when multiplied by `(dx, dy, dz)`).
-6. Writes the force on `atom_i` to `bond_pair_*[2 * k]` as
+6. Computes the bond's potential energy
+   `U_k = De * (1 - e)^2` and the bond's scalar virial
+   `W_k = Fmag * r2` (equivalent to `r · F` with `F` aligned along
+   `(dx, dy, dz)`).
+7. Writes the force on `atom_i` to `bond_pair_*[2 * k]` as
    `Fmag * (dx, dy, dz)`.
-7. Writes the force on `atom_j` to `bond_pair_*[2 * k + 1]` as
+8. Writes the force on `atom_j` to `bond_pair_*[2 * k + 1]` as
    `-Fmag * (dx, dy, dz)`.
+9. Writes `U_k * 0.5f` to both `bond_pair_energy[2 * k]` and
+   `bond_pair_energy[2 * k + 1]`.
+10. Writes `W_k * 0.5f` to both `bond_pair_virial[2 * k]` and
+    `bond_pair_virial[2 * k + 1]`.
 
-When `r == 0` exactly (degenerate overlapping atoms), the kernel
-writes `0` to both slots rather than producing NaN. This is a defensive
-guard; physical Morse simulations never reach `r == 0` because the
-exponential blows up at small `r`.
+When `r == 0` exactly (degenerate overlapping atoms), the kernel writes
+`0` to all ten slots (five quantities × two slots) rather than producing
+NaN. This is a defensive guard; physical Morse simulations never reach
+`r == 0` because the exponential blows up at small `r`.
 
 #### `reduce_bond_forces`
 
@@ -195,12 +216,17 @@ size 256, grid `ceil(n / 256)`). Thread `a`:
 
 1. Reads `start = atom_bond_offsets[a]` and `end =
    atom_bond_offsets[a + 1]`.
-2. Initialises `sum_x = 0`, `sum_y = 0`, `sum_z = 0`.
+2. Initialises five running sums to zero: `sum_x`, `sum_y`, `sum_z`,
+   `sum_e`, `sum_w`.
 3. For each `i` in `start .. end`:
    `slot = atom_bond_indices[i];
-    sum_x += bond_pair_x[slot]; (similarly y, z)`.
-4. Writes `accumulator_x[a] = sum_x`, `accumulator_y[a] = sum_y`,
-   `accumulator_z[a] = sum_z`.
+    sum_x += bond_pair_x[slot];  (similarly y, z)
+    sum_e += bond_pair_energy[slot];
+    sum_w += bond_pair_virial[slot];`.
+4. Writes the five output slices at index `a`:
+   `slot_force_x[a] = sum_x; slot_force_y[a] = sum_y;
+    slot_force_z[a] = sum_z; slot_energy[a] = sum_e;
+    slot_virial[a] = sum_w`.
 
 The summation is left-to-right in `atom_bond_indices` order. Since
 the indices are sorted at load time, the order is deterministic.
@@ -217,13 +243,17 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
 `crate::gpu`:
 
 - `morse_bond_force(state: &mut MorseBondedState, particle_buffers: &ParticleBuffers, sim_box: &SimulationBox) -> Result<(), GpuError>` <!-- rq-66d80d54 -->
-  - Launches the `morse_bond_force` kernel.
+  - Launches the `morse_bond_force` kernel, writing per-slot force,
+    half-energy, and half-virial into the state's `bond_pair_*` fields.
   - Block size 256; grid size `ceil(state.bond_count / 256)`.
   - Returns `Ok(())` without launching when `state.bond_count == 0`.
   - Panics if the `"morse"` module is not loaded.
 
-- `reduce_bond_forces(state: &mut MorseBondedState) -> Result<(), GpuError>` <!-- rq-10adebc4 -->
-  - Launches the `reduce_bond_forces` kernel.
+- `reduce_bond_forces(state: &mut MorseBondedState, output_force_x: &mut CudaViewMut<'_, f32>, output_force_y: &mut CudaViewMut<'_, f32>, output_force_z: &mut CudaViewMut<'_, f32>, output_energy: &mut CudaViewMut<'_, f32>, output_virial: &mut CudaViewMut<'_, f32>) -> Result<(), GpuError>` <!-- rq-10adebc4 -->
+  - Launches the `reduce_bond_forces` kernel, summing each atom's bond
+    contributions into the five caller-supplied output views (force x,
+    force y, force z, energy share, virial share). Output views have
+    length `state.particle_count`.
   - Block size 256; grid size `ceil(state.particle_count / 256)`.
   - Returns `Ok(())` without launching when
     `state.particle_count == 0`.
@@ -256,7 +286,6 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
   bond type).
 - Long-range / cutoff variants of Morse. Morse is treated as
   full-range bonded.
-- Pressure and virial accumulation. Only forces are computed.
 - A "soft" Morse variant that smoothly switches off for large `r`.
 - Bond breaking, forming, or reordering during a simulation.
 
@@ -420,4 +449,39 @@ Feature: Morse bonded potential
     Given a [[bond_types]] entry with potential="harmonic"
     When the config is loaded
     Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].potential", reason: _ })
+
+  # --- Energy and virial outputs ---
+
+  @rq-7ba4f321
+  Scenario: A stretched bond's energy matches the closed-form Morse expression
+    Given a BondList with one bond (atom 0 - atom 1)
+    And bond type "CC" with de=1.0, a=2.0, re=1.0
+    And atoms placed at r = 1.5
+    When morse_bond_force is called
+    Then bond_pair_energy[0] + bond_pair_energy[1]
+      equals de * (1 - exp(-a*(r - re)))^2 within f32 round-off
+
+  @rq-ca49d49a
+  Scenario: A stretched bond's virial equals r * F_mag
+    Given a BondList with one bond (atom 0 - atom 1)
+    And bond type "CC" with de=1.0, a=2.0, re=1.0
+    And atoms placed at r = 1.5
+    When morse_bond_force is called
+    Then bond_pair_virial[0] + bond_pair_virial[1]
+      equals r_ij · F_ij within f32 round-off, where F_ij is the
+      force on atom 0 due to atom 1
+
+  @rq-fe9f2ebe
+  Scenario: r == 0 produces zero energy and virial in addition to zero force
+    Given two atoms placed at identical positions and a bond between them
+    When morse_bond_force is called
+    Then bond_pair_energy[0..2] and bond_pair_virial[0..2] are all 0.0_f32
+
+  @rq-6897ffda
+  Scenario: Bond-force reduction sums energy and virial alongside forces
+    Given a BondList with bond (atom 0 - atom 1) and one bond type
+    And bond_pair_energy = [0.4, 0.4] and bond_pair_virial = [0.1, 0.1]
+    When reduce_bond_forces is called
+    Then slot_energy[0] equals 0.4 and slot_energy[1] equals 0.4
+    And slot_virial[0] equals 0.1 and slot_virial[1] equals 0.1
 ```

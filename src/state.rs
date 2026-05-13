@@ -14,6 +14,8 @@ pub struct ParticleState {
     pub forces_x: Vec<f32>,
     pub forces_y: Vec<f32>,
     pub forces_z: Vec<f32>,
+    pub potential_energies: Vec<f32>,
+    pub virials: Vec<f32>,
     pub masses: Vec<f32>,
     pub type_indices: Vec<u32>,
     pub particle_ids: Vec<u32>,
@@ -128,6 +130,8 @@ impl ParticleState {
             forces_x: vec![0.0; n],
             forces_y: vec![0.0; n],
             forces_z: vec![0.0; n],
+            potential_energies: vec![0.0; n],
+            virials: vec![0.0; n],
             masses,
             type_indices,
             particle_ids,
@@ -154,6 +158,8 @@ impl ParticleState {
         check_len("forces_x", n, self.forces_x.len())?;
         check_len("forces_y", n, self.forces_y.len())?;
         check_len("forces_z", n, self.forces_z.len())?;
+        check_len("potential_energies", n, self.potential_energies.len())?;
+        check_len("virials", n, self.virials.len())?;
         check_len("masses", n, self.masses.len())?;
         check_len("type_indices", n, self.type_indices.len())?;
         check_len("particle_ids", n, self.particle_ids.len())?;
@@ -185,6 +191,12 @@ impl ParticleState {
             .map_err(GpuError::from)?;
         device
             .dtoh_sync_copy_into(&buffers.forces_z, &mut self.forces_z)
+            .map_err(GpuError::from)?;
+        device
+            .dtoh_sync_copy_into(&buffers.potential_energies, &mut self.potential_energies)
+            .map_err(GpuError::from)?;
+        device
+            .dtoh_sync_copy_into(&buffers.virials, &mut self.virials)
             .map_err(GpuError::from)?;
         device
             .dtoh_sync_copy_into(&buffers.masses, &mut self.masses)

@@ -76,7 +76,8 @@ pub fn lj_pair_force_no_excl(
 }
 
 /// Backward-compatible wrapper that calls the new parameterised
-/// `reduce_pair_forces` launcher against `particle_buffers.forces_*`.
+/// `reduce_pair_forces` launcher against `particle_buffers.forces_*`,
+/// `potential_energies`, and `virials`.
 pub fn reduce_pair_forces_into_buffers(
     pair: &PairBuffer,
     counts: &CudaSlice<u32>,
@@ -86,5 +87,7 @@ pub fn reduce_pair_forces_into_buffers(
     let mut vx = particle_buffers.forces_x.slice_mut(..);
     let mut vy = particle_buffers.forces_y.slice_mut(..);
     let mut vz = particle_buffers.forces_z.slice_mut(..);
-    reduce_pair_forces(pair, counts, &mut vx, &mut vy, &mut vz, n)
+    let mut ve = particle_buffers.potential_energies.slice_mut(..);
+    let mut vw = particle_buffers.virials.slice_mut(..);
+    reduce_pair_forces(pair, counts, &mut vx, &mut vy, &mut vz, &mut ve, &mut vw, n)
 }

@@ -35,10 +35,10 @@ neighbor_counts[i]`:
 
 1. The pair-buffer slot is `slot = i * max_neighbors + k`.
 2. Read `j = neighbor_list[slot]`. If `i == j`, write `0.0_f32` to
-   `pair_forces_x[slot]`, `pair_forces_y[slot]`, and `pair_forces_z[slot]`
-   and stop. (The kernel encounters `i == j` only when the shared
-   neighbor list is in trivial mode, which lists every particle
-   including self.)
+   `pair_forces_x[slot]`, `pair_forces_y[slot]`, `pair_forces_z[slot]`,
+   `pair_energies[slot]`, and `pair_virials[slot]` and stop. (The kernel
+   encounters `i == j` only when the shared neighbor list is in trivial
+   mode, which lists every particle including self.)
 3. Resolve the per-pair-type parameter slot:
 
    ```
@@ -57,8 +57,9 @@ neighbor_counts[i]`:
    `dx <- dx - lx * floor((dx + lx * 0.5f) / lx)` (and similarly for `dy`,
    `dz`).
 6. Compute `r2 = dx*dx + dy*dy + dz*dz`.
-7. If `r2 > cutoff * cutoff`, write `0.0_f32` to the three slots and stop.
-8. Otherwise, compute the LJ factor in this order:
+7. If `r2 > cutoff * cutoff`, write `0.0_f32` to all five slots
+   (force x/y/z, energy, virial) and stop.
+8. Otherwise, compute the LJ factor and energy in this order:
 
    ```
    inv_r2  = 1.0f / r2
@@ -67,21 +68,35 @@ neighbor_counts[i]`:
    sr6     = sr2 * sr2 * sr2
    sr12    = sr6 * sr6
    factor  = 24.0f * epsilon * inv_r2 * (2.0f * sr12 - sr6)
+   energy  = 4.0f * epsilon * (sr12 - sr6)
    ```
 
-9. Write the per-component force to the slot:
+9. Compute the per-component force `(fx, fy, fz) = factor * (dx, dy, dz)`
+   and the scalar pair virial `w = fx * dx + fy * dy + fz * dz`. Apply the
+   exclusion scaling (see *Exclusion scaling*) to `fx`, `fy`, `fz`, and to
+   `energy` and `w`.
 
-   ```
-   pair_forces_x[slot] = factor * dx
-   pair_forces_y[slot] = factor * dy
-   pair_forces_z[slot] = factor * dz
-   ```
+10. Write the slot's share of each per-pair quantity:
+
+    ```
+    pair_forces_x[slot] = fx
+    pair_forces_y[slot] = fy
+    pair_forces_z[slot] = fz
+    pair_energies[slot] = energy * 0.5f
+    pair_virials[slot]  = w * 0.5f
+    ```
+
+    The `0.5f` factor distributes the pair's energy and virial across its
+    two slots, slot `(i, j)` and slot `(j, i)`, so the segmented reduction
+    counts each pair exactly once when summed over all particles.
 
 The `(i, k)` slot holds the force on particle `i` due to partner
-`j = neighbor_list[i * max_neighbors + k]`. The segmented reduction
-kernel sums `neighbor_counts[i]` slots per particle, including the
-self slot (which contributes zero) when present in trivial mode, and
-produces the correct net force.
+`j = neighbor_list[i * max_neighbors + k]`, plus particle `i`'s shares
+of the pair potential energy and scalar virial. The segmented reduction
+kernel sums `neighbor_counts[i]` slots per particle, including the self
+slot (which contributes zero) when present in trivial mode, and produces
+the correct per-particle net force, potential-energy share, and
+virial share.
 
 ### Parameter-table symmetry <!-- rq-7d92b551 -->
 
@@ -172,6 +187,8 @@ extern "C" __global__ void lj_pair_force(
     float *pair_forces_x,
     float *pair_forces_y,
     float *pair_forces_z,
+    float *pair_energies,
+    float *pair_virials,
     unsigned int max_neighbors,
     float lx, float ly, float lz,
     unsigned int n_types,
@@ -193,26 +210,25 @@ its k-th neighbour:
 i = blockIdx.y * blockDim.y + threadIdx.y;
 k = blockIdx.x * blockDim.x + threadIdx.x;
 if (i >= n || k >= neighbor_counts[i]) {
-    // Slots beyond the actual neighbour count must be zeroed so the
-    // segmented reduction (which sums slots 0..max_neighbors per atom
-    // for a neighbour count it does not see directly) gets a clean
-    // sum. The reduction kernel respects `neighbor_counts[i]`, so
-    // strictly only k < neighbor_counts[i] is summed; nonetheless the
-    // kernel writes zero for k in [neighbor_counts[i], max_neighbors)
-    // to keep the pair buffer in a known state for debugging.
+    // Slots beyond the actual neighbour count are zeroed so the
+    // segmented reduction sees a clean sum even when max_neighbors
+    // exceeds the realised count.
     pair_forces_x[i * max_neighbors + k] = 0.0f;  // (when i < n)
     pair_forces_y[i * max_neighbors + k] = 0.0f;
     pair_forces_z[i * max_neighbors + k] = 0.0f;
+    pair_energies[i * max_neighbors + k] = 0.0f;
+    pair_virials[i * max_neighbors + k]  = 0.0f;
     return;
 }
 unsigned int j = neighbor_list[i * max_neighbors + k];
 ```
 
 After resolving `j`, the per-pair-type parameter lookup at
-`type_indices[i] * n_types + type_indices[j]`, the per-pair force
-calculation, minimum-image, cutoff check, and exclusion-list scaling
-proceed as in the *Algorithm* section above. The force is written to
-`pair_forces_*[i * max_neighbors + k]`.
+`type_indices[i] * n_types + type_indices[j]`, the per-pair force,
+energy, and virial calculation, minimum-image, cutoff check, and
+exclusion-list scaling proceed as in the *Algorithm* section above.
+The five quantities (force x/y/z, half-energy, half-virial) are written
+to slot `i * max_neighbors + k`.
 
 `neighbor_list` and `neighbor_counts` are owned by the shared
 `NeighborListState` on `ForceField` (see `neighbor-list.md` and
@@ -221,19 +237,22 @@ proceed as in the *Algorithm* section above. The force is written to
 
 ### Exclusion scaling <!-- inline-edit --> <!-- rq-dddcbf07 -->
 
-After computing the closed-form Lennard-Jones force `(fx, fy, fz)` for pair
-`(i, k)` and before writing the result to `pair_forces_*[slot]`, the kernel
-queries the exclusion list to scale the force:
+After computing the closed-form Lennard-Jones force `(fx, fy, fz)`,
+energy, and virial for pair `(i, k)` and before writing the results to
+the pair-buffer slots, the kernel queries the exclusion list and scales
+all five quantities by the same factor:
 
 ```
 start = atom_excl_offsets[i]
 end   = atom_excl_offsets[i + 1]
 scale = 1.0f
 for m in start .. end:
-    if atom_excl_partners[m] == k:
+    if atom_excl_partners[m] == j:
         scale = atom_excl_scales[m]
         break
 fx *= scale; fy *= scale; fz *= scale
+energy *= scale
+w *= scale
 ```
 
 The lookup is a linear scan over atom `i`'s exclusion partners. The
@@ -261,9 +280,11 @@ alongside the existing `fill`, `integrate`, and `reduce` modules.
 A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
 
 - `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>` <!-- rq-d3a14184 -->
-  - Launches the `lj_pair_force` kernel with the per-pair force,
-    simulation box, parameter-table, type-index, exclusion-list, and
-    shared neighbor-list arguments described above.
+  - Launches the `lj_pair_force` kernel with the per-pair force, energy,
+    virial, simulation box, parameter-table, type-index, exclusion-list,
+    and shared neighbor-list arguments described above. The kernel writes
+    the five per-pair quantities into the corresponding fields of
+    `pair_buffer`.
   - 2D launch: `block_dim = (16, 16, 1)`, `grid_dim = (ceil(max_neighbors
     / 16), ceil(n / 16), 1)` — the y dimension covers atoms, the x
     dimension covers per-atom neighbour slots.
@@ -652,4 +673,46 @@ Feature: Lennard-Jones O(N²) pair force kernel
       and the other with NeighborListConfig::CellList { max_neighbors, r_skin }
     When ForceField::step is called on each
     Then forces_* agree componentwise within 1e-4 relative error
+
+  # --- Energy and virial outputs ---
+
+  @rq-b68b3445
+  Scenario: Two-particle pair energy matches the closed-form Lennard-Jones expression
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5,0,0)
+    And a LennardJonesParameterTable with σ=1.0, ε=1.0, cutoff=5.0
+    When lj_pair_force is called
+    Then pair_energies[0*2 + 1] + pair_energies[1*2 + 0]
+      equals 4.0 * ε * (sr12 - sr6) within f32 round-off
+      where sr2 = (σ/r)^2, sr6 = sr2^3, sr12 = sr6^2, r = 1.5
+
+  @rq-0b71c50a
+  Scenario: Two-particle pair virial matches r_ij · F_ij
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5,0,0)
+    And a LennardJonesParameterTable with σ=1.0, ε=1.0, cutoff=5.0
+    When lj_pair_force is called
+    Then pair_virials[0*2 + 1] + pair_virials[1*2 + 0]
+      equals r_ij · F_ij within f32 round-off
+      where F_ij is the force on particle 0 due to particle 1
+
+  @rq-a50cb6a1
+  Scenario: Pair beyond cutoff yields zero energy and virial slots
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(6.0,0,0)
+    And cutoff=5.0
+    When lj_pair_force is called
+    Then pair_energies[0*2 + 1] and pair_virials[0*2 + 1] are both 0.0_f32
+    And pair_energies[1*2 + 0] and pair_virials[1*2 + 0] are both 0.0_f32
+
+  @rq-82f8d168
+  Scenario: Self slots carry zero energy and virial
+    Given a ParticleState of N=4 with arbitrary positions
+    When lj_pair_force is called with a trivial neighbor list
+    Then for every i in 0..4, pair_energies[i*4 + i] and pair_virials[i*4 + i] are both 0.0_f32
+
+  @rq-95c2f543
+  Scenario: Exclusion scaling applies uniformly to force, energy, and virial
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5,0,0)
+    And a DeviceExclusionList containing the entry (0, 1, 0.5)
+    When lj_pair_force is called
+    Then pair_energies[0*2 + 1] equals 0.5 * (un-excluded LJ energy / 2) within f32 round-off
+    And pair_virials[0*2 + 1] equals 0.5 * (un-excluded virial / 2) within f32 round-off
 ```

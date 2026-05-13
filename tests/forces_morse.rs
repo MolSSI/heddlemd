@@ -95,6 +95,8 @@ fn equilibrium_distance_produces_zero_force() {
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
+        &mut mb.bond_pair_energy,
+        &mut mb.bond_pair_virial,
         1,
     )
     .unwrap();
@@ -127,6 +129,8 @@ fn compressed_bond_repulsive() {
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
+        &mut mb.bond_pair_energy,
+        &mut mb.bond_pair_virial,
         1,
     )
     .unwrap();
@@ -157,6 +161,8 @@ fn stretched_bond_attractive() {
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
+        &mut mb.bond_pair_energy,
+        &mut mb.bond_pair_virial,
         1,
     )
     .unwrap();
@@ -190,6 +196,8 @@ fn force_magnitude_matches_closed_form() {
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
+        &mut mb.bond_pair_energy,
+        &mut mb.bond_pair_virial,
         1,
     )
     .unwrap();
@@ -219,6 +227,8 @@ fn r_zero_produces_zero_force() {
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
+        &mut mb.bond_pair_energy,
+        &mut mb.bond_pair_virial,
         1,
     )
     .unwrap();
@@ -247,6 +257,8 @@ fn morse_bond_force_zero_bonds_is_noop() {
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
+        &mut mb.bond_pair_energy,
+        &mut mb.bond_pair_virial,
         0,
     )
     .unwrap();
@@ -298,22 +310,30 @@ fn atom_with_two_bonds_sums_contributions() {
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
+        &mut mb.bond_pair_energy,
+        &mut mb.bond_pair_virial,
         2,
     )
     .unwrap();
     let mut acc_x = device.alloc_zeros::<f32>(3).unwrap();
     let mut acc_y = device.alloc_zeros::<f32>(3).unwrap();
     let mut acc_z = device.alloc_zeros::<f32>(3).unwrap();
+    let mut acc_e = device.alloc_zeros::<f32>(3).unwrap();
+    let mut acc_w = device.alloc_zeros::<f32>(3).unwrap();
     reduce_bond_forces(
         &device,
         &mb.bond_pair_x,
         &mb.bond_pair_y,
         &mb.bond_pair_z,
+        &mb.bond_pair_energy,
+        &mb.bond_pair_virial,
         &mb.atom_bond_offsets,
         &mb.atom_bond_indices,
         &mut acc_x.slice_mut(..),
         &mut acc_y.slice_mut(..),
         &mut acc_z.slice_mut(..),
+        &mut acc_e.slice_mut(..),
+        &mut acc_w.slice_mut(..),
         3,
     )
     .unwrap();
@@ -351,16 +371,22 @@ fn atom_with_no_bonds_gets_zero_accumulator() {
     let mut acc_x = device.alloc_zeros::<f32>(4).unwrap();
     let mut acc_y = device.alloc_zeros::<f32>(4).unwrap();
     let mut acc_z = device.alloc_zeros::<f32>(4).unwrap();
+    let mut acc_e = device.alloc_zeros::<f32>(4).unwrap();
+    let mut acc_w = device.alloc_zeros::<f32>(4).unwrap();
     reduce_bond_forces(
         &device,
         &mb.bond_pair_x,
         &mb.bond_pair_y,
         &mb.bond_pair_z,
+        &mb.bond_pair_energy,
+        &mb.bond_pair_virial,
         &mb.atom_bond_offsets,
         &mb.atom_bond_indices,
         &mut acc_x.slice_mut(..),
         &mut acc_y.slice_mut(..),
         &mut acc_z.slice_mut(..),
+        &mut acc_e.slice_mut(..),
+        &mut acc_w.slice_mut(..),
         4,
     )
     .unwrap();
@@ -378,16 +404,22 @@ fn reduce_bond_forces_zero_particles_noop() {
     let mut acc_x = device.alloc_zeros::<f32>(0).unwrap();
     let mut acc_y = device.alloc_zeros::<f32>(0).unwrap();
     let mut acc_z = device.alloc_zeros::<f32>(0).unwrap();
+    let mut acc_e = device.alloc_zeros::<f32>(0).unwrap();
+    let mut acc_w = device.alloc_zeros::<f32>(0).unwrap();
     reduce_bond_forces(
         &device,
         &mb.bond_pair_x,
         &mb.bond_pair_y,
         &mb.bond_pair_z,
+        &mb.bond_pair_energy,
+        &mb.bond_pair_virial,
         &mb.atom_bond_offsets,
         &mb.atom_bond_indices,
         &mut acc_x.slice_mut(..),
         &mut acc_y.slice_mut(..),
         &mut acc_z.slice_mut(..),
+        &mut acc_e.slice_mut(..),
+        &mut acc_w.slice_mut(..),
         0,
     )
     .unwrap();
@@ -467,4 +499,165 @@ fn newtons_third_law_holds_for_combined_force() {
     // Verify the ForceField uses the MorseBonded slot when bonds exist.
     assert_eq!(ff.slots.len(), 2);
     assert_eq!(ff.slots[1].label(), "morse_bonded");
+}
+
+// --- Energy and virial outputs ---
+
+#[test] // rq-7ba4f321
+fn stretched_bond_energy_matches_closed_form() {
+    let device = init_device().unwrap();
+    let r = 1.5_f32;
+    let state = two_particle_state([0.0, 0.0, 0.0], [r, 0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let bl = single_bond_list(2);
+    let de = 1.0_f64;
+    let a = 2.0_f64;
+    let re = 1.0_f64;
+    let bt = vec![morse_type(de, a, re)];
+    let mut mb = MorseBondedState::new(device.clone(), &bl, &bt).unwrap();
+    morse_bond_force(
+        &buffers,
+        &mb.bonds,
+        &mb.bond_de,
+        &mb.bond_a,
+        &mb.bond_re,
+        &box_10(),
+        &mut mb.bond_pair_x,
+        &mut mb.bond_pair_y,
+        &mut mb.bond_pair_z,
+        &mut mb.bond_pair_energy,
+        &mut mb.bond_pair_virial,
+        1,
+    )
+    .unwrap();
+    let be = device.dtoh_sync_copy(&mb.bond_pair_energy).unwrap();
+    let dr = (r as f64) - re;
+    let e = (-a * dr).exp();
+    let one_minus = 1.0 - e;
+    let expected = (de * one_minus * one_minus) as f32;
+    assert!((be[0] + be[1] - expected).abs() < 1.0e-5, "got {} expected {}", be[0] + be[1], expected);
+}
+
+#[test] // rq-ca49d49a
+fn stretched_bond_virial_matches_r_dot_f() {
+    let device = init_device().unwrap();
+    let r = 1.5_f32;
+    let state = two_particle_state([0.0, 0.0, 0.0], [r, 0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let bl = single_bond_list(2);
+    let bt = vec![morse_type(1.0, 2.0, 1.0)];
+    let mut mb = MorseBondedState::new(device.clone(), &bl, &bt).unwrap();
+    morse_bond_force(
+        &buffers,
+        &mb.bonds,
+        &mb.bond_de,
+        &mb.bond_a,
+        &mb.bond_re,
+        &box_10(),
+        &mut mb.bond_pair_x,
+        &mut mb.bond_pair_y,
+        &mut mb.bond_pair_z,
+        &mut mb.bond_pair_energy,
+        &mut mb.bond_pair_virial,
+        1,
+    )
+    .unwrap();
+    let bx = device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
+    let bv = device.dtoh_sync_copy(&mb.bond_pair_virial).unwrap();
+    // dx = r_0 - r_1 = -1.5 (atom 0 at origin, atom 1 at +x).
+    // F on atom 0 due to atom 1 = bx[0] (along the dx direction times fmag).
+    // r_ij · F_ij = dx * F_x = (-1.5) * bx[0].
+    let expected = -1.5_f32 * bx[0];
+    let total = bv[0] + bv[1];
+    assert!(
+        (total - expected).abs() < 1.0e-5,
+        "got {total} expected {expected}"
+    );
+}
+
+#[test] // rq-fe9f2ebe
+fn r_zero_produces_zero_energy_and_virial() {
+    let device = init_device().unwrap();
+    let state = two_particle_state([1.0, 1.0, 1.0], [1.0, 1.0, 1.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let bl = single_bond_list(2);
+    let bt = vec![morse_type(1.0, 2.0, 1.0)];
+    let mut mb = MorseBondedState::new(device.clone(), &bl, &bt).unwrap();
+    morse_bond_force(
+        &buffers,
+        &mb.bonds,
+        &mb.bond_de,
+        &mb.bond_a,
+        &mb.bond_re,
+        &box_10(),
+        &mut mb.bond_pair_x,
+        &mut mb.bond_pair_y,
+        &mut mb.bond_pair_z,
+        &mut mb.bond_pair_energy,
+        &mut mb.bond_pair_virial,
+        1,
+    )
+    .unwrap();
+    let be = device.dtoh_sync_copy(&mb.bond_pair_energy).unwrap();
+    let bv = device.dtoh_sync_copy(&mb.bond_pair_virial).unwrap();
+    for v in be.iter().chain(bv.iter()) {
+        assert!(v.is_finite() && *v == 0.0);
+    }
+}
+
+#[test] // rq-6897ffda
+fn bond_reduction_sums_energy_and_virial_alongside_forces() {
+    let device = init_device().unwrap();
+    let r = 1.5_f32;
+    let state = two_particle_state([0.0, 0.0, 0.0], [r, 0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let bl = single_bond_list(2);
+    let bt = vec![morse_type(1.0, 2.0, 1.0)];
+    let mut mb = MorseBondedState::new(device.clone(), &bl, &bt).unwrap();
+    morse_bond_force(
+        &buffers,
+        &mb.bonds,
+        &mb.bond_de,
+        &mb.bond_a,
+        &mb.bond_re,
+        &box_10(),
+        &mut mb.bond_pair_x,
+        &mut mb.bond_pair_y,
+        &mut mb.bond_pair_z,
+        &mut mb.bond_pair_energy,
+        &mut mb.bond_pair_virial,
+        1,
+    )
+    .unwrap();
+    let mut acc_x = device.alloc_zeros::<f32>(2).unwrap();
+    let mut acc_y = device.alloc_zeros::<f32>(2).unwrap();
+    let mut acc_z = device.alloc_zeros::<f32>(2).unwrap();
+    let mut acc_e = device.alloc_zeros::<f32>(2).unwrap();
+    let mut acc_w = device.alloc_zeros::<f32>(2).unwrap();
+    reduce_bond_forces(
+        &device,
+        &mb.bond_pair_x,
+        &mb.bond_pair_y,
+        &mb.bond_pair_z,
+        &mb.bond_pair_energy,
+        &mb.bond_pair_virial,
+        &mb.atom_bond_offsets,
+        &mb.atom_bond_indices,
+        &mut acc_x.slice_mut(..),
+        &mut acc_y.slice_mut(..),
+        &mut acc_z.slice_mut(..),
+        &mut acc_e.slice_mut(..),
+        &mut acc_w.slice_mut(..),
+        2,
+    )
+    .unwrap();
+    let acc_e_host = device.dtoh_sync_copy(&acc_e).unwrap();
+    let acc_w_host = device.dtoh_sync_copy(&acc_w).unwrap();
+    let be = device.dtoh_sync_copy(&mb.bond_pair_energy).unwrap();
+    let bv = device.dtoh_sync_copy(&mb.bond_pair_virial).unwrap();
+    // Each atom's share equals one half-bond entry.
+    assert_eq!(acc_e_host[0], be[0]);
+    assert_eq!(acc_e_host[1], be[1]);
+    assert_eq!(acc_w_host[0], bv[0]);
+    assert_eq!(acc_w_host[1], bv[1]);
 }

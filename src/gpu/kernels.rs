@@ -88,12 +88,15 @@ pub fn vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError> {
 }
 
 // rq-6690fae9
+#[allow(clippy::too_many_arguments)]
 pub fn reduce_pair_forces(
     pair_buffer: &PairBuffer,
     neighbor_counts: &CudaSlice<u32>,
-    target_x: &mut CudaViewMut<'_, f32>,
-    target_y: &mut CudaViewMut<'_, f32>,
-    target_z: &mut CudaViewMut<'_, f32>,
+    target_force_x: &mut CudaViewMut<'_, f32>,
+    target_force_y: &mut CudaViewMut<'_, f32>,
+    target_force_z: &mut CudaViewMut<'_, f32>,
+    target_energy: &mut CudaViewMut<'_, f32>,
+    target_virial: &mut CudaViewMut<'_, f32>,
     particle_count: usize,
 ) -> Result<(), GpuError> {
     let n = particle_count;
@@ -103,9 +106,11 @@ pub fn reduce_pair_forces(
     let max_neighbors = pair_buffer.max_neighbors();
     debug_assert_eq!(pair_buffer.particle_count(), n);
     debug_assert_eq!(neighbor_counts.len(), n);
-    debug_assert_eq!(target_x.len(), n);
-    debug_assert_eq!(target_y.len(), n);
-    debug_assert_eq!(target_z.len(), n);
+    debug_assert_eq!(target_force_x.len(), n);
+    debug_assert_eq!(target_force_y.len(), n);
+    debug_assert_eq!(target_force_z.len(), n);
+    debug_assert_eq!(target_energy.len(), n);
+    debug_assert_eq!(target_virial.len(), n);
     debug_assert_eq!(
         pair_buffer.pair_forces_x.len(),
         n * max_neighbors as usize
@@ -124,11 +129,15 @@ pub fn reduce_pair_forces(
                 &pair_buffer.pair_forces_x,
                 &pair_buffer.pair_forces_y,
                 &pair_buffer.pair_forces_z,
+                &pair_buffer.pair_energies,
+                &pair_buffer.pair_virials,
                 neighbor_counts,
                 max_neighbors,
-                target_x,
-                target_y,
-                target_z,
+                target_force_x,
+                target_force_y,
+                target_force_z,
+                target_energy,
+                target_virial,
                 n_u32,
             ),
         )
@@ -257,6 +266,8 @@ pub fn lj_pair_force(
                 &mut pair_buffer.pair_forces_x,
                 &mut pair_buffer.pair_forces_y,
                 &mut pair_buffer.pair_forces_z,
+                &mut pair_buffer.pair_energies,
+                &mut pair_buffer.pair_virials,
                 max_neighbors,
                 lengths[0],
                 lengths[1],
@@ -290,6 +301,8 @@ pub fn morse_bond_force(
     bond_pair_x: &mut CudaSlice<f32>,
     bond_pair_y: &mut CudaSlice<f32>,
     bond_pair_z: &mut CudaSlice<f32>,
+    bond_pair_energy: &mut CudaSlice<f32>,
+    bond_pair_virial: &mut CudaSlice<f32>,
     n_bonds: usize,
 ) -> Result<(), GpuError> {
     if n_bonds == 0 {
@@ -319,6 +332,8 @@ pub fn morse_bond_force(
                 bond_pair_x,
                 bond_pair_y,
                 bond_pair_z,
+                bond_pair_energy,
+                bond_pair_virial,
                 n_u32,
             ),
         )
@@ -335,11 +350,15 @@ pub fn reduce_bond_forces(
     bond_pair_x: &CudaSlice<f32>,
     bond_pair_y: &CudaSlice<f32>,
     bond_pair_z: &CudaSlice<f32>,
+    bond_pair_energy: &CudaSlice<f32>,
+    bond_pair_virial: &CudaSlice<f32>,
     atom_bond_offsets: &CudaSlice<u32>,
     atom_bond_indices: &CudaSlice<u32>,
-    accumulator_x: &mut CudaViewMut<'_, f32>,
-    accumulator_y: &mut CudaViewMut<'_, f32>,
-    accumulator_z: &mut CudaViewMut<'_, f32>,
+    slot_force_x: &mut CudaViewMut<'_, f32>,
+    slot_force_y: &mut CudaViewMut<'_, f32>,
+    slot_force_z: &mut CudaViewMut<'_, f32>,
+    slot_energy: &mut CudaViewMut<'_, f32>,
+    slot_virial: &mut CudaViewMut<'_, f32>,
     particle_count: usize,
 ) -> Result<(), GpuError> {
     if particle_count == 0 {
@@ -357,11 +376,15 @@ pub fn reduce_bond_forces(
                 bond_pair_x,
                 bond_pair_y,
                 bond_pair_z,
+                bond_pair_energy,
+                bond_pair_virial,
                 atom_bond_offsets,
                 atom_bond_indices,
-                accumulator_x,
-                accumulator_y,
-                accumulator_z,
+                slot_force_x,
+                slot_force_y,
+                slot_force_z,
+                slot_energy,
+                slot_virial,
                 n_u32,
             ),
         )
@@ -371,11 +394,14 @@ pub fn reduce_bond_forces(
 }
 
 // rq-c0f98145
+#[allow(clippy::too_many_arguments)]
 pub fn accumulate_forces(
     particle_buffers: &mut ParticleBuffers,
     slot_forces_x: &CudaSlice<f32>,
     slot_forces_y: &CudaSlice<f32>,
     slot_forces_z: &CudaSlice<f32>,
+    slot_energies: &CudaSlice<f32>,
+    slot_virials: &CudaSlice<f32>,
     num_slots: u32,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
@@ -386,6 +412,8 @@ pub fn accumulate_forces(
     debug_assert_eq!(slot_forces_x.len(), num_slots as usize * n);
     debug_assert_eq!(slot_forces_y.len(), num_slots as usize * n);
     debug_assert_eq!(slot_forces_z.len(), num_slots as usize * n);
+    debug_assert_eq!(slot_energies.len(), num_slots as usize * n);
+    debug_assert_eq!(slot_virials.len(), num_slots as usize * n);
 
     let func = particle_buffers
         .device
@@ -400,10 +428,14 @@ pub fn accumulate_forces(
                 slot_forces_x,
                 slot_forces_y,
                 slot_forces_z,
+                slot_energies,
+                slot_virials,
                 num_slots,
                 &mut particle_buffers.forces_x,
                 &mut particle_buffers.forces_y,
                 &mut particle_buffers.forces_z,
+                &mut particle_buffers.potential_energies,
+                &mut particle_buffers.virials,
                 n_u32,
             ),
         )

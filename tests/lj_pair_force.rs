@@ -958,3 +958,165 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
         );
     }
 }
+
+// --- Energy and virial outputs ---
+
+fn download_pair_energies(pair: &PairBuffer) -> Vec<f32> {
+    let device = pair.device.clone();
+    device.dtoh_sync_copy(&pair.pair_energies).unwrap()
+}
+
+fn download_pair_virials(pair: &PairBuffer) -> Vec<f32> {
+    let device = pair.device.clone();
+    device.dtoh_sync_copy(&pair.pair_virials).unwrap()
+}
+
+#[test] // rq-b68b3445
+fn two_particle_pair_energy_matches_closed_form() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let params = default_params();
+    let table = table_from_scalar(&device, params);
+    let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
+    let state = build_state_xyz(&positions);
+    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).unwrap();
+    let pe = download_pair_energies(&pair);
+    let sigma = params.sigma;
+    let epsilon = params.epsilon;
+    let r = 1.5_f32;
+    let sr2 = (sigma / r).powi(2);
+    let sr6 = sr2.powi(3);
+    let sr12 = sr6 * sr6;
+    let expected = 4.0_f32 * epsilon * (sr12 - sr6);
+    // Slots (0,1) and (1,0) each hold half the energy.
+    assert!((pe[0 * 2 + 1] + pe[1 * 2 + 0] - expected).abs() < 1.0e-5);
+}
+
+#[test] // rq-0b71c50a
+fn two_particle_pair_virial_matches_r_dot_f() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let params = default_params();
+    let table = table_from_scalar(&device, params);
+    let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
+    let state = build_state_xyz(&positions);
+    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).unwrap();
+    let (px, _, _) = download_pair_forces(&pair);
+    let pv = download_pair_virials(&pair);
+    // r_ij = (1.5, 0, 0); F_ij = (px[0*2+1], 0, 0). w = r · F.
+    let r_dot_f = 1.5_f32 * px[0 * 2 + 1];
+    // The kernel computes w = (r_i - r_j) · F_i = (-1.5) * (-F_x_on_0) = 1.5 * F_x_on_0.
+    // But our convention: slot (i, j) holds force on i due to j, so F_x_on_0 due to 1 is px[0*2+1].
+    // Displacement vector used in kernel: r_i - r_j. For i=0, j=1: dx = -1.5.
+    // r_ij · F_ij = dx * fx + dy * fy + dz * fz where (fx,fy,fz) is force on 0 due to 1.
+    // Here dx=-1.5, fx=px[0*2+1]. So w = -1.5 * px[0*2+1].
+    // Symmetrically for slot (1,0): dx=+1.5, fx=-px[0*2+1]. Same w.
+    let expected = -1.5_f32 * px[0 * 2 + 1];
+    let total = pv[0 * 2 + 1] + pv[1 * 2 + 0];
+    assert!((total - expected).abs() < 1.0e-5, "got {total} expected {expected}");
+    // Also: the slot's value should be exactly the (i==0,j==1) virial = -1.5*F.
+    // px[0*2+1] = px is the same px from `pair`'s force buffer; we verified it.
+    let _ = r_dot_f; // silence
+}
+
+#[test] // rq-a50cb6a1
+fn pair_beyond_cutoff_yields_zero_energy_and_virial() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let params = default_params();
+    let table = table_from_scalar(&device, params);
+    let positions = [[0.0_f32, 0.0, 0.0], [6.0, 0.0, 0.0]];
+    let state = build_state_xyz(&positions);
+    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).unwrap();
+    let pe = download_pair_energies(&pair);
+    let pv = download_pair_virials(&pair);
+    assert_eq!(pe[0 * 2 + 1], 0.0);
+    assert_eq!(pv[0 * 2 + 1], 0.0);
+    assert_eq!(pe[1 * 2 + 0], 0.0);
+    assert_eq!(pv[1 * 2 + 0], 0.0);
+}
+
+#[test] // rq-82f8d168
+fn self_slots_carry_zero_energy_and_virial() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let params = default_params();
+    let table = table_from_scalar(&device, params);
+    let positions = [
+        [0.0_f32, 0.0, 0.0],
+        [1.5, 0.0, 0.0],
+        [0.0, 1.5, 0.0],
+        [0.0, 0.0, 1.5],
+    ];
+    let state = build_state_xyz(&positions);
+    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut pair = PairBuffer::new(device.clone(), 4, 4).unwrap();
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).unwrap();
+    let pe = download_pair_energies(&pair);
+    let pv = download_pair_virials(&pair);
+    for i in 0..4 {
+        let slot = i * 4 + i;
+        assert_eq!(pe[slot], 0.0_f32);
+        assert_eq!(pv[slot], 0.0_f32);
+    }
+}
+
+#[test] // rq-95c2f543
+fn exclusion_scaling_applies_uniformly_to_force_energy_virial() {
+    use dynamics::forces::{DeviceExclusionList, ExclusionList, Exclusion};
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let params = default_params();
+    let table = table_from_scalar(&device, params);
+    let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
+    let state = build_state_xyz(&positions);
+    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+
+    // Unscaled run.
+    let mut pair_full = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    lj_pair_force_no_excl(&particle_buffers, &mut pair_full, &sim_box, &table).unwrap();
+    let pe_full = download_pair_energies(&pair_full);
+    let pv_full = download_pair_virials(&pair_full);
+    let (px_full, _, _) = download_pair_forces(&pair_full);
+
+    // Half-strength exclusion run. Build the host-side ExclusionList by
+    // hand since the only public constructor is `empty(n)`.
+    let host = ExclusionList {
+        entries: vec![
+            Exclusion { atom_i: 0, atom_j: 1, scale: 0.5 },
+            Exclusion { atom_i: 1, atom_j: 0, scale: 0.5 },
+        ],
+        atom_excl_offsets: vec![0u32, 1, 2],
+        atom_excl_partners: vec![1u32, 0],
+        atom_excl_scales: vec![0.5_f32, 0.5],
+        particle_count: 2,
+    };
+    let excl = DeviceExclusionList::from_host(&device, &host).unwrap();
+    let mut pair_half = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    dynamics::gpu::lj_pair_force(
+        &particle_buffers,
+        &mut pair_half,
+        &sim_box,
+        &table,
+        &excl.atom_excl_offsets,
+        &excl.atom_excl_partners,
+        &excl.atom_excl_scales,
+        &trivial_neighbor_list(&device, &sim_box, 2).neighbor_list,
+        &trivial_neighbor_list(&device, &sim_box, 2).neighbor_counts,
+    )
+    .unwrap();
+    let pe_half = download_pair_energies(&pair_half);
+    let pv_half = download_pair_virials(&pair_half);
+    let (px_half, _, _) = download_pair_forces(&pair_half);
+
+    // Every (0,1) and (1,0) slot scaled by 0.5.
+    assert!((px_half[0 * 2 + 1] - 0.5 * px_full[0 * 2 + 1]).abs() < 1.0e-5);
+    assert!((pe_half[0 * 2 + 1] - 0.5 * pe_full[0 * 2 + 1]).abs() < 1.0e-5);
+    assert!((pv_half[0 * 2 + 1] - 0.5 * pv_full[0 * 2 + 1]).abs() < 1.0e-5);
+}

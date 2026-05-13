@@ -60,38 +60,45 @@ The runner's force evaluation does the following per step:
    `Potential::contribute`, passing a `ForceFieldContext` that carries
    a reference to the shared `NeighborListState` (when present) and any
    other shared services. The slot fills its private intermediate
-   buffers (e.g. a `PairBuffer` or a `BondPairBuffer`); the framework
-   does not inspect them.
+   buffers (e.g. a `PairBuffer` or a `BondPairBuffer`) with per-pair
+   force, energy, and virial contributions; the framework does not
+   inspect them.
 3. **Per-slot reductions.** For each slot, in slot order, invoke
-   `Potential::reduce`, passing a `SlotForceView` that points to the
-   slot's assigned row of the framework's flat slot-accumulator buffers.
+   `Potential::reduce`, passing a `SlotOutputView` that points to the
+   slot's assigned row of the framework's flat slot-output buffers.
    The reduction overwrites that row with the slot's per-particle
-   reduced force contribution.
+   reduced contributions: three force components, one potential-energy
+   share, and one scalar-virial share (five quantities total).
 4. **Combiner.** Run `accumulate_forces` once. The combiner reads the
-   flat slot-accumulator buffers and writes
-   `forces_*[i] = sum over k in 0..num_slots of slot_forces_*[k * n + i]`.
+   flat slot-output buffers and writes, for each per-particle quantity
+   `Q` in `{force_x, force_y, force_z, potential_energy, virial}`:
+   `particle_buffers.Q[i] = sum over k in 0..num_slots of slot_Q[k * n + i]`.
    The summation is left-to-right in `k`; each thread handles one `i`.
 
 Identical runs on the same GPU with the same config produce byte-identical
-`forces_*` and therefore byte-identical trajectories.
+`particle_buffers.forces_*`, `potential_energies`, and `virials`, and
+therefore byte-identical trajectories.
 
-## Slot Accumulator Buffers <!-- rq-cd28340e -->
+## Slot Output Buffers <!-- rq-cd28340e -->
 
-`ForceField` owns three contiguous device buffers, one per axis, named
-`slot_forces_x`, `slot_forces_y`, `slot_forces_z`. Each has length
+`ForceField` owns five contiguous device buffers, one per per-particle
+output quantity, named `slot_forces_x`, `slot_forces_y`, `slot_forces_z`,
+`slot_energies`, and `slot_virials`. Each has length
 `num_slots * particle_count`. The row for slot `k` is the half-open range
 `[k * particle_count, (k + 1) * particle_count)` within each buffer.
 
 After slot `k`'s `reduce()` returns, row `k` contains that slot's
-per-particle reduced force along that axis. The combiner reads every row
-and sums in slot order.
+per-particle reduced contribution along that axis or scalar quantity:
+three force components, one potential-energy share, and one scalar-virial
+share. The combiner reads every row and sums in slot order, producing the
+five per-particle aggregates on `ParticleBuffers`.
 
-Memory cost: `3 * num_slots * particle_count * 4 bytes`. For
-`particle_count = 10⁴` and four slots, this is ~480 KB — negligible.
-For `particle_count = 10⁵` and four slots, ~4.8 MB.
+Memory cost: `5 * num_slots * particle_count * 4 bytes`. For
+`particle_count = 10⁴` and four slots, this is ~800 KB — negligible.
+For `particle_count = 10⁵` and four slots, ~8 MB.
 
-When `num_slots == 0` the three buffers have length zero. When
-`particle_count == 0` the three buffers have length zero regardless of
+When `num_slots == 0` the five buffers have length zero. When
+`particle_count == 0` the five buffers have length zero regardless of
 `num_slots`.
 
 ## Empty State <!-- rq-aa52268c -->
@@ -102,15 +109,16 @@ launching. `ForceField::step` returns `Ok(())` having done no GPU work.
 
 When `num_slots == 0`, the combiner kernel still launches (with
 `num_slots = 0`) and writes zeros to every entry of
-`particle_buffers.forces_*`. The contribution and reduction phases launch
-no kernels. `ForceField::step` returns `Ok(())`.
+`particle_buffers.forces_*`, `potential_energies`, and `virials`. The
+contribution and reduction phases launch no kernels. `ForceField::step`
+returns `Ok(())`.
 
 When a slot's *input list* is empty (e.g. a `MorseBonded` slot constructed
 with `bonds.is_empty()`), the slot's `contribute` does not launch any
 contribution kernel, the slot's `reduce` writes zeros into its assigned
-row of the slot-accumulator buffers, and the rest of the pipeline runs
+rows of all five slot-output buffers, and the rest of the pipeline runs
 normally. (The combiner reads every row unconditionally; empty-input
-slots must carry valid zeros in their row.)
+slots must carry valid zeros in their rows.)
 
 ## Feature API <!-- rq-0da87ca1 -->
 
@@ -134,7 +142,8 @@ slots must carry valid zeros in their row.)
 
       fn reduce(
           &mut self,
-          output: SlotForceView<'_>,
+          output: SlotOutputView<'_>,
+          cx: &ForceFieldContext<'_>,
           timings: &mut Timings,
       ) -> Result<(), ForceFieldError>;
   }
@@ -158,9 +167,9 @@ slots must carry valid zeros in their row.)
     `Some(_)`; implementations that report `None` are free to ignore
     `cx.neighbor_list` (it may be `None` or `Some` depending on whether
     any other slot needs the list).
-  - `reduce` writes exactly `buffers.particle_count()` floats per axis
-    into the slices referenced by `output`. After `reduce` returns,
-    those slices hold the slot's per-particle force contribution.
+  - `reduce` writes exactly `buffers.particle_count()` floats per slice
+    into the five slices referenced by `output`: per-particle force x,
+    force y, force z, potential-energy share, and scalar-virial share.
 
   Implementations are responsible for emitting their own
   `KernelStage` start/stop events through `timings`.
@@ -180,22 +189,24 @@ slots must carry valid zeros in their row.)
     shared services land here as additional fields without changing the
     `Potential::contribute` signature.
 
-- `SlotForceView<'a>` — three exclusive references to per-axis output <!-- rq-304b191b -->
+- `SlotOutputView<'a>` — five exclusive references to per-particle output <!-- rq-304b191b -->
   slices, each of length `particle_count`. Constructed by `ForceField`
   and passed into `Potential::reduce`. Implementations must treat the
   slices as write-only output buffers.
 
   ```rust
-  pub struct SlotForceView<'a> {
-      pub x: CudaViewMut<'a, f32>,
-      pub y: CudaViewMut<'a, f32>,
-      pub z: CudaViewMut<'a, f32>,
+  pub struct SlotOutputView<'a> {
+      pub force_x: CudaViewMut<'a, f32>,
+      pub force_y: CudaViewMut<'a, f32>,
+      pub force_z: CudaViewMut<'a, f32>,
+      pub energy: CudaViewMut<'a, f32>,
+      pub virial: CudaViewMut<'a, f32>,
   }
   ```
 
   Each field is a `CudaViewMut` of length `particle_count` onto the
-  corresponding row of the framework's flat slot-accumulator buffer.
-  The view borrows the framework's storage for the duration of the
+  corresponding row of the framework's flat slot-output buffer. The
+  view borrows the framework's storage for the duration of the
   `reduce` call.
 
 - `LennardJonesState` — implements `Potential` with `label() == "lennard_jones"`. <!-- rq-af2d1628 -->
@@ -214,15 +225,15 @@ slots must carry valid zeros in their row.)
   In either variant, the slot's reduction reads `neighbor_counts` (so
   the existing segmented `reduce_pair_forces` kernel works without
   branching) and writes its per-particle output into the
-  `SlotForceView` it receives.
+  `SlotOutputView` it receives.
 
 - `MorseBondedState` — implements `Potential` with `label() == "morse_bonded"`. <!-- rq-2361f2b8 -->
   Owns the slot's `BondPairBuffer`, the bond index/offset tables, and
   the per-bond-type parameter table. Construction requires a non-empty
   bond list; see `morse-bonded.md`. Its reduction writes per-particle
-  output into the `SlotForceView` it receives.
+  output into the `SlotOutputView` it receives.
 
-- `ForceField` — handle owning the slot collection, the flat slot-accumulator buffers, and the shared neighbor list. <!-- rq-684a29f1 -->
+- `ForceField` — handle owning the slot collection, the flat slot-output buffers, and the shared neighbor list. <!-- rq-684a29f1 -->
 
   Fields:
   - `device: Arc<CudaDevice>`
@@ -231,6 +242,8 @@ slots must carry valid zeros in their row.)
   - `slot_forces_x: CudaSlice<f32>` — length `slots.len() * N`.
   - `slot_forces_y: CudaSlice<f32>` — length `slots.len() * N`.
   - `slot_forces_z: CudaSlice<f32>` — length `slots.len() * N`.
+  - `slot_energies: CudaSlice<f32>` — length `slots.len() * N`.
+  - `slot_virials: CudaSlice<f32>` — length `slots.len() * N`.
   - `neighbor_list: Option<NeighborListState>` — `Some(_)` when at
     least one slot returns `max_cutoff() == Some(_)`, `None`
     otherwise (bonded-only and zero-slot configurations).
@@ -255,7 +268,8 @@ slots must carry valid zeros in their row.)
       false.
   - When both inputs are absent, returns a `ForceField` with
     `slots.len() == 0`.
-  - Allocates the three flat slot-accumulator buffers of length
+  - Allocates the five flat slot-output buffers (`slot_forces_x/y/z`,
+    `slot_energies`, `slot_virials`) of length
     `slots.len() * particle_count` on `device`. When either factor is
     zero, the allocations are length-zero.
   - Builds the shared `NeighborListState`:
@@ -284,13 +298,15 @@ slots must carry valid zeros in their row.)
   - For each slot in `self.slots`, in order, calls
     `slot.contribute(buffers, sim_box, &cx, timings)`.
   - For each slot in `self.slots`, in order, calls `slot.reduce(view,
-    timings)` where `view` is a `SlotForceView` pointing into the row
-    `slot_index * particle_count .. (slot_index + 1) * particle_count`
-    of the flat slot-accumulator buffers.
+    &cx, timings)` where `view` is a `SlotOutputView` whose five fields
+    point into the row `slot_index * particle_count ..
+    (slot_index + 1) * particle_count` of the five flat slot-output
+    buffers.
   - Launches `accumulate_forces` once (with
     `KernelStage::AccumulateForces`). When `slots.is_empty()`,
     `accumulate_forces` still launches and writes zeros to
-    `buffers.forces_*`.
+    `buffers.forces_*`, `buffers.potential_energies`, and
+    `buffers.virials`.
   - Returns `Ok(())` on success.
   - Empty-state contract per *Empty State* above.
 
@@ -303,34 +319,39 @@ extern "C" __global__ void accumulate_forces(
     const float *slot_forces_x,    // shape [num_slots * n]
     const float *slot_forces_y,    // shape [num_slots * n]
     const float *slot_forces_z,    // shape [num_slots * n]
+    const float *slot_energies,    // shape [num_slots * n]
+    const float *slot_virials,     // shape [num_slots * n]
     unsigned int num_slots,
     float *forces_x,
     float *forces_y,
     float *forces_z,
+    float *potential_energies,
+    float *virials,
     unsigned int n);
 ```
 
 Each thread maps to one particle index
 `i = blockIdx.x * blockDim.x + threadIdx.x` (block size 256, grid
 `ceil(n / 256)`, no shared memory, default stream of
-`particle_buffers.device`). The thread computes
+`particle_buffers.device`). The thread computes, for each output quantity
+`Q` in `{forces_x, forces_y, forces_z, potential_energies, virials}`:
 
 ```text
-sum_x = 0
+sum_Q = 0
 for k in 0..num_slots:
-    sum_x += slot_forces_x[k * n + i]
-forces_x[i] = sum_x
+    sum_Q += slot_Q[k * n + i]
+Q[i] = sum_Q
 ```
 
-and analogously for `y` and `z`. The sum is performed left-to-right in
-slot order, so identical inputs yield byte-identical outputs across runs.
+The sums are performed left-to-right in slot order, so identical inputs
+yield byte-identical outputs across runs.
 
-When `num_slots == 0`, the inner loop does not execute and `forces_*[i]`
-is set to zero.
+When `num_slots == 0`, the inner loop does not execute and the five
+output slices are set to zero at index `i`.
 
 The kernel does not branch on slot identity and does not read pointers
-beyond `slot_forces_*[num_slots * n - 1]`. Adding a new slot does not
-change the kernel's signature.
+beyond `slot_*[num_slots * n - 1]`. Adding a new slot does not change
+the kernel's signature.
 
 ## Determinism Guarantees <!-- rq-76cb9922 -->
 
@@ -338,10 +359,11 @@ change the kernel's signature.
   same `Arc<CudaDevice>` carried by `ParticleBuffers`.
 - The slot order produced by `ForceField::new` is deterministic and
   identical across runs with the same config.
-- Each slot writes into its assigned row of the flat slot-accumulator
+- Each slot writes into its assigned row of the five flat slot-output
   buffers; rows are disjoint and written by exactly one slot.
 - The combiner's left-to-right summation across slots is fixed by the
-  slot order, so per-atom force values are byte-reproducible.
+  slot order, so per-atom force, potential-energy, and virial values are
+  byte-reproducible.
 
 ## Out of Scope <!-- rq-e448909a -->
 
@@ -357,9 +379,14 @@ change the kernel's signature.
   at `ForceField::new` and never modified.
 - Slot ordering being user-configurable. The order is fixed in
   `ForceField::new`.
-- Per-pair (force, energy, virial) output. The `Potential` trait
-  reduces forces only; energy and virial accumulation are out of scope
-  for this framework.
+- Wiring the per-particle `potential_energies` and `virials` aggregates
+  into log output, trajectory output, or pressure-coupling barostats.
+  The framework produces the per-particle aggregates each step; the
+  consumers of those aggregates (log writer, pressure logger, NPT
+  barostat) are documented in their own files.
+- Full virial-tensor accumulation. The framework's per-pair virial is
+  the scalar trace `r_ij · F_ij`; per-component virial accumulation
+  (xx, yy, zz, xy, xz, yz) is not in scope.
 
 ---
 
@@ -482,7 +509,7 @@ Feature: Pluggable potential slot framework
     And timings.finalize() reports zero samples for every KernelStage
 
   @rq-7d8485b3
-  Scenario: Each slot writes into its own row of the slot-accumulator buffers
+  Scenario: Each slot writes into its own row of the slot-output buffers
     Given a constructed ForceField with two slots and particle_count == 3
     When force_field.step(...) is called
     And slot_forces_x is downloaded
@@ -498,7 +525,7 @@ Feature: Pluggable potential slot framework
     When ForceField::new(...) is called with a config that activates all three slots
     Then force_field.slots has length 3
     And the accumulate_forces kernel binary is unchanged
-    And the SlotForceView passed to Buckingham's reduce points at row 2 of the slot-accumulator buffers
+    And the SlotOutputView passed to Buckingham's reduce points at row 2 of the slot-output buffers
 
   # --- Reproducibility ---
 
@@ -566,4 +593,53 @@ Feature: Pluggable potential slot framework
     When ForceField::step is called
     Then timings reports zero samples for KernelStage::NeighborDisplacementSquared
     And timings reports zero samples for KernelStage::NeighborListBuild
+
+  # --- Per-particle energy and virial outputs ---
+
+  @rq-531faea9
+  Scenario: ForceField with N=4 LJ-only step populates potential_energies and virials
+    Given a constructed ForceField with one LennardJones slot and N=4
+    And a ParticleState placed so the LJ contributions are non-zero
+    When ForceField::step is called
+    And ParticleBuffers is downloaded
+    Then potential_energies is finite and non-zero in the expected pattern
+    And virials is finite and non-zero in the expected pattern
+
+  @rq-a85e8216
+  Scenario: Slot-output buffers have five flat arrays sized num_slots * N
+    Given a ForceField with two slots and particle_count = 8
+    Then ForceField::slot_forces_x, slot_forces_y, slot_forces_z,
+      slot_energies, and slot_virials each have length 16
+
+  @rq-3d38868e
+  Scenario: Combiner sums slot energies and virials in slot order
+    Given a ForceField with two slots whose slot_energies rows are
+      row 0 = [1.0, 2.0] and row 1 = [10.0, 20.0]
+    And whose slot_virials rows are row 0 = [0.5, 1.0] and row 1 = [5.0, 10.0]
+    When the combiner runs with num_slots = 2 and n = 2
+    Then particle_buffers.potential_energies equals [11.0, 22.0]
+    And particle_buffers.virials equals [5.5, 11.0]
+
+  @rq-c0f2daca
+  Scenario: Zero-slot step writes zeros to potential_energies and virials
+    Given a constructed ForceField with force_field.slots.is_empty()
+    And a ParticleBuffers with particle_count() == 4 and arbitrary prior contents in
+      potential_energies and virials
+    When ForceField::step is called
+    And ParticleBuffers is downloaded
+    Then potential_energies and virials are each [0.0, 0.0, 0.0, 0.0]
+
+  @rq-db3b3d5e
+  Scenario: System total potential energy equals sum of particle shares
+    Given a constructed ForceField with one LennardJones slot and N atoms
+    When ForceField::step is called
+    And the per-particle potential_energies are downloaded
+    Then their sum equals the expected total LJ energy of the configuration within f32 round-off
+
+  @rq-7fe57a77
+  Scenario: System total scalar virial equals sum of particle shares
+    Given a constructed ForceField with one LennardJones slot and N atoms
+    When ForceField::step is called
+    And the per-particle virials are downloaded
+    Then their sum equals Σ_{i<j within cutoff} r_ij · F_ij within f32 round-off
 ```

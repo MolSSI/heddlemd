@@ -615,3 +615,47 @@ fn type_indices_round_trip_through_particle_buffers() {
     sink.download_from(&buffers).unwrap();
     assert_eq!(sink.type_indices, vec![0u32, 2, 1]);
 }
+
+#[test] // rq-0519e35c
+fn new_state_zero_inits_potential_energies_and_virials() {
+    let n = 4;
+    let state = ParticleState::new(
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![1.0_f32; n],
+        vec![0u32; n],
+        None,
+    )
+    .unwrap();
+    assert_eq!(state.potential_energies, vec![0.0_f32; n]);
+    assert_eq!(state.virials, vec![0.0_f32; n]);
+}
+
+#[test] // rq-9504346c
+fn potential_energies_and_virials_round_trip_through_buffers() {
+    let device = init_device().expect("init_device");
+    let mut state = ParticleState::new(
+        vec![0.0_f32, 1.0, 2.0, 3.0],
+        vec![0.0_f32; 4],
+        vec![0.0_f32; 4],
+        vec![0.0_f32; 4],
+        vec![0.0_f32; 4],
+        vec![0.0_f32; 4],
+        vec![1.0_f32; 4],
+        vec![0u32; 4],
+        None,
+    )
+    .unwrap();
+    state.potential_energies = vec![1.0_f32, -2.0, 3.5, 0.25];
+    state.virials = vec![10.0_f32, 20.0, -30.0, 40.0];
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    state.potential_energies = vec![0.0_f32; 4];
+    state.virials = vec![0.0_f32; 4];
+    state.download_from(&buffers).unwrap();
+    assert_eq!(state.potential_energies, vec![1.0_f32, -2.0, 3.5, 0.25]);
+    assert_eq!(state.virials, vec![10.0_f32, 20.0, -30.0, 40.0]);
+}

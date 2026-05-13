@@ -3,7 +3,7 @@ mod common;
 use cudarc::driver::DeviceSlice;
 use dynamics::forces::{
     Bond, BondList, ExclusionList, ForceField, ForceFieldContext, ForceFieldError, Potential,
-    SlotForceView,
+    SlotOutputView,
 };
 use dynamics::gpu::{ParticleBuffers, init_device};
 use dynamics::io::config::{BondTypeConfig, NeighborListConfig, PairInteractionConfig, ParticleTypeConfig};
@@ -230,7 +230,7 @@ impl Potential for LabelStub {
     }
     fn reduce(
         &mut self,
-        _output: SlotForceView<'_>,
+        _output: SlotOutputView<'_>,
         _cx: &ForceFieldContext<'_>,
         _timings: &mut Timings,
     ) -> Result<(), ForceFieldError> {
@@ -565,11 +565,11 @@ impl Potential for ConstStub {
     }
     fn reduce(
         &mut self,
-        mut output: SlotForceView<'_>,
+        mut output: SlotOutputView<'_>,
         _cx: &ForceFieldContext<'_>,
         _timings: &mut Timings,
     ) -> Result<(), ForceFieldError> {
-        let n = output.x.len();
+        let n = output.force_x.len();
         if n == 0 {
             return Ok(());
         }
@@ -577,13 +577,13 @@ impl Potential for ConstStub {
         let vy = vec![self.value_y; n];
         let vz = vec![self.value_z; n];
         self.device
-            .htod_sync_copy_into(&vx, &mut output.x)
+            .htod_sync_copy_into(&vx, &mut output.force_x)
             .map_err(|e| ForceFieldError::Gpu(e.into()))?;
         self.device
-            .htod_sync_copy_into(&vy, &mut output.y)
+            .htod_sync_copy_into(&vy, &mut output.force_y)
             .map_err(|e| ForceFieldError::Gpu(e.into()))?;
         self.device
-            .htod_sync_copy_into(&vz, &mut output.z)
+            .htod_sync_copy_into(&vz, &mut output.force_z)
             .map_err(|e| ForceFieldError::Gpu(e.into()))?;
         Ok(())
     }
@@ -618,6 +618,8 @@ fn third_potential_extensibility() {
     ff.slot_forces_x = device.alloc_zeros::<f32>(new_len).unwrap();
     ff.slot_forces_y = device.alloc_zeros::<f32>(new_len).unwrap();
     ff.slot_forces_z = device.alloc_zeros::<f32>(new_len).unwrap();
+    ff.slot_energies = device.alloc_zeros::<f32>(new_len).unwrap();
+    ff.slot_virials = device.alloc_zeros::<f32>(new_len).unwrap();
 
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
 
@@ -747,20 +749,20 @@ fn combiner_sums_slot_rows_in_slot_order() {
         }
         fn reduce(
             &mut self,
-            mut output: SlotForceView<'_>,
+            mut output: SlotOutputView<'_>,
             _cx: &ForceFieldContext<'_>,
             _t: &mut Timings,
         ) -> Result<(), ForceFieldError> {
-            let n = output.x.len();
+            let n = output.force_x.len();
             let vx = vec![10.0_f32; n];
             self.device
-                .htod_sync_copy_into(&vx, &mut output.x)
+                .htod_sync_copy_into(&vx, &mut output.force_x)
                 .map_err(|e| ForceFieldError::Gpu(e.into()))?;
             self.device
-                .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.y)
+                .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.force_y)
                 .map_err(|e| ForceFieldError::Gpu(e.into()))?;
             self.device
-                .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.z)
+                .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.force_z)
                 .map_err(|e| ForceFieldError::Gpu(e.into()))?;
             Ok(())
         }
@@ -770,6 +772,8 @@ fn combiner_sums_slot_rows_in_slot_order() {
     ff.slot_forces_x = device.alloc_zeros::<f32>(new_len).unwrap();
     ff.slot_forces_y = device.alloc_zeros::<f32>(new_len).unwrap();
     ff.slot_forces_z = device.alloc_zeros::<f32>(new_len).unwrap();
+    ff.slot_energies = device.alloc_zeros::<f32>(new_len).unwrap();
+    ff.slot_virials = device.alloc_zeros::<f32>(new_len).unwrap();
 
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
     let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
@@ -942,12 +946,12 @@ impl Potential for ContextProbeStub {
     }
     fn reduce(
         &mut self,
-        mut output: SlotForceView<'_>,
+        mut output: SlotOutputView<'_>,
         _cx: &ForceFieldContext<'_>,
         _t: &mut Timings,
     ) -> Result<(), ForceFieldError> {
         // Write zeros to the output row.
-        let n = output.x.len();
+        let n = output.force_x.len();
         let device = std::sync::Arc::clone(&self.last_seen_nl_some);
         let _ = device; // unused
         if n == 0 {
@@ -985,6 +989,8 @@ fn context_exposes_shared_neighbor_list_to_contribute() {
     ff.slot_forces_x = device.alloc_zeros::<f32>(new_len).unwrap();
     ff.slot_forces_y = device.alloc_zeros::<f32>(new_len).unwrap();
     ff.slot_forces_z = device.alloc_zeros::<f32>(new_len).unwrap();
+    ff.slot_energies = device.alloc_zeros::<f32>(new_len).unwrap();
+    ff.slot_virials = device.alloc_zeros::<f32>(new_len).unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
     assert_eq!(*probe.lock().unwrap(), Some(true));
 }
@@ -1014,7 +1020,7 @@ impl Potential for CutoffProbeStub {
     }
     fn reduce(
         &mut self,
-        _output: SlotForceView<'_>,
+        _output: SlotOutputView<'_>,
         _cx: &ForceFieldContext<'_>,
         _t: &mut Timings,
     ) -> Result<(), ForceFieldError> {
@@ -1049,4 +1055,236 @@ fn max_cutoff_aggregation_determines_neighbor_list_radius() {
         cl.r_search_sq,
         r_search
     );
+}
+
+// --- Per-particle energy and virial outputs ---
+
+#[test] // rq-531faea9
+fn force_field_lj_only_populates_energy_and_virial() {
+    let device = init_device().unwrap();
+    let state = state_n(4);
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    let mut ff = ForceField::new(
+        device.clone(),
+        4,
+        &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
+        &[lj_pair_config()],
+        &[],
+        &BondList::empty(4),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    let pe = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
+    assert!(pe.iter().any(|&v| v != 0.0), "potential_energies should be non-zero");
+    assert!(vw.iter().any(|&v| v != 0.0), "virials should be non-zero");
+    assert!(pe.iter().all(|&v| v.is_finite()));
+    assert!(vw.iter().all(|&v| v.is_finite()));
+}
+
+#[test] // rq-a85e8216
+fn slot_output_buffers_have_five_flat_arrays() {
+    let device = init_device().unwrap();
+    let bt = vec![BondTypeConfig::Morse {
+        name: "CC".to_string(),
+        de: 1.0,
+        a: 2.0,
+        re: 1.0,
+    }];
+    let bl = single_bond_list(8);
+    let ff = ForceField::new(
+        device,
+        8,
+        &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
+        &[lj_pair_config()],
+        &bt,
+        &bl,
+        &ExclusionList::empty(8),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    assert_eq!(ff.slots.len(), 2);
+    assert_eq!(ff.slot_forces_x.len(), 16);
+    assert_eq!(ff.slot_forces_y.len(), 16);
+    assert_eq!(ff.slot_forces_z.len(), 16);
+    assert_eq!(ff.slot_energies.len(), 16);
+    assert_eq!(ff.slot_virials.len(), 16);
+}
+
+#[test] // rq-3d38868e
+fn combiner_sums_slot_energies_and_virials_in_slot_order() {
+    let device = init_device().unwrap();
+    let state = state_n(2);
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    let mut ff = ForceField::new(
+        device.clone(),
+        2,
+        &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
+        &[],
+        &[],
+        &BondList::empty(2),
+        &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    // Push two ConstStub slots and pre-fill their assigned rows.
+    ff.slots.push(Box::new(ConstStub {
+        value_x: 0.0,
+        value_y: 0.0,
+        value_z: 0.0,
+        device: device.clone(),
+    }));
+    ff.slots.push(Box::new(ConstStub {
+        value_x: 0.0,
+        value_y: 0.0,
+        value_z: 0.0,
+        device: device.clone(),
+    }));
+    // The label uniqueness check normally rejects duplicate "const_stub" labels,
+    // but here we bypass ForceField::new and inject directly. Two slots → label
+    // collision is not checked during step.
+    let new_len = ff.slots.len() * 2;
+    ff.slot_forces_x = device.alloc_zeros::<f32>(new_len).unwrap();
+    ff.slot_forces_y = device.alloc_zeros::<f32>(new_len).unwrap();
+    ff.slot_forces_z = device.alloc_zeros::<f32>(new_len).unwrap();
+    ff.slot_energies = device.alloc_zeros::<f32>(new_len).unwrap();
+    ff.slot_virials = device.alloc_zeros::<f32>(new_len).unwrap();
+
+    // Pre-seed the slot energy/virial rows. ConstStub.reduce writes only
+    // force_x/y/z (zeros here); we want the combiner to see specific
+    // energy/virial values. ConstStub doesn't touch energy/virial, so the
+    // pre-seeded values pass through into the combiner.
+    device
+        .htod_sync_copy_into(&vec![1.0_f32, 2.0, 10.0, 20.0], &mut ff.slot_energies)
+        .unwrap();
+    device
+        .htod_sync_copy_into(&vec![0.5_f32, 1.0, 5.0, 10.0], &mut ff.slot_virials)
+        .unwrap();
+
+    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    let pe = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
+    assert_eq!(pe, vec![11.0_f32, 22.0]);
+    assert_eq!(vw, vec![5.5_f32, 11.0]);
+}
+
+#[test] // rq-c0f2daca
+fn zero_slot_step_writes_zeros_to_energy_and_virial() {
+    let device = init_device().unwrap();
+    let state = state_n(4);
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    // Pre-stamp non-zero junk into PE / virial.
+    device
+        .htod_sync_copy_into(&vec![42.0_f32; 4], &mut buffers.potential_energies)
+        .unwrap();
+    device
+        .htod_sync_copy_into(&vec![-7.0_f32; 4], &mut buffers.virials)
+        .unwrap();
+
+    let mut timings = Timings::new(device.clone()).unwrap();
+    let mut ff = ForceField::new(
+        device.clone(),
+        4,
+        &box_10(),
+        &[],
+        &[],
+        &[],
+        &BondList::empty(4),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    let pe = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
+    assert_eq!(pe, vec![0.0_f32; 4]);
+    assert_eq!(vw, vec![0.0_f32; 4]);
+}
+
+#[test] // rq-db3b3d5e
+fn system_total_potential_energy_equals_sum_of_particle_shares() {
+    let device = init_device().unwrap();
+    // Two particles at r=1.5 with σ=1, ε=1.
+    let state = ParticleState::new(
+        vec![0.0_f32, 1.5],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![1.0_f32, 1.0],
+        vec![0u32, 0],
+        None,
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    let mut ff = ForceField::new(
+        device.clone(),
+        2,
+        &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
+        &[lj_pair_config()],
+        &[],
+        &BondList::empty(2),
+        &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    let pe = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let total: f32 = pe.iter().sum();
+    // Closed-form LJ energy at r=1.5 with σ=1, ε=1.
+    let r = 1.5_f32;
+    let sr2 = (1.0_f32 / r).powi(2);
+    let sr6 = sr2.powi(3);
+    let sr12 = sr6 * sr6;
+    let expected = 4.0_f32 * 1.0 * (sr12 - sr6);
+    assert!((total - expected).abs() < 1.0e-5, "got {total} expected {expected}");
+}
+
+#[test] // rq-7fe57a77
+fn system_total_virial_equals_sum_of_particle_shares() {
+    let device = init_device().unwrap();
+    let state = ParticleState::new(
+        vec![0.0_f32, 1.5],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![1.0_f32, 1.0],
+        vec![0u32, 0],
+        None,
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    let mut ff = ForceField::new(
+        device.clone(),
+        2,
+        &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
+        &[lj_pair_config()],
+        &[],
+        &BondList::empty(2),
+        &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
+    let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    let total_virial: f32 = vw.iter().sum();
+    // Single pair, r_ij = (-1.5, 0, 0) for i=0 → r · F = -1.5 * F_x_on_0.
+    // F_x_on_0 = fx[0] (particle 0's net force comes entirely from particle 1).
+    let expected = -1.5_f32 * fx[0];
+    assert!((total_virial - expected).abs() < 1.0e-5, "got {total_virial} expected {expected}");
 }

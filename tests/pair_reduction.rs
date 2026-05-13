@@ -435,3 +435,103 @@ fn infinite_pair_contribution_propagates_to_infinity() {
     assert!(fx[0].is_infinite());
     assert!(fx[0] > 0.0);
 }
+
+// --- Energy and virial reduction ---
+
+#[test] // rq-9e487c80
+fn reduction_sums_pair_energies_left_to_right() {
+    let device = init_device().expect("init_device");
+    let mut pair = PairBuffer::new(device.clone(), 1, 4).unwrap();
+    let mut state = ParticleState::new(
+        vec![0.0_f32],
+        vec![0.0_f32],
+        vec![0.0_f32],
+        vec![0.0_f32],
+        vec![0.0_f32],
+        vec![0.0_f32],
+        vec![1.0_f32],
+        vec![0u32],
+        None,
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    device
+        .htod_sync_copy_into(&vec![0.5_f32, 1.5, 2.0, 999.0], &mut pair.pair_energies)
+        .unwrap();
+    device
+        .htod_sync_copy_into(&vec![-1.0_f32, 2.0, 3.0, 0.0], &mut pair.pair_virials)
+        .unwrap();
+    let counts = device.htod_sync_copy(&[3u32]).unwrap();
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
+    state.download_from(&buffers).unwrap();
+    assert_eq!(state.potential_energies[0], (0.5_f32 + 1.5_f32) + 2.0_f32);
+    assert_eq!(state.virials[0], (-1.0_f32 + 2.0_f32) + 3.0_f32);
+}
+
+#[test] // rq-961c2ee6
+fn reduction_zero_count_writes_zero_to_energy_and_virial() {
+    let device = init_device().expect("init_device");
+    let mut pair = PairBuffer::new(device.clone(), 2, 4).unwrap();
+    let mut state = ParticleState::new(
+        vec![0.0_f32, 1.0],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![1.0_f32, 1.0],
+        vec![0u32, 0],
+        None,
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    // Pre-fill energies and virials with non-zero junk to prove they get overwritten.
+    device
+        .htod_sync_copy_into(&vec![7.0_f32; 8], &mut pair.pair_energies)
+        .unwrap();
+    device
+        .htod_sync_copy_into(&vec![-3.0_f32; 8], &mut pair.pair_virials)
+        .unwrap();
+    let counts = device.htod_sync_copy(&[0u32, 0]).unwrap();
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
+    state.download_from(&buffers).unwrap();
+    assert_eq!(state.potential_energies, vec![0.0_f32, 0.0]);
+    assert_eq!(state.virials, vec![0.0_f32, 0.0]);
+}
+
+#[test] // rq-41d9e514
+fn energy_and_virial_share_force_indexing() {
+    let device = init_device().expect("init_device");
+    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let mut state = ParticleState::new(
+        vec![0.0_f32, 1.0],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![0.0_f32, 0.0],
+        vec![1.0_f32, 1.0],
+        vec![0u32, 0],
+        None,
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    device
+        .htod_sync_copy_into(&vec![1.0_f32, 2.0, 3.0, 4.0], &mut pair.pair_forces_x)
+        .unwrap();
+    device
+        .htod_sync_copy_into(&vec![10.0_f32, 20.0, 30.0, 40.0], &mut pair.pair_energies)
+        .unwrap();
+    device
+        .htod_sync_copy_into(
+            &vec![100.0_f32, 200.0, 300.0, 400.0],
+            &mut pair.pair_virials,
+        )
+        .unwrap();
+    let counts = device.htod_sync_copy(&[2u32, 2]).unwrap();
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
+    state.download_from(&buffers).unwrap();
+    assert_eq!(state.forces_x, vec![3.0_f32, 7.0]);
+    assert_eq!(state.potential_energies, vec![30.0_f32, 70.0]);
+    assert_eq!(state.virials, vec![300.0_f32, 700.0]);
+}

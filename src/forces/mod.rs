@@ -40,17 +40,19 @@ pub trait Potential: std::fmt::Debug + Send {
 
     fn reduce(
         &mut self,
-        output: SlotForceView<'_>,
+        output: SlotOutputView<'_>,
         cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
     ) -> Result<(), ForceFieldError>;
 }
 
 // rq-304b191b
-pub struct SlotForceView<'a> {
-    pub x: CudaViewMut<'a, f32>,
-    pub y: CudaViewMut<'a, f32>,
-    pub z: CudaViewMut<'a, f32>,
+pub struct SlotOutputView<'a> {
+    pub force_x: CudaViewMut<'a, f32>,
+    pub force_y: CudaViewMut<'a, f32>,
+    pub force_z: CudaViewMut<'a, f32>,
+    pub energy: CudaViewMut<'a, f32>,
+    pub virial: CudaViewMut<'a, f32>,
 }
 
 // rq-9f7d4b40
@@ -106,6 +108,8 @@ pub struct ForceField {
     pub slot_forces_x: CudaSlice<f32>,
     pub slot_forces_y: CudaSlice<f32>,
     pub slot_forces_z: CudaSlice<f32>,
+    pub slot_energies: CudaSlice<f32>,
+    pub slot_virials: CudaSlice<f32>,
     pub neighbor_list: Option<NeighborListState>,
     particle_count: usize,
 }
@@ -171,6 +175,8 @@ impl ForceField {
         let slot_forces_x = device.alloc_zeros::<f32>(flat_len).map_err(GpuError::from)?;
         let slot_forces_y = device.alloc_zeros::<f32>(flat_len).map_err(GpuError::from)?;
         let slot_forces_z = device.alloc_zeros::<f32>(flat_len).map_err(GpuError::from)?;
+        let slot_energies = device.alloc_zeros::<f32>(flat_len).map_err(GpuError::from)?;
+        let slot_virials = device.alloc_zeros::<f32>(flat_len).map_err(GpuError::from)?;
 
         // Build the shared NeighborListState when any slot reports a cutoff.
         let aggregated_cutoff: Option<f32> = slots
@@ -205,6 +211,8 @@ impl ForceField {
             slot_forces_x,
             slot_forces_y,
             slot_forces_z,
+            slot_energies,
+            slot_virials,
             neighbor_list,
             particle_count,
         })
@@ -238,13 +246,17 @@ impl ForceField {
         let sfx = &mut self.slot_forces_x;
         let sfy = &mut self.slot_forces_y;
         let sfz = &mut self.slot_forces_z;
+        let sen = &mut self.slot_energies;
+        let svi = &mut self.slot_virials;
         for k in 0..num_slots {
             let start = k * n;
             let end = (k + 1) * n;
-            let view = SlotForceView {
-                x: sfx.slice_mut(start..end),
-                y: sfy.slice_mut(start..end),
-                z: sfz.slice_mut(start..end),
+            let view = SlotOutputView {
+                force_x: sfx.slice_mut(start..end),
+                force_y: sfy.slice_mut(start..end),
+                force_z: sfz.slice_mut(start..end),
+                energy: sen.slice_mut(start..end),
+                virial: svi.slice_mut(start..end),
             };
             let cx = ForceFieldContext { neighbor_list: nl_ref };
             slots[k].reduce(view, &cx, timings)?;
@@ -256,6 +268,8 @@ impl ForceField {
             &self.slot_forces_x,
             &self.slot_forces_y,
             &self.slot_forces_z,
+            &self.slot_energies,
+            &self.slot_virials,
             num_slots as u32,
         )?;
         timings.kernel_stop(KernelStage::AccumulateForces)?;

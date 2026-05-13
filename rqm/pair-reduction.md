@@ -1,10 +1,11 @@
 # Feature: Pair Buffer and Deterministic Segmented Reduction <!-- rq-a406a35b -->
 
-The simulation accumulates per-pair force contributions into a fixed-shape
-device buffer and reduces that buffer to a per-particle net force in a
-deterministic order. This file specifies the device data structure
-(`PairBuffer`), the CUDA kernel that performs the reduction
-(`kernels/reduce.cu`), and the Rust launch helper that drives it.
+The simulation accumulates per-pair contributions to force, potential
+energy, and the scalar virial into a fixed-shape device buffer and reduces
+that buffer to per-particle aggregates in a deterministic order. This file
+specifies the device data structure (`PairBuffer`), the CUDA kernel that
+performs the reduction (`kernels/reduce.cu`), and the Rust launch helper
+that drives it.
 
 The reduction is the keystone of the project's bit-wise reproducibility
 claim: every floating-point sum is performed on the same inputs in the same
@@ -12,60 +13,83 @@ order on every run, regardless of GPU thread scheduling.
 
 ## Data Layout <!-- rq-e435f271 -->
 
-The pair buffer is a 2D array of shape `[particle_count, max_neighbors]` for
-each Cartesian force component, stored row-major with row stride
+The pair buffer is a 2D array of shape `[particle_count, max_neighbors]`
+for each per-pair quantity, stored row-major with row stride
 `max_neighbors`:
 
 ```
-pair_forces_x: CudaSlice<f32>  (length = particle_count * max_neighbors)
-pair_forces_y: CudaSlice<f32>  (length = particle_count * max_neighbors)
-pair_forces_z: CudaSlice<f32>  (length = particle_count * max_neighbors)
+pair_forces_x:  CudaSlice<f32>  (length = particle_count * max_neighbors)
+pair_forces_y:  CudaSlice<f32>  (length = particle_count * max_neighbors)
+pair_forces_z:  CudaSlice<f32>  (length = particle_count * max_neighbors)
+pair_energies:  CudaSlice<f32>  (length = particle_count * max_neighbors)
+pair_virials:   CudaSlice<f32>  (length = particle_count * max_neighbors)
 ```
 
-Slot `i * max_neighbors + k` holds the contribution to particle `i` from its
-`k`-th neighbor. The slot is written by exactly one thread of the upstream
-pair-force kernel (defined in a separate, future feature); no atomics are
-involved at any layer.
+Slot `i * max_neighbors + k` holds the contribution to particle `i` from
+its `k`-th neighbor. The slot is written by exactly one thread of the
+upstream pair-force kernel; no atomics are involved at any layer.
+
+`pair_forces_*[slot]` carries the Cartesian force on particle `i` due to
+the partner `j` of slot `k`. By Newton's third law the (i, j) and (j, i)
+force slots hold opposite signs.
+
+`pair_energies[slot]` carries particle `i`'s share of the pair potential
+energy `u_ij`. The contribution kernel writes `u_ij / 2` so that summing
+slot (i, j) plus slot (j, i) recovers `u_ij` exactly once per pair.
+
+`pair_virials[slot]` carries particle `i`'s share of the scalar virial
+`r_ij · F_ij`. The contribution kernel writes `(r_ij · F_ij) / 2` so that
+summing slot (i, j) plus slot (j, i) recovers the per-pair virial exactly
+once per pair.
 
 A separate `CudaSlice<u32>` of length `particle_count`, named
 `neighbor_counts`, records the number of populated slots in each row. It is
-not part of `PairBuffer`; the future neighbor-list feature owns it. Tests
-allocate a synthetic counts buffer.
+owned by the shared `NeighborListState` (see `forces/neighbor-list.md`).
+Tests allocate a synthetic counts buffer when exercising the reduction in
+isolation.
 
 `max_neighbors` and `particle_count` are fixed at `PairBuffer` construction.
 
 ## Reduction Algorithm <!-- rq-b0913965 -->
 
-For each particle `i`, the kernel computes:
+For each particle `i`, the kernel computes five sequential left-to-right
+sums:
 
 ```
 count = neighbor_counts[i]
 sum_x = 0.0f
 sum_y = 0.0f
 sum_z = 0.0f
+sum_e = 0.0f
+sum_w = 0.0f
 for k = 0 .. count:
     idx = i * max_neighbors + k
     sum_x = sum_x + pair_forces_x[idx]
     sum_y = sum_y + pair_forces_y[idx]
     sum_z = sum_z + pair_forces_z[idx]
+    sum_e = sum_e + pair_energies[idx]
+    sum_w = sum_w + pair_virials[idx]
 net_forces_x[i] = sum_x
 net_forces_y[i] = sum_y
 net_forces_z[i] = sum_z
+net_energy[i]   = sum_e
+net_virial[i]   = sum_w
 ```
 
-The summation is sequential left-to-right with one thread per particle. The
-final write overwrites whatever was previously in `net_forces_*[i]` — the
-reduction does not accumulate.
+The summation is sequential left-to-right with one thread per particle.
+The final writes overwrite whatever was previously in the five output
+slices — the reduction does not accumulate.
 
-When `count == 0`, the loop runs zero iterations and `net_forces_*[i]` is
-written as `0.0_f32`.
+When `count == 0`, the loop runs zero iterations and the five output
+slices receive `0.0_f32` at index `i`.
 
 ## Feature API <!-- rq-c7420b98 -->
 
 ### Types <!-- rq-9197d752 -->
 
-- `PairBuffer` — host-side wrapper around the three device pair-force <!-- rq-a0c0992f -->
-  buffers. All three `CudaSlice<f32>` fields are `pub` so future force
+- `PairBuffer` — host-side wrapper around the five device per-pair <!-- rq-a0c0992f -->
+  contribution buffers (three force components, energy, and scalar
+  virial). All five `CudaSlice<f32>` fields are `pub` so contribution
   kernels can write into them at deterministic offsets. Also carries an
   `Arc<CudaDevice>` for allocation bookkeeping.
 
@@ -74,6 +98,8 @@ written as `0.0_f32`.
   - `pair_forces_x: CudaSlice<f32>`
   - `pair_forces_y: CudaSlice<f32>`
   - `pair_forces_z: CudaSlice<f32>`
+  - `pair_energies: CudaSlice<f32>`
+  - `pair_virials: CudaSlice<f32>`
   - private `particle_count: usize`
   - private `max_neighbors: u32`
 
@@ -86,22 +112,27 @@ extern "C" __global__ void reduce_pair_forces(
     const float *pair_forces_x,
     const float *pair_forces_y,
     const float *pair_forces_z,
+    const float *pair_energies,
+    const float *pair_virials,
     const unsigned int *neighbor_counts,
     unsigned int max_neighbors,
     float *net_forces_x,
     float *net_forces_y,
     float *net_forces_z,
+    float *net_energy,
+    float *net_virial,
     unsigned int n);
 ```
 
-Each thread computes its global index as `blockIdx.x * blockDim.x + threadIdx.x`.
-If the index is `>= n` the thread returns without touching any buffer.
-Otherwise, the thread executes the reduction algorithm above for its
-assigned particle.
+Each thread computes its global index as
+`blockIdx.x * blockDim.x + threadIdx.x`. If the index is `>= n` the thread
+returns without touching any buffer. Otherwise, the thread executes the
+reduction algorithm above for its assigned particle.
 
-The kernel reads `pair_forces_*` and `neighbor_counts` and writes
-`net_forces_*`. It does not modify the pair-force buffers, the neighbor
-counts, or any other particle state.
+The kernel reads the five input pair-contribution arrays and
+`neighbor_counts`, and writes the five output per-particle arrays. It
+does not modify the pair-contribution buffers, the neighbor counts, or
+any other particle state.
 
 ### PTX Module Loading <!-- rq-56d8375d -->
 
@@ -112,12 +143,13 @@ the existing `fill` and `integrate` modules.
 ### Constructor and Accessors <!-- rq-be5fe064 -->
 
 - `PairBuffer::new(device: Arc<CudaDevice>, particle_count: usize, max_neighbors: u32) -> Result<PairBuffer, GpuError>` <!-- rq-79048663 -->
-  - Allocates three `CudaSlice<f32>` of length `particle_count * max_neighbors`
-    via `CudaDevice::alloc_zeros`. Every slot starts at `0.0_f32`.
+  - Allocates five `CudaSlice<f32>` of length `particle_count * max_neighbors`
+    via `CudaDevice::alloc_zeros` (three forces, energy, virial). Every
+    slot starts at `0.0_f32`.
   - Returns the populated `PairBuffer`.
   - Returns `Err(GpuError)` on a CUDA driver allocation failure.
   - A `particle_count` of zero or a `max_neighbors` of zero is permitted and
-    yields a buffer whose three device allocations have length zero.
+    yields a buffer whose five device allocations have length zero.
 
 - `PairBuffer::particle_count(&self) -> usize` <!-- rq-3c42e6bd -->
   - Returns the value supplied at construction.
@@ -129,11 +161,12 @@ the existing `fill` and `integrate` modules.
 
 A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
 
-- `reduce_pair_forces(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_x: &mut CudaSlice<f32>, target_y: &mut CudaSlice<f32>, target_z: &mut CudaSlice<f32>, particle_count: usize) -> Result<(), GpuError>` <!-- rq-6690fae9 -->
-  - Launches the `reduce_pair_forces` kernel against arbitrary target
-    buffers. The target buffers receive the per-particle net force from the
-    pair-buffer reduction (overwriting any prior contents); they need not
-    live inside a `ParticleBuffers`.
+- `reduce_pair_forces(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_force_x: &mut CudaViewMut<'_, f32>, target_force_y: &mut CudaViewMut<'_, f32>, target_force_z: &mut CudaViewMut<'_, f32>, target_energy: &mut CudaViewMut<'_, f32>, target_virial: &mut CudaViewMut<'_, f32>, particle_count: usize) -> Result<(), GpuError>` <!-- rq-6690fae9 -->
+  - Launches the `reduce_pair_forces` kernel against the five caller-
+    supplied target buffers. The targets receive the per-particle net
+    force (three components), per-particle potential-energy share, and
+    per-particle scalar-virial share from the pair-buffer reduction
+    (overwriting any prior contents).
   - Block size is 256; grid size is `ceil(particle_count / 256)`.
   - When `particle_count == 0`, returns `Ok(())` without launching a
     kernel.
@@ -143,16 +176,15 @@ A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
 
   The launcher trusts the caller for shape consistency: it asserts (debug
   builds only) that `pair_buffer.particle_count() == particle_count`,
-  that `neighbor_counts.len() == particle_count`, that each of
-  `target_x`, `target_y`, `target_z` has length `particle_count`, and that
-  the pair-force slices have length
-  `particle_count * pair_buffer.max_neighbors()`. Release builds skip
-  the asserts for parity with the other kernel launchers.
+  that `neighbor_counts.len() == particle_count`, that each of the five
+  target views has length `particle_count`, and that the pair-buffer
+  slices have length `particle_count * pair_buffer.max_neighbors()`.
+  Release builds skip the asserts for parity with the other kernel
+  launchers.
 
   Within the pluggable potential framework, the `LennardJonesState` slot
-  passes its private accumulator slices as `target_*`. Standalone callers
-  (e.g. existing unit tests) pass `particle_buffers.forces_x/y/z` and
-  `particle_buffers.particle_count()`.
+  passes its assigned rows of the framework's flat slot-output buffers
+  as the five targets (see `forces/framework.md`).
 
 ## Launch Configuration <!-- rq-9be271aa -->
 
@@ -183,13 +215,13 @@ Feature: Pair buffer and deterministic segmented reduction
   # --- PairBuffer construction ---
 
   @rq-6fdefca0
-  Scenario: PairBuffer::new allocates zero-initialised pair-force buffers
+  Scenario: PairBuffer::new allocates zero-initialised pair-contribution buffers
     Given a CudaDevice obtained from init_device()
     When PairBuffer::new(device, particle_count=4, max_neighbors=8) is called
     Then it returns Ok(buffer)
     And buffer.particle_count() is 4
     And buffer.max_neighbors() is 8
-    And each of buffer.pair_forces_x, pair_forces_y, pair_forces_z has length 32
+    And each of buffer.pair_forces_x, pair_forces_y, pair_forces_z, pair_energies, pair_virials has length 32
     And every element of each device buffer equals 0.0_f32 when downloaded to the host
 
   @rq-74e4bd02
@@ -368,4 +400,36 @@ Feature: Pair buffer and deterministic segmented reduction
     And neighbor_counts is [3]
     When reduce_pair_forces is called
     Then forces_x[0] is positive infinity
+
+  # --- Energy and virial reduction ---
+
+  @rq-9e487c80
+  Scenario: Reduction sums pair energies in left-to-right order
+    Given a PairBuffer with particle_count=1 and max_neighbors=4
+    And pair_energies = [0.5, 1.5, 2.0, 999.0]
+    And pair_virials = [-1.0, 2.0, 3.0, 0.0]
+    And neighbor_counts is [3]
+    When reduce_pair_forces is called
+    Then net_energy[0] equals (0.5_f32 + 1.5_f32) + 2.0_f32 in IEEE arithmetic
+    And net_virial[0] equals (-1.0_f32 + 2.0_f32) + 3.0_f32 in IEEE arithmetic
+
+  @rq-961c2ee6
+  Scenario: Reduction with zero count writes zero to energy and virial targets
+    Given a PairBuffer with particle_count=2 and max_neighbors=4
+    And pair_energies and pair_virials contain arbitrary nonzero values
+    And neighbor_counts is [0, 0]
+    When reduce_pair_forces is called
+    Then net_energy and net_virial are each [0.0, 0.0]
+
+  @rq-41d9e514
+  Scenario: Energy and virial reductions share the same indexing as force
+    Given a PairBuffer with particle_count=2 and max_neighbors=2
+    And pair_forces_x = [1.0, 2.0, 3.0, 4.0]
+    And pair_energies = [10.0, 20.0, 30.0, 40.0]
+    And pair_virials  = [100.0, 200.0, 300.0, 400.0]
+    And neighbor_counts is [2, 2]
+    When reduce_pair_forces is called
+    Then net_forces_x[0] equals 3.0 and net_forces_x[1] equals 7.0
+    And net_energy[0] equals 30.0 and net_energy[1] equals 70.0
+    And net_virial[0] equals 300.0 and net_virial[1] equals 700.0
 ```

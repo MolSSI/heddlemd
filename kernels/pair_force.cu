@@ -8,6 +8,8 @@ extern "C" __global__ void lj_pair_force(
     float *pair_forces_x,
     float *pair_forces_y,
     float *pair_forces_z,
+    float *pair_energies,
+    float *pair_virials,
     unsigned int max_neighbors,
     float lx, float ly, float lz,
     unsigned int n_types,
@@ -31,6 +33,8 @@ extern "C" __global__ void lj_pair_force(
     pair_forces_x[slot] = 0.0f;
     pair_forces_y[slot] = 0.0f;
     pair_forces_z[slot] = 0.0f;
+    pair_energies[slot] = 0.0f;
+    pair_virials[slot]  = 0.0f;
     return;
   }
   unsigned int j = neighbor_list[slot];
@@ -39,6 +43,8 @@ extern "C" __global__ void lj_pair_force(
     pair_forces_x[slot] = 0.0f;
     pair_forces_y[slot] = 0.0f;
     pair_forces_z[slot] = 0.0f;
+    pair_energies[slot] = 0.0f;
+    pair_virials[slot]  = 0.0f;
     return;
   }
 
@@ -62,6 +68,8 @@ extern "C" __global__ void lj_pair_force(
     pair_forces_x[slot] = 0.0f;
     pair_forces_y[slot] = 0.0f;
     pair_forces_z[slot] = 0.0f;
+    pair_energies[slot] = 0.0f;
+    pair_virials[slot]  = 0.0f;
     return;
   }
 
@@ -71,10 +79,12 @@ extern "C" __global__ void lj_pair_force(
   float sr6 = sr2 * sr2 * sr2;
   float sr12 = sr6 * sr6;
   float factor = 24.0f * epsilon * inv_r2 * (2.0f * sr12 - sr6);
+  float energy = 4.0f * epsilon * (sr12 - sr6);
 
   float fx = factor * dx;
   float fy = factor * dy;
   float fz = factor * dz;
+  float w = fx * dx + fy * dy + fz * dz;
 
   // rq-dddcbf07
   unsigned int start = atom_excl_offsets[i];
@@ -89,8 +99,12 @@ extern "C" __global__ void lj_pair_force(
   fx *= scale;
   fy *= scale;
   fz *= scale;
+  energy *= scale;
+  w *= scale;
 
   pair_forces_x[slot] = fx;
   pair_forces_y[slot] = fy;
   pair_forces_z[slot] = fz;
+  pair_energies[slot] = energy * 0.5f;
+  pair_virials[slot]  = w * 0.5f;
 }

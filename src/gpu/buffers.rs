@@ -18,6 +18,8 @@ pub struct ParticleBuffers {
     pub forces_x: CudaSlice<f32>,
     pub forces_y: CudaSlice<f32>,
     pub forces_z: CudaSlice<f32>,
+    pub potential_energies: CudaSlice<f32>,
+    pub virials: CudaSlice<f32>,
     pub masses: CudaSlice<f32>,
     pub type_indices: CudaSlice<u32>,
     pub particle_ids: CudaSlice<u32>,
@@ -38,6 +40,8 @@ impl ParticleBuffers {
         check_len("forces_x", n, state.forces_x.len())?;
         check_len("forces_y", n, state.forces_y.len())?;
         check_len("forces_z", n, state.forces_z.len())?;
+        check_len("potential_energies", n, state.potential_energies.len())?;
+        check_len("virials", n, state.virials.len())?;
         check_len("masses", n, state.masses.len())?;
         check_len("type_indices", n, state.type_indices.len())?;
         check_len("particle_ids", n, state.particle_ids.len())?;
@@ -51,6 +55,10 @@ impl ParticleBuffers {
         let forces_x = device.htod_sync_copy(&state.forces_x).map_err(GpuError::from)?;
         let forces_y = device.htod_sync_copy(&state.forces_y).map_err(GpuError::from)?;
         let forces_z = device.htod_sync_copy(&state.forces_z).map_err(GpuError::from)?;
+        let potential_energies = device
+            .htod_sync_copy(&state.potential_energies)
+            .map_err(GpuError::from)?;
+        let virials = device.htod_sync_copy(&state.virials).map_err(GpuError::from)?;
         let masses = device.htod_sync_copy(&state.masses).map_err(GpuError::from)?;
         let type_indices = device.htod_sync_copy(&state.type_indices).map_err(GpuError::from)?;
         let particle_ids = device.htod_sync_copy(&state.particle_ids).map_err(GpuError::from)?;
@@ -66,6 +74,8 @@ impl ParticleBuffers {
             forces_x,
             forces_y,
             forces_z,
+            potential_energies,
+            virials,
             masses,
             type_indices,
             particle_ids,
@@ -89,6 +99,8 @@ impl ParticleBuffers {
         check_len("forces_x", n, state.forces_x.len())?;
         check_len("forces_y", n, state.forces_y.len())?;
         check_len("forces_z", n, state.forces_z.len())?;
+        check_len("potential_energies", n, state.potential_energies.len())?;
+        check_len("virials", n, state.virials.len())?;
         check_len("masses", n, state.masses.len())?;
         check_len("type_indices", n, state.type_indices.len())?;
         check_len("particle_ids", n, state.particle_ids.len())?;
@@ -120,6 +132,12 @@ impl ParticleBuffers {
             .map_err(GpuError::from)?;
         device
             .htod_sync_copy_into(&state.forces_z, &mut self.forces_z)
+            .map_err(GpuError::from)?;
+        device
+            .htod_sync_copy_into(&state.potential_energies, &mut self.potential_energies)
+            .map_err(GpuError::from)?;
+        device
+            .htod_sync_copy_into(&state.virials, &mut self.virials)
             .map_err(GpuError::from)?;
         device
             .htod_sync_copy_into(&state.masses, &mut self.masses)
