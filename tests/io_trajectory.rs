@@ -32,7 +32,7 @@ fn sim_box() -> SimulationBox {
 fn open_creates_new_file() {
     let dir = tmp_path("open_new");
     let path = dir.join("traj.xyz");
-    let _writer = TrajectoryWriter::open(&path, true, vec!["Ar".to_string()]).unwrap();
+    let _writer = TrajectoryWriter::open(&path, true, false, vec!["Ar".to_string()]).unwrap();
     assert!(path.exists());
 }
 
@@ -42,7 +42,7 @@ fn open_refuses_overwrite() {
     let dir = tmp_path("refuse_overwrite");
     let path = dir.join("traj.xyz");
     std::fs::write(&path, "existing").unwrap();
-    match TrajectoryWriter::open(&path, true, vec!["Ar".to_string()]).unwrap_err() {
+    match TrajectoryWriter::open(&path, true, false, vec!["Ar".to_string()]).unwrap_err() {
         TrajectoryWriterError::OutputExists { path: p } => assert_eq!(p, path),
         other => panic!("unexpected: {other:?}"),
     }
@@ -54,7 +54,7 @@ fn open_refuses_overwrite() {
 fn open_fails_when_parent_missing() {
     let dir = tmp_path("missing_parent");
     let path = dir.join("missing-dir").join("traj.xyz");
-    match TrajectoryWriter::open(&path, true, vec!["Ar".to_string()]).unwrap_err() {
+    match TrajectoryWriter::open(&path, true, false, vec!["Ar".to_string()]).unwrap_err() {
         TrajectoryWriterError::Io(_) => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -65,7 +65,7 @@ fn open_fails_when_parent_missing() {
 fn write_single_frame_no_velocities() {
     let dir = tmp_path("single_no_velo");
     let path = dir.join("traj.xyz");
-    let mut writer = TrajectoryWriter::open(&path, false, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, false, false, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
             0,
@@ -75,6 +75,7 @@ fn write_single_frame_no_velocities() {
             &[0.0_f32, 3.4e-10_f32],
             &[0.0_f32, 0.0_f32],
             &[0.0_f32, 0.0_f32],
+            None,
             None,
         )
         .unwrap();
@@ -96,7 +97,7 @@ fn write_single_frame_no_velocities() {
 fn write_single_frame_with_velocities() {
     let dir = tmp_path("single_with_velo");
     let path = dir.join("traj.xyz");
-    let mut writer = TrajectoryWriter::open(&path, true, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, true, false, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
             10,
@@ -107,6 +108,7 @@ fn write_single_frame_with_velocities() {
             &[0.0_f32],
             &[0.0_f32],
             Some((&[100.0_f32], &[0.0_f32], &[0.0_f32])),
+            None,
         )
         .unwrap();
     writer.flush().unwrap();
@@ -129,7 +131,7 @@ fn write_single_frame_with_velocities() {
 fn append_frames_in_order() {
     let dir = tmp_path("append_frames");
     let path = dir.join("traj.xyz");
-    let mut writer = TrajectoryWriter::open(&path, false, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, false, false, vec!["Ar".to_string()]).unwrap();
     for step in [0_u64, 10, 20] {
         writer
             .write_frame(
@@ -140,6 +142,7 @@ fn append_frames_in_order() {
                 &[0.0_f32],
                 &[0.0_f32],
                 &[0.0_f32],
+                None,
                 None,
             )
             .unwrap();
@@ -158,9 +161,9 @@ fn append_frames_in_order() {
 fn write_empty_frame() {
     let dir = tmp_path("empty_frame");
     let path = dir.join("traj.xyz");
-    let mut writer = TrajectoryWriter::open(&path, false, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, false, false, vec!["Ar".to_string()]).unwrap();
     writer
-        .write_frame(0, 1.0e-15, &sim_box(), &[], &[], &[], &[], None)
+        .write_frame(0, 1.0e-15, &sim_box(), &[], &[], &[], &[], None, None)
         .unwrap();
     writer.flush().unwrap();
     let body = read(&path);
@@ -177,6 +180,7 @@ fn render_multiple_type_names() {
     let mut writer = TrajectoryWriter::open(
         &path,
         false,
+        false,
         vec!["Ar".to_string(), "Kr".to_string()],
     )
     .unwrap();
@@ -189,6 +193,7 @@ fn render_multiple_type_names() {
             &[0.0_f32; 4],
             &[0.0_f32; 4],
             &[0.0_f32; 4],
+            None,
             None,
         )
         .unwrap();
@@ -214,7 +219,7 @@ fn round_trip_via_init_parser() {
     let velocities_x = [1.0_f32, -1.0_f32, 2.0_f32, -2.0_f32];
     let velocities_y = [0.0_f32; 4];
     let velocities_z = [0.0_f32; 4];
-    let mut writer = TrajectoryWriter::open(&path, true, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, true, false, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
             0,
@@ -225,6 +230,7 @@ fn round_trip_via_init_parser() {
             &positions_y,
             &positions_z,
             Some((&velocities_x, &velocities_y, &velocities_z)),
+            None,
         )
         .unwrap();
     writer.flush().unwrap();
@@ -246,7 +252,7 @@ fn f32_position_round_trip() {
     let path = dir.join("traj.xyz");
     // Arbitrary f32 value that's not exactly representable in decimal.
     let p: f32 = 0.123456_f32;
-    let mut writer = TrajectoryWriter::open(&path, false, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, false, false, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
             0,
@@ -256,6 +262,7 @@ fn f32_position_round_trip() {
             &[p],
             &[0.0_f32],
             &[0.0_f32],
+            None,
             None,
         )
         .unwrap();
@@ -269,7 +276,7 @@ fn f32_position_round_trip() {
 fn flush_is_idempotent() {
     let dir = tmp_path("flush_idempotent");
     let path = dir.join("traj.xyz");
-    let mut writer = TrajectoryWriter::open(&path, false, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, false, false, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
             0,
@@ -279,6 +286,7 @@ fn flush_is_idempotent() {
             &[0.0_f32],
             &[0.0_f32],
             &[0.0_f32],
+            None,
             None,
         )
         .unwrap();
@@ -292,7 +300,7 @@ fn drop_flushes_best_effort() {
     let dir = tmp_path("drop_flush");
     let path = dir.join("traj.xyz");
     {
-        let mut writer = TrajectoryWriter::open(&path, false, vec!["Ar".to_string()]).unwrap();
+        let mut writer = TrajectoryWriter::open(&path, false, false, vec!["Ar".to_string()]).unwrap();
         writer
             .write_frame(
                 0,
@@ -303,6 +311,7 @@ fn drop_flushes_best_effort() {
                 &[0.0_f32],
                 &[0.0_f32],
                 None,
+                None,
             )
             .unwrap();
         // Drop without explicit flush.
@@ -311,4 +320,90 @@ fn drop_flushes_best_effort() {
     let lines: Vec<&str> = body.lines().collect();
     assert!(lines.len() >= 3);
     assert_eq!(lines[0], "1");
+}
+
+// --- Image columns ---
+
+#[test]
+fn frame_with_images_only_carries_image_property() {
+    let dir = tmp_path("images_only");
+    let path = dir.join("traj.xyz");
+    let mut writer = TrajectoryWriter::open(&path, false, true, vec!["Ar".to_string()]).unwrap();
+    writer
+        .write_frame(
+            0,
+            1.0e-15,
+            &sim_box(),
+            &[0, 0],
+            &[0.0_f32, 0.1_f32],
+            &[0.0_f32, 0.0_f32],
+            &[0.0_f32, 0.0_f32],
+            None,
+            Some((&[1_i32, -2], &[0_i32, 3], &[-4_i32, 0])),
+        )
+        .unwrap();
+    writer.flush().unwrap();
+    let body = read(&path);
+    let lines: Vec<&str> = body.lines().collect();
+    assert!(lines[1].contains("Properties=species:S:1:pos:R:3:image:I:3"));
+}
+
+#[test]
+fn frame_with_velocities_and_images_carries_both_properties() {
+    let dir = tmp_path("velo_images");
+    let path = dir.join("traj.xyz");
+    let mut writer = TrajectoryWriter::open(&path, true, true, vec!["Ar".to_string()]).unwrap();
+    writer
+        .write_frame(
+            0,
+            1.0e-15,
+            &sim_box(),
+            &[0],
+            &[0.1_f32],
+            &[0.2_f32],
+            &[0.3_f32],
+            Some((&[1.0_f32], &[2.0_f32], &[3.0_f32])),
+            Some((&[4_i32], &[-5_i32], &[6_i32])),
+        )
+        .unwrap();
+    writer.flush().unwrap();
+    let body = read(&path);
+    let lines: Vec<&str> = body.lines().collect();
+    assert!(lines[1].contains("Properties=species:S:1:pos:R:3:velo:R:3:image:I:3"));
+    // Data row: "Ar  px py pz vx vy vz  nx ny nz" → 10 columns.
+    let cols: Vec<&str> = lines[2].split_ascii_whitespace().collect();
+    assert_eq!(cols.len(), 10);
+    assert_eq!(cols[7], "4");
+    assert_eq!(cols[8], "-5");
+    assert_eq!(cols[9], "6");
+}
+
+#[test]
+fn image_round_trip_via_init_parser() {
+    let dir = tmp_path("images_round_trip");
+    let path = dir.join("traj.xyz");
+    let images_x = vec![1_i32, -2, 3, 0];
+    let images_y = vec![0_i32, 4, -5, 6];
+    let images_z = vec![-7_i32, 0, 8, -9];
+    let mut writer = TrajectoryWriter::open(&path, true, true, vec!["Ar".to_string()]).unwrap();
+    writer
+        .write_frame(
+            0,
+            1.0e-15,
+            &sim_box(),
+            &[0; 4],
+            &[0.0_f32; 4],
+            &[0.0_f32; 4],
+            &[0.0_f32; 4],
+            Some((&[1.0_f32; 4], &[0.0_f32; 4], &[0.0_f32; 4])),
+            Some((&images_x, &images_y, &images_z)),
+        )
+        .unwrap();
+    writer.flush().unwrap();
+    let state = load_init_state(&path, &["Ar"]).unwrap();
+    assert_eq!(state.particle_count, 4);
+    let imgs = state.images.unwrap();
+    assert_eq!(imgs.images_x, images_x);
+    assert_eq!(imgs.images_y, images_y);
+    assert_eq!(imgs.images_z, images_z);
 }

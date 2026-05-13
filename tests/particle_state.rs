@@ -24,6 +24,7 @@ fn make_state_with_values(
         masses,
         vec![0u32; n],
         ids,
+            None,
     )
     .expect("make_state_with_values: ParticleState::new should succeed")
 }
@@ -82,6 +83,7 @@ fn construct_with_matching_arrays_and_default_ids() {
         masses,
         vec![0u32; n],
         None,
+            None,
     )
     .expect("construction should succeed");
 
@@ -105,6 +107,7 @@ fn construct_with_matching_arrays_and_explicit_unique_ids() {
         vec![0.0; n],
         vec![0u32; n],
         Some(vec![10, 20, 30]),
+            None,
     )
     .expect("construction should succeed");
     assert_eq!(state.particle_ids, vec![10u32, 20, 30]);
@@ -122,6 +125,7 @@ fn construct_an_empty_state() {
         vec![],
         vec![0u32; 0],
         None,
+            None,
     )
     .expect("construction should succeed");
     assert_eq!(state.particle_count(), 0);
@@ -150,6 +154,7 @@ fn construct_an_empty_state_with_explicit_empty_ids() {
         vec![],
         vec![0u32; 0],
         Some(vec![]),
+            None,
     )
     .expect("construction should succeed");
     assert_eq!(state.particle_count(), 0);
@@ -167,6 +172,7 @@ fn reject_when_positions_y_has_wrong_length() {
         vec![0.0; 4],
         vec![0u32; 4],
         None,
+            None,
     )
     .expect_err("expected LengthMismatch");
     match err {
@@ -195,6 +201,7 @@ fn reject_when_masses_has_wrong_length() {
         vec![0.0; 5],
         vec![0u32; 5],
         None,
+            None,
     )
     .expect_err("expected LengthMismatch");
     match err {
@@ -223,6 +230,7 @@ fn reject_when_explicit_ids_have_wrong_length() {
         vec![0.0; 4],
         vec![0u32; 4],
         Some(vec![0, 1]),
+            None,
     )
     .expect_err("expected LengthMismatch");
     match err {
@@ -251,6 +259,7 @@ fn reject_duplicate_explicit_ids() {
         vec![0.0; 4],
         vec![0u32; 4],
         Some(vec![7, 1, 7, 3]),
+            None,
     )
     .expect_err("expected DuplicateParticleId");
     match err {
@@ -273,6 +282,7 @@ fn nan_values_accepted_at_construction() {
         vec![0.0; 4],
         vec![0u32; 4],
         None,
+            None,
     )
     .expect("construction should succeed even with NaN");
     assert!(state.positions_x[0].is_nan());
@@ -325,6 +335,7 @@ fn allocate_device_buffers_from_an_empty_state() {
         vec![],
         vec![0u32; 0],
         None,
+            None,
     )
     .unwrap();
     let buffers = ParticleBuffers::new(device.clone(), &state)
@@ -533,6 +544,7 @@ fn download_from_empty_buffers_into_empty_state() {
         vec![],
         vec![0u32; 0],
         None,
+            None,
     )
     .unwrap();
     let buffers = ParticleBuffers::new(device, &source)
@@ -547,6 +559,7 @@ fn download_from_empty_buffers_into_empty_state() {
         vec![],
         vec![0u32; 0],
         None,
+            None,
     )
     .unwrap();
     sink.download_from(&buffers).expect("download should succeed");
@@ -565,6 +578,7 @@ fn reject_when_type_indices_has_wrong_length() {
         vec![1.0; 4],
         vec![0u32; 3],
         None,
+            None,
     )
     .expect_err("expected LengthMismatch on type_indices");
     match err {
@@ -594,6 +608,7 @@ fn type_indices_round_trip_through_particle_buffers() {
         vec![1.0_f32; 3],
         vec![0u32, 2, 1],
         None,
+            None,
     )
     .unwrap();
     let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -610,6 +625,7 @@ fn type_indices_round_trip_through_particle_buffers() {
         vec![1.0_f32; 3],
         vec![0u32; 3],
         None,
+            None,
     )
     .unwrap();
     sink.download_from(&buffers).unwrap();
@@ -629,6 +645,7 @@ fn new_state_zero_inits_potential_energies_and_virials() {
         vec![1.0_f32; n],
         vec![0u32; n],
         None,
+            None,
     )
     .unwrap();
     assert_eq!(state.potential_energies, vec![0.0_f32; n]);
@@ -648,6 +665,7 @@ fn potential_energies_and_virials_round_trip_through_buffers() {
         vec![1.0_f32; 4],
         vec![0u32; 4],
         None,
+            None,
     )
     .unwrap();
     state.potential_energies = vec![1.0_f32, -2.0, 3.5, 0.25];
@@ -658,4 +676,145 @@ fn potential_energies_and_virials_round_trip_through_buffers() {
     state.download_from(&buffers).unwrap();
     assert_eq!(state.potential_energies, vec![1.0_f32, -2.0, 3.5, 0.25]);
     assert_eq!(state.virials, vec![10.0_f32, 20.0, -30.0, 40.0]);
+}
+
+// --- Image flags ---
+
+#[test]
+fn images_default_to_zero_when_none_passed() {
+    let n = 4;
+    let state = ParticleState::new(
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![1.0_f32; n],
+        vec![0u32; n],
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(state.images_x, vec![0_i32; n]);
+    assert_eq!(state.images_y, vec![0_i32; n]);
+    assert_eq!(state.images_z, vec![0_i32; n]);
+}
+
+#[test]
+fn explicit_nonzero_images_stored_as_supplied() {
+    let n = 3;
+    let state = ParticleState::new(
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![1.0_f32; n],
+        vec![0u32; n],
+        None,
+        Some((vec![1, -2, 0], vec![0, 3, -1], vec![-4, 0, 5])),
+    )
+    .unwrap();
+    assert_eq!(state.images_x, vec![1, -2, 0]);
+    assert_eq!(state.images_y, vec![0, 3, -1]);
+    assert_eq!(state.images_z, vec![-4, 0, 5]);
+}
+
+#[test]
+fn reject_explicit_images_y_wrong_length() {
+    let n = 4;
+    let err = ParticleState::new(
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![1.0_f32; n],
+        vec![0u32; n],
+        None,
+        Some((vec![0; n], vec![0; 3], vec![0; n])),
+    )
+    .expect_err("expected LengthMismatch");
+    match err {
+        dynamics::state::ParticleStateError::LengthMismatch {
+            array,
+            expected,
+            actual,
+        } => {
+            assert_eq!(array, "images_y");
+            assert_eq!(expected, 4);
+            assert_eq!(actual, 3);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn particle_buffers_carry_image_buffers() {
+    let device = init_device().expect("init_device");
+    let n = 4;
+    let images_x = vec![1, -2, 3, 0];
+    let images_y = vec![-7, 4, 0, 8];
+    let images_z = vec![5, -3, 2, -1];
+    let state = ParticleState::new(
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![1.0_f32; n],
+        vec![0u32; n],
+        None,
+        Some((images_x.clone(), images_y.clone(), images_z.clone())),
+    )
+    .unwrap();
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    assert_eq!(buffers.images_x.len(), n);
+    assert_eq!(buffers.images_y.len(), n);
+    assert_eq!(buffers.images_z.len(), n);
+    let dx: Vec<i32> = device.dtoh_sync_copy(&buffers.images_x).unwrap();
+    let dy: Vec<i32> = device.dtoh_sync_copy(&buffers.images_y).unwrap();
+    let dz: Vec<i32> = device.dtoh_sync_copy(&buffers.images_z).unwrap();
+    assert_eq!(dx, images_x);
+    assert_eq!(dy, images_y);
+    assert_eq!(dz, images_z);
+}
+
+#[test]
+fn reject_upload_when_images_x_has_wrong_length() {
+    let device = init_device().expect("init_device");
+    let n = 4;
+    let state = ParticleState::new(
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![1.0_f32; n],
+        vec![0u32; n],
+        None,
+        None,
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut bad = state.clone();
+    bad.images_x.truncate(3);
+    let err = buffers.upload(&bad).expect_err("expected LengthMismatch");
+    match err {
+        dynamics::state::ParticleStateError::LengthMismatch {
+            array,
+            expected,
+            actual,
+        } => {
+            assert_eq!(array, "images_x");
+            assert_eq!(expected, 4);
+            assert_eq!(actual, 3);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
 }

@@ -34,6 +34,16 @@ Rust launch helpers that drive both modes.
 
 ## Algorithm <!-- rq-9f6a73f9 -->
 
+Positions are kept wrapped into the primary image of the simulation
+box: each component of `positions_x/y/z` is in `[-L_a / 2, +L_a / 2)`
+for the corresponding edge length `L_a`. The companion image triple
+`(images_x[i], images_y[i], images_z[i])` records how many full
+periods particle `i` has crossed; the unwrapped position is
+`positions_a[i] + images_a[i] * L_a` (see `particle-state.md`). The
+drift kernels enforce this invariant: after updating each component,
+they wrap the result back into the primary image and advance the
+corresponding image counter by the integer number of periods crossed.
+
 For each particle `i` with position `x_i`, velocity `v_i`, force `F_i`, and
 mass `m_i`, a single timestep of size `dt` corresponds to:
 
@@ -134,9 +144,11 @@ positions so they do not require their own residuals.
 ```c
 extern "C" __global__ void vv_kick_drift(
     float *positions_x, float *positions_y, float *positions_z,
+    int *images_x, int *images_y, int *images_z,
     float *velocities_x, float *velocities_y, float *velocities_z,
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
+    float lx, float ly, float lz,
     float dt,
     unsigned int n);
 
@@ -149,11 +161,13 @@ extern "C" __global__ void vv_kick(
 
 extern "C" __global__ void vv_kick_drift_lossless(
     float *positions_x, float *positions_y, float *positions_z,
+    int *images_x, int *images_y, int *images_z,
     float *velocities_x, float *velocities_y, float *velocities_z,
     double *positions_x_lo, double *positions_y_lo, double *positions_z_lo,
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
+    float lx, float ly, float lz,
     float dt,
     unsigned int n);
 
@@ -165,6 +179,11 @@ extern "C" __global__ void vv_kick_lossless(
     float dt,
     unsigned int n);
 ```
+
+`vv_kick` and `vv_kick_lossless` update only velocities and so do not
+touch `images_*` or take box edges. `vv_kick_drift` and
+`vv_kick_drift_lossless` are the drift-bearing kernels that wrap
+positions and advance image counts.
 
 Each thread computes its global index as `blockIdx.x * blockDim.x + threadIdx.x`.
 If the index is `>= n` the thread returns without touching any buffer.
@@ -202,10 +221,21 @@ vz = velocities_z[i] + az * (dt * 0.5f)
 velocities_x[i] = vx
 velocities_y[i] = vy
 velocities_z[i] = vz
-positions_x[i] += vx * dt
-positions_y[i] += vy * dt
-positions_z[i] += vz * dt
+px = positions_x[i] + vx * dt
+py = positions_y[i] + vy * dt
+pz = positions_z[i] + vz * dt
+(positions_x[i], images_x[i]) = wrap_and_count(px, lx, images_x[i])
+(positions_y[i], images_y[i]) = wrap_and_count(py, ly, images_y[i])
+(positions_z[i], images_z[i]) = wrap_and_count(pz, lz, images_z[i])
 ```
+
+where `wrap_and_count(p, L, n)` returns `(p - k*L, n + k)` with
+`k = floor((p + L*0.5f) / L)` evaluated in `f32`. This is the same
+wrap formula `SimulationBox::wrap_position` uses on the host. A single
+update can cross any integer number of periods (the formula is
+branch-free in `k`); the integer `k` is always added to the existing
+image count, so the unwrapped position
+`positions_a[i] + images_a[i] * L_a` is invariant under wrapping.
 
 Within `vv_kick` (lossy), each thread performs:
 
@@ -222,7 +252,12 @@ Within `vv_kick_drift_lossless`, each thread performs the algebraically
 equivalent computation but with every velocity and position update done
 via the compensated `(high, low)` decomposition described in the algorithm
 section. The drift step uses `(v + v_lo)` (computed in the chosen
-intermediate precision) when forming the position increment.
+intermediate precision) when forming the position increment. After
+rounding the post-drift `(high, low)` pair back into the canonical
+form, the high half is wrapped via `wrap_and_count` against the
+corresponding edge length and the image counter is advanced; the low
+half is left unchanged by the wrap (the rounding has already
+re-zeroed it within ULP).
 
 Within `vv_kick_lossless`, each thread performs the velocity update via
 the same compensated decomposition.
@@ -244,9 +279,9 @@ module continues to be loaded alongside it.
 Four free functions live in `src/gpu/kernels.rs` and are re-exported from
 `crate::gpu`:
 
-- `vv_kick_drift(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>` <!-- rq-f1ba909b -->
-  - Launches the `vv_kick_drift` kernel using the device buffers carried by
-    `buffers`.
+- `vv_kick_drift(buffers: &mut ParticleBuffers, sim_box: &SimulationBox, dt: f32) -> Result<(), GpuError>` <!-- rq-f1ba909b -->
+  - Launches the `vv_kick_drift` kernel using the device buffers carried
+    by `buffers` and the edge lengths read from `sim_box`.
   - Block size is 256; grid size is `ceil(buffers.particle_count() / 256)`.
   - When `buffers.particle_count() == 0`, returns `Ok(())` without launching a
     kernel.
@@ -256,12 +291,14 @@ Four free functions live in `src/gpu/kernels.rs` and are re-exported from
 
 - `vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>` <!-- rq-f2e3fa58 -->
   - Same launch configuration and error/empty-state handling as `vv_kick_drift`.
-  - Launches the `vv_kick` kernel.
+  - Launches the `vv_kick` kernel. Does not consult `sim_box` because the
+    velocity-only update never wraps positions.
 
-- `vv_kick_drift_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, dt: f32) -> Result<(), GpuError>` <!-- rq-7d5e87ee -->
+- `vv_kick_drift_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, sim_box: &SimulationBox, dt: f32) -> Result<(), GpuError>` <!-- rq-7d5e87ee -->
   - Launches the `vv_kick_drift_lossless` kernel using both the
-    `ParticleBuffers` (for `(high)` halves) and the `LosslessBuffers` (for
-    `(low)` halves).
+    `ParticleBuffers` (for `(high)` halves and image flags) and the
+    `LosslessBuffers` (for `(low)` halves), with edge lengths read from
+    `sim_box`.
   - Same block/grid configuration and empty-state handling as the lossy
     variant; debug-asserts that `lossless.particle_count()` equals
     `buffers.particle_count()`.
@@ -269,14 +306,16 @@ Four free functions live in `src/gpu/kernels.rs` and are re-exported from
 
 - `vv_kick_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, dt: f32) -> Result<(), GpuError>` <!-- rq-4ea8bbb2 -->
   - Same configuration and empty-state handling as `vv_kick_drift_lossless`.
-  - Launches the `vv_kick_lossless` kernel.
+  - Launches the `vv_kick_lossless` kernel. Does not consult `sim_box`.
 
 None of the four helpers inspects mass values or constrains `dt`. NaN,
 infinite, zero, or negative values flow through the kernel arithmetic and
 produce corresponding NaN/Inf outputs.
 
-The lossy launchers (`vv_kick_drift`, `vv_kick`) take only `&mut ParticleBuffers`.
-A run with `lossless = false` never constructs a `LosslessBuffers` and pays no
+The two velocity-only launchers (`vv_kick`, `vv_kick_lossless`) take no
+`SimulationBox`; the two drift-bearing launchers (`vv_kick_drift`,
+`vv_kick_drift_lossless`) require it for the wrap step. A run with
+`lossless = false` never constructs a `LosslessBuffers` and pays no
 memory or kernel-launch cost from the lossless code path.
 
 ## Slot Integration <!-- rq-39ab439e -->
@@ -343,6 +382,12 @@ counter.
 
 ```gherkin
 Feature: Velocity Verlet time integration
+
+  Background:
+    Given a SimulationBox with lx=ly=lz=1.0e6 (large enough that no
+      particle in the scenarios below wraps in a single drift call, so
+      image flags stay at zero and positions match the closed-form
+      free-streaming arithmetic)
 
   # --- Module loading ---
 
@@ -614,4 +659,61 @@ Feature: Velocity Verlet time integration
     And both pairs are downloaded
     Then every f32 array of run A agrees byte-for-byte with run B
     And every residual array of run A agrees byte-for-byte with run B
+
+  # --- Image-flag wrap (drift only) ---
+
+  @rq-e6b6f2d8
+  Scenario: vv_kick_drift wraps positions back into the primary image
+    Given a SimulationBox with lx=ly=lz=10.0
+    And a ParticleBuffers built from a single particle at x=(4.9, 0.0, 0.0),
+      v=(2.0, 0.0, 0.0), F=(0, 0, 0), m=1.0 and zero image flags
+    When vv_kick_drift(&mut buffers, &sim_box, dt=0.1) is called
+    And the buffers are downloaded
+    Then positions_x[0] equals -4.9
+      (raw position 4.9 + 2.0 * 0.1 = 5.1; wrap subtracts lx, giving -4.9)
+    And images_x[0] equals 1
+    And images_y[0] and images_z[0] are 0
+
+  @rq-aaf3d06f
+  Scenario: vv_kick_drift wraps in the negative-x direction
+    Given a SimulationBox with lx=ly=lz=10.0
+    And a ParticleBuffers built from a single particle at x=(-4.9, 0.0, 0.0),
+      v=(-2.0, 0.0, 0.0), F=(0, 0, 0), m=1.0 and zero image flags
+    When vv_kick_drift(&mut buffers, &sim_box, dt=0.1) is called
+    And the buffers are downloaded
+    Then positions_x[0] equals 4.9
+    And images_x[0] equals -1
+
+  @rq-dae60da6
+  Scenario: vv_kick_drift increments image counts on multi-period crossings
+    Given a SimulationBox with lx=10.0
+    And a single particle at x=0.0 with v=(250.0, 0, 0), F=(0, 0, 0), m=1.0,
+      images_x[0] = 7
+    When vv_kick_drift(&mut buffers, &sim_box, dt=0.1) is called
+    And the buffers are downloaded
+    Then positions_x[0] is in [-5.0, +5.0)
+    And images_x[0] equals 7 + 2
+      (raw position 0 + 25.0 = 25.0 crosses two full periods of lx=10)
+    And positions_x[0] + images_x[0] * lx equals 25.0 to f32 precision
+
+  @rq-9cd01384
+  Scenario: vv_kick does not modify image flags
+    Given a ParticleBuffers built from N=4 particles with arbitrary nonzero positions,
+      velocities, forces, masses, and image flags
+    And a snapshot of images_x, images_y, images_z before launch
+    When vv_kick(&mut buffers, dt=0.1) is called
+    And the buffers are downloaded
+    Then images_x, images_y, images_z are byte-identical to the snapshot
+
+  @rq-b8fde05b
+  Scenario: Unwrapped displacement is preserved under wrap
+    Given a SimulationBox with lx=ly=lz=10.0
+    And a ParticleBuffers built from N=2 particles with arbitrary positions
+      inside [-5.0, +5.0), zero image flags, velocities chosen so each
+      particle crosses one boundary in the next step, F=0
+    And a recorded unwrapped position p0 = positions + images * L per particle
+    When vv_kick_drift(&mut buffers, &sim_box, dt=0.1) is called
+    And the buffers are downloaded
+    Then for every particle, positions_a + images_a * L_a equals
+      p0 + v_a * 0.1 (in f32) to within one ULP per component
 ```

@@ -13,6 +13,7 @@ pub struct InitState {
     pub positions_y: Vec<f32>,
     pub positions_z: Vec<f32>,
     pub velocities: Option<InitVelocities>,
+    pub images: Option<InitImages>,
 }
 
 // rq-abd761d4
@@ -21,6 +22,13 @@ pub struct InitVelocities {
     pub velocities_x: Vec<f32>,
     pub velocities_y: Vec<f32>,
     pub velocities_z: Vec<f32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InitImages {
+    pub images_x: Vec<i32>,
+    pub images_y: Vec<i32>,
+    pub images_z: Vec<i32>,
 }
 
 // rq-573b650b
@@ -138,19 +146,33 @@ impl std::error::Error for InitStateError {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PropertiesShape {
     SpeciesPos,
+    SpeciesPosImage,
     SpeciesPosVelo,
+    SpeciesPosVeloImage,
 }
 
 impl PropertiesShape {
     fn columns(self) -> usize {
         match self {
             PropertiesShape::SpeciesPos => 4,
+            PropertiesShape::SpeciesPosImage => 7,
             PropertiesShape::SpeciesPosVelo => 7,
+            PropertiesShape::SpeciesPosVeloImage => 10,
         }
     }
 
     fn has_velocities(self) -> bool {
-        matches!(self, PropertiesShape::SpeciesPosVelo)
+        matches!(
+            self,
+            PropertiesShape::SpeciesPosVelo | PropertiesShape::SpeciesPosVeloImage
+        )
+    }
+
+    fn has_images(self) -> bool {
+        matches!(
+            self,
+            PropertiesShape::SpeciesPosImage | PropertiesShape::SpeciesPosVeloImage
+        )
     }
 }
 
@@ -252,7 +274,9 @@ fn parse_lattice(raw: &str) -> Result<(SimulationBox, [f64; 3]), InitStateError>
 fn parse_properties(raw: &str) -> Result<PropertiesShape, InitStateError> {
     match raw {
         "species:S:1:pos:R:3" => Ok(PropertiesShape::SpeciesPos),
+        "species:S:1:pos:R:3:image:I:3" => Ok(PropertiesShape::SpeciesPosImage),
         "species:S:1:pos:R:3:velo:R:3" => Ok(PropertiesShape::SpeciesPosVelo),
+        "species:S:1:pos:R:3:velo:R:3:image:I:3" => Ok(PropertiesShape::SpeciesPosVeloImage),
         _ => Err(InitStateError::InvalidProperties(format!(
             "unsupported Properties value {raw:?}"
         ))),
@@ -304,6 +328,8 @@ pub(crate) fn parse_init_state(
     let shape = parse_properties(properties_value)?;
     let expected_cols = shape.columns();
     let has_velo = shape.has_velocities();
+    let has_images = shape.has_images();
+    let image_offset = if has_velo { 7 } else { 4 };
 
     let half = [lengths_f64[0] / 2.0, lengths_f64[1] / 2.0, lengths_f64[2] / 2.0];
 
@@ -314,6 +340,9 @@ pub(crate) fn parse_init_state(
     let mut velocities_x: Vec<f32> = Vec::with_capacity(particle_count);
     let mut velocities_y: Vec<f32> = Vec::with_capacity(particle_count);
     let mut velocities_z: Vec<f32> = Vec::with_capacity(particle_count);
+    let mut images_x: Vec<i32> = Vec::with_capacity(particle_count);
+    let mut images_y: Vec<i32> = Vec::with_capacity(particle_count);
+    let mut images_z: Vec<i32> = Vec::with_capacity(particle_count);
 
     let mut row_idx: usize = 0;
     let mut current_line_number: usize = 2;
@@ -372,6 +401,15 @@ pub(crate) fn parse_init_state(
             (0.0, 0.0, 0.0)
         };
 
+        let (ix, iy, iz) = if has_images {
+            let ix = parse_i32(cols[image_offset], current_line_number, "image_x")?;
+            let iy = parse_i32(cols[image_offset + 1], current_line_number, "image_y")?;
+            let iz = parse_i32(cols[image_offset + 2], current_line_number, "image_z")?;
+            (ix, iy, iz)
+        } else {
+            (0, 0, 0)
+        };
+
         type_indices.push(type_index);
         positions_x.push(px as f32);
         positions_y.push(py as f32);
@@ -380,6 +418,11 @@ pub(crate) fn parse_init_state(
             velocities_x.push(vx as f32);
             velocities_y.push(vy as f32);
             velocities_z.push(vz as f32);
+        }
+        if has_images {
+            images_x.push(ix);
+            images_y.push(iy);
+            images_z.push(iz);
         }
         row_idx += 1;
     }
@@ -401,6 +444,16 @@ pub(crate) fn parse_init_state(
         None
     };
 
+    let images = if has_images {
+        Some(InitImages {
+            images_x,
+            images_y,
+            images_z,
+        })
+    } else {
+        None
+    };
+
     Ok(InitState {
         sim_box,
         particle_count,
@@ -409,6 +462,7 @@ pub(crate) fn parse_init_state(
         positions_y,
         positions_z,
         velocities,
+        images,
     })
 }
 
@@ -418,6 +472,18 @@ fn parse_number(
     column: &'static str,
 ) -> Result<f64, InitStateError> {
     raw.parse::<f64>().map_err(|_| InitStateError::InvalidNumber {
+        line_number,
+        column,
+        raw: raw.to_string(),
+    })
+}
+
+fn parse_i32(
+    raw: &str,
+    line_number: usize,
+    column: &'static str,
+) -> Result<i32, InitStateError> {
+    raw.parse::<i32>().map_err(|_| InitStateError::InvalidNumber {
         line_number,
         column,
         raw: raw.to_string(),

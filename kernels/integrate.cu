@@ -1,14 +1,26 @@
 // rq-10cc8ddf rq-580fe6f7
 
+// Wrap a position component back into [-L/2, +L/2) and advance the image
+// counter by the integer number of periods crossed. Matches the host-side
+// wrap_position formula on SimulationBox.
+__device__ static inline void wrap_and_count(float &p, float lx, int &n)
+{
+  float k = floorf((p + lx * 0.5f) / lx);
+  p = p - k * lx;
+  n = n + (int)k;
+}
+
 template <bool LOSSLESS>
 __device__ inline void vv_kick_drift_body(
     unsigned int i,
     float *positions_x, float *positions_y, float *positions_z,
+    int *images_x, int *images_y, int *images_z,
     float *velocities_x, float *velocities_y, float *velocities_z,
     double *positions_x_lo, double *positions_y_lo, double *positions_z_lo,
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
+    float lx, float ly, float lz,
     float dt)
 {
   float m = masses[i];
@@ -57,9 +69,20 @@ __device__ inline void vv_kick_drift_body(
     positions_x_lo[i] = ext_x - (double)new_x;
     positions_y_lo[i] = ext_y - (double)new_y;
     positions_z_lo[i] = ext_z - (double)new_z;
+
+    int nx = images_x[i];
+    int ny = images_y[i];
+    int nz = images_z[i];
+    wrap_and_count(new_x, lx, nx);
+    wrap_and_count(new_y, ly, ny);
+    wrap_and_count(new_z, lz, nz);
+
     positions_x[i] = new_x;
     positions_y[i] = new_y;
     positions_z[i] = new_z;
+    images_x[i] = nx;
+    images_y[i] = ny;
+    images_z[i] = nz;
   } else {
     float vx = velocities_x[i] + ax * half_dt;
     float vy = velocities_y[i] + ay * half_dt;
@@ -67,9 +90,24 @@ __device__ inline void vv_kick_drift_body(
     velocities_x[i] = vx;
     velocities_y[i] = vy;
     velocities_z[i] = vz;
-    positions_x[i] += vx * dt;
-    positions_y[i] += vy * dt;
-    positions_z[i] += vz * dt;
+
+    float px = positions_x[i] + vx * dt;
+    float py = positions_y[i] + vy * dt;
+    float pz = positions_z[i] + vz * dt;
+
+    int nx = images_x[i];
+    int ny = images_y[i];
+    int nz = images_z[i];
+    wrap_and_count(px, lx, nx);
+    wrap_and_count(py, ly, ny);
+    wrap_and_count(pz, lz, nz);
+
+    positions_x[i] = px;
+    positions_y[i] = py;
+    positions_z[i] = pz;
+    images_x[i] = nx;
+    images_y[i] = ny;
+    images_z[i] = nz;
   }
 }
 
@@ -115,9 +153,11 @@ __device__ inline void vv_kick_body(
 
 extern "C" __global__ void vv_kick_drift(
     float *positions_x, float *positions_y, float *positions_z,
+    int *images_x, int *images_y, int *images_z,
     float *velocities_x, float *velocities_y, float *velocities_z,
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
+    float lx, float ly, float lz,
     float dt,
     unsigned int n)
 {
@@ -128,11 +168,12 @@ extern "C" __global__ void vv_kick_drift(
   vv_kick_drift_body<false>(
       i,
       positions_x, positions_y, positions_z,
+      images_x, images_y, images_z,
       velocities_x, velocities_y, velocities_z,
       nullptr, nullptr, nullptr,
       nullptr, nullptr, nullptr,
       forces_x, forces_y, forces_z,
-      masses, dt);
+      masses, lx, ly, lz, dt);
 }
 
 extern "C" __global__ void vv_kick(
@@ -156,11 +197,13 @@ extern "C" __global__ void vv_kick(
 
 extern "C" __global__ void vv_kick_drift_lossless(
     float *positions_x, float *positions_y, float *positions_z,
+    int *images_x, int *images_y, int *images_z,
     float *velocities_x, float *velocities_y, float *velocities_z,
     double *positions_x_lo, double *positions_y_lo, double *positions_z_lo,
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
+    float lx, float ly, float lz,
     float dt,
     unsigned int n)
 {
@@ -171,11 +214,12 @@ extern "C" __global__ void vv_kick_drift_lossless(
   vv_kick_drift_body<true>(
       i,
       positions_x, positions_y, positions_z,
+      images_x, images_y, images_z,
       velocities_x, velocities_y, velocities_z,
       positions_x_lo, positions_y_lo, positions_z_lo,
       velocities_x_lo, velocities_y_lo, velocities_z_lo,
       forces_x, forces_y, forces_z,
-      masses, dt);
+      masses, lx, ly, lz, dt);
 }
 
 extern "C" __global__ void vv_kick_lossless(

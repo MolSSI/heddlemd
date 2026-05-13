@@ -52,25 +52,34 @@ positive.
 
 #### `Properties` (required)
 
-A colon-separated specification of the data-column layout. Schema v1 accepts
-exactly two forms:
+A colon-separated specification of the data-column layout. The accepted
+forms enumerate the four combinations of optional `velo` and optional
+`image` columns, in this fixed order:
 
 ```
 Properties=species:S:1:pos:R:3
+Properties=species:S:1:pos:R:3:image:I:3
 Properties=species:S:1:pos:R:3:velo:R:3
+Properties=species:S:1:pos:R:3:velo:R:3:image:I:3
 ```
 
 - `species:S:1` — one string column for the particle type name.
 - `pos:R:3` — three real columns for the position (x, y, z) in metres.
 - `velo:R:3` — optional three real columns for velocity (vx, vy, vz) in m/s.
+- `image:I:3` — optional three integer columns for the image triple
+  `(n_x, n_y, n_z)`. The unwrapped position is
+  `pos + image · (lx, ly, lz)`. When absent, image flags default to zero
+  on load.
 
 Any other ordering, missing required columns, or unexpected columns is an
-error. The `velo` decision is all-or-nothing: when present, every data row
-must supply three velocity columns; when absent, no row may supply velocity
-columns.
+error. The `velo` and `image` decisions are each all-or-nothing: when
+declared, every data row must supply the three corresponding columns;
+when absent, no row may supply them. `velo` and `image` are independent
+(any combination of presence/absence is accepted as long as the order
+shown above is followed).
 
-Other extended-XYZ column types (`I` integer, `L` logical) and arbitrary
-property names are not accepted in schema v1.
+Other extended-XYZ column types (`L` logical) and arbitrary property
+names are not accepted in schema v1.
 
 #### Other attributes
 
@@ -91,8 +100,12 @@ more whitespace characters. The number of columns must match the
   and z. Positions exactly equal to `+L/2` are rejected (the primary cell's
   upper bound is exclusive).
 - `velo` (when present) — three `f64` values in m/s. No range restriction.
+- `image` (when present) — three `i32` values. No range restriction
+  beyond the type bounds; negative and positive values are both accepted.
 
-Non-finite values (NaN, infinity) in any numeric column are rejected.
+Non-finite values (NaN, infinity) in any real column are rejected;
+integer columns that fail to parse as `i32` (out of range, non-integer
+text) are rejected.
 
 ### Particle IDs <!-- rq-bc442f5b -->
 
@@ -122,11 +135,20 @@ This produces an empty `ParticleState` and a valid `SimulationBox`.
   - `positions_z: Vec<f32>`
   - `velocities: Option<InitVelocities>` — `Some(_)` when `Properties`
     declares `velo:R:3`; `None` otherwise.
+  - `images: Option<InitImages>` — `Some(_)` when `Properties` declares
+    `image:I:3`; `None` otherwise. When `None`, the runner default-
+    initialises the particle state's image flags to zero.
 
 - `InitVelocities` <!-- rq-abd761d4 -->
   - `velocities_x: Vec<f32>` — velocities cast from `f64` to `f32`.
   - `velocities_y: Vec<f32>`
   - `velocities_z: Vec<f32>`
+
+- `InitImages` <!-- rq-af0518f8 -->
+  - `images_x: Vec<i32>` — image triple x-component. Length equals
+    `particle_count`.
+  - `images_y: Vec<i32>`
+  - `images_z: Vec<i32>`
 
 - `InitStateError` — error type returned by the parser. Variants: <!-- rq-573b650b -->
   - `Io(String)` — failed to read the file.
@@ -140,7 +162,7 @@ This produces an empty `ParticleState` and a valid `SimulationBox`.
     (any off-diagonal nonzero), contains non-finite components, or has a
     non-positive diagonal.
   - `InvalidProperties(String)` — `Properties` does not match one of the
-    two accepted forms.
+    four accepted forms.
   - `RowCountMismatch { expected: usize, actual: usize }` — the number of
     non-blank data rows differs from `N`.
   - `RowColumnCountMismatch { line_number: usize, expected: usize, actual: usize }`
@@ -148,7 +170,8 @@ This produces an empty `ParticleState` and a valid `SimulationBox`.
   - `UnknownType { line_number: usize, name: String }` — `species` value is
     not present in the caller-supplied `type_names` slice.
   - `InvalidNumber { line_number: usize, column: &'static str, raw: String }`
-    — a numeric column could not be parsed as `f64`.
+    — a real column could not be parsed as `f64`, or an integer column
+    could not be parsed as `i32`.
   - `NonFiniteValue { line_number: usize, column: &'static str }` — a
     numeric column is NaN or infinity.
   - `PositionOutsideBox { line_number: usize, axis: &'static str, value: f64, half_length: f64 }`
@@ -457,4 +480,48 @@ Feature: Extended-XYZ initial-state file
   Scenario: File does not exist
     When load_init_state("/tmp/does-not-exist.xyz", &["Ar"]) is called
     Then it returns Err(InitStateError::Io(_))
+
+  # --- Image flags ---
+
+  @rq-8eb0050f
+  Scenario: File without image:I:3 has images None
+    Given a file whose Properties is "species:S:1:pos:R:3"
+    When load_init_state is called
+    Then it returns Ok(state)
+    And state.images is None
+
+  @rq-36f771d7
+  Scenario: File with image:I:3 parses three integer columns per row
+    Given a file whose Properties is "species:S:1:pos:R:3:image:I:3"
+    And 3 data rows with image columns "2 -1 0", "0 0 0", "-3 4 -7"
+    When load_init_state is called
+    Then it returns Ok(state)
+    And state.images is Some(InitImages { images_x: [2, 0, -3], images_y: [-1, 0, 4], images_z: [0, 0, -7] })
+
+  @rq-e794b794
+  Scenario: File with velo:R:3:image:I:3 parses both blocks in order
+    Given a file whose Properties is "species:S:1:pos:R:3:velo:R:3:image:I:3"
+    And 2 data rows where the trailing six columns of each row are three velocities followed by three integers
+    When load_init_state is called
+    Then state.velocities is Some(_)
+    And state.images is Some(_)
+
+  @rq-d65bcc90
+  Scenario: Reject image column whose value does not parse as i32
+    Given a file whose Properties is "species:S:1:pos:R:3:image:I:3"
+    And one data row whose image_x column is "1.5" (not an integer)
+    When load_init_state is called
+    Then it returns Err(InitStateError::InvalidNumber { line_number: _, column: "image_x", raw: "1.5" })
+
+  @rq-febdd0b3
+  Scenario: Reject image column declared without all three components
+    Given a file whose Properties is "species:S:1:pos:R:3:image:I:2"
+    When load_init_state is called
+    Then it returns Err(InitStateError::InvalidProperties(_))
+
+  @rq-01607062
+  Scenario: Reject image:I:3 ordered before velo:R:3
+    Given a file whose Properties is "species:S:1:pos:R:3:image:I:3:velo:R:3"
+    When load_init_state is called
+    Then it returns Err(InitStateError::InvalidProperties(_))
 ```

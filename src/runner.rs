@@ -228,6 +228,9 @@ fn run_simulation_with_phase(
         }
     };
 
+    let images_arg = init.images.as_ref().map(|im| {
+        (im.images_x.clone(), im.images_y.clone(), im.images_z.clone())
+    });
     let state = ParticleState::new(
         init.positions_x.clone(),
         init.positions_y.clone(),
@@ -238,6 +241,7 @@ fn run_simulation_with_phase(
         masses_f32.clone(),
         init.type_indices.clone(),
         None,
+        images_arg,
     )
     .map_err(|e| (RunnerError::ParticleState(e), ExitPhase::Setup))?;
 
@@ -283,6 +287,7 @@ fn run_simulation_with_phase(
             TrajectoryWriter::open(
                 &config.output.trajectory_path,
                 config.output.include_velocities,
+                config.output.include_images,
                 type_name_strings.clone(),
             )
             .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Setup))?,
@@ -459,6 +464,15 @@ fn write_traj_frame(
     } else {
         None
     };
+    let traj_images = if writer.include_images() {
+        Some((
+            &frame.images_x[..n],
+            &frame.images_y[..n],
+            &frame.images_z[..n],
+        ))
+    } else {
+        None
+    };
     writer.write_frame(
         step,
         dt,
@@ -468,6 +482,7 @@ fn write_traj_frame(
         &frame.positions_y[..n],
         &frame.positions_z[..n],
         traj_velocities,
+        traj_images,
     )
 }
 

@@ -818,6 +818,7 @@ fn kernel_start_stop_and_finalize_records_one_sample() {
         vec![1.0_f32; 2],
         vec![0u32; 2],
         None,
+            None,
     )
     .unwrap();
     let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -851,6 +852,7 @@ fn repeated_kernel_starts_stops_accumulate() {
         vec![1.0_f32; 2],
         vec![0u32; 2],
         None,
+            None,
     )
     .unwrap();
     let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();

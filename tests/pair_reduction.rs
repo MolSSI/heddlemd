@@ -18,6 +18,7 @@ fn zero_state(n: usize) -> ParticleState {
         vec![1.0; n],
         vec![0u32; n],
         None,
+            None,
     )
     .expect("ParticleState::new")
 }
@@ -333,6 +334,7 @@ fn reduction_does_not_modify_positions_velocities_masses() {
         vec![1.5, 2.5, 3.5, 4.5],
         vec![0u32; 4],
         Some(vec![100, 200, 300, 400]),
+            None,
     )
     .unwrap();
     let mut particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -452,6 +454,7 @@ fn reduction_sums_pair_energies_left_to_right() {
         vec![1.0_f32],
         vec![0u32],
         None,
+            None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -482,6 +485,7 @@ fn reduction_zero_count_writes_zero_to_energy_and_virial() {
         vec![1.0_f32, 1.0],
         vec![0u32, 0],
         None,
+            None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -513,6 +517,7 @@ fn energy_and_virial_share_force_indexing() {
         vec![1.0_f32, 1.0],
         vec![0u32, 0],
         None,
+            None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();

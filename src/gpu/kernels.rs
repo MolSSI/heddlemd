@@ -20,6 +20,7 @@ fn launch_config(n: u32) -> LaunchConfig {
 // rq-f1ba909b
 pub fn vv_kick_drift(
     buffers: &mut ParticleBuffers,
+    sim_box: &SimulationBox,
     dt: f32,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
@@ -32,6 +33,7 @@ pub fn vv_kick_drift(
         .get_func("integrate", "vv_kick_drift")
         .expect("integrate module is not loaded; init_device() must be called first");
     let cfg = launch_config(n_u32);
+    let lengths = sim_box.lengths();
     unsafe {
         func.launch(
             cfg,
@@ -39,6 +41,9 @@ pub fn vv_kick_drift(
                 &mut buffers.positions_x,
                 &mut buffers.positions_y,
                 &mut buffers.positions_z,
+                &mut buffers.images_x,
+                &mut buffers.images_y,
+                &mut buffers.images_z,
                 &mut buffers.velocities_x,
                 &mut buffers.velocities_y,
                 &mut buffers.velocities_z,
@@ -46,6 +51,9 @@ pub fn vv_kick_drift(
                 &buffers.forces_y,
                 &buffers.forces_z,
                 &buffers.masses,
+                lengths[0],
+                lengths[1],
+                lengths[2],
                 dt,
                 n_u32,
             ),
@@ -778,6 +786,7 @@ pub fn sort_cells_by_particle_id(
 pub fn vv_kick_drift_lossless(
     buffers: &mut ParticleBuffers,
     lossless: &mut LosslessBuffers,
+    sim_box: &SimulationBox,
     dt: f32,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
@@ -791,6 +800,7 @@ pub fn vv_kick_drift_lossless(
         .get_func("integrate", "vv_kick_drift_lossless")
         .expect("integrate module is not loaded; init_device() must be called first");
     let cfg = launch_config(n_u32);
+    let lengths = sim_box.lengths();
     unsafe {
         func.launch(
             cfg,
@@ -798,6 +808,9 @@ pub fn vv_kick_drift_lossless(
                 &mut buffers.positions_x,
                 &mut buffers.positions_y,
                 &mut buffers.positions_z,
+                &mut buffers.images_x,
+                &mut buffers.images_y,
+                &mut buffers.images_z,
                 &mut buffers.velocities_x,
                 &mut buffers.velocities_y,
                 &mut buffers.velocities_z,
@@ -811,6 +824,9 @@ pub fn vv_kick_drift_lossless(
                 &buffers.forces_y,
                 &buffers.forces_z,
                 &buffers.masses,
+                lengths[0],
+                lengths[1],
+                lengths[2],
                 dt,
                 n_u32,
             ),
@@ -823,6 +839,7 @@ pub fn vv_kick_drift_lossless(
 // rq-f00f729e
 pub fn lan_drift_half(
     buffers: &mut ParticleBuffers,
+    sim_box: &SimulationBox,
     dt: f32,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
@@ -835,6 +852,7 @@ pub fn lan_drift_half(
         .get_func("langevin", "lan_drift_half")
         .expect("langevin module is not loaded; init_device() must be called first");
     let cfg = launch_config(n_u32);
+    let lengths = sim_box.lengths();
     unsafe {
         func.launch(
             cfg,
@@ -842,9 +860,15 @@ pub fn lan_drift_half(
                 &mut buffers.positions_x,
                 &mut buffers.positions_y,
                 &mut buffers.positions_z,
+                &mut buffers.images_x,
+                &mut buffers.images_y,
+                &mut buffers.images_z,
                 &buffers.velocities_x,
                 &buffers.velocities_y,
                 &buffers.velocities_z,
+                lengths[0],
+                lengths[1],
+                lengths[2],
                 dt,
                 n_u32,
             ),

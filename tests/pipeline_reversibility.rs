@@ -51,6 +51,7 @@ fn build_initial_state() -> ParticleState {
         vec![1.0; N],
         vec![0u32; N],
         None,
+            None,
     )
     .expect("build_initial_state")
 }
@@ -160,14 +161,14 @@ impl PipelineFixture {
 
 // rq-7b5eef8c
 fn lossless_step(fixture: &mut PipelineFixture, lossless: &mut LosslessBuffers, dt: f32) {
-    vv_kick_drift_lossless(&mut fixture.buffers, lossless, dt).unwrap();
+    vv_kick_drift_lossless(&mut fixture.buffers, lossless, &fixture.sim_box, dt).unwrap();
     lj_pair_force_no_excl(&fixture.buffers, &mut fixture.pair, &fixture.sim_box, &fixture.params).unwrap();
     reduce_pair_forces_into_buffers(&fixture.pair, &fixture.counts, &mut fixture.buffers).unwrap();
     vv_kick_lossless(&mut fixture.buffers, lossless, dt).unwrap();
 }
 
 fn lossy_step(fixture: &mut PipelineFixture, dt: f32) {
-    vv_kick_drift(&mut fixture.buffers, dt).unwrap();
+    vv_kick_drift(&mut fixture.buffers, &fixture.sim_box, dt).unwrap();
     lj_pair_force_no_excl(&fixture.buffers, &mut fixture.pair, &fixture.sim_box, &fixture.params).unwrap();
     reduce_pair_forces_into_buffers(&fixture.pair, &fixture.counts, &mut fixture.buffers).unwrap();
     vv_kick(&mut fixture.buffers, dt).unwrap();

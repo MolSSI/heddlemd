@@ -12,6 +12,9 @@ pub struct ParticleBuffers {
     pub positions_x: CudaSlice<f32>,
     pub positions_y: CudaSlice<f32>,
     pub positions_z: CudaSlice<f32>,
+    pub images_x: CudaSlice<i32>,
+    pub images_y: CudaSlice<i32>,
+    pub images_z: CudaSlice<i32>,
     pub velocities_x: CudaSlice<f32>,
     pub velocities_y: CudaSlice<f32>,
     pub velocities_z: CudaSlice<f32>,
@@ -34,6 +37,9 @@ impl ParticleBuffers {
         let n = state.particle_count();
         check_len("positions_y", n, state.positions_y.len())?;
         check_len("positions_z", n, state.positions_z.len())?;
+        check_len("images_x", n, state.images_x.len())?;
+        check_len("images_y", n, state.images_y.len())?;
+        check_len("images_z", n, state.images_z.len())?;
         check_len("velocities_x", n, state.velocities_x.len())?;
         check_len("velocities_y", n, state.velocities_y.len())?;
         check_len("velocities_z", n, state.velocities_z.len())?;
@@ -49,6 +55,9 @@ impl ParticleBuffers {
         let positions_x = device.htod_sync_copy(&state.positions_x).map_err(GpuError::from)?;
         let positions_y = device.htod_sync_copy(&state.positions_y).map_err(GpuError::from)?;
         let positions_z = device.htod_sync_copy(&state.positions_z).map_err(GpuError::from)?;
+        let images_x = device.htod_sync_copy(&state.images_x).map_err(GpuError::from)?;
+        let images_y = device.htod_sync_copy(&state.images_y).map_err(GpuError::from)?;
+        let images_z = device.htod_sync_copy(&state.images_z).map_err(GpuError::from)?;
         let velocities_x = device.htod_sync_copy(&state.velocities_x).map_err(GpuError::from)?;
         let velocities_y = device.htod_sync_copy(&state.velocities_y).map_err(GpuError::from)?;
         let velocities_z = device.htod_sync_copy(&state.velocities_z).map_err(GpuError::from)?;
@@ -68,6 +77,9 @@ impl ParticleBuffers {
             positions_x,
             positions_y,
             positions_z,
+            images_x,
+            images_y,
+            images_z,
             velocities_x,
             velocities_y,
             velocities_z,
@@ -93,6 +105,9 @@ impl ParticleBuffers {
         check_len("positions_x", n, state.positions_x.len())?;
         check_len("positions_y", n, state.positions_y.len())?;
         check_len("positions_z", n, state.positions_z.len())?;
+        check_len("images_x", n, state.images_x.len())?;
+        check_len("images_y", n, state.images_y.len())?;
+        check_len("images_z", n, state.images_z.len())?;
         check_len("velocities_x", n, state.velocities_x.len())?;
         check_len("velocities_y", n, state.velocities_y.len())?;
         check_len("velocities_z", n, state.velocities_z.len())?;
@@ -114,6 +129,15 @@ impl ParticleBuffers {
             .map_err(GpuError::from)?;
         device
             .htod_sync_copy_into(&state.positions_z, &mut self.positions_z)
+            .map_err(GpuError::from)?;
+        device
+            .htod_sync_copy_into(&state.images_x, &mut self.images_x)
+            .map_err(GpuError::from)?;
+        device
+            .htod_sync_copy_into(&state.images_y, &mut self.images_y)
+            .map_err(GpuError::from)?;
+        device
+            .htod_sync_copy_into(&state.images_z, &mut self.images_z)
             .map_err(GpuError::from)?;
         device
             .htod_sync_copy_into(&state.velocities_x, &mut self.velocities_x)

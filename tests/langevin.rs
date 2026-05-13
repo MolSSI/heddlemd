@@ -42,6 +42,7 @@ fn one_particle_state() -> ParticleState {
         vec![1.0_f32],
         vec![0u32; 1],
         None,
+            None,
     )
     .unwrap()
 }
@@ -59,6 +60,7 @@ fn n_particle_state(n: usize) -> ParticleState {
         vec![1.0_f32; n],
         vec![0u32; n],
         None,
+            None,
     )
     .unwrap()
 }
@@ -109,9 +111,10 @@ fn construct_langevin_with_zero_particles() {
 #[test]
 fn lan_drift_half_advances_positions_by_v_half_dt() {
     let device = init_device().unwrap();
+    let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = one_particle_state();
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    lan_drift_half(&mut buffers, 0.1).unwrap();
+    lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
     assert!((downloaded.positions_x[0] - (1.0 + 0.5 * 0.05)).abs() < 1.0e-6);
@@ -124,9 +127,10 @@ fn lan_drift_half_advances_positions_by_v_half_dt() {
 #[test]
 fn lan_drift_half_leaves_other_arrays_unchanged() {
     let device = init_device().unwrap();
+    let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = n_particle_state(4);
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    lan_drift_half(&mut buffers, 0.1).unwrap();
+    lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
     assert_eq!(downloaded.velocities_x, state.velocities_x);
@@ -141,22 +145,25 @@ fn lan_drift_half_leaves_other_arrays_unchanged() {
 #[test]
 fn lan_drift_half_on_empty_is_noop() {
     let device = init_device().unwrap();
+    let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
         Vec::new(), None,
+            None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device, &state).unwrap();
-    lan_drift_half(&mut buffers, 0.1).unwrap();
+    lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
 }
 
 // rq-247e3799
 #[test]
 fn lan_drift_half_with_dt_zero_leaves_positions_unchanged() {
     let device = init_device().unwrap();
+    let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = n_particle_state(4);
     let mut buffers = ParticleBuffers::new(device, &state).unwrap();
-    lan_drift_half(&mut buffers, 0.0).unwrap();
+    lan_drift_half(&mut buffers, &sim_box, 0.0).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
     assert_eq!(downloaded.positions_x, state.positions_x);
@@ -185,6 +192,7 @@ fn lan_ou_step_on_empty_is_noop() {
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
         Vec::new(), None,
+            None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device, &state).unwrap();
@@ -277,6 +285,7 @@ fn ou_variance_scales_with_predicted_factor() {
         vec![mass; n],
         vec![0u32; n],
         None,
+            None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device, &state).unwrap();
@@ -355,6 +364,7 @@ fn langevin_step_on_empty_is_noop() {
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
         Vec::new(), None,
+            None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -586,4 +596,57 @@ log_every = 1
             "expected no langevin_* stage in N=0 run, got {stage}"
         );
     }
+}
+
+// --- Image-flag wrap (lan_drift_half) ---
+
+#[test]
+fn lan_drift_half_wraps_across_plus_l_half() {
+    let device = init_device().expect("init_device");
+    let sim_box = SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap();
+    let state = dynamics::state::ParticleState::new(
+        vec![4.95_f32],
+        vec![0.0],
+        vec![0.0],
+        vec![2.0_f32],
+        vec![0.0],
+        vec![0.0],
+        vec![1.0],
+        vec![0u32; 1],
+        None,
+        None,
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
+    let mut snap = state.clone();
+    snap.download_from(&buffers).unwrap();
+    assert!((snap.positions_x[0] - (-4.95_f32)).abs() < 1e-5);
+    assert_eq!(snap.images_x[0], 1);
+}
+
+#[test]
+fn lan_drift_half_preserves_image_flags_when_no_wrap() {
+    let device = init_device().expect("init_device");
+    let sim_box = SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap();
+    let state = dynamics::state::ParticleState::new(
+        vec![0.0_f32],
+        vec![0.0],
+        vec![0.0],
+        vec![0.1_f32],
+        vec![0.1_f32],
+        vec![0.1_f32],
+        vec![1.0],
+        vec![0u32; 1],
+        None,
+        Some((vec![3], vec![-1], vec![0])),
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
+    let mut snap = state.clone();
+    snap.download_from(&buffers).unwrap();
+    assert_eq!(snap.images_x[0], 3);
+    assert_eq!(snap.images_y[0], -1);
+    assert_eq!(snap.images_z[0], 0);
 }

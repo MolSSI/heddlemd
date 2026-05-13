@@ -27,6 +27,7 @@ fn small_state(n: usize) -> ParticleState {
         m,
         vec![0u32; n],
         None,
+            None,
     )
     .unwrap()
 }
@@ -186,6 +187,7 @@ fn step_on_empty_state_is_noop() {
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
         Vec::new(), None,
+            None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();

@@ -5,6 +5,7 @@ use dynamics::gpu::{
     LosslessBuffers, ParticleBuffers, init_device, vv_kick_drift_lossless, vv_kick_lossless,
 };
 use dynamics::state::ParticleState;
+use dynamics::pbc::SimulationBox;
 
 // --- Helpers ---
 
@@ -19,6 +20,7 @@ fn empty_state(n: usize) -> ParticleState {
         vec![1.0; n],
         vec![0u32; n],
         None,
+            None,
     )
     .expect("empty_state")
 }
@@ -41,6 +43,7 @@ fn diverse_state(n: usize) -> ParticleState {
         masses,
         vec![0u32; n],
         None,
+            None,
     )
     .unwrap();
     state.forces_x = (0..n).map(|i| 0.05 + i as f32 * 0.02).collect();
@@ -163,9 +166,10 @@ fn lossless_buffers_new_with_zero_particle_count() {
 #[test] // rq-58cac735
 fn vv_kick_drift_lossless_empty_noop() {
     let device = init_device().expect("init_device");
+    let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let mut buffers = ParticleBuffers::new(device.clone(), &empty_state(0)).unwrap();
     let mut lossless = LosslessBuffers::new(device.clone(), 0).unwrap();
-    vv_kick_drift_lossless(&mut buffers, &mut lossless, 0.1).expect("kick_drift_lossless");
+    vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, 0.1).expect("kick_drift_lossless");
 }
 
 #[test] // rq-5626dfc6
@@ -181,6 +185,7 @@ fn vv_kick_lossless_empty_noop() {
 #[test] // rq-5a6d5e9e
 fn vv_kick_drift_lossless_block_non_aligned() {
     let device = init_device().expect("init_device");
+    let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let n = 1000;
     let mut state = empty_state(n);
     state.velocities_x = vec![1.0_f32; n];
@@ -188,7 +193,7 @@ fn vv_kick_drift_lossless_block_non_aligned() {
     let mut lossless = LosslessBuffers::new(device.clone(), n).unwrap();
 
     let initial_positions_x = state.positions_x.clone();
-    vv_kick_drift_lossless(&mut buffers, &mut lossless, 0.1).expect("kick_drift_lossless");
+    vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, 0.1).expect("kick_drift_lossless");
 
     let final_positions_x: Vec<f32> = device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     let final_velocities_x: Vec<f32> = device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
@@ -207,12 +212,13 @@ fn vv_kick_drift_lossless_block_non_aligned() {
 #[test] // rq-bb075030
 fn vv_kick_drift_lossless_does_not_modify_forces_masses_ids() {
     let device = init_device().expect("init_device");
+    let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = diverse_state(4);
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut lossless = LosslessBuffers::new(device.clone(), 4).unwrap();
     let snapshot = capture_snapshot(&buffers, &lossless);
 
-    vv_kick_drift_lossless(&mut buffers, &mut lossless, 0.1).expect("kick_drift_lossless");
+    vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, 0.1).expect("kick_drift_lossless");
 
     let after = capture_snapshot(&buffers, &lossless);
     assert_eq!(after.forces_x, snapshot.forces_x);
@@ -283,6 +289,7 @@ fn assert_residuals_close(a: &FullSnapshot, b: &FullSnapshot, tol: f64) {
 #[test] // rq-1a504311
 fn single_step_round_trip_zero_force() {
     let device = init_device().expect("init_device");
+    let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let n = 8;
     let positions_x: Vec<f32> = (0..n).map(|i| 0.5 + i as f32 * 0.3).collect();
     let positions_y: Vec<f32> = (0..n).map(|i| -1.0 + i as f32 * 0.2).collect();
@@ -300,15 +307,16 @@ fn single_step_round_trip_zero_force() {
         vec![1.0_f32; n],
         vec![0u32; n],
         None,
+            None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut lossless = LosslessBuffers::new(device.clone(), n).unwrap();
     let snapshot = capture_snapshot(&buffers, &lossless);
 
-    vv_kick_drift_lossless(&mut buffers, &mut lossless, 0.1).expect("forward");
+    vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, 0.1).expect("forward");
     negate_velocities(&mut buffers, &mut lossless);
-    vv_kick_drift_lossless(&mut buffers, &mut lossless, 0.1).expect("reverse");
+    vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, 0.1).expect("reverse");
     negate_velocities(&mut buffers, &mut lossless);
 
     let after = capture_snapshot(&buffers, &lossless);
@@ -321,6 +329,7 @@ fn single_step_round_trip_zero_force() {
 #[test] // rq-b73316ed
 fn multi_step_round_trip_constant_force() {
     let device = init_device().expect("init_device");
+    let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let n = 16;
     let state = diverse_state(n);
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -330,12 +339,12 @@ fn multi_step_round_trip_constant_force() {
     let dt = 0.001_f32;
     let n_steps = 50;
     for _ in 0..n_steps {
-        vv_kick_drift_lossless(&mut buffers, &mut lossless, dt).expect("forward kd");
+        vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, dt).expect("forward kd");
         vv_kick_lossless(&mut buffers, &mut lossless, dt).expect("forward k");
     }
     negate_velocities(&mut buffers, &mut lossless);
     for _ in 0..n_steps {
-        vv_kick_drift_lossless(&mut buffers, &mut lossless, dt).expect("reverse kd");
+        vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, dt).expect("reverse kd");
         vv_kick_lossless(&mut buffers, &mut lossless, dt).expect("reverse k");
     }
     negate_velocities(&mut buffers, &mut lossless);
@@ -350,6 +359,7 @@ fn multi_step_round_trip_constant_force() {
 #[test] // rq-2a0e97f5
 fn two_independent_lossless_runs_byte_identical() {
     let device = init_device().expect("init_device");
+    let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let n = 64;
     let state = diverse_state(n);
     let dt = 0.001_f32;
@@ -359,7 +369,7 @@ fn two_independent_lossless_runs_byte_identical() {
         let mut buffers = ParticleBuffers::new(device.clone(), state).unwrap();
         let mut lossless = LosslessBuffers::new(device.clone(), n).unwrap();
         for _ in 0..n_steps {
-            vv_kick_drift_lossless(&mut buffers, &mut lossless, dt).unwrap();
+            vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, dt).unwrap();
             vv_kick_lossless(&mut buffers, &mut lossless, dt).unwrap();
         }
         capture_snapshot(&buffers, &lossless)

@@ -48,6 +48,7 @@ fn build_state_xyz(positions: &[[f32; 3]]) -> ParticleState {
         vec![1.0; n],
         vec![0u32; n],
         None,
+            None,
     )
     .expect("build_state_xyz: ParticleState::new")
 }
@@ -344,6 +345,7 @@ fn empty_state_is_noop() {
         vec![],
         vec![0u32; 0],
         None,
+            None,
     )
     .unwrap();
     let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -529,6 +531,7 @@ fn does_not_modify_positions_velocities_masses_or_forces() {
         vec![1.5, 2.5, 3.5, 4.5],
         vec![0u32; 4],
         Some(vec![100, 200, 300, 400]),
+            None,
     )
     .unwrap();
     state.forces_x = vec![0.7, 0.8, 0.9, 1.0];
@@ -600,6 +603,7 @@ fn nan_positions_propagate_to_nan_pair_forces() {
         vec![1.0, 1.0],
         vec![0u32; 2],
         None,
+            None,
     )
     .unwrap();
     let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -651,6 +655,7 @@ fn build_state_with_types(positions: &[[f32; 3]], type_indices: Vec<u32>) -> Par
         vec![1.0; n],
         type_indices,
         None,
+            None,
     )
     .expect("ParticleState::new")
 }

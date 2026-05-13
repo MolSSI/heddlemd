@@ -242,6 +242,7 @@ pub struct OutputConfig {
     pub trajectory_path: PathBuf,
     pub trajectory_every: u64,
     pub include_velocities: bool,
+    pub include_images: bool,
     pub log_path: PathBuf,
     pub log_every: u64,
     pub timings_path: PathBuf,
@@ -751,6 +752,7 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         trajectory_path,
         trajectory_every,
         include_velocities,
+        include_images,
         log_path,
         log_every,
         timings_path,
@@ -777,6 +779,11 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
                 Some(_) => return Err(invalid("output.include_velocities", "expected a boolean")),
                 None => true,
             };
+            let inci = match out_tbl.get("include_images") {
+                Some(toml::Value::Boolean(b)) => *b,
+                Some(_) => return Err(invalid("output.include_images", "expected a boolean")),
+                None => true,
+            };
             let lpath = match out_tbl.get("log_path") {
                 Some(toml::Value::String(s)) => resolve_path(&base_dir, s),
                 Some(_) => return Err(invalid("output.log_path", "expected a string")),
@@ -795,12 +802,13 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
                 Some(_) => return Err(invalid("output.timings_path", "expected a string")),
                 None => resolve_path(&base_dir, &default_timings),
             };
-            (tpath, tevery, incv, lpath, levery, timings)
+            (tpath, tevery, incv, inci, lpath, levery, timings)
         }
         Some(_) => return Err(invalid("output", "expected a table")),
         None => (
             resolve_path(&base_dir, &default_traj),
             100,
+            true,
             true,
             resolve_path(&base_dir, &default_log),
             100,
@@ -871,6 +879,7 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
             trajectory_path,
             trajectory_every,
             include_velocities,
+            include_images,
             log_path,
             log_every,
             timings_path,

@@ -22,6 +22,7 @@ fn state_from_positions(px: Vec<f32>, py: Vec<f32>, pz: Vec<f32>) -> ParticleSta
         vec![1.0; n],
         vec![0u32; n],
         None,
+            None,
     )
     .unwrap()
 }

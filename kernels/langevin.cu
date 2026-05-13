@@ -79,11 +79,20 @@ __device__ inline float philox_gaussian(
   return (float)(r * cos(theta));
 }
 
-// --- A step: x <- x + v * (dt / 2). -----------------------------------------
+// --- A step: x <- x + v * (dt / 2), then wrap into the primary image. -------
+
+__device__ static inline void wrap_and_count(float &p, float lx, int &n)
+{
+  float k = floorf((p + lx * 0.5f) / lx);
+  p = p - k * lx;
+  n = n + (int)k;
+}
 
 extern "C" __global__ void lan_drift_half(
     float *positions_x, float *positions_y, float *positions_z,
+    int *images_x, int *images_y, int *images_z,
     const float *velocities_x, const float *velocities_y, const float *velocities_z,
+    float lx, float ly, float lz,
     float dt,
     unsigned int n)
 {
@@ -91,9 +100,23 @@ extern "C" __global__ void lan_drift_half(
   if (i >= n) return;
 
   float half_dt = dt * 0.5f;
-  positions_x[i] += velocities_x[i] * half_dt;
-  positions_y[i] += velocities_y[i] * half_dt;
-  positions_z[i] += velocities_z[i] * half_dt;
+  float px = positions_x[i] + velocities_x[i] * half_dt;
+  float py = positions_y[i] + velocities_y[i] * half_dt;
+  float pz = positions_z[i] + velocities_z[i] * half_dt;
+
+  int nx = images_x[i];
+  int ny = images_y[i];
+  int nz = images_z[i];
+  wrap_and_count(px, lx, nx);
+  wrap_and_count(py, ly, ny);
+  wrap_and_count(pz, lz, nz);
+
+  positions_x[i] = px;
+  positions_y[i] = py;
+  positions_z[i] = pz;
+  images_x[i] = nx;
+  images_y[i] = ny;
+  images_z[i] = nz;
 }
 
 // --- O step: v <- alpha * v + sigma_i * xi, sigma_i = sqrt((1-alpha^2) kT/m_i).

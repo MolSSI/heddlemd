@@ -148,11 +148,11 @@ impl Integrator for VelocityVerletState {
 
         if let Some(ll) = self.lossless.as_mut() {
             timings.kernel_start(KernelStage::VV_KICK_DRIFT_LOSSLESS)?;
-            vv_kick_drift_lossless(buffers, ll, dt)?;
+            vv_kick_drift_lossless(buffers, ll, sim_box, dt)?;
             timings.kernel_stop(KernelStage::VV_KICK_DRIFT_LOSSLESS)?;
         } else {
             timings.kernel_start(KernelStage::VV_KICK_DRIFT)?;
-            vv_kick_drift(buffers, dt)?;
+            vv_kick_drift(buffers, sim_box, dt)?;
             timings.kernel_stop(KernelStage::VV_KICK_DRIFT)?;
         }
 
@@ -229,7 +229,7 @@ impl Integrator for LangevinBaoabState {
         timings.kernel_stop(KernelStage::LANGEVIN_KICK_HALF)?;
 
         timings.kernel_start(KernelStage::LANGEVIN_DRIFT_HALF)?;
-        lan_drift_half(buffers, dt)?;
+        lan_drift_half(buffers, sim_box, dt)?;
         timings.kernel_stop(KernelStage::LANGEVIN_DRIFT_HALF)?;
 
         let alpha = (-(self.friction as f32) * dt).exp();
@@ -240,7 +240,7 @@ impl Integrator for LangevinBaoabState {
         timings.kernel_stop(KernelStage::LANGEVIN_OU_STEP)?;
 
         timings.kernel_start(KernelStage::LANGEVIN_DRIFT_HALF)?;
-        lan_drift_half(buffers, dt)?;
+        lan_drift_half(buffers, sim_box, dt)?;
         timings.kernel_stop(KernelStage::LANGEVIN_DRIFT_HALF)?;
 
         // Force evaluation at the new positions.

@@ -37,6 +37,7 @@ fn state_n(n: usize) -> ParticleState {
         vec![1.0_f32; n],
         vec![0u32; n],
         None,
+            None,
     )
     .unwrap()
 }
@@ -374,6 +375,7 @@ fn step_zero_slots_writes_zero_forces() {
         vec![1.0_f32; 4],
         vec![0u32; 4],
         None,
+            None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -435,6 +437,7 @@ fn step_empty_launches_no_kernels() {
         Vec::new(),
         Vec::new(),
         None,
+            None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -1222,6 +1225,7 @@ fn system_total_potential_energy_equals_sum_of_particle_shares() {
         vec![1.0_f32, 1.0],
         vec![0u32, 0],
         None,
+            None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -1263,6 +1267,7 @@ fn system_total_virial_equals_sum_of_particle_shares() {
         vec![1.0_f32, 1.0],
         vec![0u32, 0],
         None,
+            None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();

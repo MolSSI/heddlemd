@@ -174,7 +174,9 @@ __device__ inline void philox4x32_10(
 
 extern "C" __global__ void lan_drift_half(
     float *positions_x, float *positions_y, float *positions_z,
+    int *images_x, int *images_y, int *images_z,
     const float *velocities_x, const float *velocities_y, const float *velocities_z,
+    float lx, float ly, float lz,
     float dt,
     unsigned int n);
 
@@ -193,7 +195,12 @@ Each thread computes its global index as
 `blockIdx.x * blockDim.x + threadIdx.x`. If the index is `>= n` the thread
 returns without touching any buffer.
 
-`lan_drift_half` performs `x[i] += v[i] * (dt * 0.5f)` per axis.
+`lan_drift_half` performs `x[i] += v[i] * (dt * 0.5f)` per axis, then
+wraps the updated component back into `[-L_a / 2, +L_a / 2)` via the
+same `wrap_and_count(p, L, n)` helper used by velocity Verlet
+(`k = floor((p + L*0.5f) / L)`; `p ← p - k*L`; `n ← n + k`). The
+unwrapped position `positions_a[i] + images_a[i] * L_a` is invariant
+under this wrap. Velocities are read-only inputs and are not touched.
 
 `lan_ou_step` performs, for axis `a ∈ {0, 1, 2}`:
 
@@ -221,8 +228,9 @@ and `pair_force` modules.
 
 Two free functions in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
 
-- `lan_drift_half(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>` <!-- rq-f00f729e -->
-  - Launches the `lan_drift_half` kernel.
+- `lan_drift_half(buffers: &mut ParticleBuffers, sim_box: &SimulationBox, dt: f32) -> Result<(), GpuError>` <!-- rq-f00f729e -->
+  - Launches the `lan_drift_half` kernel, reading edge lengths from
+    `sim_box` for the wrap step.
   - Block size 256; grid `ceil(n / 256)`.
   - When `buffers.particle_count() == 0`, returns `Ok(())` without
     launching.
@@ -274,6 +282,10 @@ Feature: Langevin BAOAB integrator
 
   Background:
     Given a CUDA-capable GPU available as device 0
+    And a SimulationBox with lx=ly=lz=1.0e6 unless otherwise specified
+      (large enough that no particle in a scenario below wraps during a
+      single drift call, so image flags stay at zero and positions match
+      the closed-form arithmetic).
     And init_device() has been called
 
   # --- Module loading and construction ---
@@ -448,4 +460,28 @@ Feature: Langevin BAOAB integrator
     When dynamics run is invoked
     Then it exits with code 0
     And the timings file contains no Langevin kernel rows
+
+  # --- Image-flag wrap in lan_drift_half ---
+
+  @rq-7cd5fae2
+  Scenario: lan_drift_half wraps positions across the +L/2 boundary
+    Given a SimulationBox with lx=ly=lz=10.0
+    And a ParticleBuffers from a single particle at x=(4.95, 0.0, 0.0)
+      with v=(2.0, 0.0, 0.0) and zero image flags
+    When lan_drift_half(&mut buffers, &sim_box, dt=0.1) is called
+    And the buffers are downloaded
+    Then positions_x[0] equals -4.95
+      (raw position 4.95 + 2.0 * 0.05 = 5.05; wrap subtracts lx = 10.0)
+    And images_x[0] equals 1
+
+  @rq-d6e89324
+  Scenario: lan_drift_half does not modify image flags when no wrap occurs
+    Given a SimulationBox with lx=ly=lz=10.0
+    And a ParticleBuffers from a single particle at x=(0.0, 0.0, 0.0)
+      with v=(0.1, 0.1, 0.1) and images_x[0]=3, images_y[0]=-1, images_z[0]=0
+    When lan_drift_half(&mut buffers, &sim_box, dt=0.1) is called
+    And the buffers are downloaded
+    Then images_x[0] equals 3
+    And images_y[0] equals -1
+    And images_z[0] equals 0
 ```

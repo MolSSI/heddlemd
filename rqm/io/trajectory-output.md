@@ -4,11 +4,13 @@ The runner appends one trajectory frame per snapshot interval (and one frame
 for the initial state) to a single extended-XYZ file at the output path
 declared in the config. Each frame is fully self-describing: it carries the
 particle count, the simulation box, the column layout, the step index, the
-simulation time, and the per-particle type names, positions, and (optionally)
-velocities.
+simulation time, the per-particle type names, wrapped positions, the per-
+particle integer image triple (when enabled), and per-particle velocities
+(when enabled).
 
 Frame format matches the file format read by `init-state-file.md`, so a
-trajectory frame can be hand-edited and reused as an init file.
+trajectory frame can be hand-edited and reused as an init file — including
+restart from a recorded `(positions, images)` pair.
 
 ## File Format <!-- rq-1658f77d -->
 
@@ -44,12 +46,15 @@ digits, lower-case `e` exponent), which round-trips `f32` values exactly.
 
 ### `Properties` <!-- rq-e06bcfb0 -->
 
-Two possible values:
+The Properties string is determined at writer construction from
+`output.include_velocities` and `output.include_images` (see
+`config-schema.md`). The four possible values are, in the same order
+`init-state-file.md` accepts them:
 
-- `Properties=species:S:1:pos:R:3` — when `output.include_velocities` is
-  `false` (see `config-schema.md`).
-- `Properties=species:S:1:pos:R:3:velo:R:3` — when
-  `output.include_velocities` is `true` (the default).
+- `Properties=species:S:1:pos:R:3` — neither velocities nor images.
+- `Properties=species:S:1:pos:R:3:image:I:3` — images only.
+- `Properties=species:S:1:pos:R:3:velo:R:3` — velocities only.
+- `Properties=species:S:1:pos:R:3:velo:R:3:image:I:3` — both.
 
 The value chosen at the start of a run is constant for every frame in the
 file.
@@ -74,10 +79,19 @@ The first column is the type **name** (the string declared in the config's
 without quoting. Subsequent columns are real numbers written with `{:.9e}`,
 separated by single spaces.
 
-Positions are written in their current (live) value, including any drift
-outside the primary cell from PBC accumulation; the runner does not re-wrap
-positions for trajectory output (a future feature may add a wrap-on-write
-flag). Velocities, when included, are written in m/s.
+Positions are written in their current (live) wrapped value: each
+component is in `[-L_a / 2, +L_a / 2)` for the corresponding box edge
+`L_a`. The integrator's drift kernels enforce this invariant on the
+device state, so positions read out for the trajectory are always
+already-wrapped.
+
+Image columns (when `Properties` declares `image:I:3`) are the per-
+particle integer image triple `(images_x[i], images_y[i],
+images_z[i])` carried by `ParticleBuffers` (see `particle-state.md`).
+The unwrapped position used by external analyses is
+`pos + image · (lx, ly, lz)`.
+
+Velocities, when included, are written in m/s.
 
 ## Cadence <!-- rq-74b5c137 -->
 
@@ -105,24 +119,28 @@ Total frame count when `trajectory_every > 0`:
 
 ### Functions and methods <!-- rq-3adef71d -->
 
-- `TrajectoryWriter::open(path: &Path, include_velocities: bool, type_names: Vec<String>) -> Result<TrajectoryWriter, TrajectoryWriterError>` <!-- rq-28659fbe -->
+- `TrajectoryWriter::open(path: &Path, include_velocities: bool, include_images: bool, type_names: Vec<String>) -> Result<TrajectoryWriter, TrajectoryWriterError>` <!-- rq-28659fbe -->
   - Creates the output file at `path`. If the file already exists, returns
     `OutputExists { path }`. The check and create are performed atomically
     via `OpenOptions::new().write(true).create_new(true)`.
   - Wraps the file in a buffered writer.
-  - Stores `include_velocities` and `type_names` so future `write_frame`
-    calls can produce the correct columns. `type_names[i]` is the string
-    used to render particles whose `type_index` equals `i`.
+  - Stores `include_velocities`, `include_images`, and `type_names` so
+    future `write_frame` calls produce the correct columns.
+    `type_names[i]` is the string used to render particles whose
+    `type_index` equals `i`.
   - Returns the constructed writer on success.
 
-- `TrajectoryWriter::write_frame(&mut self, step: u64, dt: f64, box: &SimulationBox, type_indices: &[u32], positions_x: &[f32], positions_y: &[f32], positions_z: &[f32], velocities: Option<(&[f32], &[f32], &[f32])>) -> Result<(), TrajectoryWriterError>` <!-- rq-be899bef -->
+- `TrajectoryWriter::write_frame(&mut self, step: u64, dt: f64, box: &SimulationBox, type_indices: &[u32], positions_x: &[f32], positions_y: &[f32], positions_z: &[f32], velocities: Option<(&[f32], &[f32], &[f32])>, images: Option<(&[i32], &[i32], &[i32])>) -> Result<(), TrajectoryWriterError>` <!-- rq-be899bef -->
   - Writes one frame to the underlying file in the format described above.
   - Asserts in debug builds that all slice lengths agree (`type_indices`,
-    `positions_*`, and each `velocities` slice).
+    `positions_*`, each `velocities` slice, and each `images` slice).
   - When `self.include_velocities == true`, the caller must supply
     `velocities = Some(_)`; when `false`, the caller must supply
     `velocities = None`. Mismatch is a debug assertion (programming
     error from the runner).
+  - When `self.include_images == true`, the caller must supply
+    `images = Some(_)`; when `false`, the caller must supply
+    `images = None`. Mismatch is a debug assertion.
   - Looks up each particle's type name via
     `self.type_names[type_indices[i] as usize]`. Out-of-range indices are
     a debug assertion.
@@ -152,13 +170,17 @@ without panicking; programs that need crash-safe trajectories call
 - Binary trajectory formats (NetCDF, HDF5, AMBER `.nc`, etc.).
 - Compression on the fly (gzip, xz).
 - Multi-stream output (one file per particle type, etc.).
-- A wrap-on-write flag to fold positions back into the primary cell
-  before output.
+- Emitting unwrapped positions in the `pos:R:3` columns. Positions are
+  always wrapped into the primary image; consumers that need unwrapped
+  coordinates request `output.include_images = true` and compute
+  `pos + image · lattice` themselves, or do the equivalent at parse
+  time.
 - Per-frame box changes (the box is constant; NPT and box rescaling are
   not part of this feature).
 - Velocity components on the data line when
   `include_velocities == false`. Either every frame carries velocities
-  or none do; the choice is fixed at writer construction.
+  or none do; the choice is fixed at writer construction. The same
+  all-or-nothing rule applies to image columns.
 - Embedded run metadata (engine version, config hash, seed) in the
   trajectory header. Captured by `simulation-runner.md` only in stdout
   output for now; a future feature may add a separate `.meta` file.
@@ -182,14 +204,14 @@ Feature: Extended-XYZ trajectory output
   @rq-a403f778
   Scenario: Open creates a new trajectory file
     Given tmp/traj.xyz does not exist
-    When TrajectoryWriter::open(tmp/traj.xyz, include_velocities=true, type_names) is called
+    When TrajectoryWriter::open(tmp/traj.xyz, include_velocities=true, include_images=true, type_names) is called
     Then it returns Ok(writer)
     And tmp/traj.xyz exists and has length 0
 
   @rq-8f31cb78
   Scenario: Open refuses to overwrite an existing file
     Given tmp/traj.xyz exists with any contents
-    When TrajectoryWriter::open(tmp/traj.xyz, include_velocities=true, type_names) is called
+    When TrajectoryWriter::open(tmp/traj.xyz, include_velocities=true, include_images=true, type_names) is called
     Then it returns Err(TrajectoryWriterError::OutputExists { path: tmp/traj.xyz })
     And tmp/traj.xyz is unchanged
 
@@ -202,10 +224,10 @@ Feature: Extended-XYZ trajectory output
   # --- Frame format: positions only ---
 
   @rq-9021ec4b
-  Scenario: Write a single frame without velocities
-    Given a writer opened with include_velocities=false
+  Scenario: Write a single frame without velocities and without images
+    Given a writer opened with include_velocities=false and include_images=false
     And type_indices=[0, 0], positions_x=[0.0, 3.4e-10], positions_y=[0.0, 0.0], positions_z=[0.0, 0.0]
-    When writer.write_frame(step=0, dt=1.0e-15, &box, type_indices, positions_x, positions_y, positions_z, None) is called
+    When writer.write_frame(step=0, dt=1.0e-15, &box, type_indices, positions_x, positions_y, positions_z, None, None) is called
     And writer.flush() is called
     Then the file contains exactly:
       """
@@ -218,10 +240,10 @@ Feature: Extended-XYZ trajectory output
   # --- Frame format: with velocities ---
 
   @rq-c5e00a28
-  Scenario: Write a single frame with velocities
-    Given a writer opened with include_velocities=true
+  Scenario: Write a single frame with velocities and without images
+    Given a writer opened with include_velocities=true and include_images=false
     And type_indices=[0], positions=(0,0,0), velocities=(100.0, 0.0, 0.0)
-    When writer.write_frame(step=10, dt=1.0e-15, &box, ..., Some((vx,vy,vz))) is called
+    When writer.write_frame(step=10, dt=1.0e-15, &box, ..., Some((vx,vy,vz)), None) is called
     And writer.flush() is called
     Then the file contains exactly one frame with N=1
     And the comment line contains 'Properties=species:S:1:pos:R:3:velo:R:3'
@@ -298,4 +320,48 @@ Feature: Extended-XYZ trajectory output
     Given a writer that has written one frame
     When the writer is dropped without calling flush
     Then the file contains the written frame after the drop completes
+
+  # --- Image columns ---
+
+  @rq-b8463a3b
+  Scenario: Frame Properties carries image:I:3 when include_images=true and include_velocities=false
+    Given a writer opened with include_velocities=false and include_images=true
+    When writer.write_frame is called with images=Some(([1, -2], [0, 3], [-4, 0]))
+    And writer.flush() is called
+    Then the comment line contains 'Properties=species:S:1:pos:R:3:image:I:3'
+
+  @rq-3df3a993
+  Scenario: Frame Properties carries velo:R:3:image:I:3 when both flags are true
+    Given a writer opened with include_velocities=true and include_images=true
+    When writer.write_frame is called with both velocities=Some(_) and images=Some(_)
+    And writer.flush() is called
+    Then the comment line contains 'Properties=species:S:1:pos:R:3:velo:R:3:image:I:3'
+
+  @rq-5395785a
+  Scenario: Image columns appear after pos (and after velo when present) in each data row
+    Given a writer opened with include_velocities=true and include_images=true
+    And one particle with pos=(0.1, 0.2, 0.3), velo=(1.0, 2.0, 3.0), image=(4, -5, 6)
+    When writer.write_frame is called and the file is flushed
+    Then the data row equals
+      "Ar 1.000000015e-1 2.000000030e-1 3.000000119e-1 1.000000000e0 2.000000000e0 3.000000000e0 4 -5 6"
+      (with positions cast to f32 and integers rendered in base 10)
+
+  @rq-7e6a503c
+  Scenario: Round-trip through load_init_state preserves image flags
+    Given a writer opened with include_velocities=true and include_images=true
+    And a frame written for N=4 with non-trivial positions, velocities, and image flags
+    When writer.flush() is called
+    And load_init_state(file_path, &type_names) is called on the same file
+    Then it returns Ok(state)
+    And state.images.unwrap() agrees with the values passed to write_frame component-by-component
+
+  @rq-48d14580
+  Scenario: Positions written by the writer are inside the primary cell
+    Given a writer opened with include_velocities=false and include_images=true
+    And a ParticleBuffers whose positions are inside [-L/2, +L/2) per axis
+      (the invariant maintained by the integrator drift kernels)
+    When writer.write_frame is called
+    Then every pos_x value in the data rows lies in [-L_x/2, +L_x/2)
+    And every pos_y value lies in [-L_y/2, +L_y/2)
+    And every pos_z value lies in [-L_z/2, +L_z/2)
 ```

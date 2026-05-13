@@ -18,6 +18,7 @@ fn two_particle_state(p0: [f32; 3], p1: [f32; 3]) -> ParticleState {
         vec![1.0, 1.0],
         vec![0u32; 2],
         None,
+            None,
     )
     .unwrap()
 }
@@ -281,6 +282,7 @@ fn atom_with_two_bonds_sums_contributions() {
         vec![1.0_f32; 3],
         vec![0u32; 3],
         None,
+            None,
     )
     .unwrap();
     let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -359,6 +361,7 @@ fn atom_with_no_bonds_gets_zero_accumulator() {
         vec![1.0_f32; 4],
         vec![0u32; 4],
         None,
+            None,
     )
     .unwrap();
     let _ = state;

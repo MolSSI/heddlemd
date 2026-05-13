@@ -9,6 +9,7 @@ use crate::pbc::SimulationBox;
 pub struct TrajectoryWriter {
     writer: BufWriter<File>,
     include_velocities: bool,
+    include_images: bool,
     type_names: Vec<String>,
 }
 
@@ -16,6 +17,7 @@ impl std::fmt::Debug for TrajectoryWriter {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TrajectoryWriter")
             .field("include_velocities", &self.include_velocities)
+            .field("include_images", &self.include_images)
             .field("type_names", &self.type_names)
             .finish_non_exhaustive()
     }
@@ -46,12 +48,14 @@ impl TrajectoryWriter {
     pub fn open(
         path: &Path,
         include_velocities: bool,
+        include_images: bool,
         type_names: Vec<String>,
     ) -> Result<Self, TrajectoryWriterError> {
         match OpenOptions::new().write(true).create_new(true).open(path) {
             Ok(file) => Ok(TrajectoryWriter {
                 writer: BufWriter::new(file),
                 include_velocities,
+                include_images,
                 type_names,
             }),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -75,6 +79,7 @@ impl TrajectoryWriter {
         positions_y: &[f32],
         positions_z: &[f32],
         velocities: Option<(&[f32], &[f32], &[f32])>,
+        images: Option<(&[i32], &[i32], &[i32])>,
     ) -> Result<(), TrajectoryWriterError> {
         let n = type_indices.len();
         debug_assert_eq!(positions_x.len(), n);
@@ -88,6 +93,14 @@ impl TrajectoryWriter {
         } else {
             debug_assert!(velocities.is_none());
         }
+        if self.include_images {
+            let (ix, iy, iz) = images.expect("include_images=true requires images");
+            debug_assert_eq!(ix.len(), n);
+            debug_assert_eq!(iy.len(), n);
+            debug_assert_eq!(iz.len(), n);
+        } else {
+            debug_assert!(images.is_none());
+        }
 
         let lengths = sim_box.lengths();
         let time = (step as f64) * dt;
@@ -95,10 +108,11 @@ impl TrajectoryWriter {
         // rq-1658f77d rq-c5518458 rq-e06bcfb0 rq-df244549 rq-6ec75323 rq-88ec92fc
         writeln!(self.writer, "{n}").map_err(io_err)?;
         let zero = 0.0_f32;
-        let props = if self.include_velocities {
-            "species:S:1:pos:R:3:velo:R:3"
-        } else {
-            "species:S:1:pos:R:3"
+        let props = match (self.include_velocities, self.include_images) {
+            (false, false) => "species:S:1:pos:R:3",
+            (false, true) => "species:S:1:pos:R:3:image:I:3",
+            (true, false) => "species:S:1:pos:R:3:velo:R:3",
+            (true, true) => "species:S:1:pos:R:3:velo:R:3:image:I:3",
         };
         writeln!(
             self.writer,
@@ -120,27 +134,26 @@ impl TrajectoryWriter {
                 .get(type_indices[i] as usize)
                 .map(|s| s.as_str())
                 .unwrap_or("?");
+            write!(
+                self.writer,
+                "{name} {:.9e} {:.9e} {:.9e}",
+                positions_x[i], positions_y[i], positions_z[i]
+            )
+            .map_err(io_err)?;
             if self.include_velocities {
                 let (vx, vy, vz) = velocities.unwrap();
-                writeln!(
+                write!(
                     self.writer,
-                    "{name} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e} {:.9e}",
-                    positions_x[i],
-                    positions_y[i],
-                    positions_z[i],
-                    vx[i],
-                    vy[i],
-                    vz[i],
-                )
-                .map_err(io_err)?;
-            } else {
-                writeln!(
-                    self.writer,
-                    "{name} {:.9e} {:.9e} {:.9e}",
-                    positions_x[i], positions_y[i], positions_z[i]
+                    " {:.9e} {:.9e} {:.9e}",
+                    vx[i], vy[i], vz[i]
                 )
                 .map_err(io_err)?;
             }
+            if self.include_images {
+                let (ix, iy, iz) = images.unwrap();
+                write!(self.writer, " {} {} {}", ix[i], iy[i], iz[i]).map_err(io_err)?;
+            }
+            writeln!(self.writer).map_err(io_err)?;
         }
         Ok(())
     }
@@ -152,6 +165,10 @@ impl TrajectoryWriter {
 
     pub fn include_velocities(&self) -> bool {
         self.include_velocities
+    }
+
+    pub fn include_images(&self) -> bool {
+        self.include_images
     }
 }
 

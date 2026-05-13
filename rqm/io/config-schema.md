@@ -78,6 +78,7 @@ r_skin = 1.0e-10    # m  (defaults to 0.3 * cutoff when omitted)
 trajectory_path = "argon-traj.xyz"
 trajectory_every = 100
 include_velocities = true
+include_images = true
 log_path = "argon.log"
 log_every = 100
 timings_path = "argon.timings"
@@ -254,6 +255,13 @@ Cross-validation:
   negative integers fail at TOML parse time.
 - `include_velocities: bool` — include `velo:R:3` columns in every
   trajectory frame. Default `true`.
+- `include_images: bool` — include `image:I:3` columns in every
+  trajectory frame. Default `true`. When `true`, each frame's data rows
+  carry three integer columns after the position (and velocity, if
+  present) columns; consumers reconstruct unwrapped positions as
+  `pos + image · (lx, ly, lz)`. When `false`, image columns are
+  omitted from the file; positions in the trajectory are still wrapped
+  into the primary image.
 - `log_path: String` — output log path. Default: `<config-stem>.log` in the
   same directory as the config file. Resolved like `trajectory_path`.
 - `log_every: u64` — write one log row every this many integration steps.
@@ -385,6 +393,7 @@ Beyond per-field validation, the loader checks:
   - `trajectory_path: PathBuf` — resolved.
   - `trajectory_every: u64`
   - `include_velocities: bool`
+  - `include_images: bool`
   - `log_path: PathBuf` — resolved.
   - `log_every: u64`
   - `timings_path: PathBuf` — resolved.
@@ -499,6 +508,7 @@ Feature: TOML simulation config schema
     Then config.output.trajectory_path equals "/tmp/sim/sim-traj.xyz"
     And config.output.trajectory_every equals 100
     And config.output.include_velocities equals true
+    And config.output.include_images equals true
     And config.output.log_path equals "/tmp/sim/sim.log"
     And config.output.log_every equals 100
 

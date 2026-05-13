@@ -46,6 +46,7 @@ fn build_initial_state() -> ParticleState {
         vec![1.0; N],
         vec![0u32; N],
         None,
+            None,
     )
     .expect("build_initial_state: ParticleState::new")
 }
@@ -64,7 +65,7 @@ fn run_pipeline(device: &Arc<CudaDevice>, n_steps: usize) -> ParticleState {
     reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
 
     for _ in 0..n_steps {
-        vv_kick_drift(&mut buffers, DT).unwrap();
+        vv_kick_drift(&mut buffers, &sim_box, DT).unwrap();
         lj_pair_force_no_excl(&buffers, &mut pair, &sim_box, &params).unwrap();
         reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
         vv_kick(&mut buffers, DT).unwrap();

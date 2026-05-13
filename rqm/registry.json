@@ -48,6 +48,13 @@
     "title": "Langevin BAOAB runs end-to-end through the runner",
     "type": "scenario"
   },
+  "rq-01607062": {
+    "decl": "Scenario: Reject image:I:3 ordered before velo:R:3",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "Reject image:I:3 ordered before velo:R:3",
+    "type": "scenario"
+  },
   "rq-01784049": {
     "decl": "Scenario: draw_counter starts at 0 and increments per step()",
     "file": "integration/langevin-baoab",
@@ -224,6 +231,13 @@
     "file": "forces/bonds",
     "refs": [],
     "title": "Exclusion row with non-numeric scale",
+    "type": "scenario"
+  },
+  "rq-0705e380": {
+    "decl": "Scenario: Reject explicit images_y of wrong length",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Reject explicit images_y of wrong length",
     "type": "scenario"
   },
   "rq-08066bdf": {
@@ -1144,6 +1158,13 @@
     "title": "Per-cell sort yields ascending partner indices inside every cell",
     "type": "scenario"
   },
+  "rq-2315b501": {
+    "decl": "Scenario: Explicit non-zero images are stored as-supplied",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Explicit non-zero images are stored as-supplied",
+    "type": "scenario"
+  },
   "rq-2344fcec": {
     "decl": "- `LogWriter` — handle to an open log file. Fields are private; the type",
     "file": "io/log-output",
@@ -1307,7 +1328,7 @@
     "type": "scenario"
   },
   "rq-28659fbe": {
-    "decl": "- `TrajectoryWriter::open(path: &Path, include_velocities: bool, type_names: Vec<String>) -> Result<TrajectoryWriter, TrajectoryWriterError>`",
+    "decl": "- `TrajectoryWriter::open(path: &Path, include_velocities: bool, include_images: bool, type_names: Vec<String>) -> Result<TrajectoryWriter, TrajectoryWriterError>`",
     "file": "io/trajectory-output",
     "refs": [
       {
@@ -1440,6 +1461,13 @@
     ],
     "title": "Velocity generation",
     "type": "section"
+  },
+  "rq-2c31aa6e": {
+    "decl": "Scenario: ParticleBuffers carries the image-flag device buffers",
+    "file": "particle-state",
+    "refs": [],
+    "title": "ParticleBuffers carries the image-flag device buffers",
+    "type": "scenario"
   },
   "rq-2cb82d44": {
     "decl": "Scenario: Newly-constructed box reports generation 0",
@@ -1803,8 +1831,15 @@
     "title": "Data Model",
     "type": "section"
   },
+  "rq-36f771d7": {
+    "decl": "Scenario: File with image:I:3 parses three integer columns per row",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "File with image:I:3 parses three integer columns per row",
+    "type": "scenario"
+  },
   "rq-3766be01": {
-    "decl": "- `ParticleState` — host-side SoA state. All fourteen per-particle arrays are",
+    "decl": "- `ParticleState` — host-side SoA state. All seventeen per-particle arrays",
     "file": "particle-state",
     "refs": [
       {
@@ -1988,6 +2023,13 @@
     "file": "forces/framework",
     "refs": [],
     "title": "Construct a ForceField with LennardJones and MorseBonded",
+    "type": "scenario"
+  },
+  "rq-3df3a993": {
+    "decl": "Scenario: Frame Properties carries velo:R:3:image:I:3 when both flags are true",
+    "file": "io/trajectory-output",
+    "refs": [],
+    "title": "Frame Properties carries velo:R:3:image:I:3 when both flags are true",
     "type": "scenario"
   },
   "rq-3e744fed": {
@@ -2231,6 +2273,13 @@
     "refs": [],
     "title": "Empty file",
     "type": "section"
+  },
+  "rq-48d14580": {
+    "decl": "Scenario: Positions written by the writer are inside the primary cell",
+    "file": "io/trajectory-output",
+    "refs": [],
+    "title": "Positions written by the writer are inside the primary cell",
+    "type": "scenario"
   },
   "rq-48fd88ed": {
     "decl": "Scenario: Construct with particle_count = 0",
@@ -2502,6 +2551,13 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "LJ kernel reads the shared neighbor list from ForceFieldContext",
+    "type": "scenario"
+  },
+  "rq-5395785a": {
+    "decl": "Scenario: Image columns appear after pos (and after velo when present) in each data row",
+    "file": "io/trajectory-output",
+    "refs": [],
+    "title": "Image columns appear after pos (and after velo when present) in each data row",
     "type": "scenario"
   },
   "rq-53ae77a4": {
@@ -2834,7 +2890,7 @@
     "type": "scenario"
   },
   "rq-5e0598cb": {
-    "decl": "- `ParticleState::new(positions_x: Vec<f32>, positions_y: Vec<f32>, positions_z: Vec<f32>, velocities_x: Vec<f32>, velocities_y: Vec<f32>, velocities_z: Vec<f32>, masses: Vec<f32>, type_indices: Vec<u32>, ids: Option<Vec<u32>>) -> Result<ParticleState, ParticleStateError>`",
+    "decl": "- `ParticleState::new(positions_x: Vec<f32>, positions_y: Vec<f32>, positions_z: Vec<f32>, velocities_x: Vec<f32>, velocities_y: Vec<f32>, velocities_z: Vec<f32>, masses: Vec<f32>, type_indices: Vec<u32>, ids: Option<Vec<u32>>, images: Option<(Vec<i32>, Vec<i32>, Vec<i32>)>) -> Result<ParticleState, ParticleStateError>`",
     "file": "particle-state",
     "refs": [
       {
@@ -3306,6 +3362,13 @@
     "title": "Reduction Launcher",
     "type": "section"
   },
+  "rq-6f897168": {
+    "decl": "Scenario: images defaults to zero-initialised arrays when None is passed",
+    "file": "particle-state",
+    "refs": [],
+    "title": "images defaults to zero-initialised arrays when None is passed",
+    "type": "scenario"
+  },
   "rq-6fd5167a": {
     "decl": "Scenario: Configuration with too many cells is rejected at construction",
     "file": "forces/neighbor-list",
@@ -3737,6 +3800,13 @@
     "title": "KE of a single particle with v=(1, 0, 0)",
     "type": "scenario"
   },
+  "rq-7cd5fae2": {
+    "decl": "Scenario: lan_drift_half wraps positions across the +L/2 boundary",
+    "file": "integration/langevin-baoab",
+    "refs": [],
+    "title": "lan_drift_half wraps positions across the +L/2 boundary",
+    "type": "scenario"
+  },
   "rq-7d5915bb": {
     "decl": "Scenario: Reject init = timings_path",
     "file": "io/config-schema",
@@ -3745,7 +3815,7 @@
     "type": "scenario"
   },
   "rq-7d5e87ee": {
-    "decl": "- `vv_kick_drift_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, dt: f32) -> Result<(), GpuError>`",
+    "decl": "- `vv_kick_drift_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, sim_box: &SimulationBox, dt: f32) -> Result<(), GpuError>`",
     "file": "integration/velocity-verlet",
     "refs": [],
     "title": "vv_kick_drift_lossless",
@@ -3804,6 +3874,13 @@
     ],
     "title": "Usage error messages",
     "type": "section"
+  },
+  "rq-7e6a503c": {
+    "decl": "Scenario: Round-trip through load_init_state preserves image flags",
+    "file": "io/trajectory-output",
+    "refs": [],
+    "title": "Round-trip through load_init_state preserves image flags",
+    "type": "scenario"
   },
   "rq-7e79501b": {
     "decl": "Scenario: total_runtime is at least as large as the maximum single-stage total",
@@ -4192,6 +4269,13 @@
     "title": "NaN forces propagate to NaN velocities and positions",
     "type": "scenario"
   },
+  "rq-8eb0050f": {
+    "decl": "Scenario: File without image:I:3 has images None",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "File without image:I:3 has images None",
+    "type": "scenario"
+  },
   "rq-8ee27e27": {
     "decl": "- `RunnerError` — error type returned from `run_simulation`. Variants:",
     "file": "simulation-runner",
@@ -4233,10 +4317,10 @@
     "type": "scenario"
   },
   "rq-9021ec4b": {
-    "decl": "Scenario: Write a single frame without velocities",
+    "decl": "Scenario: Write a single frame without velocities and without images",
     "file": "io/trajectory-output",
     "refs": [],
-    "title": "Write a single frame without velocities",
+    "title": "Write a single frame without velocities and without images",
     "type": "scenario"
   },
   "rq-9026181d": {
@@ -4620,6 +4704,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-9cd01384": {
+    "decl": "Scenario: vv_kick does not modify image flags",
+    "file": "integration/velocity-verlet",
+    "refs": [],
+    "title": "vv_kick does not modify image flags",
+    "type": "scenario"
   },
   "rq-9cf657ed": {
     "decl": "Scenario: fill kernel writes 1.0 to every element of a block-aligned buffer",
@@ -5080,6 +5171,13 @@
     "title": "Empty State",
     "type": "section"
   },
+  "rq-aaf3d06f": {
+    "decl": "Scenario: vv_kick_drift wraps in the negative-x direction",
+    "file": "integration/velocity-verlet",
+    "refs": [],
+    "title": "vv_kick_drift wraps in the negative-x direction",
+    "type": "scenario"
+  },
   "rq-ab40fe6d": {
     "decl": "Scenario: Reject non-blank content after the last data row",
     "file": "io/init-state-file",
@@ -5209,6 +5307,13 @@
       }
     ],
     "title": "SimulationBoxError",
+    "type": "api-item"
+  },
+  "rq-af0518f8": {
+    "decl": "- `InitImages`",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "InitImages",
     "type": "api-item"
   },
   "rq-af2d1628": {
@@ -5459,11 +5564,25 @@
     "title": "Constructor",
     "type": "section"
   },
+  "rq-b8463a3b": {
+    "decl": "Scenario: Frame Properties carries image:I:3 when include_images=true and include_velocities=false",
+    "file": "io/trajectory-output",
+    "refs": [],
+    "title": "Frame Properties carries image:I:3 when include_images=true and include_velocities=false",
+    "type": "scenario"
+  },
   "rq-b87fd5e8": {
     "decl": "Scenario: Positions visibly evolve over the 100-step lossless forward run",
     "file": "pipeline-reversibility",
     "refs": [],
     "title": "Positions visibly evolve over the 100-step lossless forward run",
+    "type": "scenario"
+  },
+  "rq-b8fde05b": {
+    "decl": "Scenario: Unwrapped displacement is preserved under wrap",
+    "file": "integration/velocity-verlet",
+    "refs": [],
+    "title": "Unwrapped displacement is preserved under wrap",
     "type": "scenario"
   },
   "rq-b96ce51d": {
@@ -5624,7 +5743,7 @@
     "type": "section"
   },
   "rq-be899bef": {
-    "decl": "- `TrajectoryWriter::write_frame(&mut self, step: u64, dt: f64, box: &SimulationBox, type_indices: &[u32], positions_x: &[f32], positions_y: &[f32], positions_z: &[f32], velocities: Option<(&[f32], &[f32], &[f32])>) -> Result<(), TrajectoryWriterError>`",
+    "decl": "- `TrajectoryWriter::write_frame(&mut self, step: u64, dt: f64, box: &SimulationBox, type_indices: &[u32], positions_x: &[f32], positions_y: &[f32], positions_z: &[f32], velocities: Option<(&[f32], &[f32], &[f32])>, images: Option<(&[i32], &[i32], &[i32])>) -> Result<(), TrajectoryWriterError>`",
     "file": "io/trajectory-output",
     "refs": [
       {
@@ -5845,10 +5964,10 @@
     "type": "section"
   },
   "rq-c5e00a28": {
-    "decl": "Scenario: Write a single frame with velocities",
+    "decl": "Scenario: Write a single frame with velocities and without images",
     "file": "io/trajectory-output",
     "refs": [],
-    "title": "Write a single frame with velocities",
+    "title": "Write a single frame with velocities and without images",
     "type": "scenario"
   },
   "rq-c62bb861": {
@@ -6083,6 +6202,13 @@
     "title": "Reject when masses has the wrong length",
     "type": "scenario"
   },
+  "rq-cef2288f": {
+    "decl": "Scenario: Reject upload when images_x has the wrong length",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Reject upload when images_x has the wrong length",
+    "type": "scenario"
+  },
   "rq-cf361ff5": {
     "decl": "- `Integrator::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, dt: f32, timings: &mut Timings) -> Result<(), IntegratorError>`",
     "file": "integration/framework",
@@ -6268,6 +6394,13 @@
     "title": "Force magnitude matches closed-form Morse expression",
     "type": "scenario"
   },
+  "rq-d65bcc90": {
+    "decl": "Scenario: Reject image column whose value does not parse as i32",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "Reject image column whose value does not parse as i32",
+    "type": "scenario"
+  },
   "rq-d6bd915a": {
     "decl": "Scenario: Pair exactly at cutoff is included",
     "file": "forces/lj-pair-force",
@@ -6288,6 +6421,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "minimum_image after set_lengths reflects the new edge lengths",
+    "type": "scenario"
+  },
+  "rq-d6e89324": {
+    "decl": "Scenario: lan_drift_half does not modify image flags when no wrap occurs",
+    "file": "integration/langevin-baoab",
+    "refs": [],
+    "title": "lan_drift_half does not modify image flags when no wrap occurs",
     "type": "scenario"
   },
   "rq-d836d884": {
@@ -6377,6 +6517,13 @@
     "refs": [],
     "title": "Functions and methods",
     "type": "section"
+  },
+  "rq-dae60da6": {
+    "decl": "Scenario: vv_kick_drift increments image counts on multi-period crossings",
+    "file": "integration/velocity-verlet",
+    "refs": [],
+    "title": "vv_kick_drift increments image counts on multi-period crossings",
+    "type": "scenario"
   },
   "rq-daf7550b": {
     "decl": "Scenario: NaN positions propagate to NaN pair forces",
@@ -6818,6 +6965,13 @@
     "title": "Functions",
     "type": "section"
   },
+  "rq-e6b6f2d8": {
+    "decl": "Scenario: vv_kick_drift wraps positions back into the primary image",
+    "file": "integration/velocity-verlet",
+    "refs": [],
+    "title": "vv_kick_drift wraps positions back into the primary image",
+    "type": "scenario"
+  },
   "rq-e70ee09e": {
     "decl": "Scenario: Two LangevinBaoabState instances at the same draw_counter and seed produce identical OU draws",
     "file": "integration/langevin-baoab",
@@ -6830,6 +6984,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Neighbor list excludes the self atom",
+    "type": "scenario"
+  },
+  "rq-e794b794": {
+    "decl": "Scenario: File with velo:R:3:image:I:3 parses both blocks in order",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "File with velo:R:3:image:I:3 parses both blocks in order",
     "type": "scenario"
   },
   "rq-e7c05140": {
@@ -7139,7 +7300,7 @@
     "type": "scenario"
   },
   "rq-f00f729e": {
-    "decl": "- `lan_drift_half(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>`",
+    "decl": "- `lan_drift_half(buffers: &mut ParticleBuffers, sim_box: &SimulationBox, dt: f32) -> Result<(), GpuError>`",
     "file": "integration/langevin-baoab",
     "refs": [
       {
@@ -7220,7 +7381,7 @@
     "type": "scenario"
   },
   "rq-f1ba909b": {
-    "decl": "- `vv_kick_drift(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>`",
+    "decl": "- `vv_kick_drift(buffers: &mut ParticleBuffers, sim_box: &SimulationBox, dt: f32) -> Result<(), GpuError>`",
     "file": "integration/velocity-verlet",
     "refs": [
       {
@@ -7586,6 +7747,13 @@
     "file": "forces/morse-bonded",
     "refs": [],
     "title": "r == 0 produces zero energy and virial in addition to zero force",
+    "type": "scenario"
+  },
+  "rq-febdd0b3": {
+    "decl": "Scenario: Reject image column declared without all three components",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "Reject image column declared without all three components",
     "type": "scenario"
   },
   "rq-fec7ae1c": {

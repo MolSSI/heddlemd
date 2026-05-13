@@ -8,6 +8,9 @@ pub struct ParticleState {
     pub positions_x: Vec<f32>,
     pub positions_y: Vec<f32>,
     pub positions_z: Vec<f32>,
+    pub images_x: Vec<i32>,
+    pub images_y: Vec<i32>,
+    pub images_z: Vec<i32>,
     pub velocities_x: Vec<f32>,
     pub velocities_y: Vec<f32>,
     pub velocities_z: Vec<f32>,
@@ -96,6 +99,7 @@ impl ParticleState {
         masses: Vec<f32>,
         type_indices: Vec<u32>,
         ids: Option<Vec<u32>>,
+        images: Option<(Vec<i32>, Vec<i32>, Vec<i32>)>,
     ) -> Result<Self, ParticleStateError> {
         let n = positions_x.len();
         check_len("positions_y", n, positions_y.len())?;
@@ -120,10 +124,23 @@ impl ParticleState {
             None => (0..n as u32).collect(),
         };
 
+        let (images_x, images_y, images_z) = match images {
+            Some((ix, iy, iz)) => {
+                check_len("images_x", n, ix.len())?;
+                check_len("images_y", n, iy.len())?;
+                check_len("images_z", n, iz.len())?;
+                (ix, iy, iz)
+            }
+            None => (vec![0i32; n], vec![0i32; n], vec![0i32; n]),
+        };
+
         Ok(ParticleState {
             positions_x,
             positions_y,
             positions_z,
+            images_x,
+            images_y,
+            images_z,
             velocities_x,
             velocities_y,
             velocities_z,
@@ -152,6 +169,9 @@ impl ParticleState {
         check_len("positions_x", n, self.positions_x.len())?;
         check_len("positions_y", n, self.positions_y.len())?;
         check_len("positions_z", n, self.positions_z.len())?;
+        check_len("images_x", n, self.images_x.len())?;
+        check_len("images_y", n, self.images_y.len())?;
+        check_len("images_z", n, self.images_z.len())?;
         check_len("velocities_x", n, self.velocities_x.len())?;
         check_len("velocities_y", n, self.velocities_y.len())?;
         check_len("velocities_z", n, self.velocities_z.len())?;
@@ -173,6 +193,15 @@ impl ParticleState {
             .map_err(GpuError::from)?;
         device
             .dtoh_sync_copy_into(&buffers.positions_z, &mut self.positions_z)
+            .map_err(GpuError::from)?;
+        device
+            .dtoh_sync_copy_into(&buffers.images_x, &mut self.images_x)
+            .map_err(GpuError::from)?;
+        device
+            .dtoh_sync_copy_into(&buffers.images_y, &mut self.images_y)
+            .map_err(GpuError::from)?;
+        device
+            .dtoh_sync_copy_into(&buffers.images_z, &mut self.images_z)
             .map_err(GpuError::from)?;
         device
             .dtoh_sync_copy_into(&buffers.velocities_x, &mut self.velocities_x)

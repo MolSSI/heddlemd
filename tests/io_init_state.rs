@@ -531,3 +531,99 @@ fn file_does_not_exist() {
         other => panic!("unexpected: {other:?}"),
     }
 }
+
+// --- Image flags ---
+
+#[test]
+fn file_without_image_property_has_images_none() {
+    let dir = tmp_path("img_none");
+    let path = dir.join("init.xyz");
+    std::fs::write(
+        &path,
+        "1\nLattice=\"10 0 0 0 10 0 0 0 10\" Properties=species:S:1:pos:R:3\nAr 0.0 0.0 0.0\n",
+    )
+    .unwrap();
+    let state = load_init_state(&path, &["Ar"]).unwrap();
+    assert!(state.images.is_none());
+}
+
+#[test]
+fn file_with_image_property_parses_three_integer_columns() {
+    let dir = tmp_path("img_only");
+    let path = dir.join("init.xyz");
+    std::fs::write(
+        &path,
+        "3\nLattice=\"10 0 0 0 10 0 0 0 10\" Properties=species:S:1:pos:R:3:image:I:3\n\
+         Ar 0.0 0.0 0.0 2 -1 0\nAr 0.0 0.0 0.0 0 0 0\nAr 0.0 0.0 0.0 -3 4 -7\n",
+    )
+    .unwrap();
+    let state = load_init_state(&path, &["Ar"]).unwrap();
+    let imgs = state.images.unwrap();
+    assert_eq!(imgs.images_x, vec![2, 0, -3]);
+    assert_eq!(imgs.images_y, vec![-1, 0, 4]);
+    assert_eq!(imgs.images_z, vec![0, 0, -7]);
+}
+
+#[test]
+fn file_with_velo_and_image_parses_both_blocks() {
+    let dir = tmp_path("velo_img");
+    let path = dir.join("init.xyz");
+    std::fs::write(
+        &path,
+        "2\nLattice=\"10 0 0 0 10 0 0 0 10\" Properties=species:S:1:pos:R:3:velo:R:3:image:I:3\n\
+         Ar 0.0 0.0 0.0 1.0 2.0 3.0 4 -5 6\nAr 0.0 0.0 0.0 -1.0 -2.0 -3.0 -4 5 -6\n",
+    )
+    .unwrap();
+    let state = load_init_state(&path, &["Ar"]).unwrap();
+    assert!(state.velocities.is_some());
+    let imgs = state.images.unwrap();
+    assert_eq!(imgs.images_x, vec![4, -4]);
+}
+
+#[test]
+fn reject_image_column_with_non_integer_value() {
+    let dir = tmp_path("img_bad");
+    let path = dir.join("init.xyz");
+    std::fs::write(
+        &path,
+        "1\nLattice=\"10 0 0 0 10 0 0 0 10\" Properties=species:S:1:pos:R:3:image:I:3\nAr 0.0 0.0 0.0 1.5 0 0\n",
+    )
+    .unwrap();
+    let err = load_init_state(&path, &["Ar"]).unwrap_err();
+    match err {
+        InitStateError::InvalidNumber { column, .. } => assert_eq!(column, "image_x"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn reject_image_property_with_wrong_count() {
+    let dir = tmp_path("img_wrong");
+    let path = dir.join("init.xyz");
+    std::fs::write(
+        &path,
+        "0\nLattice=\"10 0 0 0 10 0 0 0 10\" Properties=species:S:1:pos:R:3:image:I:2\n",
+    )
+    .unwrap();
+    let err = load_init_state(&path, &["Ar"]).unwrap_err();
+    match err {
+        InitStateError::InvalidProperties(_) => {}
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn reject_image_before_velo_in_properties() {
+    let dir = tmp_path("img_order");
+    let path = dir.join("init.xyz");
+    std::fs::write(
+        &path,
+        "0\nLattice=\"10 0 0 0 10 0 0 0 10\" Properties=species:S:1:pos:R:3:image:I:3:velo:R:3\n",
+    )
+    .unwrap();
+    let err = load_init_state(&path, &["Ar"]).unwrap_err();
+    match err {
+        InitStateError::InvalidProperties(_) => {}
+        other => panic!("unexpected: {other:?}"),
+    }
+}
