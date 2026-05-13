@@ -279,19 +279,20 @@ slots must carry valid zeros in their rows.)
       neighbor-list kernels for the lifetime of the run.
     - Otherwise consults `neighbor_list_config`:
       - `CellList { max_neighbors, r_skin }`: calls
-        `NeighborListState::new_cell_list(device, *sim_box,
+        `NeighborListState::new_cell_list(device, sim_box,
         particle_count, r_cut, max_neighbors, r_skin as f32)`. May
         return `ForceFieldError::NeighborList(_)` (e.g.
         `BoxTooSmallForCells`).
       - `AllPairs`: calls `NeighborListState::new_trivial(device,
-        *sim_box, particle_count)`.
+        sim_box, particle_count)`.
   - Returns `ForceFieldError::DuplicateLabel(_)` if two slots end up
     with the same `label()`.
 
 - `ForceField::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings) -> Result<(), ForceFieldError>` <!-- rq-3579df3b -->
-  - When `self.neighbor_list` is `Some(nl)`, calls `nl.pre_step(buffers,
-    timings)` to run the displacement check and rebuild as needed.
-    When `None`, this step is skipped.
+  - When `self.neighbor_list` is `Some(nl)`, calls `nl.pre_step(sim_box,
+    buffers, timings)` to run the generation-cache check, the
+    displacement check, and the rebuild as needed. When `None`, this
+    step is skipped.
   - Constructs a `ForceFieldContext { neighbor_list:
     self.neighbor_list.as_ref() }` valid for the duration of the
     contribution phase.

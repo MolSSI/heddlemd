@@ -14,7 +14,11 @@ the parsed `NeighborListConfig`:
 
 - **`CellList`** — the spatial-hash-filtered list described in this
   file. Built lazily on the first step and rebuilt on demand when an
-  atom's reference displacement exceeds `r_skin / 2`.
+  atom's reference displacement exceeds `r_skin / 2`. The cell layout
+  (number of cells per axis, cell size, total cell count) is cached at
+  construction from the simulation box's edge lengths and refreshed
+  whenever the box's `generation` counter changes (see *Box Generation
+  Tracking* below).
 - **`Trivial`** — every particle's neighbor list contains every
   particle (including itself; consumers handle the self slot). The list
   is materialised once at construction and never rebuilt. Used when the
@@ -137,6 +141,46 @@ small for v1; the per-step download is one f32 per particle (40 KB at
 N = 10000, ~4 µs over PCIe), well below the rebuild interval cost the
 displacement check is amortising.
 
+## Box Generation Tracking <!-- rq-282af621 -->
+
+In `CellList` mode the cell layout (`n_cells`, `cell_size`, `n_cells_total`)
+depends on the simulation box's edge lengths and is therefore cached. The
+state records the box's `generation()` value at the moment the cache was
+populated; this is stored as the field `cached_generation: u64`. The state
+also stores the `r_cut` value used to derive that cache so the cache can be
+refreshed without re-querying every consumer.
+
+Every call to `NeighborListState::pre_step` receives the runner's current
+`&SimulationBox` and compares `sim_box.generation()` against
+`cached_generation`. On a match no cache work is done. On a mismatch the
+state:
+
+1. Recomputes `n_cells_a = floor(L_a / (r_cut + r_skin))` per axis from the
+   current box's edge lengths.
+2. Re-validates that `n_cells_a >= 3` on every axis. If any axis fails,
+   returns `Err(NeighborListError::BoxTooSmallForCells { axis, length,
+   required })` without mutating any cached field; the caller can rerun
+   the previous step's force evaluation with the prior box or abort.
+3. Recomputes `cell_size_a = L_a / n_cells_a` per axis and the scalar
+   `n_cells_total`.
+4. Reallocates the device `cell_offsets` buffer to length
+   `n_cells_total + 1` if `n_cells_total` differs from the previous value.
+   Other device buffers (`neighbor_list`, `neighbor_counts`,
+   `reference_positions_*`, `disp_sq`, `overflow_flag`) are sized by
+   `particle_count` or are scalar and are not reallocated.
+5. Stores the new `n_cells`, `cell_size`, `n_cells_total`, and replaces
+   `cached_generation` with `sim_box.generation()`.
+6. Sets `needs_rebuild = true`. The rebuild that fires after the cache
+   refresh uses the new cell layout, so the displacement check is skipped
+   on a generation-mismatch step (current cell bins are stale by
+   construction).
+
+`r_search_sq` (`(r_cut + r_skin)²`) does not depend on the box and is left
+in place across refreshes.
+
+In `Trivial` mode the cell layout is not used; `pre_step` ignores the box's
+generation and does no per-step work.
+
 ## Rebuild Policy <!-- rq-6e11554f -->
 
 The runner holds one host-side `bool` flag `needs_rebuild`. Its initial
@@ -145,10 +189,16 @@ rebuild.
 
 Per timestep, after the integrator's pre-force step:
 
-1. Run the displacement-check kernel.
-2. Download the per-atom buffer and compute `max_disp`.
-3. If `max_disp > r_skin / 2`, set `needs_rebuild = true`.
-4. If `needs_rebuild`:
+1. If `sim_box.generation() != cached_generation`, refresh the cell-layout
+   cache (see *Box Generation Tracking*). This sets `needs_rebuild = true`
+   and skips the displacement-check kernel for this step. The refresh may
+   return `BoxTooSmallForCells`, in which case `pre_step` aborts and the
+   error propagates.
+2. Otherwise, run the displacement-check kernel, download the per-atom
+   buffer, compute `max_disp`, and set `needs_rebuild = true` if
+   `max_disp > r_skin / 2`. The displacement check is skipped when
+   `needs_rebuild` is already true.
+3. If `needs_rebuild`:
    a. Download current positions to host.
    b. Compute cell indices and sort.
    c. Upload `sorted_particle_ids` and `cell_offsets`.
@@ -156,11 +206,8 @@ Per timestep, after the integrator's pre-force step:
    e. Check the overflow flag; fail-loud if set.
    f. Copy current positions into the reference-positions buffers.
    g. Set `needs_rebuild = false`.
-5. Run the LJ force pipeline (see `lj-pair-force.md`), which reads the
-   neighbor list.
-
-The displacement check at step 1 is skipped when `needs_rebuild` is
-already true (rebuild happens unconditionally next step).
+4. Run downstream contribution kernels (see `framework.md`), which read
+   the neighbor list.
 
 ## Configuration <!-- rq-267941a2 -->
 
@@ -232,7 +279,6 @@ lifetime of the run.
 
   Fields present in both modes:
   - `device: Arc<CudaDevice>`
-  - `sim_box: SimulationBox`
   - `particle_count: usize`
   - `max_neighbors: u32`
   - `neighbor_list: CudaSlice<u32>` (length `N * max_neighbors`)
@@ -243,9 +289,16 @@ lifetime of the run.
   - `n_cells: [u32; 3]`
   - `cell_size: [f32; 3]`
   - `n_cells_total: usize`
+  - `r_cut: f32` — the largest `Potential::max_cutoff()` value reported by
+    a consumer, captured at construction. Stored so the cache-refresh
+    path can recompute `n_cells` and `cell_size` from a mutated box.
   - `r_skin: f32`
   - `r_search_sq: f32` — pre-computed `(r_cut + r_skin)²` for the build
-    kernel.
+    kernel. Independent of the box; not refreshed on generation change.
+  - `cached_generation: u64` — the box's `generation()` value at the time
+    the cell-layout cache was populated. Compared against the live box's
+    generation on every `pre_step`; a mismatch refreshes the cache (see
+    *Box Generation Tracking*).
   - `sorted_particle_ids: CudaSlice<u32>` (length `N`)
   - `cell_offsets: CudaSlice<u32>` (length `n_cells_total + 1`)
   - `reference_positions_x/y/z: CudaSlice<f32>` (length `N`)
@@ -275,19 +328,23 @@ lifetime of the run.
 
 ### Functions <!-- rq-3553aab2 -->
 
-- `NeighborListState::new_cell_list(device: Arc<CudaDevice>, sim_box: SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>` <!-- rq-14033af1 -->
+- `NeighborListState::new_cell_list(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>` <!-- rq-14033af1 -->
   - Constructs a `CellList`-mode state.
   - Computes `n_cells` per axis from `floor(L_axis / (r_cut + r_skin))`.
   - Returns `BoxTooSmallForCells` if any axis has `n_cells < 3`.
   - Allocates every device buffer described in the *CellList*-mode field
     list. Reference positions start at zero; `needs_rebuild` starts at
     `true`.
-  - `r_cut` is the largest cutoff across every consumer of the shared
-    list; the framework computes this as the maximum of every
+  - Stores `r_cut` so the cache-refresh path (see *Box Generation
+    Tracking*) can recompute `n_cells` and `cell_size` from a mutated
+    box. `r_cut` is the largest cutoff across every consumer of the
+    shared list; the framework computes this as the maximum of every
     `Potential::max_cutoff()` value it observes.
+  - Records `cached_generation = sim_box.generation()`.
 
-- `NeighborListState::new_trivial(device: Arc<CudaDevice>, sim_box: SimulationBox, particle_count: usize) -> Result<NeighborListState, NeighborListError>` <!-- inline --> <!-- rq-c96fd9d2 -->
-  - Constructs a `Trivial`-mode state.
+- `NeighborListState::new_trivial(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize) -> Result<NeighborListState, NeighborListError>` <!-- inline --> <!-- rq-c96fd9d2 -->
+  - Constructs a `Trivial`-mode state. The `sim_box` argument is accepted
+    for API uniformity; `Trivial` mode does not consult it.
   - `max_neighbors = particle_count`.
   - Allocates `neighbor_list` of length `particle_count *
     particle_count` and `neighbor_counts` of length `particle_count`.
@@ -298,27 +355,37 @@ lifetime of the run.
     buffers once.
   - When `particle_count == 0`, both buffers have length zero.
 
-- `NeighborListState::displacement_check(&mut self, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<f32, NeighborListError>` <!-- rq-c49b2fe6 -->
+- `NeighborListState::displacement_check(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<f32, NeighborListError>` <!-- rq-c49b2fe6 -->
   - Launches the displacement-check kernel against current positions and
-    the stored reference positions.
+    the stored reference positions, using `(lx, ly, lz)` from `sim_box`
+    for the minimum-image PBC wrap.
   - Downloads the per-atom buffer and returns the maximum displacement.
   - Returns `0.0` when `particle_count == 0`.
   - Returns `0.0` when the state is in `Trivial` mode (no rebuild
     machinery exists).
 
-- `NeighborListState::rebuild(&mut self, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>` <!-- rq-7db97132 -->
+- `NeighborListState::rebuild(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>` <!-- rq-7db97132 -->
   - Performs the rebuild pipeline described in *Cell List Construction*
-    and *Neighbor List Construction*. Updates reference positions.
+    and *Neighbor List Construction*, using `(lx, ly, lz)` from `sim_box`
+    for cell-binning and the build kernel's PBC parameters. Updates
+    reference positions.
   - Returns `NeighborListOverflow` when the build kernel set the
     overflow flag.
   - Returns `Ok(())` immediately when `particle_count == 0` or when the
     state is in `Trivial` mode.
 
-- `NeighborListState::pre_step(&mut self, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>` <!-- rq-1217c816 -->
+- `NeighborListState::pre_step(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>` <!-- rq-1217c816 -->
   - Called by `ForceField::step` once per timestep before any slot's
-    `contribute` runs. In `CellList` mode runs the displacement check
-    (unless `needs_rebuild` is already set) and rebuilds if required. In
-    `Trivial` mode is a no-op.
+    `contribute` runs. In `CellList` mode:
+    1. Compares `sim_box.generation()` against `cached_generation`. On
+       mismatch refreshes the cell-layout cache (see *Box Generation
+       Tracking*), sets `needs_rebuild = true`, and skips the
+       displacement check for this step. May return
+       `BoxTooSmallForCells`.
+    2. Otherwise, if `!needs_rebuild`, runs the displacement check and
+       sets `needs_rebuild = true` if `max_disp > r_skin / 2`.
+    3. If `needs_rebuild`, runs the rebuild and clears the flag.
+    In `Trivial` mode this is a no-op.
 
 ### CUDA Kernels <!-- rq-0469400b -->
 
@@ -439,6 +506,12 @@ guarantee; it only forfeits the canonical-ordering testability.
   consumers; each consumer applies its own per-pair cutoff at force
   evaluation time, reading the list but discarding entries beyond its
   own cutoff.
+- Detecting a box mutation that bypasses `SimulationBox::set_lengths`
+  (e.g. two `SimulationBox` values constructed independently that happen
+  to share a `generation`, or a future API that mutates lengths without
+  bumping the counter). The generation counter is the contract;
+  consumers trust the runner to own one canonical box and to use only
+  the documented mutator.
 
 ---
 
@@ -655,4 +728,94 @@ Feature: Cell-list neighbor list
     Given a ForceField with three short-range slots reporting max_cutoffs 2.0, 4.5, 4.5
     When the framework computes the neighbor-list search radius
     Then r_search equals 4.5 + r_skin
+
+  # --- Box generation tracking ---
+
+  @rq-1b742a37
+  Scenario: cached_generation initialised from the construction-time box
+    Given a SimulationBox with generation 0
+    When NeighborListState::new_cell_list is called with that box
+    Then state.cached_generation equals 0
+
+  @rq-882c9e86
+  Scenario: cached_generation initialised from a non-zero construction-time generation
+    Given a SimulationBox that has been mutated once (generation == 1)
+    When NeighborListState::new_cell_list is called with that box
+    Then state.cached_generation equals 1
+
+  @rq-db8b171d
+  Scenario: pre_step with unchanged box does not refresh the cell-layout cache
+    Given a NeighborListState in CellList mode immediately after its first pre_step
+    And the simulation box has not been mutated since construction
+    When pre_step is called again with the same box
+    Then n_cells, cell_size, n_cells_total are unchanged
+    And cell_offsets is not reallocated
+    And state.cached_generation is unchanged
+
+  @rq-cf847c1f
+  Scenario: Box generation increment refreshes cell layout and forces a rebuild
+    Given a NeighborListState in CellList mode immediately after its first pre_step
+      with lx=ly=lz=10.0 and r_cut + r_skin = 1.3 (so n_cells = [7, 7, 7])
+    When box.set_lengths(20.0, 20.0, 20.0) is called (generation 0 → 1)
+    And pre_step is called with the updated box
+    Then state.n_cells equals [15, 15, 15] (floor(20.0 / 1.3) = 15)
+    And state.cached_generation equals box.generation() after the call
+    And state.needs_rebuild was set to true and a rebuild was performed in
+      the same pre_step call
+    And the displacement-check kernel was not launched during this pre_step
+
+  @rq-dacb071c
+  Scenario: Generation mismatch with new box too small returns BoxTooSmallForCells
+    Given a NeighborListState in CellList mode with r_cut + r_skin = 1.3
+    When box.set_lengths(3.0, 10.0, 10.0) is called (floor(3.0 / 1.3) = 2 < 3)
+    And pre_step is called with the updated box
+    Then pre_step returns Err(NeighborListError::BoxTooSmallForCells { axis: "x", length: 3.0, required: 3.9 })
+    And state.cached_generation is left unchanged
+    And state.n_cells, state.cell_size, state.n_cells_total are left unchanged
+    And cell_offsets is not reallocated
+
+  @rq-d22f105f
+  Scenario: cell_offsets is reallocated when n_cells_total changes
+    Given a NeighborListState in CellList mode with n_cells = [10, 10, 10]
+      (n_cells_total = 1000, cell_offsets length 1001)
+    When box.set_lengths is called producing n_cells = [11, 11, 11]
+      (n_cells_total = 1331)
+    And pre_step is called with the updated box
+    Then cell_offsets is reallocated to length 1332
+
+  @rq-331b6e81
+  Scenario: cell_offsets is not reallocated when n_cells_total is unchanged
+    Given a NeighborListState in CellList mode with n_cells = [10, 10, 10]
+    When box.set_lengths is called producing n_cells = [10, 10, 10]
+      (different lengths but same n_cells_total)
+    And pre_step is called with the updated box
+    Then cell_offsets retains its previous device allocation (length 1001)
+    And state.cell_size is updated to the new per-axis values
+
+  @rq-31a9e3bb
+  Scenario: r_search_sq is preserved across a generation refresh
+    Given a NeighborListState in CellList mode with r_cut = 1.0 and r_skin = 0.3
+    When box.set_lengths is called bumping the generation
+    And pre_step is called with the updated box
+    Then state.r_search_sq still equals 1.69 (i.e. (1.0 + 0.3)²)
+
+  @rq-699cccff
+  Scenario: Two pre_steps after a single box mutation refresh only once
+    Given a NeighborListState in CellList mode
+    When box.set_lengths bumps the generation once
+    And pre_step is called, refreshing the cache and rebuilding
+    And pre_step is called again without any further box mutation
+    Then the second pre_step performs no cell-layout recompute
+    And the second pre_step runs the displacement check (no longer skipped)
+
+  @rq-72aae589
+  Scenario: Generation mismatch is detected even when the box edge lengths
+    are unchanged
+    Given a NeighborListState in CellList mode with lx=ly=lz=10.0 just past
+      its first pre_step
+    When box.set_lengths(10.0, 10.0, 10.0) is called (same lengths but
+      generation bumps from 0 to 1)
+    And pre_step is called with the updated box
+    Then state.cached_generation equals 1 after the call
+    And state.needs_rebuild was set to true and a rebuild was performed
 ```

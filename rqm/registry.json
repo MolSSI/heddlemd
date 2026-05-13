@@ -479,7 +479,7 @@
     "type": "scenario"
   },
   "rq-1217c816": {
-    "decl": "- `NeighborListState::pre_step(&mut self, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`",
+    "decl": "- `NeighborListState::pre_step(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`",
     "file": "forces/neighbor-list",
     "refs": [
       {
@@ -558,7 +558,7 @@
     "type": "scenario"
   },
   "rq-14033af1": {
-    "decl": "- `NeighborListState::new_cell_list(device: Arc<CudaDevice>, sim_box: SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>`",
+    "decl": "- `NeighborListState::new_cell_list(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>`",
     "file": "forces/neighbor-list",
     "refs": [
       {
@@ -596,6 +596,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Cell index of a position at the +L/2 boundary clamps inside the grid",
+    "type": "scenario"
+  },
+  "rq-153dd875": {
+    "decl": "Scenario: set_lengths validation order is lx then ly then lz",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "set_lengths validation order is lx then ly then lz",
     "type": "scenario"
   },
   "rq-15647873": {
@@ -763,6 +770,13 @@
     "refs": [],
     "title": "Parameters",
     "type": "section"
+  },
+  "rq-1b742a37": {
+    "decl": "Scenario: cached_generation initialised from the construction-time box",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "cached_generation initialised from the construction-time box",
+    "type": "scenario"
   },
   "rq-1b7680ad": {
     "decl": "### RNG",
@@ -1096,6 +1110,13 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-22fb3b0e": {
+    "decl": "Scenario: Mutating a copy does not affect the original",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Mutating a copy does not affect the original",
+    "type": "scenario"
+  },
   "rq-2344fcec": {
     "decl": "- `LogWriter` — handle to an open log file. Fields are private; the type",
     "file": "io/log-output",
@@ -1223,6 +1244,19 @@
     "refs": [],
     "title": "Construct with positive finite edge lengths",
     "type": "scenario"
+  },
+  "rq-282af621": {
+    "decl": "## Box Generation Tracking",
+    "file": "forces/neighbor-list",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Box Generation Tracking",
+    "type": "section"
   },
   "rq-2846ee8b": {
     "decl": "Scenario: Bit-exact equality after a 100-step run",
@@ -1365,6 +1399,13 @@
     ],
     "title": "Velocity generation",
     "type": "section"
+  },
+  "rq-2cb82d44": {
+    "decl": "Scenario: Newly-constructed box reports generation 0",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Newly-constructed box reports generation 0",
+    "type": "scenario"
   },
   "rq-2cb90e10": {
     "decl": "Scenario: Stretched bond produces an attractive force",
@@ -1523,6 +1564,13 @@
     "title": "log_every = 0 is accepted (disables log output)",
     "type": "scenario"
   },
+  "rq-31a9e3bb": {
+    "decl": "Scenario: r_search_sq is preserved across a generation refresh",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "r_search_sq is preserved across a generation refresh",
+    "type": "scenario"
+  },
   "rq-31bd2eee": {
     "decl": "### CUDA Kernel",
     "file": "pair-reduction",
@@ -1563,6 +1611,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Reject init = log_path",
+    "type": "scenario"
+  },
+  "rq-331b6e81": {
+    "decl": "Scenario: cell_offsets is not reallocated when n_cells_total is unchanged",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "cell_offsets is not reallocated when n_cells_total is unchanged",
     "type": "scenario"
   },
   "rq-33a054f9": {
@@ -3062,6 +3117,13 @@
     "title": "Two independent calls produce byte-identical accumulators",
     "type": "scenario"
   },
+  "rq-699cccff": {
+    "decl": "Scenario: Two pre_steps after a single box mutation refresh only once",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Two pre_steps after a single box mutation refresh only once",
+    "type": "scenario"
+  },
   "rq-69a31102": {
     "decl": "Scenario: Reject missing schema_version",
     "file": "io/config-schema",
@@ -3232,6 +3294,18 @@
     "title": "Numerical Behaviour",
     "type": "section"
   },
+  "rq-71fbbafb": {
+    "decl": "- `SimulationBox::set_lengths(&mut self, lx: f32, ly: f32, lz: f32) -> Result<(), SimulationBoxError>`",
+    "file": "simulation-box",
+    "refs": [
+      {
+        "file": "src/pbc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SimulationBox",
+    "type": "api-item"
+  },
   "rq-7206ab76": {
     "decl": "### Functions and methods",
     "file": "particle-state",
@@ -3246,6 +3320,13 @@
     "refs": [],
     "title": "Feature: End-to-End Pipeline Reproducibility Test",
     "type": "file"
+  },
+  "rq-72aae589": {
+    "decl": "Scenario: Generation mismatch is detected even when the box edge lengths",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Generation mismatch is detected even when the box edge lengths",
+    "type": "scenario"
   },
   "rq-72c57874": {
     "decl": "### Empty simulation",
@@ -3617,7 +3698,7 @@
     "type": "section"
   },
   "rq-7db97132": {
-    "decl": "- `NeighborListState::rebuild(&mut self, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`",
+    "decl": "- `NeighborListState::rebuild(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`",
     "file": "forces/neighbor-list",
     "refs": [
       {
@@ -3676,6 +3757,13 @@
     "refs": [],
     "title": "Synthetic stages",
     "type": "section"
+  },
+  "rq-7edab504": {
+    "decl": "Scenario: set_lengths non-finite check precedes non-positive check on the same axis",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "set_lengths non-finite check precedes non-positive check on the same axis",
+    "type": "scenario"
   },
   "rq-7f2310ac": {
     "decl": "Scenario: neighbor_list_build and copy_positions_into_reference counts match rebuilds",
@@ -3858,6 +3946,13 @@
     "title": "IntegratorBuilder",
     "type": "api-item"
   },
+  "rq-882c9e86": {
+    "decl": "Scenario: cached_generation initialised from a non-zero construction-time generation",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "cached_generation initialised from a non-zero construction-time generation",
+    "type": "scenario"
+  },
   "rq-884b5cd6": {
     "decl": "- `neighbor_displacement_squared(particle_buffers, reference_x, reference_y, reference_z, sim_box, disp_sq) -> Result<(), GpuError>`",
     "file": "forces/neighbor-list",
@@ -3909,6 +4004,13 @@
     "file": "integration/framework",
     "refs": [],
     "title": "Custom builder registered after with_builtins() is selectable",
+    "type": "scenario"
+  },
+  "rq-89c71321": {
+    "decl": "Scenario: set_lengths rejects a non-positive length without mutating the box",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "set_lengths rejects a non-positive length without mutating the box",
     "type": "scenario"
   },
   "rq-89d64ca3": {
@@ -4493,6 +4595,13 @@
     "title": "Bond row with wrong column count",
     "type": "scenario"
   },
+  "rq-9e09673b": {
+    "decl": "Scenario: Successive successful set_lengths calls increment generation monotonically",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Successive successful set_lengths calls increment generation monotonically",
+    "type": "scenario"
+  },
   "rq-9e1eee68": {
     "decl": "# Feature: Bond List, Exclusion List, and `.bonds` File",
     "file": "forces/bonds",
@@ -4681,6 +4790,13 @@
     "refs": [],
     "title": "File Format",
     "type": "section"
+  },
+  "rq-a3563587": {
+    "decl": "Scenario: Successful set_lengths increments generation by 1",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Successful set_lengths increments generation by 1",
+    "type": "scenario"
   },
   "rq-a35ca20b": {
     "decl": "Scenario: Accept the lower boundary -L/2 along an axis",
@@ -5046,6 +5162,14 @@
     "title": "Accessors",
     "type": "section"
   },
+  "rq-b033ac1d": {
+    "decl": "### Mutators",
+    "file": "simulation-box",
+    "level": 3,
+    "refs": [],
+    "title": "Mutators",
+    "type": "section"
+  },
   "rq-b09032cb": {
     "decl": "- `ParticleBuffers::new(device: Arc<CudaDevice>, state: &ParticleState) -> Result<ParticleBuffers, ParticleStateError>`",
     "file": "particle-state",
@@ -5224,7 +5348,7 @@
     "type": "scenario"
   },
   "rq-b75afb31": {
-    "decl": "- `SimulationBox` — host-side, immutable, `Copy`. Carries three `f32` edge",
+    "decl": "- `SimulationBox` — host-side, `Copy`. Carries three `f32` edge lengths and a",
     "file": "simulation-box",
     "refs": [
       {
@@ -5598,7 +5722,7 @@
     "type": "api-item"
   },
   "rq-c49b2fe6": {
-    "decl": "- `NeighborListState::displacement_check(&mut self, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<f32, NeighborListError>`",
+    "decl": "- `NeighborListState::displacement_check(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<f32, NeighborListError>`",
     "file": "forces/neighbor-list",
     "refs": [
       {
@@ -5747,9 +5871,14 @@
     "type": "scenario"
   },
   "rq-c96fd9d2": {
-    "decl": "- `NeighborListState::new_trivial(device: Arc<CudaDevice>, sim_box: SimulationBox, particle_count: usize) -> Result<NeighborListState, NeighborListError>` <!-- inline -->",
+    "decl": "- `NeighborListState::new_trivial(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize) -> Result<NeighborListState, NeighborListError>` <!-- inline -->",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "NeighborListState",
     "type": "api-item"
   },
@@ -5889,6 +6018,13 @@
     "title": "Column format: atom_i  atom_j  bond_type_name",
     "type": "file"
   },
+  "rq-cf847c1f": {
+    "decl": "Scenario: Box generation increment refreshes cell layout and forces a rebuild",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Box generation increment refreshes cell layout and forces a rebuild",
+    "type": "scenario"
+  },
   "rq-d065447f": {
     "decl": "Scenario: Run an empty (N=0) simulation",
     "file": "simulation-runner",
@@ -5931,6 +6067,13 @@
     "title": "Block-non-aligned particle count is handled by the bounds check",
     "type": "scenario"
   },
+  "rq-d22f105f": {
+    "decl": "Scenario: cell_offsets is reallocated when n_cells_total changes",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "cell_offsets is reallocated when n_cells_total changes",
+    "type": "scenario"
+  },
   "rq-d25000c5": {
     "decl": "Scenario: vv_kick_drift produces the exact half-step kinematics under a constant force",
     "file": "integration/velocity-verlet",
@@ -5943,6 +6086,13 @@
     "file": "integration/velocity-verlet",
     "refs": [],
     "title": "dt=0 leaves state unchanged for vv_kick",
+    "type": "scenario"
+  },
+  "rq-d28774dc": {
+    "decl": "Scenario: set_lengths rejects a non-finite length without mutating the box",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "set_lengths rejects a non-finite length without mutating the box",
     "type": "scenario"
   },
   "rq-d28ad917": {
@@ -6049,6 +6199,13 @@
     "title": "Rust Launcher",
     "type": "section"
   },
+  "rq-d6e10419": {
+    "decl": "Scenario: minimum_image after set_lengths reflects the new edge lengths",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "minimum_image after set_lengths reflects the new edge lengths",
+    "type": "scenario"
+  },
   "rq-d836d884": {
     "decl": "# Feature: End-to-End Pipeline Reversibility Test",
     "file": "pipeline-reversibility",
@@ -6100,6 +6257,13 @@
     "file": "simulation-runner",
     "refs": [],
     "title": "Pre-flight refuses to overwrite existing trajectory",
+    "type": "scenario"
+  },
+  "rq-dacb071c": {
+    "decl": "Scenario: Generation mismatch with new box too small returns BoxTooSmallForCells",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Generation mismatch with new box too small returns BoxTooSmallForCells",
     "type": "scenario"
   },
   "rq-dad38fdd": {
@@ -6162,6 +6326,25 @@
     "refs": [],
     "title": "Construct velocity-Verlet (lossless) via the registry",
     "type": "scenario"
+  },
+  "rq-db8b171d": {
+    "decl": "Scenario: pre_step with unchanged box does not refresh the cell-layout cache",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "pre_step with unchanged box does not refresh the cell-layout cache",
+    "type": "scenario"
+  },
+  "rq-dc17132d": {
+    "decl": "- `SimulationBox::generation(&self) -> u64`",
+    "file": "simulation-box",
+    "refs": [
+      {
+        "file": "src/pbc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SimulationBox",
+    "type": "api-item"
   },
   "rq-dc5c70bf": {
     "decl": "## Feature API",
@@ -7177,6 +7360,13 @@
     "file": "io/log-output",
     "refs": [],
     "title": "KE of empty input is zero",
+    "type": "scenario"
+  },
+  "rq-fa98ca13": {
+    "decl": "Scenario: Copy of a SimulationBox carries the original's generation",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Copy of a SimulationBox carries the original's generation",
     "type": "scenario"
   },
   "rq-fb608f06": {

@@ -65,8 +65,10 @@ pub struct CellListData {
     pub n_cells: [u32; 3],
     pub cell_size: [f32; 3],
     pub n_cells_total: usize,
+    pub r_cut: f32,
     pub r_skin: f32,
     pub r_search_sq: f32,
+    pub cached_generation: u64,
     pub sorted_particle_ids: CudaSlice<u32>,
     pub cell_offsets: CudaSlice<u32>,
     pub reference_positions_x: CudaSlice<f32>,
@@ -81,7 +83,6 @@ pub struct CellListData {
 #[derive(Debug)]
 pub struct NeighborListState {
     pub device: Arc<CudaDevice>,
-    pub sim_box: SimulationBox,
     pub particle_count: usize,
     pub max_neighbors: u32,
     pub neighbor_list: CudaSlice<u32>,
@@ -111,7 +112,7 @@ impl NeighborListState {
     // rq-14033af1
     pub fn new_cell_list(
         device: Arc<CudaDevice>,
-        sim_box: SimulationBox,
+        sim_box: &SimulationBox,
         particle_count: usize,
         r_cut: f32,
         max_neighbors: u32,
@@ -122,23 +123,7 @@ impl NeighborListState {
         debug_assert!(max_neighbors > 0);
         let r_search = r_cut + r_skin;
         let r_search_sq = r_search * r_search;
-        let lengths = sim_box.lengths();
-        let mut n_cells = [0u32; 3];
-        let mut cell_size = [0.0f32; 3];
-        let axis_names: [&'static str; 3] = ["x", "y", "z"];
-        for a in 0..3 {
-            let l = lengths[a];
-            let nc = (l / r_search).floor() as i64;
-            if nc < 3 {
-                return Err(NeighborListError::BoxTooSmallForCells {
-                    axis: axis_names[a],
-                    length: l,
-                    required: 3.0 * r_search,
-                });
-            }
-            n_cells[a] = nc as u32;
-            cell_size[a] = l / nc as f32;
-        }
+        let (n_cells, cell_size) = compute_cell_layout(sim_box, r_search)?;
         let n_cells_total =
             n_cells[0] as usize * n_cells[1] as usize * n_cells[2] as usize;
 
@@ -171,7 +156,6 @@ impl NeighborListState {
 
         Ok(NeighborListState {
             device,
-            sim_box,
             particle_count,
             max_neighbors,
             neighbor_list,
@@ -180,8 +164,10 @@ impl NeighborListState {
                 n_cells,
                 cell_size,
                 n_cells_total,
+                r_cut,
                 r_skin,
                 r_search_sq,
+                cached_generation: sim_box.generation(),
                 sorted_particle_ids,
                 cell_offsets,
                 reference_positions_x,
@@ -194,14 +180,13 @@ impl NeighborListState {
         })
     }
 
-    // rq-77754ad1
+    // rq-c96fd9d2
     pub fn new_trivial(
         device: Arc<CudaDevice>,
-        sim_box: SimulationBox,
+        _sim_box: &SimulationBox,
         particle_count: usize,
     ) -> Result<Self, NeighborListError> {
         let max_neighbors = particle_count as u32;
-        // Populate neighbor_list[i * N + k] = k and neighbor_counts[i] = N.
         let nl_len = particle_count * particle_count;
         let nl_host: Vec<u32> = if nl_len == 0 {
             Vec::new()
@@ -229,7 +214,6 @@ impl NeighborListState {
 
         Ok(NeighborListState {
             device,
-            sim_box,
             particle_count,
             max_neighbors,
             neighbor_list,
@@ -238,9 +222,40 @@ impl NeighborListState {
         })
     }
 
+    // rq-282af621
+    fn refresh_cell_layout_if_box_changed(
+        &mut self,
+        sim_box: &SimulationBox,
+    ) -> Result<bool, NeighborListError> {
+        let device = self.device.clone();
+        let cl = match &mut self.mode {
+            NeighborListMode::Trivial => return Ok(false),
+            NeighborListMode::CellList(cl) => cl,
+        };
+        if sim_box.generation() == cl.cached_generation {
+            return Ok(false);
+        }
+        let r_search = cl.r_cut + cl.r_skin;
+        let (new_n_cells, new_cell_size) = compute_cell_layout(sim_box, r_search)?;
+        let new_n_cells_total =
+            new_n_cells[0] as usize * new_n_cells[1] as usize * new_n_cells[2] as usize;
+        if new_n_cells_total != cl.n_cells_total {
+            cl.cell_offsets = device
+                .alloc_zeros::<u32>(new_n_cells_total + 1)
+                .map_err(GpuError::from)?;
+        }
+        cl.n_cells = new_n_cells;
+        cl.cell_size = new_cell_size;
+        cl.n_cells_total = new_n_cells_total;
+        cl.cached_generation = sim_box.generation();
+        cl.needs_rebuild = true;
+        Ok(true)
+    }
+
     // rq-c49b2fe6
     pub fn displacement_check(
         &mut self,
+        sim_box: &SimulationBox,
         buffers: &ParticleBuffers,
         timings: &mut Timings,
     ) -> Result<f32, NeighborListError> {
@@ -259,7 +274,7 @@ impl NeighborListState {
             &cl.reference_positions_x,
             &cl.reference_positions_y,
             &cl.reference_positions_z,
-            &self.sim_box,
+            sim_box,
             &mut cl.disp_sq,
         )?;
         timings
@@ -283,6 +298,7 @@ impl NeighborListState {
     // rq-7db97132
     pub fn rebuild(
         &mut self,
+        sim_box: &SimulationBox,
         buffers: &ParticleBuffers,
         timings: &mut Timings,
     ) -> Result<(), NeighborListError> {
@@ -296,18 +312,18 @@ impl NeighborListState {
             return Ok(());
         }
         let started = Instant::now();
-        let result = self.rebuild_impl(buffers, timings);
+        let result = self.rebuild_impl(sim_box, buffers, timings);
         timings.record_host(HostStage::NeighborListRebuild, started.elapsed());
         result
     }
 
     fn rebuild_impl(
         &mut self,
+        sim_box: &SimulationBox,
         buffers: &ParticleBuffers,
         timings: &mut Timings,
     ) -> Result<(), NeighborListError> {
         let n = self.particle_count;
-        // Download current positions.
         let pos_x: Vec<f32> = self
             .device
             .dtoh_sync_copy(&buffers.positions_x)
@@ -321,8 +337,7 @@ impl NeighborListState {
             .dtoh_sync_copy(&buffers.positions_z)
             .map_err(GpuError::from)?;
 
-        let lengths = self.sim_box.lengths();
-        let sim_box = self.sim_box;
+        let lengths = sim_box.lengths();
         let max_neighbors = self.max_neighbors;
 
         let cl = match &mut self.mode {
@@ -369,7 +384,7 @@ impl NeighborListState {
             buffers,
             &cl.sorted_particle_ids,
             &cl.cell_offsets,
-            &sim_box,
+            sim_box,
             cl.n_cells,
             cl.cell_size,
             cl.r_search_sq,
@@ -412,19 +427,26 @@ impl NeighborListState {
     // rq-1217c816
     pub fn pre_step(
         &mut self,
+        sim_box: &SimulationBox,
         buffers: &ParticleBuffers,
         timings: &mut Timings,
     ) -> Result<(), NeighborListError> {
         if self.particle_count == 0 {
             return Ok(());
         }
-        let (needs_rebuild, r_skin) = match &self.mode {
-            NeighborListMode::Trivial => return Ok(()),
+        if matches!(self.mode, NeighborListMode::Trivial) {
+            return Ok(());
+        }
+
+        let refreshed = self.refresh_cell_layout_if_box_changed(sim_box)?;
+
+        let (mut rebuild_required, r_skin) = match &self.mode {
+            NeighborListMode::Trivial => unreachable!(),
             NeighborListMode::CellList(cl) => (cl.needs_rebuild, cl.r_skin),
         };
-        let mut rebuild_required = needs_rebuild;
-        if !rebuild_required {
-            let max_disp = self.displacement_check(buffers, timings)?;
+
+        if !refreshed && !rebuild_required {
+            let max_disp = self.displacement_check(sim_box, buffers, timings)?;
             if max_disp > r_skin * 0.5 {
                 rebuild_required = true;
             }
@@ -433,10 +455,34 @@ impl NeighborListState {
             if let NeighborListMode::CellList(cl) = &mut self.mode {
                 cl.needs_rebuild = true;
             }
-            self.rebuild(buffers, timings)?;
+            self.rebuild(sim_box, buffers, timings)?;
         }
         Ok(())
     }
+}
+
+fn compute_cell_layout(
+    sim_box: &SimulationBox,
+    r_search: f32,
+) -> Result<([u32; 3], [f32; 3]), NeighborListError> {
+    let lengths = sim_box.lengths();
+    let axis_names: [&'static str; 3] = ["x", "y", "z"];
+    let mut n_cells = [0u32; 3];
+    let mut cell_size = [0.0f32; 3];
+    for a in 0..3 {
+        let l = lengths[a];
+        let nc = (l / r_search).floor() as i64;
+        if nc < 3 {
+            return Err(NeighborListError::BoxTooSmallForCells {
+                axis: axis_names[a],
+                length: l,
+                required: 3.0 * r_search,
+            });
+        }
+        n_cells[a] = nc as u32;
+        cell_size[a] = l / nc as f32;
+    }
+    Ok((n_cells, cell_size))
 }
 
 fn cell_index_axis(x: f32, length: f32, cell_size: f32, n_cells: u32) -> u32 {

@@ -1,4 +1,5 @@
 // rq-c4645fa6
+use cudarc::driver::DeviceSlice;
 use dynamics::forces::{NeighborListError, NeighborListState};
 use dynamics::gpu::{ParticleBuffers, init_device};
 use dynamics::pbc::SimulationBox;
@@ -29,7 +30,7 @@ fn state_from_positions(px: Vec<f32>, py: Vec<f32>, pz: Vec<f32>) -> ParticleSta
 #[test]
 fn cell_counts_floor_of_l_over_search_radius() {
     let device = init_device().unwrap();
-    let nl = NeighborListState::new_cell_list(device, box_n(10.0), 0, 1.0, 8, 0.3).unwrap();
+    let nl = NeighborListState::new_cell_list(device, &box_n(10.0), 0, 1.0, 8, 0.3).unwrap();
     let cl = nl.cell_list_data().expect("cell-list mode");
     assert_eq!(cl.n_cells, [7, 7, 7]);
     let expected = 10.0_f32 / 7.0;
@@ -48,7 +49,7 @@ fn cell_counts_floor_of_l_over_search_radius() {
 #[test]
 fn reject_box_admitting_fewer_than_three_cells() {
     let device = init_device().unwrap();
-    let result = NeighborListState::new_cell_list(device, box_n(10.0), 0, 1.0, 8, 3.0);
+    let result = NeighborListState::new_cell_list(device, &box_n(10.0), 0, 1.0, 8, 3.0);
     match result {
         Err(NeighborListError::BoxTooSmallForCells {
             axis,
@@ -67,24 +68,26 @@ fn reject_box_admitting_fewer_than_three_cells() {
 #[test]
 fn particle_count_zero_builds_and_runs() {
     let device = init_device().unwrap();
-    let mut nl = NeighborListState::new_cell_list(device.clone(), box_n(10.0), 0, 1.0, 8, 0.3).unwrap();
+    let sim_box = box_n(10.0);
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 0, 1.0, 8, 0.3).unwrap();
     let state = state_from_positions(vec![], vec![], vec![]);
     let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut timings = Timings::new(device).unwrap();
-    let max_disp = nl.displacement_check(&buffers, &mut timings).unwrap();
+    let max_disp = nl.displacement_check(&sim_box, &buffers, &mut timings).unwrap();
     assert_eq!(max_disp, 0.0);
-    nl.rebuild(&buffers, &mut timings).unwrap();
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
 }
 
 // rq-52f547fd
 #[test]
 fn single_particle_yields_empty_neighbor_list() {
     let device = init_device().unwrap();
-    let mut nl = NeighborListState::new_cell_list(device.clone(), box_n(10.0), 1, 1.0, 8, 0.3).unwrap();
+    let sim_box = box_n(10.0);
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 1, 1.0, 8, 0.3).unwrap();
     let state = state_from_positions(vec![0.0], vec![0.0], vec![0.0]);
     let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut timings = Timings::new(device.clone()).unwrap();
-    nl.rebuild(&buffers, &mut timings).unwrap();
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
     let counts = device.dtoh_sync_copy(&nl.neighbor_counts).unwrap();
     assert_eq!(counts[0], 0);
 }
@@ -103,11 +106,12 @@ fn neighbor_list_contains_all_within_search_radius_and_is_sorted() {
     let r_cut = 1.0_f32;
     let r_skin = 0.3_f32;
     let max_neighbors = 8u32;
+    let sim_box = box_n(10.0);
     let mut nl =
-        NeighborListState::new_cell_list(device.clone(), box_n(10.0), 4, r_cut, max_neighbors, r_skin)
+        NeighborListState::new_cell_list(device.clone(), &sim_box, 4, r_cut, max_neighbors, r_skin)
             .unwrap();
     let mut timings = Timings::new(device.clone()).unwrap();
-    nl.rebuild(&buffers, &mut timings).unwrap();
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
     let list = device.dtoh_sync_copy(&nl.neighbor_list).unwrap();
     let counts = device.dtoh_sync_copy(&nl.neighbor_counts).unwrap();
     // Atom 0 at x=0 should have partners 1 (0.5) and 2 (1.0). 2.0 is outside
@@ -143,9 +147,10 @@ fn neighbor_list_uses_minimum_image() {
         vec![0.0, 0.0],
     );
     let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut nl = NeighborListState::new_cell_list(device.clone(), box_n(10.0), 2, 0.7, 8, 0.3).unwrap();
+    let sim_box = box_n(10.0);
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 2, 0.7, 8, 0.3).unwrap();
     let mut timings = Timings::new(device.clone()).unwrap();
-    nl.rebuild(&buffers, &mut timings).unwrap();
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
     let counts = device.dtoh_sync_copy(&nl.neighbor_counts).unwrap();
     let list = device.dtoh_sync_copy(&nl.neighbor_list).unwrap();
     assert_eq!(counts[0], 1, "atom 0 should see atom 1 via PBC");
@@ -166,9 +171,10 @@ fn build_signals_overflow() {
     let pz: Vec<f32> = positions.iter().map(|p| p[2]).collect();
     let state = state_from_positions(px, py, pz);
     let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut nl = NeighborListState::new_cell_list(device.clone(), box_n(10.0), 6, 1.0, 2, 0.3).unwrap();
+    let sim_box = box_n(10.0);
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 6, 1.0, 2, 0.3).unwrap();
     let mut timings = Timings::new(device).unwrap();
-    let err = nl.rebuild(&buffers, &mut timings).unwrap_err();
+    let err = nl.rebuild(&sim_box, &buffers, &mut timings).unwrap_err();
     match err {
         NeighborListError::NeighborListOverflow { max } => assert_eq!(max, 2),
         other => panic!("expected NeighborListOverflow, got {other:?}"),
@@ -186,12 +192,13 @@ fn two_rebuilds_with_identical_positions_agree() {
     );
     let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut timings = Timings::new(device.clone()).unwrap();
+    let sim_box = box_n(10.0);
     let mut nl_a =
-        NeighborListState::new_cell_list(device.clone(), box_n(10.0), 6, 1.0, 16, 0.3).unwrap();
+        NeighborListState::new_cell_list(device.clone(), &sim_box, 6, 1.0, 16, 0.3).unwrap();
     let mut nl_b =
-        NeighborListState::new_cell_list(device.clone(), box_n(10.0), 6, 1.0, 16, 0.3).unwrap();
-    nl_a.rebuild(&buffers, &mut timings).unwrap();
-    nl_b.rebuild(&buffers, &mut timings).unwrap();
+        NeighborListState::new_cell_list(device.clone(), &sim_box, 6, 1.0, 16, 0.3).unwrap();
+    nl_a.rebuild(&sim_box, &buffers, &mut timings).unwrap();
+    nl_b.rebuild(&sim_box, &buffers, &mut timings).unwrap();
     let list_a = device.dtoh_sync_copy(&nl_a.neighbor_list).unwrap();
     let list_b = device.dtoh_sync_copy(&nl_b.neighbor_list).unwrap();
     let counts_a = device.dtoh_sync_copy(&nl_a.neighbor_counts).unwrap();
@@ -220,10 +227,11 @@ fn displacement_check_zero_immediately_after_rebuild() {
         vec![0.0, 0.0, 0.0],
     );
     let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut nl = NeighborListState::new_cell_list(device.clone(), box_n(10.0), 3, 1.0, 8, 0.3).unwrap();
+    let sim_box = box_n(10.0);
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 3, 1.0, 8, 0.3).unwrap();
     let mut timings = Timings::new(device).unwrap();
-    nl.rebuild(&buffers, &mut timings).unwrap();
-    let max_disp = nl.displacement_check(&buffers, &mut timings).unwrap();
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
+    let max_disp = nl.displacement_check(&sim_box, &buffers, &mut timings).unwrap();
     assert!(max_disp.abs() < 1.0e-5);
 }
 
@@ -237,9 +245,10 @@ fn displacement_check_returns_max_across_particles() {
         vec![0.0, 0.0, 0.0],
     );
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut nl = NeighborListState::new_cell_list(device.clone(), box_n(10.0), 3, 1.0, 8, 0.3).unwrap();
+    let sim_box = box_n(10.0);
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 3, 1.0, 8, 0.3).unwrap();
     let mut timings = Timings::new(device.clone()).unwrap();
-    nl.rebuild(&buffers, &mut timings).unwrap();
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
     // Move atom 1 by 0.5 along x.
     let new = state_from_positions(
         vec![0.0, 1.5, 2.0],
@@ -247,7 +256,7 @@ fn displacement_check_returns_max_across_particles() {
         vec![0.0, 0.0, 0.0],
     );
     buffers.upload(&new).unwrap();
-    let max_disp = nl.displacement_check(&buffers, &mut timings).unwrap();
+    let max_disp = nl.displacement_check(&sim_box, &buffers, &mut timings).unwrap();
     assert!((max_disp - 0.5).abs() < 1.0e-4, "max_disp = {max_disp}");
 }
 
@@ -261,10 +270,11 @@ fn first_pre_step_unconditionally_rebuilds() {
         vec![0.0, 0.0],
     );
     let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut nl = NeighborListState::new_cell_list(device.clone(), box_n(10.0), 2, 1.0, 8, 0.3).unwrap();
+    let sim_box = box_n(10.0);
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 2, 1.0, 8, 0.3).unwrap();
     let mut timings = Timings::new(device).unwrap();
     assert!(nl.cell_list_data().unwrap().needs_rebuild);
-    nl.pre_step(&buffers, &mut timings).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
     assert!(!nl.cell_list_data().unwrap().needs_rebuild);
 }
 
@@ -274,15 +284,16 @@ fn sub_skin_movement_does_not_trigger_rebuild() {
     let device = init_device().unwrap();
     let state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut nl = NeighborListState::new_cell_list(device.clone(), box_n(10.0), 2, 1.0, 8, 0.3).unwrap();
+    let sim_box = box_n(10.0);
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 2, 1.0, 8, 0.3).unwrap();
     let mut timings = Timings::new(device.clone()).unwrap();
-    nl.pre_step(&buffers, &mut timings).unwrap(); // Initial rebuild.
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap(); // Initial rebuild.
 
     // Move every particle by less than r_skin/2 = 0.15.
     let moved =
         state_from_positions(vec![0.05, 1.10], vec![0.0, 0.0], vec![0.0, 0.0]);
     buffers.upload(&moved).unwrap();
-    nl.pre_step(&buffers, &mut timings).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
     assert!(!nl.cell_list_data().unwrap().needs_rebuild);
 }
 
@@ -292,20 +303,21 @@ fn over_skin_movement_triggers_rebuild() {
     let device = init_device().unwrap();
     let state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut nl = NeighborListState::new_cell_list(device.clone(), box_n(10.0), 2, 1.0, 8, 0.3).unwrap();
+    let sim_box = box_n(10.0);
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 2, 1.0, 8, 0.3).unwrap();
     let mut timings = Timings::new(device.clone()).unwrap();
-    nl.pre_step(&buffers, &mut timings).unwrap(); // Initial rebuild.
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap(); // Initial rebuild.
 
     // Move atom 1 by 0.5 (more than r_skin/2 = 0.15).
     let moved =
         state_from_positions(vec![0.0, 1.5], vec![0.0, 0.0], vec![0.0, 0.0]);
     buffers.upload(&moved).unwrap();
-    nl.pre_step(&buffers, &mut timings).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
     // After pre_step, the rebuild has happened so needs_rebuild is false.
     assert!(!nl.cell_list_data().unwrap().needs_rebuild);
     // The reference positions now equal the current positions, so a fresh
     // displacement_check returns zero.
-    let max_disp = nl.displacement_check(&buffers, &mut timings).unwrap();
+    let max_disp = nl.displacement_check(&sim_box, &buffers, &mut timings).unwrap();
     assert!(max_disp.abs() < 1.0e-4);
 }
 
@@ -314,7 +326,7 @@ fn over_skin_movement_triggers_rebuild() {
 #[test] // rq-789fcec9
 fn trivial_mode_contents() {
     let device = init_device().unwrap();
-    let nl = NeighborListState::new_trivial(device.clone(), box_n(10.0), 3).unwrap();
+    let nl = NeighborListState::new_trivial(device.clone(), &box_n(10.0), 3).unwrap();
     let counts = device.dtoh_sync_copy(&nl.neighbor_counts).unwrap();
     let list = device.dtoh_sync_copy(&nl.neighbor_list).unwrap();
     assert_eq!(counts, vec![3u32, 3, 3]);
@@ -326,10 +338,11 @@ fn trivial_mode_pre_step_does_no_work() {
     let device = init_device().unwrap();
     let state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
     let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut nl = NeighborListState::new_trivial(device.clone(), box_n(10.0), 2).unwrap();
+    let sim_box = box_n(10.0);
+    let mut nl = NeighborListState::new_trivial(device.clone(), &sim_box, 2).unwrap();
     let mut timings = Timings::new(device).unwrap();
-    nl.pre_step(&buffers, &mut timings).unwrap();
-    nl.pre_step(&buffers, &mut timings).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
     let report = timings.finalize().unwrap();
     for stage in &report.stages {
         assert!(
@@ -346,7 +359,239 @@ fn trivial_mode_pre_step_does_no_work() {
 #[test] // rq-30f85829
 fn trivial_mode_has_no_cell_list_fields() {
     let device = init_device().unwrap();
-    let nl = NeighborListState::new_trivial(device, box_n(10.0), 4).unwrap();
+    let nl = NeighborListState::new_trivial(device, &box_n(10.0), 4).unwrap();
     assert!(matches!(nl.mode, dynamics::forces::NeighborListMode::Trivial));
     assert!(nl.cell_list_data().is_none());
+}
+
+// --- Box generation tracking ---
+
+#[test] // rq-1b742a37
+fn cached_generation_initialised_from_construction_time_box() {
+    let device = init_device().unwrap();
+    let sim_box = box_n(10.0);
+    assert_eq!(sim_box.generation(), 0);
+    let nl = NeighborListState::new_cell_list(device, &sim_box, 0, 1.0, 8, 0.3).unwrap();
+    assert_eq!(nl.cell_list_data().unwrap().cached_generation, 0);
+}
+
+#[test] // rq-882c9e86
+fn cached_generation_initialised_from_non_zero_generation() {
+    let device = init_device().unwrap();
+    let mut sim_box = box_n(10.0);
+    sim_box.set_lengths(10.0, 10.0, 10.0).expect("ok");
+    assert_eq!(sim_box.generation(), 1);
+    let nl = NeighborListState::new_cell_list(device, &sim_box, 0, 1.0, 8, 0.3).unwrap();
+    assert_eq!(nl.cell_list_data().unwrap().cached_generation, 1);
+}
+
+#[test] // rq-db8b171d
+fn pre_step_with_unchanged_box_does_not_refresh_cache() {
+    let device = init_device().unwrap();
+    let sim_box = box_n(10.0);
+    let state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 2, 1.0, 8, 0.3).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let cl_before = nl.cell_list_data().unwrap();
+    let (n_cells, cell_size, n_cells_total, cached_gen, offsets_len) = (
+        cl_before.n_cells,
+        cl_before.cell_size,
+        cl_before.n_cells_total,
+        cl_before.cached_generation,
+        cl_before.cell_offsets.len(),
+    );
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let cl_after = nl.cell_list_data().unwrap();
+    assert_eq!(cl_after.n_cells, n_cells);
+    assert_eq!(cl_after.cell_size, cell_size);
+    assert_eq!(cl_after.n_cells_total, n_cells_total);
+    assert_eq!(cl_after.cached_generation, cached_gen);
+    assert_eq!(cl_after.cell_offsets.len(), offsets_len);
+}
+
+#[test] // rq-cf847c1f
+fn box_generation_increment_refreshes_cell_layout_and_rebuilds() {
+    let device = init_device().unwrap();
+    let mut sim_box = box_n(10.0);
+    let state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 2, 1.0, 8, 0.3).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    assert_eq!(nl.cell_list_data().unwrap().n_cells, [7, 7, 7]);
+    assert_eq!(nl.cell_list_data().unwrap().cached_generation, 0);
+
+    sim_box.set_lengths(20.0, 20.0, 20.0).expect("ok");
+    assert_eq!(sim_box.generation(), 1);
+
+    // Move positions into the new box and re-upload (otherwise atoms sit outside primary cell).
+    let new_state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &new_state).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let cl = nl.cell_list_data().unwrap();
+    assert_eq!(cl.n_cells, [15, 15, 15]);
+    assert_eq!(cl.n_cells_total, 15 * 15 * 15);
+    assert_eq!(cl.cell_offsets.len(), 15 * 15 * 15 + 1);
+    assert_eq!(cl.cached_generation, 1);
+    assert!(!cl.needs_rebuild, "rebuild should have happened during pre_step");
+}
+
+#[test] // rq-dacb071c
+fn generation_mismatch_with_box_too_small_returns_box_too_small() {
+    let device = init_device().unwrap();
+    let mut sim_box = box_n(10.0);
+    let state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 2, 1.0, 8, 0.3).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let (n_cells_before, cell_size_before, total_before, gen_before, offsets_len_before) = {
+        let cl = nl.cell_list_data().unwrap();
+        (
+            cl.n_cells,
+            cl.cell_size,
+            cl.n_cells_total,
+            cl.cached_generation,
+            cl.cell_offsets.len(),
+        )
+    };
+
+    // Box too small along x (floor(3.0 / 1.3) = 2 < 3).
+    sim_box.set_lengths(3.0, 10.0, 10.0).expect("ok");
+    let err = nl
+        .pre_step(&sim_box, &buffers, &mut timings)
+        .expect_err("expected BoxTooSmallForCells");
+    match err {
+        NeighborListError::BoxTooSmallForCells {
+            axis,
+            length,
+            required,
+        } => {
+            assert_eq!(axis, "x");
+            assert!((length - 3.0).abs() < 1.0e-6);
+            assert!((required - 3.9).abs() < 1.0e-5);
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+    let cl = nl.cell_list_data().unwrap();
+    assert_eq!(cl.n_cells, n_cells_before);
+    assert_eq!(cl.cell_size, cell_size_before);
+    assert_eq!(cl.n_cells_total, total_before);
+    assert_eq!(cl.cached_generation, gen_before);
+    assert_eq!(cl.cell_offsets.len(), offsets_len_before);
+}
+
+#[test] // rq-d22f105f
+fn cell_offsets_reallocated_when_n_cells_total_changes() {
+    let device = init_device().unwrap();
+    let mut sim_box = box_n(10.0);
+    let state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 2, 1.0, 8, 0.3).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    assert_eq!(nl.cell_list_data().unwrap().n_cells_total, 343);
+    assert_eq!(nl.cell_list_data().unwrap().cell_offsets.len(), 344);
+
+    sim_box.set_lengths(12.0, 12.0, 12.0).expect("ok");
+    let new_state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &new_state).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    assert_eq!(nl.cell_list_data().unwrap().n_cells_total, 729);
+    assert_eq!(nl.cell_list_data().unwrap().cell_offsets.len(), 730);
+}
+
+#[test] // rq-331b6e81
+fn cell_offsets_not_reallocated_when_n_cells_total_unchanged() {
+    let device = init_device().unwrap();
+    let mut sim_box = box_n(10.0);
+    let state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 2, 1.0, 8, 0.3).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let initial_total = nl.cell_list_data().unwrap().n_cells_total;
+    let initial_offsets_len = nl.cell_list_data().unwrap().cell_offsets.len();
+    assert_eq!(initial_total, 343);
+
+    // L=9.8 still gives floor(9.8/1.3)=7 cells per axis (same n_cells_total).
+    sim_box.set_lengths(9.8, 9.8, 9.8).expect("ok");
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let cl = nl.cell_list_data().unwrap();
+    assert_eq!(cl.n_cells_total, initial_total);
+    assert_eq!(cl.cell_offsets.len(), initial_offsets_len);
+    // cell_size should reflect the new lengths.
+    assert!((cl.cell_size[0] - 9.8 / 7.0).abs() < 1.0e-5);
+}
+
+#[test] // rq-31a9e3bb
+fn r_search_sq_preserved_across_generation_refresh() {
+    let device = init_device().unwrap();
+    let mut sim_box = box_n(10.0);
+    let state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 2, 1.0, 8, 0.3).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let r_search_sq_before = nl.cell_list_data().unwrap().r_search_sq;
+    assert!((r_search_sq_before - 1.69).abs() < 1.0e-5);
+
+    sim_box.set_lengths(20.0, 20.0, 20.0).expect("ok");
+    let new_state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &new_state).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let r_search_sq_after = nl.cell_list_data().unwrap().r_search_sq;
+    assert_eq!(r_search_sq_after, r_search_sq_before);
+}
+
+#[test] // rq-699cccff
+fn two_pre_steps_after_single_box_mutation_refresh_only_once() {
+    let device = init_device().unwrap();
+    let mut sim_box = box_n(10.0);
+    let state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 2, 1.0, 8, 0.3).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+
+    sim_box.set_lengths(12.0, 12.0, 12.0).expect("ok");
+    let new_state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &new_state).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let (n_cells_total, cell_offsets_len, cached_gen) = {
+        let cl = nl.cell_list_data().unwrap();
+        (cl.n_cells_total, cl.cell_offsets.len(), cl.cached_generation)
+    };
+    assert_eq!(cached_gen, 1);
+
+    // Second pre_step without further mutation should not refresh; cache fields
+    // identical, and the displacement check runs (no longer skipped).
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let cl = nl.cell_list_data().unwrap();
+    assert_eq!(cl.cached_generation, 1);
+    assert_eq!(cl.n_cells_total, n_cells_total);
+    assert_eq!(cl.cell_offsets.len(), cell_offsets_len);
+}
+
+#[test] // rq-72aae589
+fn generation_mismatch_detected_even_when_edge_lengths_unchanged() {
+    let device = init_device().unwrap();
+    let mut sim_box = box_n(10.0);
+    let state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut nl = NeighborListState::new_cell_list(device.clone(), &sim_box, 2, 1.0, 8, 0.3).unwrap();
+    let mut timings = Timings::new(device.clone()).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    assert_eq!(nl.cell_list_data().unwrap().cached_generation, 0);
+
+    // Mutate to the same lengths — generation still bumps.
+    sim_box.set_lengths(10.0, 10.0, 10.0).expect("ok");
+    assert_eq!(sim_box.generation(), 1);
+
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let cl = nl.cell_list_data().unwrap();
+    assert_eq!(cl.cached_generation, 1);
+    assert!(!cl.needs_rebuild, "rebuild should have run inside pre_step");
 }

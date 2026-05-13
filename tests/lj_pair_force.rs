@@ -472,7 +472,7 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
     let max_neighbors: u32 = 8;
     let mut nl = dynamics::forces::NeighborListState::new_cell_list(
         device.clone(),
-        sim_box,
+        &sim_box,
         n,
         params.cutoff,
         max_neighbors,
@@ -480,7 +480,7 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
     )
     .unwrap();
     let mut timings = dynamics::timings::Timings::new(device.clone()).unwrap();
-    nl.rebuild(&particle_buffers, &mut timings).unwrap();
+    nl.rebuild(&sim_box, &particle_buffers, &mut timings).unwrap();
     let counts: Vec<u32> = device.dtoh_sync_copy(&nl.neighbor_counts).unwrap();
 
     let mut pair = PairBuffer::new(device.clone(), n, max_neighbors).unwrap();

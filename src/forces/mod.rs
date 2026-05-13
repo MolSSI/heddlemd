@@ -188,7 +188,7 @@ impl ForceField {
                 NeighborListConfig::CellList { max_neighbors, r_skin } => Some(
                     NeighborListState::new_cell_list(
                         device.clone(),
-                        *sim_box,
+                        sim_box,
                         particle_count,
                         r_cut,
                         *max_neighbors,
@@ -197,7 +197,7 @@ impl ForceField {
                 ),
                 NeighborListConfig::AllPairs => Some(NeighborListState::new_trivial(
                     device.clone(),
-                    *sim_box,
+                    sim_box,
                     particle_count,
                 )?),
             }
@@ -232,7 +232,7 @@ impl ForceField {
 
         // Shared neighbor-list update (no-op in Trivial mode and when absent).
         if let Some(nl) = self.neighbor_list.as_mut() {
-            nl.pre_step(buffers, timings)?;
+            nl.pre_step(sim_box, buffers, timings)?;
         }
 
         let nl_ref = self.neighbor_list.as_ref();

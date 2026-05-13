@@ -4,9 +4,9 @@ The simulation runs in a periodic, axis-aligned, rectangular cell of edge
 lengths `(lx, ly, lz)`. The cell's primary image is centered at the origin and
 spans `[-lx/2, lx/2) × [-ly/2, ly/2) × [-lz/2, lz/2)`.
 
-`SimulationBox` is an immutable host-side type carrying the three edge lengths.
-It exposes two pure operations used by neighbor search and pair-force
-computation:
+`SimulationBox` is a host-side `Copy` type carrying the three edge lengths and
+a monotonic `generation` counter. It exposes two pure operations used by
+neighbor search and pair-force computation:
 
 - `minimum_image` — given a displacement vector between two particles, return
   the shortest equivalent displacement under periodicity (the "minimum image").
@@ -16,6 +16,13 @@ computation:
 Both operations are pure functions of the box and the input vector. They are
 defined on the host in Rust; future kernel features inline equivalent math in
 CUDA, taking `(lx, ly, lz)` as kernel arguments.
+
+The three edge lengths are mutable in place through `set_lengths`. Every
+successful mutation increments the box's `generation` counter by one. Downstream
+consumers that cache values derived from the box's lengths (the neighbor list's
+cached cell layout; future barostat bookkeeping) record the generation alongside
+their cache and refresh whenever the live box's generation differs from the
+recorded one.
 
 ## Coordinate Conventions <!-- rq-c1308495 -->
 
@@ -43,8 +50,11 @@ displacement and an absolute position respectively.
 
 ### Types <!-- rq-fdf2db79 -->
 
-- `SimulationBox` — host-side, immutable, `Copy`. Carries three `f32` edge <!-- rq-b75afb31 -->
-  lengths. All accessors are total; the constructor enforces the invariants.
+- `SimulationBox` — host-side, `Copy`. Carries three `f32` edge lengths and a <!-- rq-b75afb31 -->
+  `u64` `generation` counter. The constructor enforces invariants on the
+  edge lengths and starts the generation at `0`; `set_lengths` enforces the
+  same invariants on each subsequent mutation and increments the generation
+  on success. All accessors are total.
 
 - `SimulationBoxError` — error type returned by the constructor: <!-- rq-aef9888b -->
   - `NonFiniteLength { axis: &'static str, value: f32 }` — at least one edge
@@ -73,6 +83,26 @@ displacement and an absolute position respectively.
 - `SimulationBox::volume(&self) -> f32` <!-- rq-3b9ed390 -->
   - Returns `lx * ly * lz` (multiplication left-to-right in `f32`).
 
+- `SimulationBox::generation(&self) -> u64` <!-- rq-dc17132d -->
+  - Returns the box's generation counter. The counter is `0` immediately after
+    construction and increments by `1` on every successful `set_lengths` call.
+    A consumer that caches a value derived from the box's lengths records the
+    generation alongside the cache and re-derives the cached value whenever
+    the observed generation differs from the recorded one.
+
+### Mutators <!-- rq-b033ac1d -->
+
+- `SimulationBox::set_lengths(&mut self, lx: f32, ly: f32, lz: f32) -> Result<(), SimulationBoxError>` <!-- rq-71fbbafb -->
+  - Validates the three lengths in declaration order (`lx`, `ly`, `lz`) using
+    the same finiteness-then-positivity rules as the constructor (returns
+    `NonFiniteLength` on NaN or infinity, otherwise `NonPositiveLength` if
+    the finite value is `<= 0.0`).
+  - On validation failure: returns the matching `SimulationBoxError`; the
+    box's stored lengths and `generation` counter are left unchanged.
+  - On success: replaces all three edge lengths with the new values and
+    increments `generation` by `1` (wrapping at `u64::MAX`; collisions take
+    `2^64` mutations and are not considered).
+
 ### Periodic-boundary operations <!-- rq-fb632dfc -->
 
 - `SimulationBox::minimum_image(&self, displacement: [f32; 3]) -> [f32; 3]` <!-- rq-d49c9093 -->
@@ -99,7 +129,13 @@ position).
 ## Out of Scope <!-- rq-987dc616 -->
 
 - Triclinic / non-orthorhombic cells.
-- Box rescaling, NPT ensembles, deformable cells.
+- NPT ensembles, barostats, and deformable cell tensors. `set_lengths` is the
+  underlying primitive that future ensemble code drives; ensemble-level
+  orchestration (when to mutate, how the box couples to a piston, etc.) is
+  its own feature.
+- Anisotropic or strain-tensor mutators (e.g. `scale_isotropic`,
+  `scale_per_axis`, shear). Callers compose them out of `set_lengths` until
+  a barostat-specific API is needed.
 - Non-periodic boundaries (open or reflecting).
 - Device-side (CUDA) PBC helpers; consuming kernels inline the math.
 - Per-particle bulk wrap helpers operating on `Vec<f32>` SoA arrays
@@ -258,4 +294,84 @@ Feature: Simulation box and periodic boundary conditions
     Then result_x is NaN
     And result_y equals 0.0
     And result_z equals 0.0
+
+  # --- Generation counter ---
+
+  @rq-2cb82d44
+  Scenario: Newly-constructed box reports generation 0
+    Given a SimulationBox constructed with lx=10.0, ly=8.0, lz=6.0
+    Then box.generation() equals 0
+
+  @rq-a3563587
+  Scenario: Successful set_lengths increments generation by 1
+    Given a SimulationBox constructed with lx=10.0, ly=8.0, lz=6.0
+    When box.set_lengths(12.0, 9.0, 7.0) is called
+    Then it returns Ok(())
+    And box.lengths() equals [12.0, 9.0, 7.0]
+    And box.generation() equals 1
+
+  @rq-9e09673b
+  Scenario: Successive successful set_lengths calls increment generation monotonically
+    Given a SimulationBox constructed with lx=10.0, ly=8.0, lz=6.0
+    When box.set_lengths(11.0, 8.0, 6.0), then box.set_lengths(11.0, 9.0, 6.0),
+      then box.set_lengths(11.0, 9.0, 7.0) are called in sequence
+    Then every call returns Ok(())
+    And box.lengths() equals [11.0, 9.0, 7.0] after the third call
+    And box.generation() equals 3 after the third call
+
+  @rq-89c71321
+  Scenario: set_lengths rejects a non-positive length without mutating the box
+    Given a SimulationBox constructed with lx=10.0, ly=8.0, lz=6.0
+    When box.set_lengths(0.0, 9.0, 7.0) is called
+    Then it returns Err(SimulationBoxError::NonPositiveLength { axis: "lx", value: 0.0 })
+    And box.lengths() equals [10.0, 8.0, 6.0]
+    And box.generation() equals 0
+
+  @rq-d28774dc
+  Scenario: set_lengths rejects a non-finite length without mutating the box
+    Given a SimulationBox constructed with lx=10.0, ly=8.0, lz=6.0
+    When box.set_lengths(10.0, f32::NAN, 7.0) is called
+    Then it returns Err(SimulationBoxError::NonFiniteLength { axis: "ly", value: v }) where v is NaN
+    And box.lengths() equals [10.0, 8.0, 6.0]
+    And box.generation() equals 0
+
+  @rq-153dd875
+  Scenario: set_lengths validation order is lx then ly then lz
+    Given a SimulationBox constructed with lx=10.0, ly=8.0, lz=6.0
+    When box.set_lengths(0.0, -1.0, f32::NAN) is called
+    Then it returns Err(SimulationBoxError::NonPositiveLength { axis: "lx", value: 0.0 })
+    And box.generation() equals 0
+
+  @rq-7edab504
+  Scenario: set_lengths non-finite check precedes non-positive check on the same axis
+    Given a SimulationBox constructed with lx=10.0, ly=8.0, lz=6.0
+    When box.set_lengths(f32::NAN, 9.0, 7.0) is called
+    Then it returns Err(SimulationBoxError::NonFiniteLength { axis: "lx", value: v }) where v is NaN
+    And box.generation() equals 0
+
+  @rq-d6e10419
+  Scenario: minimum_image after set_lengths reflects the new edge lengths
+    Given a SimulationBox constructed with lx=10.0, ly=8.0, lz=6.0
+    When box.set_lengths(20.0, 8.0, 6.0) is called
+    And box.minimum_image([12.0, 0.0, 0.0]) is called
+    Then result_x equals -8.0
+    (12.0 - 20.0; the wrap uses the post-mutation lx = 20.0, not 10.0)
+
+  @rq-fa98ca13
+  Scenario: Copy of a SimulationBox carries the original's generation
+    Given a SimulationBox constructed with lx=10.0, ly=8.0, lz=6.0
+    And box.set_lengths(11.0, 8.0, 6.0) has been called once
+    When let copy = box (a value copy via the Copy derive)
+    Then copy.generation() equals 1
+    And copy.lengths() equals [11.0, 8.0, 6.0]
+
+  @rq-22fb3b0e
+  Scenario: Mutating a copy does not affect the original
+    Given a SimulationBox constructed with lx=10.0, ly=8.0, lz=6.0
+    And let copy = box (a value copy)
+    When copy.set_lengths(20.0, 8.0, 6.0) is called
+    Then copy.lengths() equals [20.0, 8.0, 6.0]
+    And copy.generation() equals 1
+    And box.lengths() equals [10.0, 8.0, 6.0]
+    And box.generation() equals 0
 ```

@@ -46,7 +46,7 @@ pub fn trivial_neighbor_list(
     sim_box: &SimulationBox,
     particle_count: usize,
 ) -> NeighborListState {
-    NeighborListState::new_trivial(device.clone(), *sim_box, particle_count)
+    NeighborListState::new_trivial(device.clone(), sim_box, particle_count)
         .expect("trivial neighbor list")
 }
 

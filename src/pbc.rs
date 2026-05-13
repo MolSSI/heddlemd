@@ -2,6 +2,7 @@
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SimulationBox {
     lengths: [f32; 3],
+    generation: u64,
 }
 
 // rq-aef9888b
@@ -60,7 +61,28 @@ impl SimulationBox {
         check_axis("lz", lz)?;
         Ok(SimulationBox {
             lengths: [lx, ly, lz],
+            generation: 0,
         })
+    }
+
+    // rq-71fbbafb
+    pub fn set_lengths(
+        &mut self,
+        lx: f32,
+        ly: f32,
+        lz: f32,
+    ) -> Result<(), SimulationBoxError> {
+        check_axis("lx", lx)?;
+        check_axis("ly", ly)?;
+        check_axis("lz", lz)?;
+        self.lengths = [lx, ly, lz];
+        self.generation = self.generation.wrapping_add(1);
+        Ok(())
+    }
+
+    // rq-dc17132d
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     // rq-e8be1a1c

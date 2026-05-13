@@ -223,3 +223,117 @@ fn nan_displacement_propagates_to_nan_output() {
     assert_eq!(result[1], 0.0);
     assert_eq!(result[2], 0.0);
 }
+
+// --- Generation counter ---
+
+#[test] // rq-2cb82d44
+fn newly_constructed_box_reports_generation_zero() {
+    let b = default_box();
+    assert_eq!(b.generation(), 0);
+}
+
+#[test] // rq-a3563587
+fn successful_set_lengths_increments_generation_by_one() {
+    let mut b = default_box();
+    b.set_lengths(12.0, 9.0, 7.0).expect("ok");
+    assert_eq!(b.lengths(), [12.0_f32, 9.0, 7.0]);
+    assert_eq!(b.generation(), 1);
+}
+
+#[test] // rq-9e09673b
+fn successive_set_lengths_calls_increment_generation_monotonically() {
+    let mut b = default_box();
+    b.set_lengths(11.0, 8.0, 6.0).expect("ok");
+    b.set_lengths(11.0, 9.0, 6.0).expect("ok");
+    b.set_lengths(11.0, 9.0, 7.0).expect("ok");
+    assert_eq!(b.lengths(), [11.0_f32, 9.0, 7.0]);
+    assert_eq!(b.generation(), 3);
+}
+
+#[test] // rq-89c71321
+fn set_lengths_rejects_non_positive_length_without_mutating() {
+    let mut b = default_box();
+    let err = b.set_lengths(0.0, 9.0, 7.0).expect_err("err");
+    match err {
+        SimulationBoxError::NonPositiveLength { axis, value } => {
+            assert_eq!(axis, "lx");
+            assert_eq!(value, 0.0);
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+    assert_eq!(b.lengths(), [10.0_f32, 8.0, 6.0]);
+    assert_eq!(b.generation(), 0);
+}
+
+#[test] // rq-d28774dc
+fn set_lengths_rejects_non_finite_length_without_mutating() {
+    let mut b = default_box();
+    let err = b.set_lengths(10.0, f32::NAN, 7.0).expect_err("err");
+    match err {
+        SimulationBoxError::NonFiniteLength { axis, value } => {
+            assert_eq!(axis, "ly");
+            assert!(value.is_nan());
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+    assert_eq!(b.lengths(), [10.0_f32, 8.0, 6.0]);
+    assert_eq!(b.generation(), 0);
+}
+
+#[test] // rq-153dd875
+fn set_lengths_validation_order_is_lx_then_ly_then_lz() {
+    let mut b = default_box();
+    let err = b.set_lengths(0.0, -1.0, f32::NAN).expect_err("err");
+    match err {
+        SimulationBoxError::NonPositiveLength { axis, value } => {
+            assert_eq!(axis, "lx");
+            assert_eq!(value, 0.0);
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+    assert_eq!(b.generation(), 0);
+}
+
+#[test] // rq-7edab504
+fn set_lengths_non_finite_precedes_non_positive_on_same_axis() {
+    let mut b = default_box();
+    let err = b.set_lengths(f32::NAN, 9.0, 7.0).expect_err("err");
+    match err {
+        SimulationBoxError::NonFiniteLength { axis, value } => {
+            assert_eq!(axis, "lx");
+            assert!(value.is_nan());
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+    assert_eq!(b.generation(), 0);
+}
+
+#[test] // rq-d6e10419
+fn minimum_image_after_set_lengths_uses_new_edge_lengths() {
+    let mut b = default_box();
+    b.set_lengths(20.0, 8.0, 6.0).expect("ok");
+    let result = b.minimum_image([12.0, 0.0, 0.0]);
+    assert_eq!(result[0], -8.0_f32);
+    assert_eq!(result[1], 0.0);
+    assert_eq!(result[2], 0.0);
+}
+
+#[test] // rq-fa98ca13
+fn copy_of_simulation_box_carries_originals_generation() {
+    let mut b = default_box();
+    b.set_lengths(11.0, 8.0, 6.0).expect("ok");
+    let copy = b;
+    assert_eq!(copy.generation(), 1);
+    assert_eq!(copy.lengths(), [11.0_f32, 8.0, 6.0]);
+}
+
+#[test] // rq-22fb3b0e
+fn mutating_a_copy_does_not_affect_the_original() {
+    let b = default_box();
+    let mut copy = b;
+    copy.set_lengths(20.0, 8.0, 6.0).expect("ok");
+    assert_eq!(copy.lengths(), [20.0_f32, 8.0, 6.0]);
+    assert_eq!(copy.generation(), 1);
+    assert_eq!(b.lengths(), [10.0_f32, 8.0, 6.0]);
+    assert_eq!(b.generation(), 0);
+}
