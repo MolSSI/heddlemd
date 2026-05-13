@@ -816,16 +816,13 @@ fn kernel_start_stop_and_finalize_records_one_sample() {
         vec![0.0_f32; 2],
         vec![0.0_f32; 2],
         vec![1.0_f32; 2],
+        vec![0u32; 2],
         None,
     )
     .unwrap();
     let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut pair_buffer = PairBuffer::new(device.clone(), 2, 2).unwrap();
-    let params = dynamics::gpu::LennardJonesParameters {
-        sigma: 1.0e-10,
-        epsilon: 1.0,
-        cutoff: 1.0e-9,
-    };
+    let params = single_type_lj_table(&device, 1.0e-10, 1.0, 1.0e-9);
     let sim_box = SimulationBox::new_orthorhombic(1.0e-9, 1.0e-9, 1.0e-9).unwrap();
     timings.kernel_start(KernelStage::LjPairForce).unwrap();
     lj_pair_force_no_excl(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
@@ -852,16 +849,13 @@ fn repeated_kernel_starts_stops_accumulate() {
         vec![0.0_f32; 2],
         vec![0.0_f32; 2],
         vec![1.0_f32; 2],
+        vec![0u32; 2],
         None,
     )
     .unwrap();
     let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut pair_buffer = PairBuffer::new(device.clone(), 2, 2).unwrap();
-    let params = dynamics::gpu::LennardJonesParameters {
-        sigma: 1.0e-10,
-        epsilon: 1.0,
-        cutoff: 1.0e-9,
-    };
+    let params = single_type_lj_table(&device, 1.0e-10, 1.0, 1.0e-9);
     let sim_box = SimulationBox::new_orthorhombic(1.0e-9, 1.0e-9, 1.0e-9).unwrap();
     for _ in 0..10 {
         timings.kernel_start(KernelStage::LjPairForce).unwrap();

@@ -16,6 +16,7 @@ fn zero_state(n: usize) -> ParticleState {
         vec![0.0; n],
         vec![0.0; n],
         vec![1.0; n],
+        vec![0u32; n],
         None,
     )
     .expect("ParticleState::new")
@@ -330,6 +331,7 @@ fn reduction_does_not_modify_positions_velocities_masses() {
         vec![-0.1, -0.2, -0.3, -0.4],
         vec![0.05, 0.1, 0.15, 0.2],
         vec![1.5, 2.5, 3.5, 4.5],
+        vec![0u32; 4],
         Some(vec![100, 200, 300, 400]),
     )
     .unwrap();

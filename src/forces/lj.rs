@@ -4,7 +4,7 @@ use std::sync::Arc;
 use cudarc::driver::{CudaDevice, CudaSlice};
 
 use crate::gpu::{
-    GpuError, LennardJonesParameters, PairBuffer, ParticleBuffers, lj_pair_force,
+    GpuError, LennardJonesParameterTable, PairBuffer, ParticleBuffers, lj_pair_force,
     lj_pair_force_neighbor, reduce_pair_forces,
 };
 use crate::io::config::NeighborListConfig;
@@ -20,7 +20,7 @@ pub struct LjCommon {
     #[allow(dead_code)]
     pub(crate) device: Arc<CudaDevice>,
     pub(crate) pair_buffer: PairBuffer,
-    pub(crate) params: LennardJonesParameters,
+    pub(crate) params: LennardJonesParameterTable,
     pub(crate) exclusions: DeviceExclusionList,
     pub(crate) particle_count: usize,
 }
@@ -43,7 +43,8 @@ impl LennardJonesState {
         device: Arc<CudaDevice>,
         particle_count: usize,
         sim_box: SimulationBox,
-        params: LennardJonesParameters,
+        params: LennardJonesParameterTable,
+        max_cutoff: f32,
         exclusion_list: &ExclusionList,
         neighbor_list_config: &NeighborListConfig,
     ) -> Result<Self, NeighborListError> {
@@ -82,7 +83,7 @@ impl LennardJonesState {
                     device.clone(),
                     sim_box,
                     particle_count,
-                    params.cutoff,
+                    max_cutoff,
                     *max_neighbors,
                     *r_skin as f32,
                 )?;

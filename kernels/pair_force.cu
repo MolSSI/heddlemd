@@ -4,14 +4,16 @@ extern "C" __global__ void lj_pair_force(
     const float *positions_x,
     const float *positions_y,
     const float *positions_z,
+    const unsigned int *type_indices,
     float *pair_forces_x,
     float *pair_forces_y,
     float *pair_forces_z,
     unsigned int max_neighbors,
     float lx, float ly, float lz,
-    float sigma,
-    float epsilon,
-    float cutoff,
+    unsigned int n_types,
+    const float *type_sigma,
+    const float *type_epsilon,
+    const float *type_cutoff,
     const unsigned int *atom_excl_offsets,
     const unsigned int *atom_excl_partners,
     const float *atom_excl_scales,
@@ -31,6 +33,13 @@ extern "C" __global__ void lj_pair_force(
     pair_forces_z[slot] = 0.0f;
     return;
   }
+
+  unsigned int ti = type_indices[i];
+  unsigned int tj = type_indices[k];
+  unsigned int p = ti * n_types + tj;
+  float sigma = type_sigma[p];
+  float epsilon = type_epsilon[p];
+  float cutoff = type_cutoff[p];
 
   float dx = positions_x[i] - positions_x[k];
   float dy = positions_y[i] - positions_y[k];
@@ -83,14 +92,16 @@ extern "C" __global__ void lj_pair_force_neighbor(
     const float *positions_x,
     const float *positions_y,
     const float *positions_z,
+    const unsigned int *type_indices,
     float *pair_forces_x,
     float *pair_forces_y,
     float *pair_forces_z,
     unsigned int max_neighbors,
     float lx, float ly, float lz,
-    float sigma,
-    float epsilon,
-    float cutoff,
+    unsigned int n_types,
+    const float *type_sigma,
+    const float *type_epsilon,
+    const float *type_cutoff,
     const unsigned int *atom_excl_offsets,
     const unsigned int *atom_excl_partners,
     const float *atom_excl_scales,
@@ -111,6 +122,13 @@ extern "C" __global__ void lj_pair_force_neighbor(
     return;
   }
   unsigned int j = neighbor_list[slot];
+
+  unsigned int ti = type_indices[i];
+  unsigned int tj = type_indices[j];
+  unsigned int p = ti * n_types + tj;
+  float sigma = type_sigma[p];
+  float epsilon = type_epsilon[p];
+  float cutoff = type_cutoff[p];
 
   float dx = positions_x[i] - positions_x[j];
   float dy = positions_y[i] - positions_y[j];

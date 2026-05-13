@@ -57,9 +57,6 @@ pub enum ConfigError {
         kind_b: PathRole,
         path: PathBuf,
     },
-    MultiTypeUnsupported {
-        count: usize,
-    },
     UnknownIntegratorKind {
         actual: String,
     },
@@ -129,9 +126,6 @@ impl std::fmt::Display for ConfigError {
                 "PathCollision {{ kind_a: {kind_a}, kind_b: {kind_b}, path: {} }}",
                 path.display()
             ),
-            ConfigError::MultiTypeUnsupported { count } => {
-                write!(f, "MultiTypeUnsupported {{ count: {count} }}")
-            }
             ConfigError::UnknownIntegratorKind { actual } => {
                 write!(f, "UnknownIntegratorKind {{ actual: {actual:?} }}")
             }
@@ -850,13 +844,6 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         if let Some(e) = check_collision(PathRole::Timings, &timings_path, PathRole::Bonds, b) {
             return Err(e);
         }
-    }
-
-    // Multi-type restriction
-    if particle_types.len() != 1 {
-        return Err(ConfigError::MultiTypeUnsupported {
-            count: particle_types.len(),
-        });
     }
 
     Ok(Config {

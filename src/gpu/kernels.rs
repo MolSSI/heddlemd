@@ -1,6 +1,9 @@
-use cudarc::driver::{CudaSlice, CudaViewMut, DeviceSlice, LaunchAsync, LaunchConfig};
+use std::sync::Arc;
+
+use cudarc::driver::{CudaDevice, CudaSlice, CudaViewMut, DeviceSlice, LaunchAsync, LaunchConfig};
 
 use crate::gpu::{GpuError, LosslessBuffers, PairBuffer, ParticleBuffers};
+use crate::io::config::{PairInteractionConfig, ParticleTypeConfig};
 use crate::pbc::SimulationBox;
 
 const BLOCK_SIZE: u32 = 256;
@@ -135,19 +138,78 @@ pub fn reduce_pair_forces(
 }
 
 // rq-dafe0fcb
-#[derive(Debug, Clone, Copy)]
-pub struct LennardJonesParameters {
-    pub sigma: f32,
-    pub epsilon: f32,
-    pub cutoff: f32,
+#[derive(Debug)]
+pub struct LennardJonesParameterTable {
+    pub n_types: u32,
+    pub sigma: CudaSlice<f32>,
+    pub epsilon: CudaSlice<f32>,
+    pub cutoff: CudaSlice<f32>,
+}
+
+impl LennardJonesParameterTable {
+    // rq-1adf5954
+    pub fn from_config(
+        device: &Arc<CudaDevice>,
+        particle_types: &[ParticleTypeConfig],
+        pair_interactions: &[PairInteractionConfig],
+    ) -> Result<Self, GpuError> {
+        let n_types = particle_types.len();
+        let len = n_types * n_types;
+        let mut sigma_host: Vec<f32> = vec![0.0; len];
+        let mut epsilon_host: Vec<f32> = vec![0.0; len];
+        let mut cutoff_host: Vec<f32> = vec![0.0; len];
+
+        for pi in pair_interactions {
+            let ti = particle_types
+                .iter()
+                .position(|pt| pt.name == pi.between.0)
+                .expect("pair_interactions type name absent from particle_types (config-layer invariant)");
+            let tj = particle_types
+                .iter()
+                .position(|pt| pt.name == pi.between.1)
+                .expect("pair_interactions type name absent from particle_types (config-layer invariant)");
+            let s = pi.sigma as f32;
+            let e = pi.epsilon as f32;
+            let c = pi.cutoff as f32;
+            sigma_host[ti * n_types + tj] = s;
+            sigma_host[tj * n_types + ti] = s;
+            epsilon_host[ti * n_types + tj] = e;
+            epsilon_host[tj * n_types + ti] = e;
+            cutoff_host[ti * n_types + tj] = c;
+            cutoff_host[tj * n_types + ti] = c;
+        }
+
+        let sigma = htod_or_empty_f32(device, &sigma_host)?;
+        let epsilon = htod_or_empty_f32(device, &epsilon_host)?;
+        let cutoff = htod_or_empty_f32(device, &cutoff_host)?;
+
+        Ok(LennardJonesParameterTable {
+            n_types: n_types as u32,
+            sigma,
+            epsilon,
+            cutoff,
+        })
+    }
+}
+
+fn htod_or_empty_f32(
+    device: &Arc<CudaDevice>,
+    data: &[f32],
+) -> Result<CudaSlice<f32>, GpuError> {
+    if data.is_empty() {
+        device.alloc_zeros::<f32>(0).map_err(GpuError::from)
+    } else {
+        device.htod_sync_copy(data).map_err(GpuError::from)
+    }
 }
 
 // rq-d3a14184
+#[allow(clippy::too_many_arguments)]
 pub fn lj_pair_force(
     particle_buffers: &ParticleBuffers,
     pair_buffer: &mut PairBuffer,
     sim_box: &SimulationBox,
-    params: &LennardJonesParameters,
+    params: &LennardJonesParameterTable,
     atom_excl_offsets: &CudaSlice<u32>,
     atom_excl_partners: &CudaSlice<u32>,
     atom_excl_scales: &CudaSlice<f32>,
@@ -160,6 +222,10 @@ pub fn lj_pair_force(
     debug_assert!(pair_buffer.max_neighbors() as usize >= n);
     debug_assert_eq!(atom_excl_offsets.len(), n + 1);
     debug_assert_eq!(atom_excl_partners.len(), atom_excl_scales.len());
+    let table_len = params.n_types as usize * params.n_types as usize;
+    debug_assert_eq!(params.sigma.len(), table_len);
+    debug_assert_eq!(params.epsilon.len(), table_len);
+    debug_assert_eq!(params.cutoff.len(), table_len);
 
     let n_u32 = n as u32;
     let max_neighbors = pair_buffer.max_neighbors();
@@ -183,6 +249,7 @@ pub fn lj_pair_force(
                 &particle_buffers.positions_x,
                 &particle_buffers.positions_y,
                 &particle_buffers.positions_z,
+                &particle_buffers.type_indices,
                 &mut pair_buffer.pair_forces_x,
                 &mut pair_buffer.pair_forces_y,
                 &mut pair_buffer.pair_forces_z,
@@ -190,9 +257,10 @@ pub fn lj_pair_force(
                 lengths[0],
                 lengths[1],
                 lengths[2],
-                params.sigma,
-                params.epsilon,
-                params.cutoff,
+                params.n_types,
+                &params.sigma,
+                &params.epsilon,
+                &params.cutoff,
                 atom_excl_offsets,
                 atom_excl_partners,
                 atom_excl_scales,
@@ -210,7 +278,7 @@ pub fn lj_pair_force_neighbor(
     particle_buffers: &ParticleBuffers,
     pair_buffer: &mut PairBuffer,
     sim_box: &SimulationBox,
-    params: &LennardJonesParameters,
+    params: &LennardJonesParameterTable,
     atom_excl_offsets: &CudaSlice<u32>,
     atom_excl_partners: &CudaSlice<u32>,
     atom_excl_scales: &CudaSlice<f32>,
@@ -227,6 +295,10 @@ pub fn lj_pair_force_neighbor(
     debug_assert_eq!(neighbor_counts.len(), n);
     debug_assert_eq!(atom_excl_offsets.len(), n + 1);
     debug_assert_eq!(atom_excl_partners.len(), atom_excl_scales.len());
+    let table_len = params.n_types as usize * params.n_types as usize;
+    debug_assert_eq!(params.sigma.len(), table_len);
+    debug_assert_eq!(params.epsilon.len(), table_len);
+    debug_assert_eq!(params.cutoff.len(), table_len);
 
     let n_u32 = n as u32;
     let func = particle_buffers
@@ -250,6 +322,7 @@ pub fn lj_pair_force_neighbor(
                 &particle_buffers.positions_x,
                 &particle_buffers.positions_y,
                 &particle_buffers.positions_z,
+                &particle_buffers.type_indices,
                 &mut pair_buffer.pair_forces_x,
                 &mut pair_buffer.pair_forces_y,
                 &mut pair_buffer.pair_forces_z,
@@ -257,9 +330,10 @@ pub fn lj_pair_force_neighbor(
                 lengths[0],
                 lengths[1],
                 lengths[2],
-                params.sigma,
-                params.epsilon,
-                params.cutoff,
+                params.n_types,
+                &params.sigma,
+                &params.epsilon,
+                &params.cutoff,
                 atom_excl_offsets,
                 atom_excl_partners,
                 atom_excl_scales,

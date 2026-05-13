@@ -8,7 +8,7 @@ use std::sync::Arc;
 use cudarc::driver::{CudaDevice, CudaSlice};
 use dynamics::forces::{DeviceExclusionList, ExclusionList};
 use dynamics::gpu::{
-    GpuError, LennardJonesParameters, PairBuffer, ParticleBuffers, lj_pair_force,
+    GpuError, LennardJonesParameterTable, PairBuffer, ParticleBuffers, lj_pair_force,
     reduce_pair_forces,
 };
 use dynamics::pbc::SimulationBox;
@@ -21,6 +21,23 @@ pub fn empty_exclusions(device: &Arc<CudaDevice>, n: usize) -> DeviceExclusionLi
     DeviceExclusionList::from_host(device, &host).expect("empty exclusion buffers")
 }
 
+/// Build a `LennardJonesParameterTable` for a single-type system using one
+/// (σ, ε, cutoff) triple. Equivalent to the n_types=1 case with a single
+/// table entry that every particle pair looks up.
+pub fn single_type_lj_table(
+    device: &Arc<CudaDevice>,
+    sigma: f32,
+    epsilon: f32,
+    cutoff: f32,
+) -> LennardJonesParameterTable {
+    LennardJonesParameterTable {
+        n_types: 1,
+        sigma: device.htod_sync_copy(&[sigma]).expect("upload sigma"),
+        epsilon: device.htod_sync_copy(&[epsilon]).expect("upload epsilon"),
+        cutoff: device.htod_sync_copy(&[cutoff]).expect("upload cutoff"),
+    }
+}
+
 /// Backward-compatible wrapper around `lj_pair_force` that constructs an
 /// empty exclusion list on the fly. Mirrors the function's pre-framework
 /// signature so existing kernel-correctness tests can call it unchanged.
@@ -28,7 +45,7 @@ pub fn lj_pair_force_no_excl(
     particle_buffers: &ParticleBuffers,
     pair: &mut PairBuffer,
     sim_box: &SimulationBox,
-    params: &LennardJonesParameters,
+    params: &LennardJonesParameterTable,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     let excl = empty_exclusions(&particle_buffers.device, n);

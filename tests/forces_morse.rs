@@ -2,7 +2,7 @@ use dynamics::forces::{BondList, ExclusionList, ForceField, MorseBondedState};
 use dynamics::gpu::{
     ParticleBuffers, init_device, morse_bond_force, reduce_bond_forces,
 };
-use dynamics::io::config::{BondTypeConfig, NeighborListConfig, PairInteractionConfig};
+use dynamics::io::config::{BondTypeConfig, NeighborListConfig, PairInteractionConfig, ParticleTypeConfig};
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 use dynamics::timings::Timings;
@@ -16,6 +16,7 @@ fn two_particle_state(p0: [f32; 3], p1: [f32; 3]) -> ParticleState {
         vec![0.0, 0.0],
         vec![0.0, 0.0],
         vec![1.0, 1.0],
+        vec![0u32; 2],
         None,
     )
     .unwrap()
@@ -266,6 +267,7 @@ fn atom_with_two_bonds_sums_contributions() {
         vec![0.0_f32; 3],
         vec![0.0_f32; 3],
         vec![1.0_f32; 3],
+        vec![0u32; 3],
         None,
     )
     .unwrap();
@@ -335,6 +337,7 @@ fn atom_with_no_bonds_gets_zero_accumulator() {
         vec![0.0_f32; 4],
         vec![0.0_f32; 4],
         vec![1.0_f32; 4],
+        vec![0u32; 4],
         None,
     )
     .unwrap();
@@ -411,12 +414,12 @@ fn diatomic_equilibrium_produces_zero_net_force() {
         device.clone(),
         2,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[pair],
         &bt,
         &bl,
         &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
     let mut downloaded = state.clone();
@@ -445,12 +448,12 @@ fn newtons_third_law_holds_for_combined_force() {
         device.clone(),
         2,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[pair],
         &bt,
         &bl,
         &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
     let mut downloaded = state.clone();

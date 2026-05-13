@@ -4,7 +4,7 @@ use common::*;
 use std::path::{Path, PathBuf};
 
 use dynamics::gpu::{
-    LennardJonesParameters, PairBuffer, ParticleBuffers, init_device, lan_drift_half,
+    PairBuffer, ParticleBuffers, init_device, lan_drift_half,
     lan_ou_step,
 };
 use dynamics::integrator::Integrator;
@@ -40,6 +40,7 @@ fn one_particle_state() -> ParticleState {
         vec![-0.25_f32],
         vec![0.125_f32],
         vec![1.0_f32],
+        vec![0u32; 1],
         None,
     )
     .unwrap()
@@ -56,6 +57,7 @@ fn n_particle_state(n: usize) -> ParticleState {
         velos.clone(),
         velos,
         vec![1.0_f32; n],
+        vec![0u32; n],
         None,
     )
     .unwrap()
@@ -138,7 +140,8 @@ fn lan_drift_half_leaves_other_arrays_unchanged() {
 fn lan_drift_half_on_empty_is_noop() {
     let device = init_device().unwrap();
     let state = ParticleState::new(
-        Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), None,
+        Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+        Vec::new(), None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device, &state).unwrap();
@@ -178,7 +181,8 @@ fn lan_ou_step_with_alpha_one_kt_zero_is_identity() {
 fn lan_ou_step_on_empty_is_noop() {
     let device = init_device().unwrap();
     let state = ParticleState::new(
-        Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), None,
+        Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+        Vec::new(), None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device, &state).unwrap();
@@ -269,6 +273,7 @@ fn ou_variance_scales_with_predicted_factor() {
         vec![0.0_f32; n],
         vec![0.0_f32; n],
         vec![mass; n],
+        vec![0u32; n],
         None,
     )
     .unwrap();
@@ -297,11 +302,7 @@ fn slot_interface_launches_six_kernel_calls() {
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut pair_buffer = PairBuffer::new(device.clone(), 4, 4).unwrap();
     let neighbor_counts = device.htod_sync_copy(&vec![4u32; 4]).unwrap();
-    let params = LennardJonesParameters {
-        sigma: 1.0,
-        epsilon: 1.0,
-        cutoff: 1.0e9,
-    };
+    let params = single_type_lj_table(&device, 1.0, 1.0, 1.0e9);
     let sim_box = SimulationBox::new_orthorhombic(1.0e9, 1.0e9, 1.0e9).unwrap();
     let mut timings = Timings::new(device.clone()).unwrap();
     let mut integrator = Integrator::new(
@@ -343,7 +344,8 @@ fn slot_interface_launches_six_kernel_calls() {
 fn langevin_pre_force_step_on_empty_is_noop() {
     let device = init_device().unwrap();
     let state = ParticleState::new(
-        Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), None,
+        Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+        Vec::new(), None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();

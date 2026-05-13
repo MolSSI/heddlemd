@@ -4,9 +4,7 @@ use common::*;
 use std::sync::Arc;
 
 use cudarc::driver::CudaDevice;
-use dynamics::gpu::{
-    LennardJonesParameters, PairBuffer, ParticleBuffers, init_device, vv_kick, vv_kick_drift,
-};
+use dynamics::gpu::{PairBuffer, ParticleBuffers, init_device, vv_kick, vv_kick_drift};
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 
@@ -46,6 +44,7 @@ fn build_initial_state() -> ParticleState {
         vec![0.0; N],
         vec![0.0; N],
         vec![1.0; N],
+        vec![0u32; N],
         None,
     )
     .expect("build_initial_state: ParticleState::new")
@@ -58,11 +57,7 @@ fn run_pipeline(device: &Arc<CudaDevice>, n_steps: usize) -> ParticleState {
     let mut pair = PairBuffer::new(device.clone(), N, N as u32).unwrap();
     let counts = device.htod_sync_copy(&vec![N as u32; N]).unwrap();
     let sim_box = SimulationBox::new_orthorhombic(BOX_L, BOX_L, BOX_L).unwrap();
-    let params = LennardJonesParameters {
-        sigma: SIGMA,
-        epsilon: EPSILON,
-        cutoff: CUTOFF,
-    };
+    let params = single_type_lj_table(device, SIGMA, EPSILON, CUTOFF);
 
     // Warm-up: populate forces with F(0) before the first kick_drift consumes them.
     lj_pair_force_no_excl(&buffers, &mut pair, &sim_box, &params).unwrap();

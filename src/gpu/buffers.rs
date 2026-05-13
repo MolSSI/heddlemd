@@ -19,6 +19,7 @@ pub struct ParticleBuffers {
     pub forces_y: CudaSlice<f32>,
     pub forces_z: CudaSlice<f32>,
     pub masses: CudaSlice<f32>,
+    pub type_indices: CudaSlice<u32>,
     pub particle_ids: CudaSlice<u32>,
 }
 
@@ -38,6 +39,7 @@ impl ParticleBuffers {
         check_len("forces_y", n, state.forces_y.len())?;
         check_len("forces_z", n, state.forces_z.len())?;
         check_len("masses", n, state.masses.len())?;
+        check_len("type_indices", n, state.type_indices.len())?;
         check_len("particle_ids", n, state.particle_ids.len())?;
 
         let positions_x = device.htod_sync_copy(&state.positions_x).map_err(GpuError::from)?;
@@ -50,6 +52,7 @@ impl ParticleBuffers {
         let forces_y = device.htod_sync_copy(&state.forces_y).map_err(GpuError::from)?;
         let forces_z = device.htod_sync_copy(&state.forces_z).map_err(GpuError::from)?;
         let masses = device.htod_sync_copy(&state.masses).map_err(GpuError::from)?;
+        let type_indices = device.htod_sync_copy(&state.type_indices).map_err(GpuError::from)?;
         let particle_ids = device.htod_sync_copy(&state.particle_ids).map_err(GpuError::from)?;
 
         Ok(ParticleBuffers {
@@ -64,6 +67,7 @@ impl ParticleBuffers {
             forces_y,
             forces_z,
             masses,
+            type_indices,
             particle_ids,
         })
     }
@@ -86,6 +90,7 @@ impl ParticleBuffers {
         check_len("forces_y", n, state.forces_y.len())?;
         check_len("forces_z", n, state.forces_z.len())?;
         check_len("masses", n, state.masses.len())?;
+        check_len("type_indices", n, state.type_indices.len())?;
         check_len("particle_ids", n, state.particle_ids.len())?;
 
         let device = &self.device;
@@ -118,6 +123,9 @@ impl ParticleBuffers {
             .map_err(GpuError::from)?;
         device
             .htod_sync_copy_into(&state.masses, &mut self.masses)
+            .map_err(GpuError::from)?;
+        device
+            .htod_sync_copy_into(&state.type_indices, &mut self.type_indices)
             .map_err(GpuError::from)?;
         device
             .htod_sync_copy_into(&state.particle_ids, &mut self.particle_ids)

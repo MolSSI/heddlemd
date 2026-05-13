@@ -17,6 +17,7 @@ fn empty_state(n: usize) -> ParticleState {
         vec![0.0; n],
         vec![0.0; n],
         vec![1.0; n],
+        vec![0u32; n],
         None,
     )
     .expect("empty_state")
@@ -38,6 +39,7 @@ fn diverse_state(n: usize) -> ParticleState {
         velocities_y,
         velocities_z,
         masses,
+        vec![0u32; n],
         None,
     )
     .unwrap();
@@ -296,6 +298,7 @@ fn single_step_round_trip_zero_force() {
         velocities_y,
         velocities_z,
         vec![1.0_f32; n],
+        vec![0u32; n],
         None,
     )
     .unwrap();

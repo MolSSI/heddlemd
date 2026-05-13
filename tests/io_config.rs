@@ -152,9 +152,8 @@ fn pair_unknown_type_under_normalisation() {
 #[test]
 fn pair_between_normalisation_with_both_declared() {
     let dir = tmp_path("pair_normalisation_full");
-    // Two types and all three pairs — but multi-type is rejected at the end.
-    // We invoke the normalisation logic via the duplicate-pair scenario
-    // (pair entries with reversed `between` order are rejected as duplicates).
+    // Two types and all three pairs — multi-component configs are accepted;
+    // verify the loaded shape rather than the legacy rejection.
     let body = r#"schema_version = 1
 init = "init.xyz"
 
@@ -198,12 +197,16 @@ epsilon = 1.0
 cutoff = 1.0
 "#;
     let path = write_config(&dir, body);
-    let err = load_config(&path).unwrap_err();
-    // Multi-type rejection comes last; verify it.
-    match err {
-        ConfigError::MultiTypeUnsupported { count } => assert_eq!(count, 2),
-        other => panic!("unexpected error: {other:?}"),
-    }
+    let config = load_config(&path).expect("multi-type config loads");
+    assert_eq!(config.particle_types.len(), 2);
+    assert_eq!(config.pair_interactions.len(), 3);
+    // Pair entry whose source order was reversed gets normalised.
+    let normalised: Vec<(String, String)> = config
+        .pair_interactions
+        .iter()
+        .map(|p| p.between.clone())
+        .collect();
+    assert!(normalised.contains(&("Ar".to_string(), "Kr".to_string())));
 }
 
 // rq-106dcabd
@@ -785,7 +788,7 @@ fn reject_init_equals_log() {
 
 // rq-f114c560
 #[test]
-fn reject_multi_type() {
+fn accept_multi_type_with_complete_pair_table() {
     let dir = tmp_path("multi_type");
     let body = r#"schema_version = 1
 init = "init.xyz"
@@ -830,8 +833,54 @@ epsilon = 1.0
 cutoff = 1.0
 "#;
     let path = write_config(&dir, body);
+    let config = load_config(&path).expect("two-type config loads");
+    assert_eq!(config.particle_types.len(), 2);
+    assert_eq!(config.pair_interactions.len(), 3);
+}
+
+#[test]
+fn reject_multi_type_with_missing_pair() {
+    let dir = tmp_path("multi_type_missing_pair");
+    let body = r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 1
+dt = 1.0e-15
+temperature = 0.0
+
+[integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+
+[[particle_types]]
+name = "Kr"
+mass = 2.0
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+
+[[pair_interactions]]
+between = ["Kr", "Kr"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 1.0
+"#;
+    let path = write_config(&dir, body);
     match load_config(&path).unwrap_err() {
-        ConfigError::MultiTypeUnsupported { count } => assert_eq!(count, 2),
+        ConfigError::MissingPairInteraction { types } => {
+            assert_eq!(types, ("Ar".to_string(), "Kr".to_string()));
+        }
         other => panic!("unexpected: {other:?}"),
     }
 }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice};
 use dynamics::gpu::{
-    LennardJonesParameters, LosslessBuffers, PairBuffer, ParticleBuffers, init_device, vv_kick,
+    LennardJonesParameterTable, LosslessBuffers, PairBuffer, ParticleBuffers, init_device, vv_kick,
     vv_kick_drift, vv_kick_drift_lossless, vv_kick_lossless,
 };
 use dynamics::pbc::SimulationBox;
@@ -49,6 +49,7 @@ fn build_initial_state() -> ParticleState {
         vec![0.0; N],
         vec![0.0; N],
         vec![1.0; N],
+        vec![0u32; N],
         None,
     )
     .expect("build_initial_state")
@@ -132,7 +133,7 @@ struct PipelineFixture {
     pair: PairBuffer,
     counts: CudaSlice<u32>,
     sim_box: SimulationBox,
-    params: LennardJonesParameters,
+    params: LennardJonesParameterTable,
 }
 
 impl PipelineFixture {
@@ -141,11 +142,7 @@ impl PipelineFixture {
         let pair = PairBuffer::new(device.clone(), N, N as u32).unwrap();
         let counts = device.htod_sync_copy(&vec![N as u32; N]).unwrap();
         let sim_box = SimulationBox::new_orthorhombic(BOX_L, BOX_L, BOX_L).unwrap();
-        let params = LennardJonesParameters {
-            sigma: SIGMA,
-            epsilon: EPSILON,
-            cutoff: CUTOFF,
-        };
+        let params = single_type_lj_table(device, SIGMA, EPSILON, CUTOFF);
         Self {
             buffers,
             pair,

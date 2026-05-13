@@ -11,7 +11,7 @@ fn small_state(n: usize) -> ParticleState {
     }
     let zero = vec![0.0_f32; n];
     let m = vec![1.0_f32; n];
-    ParticleState::new(pos, zero.clone(), zero.clone(), zero.clone(), zero.clone(), zero, m, None)
+    ParticleState::new(pos, zero.clone(), zero.clone(), zero.clone(), zero.clone(), zero, m, vec![0u32; n], None)
         .unwrap()
 }
 
@@ -75,7 +75,8 @@ fn construct_empty() {
 fn pre_force_step_noop_on_empty() {
     let device = init_device().unwrap();
     let state = ParticleState::new(
-        Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), None,
+        Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+        Vec::new(), None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -93,7 +94,8 @@ fn pre_force_step_noop_on_empty() {
 fn post_force_step_noop_on_empty() {
     let device = init_device().unwrap();
     let state = ParticleState::new(
-        Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), None,
+        Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+        Vec::new(), None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();

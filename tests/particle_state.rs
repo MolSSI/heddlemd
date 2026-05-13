@@ -22,6 +22,7 @@ fn make_state_with_values(
         velocities_y,
         velocities_z,
         masses,
+        vec![0u32; n],
         ids,
     )
     .expect("make_state_with_values: ParticleState::new should succeed")
@@ -79,6 +80,7 @@ fn construct_with_matching_arrays_and_default_ids() {
         velocities_y,
         velocities_z,
         masses,
+        vec![0u32; n],
         None,
     )
     .expect("construction should succeed");
@@ -101,6 +103,7 @@ fn construct_with_matching_arrays_and_explicit_unique_ids() {
         vec![0.0; n],
         vec![0.0; n],
         vec![0.0; n],
+        vec![0u32; n],
         Some(vec![10, 20, 30]),
     )
     .expect("construction should succeed");
@@ -117,6 +120,7 @@ fn construct_an_empty_state() {
         vec![],
         vec![],
         vec![],
+        vec![0u32; 0],
         None,
     )
     .expect("construction should succeed");
@@ -144,6 +148,7 @@ fn construct_an_empty_state_with_explicit_empty_ids() {
         vec![],
         vec![],
         vec![],
+        vec![0u32; 0],
         Some(vec![]),
     )
     .expect("construction should succeed");
@@ -160,6 +165,7 @@ fn reject_when_positions_y_has_wrong_length() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 4],
+        vec![0u32; 4],
         None,
     )
     .expect_err("expected LengthMismatch");
@@ -187,6 +193,7 @@ fn reject_when_masses_has_wrong_length() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 5],
+        vec![0u32; 5],
         None,
     )
     .expect_err("expected LengthMismatch");
@@ -214,6 +221,7 @@ fn reject_when_explicit_ids_have_wrong_length() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 4],
+        vec![0u32; 4],
         Some(vec![0, 1]),
     )
     .expect_err("expected LengthMismatch");
@@ -241,6 +249,7 @@ fn reject_duplicate_explicit_ids() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 4],
+        vec![0u32; 4],
         Some(vec![7, 1, 7, 3]),
     )
     .expect_err("expected DuplicateParticleId");
@@ -262,6 +271,7 @@ fn nan_values_accepted_at_construction() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 4],
+        vec![0u32; 4],
         None,
     )
     .expect("construction should succeed even with NaN");
@@ -313,6 +323,7 @@ fn allocate_device_buffers_from_an_empty_state() {
         vec![],
         vec![],
         vec![],
+        vec![0u32; 0],
         None,
     )
     .unwrap();
@@ -520,6 +531,7 @@ fn download_from_empty_buffers_into_empty_state() {
         vec![],
         vec![],
         vec![],
+        vec![0u32; 0],
         None,
     )
     .unwrap();
@@ -533,9 +545,73 @@ fn download_from_empty_buffers_into_empty_state() {
         vec![],
         vec![],
         vec![],
+        vec![0u32; 0],
         None,
     )
     .unwrap();
     sink.download_from(&buffers).expect("download should succeed");
     assert_eq!(sink.particle_count(), 0);
+}
+
+#[test]
+fn reject_when_type_indices_has_wrong_length() {
+    let err = ParticleState::new(
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![1.0; 4],
+        vec![0u32; 3],
+        None,
+    )
+    .expect_err("expected LengthMismatch on type_indices");
+    match err {
+        ParticleStateError::LengthMismatch {
+            array,
+            expected,
+            actual,
+        } => {
+            assert_eq!(array, "type_indices");
+            assert_eq!(expected, 4);
+            assert_eq!(actual, 3);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn type_indices_round_trip_through_particle_buffers() {
+    let device = init_device().expect("init_device");
+    let state = ParticleState::new(
+        vec![0.0_f32, 1.0, 2.0],
+        vec![0.0_f32; 3],
+        vec![0.0_f32; 3],
+        vec![0.0_f32; 3],
+        vec![0.0_f32; 3],
+        vec![0.0_f32; 3],
+        vec![1.0_f32; 3],
+        vec![0u32, 2, 1],
+        None,
+    )
+    .unwrap();
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let host = device.dtoh_sync_copy(&buffers.type_indices).unwrap();
+    assert_eq!(host, vec![0u32, 2, 1]);
+    // Download path mirrors values back into a sink state.
+    let mut sink = ParticleState::new(
+        vec![0.0_f32; 3],
+        vec![0.0_f32; 3],
+        vec![0.0_f32; 3],
+        vec![0.0_f32; 3],
+        vec![0.0_f32; 3],
+        vec![0.0_f32; 3],
+        vec![1.0_f32; 3],
+        vec![0u32; 3],
+        None,
+    )
+    .unwrap();
+    sink.download_from(&buffers).unwrap();
+    assert_eq!(sink.type_indices, vec![0u32, 2, 1]);
 }

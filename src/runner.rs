@@ -236,6 +236,7 @@ fn run_simulation_with_phase(
         velocities_y,
         velocities_z,
         masses_f32.clone(),
+        init.type_indices.clone(),
         None,
     )
     .map_err(|e| (RunnerError::ParticleState(e), ExitPhase::Setup))?;
@@ -265,6 +266,7 @@ fn run_simulation_with_phase(
         device.clone(),
         n,
         &sim_box,
+        &config.particle_types,
         &config.pair_interactions,
         &config.bond_types,
         &bond_list,

@@ -5,7 +5,7 @@ use dynamics::forces::{
     Bond, BondList, ExclusionList, ForceField, ForceFieldError, Potential, SlotForceView,
 };
 use dynamics::gpu::{ParticleBuffers, init_device};
-use dynamics::io::config::{BondTypeConfig, NeighborListConfig, PairInteractionConfig};
+use dynamics::io::config::{BondTypeConfig, NeighborListConfig, PairInteractionConfig, ParticleTypeConfig};
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 use dynamics::timings::Timings;
@@ -34,6 +34,7 @@ fn state_n(n: usize) -> ParticleState {
         vec![0.0_f32; n],
         vec![0.0_f32; n],
         vec![1.0_f32; n],
+        vec![0u32; n],
         None,
     )
     .unwrap()
@@ -67,12 +68,12 @@ fn force_field_lj_only() {
         device,
         4,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &[],
         &BondList::empty(4),
         &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     assert_eq!(ff.slots.len(), 1);
     assert_eq!(ff.slots[0].label(), "lennard_jones");
@@ -93,12 +94,12 @@ fn force_field_lj_and_morse() {
         device,
         4,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &bt,
         &bl,
         &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     assert_eq!(ff.slots.len(), 2);
     assert_eq!(ff.slots[0].label(), "lennard_jones");
@@ -119,12 +120,12 @@ fn bond_types_declared_no_bonds() {
         device,
         4,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &bt,
         &BondList::empty(4),
         &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     assert_eq!(ff.slots.len(), 1);
     assert_eq!(ff.slots[0].label(), "lennard_jones");
@@ -140,10 +141,10 @@ fn force_field_zero_slots() {
         &box_10(),
         &[],
         &[],
+        &[],
         &BondList::empty(4),
         &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     assert!(ff.slots.is_empty());
     assert_eq!(ff.slot_forces_x.len(), 0);
@@ -166,12 +167,12 @@ fn slot_buffers_sized_num_slots_times_particle_count() {
         device,
         8,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &bt,
         &bl,
         &ExclusionList::empty(8),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     assert_eq!(ff.slots.len(), 2);
     assert_eq!(ff.slot_forces_x.len(), 16);
@@ -187,12 +188,12 @@ fn empty_force_field() {
         device,
         0,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &[],
         &BondList::empty(0),
         &ExclusionList::empty(0),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     assert_eq!(ff.slots.len(), 1);
     assert_eq!(ff.slot_forces_x.len(), 0);
@@ -260,12 +261,12 @@ fn step_lj_only_writes_lj_forces() {
         device,
         2,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &[],
         &BondList::empty(2),
         &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
     let mut downloaded = state.clone();
@@ -298,12 +299,12 @@ fn step_both_slots_sums_lj_and_morse() {
         device.clone(),
         2,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &[],
         &BondList::empty(2),
         &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff_lj.step(&mut buffers_lj_only, &box_10(), &mut timings_lj).unwrap();
     let mut lj_state = state.clone();
@@ -320,12 +321,12 @@ fn step_both_slots_sums_lj_and_morse() {
         device.clone(),
         2,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_tiny],
         &bt,
         &bl,
         &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff_morse.step(&mut buffers_b, &box_10(), &mut timings_b).unwrap();
     let mut morse_state = state.clone();
@@ -335,12 +336,12 @@ fn step_both_slots_sums_lj_and_morse() {
         device,
         2,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &bt,
         &bl,
         &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff_both.step(&mut buffers_a, &box_10(), &mut timings_a).unwrap();
     let mut combined = state.clone();
@@ -365,6 +366,7 @@ fn step_zero_slots_writes_zero_forces() {
         vec![0.0_f32; 4],
         vec![0.0_f32; 4],
         vec![1.0_f32; 4],
+        vec![0u32; 4],
         None,
     )
     .unwrap();
@@ -388,10 +390,10 @@ fn step_zero_slots_writes_zero_forces() {
         &box_10(),
         &[],
         &[],
+        &[],
         &BondList::empty(4),
         &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     assert!(ff.slots.is_empty());
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
@@ -425,6 +427,7 @@ fn step_empty_launches_no_kernels() {
         Vec::new(),
         Vec::new(),
         Vec::new(),
+        Vec::new(),
         None,
     )
     .unwrap();
@@ -434,12 +437,12 @@ fn step_empty_launches_no_kernels() {
         device,
         0,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &[],
         &BondList::empty(0),
         &ExclusionList::empty(0),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
     let report = timings.finalize().unwrap();
@@ -464,12 +467,12 @@ fn each_slot_writes_its_own_row() {
         device.clone(),
         3,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &bt,
         &bl,
         &ExclusionList::empty(3),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
 
@@ -480,12 +483,12 @@ fn each_slot_writes_its_own_row() {
         device.clone(),
         3,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &[],
         &BondList::empty(3),
         &ExclusionList::empty(3),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff_lj.step(&mut buffers_lj, &box_10(), &mut t_lj).unwrap();
     let lj_x = device.dtoh_sync_copy(&buffers_lj.forces_x).unwrap();
@@ -504,12 +507,12 @@ fn each_slot_writes_its_own_row() {
         device.clone(),
         3,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_tiny],
         &bt,
         &bl,
         &ExclusionList::empty(3),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff_m.step(&mut buffers_m, &box_10(), &mut t_m).unwrap();
     let morse_x = device.dtoh_sync_copy(&buffers_m.forces_x).unwrap();
@@ -585,12 +588,12 @@ fn third_potential_extensibility() {
         device.clone(),
         3,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &[],
         &BondList::empty(3),
         &ExclusionList::empty(3),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     // Splice in a third slot manually.
     ff.slots.push(Box::new(ConstStub {
@@ -615,12 +618,12 @@ fn third_potential_extensibility() {
         device.clone(),
         3,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &[],
         &BondList::empty(3),
         &ExclusionList::empty(3),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff_lj.step(&mut buffers_lj, &box_10(), &mut t_lj).unwrap();
     let lj_x = device.dtoh_sync_copy(&buffers_lj.forces_x).unwrap();
@@ -656,23 +659,23 @@ fn two_independent_runs_byte_identical() {
         device.clone(),
         4,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &[],
         &BondList::empty(4),
         &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     let mut ff_b = ForceField::new(
         device,
         4,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &[],
         &BondList::empty(4),
         &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff_a.step(&mut buffers_a, &box_10(), &mut timings_a).unwrap();
     ff_b.step(&mut buffers_b, &box_10(), &mut timings_b).unwrap();
@@ -699,10 +702,10 @@ fn combiner_sums_slot_rows_in_slot_order() {
         &box_10(),
         &[],
         &[],
+        &[],
         &BondList::empty(2),
         &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff.slots.push(Box::new(ConstStub {
         value_x: 1.0,
@@ -776,10 +779,10 @@ fn combiner_with_zero_slots_writes_zeros() {
         &box_10(),
         &[],
         &[],
+        &[],
         &BondList::empty(4),
         &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
     let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
@@ -801,12 +804,12 @@ fn combiner_idempotent_across_two_calls() {
         device,
         4,
         &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[lj_pair_config()],
         &[],
         &BondList::empty(4),
         &ExclusionList::empty(4),
-        &NeighborListConfig::AllPairs,
-    )
+        &NeighborListConfig::AllPairs)
     .unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
     let mut first = state.clone();

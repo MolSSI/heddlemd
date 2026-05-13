@@ -7,8 +7,10 @@ use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice, CudaViewMut};
 
-use crate::gpu::{GpuError, ParticleBuffers, accumulate_forces};
-use crate::io::config::{BondTypeConfig, NeighborListConfig, PairInteractionConfig};
+use crate::gpu::{GpuError, LennardJonesParameterTable, ParticleBuffers, accumulate_forces};
+use crate::io::config::{
+    BondTypeConfig, NeighborListConfig, PairInteractionConfig, ParticleTypeConfig,
+};
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
 
@@ -98,10 +100,12 @@ pub struct ForceField {
 
 impl ForceField {
     // rq-79938dbf
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         device: Arc<CudaDevice>,
         particle_count: usize,
         sim_box: &SimulationBox,
+        particle_types: &[ParticleTypeConfig],
         pair_interactions: &[PairInteractionConfig],
         bond_types: &[BondTypeConfig],
         bond_list: &BondList,
@@ -111,17 +115,22 @@ impl ForceField {
         let mut slots: Vec<Box<dyn Potential>> = Vec::new();
 
         // Slot 0: Lennard-Jones when at least one pair interaction is configured.
-        if let Some(pair) = pair_interactions.first() {
-            let lj_params = crate::gpu::LennardJonesParameters {
-                sigma: pair.sigma as f32,
-                epsilon: pair.epsilon as f32,
-                cutoff: pair.cutoff as f32,
-            };
+        if !pair_interactions.is_empty() {
+            let params = LennardJonesParameterTable::from_config(
+                &device,
+                particle_types,
+                pair_interactions,
+            )?;
+            let max_cutoff = pair_interactions
+                .iter()
+                .map(|p| p.cutoff as f32)
+                .fold(0.0_f32, f32::max);
             let lj_state = LennardJonesState::new(
                 device.clone(),
                 particle_count,
                 *sim_box,
-                lj_params,
+                params,
+                max_cutoff,
                 exclusion_list,
                 neighbor_list_config,
             )?;

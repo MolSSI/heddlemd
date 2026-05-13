@@ -15,6 +15,7 @@ pub struct ParticleState {
     pub forces_y: Vec<f32>,
     pub forces_z: Vec<f32>,
     pub masses: Vec<f32>,
+    pub type_indices: Vec<u32>,
     pub particle_ids: Vec<u32>,
 }
 
@@ -82,6 +83,7 @@ pub(crate) fn check_len(
 
 impl ParticleState {
     // rq-5e0598cb
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         positions_x: Vec<f32>,
         positions_y: Vec<f32>,
@@ -90,6 +92,7 @@ impl ParticleState {
         velocities_y: Vec<f32>,
         velocities_z: Vec<f32>,
         masses: Vec<f32>,
+        type_indices: Vec<u32>,
         ids: Option<Vec<u32>>,
     ) -> Result<Self, ParticleStateError> {
         let n = positions_x.len();
@@ -99,6 +102,7 @@ impl ParticleState {
         check_len("velocities_y", n, velocities_y.len())?;
         check_len("velocities_z", n, velocities_z.len())?;
         check_len("masses", n, masses.len())?;
+        check_len("type_indices", n, type_indices.len())?;
 
         let particle_ids = match ids {
             Some(v) => {
@@ -125,6 +129,7 @@ impl ParticleState {
             forces_y: vec![0.0; n],
             forces_z: vec![0.0; n],
             masses,
+            type_indices,
             particle_ids,
         })
     }
@@ -150,6 +155,7 @@ impl ParticleState {
         check_len("forces_y", n, self.forces_y.len())?;
         check_len("forces_z", n, self.forces_z.len())?;
         check_len("masses", n, self.masses.len())?;
+        check_len("type_indices", n, self.type_indices.len())?;
         check_len("particle_ids", n, self.particle_ids.len())?;
 
         let device = &buffers.device;
@@ -182,6 +188,9 @@ impl ParticleState {
             .map_err(GpuError::from)?;
         device
             .dtoh_sync_copy_into(&buffers.masses, &mut self.masses)
+            .map_err(GpuError::from)?;
+        device
+            .dtoh_sync_copy_into(&buffers.type_indices, &mut self.type_indices)
             .map_err(GpuError::from)?;
         device
             .dtoh_sync_copy_into(&buffers.particle_ids, &mut self.particle_ids)

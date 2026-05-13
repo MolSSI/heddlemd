@@ -11,6 +11,7 @@ fn empty_state(n: usize) -> ParticleState {
         vec![0.0; n],
         vec![0.0; n],
         vec![1.0; n],
+        vec![0u32; n],
         None,
     )
     .expect("empty_state: ParticleState::new should succeed")
@@ -41,6 +42,7 @@ fn diverse_state(n: usize) -> ParticleState {
         velocities_y,
         velocities_z,
         masses,
+        vec![0u32; n],
         None,
     )
     .unwrap();
@@ -70,6 +72,7 @@ fn vv_kick_drift_advances_position_when_force_zero() {
         vec![-0.25],
         vec![0.125],
         vec![1.0],
+        vec![0u32; 1],
         None,
     )
     .unwrap();
@@ -99,6 +102,7 @@ fn vv_kick_drift_exact_half_step_under_constant_force() {
         vec![0.0],
         vec![0.0],
         vec![1.0],
+        vec![0u32; 1],
         None,
     )
     .unwrap();
@@ -134,6 +138,7 @@ fn vv_kick_leaves_velocity_unchanged_when_force_zero() {
         vec![-0.25],
         vec![0.125],
         vec![1.0],
+        vec![0u32; 1],
         None,
     )
     .unwrap();
@@ -162,6 +167,7 @@ fn full_step_matches_constant_acceleration_kinematics() {
         vec![0.0],
         vec![0.0],
         vec![1.0],
+        vec![0u32; 1],
         None,
     )
     .unwrap();
@@ -200,6 +206,7 @@ fn acceleration_scales_inversely_with_mass() {
         vec![0.0, 0.0],
         vec![0.0, 0.0],
         vec![1.0, 4.0],
+        vec![0u32; 2],
         None,
     )
     .unwrap();
@@ -226,6 +233,7 @@ fn particles_evolve_independently() {
         vec![0.0, 0.0, 0.0],
         vec![0.0, 0.0, 0.0],
         vec![1.0, 1.0, 1.0],
+        vec![0u32; 3],
         None,
     )
     .unwrap();
@@ -311,6 +319,7 @@ fn vv_kick_drift_on_empty_state_is_noop() {
         vec![],
         vec![],
         vec![],
+        vec![0u32; 0],
         None,
     )
     .unwrap();
@@ -332,6 +341,7 @@ fn vv_kick_on_empty_state_is_noop() {
         vec![],
         vec![],
         vec![],
+        vec![0u32; 0],
         None,
     )
     .unwrap();
@@ -355,6 +365,7 @@ fn block_non_aligned_particle_count_is_handled() {
         vec![0.0; n],
         vec![0.0; n],
         vec![1.0; n],
+        vec![0u32; n],
         None,
     )
     .unwrap();
@@ -461,6 +472,7 @@ fn nan_force_propagates_to_velocity_and_position() {
         vec![0.0],
         vec![0.0],
         vec![1.0],
+        vec![0u32; 1],
         None,
     )
     .unwrap();
@@ -499,6 +511,7 @@ fn forward_then_negated_kick_drift_returns_free_particle_to_origin() {
         velocities_y.clone(),
         velocities_z.clone(),
         vec![1.0; 4],
+        vec![0u32; 4],
         None,
     )
     .unwrap();
