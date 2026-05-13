@@ -150,9 +150,45 @@ For `E` effective exclusions, the host-side `ExclusionList` carries:
 - `atom_excl_scales: Vec<f32>` — length `2 * E`, parallel to
   `atom_excl_partners`.
 
-The LJ kernel queries this per-atom lookup table: for pair `(i, k)` it
-walks atom `i`'s partner range and applies the scale factor when `k`
-appears; otherwise applies scale `1.0`.
+Pair-potential CUDA kernels consult this per-atom lookup table through
+the shared device helper `exclusion_scale` declared in
+`kernels/exclusions.cuh` (see *Device-side Exclusion Helper* below).
+The helper performs the linear scan over atom `i`'s partner range and
+returns either the matching scale or `1.0f` when `j` is not present.
+
+## Device-side Exclusion Helper <!-- rq-b2f23140 -->
+
+`kernels/exclusions.cuh` declares one inline `__device__` helper for
+reading the exclusion-list buffers from a pair-potential kernel:
+
+```c
+__device__ static inline float exclusion_scale(
+    unsigned int i,
+    unsigned int j,
+    const unsigned int *atom_excl_offsets,
+    const unsigned int *atom_excl_partners,
+    const float *atom_excl_scales);
+```
+
+The helper performs a linear scan over atom `i`'s partner range
+`[atom_excl_offsets[i], atom_excl_offsets[i + 1])`. On the first
+`atom_excl_partners[m] == j` match it returns `atom_excl_scales[m]`;
+when no match is found (including when the range is empty) it returns
+`1.0f`. Scan order is from lower index to higher with early exit on
+the first match, so the typical-case cost is bounded by atom `i`'s
+exclusion-partner count (≤ a few entries for typical bonded systems).
+
+`exclusion_scale` is the canonical device-side reader of the
+exclusion-list buffers described in *Exclusion list* above.
+Pair-potential `.cu` files `#include "exclusions.cuh"` and call
+`exclusion_scale(...)` at the point they want to scale a pair's
+contribution by the effective exclusion factor; nvcc inlines the body
+into each translation unit. The header carries no PTX module of its
+own and `init_device()` performs no `load_ptx` call for it.
+
+When the exclusion list is empty, every atom's `atom_excl_offsets`
+range is empty, the helper returns `1.0f`, and the unscaled
+contribution flows through to the caller without a separate code path.
 
 ## Feature API <!-- rq-81659783 -->
 

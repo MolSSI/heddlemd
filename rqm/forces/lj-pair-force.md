@@ -239,27 +239,23 @@ to slot `i * max_neighbors + k`.
 
 After computing the closed-form Lennard-Jones force `(fx, fy, fz)`,
 energy, and virial for pair `(i, k)` and before writing the results to
-the pair-buffer slots, the kernel queries the exclusion list and scales
-all five quantities by the same factor:
+the pair-buffer slots, the kernel scales all five quantities by the
+factor returned by the shared device helper `exclusion_scale` declared
+in `kernels/exclusions.cuh` (see `bonds.md` for the helper's API and
+semantics):
 
 ```
-start = atom_excl_offsets[i]
-end   = atom_excl_offsets[i + 1]
-scale = 1.0f
-for m in start .. end:
-    if atom_excl_partners[m] == j:
-        scale = atom_excl_scales[m]
-        break
-fx *= scale; fy *= scale; fz *= scale
-energy *= scale
-w *= scale
+float s = exclusion_scale(
+    i, j, atom_excl_offsets, atom_excl_partners, atom_excl_scales);
+fx *= s; fy *= s; fz *= s;
+energy *= s;
+w *= s;
 ```
 
-The lookup is a linear scan over atom `i`'s exclusion partners. The
-partner list is short for typical bonded systems (≤ 12 entries per
-atom). When the exclusion list is empty, every atom's offset range is
-`[k, k]` for some `k`, the loop runs zero iterations, and `scale`
-remains `1.0`, leaving the unscaled LJ force intact.
+The helper returns the matching scale when `j` appears in atom `i`'s
+exclusion-partner range and `1.0f` otherwise (including when the range
+is empty), so the unscaled LJ contribution flows through unchanged for
+pairs that are not on the exclusion list.
 
 The kernel must be launched with an exclusion list shaped consistently
 with the particle count: `atom_excl_offsets` has length `N + 1` (where

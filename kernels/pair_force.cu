@@ -1,5 +1,7 @@
 // rq-4ddab3c7
 
+#include "exclusions.cuh"
+
 extern "C" __global__ void lj_pair_force(
     const float *positions_x,
     const float *positions_y,
@@ -87,15 +89,8 @@ extern "C" __global__ void lj_pair_force(
   float w = fx * dx + fy * dy + fz * dz;
 
   // rq-dddcbf07
-  unsigned int start = atom_excl_offsets[i];
-  unsigned int end = atom_excl_offsets[i + 1];
-  float scale = 1.0f;
-  for (unsigned int m = start; m < end; ++m) {
-    if (atom_excl_partners[m] == j) {
-      scale = atom_excl_scales[m];
-      break;
-    }
-  }
+  float scale = exclusion_scale(
+      i, j, atom_excl_offsets, atom_excl_partners, atom_excl_scales);
   fx *= scale;
   fy *= scale;
   fz *= scale;
