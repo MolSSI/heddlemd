@@ -193,9 +193,9 @@ fn run_simulation_with_phase(
     // host stages.
     let mut timings = Timings::new(device.clone())
         .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
-    timings.record_host(HostStage::ConfigLoad, config_load_duration);
-    timings.record_host(HostStage::InitLoad, init_load_duration);
-    timings.record_host(HostStage::GpuInit, gpu_init_duration);
+    timings.record_host(HostStage::CONFIG_LOAD, config_load_duration);
+    timings.record_host(HostStage::INIT_LOAD, init_load_duration);
+    timings.record_host(HostStage::GPU_INIT, gpu_init_duration);
 
     // Build masses array from per-particle type_index lookup.
     let mut masses_f64: Vec<f64> = Vec::with_capacity(n);
@@ -223,7 +223,7 @@ fn run_simulation_with_phase(
                     &masses_f64,
                 )
             });
-            timings.record_host(HostStage::VelocityGeneration, velgen);
+            timings.record_host(HostStage::VELOCITY_GENERATION, velgen);
             vs
         }
     };
@@ -247,7 +247,7 @@ fn run_simulation_with_phase(
             ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Setup),
             other => (RunnerError::ParticleState(other), ExitPhase::Setup),
         })?;
-    timings.record_host(HostStage::HostToDeviceUpload, upload);
+    timings.record_host(HostStage::HOST_TO_DEVICE_UPLOAD, upload);
 
     let registry = IntegratorRegistry::with_builtins();
     let mut integrator = registry
@@ -318,7 +318,7 @@ fn run_simulation_with_phase(
             ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Setup),
             other => (RunnerError::ParticleState(other), ExitPhase::Setup),
         })?;
-        timings.record_host(HostStage::DeviceToHostDownload, dl);
+        timings.record_host(HostStage::DEVICE_TO_HOST_DOWNLOAD, dl);
     }
     if let Some(writer) = traj_writer.as_mut() {
         let mut tw = Duration::ZERO;
@@ -326,7 +326,7 @@ fn run_simulation_with_phase(
             write_traj_frame(writer, 0, config.simulation.dt, &sim_box, &init.type_indices, &frame)
         })
         .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Setup))?;
-        timings.record_host(HostStage::TrajectoryWrite, tw);
+        timings.record_host(HostStage::TRAJECTORY_WRITE, tw);
         frames_written += 1;
     }
     if let Some(writer) = log_writer.as_mut() {
@@ -340,7 +340,7 @@ fn run_simulation_with_phase(
         let mut lw = Duration::ZERO;
         timed(&mut lw, || writer.write_row(0, 0.0, ke, t))
             .map_err(|e| (RunnerError::Log(e), ExitPhase::Setup))?;
-        timings.record_host(HostStage::LogWrite, lw);
+        timings.record_host(HostStage::LOG_WRITE, lw);
         log_rows_written += 1;
     }
 
@@ -371,7 +371,7 @@ fn run_simulation_with_phase(
                 ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Loop),
                 other => (RunnerError::ParticleState(other), ExitPhase::Loop),
             })?;
-            timings.record_host(HostStage::DeviceToHostDownload, dl);
+            timings.record_host(HostStage::DEVICE_TO_HOST_DOWNLOAD, dl);
         }
         if want_traj {
             let writer = traj_writer.as_mut().expect("traj_writer enabled");
@@ -380,7 +380,7 @@ fn run_simulation_with_phase(
                 write_traj_frame(writer, step, config.simulation.dt, &sim_box, &init.type_indices, &frame)
             })
             .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Loop))?;
-            timings.record_host(HostStage::TrajectoryWrite, tw);
+            timings.record_host(HostStage::TRAJECTORY_WRITE, tw);
             frames_written += 1;
         }
         if want_log {
@@ -396,7 +396,7 @@ fn run_simulation_with_phase(
             let mut lw = Duration::ZERO;
             timed(&mut lw, || writer.write_row(step, time, ke, t))
                 .map_err(|e| (RunnerError::Log(e), ExitPhase::Loop))?;
-            timings.record_host(HostStage::LogWrite, lw);
+            timings.record_host(HostStage::LOG_WRITE, lw);
             log_rows_written += 1;
         }
 
@@ -426,7 +426,7 @@ fn run_simulation_with_phase(
     // Capture total runtime *before* finalising and writing the timings file
     // so the value reported in the file reflects everything except the file
     // write itself.
-    timings.record_host(HostStage::TotalRuntime, total_started.elapsed());
+    timings.record_host(HostStage::TOTAL_RUNTIME, total_started.elapsed());
 
     let report = timings
         .finalize()

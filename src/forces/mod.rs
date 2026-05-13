@@ -262,7 +262,7 @@ impl ForceField {
             slots[k].reduce(view, &cx, timings)?;
         }
 
-        timings.kernel_start(KernelStage::AccumulateForces)?;
+        timings.kernel_start(KernelStage::ACCUMULATE_FORCES)?;
         accumulate_forces(
             buffers,
             &self.slot_forces_x,
@@ -272,7 +272,7 @@ impl ForceField {
             &self.slot_virials,
             num_slots as u32,
         )?;
-        timings.kernel_stop(KernelStage::AccumulateForces)?;
+        timings.kernel_stop(KernelStage::ACCUMULATE_FORCES)?;
         Ok(())
     }
 }

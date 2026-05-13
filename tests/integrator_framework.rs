@@ -267,7 +267,7 @@ fn lossless_vv_step_uses_lossless_kernels() {
 #[test]
 fn integrator_owns_force_evaluation_inside_step() {
     // Wire up a real LJ slot so the force pipeline runs and we can confirm
-    // KernelStage::LjPairForce was triggered exactly once per step() call.
+    // KernelStage::LJ_PAIR_FORCE was triggered exactly once per step() call.
     use dynamics::io::config::{PairInteractionConfig, ParticleTypeConfig};
     let device = init_device().unwrap();
     let state = small_state(4);
@@ -385,5 +385,5 @@ fn two_independent_runs_byte_identical() {
 // Silence the unused-name lint for the imported KernelStage variant set.
 #[test]
 fn _imports_used() {
-    let _ = KernelStage::LangevinKickHalf;
+    let _ = KernelStage::LANGEVIN_KICK_HALF;
 }

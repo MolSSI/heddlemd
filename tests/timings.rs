@@ -824,9 +824,9 @@ fn kernel_start_stop_and_finalize_records_one_sample() {
     let mut pair_buffer = PairBuffer::new(device.clone(), 2, 2).unwrap();
     let params = single_type_lj_table(&device, 1.0e-10, 1.0, 1.0e-9);
     let sim_box = SimulationBox::new_orthorhombic(1.0e-9, 1.0e-9, 1.0e-9).unwrap();
-    timings.kernel_start(KernelStage::LjPairForce).unwrap();
+    timings.kernel_start(KernelStage::LJ_PAIR_FORCE).unwrap();
     lj_pair_force_no_excl(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
-    timings.kernel_stop(KernelStage::LjPairForce).unwrap();
+    timings.kernel_stop(KernelStage::LJ_PAIR_FORCE).unwrap();
     let report = timings.finalize().unwrap();
     let entry = report
         .stages
@@ -858,9 +858,9 @@ fn repeated_kernel_starts_stops_accumulate() {
     let params = single_type_lj_table(&device, 1.0e-10, 1.0, 1.0e-9);
     let sim_box = SimulationBox::new_orthorhombic(1.0e-9, 1.0e-9, 1.0e-9).unwrap();
     for _ in 0..10 {
-        timings.kernel_start(KernelStage::LjPairForce).unwrap();
+        timings.kernel_start(KernelStage::LJ_PAIR_FORCE).unwrap();
         lj_pair_force_no_excl(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
-        timings.kernel_stop(KernelStage::LjPairForce).unwrap();
+        timings.kernel_stop(KernelStage::LJ_PAIR_FORCE).unwrap();
     }
     let report = timings.finalize().unwrap();
     let entry = report
@@ -877,9 +877,9 @@ fn repeated_kernel_starts_stops_accumulate() {
 fn record_host_accumulates_count_total_min_max() {
     let device = init_device().unwrap();
     let mut timings = Timings::new(device.clone()).unwrap();
-    timings.record_host(HostStage::ConfigLoad, Duration::from_micros(100));
-    timings.record_host(HostStage::ConfigLoad, Duration::from_micros(50));
-    timings.record_host(HostStage::ConfigLoad, Duration::from_micros(200));
+    timings.record_host(HostStage::CONFIG_LOAD, Duration::from_micros(100));
+    timings.record_host(HostStage::CONFIG_LOAD, Duration::from_micros(50));
+    timings.record_host(HostStage::CONFIG_LOAD, Duration::from_micros(200));
     let report = timings.finalize().unwrap();
     let entry = report
         .stages
@@ -890,6 +890,24 @@ fn record_host_accumulates_count_total_min_max() {
     assert_eq!(entry.total_ns, 350_000);
     assert_eq!(entry.min_ns, 50_000);
     assert_eq!(entry.max_ns, 200_000);
+}
+
+#[test] // rq-f232d41b
+#[should_panic(expected = "unknown KernelStage")]
+fn kernel_start_with_unknown_kernel_stage_panics() {
+    let device = init_device().unwrap();
+    let mut timings = Timings::new(device).unwrap();
+    let unknown = KernelStage::new("not_a_stage");
+    let _ = timings.kernel_start(unknown);
+}
+
+#[test] // rq-264d2234
+#[should_panic(expected = "unknown HostStage")]
+fn record_host_with_unknown_host_stage_panics() {
+    let device = init_device().unwrap();
+    let mut timings = Timings::new(device).unwrap();
+    let unknown = HostStage::new("not_a_host_stage");
+    timings.record_host(unknown, Duration::from_micros(10));
 }
 
 // Silence unused-import warning when individual tests don't reference these.

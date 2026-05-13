@@ -1229,6 +1229,13 @@
     "title": "Neighbor list applies minimum-image PBC",
     "type": "scenario"
   },
+  "rq-264d2234": {
+    "decl": "Scenario: record_host with a HostStage not in ORDER panics",
+    "file": "performance-analysis",
+    "refs": [],
+    "title": "record_host with a HostStage not in ORDER panics",
+    "type": "scenario"
+  },
   "rq-265f4da4": {
     "decl": "Scenario: scatter places each atom inside its cell's slice",
     "file": "forces/neighbor-list",
@@ -6195,7 +6202,7 @@
     "type": "section"
   },
   "rq-d29f2811": {
-    "decl": "- `HostStage` — `enum` covering the host-timed stages. Variants:",
+    "decl": "- `HostStage` — opaque newtype wrapping a `&'static str` stage name.",
     "file": "performance-analysis",
     "refs": [
       {
@@ -6433,7 +6440,7 @@
     "type": "section"
   },
   "rq-dc8a0ff7": {
-    "decl": "- `KernelStage` — `enum` covering the instrumented kernel-launch",
+    "decl": "- `KernelStage` — opaque newtype wrapping a `&'static str` stage name.",
     "file": "performance-analysis",
     "refs": [
       {
@@ -7223,6 +7230,13 @@
     "file": "io/log-output",
     "refs": [],
     "title": "Open refuses to overwrite an existing file",
+    "type": "scenario"
+  },
+  "rq-f232d41b": {
+    "decl": "Scenario: kernel_start with a KernelStage not in ORDER panics",
+    "file": "performance-analysis",
+    "refs": [],
+    "title": "kernel_start with a KernelStage not in ORDER panics",
     "type": "scenario"
   },
   "rq-f2431cc4": {

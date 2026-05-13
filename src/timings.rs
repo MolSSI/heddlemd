@@ -1,4 +1,5 @@
 // rq-bbb62e9c rq-410afcd3 rq-4f5643f1
+use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -13,115 +14,96 @@ use crate::gpu::GpuError;
 
 // rq-dc8a0ff7
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum KernelStage {
-    VvKickDrift,
-    VvKick,
-    VvKickDriftLossless,
-    VvKickLossless,
-    LjPairForce,
-    ReducePairForces,
-    LangevinKickHalf,
-    LangevinDriftHalf,
-    LangevinOuStep,
-    MorseBondForce,
-    ReduceBondForces,
-    AccumulateForces,
-    NeighborDisplacementSquared,
-    NeighborListBuild,
-    CopyPositionsIntoReference,
+pub struct KernelStage {
+    name: &'static str,
 }
 
-const N_KERNEL_STAGES: usize = 15;
-
 impl KernelStage {
-    fn name(self) -> &'static str {
-        match self {
-            KernelStage::VvKickDrift => "vv_kick_drift",
-            KernelStage::VvKick => "vv_kick",
-            KernelStage::VvKickDriftLossless => "vv_kick_drift_lossless",
-            KernelStage::VvKickLossless => "vv_kick_lossless",
-            KernelStage::LjPairForce => "lj_pair_force",
-            KernelStage::ReducePairForces => "reduce_pair_forces",
-            KernelStage::LangevinKickHalf => "langevin_kick_half",
-            KernelStage::LangevinDriftHalf => "langevin_drift_half",
-            KernelStage::LangevinOuStep => "langevin_ou_step",
-            KernelStage::MorseBondForce => "morse_bond_force",
-            KernelStage::ReduceBondForces => "reduce_bond_forces",
-            KernelStage::AccumulateForces => "accumulate_forces",
-            KernelStage::NeighborDisplacementSquared => "neighbor_displacement_squared",
-            KernelStage::NeighborListBuild => "neighbor_list_build",
-            KernelStage::CopyPositionsIntoReference => "copy_positions_into_reference",
-        }
+    pub const fn new(name: &'static str) -> Self {
+        KernelStage { name }
     }
 
-    fn index(self) -> usize {
-        match self {
-            KernelStage::VvKickDrift => 0,
-            KernelStage::VvKick => 1,
-            KernelStage::VvKickDriftLossless => 2,
-            KernelStage::VvKickLossless => 3,
-            KernelStage::LjPairForce => 4,
-            KernelStage::ReducePairForces => 5,
-            KernelStage::LangevinKickHalf => 6,
-            KernelStage::LangevinDriftHalf => 7,
-            KernelStage::LangevinOuStep => 8,
-            KernelStage::MorseBondForce => 9,
-            KernelStage::ReduceBondForces => 10,
-            KernelStage::AccumulateForces => 11,
-            KernelStage::NeighborDisplacementSquared => 12,
-            KernelStage::NeighborListBuild => 13,
-            KernelStage::CopyPositionsIntoReference => 14,
-        }
+    pub const fn name(self) -> &'static str {
+        self.name
     }
+
+    pub const VV_KICK_DRIFT: KernelStage = KernelStage::new("vv_kick_drift");
+    pub const VV_KICK: KernelStage = KernelStage::new("vv_kick");
+    pub const VV_KICK_DRIFT_LOSSLESS: KernelStage =
+        KernelStage::new("vv_kick_drift_lossless");
+    pub const VV_KICK_LOSSLESS: KernelStage = KernelStage::new("vv_kick_lossless");
+    pub const LJ_PAIR_FORCE: KernelStage = KernelStage::new("lj_pair_force");
+    pub const REDUCE_PAIR_FORCES: KernelStage = KernelStage::new("reduce_pair_forces");
+    pub const LANGEVIN_KICK_HALF: KernelStage = KernelStage::new("langevin_kick_half");
+    pub const LANGEVIN_DRIFT_HALF: KernelStage = KernelStage::new("langevin_drift_half");
+    pub const LANGEVIN_OU_STEP: KernelStage = KernelStage::new("langevin_ou_step");
+    pub const MORSE_BOND_FORCE: KernelStage = KernelStage::new("morse_bond_force");
+    pub const REDUCE_BOND_FORCES: KernelStage = KernelStage::new("reduce_bond_forces");
+    pub const ACCUMULATE_FORCES: KernelStage = KernelStage::new("accumulate_forces");
+    pub const NEIGHBOR_DISPLACEMENT_SQUARED: KernelStage =
+        KernelStage::new("neighbor_displacement_squared");
+    pub const NEIGHBOR_LIST_BUILD: KernelStage = KernelStage::new("neighbor_list_build");
+    pub const COPY_POSITIONS_INTO_REFERENCE: KernelStage =
+        KernelStage::new("copy_positions_into_reference");
+
+    pub const ORDER: &'static [KernelStage] = &[
+        Self::VV_KICK_DRIFT,
+        Self::VV_KICK_DRIFT_LOSSLESS,
+        Self::LANGEVIN_KICK_HALF,
+        Self::LANGEVIN_DRIFT_HALF,
+        Self::LANGEVIN_OU_STEP,
+        Self::NEIGHBOR_DISPLACEMENT_SQUARED,
+        Self::COPY_POSITIONS_INTO_REFERENCE,
+        Self::NEIGHBOR_LIST_BUILD,
+        Self::LJ_PAIR_FORCE,
+        Self::REDUCE_PAIR_FORCES,
+        Self::MORSE_BOND_FORCE,
+        Self::REDUCE_BOND_FORCES,
+        Self::ACCUMULATE_FORCES,
+        Self::VV_KICK,
+        Self::VV_KICK_LOSSLESS,
+    ];
 }
 
 // rq-d29f2811
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum HostStage {
-    ConfigLoad,
-    InitLoad,
-    GpuInit,
-    VelocityGeneration,
-    HostToDeviceUpload,
-    DeviceToHostDownload,
-    TrajectoryWrite,
-    LogWrite,
-    NeighborListRebuild,
-    TotalRuntime,
+pub struct HostStage {
+    name: &'static str,
 }
 
-const N_HOST_STAGES: usize = 10;
-
 impl HostStage {
-    fn name(self) -> &'static str {
-        match self {
-            HostStage::ConfigLoad => "config_load",
-            HostStage::InitLoad => "init_load",
-            HostStage::GpuInit => "gpu_init",
-            HostStage::VelocityGeneration => "velocity_generation",
-            HostStage::HostToDeviceUpload => "host_to_device_upload",
-            HostStage::DeviceToHostDownload => "device_to_host_download",
-            HostStage::TrajectoryWrite => "trajectory_write",
-            HostStage::LogWrite => "log_write",
-            HostStage::NeighborListRebuild => "neighbor_list_rebuild",
-            HostStage::TotalRuntime => "total_runtime",
-        }
+    pub const fn new(name: &'static str) -> Self {
+        HostStage { name }
     }
 
-    fn index(self) -> usize {
-        match self {
-            HostStage::ConfigLoad => 0,
-            HostStage::InitLoad => 1,
-            HostStage::GpuInit => 2,
-            HostStage::VelocityGeneration => 3,
-            HostStage::HostToDeviceUpload => 4,
-            HostStage::DeviceToHostDownload => 5,
-            HostStage::TrajectoryWrite => 6,
-            HostStage::LogWrite => 7,
-            HostStage::NeighborListRebuild => 8,
-            HostStage::TotalRuntime => 9,
-        }
+    pub const fn name(self) -> &'static str {
+        self.name
     }
+
+    pub const CONFIG_LOAD: HostStage = HostStage::new("config_load");
+    pub const INIT_LOAD: HostStage = HostStage::new("init_load");
+    pub const GPU_INIT: HostStage = HostStage::new("gpu_init");
+    pub const VELOCITY_GENERATION: HostStage = HostStage::new("velocity_generation");
+    pub const HOST_TO_DEVICE_UPLOAD: HostStage = HostStage::new("host_to_device_upload");
+    pub const DEVICE_TO_HOST_DOWNLOAD: HostStage =
+        HostStage::new("device_to_host_download");
+    pub const TRAJECTORY_WRITE: HostStage = HostStage::new("trajectory_write");
+    pub const LOG_WRITE: HostStage = HostStage::new("log_write");
+    pub const NEIGHBOR_LIST_REBUILD: HostStage = HostStage::new("neighbor_list_rebuild");
+    pub const TOTAL_RUNTIME: HostStage = HostStage::new("total_runtime");
+
+    pub const ORDER: &'static [HostStage] = &[
+        Self::HOST_TO_DEVICE_UPLOAD,
+        Self::DEVICE_TO_HOST_DOWNLOAD,
+        Self::NEIGHBOR_LIST_REBUILD,
+        Self::TRAJECTORY_WRITE,
+        Self::LOG_WRITE,
+        Self::VELOCITY_GENERATION,
+        Self::CONFIG_LOAD,
+        Self::INIT_LOAD,
+        Self::GPU_INIT,
+        Self::TOTAL_RUNTIME,
+    ];
 }
 
 // rq-0dab90aa
@@ -219,20 +201,25 @@ impl Accumulator {
     }
 }
 
+#[derive(Debug)]
+struct KernelStageState {
+    start: CUevent,
+    stop: CUevent,
+    outstanding_stop: bool,
+    acc: Accumulator,
+}
+
 // rq-baf03449
 pub struct Timings {
     device: Arc<CudaDevice>,
-    kernel_starts: [CUevent; N_KERNEL_STAGES],
-    kernel_stops: [CUevent; N_KERNEL_STAGES],
-    outstanding_stop: [bool; N_KERNEL_STAGES],
-    kernel_acc: [Accumulator; N_KERNEL_STAGES],
-    host_acc: [Accumulator; N_HOST_STAGES],
+    kernel_states: HashMap<KernelStage, KernelStageState>,
+    host_acc: HashMap<HostStage, Accumulator>,
 }
 
 impl std::fmt::Debug for Timings {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Timings")
-            .field("kernel_acc", &self.kernel_acc)
+            .field("kernel_states", &self.kernel_states)
             .field("host_acc", &self.host_acc)
             .finish_non_exhaustive()
     }
@@ -241,57 +228,68 @@ impl std::fmt::Debug for Timings {
 impl Timings {
     // rq-8a9c44f8
     pub fn new(device: Arc<CudaDevice>) -> Result<Self, TimingsError> {
-        let mut kernel_starts = [std::ptr::null_mut(); N_KERNEL_STAGES];
-        let mut kernel_stops = [std::ptr::null_mut(); N_KERNEL_STAGES];
-        for i in 0..N_KERNEL_STAGES {
-            kernel_starts[i] = event::create(CUevent_flags::CU_EVENT_DEFAULT)?;
-            kernel_stops[i] = event::create(CUevent_flags::CU_EVENT_DEFAULT)?;
+        let mut kernel_states: HashMap<KernelStage, KernelStageState> =
+            HashMap::with_capacity(KernelStage::ORDER.len());
+        for &stage in KernelStage::ORDER {
+            let start = event::create(CUevent_flags::CU_EVENT_DEFAULT)?;
+            let stop = event::create(CUevent_flags::CU_EVENT_DEFAULT)?;
+            kernel_states.insert(
+                stage,
+                KernelStageState {
+                    start,
+                    stop,
+                    outstanding_stop: false,
+                    acc: Accumulator::default(),
+                },
+            );
+        }
+        let mut host_acc: HashMap<HostStage, Accumulator> =
+            HashMap::with_capacity(HostStage::ORDER.len());
+        for &stage in HostStage::ORDER {
+            host_acc.insert(stage, Accumulator::default());
         }
         Ok(Timings {
             device,
-            kernel_starts,
-            kernel_stops,
-            outstanding_stop: [false; N_KERNEL_STAGES],
-            kernel_acc: [Accumulator::default(); N_KERNEL_STAGES],
-            host_acc: [Accumulator::default(); N_HOST_STAGES],
+            kernel_states,
+            host_acc,
         })
     }
 
     // rq-58981e16
     pub fn kernel_start(&mut self, stage: KernelStage) -> Result<(), TimingsError> {
-        let idx = stage.index();
-        if self.outstanding_stop[idx] {
-            self.drain_pair(idx)?;
+        let state = self
+            .kernel_states
+            .get_mut(&stage)
+            .unwrap_or_else(|| panic!("unknown KernelStage: {:?}", stage.name()));
+        if state.outstanding_stop {
+            let start = state.start;
+            let stop = state.stop;
+            // Synchronize on the stop event so cuEventElapsedTime won't return
+            // CUDA_ERROR_NOT_READY.
+            unsafe { event::synchronize(stop)? };
+            let elapsed_ms = unsafe { event::elapsed(start, stop)? };
+            let ns = if elapsed_ms.is_finite() && elapsed_ms > 0.0 {
+                (elapsed_ms as f64 * 1_000_000.0).round() as u64
+            } else {
+                0
+            };
+            state.acc.record_ns(ns);
+            state.outstanding_stop = false;
         }
         let stream = *self.device.cu_stream();
-        unsafe { event::record(self.kernel_starts[idx], stream)? };
+        unsafe { event::record(state.start, stream)? };
         Ok(())
     }
 
     // rq-b17e6de6
     pub fn kernel_stop(&mut self, stage: KernelStage) -> Result<(), TimingsError> {
-        let idx = stage.index();
+        let state = self
+            .kernel_states
+            .get_mut(&stage)
+            .unwrap_or_else(|| panic!("unknown KernelStage: {:?}", stage.name()));
         let stream = *self.device.cu_stream();
-        unsafe { event::record(self.kernel_stops[idx], stream)? };
-        self.outstanding_stop[idx] = true;
-        Ok(())
-    }
-
-    fn drain_pair(&mut self, idx: usize) -> Result<(), TimingsError> {
-        // Synchronize on the stop event so cuEventElapsedTime won't return
-        // CUDA_ERROR_NOT_READY.
-        unsafe { event::synchronize(self.kernel_stops[idx])? };
-        let elapsed_ms =
-            unsafe { event::elapsed(self.kernel_starts[idx], self.kernel_stops[idx])? };
-        // Convert ms to ns, clamp at zero in case the driver reports a tiny
-        // negative.
-        let ns = if elapsed_ms.is_finite() && elapsed_ms > 0.0 {
-            (elapsed_ms as f64 * 1_000_000.0).round() as u64
-        } else {
-            0
-        };
-        self.kernel_acc[idx].record_ns(ns);
-        self.outstanding_stop[idx] = false;
+        unsafe { event::record(state.stop, stream)? };
+        state.outstanding_stop = true;
         Ok(())
     }
 
@@ -301,51 +299,35 @@ impl Timings {
         // Clamp to u64 — single-stage measurements above ~584 years would
         // overflow, which is well outside any plausible run.
         let ns_u64 = ns.min(u64::MAX as u128) as u64;
-        self.host_acc[stage.index()].record_ns(ns_u64);
+        let acc = self
+            .host_acc
+            .get_mut(&stage)
+            .unwrap_or_else(|| panic!("unknown HostStage: {:?}", stage.name()));
+        acc.record_ns(ns_u64);
     }
 
     // rq-c4845f90
     pub fn finalize(&mut self) -> Result<TimingsReport, TimingsError> {
-        for idx in 0..N_KERNEL_STAGES {
-            if self.outstanding_stop[idx] {
-                self.drain_pair(idx)?;
+        for stage in KernelStage::ORDER {
+            let state = self.kernel_states.get_mut(stage).expect("stage present");
+            if state.outstanding_stop {
+                let start = state.start;
+                let stop = state.stop;
+                unsafe { event::synchronize(stop)? };
+                let elapsed_ms = unsafe { event::elapsed(start, stop)? };
+                let ns = if elapsed_ms.is_finite() && elapsed_ms > 0.0 {
+                    (elapsed_ms as f64 * 1_000_000.0).round() as u64
+                } else {
+                    0
+                };
+                state.acc.record_ns(ns);
+                state.outstanding_stop = false;
             }
         }
 
-        // Build the report in the documented row order, omitting count==0.
         let mut stages: Vec<StageStats> = Vec::new();
-        let kernel_order: [KernelStage; N_KERNEL_STAGES] = [
-            KernelStage::VvKickDrift,
-            KernelStage::VvKickDriftLossless,
-            KernelStage::LangevinKickHalf,
-            KernelStage::LangevinDriftHalf,
-            KernelStage::LangevinOuStep,
-            KernelStage::NeighborDisplacementSquared,
-            KernelStage::CopyPositionsIntoReference,
-            KernelStage::NeighborListBuild,
-            KernelStage::LjPairForce,
-            KernelStage::ReducePairForces,
-            KernelStage::MorseBondForce,
-            KernelStage::ReduceBondForces,
-            KernelStage::AccumulateForces,
-            KernelStage::VvKick,
-            KernelStage::VvKickLossless,
-        ];
-        let host_order: [HostStage; N_HOST_STAGES] = [
-            HostStage::HostToDeviceUpload,
-            HostStage::DeviceToHostDownload,
-            HostStage::NeighborListRebuild,
-            HostStage::TrajectoryWrite,
-            HostStage::LogWrite,
-            HostStage::VelocityGeneration,
-            HostStage::ConfigLoad,
-            HostStage::InitLoad,
-            HostStage::GpuInit,
-            HostStage::TotalRuntime,
-        ];
-
-        for k in kernel_order {
-            let acc = self.kernel_acc[k.index()];
+        for &k in KernelStage::ORDER {
+            let acc = self.kernel_states.get(&k).expect("stage present").acc;
             if acc.count > 0 {
                 stages.push(StageStats {
                     name: k.name().to_string(),
@@ -356,8 +338,8 @@ impl Timings {
                 });
             }
         }
-        for h in host_order {
-            let acc = self.host_acc[h.index()];
+        for &h in HostStage::ORDER {
+            let acc = *self.host_acc.get(&h).expect("stage present");
             if acc.count > 0 {
                 stages.push(StageStats {
                     name: h.name().to_string(),
@@ -374,10 +356,10 @@ impl Timings {
 
 impl Drop for Timings {
     fn drop(&mut self) {
-        for i in 0..N_KERNEL_STAGES {
+        for state in self.kernel_states.values() {
             unsafe {
-                let _ = event::destroy(self.kernel_starts[i]);
-                let _ = event::destroy(self.kernel_stops[i]);
+                let _ = event::destroy(state.start);
+                let _ = event::destroy(state.stop);
             }
         }
     }

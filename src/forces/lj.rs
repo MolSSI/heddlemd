@@ -73,7 +73,7 @@ impl Potential for LennardJonesState {
         let nl = cx
             .neighbor_list
             .expect("LennardJonesState requires a shared neighbor list");
-        timings.kernel_start(KernelStage::LjPairForce)?;
+        timings.kernel_start(KernelStage::LJ_PAIR_FORCE)?;
         lj_pair_force(
             buffers,
             &mut self.pair_buffer,
@@ -85,7 +85,7 @@ impl Potential for LennardJonesState {
             &nl.neighbor_list,
             &nl.neighbor_counts,
         )?;
-        timings.kernel_stop(KernelStage::LjPairForce)?;
+        timings.kernel_stop(KernelStage::LJ_PAIR_FORCE)?;
         Ok(())
     }
 
@@ -101,7 +101,7 @@ impl Potential for LennardJonesState {
         let nl = cx
             .neighbor_list
             .expect("LennardJonesState requires a shared neighbor list");
-        timings.kernel_start(KernelStage::ReducePairForces)?;
+        timings.kernel_start(KernelStage::REDUCE_PAIR_FORCES)?;
         reduce_pair_forces(
             &self.pair_buffer,
             &nl.neighbor_counts,
@@ -112,7 +112,7 @@ impl Potential for LennardJonesState {
             &mut output.virial,
             self.particle_count,
         )?;
-        timings.kernel_stop(KernelStage::ReducePairForces)?;
+        timings.kernel_stop(KernelStage::REDUCE_PAIR_FORCES)?;
         Ok(())
     }
 }

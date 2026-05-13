@@ -311,7 +311,7 @@ impl NeighborListState {
             NeighborListMode::CellList(cl) => cl,
         };
         timings
-            .kernel_start(KernelStage::NeighborDisplacementSquared)
+            .kernel_start(KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED)
             .map_err(map_timings_err)?;
         neighbor_displacement_squared(
             buffers,
@@ -322,7 +322,7 @@ impl NeighborListState {
             &mut cl.disp_sq,
         )?;
         timings
-            .kernel_stop(KernelStage::NeighborDisplacementSquared)
+            .kernel_stop(KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED)
             .map_err(map_timings_err)?;
 
         let host: Vec<f32> = self
@@ -357,7 +357,7 @@ impl NeighborListState {
         }
         let started = Instant::now();
         let result = self.rebuild_impl(sim_box, buffers, timings);
-        timings.record_host(HostStage::NeighborListRebuild, started.elapsed());
+        timings.record_host(HostStage::NEIGHBOR_LIST_REBUILD, started.elapsed());
         result
     }
 
@@ -415,7 +415,7 @@ impl NeighborListState {
             .map_err(GpuError::from)?;
 
         timings
-            .kernel_start(KernelStage::NeighborListBuild)
+            .kernel_start(KernelStage::NEIGHBOR_LIST_BUILD)
             .map_err(map_timings_err)?;
         neighbor_list_build(
             buffers,
@@ -431,7 +431,7 @@ impl NeighborListState {
             &mut cl.overflow_flag,
         )?;
         timings
-            .kernel_stop(KernelStage::NeighborListBuild)
+            .kernel_stop(KernelStage::NEIGHBOR_LIST_BUILD)
             .map_err(map_timings_err)?;
 
         let flag: Vec<u32> = self
@@ -445,7 +445,7 @@ impl NeighborListState {
         }
 
         timings
-            .kernel_start(KernelStage::CopyPositionsIntoReference)
+            .kernel_start(KernelStage::COPY_POSITIONS_INTO_REFERENCE)
             .map_err(map_timings_err)?;
         copy_positions_into_reference(
             buffers,
@@ -454,7 +454,7 @@ impl NeighborListState {
             &mut cl.reference_positions_z,
         )?;
         timings
-            .kernel_stop(KernelStage::CopyPositionsIntoReference)
+            .kernel_stop(KernelStage::COPY_POSITIONS_INTO_REFERENCE)
             .map_err(map_timings_err)?;
 
         cl.needs_rebuild = false;

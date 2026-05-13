@@ -266,29 +266,65 @@ partial timings are discarded).
 
 ### Types <!-- rq-4f5643f1 -->
 
-- `KernelStage` — `enum` covering the instrumented kernel-launch <!-- rq-dc8a0ff7 -->
-  helpers. Variants: `VvKickDrift`, `VvKick`, `VvKickDriftLossless`,
-  `VvKickLossless`, `LjPairForce`, `LjPairForceNeighbor`,
-  `ReducePairForces`, `LangevinKickHalf`, `LangevinDriftHalf`,
-  `LangevinOuStep`, `MorseBondForce`, `ReduceBondForces`,
-  `AccumulateForces`, `NeighborDisplacementSquared`,
-  `NeighborListBuild`, `CopyPositionsIntoReference`. Implements
-  `Copy`, `Eq`, `Hash` so it can index a fixed-size accumulator.
+- `KernelStage` — opaque newtype wrapping a `&'static str` stage name. <!-- rq-dc8a0ff7 -->
+  `Copy`, `Eq`, `Hash`, `Debug`. Method
+  `KernelStage::name(self) -> &'static str` returns the wrapped name.
+  Stage instances are referenced via associated consts, one per timed
+  kernel:
+  - `KernelStage::VV_KICK_DRIFT` → `"vv_kick_drift"`
+  - `KernelStage::VV_KICK` → `"vv_kick"`
+  - `KernelStage::VV_KICK_DRIFT_LOSSLESS` → `"vv_kick_drift_lossless"`
+  - `KernelStage::VV_KICK_LOSSLESS` → `"vv_kick_lossless"`
+  - `KernelStage::LJ_PAIR_FORCE` → `"lj_pair_force"`
+  - `KernelStage::REDUCE_PAIR_FORCES` → `"reduce_pair_forces"`
+  - `KernelStage::LANGEVIN_KICK_HALF` → `"langevin_kick_half"`
+  - `KernelStage::LANGEVIN_DRIFT_HALF` → `"langevin_drift_half"`
+  - `KernelStage::LANGEVIN_OU_STEP` → `"langevin_ou_step"`
+  - `KernelStage::MORSE_BOND_FORCE` → `"morse_bond_force"`
+  - `KernelStage::REDUCE_BOND_FORCES` → `"reduce_bond_forces"`
+  - `KernelStage::ACCUMULATE_FORCES` → `"accumulate_forces"`
+  - `KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED` → `"neighbor_displacement_squared"`
+  - `KernelStage::NEIGHBOR_LIST_BUILD` → `"neighbor_list_build"`
+  - `KernelStage::COPY_POSITIONS_INTO_REFERENCE` → `"copy_positions_into_reference"`
 
-- `HostStage` — `enum` covering the host-timed stages. Variants: <!-- rq-d29f2811 -->
-  `ConfigLoad`, `InitLoad`, `GpuInit`, `VelocityGeneration`,
-  `HostToDeviceUpload`, `DeviceToHostDownload`, `TrajectoryWrite`,
-  `LogWrite`, `NeighborListRebuild`, `TotalRuntime`. Implements
-  `Copy`, `Eq`, `Hash`.
+  The associated const `KernelStage::ORDER: &'static [KernelStage]`
+  is the canonical registry of known kernel stages and fixes the row
+  order used by `finalize` and the output file. Adding a stage means
+  declaring a new associated const and appending it to `ORDER`.
+
+- `HostStage` — opaque newtype wrapping a `&'static str` stage name. <!-- rq-d29f2811 -->
+  `Copy`, `Eq`, `Hash`, `Debug`. Method
+  `HostStage::name(self) -> &'static str` returns the wrapped name.
+  Stage instances are referenced via associated consts:
+  - `HostStage::CONFIG_LOAD` → `"config_load"`
+  - `HostStage::INIT_LOAD` → `"init_load"`
+  - `HostStage::GPU_INIT` → `"gpu_init"`
+  - `HostStage::VELOCITY_GENERATION` → `"velocity_generation"`
+  - `HostStage::HOST_TO_DEVICE_UPLOAD` → `"host_to_device_upload"`
+  - `HostStage::DEVICE_TO_HOST_DOWNLOAD` → `"device_to_host_download"`
+  - `HostStage::TRAJECTORY_WRITE` → `"trajectory_write"`
+  - `HostStage::LOG_WRITE` → `"log_write"`
+  - `HostStage::NEIGHBOR_LIST_REBUILD` → `"neighbor_list_rebuild"`
+  - `HostStage::TOTAL_RUNTIME` → `"total_runtime"`
+
+  The associated const `HostStage::ORDER: &'static [HostStage]` is the
+  canonical registry of known host stages and fixes the row order used
+  by `finalize` and the output file. Adding a stage means declaring a
+  new associated const and appending it to `ORDER`.
 
 - `Timings` — host-side state for collecting samples. Carries: <!-- rq-baf03449 -->
-  - one `(CudaEvent, CudaEvent)` pair per `KernelStage`
-  - an `Option<CudaEvent>` "in-flight start event" tracker per
-    `KernelStage` (recorded when the previous occurrence's stop event
-    has not yet been queried)
+  - one `(CudaEvent, CudaEvent)` pair for every stage in
+    `KernelStage::ORDER`
+  - an outstanding-stop tracker per kernel stage (set when the
+    previous occurrence's stop event has not yet been queried)
   - per-stage accumulators (`count`, `total_ns`, `min_ns`, `max_ns`)
-    for both `KernelStage` and `HostStage`
+    for every stage in `KernelStage::ORDER` and `HostStage::ORDER`
   - the `Arc<CudaDevice>` used to construct the events
+
+  The set of valid stages is fixed at `Timings::new` time from
+  `KernelStage::ORDER` and `HostStage::ORDER`; passing any other
+  stage value to `kernel_start`, `kernel_stop`, or `record_host`
+  panics.
 
 - `StageStats` — public, `Clone`, `Debug` snapshot for one stage. <!-- rq-0dab90aa -->
   Fields:
@@ -316,12 +352,15 @@ partial timings are discarded).
 ### Functions and methods <!-- rq-dae150d9 -->
 
 - `Timings::new(device: Arc<CudaDevice>) -> Result<Timings, TimingsError>` <!-- rq-8a9c44f8 -->
-  - Allocates the six `(start, stop)` CUDA event pairs (one per
-    `KernelStage`) on the given device with default flags.
-  - Initialises every per-stage accumulator to zero samples.
+  - Allocates one `(start, stop)` CUDA event pair on the given device
+    (default flags) for every stage in `KernelStage::ORDER`.
+  - Initialises an accumulator at zero samples for every stage in
+    `KernelStage::ORDER` and `HostStage::ORDER`.
   - Returns `Gpu(_)` if event creation fails.
 
 - `Timings::kernel_start(&mut self, stage: KernelStage) -> Result<(), TimingsError>` <!-- rq-58981e16 -->
+  - Panics if `stage` is not in `KernelStage::ORDER` (the registry is
+    fixed at construction time).
   - If a previous launch of the same stage has an outstanding stop event
     that has not yet been drained, this call first queries that elapsed
     time (blocking until completion), accumulates it into the stage's
@@ -329,6 +368,7 @@ partial timings are discarded).
   - Records a new start event on the device's default stream.
 
 - `Timings::kernel_stop(&mut self, stage: KernelStage) -> Result<(), TimingsError>` <!-- rq-b17e6de6 -->
+  - Panics if `stage` is not in `KernelStage::ORDER`.
   - Records the stop event for the most recent `kernel_start` of the
     same stage on the default stream.
   - Sets the outstanding-stop flag so the next `kernel_start` (or
@@ -339,6 +379,7 @@ partial timings are discarded).
   for that stage debug-asserts.
 
 - `Timings::record_host(&mut self, stage: HostStage, duration: std::time::Duration)` <!-- rq-037a9326 -->
+  - Panics if `stage` is not in `HostStage::ORDER`.
   - Accumulates `duration.as_nanos()` into the stage's `total_ns`,
     increments `count`, and updates `min_ns` / `max_ns`.
 
@@ -368,13 +409,15 @@ sequence of recorded stages within `run_simulation` is:
 2. `velocity_generation` — `Instant` measurement around the
    `generate_velocities` call. Skipped when explicit velocities are read
    from the init file.
-3. Warm-up: `kernel_start(LjPairForce)` / launch / `kernel_stop(LjPairForce)`
-   then `kernel_start(ReducePairForces)` / launch / `kernel_stop(ReducePairForces)`.
+3. Warm-up: `kernel_start(KernelStage::LJ_PAIR_FORCE)` / launch /
+   `kernel_stop(KernelStage::LJ_PAIR_FORCE)` then
+   `kernel_start(KernelStage::REDUCE_PAIR_FORCES)` / launch /
+   `kernel_stop(KernelStage::REDUCE_PAIR_FORCES)`.
 4. For each timestep:
    - `kernel_start` / launch / `kernel_stop` for the active kick-drift
      variant.
-   - `kernel_start` / launch / `kernel_stop` for `LjPairForce`.
-   - `kernel_start` / launch / `kernel_stop` for `ReducePairForces`.
+   - `kernel_start` / launch / `kernel_stop` for `LJ_PAIR_FORCE`.
+   - `kernel_start` / launch / `kernel_stop` for `REDUCE_PAIR_FORCES`.
    - `kernel_start` / launch / `kernel_stop` for the active kick variant.
    - If a snapshot/log download is happening this step:
      - `Instant` measurement around `frame.download_from(&buffers)`.
@@ -414,8 +457,10 @@ writing the timings file is excluded from every row.
 - Cross-host or cross-GPU timing comparisons. Timings vary by hardware.
 - Reproducibility of timing data; only the *trajectory* and *log* outputs
   are bit-reproducible across runs.
-- A library API for user-extensible stages. The `KernelStage` and
-  `HostStage` enums are closed.
+- A public API for external-crate stage registration. The
+  `KernelStage::ORDER` and `HostStage::ORDER` arrays are the canonical
+  registry; the set of valid stages is fixed at compile time, and adding
+  a stage requires editing those arrays in this crate.
 - Streaming the timings file to stdout. Output is to a file only.
 - Compressed (gzip, etc.) timings files.
 - Profile data formats for external tools (Tracy, Perfetto, Chrome
@@ -747,9 +792,9 @@ Feature: Performance analysis and timings output
   @rq-79291197
   Scenario: kernel_start followed by kernel_stop and finalize records one sample
     Given a Timings constructed on a fresh device
-    When timings.kernel_start(KernelStage::LjPairForce) is called
+    When timings.kernel_start(KernelStage::LJ_PAIR_FORCE) is called
     And a small kernel is launched
-    And timings.kernel_stop(KernelStage::LjPairForce) is called
+    And timings.kernel_stop(KernelStage::LJ_PAIR_FORCE) is called
     And timings.finalize() is called
     Then the resulting report contains exactly one StageStats entry for lj_pair_force
     And that entry's count equals 1
@@ -757,7 +802,7 @@ Feature: Performance analysis and timings output
   @rq-56043142
   Scenario: Repeated kernel_start/kernel_stop pairs accumulate
     Given a Timings constructed on a fresh device
-    When ten matched kernel_start/kernel_stop pairs for LjPairForce are issued around real launches
+    When ten matched kernel_start/kernel_stop pairs for KernelStage::LJ_PAIR_FORCE are issued around real launches
     And timings.finalize() is called
     Then the resulting report's lj_pair_force entry has count = 10
     And the total_ns is non-zero
@@ -765,12 +810,28 @@ Feature: Performance analysis and timings output
   @rq-2cbe0828
   Scenario: record_host updates count, total, min, and max
     Given a fresh Timings
-    When record_host(HostStage::ConfigLoad, Duration::from_micros(100)) is called
-    And record_host(HostStage::ConfigLoad, Duration::from_micros(50)) is called
-    And record_host(HostStage::ConfigLoad, Duration::from_micros(200)) is called
+    When record_host(HostStage::CONFIG_LOAD, Duration::from_micros(100)) is called
+    And record_host(HostStage::CONFIG_LOAD, Duration::from_micros(50)) is called
+    And record_host(HostStage::CONFIG_LOAD, Duration::from_micros(200)) is called
     And timings.finalize() is called
     Then the config_load entry has count = 3
     And total_ns = 350_000
     And min_ns = 50_000
     And max_ns = 200_000
+
+  @rq-f232d41b
+  Scenario: kernel_start with a KernelStage not in ORDER panics
+    Given a fresh Timings
+    And a KernelStage value `unknown = KernelStage::new("not_a_stage")` whose
+      name does not appear in KernelStage::ORDER
+    When timings.kernel_start(unknown) is called
+    Then it panics
+
+  @rq-264d2234
+  Scenario: record_host with a HostStage not in ORDER panics
+    Given a fresh Timings
+    And a HostStage value `unknown = HostStage::new("not_a_host_stage")` whose
+      name does not appear in HostStage::ORDER
+    When timings.record_host(unknown, Duration::from_micros(10)) is called
+    Then it panics
 ```

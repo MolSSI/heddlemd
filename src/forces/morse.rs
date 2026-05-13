@@ -112,7 +112,7 @@ impl Potential for MorseBondedState {
         if self.bond_count == 0 {
             return Ok(());
         }
-        timings.kernel_start(KernelStage::MorseBondForce)?;
+        timings.kernel_start(KernelStage::MORSE_BOND_FORCE)?;
         morse_bond_force(
             buffers,
             &self.bonds,
@@ -127,7 +127,7 @@ impl Potential for MorseBondedState {
             &mut self.bond_pair_virial,
             self.bond_count,
         )?;
-        timings.kernel_stop(KernelStage::MorseBondForce)?;
+        timings.kernel_stop(KernelStage::MORSE_BOND_FORCE)?;
         Ok(())
     }
 
@@ -148,7 +148,7 @@ impl Potential for MorseBondedState {
             self.device.memset_zeros(&mut output.virial).map_err(GpuError::from)?;
             return Ok(());
         }
-        timings.kernel_start(KernelStage::ReduceBondForces)?;
+        timings.kernel_start(KernelStage::REDUCE_BOND_FORCES)?;
         reduce_bond_forces(
             &self.device,
             &self.bond_pair_x,
@@ -165,7 +165,7 @@ impl Potential for MorseBondedState {
             &mut output.virial,
             self.particle_count,
         )?;
-        timings.kernel_stop(KernelStage::ReduceBondForces)?;
+        timings.kernel_stop(KernelStage::REDUCE_BOND_FORCES)?;
         Ok(())
     }
 }

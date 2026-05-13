@@ -149,25 +149,25 @@ impl Integrator for VelocityVerletState {
         }
 
         if let Some(ll) = self.lossless.as_mut() {
-            timings.kernel_start(KernelStage::VvKickDriftLossless)?;
+            timings.kernel_start(KernelStage::VV_KICK_DRIFT_LOSSLESS)?;
             vv_kick_drift_lossless(buffers, ll, dt)?;
-            timings.kernel_stop(KernelStage::VvKickDriftLossless)?;
+            timings.kernel_stop(KernelStage::VV_KICK_DRIFT_LOSSLESS)?;
         } else {
-            timings.kernel_start(KernelStage::VvKickDrift)?;
+            timings.kernel_start(KernelStage::VV_KICK_DRIFT)?;
             vv_kick_drift(buffers, dt)?;
-            timings.kernel_stop(KernelStage::VvKickDrift)?;
+            timings.kernel_stop(KernelStage::VV_KICK_DRIFT)?;
         }
 
         force_field.step(buffers, sim_box, timings)?;
 
         if let Some(ll) = self.lossless.as_mut() {
-            timings.kernel_start(KernelStage::VvKickLossless)?;
+            timings.kernel_start(KernelStage::VV_KICK_LOSSLESS)?;
             vv_kick_lossless(buffers, ll, dt)?;
-            timings.kernel_stop(KernelStage::VvKickLossless)?;
+            timings.kernel_stop(KernelStage::VV_KICK_LOSSLESS)?;
         } else {
-            timings.kernel_start(KernelStage::VvKick)?;
+            timings.kernel_start(KernelStage::VV_KICK)?;
             vv_kick(buffers, dt)?;
-            timings.kernel_stop(KernelStage::VvKick)?;
+            timings.kernel_stop(KernelStage::VV_KICK)?;
         }
 
         Ok(())
@@ -226,31 +226,31 @@ impl Integrator for LangevinBaoabState {
         }
 
         // BAOAB pre-force: B(dt/2), A(dt/2), O(dt), A(dt/2)
-        timings.kernel_start(KernelStage::LangevinKickHalf)?;
+        timings.kernel_start(KernelStage::LANGEVIN_KICK_HALF)?;
         vv_kick(buffers, dt)?;
-        timings.kernel_stop(KernelStage::LangevinKickHalf)?;
+        timings.kernel_stop(KernelStage::LANGEVIN_KICK_HALF)?;
 
-        timings.kernel_start(KernelStage::LangevinDriftHalf)?;
+        timings.kernel_start(KernelStage::LANGEVIN_DRIFT_HALF)?;
         lan_drift_half(buffers, dt)?;
-        timings.kernel_stop(KernelStage::LangevinDriftHalf)?;
+        timings.kernel_stop(KernelStage::LANGEVIN_DRIFT_HALF)?;
 
         let alpha = (-(self.friction as f32) * dt).exp();
         let kt = (BOLTZMANN_J_PER_K * self.temperature) as f32;
-        timings.kernel_start(KernelStage::LangevinOuStep)?;
+        timings.kernel_start(KernelStage::LANGEVIN_OU_STEP)?;
         lan_ou_step(buffers, self.seed, step_index, alpha, kt)?;
-        timings.kernel_stop(KernelStage::LangevinOuStep)?;
+        timings.kernel_stop(KernelStage::LANGEVIN_OU_STEP)?;
 
-        timings.kernel_start(KernelStage::LangevinDriftHalf)?;
+        timings.kernel_start(KernelStage::LANGEVIN_DRIFT_HALF)?;
         lan_drift_half(buffers, dt)?;
-        timings.kernel_stop(KernelStage::LangevinDriftHalf)?;
+        timings.kernel_stop(KernelStage::LANGEVIN_DRIFT_HALF)?;
 
         // Force evaluation at the new positions.
         force_field.step(buffers, sim_box, timings)?;
 
         // BAOAB post-force: B(dt/2)
-        timings.kernel_start(KernelStage::LangevinKickHalf)?;
+        timings.kernel_start(KernelStage::LANGEVIN_KICK_HALF)?;
         vv_kick(buffers, dt)?;
-        timings.kernel_stop(KernelStage::LangevinKickHalf)?;
+        timings.kernel_stop(KernelStage::LANGEVIN_KICK_HALF)?;
 
         Ok(())
     }
