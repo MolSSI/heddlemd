@@ -252,13 +252,38 @@ script that invokes `nvcc`. The resulting PTX is loaded at runtime using
 
 ## Precision policy
 
-All positions, velocities, and forces use `f32` by default. This is sufficient
-for most short-range MD workloads and maximizes GPU throughput.
+All positions, velocities, and forces use `f32`. This is sufficient for most
+short-range MD workloads and maximizes GPU throughput.
 
-If higher precision is needed (e.g., for long simulations where energy drift
-matters), the data layout and kernels can be widened to `f64`. This should be
-a compile-time feature flag, not a runtime branch, to avoid paying any
-abstraction cost.
+Two precision concerns are easy to conflate; they are independent.
+
+### Storage precision (f32 vs f64)
+
+Widening the particle data layout and the compute kernels to `f64` — for long
+simulations where `f32` round-off in the force evaluation itself becomes the
+dominant error — is **not yet implemented**. When it is added it should be a
+compile-time feature flag, not a runtime branch, so the `f32` build pays no
+abstraction cost. Until then the engine is `f32` end to end: the pair-force
+kernels, the segmented reduction, and every integrator increment (`a = F/m`,
+`v · dt`, and `dt` itself) are single precision.
+
+### Lossless reversible integration
+
+Independently of storage precision, the velocity-Verlet integrator has a
+`lossless` mode, selected per run by `[integrator].lossless` in the config.
+This is **not** a double-precision simulation. It is compensated (Kahan-style)
+summation applied only to the integrator's accumulation: each particle carries
+an `f64` low-part for position and velocity that holds the rounding residual
+of the running sums, making the `x += v · dt` and `v += a · dt/2` updates
+exactly invertible. That exact invertibility is what enables bit-exact time
+reversal.
+
+The physics driving a `lossless` run is still `f32`: forces, `a = F/m`, and
+`dt` are single precision whether `lossless` is on or off. `lossless` does not
+improve physical accuracy the way an `f64` force evaluation would — it makes
+the integrator's bookkeeping exact, nothing more. A run with `lossless = true`
+and one with `lossless = false` follow different `f32` trajectories; only the
+former can be stepped backward to its exact starting state.
 
 ## Boundary conditions
 
