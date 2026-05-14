@@ -56,6 +56,7 @@ potential = "lennard-jones"
 sigma = 3.40e-10    # m
 epsilon = 1.65e-21  # J
 cutoff = 1.0e-9     # m
+r_switch = 9.0e-10  # m  (defaults to 0.9 * cutoff when omitted)
 
 # Optional: path to a .bonds file declaring bonds and explicit non-bonded
 # exclusions. When omitted, no bonded forces are computed and the LJ kernel
@@ -172,6 +173,12 @@ For `N` declared types the array contains exactly `N * (N + 1) / 2` entries.
 - `epsilon: f64` — LJ well depth in joules. Finite, strictly positive.
 - `cutoff: f64` — pair distance in metres beyond which the force is treated
   as zero. Finite, strictly positive.
+- `r_switch: f64` — optional. Inner radius of the CHARMM-style C¹
+  switching function applied over `[r_switch, cutoff]` (see
+  `forces/lj-pair-force.md`). Finite, strictly positive, and
+  `r_switch <= cutoff`. Defaults to `0.9 * cutoff` when omitted.
+  Setting `r_switch = cutoff` selects the hard-cutoff degenerate case
+  in which no smoothing is applied.
 
 Same-type pairs are required even when only one type is declared:
 `between = ["Ar", "Ar"]` must appear.
@@ -367,6 +374,9 @@ Beyond per-field validation, the loader checks:
   - `sigma: f64`
   - `epsilon: f64`
   - `cutoff: f64`
+  - `r_switch: f64` — inner switching radius. Populated from the
+    user-supplied `r_switch` when present, otherwise from the default
+    `0.9 * cutoff`. Always satisfies `0 < r_switch <= cutoff`.
 
 - `BondTypeConfig` — tagged enum carrying the chosen bonded-potential <!-- rq-2f230ccb -->
   parameters. Variants:
@@ -777,6 +787,49 @@ Feature: TOML simulation config schema
     Given the Background config with pair_interactions[0].cutoff=0.0
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].cutoff", reason: _ })
+
+  @rq-d1d84e31
+  Scenario: Accept user-supplied r_switch in pair_interactions
+    Given the Background config with pair_interactions[0].cutoff=1.0e-9
+      and pair_interactions[0].r_switch=9.0e-10
+    When load_config is called
+    Then it returns Ok
+    And config.pair_interactions[0].r_switch equals 9.0e-10
+
+  @rq-6f4f5ece
+  Scenario: Default r_switch to 0.9 * cutoff when omitted
+    Given the Background config with pair_interactions[0].cutoff=1.0e-9
+      and no r_switch field on pair_interactions[0]
+    When load_config is called
+    Then it returns Ok
+    And config.pair_interactions[0].r_switch equals 9.0e-10 within f64 round-off
+
+  @rq-1d8b8efe
+  Scenario: Accept r_switch equal to cutoff (hard-cutoff degenerate case)
+    Given the Background config with pair_interactions[0].cutoff=1.0e-9
+      and pair_interactions[0].r_switch=1.0e-9
+    When load_config is called
+    Then it returns Ok
+    And config.pair_interactions[0].r_switch equals 1.0e-9
+
+  @rq-7cd9471a
+  Scenario: Reject r_switch greater than cutoff
+    Given the Background config with pair_interactions[0].cutoff=1.0e-9
+      and pair_interactions[0].r_switch=1.1e-9
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].r_switch", reason: _ })
+
+  @rq-b4d2f559
+  Scenario: Reject non-positive r_switch
+    Given the Background config with pair_interactions[0].r_switch=0.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].r_switch", reason: _ })
+
+  @rq-871f0292
+  Scenario: Reject non-finite r_switch
+    Given the Background config with pair_interactions[0].r_switch=NaN
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].r_switch", reason: _ })
 
   @rq-a3a5905d
   Scenario: Reject unknown potential

@@ -18,6 +18,7 @@ fn lj_pair_config() -> PairInteractionConfig {
         sigma: 1.0,
         epsilon: 1.0,
         cutoff: 5.0,
+        r_switch: 5.0,
     }
 }
 
@@ -323,6 +324,7 @@ fn step_both_slots_sums_lj_and_morse() {
         sigma: 1.0,
         epsilon: 1.0,
         cutoff: 0.5,
+        r_switch: 0.5,
     };
     let mut ff_morse = ForceField::new(
         device.clone(),
@@ -509,6 +511,7 @@ fn each_slot_writes_its_own_row() {
         sigma: 1.0,
         epsilon: 1.0,
         cutoff: 0.5,
+        r_switch: 0.5,
     };
     let mut buffers_m = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut t_m = Timings::new(device.clone()).unwrap();

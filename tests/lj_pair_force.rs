@@ -618,7 +618,10 @@ fn nan_positions_propagate_to_nan_pair_forces() {
 // --- Multi-type parameter dispatch ---
 
 /// Build a `LennardJonesParameterTable` from explicit n_types and three
-/// length-n_types² host arrays.
+/// length-n_types² host arrays. `r_switch` is set to `cutoff` on every
+/// slot, selecting the hard-cutoff degenerate case in the kernel so
+/// multi-type tests written against the unmodified Lennard-Jones
+/// expression are unaffected.
 fn build_table(
     device: &Arc<CudaDevice>,
     n_types: u32,
@@ -626,15 +629,32 @@ fn build_table(
     epsilon: &[f32],
     cutoff: &[f32],
 ) -> LennardJonesParameterTable {
+    let switch: Vec<f32> = cutoff.to_vec();
+    build_table_with_switch(device, n_types, sigma, epsilon, cutoff, &switch)
+}
+
+/// Build a `LennardJonesParameterTable` from explicit n_types and four
+/// length-n_types² host arrays. Tests that exercise the switching
+/// function with multi-type parameters use this directly.
+fn build_table_with_switch(
+    device: &Arc<CudaDevice>,
+    n_types: u32,
+    sigma: &[f32],
+    epsilon: &[f32],
+    cutoff: &[f32],
+    switch: &[f32],
+) -> LennardJonesParameterTable {
     let len = (n_types as usize) * (n_types as usize);
     assert_eq!(sigma.len(), len);
     assert_eq!(epsilon.len(), len);
     assert_eq!(cutoff.len(), len);
+    assert_eq!(switch.len(), len);
     LennardJonesParameterTable {
         n_types,
         sigma: device.htod_sync_copy(sigma).unwrap(),
         epsilon: device.htod_sync_copy(epsilon).unwrap(),
         cutoff: device.htod_sync_copy(cutoff).unwrap(),
+        switch: device.htod_sync_copy(switch).unwrap(),
     }
 }
 
@@ -827,6 +847,7 @@ fn lj_param_table_from_config_builds_symmetric_table() {
             sigma: 1.0,
             epsilon: 1.0,
             cutoff: 5.0,
+            r_switch: 5.0,
         },
         PairInteractionConfig {
             between: ("Ar".to_string(), "Kr".to_string()),
@@ -834,6 +855,7 @@ fn lj_param_table_from_config_builds_symmetric_table() {
             sigma: 2.0,
             epsilon: 0.5,
             cutoff: 5.0,
+            r_switch: 5.0,
         },
         PairInteractionConfig {
             between: ("Kr".to_string(), "Kr".to_string()),
@@ -841,6 +863,7 @@ fn lj_param_table_from_config_builds_symmetric_table() {
             sigma: 3.0,
             epsilon: 2.0,
             cutoff: 5.0,
+            r_switch: 5.0,
         },
     ];
     let table =
@@ -850,9 +873,11 @@ fn lj_param_table_from_config_builds_symmetric_table() {
     let sigma = device.dtoh_sync_copy(&table.sigma).unwrap();
     let epsilon = device.dtoh_sync_copy(&table.epsilon).unwrap();
     let cutoff = device.dtoh_sync_copy(&table.cutoff).unwrap();
+    let switch = device.dtoh_sync_copy(&table.switch).unwrap();
     assert_eq!(sigma, vec![1.0_f32, 2.0, 2.0, 3.0]);
     assert_eq!(epsilon, vec![1.0_f32, 0.5, 0.5, 2.0]);
     assert_eq!(cutoff, vec![5.0_f32, 5.0, 5.0, 5.0]);
+    assert_eq!(switch, vec![5.0_f32, 5.0, 5.0, 5.0]);
 }
 
 // --- Shared neighbor-list integration ---
@@ -874,6 +899,7 @@ fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
         sigma: 1.0,
         epsilon: 1.0,
         cutoff: 4.0,
+        r_switch: 4.0,
     }];
     let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
     let ff = ForceField::new(
@@ -909,6 +935,7 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
         sigma: 1.0,
         epsilon: 1.0,
         cutoff: 3.0,
+        r_switch: 3.0,
     }];
     // 4 particles in a small cluster
     let positions = [
@@ -1124,4 +1151,500 @@ fn exclusion_scaling_applies_uniformly_to_force_energy_virial() {
     assert!((px_half[0 * 2 + 1] - 0.5 * px_full[0 * 2 + 1]).abs() < 1.0e-5);
     assert!((pe_half[0 * 2 + 1] - 0.5 * pe_full[0 * 2 + 1]).abs() < 1.0e-5);
     assert!((pv_half[0 * 2 + 1] - 0.5 * pv_full[0 * 2 + 1]).abs() < 1.0e-5);
+}
+
+// --- Switching function ---
+
+/// Closed-form switched LJ pair force on particle 0 from particle 1
+/// along x when the two particles lie on the x axis at separation `r`,
+/// computed in f32 with the same arithmetic order the kernel uses
+/// (normalised-tau form to avoid the (r_c²−r_s²)³ underflow at SI
+/// scales).
+fn switched_fx_on_0(r: f32, sigma: f32, epsilon: f32, cutoff: f32, r_switch: f32) -> f32 {
+    let r2 = r * r;
+    let r_c2 = cutoff * cutoff;
+    if r2 > r_c2 {
+        return 0.0;
+    }
+    let inv_r2 = 1.0 / r2;
+    let sigma2 = sigma * sigma;
+    let sr2 = sigma2 * inv_r2;
+    let sr6 = sr2 * sr2 * sr2;
+    let sr12 = sr6 * sr6;
+    let mut factor = 24.0 * epsilon * inv_r2 * (2.0 * sr12 - sr6);
+    let mut energy = 4.0 * epsilon * (sr12 - sr6);
+    let r_s2 = r_switch * r_switch;
+    if r2 > r_s2 {
+        let delta = r_c2 - r_s2;
+        let inv_delta = 1.0 / delta;
+        let tau = (r2 - r_s2) * inv_delta;
+        let one_minus_tau = 1.0 - tau;
+        let s = one_minus_tau * one_minus_tau * (1.0 + 2.0 * tau);
+        let chain_coeff = 12.0 * tau * one_minus_tau * inv_delta;
+        factor = s * factor + chain_coeff * energy;
+        energy = s * energy;
+    }
+    let _ = energy;
+    factor * (-r)
+}
+
+/// Closed-form switched LJ pair energy at separation `r` (full pair
+/// energy, not the half stored per slot).
+fn switched_pair_energy(r: f32, sigma: f32, epsilon: f32, cutoff: f32, r_switch: f32) -> f32 {
+    let r2 = r * r;
+    let r_c2 = cutoff * cutoff;
+    if r2 > r_c2 {
+        return 0.0;
+    }
+    let inv_r2 = 1.0 / r2;
+    let sigma2 = sigma * sigma;
+    let sr2 = sigma2 * inv_r2;
+    let sr6 = sr2 * sr2 * sr2;
+    let sr12 = sr6 * sr6;
+    let mut energy = 4.0 * epsilon * (sr12 - sr6);
+    let r_s2 = r_switch * r_switch;
+    if r2 > r_s2 {
+        let delta = r_c2 - r_s2;
+        let inv_delta = 1.0 / delta;
+        let tau = (r2 - r_s2) * inv_delta;
+        let one_minus_tau = 1.0 - tau;
+        let s = one_minus_tau * one_minus_tau * (1.0 + 2.0 * tau);
+        energy = s * energy;
+    }
+    energy
+}
+
+fn two_particle_pair(r: f32) -> [[f32; 3]; 2] {
+    [[0.0, 0.0, 0.0], [r, 0.0, 0.0]]
+}
+
+fn run_lj_two_particle(
+    device: &Arc<CudaDevice>,
+    sim_box: &SimulationBox,
+    positions: [[f32; 3]; 2],
+    table: &LennardJonesParameterTable,
+) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+    let state = build_state_xyz(&positions);
+    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    lj_pair_force_no_excl(&particle_buffers, &mut pair, sim_box, table).unwrap();
+    let (px, py, pz) = download_pair_forces(&pair);
+    let pe = download_pair_energies(&pair);
+    let pv = download_pair_virials(&pair);
+    (px, py, pz, pe, pv)
+}
+
+#[test] // rq-0c4f8da8
+fn switching_pair_inside_r_switch_sees_unmodified_lj() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    // cutoff=5, switch=4: r=1.5 is well inside the inner plateau.
+    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let (px, _, _, pe, _) = run_lj_two_particle(&device, &sim_box, two_particle_pair(1.5), &table);
+    let expected_fx = switched_fx_on_0(1.5, 1.0, 1.0, 5.0, 4.0);
+    assert!((px[0 * 2 + 1] - expected_fx).abs() < 1.0e-6);
+    // Inside the plateau, the switched energy equals the unswitched LJ
+    // energy. (Both slots hold half the pair energy.)
+    let r = 1.5_f32;
+    let sr2 = (1.0_f32 / r).powi(2);
+    let sr6 = sr2.powi(3);
+    let sr12 = sr6 * sr6;
+    let lj_energy = 4.0_f32 * (sr12 - sr6);
+    assert!((pe[0 * 2 + 1] + pe[1 * 2 + 0] - lj_energy).abs() < 1.0e-5);
+}
+
+#[test] // rq-38441c15
+fn switching_pair_exactly_at_r_switch_sees_unmodified_lj() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let (px, _, _, pe, _) = run_lj_two_particle(&device, &sim_box, two_particle_pair(4.0), &table);
+    // At r == r_switch the kernel takes the r2 <= r_s2 branch (S=1) and
+    // returns the unswitched LJ force/energy.
+    let expected_fx = switched_fx_on_0(4.0, 1.0, 1.0, 5.0, 4.0);
+    assert!((px[0 * 2 + 1] - expected_fx).abs() < 1.0e-6);
+    let r = 4.0_f32;
+    let sr2 = (1.0_f32 / r).powi(2);
+    let sr6 = sr2.powi(3);
+    let sr12 = sr6 * sr6;
+    let lj_energy = 4.0_f32 * (sr12 - sr6);
+    assert!((pe[0 * 2 + 1] + pe[1 * 2 + 0] - lj_energy).abs() < 1.0e-7);
+}
+
+#[test] // rq-f93d278e
+fn switching_pair_exactly_at_r_cut_yields_zero_when_switch_less_than_cutoff() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let (px, py, pz, pe, pv) =
+        run_lj_two_particle(&device, &sim_box, two_particle_pair(5.0), &table);
+    // S(r_c²) = 0 by polynomial form, so all five slots are zero.
+    assert_eq!(px[0 * 2 + 1], 0.0);
+    assert_eq!(py[0 * 2 + 1], 0.0);
+    assert_eq!(pz[0 * 2 + 1], 0.0);
+    assert_eq!(pe[0 * 2 + 1], 0.0);
+    assert_eq!(pv[0 * 2 + 1], 0.0);
+}
+
+#[test] // rq-cb85cf61
+fn switching_pair_inside_window_matches_closed_form_switched_value() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let r = 4.5_f32;
+    let (px, _, _, pe, _) = run_lj_two_particle(&device, &sim_box, two_particle_pair(r), &table);
+    let expected_fx = switched_fx_on_0(r, 1.0, 1.0, 5.0, 4.0);
+    let rel = (px[0 * 2 + 1] - expected_fx).abs() / expected_fx.abs().max(1.0e-30);
+    assert!(
+        rel < 1.0e-4,
+        "got {} expected {} (rel {rel})",
+        px[0 * 2 + 1],
+        expected_fx
+    );
+    let expected_energy = switched_pair_energy(r, 1.0, 1.0, 5.0, 4.0);
+    let got_energy = pe[0 * 2 + 1] + pe[1 * 2 + 0];
+    assert!(
+        (got_energy - expected_energy).abs() < 1.0e-6,
+        "got {got_energy} expected {expected_energy}"
+    );
+}
+
+#[test] // rq-ae20ddac
+fn switching_force_is_c1_continuous_at_r_switch() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let eps = 1.0e-3_f32;
+    let (px_below, _, _, _, _) =
+        run_lj_two_particle(&device, &sim_box, two_particle_pair(4.0 - eps), &table);
+    let (px_above, _, _, _, _) =
+        run_lj_two_particle(&device, &sim_box, two_particle_pair(4.0 + eps), &table);
+    let f_below = px_below[0 * 2 + 1];
+    let f_above = px_above[0 * 2 + 1];
+    let denom = f_below.abs().max(1.0e-10);
+    let rel = (f_below - f_above).abs() / denom;
+    assert!(
+        rel < 1.0e-2,
+        "force jump across r_switch: {f_below} vs {f_above} (rel {rel})"
+    );
+}
+
+#[test] // rq-e5e3443f
+fn switching_force_is_c1_continuous_at_r_cut() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let eps = 1.0e-3_f32;
+    let (px_inside, _, _, _, _) =
+        run_lj_two_particle(&device, &sim_box, two_particle_pair(5.0 - eps), &table);
+    let f_inside = px_inside[0 * 2 + 1].abs();
+    let f_at_rs = switched_fx_on_0(4.0, 1.0, 1.0, 5.0, 4.0).abs();
+    assert!(
+        f_inside < 1.0e-2 * f_at_rs,
+        "expected force near r_cut to be small relative to force at r_switch: \
+         f_inside={f_inside} f_at_rs={f_at_rs}"
+    );
+}
+
+#[test] // rq-916f99f3
+fn switching_degenerate_reproduces_hard_cutoff_everywhere_inside() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 5.0);
+    for r in [1.5_f32, 3.0, 4.5] {
+        let (px, _, _, pe, _) =
+            run_lj_two_particle(&device, &sim_box, two_particle_pair(r), &table);
+        let expected_fx = lj_force_components(
+            [0.0, 0.0, 0.0],
+            [r, 0.0, 0.0],
+            sim_box.lengths(),
+            LjScalarParams { sigma: 1.0, epsilon: 1.0, cutoff: 5.0 },
+        )[0];
+        assert_eq!(px[0 * 2 + 1], expected_fx, "force at r={r}");
+        let sr2 = (1.0_f32 / r).powi(2);
+        let sr6 = sr2.powi(3);
+        let sr12 = sr6 * sr6;
+        let lj_energy = 4.0_f32 * (sr12 - sr6);
+        assert!(
+            (pe[0 * 2 + 1] + pe[1 * 2 + 0] - lj_energy).abs() < 1.0e-6,
+            "energy at r={r}"
+        );
+    }
+}
+
+#[test] // rq-531afe39
+fn switching_pair_beyond_r_cut_yields_zero_independent_of_r_switch() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let (px, py, pz, pe, pv) =
+        run_lj_two_particle(&device, &sim_box, two_particle_pair(6.0), &table);
+    assert_eq!(px[0 * 2 + 1], 0.0);
+    assert_eq!(py[0 * 2 + 1], 0.0);
+    assert_eq!(pz[0 * 2 + 1], 0.0);
+    assert_eq!(pe[0 * 2 + 1], 0.0);
+    assert_eq!(pv[0 * 2 + 1], 0.0);
+}
+
+#[test] // rq-d0f489d7
+fn switching_pair_virial_inside_window_equals_factor_switched_times_r2() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let r = 4.5_f32;
+    let (px, _, _, _, pv) =
+        run_lj_two_particle(&device, &sim_box, two_particle_pair(r), &table);
+    // The pair virial is r_ij · F_ij = factor_new * r². For two particles
+    // on the x axis at separation r, that equals -r * fx_on_0 (dx = -r
+    // for particle 0, F on 0 has component +factor*(-r) = px[0*2+1]).
+    // Equivalently the kernel writes w = fx*dx + 0 + 0 = -r * px[0*2+1].
+    let expected_w = -r * px[0 * 2 + 1];
+    let got_total = pv[0 * 2 + 1] + pv[1 * 2 + 0];
+    assert!(
+        (got_total - expected_w).abs() < 1.0e-6,
+        "got {got_total} expected {expected_w}"
+    );
+}
+
+#[test] // rq-ef8013be
+fn switching_newtons_third_law_holds_bitwise_across_window() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let positions = [[0.0_f32, 0.0, 0.0], [4.5, 0.4, -0.2]];
+    let (px, py, pz, _, _) = run_lj_two_particle(&device, &sim_box, positions, &table);
+    assert_eq!(px[0 * 2 + 1], -px[1 * 2 + 0]);
+    assert_eq!(py[0 * 2 + 1], -py[1 * 2 + 0]);
+    assert_eq!(pz[0 * 2 + 1], -pz[1 * 2 + 0]);
+}
+
+#[test] // rq-fb55af77
+fn switching_exclusion_scaling_multiplies_switched_quantities() {
+    use dynamics::forces::{DeviceExclusionList, Exclusion, ExclusionList};
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let positions = two_particle_pair(4.5);
+    let state = build_state_xyz(&positions);
+    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+
+    // Unscaled (empty exclusion list).
+    let mut pair_full = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    lj_pair_force_no_excl(&particle_buffers, &mut pair_full, &sim_box, &table).unwrap();
+    let (px_full, _, _) = download_pair_forces(&pair_full);
+    let pe_full = download_pair_energies(&pair_full);
+    let pv_full = download_pair_virials(&pair_full);
+
+    // Half-strength exclusion: scale = 0.5 on the (0,1) pair.
+    let host = ExclusionList {
+        entries: vec![
+            Exclusion { atom_i: 0, atom_j: 1, scale: 0.5 },
+            Exclusion { atom_i: 1, atom_j: 0, scale: 0.5 },
+        ],
+        atom_excl_offsets: vec![0u32, 1, 2],
+        atom_excl_partners: vec![1u32, 0],
+        atom_excl_scales: vec![0.5_f32, 0.5],
+        particle_count: 2,
+    };
+    let excl = DeviceExclusionList::from_host(&device, &host).unwrap();
+    let mut pair_half = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let nl = trivial_neighbor_list(&device, &sim_box, 2);
+    dynamics::gpu::lj_pair_force(
+        &particle_buffers,
+        &mut pair_half,
+        &sim_box,
+        &table,
+        &excl.atom_excl_offsets,
+        &excl.atom_excl_partners,
+        &excl.atom_excl_scales,
+        &nl.neighbor_list,
+        &nl.neighbor_counts,
+    )
+    .unwrap();
+    let (px_half, _, _) = download_pair_forces(&pair_half);
+    let pe_half = download_pair_energies(&pair_half);
+    let pv_half = download_pair_virials(&pair_half);
+
+    assert!((px_half[0 * 2 + 1] - 0.5 * px_full[0 * 2 + 1]).abs() < 1.0e-6);
+    assert!((pe_half[0 * 2 + 1] - 0.5 * pe_full[0 * 2 + 1]).abs() < 1.0e-6);
+    assert!((pv_half[0 * 2 + 1] - 0.5 * pv_full[0 * 2 + 1]).abs() < 1.0e-6);
+}
+
+#[test] // rq-37f8c017
+fn switching_per_pair_type_r_switch_dispatches_correctly() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    // n_types = 2. Diagonal slots (0,0) and (1,1) have r_switch = 5.0
+    // (no switching); off-diagonal (0,1) and (1,0) have r_switch = 4.0
+    // (active switching at r = 4.5).
+    let sigma = vec![1.0_f32, 1.0, 1.0, 1.0];
+    let epsilon = vec![1.0_f32, 1.0, 1.0, 1.0];
+    let cutoff = vec![5.0_f32, 5.0, 5.0, 5.0];
+    let switch = vec![5.0_f32, 4.0, 4.0, 5.0];
+    let table = build_table_with_switch(&device, 2, &sigma, &epsilon, &cutoff, &switch);
+    let r = 4.5_f32;
+    let positions = [[0.0_f32, 0.0, 0.0], [r, 0.0, 0.0]];
+
+    // Mixed-type pair: uses the off-diagonal switch = 4.0.
+    let state_mixed = build_state_with_types(&positions, vec![0, 1]);
+    let buffers_mixed = ParticleBuffers::new(device.clone(), &state_mixed).unwrap();
+    let mut pair_mixed = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    lj_pair_force_no_excl(&buffers_mixed, &mut pair_mixed, &sim_box, &table).unwrap();
+    let (px_mixed, _, _) = download_pair_forces(&pair_mixed);
+    let expected_mixed = switched_fx_on_0(r, 1.0, 1.0, 5.0, 4.0);
+    let rel_mixed = (px_mixed[0 * 2 + 1] - expected_mixed).abs() / expected_mixed.abs().max(1.0e-30);
+    assert!(rel_mixed < 1.0e-4, "mixed: got {} expected {}", px_mixed[0 * 2 + 1], expected_mixed);
+
+    // Same-type pair: uses the diagonal switch = 5.0 (hard-cutoff
+    // degenerate; returns the unswitched LJ value).
+    let state_same = build_state_with_types(&positions, vec![0, 0]);
+    let buffers_same = ParticleBuffers::new(device.clone(), &state_same).unwrap();
+    let mut pair_same = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    lj_pair_force_no_excl(&buffers_same, &mut pair_same, &sim_box, &table).unwrap();
+    let (px_same, _, _) = download_pair_forces(&pair_same);
+    let expected_same = lj_force_components(
+        positions[0],
+        positions[1],
+        sim_box.lengths(),
+        LjScalarParams { sigma: 1.0, epsilon: 1.0, cutoff: 5.0 },
+    )[0];
+    assert_eq!(px_same[0 * 2 + 1], expected_same);
+}
+
+#[test] // rq-dbd3c689
+fn switching_bit_exact_reproducibility_across_runs() {
+    let device = init_device().expect("init_device");
+    let sim_box = default_box();
+    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let n = 64;
+    let positions: Vec<[f32; 3]> = (0..n)
+        .map(|i| {
+            let fi = i as f32;
+            // Place atoms over a range that crosses the switching window
+            // [4.0, 5.0] so the kernel exercises both branches.
+            [fi * 0.15 - 4.8, (fi * 0.3).sin() * 1.5, (fi * 0.7).cos() * 1.2]
+        })
+        .collect();
+    let state = build_state_xyz(&positions);
+
+    let bufs_a = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut pair_a = PairBuffer::new(device.clone(), n, n as u32).unwrap();
+    lj_pair_force_no_excl(&bufs_a, &mut pair_a, &sim_box, &table).unwrap();
+    let (ax, ay, az) = download_pair_forces(&pair_a);
+    let ae = download_pair_energies(&pair_a);
+    let av = download_pair_virials(&pair_a);
+
+    let bufs_b = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut pair_b = PairBuffer::new(device.clone(), n, n as u32).unwrap();
+    lj_pair_force_no_excl(&bufs_b, &mut pair_b, &sim_box, &table).unwrap();
+    let (bx, by, bz) = download_pair_forces(&pair_b);
+    let be = download_pair_energies(&pair_b);
+    let bv = download_pair_virials(&pair_b);
+
+    assert_eq!(ax, bx);
+    assert_eq!(ay, by);
+    assert_eq!(az, bz);
+    assert_eq!(ae, be);
+    assert_eq!(av, bv);
+}
+
+#[test] // rq-214639c9
+fn switching_from_config_populates_user_supplied_r_switch() {
+    use dynamics::io::config::{PairInteractionConfig, ParticleTypeConfig};
+    let device = init_device().expect("init_device");
+    let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }];
+    let pair_interactions = vec![PairInteractionConfig {
+        between: ("Ar".to_string(), "Ar".to_string()),
+        potential: "lennard-jones".to_string(),
+        sigma: 1.0,
+        epsilon: 1.0,
+        cutoff: 5.0,
+        r_switch: 4.0,
+    }];
+    let table =
+        LennardJonesParameterTable::from_config(&device, &particle_types, &pair_interactions)
+            .expect("from_config");
+    let switch = device.dtoh_sync_copy(&table.switch).unwrap();
+    assert_eq!(switch, vec![4.0_f32]);
+}
+
+#[test] // rq-6a542a0a
+fn switching_from_config_receives_default_r_switch_when_omitted() {
+    // Round-trip through load_config so the default r_switch = 0.9 *
+    // cutoff is exercised end-to-end, then assert the parameter table
+    // built from that config carries the default value on every slot.
+    use dynamics::io::load_config;
+    let device = init_device().expect("init_device");
+    let dir = {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "dynamics-switching-default-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&p).expect("create temp dir");
+        p
+    };
+    let config_path = dir.join("sim.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 0
+dt = 1.0e-15
+temperature = 300.0
+
+[integrator]
+kind = "velocity-verlet"
+
+[[particle_types]]
+name = "Ar"
+mass = 1.0
+
+[[particle_types]]
+name = "Kr"
+mass = 2.0
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 5.0
+
+[[pair_interactions]]
+between = ["Ar", "Kr"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 5.0
+
+[[pair_interactions]]
+between = ["Kr", "Kr"]
+potential = "lennard-jones"
+sigma = 1.0
+epsilon = 1.0
+cutoff = 5.0
+"#,
+    )
+    .unwrap();
+    let config = load_config(&config_path).expect("load_config");
+    for pi in &config.pair_interactions {
+        assert!((pi.r_switch - 4.5).abs() < 1.0e-12);
+    }
+    let table = LennardJonesParameterTable::from_config(
+        &device,
+        &config.particle_types,
+        &config.pair_interactions,
+    )
+    .expect("from_config");
+    let switch = device.dtoh_sync_copy(&table.switch).unwrap();
+    assert_eq!(switch, vec![4.5_f32, 4.5, 4.5, 4.5]);
 }

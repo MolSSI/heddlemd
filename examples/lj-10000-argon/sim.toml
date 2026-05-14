@@ -21,6 +21,8 @@ potential = "lennard-jones"
 sigma = 3.40e-10    # m
 epsilon = 1.65e-21  # J  (~120 K * k_B)
 cutoff = 8.5e-10    # m  (2.5 sigma)
+r_switch = 8.5e-10  # m  (== cutoff: hard-cutoff degenerate case; preserves
+                     #     bit-exact reference trajectory)
 
 [output]
 trajectory_every = 10

@@ -285,6 +285,7 @@ fn integrator_owns_force_evaluation_inside_step() {
             sigma: 1.0,
             epsilon: 1.0,
             cutoff: 1.0,
+            r_switch: 1.0,
         }],
         &[],
         &BondList::empty(4),

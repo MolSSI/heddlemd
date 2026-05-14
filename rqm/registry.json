@@ -319,6 +319,13 @@
     "title": "GPU Device Module",
     "type": "section"
   },
+  "rq-0c4f8da8": {
+    "decl": "Scenario: Pair inside r_switch sees the unmodified Lennard-Jones force",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Pair inside r_switch sees the unmodified Lennard-Jones force",
+    "type": "scenario"
+  },
   "rq-0c717392": {
     "decl": "- `Exclusion` — `Debug, Clone, Copy`. Fields: `atom_i: u32`,",
     "file": "forces/bonds",
@@ -926,6 +933,13 @@
     "title": "Reversal Protocol",
     "type": "section"
   },
+  "rq-1d8b8efe": {
+    "decl": "Scenario: Accept r_switch equal to cutoff (hard-cutoff degenerate case)",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Accept r_switch equal to cutoff (hard-cutoff degenerate case)",
+    "type": "scenario"
+  },
   "rq-1ddf84f1": {
     "decl": "## File Format",
     "file": "io/log-output",
@@ -1067,6 +1081,13 @@
     "refs": [],
     "title": "Types",
     "type": "section"
+  },
+  "rq-214639c9": {
+    "decl": "Scenario: from_config populates r_switch from the parsed PairInteractionConfig",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "from_config populates r_switch from the parsed PairInteractionConfig",
+    "type": "scenario"
   },
   "rq-2196fc45": {
     "decl": "### Types",
@@ -1865,12 +1886,26 @@
     "title": "Two independent runs produce byte-identical outputs",
     "type": "scenario"
   },
+  "rq-37f8c017": {
+    "decl": "Scenario: Per-pair-type r_switch dispatches correctly",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Per-pair-type r_switch dispatches correctly",
+    "type": "scenario"
+  },
   "rq-38285db7": {
     "decl": "# Comments start with '#' and run to end of line. Blank lines are",
     "file": "forces/bonds",
     "refs": [],
     "title": "Comments start with '#' and run to end of line. Blank lines are",
     "type": "file"
+  },
+  "rq-38441c15": {
+    "decl": "Scenario: Pair exactly at r_switch sees the unmodified Lennard-Jones force",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Pair exactly at r_switch sees the unmodified Lennard-Jones force",
+    "type": "scenario"
   },
   "rq-385408d0": {
     "decl": "Scenario: Langevin BAOAB rejects friction=0",
@@ -2538,6 +2573,13 @@
     ],
     "title": "SimulationConfig",
     "type": "api-item"
+  },
+  "rq-531afe39": {
+    "decl": "Scenario: Pair beyond r_cut yields zero independent of r_switch",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Pair beyond r_cut yields zero independent of r_switch",
+    "type": "scenario"
   },
   "rq-531faea9": {
     "decl": "Scenario: ForceField with N=4 LJ-only step populates potential_energies and virials",
@@ -3235,6 +3277,13 @@
     "title": "Reject missing schema_version",
     "type": "scenario"
   },
+  "rq-6a542a0a": {
+    "decl": "Scenario: from_config receives the default r_switch when the config omitted it",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "from_config receives the default r_switch when the config omitted it",
+    "type": "scenario"
+  },
   "rq-6ad9a0f8": {
     "decl": "Scenario: bond_types is optional and defaults to empty",
     "file": "io/config-schema",
@@ -3361,6 +3410,13 @@
     "refs": [],
     "title": "Reduction Launcher",
     "type": "section"
+  },
+  "rq-6f4f5ece": {
+    "decl": "Scenario: Default r_switch to 0.9 * cutoff when omitted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Default r_switch to 0.9 * cutoff when omitted",
+    "type": "scenario"
   },
   "rq-6f897168": {
     "decl": "Scenario: images defaults to zero-initialised arrays when None is passed",
@@ -3641,6 +3697,14 @@
     "title": "Trivial-mode contents",
     "type": "scenario"
   },
+  "rq-78d2ad15": {
+    "decl": "### Switching-function degenerate case <!-- inline -->",
+    "file": "forces/lj-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Switching-function degenerate case <!-- inline -->",
+    "type": "section"
+  },
   "rq-78d9fd1c": {
     "decl": "### PTX Module Loading",
     "file": "forces/lj-pair-force",
@@ -3805,6 +3869,13 @@
     "file": "integration/langevin-baoab",
     "refs": [],
     "title": "lan_drift_half wraps positions across the +L/2 boundary",
+    "type": "scenario"
+  },
+  "rq-7cd9471a": {
+    "decl": "Scenario: Reject r_switch greater than cutoff",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject r_switch greater than cutoff",
     "type": "scenario"
   },
   "rq-7d5915bb": {
@@ -4071,6 +4142,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Langevin BAOAB kind with valid parameters is accepted",
+    "type": "scenario"
+  },
+  "rq-871f0292": {
+    "decl": "Scenario: Reject non-finite r_switch",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject non-finite r_switch",
     "type": "scenario"
   },
   "rq-874dbfec": {
@@ -4343,6 +4421,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Sub-skin movement does not trigger a rebuild",
+    "type": "scenario"
+  },
+  "rq-916f99f3": {
+    "decl": "Scenario: switch == cutoff reproduces the hard-cutoff behaviour everywhere inside the cutoff",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "switch == cutoff reproduces the hard-cutoff behaviour everywhere inside the cutoff",
     "type": "scenario"
   },
   "rq-9197d752": {
@@ -5269,6 +5354,13 @@
     "title": "Data Layout",
     "type": "section"
   },
+  "rq-ae20ddac": {
+    "decl": "Scenario: Force is C¹ continuous at r_switch",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Force is C¹ continuous at r_switch",
+    "type": "scenario"
+  },
   "rq-ae65c293": {
     "decl": "Scenario: Reject non-positive cutoff",
     "file": "io/config-schema",
@@ -5472,6 +5564,13 @@
     "file": "particle-state",
     "refs": [],
     "title": "Reject upload when one host array drifts in length",
+    "type": "scenario"
+  },
+  "rq-b4d2f559": {
+    "decl": "Scenario: Reject non-positive r_switch",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject non-positive r_switch",
     "type": "scenario"
   },
   "rq-b4f18ea1": {
@@ -6120,6 +6219,13 @@
     "title": "Reject row with unparseable position",
     "type": "scenario"
   },
+  "rq-cb85cf61": {
+    "decl": "Scenario: Pair inside the switching window has force smaller than the unmodified value",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Pair inside the switching window has force smaller than the unmodified value",
+    "type": "scenario"
+  },
   "rq-cbeeea3c": {
     "decl": "## Algorithm",
     "file": "forces/morse-bonded",
@@ -6249,6 +6355,13 @@
     "title": "Positions visibly evolve over the 100-step run",
     "type": "scenario"
   },
+  "rq-d0f489d7": {
+    "decl": "Scenario: Pair virial inside the switching window equals factor_switched * r²",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Pair virial inside the switching window equals factor_switched * r²",
+    "type": "scenario"
+  },
   "rq-d12c24f0": {
     "decl": "Scenario: Two consecutive step() calls on a Langevin integrator produce different post-call velocities",
     "file": "integration/framework",
@@ -6268,6 +6381,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "minimum_image at the -L/2 boundary stays at -L/2",
+    "type": "scenario"
+  },
+  "rq-d1d84e31": {
+    "decl": "Scenario: Accept user-supplied r_switch in pair_interactions",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Accept user-supplied r_switch in pair_interactions",
     "type": "scenario"
   },
   "rq-d1e7cb57": {
@@ -6402,10 +6522,10 @@
     "type": "scenario"
   },
   "rq-d6bd915a": {
-    "decl": "Scenario: Pair exactly at cutoff is included",
+    "decl": "Scenario: Pair exactly at cutoff yields the hard-cutoff value when switch == cutoff",
     "file": "forces/lj-pair-force",
     "refs": [],
-    "title": "Pair exactly at cutoff is included",
+    "title": "Pair exactly at cutoff yields the hard-cutoff value when switch == cutoff",
     "type": "scenario"
   },
   "rq-d6beaed7": {
@@ -6563,6 +6683,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "pre_step with unchanged box does not refresh the cell-layout cache",
+    "type": "scenario"
+  },
+  "rq-dbd3c689": {
+    "decl": "Scenario: Bit-exact reproducibility across runs with switching active",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Bit-exact reproducibility across runs with switching active",
     "type": "scenario"
   },
   "rq-dc17132d": {
@@ -6924,6 +7051,13 @@
     "title": "Determinism",
     "type": "section"
   },
+  "rq-e5e3443f": {
+    "decl": "Scenario: Force is C¹ continuous at r_cut",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Force is C¹ continuous at r_cut",
+    "type": "scenario"
+  },
   "rq-e5e4b048": {
     "decl": "### Functions",
     "file": "simulation-runner",
@@ -7246,6 +7380,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "Rows appear in the documented order",
+    "type": "scenario"
+  },
+  "rq-ef8013be": {
+    "decl": "Scenario: Newton's third law holds bitwise across the switching window",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Newton's third law holds bitwise across the switching window",
     "type": "scenario"
   },
   "rq-ef902cf6": {
@@ -7628,6 +7769,13 @@
     "title": "Velocity generation is deterministic in the seed",
     "type": "scenario"
   },
+  "rq-f93d278e": {
+    "decl": "Scenario: Pair exactly at r_cut yields zero force and zero energy when switch < cutoff",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Pair exactly at r_cut yields zero force and zero energy when switch < cutoff",
+    "type": "scenario"
+  },
   "rq-f94ee5cd": {
     "decl": "Scenario: Displacement check returns the maximum across all particles",
     "file": "forces/neighbor-list",
@@ -7654,6 +7802,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "Copy of a SimulationBox carries the original's generation",
+    "type": "scenario"
+  },
+  "rq-fb55af77": {
+    "decl": "Scenario: Exclusion scaling multiplies the switched force, energy, and virial",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "Exclusion scaling multiplies the switched force, energy, and virial",
     "type": "scenario"
   },
   "rq-fb608f06": {

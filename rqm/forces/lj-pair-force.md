@@ -28,6 +28,12 @@ This file specifies `LennardJonesParameterTable` (the device-resident
 per-pair-type parameter table), the `lj_pair_force` CUDA kernel in
 `kernels/pair_force.cu`, and the Rust launch helper that drives it.
 
+Each pair contribution is multiplied by a CHARMM-style C¹ switching
+function `S(r²)` over the interval `[r_switch, r_cut]` so that both
+energy and force go smoothly to zero at the cutoff. Below `r_switch`
+the switching factor is exactly `1` and the kernel evaluates the
+unmodified Lennard-Jones force and energy.
+
 ## Algorithm <!-- rq-6d209943 -->
 
 For each ordered `(i, k)` with `0 <= i < N` and `0 <= k <
@@ -48,6 +54,7 @@ neighbor_counts[i]`:
    sigma   = type_sigma[p]
    epsilon = type_epsilon[p]
    cutoff  = type_cutoff[p]
+   switch  = type_switch[p]
    ```
 
 4. Compute the displacement `dx = positions_x[i] - positions_x[j]` (and
@@ -59,7 +66,7 @@ neighbor_counts[i]`:
 6. Compute `r2 = dx*dx + dy*dy + dz*dz`.
 7. If `r2 > cutoff * cutoff`, write `0.0_f32` to all five slots
    (force x/y/z, energy, virial) and stop.
-8. Otherwise, compute the LJ factor and energy in this order:
+8. Compute the unswitched Lennard-Jones factor and energy in this order:
 
    ```
    inv_r2  = 1.0f / r2
@@ -71,12 +78,57 @@ neighbor_counts[i]`:
    energy  = 4.0f * epsilon * (sr12 - sr6)
    ```
 
-9. Compute the per-component force `(fx, fy, fz) = factor * (dx, dy, dz)`
-   and the scalar pair virial `w = fx * dx + fy * dy + fz * dz`. Apply the
-   exclusion scaling (see *Exclusion scaling*) to `fx`, `fy`, `fz`, and to
-   `energy` and `w`.
+   `factor` is the scalar such that the radial Lennard-Jones force
+   vector is `factor * (dx, dy, dz)`; `energy` is the closed-form pair
+   potential `U_lj(r)`.
 
-10. Write the slot's share of each per-pair quantity:
+9. Apply the CHARMM-style C¹ switching function `S(r²)` defined over
+   `[r_switch, r_cut]`. Let `r_s2 = switch * switch` and
+   `r_c2 = cutoff * cutoff`. The polynomial is evaluated in
+   normalised form so the only place the cutoff-width factor appears
+   is `1/delta` (not `1/delta³`), which keeps the arithmetic in range
+   for f32 even at SI-scale lengths where `delta ≈ 10⁻¹⁹ m²` and
+   `delta³` underflows the normal range. Two branches:
+
+   - If `r2 <= r_s2`, the unmodified pair is fully inside the inner
+     plateau:
+
+     ```
+     // S = 1, dS/d(r²) = 0; factor and energy are unchanged.
+     ```
+
+   - Otherwise (`r_s2 < r2`, with `r2 <= r_c2` guaranteed by step 7):
+
+     ```
+     delta        = r_c2 - r_s2
+     inv_delta    = 1.0f / delta
+     tau          = (r2 - r_s2) * inv_delta            // in [0, 1]
+     one_minus    = 1.0f - tau
+     S            = one_minus * one_minus * (1.0f + 2.0f * tau)
+     chain_coeff  = 12.0f * tau * one_minus * inv_delta  // = -2 * dS/d(r²)
+     factor       = S * factor + chain_coeff * energy
+     energy       = S * energy
+     ```
+
+     With `tau = (r² − r_s2) / delta` the polynomial reduces to
+     `S(tau) = (1 − tau)² (1 + 2 tau)` and
+     `dS/d(r²) = −6 tau (1 − tau) / delta`. `S` satisfies
+     `S(tau=0) = 1`, `S(tau=1) = 0`, and has zero derivative at both
+     endpoints, making the resulting force C¹ continuous at
+     `r_switch` and at `r_cut`. The `factor` update is the chain-rule
+     consequence of multiplying the unswitched potential by `S(r²)`:
+     `F_new = S · F_lj − (dS/dr) · U_lj · r̂`, which when expressed via
+     `r²` collapses to
+     `factor_new = S · factor + (−2 · dS/d(r²)) · U_lj`.
+
+10. Compute the per-component force `(fx, fy, fz) = factor * (dx, dy,
+    dz)` using the post-switching `factor`, and the scalar pair virial
+    `w = fx * dx + fy * dy + fz * dz`. Apply the exclusion scaling (see
+    *Exclusion scaling*) to `fx`, `fy`, `fz`, and to the post-switching
+    `energy` and `w`. Switching is always applied before the exclusion
+    scale.
+
+11. Write the slot's share of each per-pair quantity:
 
     ```
     pair_forces_x[slot] = fx
@@ -98,15 +150,26 @@ slot (which contributes zero) when present in trivial mode, and produces
 the correct per-particle net force, potential-energy share, and
 virial share.
 
+### Switching-function degenerate case <!-- inline --> <!-- rq-78d2ad15 -->
+
+When `switch == cutoff` the interval `[r_switch, r_cut]` is empty.
+`r_s2 == r_c2` and the second branch of step 9 is unreachable: step 7
+already gated out `r2 > r_c2`, and the remaining `r2 <= r_c2 == r_s2`
+satisfies the first branch (`r2 <= r_s2`). The unmodified
+Lennard-Jones expression is therefore used everywhere up to and
+including `r2 == r_c2`. This degenerate case is the hard-cutoff
+behaviour: `S = 1` over `[0, r_cut]` and step 7 produces the cliff at
+`r_cut`. No division by zero ever occurs.
+
 ### Parameter-table symmetry <!-- rq-7d92b551 -->
 
-The kernel reads `type_sigma`, `type_epsilon`, and `type_cutoff` at index
-`ti * n_types + tj` without enforcing symmetry between
-`(ti, tj)` and `(tj, ti)`. The expected use is for the host to fill both
-`table[ti * n_types + tj]` and `table[tj * n_types + ti]` from the same
-unordered `[[pair_interactions]]` entry, so the table is symmetric by
-construction. Asymmetric tables yield asymmetric pair forces and break
-Newton's third law.
+The kernel reads `type_sigma`, `type_epsilon`, `type_cutoff`, and
+`type_switch` at index `ti * n_types + tj` without enforcing symmetry
+between `(ti, tj)` and `(tj, ti)`. The expected use is for the host to
+fill both `table[ti * n_types + tj]` and `table[tj * n_types + ti]`
+from the same unordered `[[pair_interactions]]` entry, so the table is
+symmetric by construction. Asymmetric tables yield asymmetric pair
+forces and break Newton's third law.
 
 ### Reproducibility <!-- rq-a1abedca -->
 
@@ -145,31 +208,41 @@ opposites.
     rule.
   - `cutoff: CudaSlice<f32>` — length `n_types * n_types`. Same indexing
     rule.
+  - `switch: CudaSlice<f32>` — length `n_types * n_types`. Entry at
+    index `ti * n_types + tj` holds the inner switching radius
+    `r_switch` (metres) for the unordered pair `(ti, tj)`. Always
+    satisfies `0 < r_switch <= cutoff` for that pair-type. Equality
+    `r_switch == cutoff` selects the hard-cutoff degenerate case
+    described in *Switching-function degenerate case*.
 
-  Construction loads the three host-side `Vec<f32>` parameter tables onto
+  Construction loads the four host-side `Vec<f32>` parameter tables onto
   the device with `htod_sync_copy`. The host-side construction is the
   responsibility of the caller; the standard production path is the
   associated function described below, which builds the table from a
   parsed `Config`.
 
-  The table does not validate the σ/ε/cutoff values themselves: non-finite,
-  zero, or negative entries propagate to the kernel and yield non-finite
-  or numerically meaningless forces.
+  The table does not validate the σ/ε/cutoff/r_switch values themselves:
+  non-finite, zero, or negative entries propagate to the kernel and
+  yield non-finite or numerically meaningless forces.
 
 - `LennardJonesParameterTable::from_config(device: &Arc<CudaDevice>, <!-- inline --> <!-- rq-1adf5954 -->
   particle_types: &[ParticleTypeConfig], pair_interactions:
   &[PairInteractionConfig]) -> Result<LennardJonesParameterTable, GpuError>`
   - `n_types = particle_types.len()`.
-  - Allocates three host-side `Vec<f32>` of length `n_types * n_types`,
+  - Allocates four host-side `Vec<f32>` of length `n_types * n_types`,
     initially zero. For each entry in `pair_interactions`, resolves the
-    two type names to indices `ti`, `tj` via `particle_types` (matched by
-    `name`), and writes the σ, ε, cutoff at both
+    two type names to indices `ti`, `tj` via `particle_types` (matched
+    by `name`), and writes σ, ε, cutoff, and `r_switch` at both
     `[ti * n_types + tj]` and `[tj * n_types + ti]`. The caller is
-    responsible for having validated that every unordered pair is covered
-    (the config loader enforces this; see `io/config-schema.md`).
+    responsible for having validated that every unordered pair is
+    covered and that `r_switch <= cutoff` for every entry (the config
+    loader enforces both; see `io/config-schema.md`). `r_switch` is
+    taken directly from `PairInteractionConfig::r_switch`, which the
+    config loader populates with the user-supplied value when present
+    and with `0.9 * cutoff` when omitted.
   - Uploads each host array to a fresh `CudaSlice<f32>` and returns the
     populated `LennardJonesParameterTable`.
-  - When `n_types == 0` (no particle types declared), all three slices
+  - When `n_types == 0` (no particle types declared), all four slices
     have length zero.
 
 ### CUDA Kernels <!-- rq-4ddab3c7 -->
@@ -195,6 +268,7 @@ extern "C" __global__ void lj_pair_force(
     const float *type_sigma,
     const float *type_epsilon,
     const float *type_cutoff,
+    const float *type_switch,
     const unsigned int *atom_excl_offsets,
     const unsigned int *atom_excl_partners,
     const float *atom_excl_scales,
@@ -225,7 +299,8 @@ unsigned int j = neighbor_list[i * max_neighbors + k];
 
 After resolving `j`, the per-pair-type parameter lookup at
 `type_indices[i] * n_types + type_indices[j]`, the per-pair force,
-energy, and virial calculation, minimum-image, cutoff check, and
+energy, and virial calculation, minimum-image, cutoff check, the
+CHARMM-style C¹ switching function over `[r_switch, r_cut]`, and
 exclusion-list scaling proceed as in the *Algorithm* section above.
 The five quantities (force x/y/z, half-energy, half-virial) are written
 to slot `i * max_neighbors + k`.
@@ -307,10 +382,11 @@ A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
   `neighbor_counts.len() == particle_buffers.particle_count()`,
   `exclusions.particle_count() == particle_buffers.particle_count()`,
   and `params.sigma.len() == params.epsilon.len() == params.cutoff.len()
-  == params.n_types as usize * params.n_types as usize`. Release builds
-  skip the asserts for parity with the other kernel launchers. The
-  launcher does not validate the σ/ε/cutoff entries themselves and does
-  not check any cutoff against `min(lx, ly, lz) / 2`.
+  == params.switch.len() == params.n_types as usize *
+  params.n_types as usize`. Release builds skip the asserts for parity
+  with the other kernel launchers. The launcher does not validate the
+  σ/ε/cutoff/r_switch entries themselves and does not check any cutoff
+  against `min(lx, ly, lz) / 2`.
 
 ## Launch Configuration <!-- rq-4fd872f5 -->
 
@@ -366,7 +442,10 @@ The slot's `Potential` methods:
   the config supplies per-pair `(σ, ε, cutoff)` directly and any combining
   rule is the user's responsibility at config-authoring time.
 - Energy and virial tensor computation; this feature computes forces only.
-- Long-range tail corrections and shifted/truncated potential variants.
+- Long-range tail corrections.
+- Truncated-and-shifted (energy-shift-only) potential variants. The
+  switching function specified in the *Algorithm* section is the only
+  in-scope smoothing scheme.
 - Numerical validation of inputs (cutoff vs. box size, σ > 0, ε > 0).
 - The `f64` precision feature flag.
 - Multi-stream or multi-GPU launches.
@@ -381,8 +460,12 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Background:
     Given a SimulationBox constructed with lx=20.0, ly=20.0, lz=20.0
     And a LennardJonesParameterTable with n_types=1, sigma=[1.0],
-      epsilon=[1.0], cutoff=[5.0]
+      epsilon=[1.0], cutoff=[5.0], switch=[5.0]
     And every particle has type_indices[i] = 0
+    Note: Background fixes switch == cutoff so that scenarios written
+    against the unmodified Lennard-Jones expression remain valid.
+    Scenarios that exercise the switching region override `switch`
+    explicitly in their `Given` clauses.
 
   # --- Module loading ---
 
@@ -433,11 +516,151 @@ Feature: Lennard-Jones O(N²) pair force kernel
     And pair_forces_x[1*2 + 0], pair_forces_y[1*2 + 0], pair_forces_z[1*2 + 0] are all 0.0_f32
 
   @rq-d6bd915a
-  Scenario: Pair exactly at cutoff is included
+  Scenario: Pair exactly at cutoff yields the hard-cutoff value when switch == cutoff
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(5.0, 0, 0)
-    And cutoff=5.0
+    And cutoff=5.0 and switch=5.0
     When lj_pair_force is called
     Then pair_forces_x[0*2 + 1] equals the closed-form LJ force at r=5.0
+
+  # --- Switching function ---
+
+  @rq-0c4f8da8
+  Scenario: Pair inside r_switch sees the unmodified Lennard-Jones force
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5, 0, 0)
+    And cutoff=5.0 and switch=4.0
+    When lj_pair_force is called
+    Then pair_forces_x[0*2 + 1] equals the closed-form LJ force at r=1.5
+    And pair_energies[0*2 + 1] + pair_energies[1*2 + 0]
+      equals 4.0 * ε * (sr12 - sr6) at r=1.5 within f32 round-off
+
+  @rq-38441c15
+  Scenario: Pair exactly at r_switch sees the unmodified Lennard-Jones force
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.0, 0, 0)
+    And cutoff=5.0 and switch=4.0
+    When lj_pair_force is called
+    Then pair_forces_x[0*2 + 1] equals the closed-form LJ force at r=4.0
+    And pair_energies[0*2 + 1] + pair_energies[1*2 + 0]
+      equals 4.0 * ε * (sr12 - sr6) at r=4.0 within f32 round-off
+
+  @rq-f93d278e
+  Scenario: Pair exactly at r_cut yields zero force and zero energy when switch < cutoff
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(5.0, 0, 0)
+    And cutoff=5.0 and switch=4.0
+    When lj_pair_force is called
+    Then pair_forces_x[0*2 + 1], pair_forces_y[0*2 + 1], pair_forces_z[0*2 + 1] are all 0.0_f32
+    And pair_energies[0*2 + 1] and pair_virials[0*2 + 1] are both 0.0_f32
+
+  @rq-cb85cf61
+  Scenario: Pair inside the switching window has force smaller than the unmodified value
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.5, 0, 0)
+    And cutoff=5.0 and switch=4.0
+    When lj_pair_force is called to obtain f_switched
+    And lj_pair_force is called with switch=cutoff to obtain f_unmodified
+    Then |f_switched.x| is strictly less than |f_unmodified.x|
+    And f_switched.x has the same sign as f_unmodified.x (or both are 0)
+    And the switched pair_energies[0*2 + 1] + pair_energies[1*2 + 0]
+      equals S(r²) * 4.0 * ε * (sr12 - sr6) at r=4.5 within f32 round-off,
+      where S(r²) = (r_c²-r²)²(r_c²+2r²-3r_s²)/(r_c²-r_s²)³
+
+  @rq-ae20ddac
+  Scenario: Force is C¹ continuous at r_switch
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(r, 0, 0)
+    And cutoff=5.0 and switch=4.0
+    When lj_pair_force is called at r = 4.0 - 1e-3 to obtain f_below
+    And lj_pair_force is called at r = 4.0 + 1e-3 to obtain f_above
+    Then |f_below.x - f_above.x| is bounded by 1e-2 * |f_below.x|
+
+  @rq-e5e3443f
+  Scenario: Force is C¹ continuous at r_cut
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(r, 0, 0)
+    And cutoff=5.0 and switch=4.0
+    When lj_pair_force is called at r = 5.0 - 1e-3 to obtain f_inside
+    Then |f_inside.x| is bounded by 1e-2 * |closed-form LJ force at r = 4.0|
+
+  @rq-916f99f3
+  Scenario: switch == cutoff reproduces the hard-cutoff behaviour everywhere inside the cutoff
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(r, 0, 0) for r in {1.5, 3.0, 4.5}
+    And cutoff=5.0 and switch=5.0
+    When lj_pair_force is called for each r
+    Then pair_forces_x[0*2 + 1] equals the closed-form LJ force at that r
+    And pair_energies[0*2 + 1] + pair_energies[1*2 + 0]
+      equals 4.0 * ε * (sr12 - sr6) at that r within f32 round-off
+
+  @rq-531afe39
+  Scenario: Pair beyond r_cut yields zero independent of r_switch
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(6.0, 0, 0)
+    And cutoff=5.0 and switch=4.0
+    When lj_pair_force is called
+    Then pair_forces_x[0*2 + 1], pair_forces_y[0*2 + 1], pair_forces_z[0*2 + 1] are all 0.0_f32
+    And pair_energies[0*2 + 1] and pair_virials[0*2 + 1] are both 0.0_f32
+
+  @rq-d0f489d7
+  Scenario: Pair virial inside the switching window equals factor_switched * r²
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.5, 0, 0)
+    And cutoff=5.0 and switch=4.0
+    When lj_pair_force is called
+    Then pair_virials[0*2 + 1] + pair_virials[1*2 + 0]
+      equals factor_switched * r² at r=4.5 within f32 round-off,
+      where factor_switched = S(r²) · factor_lj − 2 · dS/d(r²) · U_lj
+
+  @rq-ef8013be
+  Scenario: Newton's third law holds bitwise across the switching window
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.5, 0.4, -0.2)
+    And cutoff=5.0 and switch=4.0
+    When lj_pair_force is called
+    Then pair_forces_x[0*2 + 1] equals -pair_forces_x[1*2 + 0] bitwise
+    And pair_forces_y[0*2 + 1] equals -pair_forces_y[1*2 + 0] bitwise
+    And pair_forces_z[0*2 + 1] equals -pair_forces_z[1*2 + 0] bitwise
+
+  @rq-fb55af77
+  Scenario: Exclusion scaling multiplies the switched force, energy, and virial
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.5, 0, 0)
+    And cutoff=5.0 and switch=4.0
+    And a DeviceExclusionList containing the entry (0, 1, 0.5)
+    When lj_pair_force is called to obtain pair_forces_scaled
+    And lj_pair_force is called with an empty DeviceExclusionList
+      to obtain pair_forces_unscaled
+    Then pair_forces_scaled.x[0*2 + 1] equals 0.5 * pair_forces_unscaled.x[0*2 + 1]
+      within f32 round-off
+    And the analogous relation holds for pair_energies and pair_virials
+
+  @rq-37f8c017
+  Scenario: Per-pair-type r_switch dispatches correctly
+    Given a LennardJonesParameterTable with n_types=2,
+      sigma=[1.0, 1.0, 1.0, 1.0], epsilon=[1.0, 1.0, 1.0, 1.0],
+      cutoff=[5.0, 5.0, 5.0, 5.0], switch=[5.0, 4.0, 4.0, 5.0]
+    And a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.5, 0, 0)
+    When lj_pair_force is called with type_indices = [0, 1]
+    Then pair_forces_x[0*2 + 1] equals S(r²) * closed-form LJ force at r=4.5
+      using the off-diagonal switch=4.0
+    And lj_pair_force called with type_indices = [0, 0] under the same positions
+      yields pair_forces_x[0*2 + 1] equal to the unswitched closed-form LJ force at r=4.5
+      using the diagonal switch=5.0
+
+  @rq-dbd3c689
+  Scenario: Bit-exact reproducibility across runs with switching active
+    Given two ParticleBuffers built from byte-identical ParticleState inputs of N=64
+    And the LennardJonesParameterTable for each run has switch < cutoff
+    When lj_pair_force is launched on each with identical parameters
+    Then run A's pair_forces_x, pair_forces_y, pair_forces_z, pair_energies,
+      and pair_virials agree byte-for-byte with run B's
+
+  @rq-214639c9
+  Scenario: from_config populates r_switch from the parsed PairInteractionConfig
+    Given a Config with particle_types ["Ar"] and a single pair_interactions
+      entry between=["Ar","Ar"] with cutoff=5.0 and r_switch=4.0
+    When LennardJonesParameterTable::from_config(device, &config.particle_types,
+      &config.pair_interactions) is called
+    Then the returned table has switch downloaded to the host equal to [4.0]
+
+  @rq-6a542a0a
+  Scenario: from_config receives the default r_switch when the config omitted it
+    Given a Config in which load_config has populated PairInteractionConfig.r_switch
+      with 0.9 * cutoff because the [[pair_interactions]] entry omitted r_switch
+    When LennardJonesParameterTable::from_config is called
+    Then the returned table has switch downloaded to the host equal to
+      0.9 * cutoff for every entry, with both diagonal and off-diagonal slots
+      filled symmetrically
 
   # --- Force-zero point ---
 

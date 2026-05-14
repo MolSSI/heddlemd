@@ -444,6 +444,7 @@ fn diatomic_equilibrium_produces_zero_net_force() {
         sigma: 1.0,
         epsilon: 1.0,
         cutoff: 0.5,
+        r_switch: 0.5,
     };
     let mut ff = ForceField::new(
         device.clone(),
@@ -478,6 +479,7 @@ fn newtons_third_law_holds_for_combined_force() {
         sigma: 1.0,
         epsilon: 1.0,
         cutoff: 5.0,
+        r_switch: 5.0,
     };
     let mut ff = ForceField::new(
         device.clone(),

@@ -522,6 +522,95 @@ fn reject_nonpositive_cutoff() {
     }
 }
 
+// rq-d1d84e31
+#[test]
+fn accept_user_supplied_r_switch() {
+    let dir = tmp_path("accept_r_switch");
+    let body = minimal_config().replace(
+        "cutoff = 1.0e-9\n",
+        "cutoff = 1.0e-9\nr_switch = 9.0e-10\n",
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).expect("load_config");
+    assert_eq!(cfg.pair_interactions[0].r_switch, 9.0e-10);
+}
+
+// rq-6f4f5ece
+#[test]
+fn default_r_switch_to_0_9_times_cutoff_when_omitted() {
+    let dir = tmp_path("default_r_switch");
+    let path = write_config(&dir, &minimal_config());
+    let cfg = load_config(&path).expect("load_config");
+    // 0.9 * 1.0e-9 = 9.0e-10 exactly in f64 since 0.9 is not exact but
+    // the relative tolerance below tolerates the round-off.
+    let expected = 0.9_f64 * 1.0e-9;
+    assert!((cfg.pair_interactions[0].r_switch - expected).abs() < 1.0e-25);
+}
+
+// rq-1d8b8efe
+#[test]
+fn accept_r_switch_equal_to_cutoff() {
+    let dir = tmp_path("r_switch_eq_cutoff");
+    let body = minimal_config().replace(
+        "cutoff = 1.0e-9\n",
+        "cutoff = 1.0e-9\nr_switch = 1.0e-9\n",
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).expect("load_config");
+    assert_eq!(cfg.pair_interactions[0].r_switch, 1.0e-9);
+}
+
+// rq-7cd9471a
+#[test]
+fn reject_r_switch_greater_than_cutoff() {
+    let dir = tmp_path("r_switch_gt_cutoff");
+    let body = minimal_config().replace(
+        "cutoff = 1.0e-9\n",
+        "cutoff = 1.0e-9\nr_switch = 1.1e-9\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "pair_interactions[0].r_switch")
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-b4d2f559
+#[test]
+fn reject_nonpositive_r_switch() {
+    let dir = tmp_path("r_switch_zero");
+    let body = minimal_config().replace(
+        "cutoff = 1.0e-9\n",
+        "cutoff = 1.0e-9\nr_switch = 0.0\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "pair_interactions[0].r_switch")
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-871f0292
+#[test]
+fn reject_nonfinite_r_switch() {
+    let dir = tmp_path("r_switch_nan");
+    let body = minimal_config().replace(
+        "cutoff = 1.0e-9\n",
+        "cutoff = 1.0e-9\nr_switch = nan\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "pair_interactions[0].r_switch")
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
 // rq-a3a5905d
 #[test]
 fn reject_unknown_potential() {

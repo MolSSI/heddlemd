@@ -23,18 +23,35 @@ pub fn empty_exclusions(device: &Arc<CudaDevice>, n: usize) -> DeviceExclusionLi
 
 /// Build a `LennardJonesParameterTable` for a single-type system using one
 /// (σ, ε, cutoff) triple. Equivalent to the n_types=1 case with a single
-/// table entry that every particle pair looks up.
+/// table entry that every particle pair looks up. `r_switch` is set equal
+/// to `cutoff`, which selects the hard-cutoff degenerate case in the LJ
+/// kernel so that tests written against the unmodified Lennard-Jones
+/// expression are unaffected.
 pub fn single_type_lj_table(
     device: &Arc<CudaDevice>,
     sigma: f32,
     epsilon: f32,
     cutoff: f32,
 ) -> LennardJonesParameterTable {
+    single_type_lj_table_with_switch(device, sigma, epsilon, cutoff, cutoff)
+}
+
+/// Build a `LennardJonesParameterTable` for a single-type system with an
+/// explicit `r_switch < cutoff`. Tests that exercise the switching
+/// function use this helper.
+pub fn single_type_lj_table_with_switch(
+    device: &Arc<CudaDevice>,
+    sigma: f32,
+    epsilon: f32,
+    cutoff: f32,
+    r_switch: f32,
+) -> LennardJonesParameterTable {
     LennardJonesParameterTable {
         n_types: 1,
         sigma: device.htod_sync_copy(&[sigma]).expect("upload sigma"),
         epsilon: device.htod_sync_copy(&[epsilon]).expect("upload epsilon"),
         cutoff: device.htod_sync_copy(&[cutoff]).expect("upload cutoff"),
+        switch: device.htod_sync_copy(&[r_switch]).expect("upload switch"),
     }
 }
 

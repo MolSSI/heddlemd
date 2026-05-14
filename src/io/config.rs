@@ -209,6 +209,7 @@ pub struct PairInteractionConfig {
     pub sigma: f64,
     pub epsilon: f64,
     pub cutoff: f64,
+    pub r_switch: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -564,12 +565,35 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
             .map_err(rename_field(format!("pair_interactions[{i}].cutoff")))?;
         require_finite_positive(&format!("pair_interactions[{i}].cutoff"), cutoff)?;
 
+        // r_switch: optional, defaults to 0.9 * cutoff; must satisfy
+        // 0 < r_switch <= cutoff. Setting r_switch == cutoff selects the
+        // hard-cutoff degenerate case in the LJ kernel.
+        let r_switch = match tbl.get("r_switch") {
+            Some(toml::Value::Float(v)) => *v,
+            Some(toml::Value::Integer(n)) => *n as f64,
+            Some(_) => {
+                return Err(invalid(
+                    &format!("pair_interactions[{i}].r_switch"),
+                    "expected a float",
+                ));
+            }
+            None => 0.9 * cutoff,
+        };
+        require_finite_positive(&format!("pair_interactions[{i}].r_switch"), r_switch)?;
+        if r_switch > cutoff {
+            return Err(invalid(
+                &format!("pair_interactions[{i}].r_switch"),
+                format!("r_switch ({r_switch}) exceeds cutoff ({cutoff})"),
+            ));
+        }
+
         pair_interactions.push(PairInteractionConfig {
             between,
             potential,
             sigma,
             epsilon,
             cutoff,
+            r_switch,
         });
     }
 

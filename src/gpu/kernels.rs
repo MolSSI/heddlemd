@@ -161,6 +161,7 @@ pub struct LennardJonesParameterTable {
     pub sigma: CudaSlice<f32>,
     pub epsilon: CudaSlice<f32>,
     pub cutoff: CudaSlice<f32>,
+    pub switch: CudaSlice<f32>,
 }
 
 impl LennardJonesParameterTable {
@@ -175,6 +176,7 @@ impl LennardJonesParameterTable {
         let mut sigma_host: Vec<f32> = vec![0.0; len];
         let mut epsilon_host: Vec<f32> = vec![0.0; len];
         let mut cutoff_host: Vec<f32> = vec![0.0; len];
+        let mut switch_host: Vec<f32> = vec![0.0; len];
 
         for pi in pair_interactions {
             let ti = particle_types
@@ -188,23 +190,28 @@ impl LennardJonesParameterTable {
             let s = pi.sigma as f32;
             let e = pi.epsilon as f32;
             let c = pi.cutoff as f32;
+            let rs = pi.r_switch as f32;
             sigma_host[ti * n_types + tj] = s;
             sigma_host[tj * n_types + ti] = s;
             epsilon_host[ti * n_types + tj] = e;
             epsilon_host[tj * n_types + ti] = e;
             cutoff_host[ti * n_types + tj] = c;
             cutoff_host[tj * n_types + ti] = c;
+            switch_host[ti * n_types + tj] = rs;
+            switch_host[tj * n_types + ti] = rs;
         }
 
         let sigma = htod_or_empty_f32(device, &sigma_host)?;
         let epsilon = htod_or_empty_f32(device, &epsilon_host)?;
         let cutoff = htod_or_empty_f32(device, &cutoff_host)?;
+        let switch = htod_or_empty_f32(device, &switch_host)?;
 
         Ok(LennardJonesParameterTable {
             n_types: n_types as u32,
             sigma,
             epsilon,
             cutoff,
+            switch,
         })
     }
 }
@@ -247,6 +254,7 @@ pub fn lj_pair_force(
     debug_assert_eq!(params.sigma.len(), table_len);
     debug_assert_eq!(params.epsilon.len(), table_len);
     debug_assert_eq!(params.cutoff.len(), table_len);
+    debug_assert_eq!(params.switch.len(), table_len);
 
     let n_u32 = n as u32;
     let func = particle_buffers
@@ -284,6 +292,7 @@ pub fn lj_pair_force(
                 &params.sigma,
                 &params.epsilon,
                 &params.cutoff,
+                &params.switch,
                 atom_excl_offsets,
                 atom_excl_partners,
                 atom_excl_scales,
