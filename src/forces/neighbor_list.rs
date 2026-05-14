@@ -5,7 +5,7 @@ use std::time::Instant;
 use cudarc::driver::{CudaDevice, CudaSlice};
 
 use crate::gpu::{
-    GpuError, ParticleBuffers, SPATIAL_HASH_MAX_CELLS, SPATIAL_HASH_SCAN_BLOCK_SIZE,
+    GpuError, ParticleBuffers, SPATIAL_HASH_SCAN_BLOCK_SIZE,
     compute_cell_indices_and_histogram, copy_positions_into_reference,
     neighbor_displacement_squared, neighbor_list_build, prefix_scan_cell_counts,
     scatter_atoms_into_cells, sort_cells_by_particle_id,
@@ -85,7 +85,7 @@ pub struct CellListData {
     pub cell_indices: CudaSlice<u32>,
     pub cell_counts: CudaSlice<u32>,
     pub write_cursors: CudaSlice<u32>,
-    pub scan_block_totals: CudaSlice<u32>,
+    pub scan_block_totals: Vec<CudaSlice<u32>>,
     pub sorted_particle_ids: CudaSlice<u32>,
     pub cell_offsets: CudaSlice<u32>,
     pub reference_positions_x: CudaSlice<f32>,
@@ -154,9 +154,7 @@ impl NeighborListState {
         let write_cursors = device
             .alloc_zeros::<u32>(n_cells_total)
             .map_err(GpuError::from)?;
-        let scan_block_totals = device
-            .alloc_zeros::<u32>(scan_blocks_for(n_cells_total))
-            .map_err(GpuError::from)?;
+        let scan_block_totals = alloc_scan_block_totals(&device, n_cells_total)?;
         let sorted_particle_ids = device
             .alloc_zeros::<u32>(particle_count.max(1))
             .map_err(GpuError::from)?;
@@ -284,9 +282,8 @@ impl NeighborListState {
             cl.write_cursors = device
                 .alloc_zeros::<u32>(new_n_cells_total)
                 .map_err(GpuError::from)?;
-            cl.scan_block_totals = device
-                .alloc_zeros::<u32>(scan_blocks_for(new_n_cells_total))
-                .map_err(GpuError::from)?;
+            cl.scan_block_totals =
+                alloc_scan_block_totals(&device, new_n_cells_total)?;
         }
         cl.n_cells = new_n_cells;
         cl.cell_size = new_cell_size;
@@ -522,19 +519,59 @@ fn compute_cell_layout(
     Ok((n_cells, cell_size))
 }
 
+// rq-d8e4407a
+//
+// The device addresses cells with a `u32` cell index (the cell-index
+// arithmetic and every scan kernel argument are `u32`), so the cell
+// grid may hold at most `u32::MAX` cells. Checked before any device
+// buffer is allocated so an over-fine grid fails loud rather than
+// overflowing the cell-index arithmetic.
 fn check_n_cells_total(n_cells_total: usize) -> Result<(), NeighborListError> {
-    if n_cells_total > SPATIAL_HASH_MAX_CELLS {
+    let max_supported = u32::MAX as usize;
+    if n_cells_total > max_supported {
         return Err(NeighborListError::TooManyCells {
             n_cells_total,
-            max_supported: SPATIAL_HASH_MAX_CELLS,
+            max_supported,
         });
     }
     Ok(())
 }
 
-fn scan_blocks_for(n_cells_total: usize) -> usize {
+// rq-a060036e
+//
+// Lengths of the recursive prefix scan's block-totals stack for a grid
+// of `n_cells_total` cells: level 0 holds `ceil(n_cells_total / B)`
+// per-block totals, each subsequent level holds `ceil(prev / B)`, and
+// the stack ends with the first level of length 1. Every
+// `prefix_scan_local_blocks` call needs a block-totals output buffer,
+// including the terminal single-block one, so the last length is 1.
+fn scan_stack_lengths(n_cells_total: usize) -> Vec<usize> {
     let block = SPATIAL_HASH_SCAN_BLOCK_SIZE as usize;
-    (n_cells_total + block - 1) / block
+    let mut lengths = Vec::new();
+    let mut len = n_cells_total;
+    loop {
+        let blocks = len.div_ceil(block);
+        lengths.push(blocks);
+        if blocks <= 1 {
+            break;
+        }
+        len = blocks;
+    }
+    lengths
+}
+
+fn alloc_scan_block_totals(
+    device: &Arc<CudaDevice>,
+    n_cells_total: usize,
+) -> Result<Vec<CudaSlice<u32>>, NeighborListError> {
+    scan_stack_lengths(n_cells_total)
+        .into_iter()
+        .map(|len| {
+            device
+                .alloc_zeros::<u32>(len.max(1))
+                .map_err(|e| NeighborListError::Gpu(GpuError::from(e)))
+        })
+        .collect()
 }
 
 fn map_timings_err(e: crate::timings::TimingsError) -> NeighborListError {

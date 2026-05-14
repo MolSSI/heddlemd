@@ -93,15 +93,20 @@ The pipeline runs as a sequence of device kernels:
    in value because addition is associative; the final `cell_counts`
    array is identical across runs even though the order of atomic
    updates is not.
-2. **Exclusive prefix scan.** A multi-block device scan writes the
-   exclusive prefix sum of `cell_counts` into `cell_offsets`. The scan
-   uses a per-block local scan plus a single-block scan of the block
-   totals plus an add-back. The output invariant is
+2. **Exclusive prefix scan.** A recursive multi-level device scan writes
+   the exclusive prefix sum of `cell_counts` into `cell_offsets`. Each
+   level performs a per-block local exclusive scan and emits one
+   inclusive total per block; the array of per-block totals is scanned
+   by the same procedure applied recursively, and the scanned totals are
+   added back into the level below. The recursion bottoms out at a level
+   whose input fits in a single block. The output invariant is
    `cell_offsets[c] = sum_{c' < c} cell_counts[c']` for `c` in
-   `[0, n_cells_total]`. The implementation supports `n_cells_total` up
-   to one level of block-totals recursion; configurations that would
-   exceed this are rejected at construction time via
-   `NeighborListError::TooManyCells`.
+   `[0, n_cells_total]`, with `cell_offsets[n_cells_total] =
+   particle_count`. The scan imposes no cap on `n_cells_total`; the only
+   ceiling is the device's `u32` cell addressing (see
+   `NeighborListError::TooManyCells`). Integer addition is associative,
+   so the scan result is bit-exact run-to-run regardless of block
+   scheduling.
 3. **Scatter.** `write_cursors` is reset to zero. Each thread handles
    one atom and computes
    `slot = atomicAdd(&write_cursors[cell_indices[i]], 1)`, then writes
@@ -117,8 +122,10 @@ The pipeline runs as a sequence of device kernels:
    `(cell_index, particle_id)` lex order.
 
 No host download or upload of particle data occurs in the rebuild. The
-host work per rebuild is six device-side kernel launches plus one
-device memset (zeroing `write_cursors`).
+host work per rebuild is the three per-atom / per-cell kernel launches
+(cell-index + histogram, scatter, per-cell sort), the prefix scan's
+`O(log(n_cells_total))` launches, and one device memset (zeroing
+`write_cursors`).
 
 ## Neighbor List Construction <!-- rq-33aa3e1d -->
 
@@ -206,8 +213,8 @@ state:
 4. Reallocates the device buffers sized by `n_cells_total` (`cell_offsets`
    to `n_cells_total + 1`; `cell_counts` and `write_cursors` to
    `n_cells_total`) if `n_cells_total` differs from the previous value,
-   and reallocates the scan's block-totals scratch when the implied
-   block count changes. Other device buffers (`neighbor_list`,
+   and rebuilds the prefix scan's block-totals stack to match the new
+   `n_cells_total`. Other device buffers (`neighbor_list`,
    `neighbor_counts`, `reference_positions_*`, `disp_sq`,
    `overflow_flag`, `cell_indices`) are sized by `particle_count` or are
    scalar and are not reallocated.
@@ -354,10 +361,14 @@ lifetime of the run.
   - `write_cursors: CudaSlice<u32>` (length `n_cells_total`) — per-cell
     atomic write cursors used by the scatter stage. Reset to zero at the
     start of every rebuild. Reallocated when `n_cells_total` changes.
-  - `scan_block_totals: CudaSlice<u32>` (length
-    `ceil(n_cells_total / scan_block_size)`) — scratch for the
-    multi-block prefix scan. Reallocated when the implied block count
-    changes (in practice, when `n_cells_total` changes).
+  - `scan_block_totals: Vec<CudaSlice<u32>>` — the block-totals stack
+    for the recursive prefix scan. Buffer `l` holds the per-block
+    inclusive totals produced at recursion level `l` and has length
+    `ceil(n_cells_total / scan_block_size^(l + 1))`; the stack carries
+    one buffer per recursion level — `O(log(n_cells_total))` buffers, at
+    most four at the 256-thread block size since the buffer count is
+    bounded by the `u32` cell-addressing limit. Rebuilt as a whole when
+    `n_cells_total` changes.
   - `sorted_particle_ids: CudaSlice<u32>` (length `N`)
   - `reference_positions_x/y/z: CudaSlice<f32>` (length `N`)
   - `disp_sq: CudaSlice<f32>` (length `N`) — scratch for the
@@ -384,10 +395,13 @@ lifetime of the run.
     — the simulation box is smaller than `3 * (r_cut + r_skin)` along
     `axis`. Detected at construction and on box-generation refresh.
   - `TooManyCells { n_cells_total: usize, max_supported: usize }` — the
-    cell layout would produce more cells than the device-side prefix
-    scan supports with one level of block-totals recursion (the
-    practical limit is `scan_block_size²`). Detected at construction
-    and on box-generation refresh.
+    cell layout would produce more cells than the device can address
+    with a `u32` cell index. `max_supported` is `u32::MAX as usize`.
+    Detected at construction and on box-generation refresh, before any
+    device buffer is allocated. In practice GPU memory is exhausted by
+    the `n_cells_total`-sized buffers long before this ceiling is
+    reached, but the check makes that case an explicit error rather
+    than silent integer overflow in the cell-index arithmetic.
 
 ### Functions <!-- rq-3553aab2 -->
 
@@ -395,12 +409,12 @@ lifetime of the run.
   - Constructs a `CellList`-mode state.
   - Computes `n_cells` per axis from `floor(L_axis / (r_cut + r_skin))`.
   - Returns `BoxTooSmallForCells` if any axis has `n_cells < 3`.
-  - Returns `TooManyCells` if `n_cells_total` exceeds the device-side
-    scan's supported maximum.
+  - Returns `TooManyCells` if `n_cells_total` exceeds `u32::MAX`.
   - Allocates every device buffer described in the *CellList*-mode field
-    list, including the new persistent scratch buffers (`cell_indices`,
-    `cell_counts`, `write_cursors`, `scan_block_totals`). Reference
-    positions start at zero; `needs_rebuild` starts at `true`.
+    list, including the persistent scratch buffers (`cell_indices`,
+    `cell_counts`, `write_cursors`) and the block-totals stack
+    (`scan_block_totals`). Reference positions start at zero;
+    `needs_rebuild` starts at `true`.
   - Stores `r_cut` so the cache-refresh path (see *Box Generation
     Tracking*) can recompute `n_cells` and `cell_size` from a mutated
     box. `r_cut` is the largest cutoff across every consumer of the
@@ -503,19 +517,20 @@ extern "C" __global__ void compute_cell_indices_and_histogram(
     unsigned int n);
 
 extern "C" __global__ void prefix_scan_local_blocks(
-    const unsigned int *cell_counts,
-    unsigned int *cell_offsets,
-    unsigned int *scan_block_totals,
-    unsigned int n_cells_total);
-
-extern "C" __global__ void prefix_scan_block_totals(
-    unsigned int *scan_block_totals,
-    unsigned int n_blocks);
+    const unsigned int *input,
+    unsigned int *output,
+    unsigned int *block_totals,
+    unsigned int len);
 
 extern "C" __global__ void prefix_scan_apply_block_totals(
-    const unsigned int *scan_block_totals,
+    const unsigned int *block_offsets,
+    unsigned int *output,
+    unsigned int len);
+
+extern "C" __global__ void prefix_scan_finalize_offsets(
     unsigned int *cell_offsets,
-    unsigned int n_cells_total);
+    unsigned int n_cells_total,
+    unsigned int particle_count);
 
 extern "C" __global__ void scatter_atoms_into_cells(
     const unsigned int *cell_indices,
@@ -534,11 +549,15 @@ extern "C" __global__ void sort_cells_by_particle_id(
 `cell_indices` and increments `cell_counts[cell_idx]` via `atomicAdd`.
 
 `prefix_scan_local_blocks` performs a per-block exclusive scan over
-`cell_counts`, writing the local scan to `cell_offsets` and the
-block-total sums to `scan_block_totals`. `prefix_scan_block_totals`
-exclusive-scans the block totals in place (single block).
-`prefix_scan_apply_block_totals` adds the scanned block totals back into
-`cell_offsets` and writes `cell_offsets[n_cells_total] = particle_count`.
+`input[0 .. len]`, writing the local scan to `output[0 .. len]` and each
+block's inclusive total to `block_totals[blockIdx]`. Each thread reads
+its input element before any write and blocks write disjoint output
+ranges, so `input` and `output` may alias the same buffer — the
+recursive driver scans each block-totals level of the stack in place.
+`prefix_scan_apply_block_totals` adds `block_offsets[gid / scan_block_size]`
+into `output[gid]` for every `gid < len`. `prefix_scan_finalize_offsets`
+writes the trailing `cell_offsets[n_cells_total] = particle_count`
+sentinel with a single thread.
 
 `scatter_atoms_into_cells` writes
 `sorted_particle_ids[cell_offsets[cell_indices[i]] + atomicAdd(&write_cursors[cell_indices[i]], 1)] = i`.
@@ -561,9 +580,15 @@ Neighbor-list-build pipeline:
 Spatial-hash pipeline:
 
 - `compute_cell_indices_and_histogram(particle_buffers, sim_box, n_cells, cell_size, cell_indices, cell_counts) -> Result<(), GpuError>` <!-- rq-10f6f831 -->
-- `prefix_scan_cell_counts(cell_counts, cell_offsets, scan_block_totals, particle_count) -> Result<(), GpuError>` — <!-- rq-2ef5e222 -->
-  launches the three scan kernels in sequence. Writes
-  `cell_offsets[n_cells_total] = particle_count` in the apply step.
+- `prefix_scan_cell_counts(cell_counts, cell_offsets, scan_block_totals, n_cells_total, particle_count) -> Result<(), GpuError>` — <!-- rq-2ef5e222 -->
+  drives the recursive multi-level exclusive scan. Scans `cell_counts`
+  into `cell_offsets` with `prefix_scan_local_blocks`, emitting
+  `scan_block_totals[0]`; recursively scans each block-totals level of
+  the stack in place; applies each level's scanned totals back into the
+  level below with `prefix_scan_apply_block_totals`; finishes with
+  `prefix_scan_finalize_offsets` to write the
+  `cell_offsets[n_cells_total] = particle_count` sentinel. Issues
+  `O(log(n_cells_total))` kernel launches.
 - `scatter_atoms_into_cells(cell_indices, cell_offsets, write_cursors, sorted_particle_ids, particle_count) -> Result<(), GpuError>` — <!-- rq-9d0cb192 -->
   zeroes `write_cursors` before launching the scatter kernel.
 - `sort_cells_by_particle_id(cell_offsets, sorted_particle_ids, n_cells_total) -> Result<(), GpuError>` <!-- rq-165c4422 -->
@@ -577,15 +602,14 @@ Spatial-hash pipeline:
   with grid `ceil(n / 256)`.
 - Block size: 256 threads for the per-cell kernel
   (`sort_cells_by_particle_id`), with grid `ceil(n_cells_total / 256)`.
-- Block size: 256 threads for the per-cell scan kernels
-  (`prefix_scan_local_blocks`, `prefix_scan_apply_block_totals`), with
-  grid `ceil(n_cells_total / 256)`. The block-totals kernel
-  (`prefix_scan_block_totals`) runs a single block of 256 threads;
-  `scan_block_totals` has length `ceil(n_cells_total / 256)` and must
-  fit in one block (this is the source of the `TooManyCells`
-  construction-time check).
-- Shared memory: zero, except for the scan kernels, which use one
-  `unsigned int[block_size]` for the local scan.
+- Block size: 256 threads for the scan kernels
+  (`prefix_scan_local_blocks`, `prefix_scan_apply_block_totals`). At
+  recursion level `l` both are launched with grid `ceil(len_l / 256)`,
+  where `len_0 = n_cells_total` and `len_{l+1} = ceil(len_l / 256)`; the
+  recursion terminates at the level whose input fits in a single block.
+  `prefix_scan_finalize_offsets` runs a single thread.
+- Shared memory: zero, except for `prefix_scan_local_blocks`, which uses
+  one `unsigned int[2 * block_size]` for the double-buffered local scan.
 - Stream: the default stream carried by `particle_buffers.device`.
 
 ## Determinism <!-- rq-c62bb861 -->
@@ -620,12 +644,14 @@ guarantee; it only forfeits the canonical-ordering testability.
 
 ## Performance Notes <!-- rq-54a28837 -->
 
-- Cell-list rebuild cost is six kernel launches plus one device memset,
-  with no host-device transfers of particle data. Total work is `O(N)`
-  for the per-atom kernels (cell index, histogram, scatter), `O(N · d)`
-  for the per-cell sort at average cell density `d`, and
-  `O(n_cells_total)` for the prefix scan. At N = 10⁴ in liquid density
-  the rebuild completes in roughly tens of microseconds; rebuild
+- Cell-list rebuild cost is the per-atom and per-cell kernels plus the
+  prefix scan and one device memset, with no host-device transfers of
+  particle data. The prefix scan issues `O(log(n_cells_total))` kernel
+  launches — a small constant, at most six up to ~16 M cells. Total
+  work is `O(N)` for the per-atom kernels (cell index, histogram,
+  scatter), `O(N · d)` for the per-cell sort at average cell density
+  `d`, and `O(n_cells_total)` for the prefix scan. At N = 10⁴ in liquid
+  density the rebuild completes in roughly tens of microseconds; rebuild
   interval is typically 10–100 timesteps so amortised per-step cost is
   well below the contribution kernel cost.
 - Atomic-add contention: each cell sees on the order of `d` serialised
@@ -639,11 +665,6 @@ guarantee; it only forfeits the canonical-ordering testability.
 
 ## Out of Scope <!-- rq-58acf788 -->
 
-- Recursion in the device-side prefix scan beyond one level of
-  block-totals. The supported `n_cells_total` is bounded by
-  `scan_block_size² = 65536` (at the documented 256-thread block size);
-  beyond that, construction returns `TooManyCells`. Adding further
-  recursion to support larger cell counts is its own feature.
 - Device-side parallel displacement-max reduction. Future work when the
   N-length per-step download becomes a bottleneck.
 - Auto-growing `max_neighbors` on overflow. The current v1 contract is
@@ -1038,24 +1059,37 @@ Feature: Cell-list neighbor list
     And no host-side upload of sorted_particle_ids or cell_offsets occurs
 
   @rq-6fd5167a
-  Scenario: Configuration with too many cells is rejected at construction
-    Given r_cut + r_skin = 0.1 and lx=ly=lz=27.0 yielding
-      n_cells_per_axis = 270 (n_cells_total = 19683000)
+  Scenario: Configuration exceeding the u32 cell-addressing limit is rejected at construction
+    Given r_cut + r_skin = 0.1 and lx=ly=lz=162.6 yielding
+      n_cells_per_axis = 1626 (n_cells_total = 4298942376, just past u32::MAX)
     When NeighborListState::new_cell_list is called
-    Then it returns Err(NeighborListError::TooManyCells { n_cells_total: 19683000, max_supported })
-      where max_supported equals scan_block_size² (65536 at the
-      documented 256-thread block size)
+    Then it returns Err(NeighborListError::TooManyCells { n_cells_total: 4298942376, max_supported })
+      where max_supported equals u32::MAX as usize (4294967295)
+    And no device buffer was allocated before the error was returned
+
+  @rq-5f2c42be
+  Scenario: Prefix scan is correct for cell counts beyond a single block-totals pass
+    Given r_cut + r_skin = 0.05 yielding n_cells_per_axis = 200
+      (n_cells_total = 8000000, well past scan_block_size² and requiring
+      multiple recursion levels in the prefix scan)
+    When NeighborListState::new_cell_list is called
+    Then it returns Ok(state)
+    When NeighborListState::rebuild is called
+    Then downloading cell_offsets yields a non-decreasing sequence
+    And cell_offsets[0] equals 0
+    And cell_offsets[c+1] equals cell_offsets[c] + cell_counts[c] for every c
+    And cell_offsets[n_cells_total] equals the particle count
 
   @rq-f2e4b0b8
   Scenario: Cell-list scratch is reallocated alongside cell_offsets on box generation refresh
     Given a NeighborListState in CellList mode with n_cells_total = 343
       (cell_counts length 343, write_cursors length 343,
-       scan_block_totals length ceil(343 / scan_block_size))
+       a scan_block_totals stack sized for n_cells_total = 343)
     When box.set_lengths is called producing n_cells_total = 729
     And pre_step is called with the updated box
     Then cell_counts is reallocated to length 729
     And write_cursors is reallocated to length 729
-    And scan_block_totals is reallocated to ceil(729 / scan_block_size)
+    And the scan_block_totals stack is rebuilt for n_cells_total = 729
     And cell_indices is NOT reallocated (its length particle_count is unchanged)
 
   @rq-2303ee2e

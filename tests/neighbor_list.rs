@@ -762,21 +762,70 @@ fn rebuild_produces_correct_output_via_gpu_pipeline() {
 }
 
 #[test] // rq-6fd5167a
-fn too_many_cells_rejected_at_construction() {
+fn cells_exceeding_u32_addressing_rejected_at_construction() {
     let device = init_device().unwrap();
-    // r_cut=0.05, r_skin=0.05 → r_search=0.1; L=27 → 270 cells/axis → 19,683,000 cells.
-    let sim_box = box_n(27.0);
+    // r_cut + r_skin = 1.0; L = 1626 → 1626 cells/axis → 1626³ =
+    // 4,298,942,376 cells, just past u32::MAX (4,294,967,295). The
+    // rejection happens in check_n_cells_total before any device buffer
+    // is allocated, so the 17 GB of cell buffers are never requested.
+    let sim_box = box_n(1626.0);
     let err =
-        NeighborListState::new_cell_list(device, &sim_box, 0, 0.05, 8, 0.05).expect_err("err");
+        NeighborListState::new_cell_list(device, &sim_box, 0, 0.5, 8, 0.5).expect_err("err");
     match err {
         NeighborListError::TooManyCells {
             n_cells_total,
             max_supported,
         } => {
-            assert_eq!(n_cells_total, 270 * 270 * 270);
-            assert_eq!(max_supported, 256 * 256);
+            assert_eq!(n_cells_total, 1626usize * 1626 * 1626);
+            assert_eq!(n_cells_total, 4_298_942_376);
+            assert_eq!(max_supported, u32::MAX as usize);
         }
         other => panic!("expected TooManyCells, got {other:?}"),
+    }
+}
+
+#[test] // rq-5f2c42be
+fn prefix_scan_correct_beyond_single_block_totals_pass() {
+    let device = init_device().unwrap();
+    // r_cut + r_skin = 0.05 over a 10.0 box → 200 cells/axis →
+    // n_cells_total = 8,000,000, well past the former scan_block_size²
+    // (65,536) limit and requiring multiple recursion levels in the
+    // prefix scan.
+    let sim_box = box_n(10.0);
+    // 100 particles on a coarse lattice inside the box.
+    let mut px = Vec::with_capacity(100);
+    let mut py = Vec::with_capacity(100);
+    let mut pz = Vec::with_capacity(100);
+    for i in 0..100u32 {
+        px.push(-4.0 + (i % 10) as f32 * 0.8);
+        py.push(-4.0 + ((i / 10) % 10) as f32 * 0.8);
+        pz.push(-4.0 + (i % 7) as f32 * 0.5);
+    }
+    let state = state_from_positions(px, py, pz);
+    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut nl =
+        NeighborListState::new_cell_list(device.clone(), &sim_box, 100, 0.025, 8, 0.025)
+            .expect("new_cell_list");
+    assert_eq!(nl.cell_list_data().unwrap().n_cells, [200, 200, 200]);
+    assert_eq!(nl.cell_list_data().unwrap().n_cells_total, 8_000_000);
+    let mut timings = Timings::new(device.clone()).unwrap();
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
+
+    let cl = nl.cell_list_data().unwrap();
+    let offsets = device.dtoh_sync_copy(&cl.cell_offsets).unwrap();
+    let counts = device.dtoh_sync_copy(&cl.cell_counts).unwrap();
+    assert_eq!(offsets.len(), cl.n_cells_total + 1);
+    assert_eq!(offsets[0], 0);
+    for c in 0..cl.n_cells_total {
+        assert_eq!(
+            offsets[c + 1],
+            offsets[c] + counts[c],
+            "exclusive prefix sum broken at cell {c}"
+        );
+    }
+    assert_eq!(offsets[cl.n_cells_total], 100);
+    for w in offsets.windows(2) {
+        assert!(w[0] <= w[1], "offsets must be non-decreasing");
     }
 }
 
@@ -793,8 +842,10 @@ fn cell_list_scratch_reallocated_on_box_generation_refresh() {
     let cl_before = nl.cell_list_data().unwrap();
     assert_eq!(cl_before.cell_counts.len(), 343);
     assert_eq!(cl_before.write_cursors.len(), 343);
-    let block = 256usize;
-    assert_eq!(cl_before.scan_block_totals.len(), (343 + block - 1) / block);
+    // The block-totals stack for n_cells_total = 343 is [ceil(343/256), 1]
+    // = [2, 1]: the level-0 buffer holds 2 per-block totals.
+    assert_eq!(cl_before.scan_block_totals.len(), 2);
+    assert_eq!(cl_before.scan_block_totals[0].len(), 2);
     let cell_indices_len_before = cl_before.cell_indices.len();
 
     sim_box.set_lengths(12.0, 12.0, 12.0).expect("ok");
@@ -804,7 +855,10 @@ fn cell_list_scratch_reallocated_on_box_generation_refresh() {
     let cl_after = nl.cell_list_data().unwrap();
     assert_eq!(cl_after.cell_counts.len(), 729);
     assert_eq!(cl_after.write_cursors.len(), 729);
-    assert_eq!(cl_after.scan_block_totals.len(), (729 + block - 1) / block);
+    // The stack is rebuilt for n_cells_total = 729: [ceil(729/256), 1]
+    // = [3, 1], so the level-0 buffer now holds 3 per-block totals.
+    assert_eq!(cl_after.scan_block_totals.len(), 2);
+    assert_eq!(cl_after.scan_block_totals[0].len(), 3);
     // cell_indices is per-atom (particle_count = 2) and not reallocated.
     assert_eq!(cl_after.cell_indices.len(), cell_indices_len_before);
 }

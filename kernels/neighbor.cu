@@ -167,16 +167,22 @@ extern "C" __global__ void compute_cell_indices_and_histogram(
   atomicAdd(&cell_counts[c], 1u);
 }
 
+// Per-block exclusive Hillis-Steele scan of input[0..len] into
+// output[0..len], writing each block's inclusive total to
+// block_totals[blockIdx]. Each thread reads its input element into a
+// register before any global write, and blocks write disjoint output
+// ranges, so `input` may alias `output` — the recursive scan driver
+// relies on this to scan each block-totals level of the stack in place.
 extern "C" __global__ void prefix_scan_local_blocks(
-    const unsigned int *cell_counts,
-    unsigned int *cell_offsets,
-    unsigned int *scan_block_totals,
-    unsigned int n_cells_total)
+    const unsigned int *input,
+    unsigned int *output,
+    unsigned int *block_totals,
+    unsigned int len)
 {
   __shared__ unsigned int temp[2u * SCAN_BLOCK_SIZE];
   unsigned int t = threadIdx.x;
   unsigned int gid = blockIdx.x * SCAN_BLOCK_SIZE + t;
-  unsigned int my_input = (gid < n_cells_total) ? cell_counts[gid] : 0u;
+  unsigned int my_input = (gid < len) ? input[gid] : 0u;
   unsigned int pout = 0u;
   unsigned int pin = 1u;
   temp[pout * SCAN_BLOCK_SIZE + t] = my_input;
@@ -195,56 +201,35 @@ extern "C" __global__ void prefix_scan_local_blocks(
   }
   unsigned int inclusive = temp[pout * SCAN_BLOCK_SIZE + t];
   unsigned int exclusive = inclusive - my_input;
-  if (gid < n_cells_total) {
-    cell_offsets[gid] = exclusive;
+  if (gid < len) {
+    output[gid] = exclusive;
   }
   if (t == SCAN_BLOCK_SIZE - 1u) {
-    scan_block_totals[blockIdx.x] = inclusive;
+    block_totals[blockIdx.x] = inclusive;
   }
 }
 
-extern "C" __global__ void prefix_scan_block_totals(
-    unsigned int *scan_block_totals,
-    unsigned int n_blocks)
-{
-  __shared__ unsigned int temp[2u * SCAN_BLOCK_SIZE];
-  unsigned int t = threadIdx.x;
-  unsigned int my_input = (t < n_blocks) ? scan_block_totals[t] : 0u;
-  unsigned int pout = 0u;
-  unsigned int pin = 1u;
-  temp[pout * SCAN_BLOCK_SIZE + t] = my_input;
-  __syncthreads();
-  for (unsigned int offset = 1u; offset < SCAN_BLOCK_SIZE; offset *= 2u) {
-    pout = 1u - pout;
-    pin = 1u - pin;
-    if (t >= offset) {
-      temp[pout * SCAN_BLOCK_SIZE + t] =
-          temp[pin * SCAN_BLOCK_SIZE + t]
-          + temp[pin * SCAN_BLOCK_SIZE + t - offset];
-    } else {
-      temp[pout * SCAN_BLOCK_SIZE + t] = temp[pin * SCAN_BLOCK_SIZE + t];
-    }
-    __syncthreads();
-  }
-  unsigned int inclusive = temp[pout * SCAN_BLOCK_SIZE + t];
-  unsigned int exclusive = inclusive - my_input;
-  if (t < n_blocks) {
-    scan_block_totals[t] = exclusive;
-  }
-}
-
+// Generic add-back: output[gid] += block_offsets[gid / SCAN_BLOCK_SIZE]
+// for every gid < len.
 extern "C" __global__ void prefix_scan_apply_block_totals(
-    const unsigned int *scan_block_totals,
+    const unsigned int *block_offsets,
+    unsigned int *output,
+    unsigned int len)
+{
+  unsigned int gid = blockIdx.x * SCAN_BLOCK_SIZE + threadIdx.x;
+  if (gid < len) {
+    output[gid] += block_offsets[blockIdx.x];
+  }
+}
+
+// Writes the trailing cell_offsets[n_cells_total] = particle_count
+// sentinel slot with a single thread.
+extern "C" __global__ void prefix_scan_finalize_offsets(
     unsigned int *cell_offsets,
     unsigned int n_cells_total,
     unsigned int particle_count)
 {
-  unsigned int t = threadIdx.x;
-  unsigned int gid = blockIdx.x * SCAN_BLOCK_SIZE + t;
-  if (gid < n_cells_total) {
-    cell_offsets[gid] += scan_block_totals[blockIdx.x];
-  }
-  if (blockIdx.x == 0u && t == 0u) {
+  if (blockIdx.x == 0u && threadIdx.x == 0u) {
     cell_offsets[n_cells_total] = particle_count;
   }
 }

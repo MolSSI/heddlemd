@@ -1581,9 +1581,14 @@
     "type": "scenario"
   },
   "rq-2ef5e222": {
-    "decl": "- `prefix_scan_cell_counts(cell_counts, cell_offsets, scan_block_totals, particle_count) -> Result<(), GpuError>` —",
+    "decl": "- `prefix_scan_cell_counts(cell_counts, cell_offsets, scan_block_totals, n_cells_total, particle_count) -> Result<(), GpuError>` —",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "prefix_scan_cell_counts",
     "type": "api-item"
   },
@@ -2972,6 +2977,13 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-5f2c42be": {
+    "decl": "Scenario: Prefix scan is correct for cell counts beyond a single block-totals pass",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Prefix scan is correct for cell counts beyond a single block-totals pass",
+    "type": "scenario"
+  },
   "rq-606197d5": {
     "decl": "### Cadence",
     "file": "io/log-output",
@@ -3433,10 +3445,10 @@
     "type": "scenario"
   },
   "rq-6fd5167a": {
-    "decl": "Scenario: Configuration with too many cells is rejected at construction",
+    "decl": "Scenario: Configuration exceeding the u32 cell-addressing limit is rejected at construction",
     "file": "forces/neighbor-list",
     "refs": [],
-    "title": "Configuration with too many cells is rejected at construction",
+    "title": "Configuration exceeding the u32 cell-addressing limit is rejected at construction",
     "type": "scenario"
   },
   "rq-6fdefca0": {
@@ -4963,7 +4975,12 @@
     "decl": "## Cell List Construction",
     "file": "forces/neighbor-list",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Cell List Construction",
     "type": "section"
   },

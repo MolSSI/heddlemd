@@ -613,8 +613,6 @@ pub fn copy_positions_into_reference(
 }
 
 pub const SPATIAL_HASH_SCAN_BLOCK_SIZE: u32 = 256;
-pub const SPATIAL_HASH_MAX_CELLS: usize =
-    (SPATIAL_HASH_SCAN_BLOCK_SIZE as usize) * (SPATIAL_HASH_SCAN_BLOCK_SIZE as usize);
 
 #[allow(clippy::too_many_arguments)]
 pub fn compute_cell_indices_and_histogram(
@@ -669,78 +667,117 @@ pub fn compute_cell_indices_and_histogram(
     Ok(())
 }
 
+// rq-2ef5e222
+//
+// Drives the recursive multi-level exclusive prefix scan of `cell_counts`
+// into `cell_offsets`. `scan_block_totals` is the block-totals stack:
+// buffer `l` holds the per-block inclusive totals produced at recursion
+// level `l`, with length `ceil(n_cells_total / B^(l + 1))`; the last
+// buffer has length 1. The driver:
+//   1. scans `cell_counts` into `cell_offsets` with a per-block local
+//      scan, emitting `scan_block_totals[0]`;
+//   2. descends, scanning each stack level in place (input aliases
+//      output) and emitting the next level's totals;
+//   3. ascends, adding each level's scanned totals back into the level
+//      below;
+//   4. writes the `cell_offsets[n_cells_total] = particle_count`
+//      sentinel.
+// Issues O(log(n_cells_total)) kernel launches.
 pub fn prefix_scan_cell_counts(
     device: &Arc<CudaDevice>,
     cell_counts: &CudaSlice<u32>,
     cell_offsets: &mut CudaSlice<u32>,
-    scan_block_totals: &mut CudaSlice<u32>,
+    scan_block_totals: &mut [CudaSlice<u32>],
     n_cells_total: usize,
     particle_count: usize,
 ) -> Result<(), GpuError> {
     if n_cells_total == 0 {
         return Ok(());
     }
-    let scan_block_size = SPATIAL_HASH_SCAN_BLOCK_SIZE;
-    let n_blocks =
-        ((n_cells_total + scan_block_size as usize - 1) / scan_block_size as usize) as u32;
     debug_assert_eq!(cell_counts.len(), n_cells_total);
     debug_assert_eq!(cell_offsets.len(), n_cells_total + 1);
-    debug_assert_eq!(scan_block_totals.len(), n_blocks as usize);
-    debug_assert!(n_blocks <= scan_block_size);
+    debug_assert!(!scan_block_totals.is_empty());
 
-    let local_cfg = LaunchConfig {
-        grid_dim: (n_blocks, 1, 1),
-        block_dim: (scan_block_size, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    let local_func = device
-        .get_func("neighbor", "prefix_scan_local_blocks")
-        .expect("neighbor module is not loaded; init_device() must be called first");
     let n_cells_total_u32 = n_cells_total as u32;
-    unsafe {
-        local_func
-            .launch(
-                local_cfg,
-                (cell_counts, &mut *cell_offsets, &mut *scan_block_totals, n_cells_total_u32),
-            )
-            .map_err(GpuError::from)?;
-    }
+    let local_name = "prefix_scan_local_blocks";
+    let apply_name = "prefix_scan_apply_block_totals";
+    let not_loaded = "neighbor module is not loaded; init_device() must be called first";
 
-    let totals_cfg = LaunchConfig {
-        grid_dim: (1, 1, 1),
-        block_dim: (scan_block_size, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    let totals_func = device
-        .get_func("neighbor", "prefix_scan_block_totals")
-        .expect("neighbor module is not loaded; init_device() must be called first");
-    unsafe {
-        totals_func
-            .launch(totals_cfg, (&mut *scan_block_totals, n_blocks))
-            .map_err(GpuError::from)?;
-    }
-
-    let apply_cfg = LaunchConfig {
-        grid_dim: (n_blocks, 1, 1),
-        block_dim: (scan_block_size, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    let apply_func = device
-        .get_func("neighbor", "prefix_scan_apply_block_totals")
-        .expect("neighbor module is not loaded; init_device() must be called first");
-    let particle_count_u32 = particle_count as u32;
-    unsafe {
-        apply_func
-            .launch(
-                apply_cfg,
+    // Phase 1: per-block local scan of cell_counts into cell_offsets,
+    // emitting the level-0 block totals.
+    {
+        let func = device.get_func("neighbor", local_name).expect(not_loaded);
+        unsafe {
+            func.launch(
+                launch_config(n_cells_total_u32),
                 (
-                    &*scan_block_totals,
+                    cell_counts,
                     &mut *cell_offsets,
+                    &mut scan_block_totals[0],
                     n_cells_total_u32,
-                    particle_count_u32,
                 ),
             )
             .map_err(GpuError::from)?;
+        }
+    }
+
+    // The stack's last buffer has length 1 and is never itself scanned;
+    // every earlier level spans more than one block and is scanned in
+    // place during the descent.
+    let descent_levels = scan_block_totals.len() - 1;
+
+    // Phase 2: descend — scan each stack level in place. Level `l` reads
+    // and writes `scan_block_totals[l]` (the kernel reads each input
+    // element before any write, so aliasing is safe) and emits the
+    // level-`l + 1` totals.
+    for l in 0..descent_levels {
+        let len = scan_block_totals[l].len() as u32;
+        let (head, tail) = scan_block_totals.split_at_mut(l + 1);
+        let level = &head[l];
+        let totals = &mut tail[0];
+        let func = device.get_func("neighbor", local_name).expect(not_loaded);
+        unsafe {
+            func.launch(launch_config(len), (level, level, totals, len))
+                .map_err(GpuError::from)?;
+        }
+    }
+
+    // Phase 3: ascend — add each scanned level's totals back into the
+    // level below (level 0's target is `cell_offsets`).
+    for l in (0..descent_levels).rev() {
+        let func = device.get_func("neighbor", apply_name).expect(not_loaded);
+        if l == 0 {
+            unsafe {
+                func.launch(
+                    launch_config(n_cells_total_u32),
+                    (&scan_block_totals[0], &mut *cell_offsets, n_cells_total_u32),
+                )
+                .map_err(GpuError::from)?;
+            }
+        } else {
+            let len = scan_block_totals[l - 1].len() as u32;
+            let (head, tail) = scan_block_totals.split_at_mut(l);
+            let output = &mut head[l - 1];
+            let block_offsets = &tail[0];
+            unsafe {
+                func.launch(launch_config(len), (block_offsets, output, len))
+                    .map_err(GpuError::from)?;
+            }
+        }
+    }
+
+    // Phase 4: write the trailing cell_offsets[n_cells_total] sentinel.
+    {
+        let func = device
+            .get_func("neighbor", "prefix_scan_finalize_offsets")
+            .expect(not_loaded);
+        unsafe {
+            func.launch(
+                launch_config(1),
+                (&mut *cell_offsets, n_cells_total_u32, particle_count as u32),
+            )
+            .map_err(GpuError::from)?;
+        }
     }
     Ok(())
 }
