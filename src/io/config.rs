@@ -52,6 +52,15 @@ pub enum ConfigError {
     DuplicatePairInteraction {
         types: (String, String),
     },
+    UnknownPairPotential {
+        actual: String,
+        pair_index: usize,
+    },
+    UnknownPairInteractionField {
+        potential: String,
+        field: String,
+        pair_index: usize,
+    },
     PathCollision {
         kind_a: PathRole,
         kind_b: PathRole,
@@ -116,6 +125,18 @@ impl std::fmt::Display for ConfigError {
                 f,
                 "DuplicatePairInteraction {{ types: ({:?}, {:?}) }}",
                 types.0, types.1
+            ),
+            ConfigError::UnknownPairPotential { actual, pair_index } => write!(
+                f,
+                "UnknownPairPotential {{ actual: {actual:?}, pair_index: {pair_index} }}"
+            ),
+            ConfigError::UnknownPairInteractionField {
+                potential,
+                field,
+                pair_index,
+            } => write!(
+                f,
+                "UnknownPairInteractionField {{ potential: {potential:?}, field: {field:?}, pair_index: {pair_index} }}"
             ),
             ConfigError::PathCollision {
                 kind_a,
@@ -205,11 +226,15 @@ pub struct ParticleTypeConfig {
 #[derive(Debug, Clone)]
 pub struct PairInteractionConfig {
     pub between: (String, String),
-    pub potential: String,
-    pub sigma: f64,
-    pub epsilon: f64,
     pub cutoff: f64,
     pub r_switch: f64,
+    pub potential: PairPotentialParams,
+}
+
+// rq-70442e07
+#[derive(Debug, Clone)]
+pub enum PairPotentialParams {
+    LennardJones { sigma: f64, epsilon: f64 },
 }
 
 #[derive(Debug, Clone)]
@@ -549,18 +574,31 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         let potential = get_str(tbl, "potential")
             .map_err(rename_field(format!("pair_interactions[{i}].potential")))?
             .to_string();
-        if potential != "lennard-jones" {
-            return Err(invalid(
-                &format!("pair_interactions[{i}].potential"),
-                format!("unsupported potential {potential:?}"),
-            ));
+
+        // The recognised key set depends on the chosen potential: the
+        // common keys are always allowed, and each potential adds its
+        // own. Any other key is rejected, mirroring [[bond_types]].
+        let recognised: &[&str] = match potential.as_str() {
+            "lennard-jones" => {
+                &["between", "potential", "cutoff", "r_switch", "sigma", "epsilon"]
+            }
+            other => {
+                return Err(ConfigError::UnknownPairPotential {
+                    actual: other.to_string(),
+                    pair_index: i,
+                });
+            }
+        };
+        for key in tbl.keys() {
+            if !recognised.contains(&key.as_str()) {
+                return Err(ConfigError::UnknownPairInteractionField {
+                    potential: potential.clone(),
+                    field: key.clone(),
+                    pair_index: i,
+                });
+            }
         }
-        let sigma = get_f64(tbl, "sigma")
-            .map_err(rename_field(format!("pair_interactions[{i}].sigma")))?;
-        require_finite_positive(&format!("pair_interactions[{i}].sigma"), sigma)?;
-        let epsilon = get_f64(tbl, "epsilon")
-            .map_err(rename_field(format!("pair_interactions[{i}].epsilon")))?;
-        require_finite_positive(&format!("pair_interactions[{i}].epsilon"), epsilon)?;
+
         let cutoff = get_f64(tbl, "cutoff")
             .map_err(rename_field(format!("pair_interactions[{i}].cutoff")))?;
         require_finite_positive(&format!("pair_interactions[{i}].cutoff"), cutoff)?;
@@ -587,13 +625,29 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
             ));
         }
 
+        let potential_params = match potential.as_str() {
+            "lennard-jones" => {
+                let sigma = get_f64(tbl, "sigma")
+                    .map_err(rename_field(format!("pair_interactions[{i}].sigma")))?;
+                require_finite_positive(&format!("pair_interactions[{i}].sigma"), sigma)?;
+                let epsilon = get_f64(tbl, "epsilon")
+                    .map_err(rename_field(format!("pair_interactions[{i}].epsilon")))?;
+                require_finite_positive(
+                    &format!("pair_interactions[{i}].epsilon"),
+                    epsilon,
+                )?;
+                PairPotentialParams::LennardJones { sigma, epsilon }
+            }
+            // Unreachable: the recognised-key match above already returned
+            // UnknownPairPotential for any other value.
+            _ => unreachable!("potential tag validated above"),
+        };
+
         pair_interactions.push(PairInteractionConfig {
             between,
-            potential,
-            sigma,
-            epsilon,
             cutoff,
             r_switch,
+            potential: potential_params,
         });
     }
 

@@ -232,14 +232,17 @@ opposites.
   - Allocates four host-side `Vec<f32>` of length `n_types * n_types`,
     initially zero. For each entry in `pair_interactions`, resolves the
     two type names to indices `ti`, `tj` via `particle_types` (matched
-    by `name`), and writes σ, ε, cutoff, and `r_switch` at both
-    `[ti * n_types + tj]` and `[tj * n_types + ti]`. The caller is
-    responsible for having validated that every unordered pair is
-    covered and that `r_switch <= cutoff` for every entry (the config
-    loader enforces both; see `io/config-schema.md`). `r_switch` is
-    taken directly from `PairInteractionConfig::r_switch`, which the
-    config loader populates with the user-supplied value when present
-    and with `0.9 * cutoff` when omitted.
+    by `name`), reads σ and ε from the entry's
+    `PairPotentialParams::LennardJones` variant and `cutoff` /
+    `r_switch` from the entry's common fields, and writes σ, ε,
+    `cutoff`, and `r_switch` at both `[ti * n_types + tj]` and
+    `[tj * n_types + ti]`. The caller is responsible for having
+    validated that every unordered pair is covered and that
+    `r_switch <= cutoff` for every entry (the config loader enforces
+    both; see `io/config-schema.md`). `r_switch` is taken directly from
+    `PairInteractionConfig::r_switch`, which the config loader
+    populates with the user-supplied value when present and with
+    `0.9 * cutoff` when omitted.
   - Uploads each host array to a fresh `CudaSlice<f32>` and returns the
     populated `LennardJonesParameterTable`.
   - When `n_types == 0` (no particle types declared), all four slices

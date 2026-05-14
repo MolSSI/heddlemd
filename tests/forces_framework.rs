@@ -6,7 +6,10 @@ use dynamics::forces::{
     SlotOutputView,
 };
 use dynamics::gpu::{ParticleBuffers, init_device};
-use dynamics::io::config::{BondTypeConfig, NeighborListConfig, PairInteractionConfig, ParticleTypeConfig};
+use dynamics::io::config::{
+    BondTypeConfig, NeighborListConfig, PairInteractionConfig, PairPotentialParams,
+    ParticleTypeConfig,
+};
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 use dynamics::timings::Timings;
@@ -14,11 +17,9 @@ use dynamics::timings::Timings;
 fn lj_pair_config() -> PairInteractionConfig {
     PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
-        potential: "lennard-jones".to_string(),
-        sigma: 1.0,
-        epsilon: 1.0,
         cutoff: 5.0,
         r_switch: 5.0,
+        potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     }
 }
 
@@ -320,11 +321,9 @@ fn step_both_slots_sums_lj_and_morse() {
 
     let lj_tiny = PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
-        potential: "lennard-jones".to_string(),
-        sigma: 1.0,
-        epsilon: 1.0,
         cutoff: 0.5,
         r_switch: 0.5,
+        potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     };
     let mut ff_morse = ForceField::new(
         device.clone(),
@@ -507,11 +506,9 @@ fn each_slot_writes_its_own_row() {
     // And slot 1 (Morse) in isolation.
     let lj_tiny = PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
-        potential: "lennard-jones".to_string(),
-        sigma: 1.0,
-        epsilon: 1.0,
         cutoff: 0.5,
         r_switch: 0.5,
+        potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     };
     let mut buffers_m = ParticleBuffers::new(device.clone(), &state).unwrap();
     let mut t_m = Timings::new(device.clone()).unwrap();

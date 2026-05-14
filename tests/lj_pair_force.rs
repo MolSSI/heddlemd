@@ -834,7 +834,7 @@ fn multi_type_three_type_dispatch() {
 
 #[test]
 fn lj_param_table_from_config_builds_symmetric_table() {
-    use dynamics::io::config::{PairInteractionConfig, ParticleTypeConfig};
+    use dynamics::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
     let device = init_device().unwrap();
     let particle_types = vec![
         ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 },
@@ -843,27 +843,21 @@ fn lj_param_table_from_config_builds_symmetric_table() {
     let pair_interactions = vec![
         PairInteractionConfig {
             between: ("Ar".to_string(), "Ar".to_string()),
-            potential: "lennard-jones".to_string(),
-            sigma: 1.0,
-            epsilon: 1.0,
             cutoff: 5.0,
             r_switch: 5.0,
+            potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
         },
         PairInteractionConfig {
             between: ("Ar".to_string(), "Kr".to_string()),
-            potential: "lennard-jones".to_string(),
-            sigma: 2.0,
-            epsilon: 0.5,
             cutoff: 5.0,
             r_switch: 5.0,
+            potential: PairPotentialParams::LennardJones { sigma: 2.0, epsilon: 0.5 },
         },
         PairInteractionConfig {
             between: ("Kr".to_string(), "Kr".to_string()),
-            potential: "lennard-jones".to_string(),
-            sigma: 3.0,
-            epsilon: 2.0,
             cutoff: 5.0,
             r_switch: 5.0,
+            potential: PairPotentialParams::LennardJones { sigma: 3.0, epsilon: 2.0 },
         },
     ];
     let table =
@@ -889,17 +883,15 @@ fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
         BondList, ExclusionList, ForceField, Potential,
     };
     use dynamics::io::config::{
-        NeighborListConfig, PairInteractionConfig, ParticleTypeConfig,
+        NeighborListConfig, PairInteractionConfig, PairPotentialParams, ParticleTypeConfig,
     };
     let device = init_device().unwrap();
     let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }];
     let pair_interactions = vec![PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
-        potential: "lennard-jones".to_string(),
-        sigma: 1.0,
-        epsilon: 1.0,
         cutoff: 4.0,
         r_switch: 4.0,
+        potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     }];
     let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
     let ff = ForceField::new(
@@ -924,18 +916,16 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
         BondList, ExclusionList, ForceField,
     };
     use dynamics::io::config::{
-        NeighborListConfig, PairInteractionConfig, ParticleTypeConfig,
+        NeighborListConfig, PairInteractionConfig, PairPotentialParams, ParticleTypeConfig,
     };
     let device = init_device().unwrap();
     let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
     let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }];
     let pair_interactions = vec![PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
-        potential: "lennard-jones".to_string(),
-        sigma: 1.0,
-        epsilon: 1.0,
         cutoff: 3.0,
         r_switch: 3.0,
+        potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     }];
     // 4 particles in a small cluster
     let positions = [
@@ -1550,16 +1540,14 @@ fn switching_bit_exact_reproducibility_across_runs() {
 
 #[test] // rq-214639c9
 fn switching_from_config_populates_user_supplied_r_switch() {
-    use dynamics::io::config::{PairInteractionConfig, ParticleTypeConfig};
+    use dynamics::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
     let device = init_device().expect("init_device");
     let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }];
     let pair_interactions = vec![PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
-        potential: "lennard-jones".to_string(),
-        sigma: 1.0,
-        epsilon: 1.0,
         cutoff: 5.0,
         r_switch: 4.0,
+        potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     }];
     let table =
         LennardJonesParameterTable::from_config(&device, &particle_types, &pair_interactions)

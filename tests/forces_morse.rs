@@ -2,7 +2,10 @@ use dynamics::forces::{BondList, ExclusionList, ForceField, MorseBondedState};
 use dynamics::gpu::{
     ParticleBuffers, init_device, morse_bond_force, reduce_bond_forces,
 };
-use dynamics::io::config::{BondTypeConfig, NeighborListConfig, PairInteractionConfig, ParticleTypeConfig};
+use dynamics::io::config::{
+    BondTypeConfig, NeighborListConfig, PairInteractionConfig, PairPotentialParams,
+    ParticleTypeConfig,
+};
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 use dynamics::timings::Timings;
@@ -440,11 +443,9 @@ fn diatomic_equilibrium_produces_zero_net_force() {
     // LJ params with cutoff < bond length so LJ contributes nothing.
     let pair = PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
-        potential: "lennard-jones".to_string(),
-        sigma: 1.0,
-        epsilon: 1.0,
         cutoff: 0.5,
         r_switch: 0.5,
+        potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     };
     let mut ff = ForceField::new(
         device.clone(),
@@ -475,11 +476,9 @@ fn newtons_third_law_holds_for_combined_force() {
     let bt = vec![morse_type(1.0, 2.0, 1.0)];
     let pair = PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
-        potential: "lennard-jones".to_string(),
-        sigma: 1.0,
-        epsilon: 1.0,
         cutoff: 5.0,
         r_switch: 5.0,
+        potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     };
     let mut ff = ForceField::new(
         device.clone(),

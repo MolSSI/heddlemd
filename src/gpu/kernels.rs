@@ -3,7 +3,7 @@ use std::sync::Arc;
 use cudarc::driver::{CudaDevice, CudaSlice, CudaViewMut, DeviceSlice, LaunchAsync, LaunchConfig};
 
 use crate::gpu::{GpuError, LosslessBuffers, PairBuffer, ParticleBuffers};
-use crate::io::config::{PairInteractionConfig, ParticleTypeConfig};
+use crate::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
 use crate::pbc::SimulationBox;
 
 const BLOCK_SIZE: u32 = 256;
@@ -187,8 +187,9 @@ impl LennardJonesParameterTable {
                 .iter()
                 .position(|pt| pt.name == pi.between.1)
                 .expect("pair_interactions type name absent from particle_types (config-layer invariant)");
-            let s = pi.sigma as f32;
-            let e = pi.epsilon as f32;
+            let PairPotentialParams::LennardJones { sigma, epsilon } = pi.potential;
+            let s = sigma as f32;
+            let e = epsilon as f32;
             let c = pi.cutoff as f32;
             let rs = pi.r_switch as f32;
             sigma_host[ti * n_types + tj] = s;

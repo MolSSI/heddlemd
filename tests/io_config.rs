@@ -72,6 +72,12 @@ fn load_valid_minimal_config() {
     assert_eq!(cfg.particle_types[0].mass, 6.6335e-26);
     assert_eq!(cfg.pair_interactions.len(), 1);
     assert_eq!(cfg.pair_interactions[0].between, ("Ar".to_string(), "Ar".to_string()));
+    assert_eq!(cfg.pair_interactions[0].cutoff, 1.0e-9);
+    assert!(matches!(
+        cfg.pair_interactions[0].potential,
+        dynamics::io::PairPotentialParams::LennardJones { sigma, epsilon }
+            if sigma == 3.40e-10 && epsilon == 1.65e-21
+    ));
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
     assert_eq!(cfg.init, canonical_dir.join("argon.xyz"));
     assert_eq!(cfg.config_path, canonical_dir.join("sim.toml"));
@@ -287,7 +293,12 @@ fn malformed_toml() {
 #[test]
 fn unknown_top_level_key_permitted() {
     let dir = tmp_path("unknown_top_level");
-    let body = format!("{}unknown_key = \"x\"\n", minimal_config());
+    // Insert the unknown key at the genuine top level, before the first
+    // section header, so it is not absorbed into a table.
+    let body = minimal_config().replace(
+        "init = \"argon.xyz\"\n",
+        "init = \"argon.xyz\"\nunknown_key = \"x\"\n",
+    );
     let path = write_config(&dir, &body);
     load_config(&path).unwrap();
 }
@@ -618,8 +629,46 @@ fn reject_unknown_potential() {
     let body = minimal_config().replace("potential = \"lennard-jones\"", "potential = \"morse\"");
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => {
-            assert_eq!(field, "pair_interactions[0].potential");
+        ConfigError::UnknownPairPotential { actual, pair_index } => {
+            assert_eq!(actual, "morse");
+            assert_eq!(pair_index, 0);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-45a14d49
+#[test]
+fn reject_lennard_jones_missing_sigma() {
+    let dir = tmp_path("lj_missing_sigma");
+    let body = minimal_config().replace("sigma = 3.40e-10\n", "");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => {
+            assert_eq!(field, "pair_interactions[0].sigma");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-d10e8c7f
+#[test]
+fn reject_unknown_pair_interaction_field() {
+    let dir = tmp_path("pair_unknown_field");
+    let body = minimal_config().replace(
+        "cutoff = 1.0e-9\n",
+        "cutoff = 1.0e-9\nstiffness = 1.0\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownPairInteractionField {
+            potential,
+            field,
+            pair_index,
+        } => {
+            assert_eq!(potential, "lennard-jones");
+            assert_eq!(field, "stiffness");
+            assert_eq!(pair_index, 0);
         }
         other => panic!("unexpected: {other:?}"),
     }

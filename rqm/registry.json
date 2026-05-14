@@ -2242,6 +2242,13 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-45a14d49": {
+    "decl": "Scenario: Lennard-Jones pair interaction missing sigma is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Lennard-Jones pair interaction missing sigma is rejected",
+    "type": "scenario"
+  },
   "rq-45eb243b": {
     "decl": "- `LogWriterError` — error type. Variants:",
     "file": "io/log-output",
@@ -3445,6 +3452,18 @@
     "refs": [],
     "title": "device_to_host_download count equals snapshot points reached",
     "type": "scenario"
+  },
+  "rq-70442e07": {
+    "decl": "- `PairPotentialParams` — tagged enum carrying the functional-form",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PairPotentialParams",
+    "type": "api-item"
   },
   "rq-706001ec": {
     "decl": "Scenario: Two independent runs with identical inputs are byte-identical",
@@ -5058,10 +5077,10 @@
     "type": "scenario"
   },
   "rq-a3a5905d": {
-    "decl": "Scenario: Reject unknown potential",
+    "decl": "Scenario: Reject unknown pair potential",
     "file": "io/config-schema",
     "refs": [],
-    "title": "Reject unknown potential",
+    "title": "Reject unknown pair potential",
     "type": "scenario"
   },
   "rq-a403f778": {
@@ -6360,6 +6379,13 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Pair virial inside the switching window equals factor_switched * r²",
+    "type": "scenario"
+  },
+  "rq-d10e8c7f": {
+    "decl": "Scenario: Pair interaction rejects an extra field for the chosen potential",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Pair interaction rejects an extra field for the chosen potential",
     "type": "scenario"
   },
   "rq-d12c24f0": {

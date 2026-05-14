@@ -269,7 +269,7 @@ fn lossless_vv_step_uses_lossless_kernels() {
 fn integrator_owns_force_evaluation_inside_step() {
     // Wire up a real LJ slot so the force pipeline runs and we can confirm
     // KernelStage::LJ_PAIR_FORCE was triggered exactly once per step() call.
-    use dynamics::io::config::{PairInteractionConfig, ParticleTypeConfig};
+    use dynamics::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
     let device = init_device().unwrap();
     let state = small_state(4);
     let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
@@ -281,11 +281,9 @@ fn integrator_owns_force_evaluation_inside_step() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
         &[PairInteractionConfig {
             between: ("Ar".to_string(), "Ar".to_string()),
-            potential: "lennard-jones".to_string(),
-            sigma: 1.0,
-            epsilon: 1.0,
             cutoff: 1.0,
             r_switch: 1.0,
+            potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
         }],
         &[],
         &BondList::empty(4),

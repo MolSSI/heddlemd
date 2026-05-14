@@ -25,7 +25,7 @@ Sections:
 | `[simulation]` | yes | timestep, step count, RNG seed, temperature |
 | `[integrator]` | yes | integrator slot + per-kind parameters |
 | `[[particle_types]]` | yes (>= 1) | per-type properties |
-| `[[pair_interactions]]` | yes (covers every pair) | per-pair LJ coefficients |
+| `[[pair_interactions]]` | yes (covers every pair) | per-pair potential + parameters |
 | `[[bond_types]]` | no | per-bond-type parameters |
 | `[neighbor_list]` | no | non-bonded pair-evaluation algorithm |
 | `[output]` | no | trajectory & log paths and cadences |
@@ -164,13 +164,17 @@ One entry per unordered pair of declared types. The collection contains
 exactly one entry for every unordered pair, including same-type self pairs.
 For `N` declared types the array contains exactly `N * (N + 1) / 2` entries.
 
+Each entry is a tagged variant: a required `potential` field selects the
+pair potential, and every other field is either a common field shared by
+all potentials or specific to the chosen `potential`.
+
+Common fields:
+
 - `between: [String; 2]` — unordered pair of declared type names. Order is
   not significant: `["A", "B"]` and `["B", "A"]` refer to the same pair.
-- `potential: String` — currently must equal `"lennard-jones"`. Future values
-  (`"morse"`, `"buckingham"`, ...) are reserved.
-- `sigma: f64` — LJ zero-crossing distance in metres. Finite, strictly
-  positive.
-- `epsilon: f64` — LJ well depth in joules. Finite, strictly positive.
+- `potential: String` — selects the pair potential. In schema v1 the only
+  supported value is `"lennard-jones"`. Future values (`"buckingham"`,
+  `"coulomb"`, ...) are reserved.
 - `cutoff: f64` — pair distance in metres beyond which the force is treated
   as zero. Finite, strictly positive.
 - `r_switch: f64` — optional. Inner radius of the CHARMM-style C¹
@@ -180,8 +184,16 @@ For `N` declared types the array contains exactly `N * (N + 1) / 2` entries.
   Setting `r_switch = cutoff` selects the hard-cutoff degenerate case
   in which no smoothing is applied.
 
+Fields accepted for `potential = "lennard-jones"` (see
+`forces/lj-pair-force.md`):
+
+- `sigma: f64` — LJ zero-crossing distance in metres. Finite, strictly
+  positive.
+- `epsilon: f64` — LJ well depth in joules. Finite, strictly positive.
+
 Same-type pairs are required even when only one type is declared:
-`between = ["Ar", "Ar"]` must appear.
+`between = ["Ar", "Ar"]` must appear. Unknown fields for the chosen
+`potential` are rejected.
 
 #### `[[bond_types]]` (optional array of tables)
 
@@ -370,13 +382,19 @@ Beyond per-field validation, the loader checks:
 - `PairInteractionConfig` <!-- rq-f001eaf8 -->
   - `between: (String, String)` — stored normalised so the lexicographically
     smaller string comes first, regardless of source order.
-  - `potential: String`
-  - `sigma: f64`
-  - `epsilon: f64`
-  - `cutoff: f64`
+  - `cutoff: f64` — pair distance in metres beyond which the force is
+    treated as zero.
   - `r_switch: f64` — inner switching radius. Populated from the
     user-supplied `r_switch` when present, otherwise from the default
     `0.9 * cutoff`. Always satisfies `0 < r_switch <= cutoff`.
+  - `potential: PairPotentialParams` — tagged enum carrying the chosen
+    pair potential's functional-form parameters.
+
+- `PairPotentialParams` — tagged enum carrying the functional-form <!-- rq-70442e07 -->
+  parameters of a pair potential. Variants:
+  - `LennardJones { sigma: f64, epsilon: f64 }` — selected by
+    `potential = "lennard-jones"`. `sigma` is the LJ zero-crossing
+    distance in metres; `epsilon` is the LJ well depth in joules.
 
 - `BondTypeConfig` — tagged enum carrying the chosen bonded-potential <!-- rq-2f230ccb -->
   parameters. Variants:
@@ -420,12 +438,18 @@ Beyond per-field validation, the loader checks:
     `"particle_types[0].name"`).
   - `UnsupportedSchemaVersion { actual: u64, supported: u64 }`.
   - `InvalidValue { field: &'static str, reason: String }` — finite or
-    positivity constraint violated, or `potential` is not
-    `"lennard-jones"`, or a type/pair name is empty.
+    positivity constraint violated, or a type/pair name is empty.
   - `DuplicateTypeName { name: String }`.
   - `UnknownTypeInPair { name: String, pair_index: usize }`.
   - `MissingPairInteraction { types: (String, String) }`.
   - `DuplicatePairInteraction { types: (String, String) }`.
+  - `UnknownPairPotential { actual: String, pair_index: usize }` — a
+    `[[pair_interactions]]` entry has a `potential` value that is not
+    one of the supported strings.
+  - `UnknownPairInteractionField { potential: String, field: String, pair_index: usize }`
+    — a field in a `[[pair_interactions]]` entry is not recognised by
+    the chosen `potential` (neither a common field nor a field of that
+    potential).
   - `PathCollision { kind_a: PathRole, kind_b: PathRole, path: PathBuf }`.
   - `UnknownIntegratorKind { actual: String }` — `[integrator].kind` is
     not one of the supported strings.
@@ -508,6 +532,8 @@ Feature: TOML simulation config schema
     And config.particle_types[0].mass equals 6.6335e-26
     And config.pair_interactions has length 1
     And config.pair_interactions[0].between equals ("Ar", "Ar")
+    And config.pair_interactions[0].cutoff equals 1.0e-9
+    And config.pair_interactions[0].potential matches PairPotentialParams::LennardJones { sigma: 3.40e-10, epsilon: 1.65e-21 }
     And config.init equals "/tmp/sim/argon.xyz"
     And config.config_path equals "/tmp/sim/sim.toml"
 
@@ -832,10 +858,24 @@ Feature: TOML simulation config schema
     Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].r_switch", reason: _ })
 
   @rq-a3a5905d
-  Scenario: Reject unknown potential
+  Scenario: Reject unknown pair potential
     Given the Background config with pair_interactions[0].potential="morse"
     When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].potential", reason: _ })
+    Then it returns Err(ConfigError::UnknownPairPotential { actual: "morse", pair_index: 0 })
+
+  @rq-45a14d49
+  Scenario: Lennard-Jones pair interaction missing sigma is rejected
+    Given the Background config with pair_interactions[0] having potential="lennard-jones",
+      epsilon=1.65e-21, cutoff=1.0e-9, and no sigma field
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "pair_interactions[0].sigma" })
+
+  @rq-d10e8c7f
+  Scenario: Pair interaction rejects an extra field for the chosen potential
+    Given the Background config with pair_interactions[0] having potential="lennard-jones"
+      and an unknown field stiffness=1.0
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownPairInteractionField { potential: "lennard-jones", field: "stiffness", pair_index: 0 })
 
   @rq-a30ac09f
   Scenario: Reject empty type name
