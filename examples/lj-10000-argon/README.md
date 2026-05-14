@@ -34,7 +34,8 @@ A run produces three files in this directory:
 
 - The `[[pair_interactions]]` table uses standard LJ-argon parameters
   (σ = 3.4 Å, ε ≈ 120 k_B). Initial velocities are generated from a
-  Maxwell-Boltzmann distribution at 100 K with the centre-of-mass drift
-  removed (RNG seed = 1; deterministic across runs on the same GPU).
+  Maxwell-Boltzmann distribution, the centre-of-mass drift is removed, and
+  the result is rescaled so the realised temperature is exactly 100 K
+  (RNG seed = 1; deterministic across runs on the same GPU).
 - The runner uses the O(N²) pair-force kernel; the pair buffer for this
   example occupies ~1.2 GB of GPU memory.

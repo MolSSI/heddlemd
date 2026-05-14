@@ -524,6 +524,48 @@ fn generate_velocities(
         }
     }
 
+    // rq-be568071
+    // Rescale every velocity by a single scalar so the realised kinetic
+    // energy matches the flat-3N target `(3N/2) * k_B * T`, the
+    // degrees-of-freedom convention used by `compute_temperature`.
+    //
+    // The rescale targets the thermal degrees of freedom of the
+    // centre-of-mass-removed velocity field, which exist only for N >= 2.
+    // A single centred particle is its own centre of mass and has no
+    // internal motion, so its velocity is set to exactly zero: the N == 1
+    // momentum subtraction cancels the sampled velocity only up to a
+    // floating-point rounding residual, and the rescale would otherwise
+    // amplify that residual into a full thermal velocity. (N == 0 has
+    // already returned above.)
+    //
+    // For N >= 2 a single deterministic scalar multiply preserves both
+    // determinism and the zero-total-momentum property established above.
+    if n < 2 {
+        for i in 0..n {
+            vx[i] = 0.0;
+            vy[i] = 0.0;
+            vz[i] = 0.0;
+        }
+    } else {
+        let ke: f64 = (0..n)
+            .map(|i| {
+                0.5 * masses[i]
+                    * ((vx[i] as f64).powi(2)
+                        + (vy[i] as f64).powi(2)
+                        + (vz[i] as f64).powi(2))
+            })
+            .sum();
+        if ke > 0.0 {
+            let target_ke = 1.5 * (n as f64) * BOLTZMANN_J_PER_K * temperature;
+            let scale = (target_ke / ke).sqrt();
+            for i in 0..n {
+                vx[i] = ((vx[i] as f64) * scale) as f32;
+                vy[i] = ((vy[i] as f64) * scale) as f32;
+                vz[i] = ((vz[i] as f64) * scale) as f32;
+            }
+        }
+    }
+
     (vx, vy, vz)
 }
 

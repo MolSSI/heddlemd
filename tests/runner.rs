@@ -256,8 +256,9 @@ fn velocities_sampled_when_init_lacks_velo() {
     let ke: f64 = cols[2].parse().unwrap();
     let t: f64 = cols[3].parse().unwrap();
     assert!(ke > 0.0);
-    // Temperature should be near 300 K (statistical tolerance for N=64).
-    assert!((t - 300.0).abs() / 300.0 < 0.30, "temperature was {t}");
+    // The post-COM rescale makes this an exact round-trip up to f32
+    // velocity-storage round-off — not a statistical estimate.
+    assert!((t - 300.0).abs() / 300.0 < 1e-4, "temperature was {t}");
 }
 
 // rq-04fda32f
@@ -346,6 +347,8 @@ fn total_momentum_is_zero() {
 // rq-f7e2d0f1
 #[test]
 fn temperature_zero_yields_zero_velocities() {
+    // temperature == 0.0 takes the early return in generate_velocities,
+    // skipping sampling, the momentum subtraction, and the rescale alike.
     let dir = tmp_path("temperature_zero");
     let path = write_pair(&dir, 0, 1, 0, 0.0, false, false, 999, 4);
     run_simulation(&path).unwrap();
@@ -364,6 +367,27 @@ fn temperature_zero_yields_zero_velocities() {
         assert_eq!(vy.to_bits(), 0.0_f32.to_bits());
         assert_eq!(vz.to_bits(), 0.0_f32.to_bits());
     }
+}
+
+// rq-d82ce4aa
+#[test]
+fn single_particle_generated_velocities_zeroed_for_no_thermal_dof() {
+    // A centred one-particle system has no thermal degrees of freedom,
+    // so the rescale step sets the lone particle's velocity components to
+    // exactly zero — the step-0 log reports KE and temperature of exactly
+    // zero even though the config sets T = 300 K.
+    let dir = tmp_path("single_particle_rescale_guard");
+    let path = write_pair(&dir, 0, 0, 1, 300.0, false, false, 1, 1);
+    let summary = run_simulation(&path).unwrap();
+    assert_eq!(summary.log_rows_written, 1);
+    let log_path = std::fs::canonicalize(&dir).unwrap().join("sim.log");
+    let body = std::fs::read_to_string(&log_path).unwrap();
+    let last = body.lines().last().unwrap();
+    let cols: Vec<&str> = last.split(',').collect();
+    let ke: f64 = cols[2].parse().unwrap();
+    let t: f64 = cols[3].parse().unwrap();
+    assert_eq!(ke, 0.0);
+    assert_eq!(t, 0.0);
 }
 
 // rq-985230a5

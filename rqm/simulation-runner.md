@@ -160,9 +160,12 @@ values.
 
 When the init file does not supply velocities, the runner samples them from
 a Maxwell-Boltzmann distribution at `config.simulation.temperature` using a
-deterministic RNG seeded by `config.simulation.seed`. The procedure is
-fully specified so that two runs with identical config and identical init
-files produce byte-identical velocity arrays.
+deterministic RNG seeded by `config.simulation.seed`. Sampling is followed
+by a centre-of-mass momentum subtraction and a single-scalar rescale, so the
+generated array's flat-3N temperature equals the configured target (within
+f32 storage round-off) for any system with thermal degrees of freedom
+(`N >= 2`). The procedure is fully specified so that two runs with identical
+config and identical init files produce byte-identical velocity arrays.
 
 ### RNG <!-- rq-1b7680ad -->
 
@@ -221,11 +224,69 @@ When `N == 0` the subtraction is skipped (no particles to centre). When
 `temperature == 0.0` the subtraction is skipped (every velocity is already
 zero).
 
+### Temperature rescaling <!-- inline --> <!-- rq-be568071 -->
+
+After the momentum subtraction, when the centre-of-mass-removed velocity
+field has thermal degrees of freedom (`N >= 2`), the runner rescales every
+velocity by a single scalar so the realised kinetic energy matches the
+flat-3N target `(3 * N / 2) * k_B * T`. This is the degrees-of-freedom
+convention used by `compute_temperature` (see `io/log-output.md`), so the
+generated array's reported temperature equals
+`config.simulation.temperature`.
+
+```
+if N < 2:
+    # no thermal degrees of freedom after centring
+    for i in 0..N:
+        for axis in (x, y, z):
+            v[axis][i] = 0.0
+else:
+    ke = sum(0.5 * (masses[i] as f64) *
+             ((v_x[i] as f64)^2 + (v_y[i] as f64)^2 + (v_z[i] as f64)^2)
+             for i in 0..N)
+    if ke > 0.0:
+        target_ke = 1.5 * (N as f64) * k_B * T
+        scale = sqrt(target_ke / ke)
+        for i in 0..N:
+            for axis in (x, y, z):
+                v[axis][i] = ((v[axis][i] as f64) * scale) as f32
+```
+
+The kinetic-energy sum and the scale factor are computed in `f64`; each
+rescaled component is stored back as `f32`. Reading the result back through
+`compute_temperature` therefore recovers `T` to within f32
+velocity-storage round-off.
+
+The rescale targets the thermal degrees of freedom of the
+centre-of-mass-removed velocity field, which exist only for `N >= 2`. The
+edge cases:
+
+- `temperature == 0.0` — velocity generation returns zero velocities
+  before sampling, the momentum subtraction, or the rescale ever run.
+- `N == 0` — there are no particles; the velocity arrays are empty.
+- `N == 1` — a single centred particle is its own centre of mass and has
+  no internal motion, so its velocity components are set to exactly zero.
+  The `N == 1` momentum subtraction cancels the sampled velocity only up
+  to a floating-point rounding residual; the rescale would otherwise
+  amplify that residual into a full thermal velocity, so the velocities
+  are zeroed explicitly rather than scaled.
+- `N >= 2` with a positive post-subtraction kinetic energy — every
+  component is multiplied by `scale`. The `ke > 0.0` guard also covers the
+  measure-zero degenerate case in which every sampled velocity is
+  identical, in which case the velocities are left as the momentum
+  subtraction produced them.
+
+The rescale is a single deterministic scalar multiply, so it preserves both
+the determinism of velocity generation and the zero-total-momentum property
+established by the momentum subtraction.
+
 ### Empty init velocities <!-- rq-e6552df6 -->
 
-When `init_state.velocities = Some(_)`, the velocities are used directly,
-the RNG is not consulted, and no momentum subtraction is applied. The
-caller is presumed to have set velocities deliberately.
+When `init_state.velocities = Some(_)`, the velocities are used directly:
+the RNG is not consulted, and neither the momentum subtraction nor the
+rescale is applied. The caller is presumed to have set velocities
+deliberately; `compute_temperature` reports their flat-3N temperature as-is
+(see `io/log-output.md`).
 
 ## Progress reporting <!-- rq-73fbb111 -->
 
@@ -456,13 +517,15 @@ Feature: dynamics run simulation runner
   # --- Velocity generation ---
 
   @rq-621ce7b6
-  Scenario: Velocities are sampled when init file has no velo column
+  Scenario: Sampled velocities round-trip to the configured temperature
     Given tmp/sim.toml has seed=1, temperature=300.0, n_steps=0
     And tmp/init.xyz has 100 particles with positions but no velocities
     When dynamics is invoked
     Then it exits with code 0
     And the step-0 log row's kinetic_energy is greater than 0
-    And the step-0 log row's temperature equals approximately 300.0 within 5% (statistical tolerance for N=100)
+    And the step-0 log row's temperature equals 300.0 within a relative tolerance of 1e-4
+      (the rescale makes this an exact round-trip up to f32 velocity-storage round-off,
+       not a statistical estimate)
 
   @rq-04fda32f
   Scenario: Explicit init velocities override sampled velocities
@@ -492,10 +555,18 @@ Feature: dynamics run simulation runner
     Then |p_x|, |p_y|, |p_z| are each less than 1e-3 times the typical thermal momentum
 
   @rq-f7e2d0f1
-  Scenario: temperature=0 yields exactly zero velocities and skips momentum subtraction
+  Scenario: temperature=0 yields exactly zero velocities and skips momentum subtraction and rescaling
     Given a config with temperature=0.0 and N=4
     When dynamics is invoked with n_steps=0
     Then every velocity component written to the step-0 frame is exactly 0.0_f32
+
+  @rq-d82ce4aa
+  Scenario: Single-particle generated velocities are zeroed for lack of thermal degrees of freedom
+    Given a config with seed=1, temperature=300.0, and N=1, with no init velocities
+    When dynamics is invoked with n_steps=0
+    Then the rescale step sets the single particle's velocity components to exactly zero
+      (a centred one-particle system has no thermal degrees of freedom)
+    And the step-0 log row's kinetic_energy is exactly 0.0 and temperature is exactly 0.0
 
   # --- Timestep loop ---
 

@@ -3079,10 +3079,10 @@
     "type": "section"
   },
   "rq-621ce7b6": {
-    "decl": "Scenario: Velocities are sampled when init file has no velo column",
+    "decl": "Scenario: Sampled velocities round-trip to the configured temperature",
     "file": "simulation-runner",
     "refs": [],
-    "title": "Velocities are sampled when init file has no velo column",
+    "title": "Sampled velocities round-trip to the configured temperature",
     "type": "scenario"
   },
   "rq-62300a18": {
@@ -6021,6 +6021,19 @@
     "title": "Empty (N=0) run omits all kernel rows but retains host rows",
     "type": "scenario"
   },
+  "rq-be568071": {
+    "decl": "### Temperature rescaling <!-- inline -->",
+    "file": "simulation-runner",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Temperature rescaling <!-- inline -->",
+    "type": "section"
+  },
   "rq-be5fe064": {
     "decl": "### Constructor and Accessors",
     "file": "pair-reduction",
@@ -6743,6 +6756,13 @@
     "file": "integration/langevin-baoab",
     "refs": [],
     "title": "lan_drift_half does not modify image flags when no wrap occurs",
+    "type": "scenario"
+  },
+  "rq-d82ce4aa": {
+    "decl": "Scenario: Single-particle generated velocities are zeroed for lack of thermal degrees of freedom",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Single-particle generated velocities are zeroed for lack of thermal degrees of freedom",
     "type": "scenario"
   },
   "rq-d836d884": {
@@ -7983,10 +8003,10 @@
     "type": "api-item"
   },
   "rq-f7e2d0f1": {
-    "decl": "Scenario: temperature=0 yields exactly zero velocities and skips momentum subtraction",
+    "decl": "Scenario: temperature=0 yields exactly zero velocities and skips momentum subtraction and rescaling",
     "file": "simulation-runner",
     "refs": [],
-    "title": "temperature=0 yields exactly zero velocities and skips momentum subtraction",
+    "title": "temperature=0 yields exactly zero velocities and skips momentum subtraction and rescaling",
     "type": "scenario"
   },
   "rq-f7fe7f1b": {

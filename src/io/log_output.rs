@@ -99,6 +99,15 @@ pub fn compute_kinetic_energy(
 }
 
 // rq-46a39249
+//
+// Uses a flat-3N degrees-of-freedom convention: it does not subtract the
+// three constrained degrees of freedom of a centre-of-mass-removed
+// ensemble. The convention is exact for a Langevin-thermostatted run (the
+// stochastic thermostat couples every degree of freedom and conserves no
+// momentum) and for sampled velocities, which the runner rescales to this
+// convention. For a centre-of-mass-removed microcanonical run the
+// equipartition temperature per thermal degree of freedom is `N / (N - 1)`
+// times this value.
 pub fn compute_temperature(kinetic_energy: f64, particle_count: usize) -> f64 {
     if particle_count == 0 {
         0.0

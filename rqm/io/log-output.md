@@ -42,7 +42,15 @@ step,time,kinetic_energy,temperature
 - `temperature: f64` — instantaneous temperature in kelvin, computed as
   `T = 2 * kinetic_energy / (3 * N * k_B)` using the CODATA-2019 value
   `k_B = 1.380649e-23 J/K`. When `N == 0`, temperature is written as
-  `0.0e0` (zero by definition rather than NaN).
+  `0.0e0` (zero by definition rather than NaN). This is a flat-3N
+  degrees-of-freedom convention: it does not subtract the three
+  constrained degrees of freedom of a centre-of-mass-removed ensemble.
+  The convention is exact for a Langevin-thermostatted run (the stochastic
+  thermostat couples every degree of freedom and conserves no momentum)
+  and for sampled velocities, which are rescaled to this convention (see
+  *Velocity generation* in `simulation-runner.md`). For a
+  centre-of-mass-removed microcanonical run the equipartition temperature
+  per thermal degree of freedom is `N / (N - 1)` times this value.
 
 ### Number formatting <!-- rq-4a6969aa -->
 
@@ -109,6 +117,9 @@ contains the header line plus the one step-0 row, provided `log_every > 0`.
 - `compute_temperature(kinetic_energy: f64, particle_count: usize) -> f64` <!-- rq-46a39249 -->
   - Free helper. Returns `0.0_f64` when `particle_count == 0`. Otherwise
     returns `2.0 * kinetic_energy / (3.0 * particle_count as f64 * 1.380649e-23_f64)`.
+  - Uses a flat-3N degrees-of-freedom convention regardless of how the
+    velocities were produced; see the `temperature` field description above
+    for when that convention is exact.
 
 `LogWriter` implements `Drop` which best-effort flushes on drop without
 panicking.
