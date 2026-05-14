@@ -23,164 +23,63 @@ impl std::fmt::Display for PathRole {
     }
 }
 
-// rq-0b9372e8
-#[derive(Debug)]
+// rq-0b9372e8 rq-e1ceb5c0 rq-1bbcf3b7
+#[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    #[error("failed to read config file: {0}")]
     Io(String),
+    #[error("failed to parse config TOML: {0}")]
     Parse(String),
-    MissingField {
-        field: String,
-    },
-    UnsupportedSchemaVersion {
-        actual: u64,
-        supported: u64,
-    },
-    InvalidValue {
-        field: String,
-        reason: String,
-    },
-    DuplicateTypeName {
-        name: String,
-    },
-    UnknownTypeInPair {
-        name: String,
-        pair_index: usize,
-    },
-    MissingPairInteraction {
-        types: (String, String),
-    },
-    DuplicatePairInteraction {
-        types: (String, String),
-    },
-    UnknownPairPotential {
-        actual: String,
-        pair_index: usize,
-    },
+    #[error("missing required field `{field}`")]
+    MissingField { field: String },
+    #[error("unsupported schema version {actual}: only version {supported} is supported")]
+    UnsupportedSchemaVersion { actual: u64, supported: u64 },
+    #[error("invalid value for `{field}`: {reason}")]
+    InvalidValue { field: String, reason: String },
+    #[error("duplicate particle type name `{name}`")]
+    DuplicateTypeName { name: String },
+    #[error("pair_interactions[{pair_index}] references unknown particle type `{name}`")]
+    UnknownTypeInPair { name: String, pair_index: usize },
+    #[error("missing pair interaction for type pair (`{}`, `{}`)", types.0, types.1)]
+    MissingPairInteraction { types: (String, String) },
+    #[error("duplicate pair interaction for type pair (`{}`, `{}`)", types.0, types.1)]
+    DuplicatePairInteraction { types: (String, String) },
+    #[error("pair_interactions[{pair_index}] has unknown potential `{actual}`")]
+    UnknownPairPotential { actual: String, pair_index: usize },
+    #[error("pair_interactions[{pair_index}] has unknown field `{field}` for potential `{potential}`")]
     UnknownPairInteractionField {
         potential: String,
         field: String,
         pair_index: usize,
     },
+    #[error("output paths collide: `{kind_a}` and `{kind_b}` both resolve to `{}`", path.display())]
     PathCollision {
         kind_a: PathRole,
         kind_b: PathRole,
         path: PathBuf,
     },
-    UnknownIntegratorKind {
-        actual: String,
-    },
-    UnknownIntegratorField {
-        kind: String,
-        field: String,
-    },
+    #[error("unknown integrator kind `{actual}`")]
+    UnknownIntegratorKind { actual: String },
+    #[error("unknown field `{field}` for integrator kind `{kind}`")]
+    UnknownIntegratorField { kind: String, field: String },
+    #[error("bond_types[{bond_type_index}] has unknown potential `{actual}`")]
     UnknownBondPotential {
         actual: String,
         bond_type_index: usize,
     },
+    #[error("bond_types[{bond_type_index}] has unknown field `{field}` for potential `{potential}`")]
     UnknownBondTypeField {
         potential: String,
         field: String,
         bond_type_index: usize,
     },
-    DuplicateBondTypeName {
-        name: String,
-    },
-    UnknownNeighborListMode {
-        actual: String,
-    },
-    UnknownNeighborListField {
-        mode: String,
-        field: String,
-    },
+    #[error("duplicate bond type name `{name}`")]
+    DuplicateBondTypeName { name: String },
+    #[error("unknown neighbor_list mode `{actual}`")]
+    UnknownNeighborListMode { actual: String },
+    #[error("unknown field `{field}` for neighbor_list mode `{mode}`")]
+    UnknownNeighborListField { mode: String, field: String },
 }
-
-impl std::fmt::Display for ConfigError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ConfigError::Io(s) => write!(f, "Io({s})"),
-            ConfigError::Parse(s) => write!(f, "Parse({s})"),
-            ConfigError::MissingField { field } => {
-                write!(f, "MissingField {{ field: {field:?} }}")
-            }
-            ConfigError::UnsupportedSchemaVersion { actual, supported } => write!(
-                f,
-                "UnsupportedSchemaVersion {{ actual: {actual}, supported: {supported} }}"
-            ),
-            ConfigError::InvalidValue { field, reason } => {
-                write!(f, "InvalidValue {{ field: {field:?}, reason: {reason:?} }}")
-            }
-            ConfigError::DuplicateTypeName { name } => {
-                write!(f, "DuplicateTypeName {{ name: {name:?} }}")
-            }
-            ConfigError::UnknownTypeInPair { name, pair_index } => write!(
-                f,
-                "UnknownTypeInPair {{ name: {name:?}, pair_index: {pair_index} }}"
-            ),
-            ConfigError::MissingPairInteraction { types } => write!(
-                f,
-                "MissingPairInteraction {{ types: ({:?}, {:?}) }}",
-                types.0, types.1
-            ),
-            ConfigError::DuplicatePairInteraction { types } => write!(
-                f,
-                "DuplicatePairInteraction {{ types: ({:?}, {:?}) }}",
-                types.0, types.1
-            ),
-            ConfigError::UnknownPairPotential { actual, pair_index } => write!(
-                f,
-                "UnknownPairPotential {{ actual: {actual:?}, pair_index: {pair_index} }}"
-            ),
-            ConfigError::UnknownPairInteractionField {
-                potential,
-                field,
-                pair_index,
-            } => write!(
-                f,
-                "UnknownPairInteractionField {{ potential: {potential:?}, field: {field:?}, pair_index: {pair_index} }}"
-            ),
-            ConfigError::PathCollision {
-                kind_a,
-                kind_b,
-                path,
-            } => write!(
-                f,
-                "PathCollision {{ kind_a: {kind_a}, kind_b: {kind_b}, path: {} }}",
-                path.display()
-            ),
-            ConfigError::UnknownIntegratorKind { actual } => {
-                write!(f, "UnknownIntegratorKind {{ actual: {actual:?} }}")
-            }
-            ConfigError::UnknownIntegratorField { kind, field } => write!(
-                f,
-                "UnknownIntegratorField {{ kind: {kind:?}, field: {field:?} }}"
-            ),
-            ConfigError::UnknownBondPotential { actual, bond_type_index } => write!(
-                f,
-                "UnknownBondPotential {{ actual: {actual:?}, bond_type_index: {bond_type_index} }}"
-            ),
-            ConfigError::UnknownBondTypeField {
-                potential,
-                field,
-                bond_type_index,
-            } => write!(
-                f,
-                "UnknownBondTypeField {{ potential: {potential:?}, field: {field:?}, bond_type_index: {bond_type_index} }}"
-            ),
-            ConfigError::DuplicateBondTypeName { name } => {
-                write!(f, "DuplicateBondTypeName {{ name: {name:?} }}")
-            }
-            ConfigError::UnknownNeighborListMode { actual } => {
-                write!(f, "UnknownNeighborListMode {{ actual: {actual:?} }}")
-            }
-            ConfigError::UnknownNeighborListField { mode, field } => write!(
-                f,
-                "UnknownNeighborListField {{ mode: {mode:?}, field: {field:?} }}"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for ConfigError {}
 
 // rq-53055a5b
 #[derive(Debug, Clone)]

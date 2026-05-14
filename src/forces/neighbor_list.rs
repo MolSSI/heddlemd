@@ -13,56 +13,24 @@ use crate::gpu::{
 use crate::pbc::SimulationBox;
 use crate::timings::{HostStage, KernelStage, Timings};
 
-// rq-d8e4407a
-#[derive(Debug)]
+// rq-d8e4407a rq-e1ceb5c0 rq-6cf916af rq-1bbcf3b7
+#[derive(Debug, thiserror::Error)]
 pub enum NeighborListError {
-    Gpu(GpuError),
-    NeighborListOverflow {
-        max: u32,
-    },
+    #[error("{0}")]
+    Gpu(#[from] GpuError),
+    #[error("an atom has more than {max} neighbors")]
+    NeighborListOverflow { max: u32 },
+    #[error("simulation box is too small along axis `{axis}`: length {length} is below the required {required}")]
     BoxTooSmallForCells {
         axis: &'static str,
         length: f32,
         required: f32,
     },
+    #[error("cell grid has {n_cells_total} cells, exceeding the device limit of {max_supported}")]
     TooManyCells {
         n_cells_total: usize,
         max_supported: usize,
     },
-}
-
-impl std::fmt::Display for NeighborListError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            NeighborListError::Gpu(e) => write!(f, "Gpu({e})"),
-            NeighborListError::NeighborListOverflow { max } => {
-                write!(f, "NeighborListOverflow {{ max: {max} }}")
-            }
-            NeighborListError::BoxTooSmallForCells {
-                axis,
-                length,
-                required,
-            } => write!(
-                f,
-                "BoxTooSmallForCells {{ axis: {axis:?}, length: {length}, required: {required} }}"
-            ),
-            NeighborListError::TooManyCells {
-                n_cells_total,
-                max_supported,
-            } => write!(
-                f,
-                "TooManyCells {{ n_cells_total: {n_cells_total}, max_supported: {max_supported} }}"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for NeighborListError {}
-
-impl From<GpuError> for NeighborListError {
-    fn from(e: GpuError) -> Self {
-        NeighborListError::Gpu(e)
-    }
 }
 
 // rq-77754ad1

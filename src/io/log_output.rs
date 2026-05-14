@@ -17,25 +17,14 @@ impl std::fmt::Debug for LogWriter {
     }
 }
 
-// rq-45eb243b
-#[derive(Debug)]
+// rq-45eb243b rq-e1ceb5c0
+#[derive(Debug, thiserror::Error)]
 pub enum LogWriterError {
+    #[error("output file already exists: `{}`", .path.display())]
     OutputExists { path: PathBuf },
+    #[error("failed to write log file: {0}")]
     Io(String),
 }
-
-impl std::fmt::Display for LogWriterError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            LogWriterError::OutputExists { path } => {
-                write!(f, "OutputExists {{ path: {} }}", path.display())
-            }
-            LogWriterError::Io(s) => write!(f, "Io({s})"),
-        }
-    }
-}
-
-impl std::error::Error for LogWriterError {}
 
 impl LogWriter {
     // rq-e0ef1221 rq-8b4243e0

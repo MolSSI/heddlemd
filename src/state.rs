@@ -24,50 +24,19 @@ pub struct ParticleState {
     pub particle_ids: Vec<u32>,
 }
 
-// rq-bec7b519
-#[derive(Debug)]
+// rq-bec7b519 rq-e1ceb5c0 rq-6cf916af
+#[derive(Debug, thiserror::Error)]
 pub enum ParticleStateError {
+    #[error("length mismatch on array `{array}`: expected {expected}, got {actual}")]
     LengthMismatch {
         array: &'static str,
         expected: usize,
         actual: usize,
     },
+    #[error("duplicate particle id {0}")]
     DuplicateParticleId(u32),
-    Gpu(GpuError),
-}
-
-impl std::fmt::Display for ParticleStateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ParticleStateError::LengthMismatch {
-                array,
-                expected,
-                actual,
-            } => write!(
-                f,
-                "length mismatch on array {array}: expected {expected}, got {actual}"
-            ),
-            ParticleStateError::DuplicateParticleId(id) => {
-                write!(f, "duplicate particle id {id}")
-            }
-            ParticleStateError::Gpu(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for ParticleStateError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            ParticleStateError::Gpu(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl From<GpuError> for ParticleStateError {
-    fn from(e: GpuError) -> Self {
-        ParticleStateError::Gpu(e)
-    }
+    #[error("{0}")]
+    Gpu(#[from] GpuError),
 }
 
 pub(crate) fn check_len(

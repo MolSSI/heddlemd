@@ -104,127 +104,40 @@ impl DeviceExclusionList {
     }
 }
 
-// rq-573b650b-style errors for bond file parsing.
-#[derive(Debug)]
+// rq-e1ceb5c0 — errors for bond file parsing.
+#[derive(Debug, thiserror::Error)]
 pub enum BondsFileError {
+    #[error("failed to read bonds file: {0}")]
     Io(String),
-    UnknownSection {
-        name: String,
-        line_number: usize,
-    },
-    DuplicateSection {
-        name: String,
-        line_number: usize,
-    },
-    ContentOutsideSection {
-        line_number: usize,
-    },
-    InvalidBondRow {
-        line_number: usize,
-        reason: String,
-    },
-    InvalidExclusionRow {
-        line_number: usize,
-        reason: String,
-    },
+    #[error("line {line_number}: unknown section `{name}`")]
+    UnknownSection { name: String, line_number: usize },
+    #[error("line {line_number}: duplicate section `{name}`")]
+    DuplicateSection { name: String, line_number: usize },
+    #[error("line {line_number}: content appears outside any section")]
+    ContentOutsideSection { line_number: usize },
+    #[error("line {line_number}: invalid bond row: {reason}")]
+    InvalidBondRow { line_number: usize, reason: String },
+    #[error("line {line_number}: invalid exclusion row: {reason}")]
+    InvalidExclusionRow { line_number: usize, reason: String },
+    #[error("line {line_number}: atom index {index} is out of range (max {max})")]
     AtomIndexOutOfRange {
         line_number: usize,
         index: u32,
         max: u32,
     },
-    SelfBond {
-        line_number: usize,
-        atom: u32,
-    },
-    SelfExclusion {
-        line_number: usize,
-        atom: u32,
-    },
-    DuplicateBond {
-        atom_i: u32,
-        atom_j: u32,
-    },
-    DuplicateExclusion {
-        atom_i: u32,
-        atom_j: u32,
-    },
-    UnknownBondType {
-        line_number: usize,
-        name: String,
-    },
-    ScaleOutOfRange {
-        line_number: usize,
-        scale: f32,
-    },
+    #[error("line {line_number}: atom {atom} is bonded to itself")]
+    SelfBond { line_number: usize, atom: u32 },
+    #[error("line {line_number}: atom {atom} is excluded from itself")]
+    SelfExclusion { line_number: usize, atom: u32 },
+    #[error("duplicate bond between atoms {atom_i} and {atom_j}")]
+    DuplicateBond { atom_i: u32, atom_j: u32 },
+    #[error("duplicate exclusion between atoms {atom_i} and {atom_j}")]
+    DuplicateExclusion { atom_i: u32, atom_j: u32 },
+    #[error("line {line_number}: unknown bond type `{name}`")]
+    UnknownBondType { line_number: usize, name: String },
+    #[error("line {line_number}: exclusion scale {scale} is out of the range [0, 1]")]
+    ScaleOutOfRange { line_number: usize, scale: f32 },
 }
-
-impl std::fmt::Display for BondsFileError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            BondsFileError::Io(s) => write!(f, "Io({s})"),
-            BondsFileError::UnknownSection { name, line_number } => write!(
-                f,
-                "UnknownSection {{ name: {name:?}, line_number: {line_number} }}"
-            ),
-            BondsFileError::DuplicateSection { name, line_number } => write!(
-                f,
-                "DuplicateSection {{ name: {name:?}, line_number: {line_number} }}"
-            ),
-            BondsFileError::ContentOutsideSection { line_number } => write!(
-                f,
-                "ContentOutsideSection {{ line_number: {line_number} }}"
-            ),
-            BondsFileError::InvalidBondRow {
-                line_number,
-                reason,
-            } => write!(
-                f,
-                "InvalidBondRow {{ line_number: {line_number}, reason: {reason:?} }}"
-            ),
-            BondsFileError::InvalidExclusionRow {
-                line_number,
-                reason,
-            } => write!(
-                f,
-                "InvalidExclusionRow {{ line_number: {line_number}, reason: {reason:?} }}"
-            ),
-            BondsFileError::AtomIndexOutOfRange {
-                line_number,
-                index,
-                max,
-            } => write!(
-                f,
-                "AtomIndexOutOfRange {{ line_number: {line_number}, index: {index}, max: {max} }}"
-            ),
-            BondsFileError::SelfBond { line_number, atom } => write!(
-                f,
-                "SelfBond {{ line_number: {line_number}, atom: {atom} }}"
-            ),
-            BondsFileError::SelfExclusion { line_number, atom } => write!(
-                f,
-                "SelfExclusion {{ line_number: {line_number}, atom: {atom} }}"
-            ),
-            BondsFileError::DuplicateBond { atom_i, atom_j } => write!(
-                f,
-                "DuplicateBond {{ atom_i: {atom_i}, atom_j: {atom_j} }}"
-            ),
-            BondsFileError::DuplicateExclusion { atom_i, atom_j } => write!(
-                f,
-                "DuplicateExclusion {{ atom_i: {atom_i}, atom_j: {atom_j} }}"
-            ),
-            BondsFileError::UnknownBondType { line_number, name } => write!(
-                f,
-                "UnknownBondType {{ line_number: {line_number}, name: {name:?} }}"
-            ),
-            BondsFileError::ScaleOutOfRange { line_number, scale } => write!(
-                f,
-                "ScaleOutOfRange {{ line_number: {line_number}, scale: {scale} }}"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for BondsFileError {}
 
 pub fn load_bonds_file(
     path: &Path,

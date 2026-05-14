@@ -23,60 +23,48 @@ use crate::timings::{
     HostStage, Timings, TimingsError, TimingsWriterError, write_timings_file,
 };
 
-// rq-8ee27e27
-#[derive(Debug)]
+// rq-8ee27e27 rq-e1ceb5c0 rq-6cf916af
+//
+// `RunnerError` carries no `From` impls: the runner attaches an
+// `ExitPhase` tag at each `.map_err` call site. The wrapping variants
+// delegate `Display` to the inner error via `#[error("{0}")]` and expose
+// it through `source()` via `#[source]`, but deliberately omit `#[from]`,
+// so no implicit conversion exists.
+#[derive(Debug, thiserror::Error)]
 pub enum RunnerError {
-    Config(ConfigError),
-    InitState(InitStateError),
-    ParticleState(ParticleStateError),
-    Gpu(crate::gpu::GpuError),
-    Integrator(IntegratorError),
-    BondsFile(BondsFileError),
-    ForceField(ForceFieldError),
-    Trajectory(TrajectoryWriterError),
-    Log(LogWriterError),
-    Timings(TimingsError),
-    TimingsWriter(TimingsWriterError),
+    #[error("{0}")]
+    Config(#[source] ConfigError),
+    #[error("{0}")]
+    InitState(#[source] InitStateError),
+    #[error("{0}")]
+    ParticleState(#[source] ParticleStateError),
+    #[error("{0}")]
+    Gpu(#[source] crate::gpu::GpuError),
+    #[error("{0}")]
+    Integrator(#[source] IntegratorError),
+    #[error("{0}")]
+    BondsFile(#[source] BondsFileError),
+    #[error("{0}")]
+    ForceField(#[source] ForceFieldError),
+    #[error("{0}")]
+    Trajectory(#[source] TrajectoryWriterError),
+    #[error("{0}")]
+    Log(#[source] LogWriterError),
+    #[error("{0}")]
+    Timings(#[source] TimingsError),
+    #[error("{0}")]
+    TimingsWriter(#[source] TimingsWriterError),
+    #[error("missing command-line arguments")]
     MissingArgs,
+    #[error("output file already exists: `{}`", .path.display())]
     OutputExists { path: PathBuf },
+    #[error("simulation box is too small for the cell list along axis `{axis}`: length {length} is below the required {required}")]
     CellListBoxTooSmall {
         axis: &'static str,
         length: f32,
         required: f32,
     },
 }
-
-impl std::fmt::Display for RunnerError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RunnerError::Config(e) => write!(f, "Config({e})"),
-            RunnerError::InitState(e) => write!(f, "InitState({e})"),
-            RunnerError::ParticleState(e) => write!(f, "ParticleState({e})"),
-            RunnerError::Gpu(e) => write!(f, "Gpu({e})"),
-            RunnerError::Integrator(e) => write!(f, "Integrator({e})"),
-            RunnerError::BondsFile(e) => write!(f, "BondsFile({e})"),
-            RunnerError::ForceField(e) => write!(f, "ForceField({e})"),
-            RunnerError::Trajectory(e) => write!(f, "Trajectory({e})"),
-            RunnerError::Log(e) => write!(f, "Log({e})"),
-            RunnerError::Timings(e) => write!(f, "Timings({e})"),
-            RunnerError::TimingsWriter(e) => write!(f, "TimingsWriter({e})"),
-            RunnerError::MissingArgs => write!(f, "MissingArgs"),
-            RunnerError::OutputExists { path } => {
-                write!(f, "OutputExists {{ path: {} }}", path.display())
-            }
-            RunnerError::CellListBoxTooSmall {
-                axis,
-                length,
-                required,
-            } => write!(
-                f,
-                "CellListBoxTooSmall {{ axis: {axis:?}, length: {length}, required: {required} }}"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for RunnerError {}
 
 // rq-5c1cfc93
 #[derive(Debug, Clone, Copy)]

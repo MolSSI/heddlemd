@@ -5,27 +5,14 @@ pub struct SimulationBox {
     generation: u64,
 }
 
-// rq-aef9888b
-#[derive(Debug)]
+// rq-aef9888b rq-e1ceb5c0
+#[derive(Debug, thiserror::Error)]
 pub enum SimulationBoxError {
+    #[error("non-finite simulation-box length for axis `{axis}`: {value}")]
     NonFiniteLength { axis: &'static str, value: f32 },
+    #[error("non-positive simulation-box length for axis `{axis}`: {value}")]
     NonPositiveLength { axis: &'static str, value: f32 },
 }
-
-impl std::fmt::Display for SimulationBoxError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SimulationBoxError::NonFiniteLength { axis, value } => {
-                write!(f, "non-finite simulation-box length {axis} = {value}")
-            }
-            SimulationBoxError::NonPositiveLength { axis, value } => {
-                write!(f, "non-positive simulation-box length {axis} = {value}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for SimulationBoxError {}
 
 fn check_axis(axis: &'static str, value: f32) -> Result<(), SimulationBoxError> {
     if !value.is_finite() {

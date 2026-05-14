@@ -60,44 +60,17 @@ pub struct ForceFieldContext<'a> {
     pub neighbor_list: Option<&'a NeighborListState>,
 }
 
-// rq-a2e20b02
-#[derive(Debug)]
+// rq-a2e20b02 rq-e1ceb5c0 rq-6cf916af
+#[derive(Debug, thiserror::Error)]
 pub enum ForceFieldError {
-    Gpu(GpuError),
-    Timings(TimingsError),
-    NeighborList(NeighborListError),
+    #[error("{0}")]
+    Gpu(#[from] GpuError),
+    #[error("{0}")]
+    Timings(#[from] TimingsError),
+    #[error("{0}")]
+    NeighborList(#[from] NeighborListError),
+    #[error("duplicate potential slot label `{0}`")]
     DuplicateLabel(&'static str),
-}
-
-impl std::fmt::Display for ForceFieldError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ForceFieldError::Gpu(e) => write!(f, "Gpu({e})"),
-            ForceFieldError::Timings(e) => write!(f, "Timings({e})"),
-            ForceFieldError::NeighborList(e) => write!(f, "NeighborList({e})"),
-            ForceFieldError::DuplicateLabel(l) => write!(f, "DuplicateLabel({l:?})"),
-        }
-    }
-}
-
-impl std::error::Error for ForceFieldError {}
-
-impl From<GpuError> for ForceFieldError {
-    fn from(e: GpuError) -> Self {
-        ForceFieldError::Gpu(e)
-    }
-}
-
-impl From<TimingsError> for ForceFieldError {
-    fn from(e: TimingsError) -> Self {
-        ForceFieldError::Timings(e)
-    }
-}
-
-impl From<NeighborListError> for ForceFieldError {
-    fn from(e: NeighborListError) -> Self {
-        ForceFieldError::NeighborList(e)
-    }
 }
 
 // rq-684a29f1

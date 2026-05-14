@@ -31,117 +31,54 @@ pub struct InitImages {
     pub images_z: Vec<i32>,
 }
 
-// rq-573b650b
-#[derive(Debug)]
+// rq-573b650b rq-e1ceb5c0
+#[derive(Debug, thiserror::Error)]
 pub enum InitStateError {
+    #[error("failed to read init-state file: {0}")]
     Io(String),
+    #[error("init-state file is empty")]
     Empty,
-    InvalidParticleCount {
-        line_number: usize,
-        raw: String,
-    },
+    #[error("invalid particle count on line {line_number}: `{raw}`")]
+    InvalidParticleCount { line_number: usize, raw: String },
+    #[error("init-state file is missing the comment line")]
     MissingCommentLine,
-    MissingAttribute {
-        name: &'static str,
-    },
+    #[error("comment line is missing the required `{name}` attribute")]
+    MissingAttribute { name: &'static str },
+    #[error("invalid `Lattice` attribute: {0}")]
     InvalidLattice(String),
+    #[error("invalid `Properties` attribute: {0}")]
     InvalidProperties(String),
-    RowCountMismatch {
-        expected: usize,
-        actual: usize,
-    },
+    #[error("expected {expected} particle rows, found {actual}")]
+    RowCountMismatch { expected: usize, actual: usize },
+    #[error("line {line_number} has {actual} columns, expected {expected}")]
     RowColumnCountMismatch {
         line_number: usize,
         expected: usize,
         actual: usize,
     },
-    UnknownType {
-        line_number: usize,
-        name: String,
-    },
+    #[error("line {line_number} references unknown particle type `{name}`")]
+    UnknownType { line_number: usize, name: String },
+    #[error("line {line_number}: column `{column}` has invalid number `{raw}`")]
     InvalidNumber {
         line_number: usize,
         column: &'static str,
         raw: String,
     },
+    #[error("line {line_number}: column `{column}` is non-finite")]
     NonFiniteValue {
         line_number: usize,
         column: &'static str,
     },
+    #[error("line {line_number}: `{axis}` position {value} lies outside the box half-length {half_length}")]
     PositionOutsideBox {
         line_number: usize,
         axis: &'static str,
         value: f64,
         half_length: f64,
     },
-    TrailingContent {
-        line_number: usize,
-    },
+    #[error("unexpected trailing content on line {line_number}")]
+    TrailingContent { line_number: usize },
 }
-
-impl std::fmt::Display for InitStateError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            InitStateError::Io(s) => write!(f, "Io({s})"),
-            InitStateError::Empty => write!(f, "Empty"),
-            InitStateError::InvalidParticleCount { line_number, raw } => write!(
-                f,
-                "InvalidParticleCount {{ line_number: {line_number}, raw: {raw:?} }}"
-            ),
-            InitStateError::MissingCommentLine => write!(f, "MissingCommentLine"),
-            InitStateError::MissingAttribute { name } => {
-                write!(f, "MissingAttribute {{ name: {name:?} }}")
-            }
-            InitStateError::InvalidLattice(s) => write!(f, "InvalidLattice({s})"),
-            InitStateError::InvalidProperties(s) => write!(f, "InvalidProperties({s})"),
-            InitStateError::RowCountMismatch { expected, actual } => write!(
-                f,
-                "RowCountMismatch {{ expected: {expected}, actual: {actual} }}"
-            ),
-            InitStateError::RowColumnCountMismatch {
-                line_number,
-                expected,
-                actual,
-            } => write!(
-                f,
-                "RowColumnCountMismatch {{ line_number: {line_number}, expected: {expected}, actual: {actual} }}"
-            ),
-            InitStateError::UnknownType { line_number, name } => write!(
-                f,
-                "UnknownType {{ line_number: {line_number}, name: {name:?} }}"
-            ),
-            InitStateError::InvalidNumber {
-                line_number,
-                column,
-                raw,
-            } => write!(
-                f,
-                "InvalidNumber {{ line_number: {line_number}, column: {column:?}, raw: {raw:?} }}"
-            ),
-            InitStateError::NonFiniteValue {
-                line_number,
-                column,
-            } => write!(
-                f,
-                "NonFiniteValue {{ line_number: {line_number}, column: {column:?} }}"
-            ),
-            InitStateError::PositionOutsideBox {
-                line_number,
-                axis,
-                value,
-                half_length,
-            } => write!(
-                f,
-                "PositionOutsideBox {{ line_number: {line_number}, axis: {axis:?}, value: {value}, half_length: {half_length} }}"
-            ),
-            InitStateError::TrailingContent { line_number } => {
-                write!(f, "TrailingContent {{ line_number: {line_number} }}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for InitStateError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PropertiesShape {

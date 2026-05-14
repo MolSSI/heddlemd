@@ -133,47 +133,30 @@ pub struct TimingsReport {
     pub stages: Vec<StageStats>,
 }
 
-// rq-779092ca
-#[derive(Debug)]
+// rq-779092ca rq-e1ceb5c0 rq-6cf916af
+#[derive(Debug, thiserror::Error)]
 pub enum TimingsError {
-    Gpu(GpuError),
+    #[error("{0}")]
+    Gpu(#[from] GpuError),
 }
 
-impl std::fmt::Display for TimingsError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TimingsError::Gpu(e) => write!(f, "Gpu({e})"),
-        }
-    }
-}
-
-impl std::error::Error for TimingsError {}
-
+// Converting a raw `DriverError` into a `TimingsError` routes through
+// `GpuError`; that two-hop conversion cannot be expressed with `#[from]`
+// and stays a hand-written impl alongside the derived `From<GpuError>`.
 impl From<cudarc::driver::DriverError> for TimingsError {
     fn from(e: cudarc::driver::DriverError) -> Self {
         TimingsError::Gpu(GpuError(e))
     }
 }
 
-// rq-ec06c8e1
-#[derive(Debug)]
+// rq-ec06c8e1 rq-e1ceb5c0
+#[derive(Debug, thiserror::Error)]
 pub enum TimingsWriterError {
+    #[error("output file already exists: `{}`", .path.display())]
     OutputExists { path: PathBuf },
+    #[error("failed to write timings file: {0}")]
     Io(String),
 }
-
-impl std::fmt::Display for TimingsWriterError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TimingsWriterError::OutputExists { path } => {
-                write!(f, "OutputExists {{ path: {} }}", path.display())
-            }
-            TimingsWriterError::Io(s) => write!(f, "Io({s})"),
-        }
-    }
-}
-
-impl std::error::Error for TimingsWriterError {}
 
 #[derive(Debug, Clone, Copy, Default)]
 struct Accumulator {

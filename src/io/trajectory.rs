@@ -23,25 +23,14 @@ impl std::fmt::Debug for TrajectoryWriter {
     }
 }
 
-// rq-1fcaf334
-#[derive(Debug)]
+// rq-1fcaf334 rq-e1ceb5c0
+#[derive(Debug, thiserror::Error)]
 pub enum TrajectoryWriterError {
+    #[error("output file already exists: `{}`", .path.display())]
     OutputExists { path: PathBuf },
+    #[error("failed to write trajectory file: {0}")]
     Io(String),
 }
-
-impl std::fmt::Display for TrajectoryWriterError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            TrajectoryWriterError::OutputExists { path } => {
-                write!(f, "OutputExists {{ path: {} }}", path.display())
-            }
-            TrajectoryWriterError::Io(s) => write!(f, "Io({s})"),
-        }
-    }
-}
-
-impl std::error::Error for TrajectoryWriterError {}
 
 impl TrajectoryWriter {
     // rq-28659fbe

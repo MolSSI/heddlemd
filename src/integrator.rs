@@ -13,46 +13,17 @@ use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
 
-// rq-a5069572
-#[derive(Debug)]
+// rq-a5069572 rq-e1ceb5c0 rq-6cf916af
+#[derive(Debug, thiserror::Error)]
 pub enum IntegratorError {
-    Gpu(GpuError),
-    Timings(TimingsError),
-    ForceField(ForceFieldError),
+    #[error("{0}")]
+    Gpu(#[from] GpuError),
+    #[error("{0}")]
+    Timings(#[from] TimingsError),
+    #[error("{0}")]
+    ForceField(#[from] ForceFieldError),
+    #[error("unknown integrator kind `{0}`")]
     UnknownKind(String),
-}
-
-impl std::fmt::Display for IntegratorError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            IntegratorError::Gpu(e) => write!(f, "Gpu({e})"),
-            IntegratorError::Timings(e) => write!(f, "Timings({e})"),
-            IntegratorError::ForceField(e) => write!(f, "ForceField({e})"),
-            IntegratorError::UnknownKind(name) => {
-                write!(f, "UnknownKind({name:?})")
-            }
-        }
-    }
-}
-
-impl std::error::Error for IntegratorError {}
-
-impl From<GpuError> for IntegratorError {
-    fn from(e: GpuError) -> Self {
-        IntegratorError::Gpu(e)
-    }
-}
-
-impl From<TimingsError> for IntegratorError {
-    fn from(e: TimingsError) -> Self {
-        IntegratorError::Timings(e)
-    }
-}
-
-impl From<ForceFieldError> for IntegratorError {
-    fn from(e: ForceFieldError) -> Self {
-        IntegratorError::ForceField(e)
-    }
 }
 
 // rq-e4c4ff61
