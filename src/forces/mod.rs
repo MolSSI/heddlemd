@@ -14,6 +14,7 @@ use crate::gpu::{
 };
 use crate::io::config::{
     BondTypeConfig, CoulombConfig, NeighborListConfig, PairInteractionConfig, ParticleTypeConfig,
+    SpmeConfig,
 };
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
@@ -23,7 +24,9 @@ pub use bonds::{
     load_bonds_file,
 };
 pub use coulomb::{CoulombParameters, CoulombState};
-pub use spme::{SpmeError, SpmeParameters, SpmeReciprocalGrid};
+pub use spme::{
+    SpmeError, SpmeParameters, SpmeReciprocalGrid, SpmeReciprocalState, SpmeRealSpaceState,
+};
 pub use lj::LennardJonesState;
 pub use morse::MorseBondedState;
 pub use neighbor_list::{
@@ -64,6 +67,8 @@ pub struct SlotOutputView<'a> {
 // rq-9f7d4b40
 pub struct ForceFieldContext<'a> {
     pub neighbor_list: Option<&'a NeighborListState>,
+    pub buffers: &'a ParticleBuffers,
+    pub sim_box: &'a SimulationBox,
 }
 
 // rq-a2e20b02 rq-e1ceb5c0 rq-6cf916af
@@ -105,6 +110,8 @@ impl ForceField {
         pair_interactions: &[PairInteractionConfig],
         bond_types: &[BondTypeConfig],
         coulomb_config: Option<&CoulombConfig>,
+        spme_config: Option<&SpmeConfig>,
+        charges: &[f32],
         bond_list: &BondList,
         exclusion_list: &ExclusionList,
         neighbor_list_config: &NeighborListConfig,
@@ -153,7 +160,40 @@ impl ForceField {
             slots.push(Box::new(coul_state));
         }
 
-        // Slot 2: Morse bonded when at least one bond is present.
+        // Slots 2 + 3: SPME real-space and reciprocal-space pieces when the
+        // [spme] table is present. The two slots always appear together;
+        // their pairing is what makes the Ewald split exact. Mutual
+        // exclusion with [coulomb] is enforced at config parse time.
+        if let Some(spme_cfg) = spme_config {
+            let params = SpmeParameters::from(spme_cfg);
+            let real_state = SpmeRealSpaceState::new(
+                gpu,
+                particle_count,
+                params.alpha,
+                params.r_cut_real,
+                max_neighbors,
+                exclusion_list,
+            )?;
+            slots.push(Box::new(real_state));
+            let recip_state = SpmeReciprocalState::new(
+                gpu,
+                sim_box,
+                particle_count,
+                charges,
+                params,
+            )
+            .map_err(|e| match e {
+                SpmeError::Gpu(g) => ForceFieldError::Gpu(g),
+                SpmeError::NeighborList(n) => ForceFieldError::NeighborList(n),
+                // Construction-time errors that should not occur after
+                // config-layer validation. Surface as Gpu errors so we
+                // never silently swallow them.
+                other => panic!("SPME slot construction failed unexpectedly: {other:?}"),
+            })?;
+            slots.push(Box::new(recip_state));
+        }
+
+        // Slot 4: Morse bonded when at least one bond is present.
         if !bond_list.is_empty() {
             let morse_state = MorseBondedState::new(gpu, bond_list, bond_types)?;
             slots.push(Box::new(morse_state));
@@ -234,7 +274,11 @@ impl ForceField {
 
         let nl_ref = self.neighbor_list.as_ref();
         for slot in self.slots.iter_mut() {
-            let cx = ForceFieldContext { neighbor_list: nl_ref };
+            let cx = ForceFieldContext {
+                neighbor_list: nl_ref,
+                buffers: &*buffers,
+                sim_box,
+            };
             slot.contribute(buffers, sim_box, &cx, timings)?;
         }
 
@@ -255,7 +299,11 @@ impl ForceField {
                 energy: sen.slice_mut(start..end),
                 virial: svi.slice_mut(start..end),
             };
-            let cx = ForceFieldContext { neighbor_list: nl_ref };
+            let cx = ForceFieldContext {
+                neighbor_list: nl_ref,
+                buffers: &*buffers,
+                sim_box,
+            };
             slots[k].reduce(view, &cx, timings)?;
         }
 

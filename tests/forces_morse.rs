@@ -461,6 +461,8 @@ fn diatomic_equilibrium_produces_zero_net_force() {
         &[pair],
         &bt,
         None,
+        None,
+        &[],
         &bl,
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
@@ -494,6 +496,8 @@ fn newtons_third_law_holds_for_combined_force() {
         &[pair],
         &bt,
         None,
+        None,
+        &[],
         &bl,
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)

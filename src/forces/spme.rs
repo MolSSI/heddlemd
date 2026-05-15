@@ -14,14 +14,16 @@ use cudarc::driver::{CudaDevice, CudaSlice};
 
 use crate::gpu::cufft::{CuFftError, Plan3dC2R, Plan3dR2C};
 use crate::gpu::{
-    GpuContext, GpuError, K_COULOMB_F32, ParticleBuffers, spme_charge_spread,
-    spme_influence_multiply,
+    GpuContext, GpuError, K_COULOMB_F32, PairBuffer, ParticleBuffers, reduce_pair_forces,
+    spme_charge_spread, spme_force_gather, spme_influence_multiply, spme_real_pair_force,
 };
 use crate::io::config::SpmeConfig;
 use crate::pbc::SimulationBox;
-use crate::timings::Timings;
+use crate::timings::{KernelStage, Timings};
 
+use super::bonds::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::{NeighborListError, NeighborListState};
+use super::{ForceFieldContext, ForceFieldError, Potential, SlotOutputView};
 
 // rq-7bd2d9ca
 #[derive(Debug, Clone, Copy)]
@@ -78,6 +80,14 @@ pub struct SpmeReciprocalGrid {
     pub rho_hat_interleaved: CudaSlice<f32>,
     pub v: CudaSlice<f32>,
     pub influence_g: CudaSlice<f32>,
+    /// Per-cell factor `G[k] · (1 − K²/(2α²))`. Multiplied by
+    /// `|rho_hat[k]|²` and the Hermitian weight by the kernel to produce
+    /// `virial_per_cell`.
+    pub virial_factor: CudaSlice<f32>,
+    /// Scratch buffer holding the per-cell virial contribution after
+    /// `spme_influence_multiply`. Reduced host-side to the scalar
+    /// W_recip during the gather/reduce step.
+    pub virial_per_cell: CudaSlice<f32>,
     /// Box generation the influence function was computed against.
     /// Refreshed when the sim_box generation changes.
     pub cached_box_generation: u64,
@@ -125,14 +135,26 @@ impl SpmeReciprocalGrid {
             .alloc_zeros::<f32>(2 * m_complex)
             .map_err(GpuError::from)?;
 
-        // Compute b-factors and influence function on the host, then upload.
+        // Compute b-factors, influence function, and virial factor on
+        // the host, then upload.
         let b_factors_a = compute_b_factors(n_a, p);
         let b_factors_b = compute_b_factors(n_b, p);
         let b_factors_c = compute_b_factors(n_c, p);
-        let influence_host =
-            compute_influence_function(sim_box, params, &b_factors_a, &b_factors_b, &b_factors_c);
+        let (influence_host, virial_host) = compute_influence_and_virial(
+            sim_box,
+            params,
+            &b_factors_a,
+            &b_factors_b,
+            &b_factors_c,
+        );
         debug_assert_eq!(influence_host.len(), m_complex);
+        debug_assert_eq!(virial_host.len(), m_complex);
         let influence_g = device.htod_sync_copy(&influence_host).map_err(GpuError::from)?;
+        let virial_factor =
+            device.htod_sync_copy(&virial_host).map_err(GpuError::from)?;
+        let virial_per_cell = device
+            .alloc_zeros::<f32>(m_complex)
+            .map_err(GpuError::from)?;
 
         let forward_plan = Plan3dR2C::new(&device, n_a, n_b, n_c)?;
         let inverse_plan = Plan3dC2R::new(&device, n_a, n_b, n_c)?;
@@ -148,6 +170,8 @@ impl SpmeReciprocalGrid {
             rho_hat_interleaved,
             v,
             influence_g,
+            virial_factor,
+            virial_per_cell,
             cached_box_generation: sim_box.generation(),
             forward_plan,
             inverse_plan,
@@ -165,7 +189,8 @@ impl SpmeReciprocalGrid {
         particle_buffers: &ParticleBuffers,
         timings: &mut Timings,
     ) -> Result<(), SpmeError> {
-        // Refresh influence function if the box has changed.
+        // Refresh influence function (and the virial factor that
+        // tracks it) if the box has changed.
         if sim_box.generation() != self.cached_box_generation {
             let n_a = self.params.grid[0];
             let n_b = self.params.grid[1];
@@ -174,7 +199,7 @@ impl SpmeReciprocalGrid {
             let b_factors_a = compute_b_factors(n_a, p);
             let b_factors_b = compute_b_factors(n_b, p);
             let b_factors_c = compute_b_factors(n_c, p);
-            let host = compute_influence_function(
+            let (g_host, vf_host) = compute_influence_and_virial(
                 sim_box,
                 self.params,
                 &b_factors_a,
@@ -182,7 +207,10 @@ impl SpmeReciprocalGrid {
                 &b_factors_c,
             );
             self.device
-                .htod_sync_copy_into(&host, &mut self.influence_g)
+                .htod_sync_copy_into(&g_host, &mut self.influence_g)
+                .map_err(GpuError::from)?;
+            self.device
+                .htod_sync_copy_into(&vf_host, &mut self.virial_factor)
                 .map_err(GpuError::from)?;
             self.cached_box_generation = sim_box.generation();
         }
@@ -209,11 +237,17 @@ impl SpmeReciprocalGrid {
         self.forward_plan
             .execute(&self.rho, &mut self.rho_hat_interleaved)?;
 
-        // 4. Influence multiply (rho_hat *= G).
+        // 4. Influence multiply (rho_hat *= G; also writes per-cell virial).
+        let n_c = self.params.grid[2];
+        let n_c_complex = (n_c / 2 + 1) as u32;
         spme_influence_multiply(
             &particle_buffers.kernels,
             &self.influence_g,
+            &self.virial_factor,
             &mut self.rho_hat_interleaved,
+            &mut self.virial_per_cell,
+            n_c,
+            n_c_complex,
             self.m_complex as u32,
         )?;
 
@@ -267,19 +301,24 @@ pub fn compute_b_factors(n: u32, p: u32) -> Vec<f32> {
 // wave vector K = 2π · (m_a · b_a_vec + m_b · b_b_vec + m_c · b_c_vec)
 // where b_*_vec are the rows of H^{-T} (the inverse-transpose of the
 // lattice matrix; see `simulation-box.md`).
-pub fn compute_influence_function(
+//
+// The companion `virial_factor[k] = G[k] · (1 − K²/(2α²))` is
+// precomputed alongside G to support the reciprocal-space scalar
+// virial reduction. virial_factor[0] = 0.
+pub fn compute_influence_and_virial(
     sim_box: &SimulationBox,
     params: SpmeParameters,
     b_factors_a: &[f32],
     b_factors_b: &[f32],
     b_factors_c: &[f32],
-) -> Vec<f32> {
+) -> (Vec<f32>, Vec<f32>) {
     let n_a = params.grid[0] as usize;
     let n_b = params.grid[1] as usize;
     let n_c = params.grid[2] as usize;
     let n_c_complex = n_c / 2 + 1;
     let m_complex = n_a * n_b * n_c_complex;
     let mut out = vec![0.0_f32; m_complex];
+    let mut vf = vec![0.0_f32; m_complex];
 
     let lx = sim_box.lx() as f64;
     let ly = sim_box.ly() as f64;
@@ -338,17 +377,20 @@ pub fn compute_influence_function(
                 let idx = (ka * n_b + kb) * n_c_complex + kc;
                 if k2 == 0.0 {
                     out[idx] = 0.0;
+                    vf[idx] = 0.0;
                 } else {
                     let g = prefactor * (four_pi / k2) * (-k2 / four_alpha2).exp()
                         * b_a
                         * b_b
                         * b_c;
                     out[idx] = g as f32;
+                    let factor = 1.0 - k2 / (2.0 * alpha * alpha);
+                    vf[idx] = (g * factor) as f32;
                 }
             }
         }
     }
-    out
+    (out, vf)
 }
 
 // Cardinal B-spline M_p(x) via the Cox-de Boor recursion, host-side.
@@ -372,4 +414,277 @@ fn cardinal_bspline(p: usize, x: f64) -> f64 {
         }
     }
     vals[0]
+}
+
+// rq-f6d45062
+//
+// Real-space `erfc`-screened pair-force slot. Structurally analogous to
+// `LennardJonesState` and `CoulombState`: owns a `PairBuffer` and a
+// `DeviceExclusionList`, contributes via the `spme_real_pair_force`
+// kernel, and reduces via `reduce_pair_forces`.
+#[derive(Debug)]
+pub struct SpmeRealSpaceState {
+    #[allow(dead_code)]
+    device: Arc<CudaDevice>,
+    pair_buffer: PairBuffer,
+    exclusions: DeviceExclusionList,
+    alpha: f32,
+    r_cut_real: f32,
+    particle_count: usize,
+}
+
+impl SpmeRealSpaceState {
+    pub fn new(
+        gpu: &GpuContext,
+        particle_count: usize,
+        alpha: f32,
+        r_cut_real: f32,
+        max_neighbors: u32,
+        exclusion_list: &ExclusionList,
+    ) -> Result<Self, NeighborListError> {
+        let device = gpu.device.clone();
+        let pair_buffer = PairBuffer::new(gpu, particle_count, max_neighbors)?;
+        let exclusions = DeviceExclusionList::from_host(&device, exclusion_list)?;
+        Ok(SpmeRealSpaceState {
+            device,
+            pair_buffer,
+            exclusions,
+            alpha,
+            r_cut_real,
+            particle_count,
+        })
+    }
+}
+
+impl Potential for SpmeRealSpaceState {
+    fn label(&self) -> &'static str {
+        "spme_real"
+    }
+
+    fn max_cutoff(&self) -> Option<f32> {
+        Some(self.r_cut_real)
+    }
+
+    fn contribute(
+        &mut self,
+        buffers: &ParticleBuffers,
+        sim_box: &SimulationBox,
+        cx: &ForceFieldContext<'_>,
+        timings: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        if self.particle_count == 0 {
+            return Ok(());
+        }
+        let nl = cx
+            .neighbor_list
+            .expect("SpmeRealSpaceState requires a shared neighbor list");
+        timings.kernel_start(KernelStage::SPME_REAL_PAIR_FORCE)?;
+        spme_real_pair_force(
+            buffers,
+            &mut self.pair_buffer,
+            sim_box,
+            self.alpha,
+            self.r_cut_real,
+            &self.exclusions.atom_excl_offsets,
+            &self.exclusions.atom_excl_partners,
+            &self.exclusions.atom_excl_coul_scales,
+            &nl.neighbor_list,
+            &nl.neighbor_counts,
+        )?;
+        timings.kernel_stop(KernelStage::SPME_REAL_PAIR_FORCE)?;
+        Ok(())
+    }
+
+    fn reduce(
+        &mut self,
+        mut output: SlotOutputView<'_>,
+        cx: &ForceFieldContext<'_>,
+        timings: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        if self.particle_count == 0 {
+            return Ok(());
+        }
+        let nl = cx
+            .neighbor_list
+            .expect("SpmeRealSpaceState requires a shared neighbor list");
+        timings.kernel_start(KernelStage::REDUCE_PAIR_FORCES)?;
+        reduce_pair_forces(
+            &self.pair_buffer,
+            &nl.neighbor_counts,
+            &mut output.force_x,
+            &mut output.force_y,
+            &mut output.force_z,
+            &mut output.energy,
+            &mut output.virial,
+            self.particle_count,
+        )?;
+        timings.kernel_stop(KernelStage::REDUCE_PAIR_FORCES)?;
+        Ok(())
+    }
+}
+
+// rq-202493a5 rq-9ca00d25
+//
+// Reciprocal-space slot wrapping `SpmeReciprocalGrid` plus a per-
+// particle self-energy buffer. `contribute()` runs the spread / FFT /
+// multiply / inverse-FFT pipeline and reduces the per-cell virial to a
+// scalar; `reduce()` runs the force-gather kernel which writes per-
+// particle force, energy (with self-energy subtracted), and the
+// uniform per-particle virial share.
+#[derive(Debug)]
+pub struct SpmeReciprocalState {
+    grid: SpmeReciprocalGrid,
+    // `u_self_per_particle[i] = k_C · (α/√π) · q_i²`. Subtracted from
+    // the per-particle reciprocal energy inside the gather kernel.
+    u_self_per_particle: CudaSlice<f32>,
+    // Host scratch for the reciprocal-virial reduction. Reused across
+    // steps to avoid per-step allocation.
+    virial_host_scratch: Vec<f32>,
+    // Reduced per-particle reciprocal virial share, set by `contribute()`
+    // from `virial_per_cell` and consumed by `reduce()` via the gather
+    // kernel argument.
+    w_per_particle_virial: f32,
+}
+
+impl SpmeReciprocalState {
+    pub fn new(
+        gpu: &GpuContext,
+        sim_box: &SimulationBox,
+        particle_count: usize,
+        charges: &[f32],
+        params: SpmeParameters,
+    ) -> Result<Self, SpmeError> {
+        let grid = SpmeReciprocalGrid::new(gpu, sim_box, particle_count, params)?;
+        // Precompute per-particle self-energy:
+        //   u_self_i = k_C · (α/√π) · q_i²
+        let inv_sqrt_pi = 1.0_f64 / std::f64::consts::PI.sqrt();
+        let prefactor = (K_COULOMB_F32 as f64) * (params.alpha as f64) * inv_sqrt_pi;
+        let u_self_host: Vec<f32> = (0..particle_count)
+            .map(|i| {
+                let q = charges.get(i).copied().unwrap_or(0.0);
+                (prefactor * (q as f64) * (q as f64)) as f32
+            })
+            .collect();
+        let u_self_per_particle = if particle_count == 0 {
+            grid.device.alloc_zeros::<f32>(0).map_err(GpuError::from)?
+        } else {
+            grid.device
+                .htod_sync_copy(&u_self_host)
+                .map_err(GpuError::from)?
+        };
+        Ok(SpmeReciprocalState {
+            grid,
+            u_self_per_particle,
+            virial_host_scratch: vec![0.0_f32; grid_m_complex_or_zero(&params)],
+            w_per_particle_virial: 0.0,
+        })
+    }
+
+    // Test access to the underlying grid (rho/V buffers, influence_g,
+    // etc.). Used by `tests/spme_pipeline.rs`.
+    pub fn grid(&self) -> &SpmeReciprocalGrid {
+        &self.grid
+    }
+}
+
+fn grid_m_complex_or_zero(params: &SpmeParameters) -> usize {
+    let n_a = params.grid[0] as usize;
+    let n_b = params.grid[1] as usize;
+    let n_c = params.grid[2] as usize;
+    n_a * n_b * (n_c / 2 + 1)
+}
+
+impl Potential for SpmeReciprocalState {
+    fn label(&self) -> &'static str {
+        "spme_reciprocal"
+    }
+
+    fn max_cutoff(&self) -> Option<f32> {
+        // The reciprocal-space slot does not consume the shared
+        // neighbor list; it owns its own bin structure internally.
+        None
+    }
+
+    fn contribute(
+        &mut self,
+        buffers: &ParticleBuffers,
+        sim_box: &SimulationBox,
+        _cx: &ForceFieldContext<'_>,
+        timings: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        let n = self.grid.particle_count;
+        if n == 0 {
+            self.w_per_particle_virial = 0.0;
+            return Ok(());
+        }
+        timings.kernel_start(KernelStage::SPME_RECIP_PIPELINE)?;
+        self.grid
+            .compute(sim_box, buffers, timings)
+            .map_err(map_spme_err)?;
+        timings.kernel_stop(KernelStage::SPME_RECIP_PIPELINE)?;
+
+        // Reduce `virial_per_cell` host-side. The 0.5 factor matches the
+        // Ewald half-sum that defines U_recip in
+        // `docs/long-range-electrostatics.md`.
+        if self.virial_host_scratch.len() != self.grid.m_complex {
+            self.virial_host_scratch.resize(self.grid.m_complex, 0.0);
+        }
+        self.grid
+            .device
+            .dtoh_sync_copy_into(&self.grid.virial_per_cell, &mut self.virial_host_scratch)
+            .map_err(GpuError::from)?;
+        let mut w_recip = 0.0_f64;
+        for &v in &self.virial_host_scratch {
+            w_recip += v as f64;
+        }
+        self.w_per_particle_virial = (0.5 * w_recip / n as f64) as f32;
+        Ok(())
+    }
+
+    fn reduce(
+        &mut self,
+        mut output: SlotOutputView<'_>,
+        cx: &ForceFieldContext<'_>,
+        timings: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        let n = self.grid.particle_count;
+        if n == 0 {
+            return Ok(());
+        }
+        timings.kernel_start(KernelStage::SPME_FORCE_GATHER)?;
+        spme_force_gather(
+            cx.buffers,
+            cx.sim_box,
+            &self.grid.v,
+            &self.u_self_per_particle,
+            self.w_per_particle_virial,
+            self.grid.params.grid,
+            self.grid.params.spline_order,
+            &mut output.force_x,
+            &mut output.force_y,
+            &mut output.force_z,
+            &mut output.energy,
+            &mut output.virial,
+        )?;
+        timings.kernel_stop(KernelStage::SPME_FORCE_GATHER)?;
+        Ok(())
+    }
+}
+
+fn map_spme_err(e: SpmeError) -> ForceFieldError {
+    match e {
+        SpmeError::Gpu(g) => ForceFieldError::Gpu(g),
+        SpmeError::NeighborList(n) => ForceFieldError::NeighborList(n),
+        // The other variants are construction-time errors that should
+        // not surface during a step. If one ever does, panic loudly
+        // rather than silently mapping to a generic GPU error: it
+        // indicates a config-layer invariant has been violated after
+        // setup.
+        SpmeError::CuFft(other) => {
+            panic!("SPME step encountered cuFFT error: {other:?}")
+        }
+        SpmeError::InvalidGrid { axis, n, required } => panic!(
+            "SPME step encountered invalid grid (axis {axis}, n {n}, required {required})"
+        ),
+    }
 }

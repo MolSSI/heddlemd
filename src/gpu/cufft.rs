@@ -178,3 +178,61 @@ impl Drop for Plan3dC2R {
         unsafe { cufftDestroy(self.handle) };
     }
 }
+
+// rq-d880c228 rq-637cd1a5 rq-02f4d342
+//
+// Runs an R2C forward FFT on a fixed input twice on the same device,
+// returning the number of float positions that differ bit-for-bit
+// between the two runs. cuFFT's plan selection on a given GPU is
+// deterministic for a fixed problem size, so the expected return value
+// is 0. A non-zero count means cuFFT chose different algorithms
+// between calls (driver/library issue or hardware unsupported for the
+// determinism guarantee), and the runner refuses to start an SPME run
+// in that case.
+//
+// The probe size (`n_a = n_b = n_c = 16`) is small enough to incur
+// negligible setup cost yet large enough to exercise the multi-axis
+// plan selector. The input is a fixed deterministic pattern (rather
+// than zeros), so any algorithmic divergence produces a numerically
+// distinguishable bit pattern.
+pub fn cufft_determinism_smoke_test(
+    device: &Arc<CudaDevice>,
+) -> Result<usize, CuFftError> {
+    const N: u32 = 16;
+    let m = (N * N * N) as usize;
+    let m_complex = (N as usize * N as usize) * (N as usize / 2 + 1);
+
+    let mut input_host = vec![0.0_f32; m];
+    for (i, v) in input_host.iter_mut().enumerate() {
+        // Mix in a triangular and a frequency pattern so the FFT
+        // output spreads across many output cells.
+        let x = (i as f32) * 0.123456_f32;
+        *v = x.sin() + 0.5 * x.cos();
+    }
+    let input = device
+        .htod_sync_copy(&input_host)
+        .map_err(|_| CuFftError::Status(-1))?;
+
+    let plan = Plan3dR2C::new(device, N, N, N)?;
+    let mut out_a = device
+        .alloc_zeros::<f32>(2 * m_complex)
+        .map_err(|_| CuFftError::Status(-1))?;
+    let mut out_b = device
+        .alloc_zeros::<f32>(2 * m_complex)
+        .map_err(|_| CuFftError::Status(-1))?;
+    plan.execute(&input, &mut out_a)?;
+    plan.execute(&input, &mut out_b)?;
+
+    let host_a: Vec<f32> = device
+        .dtoh_sync_copy(&out_a)
+        .map_err(|_| CuFftError::Status(-1))?;
+    let host_b: Vec<f32> = device
+        .dtoh_sync_copy(&out_b)
+        .map_err(|_| CuFftError::Status(-1))?;
+    let differences = host_a
+        .iter()
+        .zip(host_b.iter())
+        .filter(|(a, b)| a.to_bits() != b.to_bits())
+        .count();
+    Ok(differences)
+}

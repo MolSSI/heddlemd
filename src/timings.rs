@@ -34,6 +34,11 @@ impl KernelStage {
     pub const VV_KICK_LOSSLESS: KernelStage = KernelStage::new("vv_kick_lossless");
     pub const LJ_PAIR_FORCE: KernelStage = KernelStage::new("lj_pair_force");
     pub const COULOMB_PAIR_FORCE: KernelStage = KernelStage::new("coulomb_pair_force");
+    pub const SPME_REAL_PAIR_FORCE: KernelStage =
+        KernelStage::new("spme_real_pair_force");
+    pub const SPME_RECIP_PIPELINE: KernelStage =
+        KernelStage::new("spme_recip_pipeline");
+    pub const SPME_FORCE_GATHER: KernelStage = KernelStage::new("spme_force_gather");
     pub const REDUCE_PAIR_FORCES: KernelStage = KernelStage::new("reduce_pair_forces");
     pub const LANGEVIN_KICK_HALF: KernelStage = KernelStage::new("langevin_kick_half");
     pub const LANGEVIN_DRIFT_HALF: KernelStage = KernelStage::new("langevin_drift_half");
@@ -58,6 +63,9 @@ impl KernelStage {
         Self::NEIGHBOR_LIST_BUILD,
         Self::LJ_PAIR_FORCE,
         Self::COULOMB_PAIR_FORCE,
+        Self::SPME_REAL_PAIR_FORCE,
+        Self::SPME_RECIP_PIPELINE,
+        Self::SPME_FORCE_GATHER,
         Self::REDUCE_PAIR_FORCES,
         Self::MORSE_BOND_FORCE,
         Self::REDUCE_BOND_FORCES,

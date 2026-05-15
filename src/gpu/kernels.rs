@@ -379,6 +379,80 @@ pub fn coulomb_pair_force(
     Ok(())
 }
 
+// rq-9a512ed1 rq-f6d45062
+#[allow(clippy::too_many_arguments)]
+pub fn spme_real_pair_force(
+    particle_buffers: &ParticleBuffers,
+    pair_buffer: &mut PairBuffer,
+    sim_box: &SimulationBox,
+    alpha: f32,
+    r_cut_real: f32,
+    atom_excl_offsets: &CudaSlice<u32>,
+    atom_excl_partners: &CudaSlice<u32>,
+    atom_excl_coul_scales: &CudaSlice<f32>,
+    neighbor_list: &CudaSlice<u32>,
+    neighbor_counts: &CudaSlice<u32>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(pair_buffer.particle_count(), n);
+    let max_neighbors = pair_buffer.max_neighbors();
+    debug_assert_eq!(neighbor_list.len(), n * max_neighbors as usize);
+    debug_assert_eq!(neighbor_counts.len(), n);
+    debug_assert_eq!(atom_excl_offsets.len(), n + 1);
+    debug_assert_eq!(atom_excl_partners.len(), atom_excl_coul_scales.len());
+    debug_assert_eq!(particle_buffers.charges.len(), n);
+
+    let n_u32 = n as u32;
+    let func = particle_buffers.kernels.spme_real_pair_force.clone();
+
+    let grid_y = n_u32.div_ceil(16);
+    let grid_x = max_neighbors.div_ceil(16).max(1);
+    let cfg = LaunchConfig {
+        grid_dim: (grid_x, grid_y, 1),
+        block_dim: (16, 16, 1),
+        shared_mem_bytes: 0,
+    };
+
+    let lat = sim_box.lattice();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.positions_x,
+                &particle_buffers.positions_y,
+                &particle_buffers.positions_z,
+                &particle_buffers.charges,
+                &mut pair_buffer.pair_forces_x,
+                &mut pair_buffer.pair_forces_y,
+                &mut pair_buffer.pair_forces_z,
+                &mut pair_buffer.pair_energies,
+                &mut pair_buffer.pair_virials,
+                max_neighbors,
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
+                K_COULOMB_F32,
+                alpha,
+                r_cut_real,
+                atom_excl_offsets,
+                atom_excl_partners,
+                atom_excl_coul_scales,
+                neighbor_list,
+                neighbor_counts,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 // rq-9ca00d25 rq-202493a5
 #[allow(clippy::too_many_arguments)]
 pub fn spme_charge_spread(
@@ -435,22 +509,109 @@ pub fn spme_charge_spread(
 }
 
 // rq-9ca00d25
+#[allow(clippy::too_many_arguments)]
 pub fn spme_influence_multiply(
     kernels: &Kernels,
     influence_g: &CudaSlice<f32>,
+    virial_factor: &CudaSlice<f32>,
     rho_hat_interleaved: &mut CudaSlice<f32>,
+    virial_per_cell: &mut CudaSlice<f32>,
+    n_c: u32,
+    n_c_complex: u32,
     n_complex: u32,
 ) -> Result<(), GpuError> {
     if n_complex == 0 {
         return Ok(());
     }
     debug_assert_eq!(influence_g.len(), n_complex as usize);
+    debug_assert_eq!(virial_factor.len(), n_complex as usize);
     debug_assert_eq!(rho_hat_interleaved.len(), 2 * n_complex as usize);
+    debug_assert_eq!(virial_per_cell.len(), n_complex as usize);
     let func = kernels.spme_influence_multiply.clone();
     let cfg = launch_config(n_complex);
     unsafe {
-        func.launch(cfg, (influence_g, rho_hat_interleaved, n_complex))
-            .map_err(GpuError::from)?;
+        func.launch(
+            cfg,
+            (
+                influence_g,
+                virial_factor,
+                rho_hat_interleaved,
+                virial_per_cell,
+                n_c,
+                n_c_complex,
+                n_complex,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-9ca00d25
+#[allow(clippy::too_many_arguments)]
+pub fn spme_force_gather(
+    particle_buffers: &ParticleBuffers,
+    sim_box: &SimulationBox,
+    v: &CudaSlice<f32>,
+    u_self_per_particle: &CudaSlice<f32>,
+    w_per_particle_virial: f32,
+    grid: [u32; 3],
+    spline_order: u32,
+    slot_force_x: &mut CudaViewMut<'_, f32>,
+    slot_force_y: &mut CudaViewMut<'_, f32>,
+    slot_force_z: &mut CudaViewMut<'_, f32>,
+    slot_energy: &mut CudaViewMut<'_, f32>,
+    slot_virial: &mut CudaViewMut<'_, f32>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let m =
+        grid[0] as usize * grid[1] as usize * grid[2] as usize;
+    debug_assert_eq!(v.len(), m);
+    debug_assert_eq!(particle_buffers.charges.len(), n);
+    debug_assert_eq!(u_self_per_particle.len(), n);
+    debug_assert_eq!(slot_force_x.len(), n);
+    debug_assert_eq!(slot_force_y.len(), n);
+    debug_assert_eq!(slot_force_z.len(), n);
+    debug_assert_eq!(slot_energy.len(), n);
+    debug_assert_eq!(slot_virial.len(), n);
+
+    let n_u32 = n as u32;
+    let func = particle_buffers.kernels.spme_force_gather.clone();
+    let cfg = launch_config(n_u32);
+    let lat = sim_box.lattice();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.positions_x,
+                &particle_buffers.positions_y,
+                &particle_buffers.positions_z,
+                &particle_buffers.charges,
+                v,
+                u_self_per_particle,
+                w_per_particle_virial,
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
+                grid[0],
+                grid[1],
+                grid[2],
+                spline_order,
+                slot_force_x,
+                slot_force_y,
+                slot_force_z,
+                slot_energy,
+                slot_virial,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
     }
     Ok(())
 }

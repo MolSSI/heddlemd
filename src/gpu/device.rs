@@ -27,8 +27,10 @@ pub struct Kernels {
     pub reduce_pair_forces: CudaFunction,
     pub lj_pair_force: CudaFunction,
     pub coulomb_pair_force: CudaFunction,
+    pub spme_real_pair_force: CudaFunction,
     pub spme_charge_spread: CudaFunction,
     pub spme_influence_multiply: CudaFunction,
+    pub spme_force_gather: CudaFunction,
     pub lan_drift_half: CudaFunction,
     pub lan_ou_step: CudaFunction,
     pub morse_bond_force: CudaFunction,
@@ -90,11 +92,17 @@ pub fn init_device() -> Result<GpuContext, GpuError> {
         "coulomb",
         &["coulomb_pair_force"],
     )?;
+    // rq-9a512ed1
+    device.load_ptx(
+        Ptx::from_src(kernels::SPME_REAL),
+        "spme_real",
+        &["spme_real_pair_force"],
+    )?;
     // rq-9ca00d25
     device.load_ptx(
         Ptx::from_src(kernels::SPME_RECIP),
         "spme_recip",
-        &["spme_charge_spread", "spme_influence_multiply"],
+        &["spme_charge_spread", "spme_influence_multiply", "spme_force_gather"],
     )?;
     device.load_ptx(
         Ptx::from_src(kernels::LANGEVIN),
@@ -145,8 +153,10 @@ pub fn init_device() -> Result<GpuContext, GpuError> {
         reduce_pair_forces: get("reduce", "reduce_pair_forces")?,
         lj_pair_force: get("pair_force", "lj_pair_force")?,
         coulomb_pair_force: get("coulomb", "coulomb_pair_force")?,
+        spme_real_pair_force: get("spme_real", "spme_real_pair_force")?,
         spme_charge_spread: get("spme_recip", "spme_charge_spread")?,
         spme_influence_multiply: get("spme_recip", "spme_influence_multiply")?,
+        spme_force_gather: get("spme_recip", "spme_force_gather")?,
         lan_drift_half: get("langevin", "lan_drift_half")?,
         lan_ou_step: get("langevin", "lan_ou_step")?,
         morse_bond_force: get("morse", "morse_bond_force")?,

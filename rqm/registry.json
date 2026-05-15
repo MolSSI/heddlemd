@@ -135,7 +135,16 @@
   "rq-02f4d342": {
     "decl": "Scenario: cuFFT smoke test fails-loud when consecutive transforms produce different output",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/cufft.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "cuFFT smoke test fails-loud when consecutive transforms produce different output",
     "type": "scenario"
   },
@@ -3637,7 +3646,16 @@
   "rq-637cd1a5": {
     "decl": "Scenario: cuFFT smoke test passes on a determinism-conforming installation",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/cufft.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "cuFFT smoke test passes on a determinism-conforming installation",
     "type": "scenario"
   },
@@ -5690,7 +5708,16 @@
     "decl": "### Real-space CUDA kernel",
     "file": "forces/spme",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/device.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Real-space CUDA kernel",
     "type": "section"
   },
@@ -7932,7 +7959,12 @@
   "rq-d880c228": {
     "decl": "- `cufft_determinism_smoke_test(device: &Arc<CudaDevice>) -> Result<(), CuFftError>`",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/cufft.rs",
+        "kind": "code"
+      }
+    ],
     "title": "cufft_determinism_smoke_test",
     "type": "api-item"
   },
@@ -8775,7 +8807,12 @@
   "rq-ea4205ec": {
     "decl": "Scenario: cuFFT smoke test is skipped when SPME is not configured",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "cuFFT smoke test is skipped when SPME is not configured",
     "type": "scenario"
   },
@@ -9286,7 +9323,16 @@
     "decl": "## Real-space slot",
     "file": "forces/spme",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Real-space slot",
     "type": "section"
   },

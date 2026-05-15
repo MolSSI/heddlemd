@@ -64,6 +64,11 @@ pub enum RunnerError {
         width: f32,
         required: f32,
     },
+    // rq-8ee27e27 rq-02f4d342
+    #[error(
+        "cuFFT returned non-deterministic R2C output between two identical runs ({differences} differing floats); SPME requires bit-exact reciprocal-space behaviour"
+    )]
+    CuFftNonDeterministic { differences: usize },
 }
 
 // rq-5c1cfc93
@@ -161,6 +166,9 @@ fn run_simulation_with_phase(
         if let Some(c) = config.coulomb.as_ref() {
             cutoff_max = cutoff_max.max(c.cutoff);
         }
+        if let Some(s) = config.spme.as_ref() {
+            cutoff_max = cutoff_max.max(s.r_cut_real);
+        }
         let required = (3.0 * (cutoff_max + r_skin)) as f32;
         let widths = sim_box.perpendicular_widths();
         let direction_names: [&'static str; 3] = ["a", "b", "c"];
@@ -181,6 +189,28 @@ fn run_simulation_with_phase(
     let mut gpu_init_duration = Duration::ZERO;
     let gpu = timed(&mut gpu_init_duration, init_device)
         .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?;
+
+    // rq-637cd1a5 rq-02f4d342 rq-ea4205ec
+    //
+    // SPME runs depend on cuFFT producing bit-identical output on
+    // repeated calls with identical input. cuFFT's plan selector is
+    // deterministic on a given GPU, but we verify this up front so a
+    // misconfigured environment fails loudly at setup rather than
+    // producing silently non-reproducible simulations.
+    if config.spme.is_some() {
+        let differences = crate::gpu::cufft::cufft_determinism_smoke_test(&gpu.device)
+            .map_err(|_| (RunnerError::Gpu(crate::gpu::GpuError(
+                cudarc::driver::DriverError(
+                    cudarc::driver::sys::CUresult::CUDA_ERROR_UNKNOWN,
+                ),
+            )), ExitPhase::Setup))?;
+        if differences != 0 {
+            return Err((
+                RunnerError::CuFftNonDeterministic { differences },
+                ExitPhase::Setup,
+            ));
+        }
+    }
 
     // Construct the Timings instance now and replay the three pre-instrumented
     // host stages.
@@ -226,6 +256,7 @@ fn run_simulation_with_phase(
     let images_arg = init.images.as_ref().map(|im| {
         (im.images_x.clone(), im.images_y.clone(), im.images_z.clone())
     });
+    let charges_for_force_field = charges_f32.clone();
     let state = ParticleState::new(
         init.positions_x.clone(),
         init.positions_y.clone(),
@@ -272,6 +303,8 @@ fn run_simulation_with_phase(
         &config.pair_interactions,
         &config.bond_types,
         config.coulomb.as_ref(),
+        config.spme.as_ref(),
+        &charges_for_force_field,
         &bond_list,
         &exclusion_list,
         &config.neighbor_list,
