@@ -4,7 +4,7 @@ use common::*;
 use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice, DeviceSlice};
-use dynamics::gpu::{PairBuffer, ParticleBuffers, init_device};
+use dynamics::gpu::{GpuContext, PairBuffer, ParticleBuffers, init_device};
 use dynamics::state::ParticleState;
 
 fn zero_state(n: usize) -> ParticleState {
@@ -23,8 +23,8 @@ fn zero_state(n: usize) -> ParticleState {
     .expect("ParticleState::new")
 }
 
-fn zero_particle_buffers(device: Arc<CudaDevice>, n: usize) -> ParticleBuffers {
-    ParticleBuffers::new(device, &zero_state(n)).expect("ParticleBuffers::new")
+fn zero_particle_buffers(gpu: &GpuContext, n: usize) -> ParticleBuffers {
+    ParticleBuffers::new(gpu, &zero_state(n)).expect("ParticleBuffers::new")
 }
 
 fn upload_counts(device: &Arc<CudaDevice>, counts: &[u32]) -> CudaSlice<u32> {
@@ -77,8 +77,8 @@ fn download_forces(buffers: &ParticleBuffers) -> (Vec<f32>, Vec<f32>, Vec<f32>) 
 
 #[test] // rq-6fdefca0
 fn pair_buffer_new_allocates_zero_initialised_buffers() {
-    let device = init_device().expect("init_device");
-    let pair = PairBuffer::new(device.clone(), 4, 8).expect("PairBuffer::new");
+    let gpu = init_device().expect("init_device");
+    let pair = PairBuffer::new(&gpu, 4, 8).expect("PairBuffer::new");
     assert_eq!(pair.particle_count(), 4);
     assert_eq!(pair.max_neighbors(), 8);
     assert_eq!(pair.pair_forces_x.len(), 32);
@@ -91,8 +91,8 @@ fn pair_buffer_new_allocates_zero_initialised_buffers() {
 
 #[test] // rq-74e4bd02
 fn pair_buffer_new_with_zero_particle_count() {
-    let device = init_device().expect("init_device");
-    let pair = PairBuffer::new(device.clone(), 0, 8).expect("PairBuffer::new");
+    let gpu = init_device().expect("init_device");
+    let pair = PairBuffer::new(&gpu, 0, 8).expect("PairBuffer::new");
     assert_eq!(pair.particle_count(), 0);
     assert_eq!(pair.pair_forces_x.len(), 0);
     assert_eq!(pair.pair_forces_y.len(), 0);
@@ -101,8 +101,8 @@ fn pair_buffer_new_with_zero_particle_count() {
 
 #[test] // rq-15e1e995
 fn pair_buffer_new_with_zero_max_neighbors() {
-    let device = init_device().expect("init_device");
-    let pair = PairBuffer::new(device.clone(), 4, 0).expect("PairBuffer::new");
+    let gpu = init_device().expect("init_device");
+    let pair = PairBuffer::new(&gpu, 4, 0).expect("PairBuffer::new");
     assert_eq!(pair.max_neighbors(), 0);
     assert_eq!(pair.pair_forces_x.len(), 0);
     assert_eq!(pair.pair_forces_y.len(), 0);
@@ -113,16 +113,19 @@ fn pair_buffer_new_with_zero_max_neighbors() {
 
 #[test] // rq-a43552d5
 fn init_device_loads_reduce_module() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     assert!(device.has_func("reduce", "reduce_pair_forces"));
+    let _ = gpu.kernels.reduce_pair_forces.clone();
 }
 
 // --- Reduction correctness: trivial cases ---
 
 #[test] // rq-2d051b0c
 fn reduction_with_all_zero_counts_zeroes_forces() {
-    let device = init_device().expect("init_device");
-    let mut pair = PairBuffer::new(device.clone(), 4, 8).expect("PairBuffer::new");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let mut pair = PairBuffer::new(&gpu, 4, 8).expect("PairBuffer::new");
     upload_pair_x(&mut pair, &vec![3.14_f32; 32]);
     upload_pair_y(&mut pair, &vec![2.71_f32; 32]);
     upload_pair_z(&mut pair, &vec![1.41_f32; 32]);
@@ -131,7 +134,7 @@ fn reduction_with_all_zero_counts_zeroes_forces() {
     state.forces_x = vec![10.0, 20.0, 30.0, 40.0];
     state.forces_y = vec![-1.0, -2.0, -3.0, -4.0];
     state.forces_z = vec![5.0, 6.0, 7.0, 8.0];
-    let mut particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
 
     let counts = upload_counts(&device, &[0u32, 0, 0, 0]);
 
@@ -144,13 +147,14 @@ fn reduction_with_all_zero_counts_zeroes_forces() {
 
 #[test] // rq-8ee33aa0
 fn reduction_with_single_particle_single_neighbor() {
-    let device = init_device().expect("init_device");
-    let mut pair = PairBuffer::new(device.clone(), 1, 4).expect("PairBuffer::new");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let mut pair = PairBuffer::new(&gpu, 1, 4).expect("PairBuffer::new");
     upload_pair_x(&mut pair, &[1.5_f32, 0.0, 0.0, 0.0]);
     upload_pair_y(&mut pair, &[-2.5_f32, 0.0, 0.0, 0.0]);
     upload_pair_z(&mut pair, &[0.75_f32, 0.0, 0.0, 0.0]);
 
-    let mut particle_buffers = zero_particle_buffers(device.clone(), 1);
+    let mut particle_buffers = zero_particle_buffers(&gpu, 1);
     let counts = upload_counts(&device, &[1u32]);
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
@@ -164,11 +168,12 @@ fn reduction_with_single_particle_single_neighbor() {
 
 #[test] // rq-e950f4e6
 fn reduction_sums_entries_left_to_right() {
-    let device = init_device().expect("init_device");
-    let mut pair = PairBuffer::new(device.clone(), 1, 4).expect("PairBuffer::new");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let mut pair = PairBuffer::new(&gpu, 1, 4).expect("PairBuffer::new");
     upload_pair_x(&mut pair, &[1.0_f32, 2.0, 4.0, 999.0]);
 
-    let mut particle_buffers = zero_particle_buffers(device.clone(), 1);
+    let mut particle_buffers = zero_particle_buffers(&gpu, 1);
     let counts = upload_counts(&device, &[3u32]);
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
@@ -181,14 +186,15 @@ fn reduction_sums_entries_left_to_right() {
 
 #[test] // rq-78fc2fbb
 fn reduction_ignores_slots_beyond_count() {
-    let device = init_device().expect("init_device");
-    let mut pair = PairBuffer::new(device.clone(), 1, 8).expect("PairBuffer::new");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let mut pair = PairBuffer::new(&gpu, 1, 8).expect("PairBuffer::new");
     let mut data = vec![f32::INFINITY; 8];
     data[0] = 10.0;
     data[1] = 20.0;
     upload_pair_x(&mut pair, &data);
 
-    let mut particle_buffers = zero_particle_buffers(device.clone(), 1);
+    let mut particle_buffers = zero_particle_buffers(&gpu, 1);
     let counts = upload_counts(&device, &[2u32]);
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
@@ -199,11 +205,12 @@ fn reduction_ignores_slots_beyond_count() {
 
 #[test] // rq-590dcd7e
 fn reduction_at_full_max_neighbors_capacity() {
-    let device = init_device().expect("init_device");
-    let mut pair = PairBuffer::new(device.clone(), 1, 4).expect("PairBuffer::new");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let mut pair = PairBuffer::new(&gpu, 1, 4).expect("PairBuffer::new");
     upload_pair_x(&mut pair, &[1.0_f32, 2.0, 3.0, 4.0]);
 
-    let mut particle_buffers = zero_particle_buffers(device.clone(), 1);
+    let mut particle_buffers = zero_particle_buffers(&gpu, 1);
     let counts = upload_counts(&device, &[4u32]);
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
@@ -216,8 +223,9 @@ fn reduction_at_full_max_neighbors_capacity() {
 
 #[test] // rq-6808532e
 fn per_particle_reduction_with_varying_counts() {
-    let device = init_device().expect("init_device");
-    let mut pair = PairBuffer::new(device.clone(), 3, 4).expect("PairBuffer::new");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let mut pair = PairBuffer::new(&gpu, 3, 4).expect("PairBuffer::new");
     let pair_x: Vec<f32> = vec![
         // particle 0: count = 2
         1.0, 2.0, 100.0, 100.0,
@@ -228,7 +236,7 @@ fn per_particle_reduction_with_varying_counts() {
     ];
     upload_pair_x(&mut pair, &pair_x);
 
-    let mut particle_buffers = zero_particle_buffers(device.clone(), 3);
+    let mut particle_buffers = zero_particle_buffers(&gpu, 3);
     let counts = upload_counts(&device, &[2u32, 1, 4]);
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
@@ -242,9 +250,10 @@ fn per_particle_reduction_with_varying_counts() {
 
 #[test] // rq-493caf32
 fn reduce_pair_forces_on_empty_state_is_noop() {
-    let device = init_device().expect("init_device");
-    let pair = PairBuffer::new(device.clone(), 0, 8).expect("PairBuffer::new");
-    let mut particle_buffers = zero_particle_buffers(device.clone(), 0);
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let pair = PairBuffer::new(&gpu, 0, 8).expect("PairBuffer::new");
+    let mut particle_buffers = zero_particle_buffers(&gpu, 0);
     let counts = upload_counts(&device, &[]);
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
 }
@@ -253,10 +262,11 @@ fn reduce_pair_forces_on_empty_state_is_noop() {
 
 #[test] // rq-77e88745
 fn block_non_aligned_particle_count_is_handled() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let n: usize = 1000;
     let max_neighbors: u32 = 2;
-    let mut pair = PairBuffer::new(device.clone(), n, max_neighbors).expect("PairBuffer::new");
+    let mut pair = PairBuffer::new(&gpu, n, max_neighbors).expect("PairBuffer::new");
     let mut x_data = vec![0.0_f32; n * 2];
     for i in 0..n {
         x_data[i * 2] = i as f32;
@@ -264,7 +274,7 @@ fn block_non_aligned_particle_count_is_handled() {
     }
     upload_pair_x(&mut pair, &x_data);
 
-    let mut particle_buffers = zero_particle_buffers(device.clone(), n);
+    let mut particle_buffers = zero_particle_buffers(&gpu, n);
     let counts = upload_counts(&device, &vec![2u32; n]);
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
@@ -280,12 +290,13 @@ fn block_non_aligned_particle_count_is_handled() {
 
 #[test] // rq-f5299d6e
 fn reduction_overwrites_prior_force_values() {
-    let device = init_device().expect("init_device");
-    let pair = PairBuffer::new(device.clone(), 4, 2).expect("PairBuffer::new");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let pair = PairBuffer::new(&gpu, 4, 2).expect("PairBuffer::new");
 
     let mut state = zero_state(4);
     state.forces_x = vec![99.0, 88.0, 77.0, 66.0];
-    let mut particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
 
     let counts = upload_counts(&device, &[0u32, 0, 0, 0]);
 
@@ -296,8 +307,9 @@ fn reduction_overwrites_prior_force_values() {
 
 #[test] // rq-9b794cff
 fn reduction_does_not_modify_pair_buffer() {
-    let device = init_device().expect("init_device");
-    let mut pair = PairBuffer::new(device.clone(), 4, 4).expect("PairBuffer::new");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let mut pair = PairBuffer::new(&gpu, 4, 4).expect("PairBuffer::new");
     let pair_x: Vec<f32> = (0..16).map(|i| 0.1 + i as f32 * 0.5).collect();
     let pair_y: Vec<f32> = (0..16).map(|i| -0.2 + i as f32 * 0.25).collect();
     let pair_z: Vec<f32> = (0..16).map(|i| 0.3 + i as f32 * 0.125).collect();
@@ -309,7 +321,7 @@ fn reduction_does_not_modify_pair_buffer() {
     let snapshot_y = download_pair_y(&pair);
     let snapshot_z = download_pair_z(&pair);
 
-    let mut particle_buffers = zero_particle_buffers(device.clone(), 4);
+    let mut particle_buffers = zero_particle_buffers(&gpu, 4);
     let counts = upload_counts(&device, &[3u32, 3, 3, 3]);
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
@@ -321,8 +333,9 @@ fn reduction_does_not_modify_pair_buffer() {
 
 #[test] // rq-c9da25a7
 fn reduction_does_not_modify_positions_velocities_masses() {
-    let device = init_device().expect("init_device");
-    let pair = PairBuffer::new(device.clone(), 4, 2).expect("PairBuffer::new");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let pair = PairBuffer::new(&gpu, 4, 2).expect("PairBuffer::new");
 
     let state = ParticleState::new(
         vec![1.0, 2.0, 3.0, 4.0],
@@ -337,7 +350,7 @@ fn reduction_does_not_modify_positions_velocities_masses() {
             None,
     )
     .unwrap();
-    let mut particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
 
     let counts = upload_counts(&device, &[0u32, 0, 0, 0]);
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
@@ -356,9 +369,10 @@ fn reduction_does_not_modify_positions_velocities_masses() {
 
 #[test] // rq-eb3a65df
 fn reduction_does_not_modify_neighbor_counts() {
-    let device = init_device().expect("init_device");
-    let pair = PairBuffer::new(device.clone(), 4, 2).expect("PairBuffer::new");
-    let mut particle_buffers = zero_particle_buffers(device.clone(), 4);
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let pair = PairBuffer::new(&gpu, 4, 2).expect("PairBuffer::new");
+    let mut particle_buffers = zero_particle_buffers(&gpu, 4);
     let counts = upload_counts(&device, &[0u32, 1, 2, 0]);
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
@@ -371,7 +385,7 @@ fn reduction_does_not_modify_neighbor_counts() {
 
 #[test] // rq-b4f18ea1
 fn two_independent_runs_produce_byte_identical_net_forces() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let n: usize = 128;
     let max_neighbors: u32 = 16;
     let total = n * max_neighbors as usize;
@@ -381,7 +395,7 @@ fn two_independent_runs_produce_byte_identical_net_forces() {
     let counts: Vec<u32> = (0..n).map(|i| (i as u32) % (max_neighbors + 1)).collect();
 
     fn run(
-        device: &Arc<CudaDevice>,
+        gpu: &GpuContext,
         n: usize,
         max_neighbors: u32,
         pair_x: &[f32],
@@ -390,18 +404,18 @@ fn two_independent_runs_produce_byte_identical_net_forces() {
         counts: &[u32],
     ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
         let mut pair =
-            PairBuffer::new(device.clone(), n, max_neighbors).expect("PairBuffer::new");
+            PairBuffer::new(gpu, n, max_neighbors).expect("PairBuffer::new");
         upload_pair_x(&mut pair, pair_x);
         upload_pair_y(&mut pair, pair_y);
         upload_pair_z(&mut pair, pair_z);
-        let mut particle_buffers = zero_particle_buffers(device.clone(), n);
-        let counts_dev = upload_counts(device, counts);
+        let mut particle_buffers = zero_particle_buffers(gpu, n);
+        let counts_dev = upload_counts(&gpu.device, counts);
         reduce_pair_forces_into_buffers(&pair, &counts_dev, &mut particle_buffers).expect("reduce");
         download_forces(&particle_buffers)
     }
 
-    let (ax, ay, az) = run(&device, n, max_neighbors, &pair_x, &pair_y, &pair_z, &counts);
-    let (bx, by, bz) = run(&device, n, max_neighbors, &pair_x, &pair_y, &pair_z, &counts);
+    let (ax, ay, az) = run(&gpu, n, max_neighbors, &pair_x, &pair_y, &pair_z, &counts);
+    let (bx, by, bz) = run(&gpu, n, max_neighbors, &pair_x, &pair_y, &pair_z, &counts);
     assert_eq!(ax, bx);
     assert_eq!(ay, by);
     assert_eq!(az, bz);
@@ -411,11 +425,12 @@ fn two_independent_runs_produce_byte_identical_net_forces() {
 
 #[test] // rq-5cb58365
 fn nan_pair_contribution_propagates_to_nan() {
-    let device = init_device().expect("init_device");
-    let mut pair = PairBuffer::new(device.clone(), 1, 4).expect("PairBuffer::new");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let mut pair = PairBuffer::new(&gpu, 1, 4).expect("PairBuffer::new");
     upload_pair_x(&mut pair, &[1.0_f32, f32::NAN, 3.0, 0.0]);
 
-    let mut particle_buffers = zero_particle_buffers(device.clone(), 1);
+    let mut particle_buffers = zero_particle_buffers(&gpu, 1);
     let counts = upload_counts(&device, &[3u32]);
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
@@ -425,11 +440,12 @@ fn nan_pair_contribution_propagates_to_nan() {
 
 #[test] // rq-a1c567b3
 fn infinite_pair_contribution_propagates_to_infinity() {
-    let device = init_device().expect("init_device");
-    let mut pair = PairBuffer::new(device.clone(), 1, 4).expect("PairBuffer::new");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let mut pair = PairBuffer::new(&gpu, 1, 4).expect("PairBuffer::new");
     upload_pair_x(&mut pair, &[1.0_f32, f32::INFINITY, 3.0, 0.0]);
 
-    let mut particle_buffers = zero_particle_buffers(device.clone(), 1);
+    let mut particle_buffers = zero_particle_buffers(&gpu, 1);
     let counts = upload_counts(&device, &[3u32]);
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
@@ -442,8 +458,9 @@ fn infinite_pair_contribution_propagates_to_infinity() {
 
 #[test] // rq-9e487c80
 fn reduction_sums_pair_energies_left_to_right() {
-    let device = init_device().expect("init_device");
-    let mut pair = PairBuffer::new(device.clone(), 1, 4).unwrap();
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let mut pair = PairBuffer::new(&gpu, 1, 4).unwrap();
     let mut state = ParticleState::new(
         vec![0.0_f32],
         vec![0.0_f32],
@@ -457,7 +474,7 @@ fn reduction_sums_pair_energies_left_to_right() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     device
         .htod_sync_copy_into(&vec![0.5_f32, 1.5, 2.0, 999.0], &mut pair.pair_energies)
         .unwrap();
@@ -473,8 +490,9 @@ fn reduction_sums_pair_energies_left_to_right() {
 
 #[test] // rq-961c2ee6
 fn reduction_zero_count_writes_zero_to_energy_and_virial() {
-    let device = init_device().expect("init_device");
-    let mut pair = PairBuffer::new(device.clone(), 2, 4).unwrap();
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let mut pair = PairBuffer::new(&gpu, 2, 4).unwrap();
     let mut state = ParticleState::new(
         vec![0.0_f32, 1.0],
         vec![0.0_f32, 0.0],
@@ -488,7 +506,7 @@ fn reduction_zero_count_writes_zero_to_energy_and_virial() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     // Pre-fill energies and virials with non-zero junk to prove they get overwritten.
     device
         .htod_sync_copy_into(&vec![7.0_f32; 8], &mut pair.pair_energies)
@@ -505,8 +523,9 @@ fn reduction_zero_count_writes_zero_to_energy_and_virial() {
 
 #[test] // rq-41d9e514
 fn energy_and_virial_share_force_indexing() {
-    let device = init_device().expect("init_device");
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
     let mut state = ParticleState::new(
         vec![0.0_f32, 1.0],
         vec![0.0_f32, 0.0],
@@ -520,7 +539,7 @@ fn energy_and_virial_share_force_indexing() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     device
         .htod_sync_copy_into(&vec![1.0_f32, 2.0, 3.0, 4.0], &mut pair.pair_forces_x)
         .unwrap();

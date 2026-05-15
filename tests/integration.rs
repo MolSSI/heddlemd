@@ -58,15 +58,21 @@ fn diverse_state(n: usize) -> ParticleState {
 // rq-bc8375ce
 #[test]
 fn init_device_loads_integrate_module_with_both_kernels() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     assert!(device.has_func("integrate", "vv_kick_drift"));
     assert!(device.has_func("integrate", "vv_kick"));
+    // The GpuContext's kernels handle exposes both functions through typed
+    // field access; referencing the fields is a compile-time assertion that
+    // they exist on `Kernels`.
+    let _ = gpu.kernels.vv_kick_drift.clone();
+    let _ = gpu.kernels.vv_kick.clone();
 }
 
 // rq-4f7dc024
 #[test]
 fn vv_kick_drift_advances_position_when_force_zero() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = ParticleState::new(
         vec![1.0],
@@ -81,7 +87,7 @@ fn vv_kick_drift_advances_position_when_force_zero() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
 
     vv_kick_drift(&mut buffers, &sim_box, 0.1).expect("kick_drift");
     let result = snapshot_via_download(&buffers);
@@ -98,7 +104,7 @@ fn vv_kick_drift_advances_position_when_force_zero() {
 // rq-d25000c5
 #[test]
 fn vv_kick_drift_exact_half_step_under_constant_force() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let mut state = ParticleState::new(
         vec![0.0],
@@ -117,7 +123,7 @@ fn vv_kick_drift_exact_half_step_under_constant_force() {
     state.forces_y = vec![-4.0];
     state.forces_z = vec![1.0];
 
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
     vv_kick_drift(&mut buffers, &sim_box, 0.1).expect("kick_drift");
     let result = snapshot_via_download(&buffers);
 
@@ -136,7 +142,7 @@ fn vv_kick_drift_exact_half_step_under_constant_force() {
 // rq-2f52c25e
 #[test]
 fn vv_kick_leaves_velocity_unchanged_when_force_zero() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let state = ParticleState::new(
         vec![1.0],
         vec![2.0],
@@ -150,7 +156,7 @@ fn vv_kick_leaves_velocity_unchanged_when_force_zero() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
 
     vv_kick(&mut buffers, 0.1).expect("kick");
     let result = snapshot_via_download(&buffers);
@@ -166,7 +172,7 @@ fn vv_kick_leaves_velocity_unchanged_when_force_zero() {
 // rq-29718dcf
 #[test]
 fn full_step_matches_constant_acceleration_kinematics() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let mut state = ParticleState::new(
         vec![0.0],
@@ -182,7 +188,7 @@ fn full_step_matches_constant_acceleration_kinematics() {
     )
     .unwrap();
     state.forces_x = vec![2.0];
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
 
     vv_kick_drift(&mut buffers, &sim_box, 0.1).expect("kick_drift");
     vv_kick(&mut buffers, 0.1).expect("kick");
@@ -207,7 +213,7 @@ fn full_step_matches_constant_acceleration_kinematics() {
 // rq-bd149f52
 #[test]
 fn acceleration_scales_inversely_with_mass() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let mut state = ParticleState::new(
         vec![0.0, 0.0],
@@ -223,7 +229,7 @@ fn acceleration_scales_inversely_with_mass() {
     )
     .unwrap();
     state.forces_x = vec![1.0, 1.0];
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
 
     vv_kick_drift(&mut buffers, &sim_box, 0.2).expect("kick_drift");
     let result = snapshot_via_download(&buffers);
@@ -236,7 +242,7 @@ fn acceleration_scales_inversely_with_mass() {
 // rq-b13eba96
 #[test]
 fn particles_evolve_independently() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let mut state = ParticleState::new(
         vec![0.0, 1.0, -2.0],
@@ -253,7 +259,7 @@ fn particles_evolve_independently() {
     .unwrap();
     state.forces_x = vec![1.0, -2.0, 0.5];
     let initial_positions_x = state.positions_x.clone();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
 
     vv_kick_drift(&mut buffers, &sim_box, 0.1).expect("kick_drift");
     vv_kick(&mut buffers, 0.1).expect("kick");
@@ -276,10 +282,10 @@ fn particles_evolve_independently() {
 // rq-e8c21a03
 #[test]
 fn dt_zero_leaves_state_unchanged_for_kick_drift() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = diverse_state(8);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
     let snapshot = snapshot_via_download(&buffers);
 
     vv_kick_drift(&mut buffers, &sim_box, 0.0).expect("kick_drift");
@@ -301,9 +307,9 @@ fn dt_zero_leaves_state_unchanged_for_kick_drift() {
 // rq-d28737dd
 #[test]
 fn dt_zero_leaves_state_unchanged_for_kick() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let state = diverse_state(8);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
     let snapshot = snapshot_via_download(&buffers);
 
     vv_kick(&mut buffers, 0.0).expect("kick");
@@ -325,7 +331,7 @@ fn dt_zero_leaves_state_unchanged_for_kick() {
 // rq-1e2d749d
 #[test]
 fn vv_kick_drift_on_empty_state_is_noop() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = ParticleState::new(
         vec![],
@@ -340,7 +346,7 @@ fn vv_kick_drift_on_empty_state_is_noop() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
     vv_kick_drift(&mut buffers, &sim_box, 0.1).expect("kick_drift");
     assert_eq!(buffers.particle_count(), 0);
     assert_eq!(buffers.positions_x.len(), 0);
@@ -349,7 +355,7 @@ fn vv_kick_drift_on_empty_state_is_noop() {
 // rq-386cfae3
 #[test]
 fn vv_kick_on_empty_state_is_noop() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let state = ParticleState::new(
         vec![],
         vec![],
@@ -363,7 +369,7 @@ fn vv_kick_on_empty_state_is_noop() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
     vv_kick(&mut buffers, 0.1).expect("kick");
     assert_eq!(buffers.particle_count(), 0);
     assert_eq!(buffers.velocities_x.len(), 0);
@@ -372,7 +378,7 @@ fn vv_kick_on_empty_state_is_noop() {
 // rq-a93a5b14
 #[test]
 fn block_non_aligned_particle_count_is_handled() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let n = 1000;
     let positions_x: Vec<f32> = (0..n).map(|i| i as f32).collect();
@@ -389,7 +395,7 @@ fn block_non_aligned_particle_count_is_handled() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
     let snapshot = snapshot_via_download(&buffers);
 
     vv_kick_drift(&mut buffers, &sim_box, 0.1).expect("kick_drift");
@@ -417,10 +423,10 @@ fn block_non_aligned_particle_count_is_handled() {
 // rq-7dfa14cf
 #[test]
 fn vv_kick_drift_does_not_modify_forces_or_masses() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = diverse_state(4);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
     let snapshot = snapshot_via_download(&buffers);
 
     vv_kick_drift(&mut buffers, &sim_box, 0.1).expect("kick_drift");
@@ -435,9 +441,9 @@ fn vv_kick_drift_does_not_modify_forces_or_masses() {
 // rq-f721b7a1
 #[test]
 fn vv_kick_does_not_modify_forces_masses_or_positions() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let state = diverse_state(4);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
     let snapshot = snapshot_via_download(&buffers);
 
     vv_kick(&mut buffers, 0.1).expect("kick");
@@ -455,16 +461,16 @@ fn vv_kick_does_not_modify_forces_masses_or_positions() {
 // rq-37e6f318
 #[test]
 fn two_independent_runs_produce_byte_identical_outputs() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = diverse_state(128);
 
-    let mut buffers_a = ParticleBuffers::new(device.clone(), &state).expect("buffers a");
+    let mut buffers_a = ParticleBuffers::new(&gpu, &state).expect("buffers a");
     vv_kick_drift(&mut buffers_a, &sim_box, 0.01).expect("kick_drift a");
     vv_kick(&mut buffers_a, 0.01).expect("kick a");
     let result_a = snapshot_via_download(&buffers_a);
 
-    let mut buffers_b = ParticleBuffers::new(device.clone(), &state).expect("buffers b");
+    let mut buffers_b = ParticleBuffers::new(&gpu, &state).expect("buffers b");
     vv_kick_drift(&mut buffers_b, &sim_box, 0.01).expect("kick_drift b");
     vv_kick(&mut buffers_b, 0.01).expect("kick b");
     let result_b = snapshot_via_download(&buffers_b);
@@ -485,7 +491,7 @@ fn two_independent_runs_produce_byte_identical_outputs() {
 // rq-8e47334c
 #[test]
 fn nan_force_propagates_to_velocity_and_position() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let mut state = ParticleState::new(
         vec![1.0],
@@ -503,7 +509,7 @@ fn nan_force_propagates_to_velocity_and_position() {
     state.forces_x = vec![f32::NAN];
     state.forces_y = vec![0.0];
     state.forces_z = vec![0.0];
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
 
     vv_kick_drift(&mut buffers, &sim_box, 0.1).expect("kick_drift");
     let result = snapshot_via_download(&buffers);
@@ -519,7 +525,7 @@ fn nan_force_propagates_to_velocity_and_position() {
 // rq-b2d67b57
 #[test]
 fn forward_then_negated_kick_drift_returns_free_particle_to_origin() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     // Free particles: F=0, m=1, arbitrary nonzero positions and velocities.
     let positions_x = vec![1.0_f32, -2.0, 3.5, 0.25];
@@ -541,7 +547,7 @@ fn forward_then_negated_kick_drift_returns_free_particle_to_origin() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).expect("buffers");
+    let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
 
     vv_kick_drift(&mut buffers, &sim_box, 0.1).expect("forward");
     vv_kick_drift(&mut buffers, &sim_box, -0.1).expect("reverse");
@@ -562,7 +568,7 @@ fn forward_then_negated_kick_drift_returns_free_particle_to_origin() {
 
 #[test]
 fn vv_kick_drift_wraps_positions_back_into_primary_image() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap();
     let state = ParticleState::new(
         vec![4.9_f32],
@@ -577,7 +583,7 @@ fn vv_kick_drift_wraps_positions_back_into_primary_image() {
         None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     vv_kick_drift(&mut buffers, &sim_box, 0.1).unwrap();
     let r = snapshot_via_download(&buffers);
     assert!((r.positions_x[0] - (-4.9_f32)).abs() < 1e-5);
@@ -588,7 +594,7 @@ fn vv_kick_drift_wraps_positions_back_into_primary_image() {
 
 #[test]
 fn vv_kick_drift_wraps_in_negative_x() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap();
     let state = ParticleState::new(
         vec![-4.9_f32],
@@ -603,7 +609,7 @@ fn vv_kick_drift_wraps_in_negative_x() {
         None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     vv_kick_drift(&mut buffers, &sim_box, 0.1).unwrap();
     let r = snapshot_via_download(&buffers);
     assert!((r.positions_x[0] - 4.9_f32).abs() < 1e-5);
@@ -612,7 +618,7 @@ fn vv_kick_drift_wraps_in_negative_x() {
 
 #[test]
 fn vv_kick_drift_handles_multi_period_crossings() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap();
     let state = ParticleState::new(
         vec![0.0_f32],
@@ -627,7 +633,7 @@ fn vv_kick_drift_handles_multi_period_crossings() {
         Some((vec![7], vec![0], vec![0])),
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     vv_kick_drift(&mut buffers, &sim_box, 0.1).unwrap();
     let r = snapshot_via_download(&buffers);
     assert!(r.positions_x[0] >= -5.0 && r.positions_x[0] < 5.0);
@@ -641,7 +647,7 @@ fn vv_kick_drift_handles_multi_period_crossings() {
 
 #[test]
 fn vv_kick_does_not_modify_image_flags() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let n = 4;
     let state = ParticleState::new(
         vec![0.1_f32, 0.2, 0.3, 0.4],
@@ -656,7 +662,7 @@ fn vv_kick_does_not_modify_image_flags() {
         Some((vec![1, -2, 3, 0], vec![0, 1, -1, 4], vec![2, 0, -3, 1])),
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     vv_kick(&mut buffers, 0.1).unwrap();
     let r = snapshot_via_download(&buffers);
     assert_eq!(r.images_x, vec![1, -2, 3, 0]);

@@ -292,9 +292,10 @@ fn nan_values_accepted_at_construction() {
 
 #[test] // rq-0ffccee0
 fn allocate_device_buffers_and_perform_initial_upload() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let state = make_state_with_values(4, 1.0, None);
-    let buffers = ParticleBuffers::new(device.clone(), &state)
+    let buffers = ParticleBuffers::new(&gpu, &state)
         .expect("ParticleBuffers::new should succeed");
     assert_eq!(buffers.particle_count(), 4);
     assert_eq!(buffers.positions_x.len(), 4);
@@ -324,7 +325,7 @@ fn allocate_device_buffers_and_perform_initial_upload() {
 
 #[test] // rq-c8aa7417
 fn allocate_device_buffers_from_an_empty_state() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let state = ParticleState::new(
         vec![],
         vec![],
@@ -338,7 +339,7 @@ fn allocate_device_buffers_from_an_empty_state() {
             None,
     )
     .unwrap();
-    let buffers = ParticleBuffers::new(device.clone(), &state)
+    let buffers = ParticleBuffers::new(&gpu, &state)
         .expect("ParticleBuffers::new should succeed");
     assert_eq!(buffers.particle_count(), 0);
     assert_eq!(buffers.positions_x.len(), 0);
@@ -356,10 +357,10 @@ fn allocate_device_buffers_from_an_empty_state() {
 
 #[test] // rq-780d68ea
 fn reject_particle_buffers_new_when_host_array_length_inconsistent() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let mut state = make_state_with_values(4, 1.0, None);
     state.velocities_z.truncate(3);
-    let err = ParticleBuffers::new(device, &state)
+    let err = ParticleBuffers::new(&gpu, &state)
         .expect_err("expected LengthMismatch on velocities_z");
     match err {
         ParticleStateError::LengthMismatch {
@@ -377,9 +378,10 @@ fn reject_particle_buffers_new_when_host_array_length_inconsistent() {
 
 #[test] // rq-4d226dff
 fn re_upload_after_host_side_mutation() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let mut state = make_state_with_values(4, 1.0, None);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state)
+    let mut buffers = ParticleBuffers::new(&gpu, &state)
         .expect("ParticleBuffers::new");
 
     let new_positions_x: Vec<f32> = vec![100.0, 101.0, 102.0, 103.0];
@@ -402,10 +404,10 @@ fn re_upload_after_host_side_mutation() {
 
 #[test] // rq-9ff4fd10
 fn reject_upload_when_host_particle_count_differs_from_buffers() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let state_a = make_state_with_values(4, 1.0, None);
     let state_b = make_state_with_values(5, 2.0, None);
-    let mut buffers = ParticleBuffers::new(device, &state_a)
+    let mut buffers = ParticleBuffers::new(&gpu, &state_a)
         .expect("ParticleBuffers::new");
     let err = buffers.upload(&state_b).expect_err("expected LengthMismatch");
     match err {
@@ -424,9 +426,9 @@ fn reject_upload_when_host_particle_count_differs_from_buffers() {
 
 #[test] // rq-b4bb7096
 fn reject_upload_when_host_array_drifts_in_length() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let mut state = make_state_with_values(4, 1.0, None);
-    let mut buffers = ParticleBuffers::new(device, &state)
+    let mut buffers = ParticleBuffers::new(&gpu, &state)
         .expect("ParticleBuffers::new");
     state.forces_y.truncate(3);
     let err = buffers.upload(&state).expect_err("expected LengthMismatch");
@@ -448,20 +450,20 @@ fn reject_upload_when_host_array_drifts_in_length() {
 
 #[test] // rq-39a260b5
 fn download_into_source_state_preserves_values() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let mut state = make_state_with_values(4, 1.0, None);
     let snapshot = state.clone();
-    let buffers = ParticleBuffers::new(device, &state).expect("ParticleBuffers::new");
+    let buffers = ParticleBuffers::new(&gpu, &state).expect("ParticleBuffers::new");
     state.download_from(&buffers).expect("download should succeed");
     assert_states_equal(&state, &snapshot);
 }
 
 #[test] // rq-9594de53
 fn download_overwrites_in_place_after_host_mutation() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let mut state = make_state_with_values(4, 1.0, None);
     let original = state.clone();
-    let buffers = ParticleBuffers::new(device, &state).expect("ParticleBuffers::new");
+    let buffers = ParticleBuffers::new(&gpu, &state).expect("ParticleBuffers::new");
 
     fill_with_garbage(&mut state);
 
@@ -471,9 +473,9 @@ fn download_overwrites_in_place_after_host_mutation() {
 
 #[test] // rq-f4ebf12a
 fn download_reflects_device_side_changes_pushed_by_interim_re_upload() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let mut state_a = make_state_with_values(4, 1.0, None);
-    let mut buffers = ParticleBuffers::new(device, &state_a)
+    let mut buffers = ParticleBuffers::new(&gpu, &state_a)
         .expect("ParticleBuffers::new");
 
     let state_b = make_state_with_values(4, 100.0, Some(vec![100, 101, 102, 103]));
@@ -488,10 +490,10 @@ fn download_reflects_device_side_changes_pushed_by_interim_re_upload() {
 
 #[test] // rq-7ab80063
 fn reject_download_when_host_particle_count_differs_from_buffers() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let state_a = make_state_with_values(4, 1.0, None);
     let mut state_b = make_state_with_values(5, 2.0, None);
-    let buffers = ParticleBuffers::new(device, &state_a)
+    let buffers = ParticleBuffers::new(&gpu, &state_a)
         .expect("ParticleBuffers::new");
     let err = state_b.download_from(&buffers).expect_err("expected LengthMismatch");
     match err {
@@ -510,9 +512,9 @@ fn reject_download_when_host_particle_count_differs_from_buffers() {
 
 #[test] // rq-1bdbd71e
 fn reject_download_when_host_array_drifts_in_length() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let state = make_state_with_values(4, 1.0, None);
-    let buffers = ParticleBuffers::new(device, &state)
+    let buffers = ParticleBuffers::new(&gpu, &state)
         .expect("ParticleBuffers::new");
     let mut other = make_state_with_values(4, 5.0, None);
     other.masses = vec![0.0; 6];
@@ -533,7 +535,7 @@ fn reject_download_when_host_array_drifts_in_length() {
 
 #[test] // rq-58254790
 fn download_from_empty_buffers_into_empty_state() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let source = ParticleState::new(
         vec![],
         vec![],
@@ -547,7 +549,7 @@ fn download_from_empty_buffers_into_empty_state() {
             None,
     )
     .unwrap();
-    let buffers = ParticleBuffers::new(device, &source)
+    let buffers = ParticleBuffers::new(&gpu, &source)
         .expect("ParticleBuffers::new");
     let mut sink = ParticleState::new(
         vec![],
@@ -597,7 +599,8 @@ fn reject_when_type_indices_has_wrong_length() {
 
 #[test]
 fn type_indices_round_trip_through_particle_buffers() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let state = ParticleState::new(
         vec![0.0_f32, 1.0, 2.0],
         vec![0.0_f32; 3],
@@ -611,7 +614,7 @@ fn type_indices_round_trip_through_particle_buffers() {
             None,
     )
     .unwrap();
-    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let host = device.dtoh_sync_copy(&buffers.type_indices).unwrap();
     assert_eq!(host, vec![0u32, 2, 1]);
     // Download path mirrors values back into a sink state.
@@ -654,7 +657,7 @@ fn new_state_zero_inits_potential_energies_and_virials() {
 
 #[test] // rq-9504346c
 fn potential_energies_and_virials_round_trip_through_buffers() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let mut state = ParticleState::new(
         vec![0.0_f32, 1.0, 2.0, 3.0],
         vec![0.0_f32; 4],
@@ -670,7 +673,7 @@ fn potential_energies_and_virials_round_trip_through_buffers() {
     .unwrap();
     state.potential_energies = vec![1.0_f32, -2.0, 3.5, 0.25];
     state.virials = vec![10.0_f32, 20.0, -30.0, 40.0];
-    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     state.potential_energies = vec![0.0_f32; 4];
     state.virials = vec![0.0_f32; 4];
     state.download_from(&buffers).unwrap();
@@ -754,7 +757,8 @@ fn reject_explicit_images_y_wrong_length() {
 
 #[test]
 fn particle_buffers_carry_image_buffers() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let n = 4;
     let images_x = vec![1, -2, 3, 0];
     let images_y = vec![-7, 4, 0, 8];
@@ -772,7 +776,7 @@ fn particle_buffers_carry_image_buffers() {
         Some((images_x.clone(), images_y.clone(), images_z.clone())),
     )
     .unwrap();
-    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     assert_eq!(buffers.images_x.len(), n);
     assert_eq!(buffers.images_y.len(), n);
     assert_eq!(buffers.images_z.len(), n);
@@ -786,7 +790,7 @@ fn particle_buffers_carry_image_buffers() {
 
 #[test]
 fn reject_upload_when_images_x_has_wrong_length() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let n = 4;
     let state = ParticleState::new(
         vec![0.0_f32; n],
@@ -801,7 +805,7 @@ fn reject_upload_when_images_x_has_wrong_length() {
         None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut bad = state.clone();
     bad.images_x.truncate(3);
     let err = buffers.upload(&bad).expect_err("expected LengthMismatch");

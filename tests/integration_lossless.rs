@@ -122,17 +122,21 @@ fn capture_snapshot(buffers: &ParticleBuffers, lossless: &LosslessBuffers) -> Fu
 
 #[test] // rq-70fe268a
 fn init_device_loads_lossless_kernels() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     assert!(device.has_func("integrate", "vv_kick_drift_lossless"));
     assert!(device.has_func("integrate", "vv_kick_lossless"));
+    let _ = gpu.kernels.vv_kick_drift_lossless.clone();
+    let _ = gpu.kernels.vv_kick_lossless.clone();
 }
 
 // --- LosslessBuffers construction ---
 
 #[test] // rq-5bfa5b37
 fn lossless_buffers_new_allocates_zero_initialised() {
-    let device = init_device().expect("init_device");
-    let lossless = LosslessBuffers::new(device.clone(), 4).expect("new");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let lossless = LosslessBuffers::new(&gpu, 4).expect("new");
     assert_eq!(lossless.particle_count(), 4);
     assert_eq!(lossless.positions_x_lo.len(), 4);
     assert_eq!(lossless.positions_y_lo.len(), 4);
@@ -150,8 +154,8 @@ fn lossless_buffers_new_allocates_zero_initialised() {
 
 #[test] // rq-b96ce51d
 fn lossless_buffers_new_with_zero_particle_count() {
-    let device = init_device().expect("init_device");
-    let lossless = LosslessBuffers::new(device.clone(), 0).expect("new");
+    let gpu = init_device().expect("init_device");
+    let lossless = LosslessBuffers::new(&gpu, 0).expect("new");
     assert_eq!(lossless.particle_count(), 0);
     assert_eq!(lossless.positions_x_lo.len(), 0);
     assert_eq!(lossless.positions_y_lo.len(), 0);
@@ -165,18 +169,18 @@ fn lossless_buffers_new_with_zero_particle_count() {
 
 #[test] // rq-58cac735
 fn vv_kick_drift_lossless_empty_noop() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &empty_state(0)).unwrap();
-    let mut lossless = LosslessBuffers::new(device.clone(), 0).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &empty_state(0)).unwrap();
+    let mut lossless = LosslessBuffers::new(&gpu, 0).unwrap();
     vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, 0.1).expect("kick_drift_lossless");
 }
 
 #[test] // rq-5626dfc6
 fn vv_kick_lossless_empty_noop() {
-    let device = init_device().expect("init_device");
-    let mut buffers = ParticleBuffers::new(device.clone(), &empty_state(0)).unwrap();
-    let mut lossless = LosslessBuffers::new(device.clone(), 0).unwrap();
+    let gpu = init_device().expect("init_device");
+    let mut buffers = ParticleBuffers::new(&gpu, &empty_state(0)).unwrap();
+    let mut lossless = LosslessBuffers::new(&gpu, 0).unwrap();
     vv_kick_lossless(&mut buffers, &mut lossless, 0.1).expect("kick_lossless");
 }
 
@@ -184,13 +188,14 @@ fn vv_kick_lossless_empty_noop() {
 
 #[test] // rq-5a6d5e9e
 fn vv_kick_drift_lossless_block_non_aligned() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let n = 1000;
     let mut state = empty_state(n);
     state.velocities_x = vec![1.0_f32; n];
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut lossless = LosslessBuffers::new(device.clone(), n).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut lossless = LosslessBuffers::new(&gpu, n).unwrap();
 
     let initial_positions_x = state.positions_x.clone();
     vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, 0.1).expect("kick_drift_lossless");
@@ -211,11 +216,11 @@ fn vv_kick_drift_lossless_block_non_aligned() {
 
 #[test] // rq-bb075030
 fn vv_kick_drift_lossless_does_not_modify_forces_masses_ids() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = diverse_state(4);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut lossless = LosslessBuffers::new(device.clone(), 4).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut lossless = LosslessBuffers::new(&gpu, 4).unwrap();
     let snapshot = capture_snapshot(&buffers, &lossless);
 
     vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, 0.1).expect("kick_drift_lossless");
@@ -230,10 +235,10 @@ fn vv_kick_drift_lossless_does_not_modify_forces_masses_ids() {
 
 #[test] // rq-acafdfe4
 fn vv_kick_lossless_does_not_modify_positions_forces_masses_ids() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let state = diverse_state(4);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut lossless = LosslessBuffers::new(device.clone(), 4).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut lossless = LosslessBuffers::new(&gpu, 4).unwrap();
     let snapshot = capture_snapshot(&buffers, &lossless);
 
     vv_kick_lossless(&mut buffers, &mut lossless, 0.1).expect("kick_lossless");
@@ -288,7 +293,7 @@ fn assert_residuals_close(a: &FullSnapshot, b: &FullSnapshot, tol: f64) {
 
 #[test] // rq-1a504311
 fn single_step_round_trip_zero_force() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let n = 8;
     let positions_x: Vec<f32> = (0..n).map(|i| 0.5 + i as f32 * 0.3).collect();
@@ -310,8 +315,8 @@ fn single_step_round_trip_zero_force() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut lossless = LosslessBuffers::new(device.clone(), n).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut lossless = LosslessBuffers::new(&gpu, n).unwrap();
     let snapshot = capture_snapshot(&buffers, &lossless);
 
     vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, 0.1).expect("forward");
@@ -328,12 +333,12 @@ fn single_step_round_trip_zero_force() {
 
 #[test] // rq-b73316ed
 fn multi_step_round_trip_constant_force() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let n = 16;
     let state = diverse_state(n);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut lossless = LosslessBuffers::new(device.clone(), n).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut lossless = LosslessBuffers::new(&gpu, n).unwrap();
     let snapshot = capture_snapshot(&buffers, &lossless);
 
     let dt = 0.001_f32;
@@ -358,7 +363,7 @@ fn multi_step_round_trip_constant_force() {
 
 #[test] // rq-2a0e97f5
 fn two_independent_lossless_runs_byte_identical() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let n = 64;
     let state = diverse_state(n);
@@ -366,8 +371,8 @@ fn two_independent_lossless_runs_byte_identical() {
     let n_steps = 10;
 
     let run = |state: &ParticleState| -> FullSnapshot {
-        let mut buffers = ParticleBuffers::new(device.clone(), state).unwrap();
-        let mut lossless = LosslessBuffers::new(device.clone(), n).unwrap();
+        let mut buffers = ParticleBuffers::new(&gpu, state).unwrap();
+        let mut lossless = LosslessBuffers::new(&gpu, n).unwrap();
         for _ in 0..n_steps {
             vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, dt).unwrap();
             vv_kick_lossless(&mut buffers, &mut lossless, dt).unwrap();

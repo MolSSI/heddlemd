@@ -797,8 +797,8 @@ fn write_timings_empty_report_writes_header_only() {
 // rq-e946870f
 #[test]
 fn timings_new_allocates_event_pairs() {
-    let device = init_device().unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
+    let gpu = init_device().unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
     let report = timings.finalize().unwrap();
     assert!(report.stages.is_empty());
 }
@@ -806,8 +806,9 @@ fn timings_new_allocates_event_pairs() {
 // rq-79291197
 #[test]
 fn kernel_start_stop_and_finalize_records_one_sample() {
-    let device = init_device().unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
+    let mut timings = Timings::new(&gpu).unwrap();
     let state = ParticleState::new(
         vec![0.0_f32, 1.0e-10_f32],
         vec![0.0_f32; 2],
@@ -821,8 +822,8 @@ fn kernel_start_stop_and_finalize_records_one_sample() {
             None,
     )
     .unwrap();
-    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair_buffer = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair_buffer = PairBuffer::new(&gpu, 2, 2).unwrap();
     let params = single_type_lj_table(&device, 1.0e-10, 1.0, 1.0e-9);
     let sim_box = SimulationBox::new_orthorhombic(1.0e-9, 1.0e-9, 1.0e-9).unwrap();
     timings.kernel_start(KernelStage::LJ_PAIR_FORCE).unwrap();
@@ -840,8 +841,9 @@ fn kernel_start_stop_and_finalize_records_one_sample() {
 // rq-56043142
 #[test]
 fn repeated_kernel_starts_stops_accumulate() {
-    let device = init_device().unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
+    let mut timings = Timings::new(&gpu).unwrap();
     let state = ParticleState::new(
         vec![0.0_f32, 1.0e-10_f32],
         vec![0.0_f32; 2],
@@ -855,8 +857,8 @@ fn repeated_kernel_starts_stops_accumulate() {
             None,
     )
     .unwrap();
-    let buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair_buffer = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair_buffer = PairBuffer::new(&gpu, 2, 2).unwrap();
     let params = single_type_lj_table(&device, 1.0e-10, 1.0, 1.0e-9);
     let sim_box = SimulationBox::new_orthorhombic(1.0e-9, 1.0e-9, 1.0e-9).unwrap();
     for _ in 0..10 {
@@ -877,8 +879,8 @@ fn repeated_kernel_starts_stops_accumulate() {
 // rq-2cbe0828
 #[test]
 fn record_host_accumulates_count_total_min_max() {
-    let device = init_device().unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
+    let gpu = init_device().unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
     timings.record_host(HostStage::CONFIG_LOAD, Duration::from_micros(100));
     timings.record_host(HostStage::CONFIG_LOAD, Duration::from_micros(50));
     timings.record_host(HostStage::CONFIG_LOAD, Duration::from_micros(200));
@@ -897,8 +899,8 @@ fn record_host_accumulates_count_total_min_max() {
 #[test] // rq-f232d41b
 #[should_panic(expected = "unknown KernelStage")]
 fn kernel_start_with_unknown_kernel_stage_panics() {
-    let device = init_device().unwrap();
-    let mut timings = Timings::new(device).unwrap();
+    let gpu = init_device().unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
     let unknown = KernelStage::new("not_a_stage");
     let _ = timings.kernel_start(unknown);
 }
@@ -906,8 +908,8 @@ fn kernel_start_with_unknown_kernel_stage_panics() {
 #[test] // rq-264d2234
 #[should_panic(expected = "unknown HostStage")]
 fn record_host_with_unknown_host_stage_panics() {
-    let device = init_device().unwrap();
-    let mut timings = Timings::new(device).unwrap();
+    let gpu = init_device().unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
     let unknown = HostStage::new("not_a_host_stage");
     timings.record_host(unknown, Duration::from_micros(10));
 }

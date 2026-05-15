@@ -117,7 +117,8 @@ per occurrence. Stages:
 ### CUDA events <!-- rq-91cec484 -->
 
 The runner holds one `(start, stop)` event pair per kernel stage. Both events
-are created with default flags on the device returned by `init_device()`.
+are created with default flags on the `device` carried by the `GpuContext`
+from `init_device()`.
 
 Launch sequencing per kernel stage:
 
@@ -784,7 +785,7 @@ Feature: Performance analysis and timings output
 
   @rq-e946870f
   Scenario: Timings::new allocates the documented event pairs
-    Given a CudaDevice obtained from init_device()
+    Given a GpuContext obtained from init_device()
     When Timings::new(device) is called
     Then it returns Ok(timings)
     And every per-stage accumulator has count = 0

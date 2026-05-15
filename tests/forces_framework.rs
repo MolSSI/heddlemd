@@ -67,9 +67,8 @@ fn single_bond_list(n: usize) -> BondList {
 // rq-56c8a238
 #[test]
 fn force_field_lj_only() {
-    let device = init_device().unwrap();
-    let ff = ForceField::new(
-        device,
+    let gpu = init_device().unwrap();
+    let ff = ForceField::new(&gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -86,7 +85,7 @@ fn force_field_lj_only() {
 // rq-3de16ce0
 #[test]
 fn force_field_lj_and_morse() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let bl = single_bond_list(4);
     let bt = vec![BondTypeConfig::Morse {
         name: "CC".to_string(),
@@ -94,8 +93,7 @@ fn force_field_lj_and_morse() {
         a: 2.0,
         re: 1.0,
     }];
-    let ff = ForceField::new(
-        device,
+    let ff = ForceField::new(&gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -113,15 +111,14 @@ fn force_field_lj_and_morse() {
 // rq-0f34d11b
 #[test]
 fn bond_types_declared_no_bonds() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let bt = vec![BondTypeConfig::Morse {
         name: "CC".to_string(),
         de: 1.0,
         a: 2.0,
         re: 1.0,
     }];
-    let ff = ForceField::new(
-        device,
+    let ff = ForceField::new(&gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -138,9 +135,8 @@ fn bond_types_declared_no_bonds() {
 // rq-60f445b2
 #[test]
 fn force_field_zero_slots() {
-    let device = init_device().unwrap();
-    let ff = ForceField::new(
-        device,
+    let gpu = init_device().unwrap();
+    let ff = ForceField::new(&gpu,
         4,
         &box_10(),
         &[],
@@ -159,7 +155,7 @@ fn force_field_zero_slots() {
 // rq-455db9c2
 #[test]
 fn slot_buffers_sized_num_slots_times_particle_count() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let bt = vec![BondTypeConfig::Morse {
         name: "CC".to_string(),
         de: 1.0,
@@ -167,8 +163,7 @@ fn slot_buffers_sized_num_slots_times_particle_count() {
         re: 1.0,
     }];
     let bl = single_bond_list(8);
-    let ff = ForceField::new(
-        device,
+    let ff = ForceField::new(&gpu,
         8,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -187,9 +182,8 @@ fn slot_buffers_sized_num_slots_times_particle_count() {
 // rq-c525ee79
 #[test]
 fn empty_force_field() {
-    let device = init_device().unwrap();
-    let ff = ForceField::new(
-        device,
+    let gpu = init_device().unwrap();
+    let ff = ForceField::new(&gpu,
         0,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -262,12 +256,11 @@ fn duplicate_label_check_rejects_colliding_labels() {
 // rq-32e981cc
 #[test]
 fn step_lj_only_writes_lj_forces() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let state = state_n(2);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
-    let mut ff = ForceField::new(
-        device,
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut ff = ForceField::new(&gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -287,14 +280,14 @@ fn step_lj_only_writes_lj_forces() {
 // rq-df3a50f6
 #[test]
 fn step_both_slots_sums_lj_and_morse() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let state = state_n(2);
-    let mut buffers_a = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut buffers_b = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut buffers_lj_only = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut timings_a = Timings::new(device.clone()).unwrap();
-    let mut timings_b = Timings::new(device.clone()).unwrap();
-    let mut timings_lj = Timings::new(device.clone()).unwrap();
+    let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers_lj_only = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings_a = Timings::new(&gpu).unwrap();
+    let mut timings_b = Timings::new(&gpu).unwrap();
+    let mut timings_lj = Timings::new(&gpu).unwrap();
 
     let bt = vec![BondTypeConfig::Morse {
         name: "CC".to_string(),
@@ -304,8 +297,7 @@ fn step_both_slots_sums_lj_and_morse() {
     }];
     let bl = single_bond_list(2);
 
-    let mut ff_lj = ForceField::new(
-        device.clone(),
+    let mut ff_lj = ForceField::new(&gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -325,8 +317,7 @@ fn step_both_slots_sums_lj_and_morse() {
         r_switch: 0.5,
         potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     };
-    let mut ff_morse = ForceField::new(
-        device.clone(),
+    let mut ff_morse = ForceField::new(&gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -340,8 +331,7 @@ fn step_both_slots_sums_lj_and_morse() {
     let mut morse_state = state.clone();
     morse_state.download_from(&buffers_b).unwrap();
 
-    let mut ff_both = ForceField::new(
-        device,
+    let mut ff_both = ForceField::new(&gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -363,7 +353,8 @@ fn step_both_slots_sums_lj_and_morse() {
 // rq-fc7b1565
 #[test]
 fn step_zero_slots_writes_zero_forces() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     // Seed forces_* with non-zero junk so we can prove the combiner
     // overwrites them.
     let state = ParticleState::new(
@@ -379,7 +370,7 @@ fn step_zero_slots_writes_zero_forces() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     // Stamp non-zero forces directly into the device buffer.
     let nonzero = vec![7.0_f32; 4];
     device
@@ -392,9 +383,8 @@ fn step_zero_slots_writes_zero_forces() {
         .htod_sync_copy_into(&nonzero, &mut buffers.forces_z)
         .unwrap();
 
-    let mut timings = Timings::new(device.clone()).unwrap();
-    let mut ff = ForceField::new(
-        device.clone(),
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut ff = ForceField::new(&gpu,
         4,
         &box_10(),
         &[],
@@ -427,7 +417,7 @@ fn step_zero_slots_writes_zero_forces() {
 // rq-de47c1ac
 #[test]
 fn step_empty_launches_no_kernels() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let state = ParticleState::new(
         Vec::new(),
         Vec::new(),
@@ -441,10 +431,9 @@ fn step_empty_launches_no_kernels() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
-    let mut ff = ForceField::new(
-        device,
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut ff = ForceField::new(&gpu,
         0,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -462,10 +451,11 @@ fn step_empty_launches_no_kernels() {
 // rq-7d8485b3
 #[test]
 fn each_slot_writes_its_own_row() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let state = state_n(3);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
     let bt = vec![BondTypeConfig::Morse {
         name: "CC".to_string(),
         de: 1.0,
@@ -473,8 +463,7 @@ fn each_slot_writes_its_own_row() {
         re: 1.0,
     }];
     let bl = single_bond_list(3);
-    let mut ff = ForceField::new(
-        device.clone(),
+    let mut ff = ForceField::new(&gpu,
         3,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -487,10 +476,9 @@ fn each_slot_writes_its_own_row() {
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
 
     // Recompute slot 0 (LJ) in isolation to compare.
-    let mut buffers_lj = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut t_lj = Timings::new(device.clone()).unwrap();
-    let mut ff_lj = ForceField::new(
-        device.clone(),
+    let mut buffers_lj = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut t_lj = Timings::new(&gpu).unwrap();
+    let mut ff_lj = ForceField::new(&gpu,
         3,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -510,10 +498,9 @@ fn each_slot_writes_its_own_row() {
         r_switch: 0.5,
         potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     };
-    let mut buffers_m = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut t_m = Timings::new(device.clone()).unwrap();
-    let mut ff_m = ForceField::new(
-        device.clone(),
+    let mut buffers_m = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut t_m = Timings::new(&gpu).unwrap();
+    let mut ff_m = ForceField::new(&gpu,
         3,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -594,12 +581,12 @@ impl Potential for ConstStub {
 
 #[test]
 fn third_potential_extensibility() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let state = state_n(3);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
-    let mut ff = ForceField::new(
-        device.clone(),
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut ff = ForceField::new(&gpu,
         3,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -628,10 +615,9 @@ fn third_potential_extensibility() {
 
     // The stub writes (1, 2, 3) per particle. Subtract the LJ-only result
     // to recover the stub's contribution.
-    let mut buffers_lj = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut t_lj = Timings::new(device.clone()).unwrap();
-    let mut ff_lj = ForceField::new(
-        device.clone(),
+    let mut buffers_lj = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut t_lj = Timings::new(&gpu).unwrap();
+    let mut ff_lj = ForceField::new(&gpu,
         3,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -665,14 +651,13 @@ fn third_potential_extensibility() {
 // rq-c8e5b14e
 #[test]
 fn two_independent_runs_byte_identical() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let state = state_n(4);
-    let mut buffers_a = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut buffers_b = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut timings_a = Timings::new(device.clone()).unwrap();
-    let mut timings_b = Timings::new(device.clone()).unwrap();
-    let mut ff_a = ForceField::new(
-        device.clone(),
+    let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings_a = Timings::new(&gpu).unwrap();
+    let mut timings_b = Timings::new(&gpu).unwrap();
+    let mut ff_a = ForceField::new(&gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -682,8 +667,7 @@ fn two_independent_runs_byte_identical() {
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    let mut ff_b = ForceField::new(
-        device,
+    let mut ff_b = ForceField::new(&gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -707,13 +691,13 @@ fn two_independent_runs_byte_identical() {
 // rq-a5aa743e
 #[test]
 fn combiner_sums_slot_rows_in_slot_order() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let state = state_n(2);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
     // Build a ForceField with two ConstStub slots that write distinct rows.
-    let mut ff = ForceField::new(
-        device.clone(),
+    let mut ff = ForceField::new(&gpu,
         2,
         &box_10(),
         &[],
@@ -786,18 +770,18 @@ fn combiner_sums_slot_rows_in_slot_order() {
 // rq-3e9217e2
 #[test]
 fn combiner_with_zero_slots_writes_zeros() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let state = state_n(4);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     // Pre-stamp non-zero forces.
     let stamp = vec![42.0_f32; 4];
     device.htod_sync_copy_into(&stamp, &mut buffers.forces_x).unwrap();
     device.htod_sync_copy_into(&stamp, &mut buffers.forces_y).unwrap();
     device.htod_sync_copy_into(&stamp, &mut buffers.forces_z).unwrap();
 
-    let mut timings = Timings::new(device.clone()).unwrap();
-    let mut ff = ForceField::new(
-        device.clone(),
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut ff = ForceField::new(&gpu,
         4,
         &box_10(),
         &[],
@@ -819,12 +803,11 @@ fn combiner_with_zero_slots_writes_zeros() {
 // rq-82acb52f
 #[test]
 fn combiner_idempotent_across_two_calls() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let state = state_n(4);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
-    let mut ff = ForceField::new(
-        device,
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut ff = ForceField::new(&gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -847,10 +830,9 @@ fn combiner_idempotent_across_two_calls() {
 
 #[test] // rq-b33cf896
 fn force_field_with_lj_owns_shared_neighbor_list() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
-    let ff = ForceField::new(
-        device,
+    let ff = ForceField::new(&gpu,
         4,
         &sim_box,
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -867,7 +849,7 @@ fn force_field_with_lj_owns_shared_neighbor_list() {
 
 #[test] // rq-433c972f rq-83312d09
 fn force_field_with_only_bonded_owns_no_neighbor_list() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let bt = vec![BondTypeConfig::Morse {
         name: "CC".to_string(),
         de: 1.0,
@@ -875,8 +857,7 @@ fn force_field_with_only_bonded_owns_no_neighbor_list() {
         re: 1.0,
     }];
     let bl = single_bond_list(4);
-    let ff = ForceField::new(
-        device,
+    let ff = ForceField::new(&gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -894,10 +875,10 @@ fn force_field_with_only_bonded_owns_no_neighbor_list() {
 
 #[test] // rq-47540d14
 fn bonded_only_step_launches_no_neighbor_list_kernels() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let state = state_n(4);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
     let bt = vec![BondTypeConfig::Morse {
         name: "CC".to_string(),
         de: 1.0,
@@ -905,8 +886,7 @@ fn bonded_only_step_launches_no_neighbor_list_kernels() {
         re: 1.0,
     }];
     let bl = single_bond_list(4);
-    let mut ff = ForceField::new(
-        device,
+    let mut ff = ForceField::new(&gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -966,12 +946,12 @@ impl Potential for ContextProbeStub {
 
 #[test] // rq-81e84c73 rq-2ed643ad
 fn context_exposes_shared_neighbor_list_to_contribute() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let state = state_n(2);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
-    let mut ff = ForceField::new(
-        device.clone(),
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut ff = ForceField::new(&gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -1034,11 +1014,10 @@ impl Potential for CutoffProbeStub {
 #[test] // rq-e39d0ed8 rq-3bc18e1a
 fn max_cutoff_aggregation_determines_neighbor_list_radius() {
     // The LJ slot's max_cutoff() governs the neighbor-list radius.
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
     let r_skin = 0.5_f64;
-    let ff = ForceField::new(
-        device,
+    let ff = ForceField::new(&gpu,
         4,
         &sim_box,
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -1064,12 +1043,12 @@ fn max_cutoff_aggregation_determines_neighbor_list_radius() {
 
 #[test] // rq-531faea9
 fn force_field_lj_only_populates_energy_and_virial() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let state = state_n(4);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
-    let mut ff = ForceField::new(
-        device.clone(),
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut ff = ForceField::new(&gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -1091,7 +1070,7 @@ fn force_field_lj_only_populates_energy_and_virial() {
 
 #[test] // rq-a85e8216
 fn slot_output_buffers_have_five_flat_arrays() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let bt = vec![BondTypeConfig::Morse {
         name: "CC".to_string(),
         de: 1.0,
@@ -1099,8 +1078,7 @@ fn slot_output_buffers_have_five_flat_arrays() {
         re: 1.0,
     }];
     let bl = single_bond_list(8);
-    let ff = ForceField::new(
-        device,
+    let ff = ForceField::new(&gpu,
         8,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -1121,12 +1099,12 @@ fn slot_output_buffers_have_five_flat_arrays() {
 
 #[test] // rq-3d38868e
 fn combiner_sums_slot_energies_and_virials_in_slot_order() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let state = state_n(2);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
-    let mut ff = ForceField::new(
-        device.clone(),
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut ff = ForceField::new(&gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -1180,9 +1158,10 @@ fn combiner_sums_slot_energies_and_virials_in_slot_order() {
 
 #[test] // rq-c0f2daca
 fn zero_slot_step_writes_zeros_to_energy_and_virial() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let state = state_n(4);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     // Pre-stamp non-zero junk into PE / virial.
     device
         .htod_sync_copy_into(&vec![42.0_f32; 4], &mut buffers.potential_energies)
@@ -1191,9 +1170,8 @@ fn zero_slot_step_writes_zeros_to_energy_and_virial() {
         .htod_sync_copy_into(&vec![-7.0_f32; 4], &mut buffers.virials)
         .unwrap();
 
-    let mut timings = Timings::new(device.clone()).unwrap();
-    let mut ff = ForceField::new(
-        device.clone(),
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut ff = ForceField::new(&gpu,
         4,
         &box_10(),
         &[],
@@ -1213,7 +1191,8 @@ fn zero_slot_step_writes_zeros_to_energy_and_virial() {
 
 #[test] // rq-db3b3d5e
 fn system_total_potential_energy_equals_sum_of_particle_shares() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     // Two particles at r=1.5 with σ=1, ε=1.
     let state = ParticleState::new(
         vec![0.0_f32, 1.5],
@@ -1228,10 +1207,9 @@ fn system_total_potential_energy_equals_sum_of_particle_shares() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
-    let mut ff = ForceField::new(
-        device.clone(),
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut ff = ForceField::new(&gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
@@ -1256,7 +1234,8 @@ fn system_total_potential_energy_equals_sum_of_particle_shares() {
 
 #[test] // rq-7fe57a77
 fn system_total_virial_equals_sum_of_particle_shares() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let state = ParticleState::new(
         vec![0.0_f32, 1.5],
         vec![0.0_f32, 0.0],
@@ -1270,10 +1249,9 @@ fn system_total_virial_equals_sum_of_particle_shares() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
-    let mut ff = ForceField::new(
-        device.clone(),
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut ff = ForceField::new(&gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],

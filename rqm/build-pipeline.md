@@ -52,21 +52,45 @@ The generated file is included in the Rust source tree with
 ## GPU Device Module <!-- rq-0c3a23bb -->
 
 `src/gpu/device.rs` exposes a function for obtaining an initialized CUDA
-device with all compiled PTX modules loaded.
+device with all compiled PTX modules loaded, together with a typed handle
+to every kernel function.
 
 ### Functions <!-- rq-c38c8f3b -->
 
-- `init_device() -> Result<Arc<CudaDevice>, GpuError>`
+- `init_device() -> Result<GpuContext, GpuError>`
   - Calls `CudaDevice::new(0)` to initialize the default CUDA device.
-  - Loads each embedded PTX constant into the device using
+  - Loads each embedded PTX constant onto the device with
     `CudaDevice::load_ptx`.
-  - Returns the device wrapped in an `Arc`.
-  - Returns `Err(GpuError)` if device creation or PTX loading fails.
+  - Captures every kernel function declared by the loaded modules into a
+    `Kernels` handle, keyed by name.
+  - Returns a `GpuContext` bundling the `Arc<CudaDevice>` and the
+    `Arc<Kernels>` handle.
+  - Returns `Err(GpuError)` if device creation, PTX loading, or the
+    lookup of any expected kernel fails.
 
 ### Types <!-- rq-2093594f -->
 
 - `GpuError` — error type for GPU operations. Wraps the underlying
   `cudarc::driver::DriverError`.
+
+- `GpuContext` — the value returned by `init_device`. A plain struct with
+  two public fields and no `Deref`:
+  - `device: Arc<CudaDevice>` — the initialized cudarc device, used for
+    memory allocation and host/device transfers.
+  - `kernels: Arc<Kernels>` — the kernel-function handle.
+
+  Both fields are cheap to clone, so each GPU-resource struct stores its
+  own clones rather than borrowing the `GpuContext`.
+
+- `Kernels` — a handle holding, for every CUDA kernel compiled from
+  `kernels/*.cu`, its launchable function. It carries one field per
+  kernel, each named after the kernel; the field set is exactly the
+  kernels enumerated in the per-feature *PTX Module Loading* sections.
+  `init_device` populates every field once, so kernel launch sites
+  obtain their function through typed field access on `Kernels` rather
+  than a string-keyed lookup: a reference to a non-existent kernel is a
+  compile error, and a kernel missing from its PTX module is caught
+  once, by `init_device`, rather than on first launch.
 
 ## Fill Kernel <!-- rq-599b2eb4 -->
 
@@ -92,9 +116,10 @@ An integration test in `tests/smoke_gpu.rs` validates the full pipeline.
 
 ### Test procedure <!-- rq-f7fe7f1b -->
 
-1. Call `init_device()` to obtain a `CudaDevice`.
+1. Call `init_device()` to obtain a `GpuContext`.
 2. Allocate a device buffer of 1024 `f32` elements using `CudaDevice::alloc_zeros`.
-3. Launch the `fill` kernel with `value = 1.0` and `n = 1024`.
+3. Launch the `fill` kernel — obtained from the `GpuContext`'s `kernels`
+   handle — with `value = 1.0` and `n = 1024`.
    - Block size: 256 threads.
    - Grid size: `ceil(n / 256)` blocks.
 4. Copy the buffer back to the host using `CudaDevice::dtoh_sync_copy`.
@@ -115,7 +140,7 @@ kernels/
 src/
   gpu/
     mod.rs                # re-exports gpu submodules
-    device.rs             # init_device(), GpuError
+    device.rs             # init_device(), GpuContext, Kernels, GpuError
 tests/
   smoke_gpu.rs            # integration test for fill kernel
 Cargo.toml                # depends on cudarc
@@ -188,8 +213,8 @@ Feature: CUDA build pipeline and smoke test kernel
   Scenario: init_device succeeds on a machine with a CUDA GPU
     Given a CUDA-capable GPU is available as device 0
     When init_device() is called
-    Then it returns Ok containing a CudaDevice
-    And the fill PTX module is loaded on the device
+    Then it returns Ok containing a GpuContext
+    And the GpuContext's kernels handle exposes the fill function
 
   @rq-299c69c9
   Scenario: init_device fails when no GPU is available
@@ -201,7 +226,7 @@ Feature: CUDA build pipeline and smoke test kernel
 
   @rq-9cf657ed
   Scenario: fill kernel writes 1.0 to every element of a block-aligned buffer
-    Given a CudaDevice with the fill module loaded
+    Given a GpuContext obtained from init_device()
     And a device buffer of 1024 f32 elements initialized to zero
     When the fill kernel is launched with value=1.0 and n=1024
     And the buffer is copied back to the host
@@ -209,7 +234,7 @@ Feature: CUDA build pipeline and smoke test kernel
 
   @rq-26d8c08c
   Scenario: fill kernel handles a non-block-aligned buffer size
-    Given a CudaDevice with the fill module loaded
+    Given a GpuContext obtained from init_device()
     And a device buffer of 1000 f32 elements initialized to zero
     When the fill kernel is launched with value=1.0 and n=1000
     And the buffer is copied back to the host
@@ -217,7 +242,7 @@ Feature: CUDA build pipeline and smoke test kernel
 
   @rq-d920e446
   Scenario: fill kernel does not write beyond the buffer
-    Given a CudaDevice with the fill module loaded
+    Given a GpuContext obtained from init_device()
     And a device buffer of 1024 f32 elements initialized to zero
     When the fill kernel is launched with value=1.0 and n=1000
     And the buffer is copied back to the host

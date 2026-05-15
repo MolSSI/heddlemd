@@ -5,7 +5,7 @@ pub mod lossless_buffers;
 pub mod pair_buffer;
 
 pub use buffers::ParticleBuffers;
-pub use device::{GpuError, init_device};
+pub use device::{GpuContext, GpuError, Kernels, init_device};
 pub use kernels::{
     LennardJonesParameterTable, SPATIAL_HASH_SCAN_BLOCK_SIZE,
     accumulate_forces, compute_cell_indices_and_histogram, copy_positions_into_reference,

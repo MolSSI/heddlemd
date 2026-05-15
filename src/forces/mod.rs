@@ -7,7 +7,9 @@ use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice, CudaViewMut};
 
-use crate::gpu::{GpuError, LennardJonesParameterTable, ParticleBuffers, accumulate_forces};
+use crate::gpu::{
+    GpuContext, GpuError, Kernels, LennardJonesParameterTable, ParticleBuffers, accumulate_forces,
+};
 use crate::io::config::{
     BondTypeConfig, NeighborListConfig, PairInteractionConfig, ParticleTypeConfig,
 };
@@ -77,6 +79,7 @@ pub enum ForceFieldError {
 #[derive(Debug)]
 pub struct ForceField {
     pub device: Arc<CudaDevice>,
+    pub kernels: Arc<Kernels>,
     pub slots: Vec<Box<dyn Potential>>,
     pub slot_forces_x: CudaSlice<f32>,
     pub slot_forces_y: CudaSlice<f32>,
@@ -91,7 +94,7 @@ impl ForceField {
     // rq-79938dbf
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        device: Arc<CudaDevice>,
+        gpu: &GpuContext,
         particle_count: usize,
         sim_box: &SimulationBox,
         particle_types: &[ParticleTypeConfig],
@@ -101,6 +104,8 @@ impl ForceField {
         exclusion_list: &ExclusionList,
         neighbor_list_config: &NeighborListConfig,
     ) -> Result<Self, ForceFieldError> {
+        let device = gpu.device.clone();
+        let kernels = gpu.kernels.clone();
         let mut slots: Vec<Box<dyn Potential>> = Vec::new();
 
         // Slot 0: Lennard-Jones when at least one pair interaction is configured.
@@ -119,7 +124,7 @@ impl ForceField {
                 NeighborListConfig::CellList { max_neighbors, .. } => *max_neighbors,
             };
             let lj_state = LennardJonesState::new(
-                device.clone(),
+                gpu,
                 particle_count,
                 params,
                 max_cutoff,
@@ -131,8 +136,7 @@ impl ForceField {
 
         // Slot 1: Morse bonded when at least one bond is present.
         if !bond_list.is_empty() {
-            let morse_state =
-                MorseBondedState::new(device.clone(), bond_list, bond_types)?;
+            let morse_state = MorseBondedState::new(gpu, bond_list, bond_types)?;
             slots.push(Box::new(morse_state));
         }
 
@@ -160,7 +164,7 @@ impl ForceField {
             match neighbor_list_config {
                 NeighborListConfig::CellList { max_neighbors, r_skin } => Some(
                     NeighborListState::new_cell_list(
-                        device.clone(),
+                        gpu,
                         sim_box,
                         particle_count,
                         r_cut,
@@ -169,7 +173,7 @@ impl ForceField {
                     )?,
                 ),
                 NeighborListConfig::AllPairs => Some(NeighborListState::new_trivial(
-                    device.clone(),
+                    gpu,
                     sim_box,
                     particle_count,
                 )?),
@@ -180,6 +184,7 @@ impl ForceField {
 
         Ok(ForceField {
             device,
+            kernels,
             slots,
             slot_forces_x,
             slot_forces_y,

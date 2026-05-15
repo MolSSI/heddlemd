@@ -5,8 +5,8 @@ use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice};
 use dynamics::gpu::{
-    LennardJonesParameterTable, LosslessBuffers, PairBuffer, ParticleBuffers, init_device, vv_kick,
-    vv_kick_drift, vv_kick_drift_lossless, vv_kick_lossless,
+    GpuContext, LennardJonesParameterTable, LosslessBuffers, PairBuffer, ParticleBuffers,
+    init_device, vv_kick, vv_kick_drift, vv_kick_drift_lossless, vv_kick_lossless,
 };
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
@@ -138,12 +138,12 @@ struct PipelineFixture {
 }
 
 impl PipelineFixture {
-    fn build(device: &Arc<CudaDevice>, state: &ParticleState) -> Self {
-        let buffers = ParticleBuffers::new(device.clone(), state).unwrap();
-        let pair = PairBuffer::new(device.clone(), N, N as u32).unwrap();
-        let counts = device.htod_sync_copy(&vec![N as u32; N]).unwrap();
+    fn build(gpu: &GpuContext, state: &ParticleState) -> Self {
+        let buffers = ParticleBuffers::new(gpu, state).unwrap();
+        let pair = PairBuffer::new(gpu, N, N as u32).unwrap();
+        let counts = gpu.device.htod_sync_copy(&vec![N as u32; N]).unwrap();
         let sim_box = SimulationBox::new_orthorhombic(BOX_L, BOX_L, BOX_L).unwrap();
-        let params = single_type_lj_table(device, SIGMA, EPSILON, CUTOFF);
+        let params = single_type_lj_table(&gpu.device, SIGMA, EPSILON, CUTOFF);
         Self {
             buffers,
             pair,
@@ -212,10 +212,10 @@ fn assert_residuals_close(after: &FullSnapshot, before: &FullSnapshot, tol: f64)
 
 // rq-1d618f18
 fn lossless_round_trip(n_steps: usize) -> (FullSnapshot, FullSnapshot) {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let state = build_initial_state();
-    let mut fixture = PipelineFixture::build(&device, &state);
-    let mut lossless = LosslessBuffers::new(device.clone(), N).unwrap();
+    let mut fixture = PipelineFixture::build(&gpu, &state);
+    let mut lossless = LosslessBuffers::new(&gpu, N).unwrap();
 
     fixture.warm_up();
     let snapshot = capture_snapshot(&fixture.buffers, &lossless);
@@ -249,10 +249,10 @@ fn hundred_step_lossless_round_trip_restores_observables_bit_exactly() {
 
 #[test] // rq-b87fd5e8
 fn positions_visibly_evolve_over_lossless_forward_run() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let state = build_initial_state();
-    let mut fixture = PipelineFixture::build(&device, &state);
-    let mut lossless = LosslessBuffers::new(device.clone(), N).unwrap();
+    let mut fixture = PipelineFixture::build(&gpu, &state);
+    let mut lossless = LosslessBuffers::new(&gpu, N).unwrap();
 
     fixture.warm_up();
     let initial = capture_snapshot(&fixture.buffers, &lossless);
@@ -279,10 +279,10 @@ fn positions_visibly_evolve_over_lossless_forward_run() {
 
 #[test] // rq-ed048159
 fn all_observables_finite_after_lossless_forward_run() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let state = build_initial_state();
-    let mut fixture = PipelineFixture::build(&device, &state);
-    let mut lossless = LosslessBuffers::new(device.clone(), N).unwrap();
+    let mut fixture = PipelineFixture::build(&gpu, &state);
+    let mut lossless = LosslessBuffers::new(&gpu, N).unwrap();
 
     fixture.warm_up();
     for _ in 0..N_STEPS {
@@ -310,9 +310,10 @@ fn all_observables_finite_after_lossless_forward_run() {
 
 #[test] // rq-1b44b5da
 fn lossy_round_trip_does_not_restore_observables() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let state = build_initial_state();
-    let mut fixture = PipelineFixture::build(&device, &state);
+    let mut fixture = PipelineFixture::build(&gpu, &state);
 
     fixture.warm_up();
     let before_positions_x: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.positions_x).unwrap();

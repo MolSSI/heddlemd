@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice};
 
-use crate::gpu::{GpuError, ParticleBuffers, morse_bond_force, reduce_bond_forces};
+use crate::gpu::{
+    GpuContext, GpuError, Kernels, ParticleBuffers, morse_bond_force, reduce_bond_forces,
+};
 use crate::io::config::BondTypeConfig;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -14,6 +16,7 @@ use super::{ForceFieldError, Potential, SlotOutputView};
 #[derive(Debug)]
 pub struct MorseBondedState {
     pub device: Arc<CudaDevice>,
+    pub kernels: Arc<Kernels>,
     pub bonds: CudaSlice<u32>,
     pub atom_bond_offsets: CudaSlice<u32>,
     pub atom_bond_indices: CudaSlice<u32>,
@@ -31,10 +34,12 @@ pub struct MorseBondedState {
 
 impl MorseBondedState {
     pub fn new(
-        device: Arc<CudaDevice>,
+        gpu: &GpuContext,
         bond_list: &BondList,
         bond_types: &[BondTypeConfig],
     ) -> Result<Self, GpuError> {
+        let device = gpu.device.clone();
+        let kernels = gpu.kernels.clone();
         let bond_count = bond_list.bonds.len();
         let particle_count = bond_list.particle_count;
 
@@ -76,6 +81,7 @@ impl MorseBondedState {
 
         Ok(MorseBondedState {
             device,
+            kernels,
             bonds,
             atom_bond_offsets,
             atom_bond_indices,
@@ -150,7 +156,7 @@ impl Potential for MorseBondedState {
         }
         timings.kernel_start(KernelStage::REDUCE_BOND_FORCES)?;
         reduce_bond_forces(
-            &self.device,
+            &self.kernels,
             &self.bond_pair_x,
             &self.bond_pair_y,
             &self.bond_pair_z,

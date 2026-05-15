@@ -4,7 +4,7 @@ use common::*;
 use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice, DeviceSlice};
-use dynamics::gpu::{LennardJonesParameterTable, PairBuffer, ParticleBuffers, init_device};
+use dynamics::gpu::{GpuContext, LennardJonesParameterTable, PairBuffer, ParticleBuffers, init_device};
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 
@@ -111,22 +111,25 @@ fn upload_counts(device: &Arc<CudaDevice>, counts: &[u32]) -> CudaSlice<u32> {
 
 #[test] // rq-06058b71
 fn init_device_loads_pair_force_module() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     assert!(device.has_func("pair_force", "lj_pair_force"));
+    let _ = gpu.kernels.lj_pair_force.clone();
 }
 
 // --- Two-particle correctness ---
 
 #[test] // rq-c538b29d
 fn two_particles_at_fixed_separation_produce_closed_form_force() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
     let positions = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
 
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
@@ -139,14 +142,15 @@ fn two_particles_at_fixed_separation_produce_closed_form_force() {
 
 #[test] // rq-975b5ae0
 fn newtons_third_law_is_bit_exact_for_non_boundary_displacements() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
     let positions = [[0.0, 0.0, 0.0], [1.3, 0.4, -0.2]];
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
 
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
@@ -160,7 +164,8 @@ fn newtons_third_law_is_bit_exact_for_non_boundary_displacements() {
 
 #[test] // rq-cc87744c
 fn self_interaction_slots_are_zero() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
@@ -171,8 +176,8 @@ fn self_interaction_slots_are_zero() {
         [0.8, -1.5, 2.5],
     ];
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 4, 4).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 4, 4).unwrap();
     fill_pair_forces_with(&mut pair, 999.0);
 
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
@@ -189,14 +194,15 @@ fn self_interaction_slots_are_zero() {
 
 #[test] // rq-96fadc6f
 fn slot_for_pair_beyond_cutoff_is_zero() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
     let positions = [[0.0, 0.0, 0.0], [6.0, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
     fill_pair_forces_with(&mut pair, 999.0);
 
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
@@ -211,14 +217,15 @@ fn slot_for_pair_beyond_cutoff_is_zero() {
 
 #[test] // rq-d6bd915a
 fn pair_exactly_at_cutoff_is_included() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
     let positions = [[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
 
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
     let (px, _, _) = download_pair_forces(&pair);
@@ -233,15 +240,16 @@ fn pair_exactly_at_cutoff_is_included() {
 
 #[test] // rq-85192a05
 fn at_lj_minimum_force_is_near_zero() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
     let r_min = 2.0_f32.powf(1.0 / 6.0);
     let positions = [[0.0, 0.0, 0.0], [r_min, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
 
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
@@ -260,19 +268,20 @@ fn at_lj_minimum_force_is_near_zero() {
 
 #[test] // rq-26ffa053
 fn doubling_epsilon_doubles_force() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let positions = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
 
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
     let table1 = single_type_lj_table(&device, 1.0, 1.0, 5.0);
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table1).expect("lj1");
     let (px1, _, _) = download_pair_forces(&pair);
     let f1 = px1[0 * 2 + 1];
 
-    let mut pair2 = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let mut pair2 = PairBuffer::new(&gpu, 2, 2).unwrap();
     let table2 = single_type_lj_table(&device, 1.0, 2.0, 5.0);
     lj_pair_force_no_excl(&particle_buffers, &mut pair2, &sim_box, &table2).expect("lj2");
     let (px2, _, _) = download_pair_forces(&pair2);
@@ -286,7 +295,8 @@ fn doubling_epsilon_doubles_force() {
 
 #[test] // rq-8626ec3c
 fn pbc_minimum_image_used_across_box_boundary() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap();
     let params = LjScalarParams {
         sigma: 1.0,
@@ -296,8 +306,8 @@ fn pbc_minimum_image_used_across_box_boundary() {
     let table = table_from_scalar(&device, params);
     let positions = [[-4.5, 0.0, 0.0], [4.5, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
 
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
     let (px, _, _) = download_pair_forces(&pair);
@@ -313,13 +323,14 @@ fn pbc_minimum_image_used_across_box_boundary() {
 
 #[test] // rq-681afa90
 fn single_particle_state_only_self_slot() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
     let state = build_state_xyz(&[[1.0, 2.0, 3.0]]);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 1, 1).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 1, 1).unwrap();
     fill_pair_forces_with(&mut pair, 999.0);
 
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
@@ -331,7 +342,8 @@ fn single_particle_state_only_self_slot() {
 
 #[test] // rq-fc220d87
 fn empty_state_is_noop() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
@@ -348,8 +360,8 @@ fn empty_state_is_noop() {
             None,
     )
     .unwrap();
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 0, 0).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 0, 0).unwrap();
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
 }
 
@@ -357,7 +369,8 @@ fn empty_state_is_noop() {
 
 #[test] // rq-d1e7cb57
 fn block_non_aligned_particle_count() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
@@ -369,8 +382,8 @@ fn block_non_aligned_particle_count() {
         })
         .collect();
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), n, n as u32).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, n, n as u32).unwrap();
 
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
@@ -420,7 +433,8 @@ fn block_non_aligned_particle_count() {
 
 #[test] // rq-dfca62d2
 fn two_independent_runs_byte_identical() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
@@ -433,13 +447,13 @@ fn two_independent_runs_byte_identical() {
         .collect();
     let state = build_state_xyz(&positions);
 
-    let particle_buffers_a = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair_a = PairBuffer::new(device.clone(), n, n as u32).unwrap();
+    let particle_buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair_a = PairBuffer::new(&gpu, n, n as u32).unwrap();
     lj_pair_force_no_excl(&particle_buffers_a, &mut pair_a, &sim_box, &table).expect("a");
     let (ax, ay, az) = download_pair_forces(&pair_a);
 
-    let particle_buffers_b = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair_b = PairBuffer::new(device.clone(), n, n as u32).unwrap();
+    let particle_buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair_b = PairBuffer::new(&gpu, n, n as u32).unwrap();
     lj_pair_force_no_excl(&particle_buffers_b, &mut pair_b, &sim_box, &table).expect("b");
     let (bx, by, bz) = download_pair_forces(&pair_b);
 
@@ -456,7 +470,8 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
     // shared neighbor list's max_neighbors. With a cell-list neighbor list
     // where max_neighbors exceeds the actual neighbor count, the kernel
     // zeros the unused slots so the segmented reduction sees a clean sum.
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
     let params = default_params();
     let table = table_from_scalar(&device, params);
@@ -468,12 +483,11 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
         [0.8, -1.5, 2.5],
     ];
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     // Cell-list neighbor list with max_neighbors=8 (exceeding any plausible
     // per-particle neighbor count for N=4).
     let max_neighbors: u32 = 8;
-    let mut nl = dynamics::forces::NeighborListState::new_cell_list(
-        device.clone(),
+    let mut nl = dynamics::forces::NeighborListState::new_cell_list(&gpu,
         &sim_box,
         n,
         params.cutoff,
@@ -481,11 +495,11 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
         0.3,
     )
     .unwrap();
-    let mut timings = dynamics::timings::Timings::new(device.clone()).unwrap();
+    let mut timings = dynamics::timings::Timings::new(&gpu).unwrap();
     nl.rebuild(&sim_box, &particle_buffers, &mut timings).unwrap();
     let counts: Vec<u32> = device.dtoh_sync_copy(&nl.neighbor_counts).unwrap();
 
-    let mut pair = PairBuffer::new(device.clone(), n, max_neighbors).unwrap();
+    let mut pair = PairBuffer::new(&gpu, n, max_neighbors).unwrap();
     fill_pair_forces_with(&mut pair, 13.5);
     let excl = empty_exclusions(&device, n);
     dynamics::gpu::lj_pair_force(
@@ -517,7 +531,8 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
 
 #[test] // rq-14d7a940
 fn does_not_modify_positions_velocities_masses_or_forces() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
@@ -537,8 +552,8 @@ fn does_not_modify_positions_velocities_masses_or_forces() {
     state.forces_x = vec![0.7, 0.8, 0.9, 1.0];
     state.forces_y = vec![-0.7, -0.8, -0.9, -1.0];
     state.forces_z = vec![0.5, 0.6, 0.7, 0.8];
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 4, 4).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 4, 4).unwrap();
 
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
 
@@ -561,14 +576,15 @@ fn does_not_modify_positions_velocities_masses_or_forces() {
 
 #[test] // rq-ec53799e
 fn lj_then_reduce_produces_correct_net_forces() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
     let positions = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
-    let mut particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let mut particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
     let counts = upload_counts(&device, &[2u32, 2]);
 
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
@@ -589,7 +605,8 @@ fn lj_then_reduce_produces_correct_net_forces() {
 
 #[test] // rq-daf7550b
 fn nan_positions_propagate_to_nan_pair_forces() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
@@ -606,8 +623,8 @@ fn nan_positions_propagate_to_nan_pair_forces() {
             None,
     )
     .unwrap();
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
 
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
     let (px, _, _) = download_pair_forces(&pair);
@@ -682,7 +699,8 @@ fn build_state_with_types(positions: &[[f32; 3]], type_indices: Vec<u32>) -> Par
 
 #[test]
 fn multi_type_same_type_pair_uses_diagonal_slot() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let sim_box = default_box();
     // n_types=2: σ_00=1.0, σ_01=σ_10=2.0, σ_11=3.0; ε=1.0 across the
     // diagonal, ε=0.5 off-diagonal; all cutoffs = 5.0.
@@ -694,8 +712,8 @@ fn multi_type_same_type_pair_uses_diagonal_slot() {
         &[5.0, 5.0, 5.0, 5.0],
     );
     let state = build_state_with_types(&[[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]], vec![0, 0]);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).unwrap();
     let (px, _, _) = download_pair_forces(&pair);
     // Both particles are type 0 → diagonal slot σ=1, ε=1.
@@ -710,7 +728,8 @@ fn multi_type_same_type_pair_uses_diagonal_slot() {
 
 #[test]
 fn multi_type_mixed_pair_uses_off_diagonal_slot() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let table = build_table(
         &device,
@@ -720,8 +739,8 @@ fn multi_type_mixed_pair_uses_off_diagonal_slot() {
         &[5.0, 5.0, 5.0, 5.0],
     );
     let state = build_state_with_types(&[[0.0, 0.0, 0.0], [2.5, 0.0, 0.0]], vec![0, 1]);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).unwrap();
     let (px, _, _) = download_pair_forces(&pair);
     // Mixed pair (0,1) → slot [0,1] = off-diagonal: σ=2.0, ε=0.5.
@@ -736,7 +755,8 @@ fn multi_type_mixed_pair_uses_off_diagonal_slot() {
 
 #[test]
 fn multi_type_newtons_third_law_symmetric_table() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let sim_box = default_box();
     // Off-diagonal entries equal; symmetric by construction.
     let table = build_table(
@@ -750,8 +770,8 @@ fn multi_type_newtons_third_law_symmetric_table() {
         &[[0.0, 0.0, 0.0], [1.3, 0.4, -0.2]],
         vec![0, 1],
     );
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).unwrap();
     let (px, py, pz) = download_pair_forces(&pair);
     assert_eq!(px[0 * 2 + 1], -px[1 * 2 + 0]);
@@ -761,7 +781,8 @@ fn multi_type_newtons_third_law_symmetric_table() {
 
 #[test]
 fn multi_type_per_pair_cutoff_zeros_only_the_exceeded_pair() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let sim_box = default_box();
     // cutoff_00 = 5.0, cutoff_01 = cutoff_10 = 1.0, cutoff_11 = 5.0
     let table = build_table(
@@ -778,8 +799,8 @@ fn multi_type_per_pair_cutoff_zeros_only_the_exceeded_pair() {
         &[[0.0, 0.0, 0.0], [1.5, 0.0, 0.0], [2.0, 0.0, 0.0]],
         vec![0, 0, 1],
     );
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 3, 3).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 3, 3).unwrap();
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).unwrap();
     let (px, _, _) = download_pair_forces(&pair);
     assert!(px[0 * 3 + 1] != 0.0, "(0,0)-type pair at r=1.5 should be non-zero");
@@ -789,7 +810,8 @@ fn multi_type_per_pair_cutoff_zeros_only_the_exceeded_pair() {
 
 #[test]
 fn multi_type_three_type_dispatch() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let sim_box = default_box();
     // 3x3 table with distinct σ per pair (kept symmetric).
     let sigma = [
@@ -803,8 +825,8 @@ fn multi_type_three_type_dispatch() {
     // One atom of each type, placed so all pairs are within cutoff.
     let positions = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0], [3.0, 0.0, 0.0]];
     let state = build_state_with_types(&positions, vec![0, 1, 2]);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 3, 3).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 3, 3).unwrap();
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).unwrap();
     let (px, _, _) = download_pair_forces(&pair);
     // Verify each (i, k) slot matches its closed-form prediction using the
@@ -835,7 +857,8 @@ fn multi_type_three_type_dispatch() {
 #[test]
 fn lj_param_table_from_config_builds_symmetric_table() {
     use dynamics::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let particle_types = vec![
         ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 },
         ParticleTypeConfig { name: "Kr".to_string(), mass: 2.0 },
@@ -885,7 +908,7 @@ fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
     use dynamics::io::config::{
         NeighborListConfig, PairInteractionConfig, PairPotentialParams, ParticleTypeConfig,
     };
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }];
     let pair_interactions = vec![PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
@@ -894,8 +917,7 @@ fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
         potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     }];
     let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
-    let ff = ForceField::new(
-        device,
+    let ff = ForceField::new(&gpu,
         4,
         &sim_box,
         &particle_types,
@@ -918,7 +940,8 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
     use dynamics::io::config::{
         NeighborListConfig, PairInteractionConfig, PairPotentialParams, ParticleTypeConfig,
     };
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
     let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }];
     let pair_interactions = vec![PairInteractionConfig {
@@ -936,13 +959,12 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
     ];
     let state_a = build_state_xyz(&positions);
     let state_b = state_a.clone();
-    let mut buffers_a = ParticleBuffers::new(device.clone(), &state_a).unwrap();
-    let mut buffers_b = ParticleBuffers::new(device.clone(), &state_b).unwrap();
-    let mut t_a = dynamics::timings::Timings::new(device.clone()).unwrap();
-    let mut t_b = dynamics::timings::Timings::new(device.clone()).unwrap();
+    let mut buffers_a = ParticleBuffers::new(&gpu, &state_a).unwrap();
+    let mut buffers_b = ParticleBuffers::new(&gpu, &state_b).unwrap();
+    let mut t_a = dynamics::timings::Timings::new(&gpu).unwrap();
+    let mut t_b = dynamics::timings::Timings::new(&gpu).unwrap();
 
-    let mut ff_trivial = ForceField::new(
-        device.clone(),
+    let mut ff_trivial = ForceField::new(&gpu,
         4,
         &sim_box,
         &particle_types,
@@ -953,8 +975,7 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    let mut ff_cell = ForceField::new(
-        device.clone(),
+    let mut ff_cell = ForceField::new(&gpu,
         4,
         &sim_box,
         &particle_types,
@@ -995,14 +1016,15 @@ fn download_pair_virials(pair: &PairBuffer) -> Vec<f32> {
 
 #[test] // rq-b68b3445
 fn two_particle_pair_energy_matches_closed_form() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
     let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).unwrap();
     let pe = download_pair_energies(&pair);
     let sigma = params.sigma;
@@ -1018,14 +1040,15 @@ fn two_particle_pair_energy_matches_closed_form() {
 
 #[test] // rq-0b71c50a
 fn two_particle_pair_virial_matches_r_dot_f() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
     let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).unwrap();
     let (px, _, _) = download_pair_forces(&pair);
     let pv = download_pair_virials(&pair);
@@ -1047,14 +1070,15 @@ fn two_particle_pair_virial_matches_r_dot_f() {
 
 #[test] // rq-a50cb6a1
 fn pair_beyond_cutoff_yields_zero_energy_and_virial() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
     let positions = [[0.0_f32, 0.0, 0.0], [6.0, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).unwrap();
     let pe = download_pair_energies(&pair);
     let pv = download_pair_virials(&pair);
@@ -1066,7 +1090,8 @@ fn pair_beyond_cutoff_yields_zero_energy_and_virial() {
 
 #[test] // rq-82f8d168
 fn self_slots_carry_zero_energy_and_virial() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
@@ -1077,8 +1102,8 @@ fn self_slots_carry_zero_energy_and_virial() {
         [0.0, 0.0, 1.5],
     ];
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 4, 4).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(&gpu, 4, 4).unwrap();
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).unwrap();
     let pe = download_pair_energies(&pair);
     let pv = download_pair_virials(&pair);
@@ -1092,16 +1117,17 @@ fn self_slots_carry_zero_energy_and_virial() {
 #[test] // rq-95c2f543
 fn exclusion_scaling_applies_uniformly_to_force_energy_virial() {
     use dynamics::forces::{DeviceExclusionList, ExclusionList, Exclusion};
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
     let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
 
     // Unscaled run.
-    let mut pair_full = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let mut pair_full = PairBuffer::new(&gpu, 2, 2).unwrap();
     lj_pair_force_no_excl(&particle_buffers, &mut pair_full, &sim_box, &table).unwrap();
     let pe_full = download_pair_energies(&pair_full);
     let pv_full = download_pair_virials(&pair_full);
@@ -1120,7 +1146,7 @@ fn exclusion_scaling_applies_uniformly_to_force_energy_virial() {
         particle_count: 2,
     };
     let excl = DeviceExclusionList::from_host(&device, &host).unwrap();
-    let mut pair_half = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let mut pair_half = PairBuffer::new(&gpu, 2, 2).unwrap();
     dynamics::gpu::lj_pair_force(
         &particle_buffers,
         &mut pair_half,
@@ -1129,8 +1155,8 @@ fn exclusion_scaling_applies_uniformly_to_force_energy_virial() {
         &excl.atom_excl_offsets,
         &excl.atom_excl_partners,
         &excl.atom_excl_scales,
-        &trivial_neighbor_list(&device, &sim_box, 2).neighbor_list,
-        &trivial_neighbor_list(&device, &sim_box, 2).neighbor_counts,
+        &trivial_neighbor_list(&gpu, &sim_box, 2).neighbor_list,
+        &trivial_neighbor_list(&gpu, &sim_box, 2).neighbor_counts,
     )
     .unwrap();
     let pe_half = download_pair_energies(&pair_half);
@@ -1209,14 +1235,14 @@ fn two_particle_pair(r: f32) -> [[f32; 3]; 2] {
 }
 
 fn run_lj_two_particle(
-    device: &Arc<CudaDevice>,
+    gpu: &GpuContext,
     sim_box: &SimulationBox,
     positions: [[f32; 3]; 2],
     table: &LennardJonesParameterTable,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let particle_buffers = ParticleBuffers::new(gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(gpu, 2, 2).unwrap();
     lj_pair_force_no_excl(&particle_buffers, &mut pair, sim_box, table).unwrap();
     let (px, py, pz) = download_pair_forces(&pair);
     let pe = download_pair_energies(&pair);
@@ -1226,11 +1252,12 @@ fn run_lj_two_particle(
 
 #[test] // rq-0c4f8da8
 fn switching_pair_inside_r_switch_sees_unmodified_lj() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     // cutoff=5, switch=4: r=1.5 is well inside the inner plateau.
     let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
-    let (px, _, _, pe, _) = run_lj_two_particle(&device, &sim_box, two_particle_pair(1.5), &table);
+    let (px, _, _, pe, _) = run_lj_two_particle(&gpu, &sim_box, two_particle_pair(1.5), &table);
     let expected_fx = switched_fx_on_0(1.5, 1.0, 1.0, 5.0, 4.0);
     assert!((px[0 * 2 + 1] - expected_fx).abs() < 1.0e-6);
     // Inside the plateau, the switched energy equals the unswitched LJ
@@ -1245,10 +1272,11 @@ fn switching_pair_inside_r_switch_sees_unmodified_lj() {
 
 #[test] // rq-38441c15
 fn switching_pair_exactly_at_r_switch_sees_unmodified_lj() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
-    let (px, _, _, pe, _) = run_lj_two_particle(&device, &sim_box, two_particle_pair(4.0), &table);
+    let (px, _, _, pe, _) = run_lj_two_particle(&gpu, &sim_box, two_particle_pair(4.0), &table);
     // At r == r_switch the kernel takes the r2 <= r_s2 branch (S=1) and
     // returns the unswitched LJ force/energy.
     let expected_fx = switched_fx_on_0(4.0, 1.0, 1.0, 5.0, 4.0);
@@ -1263,11 +1291,12 @@ fn switching_pair_exactly_at_r_switch_sees_unmodified_lj() {
 
 #[test] // rq-f93d278e
 fn switching_pair_exactly_at_r_cut_yields_zero_when_switch_less_than_cutoff() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
     let (px, py, pz, pe, pv) =
-        run_lj_two_particle(&device, &sim_box, two_particle_pair(5.0), &table);
+        run_lj_two_particle(&gpu, &sim_box, two_particle_pair(5.0), &table);
     // S(r_c²) = 0 by polynomial form, so all five slots are zero.
     assert_eq!(px[0 * 2 + 1], 0.0);
     assert_eq!(py[0 * 2 + 1], 0.0);
@@ -1278,11 +1307,12 @@ fn switching_pair_exactly_at_r_cut_yields_zero_when_switch_less_than_cutoff() {
 
 #[test] // rq-cb85cf61
 fn switching_pair_inside_window_matches_closed_form_switched_value() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
     let r = 4.5_f32;
-    let (px, _, _, pe, _) = run_lj_two_particle(&device, &sim_box, two_particle_pair(r), &table);
+    let (px, _, _, pe, _) = run_lj_two_particle(&gpu, &sim_box, two_particle_pair(r), &table);
     let expected_fx = switched_fx_on_0(r, 1.0, 1.0, 5.0, 4.0);
     let rel = (px[0 * 2 + 1] - expected_fx).abs() / expected_fx.abs().max(1.0e-30);
     assert!(
@@ -1301,14 +1331,15 @@ fn switching_pair_inside_window_matches_closed_form_switched_value() {
 
 #[test] // rq-ae20ddac
 fn switching_force_is_c1_continuous_at_r_switch() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
     let eps = 1.0e-3_f32;
     let (px_below, _, _, _, _) =
-        run_lj_two_particle(&device, &sim_box, two_particle_pair(4.0 - eps), &table);
+        run_lj_two_particle(&gpu, &sim_box, two_particle_pair(4.0 - eps), &table);
     let (px_above, _, _, _, _) =
-        run_lj_two_particle(&device, &sim_box, two_particle_pair(4.0 + eps), &table);
+        run_lj_two_particle(&gpu, &sim_box, two_particle_pair(4.0 + eps), &table);
     let f_below = px_below[0 * 2 + 1];
     let f_above = px_above[0 * 2 + 1];
     let denom = f_below.abs().max(1.0e-10);
@@ -1321,12 +1352,13 @@ fn switching_force_is_c1_continuous_at_r_switch() {
 
 #[test] // rq-e5e3443f
 fn switching_force_is_c1_continuous_at_r_cut() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
     let eps = 1.0e-3_f32;
     let (px_inside, _, _, _, _) =
-        run_lj_two_particle(&device, &sim_box, two_particle_pair(5.0 - eps), &table);
+        run_lj_two_particle(&gpu, &sim_box, two_particle_pair(5.0 - eps), &table);
     let f_inside = px_inside[0 * 2 + 1].abs();
     let f_at_rs = switched_fx_on_0(4.0, 1.0, 1.0, 5.0, 4.0).abs();
     assert!(
@@ -1338,12 +1370,13 @@ fn switching_force_is_c1_continuous_at_r_cut() {
 
 #[test] // rq-916f99f3
 fn switching_degenerate_reproduces_hard_cutoff_everywhere_inside() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 5.0);
     for r in [1.5_f32, 3.0, 4.5] {
         let (px, _, _, pe, _) =
-            run_lj_two_particle(&device, &sim_box, two_particle_pair(r), &table);
+            run_lj_two_particle(&gpu, &sim_box, two_particle_pair(r), &table);
         let expected_fx = lj_force_components(
             [0.0, 0.0, 0.0],
             [r, 0.0, 0.0],
@@ -1364,11 +1397,12 @@ fn switching_degenerate_reproduces_hard_cutoff_everywhere_inside() {
 
 #[test] // rq-531afe39
 fn switching_pair_beyond_r_cut_yields_zero_independent_of_r_switch() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
     let (px, py, pz, pe, pv) =
-        run_lj_two_particle(&device, &sim_box, two_particle_pair(6.0), &table);
+        run_lj_two_particle(&gpu, &sim_box, two_particle_pair(6.0), &table);
     assert_eq!(px[0 * 2 + 1], 0.0);
     assert_eq!(py[0 * 2 + 1], 0.0);
     assert_eq!(pz[0 * 2 + 1], 0.0);
@@ -1378,12 +1412,13 @@ fn switching_pair_beyond_r_cut_yields_zero_independent_of_r_switch() {
 
 #[test] // rq-d0f489d7
 fn switching_pair_virial_inside_window_equals_factor_switched_times_r2() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
     let r = 4.5_f32;
     let (px, _, _, _, pv) =
-        run_lj_two_particle(&device, &sim_box, two_particle_pair(r), &table);
+        run_lj_two_particle(&gpu, &sim_box, two_particle_pair(r), &table);
     // The pair virial is r_ij · F_ij = factor_new * r². For two particles
     // on the x axis at separation r, that equals -r * fx_on_0 (dx = -r
     // for particle 0, F on 0 has component +factor*(-r) = px[0*2+1]).
@@ -1398,11 +1433,12 @@ fn switching_pair_virial_inside_window_equals_factor_switched_times_r2() {
 
 #[test] // rq-ef8013be
 fn switching_newtons_third_law_holds_bitwise_across_window() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
     let positions = [[0.0_f32, 0.0, 0.0], [4.5, 0.4, -0.2]];
-    let (px, py, pz, _, _) = run_lj_two_particle(&device, &sim_box, positions, &table);
+    let (px, py, pz, _, _) = run_lj_two_particle(&gpu, &sim_box, positions, &table);
     assert_eq!(px[0 * 2 + 1], -px[1 * 2 + 0]);
     assert_eq!(py[0 * 2 + 1], -py[1 * 2 + 0]);
     assert_eq!(pz[0 * 2 + 1], -pz[1 * 2 + 0]);
@@ -1411,15 +1447,16 @@ fn switching_newtons_third_law_holds_bitwise_across_window() {
 #[test] // rq-fb55af77
 fn switching_exclusion_scaling_multiplies_switched_quantities() {
     use dynamics::forces::{DeviceExclusionList, Exclusion, ExclusionList};
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
     let positions = two_particle_pair(4.5);
     let state = build_state_xyz(&positions);
-    let particle_buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
 
     // Unscaled (empty exclusion list).
-    let mut pair_full = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let mut pair_full = PairBuffer::new(&gpu, 2, 2).unwrap();
     lj_pair_force_no_excl(&particle_buffers, &mut pair_full, &sim_box, &table).unwrap();
     let (px_full, _, _) = download_pair_forces(&pair_full);
     let pe_full = download_pair_energies(&pair_full);
@@ -1437,8 +1474,8 @@ fn switching_exclusion_scaling_multiplies_switched_quantities() {
         particle_count: 2,
     };
     let excl = DeviceExclusionList::from_host(&device, &host).unwrap();
-    let mut pair_half = PairBuffer::new(device.clone(), 2, 2).unwrap();
-    let nl = trivial_neighbor_list(&device, &sim_box, 2);
+    let mut pair_half = PairBuffer::new(&gpu, 2, 2).unwrap();
+    let nl = trivial_neighbor_list(&gpu, &sim_box, 2);
     dynamics::gpu::lj_pair_force(
         &particle_buffers,
         &mut pair_half,
@@ -1462,7 +1499,8 @@ fn switching_exclusion_scaling_multiplies_switched_quantities() {
 
 #[test] // rq-37f8c017
 fn switching_per_pair_type_r_switch_dispatches_correctly() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     // n_types = 2. Diagonal slots (0,0) and (1,1) have r_switch = 5.0
     // (no switching); off-diagonal (0,1) and (1,0) have r_switch = 4.0
@@ -1477,8 +1515,8 @@ fn switching_per_pair_type_r_switch_dispatches_correctly() {
 
     // Mixed-type pair: uses the off-diagonal switch = 4.0.
     let state_mixed = build_state_with_types(&positions, vec![0, 1]);
-    let buffers_mixed = ParticleBuffers::new(device.clone(), &state_mixed).unwrap();
-    let mut pair_mixed = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let buffers_mixed = ParticleBuffers::new(&gpu, &state_mixed).unwrap();
+    let mut pair_mixed = PairBuffer::new(&gpu, 2, 2).unwrap();
     lj_pair_force_no_excl(&buffers_mixed, &mut pair_mixed, &sim_box, &table).unwrap();
     let (px_mixed, _, _) = download_pair_forces(&pair_mixed);
     let expected_mixed = switched_fx_on_0(r, 1.0, 1.0, 5.0, 4.0);
@@ -1488,8 +1526,8 @@ fn switching_per_pair_type_r_switch_dispatches_correctly() {
     // Same-type pair: uses the diagonal switch = 5.0 (hard-cutoff
     // degenerate; returns the unswitched LJ value).
     let state_same = build_state_with_types(&positions, vec![0, 0]);
-    let buffers_same = ParticleBuffers::new(device.clone(), &state_same).unwrap();
-    let mut pair_same = PairBuffer::new(device.clone(), 2, 2).unwrap();
+    let buffers_same = ParticleBuffers::new(&gpu, &state_same).unwrap();
+    let mut pair_same = PairBuffer::new(&gpu, 2, 2).unwrap();
     lj_pair_force_no_excl(&buffers_same, &mut pair_same, &sim_box, &table).unwrap();
     let (px_same, _, _) = download_pair_forces(&pair_same);
     let expected_same = lj_force_components(
@@ -1503,7 +1541,8 @@ fn switching_per_pair_type_r_switch_dispatches_correctly() {
 
 #[test] // rq-dbd3c689
 fn switching_bit_exact_reproducibility_across_runs() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
     let n = 64;
@@ -1517,15 +1556,15 @@ fn switching_bit_exact_reproducibility_across_runs() {
         .collect();
     let state = build_state_xyz(&positions);
 
-    let bufs_a = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair_a = PairBuffer::new(device.clone(), n, n as u32).unwrap();
+    let bufs_a = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair_a = PairBuffer::new(&gpu, n, n as u32).unwrap();
     lj_pair_force_no_excl(&bufs_a, &mut pair_a, &sim_box, &table).unwrap();
     let (ax, ay, az) = download_pair_forces(&pair_a);
     let ae = download_pair_energies(&pair_a);
     let av = download_pair_virials(&pair_a);
 
-    let bufs_b = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair_b = PairBuffer::new(device.clone(), n, n as u32).unwrap();
+    let bufs_b = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut pair_b = PairBuffer::new(&gpu, n, n as u32).unwrap();
     lj_pair_force_no_excl(&bufs_b, &mut pair_b, &sim_box, &table).unwrap();
     let (bx, by, bz) = download_pair_forces(&pair_b);
     let be = download_pair_energies(&pair_b);
@@ -1541,7 +1580,8 @@ fn switching_bit_exact_reproducibility_across_runs() {
 #[test] // rq-214639c9
 fn switching_from_config_populates_user_supplied_r_switch() {
     use dynamics::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }];
     let pair_interactions = vec![PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
@@ -1562,7 +1602,8 @@ fn switching_from_config_receives_default_r_switch_when_omitted() {
     // cutoff is exercised end-to-end, then assert the parameter table
     // built from that config carries the default value on every slot.
     use dynamics::io::load_config;
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
     let dir = {
         let mut p = std::env::temp_dir();
         p.push(format!(

@@ -68,9 +68,12 @@ fn n_particle_state(n: usize) -> ParticleState {
 // rq-662fccc1
 #[test]
 fn init_device_loads_langevin_module() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
     assert!(device.get_func("langevin", "lan_drift_half").is_some());
     assert!(device.get_func("langevin", "lan_ou_step").is_some());
+    let _ = gpu.kernels.lan_drift_half.clone();
+    let _ = gpu.kernels.lan_ou_step.clone();
 }
 
 // rq-457b5271
@@ -80,14 +83,14 @@ fn construct_langevin_state_stores_parameters() {
     // public LangevinBaoabState carries the kind's parameter triple, which
     // we can inspect by calling build() on the concrete builder type and
     // downcasting the result.
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let kind = IntegratorKind::LangevinBaoab {
         friction: 1.0e12,
         temperature: 300.0,
         seed: 42,
     };
     let builder = LangevinBaoabBuilder;
-    let boxed = builder.build(device, 4, &kind).unwrap();
+    let boxed = builder.build(&gpu, 4, &kind).unwrap();
     // The integrator is a `Box<dyn Integrator>`; we can't downcast without
     // `Any`. Instead verify behaviour: a single step with seed=42 yields
     // post-call velocities specific to that seed.
@@ -98,22 +101,22 @@ fn construct_langevin_state_stores_parameters() {
 // rq-e9994f86
 #[test]
 fn construct_langevin_with_zero_particles() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let kind = IntegratorKind::LangevinBaoab {
         friction: 1.0e12,
         temperature: 300.0,
         seed: 42,
     };
-    let _ = IntegratorRegistry::with_builtins().build(&kind, device, 0).unwrap();
+    let _ = IntegratorRegistry::with_builtins().build(&kind, &gpu, 0).unwrap();
 }
 
 // rq-358de3e6
 #[test]
 fn lan_drift_half_advances_positions_by_v_half_dt() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = one_particle_state();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
@@ -126,10 +129,10 @@ fn lan_drift_half_advances_positions_by_v_half_dt() {
 // rq-5e8125ac
 #[test]
 fn lan_drift_half_leaves_other_arrays_unchanged() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = n_particle_state(4);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
@@ -144,7 +147,7 @@ fn lan_drift_half_leaves_other_arrays_unchanged() {
 // rq-2680918c
 #[test]
 fn lan_drift_half_on_empty_is_noop() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
@@ -152,17 +155,17 @@ fn lan_drift_half_on_empty_is_noop() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device, &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
 }
 
 // rq-247e3799
 #[test]
 fn lan_drift_half_with_dt_zero_leaves_positions_unchanged() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
     let state = n_particle_state(4);
-    let mut buffers = ParticleBuffers::new(device, &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_drift_half(&mut buffers, &sim_box, 0.0).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
@@ -174,9 +177,9 @@ fn lan_drift_half_with_dt_zero_leaves_positions_unchanged() {
 // rq-41389685
 #[test]
 fn lan_ou_step_with_alpha_one_kt_zero_is_identity() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let state = n_particle_state(4);
-    let mut buffers = ParticleBuffers::new(device, &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_ou_step(&mut buffers, 1, 1, 1.0, 0.0).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
@@ -188,24 +191,24 @@ fn lan_ou_step_with_alpha_one_kt_zero_is_identity() {
 // rq-01813ffa
 #[test]
 fn lan_ou_step_on_empty_is_noop() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
         Vec::new(), None,
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device, &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_ou_step(&mut buffers, 1, 1, 0.5, 1.0).unwrap();
 }
 
 // rq-9922b639
 #[test]
 fn two_identical_lan_ou_calls_byte_identical() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let state = n_particle_state(64);
-    let mut buffers_a = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut buffers_b = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_ou_step(&mut buffers_a, 42, 7, 0.5, 1.0e-21).unwrap();
     lan_ou_step(&mut buffers_b, 42, 7, 0.5, 1.0e-21).unwrap();
     let mut state_a = state.clone();
@@ -225,10 +228,10 @@ fn different_seeds_produce_different_velocities() {
     // Use kt = 1.0 in reduced units so the OU perturbation is much larger than
     // an f32 ULP at the input velocity magnitudes; the per-(particle, axis)
     // Philox draws then surface as visible bit differences.
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let state = n_particle_state(64);
-    let mut buffers_a = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut buffers_b = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_ou_step(&mut buffers_a, 1, 1, 0.5, 1.0).unwrap();
     lan_ou_step(&mut buffers_b, 2, 1, 0.5, 1.0).unwrap();
     let mut state_a = state.clone();
@@ -247,10 +250,10 @@ fn different_seeds_produce_different_velocities() {
 // rq-e2f2de4f
 #[test]
 fn different_step_indices_produce_different_velocities() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let state = n_particle_state(64);
-    let mut buffers_a = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut buffers_b = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_ou_step(&mut buffers_a, 1, 1, 0.5, 1.0).unwrap();
     lan_ou_step(&mut buffers_b, 1, 2, 0.5, 1.0).unwrap();
     let mut state_a = state.clone();
@@ -269,7 +272,7 @@ fn different_step_indices_produce_different_velocities() {
 // rq-50baca8c
 #[test]
 fn ou_variance_scales_with_predicted_factor() {
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let n = 10_000;
     let mass = 6.6335e-26_f32;
     let temperature = 300.0_f64;
@@ -288,7 +291,7 @@ fn ou_variance_scales_with_predicted_factor() {
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device, &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_ou_step(&mut buffers, 42, 1, alpha, kt).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
@@ -310,12 +313,11 @@ fn ou_variance_scales_with_predicted_factor() {
 fn step_launches_all_six_expected_kernel_calls() {
     use dynamics::forces::{BondList, ExclusionList, ForceField};
     use dynamics::io::config::NeighborListConfig;
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let state = n_particle_state(4);
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = SimulationBox::new_orthorhombic(1.0e9, 1.0e9, 1.0e9).unwrap();
-    let mut ff = ForceField::new(
-        device.clone(),
+    let mut ff = ForceField::new(&gpu,
         4,
         &sim_box,
         &[],
@@ -326,7 +328,7 @@ fn step_launches_all_six_expected_kernel_calls() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
         .build(
             &IntegratorKind::LangevinBaoab {
@@ -334,7 +336,7 @@ fn step_launches_all_six_expected_kernel_calls() {
                 temperature: 300.0,
                 seed: 1,
             },
-            device,
+            &gpu,
             4,
         )
         .unwrap();
@@ -360,17 +362,16 @@ fn step_launches_all_six_expected_kernel_calls() {
 fn langevin_step_on_empty_is_noop() {
     use dynamics::forces::{BondList, ExclusionList, ForceField};
     use dynamics::io::config::NeighborListConfig;
-    let device = init_device().unwrap();
+    let gpu = init_device().unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
         Vec::new(), None,
             None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = SimulationBox::new_orthorhombic(1.0e9, 1.0e9, 1.0e9).unwrap();
-    let mut ff = ForceField::new(
-        device.clone(),
+    let mut ff = ForceField::new(&gpu,
         0,
         &sim_box,
         &[],
@@ -381,7 +382,7 @@ fn langevin_step_on_empty_is_noop() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    let mut timings = Timings::new(device.clone()).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
         .build(
             &IntegratorKind::LangevinBaoab {
@@ -389,7 +390,7 @@ fn langevin_step_on_empty_is_noop() {
                 temperature: 300.0,
                 seed: 1,
             },
-            device,
+            &gpu,
             0,
         )
         .unwrap();
@@ -602,7 +603,7 @@ log_every = 1
 
 #[test]
 fn lan_drift_half_wraps_across_plus_l_half() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap();
     let state = dynamics::state::ParticleState::new(
         vec![4.95_f32],
@@ -617,7 +618,7 @@ fn lan_drift_half_wraps_across_plus_l_half() {
         None,
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
     let mut snap = state.clone();
     snap.download_from(&buffers).unwrap();
@@ -627,7 +628,7 @@ fn lan_drift_half_wraps_across_plus_l_half() {
 
 #[test]
 fn lan_drift_half_preserves_image_flags_when_no_wrap() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap();
     let state = dynamics::state::ParticleState::new(
         vec![0.0_f32],
@@ -642,7 +643,7 @@ fn lan_drift_half_preserves_image_flags_when_no_wrap() {
         Some((vec![3], vec![-1], vec![0])),
     )
     .unwrap();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
     let mut snap = state.clone();
     snap.download_from(&buffers).unwrap();

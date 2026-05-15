@@ -136,9 +136,9 @@ any other particle state.
 
 ### PTX Module Loading <!-- rq-56d8375d -->
 
-`init_device()` loads the compiled `kernels/reduce.cu` PTX with module name
-`"reduce"` and registers function name `"reduce_pair_forces"`, alongside
-the existing `fill` and `integrate` modules.
+`init_device()` loads the compiled `kernels/reduce.cu` PTX as module
+`"reduce"` and captures its `reduce_pair_forces` function into the
+`Kernels` handle (see `build-pipeline.md`).
 
 ### Constructor and Accessors <!-- rq-be5fe064 -->
 
@@ -171,8 +171,9 @@ A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
   - When `particle_count == 0`, returns `Ok(())` without launching a
     kernel.
   - Returns the underlying `GpuError` if the kernel launch fails.
-  - Panics if the `"reduce"` module is not loaded on the device, since this
-    indicates a programming error in `init_device()`.
+  - Invokes the kernel through the `reduce_pair_forces` field of the
+    `Kernels` handle reached from its arguments; it performs no
+    string-keyed kernel lookup of its own (see `build-pipeline.md`).
 
   The launcher trusts the caller for shape consistency: it asserts (debug
   builds only) that `pair_buffer.particle_count() == particle_count`,
@@ -216,7 +217,7 @@ Feature: Pair buffer and deterministic segmented reduction
 
   @rq-6fdefca0
   Scenario: PairBuffer::new allocates zero-initialised pair-contribution buffers
-    Given a CudaDevice obtained from init_device()
+    Given a GpuContext obtained from init_device()
     When PairBuffer::new(device, particle_count=4, max_neighbors=8) is called
     Then it returns Ok(buffer)
     And buffer.particle_count() is 4
@@ -226,7 +227,7 @@ Feature: Pair buffer and deterministic segmented reduction
 
   @rq-74e4bd02
   Scenario: PairBuffer::new with particle_count = 0
-    Given a CudaDevice obtained from init_device()
+    Given a GpuContext obtained from init_device()
     When PairBuffer::new(device, particle_count=0, max_neighbors=8) is called
     Then it returns Ok(buffer)
     And buffer.particle_count() is 0
@@ -234,7 +235,7 @@ Feature: Pair buffer and deterministic segmented reduction
 
   @rq-15e1e995
   Scenario: PairBuffer::new with max_neighbors = 0
-    Given a CudaDevice obtained from init_device()
+    Given a GpuContext obtained from init_device()
     When PairBuffer::new(device, particle_count=4, max_neighbors=0) is called
     Then it returns Ok(buffer)
     And buffer.max_neighbors() is 0
@@ -243,10 +244,10 @@ Feature: Pair buffer and deterministic segmented reduction
   # --- Module loading ---
 
   @rq-a43552d5
-  Scenario: init_device loads the reduce module with the reduction kernel
+  Scenario: init_device exposes the reduction kernel on the Kernels handle
     Given a CUDA-capable GPU is available as device 0
     When init_device() is called
-    Then the device exposes a function named "reduce_pair_forces" in module "reduce"
+    Then the returned GpuContext's kernels handle exposes the reduce_pair_forces function
 
   # --- Reduction correctness: trivial cases ---
 

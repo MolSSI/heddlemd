@@ -269,10 +269,10 @@ mutate.
 
 ### PTX Module Loading <!-- rq-e20b2f39 -->
 
-`init_device()` loads the compiled `kernels/integrate.cu` PTX with module name
-`"integrate"` and registers the function names `"vv_kick_drift"`, `"vv_kick"`,
-`"vv_kick_drift_lossless"`, and `"vv_kick_lossless"`. The `fill` smoke-test
-module continues to be loaded alongside it.
+`init_device()` loads the compiled `kernels/integrate.cu` PTX as module
+`"integrate"` and captures its `vv_kick_drift`, `vv_kick`,
+`vv_kick_drift_lossless`, and `vv_kick_lossless` functions into the
+`Kernels` handle (see `build-pipeline.md`).
 
 ### Rust Launch Helpers <!-- rq-581ec3ff -->
 
@@ -286,8 +286,9 @@ Four free functions live in `src/gpu/kernels.rs` and are re-exported from
   - When `buffers.particle_count() == 0`, returns `Ok(())` without launching a
     kernel.
   - Returns the underlying `GpuError` if the kernel launch fails.
-  - Panics if the `"integrate"` module is not loaded on the device, since this
-    indicates a programming error in `init_device()`.
+  - Invokes the kernel through the `Kernels` handle reached from its
+    arguments; it performs no string-keyed kernel lookup of its own (see
+    `build-pipeline.md`).
 
 - `vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>` <!-- rq-f2e3fa58 -->
   - Same launch configuration and error/empty-state handling as `vv_kick_drift`.
@@ -302,7 +303,8 @@ Four free functions live in `src/gpu/kernels.rs` and are re-exported from
   - Same block/grid configuration and empty-state handling as the lossy
     variant; debug-asserts that `lossless.particle_count()` equals
     `buffers.particle_count()`.
-  - Panics if the `"integrate"` module is not loaded.
+  - Invokes the kernel through the `Kernels` handle, like the other
+    launch helpers.
 
 - `vv_kick_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, dt: f32) -> Result<(), GpuError>` <!-- rq-4ea8bbb2 -->
   - Same configuration and empty-state handling as `vv_kick_drift_lossless`.
@@ -392,11 +394,11 @@ Feature: Velocity Verlet time integration
   # --- Module loading ---
 
   @rq-bc8375ce
-  Scenario: init_device loads the integrate module with both kernels
+  Scenario: init_device exposes the velocity-Verlet kernels on the Kernels handle
     Given a CUDA-capable GPU is available as device 0
     When init_device() is called
-    Then the device exposes a function named "vv_kick_drift" in module "integrate"
-    And the device exposes a function named "vv_kick" in module "integrate"
+    Then the returned GpuContext's kernels handle exposes the vv_kick_drift function
+    And the kernels handle exposes the vv_kick function
 
   # --- vv_kick_drift on a free particle ---
 
@@ -562,12 +564,12 @@ Feature: Velocity Verlet time integration
   Scenario: init_device exposes the lossless integrator kernels
     Given a CUDA-capable GPU is available as device 0
     When init_device() is called
-    Then the device exposes a function named "vv_kick_drift_lossless" in module "integrate"
-    And the device exposes a function named "vv_kick_lossless" in module "integrate"
+    Then the returned GpuContext's kernels handle exposes the vv_kick_drift_lossless function
+    And the kernels handle exposes the vv_kick_lossless function
 
   @rq-5bfa5b37
   Scenario: LosslessBuffers::new allocates six zero-initialised residual buffers
-    Given a CudaDevice obtained from init_device()
+    Given a GpuContext obtained from init_device()
     When LosslessBuffers::new(device, particle_count=4) is called
     Then it returns Ok(buffers)
     And buffers.particle_count() is 4
@@ -576,7 +578,7 @@ Feature: Velocity Verlet time integration
 
   @rq-b96ce51d
   Scenario: LosslessBuffers::new with particle_count = 0
-    Given a CudaDevice obtained from init_device()
+    Given a GpuContext obtained from init_device()
     When LosslessBuffers::new(device, particle_count=0) is called
     Then it returns Ok(buffers)
     And every residual device buffer has length 0

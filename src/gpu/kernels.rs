@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice, CudaViewMut, DeviceSlice, LaunchAsync, LaunchConfig};
 
-use crate::gpu::{GpuError, LosslessBuffers, PairBuffer, ParticleBuffers};
+use crate::gpu::{GpuError, Kernels, LosslessBuffers, PairBuffer, ParticleBuffers};
 use crate::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
 use crate::pbc::SimulationBox;
 
@@ -28,10 +28,7 @@ pub fn vv_kick_drift(
         return Ok(());
     }
     let n_u32 = n as u32;
-    let func = buffers
-        .device
-        .get_func("integrate", "vv_kick_drift")
-        .expect("integrate module is not loaded; init_device() must be called first");
+    let func = buffers.kernels.vv_kick_drift.clone();
     let cfg = launch_config(n_u32);
     let lengths = sim_box.lengths();
     unsafe {
@@ -70,10 +67,7 @@ pub fn vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError> {
         return Ok(());
     }
     let n_u32 = n as u32;
-    let func = buffers
-        .device
-        .get_func("integrate", "vv_kick")
-        .expect("integrate module is not loaded; init_device() must be called first");
+    let func = buffers.kernels.vv_kick.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -125,10 +119,7 @@ pub fn reduce_pair_forces(
     );
 
     let n_u32 = n as u32;
-    let func = pair_buffer
-        .device
-        .get_func("reduce", "reduce_pair_forces")
-        .expect("reduce module is not loaded; init_device() must be called first");
+    let func = pair_buffer.kernels.reduce_pair_forces.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -258,10 +249,7 @@ pub fn lj_pair_force(
     debug_assert_eq!(params.switch.len(), table_len);
 
     let n_u32 = n as u32;
-    let func = particle_buffers
-        .device
-        .get_func("pair_force", "lj_pair_force")
-        .expect("pair_force module is not loaded; init_device() must be called first");
+    let func = particle_buffers.kernels.lj_pair_force.clone();
 
     let grid_y = n_u32.div_ceil(16);
     let grid_x = max_neighbors.div_ceil(16).max(1);
@@ -327,10 +315,7 @@ pub fn morse_bond_force(
         return Ok(());
     }
     let n_u32 = n_bonds as u32;
-    let func = particle_buffers
-        .device
-        .get_func("morse", "morse_bond_force")
-        .expect("morse module is not loaded; init_device() must be called first");
+    let func = particle_buffers.kernels.morse_bond_force.clone();
     let cfg = launch_config(n_u32);
     let lengths = sim_box.lengths();
     unsafe {
@@ -364,7 +349,7 @@ pub fn morse_bond_force(
 // using a fresh id-comment in the spec rqm-bond reduction declaration.)
 #[allow(clippy::too_many_arguments)]
 pub fn reduce_bond_forces(
-    device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    kernels: &Kernels,
     bond_pair_x: &CudaSlice<f32>,
     bond_pair_y: &CudaSlice<f32>,
     bond_pair_z: &CudaSlice<f32>,
@@ -383,9 +368,7 @@ pub fn reduce_bond_forces(
         return Ok(());
     }
     let n_u32 = particle_count as u32;
-    let func = device
-        .get_func("morse", "reduce_bond_forces")
-        .expect("morse module is not loaded; init_device() must be called first");
+    let func = kernels.reduce_bond_forces.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -433,10 +416,7 @@ pub fn accumulate_forces(
     debug_assert_eq!(slot_energies.len(), num_slots as usize * n);
     debug_assert_eq!(slot_virials.len(), num_slots as usize * n);
 
-    let func = particle_buffers
-        .device
-        .get_func("forces", "accumulate_forces")
-        .expect("forces module is not loaded; init_device() must be called first");
+    let func = particle_buffers.kernels.accumulate_forces.clone();
     let cfg = launch_config(n_u32);
 
     unsafe {
@@ -480,10 +460,7 @@ pub fn neighbor_displacement_squared(
     debug_assert_eq!(reference_z.len(), n);
     debug_assert_eq!(disp_sq.len(), n);
     let n_u32 = n as u32;
-    let func = particle_buffers
-        .device
-        .get_func("neighbor", "neighbor_displacement_squared")
-        .expect("neighbor module is not loaded; init_device() must be called first");
+    let func = particle_buffers.kernels.neighbor_displacement_squared.clone();
     let cfg = launch_config(n_u32);
     let lengths = sim_box.lengths();
     unsafe {
@@ -537,10 +514,7 @@ pub fn neighbor_list_build(
     debug_assert_eq!(overflow_flag.len(), 1);
 
     let n_u32 = n as u32;
-    let func = particle_buffers
-        .device
-        .get_func("neighbor", "neighbor_list_build")
-        .expect("neighbor module is not loaded; init_device() must be called first");
+    let func = particle_buffers.kernels.neighbor_list_build.clone();
     let cfg = launch_config(n_u32);
     let lengths = sim_box.lengths();
     unsafe {
@@ -589,10 +563,7 @@ pub fn copy_positions_into_reference(
     debug_assert_eq!(reference_y.len(), n);
     debug_assert_eq!(reference_z.len(), n);
     let n_u32 = n as u32;
-    let func = particle_buffers
-        .device
-        .get_func("neighbor", "copy_positions_into_reference")
-        .expect("neighbor module is not loaded; init_device() must be called first");
+    let func = particle_buffers.kernels.copy_positions_into_reference.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -636,9 +607,9 @@ pub fn compute_cell_indices_and_histogram(
         .map_err(GpuError::from)?;
     let n_u32 = n as u32;
     let func = particle_buffers
-        .device
-        .get_func("neighbor", "compute_cell_indices_and_histogram")
-        .expect("neighbor module is not loaded; init_device() must be called first");
+        .kernels
+        .compute_cell_indices_and_histogram
+        .clone();
     let cfg = launch_config(n_u32);
     let lengths = sim_box.lengths();
     unsafe {
@@ -684,7 +655,7 @@ pub fn compute_cell_indices_and_histogram(
 //      sentinel.
 // Issues O(log(n_cells_total)) kernel launches.
 pub fn prefix_scan_cell_counts(
-    device: &Arc<CudaDevice>,
+    kernels: &Kernels,
     cell_counts: &CudaSlice<u32>,
     cell_offsets: &mut CudaSlice<u32>,
     scan_block_totals: &mut [CudaSlice<u32>],
@@ -699,14 +670,11 @@ pub fn prefix_scan_cell_counts(
     debug_assert!(!scan_block_totals.is_empty());
 
     let n_cells_total_u32 = n_cells_total as u32;
-    let local_name = "prefix_scan_local_blocks";
-    let apply_name = "prefix_scan_apply_block_totals";
-    let not_loaded = "neighbor module is not loaded; init_device() must be called first";
 
     // Phase 1: per-block local scan of cell_counts into cell_offsets,
     // emitting the level-0 block totals.
     {
-        let func = device.get_func("neighbor", local_name).expect(not_loaded);
+        let func = kernels.prefix_scan_local_blocks.clone();
         unsafe {
             func.launch(
                 launch_config(n_cells_total_u32),
@@ -735,7 +703,7 @@ pub fn prefix_scan_cell_counts(
         let (head, tail) = scan_block_totals.split_at_mut(l + 1);
         let level = &head[l];
         let totals = &mut tail[0];
-        let func = device.get_func("neighbor", local_name).expect(not_loaded);
+        let func = kernels.prefix_scan_local_blocks.clone();
         unsafe {
             func.launch(launch_config(len), (level, level, totals, len))
                 .map_err(GpuError::from)?;
@@ -745,7 +713,7 @@ pub fn prefix_scan_cell_counts(
     // Phase 3: ascend — add each scanned level's totals back into the
     // level below (level 0's target is `cell_offsets`).
     for l in (0..descent_levels).rev() {
-        let func = device.get_func("neighbor", apply_name).expect(not_loaded);
+        let func = kernels.prefix_scan_apply_block_totals.clone();
         if l == 0 {
             unsafe {
                 func.launch(
@@ -768,9 +736,7 @@ pub fn prefix_scan_cell_counts(
 
     // Phase 4: write the trailing cell_offsets[n_cells_total] sentinel.
     {
-        let func = device
-            .get_func("neighbor", "prefix_scan_finalize_offsets")
-            .expect(not_loaded);
+        let func = kernels.prefix_scan_finalize_offsets.clone();
         unsafe {
             func.launch(
                 launch_config(1),
@@ -784,6 +750,7 @@ pub fn prefix_scan_cell_counts(
 
 pub fn scatter_atoms_into_cells(
     device: &Arc<CudaDevice>,
+    kernels: &Kernels,
     cell_indices: &CudaSlice<u32>,
     cell_offsets: &CudaSlice<u32>,
     write_cursors: &mut CudaSlice<u32>,
@@ -797,9 +764,7 @@ pub fn scatter_atoms_into_cells(
     debug_assert_eq!(sorted_particle_ids.len(), particle_count);
     device.memset_zeros(write_cursors).map_err(GpuError::from)?;
     let n_u32 = particle_count as u32;
-    let func = device
-        .get_func("neighbor", "scatter_atoms_into_cells")
-        .expect("neighbor module is not loaded; init_device() must be called first");
+    let func = kernels.scatter_atoms_into_cells.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(cfg, (cell_indices, cell_offsets, write_cursors, sorted_particle_ids, n_u32))
@@ -809,7 +774,7 @@ pub fn scatter_atoms_into_cells(
 }
 
 pub fn sort_cells_by_particle_id(
-    device: &Arc<CudaDevice>,
+    kernels: &Kernels,
     cell_offsets: &CudaSlice<u32>,
     sorted_particle_ids: &mut CudaSlice<u32>,
     n_cells_total: usize,
@@ -819,9 +784,7 @@ pub fn sort_cells_by_particle_id(
     }
     debug_assert_eq!(cell_offsets.len(), n_cells_total + 1);
     let n_u32 = n_cells_total as u32;
-    let func = device
-        .get_func("neighbor", "sort_cells_by_particle_id")
-        .expect("neighbor module is not loaded; init_device() must be called first");
+    let func = kernels.sort_cells_by_particle_id.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(cfg, (cell_offsets, sorted_particle_ids, n_u32))
@@ -842,10 +805,7 @@ pub fn vv_kick_drift_lossless(
     }
     debug_assert_eq!(lossless.particle_count(), n);
     let n_u32 = n as u32;
-    let func = buffers
-        .device
-        .get_func("integrate", "vv_kick_drift_lossless")
-        .expect("integrate module is not loaded; init_device() must be called first");
+    let func = buffers.kernels.vv_kick_drift_lossless.clone();
     let cfg = launch_config(n_u32);
     let lengths = sim_box.lengths();
     unsafe {
@@ -894,10 +854,7 @@ pub fn lan_drift_half(
         return Ok(());
     }
     let n_u32 = n as u32;
-    let func = buffers
-        .device
-        .get_func("langevin", "lan_drift_half")
-        .expect("langevin module is not loaded; init_device() must be called first");
+    let func = buffers.kernels.lan_drift_half.clone();
     let cfg = launch_config(n_u32);
     let lengths = sim_box.lengths();
     unsafe {
@@ -938,10 +895,7 @@ pub fn lan_ou_step(
         return Ok(());
     }
     let n_u32 = n as u32;
-    let func = buffers
-        .device
-        .get_func("langevin", "lan_ou_step")
-        .expect("langevin module is not loaded; init_device() must be called first");
+    let func = buffers.kernels.lan_ou_step.clone();
     let cfg = launch_config(n_u32);
     let seed_lo = (seed & 0xFFFF_FFFF) as u32;
     let seed_hi = (seed >> 32) as u32;
@@ -981,10 +935,7 @@ pub fn vv_kick_lossless(
     }
     debug_assert_eq!(lossless.particle_count(), n);
     let n_u32 = n as u32;
-    let func = buffers
-        .device
-        .get_func("integrate", "vv_kick_lossless")
-        .expect("integrate module is not loaded; init_device() must be called first");
+    let func = buffers.kernels.vv_kick_lossless.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(

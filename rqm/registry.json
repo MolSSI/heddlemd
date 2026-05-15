@@ -208,10 +208,10 @@
     "type": "scenario"
   },
   "rq-06058b71": {
-    "decl": "Scenario: init_device loads the pair_force module with the LJ kernel",
+    "decl": "Scenario: init_device exposes the LJ kernel on the Kernels handle",
     "file": "forces/lj-pair-force",
     "refs": [],
-    "title": "init_device loads the pair_force module with the LJ kernel",
+    "title": "init_device exposes the LJ kernel on the Kernels handle",
     "type": "scenario"
   },
   "rq-060b1fab": {
@@ -1074,7 +1074,12 @@
     "decl": "### Types",
     "file": "build-pipeline",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/device.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Types",
     "type": "section"
   },
@@ -3181,10 +3186,10 @@
     "type": "scenario"
   },
   "rq-662fccc1": {
-    "decl": "Scenario: init_device loads the langevin module",
+    "decl": "Scenario: init_device exposes the Langevin kernels on the Kernels handle",
     "file": "integration/langevin-baoab",
     "refs": [],
-    "title": "init_device loads the langevin module",
+    "title": "init_device exposes the Langevin kernels on the Kernels handle",
     "type": "scenario"
   },
   "rq-6690fae9": {
@@ -3241,10 +3246,10 @@
     "type": "section"
   },
   "rq-679282f5": {
-    "decl": "Scenario: init_device loads the morse module",
+    "decl": "Scenario: init_device exposes the Morse kernels on the Kernels handle",
     "file": "forces/morse-bonded",
     "refs": [],
-    "title": "init_device loads the morse module",
+    "title": "init_device exposes the Morse kernels on the Kernels handle",
     "type": "scenario"
   },
   "rq-67ebf3b1": {
@@ -5260,10 +5265,10 @@
     "type": "file"
   },
   "rq-a43552d5": {
-    "decl": "Scenario: init_device loads the reduce module with the reduction kernel",
+    "decl": "Scenario: init_device exposes the reduction kernel on the Kernels handle",
     "file": "pair-reduction",
     "refs": [],
-    "title": "init_device loads the reduce module with the reduction kernel",
+    "title": "init_device exposes the reduction kernel on the Kernels handle",
     "type": "scenario"
   },
   "rq-a5069572": {
@@ -5974,10 +5979,10 @@
     "type": "section"
   },
   "rq-bc8375ce": {
-    "decl": "Scenario: init_device loads the integrate module with both kernels",
+    "decl": "Scenario: init_device exposes the velocity-Verlet kernels on the Kernels handle",
     "file": "integration/velocity-verlet",
     "refs": [],
-    "title": "init_device loads the integrate module with both kernels",
+    "title": "init_device exposes the velocity-Verlet kernels on the Kernels handle",
     "type": "scenario"
   },
   "rq-bca0adbc": {
@@ -6200,7 +6205,12 @@
     "decl": "### Functions",
     "file": "build-pipeline",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/device.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Functions",
     "type": "section"
   },

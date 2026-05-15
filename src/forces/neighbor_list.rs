@@ -5,7 +5,7 @@ use std::time::Instant;
 use cudarc::driver::{CudaDevice, CudaSlice};
 
 use crate::gpu::{
-    GpuError, ParticleBuffers, SPATIAL_HASH_SCAN_BLOCK_SIZE,
+    GpuContext, GpuError, Kernels, ParticleBuffers, SPATIAL_HASH_SCAN_BLOCK_SIZE,
     compute_cell_indices_and_histogram, copy_positions_into_reference,
     neighbor_displacement_squared, neighbor_list_build, prefix_scan_cell_counts,
     scatter_atoms_into_cells, sort_cells_by_particle_id,
@@ -68,6 +68,7 @@ pub struct CellListData {
 #[derive(Debug)]
 pub struct NeighborListState {
     pub device: Arc<CudaDevice>,
+    pub kernels: Arc<Kernels>,
     pub particle_count: usize,
     pub max_neighbors: u32,
     pub neighbor_list: CudaSlice<u32>,
@@ -96,13 +97,15 @@ impl NeighborListState {
 
     // rq-14033af1
     pub fn new_cell_list(
-        device: Arc<CudaDevice>,
+        gpu: &GpuContext,
         sim_box: &SimulationBox,
         particle_count: usize,
         r_cut: f32,
         max_neighbors: u32,
         r_skin: f32,
     ) -> Result<Self, NeighborListError> {
+        let device = gpu.device.clone();
+        let kernels = gpu.kernels.clone();
         debug_assert!(r_cut > 0.0);
         debug_assert!(r_skin > 0.0);
         debug_assert!(max_neighbors > 0);
@@ -152,6 +155,7 @@ impl NeighborListState {
 
         Ok(NeighborListState {
             device,
+            kernels,
             particle_count,
             max_neighbors,
             neighbor_list,
@@ -182,10 +186,12 @@ impl NeighborListState {
 
     // rq-c96fd9d2
     pub fn new_trivial(
-        device: Arc<CudaDevice>,
+        gpu: &GpuContext,
         _sim_box: &SimulationBox,
         particle_count: usize,
     ) -> Result<Self, NeighborListError> {
+        let device = gpu.device.clone();
+        let kernels = gpu.kernels.clone();
         let max_neighbors = particle_count as u32;
         let nl_len = particle_count * particle_count;
         let nl_host: Vec<u32> = if nl_len == 0 {
@@ -214,6 +220,7 @@ impl NeighborListState {
 
         Ok(NeighborListState {
             device,
+            kernels,
             particle_count,
             max_neighbors,
             neighbor_list,
@@ -333,6 +340,7 @@ impl NeighborListState {
         timings: &mut Timings,
     ) -> Result<(), NeighborListError> {
         let device = self.device.clone();
+        let kernels = self.kernels.clone();
         let max_neighbors = self.max_neighbors;
         let particle_count = self.particle_count;
 
@@ -351,7 +359,7 @@ impl NeighborListState {
         )?;
 
         prefix_scan_cell_counts(
-            &device,
+            &kernels,
             &cl.cell_counts,
             &mut cl.cell_offsets,
             &mut cl.scan_block_totals,
@@ -361,6 +369,7 @@ impl NeighborListState {
 
         scatter_atoms_into_cells(
             &device,
+            &kernels,
             &cl.cell_indices,
             &cl.cell_offsets,
             &mut cl.write_cursors,
@@ -369,7 +378,7 @@ impl NeighborListState {
         )?;
 
         sort_cells_by_particle_id(
-            &device,
+            &kernels,
             &cl.cell_offsets,
             &mut cl.sorted_particle_ids,
             cl.n_cells_total,

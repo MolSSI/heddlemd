@@ -10,7 +10,7 @@ use cudarc::driver::CudaDevice;
 use cudarc::driver::result::event;
 use cudarc::driver::sys::{CUevent, CUevent_flags};
 
-use crate::gpu::GpuError;
+use crate::gpu::{GpuContext, GpuError};
 
 // rq-dc8a0ff7
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -210,7 +210,8 @@ impl std::fmt::Debug for Timings {
 
 impl Timings {
     // rq-8a9c44f8
-    pub fn new(device: Arc<CudaDevice>) -> Result<Self, TimingsError> {
+    pub fn new(gpu: &GpuContext) -> Result<Self, TimingsError> {
+        let device = gpu.device.clone();
         let mut kernel_states: HashMap<KernelStage, KernelStageState> =
             HashMap::with_capacity(KernelStage::ORDER.len());
         for &stage in KernelStage::ORDER {

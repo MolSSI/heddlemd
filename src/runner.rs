@@ -174,12 +174,12 @@ fn run_simulation_with_phase(
     }
 
     let mut gpu_init_duration = Duration::ZERO;
-    let device = timed(&mut gpu_init_duration, init_device)
+    let gpu = timed(&mut gpu_init_duration, init_device)
         .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?;
 
     // Construct the Timings instance now and replay the three pre-instrumented
     // host stages.
-    let mut timings = Timings::new(device.clone())
+    let mut timings = Timings::new(&gpu)
         .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
     timings.record_host(HostStage::CONFIG_LOAD, config_load_duration);
     timings.record_host(HostStage::INIT_LOAD, init_load_duration);
@@ -234,7 +234,7 @@ fn run_simulation_with_phase(
     .map_err(|e| (RunnerError::ParticleState(e), ExitPhase::Setup))?;
 
     let mut upload = Duration::ZERO;
-    let mut buffers = timed(&mut upload, || ParticleBuffers::new(device.clone(), &state))
+    let mut buffers = timed(&mut upload, || ParticleBuffers::new(&gpu, &state))
         .map_err(|e| match e {
             ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Setup),
             other => (RunnerError::ParticleState(other), ExitPhase::Setup),
@@ -243,7 +243,7 @@ fn run_simulation_with_phase(
 
     let registry = IntegratorRegistry::with_builtins();
     let mut integrator = registry
-        .build(&config.integrator, device.clone(), n)
+        .build(&config.integrator, &gpu, n)
         .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Setup))?;
 
     // Load the .bonds file when supplied, otherwise build empty bond / exclusion
@@ -257,7 +257,7 @@ fn run_simulation_with_phase(
     };
 
     let mut force_field = ForceField::new(
-        device.clone(),
+        &gpu,
         n,
         &sim_box,
         &config.particle_types,

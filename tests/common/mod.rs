@@ -8,7 +8,7 @@ use std::sync::Arc;
 use cudarc::driver::{CudaDevice, CudaSlice};
 use dynamics::forces::{DeviceExclusionList, ExclusionList, NeighborListState};
 use dynamics::gpu::{
-    GpuError, LennardJonesParameterTable, PairBuffer, ParticleBuffers, lj_pair_force,
+    GpuContext, GpuError, LennardJonesParameterTable, PairBuffer, ParticleBuffers, lj_pair_force,
     reduce_pair_forces,
 };
 use dynamics::pbc::SimulationBox;
@@ -59,11 +59,11 @@ pub fn single_type_lj_table_with_switch(
 /// Used by tests that exercise the LJ kernel directly without going through
 /// the ForceField pipeline.
 pub fn trivial_neighbor_list(
-    device: &Arc<CudaDevice>,
+    gpu: &GpuContext,
     sim_box: &SimulationBox,
     particle_count: usize,
 ) -> NeighborListState {
-    NeighborListState::new_trivial(device.clone(), sim_box, particle_count)
+    NeighborListState::new_trivial(gpu, sim_box, particle_count)
         .expect("trivial neighbor list")
 }
 
@@ -77,8 +77,12 @@ pub fn lj_pair_force_no_excl(
     params: &LennardJonesParameterTable,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
-    let excl = empty_exclusions(&particle_buffers.device, n);
-    let nl = trivial_neighbor_list(&particle_buffers.device, sim_box, n);
+    let gpu = GpuContext {
+        device: particle_buffers.device.clone(),
+        kernels: particle_buffers.kernels.clone(),
+    };
+    let excl = empty_exclusions(&gpu.device, n);
+    let nl = trivial_neighbor_list(&gpu, sim_box, n);
     lj_pair_force(
         particle_buffers,
         pair,

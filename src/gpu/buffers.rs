@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice, DeviceSlice};
 
-use crate::gpu::GpuError;
+use crate::gpu::{GpuContext, GpuError, Kernels};
 use crate::state::{ParticleState, ParticleStateError, check_len};
 
 // rq-4a8de06c
 #[derive(Debug)]
 pub struct ParticleBuffers {
     pub device: Arc<CudaDevice>,
+    pub kernels: Arc<Kernels>,
     pub positions_x: CudaSlice<f32>,
     pub positions_y: CudaSlice<f32>,
     pub positions_z: CudaSlice<f32>,
@@ -31,9 +32,11 @@ pub struct ParticleBuffers {
 impl ParticleBuffers {
     // rq-b09032cb
     pub fn new(
-        device: Arc<CudaDevice>,
+        gpu: &GpuContext,
         state: &ParticleState,
     ) -> Result<Self, ParticleStateError> {
+        let device = gpu.device.clone();
+        let kernels = gpu.kernels.clone();
         let n = state.particle_count();
         check_len("positions_y", n, state.positions_y.len())?;
         check_len("positions_z", n, state.positions_z.len())?;
@@ -74,6 +77,7 @@ impl ParticleBuffers {
 
         Ok(ParticleBuffers {
             device,
+            kernels,
             positions_x,
             positions_y,
             positions_z,

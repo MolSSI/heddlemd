@@ -219,10 +219,9 @@ the kernel.
 
 ### PTX Module Loading <!-- rq-8586776f -->
 
-`init_device()` loads the compiled `kernels/langevin.cu` PTX with module
-name `"langevin"` and registers function names `"lan_drift_half"` and
-`"lan_ou_step"`, alongside the existing `fill`, `integrate`, `reduce`,
-and `pair_force` modules.
+`init_device()` loads the compiled `kernels/langevin.cu` PTX as module
+`"langevin"` and captures its `lan_drift_half` and `lan_ou_step`
+functions into the `Kernels` handle (see `build-pipeline.md`).
 
 ### Rust Launch Helpers <!-- rq-3bf899d0 -->
 
@@ -234,7 +233,9 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
   - Block size 256; grid `ceil(n / 256)`.
   - When `buffers.particle_count() == 0`, returns `Ok(())` without
     launching.
-  - Panics if the `"langevin"` module is not loaded.
+  - Invokes the kernel through the `Kernels` handle reached from its
+    arguments; it performs no string-keyed kernel lookup of its own (see
+    `build-pipeline.md`).
 
 - `lan_ou_step(buffers: &mut ParticleBuffers, seed: u64, draw_counter: u64, alpha: f32, kt: f32) -> Result<(), GpuError>` <!-- rq-6435723d -->
   - Launches the `lan_ou_step` kernel with the seed and draw counter
@@ -243,7 +244,8 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
   - Block size 256; grid `ceil(n / 256)`.
   - When `buffers.particle_count() == 0`, returns `Ok(())` without
     launching.
-  - Panics if the `"langevin"` module is not loaded.
+  - Invokes the kernel through the `Kernels` handle, like
+    `lan_drift_half`.
 
 ## Launch Configuration <!-- rq-9bef7cd0 -->
 
@@ -291,10 +293,10 @@ Feature: Langevin BAOAB integrator
   # --- Module loading and construction ---
 
   @rq-662fccc1
-  Scenario: init_device loads the langevin module
+  Scenario: init_device exposes the Langevin kernels on the Kernels handle
     When init_device() is called
-    Then the device exposes a function named "lan_drift_half" in module "langevin"
-    And the device exposes a function named "lan_ou_step" in module "langevin"
+    Then the returned GpuContext's kernels handle exposes the lan_drift_half function
+    And the kernels handle exposes the lan_ou_step function
 
   @rq-457b5271
   Scenario: Construct LangevinBaoabState

@@ -384,7 +384,8 @@ The runner preserves the project's bit-wise reproducibility invariant:
 - Velocity generation is fully deterministic in `(seed, temperature,
   masses, N)` (the masses and N derive from the config and init file).
 - Every device kernel launch is on the default stream of the `Arc<CudaDevice>`
-  obtained from `init_device()`; no other streams are introduced.
+  carried by the `GpuContext` from `init_device()`; no other streams are
+  introduced.
 - `compute_kinetic_energy` sums in particle order, so the log values are
   byte-identical across runs on the same GPU.
 - The Maxwell-Boltzmann RNG is `ChaCha8Rng::seed_from_u64(seed)` and is

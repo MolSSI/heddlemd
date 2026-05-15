@@ -1,11 +1,7 @@
 // rq-4f386df8 rq-5cb33196 rq-67414c32
-use std::sync::Arc;
-
-use cudarc::driver::CudaDevice;
-
 use crate::forces::{ForceField, ForceFieldError};
 use crate::gpu::{
-    GpuError, LosslessBuffers, ParticleBuffers, lan_drift_half, lan_ou_step, vv_kick,
+    GpuContext, GpuError, LosslessBuffers, ParticleBuffers, lan_drift_half, lan_ou_step, vv_kick,
     vv_kick_drift, vv_kick_drift_lossless, vv_kick_lossless,
 };
 use crate::io::config::IntegratorKind;
@@ -43,7 +39,7 @@ pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
     fn kind_name(&self) -> &'static str;
     fn build(
         &self,
-        device: Arc<CudaDevice>,
+        gpu: &GpuContext,
         particle_count: usize,
         kind: &IntegratorKind,
     ) -> Result<Box<dyn Integrator>, IntegratorError>;
@@ -77,13 +73,13 @@ impl IntegratorRegistry {
     pub fn build(
         &self,
         kind: &IntegratorKind,
-        device: Arc<CudaDevice>,
+        gpu: &GpuContext,
         particle_count: usize,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
         let target = kind.name();
         for b in &self.builders {
             if b.kind_name() == target {
-                return b.build(device, particle_count, kind);
+                return b.build(gpu, particle_count, kind);
             }
         }
         Err(IntegratorError::UnknownKind(target.to_string()))
@@ -153,14 +149,14 @@ impl IntegratorBuilder for VelocityVerletBuilder {
 
     fn build(
         &self,
-        device: Arc<CudaDevice>,
+        gpu: &GpuContext,
         particle_count: usize,
         kind: &IntegratorKind,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
         match kind {
             IntegratorKind::VelocityVerlet { lossless } => {
                 let buffers = if *lossless {
-                    Some(LosslessBuffers::new(device, particle_count)?)
+                    Some(LosslessBuffers::new(gpu, particle_count)?)
                 } else {
                     None
                 };
@@ -236,11 +232,11 @@ impl IntegratorBuilder for LangevinBaoabBuilder {
 
     fn build(
         &self,
-        device: Arc<CudaDevice>,
+        gpu: &GpuContext,
         particle_count: usize,
         kind: &IntegratorKind,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
-        let _ = device;
+        let _ = gpu;
         let _ = particle_count;
         match kind {
             IntegratorKind::LangevinBaoab {

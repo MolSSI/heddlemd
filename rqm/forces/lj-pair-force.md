@@ -345,9 +345,9 @@ buffers; the kernel handles this case without a separate code path.
 
 ### PTX Module Loading <!-- rq-78d9fd1c -->
 
-`init_device()` loads the compiled `kernels/pair_force.cu` PTX with
-module name `"pair_force"` and registers function name `"lj_pair_force"`,
-alongside the existing `fill`, `integrate`, and `reduce` modules.
+`init_device()` loads the compiled `kernels/pair_force.cu` PTX as module
+`"pair_force"` and captures its `lj_pair_force` function into the
+`Kernels` handle (see `build-pipeline.md`).
 
 ### Rust Launcher <!-- rq-d6beaed7 -->
 
@@ -365,8 +365,9 @@ A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
   - When `particle_buffers.particle_count() == 0`, returns `Ok(())`
     without launching a kernel.
   - Returns the underlying `GpuError` if the kernel launch fails.
-  - Panics if the `"pair_force"` module is not loaded on the device,
-    since this indicates a programming error in `init_device()`.
+  - Invokes the kernel through the `lj_pair_force` field of the
+    `Kernels` handle reached from its arguments; it performs no
+    string-keyed kernel lookup of its own (see `build-pipeline.md`).
 
   The `DeviceExclusionList` argument is a host-side handle holding the
   three device buffers `atom_excl_offsets`, `atom_excl_partners`, and
@@ -473,10 +474,10 @@ Feature: Lennard-Jones O(N²) pair force kernel
   # --- Module loading ---
 
   @rq-06058b71
-  Scenario: init_device loads the pair_force module with the LJ kernel
+  Scenario: init_device exposes the LJ kernel on the Kernels handle
     Given a CUDA-capable GPU is available as device 0
     When init_device() is called
-    Then the device exposes a function named "lj_pair_force" in module "pair_force"
+    Then the returned GpuContext's kernels handle exposes the lj_pair_force function
 
   # --- Two-particle correctness ---
 

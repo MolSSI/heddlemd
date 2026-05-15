@@ -233,9 +233,9 @@ the indices are sorted at load time, the order is deterministic.
 
 ### PTX Module Loading <!-- rq-aa36ee0b -->
 
-`init_device()` loads the compiled `kernels/morse.cu` PTX with module
-name `"morse"` and registers function names `"morse_bond_force"` and
-`"reduce_bond_forces"`, alongside the existing modules.
+`init_device()` loads the compiled `kernels/morse.cu` PTX as module
+`"morse"` and captures its `morse_bond_force` and `reduce_bond_forces`
+functions into the `Kernels` handle (see `build-pipeline.md`).
 
 ### Rust Launch Helpers <!-- rq-637c4fdd -->
 
@@ -247,7 +247,9 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
     half-energy, and half-virial into the state's `bond_pair_*` fields.
   - Block size 256; grid size `ceil(state.bond_count / 256)`.
   - Returns `Ok(())` without launching when `state.bond_count == 0`.
-  - Panics if the `"morse"` module is not loaded.
+  - Invokes the kernel through the `Kernels` handle reached from its
+    arguments; it performs no string-keyed kernel lookup of its own (see
+    `build-pipeline.md`).
 
 - `reduce_bond_forces(state: &mut MorseBondedState, output_force_x: &mut CudaViewMut<'_, f32>, output_force_y: &mut CudaViewMut<'_, f32>, output_force_z: &mut CudaViewMut<'_, f32>, output_energy: &mut CudaViewMut<'_, f32>, output_virial: &mut CudaViewMut<'_, f32>) -> Result<(), GpuError>` <!-- rq-10adebc4 -->
   - Launches the `reduce_bond_forces` kernel, summing each atom's bond
@@ -257,7 +259,8 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
   - Block size 256; grid size `ceil(state.particle_count / 256)`.
   - Returns `Ok(())` without launching when
     `state.particle_count == 0`.
-  - Panics if the `"morse"` module is not loaded.
+  - Invokes the kernel through the `Kernels` handle, like
+    `morse_bond_force`.
 
 ## Launch Configuration <!-- rq-c1678fe1 -->
 
@@ -304,10 +307,10 @@ Feature: Morse bonded potential
   # --- Module loading ---
 
   @rq-679282f5
-  Scenario: init_device loads the morse module
+  Scenario: init_device exposes the Morse kernels on the Kernels handle
     When init_device() is called
-    Then the device exposes a function named "morse_bond_force" in module "morse"
-    And the device exposes a function named "reduce_bond_forces" in module "morse"
+    Then the returned GpuContext's kernels handle exposes the morse_bond_force function
+    And the kernels handle exposes the reduce_bond_forces function
 
   # --- Construction ---
 

@@ -4,7 +4,8 @@ use std::sync::Arc;
 use cudarc::driver::CudaDevice;
 
 use crate::gpu::{
-    LennardJonesParameterTable, PairBuffer, ParticleBuffers, lj_pair_force, reduce_pair_forces,
+    GpuContext, LennardJonesParameterTable, PairBuffer, ParticleBuffers, lj_pair_force,
+    reduce_pair_forces,
 };
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -27,14 +28,15 @@ pub struct LennardJonesState {
 
 impl LennardJonesState {
     pub fn new(
-        device: Arc<CudaDevice>,
+        gpu: &GpuContext,
         particle_count: usize,
         params: LennardJonesParameterTable,
         max_cutoff: f32,
         max_neighbors: u32,
         exclusion_list: &ExclusionList,
     ) -> Result<Self, NeighborListError> {
-        let pair_buffer = PairBuffer::new(device.clone(), particle_count, max_neighbors)?;
+        let device = gpu.device.clone();
+        let pair_buffer = PairBuffer::new(gpu, particle_count, max_neighbors)?;
         let exclusions = DeviceExclusionList::from_host(&device, exclusion_list)?;
         Ok(LennardJonesState {
             device,

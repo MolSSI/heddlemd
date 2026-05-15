@@ -303,7 +303,7 @@ Feature: SoA particle state and GPU buffers
 
   @rq-0ffccee0
   Scenario: Allocate device buffers and perform initial upload
-    Given a CudaDevice obtained from init_device()
+    Given a GpuContext obtained from init_device()
     And a ParticleState with particle_count() == 4 and known field values
     When ParticleBuffers::new(device, &state) is called
     Then it returns Ok(buffers)
@@ -333,7 +333,7 @@ Feature: SoA particle state and GPU buffers
 
   @rq-c8aa7417
   Scenario: Allocate device buffers from an empty state
-    Given a CudaDevice obtained from init_device()
+    Given a GpuContext obtained from init_device()
     And a ParticleState with particle_count() == 0
     When ParticleBuffers::new(device, &state) is called
     Then it returns Ok(buffers)
@@ -342,7 +342,7 @@ Feature: SoA particle state and GPU buffers
 
   @rq-780d68ea
   Scenario: Reject ParticleBuffers::new when a host array length is inconsistent
-    Given a CudaDevice obtained from init_device()
+    Given a GpuContext obtained from init_device()
     And a ParticleState whose positions_x.len() is 4 but velocities_z.len() is 3
     When ParticleBuffers::new(device, &state) is called
     Then it returns Err(ParticleStateError::LengthMismatch { array: "velocities_z", expected: 4, actual: 3 })

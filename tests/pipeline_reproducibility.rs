@@ -1,10 +1,7 @@
 mod common;
 use common::*;
 
-use std::sync::Arc;
-
-use cudarc::driver::CudaDevice;
-use dynamics::gpu::{PairBuffer, ParticleBuffers, init_device, vv_kick, vv_kick_drift};
+use dynamics::gpu::{GpuContext, PairBuffer, ParticleBuffers, init_device, vv_kick, vv_kick_drift};
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 
@@ -52,13 +49,13 @@ fn build_initial_state() -> ParticleState {
 }
 
 // rq-6b6180af
-fn run_pipeline(device: &Arc<CudaDevice>, n_steps: usize) -> ParticleState {
+fn run_pipeline(gpu: &GpuContext, n_steps: usize) -> ParticleState {
     let state = build_initial_state();
-    let mut buffers = ParticleBuffers::new(device.clone(), &state).unwrap();
-    let mut pair = PairBuffer::new(device.clone(), N, N as u32).unwrap();
-    let counts = device.htod_sync_copy(&vec![N as u32; N]).unwrap();
+    let mut buffers = ParticleBuffers::new(gpu, &state).unwrap();
+    let mut pair = PairBuffer::new(gpu, N, N as u32).unwrap();
+    let counts = gpu.device.htod_sync_copy(&vec![N as u32; N]).unwrap();
     let sim_box = SimulationBox::new_orthorhombic(BOX_L, BOX_L, BOX_L).unwrap();
-    let params = single_type_lj_table(device, SIGMA, EPSILON, CUTOFF);
+    let params = single_type_lj_table(&gpu.device, SIGMA, EPSILON, CUTOFF);
 
     // Warm-up: populate forces with F(0) before the first kick_drift consumes them.
     lj_pair_force_no_excl(&buffers, &mut pair, &sim_box, &params).unwrap();
@@ -93,25 +90,25 @@ fn assert_states_byte_identical(a: &ParticleState, b: &ParticleState) {
 
 #[test] // rq-b2314952
 fn bit_exact_after_single_full_step() {
-    let device = init_device().expect("init_device");
-    let result_a = run_pipeline(&device, 1);
-    let result_b = run_pipeline(&device, 1);
+    let gpu = init_device().expect("init_device");
+    let result_a = run_pipeline(&gpu, 1);
+    let result_b = run_pipeline(&gpu, 1);
     assert_states_byte_identical(&result_a, &result_b);
 }
 
 #[test] // rq-2846ee8b
 fn bit_exact_after_100_step_run() {
-    let device = init_device().expect("init_device");
-    let result_a = run_pipeline(&device, 100);
-    let result_b = run_pipeline(&device, 100);
+    let gpu = init_device().expect("init_device");
+    let result_a = run_pipeline(&gpu, 100);
+    let result_b = run_pipeline(&gpu, 100);
     assert_states_byte_identical(&result_a, &result_b);
 }
 
 #[test] // rq-d0a54b3c
 fn positions_visibly_evolve_over_100_step_run() {
-    let device = init_device().expect("init_device");
+    let gpu = init_device().expect("init_device");
     let initial = build_initial_state();
-    let result = run_pipeline(&device, 100);
+    let result = run_pipeline(&gpu, 100);
 
     let max_disp = (0..N)
         .map(|i| {
@@ -129,8 +126,8 @@ fn positions_visibly_evolve_over_100_step_run() {
 
 #[test] // rq-3f46fb2e
 fn all_outputs_finite_after_100_step_run() {
-    let device = init_device().expect("init_device");
-    let result = run_pipeline(&device, 100);
+    let gpu = init_device().expect("init_device");
+    let result = run_pipeline(&gpu, 100);
 
     let arrays: [&[f32]; 9] = [
         &result.positions_x,
