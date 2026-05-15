@@ -24,6 +24,8 @@ config:
 | --- | --- | --- |
 | `lennard-jones` | non-bonded pairwise via `[[pair_interactions]]` | `lj-pair-force.md` |
 | `coulomb` | non-bonded truncated electrostatics via `[coulomb]` | `coulomb-pair-force.md` |
+| `spme_real` | non-bonded `erfc`-screened pair force via `[spme]` | `spme.md` |
+| `spme_reciprocal` | reciprocal-space FFT pipeline via `[spme]` | `spme.md` |
 | `morse-bonded` | bonded pairwise via `[[bond_types]]` + `.bonds` file | `morse-bonded.md` |
 
 Slots are present in the `ForceField` according to the config:
@@ -32,9 +34,15 @@ Slots are present in the `ForceField` according to the config:
   at least one entry.
 - The `Coulomb` slot is present when the config supplies a `[coulomb]`
   table.
+- The `SpmeRealSpace` and `SpmeReciprocal` slots are both present when
+  the config supplies a `[spme]` table.
 - The `MorseBonded` slot is present when the config supplies a
   `bonds = "..."` path *and* at least one `[[bond_types]]` entry uses
   `potential = "morse"`.
+
+The `[coulomb]` and `[spme]` tables are mutually exclusive at config
+load (see `io/config-schema.md`); a `ForceField` therefore contains at
+most one electrostatics path.
 
 A `ForceField` with zero slots is a valid configuration. `step()` writes
 zeros into `particle_buffers.forces_*` and returns without launching any
@@ -45,7 +53,9 @@ list in a fixed order determined at construction:
 
 1. `LennardJones`
 2. `Coulomb`
-3. `MorseBonded`
+3. `SpmeRealSpace`
+4. `SpmeReciprocal`
+5. `MorseBonded`
 
 Future potentials are inserted into this order at fixed positions defined
 in `ForceField::new`.

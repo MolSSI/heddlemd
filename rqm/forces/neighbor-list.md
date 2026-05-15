@@ -271,6 +271,12 @@ Per timestep, after the integrator's pre-force step:
 4. Run downstream contribution kernels (see `framework.md`), which read
    the neighbor list.
 
+In `CellListOnly` mode, `pre_step` skips the displacement check
+entirely and runs the cell-list pipeline (cell indexing, prefix scan,
+scatter, in-cell sort) on every call, regardless of how far particles
+have moved. The neighbor-list-build kernel does not run in
+`CellListOnly` mode.
+
 ## Configuration <!-- rq-267941a2 -->
 
 Selected from the config's optional `[neighbor_list]` table; see
@@ -397,7 +403,13 @@ lifetime of the run.
 
 - `NeighborListMode` — discriminator. Variants: <!-- inline --> <!-- inline --> <!-- rq-ff424773 -->
   - `Trivial`
-  - `CellList`
+  - `CellList` — the cell-list-mode state described above; produces both
+    the cell-list output (sorted particle IDs and per-cell offsets) and a
+    neighbor list.
+  - `CellListOnly` — same cell-list output, no neighbor list. Used by
+    the SPME reciprocal-space slot (see `spme.md`); the spread and
+    gather kernels read `sorted_particle_ids` and `cell_offsets` but do
+    not consult `neighbor_list` or `neighbor_counts`.
 
 - `NeighborListError` — error type. Variants: <!-- rq-d8e4407a -->
   - `Gpu(GpuError)` — CUDA driver / kernel-launch failure.
@@ -441,6 +453,31 @@ lifetime of the run.
     computes this as the maximum of every `Potential::max_cutoff()` value
     it observes.
   - Records `cached_generation = sim_box.generation()`.
+
+- `NeighborListState::new_cell_list_only(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, n_cells_per_direction: [u32; 3]) -> Result<NeighborListState, NeighborListError>` <!-- rq-d47caa3d -->
+  - Constructs a `CellListOnly`-mode state with explicit grid
+    dimensions, bypassing the `r_cut + r_skin` derivation used by
+    `new_cell_list`.
+  - Stores `n_cells = n_cells_per_direction` directly; the constructor
+    rejects any direction with `n_cells_per_direction[d] < 3` via
+    `BoxTooSmallForCells { direction, width: 0.0, required: 3.0 }`
+    (the `width: 0.0` field reflects that the rejection comes from the
+    grid spec, not from a measured box width).
+  - Allocates the cell-list scratch buffers (`cell_indices`,
+    `cell_counts`, `write_cursors`, `scan_block_totals`,
+    `sorted_particle_ids`, `cell_offsets`) sized to `n_cells_total`.
+    Does **not** allocate `neighbor_list`, `neighbor_counts`,
+    `reference_positions_*`, `disp_sq`, or `overflow_flag` (these
+    fields are absent from `CellListOnly`-mode states).
+  - `r_cut`, `r_skin`, `r_search_sq` are not stored.
+  - The state's `pre_step` rebuilds the cell list on every call,
+    unconditionally; the displacement-check kernel is never launched
+    in `CellListOnly` mode.
+  - Records `cached_generation = sim_box.generation()`. A box-generation
+    mismatch on subsequent `pre_step` calls triggers a layout refresh
+    that reverifies the grid against the new box (the `n_cells` value
+    is fixed; the box-generation refresh re-derives the cell sizes
+    implicitly through the kernels' fractional-coordinate math).
 
 - `NeighborListState::new_trivial(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize) -> Result<NeighborListState, NeighborListError>` <!-- inline --> <!-- rq-c96fd9d2 -->
   - Constructs a `Trivial`-mode state. The `sim_box` argument is accepted

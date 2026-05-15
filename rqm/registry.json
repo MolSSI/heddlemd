@@ -62,6 +62,14 @@
     "title": "draw_counter starts at 0 and increments per step()",
     "type": "scenario"
   },
+  "rq-017a61a4": {
+    "decl": "## cuFFT determinism precondition",
+    "file": "forces/spme",
+    "level": 2,
+    "refs": [],
+    "title": "cuFFT determinism precondition",
+    "type": "section"
+  },
   "rq-017b6769": {
     "decl": "Scenario: Reject non-positive epsilon",
     "file": "io/config-schema",
@@ -124,6 +132,13 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-02f4d342": {
+    "decl": "Scenario: cuFFT smoke test fails-loud when consecutive transforms produce different output",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "cuFFT smoke test fails-loud when consecutive transforms produce different output",
+    "type": "scenario"
+  },
   "rq-03423870": {
     "decl": "## Reproducibility",
     "file": "forces/coulomb-pair-force",
@@ -144,6 +159,14 @@
     "title": "Timings",
     "type": "api-item"
   },
+  "rq-037dd2f3": {
+    "decl": "### Charge spreading",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Charge spreading",
+    "type": "section"
+  },
   "rq-03830444": {
     "decl": "# Feature: Simulation Box and Periodic Boundary Conditions",
     "file": "simulation-box",
@@ -155,6 +178,14 @@
     ],
     "title": "Feature: Simulation Box and Periodic Boundary Conditions",
     "type": "file"
+  },
+  "rq-03d9869d": {
+    "decl": "### Launch configuration",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Launch configuration",
+    "type": "section"
   },
   "rq-03ff6434": {
     "decl": "Scenario: Drop best-effort flushes",
@@ -260,6 +291,13 @@
     "title": "Reject explicit images_y of wrong length",
     "type": "scenario"
   },
+  "rq-07297467": {
+    "decl": "Scenario: Spread is independent of particle order in the bin",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Spread is independent of particle order in the bin",
+    "type": "scenario"
+  },
   "rq-08066bdf": {
     "decl": "### Types",
     "file": "particle-state",
@@ -267,6 +305,21 @@
     "refs": [],
     "title": "Types",
     "type": "section"
+  },
+  "rq-08131b48": {
+    "decl": "#### `[spme]` (optional table)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[spme]` (optional table)",
+    "type": "section"
+  },
+  "rq-0816969e": {
+    "decl": "Scenario: Reciprocal-space virial is distributed equally per particle",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Reciprocal-space virial is distributed equally per particle",
+    "type": "scenario"
   },
   "rq-0896c33a": {
     "decl": "Scenario: Pair beyond cutoff contributes zero",
@@ -289,6 +342,13 @@
     "refs": [],
     "title": "Feature: Velocity Verlet Time Integration",
     "type": "file"
+  },
+  "rq-09d4e13f": {
+    "decl": "Scenario: Two independent SPME runs on identical inputs produce byte-identical outputs",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Two independent SPME runs on identical inputs produce byte-identical outputs",
+    "type": "scenario"
   },
   "rq-0a8831b1": {
     "decl": "- `Bond` — `Debug, Clone, Copy`. Fields: `atom_i: u32`, `atom_j: u32`,",
@@ -365,6 +425,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "Reject NaN tilt",
+    "type": "scenario"
+  },
+  "rq-0caebe37": {
+    "decl": "Scenario: Real-space slot obeys Newton's third law for a non-boundary pair",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Real-space slot obeys Newton's third law for a non-boundary pair",
     "type": "scenario"
   },
   "rq-0cb3c41c": {
@@ -611,6 +678,13 @@
     "title": "PairBuffer",
     "type": "api-item"
   },
+  "rq-127df3d6": {
+    "decl": "- `spme_influence_multiply`: one thread per complex grid cell, block",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_influence_multiply",
+    "type": "api-item"
+  },
   "rq-12872970": {
     "decl": "## Parameters",
     "file": "forces/morse-bonded",
@@ -737,6 +811,13 @@
     "title": "sort_cells_by_particle_id",
     "type": "api-item"
   },
+  "rq-16f6c7dc": {
+    "decl": "- `spme_charge_spread`: one thread per real grid cell, block size 256,",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_charge_spread",
+    "type": "api-item"
+  },
   "rq-171b99f5": {
     "decl": "Scenario: step() on empty state is a no-op",
     "file": "integration/framework",
@@ -836,6 +917,13 @@
     "refs": [],
     "title": "Single-step round-trip restores the observable state bit-exactly under zero force",
     "type": "scenario"
+  },
+  "rq-1ad7e751": {
+    "decl": "- `CuFftError` — wrapper around cuFFT failure codes from the underlying",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "CuFftError",
+    "type": "api-item"
   },
   "rq-1adf5954": {
     "decl": "- `LennardJonesParameterTable::from_config(device: &Arc<CudaDevice>, <!-- inline -->",
@@ -1158,6 +1246,45 @@
     "title": "KE is bit-identical across two host runs with identical f32 inputs",
     "type": "scenario"
   },
+  "rq-202493a5": {
+    "decl": "# Feature: Smooth Particle-Mesh Ewald (SPME)",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Smooth Particle-Mesh Ewald (SPME)",
+    "type": "file"
+  },
+  "rq-203ecf81": {
+    "decl": "Scenario: Reject a config that declares both [spme] and [coulomb]",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Reject a config that declares both [spme] and [coulomb]",
+    "type": "scenario"
+  },
+  "rq-20530653": {
+    "decl": "## Reproducibility",
+    "file": "forces/spme",
+    "level": 2,
+    "refs": [],
+    "title": "Reproducibility",
+    "type": "section"
+  },
   "rq-2093594f": {
     "decl": "### Types",
     "file": "build-pipeline",
@@ -1233,6 +1360,13 @@
     "refs": [],
     "title": "Unrecognised subcommand prints usage and exits 1",
     "type": "scenario"
+  },
+  "rq-22171569": {
+    "decl": "- `SpmeRealSpaceState` — implements `Potential` with",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SpmeRealSpaceState",
+    "type": "api-item"
   },
   "rq-221b1bb4": {
     "decl": "Scenario: Missing [simulation].dt",
@@ -1355,6 +1489,13 @@
     "refs": [],
     "title": "Comparison Procedure",
     "type": "section"
+  },
+  "rq-24e36eba": {
+    "decl": "- `spme_forward_fft(spme_state) -> Result<(), CuFftError>`",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_forward_fft",
+    "type": "api-item"
   },
   "rq-24f280af": {
     "decl": "### Effective exclusions",
@@ -1514,12 +1655,27 @@
     "title": "Velocity-Verlet step() launches vv_kick_drift, force pipeline, and vv_kick",
     "type": "scenario"
   },
+  "rq-2996a545": {
+    "decl": "Scenario: Force gather and forward FFT of force agree with explicit Ewald for small N",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Force gather and forward FFT of force agree with explicit Ewald for small N",
+    "type": "scenario"
+  },
   "rq-299c69c9": {
     "decl": "Scenario: init_device fails when no GPU is available",
     "file": "build-pipeline",
     "refs": [],
     "title": "init_device fails when no GPU is available",
     "type": "scenario"
+  },
+  "rq-29bdf2b2": {
+    "decl": "### Self-energy",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Self-energy",
+    "type": "section"
   },
   "rq-2a0e97f5": {
     "decl": "Scenario: Two independent lossless runs produce byte-identical results",
@@ -1572,6 +1728,13 @@
     ],
     "title": "TrajectoryWriter",
     "type": "api-item"
+  },
+  "rq-2ae37ac3": {
+    "decl": "Scenario: SPME reciprocal state's internal cell list uses one bin per FFT grid cell",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SPME reciprocal state's internal cell list uses one bin per FFT grid cell",
+    "type": "scenario"
   },
   "rq-2b21f93c": {
     "decl": "### Reproducibility",
@@ -1988,6 +2151,13 @@
     "title": "First displacement_check call always rebuilds (needs_rebuild starts true)",
     "type": "scenario"
   },
+  "rq-35b76155": {
+    "decl": "- `spme_force_gather`: one thread per particle, block size 256, grid",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_force_gather",
+    "type": "api-item"
+  },
   "rq-36105526": {
     "decl": "### Host stages (Instant-timed)",
     "file": "performance-analysis",
@@ -2009,6 +2179,13 @@
     "file": "io/init-state-file",
     "refs": [],
     "title": "File with image:I:3 parses three integer columns per row",
+    "type": "scenario"
+  },
+  "rq-3726c0f1": {
+    "decl": "Scenario: Real-space slot produces zero force on an excluded pair (scale_coul=0)",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Real-space slot produces zero force on an excluded pair (scale_coul=0)",
     "type": "scenario"
   },
   "rq-3766be01": {
@@ -2122,6 +2299,14 @@
     "title": "Slot Integration",
     "type": "section"
   },
+  "rq-39b05bc9": {
+    "decl": "### Algorithm",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
+  },
   "rq-39cec761": {
     "decl": "#### `morse_bond_force`",
     "file": "forces/morse-bonded",
@@ -2159,6 +2344,13 @@
     "title": "Zero charges produce zero force",
     "type": "scenario"
   },
+  "rq-3b9611f2": {
+    "decl": "Scenario: SPME runs on a triclinic box with non-zero tilts",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SPME runs on a triclinic box with non-zero tilts",
+    "type": "scenario"
+  },
   "rq-3b9ed390": {
     "decl": "- `SimulationBox::volume(&self) -> f32`",
     "file": "simulation-box",
@@ -2192,6 +2384,13 @@
     "refs": [],
     "title": "Rust Launch Helpers",
     "type": "section"
+  },
+  "rq-3c0beda9": {
+    "decl": "Scenario: Spread reduces to a single B-spline weight for one isolated particle",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Spread reduces to a single B-spline weight for one isolated particle",
+    "type": "scenario"
   },
   "rq-3c17477d": {
     "decl": "Scenario: Total momentum after generation is zero (within f32 round-off)",
@@ -2255,6 +2454,14 @@
     "refs": [],
     "title": "Pair at exactly the cutoff contributes the smoothed (zero) value",
     "type": "scenario"
+  },
+  "rq-3e2bcb37": {
+    "decl": "## Slot structure",
+    "file": "forces/spme",
+    "level": 2,
+    "refs": [],
+    "title": "Slot structure",
+    "type": "section"
   },
   "rq-3e744fed": {
     "decl": "## Feature API",
@@ -2505,6 +2712,14 @@
     "refs": [],
     "title": "Construct Langevin BAOAB via the registry",
     "type": "scenario"
+  },
+  "rq-47a9ef14": {
+    "decl": "## Feature API",
+    "file": "forces/spme",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-47e800e0": {
     "decl": "Scenario: min_perpendicular_width of a c-tilted box reflects the yz contribution",
@@ -3359,6 +3574,21 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-61889ff1": {
+    "decl": "- `SpmeConfig` — parsed `[spme]` table. Fields:",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SpmeConfig",
+    "type": "api-item"
+  },
+  "rq-618bc65e": {
+    "decl": "### Bin structure",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Bin structure",
+    "type": "section"
+  },
   "rq-621ce7b6": {
     "decl": "Scenario: Sampled velocities round-trip to the configured temperature",
     "file": "simulation-runner",
@@ -3403,6 +3633,13 @@
     "refs": [],
     "title": "Rust Launch Helpers",
     "type": "section"
+  },
+  "rq-637cd1a5": {
+    "decl": "Scenario: cuFFT smoke test passes on a determinism-conforming installation",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "cuFFT smoke test passes on a determinism-conforming installation",
+    "type": "scenario"
   },
   "rq-63f3e0b9": {
     "decl": "## Feature API",
@@ -3456,6 +3693,14 @@
     "refs": [],
     "title": "Config rejected by load_config",
     "type": "scenario"
+  },
+  "rq-66067eba": {
+    "decl": "### Types",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
   },
   "rq-661bf664": {
     "decl": "- `IntegratorKind` — tagged enum carrying the chosen integrator slot and",
@@ -3535,6 +3780,13 @@
     ],
     "title": "Types",
     "type": "section"
+  },
+  "rq-674cc467": {
+    "decl": "Scenario: Box compatibility picks up SPME's real-space cutoff",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Box compatibility picks up SPME's real-space cutoff",
+    "type": "scenario"
   },
   "rq-67678030": {
     "decl": "Scenario: Switching interval r_switch == cutoff selects hard-cutoff",
@@ -3975,6 +4227,14 @@
     "title": "Feature: End-to-End Pipeline Reproducibility Test",
     "type": "file"
   },
+  "rq-7225b86f": {
+    "decl": "### CUDA kernels",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA kernels",
+    "type": "section"
+  },
   "rq-72aae589": {
     "decl": "Scenario: Generation mismatch is detected even when the box lattice parameters",
     "file": "forces/neighbor-list",
@@ -4273,6 +4533,13 @@
     "title": "kernel_start followed by kernel_stop and finalize records one sample",
     "type": "scenario"
   },
+  "rq-79291441": {
+    "decl": "Scenario: Spread sum integrates to total charge",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Spread sum integrates to total charge",
+    "type": "scenario"
+  },
   "rq-793a7cbb": {
     "decl": "- `CoulombConfig`",
     "file": "io/config-schema",
@@ -4400,6 +4667,23 @@
     "level": 3,
     "refs": [],
     "title": "Functions",
+    "type": "section"
+  },
+  "rq-7bd2d9ca": {
+    "decl": "## Parameters",
+    "file": "forces/spme",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Parameters",
     "type": "section"
   },
   "rq-7c23d271": {
@@ -4653,6 +4937,20 @@
     "title": "Self slots carry zero energy and virial",
     "type": "scenario"
   },
+  "rq-83088c2f": {
+    "decl": "Scenario: Real-space slot matches the closed-form erfc force for an isolated pair",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Real-space slot matches the closed-form erfc force for an isolated pair",
+    "type": "scenario"
+  },
+  "rq-8326d2d1": {
+    "decl": "- `spme_influence_multiply(spme_state) -> Result<(), GpuError>`",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_influence_multiply",
+    "type": "api-item"
+  },
   "rq-83312d09": {
     "decl": "Scenario: Bonded-only ForceField builds no neighbor list",
     "file": "forces/neighbor-list",
@@ -4680,6 +4978,14 @@
     "refs": [
       {
         "file": "src/forces/coulomb.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/cufft.rs",
         "kind": "code"
       },
       {
@@ -4781,6 +5087,13 @@
     ],
     "title": "IntegratorBuilder",
     "type": "api-item"
+  },
+  "rq-881559bd": {
+    "decl": "Scenario: Spread produces zero charge density at a grid point with no particle support",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Spread produces zero charge density at a grid point with no particle support",
+    "type": "scenario"
   },
   "rq-882c9e86": {
     "decl": "Scenario: cached_generation initialised from a non-zero construction-time generation",
@@ -5190,6 +5503,14 @@
     "title": "potential_energies and virials round-trip through ParticleBuffers",
     "type": "scenario"
   },
+  "rq-95385a9d": {
+    "decl": "### Influence-function multiply and inverse FFT",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Influence-function multiply and inverse FFT",
+    "type": "section"
+  },
   "rq-955b55f0": {
     "decl": "# Atom indices are 0-based and refer to entries in the init file.",
     "file": "forces/bonds",
@@ -5339,6 +5660,13 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-991b4695": {
+    "decl": "Scenario: Box compatibility ignores SPME's reciprocal grid",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Box compatibility ignores SPME's reciprocal grid",
+    "type": "scenario"
+  },
   "rq-9922b639": {
     "decl": "Scenario: Two identical calls produce byte-identical velocities",
     "file": "integration/langevin-baoab",
@@ -5357,6 +5685,14 @@
     ],
     "title": "ParticleState",
     "type": "api-item"
+  },
+  "rq-9a512ed1": {
+    "decl": "### Real-space CUDA kernel",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Real-space CUDA kernel",
+    "type": "section"
   },
   "rq-9a9523d9": {
     "decl": "Scenario: minimum_image at the +L/2 boundary maps to -L/2",
@@ -5468,6 +5804,31 @@
     "level": 2,
     "refs": [],
     "title": "Out of Scope",
+    "type": "section"
+  },
+  "rq-9ca00d25": {
+    "decl": "## Reciprocal-space pipeline",
+    "file": "forces/spme",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/device.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Reciprocal-space pipeline",
     "type": "section"
   },
   "rq-9cd01384": {
@@ -5632,6 +5993,13 @@
     "refs": [],
     "title": "Reject upload when host particle count differs from buffers",
     "type": "scenario"
+  },
+  "rq-a03de3d5": {
+    "decl": "- `SpmeConfig`",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "SpmeConfig",
+    "type": "api-item"
   },
   "rq-a060036e": {
     "decl": "## Cell List Construction",
@@ -5952,6 +6320,13 @@
     "title": "Lossy mode is the default for velocity-Verlet",
     "type": "scenario"
   },
+  "rq-a98abc35": {
+    "decl": "- `spme_inverse_fft(spme_state) -> Result<(), CuFftError>`",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_inverse_fft",
+    "type": "api-item"
+  },
   "rq-a99ca751": {
     "decl": "Scenario: Cell index of a position outside the primary cell wraps before binning",
     "file": "forces/neighbor-list",
@@ -6008,6 +6383,13 @@
     "file": "io/init-state-file",
     "refs": [],
     "title": "Reject non-blank content after the last data row",
+    "type": "scenario"
+  },
+  "rq-ab74a666": {
+    "decl": "Scenario: Reject grid dimension below 2*spline_order along b",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Reject grid dimension below 2*spline_order along b",
     "type": "scenario"
   },
   "rq-abd761d4": {
@@ -6137,6 +6519,13 @@
     "title": "Morse bond_type rejects non-positive a",
     "type": "scenario"
   },
+  "rq-aeb23925": {
+    "decl": "Scenario: Reject grid dimension below 2*spline_order",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Reject grid dimension below 2*spline_order",
+    "type": "scenario"
+  },
   "rq-aef9888b": {
     "decl": "- `SimulationBoxError` — error type returned by the constructor and",
     "file": "simulation-box",
@@ -6174,6 +6563,13 @@
     ],
     "title": "LennardJonesState",
     "type": "api-item"
+  },
+  "rq-af7018c0": {
+    "decl": "Scenario: Real-space slot produces zero outside r_cut_real",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Real-space slot produces zero outside r_cut_real",
+    "type": "scenario"
   },
   "rq-afb80e25": {
     "decl": "Scenario: Timings file uses the default path derived from config stem",
@@ -6231,6 +6627,13 @@
     "refs": [],
     "title": "Empty .bonds file is valid",
     "type": "scenario"
+  },
+  "rq-b1148667": {
+    "decl": "- `SpmeReciprocalState` — implements `Potential` with",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SpmeReciprocalState",
+    "type": "api-item"
   },
   "rq-b13eba96": {
     "decl": "Scenario: Particles evolve independently with their own forces",
@@ -6610,6 +7013,13 @@
     "title": "Cross-validation",
     "type": "section"
   },
+  "rq-bd684a0d": {
+    "decl": "Scenario: Force gather on one isolated particle returns the gradient of its own spread",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Force gather on one isolated particle returns the gradient of its own spread",
+    "type": "scenario"
+  },
   "rq-bde625cf": {
     "decl": "Scenario: Empty (N=0) run omits all kernel rows but retains host rows",
     "file": "performance-analysis",
@@ -6727,6 +7137,14 @@
       }
     ],
     "title": "Algorithm",
+    "type": "section"
+  },
+  "rq-c0668cb7": {
+    "decl": "## Gherkin Scenarios",
+    "file": "forces/spme",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
     "type": "section"
   },
   "rq-c0aa3b5c": {
@@ -6937,6 +7355,13 @@
     "refs": [],
     "title": "Smoke Test",
     "type": "section"
+  },
+  "rq-c6f6a13c": {
+    "decl": "- `spme_force_gather(particle_buffers, spme_state, slot_output) -> Result<(), GpuError>`",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_force_gather",
+    "type": "api-item"
   },
   "rq-c7420b98": {
     "decl": "## Feature API",
@@ -7168,6 +7593,14 @@
     "title": "RNG",
     "type": "section"
   },
+  "rq-ce4590c1": {
+    "decl": "### Reciprocal-space virial",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Reciprocal-space virial",
+    "type": "section"
+  },
   "rq-ce89d4a4": {
     "decl": "Scenario: Reject when masses has the wrong length",
     "file": "particle-state",
@@ -7200,6 +7633,22 @@
     "refs": [],
     "title": "Column format: atom_i  atom_j  bond_type_name",
     "type": "file"
+  },
+  "rq-cf6116b8": {
+    "decl": "### Real-space reproducibility",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Real-space reproducibility",
+    "type": "section"
+  },
+  "rq-cf82e422": {
+    "decl": "### Functions",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Functions",
+    "type": "section"
   },
   "rq-cf847c1f": {
     "decl": "Scenario: Box generation increment refreshes cell layout and forces a rebuild",
@@ -7376,6 +7825,13 @@
     "title": "Pair `between` normalisation when both types are declared",
     "type": "scenario"
   },
+  "rq-d47caa3d": {
+    "decl": "- `NeighborListState::new_cell_list_only(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, n_cells_per_direction: [u32; 3]) -> Result<NeighborListState, NeighborListError>`",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "NeighborListState",
+    "type": "api-item"
+  },
   "rq-d49c9093": {
     "decl": "- `SimulationBox::minimum_image(&self, displacement: [f32; 3]) -> [f32; 3]`",
     "file": "simulation-box",
@@ -7472,6 +7928,13 @@
     "refs": [],
     "title": "Feature: End-to-End Pipeline Reversibility Test",
     "type": "file"
+  },
+  "rq-d880c228": {
+    "decl": "- `cufft_determinism_smoke_test(device: &Arc<CudaDevice>) -> Result<(), CuFftError>`",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "cufft_determinism_smoke_test",
+    "type": "api-item"
   },
   "rq-d8a08c7a": {
     "decl": "### Data rows",
@@ -7660,6 +8123,20 @@
     "title": "Integration with the Runner",
     "type": "section"
   },
+  "rq-dd41209b": {
+    "decl": "Scenario: SPME slots present in the ForceField when [spme] is configured",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SPME slots present in the ForceField when [spme] is configured",
+    "type": "scenario"
+  },
+  "rq-dd829afb": {
+    "decl": "Scenario: Bin-only cell list rebuilds every step regardless of particle displacement",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Bin-only cell list rebuilds every step regardless of particle displacement",
+    "type": "scenario"
+  },
   "rq-dddcbf07": {
     "decl": "### Exclusion scaling <!-- inline-edit -->",
     "file": "forces/lj-pair-force",
@@ -7741,6 +8218,14 @@
     "refs": [],
     "title": "step() on a ForceField with both slots sums LJ and Morse",
     "type": "scenario"
+  },
+  "rq-df8766ae": {
+    "decl": "### Force gather",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Force gather",
+    "type": "section"
   },
   "rq-dfad7218": {
     "decl": "## Cell Layout",
@@ -7936,6 +8421,13 @@
     "title": "max_cutoff aggregation determines the neighbor-list radius",
     "type": "scenario"
   },
+  "rq-e3c3898a": {
+    "decl": "Scenario: Forward FFT of a zero grid produces zero",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Forward FFT of a zero grid produces zero",
+    "type": "scenario"
+  },
   "rq-e409ce75": {
     "decl": "- `LogWriter::write_row(&mut self, step: u64, time: f64, kinetic_energy: f64, temperature: f64) -> Result<(), LogWriterError>`",
     "file": "io/log-output",
@@ -8051,6 +8543,13 @@
     "title": "Determinism",
     "type": "section"
   },
+  "rq-e5bf6fea": {
+    "decl": "Scenario: The k=0 entry is zeroed by the influence-function multiply",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "The k=0 entry is zeroed by the influence-function multiply",
+    "type": "scenario"
+  },
   "rq-e5e3443f": {
     "decl": "Scenario: Force is C¹ continuous at r_cut",
     "file": "forces/lj-pair-force",
@@ -8126,6 +8625,14 @@
     "refs": [],
     "title": "File with velo:R:3:image:I:3 parses both blocks in order",
     "type": "scenario"
+  },
+  "rq-e7b74f7a": {
+    "decl": "### Influence function",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Influence function",
+    "type": "section"
   },
   "rq-e7c05140": {
     "decl": "Scenario: Langevin-BAOAB kind rejects velocity-Verlet fields",
@@ -8265,12 +8772,40 @@
     "title": "Reject positions past +L/2 (orthorhombic)",
     "type": "scenario"
   },
+  "rq-ea4205ec": {
+    "decl": "Scenario: cuFFT smoke test is skipped when SPME is not configured",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "cuFFT smoke test is skipped when SPME is not configured",
+    "type": "scenario"
+  },
+  "rq-ea67c26b": {
+    "decl": "Scenario: Doubling all charges quadruples the reciprocal-space energy and forces scale linearly",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Doubling all charges quadruples the reciprocal-space energy and forces scale linearly",
+    "type": "scenario"
+  },
   "rq-eb3a65df": {
     "decl": "Scenario: Reduction does not modify neighbor_counts",
     "file": "pair-reduction",
     "refs": [],
     "title": "Reduction does not modify neighbor_counts",
     "type": "scenario"
+  },
+  "rq-eb9e5cc3": {
+    "decl": "- `spme_real_pair_force`: 16×16×1 = 256 threads/block, grid",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_real_pair_force",
+    "type": "api-item"
+  },
+  "rq-ebfa6e1f": {
+    "decl": "- `SpmeError` — error type for SPME slot construction. Variants:",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SpmeError",
+    "type": "api-item"
   },
   "rq-ec06c8e1": {
     "decl": "- `TimingsWriterError` — error type. Variants:",
@@ -8432,6 +8967,13 @@
     "title": "Triclinic Lattice attribute carries non-zero tilts",
     "type": "scenario"
   },
+  "rq-ef8dee82": {
+    "decl": "Scenario: Self-energy is subtracted per particle and totals -k_C·(α/√π)·Σ q²",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Self-energy is subtracted per particle and totals -k_C·(α/√π)·Σ q²",
+    "type": "scenario"
+  },
   "rq-ef902cf6": {
     "decl": "## Runner flow",
     "file": "simulation-runner",
@@ -8464,6 +9006,14 @@
     "title": "PairInteractionConfig",
     "type": "api-item"
   },
+  "rq-f0038583": {
+    "decl": "## Out of Scope",
+    "file": "forces/spme",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-f0084057": {
     "decl": "- `PathRole` — `enum { Init, Trajectory, Log, Timings, Bonds }`. Used in `PathCollision`.",
     "file": "io/config-schema",
@@ -8494,6 +9044,13 @@
     ],
     "title": "lan_drift_half",
     "type": "api-item"
+  },
+  "rq-f02e9e0e": {
+    "decl": "Scenario: Inverse FFT round-trips the forward FFT",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Inverse FFT round-trips the forward FFT",
+    "type": "scenario"
   },
   "rq-f04e473c": {
     "decl": "# Feature: SoA Particle State and GPU Buffers",
@@ -8596,6 +9153,14 @@
     "refs": [],
     "title": "Langevin BAOAB missing temperature is rejected",
     "type": "scenario"
+  },
+  "rq-f2673343": {
+    "decl": "### Forward FFT",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Forward FFT",
+    "type": "section"
   },
   "rq-f2e3fa58": {
     "decl": "- `vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>`",
@@ -8710,6 +9275,21 @@
     "title": "Init file rejected by load_init_state",
     "type": "scenario"
   },
+  "rq-f69698b8": {
+    "decl": "- `spme_charge_spread(particle_buffers, spme_state) -> Result<(), GpuError>`",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_charge_spread",
+    "type": "api-item"
+  },
+  "rq-f6d45062": {
+    "decl": "## Real-space slot",
+    "file": "forces/spme",
+    "level": 2,
+    "refs": [],
+    "title": "Real-space slot",
+    "type": "section"
+  },
   "rq-f704561b": {
     "decl": "Scenario: Valid Morse bond_type is accepted",
     "file": "io/config-schema",
@@ -8723,6 +9303,13 @@
     "refs": [],
     "title": "vv_kick does not modify forces, masses, or positions",
     "type": "scenario"
+  },
+  "rq-f735ea05": {
+    "decl": "- `spme_real_pair_force(particle_buffers, pair_buffer, sim_box, alpha, r_cut_real, atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales, neighbor_list, neighbor_counts) -> Result<(), GpuError>`",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_real_pair_force",
+    "type": "api-item"
   },
   "rq-f73a0f99": {
     "decl": "- `SimulationBox::lx(&self) -> f32`, `SimulationBox::ly(&self) -> f32`,",

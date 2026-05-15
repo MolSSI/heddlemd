@@ -251,11 +251,43 @@ real-space cutoff parameters that apply uniformly to every pair.
   Setting `r_switch = cutoff` selects the hard-cutoff degenerate case
   in which no smoothing is applied.
 
+The `[coulomb]` and `[spme]` tables are mutually exclusive: a config
+declaring both is rejected with `ConfigError::ConflictingElectrostatics`.
+
 Cross-validation alongside the other pair potentials feeds into the
 neighbor list's box-compatibility check: the shared neighbor list's
-search radius is `max(pair_interactions.cutoff_max, coulomb.cutoff)
-+ r_skin`, and the simulation box's minimum perpendicular width must be
-at least `3 *` that value.
+search radius is `max(pair_interactions.cutoff_max, coulomb.cutoff,
+spme.r_cut_real) + r_skin`, and the simulation box's minimum
+perpendicular width must be at least `3 *` that value.
+
+#### `[spme]` (optional table) <!-- rq-08131b48 -->
+
+Activates smooth particle-mesh Ewald (see `forces/spme.md`). The two
+SPME slots — the real-space `erfc`-screened pair-force slot and the
+reciprocal-space spread / FFT / multiply / IFFT / gather pipeline —
+are present iff this table is present. Per-particle charges come from
+each particle type's `charge` field in `[[particle_types]]`; the table
+carries the SPME parameters that apply uniformly to every pair and
+every grid cell.
+
+- `alpha: f64` — Ewald splitting parameter in inverse metres.
+  Required. Finite, strictly positive. Larger values shift work into
+  reciprocal space (shorter real-space cutoff feasible, finer grid
+  needed). A common starting point for typical accuracy targets is
+  `alpha ≈ 3.5 / r_cut_real`.
+- `r_cut_real: f64` — real-space cutoff in metres beyond which the
+  screened Coulomb force is treated as zero. Required. Finite,
+  strictly positive.
+- `grid: [u32; 3]` — FFT grid dimensions in the lattice-direction order
+  `[n_a, n_b, n_c]`. Required. Each component must satisfy
+  `n_d >= 2 · spline_order`. A typical starting point is one grid
+  point per `~1 Å` of perpendicular width.
+- `spline_order: u32` — B-spline interpolation order. Optional;
+  defaults to `4` when omitted. Accepted values are `4`, `5`, `6`,
+  `7`, `8`.
+
+The `[spme]` and `[coulomb]` tables are mutually exclusive (see
+above).
 
 #### `[neighbor_list]` (optional table) <!-- rq-adddaf1a -->
 
@@ -389,12 +421,17 @@ Beyond per-field validation, the loader checks:
   - `bond_types: Vec<BondTypeConfig>` — empty when the `[[bond_types]]`
     array is absent.
   - `coulomb: Option<CoulombConfig>` — `Some` when the `[coulomb]` table
-    is present in the config, `None` otherwise.
+    is present in the config, `None` otherwise. Mutually exclusive with
+    `spme`.
+  - `spme: Option<SpmeConfig>` — `Some` when the `[spme]` table is
+    present in the config, `None` otherwise. Mutually exclusive with
+    `coulomb`.
   - `neighbor_list: NeighborListConfig` — defaults to
     `NeighborListConfig::CellList { max_neighbors: 256, r_skin: 0.3 *
     max_cutoff }` when the `[neighbor_list]` table is omitted from the
     config, where `max_cutoff` is the largest cutoff across
-    `[[pair_interactions]]` and the `[coulomb]` table.
+    `[[pair_interactions]]`, the `[coulomb]` table, and the `[spme]`
+    table's `r_cut_real` (whichever are present).
   - `output: OutputConfig`
   - `config_path: PathBuf` — the absolute path of the source config file,
     retained for error messages and default output-path derivation.
@@ -449,9 +486,16 @@ Beyond per-field validation, the loader checks:
   - `r_switch: f64` — populated from the optional `r_switch` field with
     the documented default `0.9 * cutoff`.
 
+- `SpmeConfig` <!-- rq-a03de3d5 -->
+  - `alpha: f64` — Ewald splitting parameter (1/m).
+  - `r_cut_real: f64` — real-space cutoff in metres.
+  - `grid: [u32; 3]` — FFT grid dimensions `[n_a, n_b, n_c]`.
+  - `spline_order: u32` — populated from the optional `spline_order`
+    field with the documented default `4`.
+
 - `NeighborListConfig` — tagged enum selecting the algorithm used by <!-- rq-a8320030 -->
-  every short-range pair-force slot (Lennard-Jones, truncated Coulomb)
-  to enumerate non-bonded pairs. Variants:
+  every short-range pair-force slot (Lennard-Jones, truncated Coulomb,
+  SPME real-space) to enumerate non-bonded pairs. Variants:
   - `AllPairs` — selected by `mode = "all-pairs"`. Carries no
     parameters; pair-force slots use the O(N²) kernel.
   - `CellList { max_neighbors: u32, r_skin: f64 }` — selected by
@@ -497,6 +541,8 @@ Beyond per-field validation, the loader checks:
     the chosen `potential` (neither a common field nor a field of that
     potential).
   - `PathCollision { kind_a: PathRole, kind_b: PathRole, path: PathBuf }`.
+  - `ConflictingElectrostatics` — the config declares both `[coulomb]`
+    and `[spme]`. Only one electrostatics method may be active per run.
   - `UnknownIntegratorKind { actual: String }` — `[integrator].kind` is
     not one of the supported strings.
   - `UnknownIntegratorField { kind: String, field: String }` — a field in

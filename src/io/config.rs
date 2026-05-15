@@ -58,6 +58,8 @@ pub enum ConfigError {
         kind_b: PathRole,
         path: PathBuf,
     },
+    #[error("config declares both [coulomb] and [spme]; only one electrostatics method may be active per run")]
+    ConflictingElectrostatics,
     #[error("unknown integrator kind `{actual}`")]
     UnknownIntegratorKind { actual: String },
     #[error("unknown field `{field}` for integrator kind `{kind}`")]
@@ -169,6 +171,15 @@ pub struct CoulombConfig {
     pub r_switch: f64,
 }
 
+// SpmeConfig — parsed `[spme]` table; rq-7bd2d9ca rq-202493a5
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpmeConfig {
+    pub alpha: f64,
+    pub r_cut_real: f64,
+    pub grid: [u32; 3],
+    pub spline_order: u32,
+}
+
 // rq-1254cd3a
 #[derive(Debug, Clone)]
 pub struct OutputConfig {
@@ -193,6 +204,7 @@ pub struct Config {
     pub pair_interactions: Vec<PairInteractionConfig>,
     pub bond_types: Vec<BondTypeConfig>,
     pub coulomb: Option<CoulombConfig>,
+    pub spme: Option<SpmeConfig>,
     pub neighbor_list: NeighborListConfig,
     pub output: OutputConfig,
     pub config_path: PathBuf,
@@ -709,11 +721,99 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         Some(_) => return Err(invalid("coulomb", "expected a table")),
     };
 
-    // Effective max cutoff includes both pair_interactions and coulomb.
-    let max_cutoff = match coulomb.as_ref() {
-        Some(c) => max_cutoff.max(c.cutoff),
-        None => max_cutoff,
+    // rq-7bd2d9ca rq-202493a5: parse the optional [spme] table. The
+    // SPME slots are present iff this table is present in the config.
+    let spme: Option<SpmeConfig> = match root.get("spme") {
+        None => None,
+        Some(toml::Value::Table(spme_tbl)) => {
+            for key in spme_tbl.keys() {
+                if !matches!(
+                    key.as_str(),
+                    "alpha" | "r_cut_real" | "grid" | "spline_order"
+                ) {
+                    return Err(invalid(
+                        &format!("spme.{key}"),
+                        "unknown field for [spme]",
+                    ));
+                }
+            }
+            let alpha = get_f64(spme_tbl, "alpha")
+                .map_err(rename_field("spme.alpha".to_string()))?;
+            require_finite_positive("spme.alpha", alpha)?;
+            let r_cut_real = get_f64(spme_tbl, "r_cut_real")
+                .map_err(rename_field("spme.r_cut_real".to_string()))?;
+            require_finite_positive("spme.r_cut_real", r_cut_real)?;
+            let spline_order: u32 = match spme_tbl.get("spline_order") {
+                Some(toml::Value::Integer(i)) if (4..=8).contains(i) => *i as u32,
+                Some(toml::Value::Integer(i)) => {
+                    return Err(invalid(
+                        "spme.spline_order",
+                        format!("expected an integer in [4, 8]; got {i}"),
+                    ));
+                }
+                Some(_) => return Err(invalid("spme.spline_order", "expected an integer")),
+                None => 4,
+            };
+            let grid_value = spme_tbl
+                .get("grid")
+                .ok_or_else(|| missing("spme.grid"))?;
+            let grid_array = grid_value
+                .as_array()
+                .ok_or_else(|| invalid("spme.grid", "expected an array of three integers"))?;
+            if grid_array.len() != 3 {
+                return Err(invalid(
+                    "spme.grid",
+                    format!("expected 3 integers, got {}", grid_array.len()),
+                ));
+            }
+            let mut grid = [0u32; 3];
+            let axis_names = ["a", "b", "c"];
+            for (i, item) in grid_array.iter().enumerate() {
+                let v = match item {
+                    toml::Value::Integer(n) if *n > 0 => *n as u32,
+                    toml::Value::Integer(n) => {
+                        return Err(invalid(
+                            &format!("spme.grid[{}]", axis_names[i]),
+                            format!("expected a strictly positive integer, got {n}"),
+                        ));
+                    }
+                    _ => {
+                        return Err(invalid(
+                            &format!("spme.grid[{}]", axis_names[i]),
+                            "expected an integer",
+                        ));
+                    }
+                };
+                if v < 2 * spline_order {
+                    return Err(invalid(
+                        &format!("spme.grid[{}]", axis_names[i]),
+                        format!(
+                            "must be >= 2 * spline_order = {}; got {}",
+                            2 * spline_order,
+                            v
+                        ),
+                    ));
+                }
+                grid[i] = v;
+            }
+            Some(SpmeConfig {
+                alpha,
+                r_cut_real,
+                grid,
+                spline_order,
+            })
+        }
+        Some(_) => return Err(invalid("spme", "expected a table")),
     };
+
+    if coulomb.is_some() && spme.is_some() {
+        return Err(ConfigError::ConflictingElectrostatics);
+    }
+
+    // Effective max cutoff includes pair_interactions, coulomb, and spme.
+    let max_cutoff = max_cutoff
+        .max(coulomb.as_ref().map(|c| c.cutoff).unwrap_or(0.0))
+        .max(spme.as_ref().map(|s| s.r_cut_real).unwrap_or(0.0));
 
     let neighbor_list = match root.get("neighbor_list") {
         None => NeighborListConfig::CellList {
@@ -930,6 +1030,7 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         pair_interactions,
         bond_types,
         coulomb,
+        spme,
         neighbor_list,
         output: OutputConfig {
             trajectory_path,

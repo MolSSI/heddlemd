@@ -38,6 +38,10 @@ pub enum NeighborListError {
 pub enum NeighborListMode {
     Trivial,
     CellList(CellListData),
+    // CellListOnly produces the cell-list output (sorted particle IDs +
+    // per-cell offsets) without building a neighbor list. Used by the
+    // SPME reciprocal-space slot; see `rqm/forces/spme.md`.
+    CellListOnly(CellListData),
 }
 
 // rq-77754ad1
@@ -81,7 +85,7 @@ impl NeighborListState {
     pub fn cell_list_data(&self) -> Option<&CellListData> {
         match &self.mode {
             NeighborListMode::Trivial => None,
-            NeighborListMode::CellList(cl) => Some(cl),
+            NeighborListMode::CellList(cl) | NeighborListMode::CellListOnly(cl) => Some(cl),
         }
     }
 
@@ -90,8 +94,14 @@ impl NeighborListState {
     pub fn cell_list_data_mut(&mut self) -> Option<&mut CellListData> {
         match &mut self.mode {
             NeighborListMode::Trivial => None,
-            NeighborListMode::CellList(cl) => Some(cl),
+            NeighborListMode::CellList(cl) | NeighborListMode::CellListOnly(cl) => Some(cl),
         }
+    }
+
+    /// `true` when the state is in CellListOnly mode (bin structure only,
+    /// no neighbor list).
+    pub fn is_bin_only(&self) -> bool {
+        matches!(self.mode, NeighborListMode::CellListOnly(_))
     }
 
     // rq-14033af1
@@ -182,6 +192,94 @@ impl NeighborListState {
         })
     }
 
+    // rq-9ca00d25 rq-202493a5
+    //
+    // Build a bin-only cell-list state with explicit grid dimensions.
+    // Used by the SPME reciprocal-space slot (see rqm/forces/spme.md).
+    // The state produces sorted particle IDs and per-cell offsets but
+    // no neighbor list; the neighbor-list-build and displacement-check
+    // kernels are never launched.
+    pub fn new_cell_list_only(
+        gpu: &GpuContext,
+        sim_box: &SimulationBox,
+        particle_count: usize,
+        n_cells_per_direction: [u32; 3],
+    ) -> Result<Self, NeighborListError> {
+        let device = gpu.device.clone();
+        let kernels = gpu.kernels.clone();
+
+        let direction_names: [&'static str; 3] = ["a", "b", "c"];
+        for d in 0..3 {
+            if n_cells_per_direction[d] < 3 {
+                return Err(NeighborListError::BoxTooSmallForCells {
+                    direction: direction_names[d],
+                    width: 0.0,
+                    required: 3.0,
+                });
+            }
+        }
+        let n_cells = n_cells_per_direction;
+        let n_cells_total =
+            n_cells[0] as usize * n_cells[1] as usize * n_cells[2] as usize;
+        check_n_cells_total(n_cells_total)?;
+
+        // Cell-list scratch + outputs.
+        let cell_indices = device
+            .alloc_zeros::<u32>(particle_count.max(1))
+            .map_err(GpuError::from)?;
+        let cell_counts = device
+            .alloc_zeros::<u32>(n_cells_total)
+            .map_err(GpuError::from)?;
+        let write_cursors = device
+            .alloc_zeros::<u32>(n_cells_total)
+            .map_err(GpuError::from)?;
+        let scan_block_totals = alloc_scan_block_totals(&device, n_cells_total)?;
+        let sorted_particle_ids = device
+            .alloc_zeros::<u32>(particle_count.max(1))
+            .map_err(GpuError::from)?;
+        let cell_offsets = device
+            .alloc_zeros::<u32>(n_cells_total + 1)
+            .map_err(GpuError::from)?;
+
+        // Neighbor-list-only buffers are zero-length in bin-only mode.
+        let neighbor_list = device.alloc_zeros::<u32>(0).map_err(GpuError::from)?;
+        let neighbor_counts = device.alloc_zeros::<u32>(0).map_err(GpuError::from)?;
+        let reference_positions_x = device.alloc_zeros::<f32>(0).map_err(GpuError::from)?;
+        let reference_positions_y = device.alloc_zeros::<f32>(0).map_err(GpuError::from)?;
+        let reference_positions_z = device.alloc_zeros::<f32>(0).map_err(GpuError::from)?;
+        let disp_sq = device.alloc_zeros::<f32>(0).map_err(GpuError::from)?;
+        let overflow_flag = device.alloc_zeros::<u32>(0).map_err(GpuError::from)?;
+
+        Ok(NeighborListState {
+            device,
+            kernels,
+            particle_count,
+            max_neighbors: 0,
+            neighbor_list,
+            neighbor_counts,
+            mode: NeighborListMode::CellListOnly(CellListData {
+                n_cells,
+                n_cells_total,
+                r_cut: 0.0,
+                r_skin: 0.0,
+                r_search_sq: 0.0,
+                cached_generation: sim_box.generation(),
+                cell_indices,
+                cell_counts,
+                write_cursors,
+                scan_block_totals,
+                sorted_particle_ids,
+                cell_offsets,
+                reference_positions_x,
+                reference_positions_y,
+                reference_positions_z,
+                disp_sq,
+                overflow_flag,
+                needs_rebuild: true,
+            }),
+        })
+    }
+
     // rq-c96fd9d2
     pub fn new_trivial(
         gpu: &GpuContext,
@@ -235,6 +333,18 @@ impl NeighborListState {
         let device = self.device.clone();
         let cl = match &mut self.mode {
             NeighborListMode::Trivial => return Ok(false),
+            // Bin-only mode has a fixed n_cells_per_direction (the FFT
+            // grid resolution); the box-generation refresh re-records
+            // the generation but does not re-derive n_cells from
+            // r_cut/r_skin.
+            NeighborListMode::CellListOnly(cl) => {
+                if sim_box.generation() != cl.cached_generation {
+                    cl.cached_generation = sim_box.generation();
+                    cl.needs_rebuild = true;
+                    return Ok(true);
+                }
+                return Ok(false);
+            }
             NeighborListMode::CellList(cl) => cl,
         };
         if sim_box.generation() == cl.cached_generation {
@@ -277,6 +387,8 @@ impl NeighborListState {
         }
         let cl = match &mut self.mode {
             NeighborListMode::Trivial => return Ok(0.0),
+            // Bin-only mode has no displacement check; rebuild every step.
+            NeighborListMode::CellListOnly(_) => return Ok(0.0),
             NeighborListMode::CellList(cl) => cl,
         };
         timings
@@ -316,8 +428,11 @@ impl NeighborListState {
         timings: &mut Timings,
     ) -> Result<(), NeighborListError> {
         if self.particle_count == 0 {
-            if let NeighborListMode::CellList(cl) = &mut self.mode {
-                cl.needs_rebuild = false;
+            match &mut self.mode {
+                NeighborListMode::CellList(cl) | NeighborListMode::CellListOnly(cl) => {
+                    cl.needs_rebuild = false;
+                }
+                NeighborListMode::Trivial => {}
             }
             return Ok(());
         }
@@ -340,10 +455,11 @@ impl NeighborListState {
         let kernels = self.kernels.clone();
         let max_neighbors = self.max_neighbors;
         let particle_count = self.particle_count;
+        let bin_only = matches!(self.mode, NeighborListMode::CellListOnly(_));
 
         let cl = match &mut self.mode {
             NeighborListMode::Trivial => return Ok(()),
-            NeighborListMode::CellList(cl) => cl,
+            NeighborListMode::CellList(cl) | NeighborListMode::CellListOnly(cl) => cl,
         };
 
         compute_cell_indices_and_histogram(
@@ -379,6 +495,11 @@ impl NeighborListState {
             &mut cl.sorted_particle_ids,
             cl.n_cells_total,
         )?;
+
+        if bin_only {
+            cl.needs_rebuild = false;
+            return Ok(());
+        }
 
         device
             .memset_zeros(&mut cl.overflow_flag)
@@ -444,10 +565,19 @@ impl NeighborListState {
             return Ok(());
         }
 
+        // CellListOnly mode rebuilds every step unconditionally; the
+        // displacement-check + r_skin machinery is bypassed entirely.
+        if matches!(self.mode, NeighborListMode::CellListOnly(_)) {
+            if let NeighborListMode::CellListOnly(cl) = &mut self.mode {
+                cl.needs_rebuild = true;
+            }
+            return self.rebuild(sim_box, buffers, timings);
+        }
+
         let refreshed = self.refresh_cell_layout_if_box_changed(sim_box)?;
 
         let (mut rebuild_required, r_skin) = match &self.mode {
-            NeighborListMode::Trivial => unreachable!(),
+            NeighborListMode::Trivial | NeighborListMode::CellListOnly(_) => unreachable!(),
             NeighborListMode::CellList(cl) => (cl.needs_rebuild, cl.r_skin),
         };
 

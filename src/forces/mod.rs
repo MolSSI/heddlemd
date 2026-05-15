@@ -3,6 +3,7 @@ pub mod coulomb;
 pub mod lj;
 pub mod morse;
 pub mod neighbor_list;
+pub mod spme;
 
 use std::sync::Arc;
 
@@ -22,6 +23,7 @@ pub use bonds::{
     load_bonds_file,
 };
 pub use coulomb::{CoulombParameters, CoulombState};
+pub use spme::{SpmeError, SpmeParameters, SpmeReciprocalGrid};
 pub use lj::LennardJonesState;
 pub use morse::MorseBondedState;
 pub use neighbor_list::{

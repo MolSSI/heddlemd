@@ -379,6 +379,82 @@ pub fn coulomb_pair_force(
     Ok(())
 }
 
+// rq-9ca00d25 rq-202493a5
+#[allow(clippy::too_many_arguments)]
+pub fn spme_charge_spread(
+    particle_buffers: &ParticleBuffers,
+    sim_box: &SimulationBox,
+    sorted_particle_ids: &CudaSlice<u32>,
+    cell_offsets: &CudaSlice<u32>,
+    grid: [u32; 3],
+    spline_order: u32,
+    rho: &mut CudaSlice<f32>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    let n_a = grid[0];
+    let n_b = grid[1];
+    let n_c = grid[2];
+    let m = n_a as usize * n_b as usize * n_c as usize;
+    debug_assert_eq!(rho.len(), m);
+    debug_assert_eq!(cell_offsets.len(), m + 1);
+    debug_assert_eq!(sorted_particle_ids.len(), n.max(1));
+    debug_assert_eq!(particle_buffers.charges.len(), n);
+
+    let m_u32 = m as u32;
+    let func = particle_buffers.kernels.spme_charge_spread.clone();
+    let cfg = launch_config(m_u32);
+    let lat = sim_box.lattice();
+    let n_u32 = n as u32;
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.positions_x,
+                &particle_buffers.positions_y,
+                &particle_buffers.positions_z,
+                &particle_buffers.charges,
+                sorted_particle_ids,
+                cell_offsets,
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
+                n_a,
+                n_b,
+                n_c,
+                spline_order,
+                rho,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-9ca00d25
+pub fn spme_influence_multiply(
+    kernels: &Kernels,
+    influence_g: &CudaSlice<f32>,
+    rho_hat_interleaved: &mut CudaSlice<f32>,
+    n_complex: u32,
+) -> Result<(), GpuError> {
+    if n_complex == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(influence_g.len(), n_complex as usize);
+    debug_assert_eq!(rho_hat_interleaved.len(), 2 * n_complex as usize);
+    let func = kernels.spme_influence_multiply.clone();
+    let cfg = launch_config(n_complex);
+    unsafe {
+        func.launch(cfg, (influence_g, rho_hat_interleaved, n_complex))
+            .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 // rq-f00f729e (morse_bond_force launcher mirroring the `gpu` convention)
 #[allow(clippy::too_many_arguments)]
 pub fn morse_bond_force(

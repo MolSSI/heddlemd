@@ -18,6 +18,17 @@ fn main() {
 
     println!("cargo:rerun-if-changed=kernels");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=CUDA_PATH");
+    println!("cargo:rerun-if-env-changed=CUDA_HOME");
+
+    // Link against cuFFT. cudarc 0.13 does not bundle cuFFT bindings;
+    // SPME uses raw FFI through src/gpu/cufft.rs.
+    for path in cuda_library_search_paths() {
+        if path.exists() {
+            println!("cargo:rustc-link-search=native={}", path.display());
+        }
+    }
+    println!("cargo:rustc-link-lib=cufft");
 
     let mut kernels: Vec<(String, PathBuf)> = Vec::new();
     let entries = fs::read_dir(&kernels_dir).unwrap_or_else(|e| {
@@ -52,6 +63,28 @@ fn main() {
         )
         .expect("failed to write kernels.rs");
     }
+}
+
+fn cuda_library_search_paths() -> Vec<PathBuf> {
+    // Honour explicit env overrides first; fall back to common CUDA
+    // installation locations.
+    let mut roots: Vec<PathBuf> = Vec::new();
+    if let Some(p) = env::var_os("CUDA_PATH") {
+        roots.push(PathBuf::from(p));
+    }
+    if let Some(p) = env::var_os("CUDA_HOME") {
+        roots.push(PathBuf::from(p));
+    }
+    roots.push(PathBuf::from("/usr/local/cuda"));
+    roots.push(PathBuf::from("/opt/cuda"));
+
+    let mut paths: Vec<PathBuf> = Vec::new();
+    for r in roots {
+        paths.push(r.join("lib64"));
+        paths.push(r.join("targets/x86_64-linux/lib"));
+        paths.push(r.join("lib"));
+    }
+    paths
 }
 
 fn compile_to_ptx(source: &Path, output: &Path) {

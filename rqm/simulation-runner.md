@@ -74,7 +74,8 @@ message.
    `w_d >= 3 * (cutoff_max + r_skin)` where `w_d` is the box's
    perpendicular width along direction `d` (see `simulation-box.md`)
    and `cutoff_max` is the largest cutoff across
-   `config.pair_interactions` and `config.coulomb` (when present).
+   `config.pair_interactions`, `config.coulomb.cutoff`, and
+   `config.spme.r_cut_real` (whichever are present).
    A violation surfaces as `RunnerError::CellListBoxTooSmall {
    direction, width, required }` and exits with code `1`.
    `NeighborListConfig::AllPairs` skips this check.
@@ -85,7 +86,11 @@ message.
     ExclusionList)`. Failure → exit 1. When `config.bonds.is_none()`,
     use an empty `BondList` and `ExclusionList`.
 7. **Initialise CUDA.** Call `init_device()` (`build-pipeline.md`).
-   Failure → exit 1.
+   Failure → exit 1. When `config.spme.is_some()`, `init_device` runs
+   the cuFFT determinism smoke test described in `forces/spme.md`. A
+   smoke-test failure surfaces as
+   `RunnerError::CuFftNonDeterministic { differences: usize }` and
+   exits with code `1`.
 8. **Generate velocities (if absent).** When
    `init_state.velocities.is_none()`, sample velocities via the
    Maxwell-Boltzmann procedure described in *Velocity generation*. When
@@ -362,9 +367,15 @@ wrapper that calls into the library.
     — when `config.neighbor_list` is `CellList`, the box read from the
     init file has a perpendicular width along some lattice direction
     that is shorter than `3 * (cutoff_max + r_skin)`, where `cutoff_max`
-    is the largest cutoff across `config.pair_interactions` and
-    `config.coulomb` (when present). `direction` is one of `"a"`,
-    `"b"`, `"c"`.
+    is the largest cutoff across `config.pair_interactions`,
+    `config.coulomb.cutoff`, and `config.spme.r_cut_real` (whichever
+    are present). `direction` is one of `"a"`, `"b"`, `"c"`.
+  - `CuFftNonDeterministic { differences: usize }` — `init_device`'s
+    cuFFT determinism smoke test detected `differences > 0` bytes
+    differing between two consecutive R2C transforms of the same
+    input. Raised only when `config.spme.is_some()`. Indicates the
+    host's cuFFT installation does not meet SPME's reproducibility
+    contract.
 
 ### Functions <!-- rq-e5e4b048 -->
 

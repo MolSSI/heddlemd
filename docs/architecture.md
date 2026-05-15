@@ -294,8 +294,7 @@ box periodicity is selected.
 
 ## Extensibility
 
-New force models (e.g., bonded interactions, long-range electrostatics via
-Ewald/PME) follow the same pattern:
+New force models (e.g., bonded interactions) follow the same pattern:
 
 1. Compute pairwise (or per-particle) contributions in a dedicated kernel.
 2. Write results to a deterministic buffer.
@@ -303,3 +302,8 @@ Ewald/PME) follow the same pattern:
 
 As long as every new kernel writes to pre-indexed buffer slots and avoids
 atomic float accumulation, reproducibility is preserved.
+
+Long-range electrostatics (SPME) uses an inverted iteration pattern — one
+thread per grid cell rather than per-particle — to preserve determinism
+without an `O(N · p³)` intermediate buffer. See
+`long-range-electrostatics.md` for the architectural overview.
