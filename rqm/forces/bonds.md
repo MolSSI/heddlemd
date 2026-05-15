@@ -33,11 +33,14 @@ Sections may appear in either order.
 2 3 CN
 
 [exclusions]
-# Column format: atom_i  atom_j  [scale] <!-- rq-c8ea0a96 -->
-# Scale defaults to 0.0 (full exclusion) when omitted. <!-- rq-922c9a86 -->
+# Column format: atom_i  atom_j  [scale_lj]  [scale_coul] <!-- rq-c8ea0a96 -->
+# Both scales default to 0.0 (full exclusion) when omitted. <!-- rq-922c9a86 -->
+# A single scale column (3-column form) sets both scale_lj and <!-- rq-10956a4e -->
+# scale_coul to that value. <!-- rq-d7675fb3 -->
 0 1 0.0
 1 2 0.0
 0 2 0.5
+0 3 0.5 0.833
 ```
 
 Inside a section, columns are separated by ASCII whitespace (one or
@@ -63,14 +66,23 @@ are rejected as duplicates regardless of order in the file.
 
 ### Exclusion entries <!-- rq-4ae7794c -->
 
-Each non-comment line in `[exclusions]` has the form
-`atom_i atom_j [scale]`. The scale column is optional; when omitted
-the scale defaults to `0.0` (full exclusion).
+Each non-comment line in `[exclusions]` has one of three forms:
+
+- `atom_i atom_j` — both `scale_lj` and `scale_coul` default to `0.0`
+  (full exclusion of the pair from both non-bonded potentials).
+- `atom_i atom_j scale` — single scale applied identically to LJ and
+  Coulomb: `scale_lj = scale_coul = scale`.
+- `atom_i atom_j scale_lj scale_coul` — independent per-potential
+  scales.
+
+Per-potential scaling lets a `.bonds` file express force-field
+conventions like AMBER's 1-4 scaling, where LJ-1-4 = 0.5 and
+Coulomb-1-4 = 1/1.2 ≈ 0.833.
 
 - `atom_i: u32` and `atom_j: u32` are zero-based particle indices. Both
   must be `< particle_count`. `atom_i == atom_j` is rejected.
-- `scale: f32` when present is a finite number in `[0.0, 1.0]`.
-  Out-of-range values, NaN, and infinity are rejected.
+- `scale_lj: f32` and `scale_coul: f32` when present are finite numbers
+  in `[0.0, 1.0]`. Out-of-range values, NaN, and infinity are rejected.
 
 Like bonds, exclusions are canonicalised to `(min, max)` and sorted by
 `(min, max)`. Duplicate pairs (after canonicalisation) are rejected.
@@ -81,25 +93,27 @@ After parsing, the consumer-facing `ExclusionList` is the *effective
 exclusion list*, formed by combining the explicit `[exclusions]`
 entries with implicit exclusions derived from `[bonds]`:
 
-- Every explicit `(i, j, s)` entry from the file becomes an effective
-  exclusion `(i, j, s)`.
+- Every explicit `(i, j, scale_lj, scale_coul)` entry from the file
+  becomes an effective exclusion with those two scales.
 - For every bond `(i, j)` in `[bonds]` that does **not** have a
-  matching explicit `(i, j, _)` entry, an implicit exclusion
-  `(i, j, 0.0)` is added.
+  matching explicit `(i, j, _, _)` entry, an implicit exclusion
+  `(i, j, 0.0, 0.0)` is added.
 
-The result is the set of `(i, j, scale)` tuples consulted by the LJ
-kernel for scaling pairwise non-bonded interactions. Explicit entries
-take precedence over the bond default; an explicit entry with
-`scale = 1.0` therefore *keeps* the LJ contribution for a bonded pair,
-which is unusual physics but is the user's deliberate override.
+The result is the set of `(i, j, scale_lj, scale_coul)` tuples
+consulted by the LJ and Coulomb pair-force kernels. The LJ kernel reads
+`scale_lj`; the Coulomb kernel reads `scale_coul`. Explicit entries take
+precedence over the bond default; an explicit entry with `scale = 1.0`
+therefore *keeps* the corresponding non-bonded contribution for a bonded
+pair, which is unusual physics but is the user's deliberate override.
 
 Effective exclusions for pairs that are neither bonded nor explicitly
-listed are absent from the list; the LJ kernel treats them as
-`scale = 1.0` (no scaling).
+listed are absent from the list; the LJ and Coulomb kernels treat them
+as `scale = 1.0` (no scaling).
 
 The framework treats this implicit-exclusion rule as the only
 default behaviour that affects simulation results without an explicit
-user declaration. It is documented here and in `lj-pair-force.md`.
+user declaration. It is documented here, in `lj-pair-force.md`, and in
+`coulomb-pair-force.md`.
 
 ### Empty file <!-- rq-1c794f95 -->
 
@@ -140,21 +154,24 @@ For `E` effective exclusions, the host-side `ExclusionList` carries:
 
 - `entries: Vec<Exclusion>` — length `E`, sorted by `(atom_i, atom_j)`
   with `atom_i < atom_j`. Each `Exclusion` records `atom_i: u32`,
-  `atom_j: u32`, and `scale: f32`.
+  `atom_j: u32`, `scale_lj: f32`, and `scale_coul: f32`.
 - `atom_excl_offsets: Vec<u32>` — length `N + 1`. For atom `a`, the
   slice
   `atom_excl_partners[atom_excl_offsets[a] .. atom_excl_offsets[a+1]]`
   lists the *partners* (`u32`) of `a` in the effective exclusion list,
-  paired with their scale factors.
+  paired with their per-potential scale factors.
 - `atom_excl_partners: Vec<u32>` — length `2 * E`.
-- `atom_excl_scales: Vec<f32>` — length `2 * E`, parallel to
-  `atom_excl_partners`.
+- `atom_excl_lj_scales: Vec<f32>` — length `2 * E`, parallel to
+  `atom_excl_partners`. Consumed by the LJ kernel.
+- `atom_excl_coul_scales: Vec<f32>` — length `2 * E`, parallel to
+  `atom_excl_partners`. Consumed by the Coulomb kernel.
 
 Pair-potential CUDA kernels consult this per-atom lookup table through
 the shared device helper `exclusion_scale` declared in
 `kernels/exclusions.cuh` (see *Device-side Exclusion Helper* below).
 The helper performs the linear scan over atom `i`'s partner range and
-returns either the matching scale or `1.0f` when `j` is not present.
+returns either the matching scale (from the per-potential scale array
+the kernel passes in) or `1.0f` when `j` is not present.
 
 ## Device-side Exclusion Helper <!-- rq-b2f23140 -->
 
@@ -179,12 +196,15 @@ the first match, so the typical-case cost is bounded by atom `i`'s
 exclusion-partner count (≤ a few entries for typical bonded systems).
 
 `exclusion_scale` is the canonical device-side reader of the
-exclusion-list buffers described in *Exclusion list* above.
-Pair-potential `.cu` files `#include "exclusions.cuh"` and call
-`exclusion_scale(...)` at the point they want to scale a pair's
-contribution by the effective exclusion factor; nvcc inlines the body
-into each translation unit. The header carries no PTX module of its
-own and `init_device()` performs no `load_ptx` call for it.
+exclusion-list buffers described in *Exclusion list* above. Each
+pair-potential kernel passes the per-potential scale array appropriate
+to itself: the LJ kernel passes `atom_excl_lj_scales`, the Coulomb
+kernel passes `atom_excl_coul_scales`. Pair-potential `.cu` files
+`#include "exclusions.cuh"` and call `exclusion_scale(...)` at the
+point they want to scale a pair's contribution by the effective
+exclusion factor; nvcc inlines the body into each translation unit.
+The header carries no PTX module of its own and `init_device()`
+performs no `load_ptx` call for it.
 
 When the exclusion list is empty, every atom's `atom_excl_offsets`
 range is empty, the helper returns `1.0f`, and the unscaled
@@ -310,22 +330,34 @@ Feature: Bond list, exclusion list, and .bonds file
     Then bond_list.bonds equals [(0,1,0), (1,2,0), (2,3,0)]
 
   @rq-9c1c58ef
-  Scenario: Exclusion scale defaults to 0.0 when column omitted
+  Scenario: Exclusion scales default to 0.0 when both columns omitted
     Given tmp/topology.bonds with exclusion "0 1"
     When load_bonds_file is called
-    Then exclusion_list.entries contains (0, 1, 0.0)
+    Then exclusion_list.entries contains (0, 1, scale_lj=0.0, scale_coul=0.0)
+
+  @rq-1221d020
+  Scenario: Single-scale form sets both LJ and Coulomb scales equally
+    Given tmp/topology.bonds with exclusion "0 1 0.5"
+    When load_bonds_file is called
+    Then exclusion_list.entries contains (0, 1, scale_lj=0.5, scale_coul=0.5)
+
+  @rq-1fde7f32
+  Scenario: Four-column form sets LJ and Coulomb scales independently
+    Given tmp/topology.bonds with exclusion "0 1 0.5 0.833"
+    When load_bonds_file is called
+    Then exclusion_list.entries contains (0, 1, scale_lj=0.5, scale_coul=0.833)
 
   @rq-dcba6fce
   Scenario: Implicit exclusion is added for a bond without explicit entry
     Given tmp/topology.bonds with bond "0 1 CC" and no exclusions
     When load_bonds_file is called
-    Then exclusion_list.entries equals [(0, 1, 0.0)]
+    Then exclusion_list.entries equals [(0, 1, scale_lj=0.0, scale_coul=0.0)]
 
   @rq-e9a421ef
   Scenario: Explicit exclusion overrides the bond's implicit default
     Given tmp/topology.bonds with bond "0 1 CC" and exclusion "0 1 1.0"
     When load_bonds_file is called
-    Then exclusion_list.entries equals [(0, 1, 1.0)]
+    Then exclusion_list.entries equals [(0, 1, scale_lj=1.0, scale_coul=1.0)]
 
   @rq-b0c18819
   Scenario: Empty .bonds file is valid
@@ -367,9 +399,13 @@ Feature: Bond list, exclusion list, and .bonds file
 
   @rq-77f53d4b
   Scenario: atom_excl_offsets reflects sorted exclusion list
-    Given an effective exclusion list of [(0,1,0.0), (0,2,0.5), (1,3,0.5)]
+    Given an effective exclusion list of
+      [(0, 1, scale_lj=0.0, scale_coul=0.0),
+       (0, 2, scale_lj=0.5, scale_coul=0.5),
+       (1, 3, scale_lj=0.5, scale_coul=0.833)]
     Then atom_excl_offsets equals [0, 2, 3, 4, 5]
-    And atom 0's partners are [1, 2] with scales [0.0, 0.5]
+    And atom 0's partners are [1, 2] with LJ scales [0.0, 0.5] and Coulomb scales [0.0, 0.5]
+    And atom 1's partners are [0, 3] with LJ scales [0.0, 0.5] and Coulomb scales [0.0, 0.833]
 
   # --- IO and parser errors ---
 
@@ -437,8 +473,14 @@ Feature: Bond list, exclusion list, and .bonds file
   # --- Exclusion row validation ---
 
   @rq-f371677d
-  Scenario: Exclusion row with wrong column count
-    Given an exclusion row "0 1 0.5 extra"
+  Scenario: Exclusion row with too many columns
+    Given an exclusion row "0 1 0.5 0.8 extra"
+    When load_bonds_file is called
+    Then it returns Err(BondsFileError::InvalidExclusionRow { line_number: _, reason: _ })
+
+  @rq-6cd92c14
+  Scenario: Exclusion row with too few columns
+    Given an exclusion row "0"
     When load_bonds_file is called
     Then it returns Err(BondsFileError::InvalidExclusionRow { line_number: _, reason: _ })
 
@@ -483,4 +525,10 @@ Feature: Bond list, exclusion list, and .bonds file
     Given an exclusion row "0 1 nan"
     When load_bonds_file is called
     Then it returns Err(BondsFileError::ScaleOutOfRange { scale: _, .. })
+
+  @rq-6a9f0a18
+  Scenario: Out-of-range Coulomb scale in four-column form rejected
+    Given an exclusion row "0 1 0.5 1.5"
+    When load_bonds_file is called
+    Then it returns Err(BondsFileError::ScaleOutOfRange { scale: 1.5, .. })
 ```

@@ -46,6 +46,7 @@ fn build_state_xyz(positions: &[[f32; 3]]) -> ParticleState {
         vec![0.0; n],
         vec![0.0; n],
         vec![1.0; n],
+        vec![0.0_f32; n],
         vec![0u32; n],
         None,
             None,
@@ -340,6 +341,7 @@ fn empty_state_is_noop() {
         vec![],
         vec![],
         vec![],
+        vec![],
         vec![0u32; 0],
         None,
             None,
@@ -492,7 +494,7 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
         &table,
         &excl.atom_excl_offsets,
         &excl.atom_excl_partners,
-        &excl.atom_excl_scales,
+        &excl.atom_excl_lj_scales,
         &nl.neighbor_list,
         &nl.neighbor_counts,
     )
@@ -526,6 +528,7 @@ fn does_not_modify_positions_velocities_masses_or_forces() {
         vec![-0.1, -0.2, -0.3, -0.4],
         vec![0.05, 0.1, 0.15, 0.2],
         vec![1.5, 2.5, 3.5, 4.5],
+        vec![0.0_f32; vec![1.5, 2.5, 3.5, 4.5].len()],
         vec![0u32; 4],
         Some(vec![100, 200, 300, 400]),
             None,
@@ -599,6 +602,7 @@ fn nan_positions_propagate_to_nan_pair_forces() {
         vec![0.0, 0.0],
         vec![0.0, 0.0],
         vec![1.0, 1.0],
+        vec![0.0_f32; vec![1.0, 1.0].len()],
         vec![0u32; 2],
         None,
             None,
@@ -671,6 +675,7 @@ fn build_state_with_types(positions: &[[f32; 3]], type_indices: Vec<u32>) -> Par
         vec![0.0; n],
         vec![0.0; n],
         vec![1.0; n],
+        vec![0.0_f32; n],
         type_indices,
         None,
             None,
@@ -835,8 +840,8 @@ fn lj_param_table_from_config_builds_symmetric_table() {
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
     let particle_types = vec![
-        ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 },
-        ParticleTypeConfig { name: "Kr".to_string(), mass: 2.0 },
+        ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 },
+        ParticleTypeConfig { name: "Kr".to_string(), mass: 2.0, charge: 0.0 },
     ];
     let pair_interactions = vec![
         PairInteractionConfig {
@@ -882,7 +887,7 @@ fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
         NeighborListConfig, PairInteractionConfig, PairPotentialParams, ParticleTypeConfig,
     };
     let gpu = init_device().unwrap();
-    let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }];
+    let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }];
     let pair_interactions = vec![PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
         cutoff: 4.0,
@@ -896,6 +901,7 @@ fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
         &particle_types,
         &pair_interactions,
         &[],
+        None,
         &BondList::empty(4),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
@@ -916,7 +922,7 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
     let sim_box = SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap();
-    let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }];
+    let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }];
     let pair_interactions = vec![PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
         cutoff: 3.0,
@@ -943,6 +949,7 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
         &particle_types,
         &pair_interactions,
         &[],
+        None,
         &BondList::empty(4),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
@@ -954,6 +961,7 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
         &particle_types,
         &pair_interactions,
         &[],
+        None,
         &BondList::empty(4),
         &ExclusionList::empty(4),
         &NeighborListConfig::CellList { max_neighbors: 32, r_skin: 0.4 },
@@ -1106,12 +1114,12 @@ fn exclusion_scaling_applies_uniformly_to_force_energy_virial() {
     // hand since the only public constructor is `empty(n)`.
     let host = ExclusionList {
         entries: vec![
-            Exclusion { atom_i: 0, atom_j: 1, scale: 0.5 },
-            Exclusion { atom_i: 1, atom_j: 0, scale: 0.5 },
+            Exclusion { atom_i: 0, atom_j: 1, scale_lj: 0.5, scale_coul: 0.5 },
+            Exclusion { atom_i: 1, atom_j: 0, scale_lj: 0.5, scale_coul: 0.5 },
         ],
         atom_excl_offsets: vec![0u32, 1, 2],
         atom_excl_partners: vec![1u32, 0],
-        atom_excl_scales: vec![0.5_f32, 0.5],
+        atom_excl_lj_scales: vec![0.5_f32, 0.5], atom_excl_coul_scales: vec![0.5_f32, 0.5],
         particle_count: 2,
     };
     let excl = DeviceExclusionList::from_host(&device, &host).unwrap();
@@ -1123,7 +1131,7 @@ fn exclusion_scaling_applies_uniformly_to_force_energy_virial() {
         &table,
         &excl.atom_excl_offsets,
         &excl.atom_excl_partners,
-        &excl.atom_excl_scales,
+        &excl.atom_excl_lj_scales,
         &trivial_neighbor_list(&gpu, &sim_box, 2).neighbor_list,
         &trivial_neighbor_list(&gpu, &sim_box, 2).neighbor_counts,
     )
@@ -1424,12 +1432,12 @@ fn switching_exclusion_scaling_multiplies_switched_quantities() {
     // Half-strength exclusion: scale = 0.5 on the (0,1) pair.
     let host = ExclusionList {
         entries: vec![
-            Exclusion { atom_i: 0, atom_j: 1, scale: 0.5 },
-            Exclusion { atom_i: 1, atom_j: 0, scale: 0.5 },
+            Exclusion { atom_i: 0, atom_j: 1, scale_lj: 0.5, scale_coul: 0.5 },
+            Exclusion { atom_i: 1, atom_j: 0, scale_lj: 0.5, scale_coul: 0.5 },
         ],
         atom_excl_offsets: vec![0u32, 1, 2],
         atom_excl_partners: vec![1u32, 0],
-        atom_excl_scales: vec![0.5_f32, 0.5],
+        atom_excl_lj_scales: vec![0.5_f32, 0.5], atom_excl_coul_scales: vec![0.5_f32, 0.5],
         particle_count: 2,
     };
     let excl = DeviceExclusionList::from_host(&device, &host).unwrap();
@@ -1442,7 +1450,7 @@ fn switching_exclusion_scaling_multiplies_switched_quantities() {
         &table,
         &excl.atom_excl_offsets,
         &excl.atom_excl_partners,
-        &excl.atom_excl_scales,
+        &excl.atom_excl_lj_scales,
         &nl.neighbor_list,
         &nl.neighbor_counts,
     )
@@ -1539,7 +1547,7 @@ fn switching_from_config_populates_user_supplied_r_switch() {
     use dynamics::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
     let gpu = init_device().expect("init_device");
     let device = gpu.device.clone();
-    let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }];
+    let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }];
     let pair_interactions = vec![PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
         cutoff: 5.0,

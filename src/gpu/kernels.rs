@@ -231,7 +231,7 @@ pub fn lj_pair_force(
     params: &LennardJonesParameterTable,
     atom_excl_offsets: &CudaSlice<u32>,
     atom_excl_partners: &CudaSlice<u32>,
-    atom_excl_scales: &CudaSlice<f32>,
+    atom_excl_lj_scales: &CudaSlice<f32>,
     neighbor_list: &CudaSlice<u32>,
     neighbor_counts: &CudaSlice<u32>,
 ) -> Result<(), GpuError> {
@@ -244,7 +244,7 @@ pub fn lj_pair_force(
     debug_assert_eq!(neighbor_list.len(), n * max_neighbors as usize);
     debug_assert_eq!(neighbor_counts.len(), n);
     debug_assert_eq!(atom_excl_offsets.len(), n + 1);
-    debug_assert_eq!(atom_excl_partners.len(), atom_excl_scales.len());
+    debug_assert_eq!(atom_excl_partners.len(), atom_excl_lj_scales.len());
     let table_len = params.n_types as usize * params.n_types as usize;
     debug_assert_eq!(params.sigma.len(), table_len);
     debug_assert_eq!(params.epsilon.len(), table_len);
@@ -290,7 +290,85 @@ pub fn lj_pair_force(
                 &params.switch,
                 atom_excl_offsets,
                 atom_excl_partners,
-                atom_excl_scales,
+                atom_excl_lj_scales,
+                neighbor_list,
+                neighbor_counts,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+/// Coulomb constant `k_C = 1 / (4 π ε₀)` in SI units (N·m²/C²),
+/// rounded to f32. See `forces/coulomb-pair-force.md`. rq-bfd7004c
+pub const K_COULOMB_F32: f32 = 8.987_551_787e9_f32;
+
+// rq-846bdb8b
+#[allow(clippy::too_many_arguments)]
+pub fn coulomb_pair_force(
+    particle_buffers: &ParticleBuffers,
+    pair_buffer: &mut PairBuffer,
+    sim_box: &SimulationBox,
+    cutoff: f32,
+    r_switch: f32,
+    atom_excl_offsets: &CudaSlice<u32>,
+    atom_excl_partners: &CudaSlice<u32>,
+    atom_excl_coul_scales: &CudaSlice<f32>,
+    neighbor_list: &CudaSlice<u32>,
+    neighbor_counts: &CudaSlice<u32>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(pair_buffer.particle_count(), n);
+    let max_neighbors = pair_buffer.max_neighbors();
+    debug_assert_eq!(neighbor_list.len(), n * max_neighbors as usize);
+    debug_assert_eq!(neighbor_counts.len(), n);
+    debug_assert_eq!(atom_excl_offsets.len(), n + 1);
+    debug_assert_eq!(atom_excl_partners.len(), atom_excl_coul_scales.len());
+    debug_assert_eq!(particle_buffers.charges.len(), n);
+
+    let n_u32 = n as u32;
+    let func = particle_buffers.kernels.coulomb_pair_force.clone();
+
+    let grid_y = n_u32.div_ceil(16);
+    let grid_x = max_neighbors.div_ceil(16).max(1);
+    let cfg = LaunchConfig {
+        grid_dim: (grid_x, grid_y, 1),
+        block_dim: (16, 16, 1),
+        shared_mem_bytes: 0,
+    };
+
+    let lat = sim_box.lattice();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.positions_x,
+                &particle_buffers.positions_y,
+                &particle_buffers.positions_z,
+                &particle_buffers.charges,
+                &mut pair_buffer.pair_forces_x,
+                &mut pair_buffer.pair_forces_y,
+                &mut pair_buffer.pair_forces_z,
+                &mut pair_buffer.pair_energies,
+                &mut pair_buffer.pair_virials,
+                max_neighbors,
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
+                K_COULOMB_F32,
+                cutoff,
+                r_switch,
+                atom_excl_offsets,
+                atom_excl_partners,
+                atom_excl_coul_scales,
                 neighbor_list,
                 neighbor_counts,
                 n_u32,

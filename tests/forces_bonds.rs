@@ -76,7 +76,7 @@ fn exclusion_scale_defaults_to_zero() {
     let body = "[exclusions]\n0 1\n";
     let path = write(&dir, body);
     let (_, el) = load_bonds_file(&path, 2, &[]).unwrap();
-    assert_eq!(el.entries[0].scale, 0.0);
+    assert_eq!(el.entries[0].scale_lj, 0.0);
 }
 
 // rq-dcba6fce
@@ -89,7 +89,7 @@ fn implicit_exclusion_added_for_bond() {
     assert_eq!(el.entries.len(), 1);
     assert_eq!(el.entries[0].atom_i, 0);
     assert_eq!(el.entries[0].atom_j, 1);
-    assert_eq!(el.entries[0].scale, 0.0);
+    assert_eq!(el.entries[0].scale_lj, 0.0);
 }
 
 // rq-e9a421ef
@@ -100,7 +100,7 @@ fn explicit_exclusion_overrides_bond_default() {
     let path = write(&dir, body);
     let (_, el) = load_bonds_file(&path, 2, &["CC"]).unwrap();
     assert_eq!(el.entries.len(), 1);
-    assert_eq!(el.entries[0].scale, 1.0);
+    assert_eq!(el.entries[0].scale_lj, 1.0);
 }
 
 // rq-b0c18819
@@ -327,6 +327,61 @@ fn exclusion_scale_nan_rejected() {
     let path = write(&dir, body);
     match load_bonds_file(&path, 2, &[]).unwrap_err() {
         BondsFileError::ScaleOutOfRange { .. } => {}
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn single_scale_form_sets_both_lj_and_coul_scales_equally() {
+    let dir = tmp_path("single_scale");
+    let body = "[exclusions]\n0 1 0.5\n";
+    let path = write(&dir, body);
+    let (_b, el) = load_bonds_file(&path, 2, &[]).unwrap();
+    assert_eq!(el.entries.len(), 1);
+    assert_eq!(el.entries[0].scale_lj, 0.5);
+    assert_eq!(el.entries[0].scale_coul, 0.5);
+}
+
+#[test]
+fn four_column_form_sets_lj_and_coul_scales_independently() {
+    let dir = tmp_path("four_col");
+    let body = "[exclusions]\n0 1 0.5 0.833\n";
+    let path = write(&dir, body);
+    let (_b, el) = load_bonds_file(&path, 2, &[]).unwrap();
+    assert_eq!(el.entries.len(), 1);
+    assert_eq!(el.entries[0].scale_lj, 0.5);
+    assert_eq!(el.entries[0].scale_coul, 0.833);
+}
+
+#[test]
+fn out_of_range_coul_scale_in_four_column_form_rejected() {
+    let dir = tmp_path("coul_oor");
+    let body = "[exclusions]\n0 1 0.5 1.5\n";
+    let path = write(&dir, body);
+    match load_bonds_file(&path, 2, &[]).unwrap_err() {
+        BondsFileError::ScaleOutOfRange { .. } => {}
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn too_few_exclusion_columns_rejected() {
+    let dir = tmp_path("too_few");
+    let body = "[exclusions]\n0\n";
+    let path = write(&dir, body);
+    match load_bonds_file(&path, 2, &[]).unwrap_err() {
+        BondsFileError::InvalidExclusionRow { .. } => {}
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn too_many_exclusion_columns_rejected() {
+    let dir = tmp_path("too_many");
+    let body = "[exclusions]\n0 1 0.5 0.8 extra\n";
+    let path = write(&dir, body);
+    match load_bonds_file(&path, 2, &[]).unwrap_err() {
+        BondsFileError::InvalidExclusionRow { .. } => {}
         other => panic!("unexpected: {other:?}"),
     }
 }

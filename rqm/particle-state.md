@@ -35,6 +35,7 @@ forces_z:           Vec<f32>
 potential_energies: Vec<f32>
 virials:            Vec<f32>
 masses:             Vec<f32>
+charges:            Vec<f32>
 type_indices:       Vec<u32>
 particle_ids:       Vec<u32>
 ```
@@ -94,7 +95,7 @@ call.
 
 ### Types <!-- rq-08066bdf -->
 
-- `ParticleState` — host-side SoA state. All seventeen per-particle arrays <!-- rq-3766be01 -->
+- `ParticleState` — host-side SoA state. All eighteen per-particle arrays <!-- rq-3766be01 -->
   are declared as `pub` fields so callers may iterate, index, and mutate
   them directly. Length consistency between fields is the caller's
   responsibility while the state is held on the host; it is re-validated
@@ -122,12 +123,13 @@ call.
 
 ### Functions and methods <!-- rq-7206ab76 -->
 
-- `ParticleState::new(positions_x: Vec<f32>, positions_y: Vec<f32>, positions_z: Vec<f32>, velocities_x: Vec<f32>, velocities_y: Vec<f32>, velocities_z: Vec<f32>, masses: Vec<f32>, type_indices: Vec<u32>, ids: Option<Vec<u32>>, images: Option<(Vec<i32>, Vec<i32>, Vec<i32>)>) -> Result<ParticleState, ParticleStateError>` <!-- rq-5e0598cb -->
+- `ParticleState::new(positions_x: Vec<f32>, positions_y: Vec<f32>, positions_z: Vec<f32>, velocities_x: Vec<f32>, velocities_y: Vec<f32>, velocities_z: Vec<f32>, masses: Vec<f32>, charges: Vec<f32>, type_indices: Vec<u32>, ids: Option<Vec<u32>>, images: Option<(Vec<i32>, Vec<i32>, Vec<i32>)>) -> Result<ParticleState, ParticleStateError>` <!-- rq-5e0598cb -->
   - The particle count is taken from `positions_x.len()`.
   - Validates that `positions_y`, `positions_z`, `velocities_x`,
-    `velocities_y`, `velocities_z`, `masses`, and `type_indices` all have
-    the same length as `positions_x`. Returns `LengthMismatch` on the first
-    offending array (checked in declaration order).
+    `velocities_y`, `velocities_z`, `masses`, `charges`, and
+    `type_indices` all have the same length as `positions_x`. Returns
+    `LengthMismatch` on the first offending array (checked in
+    declaration order).
   - If `ids` is `Some(v)`, validates that `v.len()` matches the particle
     count and that `v` contains no duplicates; returns `LengthMismatch` or
     `DuplicateParticleId` accordingly.
@@ -163,7 +165,7 @@ call.
     `state.particle_count()`.
   - Validates that every host array has length `state.particle_count()`;
     returns `LengthMismatch` otherwise.
-  - Copies all seventeen host arrays into the corresponding device buffers.
+  - Copies all eighteen host arrays into the corresponding device buffers.
   - Returns the populated `ParticleBuffers` on success.
 
 - `ParticleBuffers::particle_count(&self) -> usize` <!-- rq-18411920 -->
@@ -173,7 +175,7 @@ call.
   - Validates that `state.particle_count()` equals `self.particle_count()`
     and that every host array has that length; returns `LengthMismatch`
     otherwise.
-  - Copies all seventeen host arrays into the existing device buffers
+  - Copies all eighteen host arrays into the existing device buffers
     in-place.
 
 - `ParticleState::download_from(&mut self, buffers: &ParticleBuffers) -> Result<(), ParticleStateError>` <!-- rq-9a19bfa3 -->
@@ -189,8 +191,9 @@ call.
   host arrays at construction.
 - Length validation is performed in declaration order
   (`positions_y`, `positions_z`, `velocities_x`, `velocities_y`,
-  `velocities_z`, `masses`, `type_indices`, then `ids` when `Some`,
-  then `images_x`, `images_y`, `images_z` when `images` is `Some`).
+  `velocities_z`, `masses`, `charges`, `type_indices`, then `ids` when
+  `Some`, then `images_x`, `images_y`, `images_z` when `images` is
+  `Some`).
 - Duplicate-ID detection is performed using a hash set; expected complexity
   is O(N) for N particles.
 
@@ -282,10 +285,26 @@ Feature: SoA particle state and GPU buffers
 
   @rq-790c1f86
   Scenario: Reject when type_indices has the wrong length
-    Given positions_x, positions_y, positions_z, velocities_x, velocities_y, velocities_z, masses each have length 4
+    Given positions_x, positions_y, positions_z, velocities_x, velocities_y, velocities_z, masses, charges each have length 4
     And type_indices has length 3
     When ParticleState::new(...) is called with ids=None
     Then it returns Err(ParticleStateError::LengthMismatch { array: "type_indices", expected: 4, actual: 3 })
+
+  @rq-7fd19f00
+  Scenario: Reject when charges has the wrong length
+    Given every other input Vec has length 4
+    And charges has length 5
+    When ParticleState::new(...) is called with ids=None
+    Then it returns Err(ParticleStateError::LengthMismatch { array: "charges", expected: 4, actual: 5 })
+
+  @rq-fdc02bdb
+  Scenario: charges round-trip through ParticleBuffers
+    Given a ParticleState A with particle_count() == 4
+    And A.charges has been overwritten with [+1.602e-19, -1.602e-19, 0.0, 3.2e-19]
+    And a ParticleBuffers built from A
+    And A.charges has been zeroed on the host
+    When A.download_from(&buffers) is called
+    Then A.charges equals [+1.602e-19, -1.602e-19, 0.0, 3.2e-19] byte-for-byte
 
   @rq-391cb266
   Scenario: Reject when explicit IDs have the wrong length

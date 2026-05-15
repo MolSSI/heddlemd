@@ -26,6 +26,7 @@ pub struct Kernels {
     pub vv_kick_lossless: CudaFunction,
     pub reduce_pair_forces: CudaFunction,
     pub lj_pair_force: CudaFunction,
+    pub coulomb_pair_force: CudaFunction,
     pub lan_drift_half: CudaFunction,
     pub lan_ou_step: CudaFunction,
     pub morse_bond_force: CudaFunction,
@@ -81,6 +82,12 @@ pub fn init_device() -> Result<GpuContext, GpuError> {
         "pair_force",
         &["lj_pair_force"],
     )?;
+    // rq-846bdb8b
+    device.load_ptx(
+        Ptx::from_src(kernels::COULOMB),
+        "coulomb",
+        &["coulomb_pair_force"],
+    )?;
     device.load_ptx(
         Ptx::from_src(kernels::LANGEVIN),
         "langevin",
@@ -129,6 +136,7 @@ pub fn init_device() -> Result<GpuContext, GpuError> {
         vv_kick_lossless: get("integrate", "vv_kick_lossless")?,
         reduce_pair_forces: get("reduce", "reduce_pair_forces")?,
         lj_pair_force: get("pair_force", "lj_pair_force")?,
+        coulomb_pair_force: get("coulomb", "coulomb_pair_force")?,
         lan_drift_half: get("langevin", "lan_drift_half")?,
         lan_ou_step: get("langevin", "lan_ou_step")?,
         morse_bond_force: get("morse", "morse_bond_force")?,

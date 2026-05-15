@@ -1,4 +1,5 @@
 pub mod bonds;
+pub mod coulomb;
 pub mod lj;
 pub mod morse;
 pub mod neighbor_list;
@@ -11,7 +12,7 @@ use crate::gpu::{
     GpuContext, GpuError, Kernels, LennardJonesParameterTable, ParticleBuffers, accumulate_forces,
 };
 use crate::io::config::{
-    BondTypeConfig, NeighborListConfig, PairInteractionConfig, ParticleTypeConfig,
+    BondTypeConfig, CoulombConfig, NeighborListConfig, PairInteractionConfig, ParticleTypeConfig,
 };
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
@@ -20,6 +21,7 @@ pub use bonds::{
     Bond, BondList, BondsFileError, DeviceExclusionList, Exclusion, ExclusionList,
     load_bonds_file,
 };
+pub use coulomb::{CoulombParameters, CoulombState};
 pub use lj::LennardJonesState;
 pub use morse::MorseBondedState;
 pub use neighbor_list::{
@@ -100,6 +102,7 @@ impl ForceField {
         particle_types: &[ParticleTypeConfig],
         pair_interactions: &[PairInteractionConfig],
         bond_types: &[BondTypeConfig],
+        coulomb_config: Option<&CoulombConfig>,
         bond_list: &BondList,
         exclusion_list: &ExclusionList,
         neighbor_list_config: &NeighborListConfig,
@@ -107,6 +110,11 @@ impl ForceField {
         let device = gpu.device.clone();
         let kernels = gpu.kernels.clone();
         let mut slots: Vec<Box<dyn Potential>> = Vec::new();
+
+        let max_neighbors = match neighbor_list_config {
+            NeighborListConfig::AllPairs => particle_count as u32,
+            NeighborListConfig::CellList { max_neighbors, .. } => *max_neighbors,
+        };
 
         // Slot 0: Lennard-Jones when at least one pair interaction is configured.
         if !pair_interactions.is_empty() {
@@ -119,10 +127,6 @@ impl ForceField {
                 .iter()
                 .map(|p| p.cutoff as f32)
                 .fold(0.0_f32, f32::max);
-            let max_neighbors = match neighbor_list_config {
-                NeighborListConfig::AllPairs => particle_count as u32,
-                NeighborListConfig::CellList { max_neighbors, .. } => *max_neighbors,
-            };
             let lj_state = LennardJonesState::new(
                 gpu,
                 particle_count,
@@ -134,7 +138,20 @@ impl ForceField {
             slots.push(Box::new(lj_state));
         }
 
-        // Slot 1: Morse bonded when at least one bond is present.
+        // Slot 1: Coulomb when the [coulomb] table is present in the config.
+        if let Some(coul) = coulomb_config {
+            let params = CoulombParameters::from(coul);
+            let coul_state = CoulombState::new(
+                gpu,
+                particle_count,
+                params,
+                max_neighbors,
+                exclusion_list,
+            )?;
+            slots.push(Box::new(coul_state));
+        }
+
+        // Slot 2: Morse bonded when at least one bond is present.
         if !bond_list.is_empty() {
             let morse_state = MorseBondedState::new(gpu, bond_list, bond_types)?;
             slots.push(Box::new(morse_state));

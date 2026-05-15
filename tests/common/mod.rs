@@ -90,7 +90,7 @@ pub fn lj_pair_force_no_excl(
         params,
         &excl.atom_excl_offsets,
         &excl.atom_excl_partners,
-        &excl.atom_excl_scales,
+        &excl.atom_excl_lj_scales,
         &nl.neighbor_list,
         &nl.neighbor_counts,
     )

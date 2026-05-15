@@ -97,6 +97,13 @@
     "title": "bonds field is resolved relative to the config directory",
     "type": "scenario"
   },
+  "rq-02a15197": {
+    "decl": "Scenario: Mixed charge magnitudes scale linearly",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Mixed charge magnitudes scale linearly",
+    "type": "scenario"
+  },
   "rq-02bde767": {
     "decl": "Scenario: Drop best-effort flushes",
     "file": "io/log-output",
@@ -115,6 +122,14 @@
       }
     ],
     "title": "Feature API",
+    "type": "section"
+  },
+  "rq-03423870": {
+    "decl": "## Reproducibility",
+    "file": "forces/coulomb-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Reproducibility",
     "type": "section"
   },
   "rq-037a9326": {
@@ -253,6 +268,13 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-0896c33a": {
+    "decl": "Scenario: Pair beyond cutoff contributes zero",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Pair beyond cutoff contributes zero",
+    "type": "scenario"
+  },
   "rq-090b70bb": {
     "decl": "## Comparison Procedure",
     "file": "pipeline-reversibility",
@@ -350,6 +372,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Reject unknown schema_version",
+    "type": "scenario"
+  },
+  "rq-0cb544f4": {
+    "decl": "Scenario: Coulomb cutoff participates in box-too-small check",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Coulomb cutoff participates in box-too-small check",
     "type": "scenario"
   },
   "rq-0da87ca1": {
@@ -461,6 +490,13 @@
     "title": "KE of a single particle at rest is zero",
     "type": "scenario"
   },
+  "rq-10956a4e": {
+    "decl": "# A single scale column (3-column form) sets both scale_lj and",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "A single scale column (3-column form) sets both scale_lj and",
+    "type": "file"
+  },
   "rq-10adebc4": {
     "decl": "- `reduce_bond_forces(state: &mut MorseBondedState, output_force_x: &mut CudaViewMut<'_, f32>, output_force_y: &mut CudaViewMut<'_, f32>, output_force_z: &mut CudaViewMut<'_, f32>, output_energy: &mut CudaViewMut<'_, f32>, output_virial: &mut CudaViewMut<'_, f32>) -> Result<(), GpuError>`",
     "file": "forces/morse-bonded",
@@ -536,6 +572,13 @@
     ],
     "title": "NeighborListState",
     "type": "api-item"
+  },
+  "rq-1221d020": {
+    "decl": "Scenario: Single-scale form sets both LJ and Coulomb scales equally",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Single-scale form sets both LJ and Coulomb scales equally",
+    "type": "scenario"
   },
   "rq-123f560e": {
     "decl": "Scenario: build.rs fails with a clear message when nvcc is missing",
@@ -766,6 +809,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "Reject NaN diagonal",
+    "type": "scenario"
+  },
+  "rq-1a0f3eef": {
+    "decl": "Scenario: Identical inputs produce byte-identical pair-buffer outputs",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Identical inputs produce byte-identical pair-buffer outputs",
     "type": "scenario"
   },
   "rq-1a3ec0c8": {
@@ -1093,6 +1143,13 @@
     ],
     "title": "TrajectoryWriterError",
     "type": "api-item"
+  },
+  "rq-1fde7f32": {
+    "decl": "Scenario: Four-column form sets LJ and Coulomb scales independently",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Four-column form sets LJ and Coulomb scales independently",
+    "type": "scenario"
   },
   "rq-1feec66c": {
     "decl": "Scenario: KE is bit-identical across two host runs with identical f32 inputs",
@@ -1434,6 +1491,14 @@
     ],
     "title": "TrajectoryWriter",
     "type": "api-item"
+  },
+  "rq-28d519b5": {
+    "decl": "#### `[coulomb]` (optional table)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[coulomb]` (optional table)",
+    "type": "section"
   },
   "rq-29718dcf": {
     "decl": "Scenario: kick_drift followed by kick reproduces closed-form constant-acceleration kinematics",
@@ -1947,7 +2012,7 @@
     "type": "scenario"
   },
   "rq-3766be01": {
-    "decl": "- `ParticleState` — host-side SoA state. All seventeen per-particle arrays",
+    "decl": "- `ParticleState` — host-side SoA state. All eighteen per-particle arrays",
     "file": "particle-state",
     "refs": [
       {
@@ -2000,6 +2065,13 @@
     "refs": [],
     "title": "Langevin BAOAB rejects friction=0",
     "type": "scenario"
+  },
+  "rq-38676211": {
+    "decl": "- `coulomb_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &CoulombParameters, atom_excl_offsets: &CudaSlice<u32>, atom_excl_partners: &CudaSlice<u32>, atom_excl_coul_scales: &CudaSlice<f32>, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>`",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "coulomb_pair_force",
+    "type": "api-item"
   },
   "rq-386cfae3": {
     "decl": "Scenario: vv_kick on an empty state is a no-op",
@@ -2078,6 +2150,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Morse bond_type missing de is rejected",
+    "type": "scenario"
+  },
+  "rq-3b7da473": {
+    "decl": "Scenario: Zero charges produce zero force",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Zero charges produce zero force",
     "type": "scenario"
   },
   "rq-3b9ed390": {
@@ -2168,6 +2247,13 @@
     "file": "io/trajectory-output",
     "refs": [],
     "title": "Frame Properties carries velo:R:3:image:I:3 when both flags are true",
+    "type": "scenario"
+  },
+  "rq-3df3ed61": {
+    "decl": "Scenario: Pair at exactly the cutoff contributes the smoothed (zero) value",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Pair at exactly the cutoff contributes the smoothed (zero) value",
     "type": "scenario"
   },
   "rq-3e744fed": {
@@ -2477,6 +2563,14 @@
     "title": "Every governed error type implements std::error::Error",
     "type": "scenario"
   },
+  "rq-4968452d": {
+    "decl": "## Feature API",
+    "file": "forces/coulomb-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-4994ba90": {
     "decl": "Scenario: Reject missing comment line",
     "file": "io/init-state-file",
@@ -2530,6 +2624,14 @@
     "level": 2,
     "refs": [],
     "title": "Practical Bounds",
+    "type": "section"
+  },
+  "rq-4a96b705": {
+    "decl": "### CUDA kernel",
+    "file": "forces/coulomb-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA kernel",
     "type": "section"
   },
   "rq-4ae7794c": {
@@ -2639,6 +2741,13 @@
     "refs": [],
     "title": "vv_kick_lossless",
     "type": "api-item"
+  },
+  "rq-4f23c656": {
+    "decl": "Scenario: Opposite-sign charges attract",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Opposite-sign charges attract",
+    "type": "scenario"
   },
   "rq-4f386df8": {
     "decl": "# Feature: Pluggable Integrator Framework",
@@ -2802,6 +2911,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Displacement check on reference positions equal to current returns 0",
+    "type": "scenario"
+  },
+  "rq-5444c7ae": {
+    "decl": "Scenario: pair_energies carries half the pair's potential energy",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "pair_energies carries half the pair's potential energy",
     "type": "scenario"
   },
   "rq-545c961a": {
@@ -3053,6 +3169,14 @@
     "title": "vv_kick_drift_lossless handles a block-non-aligned particle count",
     "type": "scenario"
   },
+  "rq-5ad9b8b9": {
+    "decl": "## Empty state",
+    "file": "forces/coulomb-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Empty state",
+    "type": "section"
+  },
   "rq-5b097ec0": {
     "decl": "Scenario: Comments and blank lines are tolerated",
     "file": "forces/bonds",
@@ -3144,7 +3268,7 @@
     "type": "scenario"
   },
   "rq-5e0598cb": {
-    "decl": "- `ParticleState::new(positions_x: Vec<f32>, positions_y: Vec<f32>, positions_z: Vec<f32>, velocities_x: Vec<f32>, velocities_y: Vec<f32>, velocities_z: Vec<f32>, masses: Vec<f32>, type_indices: Vec<u32>, ids: Option<Vec<u32>>, images: Option<(Vec<i32>, Vec<i32>, Vec<i32>)>) -> Result<ParticleState, ParticleStateError>`",
+    "decl": "- `ParticleState::new(positions_x: Vec<f32>, positions_y: Vec<f32>, positions_z: Vec<f32>, velocities_x: Vec<f32>, velocities_y: Vec<f32>, velocities_z: Vec<f32>, masses: Vec<f32>, charges: Vec<f32>, type_indices: Vec<u32>, ids: Option<Vec<u32>>, images: Option<(Vec<i32>, Vec<i32>, Vec<i32>)>) -> Result<ParticleState, ParticleStateError>`",
     "file": "particle-state",
     "refs": [
       {
@@ -3183,6 +3307,14 @@
     "refs": [],
     "title": "Prefix scan is correct for cell counts beyond a single block-totals pass",
     "type": "scenario"
+  },
+  "rq-5f7aa9ac": {
+    "decl": "## Gherkin Scenarios",
+    "file": "forces/coulomb-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-5fe22acb": {
     "decl": "- `SimulationBox::min_perpendicular_width(&self) -> f32`",
@@ -3404,6 +3536,13 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-67678030": {
+    "decl": "Scenario: Switching interval r_switch == cutoff selects hard-cutoff",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Switching interval r_switch == cutoff selects hard-cutoff",
+    "type": "scenario"
+  },
   "rq-679282f5": {
     "decl": "Scenario: init_device exposes the Morse kernels on the Kernels handle",
     "file": "forces/morse-bonded",
@@ -3537,6 +3676,13 @@
     "title": "from_config receives the default r_switch when the config omitted it",
     "type": "scenario"
   },
+  "rq-6a9f0a18": {
+    "decl": "Scenario: Out-of-range Coulomb scale in four-column form rejected",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Out-of-range Coulomb scale in four-column form rejected",
+    "type": "scenario"
+  },
   "rq-6ad9a0f8": {
     "decl": "Scenario: bond_types is optional and defaults to empty",
     "file": "io/config-schema",
@@ -3559,6 +3705,13 @@
     "refs": [],
     "title": "Velocity-Verlet Loop",
     "type": "section"
+  },
+  "rq-6bdfdd6d": {
+    "decl": "- `CoulombParameters` — host-side parameter container. Fields:",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "CoulombParameters",
+    "type": "api-item"
   },
   "rq-6bf3709c": {
     "decl": "Scenario: Two independent rebuilds with identical positions produce identical lists",
@@ -3586,6 +3739,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "bonds field is optional and defaults to None",
+    "type": "scenario"
+  },
+  "rq-6cd92c14": {
+    "decl": "Scenario: Exclusion row with too few columns",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "Exclusion row with too few columns",
     "type": "scenario"
   },
   "rq-6cf916af": {
@@ -3950,6 +4110,13 @@
     "title": "Reject trajectory_path = log_path",
     "type": "scenario"
   },
+  "rq-76a6be2f": {
+    "decl": "Scenario: Zero particles is a no-op",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Zero particles is a no-op",
+    "type": "scenario"
+  },
   "rq-76cb9922": {
     "decl": "## Determinism Guarantees",
     "file": "forces/framework",
@@ -4022,7 +4189,12 @@
     "decl": "#### `[[particle_types]]` (array of tables)",
     "file": "io/config-schema",
     "level": 4,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`[[particle_types]]` (array of tables)",
     "type": "section"
   },
@@ -4100,6 +4272,13 @@
     "refs": [],
     "title": "kernel_start followed by kernel_stop and finalize records one sample",
     "type": "scenario"
+  },
+  "rq-793a7cbb": {
+    "decl": "- `CoulombConfig`",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "CoulombConfig",
+    "type": "api-item"
   },
   "rq-79938dbf": {
     "decl": "- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], bond_list: &BondList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>`",
@@ -4213,6 +4392,14 @@
     "level": 2,
     "refs": [],
     "title": "Force Evaluation Pipeline",
+    "type": "section"
+  },
+  "rq-7bae4b69": {
+    "decl": "### Functions",
+    "file": "forces/coulomb-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Functions",
     "type": "section"
   },
   "rq-7c23d271": {
@@ -4368,6 +4555,13 @@
     "title": "Reject infinite diagonal",
     "type": "scenario"
   },
+  "rq-7fd19f00": {
+    "decl": "Scenario: Reject when charges has the wrong length",
+    "file": "particle-state",
+    "refs": [],
+    "title": "Reject when charges has the wrong length",
+    "type": "scenario"
+  },
   "rq-7fe57a77": {
     "decl": "Scenario: System total scalar virial equals sum of particle shares",
     "file": "forces/framework",
@@ -4445,6 +4639,13 @@
     "title": "CLI",
     "type": "section"
   },
+  "rq-82e4f74e": {
+    "decl": "Scenario: Same-sign charges repel",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Same-sign charges repel",
+    "type": "scenario"
+  },
   "rq-82f8d168": {
     "decl": "Scenario: Self slots carry zero energy and virial",
     "file": "forces/lj-pair-force",
@@ -4472,6 +4673,38 @@
     "refs": [],
     "title": "sorted_particle_ids sorts particles by (cell_index, particle_id)",
     "type": "scenario"
+  },
+  "rq-846bdb8b": {
+    "decl": "# Feature: Truncated Coulomb Pair Force Kernel",
+    "file": "forces/coulomb-pair-force",
+    "refs": [
+      {
+        "file": "src/forces/coulomb.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/device.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Truncated Coulomb Pair Force Kernel",
+    "type": "file"
+  },
+  "rq-84af056c": {
+    "decl": "## Launch Configuration",
+    "file": "forces/coulomb-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
+    "type": "section"
   },
   "rq-85192a05": {
     "decl": "Scenario: At the LJ minimum r = sigma * 2^(1/6), the force is zero",
@@ -4692,6 +4925,13 @@
     "title": "Exclusion only applies to the listed pair",
     "type": "scenario"
   },
+  "rq-8c96d3c7": {
+    "decl": "Scenario: Coulomb and LJ exclusions are independent",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Coulomb and LJ exclusions are independent",
+    "type": "scenario"
+  },
   "rq-8d44fa4d": {
     "decl": "## Determinism Guarantees",
     "file": "integration/framework",
@@ -4866,10 +5106,10 @@
     "type": "section"
   },
   "rq-922c9a86": {
-    "decl": "# Scale defaults to 0.0 (full exclusion) when omitted.",
+    "decl": "# Both scales default to 0.0 (full exclusion) when omitted.",
     "file": "forces/bonds",
     "refs": [],
-    "title": "Scale defaults to 0.0 (full exclusion) when omitted.",
+    "title": "Both scales default to 0.0 (full exclusion) when omitted.",
     "type": "file"
   },
   "rq-9244aae4": {
@@ -5125,6 +5365,13 @@
     "title": "minimum_image at the +L/2 boundary maps to -L/2",
     "type": "scenario"
   },
+  "rq-9af1f9dc": {
+    "decl": "Scenario: Minimum-image works for a triclinic box",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Minimum-image works for a triclinic box",
+    "type": "scenario"
+  },
   "rq-9b0aad2c": {
     "decl": "## Gherkin Scenarios",
     "file": "particle-state",
@@ -5202,10 +5449,10 @@
     "type": "scenario"
   },
   "rq-9c1c58ef": {
-    "decl": "Scenario: Exclusion scale defaults to 0.0 when column omitted",
+    "decl": "Scenario: Exclusion scales default to 0.0 when both columns omitted",
     "file": "forces/bonds",
     "refs": [],
-    "title": "Exclusion scale defaults to 0.0 when column omitted",
+    "title": "Exclusion scales default to 0.0 when both columns omitted",
     "type": "scenario"
   },
   "rq-9c3ecf3f": {
@@ -5514,6 +5761,14 @@
     "refs": [],
     "title": "Reject unknown pair potential",
     "type": "scenario"
+  },
+  "rq-a3fdbd7c": {
+    "decl": "### Types",
+    "file": "forces/coulomb-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
   },
   "rq-a403f778": {
     "decl": "Scenario: Open creates a new trajectory file",
@@ -5942,6 +6197,13 @@
     "refs": [],
     "title": "Mutators",
     "type": "section"
+  },
+  "rq-b07abbd4": {
+    "decl": "Scenario: Pair inside the inner plateau is unsmoothed",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Pair inside the inner plateau is unsmoothed",
+    "type": "scenario"
   },
   "rq-b09032cb": {
     "decl": "- `ParticleBuffers::new(device: Arc<CudaDevice>, state: &ParticleState) -> Result<ParticleBuffers, ParticleStateError>`",
@@ -6412,6 +6674,14 @@
     "title": "ParticleStateError",
     "type": "api-item"
   },
+  "rq-bee8e566": {
+    "decl": "## Out of Scope",
+    "file": "forces/coulomb-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-bf62f645": {
     "decl": "## Gherkin Scenarios",
     "file": "forces/bonds",
@@ -6428,12 +6698,36 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-bf7dfc6d": {
+    "decl": "Scenario: Self slot in trivial-mode neighbor list yields zero",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Self slot in trivial-mode neighbor list yields zero",
+    "type": "scenario"
+  },
   "rq-bfb3b9d8": {
     "decl": "Scenario: minimum_image leaves a displacement strictly inside the primary image unchanged",
     "file": "simulation-box",
     "refs": [],
     "title": "minimum_image leaves a displacement strictly inside the primary image unchanged",
     "type": "scenario"
+  },
+  "rq-bfd7004c": {
+    "decl": "## Algorithm",
+    "file": "forces/coulomb-pair-force",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/forces/coulomb.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Algorithm",
+    "type": "section"
   },
   "rq-c0aa3b5c": {
     "decl": "### Types",
@@ -6587,6 +6881,13 @@
     "title": "NeighborListState",
     "type": "api-item"
   },
+  "rq-c4d4608f": {
+    "decl": "Scenario: Pair with Coulomb exclusion scale 0.0 contributes nothing",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Pair with Coulomb exclusion scale 0.0 contributes nothing",
+    "type": "scenario"
+  },
   "rq-c525ee79": {
     "decl": "Scenario: Construct an empty (N=0) ForceField with potentials configured",
     "file": "forces/framework",
@@ -6696,10 +6997,10 @@
     "type": "scenario"
   },
   "rq-c8ea0a96": {
-    "decl": "# Column format: atom_i  atom_j  [scale]",
+    "decl": "# Column format: atom_i  atom_j  [scale_lj]  [scale_coul]",
     "file": "forces/bonds",
     "refs": [],
-    "title": "Column format: atom_i  atom_j  [scale]",
+    "title": "Column format: atom_i  atom_j  [scale_lj]  [scale_coul]",
     "type": "file"
   },
   "rq-c9016748": {
@@ -6907,6 +7208,13 @@
     "title": "Box generation increment refreshes cell layout and forces a rebuild",
     "type": "scenario"
   },
+  "rq-d01b6fb0": {
+    "decl": "Scenario: Slots beyond neighbor_counts[i] are explicitly zeroed",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Slots beyond neighbor_counts[i] are explicitly zeroed",
+    "type": "scenario"
+  },
   "rq-d065447f": {
     "decl": "Scenario: Run an empty (N=0) simulation",
     "file": "simulation-runner",
@@ -6984,6 +7292,13 @@
     "title": "vv_kick_drift produces the exact half-step kinematics under a constant force",
     "type": "scenario"
   },
+  "rq-d26e9f9c": {
+    "decl": "Scenario: Pair with Coulomb exclusion scale 0.5 contributes half",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Pair with Coulomb exclusion scale 0.5 contributes half",
+    "type": "scenario"
+  },
   "rq-d28737dd": {
     "decl": "Scenario: dt=0 leaves state unchanged for vv_kick",
     "file": "integration/velocity-verlet",
@@ -7031,6 +7346,13 @@
     "title": "HostStage",
     "type": "api-item"
   },
+  "rq-d340b338": {
+    "decl": "- `CoulombState` — implements the `Potential` trait with",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "CoulombState",
+    "type": "api-item"
+  },
   "rq-d3a14184": {
     "decl": "- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>`",
     "file": "forces/lj-pair-force",
@@ -7071,6 +7393,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Pair `between` is normalised to lexicographic order",
+    "type": "scenario"
+  },
+  "rq-d52bcc88": {
+    "decl": "Scenario: Pair inside the switching interval is smoothed",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Pair inside the switching interval is smoothed",
     "type": "scenario"
   },
   "rq-d5a4f220": {
@@ -7122,6 +7451,13 @@
     "refs": [],
     "title": "lan_drift_half does not modify image flags when no wrap occurs",
     "type": "scenario"
+  },
+  "rq-d7675fb3": {
+    "decl": "# scale_coul to that value.",
+    "file": "forces/bonds",
+    "refs": [],
+    "title": "scale_coul to that value.",
+    "type": "file"
   },
   "rq-d82ce4aa": {
     "decl": "Scenario: Single-particle generated velocities are zeroed for lack of thermal degrees of freedom",
@@ -7619,6 +7955,13 @@
     "title": "Morse bond_type rejects extra fields",
     "type": "scenario"
   },
+  "rq-e412e54a": {
+    "decl": "Scenario: pair_virials carries half the pair's scalar virial",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "pair_virials carries half the pair's scalar virial",
+    "type": "scenario"
+  },
   "rq-e435f271": {
     "decl": "## Data Layout",
     "file": "pair-reduction",
@@ -7824,6 +8167,14 @@
     "title": "Reject a tilted box whose perpendicular width drops below 3*(r_cut+r_skin)",
     "type": "scenario"
   },
+  "rq-e858417a": {
+    "decl": "## Newton's third law",
+    "file": "forces/coulomb-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Newton's third law",
+    "type": "section"
+  },
   "rq-e8be1a1c": {
     "decl": "- `SimulationBox::lattice(&self) -> [f32; 6]`",
     "file": "simulation-box",
@@ -8017,11 +8368,25 @@
     "title": "Units",
     "type": "section"
   },
+  "rq-ee4ebbda": {
+    "decl": "Scenario: A neutral system with [coulomb] present still launches and produces zeros",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "A neutral system with [coulomb] present still launches and produces zeros",
+    "type": "scenario"
+  },
   "rq-eea2f5f8": {
     "decl": "Scenario: Duplicate exclusion rejected",
     "file": "forces/bonds",
     "refs": [],
     "title": "Duplicate exclusion rejected",
+    "type": "scenario"
+  },
+  "rq-ef3083cd": {
+    "decl": "Scenario: Pair across the periodic boundary uses minimum-image displacement",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Pair across the periodic boundary uses minimum-image displacement",
     "type": "scenario"
   },
   "rq-ef5aa4b7": {
@@ -8259,10 +8624,10 @@
     "type": "scenario"
   },
   "rq-f371677d": {
-    "decl": "Scenario: Exclusion row with wrong column count",
+    "decl": "Scenario: Exclusion row with too many columns",
     "file": "forces/bonds",
     "refs": [],
-    "title": "Exclusion row with wrong column count",
+    "title": "Exclusion row with too many columns",
     "type": "scenario"
   },
   "rq-f379e47c": {
@@ -8329,6 +8694,13 @@
     "file": "io/trajectory-output",
     "refs": [],
     "title": "Write a frame for an empty state",
+    "type": "scenario"
+  },
+  "rq-f652bf7c": {
+    "decl": "Scenario: Forces on the two members of a non-boundary pair are equal and opposite",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Forces on the two members of a non-boundary pair are equal and opposite",
     "type": "scenario"
   },
   "rq-f6927716": {
@@ -8461,6 +8833,14 @@
     "title": "Displacement check returns the maximum across all particles",
     "type": "scenario"
   },
+  "rq-f9a9c569": {
+    "decl": "## Parameters",
+    "file": "forces/coulomb-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Parameters",
+    "type": "section"
+  },
   "rq-fa24a8d1": {
     "decl": "Scenario: timings_path can be overridden in [output]",
     "file": "io/config-schema",
@@ -8567,6 +8947,13 @@
     "refs": [],
     "title": "Timing Methodology",
     "type": "section"
+  },
+  "rq-fdc02bdb": {
+    "decl": "Scenario: charges round-trip through ParticleBuffers",
+    "file": "particle-state",
+    "refs": [],
+    "title": "charges round-trip through ParticleBuffers",
+    "type": "scenario"
   },
   "rq-fdf2db79": {
     "decl": "### Types",

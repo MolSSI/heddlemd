@@ -34,6 +34,7 @@ fn one_particle_state() -> ParticleState {
         vec![-0.25_f32],
         vec![0.125_f32],
         vec![1.0_f32],
+        vec![0.0_f32; vec![1.0_f32].len()],
         vec![0u32; 1],
         None,
             None,
@@ -52,6 +53,7 @@ fn n_particle_state(n: usize) -> ParticleState {
         velos.clone(),
         velos,
         vec![1.0_f32; n],
+        vec![0.0_f32; n],
         vec![0u32; n],
         None,
             None,
@@ -145,6 +147,7 @@ fn lan_drift_half_on_empty_is_noop() {
     let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+        vec![0.0_f32; 0],
         Vec::new(), None,
             None,
     )
@@ -188,6 +191,7 @@ fn lan_ou_step_on_empty_is_noop() {
     let gpu = init_device().unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+        vec![0.0_f32; 0],
         Vec::new(), None,
             None,
     )
@@ -280,6 +284,7 @@ fn ou_variance_scales_with_predicted_factor() {
         vec![0.0_f32; n],
         vec![0.0_f32; n],
         vec![mass; n],
+        vec![0.0_f32; n],
         vec![0u32; n],
         None,
             None,
@@ -317,6 +322,7 @@ fn step_launches_all_six_expected_kernel_calls() {
         &[],
         &[],
         &[],
+        None,
         &BondList::empty(4),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
@@ -359,6 +365,7 @@ fn langevin_step_on_empty_is_noop() {
     let gpu = init_device().unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+        vec![0.0_f32; 0],
         Vec::new(), None,
             None,
     )
@@ -371,6 +378,7 @@ fn langevin_step_on_empty_is_noop() {
         &[],
         &[],
         &[],
+        None,
         &BondList::empty(0),
         &ExclusionList::empty(0),
         &NeighborListConfig::AllPairs,
@@ -607,6 +615,7 @@ fn lan_drift_half_wraps_across_plus_l_half() {
         vec![0.0],
         vec![0.0],
         vec![1.0],
+        vec![0.0_f32; vec![1.0].len()],
         vec![0u32; 1],
         None,
         None,
@@ -632,6 +641,7 @@ fn lan_drift_half_preserves_image_flags_when_no_wrap() {
         vec![0.1_f32],
         vec![0.1_f32],
         vec![1.0],
+        vec![0.0_f32; vec![1.0].len()],
         vec![0u32; 1],
         None,
         Some((vec![3], vec![-1], vec![0])),

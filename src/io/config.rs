@@ -119,6 +119,7 @@ impl IntegratorKind {
 pub struct ParticleTypeConfig {
     pub name: String,
     pub mass: f64,
+    pub charge: f64,
 }
 
 // rq-f001eaf8
@@ -161,6 +162,13 @@ pub enum NeighborListConfig {
     CellList { max_neighbors: u32, r_skin: f64 },
 }
 
+// CoulombConfig — parsed `[coulomb]` table; rq-846bdb8b
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoulombConfig {
+    pub cutoff: f64,
+    pub r_switch: f64,
+}
+
 // rq-1254cd3a
 #[derive(Debug, Clone)]
 pub struct OutputConfig {
@@ -184,6 +192,7 @@ pub struct Config {
     pub particle_types: Vec<ParticleTypeConfig>,
     pub pair_interactions: Vec<PairInteractionConfig>,
     pub bond_types: Vec<BondTypeConfig>,
+    pub coulomb: Option<CoulombConfig>,
     pub neighbor_list: NeighborListConfig,
     pub output: OutputConfig,
     pub config_path: PathBuf,
@@ -408,11 +417,35 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         let mass = get_f64(tbl, "mass")
             .map_err(rename_field(format!("particle_types[{i}].mass")))?;
         require_finite_positive(&format!("particle_types[{i}].mass"), mass)?;
+        // rq-78487f38: `charge` is optional and defaults to 0.0; when
+        // supplied it must be finite (any sign is accepted).
+        let charge = match tbl.get("charge") {
+            Some(v) => {
+                let f = match v {
+                    toml::Value::Float(f) => *f,
+                    toml::Value::Integer(i) => *i as f64,
+                    _ => {
+                        return Err(invalid(
+                            &format!("particle_types[{i}].charge"),
+                            "expected a float",
+                        ));
+                    }
+                };
+                if !f.is_finite() {
+                    return Err(invalid(
+                        &format!("particle_types[{i}].charge"),
+                        format!("expected a finite number, got {f}"),
+                    ));
+                }
+                f
+            }
+            None => 0.0,
+        };
         if seen_names.contains(&name) {
             return Err(ConfigError::DuplicateTypeName { name });
         }
         seen_names.push(name.clone());
-        particle_types.push(ParticleTypeConfig { name, mass });
+        particle_types.push(ParticleTypeConfig { name, mass, charge });
     }
 
     let pi_array = root
@@ -637,6 +670,51 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         .iter()
         .map(|p| p.cutoff)
         .fold(0.0_f64, f64::max);
+
+    // rq-846bdb8b: parse the optional [coulomb] table. The slot is
+    // present iff this table is present in the config.
+    let coulomb: Option<CoulombConfig> = match root.get("coulomb") {
+        None => None,
+        Some(toml::Value::Table(coul_tbl)) => {
+            for key in coul_tbl.keys() {
+                if !matches!(key.as_str(), "cutoff" | "r_switch") {
+                    return Err(invalid(
+                        &format!("coulomb.{key}"),
+                        "unknown field for [coulomb]",
+                    ));
+                }
+            }
+            let cutoff = get_f64(coul_tbl, "cutoff")
+                .map_err(rename_field("coulomb.cutoff".to_string()))?;
+            require_finite_positive("coulomb.cutoff", cutoff)?;
+            let r_switch = match coul_tbl.get("r_switch") {
+                Some(toml::Value::Float(v)) => *v,
+                Some(toml::Value::Integer(i)) => *i as f64,
+                Some(_) => {
+                    return Err(invalid("coulomb.r_switch", "expected a float"));
+                }
+                None => 0.9 * cutoff,
+            };
+            require_finite_positive("coulomb.r_switch", r_switch)?;
+            if r_switch > cutoff {
+                return Err(invalid(
+                    "coulomb.r_switch",
+                    format!(
+                        "expected r_switch <= cutoff; got r_switch={r_switch}, cutoff={cutoff}"
+                    ),
+                ));
+            }
+            Some(CoulombConfig { cutoff, r_switch })
+        }
+        Some(_) => return Err(invalid("coulomb", "expected a table")),
+    };
+
+    // Effective max cutoff includes both pair_interactions and coulomb.
+    let max_cutoff = match coulomb.as_ref() {
+        Some(c) => max_cutoff.max(c.cutoff),
+        None => max_cutoff,
+    };
+
     let neighbor_list = match root.get("neighbor_list") {
         None => NeighborListConfig::CellList {
             max_neighbors: 256,
@@ -851,6 +929,7 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         particle_types,
         pair_interactions,
         bond_types,
+        coulomb,
         neighbor_list,
         output: OutputConfig {
             trajectory_path,

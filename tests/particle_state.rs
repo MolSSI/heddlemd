@@ -22,6 +22,7 @@ fn make_state_with_values(
         velocities_y,
         velocities_z,
         masses,
+        vec![0.0_f32; n],
         vec![0u32; n],
         ids,
             None,
@@ -81,6 +82,7 @@ fn construct_with_matching_arrays_and_default_ids() {
         velocities_y,
         velocities_z,
         masses,
+        vec![0.0_f32; n],
         vec![0u32; n],
         None,
             None,
@@ -105,6 +107,7 @@ fn construct_with_matching_arrays_and_explicit_unique_ids() {
         vec![0.0; n],
         vec![0.0; n],
         vec![0.0; n],
+        vec![0.0_f32; n],
         vec![0u32; n],
         Some(vec![10, 20, 30]),
             None,
@@ -116,6 +119,7 @@ fn construct_with_matching_arrays_and_explicit_unique_ids() {
 #[test] // rq-c22483b4
 fn construct_an_empty_state() {
     let state = ParticleState::new(
+        vec![],
         vec![],
         vec![],
         vec![],
@@ -152,6 +156,7 @@ fn construct_an_empty_state_with_explicit_empty_ids() {
         vec![],
         vec![],
         vec![],
+        vec![],
         vec![0u32; 0],
         Some(vec![]),
             None,
@@ -170,6 +175,7 @@ fn reject_when_positions_y_has_wrong_length() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 4],
+        vec![0.0_f32; 4],
         vec![0u32; 4],
         None,
             None,
@@ -199,6 +205,7 @@ fn reject_when_masses_has_wrong_length() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 5],
+        vec![0.0_f32; 5],
         vec![0u32; 5],
         None,
             None,
@@ -228,6 +235,7 @@ fn reject_when_explicit_ids_have_wrong_length() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 4],
+        vec![0.0_f32; 4],
         vec![0u32; 4],
         Some(vec![0, 1]),
             None,
@@ -257,6 +265,7 @@ fn reject_duplicate_explicit_ids() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 4],
+        vec![0.0_f32; 4],
         vec![0u32; 4],
         Some(vec![7, 1, 7, 3]),
             None,
@@ -280,6 +289,7 @@ fn nan_values_accepted_at_construction() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 4],
+        vec![0.0_f32; 4],
         vec![0u32; 4],
         None,
             None,
@@ -327,6 +337,7 @@ fn allocate_device_buffers_and_perform_initial_upload() {
 fn allocate_device_buffers_from_an_empty_state() {
     let gpu = init_device().expect("init_device");
     let state = ParticleState::new(
+        vec![],
         vec![],
         vec![],
         vec![],
@@ -544,6 +555,7 @@ fn download_from_empty_buffers_into_empty_state() {
         vec![],
         vec![],
         vec![],
+        vec![],
         vec![0u32; 0],
         None,
             None,
@@ -552,6 +564,7 @@ fn download_from_empty_buffers_into_empty_state() {
     let buffers = ParticleBuffers::new(&gpu, &source)
         .expect("ParticleBuffers::new");
     let mut sink = ParticleState::new(
+        vec![],
         vec![],
         vec![],
         vec![],
@@ -578,6 +591,7 @@ fn reject_when_type_indices_has_wrong_length() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![1.0; 4],
+        vec![0.0_f32; 4],
         vec![0u32; 3],
         None,
             None,
@@ -608,6 +622,7 @@ fn type_indices_round_trip_through_particle_buffers() {
         vec![0.0_f32; 3],
         vec![0.0_f32; 3],
         vec![1.0_f32; 3],
+        vec![0.0_f32; 3],
         vec![0u32, 2, 1],
         None,
             None,
@@ -625,6 +640,7 @@ fn type_indices_round_trip_through_particle_buffers() {
         vec![0.0_f32; 3],
         vec![0.0_f32; 3],
         vec![1.0_f32; 3],
+        vec![0.0_f32; 3],
         vec![0u32; 3],
         None,
             None,
@@ -645,6 +661,7 @@ fn new_state_zero_inits_potential_energies_and_virials() {
         vec![0.0_f32; n],
         vec![0.0_f32; n],
         vec![1.0_f32; n],
+        vec![0.0_f32; n],
         vec![0u32; n],
         None,
             None,
@@ -665,6 +682,7 @@ fn potential_energies_and_virials_round_trip_through_buffers() {
         vec![0.0_f32; 4],
         vec![0.0_f32; 4],
         vec![1.0_f32; 4],
+        vec![0.0_f32; 4],
         vec![0u32; 4],
         None,
             None,
@@ -693,6 +711,7 @@ fn images_default_to_zero_when_none_passed() {
         vec![0.0_f32; n],
         vec![0.0_f32; n],
         vec![1.0_f32; n],
+        vec![0.0_f32; n],
         vec![0u32; n],
         None,
         None,
@@ -714,6 +733,7 @@ fn explicit_nonzero_images_stored_as_supplied() {
         vec![0.0_f32; n],
         vec![0.0_f32; n],
         vec![1.0_f32; n],
+        vec![0.0_f32; n],
         vec![0u32; n],
         None,
         Some((vec![1, -2, 0], vec![0, 3, -1], vec![-4, 0, 5])),
@@ -735,6 +755,7 @@ fn reject_explicit_images_y_wrong_length() {
         vec![0.0_f32; n],
         vec![0.0_f32; n],
         vec![1.0_f32; n],
+        vec![0.0_f32; n],
         vec![0u32; n],
         None,
         Some((vec![0; n], vec![0; 3], vec![0; n])),
@@ -770,6 +791,7 @@ fn particle_buffers_carry_image_buffers() {
         vec![0.0_f32; n],
         vec![0.0_f32; n],
         vec![1.0_f32; n],
+        vec![0.0_f32; n],
         vec![0u32; n],
         None,
         Some((images_x.clone(), images_y.clone(), images_z.clone())),
@@ -799,6 +821,7 @@ fn reject_upload_when_images_x_has_wrong_length() {
         vec![0.0_f32; n],
         vec![0.0_f32; n],
         vec![1.0_f32; n],
+        vec![0.0_f32; n],
         vec![0u32; n],
         None,
         None,
@@ -820,4 +843,62 @@ fn reject_upload_when_images_x_has_wrong_length() {
         }
         other => panic!("unexpected: {other:?}"),
     }
+}
+
+#[test]
+fn reject_when_charges_has_wrong_length() {
+    let n = 4;
+    let positions_x = vec![0.0_f32; n];
+    let err = ParticleState::new(
+        positions_x.clone(),
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![1.0_f32; n],
+        vec![0.0_f32; 5], // charges wrong length
+        vec![0u32; n],
+        None,
+        None,
+    )
+    .expect_err("expected LengthMismatch on charges");
+    match err {
+        ParticleStateError::LengthMismatch {
+            array,
+            expected,
+            actual,
+        } => {
+            assert_eq!(array, "charges");
+            assert_eq!(expected, 4);
+            assert_eq!(actual, 5);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn charges_round_trip_through_particle_buffers() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.602e-19_f32, -1.602e-19, 0.0, 3.2e-19];
+    let mut state = ParticleState::new(
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![1.0_f32; n],
+        charges.clone(),
+        vec![0u32; n],
+        None,
+        None,
+    )
+    .unwrap();
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    // Zero on the host, download, and check it matches the device side.
+    state.charges = vec![0.0; n];
+    state.download_from(&buffers).unwrap();
+    assert_eq!(state.charges, charges);
 }

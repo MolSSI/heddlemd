@@ -25,6 +25,7 @@ pub struct ParticleBuffers {
     pub potential_energies: CudaSlice<f32>,
     pub virials: CudaSlice<f32>,
     pub masses: CudaSlice<f32>,
+    pub charges: CudaSlice<f32>,
     pub type_indices: CudaSlice<u32>,
     pub particle_ids: CudaSlice<u32>,
 }
@@ -52,6 +53,7 @@ impl ParticleBuffers {
         check_len("potential_energies", n, state.potential_energies.len())?;
         check_len("virials", n, state.virials.len())?;
         check_len("masses", n, state.masses.len())?;
+        check_len("charges", n, state.charges.len())?;
         check_len("type_indices", n, state.type_indices.len())?;
         check_len("particle_ids", n, state.particle_ids.len())?;
 
@@ -72,6 +74,7 @@ impl ParticleBuffers {
             .map_err(GpuError::from)?;
         let virials = device.htod_sync_copy(&state.virials).map_err(GpuError::from)?;
         let masses = device.htod_sync_copy(&state.masses).map_err(GpuError::from)?;
+        let charges = device.htod_sync_copy(&state.charges).map_err(GpuError::from)?;
         let type_indices = device.htod_sync_copy(&state.type_indices).map_err(GpuError::from)?;
         let particle_ids = device.htod_sync_copy(&state.particle_ids).map_err(GpuError::from)?;
 
@@ -93,6 +96,7 @@ impl ParticleBuffers {
             potential_energies,
             virials,
             masses,
+            charges,
             type_indices,
             particle_ids,
         })
@@ -121,6 +125,7 @@ impl ParticleBuffers {
         check_len("potential_energies", n, state.potential_energies.len())?;
         check_len("virials", n, state.virials.len())?;
         check_len("masses", n, state.masses.len())?;
+        check_len("charges", n, state.charges.len())?;
         check_len("type_indices", n, state.type_indices.len())?;
         check_len("particle_ids", n, state.particle_ids.len())?;
 
@@ -169,6 +174,9 @@ impl ParticleBuffers {
             .map_err(GpuError::from)?;
         device
             .htod_sync_copy_into(&state.masses, &mut self.masses)
+            .map_err(GpuError::from)?;
+        device
+            .htod_sync_copy_into(&state.charges, &mut self.charges)
             .map_err(GpuError::from)?;
         device
             .htod_sync_copy_into(&state.type_indices, &mut self.type_indices)

@@ -33,6 +33,7 @@ impl KernelStage {
         KernelStage::new("vv_kick_drift_lossless");
     pub const VV_KICK_LOSSLESS: KernelStage = KernelStage::new("vv_kick_lossless");
     pub const LJ_PAIR_FORCE: KernelStage = KernelStage::new("lj_pair_force");
+    pub const COULOMB_PAIR_FORCE: KernelStage = KernelStage::new("coulomb_pair_force");
     pub const REDUCE_PAIR_FORCES: KernelStage = KernelStage::new("reduce_pair_forces");
     pub const LANGEVIN_KICK_HALF: KernelStage = KernelStage::new("langevin_kick_half");
     pub const LANGEVIN_DRIFT_HALF: KernelStage = KernelStage::new("langevin_drift_half");
@@ -56,6 +57,7 @@ impl KernelStage {
         Self::COPY_POSITIONS_INTO_REFERENCE,
         Self::NEIGHBOR_LIST_BUILD,
         Self::LJ_PAIR_FORCE,
+        Self::COULOMB_PAIR_FORCE,
         Self::REDUCE_PAIR_FORCES,
         Self::MORSE_BOND_FORCE,
         Self::REDUCE_BOND_FORCES,

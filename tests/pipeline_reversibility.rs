@@ -49,6 +49,7 @@ fn build_initial_state() -> ParticleState {
         vec![0.0; N],
         vec![0.0; N],
         vec![1.0; N],
+        vec![0.0_f32; N],
         vec![0u32; N],
         None,
             None,

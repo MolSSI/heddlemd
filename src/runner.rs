@@ -153,11 +153,14 @@ fn run_simulation_with_phase(
     // For a triclinic box the constraint is on the perpendicular widths
     // along each lattice direction, not on the diagonal edge lengths.
     if let NeighborListConfig::CellList { r_skin, .. } = &config.neighbor_list {
-        let cutoff_max: f64 = config
+        let mut cutoff_max: f64 = config
             .pair_interactions
             .iter()
             .map(|p| p.cutoff)
             .fold(0.0, f64::max);
+        if let Some(c) = config.coulomb.as_ref() {
+            cutoff_max = cutoff_max.max(c.cutoff);
+        }
         let required = (3.0 * (cutoff_max + r_skin)) as f32;
         let widths = sim_box.perpendicular_widths();
         let direction_names: [&'static str; 3] = ["a", "b", "c"];
@@ -187,13 +190,15 @@ fn run_simulation_with_phase(
     timings.record_host(HostStage::INIT_LOAD, init_load_duration);
     timings.record_host(HostStage::GPU_INIT, gpu_init_duration);
 
-    // Build masses array from per-particle type_index lookup.
+    // Build masses and charges arrays from per-particle type_index lookup.
     let mut masses_f64: Vec<f64> = Vec::with_capacity(n);
     let mut masses_f32: Vec<f32> = Vec::with_capacity(n);
+    let mut charges_f32: Vec<f32> = Vec::with_capacity(n);
     for &ti in &init.type_indices {
-        let m = config.particle_types[ti as usize].mass;
-        masses_f64.push(m);
-        masses_f32.push(m as f32);
+        let pt = &config.particle_types[ti as usize];
+        masses_f64.push(pt.mass);
+        masses_f32.push(pt.mass as f32);
+        charges_f32.push(pt.charge as f32);
     }
 
     // Build velocities: either from the init state or sampled.
@@ -229,6 +234,7 @@ fn run_simulation_with_phase(
         velocities_y,
         velocities_z,
         masses_f32.clone(),
+        charges_f32,
         init.type_indices.clone(),
         None,
         images_arg,
@@ -265,6 +271,7 @@ fn run_simulation_with_phase(
         &config.particle_types,
         &config.pair_interactions,
         &config.bond_types,
+        config.coulomb.as_ref(),
         &bond_list,
         &exclusion_list,
         &config.neighbor_list,

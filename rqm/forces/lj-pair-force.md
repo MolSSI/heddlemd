@@ -275,7 +275,7 @@ extern "C" __global__ void lj_pair_force(
     const float *type_switch,
     const unsigned int *atom_excl_offsets,
     const unsigned int *atom_excl_partners,
-    const float *atom_excl_scales,
+    const float *atom_excl_lj_scales,
     const unsigned int *neighbor_list,
     const unsigned int *neighbor_counts,
     unsigned int n);
@@ -325,7 +325,7 @@ semantics):
 
 ```
 float s = exclusion_scale(
-    i, j, atom_excl_offsets, atom_excl_partners, atom_excl_scales);
+    i, j, atom_excl_offsets, atom_excl_partners, atom_excl_lj_scales);
 fx *= s; fy *= s; fz *= s;
 energy *= s;
 w *= s;
@@ -339,7 +339,7 @@ pairs that are not on the exclusion list.
 The kernel must be launched with an exclusion list shaped consistently
 with the particle count: `atom_excl_offsets` has length `N + 1` (where
 the final entry equals the total number of partner entries), and
-`atom_excl_partners` and `atom_excl_scales` have the same length as
+`atom_excl_partners` and `atom_excl_lj_scales` have the same length as
 each other. Empty lists are represented by `atom_excl_offsets` of
 length `N + 1` filled with zeros and zero-length partner / scale
 buffers; the kernel handles this case without a separate code path.
@@ -371,12 +371,13 @@ A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
     string-keyed kernel lookup of its own (see `build-pipeline.md`).
 
   The `DeviceExclusionList` argument is a host-side handle holding the
-  three device buffers `atom_excl_offsets`, `atom_excl_partners`, and
-  `atom_excl_scales`. It is constructed from the host-side
-  `ExclusionList` (see `bonds.md`) when the `MorseBonded` slot (or the
-  `LennardJones` slot on its own) is built. An empty exclusion list is
-  represented by a `DeviceExclusionList` whose offsets buffer has length
-  `N + 1` filled with zeros and whose partner / scale buffers have
+  four device buffers `atom_excl_offsets`, `atom_excl_partners`,
+  `atom_excl_lj_scales`, and `atom_excl_coul_scales`. It is constructed
+  from the host-side `ExclusionList` (see `bonds.md`) once at force-field
+  construction time and shared between the LJ and Coulomb slots; each
+  slot consumes the scale array appropriate to itself. An empty exclusion
+  list is represented by a `DeviceExclusionList` whose offsets buffer has
+  length `N + 1` filled with zeros and whose partner / scale buffers have
   length zero.
 
   The launcher trusts the caller for shape consistency: in debug builds

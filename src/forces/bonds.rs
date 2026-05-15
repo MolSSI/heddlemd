@@ -17,7 +17,8 @@ pub struct Bond {
 pub struct Exclusion {
     pub atom_i: u32,
     pub atom_j: u32,
-    pub scale: f32,
+    pub scale_lj: f32,
+    pub scale_coul: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +49,8 @@ pub struct ExclusionList {
     pub entries: Vec<Exclusion>,
     pub atom_excl_offsets: Vec<u32>,
     pub atom_excl_partners: Vec<u32>,
-    pub atom_excl_scales: Vec<f32>,
+    pub atom_excl_lj_scales: Vec<f32>,
+    pub atom_excl_coul_scales: Vec<f32>,
     pub particle_count: usize,
 }
 
@@ -58,18 +60,22 @@ impl ExclusionList {
             entries: Vec::new(),
             atom_excl_offsets: vec![0; particle_count + 1],
             atom_excl_partners: Vec::new(),
-            atom_excl_scales: Vec::new(),
+            atom_excl_lj_scales: Vec::new(),
+            atom_excl_coul_scales: Vec::new(),
             particle_count,
         }
     }
 }
 
-/// Host-side handle around the exclusion list's three device buffers.
+/// Host-side handle around the exclusion list's four device buffers.
+/// Shared between the LJ and Coulomb pair-force slots; each consumes
+/// the scale array appropriate to itself.
 #[derive(Debug)]
 pub struct DeviceExclusionList {
     pub atom_excl_offsets: CudaSlice<u32>,
     pub atom_excl_partners: CudaSlice<u32>,
-    pub atom_excl_scales: CudaSlice<f32>,
+    pub atom_excl_lj_scales: CudaSlice<f32>,
+    pub atom_excl_coul_scales: CudaSlice<f32>,
     pub particle_count: usize,
 }
 
@@ -88,17 +94,25 @@ impl DeviceExclusionList {
                 .htod_sync_copy(&list.atom_excl_partners)
                 .map_err(GpuError::from)?
         };
-        let atom_excl_scales = if list.atom_excl_scales.is_empty() {
+        let atom_excl_lj_scales = if list.atom_excl_lj_scales.is_empty() {
             device.alloc_zeros::<f32>(0).map_err(GpuError::from)?
         } else {
             device
-                .htod_sync_copy(&list.atom_excl_scales)
+                .htod_sync_copy(&list.atom_excl_lj_scales)
+                .map_err(GpuError::from)?
+        };
+        let atom_excl_coul_scales = if list.atom_excl_coul_scales.is_empty() {
+            device.alloc_zeros::<f32>(0).map_err(GpuError::from)?
+        } else {
+            device
+                .htod_sync_copy(&list.atom_excl_coul_scales)
                 .map_err(GpuError::from)?
         };
         Ok(DeviceExclusionList {
             atom_excl_offsets,
             atom_excl_partners,
-            atom_excl_scales,
+            atom_excl_lj_scales,
+            atom_excl_coul_scales,
             particle_count: list.particle_count,
         })
     }
@@ -167,7 +181,7 @@ pub(crate) fn parse_bonds_file(
     let mut bonds_seen = false;
     let mut exclusions_seen = false;
     let mut raw_bonds: Vec<(usize, u32, u32, u32)> = Vec::new(); // (line, i, j, type_idx)
-    let mut raw_excl: Vec<(usize, u32, u32, f32)> = Vec::new();
+    let mut raw_excl: Vec<(usize, u32, u32, f32, f32)> = Vec::new(); // (line, i, j, scale_lj, scale_coul)
 
     for (idx, line) in raw.lines().enumerate() {
         let line_number = idx + 1;
@@ -263,10 +277,10 @@ pub(crate) fn parse_bonds_file(
             }
             Section::Exclusions => {
                 let cols: Vec<&str> = trimmed.split_ascii_whitespace().collect();
-                if cols.len() < 2 || cols.len() > 3 {
+                if cols.len() < 2 || cols.len() > 4 {
                     return Err(BondsFileError::InvalidExclusionRow {
                         line_number,
-                        reason: format!("expected 2 or 3 columns, got {}", cols.len()),
+                        reason: format!("expected 2, 3, or 4 columns, got {}", cols.len()),
                     });
                 }
                 let atom_i = cols[0].parse::<u32>().map_err(|_| {
@@ -301,20 +315,23 @@ pub(crate) fn parse_bonds_file(
                         atom: atom_i,
                     });
                 }
-                let scale = if cols.len() == 3 {
-                    cols[2].parse::<f32>().map_err(|_| {
-                        BondsFileError::InvalidExclusionRow {
-                            line_number,
-                            reason: format!("scale {:?} is not an f32", cols[2]),
-                        }
-                    })?
-                } else {
-                    0.0
+                // Two-column form: both scales default to 0.0 (full exclusion).
+                // Three-column form: single scale applied to both potentials.
+                // Four-column form: independent (scale_lj, scale_coul).
+                let (scale_lj, scale_coul) = match cols.len() {
+                    2 => (0.0_f32, 0.0_f32),
+                    3 => {
+                        let s = parse_scale(line_number, "scale", cols[2])?;
+                        (s, s)
+                    }
+                    4 => {
+                        let lj = parse_scale(line_number, "scale_lj", cols[2])?;
+                        let coul = parse_scale(line_number, "scale_coul", cols[3])?;
+                        (lj, coul)
+                    }
+                    _ => unreachable!(),
                 };
-                if !scale.is_finite() || !(0.0..=1.0).contains(&scale) {
-                    return Err(BondsFileError::ScaleOutOfRange { line_number, scale });
-                }
-                raw_excl.push((line_number, atom_i, atom_j, scale));
+                raw_excl.push((line_number, atom_i, atom_j, scale_lj, scale_coul));
             }
         }
     }
@@ -344,12 +361,13 @@ pub(crate) fn parse_bonds_file(
     // Canonicalise + sort explicit exclusions; reject duplicates.
     let mut explicit: Vec<Exclusion> = raw_excl
         .iter()
-        .map(|&(_, i, j, s)| {
+        .map(|&(_, i, j, sl, sc)| {
             let (a, b) = if i < j { (i, j) } else { (j, i) };
             Exclusion {
                 atom_i: a,
                 atom_j: b,
-                scale: s,
+                scale_lj: sl,
+                scale_coul: sc,
             }
         })
         .collect();
@@ -364,7 +382,7 @@ pub(crate) fn parse_bonds_file(
     }
 
     // Build the effective exclusion list: explicit entries plus implicit
-    // (0.0) entries for any bonded pair that does not already appear.
+    // (0.0, 0.0) entries for any bonded pair that does not already appear.
     let mut effective = explicit.clone();
     for b in &bonds {
         let already = effective
@@ -374,7 +392,8 @@ pub(crate) fn parse_bonds_file(
             effective.push(Exclusion {
                 atom_i: b.atom_i,
                 atom_j: b.atom_j,
-                scale: 0.0,
+                scale_lj: 0.0,
+                scale_coul: 0.0,
             });
             effective.sort_by_key(|e| (e.atom_i, e.atom_j));
         }
@@ -413,16 +432,19 @@ pub(crate) fn parse_bonds_file(
     }
     let total_partner_entries = atom_excl_offsets[particle_count] as usize;
     let mut atom_excl_partners = vec![0u32; total_partner_entries];
-    let mut atom_excl_scales = vec![0f32; total_partner_entries];
+    let mut atom_excl_lj_scales = vec![0f32; total_partner_entries];
+    let mut atom_excl_coul_scales = vec![0f32; total_partner_entries];
     let mut cursor_e: Vec<u32> = atom_excl_offsets[..particle_count].to_vec();
     for e in &effective {
         let pi = e.atom_i as usize;
         let pj = e.atom_j as usize;
         atom_excl_partners[cursor_e[pi] as usize] = e.atom_j;
-        atom_excl_scales[cursor_e[pi] as usize] = e.scale;
+        atom_excl_lj_scales[cursor_e[pi] as usize] = e.scale_lj;
+        atom_excl_coul_scales[cursor_e[pi] as usize] = e.scale_coul;
         cursor_e[pi] += 1;
         atom_excl_partners[cursor_e[pj] as usize] = e.atom_i;
-        atom_excl_scales[cursor_e[pj] as usize] = e.scale;
+        atom_excl_lj_scales[cursor_e[pj] as usize] = e.scale_lj;
+        atom_excl_coul_scales[cursor_e[pj] as usize] = e.scale_coul;
         cursor_e[pj] += 1;
     }
 
@@ -436,10 +458,28 @@ pub(crate) fn parse_bonds_file(
         entries: effective,
         atom_excl_offsets,
         atom_excl_partners,
-        atom_excl_scales,
+        atom_excl_lj_scales,
+        atom_excl_coul_scales,
         particle_count,
     };
     Ok((bond_list, exclusion_list))
+}
+
+fn parse_scale(
+    line_number: usize,
+    column: &'static str,
+    raw: &str,
+) -> Result<f32, BondsFileError> {
+    let scale = raw.parse::<f32>().map_err(|_| {
+        BondsFileError::InvalidExclusionRow {
+            line_number,
+            reason: format!("{column} {:?} is not an f32", raw),
+        }
+    })?;
+    if !scale.is_finite() || !(0.0..=1.0).contains(&scale) {
+        return Err(BondsFileError::ScaleOutOfRange { line_number, scale });
+    }
+    Ok(scale)
 }
 
 fn strip_comment(line: &str) -> &str {

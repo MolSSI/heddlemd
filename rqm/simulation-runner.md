@@ -70,12 +70,14 @@ message.
    simulation uses; the config does not specify a box. Immediately
    after the box is known, verify the cell-list compatibility check:
    when `config.neighbor_list` is `NeighborListConfig::CellList { r_skin, .. }`,
-   every box edge must satisfy `L >= 3 * (cutoff_max + r_skin)` where
-   `cutoff_max` is the largest cutoff among `config.pair_interactions`.
-   A violation surfaces as
-   `RunnerError::CellListBoxTooSmall { axis, length, required }` and
-   exits with code `1`. `NeighborListConfig::AllPairs` skips this
-   check.
+   every lattice direction `d ∈ {a, b, c}` must satisfy
+   `w_d >= 3 * (cutoff_max + r_skin)` where `w_d` is the box's
+   perpendicular width along direction `d` (see `simulation-box.md`)
+   and `cutoff_max` is the largest cutoff across
+   `config.pair_interactions` and `config.coulomb` (when present).
+   A violation surfaces as `RunnerError::CellListBoxTooSmall {
+   direction, width, required }` and exits with code `1`.
+   `NeighborListConfig::AllPairs` skips this check.
 6a. **Load bonds file (if supplied).** When `config.bonds.is_some()`,
     build the slice of bond type names from `config.bond_types`,
     call `load_bonds_file(path, particle_count, &bond_type_names)`
@@ -94,6 +96,9 @@ message.
    - `velocities_*` from either the init state or the generated values,
    - `masses` populated from
      `config.particle_types[init_state.type_indices[i]].mass` cast to `f32`,
+   - `charges` populated from
+     `config.particle_types[init_state.type_indices[i]].charge` cast to
+     `f32`,
    - `ids = None` (default `0..N`),
    - `forces_*` zero-initialised by the constructor.
 10. **Allocate `ParticleBuffers`.** Construct `ParticleBuffers` from
@@ -353,11 +358,13 @@ wrapper that calls into the library.
   - `OutputExists { path: PathBuf }` — pre-flight check before the init
     file is read; surfaces the same condition the writers detect at
     open time, but earlier.
-  - `CellListBoxTooSmall { axis: &'static str, length: f32, required: f32 }`
+  - `CellListBoxTooSmall { direction: &'static str, width: f32, required: f32 }`
     — when `config.neighbor_list` is `CellList`, the box read from the
-    init file has an edge shorter than `3 * (cutoff_max + r_skin)`,
-    where `cutoff_max` is the largest cutoff among
-    `config.pair_interactions`. `axis` is one of `"x"`, `"y"`, `"z"`.
+    init file has a perpendicular width along some lattice direction
+    that is shorter than `3 * (cutoff_max + r_skin)`, where `cutoff_max`
+    is the largest cutoff across `config.pair_interactions` and
+    `config.coulomb` (when present). `direction` is one of `"a"`,
+    `"b"`, `"c"`.
 
 ### Functions <!-- rq-e5e4b048 -->
 
@@ -662,10 +669,21 @@ Feature: dynamics run simulation runner
   Scenario: Box too small for cell-list rejected before forces are constructed
     Given tmp/sim.toml has [neighbor_list] mode="cell-list" r_skin=1.0e-10
       and one [[pair_interactions]] with cutoff=1.0e-9
-    And tmp/init.xyz has box edges (2.0e-9, 5.0e-9, 5.0e-9)
+    And tmp/init.xyz has an orthorhombic box with lx=2.0e-9, ly=lz=5.0e-9
     When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
     Then it exits with code 1
-    And stderr contains "CellListBoxTooSmall" and "x" and "2"
+    And stderr contains "CellListBoxTooSmall" and "a" and "2"
+
+  @rq-0cb544f4
+  Scenario: Coulomb cutoff participates in box-too-small check
+    Given tmp/sim.toml has [neighbor_list] mode="cell-list" r_skin=1.0e-10
+      and one [[pair_interactions]] with cutoff=5.0e-10
+      and a [coulomb] table with cutoff=2.0e-9 (the larger of the two)
+    And tmp/init.xyz has an orthorhombic box with lx=ly=lz=5.0e-9
+      (so 3*(2.0e-9 + 1.0e-10) = 6.3e-9 > 5.0e-9)
+    When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
+    Then it exits with code 1
+    And stderr contains "CellListBoxTooSmall"
 
   @rq-21d27f06
   Scenario: All-pairs mode skips the box-too-small check

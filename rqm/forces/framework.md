@@ -23,12 +23,15 @@ config:
 | `kind` | Implementation | File |
 | --- | --- | --- |
 | `lennard-jones` | non-bonded pairwise via `[[pair_interactions]]` | `lj-pair-force.md` |
+| `coulomb` | non-bonded truncated electrostatics via `[coulomb]` | `coulomb-pair-force.md` |
 | `morse-bonded` | bonded pairwise via `[[bond_types]]` + `.bonds` file | `morse-bonded.md` |
 
 Slots are present in the `ForceField` according to the config:
 
 - The `LennardJones` slot is present when `[[pair_interactions]]` contains
   at least one entry.
+- The `Coulomb` slot is present when the config supplies a `[coulomb]`
+  table.
 - The `MorseBonded` slot is present when the config supplies a
   `bonds = "..."` path *and* at least one `[[bond_types]]` entry uses
   `potential = "morse"`.
@@ -41,7 +44,8 @@ When multiple slots are present, they appear in the `ForceField`'s slot
 list in a fixed order determined at construction:
 
 1. `LennardJones`
-2. `MorseBonded`
+2. `Coulomb`
+3. `MorseBonded`
 
 Future potentials are inserted into this order at fixed positions defined
 in `ForceField::new`.

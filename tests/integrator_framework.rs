@@ -22,6 +22,7 @@ fn small_state(n: usize) -> ParticleState {
         zero.clone(),
         zero,
         m,
+        vec![0.0_f32; n],
         vec![0u32; n],
         None,
             None,
@@ -53,6 +54,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &[],
         &[],
         &[],
+        None,
         &BondList::empty(n),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
@@ -183,6 +185,7 @@ fn step_on_empty_state_is_noop() {
     let gpu = init_device().unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
+        vec![0.0_f32; 0],
         Vec::new(), None,
             None,
     )
@@ -274,7 +277,7 @@ fn integrator_owns_force_evaluation_inside_step() {
     let mut ff = ForceField::new(&gpu,
         4,
         &sim_box,
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }],
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[PairInteractionConfig {
             between: ("Ar".to_string(), "Ar".to_string()),
             cutoff: 1.0,
@@ -282,6 +285,7 @@ fn integrator_owns_force_evaluation_inside_step() {
             potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
         }],
         &[],
+        None,
         &BondList::empty(4),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,

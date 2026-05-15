@@ -155,6 +155,11 @@ One entry per particle species. At least one entry required.
   `pair_interactions.between`. Case-sensitive. Empty strings are rejected.
 - `mass: f64` — particle mass in kilograms. Must be finite and strictly
   positive.
+- `charge: f64` — optional. Particle charge in coulombs. Must be finite
+  when supplied; any sign is accepted. Defaults to `0.0` when omitted.
+  The charge applies to every particle of this type uniformly. The runner
+  uploads the per-type charges into a per-particle `charges` buffer at
+  init time (see `particle-state.md`).
 
 Names must be unique within the array.
 
@@ -172,9 +177,13 @@ Common fields:
 
 - `between: [String; 2]` — unordered pair of declared type names. Order is
   not significant: `["A", "B"]` and `["B", "A"]` refer to the same pair.
-- `potential: String` — selects the pair potential. In schema v1 the only
-  supported value is `"lennard-jones"`. Future values (`"buckingham"`,
-  `"coulomb"`, ...) are reserved.
+- `potential: String` — selects the pair potential. The only supported
+  value in `[[pair_interactions]]` is `"lennard-jones"`. Electrostatic
+  pair interactions are configured globally through the top-level
+  `[coulomb]` table (see below) rather than per type pair, since the
+  Coulomb pair magnitude is constructed from per-particle charges and
+  carries no per-pair parameters. Future values
+  (`"buckingham"`, ...) for `[[pair_interactions]]` are reserved.
 - `cutoff: f64` — pair distance in metres beyond which the force is treated
   as zero. Finite, strictly positive.
 - `r_switch: f64` — optional. Inner radius of the CHARMM-style C¹
@@ -223,6 +232,31 @@ Fields accepted for `potential = "morse"` (see `forces/morse-bonded.md`):
 Names must be unique within the array. Unknown fields for the chosen
 `potential` are rejected.
 
+#### `[coulomb]` (optional table) <!-- rq-28d519b5 -->
+
+Activates the truncated Coulomb pair-force slot (see
+`forces/coulomb-pair-force.md`). The slot is present iff this table is
+present. The kernel computes pair contributions from the per-particle
+charges carried by `ParticleBuffers` (sourced from each particle type's
+`charge` field in `[[particle_types]]`); the table carries only the
+real-space cutoff parameters that apply uniformly to every pair.
+
+- `cutoff: f64` — pair distance in metres beyond which the Coulomb
+  force is treated as zero. Required when the table is present. Finite,
+  strictly positive.
+- `r_switch: f64` — optional. Inner radius of the CHARMM-style C¹
+  switching function applied over `[r_switch, cutoff]` (see
+  `forces/coulomb-pair-force.md`). Finite, strictly positive, and
+  `r_switch <= cutoff`. Defaults to `0.9 * cutoff` when omitted.
+  Setting `r_switch = cutoff` selects the hard-cutoff degenerate case
+  in which no smoothing is applied.
+
+Cross-validation alongside the other pair potentials feeds into the
+neighbor list's box-compatibility check: the shared neighbor list's
+search radius is `max(pair_interactions.cutoff_max, coulomb.cutoff)
++ r_skin`, and the simulation box's minimum perpendicular width must be
+at least `3 *` that value.
+
 #### `[neighbor_list]` (optional table) <!-- rq-adddaf1a -->
 
 Selects the algorithm used by the Lennard-Jones slot to enumerate
@@ -255,12 +289,13 @@ Cross-validation:
 
 - `r_skin > 0` and finite.
 - `max_neighbors > 0`.
-- The smallest box edge satisfies `L_min >= 3 * (cutoff_max + r_skin)`
-  where `cutoff_max` is the largest cutoff among
-  `[[pair_interactions]]`. The box is read from the init file, so this
-  check is performed by the runner, not by `load_config`. See
-  `simulation-runner.md` for the runner-side validation and the
-  corresponding `RunnerError` variant.
+- The simulation box's minimum perpendicular width satisfies
+  `min_perpendicular_width >= 3 * (cutoff_max + r_skin)` where
+  `cutoff_max` is the largest cutoff among `[[pair_interactions]]`
+  and the `[coulomb]` table's `cutoff` (when present). The box is
+  read from the init file, so this check is performed by the runner,
+  not by `load_config`. See `simulation-runner.md` for the
+  runner-side validation and the corresponding `RunnerError` variant.
 
 #### `[output]` (optional table; all fields have defaults) <!-- rq-6340fae2 -->
 
@@ -353,10 +388,13 @@ Beyond per-field validation, the loader checks:
   - `pair_interactions: Vec<PairInteractionConfig>`
   - `bond_types: Vec<BondTypeConfig>` — empty when the `[[bond_types]]`
     array is absent.
+  - `coulomb: Option<CoulombConfig>` — `Some` when the `[coulomb]` table
+    is present in the config, `None` otherwise.
   - `neighbor_list: NeighborListConfig` — defaults to
     `NeighborListConfig::CellList { max_neighbors: 256, r_skin: 0.3 *
-    max(pair_interactions[].cutoff) }` when the `[neighbor_list]`
-    table is omitted from the config.
+    max_cutoff }` when the `[neighbor_list]` table is omitted from the
+    config, where `max_cutoff` is the largest cutoff across
+    `[[pair_interactions]]` and the `[coulomb]` table.
   - `output: OutputConfig`
   - `config_path: PathBuf` — the absolute path of the source config file,
     retained for error messages and default output-path derivation.
@@ -379,6 +417,7 @@ Beyond per-field validation, the loader checks:
 - `ParticleTypeConfig` <!-- rq-a5ccc1de -->
   - `name: String`
   - `mass: f64`
+  - `charge: f64` — defaults to `0.0` when the TOML field is omitted.
 
 - `PairInteractionConfig` <!-- rq-f001eaf8 -->
   - `between: (String, String)` — stored normalised so the lexicographically
@@ -405,10 +444,16 @@ Beyond per-field validation, the loader checks:
   The `name` field is the lookup key referenced from the `.bonds` file's
   `[bonds]` section.
 
+- `CoulombConfig` <!-- rq-793a7cbb -->
+  - `cutoff: f64` — real-space cutoff in metres.
+  - `r_switch: f64` — populated from the optional `r_switch` field with
+    the documented default `0.9 * cutoff`.
+
 - `NeighborListConfig` — tagged enum selecting the algorithm used by <!-- rq-a8320030 -->
-  the Lennard-Jones slot to enumerate non-bonded pairs. Variants:
+  every short-range pair-force slot (Lennard-Jones, truncated Coulomb)
+  to enumerate non-bonded pairs. Variants:
   - `AllPairs` — selected by `mode = "all-pairs"`. Carries no
-    parameters; the LJ slot uses the O(N²) kernel.
+    parameters; pair-force slots use the O(N²) kernel.
   - `CellList { max_neighbors: u32, r_skin: f64 }` — selected by
     `mode = "cell-list"` (and used as the default when the
     `[neighbor_list]` table is omitted). `max_neighbors` is the
