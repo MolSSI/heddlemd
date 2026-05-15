@@ -18,7 +18,7 @@ struct LjScalarParams {
 }
 
 fn default_box() -> SimulationBox {
-    SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).expect("default box")
+    SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).expect("default box")
 }
 
 fn default_params() -> LjScalarParams {
@@ -53,19 +53,14 @@ fn build_state_xyz(positions: &[[f32; 3]]) -> ParticleState {
     .expect("build_state_xyz: ParticleState::new")
 }
 
-fn min_image_axis(dx: f32, l: f32) -> f32 {
-    dx - l * ((dx + l * 0.5) / l).floor()
-}
-
 fn lj_force_components(
     pi: [f32; 3],
     pj: [f32; 3],
-    lengths: [f32; 3],
+    sim_box: &SimulationBox,
     params: LjScalarParams,
 ) -> [f32; 3] {
-    let dx = min_image_axis(pi[0] - pj[0], lengths[0]);
-    let dy = min_image_axis(pi[1] - pj[1], lengths[1]);
-    let dz = min_image_axis(pi[2] - pj[2], lengths[2]);
+    let d = sim_box.minimum_image([pi[0] - pj[0], pi[1] - pj[1], pi[2] - pj[2]]);
+    let (dx, dy, dz) = (d[0], d[1], d[2]);
     let r2 = dx * dx + dy * dy + dz * dz;
     if r2 > params.cutoff * params.cutoff {
         return [0.0, 0.0, 0.0];
@@ -132,7 +127,7 @@ fn two_particles_at_fixed_separation_produce_closed_form_force() {
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
 
-    let expected = lj_force_components(positions[0], positions[1], sim_box.lengths(), params);
+    let expected = lj_force_components(positions[0], positions[1], &sim_box, params);
     assert_eq!(px[0 * 2 + 1], expected[0]);
     assert_eq!(py[0 * 2 + 1], expected[1]);
     assert_eq!(pz[0 * 2 + 1], expected[2]);
@@ -224,7 +219,7 @@ fn pair_exactly_at_cutoff_is_included() {
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
     let (px, _, _) = download_pair_forces(&pair);
 
-    let expected = lj_force_components(positions[0], positions[1], sim_box.lengths(), params);
+    let expected = lj_force_components(positions[0], positions[1], &sim_box, params);
     assert_eq!(px[0 * 2 + 1], expected[0]);
     // At r=cutoff the LJ force is non-zero (a small attractive value).
     assert!(expected[0] != 0.0);
@@ -247,7 +242,7 @@ fn at_lj_minimum_force_is_near_zero() {
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
 
-    let expected = lj_force_components(positions[0], positions[1], sim_box.lengths(), params);
+    let expected = lj_force_components(positions[0], positions[1], &sim_box, params);
     assert_eq!(px[0 * 2 + 1], expected[0]);
     assert_eq!(py[0 * 2 + 1], expected[1]);
     assert_eq!(pz[0 * 2 + 1], expected[2]);
@@ -289,7 +284,7 @@ fn doubling_epsilon_doubles_force() {
 #[test] // rq-8626ec3c
 fn pbc_minimum_image_used_across_box_boundary() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap();
+    let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let params = LjScalarParams {
         sigma: 1.0,
         epsilon: 1.0,
@@ -304,7 +299,7 @@ fn pbc_minimum_image_used_across_box_boundary() {
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
     let (px, _, _) = download_pair_forces(&pair);
 
-    let expected = lj_force_components(positions[0], positions[1], sim_box.lengths(), params);
+    let expected = lj_force_components(positions[0], positions[1], &sim_box, params);
     assert_eq!(px[0 * 2 + 1], expected[0]);
     // The minimum-image displacement from particle 0 to particle 1 is dx=+1.0, so
     // the repulsive force on particle 0 points in the +x direction.
@@ -394,7 +389,7 @@ fn block_non_aligned_particle_count() {
                 assert_eq!(pz[slot], 0.0_f32, "pz self slot i={i}");
             } else {
                 let expected =
-                    lj_force_components(positions[i], positions[k], sim_box.lengths(), params);
+                    lj_force_components(positions[i], positions[k], &sim_box, params);
                 assert!(
                     close_enough(px[slot], expected[0]),
                     "px[{i},{k}] kernel={} host={}",
@@ -460,7 +455,7 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
     // zeros the unused slots so the segmented reduction sees a clean sum.
     let gpu = init_device().expect("init_device");
     let device = gpu.device.clone();
-    let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
+    let sim_box = SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap();
     let params = default_params();
     let table = table_from_scalar(&device, params);
     let n = 4;
@@ -581,7 +576,7 @@ fn lj_then_reduce_produces_correct_net_forces() {
     downloaded.download_from(&particle_buffers).unwrap();
 
     let expected_on_0 =
-        lj_force_components(positions[0], positions[1], sim_box.lengths(), params);
+        lj_force_components(positions[0], positions[1], &sim_box, params);
     assert_eq!(downloaded.forces_x[0], expected_on_0[0]);
     assert_eq!(downloaded.forces_x[1], -downloaded.forces_x[0]);
     assert_eq!(downloaded.forces_y[0], expected_on_0[1]);
@@ -705,7 +700,7 @@ fn multi_type_same_type_pair_uses_diagonal_slot() {
     let expected = lj_force_components(
         [0.0, 0.0, 0.0],
         [1.5, 0.0, 0.0],
-        sim_box.lengths(),
+        &sim_box,
         LjScalarParams { sigma: 1.0, epsilon: 1.0, cutoff: 5.0 },
     );
     assert!((px[0 * 2 + 1] - expected[0]).abs() < 1e-5);
@@ -731,7 +726,7 @@ fn multi_type_mixed_pair_uses_off_diagonal_slot() {
     let expected = lj_force_components(
         [0.0, 0.0, 0.0],
         [2.5, 0.0, 0.0],
-        sim_box.lengths(),
+        &sim_box,
         LjScalarParams { sigma: 2.0, epsilon: 0.5, cutoff: 5.0 },
     );
     assert!((px[0 * 2 + 1] - expected[0]).abs() < 1e-5);
@@ -812,7 +807,6 @@ fn multi_type_three_type_dispatch() {
     let (px, _, _) = download_pair_forces(&pair);
     // Verify each (i, k) slot matches its closed-form prediction using the
     // sigma at type_indices[i] * 3 + type_indices[k].
-    let lengths = sim_box.lengths();
     for i in 0..3 {
         for k in 0..3 {
             if i == k {
@@ -822,7 +816,7 @@ fn multi_type_three_type_dispatch() {
             let expected = lj_force_components(
                 positions[i],
                 positions[k],
-                lengths,
+                &sim_box,
                 LjScalarParams { sigma: s, epsilon: 1.0, cutoff: 5.0 },
             );
             assert!(
@@ -895,7 +889,7 @@ fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
         r_switch: 4.0,
         potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     }];
-    let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
+    let sim_box = SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap();
     let ff = ForceField::new(&gpu,
         4,
         &sim_box,
@@ -921,7 +915,7 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
     };
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
-    let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
+    let sim_box = SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap();
     let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0 }];
     let pair_interactions = vec![PairInteractionConfig {
         between: ("Ar".to_string(), "Ar".to_string()),
@@ -1348,7 +1342,7 @@ fn switching_degenerate_reproduces_hard_cutoff_everywhere_inside() {
         let expected_fx = lj_force_components(
             [0.0, 0.0, 0.0],
             [r, 0.0, 0.0],
-            sim_box.lengths(),
+            &sim_box,
             LjScalarParams { sigma: 1.0, epsilon: 1.0, cutoff: 5.0 },
         )[0];
         assert_eq!(px[0 * 2 + 1], expected_fx, "force at r={r}");
@@ -1497,7 +1491,7 @@ fn switching_per_pair_type_r_switch_dispatches_correctly() {
     let expected_same = lj_force_components(
         positions[0],
         positions[1],
-        sim_box.lengths(),
+        &sim_box,
         LjScalarParams { sigma: 1.0, epsilon: 1.0, cutoff: 5.0 },
     )[0];
     assert_eq!(px_same[0 * 2 + 1], expected_same);

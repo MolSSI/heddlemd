@@ -40,15 +40,24 @@ particle_ids:       Vec<u32>
 ```
 
 `positions_x[i]`, `positions_y[i]`, and `positions_z[i]` carry the
-*wrapped* position of particle `i`: each component is in
-`[-L_a / 2, +L_a / 2)` for the corresponding box edge `L_a`. The
-companion image triple `(images_x[i], images_y[i], images_z[i])`
-records how many full periods the particle has crossed since the start
-of the run. The *unwrapped* position of particle `i` along axis `a`
-is `positions_a[i] + images_a[i] * L_a`. Image flags start at zero (or
+*wrapped* position of particle `i`: the position lies inside the primary
+image of the simulation box (its fractional coordinates lie in
+`[-1/2, 1/2)³`; see `simulation-box.md`). The companion image triple
+`(images_x[i], images_y[i], images_z[i])` records how many lattice
+vectors the particle has crossed since the start of the run, counted
+per lattice direction `(a, b, c)`. The *unwrapped* position of
+particle `i` is:
+
+```
+unwrapped = wrapped + images_x[i] * a + images_y[i] * b + images_z[i] * c
+```
+
+where `a`, `b`, `c` are the lattice vectors carried by `SimulationBox`.
+For an orthorhombic box this reduces to the per-axis form
+`unwrapped_a = wrapped_a + image_a * L_a`. Image flags start at zero (or
 at the values supplied via the init file) and are advanced by the
 integrator's drift kernels whenever the wrapped position crosses a
-`±L/2` boundary.
+boundary of the primary image.
 
 `potential_energies[i]` holds particle `i`'s share of the system's total
 potential energy after a force-evaluation step (the sum of `U_ij / 2` over
@@ -141,8 +150,9 @@ call.
     accepted as-is), `type_indices` values (range checks happen in the
     runner against the parsed `Config::particle_types` length), or the
     spatial consistency of position / image pairs (the constructor does
-    not enforce `positions_a[i] ∈ [-L_a/2, +L_a/2)`; that invariant is
-    re-established by the integrator's drift kernels on the first step).
+    not enforce that fractional coordinates lie in `[-1/2, 1/2)³`; that
+    invariant is re-established by the integrator's drift kernels on the
+    first step).
 
 - `ParticleState::particle_count(&self) -> usize` <!-- rq-ac035b90 -->
   - Returns `positions_x.len()`. Callers are expected to keep the other

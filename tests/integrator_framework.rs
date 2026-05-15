@@ -42,7 +42,7 @@ fn langevin_kind(seed: u64) -> IntegratorKind {
 }
 
 fn box_10() -> SimulationBox {
-    SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap()
+    SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {

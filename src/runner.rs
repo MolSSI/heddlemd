@@ -58,10 +58,10 @@ pub enum RunnerError {
     MissingArgs,
     #[error("output file already exists: `{}`", .path.display())]
     OutputExists { path: PathBuf },
-    #[error("simulation box is too small for the cell list along axis `{axis}`: length {length} is below the required {required}")]
+    #[error("simulation box perpendicular width along lattice direction `{direction}` is {width}, below the required {required}")]
     CellListBoxTooSmall {
-        axis: &'static str,
-        length: f32,
+        direction: &'static str,
+        width: f32,
         required: f32,
     },
 }
@@ -150,6 +150,8 @@ fn run_simulation_with_phase(
     let n = init.particle_count;
 
     // Cell-list box-compatibility check (uses the init file's box).
+    // For a triclinic box the constraint is on the perpendicular widths
+    // along each lattice direction, not on the diagonal edge lengths.
     if let NeighborListConfig::CellList { r_skin, .. } = &config.neighbor_list {
         let cutoff_max: f64 = config
             .pair_interactions
@@ -157,14 +159,14 @@ fn run_simulation_with_phase(
             .map(|p| p.cutoff)
             .fold(0.0, f64::max);
         let required = (3.0 * (cutoff_max + r_skin)) as f32;
-        let lengths = sim_box.lengths();
-        let axis_names: [&'static str; 3] = ["x", "y", "z"];
-        for a in 0..3 {
-            if lengths[a] < required {
+        let widths = sim_box.perpendicular_widths();
+        let direction_names: [&'static str; 3] = ["a", "b", "c"];
+        for d in 0..3 {
+            if widths[d] < required {
                 return Err((
                     RunnerError::CellListBoxTooSmall {
-                        axis: axis_names[a],
-                        length: lengths[a],
+                        direction: direction_names[d],
+                        width: widths[d],
                         required,
                     },
                     ExitPhase::Setup,

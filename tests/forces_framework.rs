@@ -24,7 +24,7 @@ fn lj_pair_config() -> PairInteractionConfig {
 }
 
 fn box_10() -> SimulationBox {
-    SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap()
+    SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn state_n(n: usize) -> ParticleState {
@@ -831,7 +831,7 @@ fn combiner_idempotent_across_two_calls() {
 #[test] // rq-b33cf896
 fn force_field_with_lj_owns_shared_neighbor_list() {
     let gpu = init_device().unwrap();
-    let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
+    let sim_box = SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap();
     let ff = ForceField::new(&gpu,
         4,
         &sim_box,
@@ -1016,7 +1016,7 @@ impl Potential for CutoffProbeStub {
 fn max_cutoff_aggregation_determines_neighbor_list_radius() {
     // The LJ slot's max_cutoff() governs the neighbor-list radius.
     let gpu = init_device().unwrap();
-    let sim_box = SimulationBox::new_orthorhombic(20.0, 20.0, 20.0).unwrap();
+    let sim_box = SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap();
     let r_skin = 0.5_f64;
     let ff = ForceField::new(&gpu,
         4,

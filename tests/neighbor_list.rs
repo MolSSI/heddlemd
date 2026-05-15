@@ -7,7 +7,7 @@ use dynamics::state::ParticleState;
 use dynamics::timings::Timings;
 
 fn box_n(l: f32) -> SimulationBox {
-    SimulationBox::new_orthorhombic(l, l, l).unwrap()
+    SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn state_from_positions(px: Vec<f32>, py: Vec<f32>, pz: Vec<f32>) -> ParticleState {
@@ -34,16 +34,6 @@ fn cell_counts_floor_of_l_over_search_radius() {
     let nl = NeighborListState::new_cell_list(&gpu, &box_n(10.0), 0, 1.0, 8, 0.3).unwrap();
     let cl = nl.cell_list_data().expect("cell-list mode");
     assert_eq!(cl.n_cells, [7, 7, 7]);
-    let expected = 10.0_f32 / 7.0;
-    for a in 0..3 {
-        assert!(
-            (cl.cell_size[a] - expected).abs() < 1.0e-6,
-            "cell_size[{}] = {}, expected {}",
-            a,
-            cl.cell_size[a],
-            expected
-        );
-    }
 }
 
 // rq-1b9c474c
@@ -53,12 +43,12 @@ fn reject_box_admitting_fewer_than_three_cells() {
     let result = NeighborListState::new_cell_list(&gpu, &box_n(10.0), 0, 1.0, 8, 3.0);
     match result {
         Err(NeighborListError::BoxTooSmallForCells {
-            axis,
-            length,
+            direction,
+            width,
             required,
         }) => {
-            assert_eq!(axis, "x");
-            assert!((length - 10.0).abs() < 1.0e-6);
+            assert_eq!(direction, "a");
+            assert!((width - 10.0).abs() < 1.0e-6);
             assert!((required - 12.0).abs() < 1.0e-6);
         }
         other => panic!("expected BoxTooSmallForCells, got {other:?}"),
@@ -384,7 +374,7 @@ fn cached_generation_initialised_from_construction_time_box() {
 fn cached_generation_initialised_from_non_zero_generation() {
     let gpu = init_device().unwrap();
     let mut sim_box = box_n(10.0);
-    sim_box.set_lengths(10.0, 10.0, 10.0).expect("ok");
+    sim_box.set_lattice(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).expect("ok");
     assert_eq!(sim_box.generation(), 1);
     let nl = NeighborListState::new_cell_list(&gpu, &sim_box, 0, 1.0, 8, 0.3).unwrap();
     assert_eq!(nl.cell_list_data().unwrap().cached_generation, 1);
@@ -400,9 +390,8 @@ fn pre_step_with_unchanged_box_does_not_refresh_cache() {
     let mut timings = Timings::new(&gpu).unwrap();
     nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
     let cl_before = nl.cell_list_data().unwrap();
-    let (n_cells, cell_size, n_cells_total, cached_gen, offsets_len) = (
+    let (n_cells, n_cells_total, cached_gen, offsets_len) = (
         cl_before.n_cells,
-        cl_before.cell_size,
         cl_before.n_cells_total,
         cl_before.cached_generation,
         cl_before.cell_offsets.len(),
@@ -410,7 +399,6 @@ fn pre_step_with_unchanged_box_does_not_refresh_cache() {
     nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
     let cl_after = nl.cell_list_data().unwrap();
     assert_eq!(cl_after.n_cells, n_cells);
-    assert_eq!(cl_after.cell_size, cell_size);
     assert_eq!(cl_after.n_cells_total, n_cells_total);
     assert_eq!(cl_after.cached_generation, cached_gen);
     assert_eq!(cl_after.cell_offsets.len(), offsets_len);
@@ -428,7 +416,7 @@ fn box_generation_increment_refreshes_cell_layout_and_rebuilds() {
     assert_eq!(nl.cell_list_data().unwrap().n_cells, [7, 7, 7]);
     assert_eq!(nl.cell_list_data().unwrap().cached_generation, 0);
 
-    sim_box.set_lengths(20.0, 20.0, 20.0).expect("ok");
+    sim_box.set_lattice(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).expect("ok");
     assert_eq!(sim_box.generation(), 1);
 
     // Move positions into the new box and re-upload (otherwise atoms sit outside primary cell).
@@ -452,37 +440,35 @@ fn generation_mismatch_with_box_too_small_returns_box_too_small() {
     let mut nl = NeighborListState::new_cell_list(&gpu, &sim_box, 2, 1.0, 8, 0.3).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
-    let (n_cells_before, cell_size_before, total_before, gen_before, offsets_len_before) = {
+    let (n_cells_before, total_before, gen_before, offsets_len_before) = {
         let cl = nl.cell_list_data().unwrap();
         (
             cl.n_cells,
-            cl.cell_size,
             cl.n_cells_total,
             cl.cached_generation,
             cl.cell_offsets.len(),
         )
     };
 
-    // Box too small along x (floor(3.0 / 1.3) = 2 < 3).
-    sim_box.set_lengths(3.0, 10.0, 10.0).expect("ok");
+    // Box too small along a (floor(3.0 / 1.3) = 2 < 3).
+    sim_box.set_lattice(3.0, 10.0, 10.0, 0.0, 0.0, 0.0).expect("ok");
     let err = nl
         .pre_step(&sim_box, &buffers, &mut timings)
         .expect_err("expected BoxTooSmallForCells");
     match err {
         NeighborListError::BoxTooSmallForCells {
-            axis,
-            length,
+            direction,
+            width,
             required,
         } => {
-            assert_eq!(axis, "x");
-            assert!((length - 3.0).abs() < 1.0e-6);
+            assert_eq!(direction, "a");
+            assert!((width - 3.0).abs() < 1.0e-6);
             assert!((required - 3.9).abs() < 1.0e-5);
         }
         other => panic!("unexpected error: {other:?}"),
     }
     let cl = nl.cell_list_data().unwrap();
     assert_eq!(cl.n_cells, n_cells_before);
-    assert_eq!(cl.cell_size, cell_size_before);
     assert_eq!(cl.n_cells_total, total_before);
     assert_eq!(cl.cached_generation, gen_before);
     assert_eq!(cl.cell_offsets.len(), offsets_len_before);
@@ -500,7 +486,7 @@ fn cell_offsets_reallocated_when_n_cells_total_changes() {
     assert_eq!(nl.cell_list_data().unwrap().n_cells_total, 343);
     assert_eq!(nl.cell_list_data().unwrap().cell_offsets.len(), 344);
 
-    sim_box.set_lengths(12.0, 12.0, 12.0).expect("ok");
+    sim_box.set_lattice(12.0, 12.0, 12.0, 0.0, 0.0, 0.0).expect("ok");
     let new_state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
     let buffers = ParticleBuffers::new(&gpu, &new_state).unwrap();
     nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
@@ -522,13 +508,12 @@ fn cell_offsets_not_reallocated_when_n_cells_total_unchanged() {
     assert_eq!(initial_total, 343);
 
     // L=9.8 still gives floor(9.8/1.3)=7 cells per axis (same n_cells_total).
-    sim_box.set_lengths(9.8, 9.8, 9.8).expect("ok");
+    sim_box.set_lattice(9.8, 9.8, 9.8, 0.0, 0.0, 0.0).expect("ok");
     nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
     let cl = nl.cell_list_data().unwrap();
     assert_eq!(cl.n_cells_total, initial_total);
     assert_eq!(cl.cell_offsets.len(), initial_offsets_len);
-    // cell_size should reflect the new lengths.
-    assert!((cl.cell_size[0] - 9.8 / 7.0).abs() < 1.0e-5);
+    assert_eq!(cl.n_cells, [7, 7, 7]);
 }
 
 #[test] // rq-31a9e3bb
@@ -543,7 +528,7 @@ fn r_search_sq_preserved_across_generation_refresh() {
     let r_search_sq_before = nl.cell_list_data().unwrap().r_search_sq;
     assert!((r_search_sq_before - 1.69).abs() < 1.0e-5);
 
-    sim_box.set_lengths(20.0, 20.0, 20.0).expect("ok");
+    sim_box.set_lattice(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).expect("ok");
     let new_state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
     let buffers = ParticleBuffers::new(&gpu, &new_state).unwrap();
     nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
@@ -561,7 +546,7 @@ fn two_pre_steps_after_single_box_mutation_refresh_only_once() {
     let mut timings = Timings::new(&gpu).unwrap();
     nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
 
-    sim_box.set_lengths(12.0, 12.0, 12.0).expect("ok");
+    sim_box.set_lattice(12.0, 12.0, 12.0, 0.0, 0.0, 0.0).expect("ok");
     let new_state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
     let buffers = ParticleBuffers::new(&gpu, &new_state).unwrap();
     nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
@@ -592,7 +577,7 @@ fn generation_mismatch_detected_even_when_edge_lengths_unchanged() {
     assert_eq!(nl.cell_list_data().unwrap().cached_generation, 0);
 
     // Mutate to the same lengths — generation still bumps.
-    sim_box.set_lengths(10.0, 10.0, 10.0).expect("ok");
+    sim_box.set_lattice(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).expect("ok");
     assert_eq!(sim_box.generation(), 1);
 
     nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
@@ -857,7 +842,7 @@ fn cell_list_scratch_reallocated_on_box_generation_refresh() {
     assert_eq!(cl_before.scan_block_totals[0].len(), 2);
     let cell_indices_len_before = cl_before.cell_indices.len();
 
-    sim_box.set_lengths(12.0, 12.0, 12.0).expect("ok");
+    sim_box.set_lattice(12.0, 12.0, 12.0, 0.0, 0.0, 0.0).expect("ok");
     let new_state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
     let buffers = ParticleBuffers::new(&gpu, &new_state).unwrap();
     nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();

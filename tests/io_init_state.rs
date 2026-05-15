@@ -32,10 +32,9 @@ fn load_two_particles_no_velocities() {
     let path = write_init(&dir, body);
     let state = load_init_state(&path, &["Ar"]).unwrap();
     assert_eq!(state.particle_count, 2);
-    let lengths = state.sim_box.lengths();
-    assert!((lengths[0] - 1.0e-9_f32).abs() < 1.0e-18);
-    assert!((lengths[1] - 1.0e-9_f32).abs() < 1.0e-18);
-    assert!((lengths[2] - 1.0e-9_f32).abs() < 1.0e-18);
+    assert!((state.sim_box.lx() - 1.0e-9_f32).abs() < 1.0e-18);
+    assert!((state.sim_box.ly() - 1.0e-9_f32).abs() < 1.0e-18);
+    assert!((state.sim_box.lz() - 1.0e-9_f32).abs() < 1.0e-18);
     assert_eq!(state.type_indices, vec![0, 0]);
     assert!((state.positions_x[0] - 0.0_f32).abs() < 1e-30);
     assert!((state.positions_x[1] - 3.4e-10_f32).abs() < 1e-20);
@@ -173,12 +172,14 @@ fn reject_missing_properties() {
 }
 
 // rq-2ed137d9
+// rq-2ed137d9
 #[test]
-fn reject_non_orthorhombic() {
-    let dir = tmp_path("non_ortho");
+fn reject_lattice_with_non_zero_upper_triangular_entry() {
+    // a_y (slot 1 in row-major) must be exactly 0 for lower-triangular form.
+    let dir = tmp_path("non_lower_tri");
     let path = write_init(
         &dir,
-        "0\nLattice=\"1.0e-9 0 0 0.1e-9 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\n",
+        "0\nLattice=\"1.0e-9 0.1e-9 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\n",
     );
     match load_init_state(&path, &["Ar"]).unwrap_err() {
         InitStateError::InvalidLattice(_) => {}
@@ -442,10 +443,12 @@ fn reject_upper_boundary() {
     );
     match load_init_state(&path, &["Ar"]).unwrap_err() {
         InitStateError::PositionOutsideBox {
-            line_number, axis, ..
+            line_number,
+            direction,
+            ..
         } => {
             assert_eq!(line_number, 3);
-            assert_eq!(axis, "x");
+            assert_eq!(direction, "a");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -460,7 +463,9 @@ fn reject_past_upper() {
         "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 6.0e-10 0 0\n",
     );
     match load_init_state(&path, &["Ar"]).unwrap_err() {
-        InitStateError::PositionOutsideBox { axis, .. } => assert_eq!(axis, "x"),
+        InitStateError::PositionOutsideBox { direction, .. } => {
+            assert_eq!(direction, "a")
+        }
         other => panic!("unexpected: {other:?}"),
     }
 }
@@ -474,7 +479,9 @@ fn reject_past_lower_y() {
         "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0 -6.0e-10 0\n",
     );
     match load_init_state(&path, &["Ar"]).unwrap_err() {
-        InitStateError::PositionOutsideBox { axis, .. } => assert_eq!(axis, "y"),
+        InitStateError::PositionOutsideBox { direction, .. } => {
+            assert_eq!(direction, "b")
+        }
         other => panic!("unexpected: {other:?}"),
     }
 }
@@ -624,6 +631,75 @@ fn reject_image_before_velo_in_properties() {
     let err = load_init_state(&path, &["Ar"]).unwrap_err();
     match err {
         InitStateError::InvalidProperties(_) => {}
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// --- Triclinic Lattice scenarios ---
+
+#[test] // rq-b7573bd5
+fn accept_lower_triangular_triclinic_lattice() {
+    let dir = tmp_path("triclinic_lattice");
+    let path = write_init(
+        &dir,
+        "0\nLattice=\"1.0e-9 0 0 0.2e-9 1.0e-9 0 0.1e-9 -0.3e-9 1.0e-9\" Properties=species:S:1:pos:R:3\n",
+    );
+    let state = load_init_state(&path, &["Ar"]).unwrap();
+    let lat = state.sim_box.lattice();
+    let eps = 1.0e-18_f32;
+    assert!((lat[0] - 1.0e-9_f32).abs() < eps);
+    assert!((lat[1] - 1.0e-9_f32).abs() < eps);
+    assert!((lat[2] - 1.0e-9_f32).abs() < eps);
+    assert!((lat[3] - 0.2e-9_f32).abs() < eps);
+    assert!((lat[4] - 0.1e-9_f32).abs() < eps);
+    assert!((lat[5] - (-0.3e-9_f32)).abs() < eps);
+}
+
+#[test] // rq-cc4e9821
+fn accept_lattice_with_negative_tilts() {
+    let dir = tmp_path("negative_tilts");
+    let path = write_init(
+        &dir,
+        "0\nLattice=\"1.0e-9 0 0 -0.5e-9 1.0e-9 0 -0.1e-9 -0.2e-9 1.0e-9\" Properties=species:S:1:pos:R:3\n",
+    );
+    let state = load_init_state(&path, &["Ar"]).unwrap();
+    let lat = state.sim_box.lattice();
+    assert!(lat[3] < 0.0);
+    assert!(lat[4] < 0.0);
+    assert!(lat[5] < 0.0);
+}
+
+#[test] // rq-1aeb2da1
+fn accept_position_inside_primary_parallelepiped_of_triclinic_box() {
+    // xy = 0.2e-9: a particle at (0.4e-9, 0.3e-9, 0) has fractional
+    //   s_c = 0, s_b = 0.3, s_a = (0.4 - 0.3*0.2) / 1.0 = 0.34 — inside.
+    let dir = tmp_path("triclinic_inside");
+    let path = write_init(
+        &dir,
+        "1\nLattice=\"1.0e-9 0 0 0.2e-9 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0.4e-9 0.3e-9 0\n",
+    );
+    load_init_state(&path, &["Ar"]).expect("position should be accepted");
+}
+
+#[test] // rq-8a3858fd
+fn reject_position_with_fractional_coord_outside_primary_image() {
+    // Lattice with non-zero yz=0.5e-9; a position with s_b >= 0.5
+    // along b should be rejected.
+    let dir = tmp_path("triclinic_outside");
+    let path = write_init(
+        &dir,
+        // s_b = 0.5e-9 / 1.0e-9 = 0.5 — exactly the upper bound, rejected.
+        "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0.5e-9 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0 5.0e-10 0\n",
+    );
+    match load_init_state(&path, &["Ar"]).unwrap_err() {
+        InitStateError::PositionOutsideBox {
+            direction,
+            fractional,
+            ..
+        } => {
+            assert_eq!(direction, "b");
+            assert!(fractional >= 0.5);
+        }
         other => panic!("unexpected: {other:?}"),
     }
 }

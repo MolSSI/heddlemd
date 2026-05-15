@@ -30,7 +30,7 @@ pub fn vv_kick_drift(
     let n_u32 = n as u32;
     let func = buffers.kernels.vv_kick_drift.clone();
     let cfg = launch_config(n_u32);
-    let lengths = sim_box.lengths();
+    let lat = sim_box.lattice();
     unsafe {
         func.launch(
             cfg,
@@ -48,9 +48,12 @@ pub fn vv_kick_drift(
                 &buffers.forces_y,
                 &buffers.forces_z,
                 &buffers.masses,
-                lengths[0],
-                lengths[1],
-                lengths[2],
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
                 dt,
                 n_u32,
             ),
@@ -259,7 +262,7 @@ pub fn lj_pair_force(
         shared_mem_bytes: 0,
     };
 
-    let lengths = sim_box.lengths();
+    let lat = sim_box.lattice();
     unsafe {
         func.launch(
             cfg,
@@ -274,9 +277,12 @@ pub fn lj_pair_force(
                 &mut pair_buffer.pair_energies,
                 &mut pair_buffer.pair_virials,
                 max_neighbors,
-                lengths[0],
-                lengths[1],
-                lengths[2],
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
                 params.n_types,
                 &params.sigma,
                 &params.epsilon,
@@ -317,7 +323,7 @@ pub fn morse_bond_force(
     let n_u32 = n_bonds as u32;
     let func = particle_buffers.kernels.morse_bond_force.clone();
     let cfg = launch_config(n_u32);
-    let lengths = sim_box.lengths();
+    let lat = sim_box.lattice();
     unsafe {
         func.launch(
             cfg,
@@ -329,9 +335,12 @@ pub fn morse_bond_force(
                 bond_de,
                 bond_a,
                 bond_re,
-                lengths[0],
-                lengths[1],
-                lengths[2],
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
                 bond_pair_x,
                 bond_pair_y,
                 bond_pair_z,
@@ -462,7 +471,7 @@ pub fn neighbor_displacement_squared(
     let n_u32 = n as u32;
     let func = particle_buffers.kernels.neighbor_displacement_squared.clone();
     let cfg = launch_config(n_u32);
-    let lengths = sim_box.lengths();
+    let lat = sim_box.lattice();
     unsafe {
         func.launch(
             cfg,
@@ -473,9 +482,12 @@ pub fn neighbor_displacement_squared(
                 reference_x,
                 reference_y,
                 reference_z,
-                lengths[0],
-                lengths[1],
-                lengths[2],
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
                 disp_sq,
                 n_u32,
             ),
@@ -493,7 +505,6 @@ pub fn neighbor_list_build(
     cell_offsets: &CudaSlice<u32>,
     sim_box: &SimulationBox,
     n_cells: [u32; 3],
-    cell_size: [f32; 3],
     r_search_sq: f32,
     max_neighbors: u32,
     neighbor_list: &mut CudaSlice<u32>,
@@ -516,7 +527,7 @@ pub fn neighbor_list_build(
     let n_u32 = n as u32;
     let func = particle_buffers.kernels.neighbor_list_build.clone();
     let cfg = launch_config(n_u32);
-    let lengths = sim_box.lengths();
+    let lat = sim_box.lattice();
     unsafe {
         func.launch(
             cfg,
@@ -526,12 +537,12 @@ pub fn neighbor_list_build(
                 &particle_buffers.positions_z,
                 sorted_particle_ids,
                 cell_offsets,
-                lengths[0],
-                lengths[1],
-                lengths[2],
-                cell_size[0],
-                cell_size[1],
-                cell_size[2],
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
                 n_cells[0],
                 n_cells[1],
                 n_cells[2],
@@ -590,7 +601,6 @@ pub fn compute_cell_indices_and_histogram(
     particle_buffers: &ParticleBuffers,
     sim_box: &SimulationBox,
     n_cells: [u32; 3],
-    cell_size: [f32; 3],
     cell_indices: &mut CudaSlice<u32>,
     cell_counts: &mut CudaSlice<u32>,
 ) -> Result<(), GpuError> {
@@ -611,7 +621,7 @@ pub fn compute_cell_indices_and_histogram(
         .compute_cell_indices_and_histogram
         .clone();
     let cfg = launch_config(n_u32);
-    let lengths = sim_box.lengths();
+    let lat = sim_box.lattice();
     unsafe {
         func.launch(
             cfg,
@@ -619,12 +629,12 @@ pub fn compute_cell_indices_and_histogram(
                 &particle_buffers.positions_x,
                 &particle_buffers.positions_y,
                 &particle_buffers.positions_z,
-                lengths[0],
-                lengths[1],
-                lengths[2],
-                cell_size[0],
-                cell_size[1],
-                cell_size[2],
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
                 n_cells[0],
                 n_cells[1],
                 n_cells[2],
@@ -807,7 +817,7 @@ pub fn vv_kick_drift_lossless(
     let n_u32 = n as u32;
     let func = buffers.kernels.vv_kick_drift_lossless.clone();
     let cfg = launch_config(n_u32);
-    let lengths = sim_box.lengths();
+    let lat = sim_box.lattice();
     unsafe {
         func.launch(
             cfg,
@@ -831,9 +841,12 @@ pub fn vv_kick_drift_lossless(
                 &buffers.forces_y,
                 &buffers.forces_z,
                 &buffers.masses,
-                lengths[0],
-                lengths[1],
-                lengths[2],
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
                 dt,
                 n_u32,
             ),
@@ -856,7 +869,7 @@ pub fn lan_drift_half(
     let n_u32 = n as u32;
     let func = buffers.kernels.lan_drift_half.clone();
     let cfg = launch_config(n_u32);
-    let lengths = sim_box.lengths();
+    let lat = sim_box.lattice();
     unsafe {
         func.launch(
             cfg,
@@ -870,9 +883,12 @@ pub fn lan_drift_half(
                 &buffers.velocities_x,
                 &buffers.velocities_y,
                 &buffers.velocities_z,
-                lengths[0],
-                lengths[1],
-                lengths[2],
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
                 dt,
                 n_u32,
             ),

@@ -20,10 +20,10 @@ pub enum NeighborListError {
     Gpu(#[from] GpuError),
     #[error("an atom has more than {max} neighbors")]
     NeighborListOverflow { max: u32 },
-    #[error("simulation box is too small along axis `{axis}`: length {length} is below the required {required}")]
+    #[error("simulation box perpendicular width along lattice direction `{direction}` is {width}, below the required {required}")]
     BoxTooSmallForCells {
-        axis: &'static str,
-        length: f32,
+        direction: &'static str,
+        width: f32,
         required: f32,
     },
     #[error("cell grid has {n_cells_total} cells, exceeding the device limit of {max_supported}")]
@@ -44,7 +44,6 @@ pub enum NeighborListMode {
 #[derive(Debug)]
 pub struct CellListData {
     pub n_cells: [u32; 3],
-    pub cell_size: [f32; 3],
     pub n_cells_total: usize,
     pub r_cut: f32,
     pub r_skin: f32,
@@ -111,7 +110,7 @@ impl NeighborListState {
         debug_assert!(max_neighbors > 0);
         let r_search = r_cut + r_skin;
         let r_search_sq = r_search * r_search;
-        let (n_cells, cell_size) = compute_cell_layout(sim_box, r_search)?;
+        let n_cells = compute_cell_layout(sim_box, r_search)?;
         let n_cells_total =
             n_cells[0] as usize * n_cells[1] as usize * n_cells[2] as usize;
         check_n_cells_total(n_cells_total)?;
@@ -162,7 +161,6 @@ impl NeighborListState {
             neighbor_counts,
             mode: NeighborListMode::CellList(CellListData {
                 n_cells,
-                cell_size,
                 n_cells_total,
                 r_cut,
                 r_skin,
@@ -243,7 +241,7 @@ impl NeighborListState {
             return Ok(false);
         }
         let r_search = cl.r_cut + cl.r_skin;
-        let (new_n_cells, new_cell_size) = compute_cell_layout(sim_box, r_search)?;
+        let new_n_cells = compute_cell_layout(sim_box, r_search)?;
         let new_n_cells_total =
             new_n_cells[0] as usize * new_n_cells[1] as usize * new_n_cells[2] as usize;
         check_n_cells_total(new_n_cells_total)?;
@@ -261,7 +259,6 @@ impl NeighborListState {
                 alloc_scan_block_totals(&device, new_n_cells_total)?;
         }
         cl.n_cells = new_n_cells;
-        cl.cell_size = new_cell_size;
         cl.n_cells_total = new_n_cells_total;
         cl.cached_generation = sim_box.generation();
         cl.needs_rebuild = true;
@@ -353,7 +350,6 @@ impl NeighborListState {
             buffers,
             sim_box,
             cl.n_cells,
-            cl.cell_size,
             &mut cl.cell_indices,
             &mut cl.cell_counts,
         )?;
@@ -397,7 +393,6 @@ impl NeighborListState {
             &cl.cell_offsets,
             sim_box,
             cl.n_cells,
-            cl.cell_size,
             cl.r_search_sq,
             max_neighbors,
             &mut self.neighbor_list,
@@ -472,28 +467,32 @@ impl NeighborListState {
     }
 }
 
+// rq-dfad7218
+//
+// n_cells_d = floor(w_d / (r_cut + r_skin)) per lattice direction
+// d ∈ {a, b, c}, where w_d is the box's perpendicular width along that
+// direction (see simulation-box.md). Rejects with BoxTooSmallForCells if
+// any direction admits fewer than 3 cells.
 fn compute_cell_layout(
     sim_box: &SimulationBox,
     r_search: f32,
-) -> Result<([u32; 3], [f32; 3]), NeighborListError> {
-    let lengths = sim_box.lengths();
-    let axis_names: [&'static str; 3] = ["x", "y", "z"];
+) -> Result<[u32; 3], NeighborListError> {
+    let widths = sim_box.perpendicular_widths();
+    let direction_names: [&'static str; 3] = ["a", "b", "c"];
     let mut n_cells = [0u32; 3];
-    let mut cell_size = [0.0f32; 3];
-    for a in 0..3 {
-        let l = lengths[a];
-        let nc = (l / r_search).floor() as i64;
+    for d in 0..3 {
+        let w = widths[d];
+        let nc = (w / r_search).floor() as i64;
         if nc < 3 {
             return Err(NeighborListError::BoxTooSmallForCells {
-                axis: axis_names[a],
-                length: l,
+                direction: direction_names[d],
+                width: w,
                 required: 3.0 * r_search,
             });
         }
-        n_cells[a] = nc as u32;
-        cell_size[a] = l / nc as f32;
+        n_cells[d] = nc as u32;
     }
-    Ok((n_cells, cell_size))
+    Ok(n_cells)
 }
 
 // rq-d8e4407a

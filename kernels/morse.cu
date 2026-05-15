@@ -1,5 +1,7 @@
 // rq-d28ad917
 
+#include "pbc.cuh"
+
 extern "C" __global__ void morse_bond_force(
     const float *positions_x,
     const float *positions_y,
@@ -8,7 +10,7 @@ extern "C" __global__ void morse_bond_force(
     const float *bond_de,
     const float *bond_a,
     const float *bond_re,
-    float lx, float ly, float lz,
+    float lx, float ly, float lz, float xy, float xz, float yz,
     float *bond_pair_x,
     float *bond_pair_y,
     float *bond_pair_z,
@@ -29,9 +31,7 @@ extern "C" __global__ void morse_bond_force(
   float dy = positions_y[atom_i] - positions_y[atom_j];
   float dz = positions_z[atom_i] - positions_z[atom_j];
 
-  dx = dx - lx * floorf((dx + lx * 0.5f) / lx);
-  dy = dy - ly * floorf((dy + ly * 0.5f) / ly);
-  dz = dz - lz * floorf((dz + lz * 0.5f) / lz);
+  triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
 
   float r2 = dx * dx + dy * dy + dz * dz;
   if (r2 == 0.0f) {

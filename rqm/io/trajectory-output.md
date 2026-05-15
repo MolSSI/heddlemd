@@ -18,7 +18,7 @@ A trajectory file is a concatenation of frames. Each frame has the structure:
 
 ```
 N
-Lattice="lx 0 0 0 ly 0 0 0 lz" Properties=species:S:1:pos:R:3[:velo:R:3] Step=<u64> Time=<f64>
+Lattice="lx 0 0 xy ly 0 xz yz lz" Properties=species:S:1:pos:R:3[:velo:R:3] Step=<u64> Time=<f64>
 <row 1>
 <row 2>
 ...
@@ -36,10 +36,15 @@ Lines end in `\n` (Unix line endings). The file is UTF-8.
 
 ### `Lattice` <!-- rq-c5518458 -->
 
-`Lattice="lx 0 0 0 ly 0 0 0 lz"` where `lx`, `ly`, `lz` are the simulation
-box edge lengths in metres. The runner writes a constant box throughout a
-simulation; the `Lattice` attribute is repeated in every frame for
-self-description.
+`Lattice="lx 0 0 xy ly 0 xz yz lz"` where the nine values are the row-major
+entries of the lower-triangular lattice matrix (row 1 = `a` vector, row 2
+= `b` vector, row 3 = `c` vector) in metres. The three upper-triangular
+slots (`a_y`, `a_z`, `b_z`) are always written as `0` to make the file
+consumable by tools that expect a 9-component lattice. The orthorhombic
+case (`xy = xz = yz = 0`) prints the three middle slots as zeros and is
+indistinguishable from the v0 format. The runner writes a constant
+lattice throughout a simulation; the `Lattice` attribute is repeated in
+every frame for self-description.
 
 Box components are written using Rust's `{:.9e}` formatter (9 fractional
 digits, lower-case `e` exponent), which round-trips `f32` values exactly.
@@ -80,16 +85,20 @@ without quoting. Subsequent columns are real numbers written with `{:.9e}`,
 separated by single spaces.
 
 Positions are written in their current (live) wrapped value: each
-component is in `[-L_a / 2, +L_a / 2)` for the corresponding box edge
-`L_a`. The integrator's drift kernels enforce this invariant on the
-device state, so positions read out for the trajectory are always
-already-wrapped.
+particle lies inside the primary image of the simulation box (its
+fractional coordinates are in `[-1/2, 1/2)³`; see `simulation-box.md`).
+The integrator's drift kernels enforce this invariant on the device
+state, so positions read out for the trajectory are always
+already-wrapped. For an orthorhombic box this reduces to
+`pos_x ∈ [-lx/2, lx/2)` etc.
 
 Image columns (when `Properties` declares `image:I:3`) are the per-
 particle integer image triple `(images_x[i], images_y[i],
-images_z[i])` carried by `ParticleBuffers` (see `particle-state.md`).
+images_z[i])` carried by `ParticleBuffers` (see `particle-state.md`),
+counting lattice-vector crossings along the `a`, `b`, `c` directions.
 The unwrapped position used by external analyses is
-`pos + image · (lx, ly, lz)`.
+`pos + images_x · a + images_y · b + images_z · c`, which reduces to
+`pos + image · (lx, ly, lz)` for an orthorhombic box.
 
 Velocities, when included, are written in m/s.
 
@@ -173,10 +182,10 @@ without panicking; programs that need crash-safe trajectories call
 - Emitting unwrapped positions in the `pos:R:3` columns. Positions are
   always wrapped into the primary image; consumers that need unwrapped
   coordinates request `output.include_images = true` and compute
-  `pos + image · lattice` themselves, or do the equivalent at parse
-  time.
-- Per-frame box changes (the box is constant; NPT and box rescaling are
-  not part of this feature).
+  `pos + images_x · a + images_y · b + images_z · c` themselves, or do
+  the equivalent at parse time.
+- Per-frame box changes (the box is constant for the run; NPT and box
+  rescaling are not part of this feature).
 - Velocity components on the data line when
   `include_velocities == false`. Either every frame carries velocities
   or none do; the choice is fixed at writer construction. The same
@@ -358,10 +367,30 @@ Feature: Extended-XYZ trajectory output
   @rq-48d14580
   Scenario: Positions written by the writer are inside the primary cell
     Given a writer opened with include_velocities=false and include_images=true
-    And a ParticleBuffers whose positions are inside [-L/2, +L/2) per axis
-      (the invariant maintained by the integrator drift kernels)
+    And a ParticleBuffers whose positions are inside the primary image of
+      the simulation box (the invariant maintained by the integrator
+      drift kernels)
     When writer.write_frame is called
-    Then every pos_x value in the data rows lies in [-L_x/2, +L_x/2)
-    And every pos_y value lies in [-L_y/2, +L_y/2)
-    And every pos_z value lies in [-L_z/2, +L_z/2)
+    Then every row's fractional coordinates lie in [-0.5, 0.5)³
+    And for an orthorhombic box every pos_a value lies in [-L_a/2, +L_a/2)
+
+  @rq-ef891f9c
+  Scenario: Triclinic Lattice attribute carries non-zero tilts
+    Given a writer opened on a frame produced by a SimulationBox with
+      lx=1.0e-9, ly=1.0e-9, lz=1.0e-9, xy=0.2e-9, xz=0.1e-9, yz=-0.3e-9
+    When writer.write_frame is called and the file is flushed
+    Then the comment-line Lattice attribute equals
+      'Lattice="1.000000000e-9 0.000000000e0 0.000000000e0 2.000000030e-10 1.000000000e-9 0.000000000e0 1.000000015e-10 -3.000000119e-10 1.000000000e-9"'
+      (the three upper-triangular slots are exactly 0.0e0; the three
+       tilts are the f32 representations of the construction-time
+       values)
+
+  @rq-ce15e04e
+  Scenario: Round-trip through load_init_state preserves a triclinic lattice
+    Given a writer opened on a frame produced by a triclinic SimulationBox
+    When writer.write_frame is called and the file is flushed
+    And load_init_state is called on the same file
+    Then it returns Ok(state)
+    And state.box.lattice() agrees with the write-side lattice byte-for-byte
+      after casting back to f32
 ```

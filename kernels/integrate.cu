@@ -1,13 +1,22 @@
 // rq-10cc8ddf rq-580fe6f7
 
-// Wrap a position component back into [-L/2, +L/2) and advance the image
-// counter by the integer number of periods crossed. Matches the host-side
-// wrap_position formula on SimulationBox.
-__device__ static inline void wrap_and_count(float &p, float lx, int &n)
+#include "pbc.cuh"
+
+// Wrap a position back into the primary image of the simulation box and
+// advance the three per-direction image counters by the integer triple
+// returned by the triclinic wrap. Matches the host-side
+// wrap_position_with_image_count formula on SimulationBox.
+__device__ static inline void wrap_and_count_triclinic(
+    float &px, float &py, float &pz,
+    int &nx, int &ny, int &nz,
+    float lx, float ly, float lz,
+    float xy, float xz, float yz)
 {
-  float k = floorf((p + lx * 0.5f) / lx);
-  p = p - k * lx;
-  n = n + (int)k;
+  int ka, kb, kc;
+  triclinic_wrap_with_image(px, py, pz, ka, kb, kc, lx, ly, lz, xy, xz, yz);
+  nx += ka;
+  ny += kb;
+  nz += kc;
 }
 
 template <bool LOSSLESS>
@@ -20,7 +29,7 @@ __device__ inline void vv_kick_drift_body(
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
-    float lx, float ly, float lz,
+    float lx, float ly, float lz, float xy, float xz, float yz,
     float dt)
 {
   float m = masses[i];
@@ -73,9 +82,8 @@ __device__ inline void vv_kick_drift_body(
     int nx = images_x[i];
     int ny = images_y[i];
     int nz = images_z[i];
-    wrap_and_count(new_x, lx, nx);
-    wrap_and_count(new_y, ly, ny);
-    wrap_and_count(new_z, lz, nz);
+    wrap_and_count_triclinic(new_x, new_y, new_z, nx, ny, nz,
+                             lx, ly, lz, xy, xz, yz);
 
     positions_x[i] = new_x;
     positions_y[i] = new_y;
@@ -98,9 +106,8 @@ __device__ inline void vv_kick_drift_body(
     int nx = images_x[i];
     int ny = images_y[i];
     int nz = images_z[i];
-    wrap_and_count(px, lx, nx);
-    wrap_and_count(py, ly, ny);
-    wrap_and_count(pz, lz, nz);
+    wrap_and_count_triclinic(px, py, pz, nx, ny, nz,
+                             lx, ly, lz, xy, xz, yz);
 
     positions_x[i] = px;
     positions_y[i] = py;
@@ -157,7 +164,7 @@ extern "C" __global__ void vv_kick_drift(
     float *velocities_x, float *velocities_y, float *velocities_z,
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
-    float lx, float ly, float lz,
+    float lx, float ly, float lz, float xy, float xz, float yz,
     float dt,
     unsigned int n)
 {
@@ -173,7 +180,7 @@ extern "C" __global__ void vv_kick_drift(
       nullptr, nullptr, nullptr,
       nullptr, nullptr, nullptr,
       forces_x, forces_y, forces_z,
-      masses, lx, ly, lz, dt);
+      masses, lx, ly, lz, xy, xz, yz, dt);
 }
 
 extern "C" __global__ void vv_kick(
@@ -203,7 +210,7 @@ extern "C" __global__ void vv_kick_drift_lossless(
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
-    float lx, float ly, float lz,
+    float lx, float ly, float lz, float xy, float xz, float yz,
     float dt,
     unsigned int n)
 {
@@ -219,7 +226,7 @@ extern "C" __global__ void vv_kick_drift_lossless(
       positions_x_lo, positions_y_lo, positions_z_lo,
       velocities_x_lo, velocities_y_lo, velocities_z_lo,
       forces_x, forces_y, forces_z,
-      masses, lx, ly, lz, dt);
+      masses, lx, ly, lz, xy, xz, yz, dt);
 }
 
 extern "C" __global__ void vv_kick_lossless(

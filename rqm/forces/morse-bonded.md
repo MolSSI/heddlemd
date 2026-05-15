@@ -162,7 +162,7 @@ extern "C" __global__ void morse_bond_force(
     const float *positions_x, const float *positions_y, const float *positions_z,
     const unsigned int *bonds,
     const float *bond_de, const float *bond_a, const float *bond_re,
-    float lx, float ly, float lz,
+    float lx, float ly, float lz, float xy, float xz, float yz,
     float *bond_pair_x, float *bond_pair_y, float *bond_pair_z,
     float *bond_pair_energy, float *bond_pair_virial,
     unsigned int n_bonds);
@@ -177,14 +177,16 @@ extern "C" __global__ void reduce_bond_forces(
     unsigned int n);
 ```
 
-#### `morse_bond_force`
+#### `morse_bond_force` <!-- rq-39cec761 -->
 
 One thread per bond. Thread `k`:
 
 1. Reads `atom_i`, `atom_j`, `type_idx` from `bonds[3*k .. 3*k + 3]`.
 2. Computes the minimum-image displacement
-   `(dx, dy, dz) = (r_i - r_j)` wrapped against `(lx, ly, lz)` using
-   the same formula as `lj_pair_force`.
+   `(dx, dy, dz) = (r_i - r_j)` wrapped against the six lattice
+   parameters `(lx, ly, lz, xy, xz, yz)` via the triclinic tilt-
+   subtraction algorithm defined in `simulation-box.md`. For an
+   orthorhombic box this reduces to three independent per-axis wraps.
 3. Computes `r2 = dx² + dy² + dz²` and `r = sqrt(r2)`.
 4. Reads `De = bond_de[type_idx]`, `a = bond_a[type_idx]`,
    `re = bond_re[type_idx]`.
@@ -209,7 +211,7 @@ When `r == 0` exactly (degenerate overlapping atoms), the kernel writes
 NaN. This is a defensive guard; physical Morse simulations never reach
 `r == 0` because the exponential blows up at small `r`.
 
-#### `reduce_bond_forces`
+#### `reduce_bond_forces` <!-- rq-b2559e09 -->
 
 One thread per atom `a = blockIdx.x * blockDim.x + threadIdx.x` (block
 size 256, grid `ceil(n / 256)`). Thread `a`:

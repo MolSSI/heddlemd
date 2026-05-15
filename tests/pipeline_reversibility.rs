@@ -142,7 +142,7 @@ impl PipelineFixture {
         let buffers = ParticleBuffers::new(gpu, state).unwrap();
         let pair = PairBuffer::new(gpu, N, N as u32).unwrap();
         let counts = gpu.device.htod_sync_copy(&vec![N as u32; N]).unwrap();
-        let sim_box = SimulationBox::new_orthorhombic(BOX_L, BOX_L, BOX_L).unwrap();
+        let sim_box = SimulationBox::new(BOX_L, BOX_L, BOX_L, 0.0, 0.0, 0.0).unwrap();
         let params = single_type_lj_table(&gpu.device, SIGMA, EPSILON, CUTOFF);
         Self {
             buffers,

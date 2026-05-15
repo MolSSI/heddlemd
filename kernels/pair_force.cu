@@ -1,6 +1,7 @@
 // rq-4ddab3c7
 
 #include "exclusions.cuh"
+#include "pbc.cuh"
 
 extern "C" __global__ void lj_pair_force(
     const float *positions_x,
@@ -13,7 +14,7 @@ extern "C" __global__ void lj_pair_force(
     float *pair_energies,
     float *pair_virials,
     unsigned int max_neighbors,
-    float lx, float ly, float lz,
+    float lx, float ly, float lz, float xy, float xz, float yz,
     unsigned int n_types,
     const float *type_sigma,
     const float *type_epsilon,
@@ -63,9 +64,7 @@ extern "C" __global__ void lj_pair_force(
   float dy = positions_y[i] - positions_y[j];
   float dz = positions_z[i] - positions_z[j];
 
-  dx = dx - lx * floorf((dx + lx * 0.5f) / lx);
-  dy = dy - ly * floorf((dy + ly * 0.5f) / ly);
-  dz = dz - lz * floorf((dz + lz * 0.5f) / lz);
+  triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
 
   float r_c2 = cutoff * cutoff;
   float r2 = dx * dx + dy * dy + dz * dz;

@@ -24,7 +24,7 @@ fn read(path: &Path) -> String {
 }
 
 fn sim_box() -> SimulationBox {
-    SimulationBox::new_orthorhombic(1.0, 1.0, 1.0).unwrap()
+    SimulationBox::new(1.0, 1.0, 1.0, 0.0, 0.0, 0.0).unwrap()
 }
 
 // rq-a403f778
@@ -406,4 +406,38 @@ fn image_round_trip_via_init_parser() {
     assert_eq!(imgs.images_x, images_x);
     assert_eq!(imgs.images_y, images_y);
     assert_eq!(imgs.images_z, images_z);
+}
+
+#[test] // rq-ce15e04e
+fn round_trip_preserves_triclinic_lattice() {
+    let dir = tmp_path("triclinic_roundtrip");
+    let path = dir.join("traj.xyz");
+    let tri = SimulationBox::new(1.0, 1.0, 1.0, 0.2, 0.1, -0.3).unwrap();
+    let mut writer =
+        TrajectoryWriter::open(&path, false, false, vec!["Ar".to_string()]).unwrap();
+    writer
+        .write_frame(
+            0,
+            1.0e-15,
+            &tri,
+            &[0; 0],
+            &[0.0_f32; 0],
+            &[0.0_f32; 0],
+            &[0.0_f32; 0],
+            None,
+            None,
+        )
+        .unwrap();
+    writer.flush().unwrap();
+    let state = load_init_state(&path, &["Ar"]).unwrap();
+    let parsed = state.sim_box.lattice();
+    let original = tri.lattice();
+    for d in 0..6 {
+        assert!(
+            (parsed[d] - original[d]).abs() < 1.0e-9,
+            "lattice[{d}] parsed {} vs original {}",
+            parsed[d],
+            original[d]
+        );
+    }
 }

@@ -15,8 +15,8 @@ the parsed `NeighborListConfig`:
 - **`CellList`** — the spatial-hash-filtered list described in this
   file. Built lazily on the first step and rebuilt on demand when an
   atom's reference displacement exceeds `r_skin / 2`. The cell layout
-  (number of cells per axis, cell size, total cell count) is cached at
-  construction from the simulation box's edge lengths and refreshed
+  (number of cells per lattice direction, total cell count) is cached at
+  construction from the simulation box's lattice parameters and refreshed
   whenever the box's `generation` counter changes (see *Box Generation
   Tracking* below).
 - **`Trivial`** — every particle's neighbor list contains every
@@ -34,32 +34,42 @@ used by `Trivial`, and the `NeighborListState` API the framework drives.
 
 ## Cell Layout <!-- rq-dfad7218 -->
 
-Cells partition the simulation box into a 3D grid. Per axis `a`:
+Cells partition the parallelepiped box into a 3D grid of smaller
+parallelepipeds aligned with the lattice vectors. Per lattice direction
+`d ∈ {a, b, c}`:
 
 ```
-target_cell_size_a = r_cut + r_skin
-n_cells_a           = floor(L_a / target_cell_size_a)
-actual_cell_size_a  = L_a / n_cells_a
+n_cells_d            = floor(w_d / (r_cut + r_skin))
+fractional_cell_size = 1 / n_cells_d
 ```
 
-The actual cell size is always `>= r_cut + r_skin` because `n_cells_a` is
-rounded down. The 27-cell PBC search visits every adjacent cell exactly
-once iff `n_cells_a >= 3`. Configurations that violate this on any axis
-are rejected at config-load time (see `io/config-schema.md`).
+where `w_d` is the perpendicular width along lattice direction `d` (see
+`simulation-box.md`). The cell thickness perpendicular to the opposite
+face is `w_d / n_cells_d`, which is always `>= r_cut + r_skin` because
+`n_cells_d` is rounded down. The 27-cell PBC search visits every adjacent
+cell exactly once iff `n_cells_d >= 3` along every direction. Configurations
+that violate this on any direction are rejected at neighbor-list
+construction time and again on every box-generation refresh (see *Box
+Generation Tracking*).
 
-`n_cells_total = n_cells_x * n_cells_y * n_cells_z`. The cell index of
-position `(x, y, z)` is `cell_x * n_cells_y * n_cells_z + cell_y *
-n_cells_z + cell_z` (row-major). Per-axis cell indices are computed from
-the minimum-image-wrapped position:
+`n_cells_total = n_cells_a * n_cells_b * n_cells_c`. The cell index of a
+particle at Cartesian position `(x, y, z)` is computed in fractional
+coordinates:
 
 ```
-wrapped_x = x - L_x * floor((x + L_x / 2) / L_x)
-cell_x    = floor((wrapped_x + L_x / 2) / actual_cell_size_x)
+s = sim_box.fractional_coords(sim_box.wrap_position((x, y, z)))
+cell_d = floor((s_d + 0.5) * n_cells_d)   for d in {a, b, c}
 ```
 
-with `cell_x` clamped to `[0, n_cells_x - 1]` to handle the
-`wrapped_x = +L_x / 2` boundary case (mapped to `cell_x = n_cells_x - 1`
-rather than `n_cells_x`).
+The total row-major cell index is `cell_a * n_cells_b * n_cells_c +
+cell_b * n_cells_c + cell_c`. Per-direction indices are clamped to
+`[0, n_cells_d - 1]` to handle the `s_d = +0.5` boundary case (mapped to
+`cell_d = n_cells_d - 1` rather than `n_cells_d`).
+
+For an orthorhombic box (`xy = xz = yz = 0`), `w_a = lx`, `w_b = ly`,
+`w_c = lz`, and `s_d` reduces to per-axis `pos_d / L_d` so the cell-index
+formula collapses to the per-axis formula `floor((wrapped + L/2) /
+cell_size)` with `cell_size_d = L_d / n_cells_d`.
 
 ## Cell List Construction <!-- rq-a060036e -->
 
@@ -190,8 +200,9 @@ displacement check is amortising.
 
 ## Box Generation Tracking <!-- rq-282af621 -->
 
-In `CellList` mode the cell layout (`n_cells`, `cell_size`, `n_cells_total`)
-depends on the simulation box's edge lengths and is therefore cached. The
+In `CellList` mode the cell layout (`n_cells`, `n_cells_total`, and the
+cached lattice parameters used by the spatial-hash and build kernels)
+depends on the simulation box's lattice and is therefore cached. The
 state records the box's `generation()` value at the moment the cache was
 populated; this is stored as the field `cached_generation: u64`. The state
 also stores the `r_cut` value used to derive that cache so the cache can be
@@ -202,14 +213,14 @@ Every call to `NeighborListState::pre_step` receives the runner's current
 `cached_generation`. On a match no cache work is done. On a mismatch the
 state:
 
-1. Recomputes `n_cells_a = floor(L_a / (r_cut + r_skin))` per axis from the
-   current box's edge lengths.
-2. Re-validates that `n_cells_a >= 3` on every axis. If any axis fails,
-   returns `Err(NeighborListError::BoxTooSmallForCells { axis, length,
-   required })` without mutating any cached field; the caller can rerun
-   the previous step's force evaluation with the prior box or abort.
-3. Recomputes `cell_size_a = L_a / n_cells_a` per axis and the scalar
-   `n_cells_total`.
+1. Recomputes `n_cells_d = floor(w_d / (r_cut + r_skin))` per lattice
+   direction `d ∈ {a, b, c}` from the current box's perpendicular widths
+   `w_d` (see `simulation-box.md`).
+2. Re-validates that `n_cells_d >= 3` on every direction. If any direction
+   fails, returns `Err(NeighborListError::BoxTooSmallForCells { direction,
+   width, required })` without mutating any cached field; the caller can
+   rerun the previous step's force evaluation with the prior box or abort.
+3. Recomputes the scalar `n_cells_total = n_cells_a * n_cells_b * n_cells_c`.
 4. Reallocates the device buffers sized by `n_cells_total` (`cell_offsets`
    to `n_cells_total + 1`; `cell_counts` and `write_cursors` to
    `n_cells_total`) if `n_cells_total` differs from the previous value,
@@ -218,7 +229,8 @@ state:
    `neighbor_counts`, `reference_positions_*`, `disp_sq`,
    `overflow_flag`, `cell_indices`) are sized by `particle_count` or are
    scalar and are not reallocated.
-5. Stores the new `n_cells`, `cell_size`, `n_cells_total`, and replaces
+5. Stores the new `n_cells`, `n_cells_total`, and the cached lattice
+   parameters used by the spatial-hash and build kernels, and replaces
    `cached_generation` with `sim_box.generation()`.
 6. Sets `needs_rebuild = true`. The rebuild that fires after the cache
    refresh uses the new cell layout, so the displacement check is skipped
@@ -275,8 +287,10 @@ Validation at config load:
 
 - `r_skin > 0` and finite.
 - `max_neighbors > 0`.
-- For every cutoff `c` reported by a consuming potential, the smallest
-  box edge satisfies `L_min >= 3 * (c + r_skin)`. The init file holds
+- For every cutoff `c` reported by a consuming potential, the box's
+  minimum perpendicular width satisfies `min_perpendicular_width >= 3 *
+  (c + r_skin)` (see `simulation-box.md`). For an orthorhombic box this
+  reduces to `min(lx, ly, lz) >= 3 * (c + r_skin)`. The init file holds
   the box; validation therefore happens after the init file is loaded
   and the effective `r_skin` and `max_cutoff` are known.
 - In `mode = "all-pairs"`, `max_neighbors` and `r_skin` are rejected.
@@ -336,12 +350,12 @@ lifetime of the run.
   - `mode: NeighborListMode` — discriminator (`Trivial` or `CellList`).
 
   Fields present only in `CellList` mode:
-  - `n_cells: [u32; 3]`
-  - `cell_size: [f32; 3]`
+  - `n_cells: [u32; 3]` — number of cells along each lattice direction
+    `(n_a, n_b, n_c)`.
   - `n_cells_total: usize`
   - `r_cut: f32` — the largest `Potential::max_cutoff()` value reported by
     a consumer, captured at construction. Stored so the cache-refresh
-    path can recompute `n_cells` and `cell_size` from a mutated box.
+    path can recompute `n_cells` from a mutated box.
   - `r_skin: f32`
   - `r_search_sq: f32` — pre-computed `(r_cut + r_skin)²` for the build
     kernel. Independent of the box; not refreshed on generation change.
@@ -391,9 +405,13 @@ lifetime of the run.
     atom whose neighbor count would exceed `max_neighbors`. The
     simulation halts; the user must raise `max_neighbors` or reduce
     density.
-  - `BoxTooSmallForCells { axis: &'static str, length: f32, required: f32 }`
-    — the simulation box is smaller than `3 * (r_cut + r_skin)` along
-    `axis`. Detected at construction and on box-generation refresh.
+  - `BoxTooSmallForCells { direction: &'static str, width: f32, required: f32 }`
+    — the simulation box's perpendicular width is smaller than
+    `3 * (r_cut + r_skin)` along the named lattice direction.
+    `direction` is one of `"a"`, `"b"`, `"c"`. `width` is the box's
+    perpendicular width along that direction; `required` is
+    `3 * (r_cut + r_skin)`. Detected at construction and on
+    box-generation refresh.
   - `TooManyCells { n_cells_total: usize, max_supported: usize }` — the
     cell layout would produce more cells than the device can address
     with a `u32` cell index. `max_supported` is `u32::MAX as usize`.
@@ -407,8 +425,10 @@ lifetime of the run.
 
 - `NeighborListState::new_cell_list(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>` <!-- rq-14033af1 -->
   - Constructs a `CellList`-mode state.
-  - Computes `n_cells` per axis from `floor(L_axis / (r_cut + r_skin))`.
-  - Returns `BoxTooSmallForCells` if any axis has `n_cells < 3`.
+  - Computes `n_cells` per lattice direction from
+    `floor(w_d / (r_cut + r_skin))` where `w_d` is the box's perpendicular
+    width along direction `d` (see `simulation-box.md`).
+  - Returns `BoxTooSmallForCells` if any direction has `n_cells < 3`.
   - Returns `TooManyCells` if `n_cells_total` exceeds `u32::MAX`.
   - Allocates every device buffer described in the *CellList*-mode field
     list, including the persistent scratch buffers (`cell_indices`,
@@ -416,10 +436,10 @@ lifetime of the run.
     (`scan_block_totals`). Reference positions start at zero;
     `needs_rebuild` starts at `true`.
   - Stores `r_cut` so the cache-refresh path (see *Box Generation
-    Tracking*) can recompute `n_cells` and `cell_size` from a mutated
-    box. `r_cut` is the largest cutoff across every consumer of the
-    shared list; the framework computes this as the maximum of every
-    `Potential::max_cutoff()` value it observes.
+    Tracking*) can recompute `n_cells` from a mutated box. `r_cut` is the
+    largest cutoff across every consumer of the shared list; the framework
+    computes this as the maximum of every `Potential::max_cutoff()` value
+    it observes.
   - Records `cached_generation = sim_box.generation()`.
 
 - `NeighborListState::new_trivial(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize) -> Result<NeighborListState, NeighborListError>` <!-- inline --> <!-- rq-c96fd9d2 -->
@@ -480,7 +500,7 @@ Neighbor-list-build pipeline:
 extern "C" __global__ void neighbor_displacement_squared(
     const float *positions_x, const float *positions_y, const float *positions_z,
     const float *reference_x, const float *reference_y, const float *reference_z,
-    float lx, float ly, float lz,
+    float lx, float ly, float lz, float xy, float xz, float yz,
     float *disp_sq,
     unsigned int n);
 
@@ -488,9 +508,8 @@ extern "C" __global__ void neighbor_list_build(
     const float *positions_x, const float *positions_y, const float *positions_z,
     const unsigned int *sorted_particle_ids,
     const unsigned int *cell_offsets,
-    float lx, float ly, float lz,
-    float cell_size_x, float cell_size_y, float cell_size_z,
-    unsigned int n_cells_x, unsigned int n_cells_y, unsigned int n_cells_z,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
     float r_search_sq,
     unsigned int max_neighbors,
     unsigned int *neighbor_list,
@@ -504,14 +523,22 @@ extern "C" __global__ void copy_positions_into_reference(
     unsigned int n);
 ```
 
+The six lattice parameters `(lx, ly, lz, xy, xz, yz)` carry the box's
+lower-triangular form (see `simulation-box.md`). Both
+`neighbor_displacement_squared` and `neighbor_list_build` compute their
+minimum-image displacements via the triclinic *Wrap Algorithm* defined in
+`simulation-box.md`. The neighbor-list-build kernel also computes its
+own and its neighbor-cell indices in fractional coordinates from these
+six values (no separate `cell_size_x/y/z` argument; `1.0f / n_cells_d` is
+computed on the fly).
+
 Spatial-hash pipeline (cell-list construction):
 
 ```c
 extern "C" __global__ void compute_cell_indices_and_histogram(
     const float *positions_x, const float *positions_y, const float *positions_z,
-    float lx, float ly, float lz,
-    float cell_size_x, float cell_size_y, float cell_size_z,
-    unsigned int n_cells_x, unsigned int n_cells_y, unsigned int n_cells_z,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
     unsigned int *cell_indices,
     unsigned int *cell_counts,
     unsigned int n);
@@ -574,12 +601,12 @@ Each is a no-op when `particle_count == 0`.
 Neighbor-list-build pipeline:
 
 - `neighbor_displacement_squared(particle_buffers, reference_x, reference_y, reference_z, sim_box, disp_sq) -> Result<(), GpuError>` <!-- rq-884b5cd6 -->
-- `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, cell_size, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>` <!-- rq-a1262872 -->
+- `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>` <!-- rq-a1262872 -->
 - `copy_positions_into_reference(particle_buffers, reference_x, reference_y, reference_z) -> Result<(), GpuError>` <!-- rq-344f7af0 -->
 
 Spatial-hash pipeline:
 
-- `compute_cell_indices_and_histogram(particle_buffers, sim_box, n_cells, cell_size, cell_indices, cell_counts) -> Result<(), GpuError>` <!-- rq-10f6f831 -->
+- `compute_cell_indices_and_histogram(particle_buffers, sim_box, n_cells, cell_indices, cell_counts) -> Result<(), GpuError>` <!-- rq-10f6f831 -->
 - `prefix_scan_cell_counts(cell_counts, cell_offsets, scan_block_totals, n_cells_total, particle_count) -> Result<(), GpuError>` — <!-- rq-2ef5e222 -->
   drives the recursive multi-level exclusive scan. Scans `cell_counts`
   into `cell_offsets` with `prefix_scan_local_blocks`, emitting
@@ -676,7 +703,6 @@ guarantee; it only forfeits the canonical-ordering testability.
   pair once instead of twice). Doubles the build complexity and would
   also force a different reduction strategy.
 - Constant or adaptive `r_skin`. v1 is constant.
-- Triclinic boxes. v1 cell layout assumes orthorhombic.
 - Sort 2 (per-atom neighbor-list sort) being optional in v1 — the v1
   implementation always sorts. A future feature may make it
   conditional, but doing so is its own decision-point and is not
@@ -686,10 +712,10 @@ guarantee; it only forfeits the canonical-ordering testability.
   consumers; each consumer applies its own per-pair cutoff at force
   evaluation time, reading the list but discarding entries beyond its
   own cutoff.
-- Detecting a box mutation that bypasses `SimulationBox::set_lengths`
+- Detecting a box mutation that bypasses `SimulationBox::set_lattice`
   (e.g. two `SimulationBox` values constructed independently that happen
-  to share a `generation`, or a future API that mutates lengths without
-  bumping the counter). The generation counter is the contract;
+  to share a `generation`, or a future API that mutates the lattice
+  without bumping the counter). The generation counter is the contract;
   consumers trust the runner to own one canonical box and to use only
   the documented mutator.
 
@@ -703,36 +729,55 @@ Feature: Cell-list neighbor list
   Background:
     Given a CUDA-capable GPU available as device 0
     And init_device() has been called
-    And a SimulationBox lx=ly=lz=10.0
+    And an orthorhombic SimulationBox with lx=ly=lz=10.0
     And a particle count of 100
 
   # --- Cell layout ---
 
   @rq-c0cfc5d6
-  Scenario: Cell counts are floor(L / (r_cut + r_skin))
+  Scenario: Cell counts are floor(w / (r_cut + r_skin)) for an orthorhombic box
     Given r_cut = 1.0, r_skin = 0.3
-    When NeighborListState::new is called with lx=ly=lz=10.0
+    And an orthorhombic SimulationBox with lx=ly=lz=10.0 (so w_a=w_b=w_c=10.0)
+    When NeighborListState::new_cell_list is called
     Then n_cells equals [7, 7, 7]
-    And actual cell sizes are 10.0 / 7 along each axis
+
+  @rq-a7aac794
+  Scenario: Cell counts reflect perpendicular widths for a tilted box
+    Given r_cut + r_skin = 1.3
+    And a SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 10.0)
+      (so w_c = 10.0 but w_b = (ly*lz)/sqrt(lz² + yz²) = 100/sqrt(200) ≈ 7.07)
+    When NeighborListState::new_cell_list is called
+    Then n_cells[1] equals floor(7.07 / 1.3) = 5
+    And n_cells[2] equals floor(10.0 / 1.3) = 7
 
   @rq-1b9c474c
-  Scenario: Reject configurations whose box admits fewer than 3 cells per axis
+  Scenario: Reject configurations whose box admits fewer than 3 cells along any direction
     Given r_cut = 1.0, r_skin = 3.0 (so r_cut + r_skin = 4.0)
-    And lx = 10.0 (giving floor(10/4) = 2 < 3)
-    When NeighborListState::new is called
-    Then it returns Err(NeighborListError::BoxTooSmallForCells { axis: "x", length: 10.0, required: 12.0 })
+    And an orthorhombic SimulationBox with lx=10.0 (so w_a = 10.0, giving floor(10/4) = 2 < 3)
+    When NeighborListState::new_cell_list is called
+    Then it returns Err(NeighborListError::BoxTooSmallForCells { direction: "a", width: 10.0, required: 12.0 })
+
+  @rq-e84d3bac
+  Scenario: Reject a tilted box whose perpendicular width drops below 3*(r_cut+r_skin)
+    Given r_cut + r_skin = 4.0 (required perpendicular width = 12.0)
+    And a SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 8.0) so that
+      w_b = (10*10)/sqrt(100 + 64) ≈ 7.81 < 12.0
+    When NeighborListState::new_cell_list is called
+    Then it returns Err(NeighborListError::BoxTooSmallForCells { direction: "b", width: w, required: 12.0 })
+      where w is the actual computed perpendicular width
 
   @rq-151cb099
-  Scenario: Cell index of a position at the +L/2 boundary clamps inside the grid
-    Given a particle at x = +lx/2 (boundary case)
+  Scenario: Cell index of a position at the +1/2 fractional-coordinate boundary clamps inside the grid
+    Given a particle whose fractional coordinate along a equals +0.5 (boundary case)
     When its cell index is computed
-    Then cell_x equals n_cells_x - 1 (no out-of-bounds index)
+    Then cell_a equals n_cells_a - 1 (no out-of-bounds index)
 
   @rq-a99ca751
   Scenario: Cell index of a position outside the primary cell wraps before binning
-    Given a particle at x = lx (one full period past the primary cell)
+    Given a particle whose Cartesian position is exactly one full lattice vector
+      past the primary cell along direction a
     When its cell index is computed
-    Then it equals the cell index of x = 0
+    Then it equals the cell index of the corresponding particle inside the primary cell
 
   # --- Cell list construction ---
 
@@ -928,15 +973,16 @@ Feature: Cell-list neighbor list
     Given a NeighborListState in CellList mode immediately after its first pre_step
     And the simulation box has not been mutated since construction
     When pre_step is called again with the same box
-    Then n_cells, cell_size, n_cells_total are unchanged
+    Then n_cells and n_cells_total are unchanged
     And cell_offsets is not reallocated
     And state.cached_generation is unchanged
 
   @rq-cf847c1f
   Scenario: Box generation increment refreshes cell layout and forces a rebuild
     Given a NeighborListState in CellList mode immediately after its first pre_step
-      with lx=ly=lz=10.0 and r_cut + r_skin = 1.3 (so n_cells = [7, 7, 7])
-    When box.set_lengths(20.0, 20.0, 20.0) is called (generation 0 → 1)
+      with an orthorhombic box lx=ly=lz=10.0 and r_cut + r_skin = 1.3
+      (so n_cells = [7, 7, 7])
+    When box.set_lattice(20.0, 20.0, 20.0, 0.0, 0.0, 0.0) is called (generation 0 → 1)
     And pre_step is called with the updated box
     Then state.n_cells equals [15, 15, 15] (floor(20.0 / 1.3) = 15)
     And state.cached_generation equals box.generation() after the call
@@ -944,21 +990,32 @@ Feature: Cell-list neighbor list
       the same pre_step call
     And the displacement-check kernel was not launched during this pre_step
 
+  @rq-e2a31585
+  Scenario: Box-generation refresh handles tilt mutation
+    Given a NeighborListState in CellList mode with an orthorhombic box
+      lx=ly=lz=10.0 and r_cut + r_skin = 1.3
+    When box.set_lattice(10.0, 10.0, 10.0, 0.0, 0.0, 5.0) is called
+      (introducing yz=5.0; w_b drops to (10*10)/sqrt(100 + 25) = 100/sqrt(125) ≈ 8.94)
+    And pre_step is called with the updated box
+    Then state.n_cells[1] equals floor(8.94 / 1.3) = 6
+    And state.n_cells[0] and state.n_cells[2] equal floor(10.0 / 1.3) = 7
+
   @rq-dacb071c
   Scenario: Generation mismatch with new box too small returns BoxTooSmallForCells
     Given a NeighborListState in CellList mode with r_cut + r_skin = 1.3
-    When box.set_lengths(3.0, 10.0, 10.0) is called (floor(3.0 / 1.3) = 2 < 3)
+    When box.set_lattice(3.0, 10.0, 10.0, 0.0, 0.0, 0.0) is called
+      (so w_a = 3.0, giving floor(3.0 / 1.3) = 2 < 3)
     And pre_step is called with the updated box
-    Then pre_step returns Err(NeighborListError::BoxTooSmallForCells { axis: "x", length: 3.0, required: 3.9 })
+    Then pre_step returns Err(NeighborListError::BoxTooSmallForCells { direction: "a", width: 3.0, required: 3.9 })
     And state.cached_generation is left unchanged
-    And state.n_cells, state.cell_size, state.n_cells_total are left unchanged
+    And state.n_cells and state.n_cells_total are left unchanged
     And cell_offsets is not reallocated
 
   @rq-d22f105f
   Scenario: cell_offsets is reallocated when n_cells_total changes
     Given a NeighborListState in CellList mode with n_cells = [10, 10, 10]
       (n_cells_total = 1000, cell_offsets length 1001)
-    When box.set_lengths is called producing n_cells = [11, 11, 11]
+    When box.set_lattice is called producing n_cells = [11, 11, 11]
       (n_cells_total = 1331)
     And pre_step is called with the updated box
     Then cell_offsets is reallocated to length 1332
@@ -966,35 +1023,34 @@ Feature: Cell-list neighbor list
   @rq-331b6e81
   Scenario: cell_offsets is not reallocated when n_cells_total is unchanged
     Given a NeighborListState in CellList mode with n_cells = [10, 10, 10]
-    When box.set_lengths is called producing n_cells = [10, 10, 10]
-      (different lengths but same n_cells_total)
+    When box.set_lattice is called producing n_cells = [10, 10, 10]
+      (different lattice parameters but same n_cells_total)
     And pre_step is called with the updated box
     Then cell_offsets retains its previous device allocation (length 1001)
-    And state.cell_size is updated to the new per-axis values
 
   @rq-31a9e3bb
   Scenario: r_search_sq is preserved across a generation refresh
     Given a NeighborListState in CellList mode with r_cut = 1.0 and r_skin = 0.3
-    When box.set_lengths is called bumping the generation
+    When box.set_lattice is called bumping the generation
     And pre_step is called with the updated box
     Then state.r_search_sq still equals 1.69 (i.e. (1.0 + 0.3)²)
 
   @rq-699cccff
   Scenario: Two pre_steps after a single box mutation refresh only once
     Given a NeighborListState in CellList mode
-    When box.set_lengths bumps the generation once
+    When box.set_lattice bumps the generation once
     And pre_step is called, refreshing the cache and rebuilding
     And pre_step is called again without any further box mutation
     Then the second pre_step performs no cell-layout recompute
     And the second pre_step runs the displacement check (no longer skipped)
 
   @rq-72aae589
-  Scenario: Generation mismatch is detected even when the box edge lengths
+  Scenario: Generation mismatch is detected even when the box lattice parameters
     are unchanged
-    Given a NeighborListState in CellList mode with lx=ly=lz=10.0 just past
-      its first pre_step
-    When box.set_lengths(10.0, 10.0, 10.0) is called (same lengths but
-      generation bumps from 0 to 1)
+    Given a NeighborListState in CellList mode with an orthorhombic box
+      lx=ly=lz=10.0 just past its first pre_step
+    When box.set_lattice(10.0, 10.0, 10.0, 0.0, 0.0, 0.0) is called
+      (same lattice but generation bumps from 0 to 1)
     And pre_step is called with the updated box
     Then state.cached_generation equals 1 after the call
     And state.needs_rebuild was set to true and a rebuild was performed
@@ -1085,7 +1141,7 @@ Feature: Cell-list neighbor list
     Given a NeighborListState in CellList mode with n_cells_total = 343
       (cell_counts length 343, write_cursors length 343,
        a scan_block_totals stack sized for n_cells_total = 343)
-    When box.set_lengths is called producing n_cells_total = 729
+    When box.set_lattice is called producing n_cells_total = 729
     And pre_step is called with the updated box
     Then cell_counts is reallocated to length 729
     And write_cursors is reallocated to length 729

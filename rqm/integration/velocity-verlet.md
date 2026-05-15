@@ -35,14 +35,16 @@ Rust launch helpers that drive both modes.
 ## Algorithm <!-- rq-9f6a73f9 -->
 
 Positions are kept wrapped into the primary image of the simulation
-box: each component of `positions_x/y/z` is in `[-L_a / 2, +L_a / 2)`
-for the corresponding edge length `L_a`. The companion image triple
-`(images_x[i], images_y[i], images_z[i])` records how many full
-periods particle `i` has crossed; the unwrapped position is
-`positions_a[i] + images_a[i] * L_a` (see `particle-state.md`). The
-drift kernels enforce this invariant: after updating each component,
-they wrap the result back into the primary image and advance the
-corresponding image counter by the integer number of periods crossed.
+box: each particle's fractional coordinates lie in `[-1/2, 1/2)³` (see
+`simulation-box.md`). The companion image triple
+`(images_x[i], images_y[i], images_z[i])` records the number of lattice
+vectors particle `i` has crossed along each of the three lattice
+directions; the unwrapped position is
+`wrapped + images_x[i] · a + images_y[i] · b + images_z[i] · c` (see
+`particle-state.md`). The drift kernels enforce this invariant: after
+updating positions, they wrap the result back into the primary image via
+`SimulationBox::wrap_position_with_image_count` and advance the image
+counter triple by the returned integer triple.
 
 For each particle `i` with position `x_i`, velocity `v_i`, force `F_i`, and
 mass `m_i`, a single timestep of size `dt` corresponds to:
@@ -148,7 +150,7 @@ extern "C" __global__ void vv_kick_drift(
     float *velocities_x, float *velocities_y, float *velocities_z,
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
-    float lx, float ly, float lz,
+    float lx, float ly, float lz, float xy, float xz, float yz,
     float dt,
     unsigned int n);
 
@@ -167,7 +169,7 @@ extern "C" __global__ void vv_kick_drift_lossless(
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
-    float lx, float ly, float lz,
+    float lx, float ly, float lz, float xy, float xz, float yz,
     float dt,
     unsigned int n);
 
@@ -181,9 +183,10 @@ extern "C" __global__ void vv_kick_lossless(
 ```
 
 `vv_kick` and `vv_kick_lossless` update only velocities and so do not
-touch `images_*` or take box edges. `vv_kick_drift` and
+touch `images_*` or take any lattice parameters. `vv_kick_drift` and
 `vv_kick_drift_lossless` are the drift-bearing kernels that wrap
-positions and advance image counts.
+positions (via the triclinic *Wrap Algorithm* defined in
+`simulation-box.md`) and advance image counts.
 
 Each thread computes its global index as `blockIdx.x * blockDim.x + threadIdx.x`.
 If the index is `>= n` the thread returns without touching any buffer.
@@ -224,18 +227,22 @@ velocities_z[i] = vz
 px = positions_x[i] + vx * dt
 py = positions_y[i] + vy * dt
 pz = positions_z[i] + vz * dt
-(positions_x[i], images_x[i]) = wrap_and_count(px, lx, images_x[i])
-(positions_y[i], images_y[i]) = wrap_and_count(py, ly, images_y[i])
-(positions_z[i], images_z[i]) = wrap_and_count(pz, lz, images_z[i])
+(positions_x[i], positions_y[i], positions_z[i], k_a, k_b, k_c)
+    = wrap_position_with_image_count(px, py, pz, lx, ly, lz, xy, xz, yz)
+images_x[i] += k_a
+images_y[i] += k_b
+images_z[i] += k_c
 ```
 
-where `wrap_and_count(p, L, n)` returns `(p - k*L, n + k)` with
-`k = floor((p + L*0.5f) / L)` evaluated in `f32`. This is the same
-wrap formula `SimulationBox::wrap_position` uses on the host. A single
-update can cross any integer number of periods (the formula is
-branch-free in `k`); the integer `k` is always added to the existing
-image count, so the unwrapped position
-`positions_a[i] + images_a[i] * L_a` is invariant under wrapping.
+where `wrap_position_with_image_count` is the triclinic tilt-subtraction
+wrap defined in `simulation-box.md`. The same formula is what
+`SimulationBox::wrap_position_with_image_count` uses on the host. A
+single update can cross any integer number of lattice vectors along
+each direction; the integer triple `(k_a, k_b, k_c)` is always added to
+the existing image counts so the unwrapped position
+`wrapped + images_x · a + images_y · b + images_z · c` is invariant
+under wrapping. For an orthorhombic box (`xy = xz = yz = 0`) this
+reduces to three independent per-axis wraps.
 
 Within `vv_kick` (lossy), each thread performs:
 
@@ -254,10 +261,11 @@ via the compensated `(high, low)` decomposition described in the algorithm
 section. The drift step uses `(v + v_lo)` (computed in the chosen
 intermediate precision) when forming the position increment. After
 rounding the post-drift `(high, low)` pair back into the canonical
-form, the high half is wrapped via `wrap_and_count` against the
-corresponding edge length and the image counter is advanced; the low
-half is left unchanged by the wrap (the rounding has already
-re-zeroed it within ULP).
+form, the high halves are wrapped jointly via
+`wrap_position_with_image_count` (which applies the lattice's six
+parameters; see `simulation-box.md`) and the image counters are advanced
+by the returned integer triple; the low halves are left unchanged by the
+wrap (the rounding has already re-zeroed them within ULP).
 
 Within `vv_kick_lossless`, each thread performs the velocity update via
 the same compensated decomposition.
@@ -281,7 +289,7 @@ Four free functions live in `src/gpu/kernels.rs` and are re-exported from
 
 - `vv_kick_drift(buffers: &mut ParticleBuffers, sim_box: &SimulationBox, dt: f32) -> Result<(), GpuError>` <!-- rq-f1ba909b -->
   - Launches the `vv_kick_drift` kernel using the device buffers carried
-    by `buffers` and the edge lengths read from `sim_box`.
+    by `buffers` and the lattice parameters read from `sim_box`.
   - Block size is 256; grid size is `ceil(buffers.particle_count() / 256)`.
   - When `buffers.particle_count() == 0`, returns `Ok(())` without launching a
     kernel.
@@ -298,7 +306,7 @@ Four free functions live in `src/gpu/kernels.rs` and are re-exported from
 - `vv_kick_drift_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, sim_box: &SimulationBox, dt: f32) -> Result<(), GpuError>` <!-- rq-7d5e87ee -->
   - Launches the `vv_kick_drift_lossless` kernel using both the
     `ParticleBuffers` (for `(high)` halves and image flags) and the
-    `LosslessBuffers` (for `(low)` halves), with edge lengths read from
+    `LosslessBuffers` (for `(low)` halves), with lattice parameters read from
     `sim_box`.
   - Same block/grid configuration and empty-state handling as the lossy
     variant; debug-asserts that `lossless.particle_count()` equals

@@ -59,10 +59,11 @@ neighbor_counts[i]`:
 
 4. Compute the displacement `dx = positions_x[i] - positions_x[j]` (and
    similarly `dy`, `dz`).
-5. Apply the minimum-image convention along each Cartesian axis using the
-   simulation box edge lengths `(lx, ly, lz)`:
-   `dx <- dx - lx * floor((dx + lx * 0.5f) / lx)` (and similarly for `dy`,
-   `dz`).
+5. Apply the triclinic minimum-image convention to `(dx, dy, dz)` using
+   the six lattice parameters `(lx, ly, lz, xy, xz, yz)` and the tilt-
+   subtraction algorithm defined in `simulation-box.md` (z-then-y-then-x
+   wraps with tilt subtraction). For an orthorhombic box (all tilts
+   zero) this reduces to three independent per-axis wraps.
 6. Compute `r2 = dx*dx + dy*dy + dz*dz`.
 7. If `r2 > cutoff * cutoff`, write `0.0_f32` to all five slots
    (force x/y/z, energy, virial) and stop.
@@ -252,7 +253,7 @@ opposites.
 
 `kernels/pair_force.cu` declares one `extern "C"` kernel.
 
-#### `lj_pair_force`
+#### `lj_pair_force` <!-- rq-7b13d9cf -->
 
 ```c
 extern "C" __global__ void lj_pair_force(
@@ -266,7 +267,7 @@ extern "C" __global__ void lj_pair_force(
     float *pair_energies,
     float *pair_virials,
     unsigned int max_neighbors,
-    float lx, float ly, float lz,
+    float lx, float ly, float lz, float xy, float xz, float yz,
     unsigned int n_types,
     const float *type_sigma,
     const float *type_epsilon,
@@ -390,7 +391,8 @@ A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
   params.n_types as usize`. Release builds skip the asserts for parity
   with the other kernel launchers. The launcher does not validate the
   σ/ε/cutoff/r_switch entries themselves and does not check any cutoff
-  against `min(lx, ly, lz) / 2`.
+  against `sim_box.min_perpendicular_width() / 2` (that gating happens
+  in the neighbor list; see `forces/neighbor-list.md`).
 
 ## Launch Configuration <!-- rq-4fd872f5 -->
 

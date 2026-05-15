@@ -54,7 +54,7 @@ fn run_pipeline(gpu: &GpuContext, n_steps: usize) -> ParticleState {
     let mut buffers = ParticleBuffers::new(gpu, &state).unwrap();
     let mut pair = PairBuffer::new(gpu, N, N as u32).unwrap();
     let counts = gpu.device.htod_sync_copy(&vec![N as u32; N]).unwrap();
-    let sim_box = SimulationBox::new_orthorhombic(BOX_L, BOX_L, BOX_L).unwrap();
+    let sim_box = SimulationBox::new(BOX_L, BOX_L, BOX_L, 0.0, 0.0, 0.0).unwrap();
     let params = single_type_lj_table(&gpu.device, SIGMA, EPSILON, CUTOFF);
 
     // Warm-up: populate forces with F(0) before the first kick_drift consumes them.

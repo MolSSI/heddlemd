@@ -69,12 +69,11 @@ pub enum InitStateError {
         line_number: usize,
         column: &'static str,
     },
-    #[error("line {line_number}: `{axis}` position {value} lies outside the box half-length {half_length}")]
+    #[error("line {line_number}: fractional coordinate {fractional} along direction `{direction}` is outside [-0.5, 0.5)")]
     PositionOutsideBox {
         line_number: usize,
-        axis: &'static str,
-        value: f64,
-        half_length: f64,
+        direction: &'static str,
+        fractional: f64,
     },
     #[error("unexpected trailing content on line {line_number}")]
     TrailingContent { line_number: usize },
@@ -165,7 +164,15 @@ fn parse_attribute_line(line: &str) -> Vec<(String, String)> {
     out
 }
 
-fn parse_lattice(raw: &str) -> Result<(SimulationBox, [f64; 3]), InitStateError> {
+// rq-9864078f
+//
+// The 9 components are the row-major lattice matrix with rows = lattice
+// vectors. Only the lower-triangular form is accepted: positions 1, 2,
+// and 5 (a_y, a_z, b_z) must be exactly 0. The remaining six slots
+// become the six SimulationBox lattice parameters:
+//   vals[0] = lx (a_x), vals[3] = xy (b_x), vals[4] = ly (b_y),
+//   vals[6] = xz (c_x), vals[7] = yz (c_y), vals[8] = lz (c_z).
+fn parse_lattice(raw: &str) -> Result<SimulationBox, InitStateError> {
     let parts: Vec<&str> = raw.split_ascii_whitespace().collect();
     if parts.len() != 9 {
         return Err(InitStateError::InvalidLattice(format!(
@@ -186,11 +193,11 @@ fn parse_lattice(raw: &str) -> Result<(SimulationBox, [f64; 3]), InitStateError>
             )));
         }
     }
-    let off_diag_indices = [1, 2, 3, 5, 6, 7];
-    for &i in &off_diag_indices {
+    let upper_triangular_indices = [1, 2, 5];
+    for &i in &upper_triangular_indices {
         if vals[i] != 0.0 {
             return Err(InitStateError::InvalidLattice(format!(
-                "off-diagonal component {i} must be 0.0, got {}",
+                "upper-triangular component {i} must be 0.0, got {}",
                 vals[i]
             )));
         }
@@ -198,14 +205,19 @@ fn parse_lattice(raw: &str) -> Result<(SimulationBox, [f64; 3]), InitStateError>
     let lx = vals[0];
     let ly = vals[4];
     let lz = vals[8];
+    let xy = vals[3];
+    let xz = vals[6];
+    let yz = vals[7];
     if lx <= 0.0 || ly <= 0.0 || lz <= 0.0 {
         return Err(InitStateError::InvalidLattice(format!(
             "diagonal must be strictly positive; got ({lx}, {ly}, {lz})"
         )));
     }
-    let sim_box = SimulationBox::new_orthorhombic(lx as f32, ly as f32, lz as f32)
-        .map_err(|e| InitStateError::InvalidLattice(format!("{e}")))?;
-    Ok((sim_box, [lx, ly, lz]))
+    let sim_box = SimulationBox::new(
+        lx as f32, ly as f32, lz as f32, xy as f32, xz as f32, yz as f32,
+    )
+    .map_err(|e| InitStateError::InvalidLattice(format!("{e}")))?;
+    Ok(sim_box)
 }
 
 fn parse_properties(raw: &str) -> Result<PropertiesShape, InitStateError> {
@@ -255,7 +267,7 @@ pub(crate) fn parse_init_state(
         .find(|(k, _)| k == "Lattice")
         .map(|(_, v)| v.as_str())
         .ok_or(InitStateError::MissingAttribute { name: "Lattice" })?;
-    let (sim_box, lengths_f64) = parse_lattice(lattice_value)?;
+    let sim_box = parse_lattice(lattice_value)?;
 
     let properties_value = attrs
         .iter()
@@ -267,8 +279,6 @@ pub(crate) fn parse_init_state(
     let has_velo = shape.has_velocities();
     let has_images = shape.has_images();
     let image_offset = if has_velo { 7 } else { 4 };
-
-    let half = [lengths_f64[0] / 2.0, lengths_f64[1] / 2.0, lengths_f64[2] / 2.0];
 
     let mut type_indices: Vec<u32> = Vec::with_capacity(particle_count);
     let mut positions_x: Vec<f32> = Vec::with_capacity(particle_count);
@@ -322,9 +332,7 @@ pub(crate) fn parse_init_state(
         check_finite(px, current_line_number, "pos_x")?;
         check_finite(py, current_line_number, "pos_y")?;
         check_finite(pz, current_line_number, "pos_z")?;
-        check_in_box(px, current_line_number, "x", half[0])?;
-        check_in_box(py, current_line_number, "y", half[1])?;
-        check_in_box(pz, current_line_number, "z", half[2])?;
+        check_in_primary_image(px, py, pz, current_line_number, &sim_box)?;
 
         let (vx, vy, vz) = if has_velo {
             let vx = parse_number(cols[4], current_line_number, "velo_x")?;
@@ -438,20 +446,29 @@ fn check_finite(value: f64, line_number: usize, column: &'static str) -> Result<
     }
 }
 
-fn check_in_box(
-    value: f64,
+// rq-d8a08c7a
+//
+// A particle is inside the primary image of a triclinic box iff its
+// fractional coordinates lie in [-1/2, 1/2) along each lattice direction.
+// For an orthorhombic box this reduces to pos_x ∈ [-lx/2, lx/2) etc.
+fn check_in_primary_image(
+    px: f64,
+    py: f64,
+    pz: f64,
     line_number: usize,
-    axis: &'static str,
-    half: f64,
+    sim_box: &SimulationBox,
 ) -> Result<(), InitStateError> {
-    if value >= -half && value < half {
-        Ok(())
-    } else {
-        Err(InitStateError::PositionOutsideBox {
-            line_number,
-            axis,
-            value,
-            half_length: half,
-        })
+    let s = sim_box.fractional_coords([px as f32, py as f32, pz as f32]);
+    let direction_names: [&'static str; 3] = ["a", "b", "c"];
+    for d in 0..3 {
+        let frac = s[d] as f64;
+        if !(frac >= -0.5 && frac < 0.5) {
+            return Err(InitStateError::PositionOutsideBox {
+                line_number,
+                direction: direction_names[d],
+                fractional: frac,
+            });
+        }
     }
+    Ok(())
 }

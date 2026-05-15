@@ -27,7 +27,7 @@ fn two_particle_state(p0: [f32; 3], p1: [f32; 3]) -> ParticleState {
 }
 
 fn box_10() -> SimulationBox {
-    SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap()
+    SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn morse_type(de: f64, a: f64, re: f64) -> BondTypeConfig {

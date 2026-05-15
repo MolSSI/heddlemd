@@ -93,7 +93,7 @@ or unit suffixes are supported in schema v1.
 
 ### Field reference <!-- rq-e367855a -->
 
-#### Top level
+#### Top level <!-- rq-4c42a952 -->
 
 - `schema_version: u64` — must equal `1`. See *Schema version handling* below.
 - `init: String` — path to the extended-XYZ initial-state file. Resolved
@@ -105,7 +105,7 @@ or unit suffixes are supported in schema v1.
   the file is loaded after the init file (so atom-index bounds checking
   has access to the particle count).
 
-#### `[simulation]`
+#### `[simulation]` <!-- rq-a84e1c76 -->
 
 - `seed: u64` — RNG seed used for Maxwell-Boltzmann velocity generation.
   Required even when the init file supplies explicit velocities. No default.
@@ -118,7 +118,7 @@ or unit suffixes are supported in schema v1.
   field; ignored (but still required and validated) when the init file
   supplies velocities. Must be finite and `>= 0.0`.
 
-#### `[integrator]`
+#### `[integrator]` <!-- rq-27f9fae8 -->
 
 The integrator section is a tagged variant. A required `kind` field selects
 one of the pluggable integrator slots (see `integration/framework.md` for
@@ -147,7 +147,7 @@ Fields accepted for `kind = "langevin-baoab"`:
 - `seed: u64` — counter-based RNG seed. Required, independent of
   `simulation.seed`.
 
-#### `[[particle_types]]` (array of tables)
+#### `[[particle_types]]` (array of tables) <!-- rq-78487f38 -->
 
 One entry per particle species. At least one entry required.
 
@@ -158,7 +158,7 @@ One entry per particle species. At least one entry required.
 
 Names must be unique within the array.
 
-#### `[[pair_interactions]]` (array of tables)
+#### `[[pair_interactions]]` (array of tables) <!-- rq-9244aae4 -->
 
 One entry per unordered pair of declared types. The collection contains
 exactly one entry for every unordered pair, including same-type self pairs.
@@ -195,7 +195,7 @@ Same-type pairs are required even when only one type is declared:
 `between = ["Ar", "Ar"]` must appear. Unknown fields for the chosen
 `potential` are rejected.
 
-#### `[[bond_types]]` (optional array of tables)
+#### `[[bond_types]]` (optional array of tables) <!-- rq-e4420955 -->
 
 Declares the parameter sets for bonded potentials referenced by name from
 the `.bonds` file. The array is optional and may be empty. When supplied,
@@ -223,7 +223,7 @@ Fields accepted for `potential = "morse"` (see `forces/morse-bonded.md`):
 Names must be unique within the array. Unknown fields for the chosen
 `potential` are rejected.
 
-#### `[neighbor_list]` (optional table)
+#### `[neighbor_list]` (optional table) <!-- rq-adddaf1a -->
 
 Selects the algorithm used by the Lennard-Jones slot to enumerate
 non-bonded pairs. The table is optional; when omitted the runner uses
@@ -262,7 +262,7 @@ Cross-validation:
   `simulation-runner.md` for the runner-side validation and the
   corresponding `RunnerError` variant.
 
-#### `[output]` (optional table; all fields have defaults)
+#### `[output]` (optional table; all fields have defaults) <!-- rq-6340fae2 -->
 
 - `trajectory_path: String` — output trajectory path. Default:
   `<config-stem>-traj.xyz` in the same directory as the config file
@@ -278,9 +278,10 @@ Cross-validation:
   trajectory frame. Default `true`. When `true`, each frame's data rows
   carry three integer columns after the position (and velocity, if
   present) columns; consumers reconstruct unwrapped positions as
-  `pos + image · (lx, ly, lz)`. When `false`, image columns are
-  omitted from the file; positions in the trajectory are still wrapped
-  into the primary image.
+  `pos + images_x · a + images_y · b + images_z · c`, which reduces to
+  `pos + image · (lx, ly, lz)` for an orthorhombic box. When `false`,
+  image columns are omitted from the file; positions in the trajectory
+  are still wrapped into the primary image.
 - `log_path: String` — output log path. Default: `<config-stem>.log` in the
   same directory as the config file. Resolved like `trajectory_path`.
 - `log_every: u64` — write one log row every this many integration steps.

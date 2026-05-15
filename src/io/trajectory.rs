@@ -91,10 +91,15 @@ impl TrajectoryWriter {
             debug_assert!(images.is_none());
         }
 
-        let lengths = sim_box.lengths();
+        let lat = sim_box.lattice();
         let time = (step as f64) * dt;
 
         // rq-1658f77d rq-c5518458 rq-e06bcfb0 rq-df244549 rq-6ec75323 rq-88ec92fc
+        //
+        // Emit the 9-component lattice in row-major order with the three
+        // upper-triangular slots fixed to 0.0 (lower-triangular form).
+        // Orthorhombic boxes (xy = xz = yz = 0) print three middle zeros
+        // and are byte-identical to the previous orthorhombic-only format.
         writeln!(self.writer, "{n}").map_err(io_err)?;
         let zero = 0.0_f32;
         let props = match (self.include_velocities, self.include_images) {
@@ -105,10 +110,13 @@ impl TrajectoryWriter {
         };
         writeln!(
             self.writer,
-            "Lattice=\"{lx:.9e} {z:.9e} {z:.9e} {z:.9e} {ly:.9e} {z:.9e} {z:.9e} {z:.9e} {lz:.9e}\" Properties={props} Step={step} Time={time:.9e}",
-            lx = lengths[0],
-            ly = lengths[1],
-            lz = lengths[2],
+            "Lattice=\"{lx:.9e} {z:.9e} {z:.9e} {xy:.9e} {ly:.9e} {z:.9e} {xz:.9e} {yz:.9e} {lz:.9e}\" Properties={props} Step={step} Time={time:.9e}",
+            lx = lat[0],
+            ly = lat[1],
+            lz = lat[2],
+            xy = lat[3],
+            xz = lat[4],
+            yz = lat[5],
             z = zero,
             props = props,
             step = step,

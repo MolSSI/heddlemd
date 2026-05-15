@@ -36,21 +36,30 @@ trailing content is an error.
 
 ### Comment-line attributes <!-- rq-20e7cab6 -->
 
-#### `Lattice` (required)
+#### `Lattice` (required) <!-- rq-9864078f -->
 
 A nine-element space-separated list of `f64` values inside double quotes
-representing the three Cartesian box vectors in row-major order:
+representing the three Cartesian box vectors in row-major order (row 1 =
+`a` vector, row 2 = `b` vector, row 3 = `c` vector):
 
 ```
-Lattice="lx 0 0 0 ly 0 0 0 lz"
+Lattice="lx 0 0 xy ly 0 xz yz lz"
 ```
 
-The parser accepts only orthorhombic boxes: the six off-diagonal entries must
-be exactly `0.0`. The three diagonal entries (`lx`, `ly`, `lz`) become the
-simulation box edge lengths in metres. Each must be finite and strictly
-positive.
+The parser accepts only lower-triangular boxes: the three "upper-
+triangular" entries (positions 2, 3, 6 in the row-major list — `a_y`,
+`a_z`, `b_z`) must be exactly `0.0`. The remaining six entries become
+the six lattice parameters of the `SimulationBox`:
 
-#### `Properties` (required)
+- Diagonal entries (positions 1, 5, 9 — `lx = a_x`, `ly = b_y`,
+  `lz = c_z`) must be finite and strictly positive.
+- Tilt entries (positions 4, 7, 8 — `xy = b_x`, `xz = c_x`,
+  `yz = c_y`) must be finite; any sign and magnitude are accepted.
+
+The orthorhombic case corresponds to `Lattice="lx 0 0 0 ly 0 0 0 lz"`
+(all three tilts zero).
+
+#### `Properties` (required) <!-- rq-3d3679d0 -->
 
 A colon-separated specification of the data-column layout. The accepted
 forms enumerate the four combinations of optional `velo` and optional
@@ -67,9 +76,11 @@ Properties=species:S:1:pos:R:3:velo:R:3:image:I:3
 - `pos:R:3` — three real columns for the position (x, y, z) in metres.
 - `velo:R:3` — optional three real columns for velocity (vx, vy, vz) in m/s.
 - `image:I:3` — optional three integer columns for the image triple
-  `(n_x, n_y, n_z)`. The unwrapped position is
-  `pos + image · (lx, ly, lz)`. When absent, image flags default to zero
-  on load.
+  `(n_a, n_b, n_c)`, one per lattice direction. The unwrapped position
+  is `pos + n_a · a + n_b · b + n_c · c` (see `particle-state.md`).
+  For an orthorhombic box this reduces to
+  `pos + image · (lx, ly, lz)`. When absent, image flags default to
+  zero on load.
 
 Any other ordering, missing required columns, or unexpected columns is an
 error. The `velo` and `image` decisions are each all-or-nothing: when
@@ -81,7 +92,7 @@ shown above is followed).
 Other extended-XYZ column types (`L` logical) and arbitrary property
 names are not accepted in schema v1.
 
-#### Other attributes
+#### Other attributes <!-- rq-41eb5e02 -->
 
 Any attribute not listed above is parsed but ignored (e.g. `Time=0.0`,
 `Origin="0 0 0"`, comments embedded as `Comment="..."`). This preserves
@@ -95,10 +106,13 @@ more whitespace characters. The number of columns must match the
 
 - `species` — a string token (no whitespace inside). Must be a name declared
   in the consumer-supplied type list (see *Feature API*).
-- `pos` — three `f64` values in metres. Each component must lie in the
-  primary cell along its axis: `pos_x ∈ [-lx/2, lx/2)`, and similarly for y
-  and z. Positions exactly equal to `+L/2` are rejected (the primary cell's
-  upper bound is exclusive).
+- `pos` — three `f64` values in metres. Each particle must lie in the
+  primary image of the simulation box: its fractional coordinates
+  (computed via `SimulationBox::fractional_coords`) must satisfy
+  `s_a, s_b, s_c ∈ [-1/2, 1/2)`. Positions whose fractional component
+  equals `+1/2` along any direction are rejected (the primary cell's
+  upper bound is exclusive). For an orthorhombic box this reduces to
+  `pos_x ∈ [-lx/2, lx/2)` etc.
 - `velo` (when present) — three `f64` values in m/s. No range restriction.
 - `image` (when present) — three `i32` values. No range restriction
   beyond the type bounds; negative and positive values are both accepted.
@@ -125,7 +139,8 @@ This produces an empty `ParticleState` and a valid `SimulationBox`.
 ### Types <!-- rq-a953fc1d -->
 
 - `InitState` — the parser's output. Fields: <!-- rq-8df7fb0c -->
-  - `box: SimulationBox` — orthorhombic box from `Lattice`.
+  - `box: SimulationBox` — simulation box parsed from `Lattice` (in
+    lower-triangular form; orthorhombic when all three tilts are zero).
   - `particle_count: usize` — the integer from line 1.
   - `type_indices: Vec<u32>` — for each particle, the zero-based index into
     the supplied `type_names` slice. Length equals `particle_count`.
@@ -158,9 +173,9 @@ This produces an empty `ParticleState` and a valid `SimulationBox`.
   - `MissingCommentLine` — the file has fewer than two lines.
   - `MissingAttribute { name: &'static str }` — required `Lattice` or
     `Properties` attribute absent.
-  - `InvalidLattice(String)` — `Lattice` is malformed, non-orthorhombic
-    (any off-diagonal nonzero), contains non-finite components, or has a
-    non-positive diagonal.
+  - `InvalidLattice(String)` — `Lattice` is malformed, has a non-zero
+    upper-triangular entry (one of `a_y`, `a_z`, `b_z`), contains
+    non-finite components, or has a non-positive diagonal.
   - `InvalidProperties(String)` — `Properties` does not match one of the
     four accepted forms.
   - `RowCountMismatch { expected: usize, actual: usize }` — the number of
@@ -174,8 +189,10 @@ This produces an empty `ParticleState` and a valid `SimulationBox`.
     could not be parsed as `i32`.
   - `NonFiniteValue { line_number: usize, column: &'static str }` — a
     numeric column is NaN or infinity.
-  - `PositionOutsideBox { line_number: usize, axis: &'static str, value: f64, half_length: f64 }`
-    — a position falls outside `[-L/2, L/2)` along the named axis.
+  - `PositionOutsideBox { line_number: usize, direction: &'static str, fractional: f64 }`
+    — a position falls outside the primary image of the simulation box.
+    `direction` is one of `"a"`, `"b"`, `"c"`; `fractional` is the
+    out-of-range fractional coordinate (either `>= 0.5` or `< -0.5`).
   - `TrailingContent { line_number: usize }` — non-blank content beyond row
     `N+2`.
 
@@ -197,7 +214,10 @@ ordering: first line 1, then line 2 attributes (`Lattice` before
 
 ## Out of Scope <!-- rq-6897be01 -->
 
-- Non-orthorhombic (triclinic) boxes.
+- Crystallographic `a, b, c, α, β, γ` lattice syntax; the parser
+  accepts only the row-major 9-component lattice matrix described
+  above. Converting from `a, b, c, α, β, γ` is the caller's
+  responsibility.
 - Property columns other than `species:S:1`, `pos:R:3`, `velo:R:3`. Forces,
   masses, charges, type-as-integer columns, etc. are all rejected in schema
   v1.
@@ -331,10 +351,26 @@ Feature: Extended-XYZ initial-state file
     Then it returns Err(InitStateError::MissingAttribute { name: "Properties" })
 
   @rq-2ed137d9
-  Scenario: Reject non-orthorhombic lattice
-    Given a Lattice value "1.0e-9 0 0 0.1e-9 1.0e-9 0 0 0 1.0e-9"
+  Scenario: Reject lattice with a non-zero upper-triangular entry
+    Given a Lattice value "1.0e-9 0.1e-9 0 0 1.0e-9 0 0 0 1.0e-9"
+      (a_y = 0.1e-9, which must be exactly 0 for lower-triangular form)
     When load_init_state is called
     Then it returns Err(InitStateError::InvalidLattice(_))
+
+  @rq-b7573bd5
+  Scenario: Accept a lower-triangular triclinic lattice
+    Given a Lattice value "1.0e-9 0 0 0.2e-9 1.0e-9 0 0.1e-9 -0.3e-9 1.0e-9"
+      (xy=0.2e-9, xz=0.1e-9, yz=-0.3e-9, with the three "upper" slots zero)
+    When load_init_state is called
+    Then it returns Ok(state)
+    And state.box.lattice() equals [1.0e-9, 1.0e-9, 1.0e-9, 0.2e-9, 0.1e-9, -0.3e-9]
+      cast to f32
+
+  @rq-cc4e9821
+  Scenario: Accept a lattice with negative tilts
+    Given a Lattice value "1.0e-9 0 0 -0.5e-9 1.0e-9 0 -0.1e-9 -0.2e-9 1.0e-9"
+    When load_init_state is called
+    Then it returns Ok(state)
 
   @rq-57173f96
   Scenario: Reject non-positive lattice diagonal
@@ -423,34 +459,53 @@ Feature: Extended-XYZ initial-state file
   # --- Position bounds ---
 
   @rq-685006bb
-  Scenario: Accept positions strictly inside the primary cell
+  Scenario: Accept positions strictly inside the primary cell (orthorhombic)
     Given lx=1.0e-9 and a row "Ar 4.999e-10 0 0"
     When load_init_state is called
     Then it returns Ok(state)
 
   @rq-a35ca20b
-  Scenario: Accept the lower boundary -L/2 along an axis
+  Scenario: Accept the lower boundary -L/2 along an axis (orthorhombic)
     Given lx=1.0e-9 and a row "Ar -5.0e-10 0 0"
     When load_init_state is called
     Then it returns Ok(state)
 
-  @rq-7a4ed012
-  Scenario: Reject positions at the +L/2 boundary
-    Given lx=1.0e-9 and a row "Ar 5.0e-10 0 0"
+  @rq-1aeb2da1
+  Scenario: Accept a position inside the primary parallelepiped of a triclinic box
+    Given a Lattice value "1.0e-9 0 0 0.2e-9 1.0e-9 0 0 0 1.0e-9"
+    And a row "Ar 5.5e-10 4.0e-10 0"
+      (fractional coords s_a = 0.55 - 0.5 * 0.2/1.0 = ... within [-0.5, 0.5))
     When load_init_state is called
-    Then it returns Err(InitStateError::PositionOutsideBox { line_number: 3, axis: "x", value: 5.0e-10, half_length: 5.0e-10 })
+    Then it returns Ok(state)
+
+  @rq-8a3858fd
+  Scenario: Reject a position whose fractional coordinate exceeds +0.5 in a triclinic box
+    Given a Lattice value "1.0e-9 0 0 0.5e-9 1.0e-9 0 0 0 1.0e-9"
+    And a row whose Cartesian position has fractional s_b >= 0.5
+    When load_init_state is called
+    Then it returns Err(InitStateError::PositionOutsideBox { line_number: 3, direction: "b", fractional: v })
+      where v >= 0.5
+
+  @rq-7a4ed012
+  Scenario: Reject positions at the +L/2 boundary (orthorhombic)
+    Given lx=1.0e-9 and a row "Ar 5.0e-10 0 0"
+      (fractional s_a = 0.5, on the excluded upper bound)
+    When load_init_state is called
+    Then it returns Err(InitStateError::PositionOutsideBox { line_number: 3, direction: "a", fractional: 0.5 })
 
   @rq-ea3bef6c
-  Scenario: Reject positions past +L/2
+  Scenario: Reject positions past +L/2 (orthorhombic)
     Given lx=1.0e-9 and a row "Ar 6.0e-10 0 0"
+      (fractional s_a = 0.6)
     When load_init_state is called
-    Then it returns Err(InitStateError::PositionOutsideBox { line_number: 3, axis: "x", value: 6.0e-10, half_length: 5.0e-10 })
+    Then it returns Err(InitStateError::PositionOutsideBox { line_number: 3, direction: "a", fractional: 0.6 })
 
   @rq-11dbe0a5
-  Scenario: Reject positions past -L/2 along y
+  Scenario: Reject positions past -L/2 along b (orthorhombic)
     Given ly=1.0e-9 and a row "Ar 0 -6.0e-10 0"
+      (fractional s_b = -0.6)
     When load_init_state is called
-    Then it returns Err(InitStateError::PositionOutsideBox { line_number: 3, axis: "y", value: -6.0e-10, half_length: 5.0e-10 })
+    Then it returns Err(InitStateError::PositionOutsideBox { line_number: 3, direction: "b", fractional: -0.6 })
 
   # --- Trailing content ---
 

@@ -108,7 +108,7 @@ fn construct_langevin_with_zero_particles() {
 #[test]
 fn lan_drift_half_advances_positions_by_v_half_dt() {
     let gpu = init_device().unwrap();
-    let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
+    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = one_particle_state();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
@@ -124,7 +124,7 @@ fn lan_drift_half_advances_positions_by_v_half_dt() {
 #[test]
 fn lan_drift_half_leaves_other_arrays_unchanged() {
     let gpu = init_device().unwrap();
-    let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
+    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = n_particle_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
@@ -142,7 +142,7 @@ fn lan_drift_half_leaves_other_arrays_unchanged() {
 #[test]
 fn lan_drift_half_on_empty_is_noop() {
     let gpu = init_device().unwrap();
-    let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
+    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
         Vec::new(), None,
@@ -157,7 +157,7 @@ fn lan_drift_half_on_empty_is_noop() {
 #[test]
 fn lan_drift_half_with_dt_zero_leaves_positions_unchanged() {
     let gpu = init_device().unwrap();
-    let sim_box = SimulationBox::new_orthorhombic(1.0e6, 1.0e6, 1.0e6).unwrap();
+    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = n_particle_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     lan_drift_half(&mut buffers, &sim_box, 0.0).unwrap();
@@ -310,7 +310,7 @@ fn step_launches_all_six_expected_kernel_calls() {
     let gpu = init_device().unwrap();
     let state = n_particle_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = SimulationBox::new_orthorhombic(1.0e9, 1.0e9, 1.0e9).unwrap();
+    let mut sim_box = SimulationBox::new(1.0e9, 1.0e9, 1.0e9, 0.0, 0.0, 0.0).unwrap();
     let mut ff = ForceField::new(&gpu,
         4,
         &sim_box,
@@ -364,7 +364,7 @@ fn langevin_step_on_empty_is_noop() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = SimulationBox::new_orthorhombic(1.0e9, 1.0e9, 1.0e9).unwrap();
+    let mut sim_box = SimulationBox::new(1.0e9, 1.0e9, 1.0e9, 0.0, 0.0, 0.0).unwrap();
     let mut ff = ForceField::new(&gpu,
         0,
         &sim_box,
@@ -598,7 +598,7 @@ log_every = 1
 #[test]
 fn lan_drift_half_wraps_across_plus_l_half() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap();
+    let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let state = dynamics::state::ParticleState::new(
         vec![4.95_f32],
         vec![0.0],
@@ -623,7 +623,7 @@ fn lan_drift_half_wraps_across_plus_l_half() {
 #[test]
 fn lan_drift_half_preserves_image_flags_when_no_wrap() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap();
+    let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let state = dynamics::state::ParticleState::new(
         vec![0.0_f32],
         vec![0.0],

@@ -81,18 +81,13 @@ __device__ inline float philox_gaussian(
 
 // --- A step: x <- x + v * (dt / 2), then wrap into the primary image. -------
 
-__device__ static inline void wrap_and_count(float &p, float lx, int &n)
-{
-  float k = floorf((p + lx * 0.5f) / lx);
-  p = p - k * lx;
-  n = n + (int)k;
-}
+#include "pbc.cuh"
 
 extern "C" __global__ void lan_drift_half(
     float *positions_x, float *positions_y, float *positions_z,
     int *images_x, int *images_y, int *images_z,
     const float *velocities_x, const float *velocities_y, const float *velocities_z,
-    float lx, float ly, float lz,
+    float lx, float ly, float lz, float xy, float xz, float yz,
     float dt,
     unsigned int n)
 {
@@ -107,9 +102,11 @@ extern "C" __global__ void lan_drift_half(
   int nx = images_x[i];
   int ny = images_y[i];
   int nz = images_z[i];
-  wrap_and_count(px, lx, nx);
-  wrap_and_count(py, ly, ny);
-  wrap_and_count(pz, lz, nz);
+  int ka, kb, kc;
+  triclinic_wrap_with_image(px, py, pz, ka, kb, kc, lx, ly, lz, xy, xz, yz);
+  nx += ka;
+  ny += kb;
+  nz += kc;
 
   positions_x[i] = px;
   positions_y[i] = py;

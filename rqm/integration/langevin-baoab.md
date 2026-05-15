@@ -176,7 +176,7 @@ extern "C" __global__ void lan_drift_half(
     float *positions_x, float *positions_y, float *positions_z,
     int *images_x, int *images_y, int *images_z,
     const float *velocities_x, const float *velocities_y, const float *velocities_z,
-    float lx, float ly, float lz,
+    float lx, float ly, float lz, float xy, float xz, float yz,
     float dt,
     unsigned int n);
 
@@ -196,11 +196,14 @@ Each thread computes its global index as
 returns without touching any buffer.
 
 `lan_drift_half` performs `x[i] += v[i] * (dt * 0.5f)` per axis, then
-wraps the updated component back into `[-L_a / 2, +L_a / 2)` via the
-same `wrap_and_count(p, L, n)` helper used by velocity Verlet
-(`k = floor((p + L*0.5f) / L)`; `p ← p - k*L`; `n ← n + k`). The
-unwrapped position `positions_a[i] + images_a[i] * L_a` is invariant
-under this wrap. Velocities are read-only inputs and are not touched.
+wraps the updated position back into the primary image of the
+simulation box via the same triclinic
+`wrap_position_with_image_count` step used by velocity Verlet (see
+`simulation-box.md`). The integer triple returned by the wrap is added
+to `(images_x[i], images_y[i], images_z[i])`. The unwrapped position
+`wrapped + images_x · a + images_y · b + images_z · c` is invariant
+under this wrap. For an orthorhombic box the algorithm reduces to per-
+axis wraps. Velocities are read-only inputs and are not touched.
 
 `lan_ou_step` performs, for axis `a ∈ {0, 1, 2}`:
 

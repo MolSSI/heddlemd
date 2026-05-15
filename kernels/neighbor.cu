@@ -1,32 +1,41 @@
 // rq-0469400b
 
-// Minimum-image wrap of a displacement component into [-L/2, +L/2).
-__device__ static inline float min_image(float dx, float lx)
-{
-  return dx - lx * floorf((dx + lx * 0.5f) / lx);
-}
+#include "pbc.cuh"
 
-// Per-axis cell index of a position. Wraps the position into the primary
-// cell, clamps to [0, n_cells - 1] (handles the +L/2 boundary case).
-__device__ static inline unsigned int cell_index_axis(
-    float x, float lx, float cell_size, unsigned int n_cells)
+// Compute the parallelepiped cell index of a Cartesian position. Wraps
+// the position into the primary image, transforms to fractional
+// coordinates, and bins each fractional component to [0, n_cells_d - 1]
+// (clamping handles the +0.5 boundary case).
+__device__ static inline void parallelepiped_cell_indices(
+    float x, float y, float z,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
+    unsigned int &ca, unsigned int &cb, unsigned int &cc)
 {
-  float wrapped = x - lx * floorf((x + lx * 0.5f) / lx);
-  int idx = (int) floorf((wrapped + lx * 0.5f) / cell_size);
-  if (idx < 0) {
-    idx = 0;
-  }
-  if (idx >= (int) n_cells) {
-    idx = (int) n_cells - 1;
-  }
-  return (unsigned int) idx;
+  int dummy_a, dummy_b, dummy_c;
+  triclinic_wrap_with_image(x, y, z, dummy_a, dummy_b, dummy_c,
+                            lx, ly, lz, xy, xz, yz);
+  float s_a, s_b, s_c;
+  triclinic_cart_to_frac(x, y, z, lx, ly, lz, xy, xz, yz, s_a, s_b, s_c);
+  int ia = (int) floorf((s_a + 0.5f) * (float) n_cells_a);
+  int ib = (int) floorf((s_b + 0.5f) * (float) n_cells_b);
+  int ic = (int) floorf((s_c + 0.5f) * (float) n_cells_c);
+  if (ia < 0) ia = 0;
+  if (ia >= (int) n_cells_a) ia = (int) n_cells_a - 1;
+  if (ib < 0) ib = 0;
+  if (ib >= (int) n_cells_b) ib = (int) n_cells_b - 1;
+  if (ic < 0) ic = 0;
+  if (ic >= (int) n_cells_c) ic = (int) n_cells_c - 1;
+  ca = (unsigned int) ia;
+  cb = (unsigned int) ib;
+  cc = (unsigned int) ic;
 }
 
 // rq-884b5cd6
 extern "C" __global__ void neighbor_displacement_squared(
     const float *positions_x, const float *positions_y, const float *positions_z,
     const float *reference_x, const float *reference_y, const float *reference_z,
-    float lx, float ly, float lz,
+    float lx, float ly, float lz, float xy, float xz, float yz,
     float *disp_sq,
     unsigned int n)
 {
@@ -34,9 +43,10 @@ extern "C" __global__ void neighbor_displacement_squared(
   if (i >= n) {
     return;
   }
-  float dx = min_image(positions_x[i] - reference_x[i], lx);
-  float dy = min_image(positions_y[i] - reference_y[i], ly);
-  float dz = min_image(positions_z[i] - reference_z[i], lz);
+  float dx = positions_x[i] - reference_x[i];
+  float dy = positions_y[i] - reference_y[i];
+  float dz = positions_z[i] - reference_z[i];
+  triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
   disp_sq[i] = dx * dx + dy * dy + dz * dz;
 }
 
@@ -45,9 +55,8 @@ extern "C" __global__ void neighbor_list_build(
     const float *positions_x, const float *positions_y, const float *positions_z,
     const unsigned int *sorted_particle_ids,
     const unsigned int *cell_offsets,
-    float lx, float ly, float lz,
-    float cell_size_x, float cell_size_y, float cell_size_z,
-    unsigned int n_cells_x, unsigned int n_cells_y, unsigned int n_cells_z,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
     float r_search_sq,
     unsigned int max_neighbors,
     unsigned int *neighbor_list,
@@ -64,30 +73,32 @@ extern "C" __global__ void neighbor_list_build(
   float yi = positions_y[i];
   float zi = positions_z[i];
 
-  unsigned int cx = cell_index_axis(xi, lx, cell_size_x, n_cells_x);
-  unsigned int cy = cell_index_axis(yi, ly, cell_size_y, n_cells_y);
-  unsigned int cz = cell_index_axis(zi, lz, cell_size_z, n_cells_z);
+  unsigned int ca, cb, cc;
+  parallelepiped_cell_indices(xi, yi, zi,
+                              lx, ly, lz, xy, xz, yz,
+                              n_cells_a, n_cells_b, n_cells_c,
+                              ca, cb, cc);
 
   unsigned int *self_list = neighbor_list + (size_t) i * (size_t) max_neighbors;
   unsigned int count = 0;
   unsigned int overflowed = 0;
 
-  // Walk 27 cells in a deterministic order: dx outer, dy middle, dz inner.
-  for (int dxc = -1; dxc <= 1; ++dxc) {
-    int ncx = (int) cx + dxc;
-    while (ncx < 0) { ncx += (int) n_cells_x; }
-    while (ncx >= (int) n_cells_x) { ncx -= (int) n_cells_x; }
-    for (int dyc = -1; dyc <= 1; ++dyc) {
-      int ncy = (int) cy + dyc;
-      while (ncy < 0) { ncy += (int) n_cells_y; }
-      while (ncy >= (int) n_cells_y) { ncy -= (int) n_cells_y; }
-      for (int dzc = -1; dzc <= 1; ++dzc) {
-        int ncz = (int) cz + dzc;
-        while (ncz < 0) { ncz += (int) n_cells_z; }
-        while (ncz >= (int) n_cells_z) { ncz -= (int) n_cells_z; }
+  // Walk 27 cells in a deterministic order: a outer, b middle, c inner.
+  for (int da = -1; da <= 1; ++da) {
+    int nca = (int) ca + da;
+    while (nca < 0) { nca += (int) n_cells_a; }
+    while (nca >= (int) n_cells_a) { nca -= (int) n_cells_a; }
+    for (int db = -1; db <= 1; ++db) {
+      int ncb = (int) cb + db;
+      while (ncb < 0) { ncb += (int) n_cells_b; }
+      while (ncb >= (int) n_cells_b) { ncb -= (int) n_cells_b; }
+      for (int dc = -1; dc <= 1; ++dc) {
+        int ncc = (int) cc + dc;
+        while (ncc < 0) { ncc += (int) n_cells_c; }
+        while (ncc >= (int) n_cells_c) { ncc -= (int) n_cells_c; }
 
-        unsigned int c = ((unsigned int) ncx * n_cells_y + (unsigned int) ncy)
-                         * n_cells_z + (unsigned int) ncz;
+        unsigned int c = ((unsigned int) nca * n_cells_b + (unsigned int) ncb)
+                         * n_cells_c + (unsigned int) ncc;
         unsigned int start = cell_offsets[c];
         unsigned int end = cell_offsets[c + 1];
         for (unsigned int s = start; s < end; ++s) {
@@ -95,9 +106,10 @@ extern "C" __global__ void neighbor_list_build(
           if (j == i) {
             continue;
           }
-          float ddx = min_image(xi - positions_x[j], lx);
-          float ddy = min_image(yi - positions_y[j], ly);
-          float ddz = min_image(zi - positions_z[j], lz);
+          float ddx = xi - positions_x[j];
+          float ddy = yi - positions_y[j];
+          float ddz = zi - positions_z[j];
+          triclinic_min_image(ddx, ddy, ddz, lx, ly, lz, xy, xz, yz);
           float r2 = ddx * ddx + ddy * ddy + ddz * ddz;
           if (r2 <= r_search_sq) {
             if (count < max_neighbors) {
@@ -148,9 +160,8 @@ extern "C" __global__ void copy_positions_into_reference(
 
 extern "C" __global__ void compute_cell_indices_and_histogram(
     const float *positions_x, const float *positions_y, const float *positions_z,
-    float lx, float ly, float lz,
-    float cell_size_x, float cell_size_y, float cell_size_z,
-    unsigned int n_cells_x, unsigned int n_cells_y, unsigned int n_cells_z,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
     unsigned int *cell_indices,
     unsigned int *cell_counts,
     unsigned int n)
@@ -159,10 +170,12 @@ extern "C" __global__ void compute_cell_indices_and_histogram(
   if (i >= n) {
     return;
   }
-  unsigned int cx = cell_index_axis(positions_x[i], lx, cell_size_x, n_cells_x);
-  unsigned int cy = cell_index_axis(positions_y[i], ly, cell_size_y, n_cells_y);
-  unsigned int cz = cell_index_axis(positions_z[i], lz, cell_size_z, n_cells_z);
-  unsigned int c = (cx * n_cells_y + cy) * n_cells_z + cz;
+  unsigned int ca, cb, cc;
+  parallelepiped_cell_indices(positions_x[i], positions_y[i], positions_z[i],
+                              lx, ly, lz, xy, xz, yz,
+                              n_cells_a, n_cells_b, n_cells_c,
+                              ca, cb, cc);
+  unsigned int c = (ca * n_cells_b + cb) * n_cells_c + cc;
   cell_indices[i] = c;
   atomicAdd(&cell_counts[c], 1u);
 }

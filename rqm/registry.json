@@ -132,7 +132,12 @@
   "rq-03830444": {
     "decl": "# Feature: Simulation Box and Periodic Boundary Conditions",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/pbc.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: Simulation Box and Periodic Boundary Conditions",
     "type": "file"
   },
@@ -271,10 +276,10 @@
     "type": "api-item"
   },
   "rq-0ae304bc": {
-    "decl": "Scenario: minimum_image handles many-period displacements",
+    "decl": "Scenario: minimum_image handles many-period displacements (orthorhombic)",
     "file": "simulation-box",
     "refs": [],
-    "title": "minimum_image handles many-period displacements",
+    "title": "minimum_image handles many-period displacements (orthorhombic)",
     "type": "scenario"
   },
   "rq-0b71c50a": {
@@ -332,6 +337,13 @@
     "refs": [],
     "title": "Exclusion",
     "type": "api-item"
+  },
+  "rq-0c9dc32b": {
+    "decl": "Scenario: Reject NaN tilt",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Reject NaN tilt",
+    "type": "scenario"
   },
   "rq-0cb3c41c": {
     "decl": "Scenario: Reject unknown schema_version",
@@ -480,7 +492,7 @@
     "type": "scenario"
   },
   "rq-10f6f831": {
-    "decl": "- `compute_cell_indices_and_histogram(particle_buffers, sim_box, n_cells, cell_size, cell_indices, cell_counts) -> Result<(), GpuError>`",
+    "decl": "- `compute_cell_indices_and_histogram(particle_buffers, sim_box, n_cells, cell_indices, cell_counts) -> Result<(), GpuError>`",
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "compute_cell_indices_and_histogram",
@@ -507,10 +519,10 @@
     "type": "scenario"
   },
   "rq-11dbe0a5": {
-    "decl": "Scenario: Reject positions past -L/2 along y",
+    "decl": "Scenario: Reject positions past -L/2 along b (orthorhombic)",
     "file": "io/init-state-file",
     "refs": [],
-    "title": "Reject positions past -L/2 along y",
+    "title": "Reject positions past -L/2 along b (orthorhombic)",
     "type": "scenario"
   },
   "rq-1217c816": {
@@ -627,17 +639,17 @@
     "type": "scenario"
   },
   "rq-151cb099": {
-    "decl": "Scenario: Cell index of a position at the +L/2 boundary clamps inside the grid",
+    "decl": "Scenario: Cell index of a position at the +1/2 fractional-coordinate boundary clamps inside the grid",
     "file": "forces/neighbor-list",
     "refs": [],
-    "title": "Cell index of a position at the +L/2 boundary clamps inside the grid",
+    "title": "Cell index of a position at the +1/2 fractional-coordinate boundary clamps inside the grid",
     "type": "scenario"
   },
   "rq-153dd875": {
-    "decl": "Scenario: set_lengths validation order is lx then ly then lz",
+    "decl": "Scenario: set_lattice validation order is lx, ly, lz, xy, xz, yz",
     "file": "simulation-box",
     "refs": [],
-    "title": "set_lengths validation order is lx then ly then lz",
+    "title": "set_lattice validation order is lx, ly, lz, xy, xz, yz",
     "type": "scenario"
   },
   "rq-15647873": {
@@ -750,11 +762,23 @@
     "type": "scenario"
   },
   "rq-19fe4806": {
-    "decl": "Scenario: Reject NaN lx",
+    "decl": "Scenario: Reject NaN diagonal",
     "file": "simulation-box",
     "refs": [],
-    "title": "Reject NaN lx",
+    "title": "Reject NaN diagonal",
     "type": "scenario"
+  },
+  "rq-1a3ec0c8": {
+    "decl": "- `SimulationBox::fractional_coords(&self, position: [f32; 3]) -> [f32; 3]`",
+    "file": "simulation-box",
+    "refs": [
+      {
+        "file": "src/pbc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SimulationBox",
+    "type": "api-item"
   },
   "rq-1a504311": {
     "decl": "Scenario: Single-step round-trip restores the observable state bit-exactly under zero force",
@@ -780,6 +804,13 @@
     "file": "simulation-runner",
     "refs": [],
     "title": "Run a valid minimal config to completion",
+    "type": "scenario"
+  },
+  "rq-1aeb2da1": {
+    "decl": "Scenario: Accept a position inside the primary parallelepiped of a triclinic box",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "Accept a position inside the primary parallelepiped of a triclinic box",
     "type": "scenario"
   },
   "rq-1b18924f": {
@@ -847,10 +878,10 @@
     "type": "scenario"
   },
   "rq-1b9c474c": {
-    "decl": "Scenario: Reject configurations whose box admits fewer than 3 cells per axis",
+    "decl": "Scenario: Reject configurations whose box admits fewer than 3 cells along any direction",
     "file": "forces/neighbor-list",
     "refs": [],
-    "title": "Reject configurations whose box admits fewer than 3 cells per axis",
+    "title": "Reject configurations whose box admits fewer than 3 cells along any direction",
     "type": "scenario"
   },
   "rq-1bbcf3b7": {
@@ -1299,6 +1330,13 @@
     "title": "Neighbor list applies minimum-image PBC",
     "type": "scenario"
   },
+  "rq-261fde88": {
+    "decl": "Scenario: minimum_image of a displacement that requires b-tilt cancellation",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "minimum_image of a displacement that requires b-tilt cancellation",
+    "type": "scenario"
+  },
   "rq-264d2234": {
     "decl": "Scenario: record_host with a HostStage not in ORDER panics",
     "file": "performance-analysis",
@@ -1350,11 +1388,19 @@
     "title": "Doubling epsilon doubles the force at the same separation",
     "type": "scenario"
   },
+  "rq-27f9fae8": {
+    "decl": "#### `[integrator]`",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[integrator]`",
+    "type": "section"
+  },
   "rq-27ffd3f4": {
-    "decl": "Scenario: Construct with positive finite edge lengths",
+    "decl": "Scenario: Construct an orthorhombic box (all tilts zero)",
     "file": "simulation-box",
     "refs": [],
-    "title": "Construct with positive finite edge lengths",
+    "title": "Construct an orthorhombic box (all tilts zero)",
     "type": "scenario"
   },
   "rq-282af621": {
@@ -1596,10 +1642,10 @@
     "type": "scenario"
   },
   "rq-2ed137d9": {
-    "decl": "Scenario: Reject non-orthorhombic lattice",
+    "decl": "Scenario: Reject lattice with a non-zero upper-triangular entry",
     "file": "io/init-state-file",
     "refs": [],
-    "title": "Reject non-orthorhombic lattice",
+    "title": "Reject lattice with a non-zero upper-triangular entry",
     "type": "scenario"
   },
   "rq-2ed643ad": {
@@ -2004,6 +2050,14 @@
     "title": "Slot Integration",
     "type": "section"
   },
+  "rq-39cec761": {
+    "decl": "#### `morse_bond_force`",
+    "file": "forces/morse-bonded",
+    "level": 4,
+    "refs": [],
+    "title": "`morse_bond_force`",
+    "type": "section"
+  },
   "rq-3a1eea58": {
     "decl": "Scenario: Scale = 1.0 is equivalent to no exclusion",
     "file": "forces/lj-pair-force",
@@ -2087,6 +2141,14 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-3d3679d0": {
+    "decl": "#### `Properties` (required)",
+    "file": "io/init-state-file",
+    "level": 4,
+    "refs": [],
+    "title": "`Properties` (required)",
+    "type": "section"
+  },
   "rq-3d38868e": {
     "decl": "Scenario: Combiner sums slot energies and virials in slot order",
     "file": "forces/framework",
@@ -2117,10 +2179,10 @@
     "type": "section"
   },
   "rq-3e8324c2": {
-    "decl": "Scenario: wrap_position leaves a position inside the primary image unchanged",
+    "decl": "Scenario: wrap_position leaves a position inside the primary cell unchanged",
     "file": "simulation-box",
     "refs": [],
-    "title": "wrap_position leaves a position inside the primary image unchanged",
+    "title": "wrap_position leaves a position inside the primary cell unchanged",
     "type": "scenario"
   },
   "rq-3e9217e2": {
@@ -2217,6 +2279,14 @@
     "refs": [],
     "title": "Energy and virial reductions share the same indexing as force",
     "type": "scenario"
+  },
+  "rq-41eb5e02": {
+    "decl": "#### Other attributes",
+    "file": "io/init-state-file",
+    "level": 4,
+    "refs": [],
+    "title": "Other attributes",
+    "type": "section"
   },
   "rq-433c972f": {
     "decl": "Scenario: ForceField with only a bonded potential owns no neighbor list",
@@ -2350,6 +2420,13 @@
     "title": "Construct Langevin BAOAB via the registry",
     "type": "scenario"
   },
+  "rq-47e800e0": {
+    "decl": "Scenario: min_perpendicular_width of a c-tilted box reflects the yz contribution",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "min_perpendicular_width of a c-tilted box reflects the yz contribution",
+    "type": "scenario"
+  },
   "rq-4811af60": {
     "decl": "Scenario: r=0 produces zero force, not NaN",
     "file": "forces/morse-bonded",
@@ -2377,6 +2454,13 @@
     "file": "integration/framework",
     "refs": [],
     "title": "Construct with particle_count = 0",
+    "type": "scenario"
+  },
+  "rq-491235c1": {
+    "decl": "Scenario: minimum_image after set_lattice reflects new tilts",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "minimum_image after set_lattice reflects new tilts",
     "type": "scenario"
   },
   "rq-493caf32": {
@@ -2485,10 +2569,10 @@
     "type": "scenario"
   },
   "rq-4b9d059e": {
-    "decl": "Scenario: wrap_position wraps a position outside the primary image",
+    "decl": "Scenario: wrap_position wraps a position outside the primary cell (orthorhombic)",
     "file": "simulation-box",
     "refs": [],
-    "title": "wrap_position wraps a position outside the primary image",
+    "title": "wrap_position wraps a position outside the primary cell (orthorhombic)",
     "type": "scenario"
   },
   "rq-4bc8028f": {
@@ -2505,12 +2589,25 @@
     "title": "Unknown section header",
     "type": "scenario"
   },
+  "rq-4c42a952": {
+    "decl": "#### Top level",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "Top level",
+    "type": "section"
+  },
   "rq-4ca9b179": {
-    "decl": "## Wrap Formula",
+    "decl": "## Wrap Algorithm",
     "file": "simulation-box",
     "level": 2,
-    "refs": [],
-    "title": "Wrap Formula",
+    "refs": [
+      {
+        "file": "src/pbc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Wrap Algorithm",
     "type": "section"
   },
   "rq-4cf03f96": {
@@ -2611,6 +2708,20 @@
     "title": "Variance scales with sqrt((1 - alpha^2) * kt / m)",
     "type": "scenario"
   },
+  "rq-50fa922c": {
+    "decl": "Scenario: set_lattice rejects a non-finite tilt without mutating the box",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "set_lattice rejects a non-finite tilt without mutating the box",
+    "type": "scenario"
+  },
+  "rq-5269221c": {
+    "decl": "Scenario: wrap_position is idempotent for a triclinic box",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "wrap_position is idempotent for a triclinic box",
+    "type": "scenario"
+  },
   "rq-52c483c0": {
     "decl": "Scenario: Pre-flight refuses to overwrite existing log",
     "file": "simulation-runner",
@@ -2644,6 +2755,13 @@
     "title": "SimulationConfig",
     "type": "api-item"
   },
+  "rq-5318db55": {
+    "decl": "Scenario: Reject infinite tilt",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Reject infinite tilt",
+    "type": "scenario"
+  },
   "rq-531afe39": {
     "decl": "Scenario: Pair beyond r_cut yields zero independent of r_switch",
     "file": "forces/lj-pair-force",
@@ -2656,6 +2774,13 @@
     "file": "forces/framework",
     "refs": [],
     "title": "ForceField with N=4 LJ-only step populates potential_energies and virials",
+    "type": "scenario"
+  },
+  "rq-5355f3f0": {
+    "decl": "Scenario: wrap_position_with_image_count tracks per-direction image counts for a triclinic box",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "wrap_position_with_image_count tracks per-direction image counts for a triclinic box",
     "type": "scenario"
   },
   "rq-535c2b1e": {
@@ -2677,6 +2802,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Displacement check on reference positions equal to current returns 0",
+    "type": "scenario"
+  },
+  "rq-545c961a": {
+    "decl": "Scenario: fractional_coords inverts cartesian_coords",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "fractional_coords inverts cartesian_coords",
     "type": "scenario"
   },
   "rq-54a28837": {
@@ -3052,6 +3184,18 @@
     "title": "Prefix scan is correct for cell counts beyond a single block-totals pass",
     "type": "scenario"
   },
+  "rq-5fe22acb": {
+    "decl": "- `SimulationBox::min_perpendicular_width(&self) -> f32`",
+    "file": "simulation-box",
+    "refs": [
+      {
+        "file": "src/pbc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SimulationBox",
+    "type": "api-item"
+  },
   "rq-606197d5": {
     "decl": "### Cadence",
     "file": "io/log-output",
@@ -3112,6 +3256,14 @@
     "title": "morse_bond_force on zero bonds is a no-op",
     "type": "scenario"
   },
+  "rq-6340fae2": {
+    "decl": "#### `[output]` (optional table; all fields have defaults)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[output]` (optional table; all fields have defaults)",
+    "type": "section"
+  },
   "rq-637c4fdd": {
     "decl": "### Rust Launch Helpers",
     "file": "forces/morse-bonded",
@@ -3151,6 +3303,13 @@
     ],
     "title": "lan_ou_step",
     "type": "api-item"
+  },
+  "rq-650875cc": {
+    "decl": "Scenario: Tilts may exceed the corresponding diagonals",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Tilts may exceed the corresponding diagonals",
+    "type": "scenario"
   },
   "rq-6575e627": {
     "decl": "Scenario: Reject non-integer particle count",
@@ -3252,6 +3411,13 @@
     "title": "init_device exposes the Morse kernels on the Kernels handle",
     "type": "scenario"
   },
+  "rq-67c5a863": {
+    "decl": "Scenario: Tilts may be negative",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Tilts may be negative",
+    "type": "scenario"
+  },
   "rq-67ebf3b1": {
     "decl": "- `Potential` — object-safe trait implemented by every slot.",
     "file": "forces/framework",
@@ -3298,10 +3464,10 @@
     "type": "api-item"
   },
   "rq-685006bb": {
-    "decl": "Scenario: Accept positions strictly inside the primary cell",
+    "decl": "Scenario: Accept positions strictly inside the primary cell (orthorhombic)",
     "file": "io/init-state-file",
     "refs": [],
-    "title": "Accept positions strictly inside the primary cell",
+    "title": "Accept positions strictly inside the primary cell (orthorhombic)",
     "type": "scenario"
   },
   "rq-686b0d37": {
@@ -3399,6 +3565,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Two independent rebuilds with identical positions produce identical lists",
+    "type": "scenario"
+  },
+  "rq-6c52e57d": {
+    "decl": "Scenario: Unwrap invariant holds across wrap_position_with_image_count",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Unwrap invariant holds across wrap_position_with_image_count",
     "type": "scenario"
   },
   "rq-6c8415f6": {
@@ -3616,7 +3789,7 @@
     "type": "section"
   },
   "rq-71fbbafb": {
-    "decl": "- `SimulationBox::set_lengths(&mut self, lx: f32, ly: f32, lz: f32) -> Result<(), SimulationBoxError>`",
+    "decl": "- `SimulationBox::set_lattice(&mut self, lx: f32, ly: f32, lz: f32, xy: f32, xz: f32, yz: f32) -> Result<(), SimulationBoxError>`",
     "file": "simulation-box",
     "refs": [
       {
@@ -3643,10 +3816,10 @@
     "type": "file"
   },
   "rq-72aae589": {
-    "decl": "Scenario: Generation mismatch is detected even when the box edge lengths",
+    "decl": "Scenario: Generation mismatch is detected even when the box lattice parameters",
     "file": "forces/neighbor-list",
     "refs": [],
-    "title": "Generation mismatch is detected even when the box edge lengths",
+    "title": "Generation mismatch is detected even when the box lattice parameters",
     "type": "scenario"
   },
   "rq-72c57874": {
@@ -3727,11 +3900,18 @@
     "title": "PairBuffer::new with particle_count = 0",
     "type": "scenario"
   },
-  "rq-7541fd8a": {
-    "decl": "Scenario: Validation order is lx then ly then lz",
+  "rq-74f48855": {
+    "decl": "Scenario: NaN z-displacement propagates through tilt coupling for a triclinic box",
     "file": "simulation-box",
     "refs": [],
-    "title": "Validation order is lx then ly then lz",
+    "title": "NaN z-displacement propagates through tilt coupling for a triclinic box",
+    "type": "scenario"
+  },
+  "rq-7541fd8a": {
+    "decl": "Scenario: Validation order is lx, ly, lz, xy, xz, yz",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Validation order is lx, ly, lz, xy, xz, yz",
     "type": "scenario"
   },
   "rq-75446ddd": {
@@ -3838,6 +4018,14 @@
     "title": "100-step lossless round trip restores observables bit-exactly",
     "type": "scenario"
   },
+  "rq-78487f38": {
+    "decl": "#### `[[particle_types]]` (array of tables)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[[particle_types]]` (array of tables)",
+    "type": "section"
+  },
   "rq-789b7a33": {
     "decl": "Scenario: Langevin BAOAB rejects non-positive temperature",
     "file": "io/config-schema",
@@ -3932,6 +4120,13 @@
     "title": "per-cell sort canonicalises sorted_particle_ids",
     "type": "scenario"
   },
+  "rq-7a1c24be": {
+    "decl": "Scenario: Construct a triclinic box with non-zero tilts",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Construct a triclinic box with non-zero tilts",
+    "type": "scenario"
+  },
   "rq-7a26eeae": {
     "decl": "## Feature API",
     "file": "io/log-output",
@@ -3954,10 +4149,10 @@
     "type": "section"
   },
   "rq-7a4ed012": {
-    "decl": "Scenario: Reject positions at the +L/2 boundary",
+    "decl": "Scenario: Reject positions at the +L/2 boundary (orthorhombic)",
     "file": "io/init-state-file",
     "refs": [],
-    "title": "Reject positions at the +L/2 boundary",
+    "title": "Reject positions at the +L/2 boundary (orthorhombic)",
     "type": "scenario"
   },
   "rq-7ab80063": {
@@ -3981,6 +4176,14 @@
     "refs": [],
     "title": "Reject row with NaN position",
     "type": "scenario"
+  },
+  "rq-7b13d9cf": {
+    "decl": "#### `lj_pair_force`",
+    "file": "forces/lj-pair-force",
+    "level": 4,
+    "refs": [],
+    "title": "`lj_pair_force`",
+    "type": "section"
   },
   "rq-7b5eef8c": {
     "decl": "## Lossless Velocity-Verlet Loop",
@@ -4138,10 +4341,17 @@
     "type": "section"
   },
   "rq-7edab504": {
-    "decl": "Scenario: set_lengths non-finite check precedes non-positive check on the same axis",
+    "decl": "Scenario: set_lattice non-finite check precedes non-positive check on a diagonal",
     "file": "simulation-box",
     "refs": [],
-    "title": "set_lengths non-finite check precedes non-positive check on the same axis",
+    "title": "set_lattice non-finite check precedes non-positive check on a diagonal",
+    "type": "scenario"
+  },
+  "rq-7f018040": {
+    "decl": "Scenario: cartesian_coords of unit fractional triples yields the lattice vectors",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "cartesian_coords of unit fractional triples yields the lattice vectors",
     "type": "scenario"
   },
   "rq-7f2310ac": {
@@ -4152,10 +4362,10 @@
     "type": "scenario"
   },
   "rq-7f867e37": {
-    "decl": "Scenario: Reject infinite ly",
+    "decl": "Scenario: Reject infinite diagonal",
     "file": "simulation-box",
     "refs": [],
-    "title": "Reject infinite ly",
+    "title": "Reject infinite diagonal",
     "type": "scenario"
   },
   "rq-7fe57a77": {
@@ -4306,6 +4516,13 @@
     "title": "Langevin BAOAB kind with valid parameters is accepted",
     "type": "scenario"
   },
+  "rq-870ed681": {
+    "decl": "Scenario: wrap_position_with_image_count returns the image triple together with the wrapped position",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "wrap_position_with_image_count returns the image triple together with the wrapped position",
+    "type": "scenario"
+  },
   "rq-871f0292": {
     "decl": "Scenario: Reject non-finite r_switch",
     "file": "io/config-schema",
@@ -4393,10 +4610,10 @@
     "type": "scenario"
   },
   "rq-89c71321": {
-    "decl": "Scenario: set_lengths rejects a non-positive length without mutating the box",
+    "decl": "Scenario: set_lattice rejects a non-positive diagonal without mutating the box",
     "file": "simulation-box",
     "refs": [],
-    "title": "set_lengths rejects a non-positive length without mutating the box",
+    "title": "set_lattice rejects a non-positive diagonal without mutating the box",
     "type": "scenario"
   },
   "rq-89d64ca3": {
@@ -4412,6 +4629,13 @@
     "file": "forces/bonds",
     "refs": [],
     "title": "Load a typical .bonds file",
+    "type": "scenario"
+  },
+  "rq-8a3858fd": {
+    "decl": "Scenario: Reject a position whose fractional coordinate exceeds +0.5 in a triclinic box",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "Reject a position whose fractional coordinate exceeds +0.5 in a triclinic box",
     "type": "scenario"
   },
   "rq-8a9c44f8": {
@@ -4648,6 +4872,14 @@
     "title": "Scale defaults to 0.0 (full exclusion) when omitted.",
     "type": "file"
   },
+  "rq-9244aae4": {
+    "decl": "#### `[[pair_interactions]]` (array of tables)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[[pair_interactions]]` (array of tables)",
+    "type": "section"
+  },
   "rq-925e5583": {
     "decl": "- `LogWriter::flush(&mut self) -> Result<(), LogWriterError>`",
     "file": "io/log-output",
@@ -4846,6 +5078,19 @@
     "title": "Loop executes exactly n_steps integration steps",
     "type": "scenario"
   },
+  "rq-9864078f": {
+    "decl": "#### `Lattice` (required)",
+    "file": "io/init-state-file",
+    "level": 4,
+    "refs": [
+      {
+        "file": "src/io/init_state.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "`Lattice` (required)",
+    "type": "section"
+  },
   "rq-987dc616": {
     "decl": "## Out of Scope",
     "file": "simulation-box",
@@ -4901,10 +5146,10 @@
     "type": "api-item"
   },
   "rq-9b1f8a7c": {
-    "decl": "Scenario: Reject negative lx",
+    "decl": "Scenario: Reject negative diagonal",
     "file": "simulation-box",
     "refs": [],
-    "title": "Reject negative lx",
+    "title": "Reject negative diagonal",
     "type": "scenario"
   },
   "rq-9b794cff": {
@@ -4963,6 +5208,13 @@
     "title": "Exclusion scale defaults to 0.0 when column omitted",
     "type": "scenario"
   },
+  "rq-9c3ecf3f": {
+    "decl": "Scenario: min_perpendicular_width of an xy-tilted box reflects the xy contribution",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "min_perpendicular_width of an xy-tilted box reflects the xy contribution",
+    "type": "scenario"
+  },
   "rq-9c94f23b": {
     "decl": "## Out of Scope",
     "file": "pipeline-reproducibility",
@@ -5014,6 +5266,19 @@
     "title": "Unknown integrator kind is rejected",
     "type": "scenario"
   },
+  "rq-9d8d96f1": {
+    "decl": "## Perpendicular Widths",
+    "file": "simulation-box",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/pbc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Perpendicular Widths",
+    "type": "section"
+  },
   "rq-9da14aa1": {
     "decl": "Scenario: Sections may appear in either order",
     "file": "forces/bonds",
@@ -5029,10 +5294,10 @@
     "type": "scenario"
   },
   "rq-9e09673b": {
-    "decl": "Scenario: Successive successful set_lengths calls increment generation monotonically",
+    "decl": "Scenario: Successive successful set_lattice calls increment generation monotonically",
     "file": "simulation-box",
     "refs": [],
-    "title": "Successive successful set_lengths calls increment generation monotonically",
+    "title": "Successive successful set_lattice calls increment generation monotonically",
     "type": "scenario"
   },
   "rq-9e1eee68": {
@@ -5147,7 +5412,7 @@
     "type": "api-item"
   },
   "rq-a1262872": {
-    "decl": "- `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, cell_size, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>`",
+    "decl": "- `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>`",
     "file": "forces/neighbor-list",
     "refs": [
       {
@@ -5230,17 +5495,17 @@
     "type": "section"
   },
   "rq-a3563587": {
-    "decl": "Scenario: Successful set_lengths increments generation by 1",
+    "decl": "Scenario: Successful set_lattice increments generation by 1",
     "file": "simulation-box",
     "refs": [],
-    "title": "Successful set_lengths increments generation by 1",
+    "title": "Successful set_lattice increments generation by 1",
     "type": "scenario"
   },
   "rq-a35ca20b": {
-    "decl": "Scenario: Accept the lower boundary -L/2 along an axis",
+    "decl": "Scenario: Accept the lower boundary -L/2 along an axis (orthorhombic)",
     "file": "io/init-state-file",
     "refs": [],
-    "title": "Accept the lower boundary -L/2 along an axis",
+    "title": "Accept the lower boundary -L/2 along an axis (orthorhombic)",
     "type": "scenario"
   },
   "rq-a3a5905d": {
@@ -5270,6 +5535,18 @@
     "refs": [],
     "title": "init_device exposes the reduction kernel on the Kernels handle",
     "type": "scenario"
+  },
+  "rq-a4d5e711": {
+    "decl": "- `SimulationBox::wrap_position_with_image_count(&self, position: [f32; 3]) -> ([f32; 3], [i32; 3])`",
+    "file": "simulation-box",
+    "refs": [
+      {
+        "file": "src/pbc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SimulationBox",
+    "type": "api-item"
   },
   "rq-a5069572": {
     "decl": "- `IntegratorError` — error type returned by every integrator method.",
@@ -5336,6 +5613,13 @@
     "title": "ParticleTypeConfig",
     "type": "api-item"
   },
+  "rq-a7aac794": {
+    "decl": "Scenario: Cell counts reflect perpendicular widths for a tilted box",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Cell counts reflect perpendicular widths for a tilted box",
+    "type": "scenario"
+  },
   "rq-a7fdf81f": {
     "decl": "Scenario: Lossy run includes lossy kick rows and excludes lossless rows",
     "file": "performance-analysis",
@@ -5349,6 +5633,14 @@
     "refs": [],
     "title": "NeighborListConfig",
     "type": "api-item"
+  },
+  "rq-a84e1c76": {
+    "decl": "#### `[simulation]`",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[simulation]`",
+    "type": "section"
   },
   "rq-a85e8216": {
     "decl": "Scenario: Slot-output buffers have five flat arrays sized num_slots * N",
@@ -5410,6 +5702,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Cell index of a position outside the primary cell wraps before binning",
+    "type": "scenario"
+  },
+  "rq-a9ab33a8": {
+    "decl": "Scenario: A wrap result lies inside the primary parallelepiped",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "A wrap result lies inside the primary parallelepiped",
     "type": "scenario"
   },
   "rq-a9b511ea": {
@@ -5540,6 +5839,14 @@
     "title": "Data Layout",
     "type": "section"
   },
+  "rq-adddaf1a": {
+    "decl": "#### `[neighbor_list]` (optional table)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[neighbor_list]` (optional table)",
+    "type": "section"
+  },
   "rq-ae20ddac": {
     "decl": "Scenario: Force is C¹ continuous at r_switch",
     "file": "forces/lj-pair-force",
@@ -5576,7 +5883,7 @@
     "type": "scenario"
   },
   "rq-aef9888b": {
-    "decl": "- `SimulationBoxError` — error type returned by the constructor:",
+    "decl": "- `SimulationBoxError` — error type returned by the constructor and",
     "file": "simulation-box",
     "refs": [
       {
@@ -5696,6 +6003,14 @@
     "title": "Bit-exact equality after a single full velocity-Verlet step",
     "type": "scenario"
   },
+  "rq-b2559e09": {
+    "decl": "#### `reduce_bond_forces`",
+    "file": "forces/morse-bonded",
+    "level": 4,
+    "refs": [],
+    "title": "`reduce_bond_forces`",
+    "type": "section"
+  },
   "rq-b2d67b57": {
     "decl": "Scenario: Forward then negated step returns to the original state for a free particle",
     "file": "integration/velocity-verlet",
@@ -5766,6 +6081,13 @@
     "title": "Reject non-positive r_switch",
     "type": "scenario"
   },
+  "rq-b4e4bdc7": {
+    "decl": "Scenario: minimum_image of a c-aligned displacement subtracts the c lattice vector",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "minimum_image of a c-aligned displacement subtracts the c lattice vector",
+    "type": "scenario"
+  },
   "rq-b4f18ea1": {
     "decl": "Scenario: Two independent runs produce byte-identical net forces",
     "file": "pair-reduction",
@@ -5828,8 +6150,15 @@
     "title": "Config does not exist",
     "type": "scenario"
   },
+  "rq-b7573bd5": {
+    "decl": "Scenario: Accept a lower-triangular triclinic lattice",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "Accept a lower-triangular triclinic lattice",
+    "type": "scenario"
+  },
   "rq-b75afb31": {
-    "decl": "- `SimulationBox` — host-side, `Copy`. Carries three `f32` edge lengths and a",
+    "decl": "- `SimulationBox` — host-side, `Copy`. Carries six `f32` lattice",
     "file": "simulation-box",
     "refs": [
       {
@@ -5885,10 +6214,10 @@
     "type": "scenario"
   },
   "rq-b9a4e3de": {
-    "decl": "Scenario: Non-finite check precedes non-positive check on the same axis",
+    "decl": "Scenario: Non-finite check precedes non-positive check on a diagonal",
     "file": "simulation-box",
     "refs": [],
-    "title": "Non-finite check precedes non-positive check on the same axis",
+    "title": "Non-finite check precedes non-positive check on a diagonal",
     "type": "scenario"
   },
   "rq-ba0724dc": {
@@ -6047,6 +6376,18 @@
     "title": "Constructor and Accessors",
     "type": "section"
   },
+  "rq-be7b9fe6": {
+    "decl": "- `SimulationBox::cartesian_coords(&self, fractional: [f32; 3]) -> [f32; 3]`",
+    "file": "simulation-box",
+    "refs": [
+      {
+        "file": "src/pbc.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SimulationBox",
+    "type": "api-item"
+  },
   "rq-be899bef": {
     "decl": "- `TrajectoryWriter::write_frame(&mut self, step: u64, dt: f64, box: &SimulationBox, type_indices: &[u32], positions_x: &[f32], positions_y: &[f32], positions_z: &[f32], velocities: Option<(&[f32], &[f32], &[f32])>, images: Option<(&[i32], &[i32], &[i32])>) -> Result<(), TrajectoryWriterError>`",
     "file": "io/trajectory-output",
@@ -6108,10 +6449,10 @@
     "type": "section"
   },
   "rq-c0cfc5d6": {
-    "decl": "Scenario: Cell counts are floor(L / (r_cut + r_skin))",
+    "decl": "Scenario: Cell counts are floor(w / (r_cut + r_skin)) for an orthorhombic box",
     "file": "forces/neighbor-list",
     "refs": [],
-    "title": "Cell counts are floor(L / (r_cut + r_skin))",
+    "title": "Cell counts are floor(w / (r_cut + r_skin)) for an orthorhombic box",
     "type": "scenario"
   },
   "rq-c0f2daca": {
@@ -6135,11 +6476,11 @@
     "type": "section"
   },
   "rq-c1308495": {
-    "decl": "## Coordinate Conventions",
+    "decl": "## Lattice Convention",
     "file": "simulation-box",
     "level": 2,
     "refs": [],
-    "title": "Coordinate Conventions",
+    "title": "Lattice Convention",
     "type": "section"
   },
   "rq-c1678fe1": {
@@ -6377,10 +6718,10 @@
     "type": "scenario"
   },
   "rq-c9618bdd": {
-    "decl": "Scenario: minimum_image is per-axis independent",
+    "decl": "Scenario: minimum_image is per-axis independent for an orthorhombic box",
     "file": "simulation-box",
     "refs": [],
-    "title": "minimum_image is per-axis independent",
+    "title": "minimum_image is per-axis independent for an orthorhombic box",
     "type": "scenario"
   },
   "rq-c96fd9d2": {
@@ -6459,6 +6800,13 @@
     "title": "Feature: CUDA Build Pipeline and Smoke Test Kernel",
     "type": "file"
   },
+  "rq-cc4e9821": {
+    "decl": "Scenario: Accept a lattice with negative tilts",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "Accept a lattice with negative tilts",
+    "type": "scenario"
+  },
   "rq-cc73f184": {
     "decl": "## Slots",
     "file": "forces/framework",
@@ -6502,6 +6850,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "neighbor_list cell-list mode omitting r_skin uses 0.3 * max cutoff",
+    "type": "scenario"
+  },
+  "rq-ce15e04e": {
+    "decl": "Scenario: Round-trip through load_init_state preserves a triclinic lattice",
+    "file": "io/trajectory-output",
+    "refs": [],
+    "title": "Round-trip through load_init_state preserves a triclinic lattice",
     "type": "scenario"
   },
   "rq-ce445e13": {
@@ -6637,10 +6992,10 @@
     "type": "scenario"
   },
   "rq-d28774dc": {
-    "decl": "Scenario: set_lengths rejects a non-finite length without mutating the box",
+    "decl": "Scenario: set_lattice rejects a non-finite diagonal without mutating the box",
     "file": "simulation-box",
     "refs": [],
-    "title": "set_lengths rejects a non-finite length without mutating the box",
+    "title": "set_lattice rejects a non-finite diagonal without mutating the box",
     "type": "scenario"
   },
   "rq-d28ad917": {
@@ -6755,10 +7110,10 @@
     "type": "section"
   },
   "rq-d6e10419": {
-    "decl": "Scenario: minimum_image after set_lengths reflects the new edge lengths",
+    "decl": "Scenario: minimum_image after set_lattice reflects the new lattice parameters",
     "file": "simulation-box",
     "refs": [],
-    "title": "minimum_image after set_lengths reflects the new edge lengths",
+    "title": "minimum_image after set_lattice reflects the new lattice parameters",
     "type": "scenario"
   },
   "rq-d6e89324": {
@@ -7055,7 +7410,12 @@
     "decl": "## Cell Layout",
     "file": "forces/neighbor-list",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Cell Layout",
     "type": "section"
   },
@@ -7114,10 +7474,10 @@
     "type": "section"
   },
   "rq-e1b51bd9": {
-    "decl": "Scenario: volume returns the product of the edge lengths",
+    "decl": "Scenario: volume returns lx * ly * lz regardless of tilts",
     "file": "simulation-box",
     "refs": [],
-    "title": "volume returns the product of the edge lengths",
+    "title": "volume returns lx * ly * lz regardless of tilts",
     "type": "scenario"
   },
   "rq-e1ceb5c0": {
@@ -7162,10 +7522,6 @@
         "kind": "code"
       },
       {
-        "file": "src/pbc.rs",
-        "kind": "code"
-      },
-      {
         "file": "src/runner.rs",
         "kind": "code"
       },
@@ -7200,6 +7556,13 @@
     ],
     "title": "PTX Module Loading",
     "type": "section"
+  },
+  "rq-e2a31585": {
+    "decl": "Scenario: Box-generation refresh handles tilt mutation",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Box-generation refresh handles tilt mutation",
+    "type": "scenario"
   },
   "rq-e2f2de4f": {
     "decl": "Scenario: Different draw_counter values give different velocity outputs",
@@ -7262,6 +7625,14 @@
     "level": 2,
     "refs": [],
     "title": "Data Layout",
+    "type": "section"
+  },
+  "rq-e4420955": {
+    "decl": "#### `[[bond_types]]` (optional array of tables)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[[bond_types]]` (optional array of tables)",
     "type": "section"
   },
   "rq-e448909a": {
@@ -7446,8 +7817,15 @@
     "title": "load_config",
     "type": "api-item"
   },
+  "rq-e84d3bac": {
+    "decl": "Scenario: Reject a tilted box whose perpendicular width drops below 3*(r_cut+r_skin)",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Reject a tilted box whose perpendicular width drops below 3*(r_cut+r_skin)",
+    "type": "scenario"
+  },
   "rq-e8be1a1c": {
-    "decl": "- `SimulationBox::lengths(&self) -> [f32; 3]`",
+    "decl": "- `SimulationBox::lattice(&self) -> [f32; 6]`",
     "file": "simulation-box",
     "refs": [
       {
@@ -7530,10 +7908,10 @@
     "type": "scenario"
   },
   "rq-ea3bef6c": {
-    "decl": "Scenario: Reject positions past +L/2",
+    "decl": "Scenario: Reject positions past +L/2 (orthorhombic)",
     "file": "io/init-state-file",
     "refs": [],
-    "title": "Reject positions past +L/2",
+    "title": "Reject positions past +L/2 (orthorhombic)",
     "type": "scenario"
   },
   "rq-eb3a65df": {
@@ -7653,6 +8031,13 @@
     "title": "File does not exist",
     "type": "scenario"
   },
+  "rq-ef6ae25a": {
+    "decl": "Scenario: min_perpendicular_width equals min(lx, ly, lz) for an orthorhombic box",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "min_perpendicular_width equals min(lx, ly, lz) for an orthorhombic box",
+    "type": "scenario"
+  },
   "rq-ef7b719d": {
     "decl": "## Construction Details",
     "file": "particle-state",
@@ -7673,6 +8058,13 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Newton's third law holds bitwise across the switching window",
+    "type": "scenario"
+  },
+  "rq-ef891f9c": {
+    "decl": "Scenario: Triclinic Lattice attribute carries non-zero tilts",
+    "file": "io/trajectory-output",
+    "refs": [],
+    "title": "Triclinic Lattice attribute carries non-zero tilts",
     "type": "scenario"
   },
   "rq-ef902cf6": {
@@ -7753,7 +8145,7 @@
     "type": "scenario"
   },
   "rq-f0da71ea": {
-    "decl": "- `SimulationBox::new_orthorhombic(lx: f32, ly: f32, lz: f32) -> Result<SimulationBox, SimulationBoxError>`",
+    "decl": "- `SimulationBox::new(lx: f32, ly: f32, lz: f32, xy: f32, xz: f32, yz: f32) -> Result<SimulationBox, SimulationBoxError>`",
     "file": "simulation-box",
     "refs": [
       {
