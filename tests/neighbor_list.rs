@@ -83,14 +83,13 @@ fn particle_count_zero_builds_and_runs() {
 #[test]
 fn single_particle_yields_empty_neighbor_list() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     let sim_box = box_n(10.0);
     let mut nl = NeighborListState::new_cell_list(&gpu, &sim_box, 1, 1.0, 8, 0.3).unwrap();
     let state = state_from_positions(vec![0.0], vec![0.0], vec![0.0]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
-    let counts = device.dtoh_sync_copy(&nl.neighbor_counts).unwrap();
+    let counts = gpu.device.dtoh_sync_copy(&nl.neighbor_counts).unwrap();
     assert_eq!(counts[0], 0);
 }
 
@@ -633,10 +632,9 @@ fn spatial_hash_fixture(
 #[test] // rq-f164bf76
 fn cell_indices_populated_by_device_pipeline() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     let (sim_box, mut nl, buffers, mut timings) = spatial_hash_fixture(&gpu);
     nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
-    let cell_indices = device
+    let cell_indices = gpu.device
         .dtoh_sync_copy(&nl.cell_list_data().unwrap().cell_indices)
         .unwrap();
     assert_eq!(&cell_indices[..5], &[122u32, 24, 73, 24, 122]);
@@ -645,10 +643,9 @@ fn cell_indices_populated_by_device_pipeline() {
 #[test] // rq-19fd5b09
 fn cell_counts_is_device_computed_histogram() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     let (sim_box, mut nl, buffers, mut timings) = spatial_hash_fixture(&gpu);
     nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
-    let counts = device
+    let counts = gpu.device
         .dtoh_sync_copy(&nl.cell_list_data().unwrap().cell_counts)
         .unwrap();
     let n_cells_total = nl.cell_list_data().unwrap().n_cells_total;
@@ -764,10 +761,9 @@ fn rebuild_produces_correct_output_via_gpu_pipeline() {
     // (cell, particle_id) order, which is only achievable when the entire
     // pipeline runs on the device.
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     let (sim_box, mut nl, buffers, mut timings) = spatial_hash_fixture(&gpu);
     nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
-    let sorted_ids = device
+    let sorted_ids = gpu.device
         .dtoh_sync_copy(&nl.cell_list_data().unwrap().sorted_particle_ids)
         .unwrap();
     assert_eq!(&sorted_ids[..5], &[1u32, 3, 2, 0, 4]);

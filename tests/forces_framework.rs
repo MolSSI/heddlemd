@@ -929,7 +929,7 @@ impl Potential for ContextProbeStub {
     }
     fn reduce(
         &mut self,
-        mut output: SlotOutputView<'_>,
+        output: SlotOutputView<'_>,
         _cx: &ForceFieldContext<'_>,
         _t: &mut Timings,
     ) -> Result<(), ForceFieldError> {
@@ -981,6 +981,7 @@ fn context_exposes_shared_neighbor_list_to_contribute() {
 // Stub Potential that reports a configurable max_cutoff. Used to verify the
 // framework aggregates max_cutoff across slots when building the shared list.
 #[derive(Debug)]
+#[allow(dead_code)]
 struct CutoffProbeStub {
     cutoff: f32,
 }
@@ -1192,7 +1193,6 @@ fn zero_slot_step_writes_zeros_to_energy_and_virial() {
 #[test] // rq-db3b3d5e
 fn system_total_potential_energy_equals_sum_of_particle_shares() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     // Two particles at r=1.5 with σ=1, ε=1.
     let state = ParticleState::new(
         vec![0.0_f32, 1.5],
@@ -1221,7 +1221,7 @@ fn system_total_potential_energy_equals_sum_of_particle_shares() {
     )
     .unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
-    let pe = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let pe = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let total: f32 = pe.iter().sum();
     // Closed-form LJ energy at r=1.5 with σ=1, ε=1.
     let r = 1.5_f32;

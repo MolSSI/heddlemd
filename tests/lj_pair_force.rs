@@ -112,8 +112,7 @@ fn upload_counts(device: &Arc<CudaDevice>, counts: &[u32]) -> CudaSlice<u32> {
 #[test] // rq-06058b71
 fn init_device_loads_pair_force_module() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
-    assert!(device.has_func("pair_force", "lj_pair_force"));
+    assert!(gpu.device.has_func("pair_force", "lj_pair_force"));
     let _ = gpu.kernels.lj_pair_force.clone();
 }
 
@@ -122,10 +121,9 @@ fn init_device_loads_pair_force_module() {
 #[test] // rq-c538b29d
 fn two_particles_at_fixed_separation_produce_closed_form_force() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let positions = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -143,10 +141,9 @@ fn two_particles_at_fixed_separation_produce_closed_form_force() {
 #[test] // rq-975b5ae0
 fn newtons_third_law_is_bit_exact_for_non_boundary_displacements() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let positions = [[0.0, 0.0, 0.0], [1.3, 0.4, -0.2]];
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -165,10 +162,9 @@ fn newtons_third_law_is_bit_exact_for_non_boundary_displacements() {
 #[test] // rq-cc87744c
 fn self_interaction_slots_are_zero() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let positions = [
         [0.0, 0.0, 0.0],
         [1.5, 0.5, -0.3],
@@ -195,10 +191,9 @@ fn self_interaction_slots_are_zero() {
 #[test] // rq-96fadc6f
 fn slot_for_pair_beyond_cutoff_is_zero() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let positions = [[0.0, 0.0, 0.0], [6.0, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -218,10 +213,9 @@ fn slot_for_pair_beyond_cutoff_is_zero() {
 #[test] // rq-d6bd915a
 fn pair_exactly_at_cutoff_is_included() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let positions = [[0.0, 0.0, 0.0], [5.0, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -241,10 +235,9 @@ fn pair_exactly_at_cutoff_is_included() {
 #[test] // rq-85192a05
 fn at_lj_minimum_force_is_near_zero() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let r_min = 2.0_f32.powf(1.0 / 6.0);
     let positions = [[0.0, 0.0, 0.0], [r_min, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
@@ -296,14 +289,13 @@ fn doubling_epsilon_doubles_force() {
 #[test] // rq-8626ec3c
 fn pbc_minimum_image_used_across_box_boundary() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = SimulationBox::new_orthorhombic(10.0, 10.0, 10.0).unwrap();
     let params = LjScalarParams {
         sigma: 1.0,
         epsilon: 1.0,
         cutoff: 2.0,
     };
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let positions = [[-4.5, 0.0, 0.0], [4.5, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -324,10 +316,9 @@ fn pbc_minimum_image_used_across_box_boundary() {
 #[test] // rq-681afa90
 fn single_particle_state_only_self_slot() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let state = build_state_xyz(&[[1.0, 2.0, 3.0]]);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut pair = PairBuffer::new(&gpu, 1, 1).unwrap();
@@ -343,10 +334,9 @@ fn single_particle_state_only_self_slot() {
 #[test] // rq-fc220d87
 fn empty_state_is_noop() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let state = ParticleState::new(
         vec![],
         vec![],
@@ -370,10 +360,9 @@ fn empty_state_is_noop() {
 #[test] // rq-d1e7cb57
 fn block_non_aligned_particle_count() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let n = 17;
     let positions: Vec<[f32; 3]> = (0..n)
         .map(|i| {
@@ -434,10 +423,9 @@ fn block_non_aligned_particle_count() {
 #[test] // rq-dfca62d2
 fn two_independent_runs_byte_identical() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let n = 64;
     let positions: Vec<[f32; 3]> = (0..n)
         .map(|i| {
@@ -532,10 +520,9 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
 #[test] // rq-14d7a940
 fn does_not_modify_positions_velocities_masses_or_forces() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let mut state = ParticleState::new(
         vec![1.0, 2.0, 3.0, 4.0],
         vec![5.0, 6.0, 7.0, 8.0],
@@ -606,10 +593,9 @@ fn lj_then_reduce_produces_correct_net_forces() {
 #[test] // rq-daf7550b
 fn nan_positions_propagate_to_nan_pair_forces() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let state = ParticleState::new(
         vec![f32::NAN, 1.5],
         vec![0.0, 0.0],
@@ -700,12 +686,11 @@ fn build_state_with_types(positions: &[[f32; 3]], type_indices: Vec<u32>) -> Par
 #[test]
 fn multi_type_same_type_pair_uses_diagonal_slot() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     let sim_box = default_box();
     // n_types=2: σ_00=1.0, σ_01=σ_10=2.0, σ_11=3.0; ε=1.0 across the
     // diagonal, ε=0.5 off-diagonal; all cutoffs = 5.0.
     let table = build_table(
-        &device,
+        &gpu.device,
         2,
         &[1.0, 2.0, 2.0, 3.0],
         &[1.0, 0.5, 0.5, 2.0],
@@ -729,10 +714,9 @@ fn multi_type_same_type_pair_uses_diagonal_slot() {
 #[test]
 fn multi_type_mixed_pair_uses_off_diagonal_slot() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let table = build_table(
-        &device,
+        &gpu.device,
         2,
         &[1.0, 2.0, 2.0, 3.0],
         &[1.0, 0.5, 0.5, 2.0],
@@ -756,11 +740,10 @@ fn multi_type_mixed_pair_uses_off_diagonal_slot() {
 #[test]
 fn multi_type_newtons_third_law_symmetric_table() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     let sim_box = default_box();
     // Off-diagonal entries equal; symmetric by construction.
     let table = build_table(
-        &device,
+        &gpu.device,
         2,
         &[1.0, 2.0, 2.0, 3.0],
         &[1.0, 0.5, 0.5, 2.0],
@@ -782,11 +765,10 @@ fn multi_type_newtons_third_law_symmetric_table() {
 #[test]
 fn multi_type_per_pair_cutoff_zeros_only_the_exceeded_pair() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     let sim_box = default_box();
     // cutoff_00 = 5.0, cutoff_01 = cutoff_10 = 1.0, cutoff_11 = 5.0
     let table = build_table(
-        &device,
+        &gpu.device,
         2,
         &[1.0, 1.0, 1.0, 1.0],
         &[1.0, 1.0, 1.0, 1.0],
@@ -811,7 +793,6 @@ fn multi_type_per_pair_cutoff_zeros_only_the_exceeded_pair() {
 #[test]
 fn multi_type_three_type_dispatch() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     let sim_box = default_box();
     // 3x3 table with distinct σ per pair (kept symmetric).
     let sigma = [
@@ -821,7 +802,7 @@ fn multi_type_three_type_dispatch() {
     ];
     let epsilon = [1.0; 9];
     let cutoff = [5.0; 9];
-    let table = build_table(&device, 3, &sigma, &epsilon, &cutoff);
+    let table = build_table(&gpu.device, 3, &sigma, &epsilon, &cutoff);
     // One atom of each type, placed so all pairs are within cutoff.
     let positions = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0], [3.0, 0.0, 0.0]];
     let state = build_state_with_types(&positions, vec![0, 1, 2]);
@@ -902,9 +883,7 @@ fn lj_param_table_from_config_builds_symmetric_table() {
 #[test] // rq-9004fd7a
 fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
     // Build a ForceField with one LJ slot whose largest cutoff is 4.0.
-    use dynamics::forces::{
-        BondList, ExclusionList, ForceField, Potential,
-    };
+    use dynamics::forces::{BondList, ExclusionList, ForceField};
     use dynamics::io::config::{
         NeighborListConfig, PairInteractionConfig, PairPotentialParams, ParticleTypeConfig,
     };
@@ -1017,10 +996,9 @@ fn download_pair_virials(pair: &PairBuffer) -> Vec<f32> {
 #[test] // rq-b68b3445
 fn two_particle_pair_energy_matches_closed_form() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -1041,10 +1019,9 @@ fn two_particle_pair_energy_matches_closed_form() {
 #[test] // rq-0b71c50a
 fn two_particle_pair_virial_matches_r_dot_f() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -1071,10 +1048,9 @@ fn two_particle_pair_virial_matches_r_dot_f() {
 #[test] // rq-a50cb6a1
 fn pair_beyond_cutoff_yields_zero_energy_and_virial() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let positions = [[0.0_f32, 0.0, 0.0], [6.0, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -1091,10 +1067,9 @@ fn pair_beyond_cutoff_yields_zero_energy_and_virial() {
 #[test] // rq-82f8d168
 fn self_slots_carry_zero_energy_and_virial() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     let params = default_params();
-    let table = table_from_scalar(&device, params);
+    let table = table_from_scalar(&gpu.device, params);
     let positions = [
         [0.0_f32, 0.0, 0.0],
         [1.5, 0.0, 0.0],
@@ -1253,10 +1228,9 @@ fn run_lj_two_particle(
 #[test] // rq-0c4f8da8
 fn switching_pair_inside_r_switch_sees_unmodified_lj() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     // cutoff=5, switch=4: r=1.5 is well inside the inner plateau.
-    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
     let (px, _, _, pe, _) = run_lj_two_particle(&gpu, &sim_box, two_particle_pair(1.5), &table);
     let expected_fx = switched_fx_on_0(1.5, 1.0, 1.0, 5.0, 4.0);
     assert!((px[0 * 2 + 1] - expected_fx).abs() < 1.0e-6);
@@ -1273,9 +1247,8 @@ fn switching_pair_inside_r_switch_sees_unmodified_lj() {
 #[test] // rq-38441c15
 fn switching_pair_exactly_at_r_switch_sees_unmodified_lj() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
-    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
     let (px, _, _, pe, _) = run_lj_two_particle(&gpu, &sim_box, two_particle_pair(4.0), &table);
     // At r == r_switch the kernel takes the r2 <= r_s2 branch (S=1) and
     // returns the unswitched LJ force/energy.
@@ -1292,9 +1265,8 @@ fn switching_pair_exactly_at_r_switch_sees_unmodified_lj() {
 #[test] // rq-f93d278e
 fn switching_pair_exactly_at_r_cut_yields_zero_when_switch_less_than_cutoff() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
-    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
     let (px, py, pz, pe, pv) =
         run_lj_two_particle(&gpu, &sim_box, two_particle_pair(5.0), &table);
     // S(r_c²) = 0 by polynomial form, so all five slots are zero.
@@ -1308,9 +1280,8 @@ fn switching_pair_exactly_at_r_cut_yields_zero_when_switch_less_than_cutoff() {
 #[test] // rq-cb85cf61
 fn switching_pair_inside_window_matches_closed_form_switched_value() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
-    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
     let r = 4.5_f32;
     let (px, _, _, pe, _) = run_lj_two_particle(&gpu, &sim_box, two_particle_pair(r), &table);
     let expected_fx = switched_fx_on_0(r, 1.0, 1.0, 5.0, 4.0);
@@ -1332,9 +1303,8 @@ fn switching_pair_inside_window_matches_closed_form_switched_value() {
 #[test] // rq-ae20ddac
 fn switching_force_is_c1_continuous_at_r_switch() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
-    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
     let eps = 1.0e-3_f32;
     let (px_below, _, _, _, _) =
         run_lj_two_particle(&gpu, &sim_box, two_particle_pair(4.0 - eps), &table);
@@ -1353,9 +1323,8 @@ fn switching_force_is_c1_continuous_at_r_switch() {
 #[test] // rq-e5e3443f
 fn switching_force_is_c1_continuous_at_r_cut() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
-    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
     let eps = 1.0e-3_f32;
     let (px_inside, _, _, _, _) =
         run_lj_two_particle(&gpu, &sim_box, two_particle_pair(5.0 - eps), &table);
@@ -1371,9 +1340,8 @@ fn switching_force_is_c1_continuous_at_r_cut() {
 #[test] // rq-916f99f3
 fn switching_degenerate_reproduces_hard_cutoff_everywhere_inside() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
-    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 5.0);
+    let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 5.0);
     for r in [1.5_f32, 3.0, 4.5] {
         let (px, _, _, pe, _) =
             run_lj_two_particle(&gpu, &sim_box, two_particle_pair(r), &table);
@@ -1398,9 +1366,8 @@ fn switching_degenerate_reproduces_hard_cutoff_everywhere_inside() {
 #[test] // rq-531afe39
 fn switching_pair_beyond_r_cut_yields_zero_independent_of_r_switch() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
-    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
     let (px, py, pz, pe, pv) =
         run_lj_two_particle(&gpu, &sim_box, two_particle_pair(6.0), &table);
     assert_eq!(px[0 * 2 + 1], 0.0);
@@ -1413,9 +1380,8 @@ fn switching_pair_beyond_r_cut_yields_zero_independent_of_r_switch() {
 #[test] // rq-d0f489d7
 fn switching_pair_virial_inside_window_equals_factor_switched_times_r2() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
-    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
     let r = 4.5_f32;
     let (px, _, _, _, pv) =
         run_lj_two_particle(&gpu, &sim_box, two_particle_pair(r), &table);
@@ -1434,9 +1400,8 @@ fn switching_pair_virial_inside_window_equals_factor_switched_times_r2() {
 #[test] // rq-ef8013be
 fn switching_newtons_third_law_holds_bitwise_across_window() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
-    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
     let positions = [[0.0_f32, 0.0, 0.0], [4.5, 0.4, -0.2]];
     let (px, py, pz, _, _) = run_lj_two_particle(&gpu, &sim_box, positions, &table);
     assert_eq!(px[0 * 2 + 1], -px[1 * 2 + 0]);
@@ -1500,7 +1465,6 @@ fn switching_exclusion_scaling_multiplies_switched_quantities() {
 #[test] // rq-37f8c017
 fn switching_per_pair_type_r_switch_dispatches_correctly() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
     // n_types = 2. Diagonal slots (0,0) and (1,1) have r_switch = 5.0
     // (no switching); off-diagonal (0,1) and (1,0) have r_switch = 4.0
@@ -1509,7 +1473,7 @@ fn switching_per_pair_type_r_switch_dispatches_correctly() {
     let epsilon = vec![1.0_f32, 1.0, 1.0, 1.0];
     let cutoff = vec![5.0_f32, 5.0, 5.0, 5.0];
     let switch = vec![5.0_f32, 4.0, 4.0, 5.0];
-    let table = build_table_with_switch(&device, 2, &sigma, &epsilon, &cutoff, &switch);
+    let table = build_table_with_switch(&gpu.device, 2, &sigma, &epsilon, &cutoff, &switch);
     let r = 4.5_f32;
     let positions = [[0.0_f32, 0.0, 0.0], [r, 0.0, 0.0]];
 
@@ -1542,9 +1506,8 @@ fn switching_per_pair_type_r_switch_dispatches_correctly() {
 #[test] // rq-dbd3c689
 fn switching_bit_exact_reproducibility_across_runs() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let sim_box = default_box();
-    let table = single_type_lj_table_with_switch(&device, 1.0, 1.0, 5.0, 4.0);
+    let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
     let n = 64;
     let positions: Vec<[f32; 3]> = (0..n)
         .map(|i| {

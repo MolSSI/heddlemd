@@ -600,7 +600,6 @@ fn reject_when_type_indices_has_wrong_length() {
 #[test]
 fn type_indices_round_trip_through_particle_buffers() {
     let gpu = init_device().expect("init_device");
-    let device = gpu.device.clone();
     let state = ParticleState::new(
         vec![0.0_f32, 1.0, 2.0],
         vec![0.0_f32; 3],
@@ -615,7 +614,7 @@ fn type_indices_round_trip_through_particle_buffers() {
     )
     .unwrap();
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let host = device.dtoh_sync_copy(&buffers.type_indices).unwrap();
+    let host = gpu.device.dtoh_sync_copy(&buffers.type_indices).unwrap();
     assert_eq!(host, vec![0u32, 2, 1]);
     // Download path mirrors values back into a sink state.
     let mut sink = ParticleState::new(

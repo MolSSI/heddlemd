@@ -121,7 +121,6 @@ fn equilibrium_distance_produces_zero_force() {
 #[test]
 fn compressed_bond_repulsive() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     // r = 0.5, re = 1.0 → r < re → repulsive: atom 0 is pushed in -x.
     let state = two_particle_state([0.0, 0.0, 0.0], [0.5, 0.0, 0.0]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -143,7 +142,7 @@ fn compressed_bond_repulsive() {
         1,
     )
     .unwrap();
-    let bx = device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
+    let bx = gpu.device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
     // dx = r_i - r_j = -0.5 (atom 0 is left of atom 1). Compressed bond is
     // repulsive: atom 0 is pushed away from atom 1, i.e. in -x. So bx[0] < 0.
     assert!(bx[0] < 0.0, "bx[0] = {} should be negative", bx[0]);
@@ -154,7 +153,6 @@ fn compressed_bond_repulsive() {
 #[test]
 fn stretched_bond_attractive() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     // r = 2.0, re = 1.0 → r > re → attractive: atom 0 pulled toward atom 1 (+x).
     let state = two_particle_state([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -176,7 +174,7 @@ fn stretched_bond_attractive() {
         1,
     )
     .unwrap();
-    let bx = device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
+    let bx = gpu.device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
     // Stretched bond → attractive, fmag negative; F on atom 0 = fmag * (-2.0)
     // → positive (toward atom 1 in +x).
     assert!(bx[0] > 0.0, "bx[0] = {}", bx[0]);
@@ -187,7 +185,6 @@ fn stretched_bond_attractive() {
 #[test]
 fn force_magnitude_matches_closed_form() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     let r = 1.2_f32;
     let state = two_particle_state([0.0, 0.0, 0.0], [r, 0.0, 0.0]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -212,7 +209,7 @@ fn force_magnitude_matches_closed_form() {
         1,
     )
     .unwrap();
-    let bx = device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
+    let bx = gpu.device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
     let dr = (r as f64) - re;
     let e = (-a * dr).exp();
     let expected_magnitude = (2.0 * de * a * (1.0 - e) * e) as f32;
@@ -223,7 +220,6 @@ fn force_magnitude_matches_closed_form() {
 #[test]
 fn r_zero_produces_zero_force() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     let state = two_particle_state([1.0, 1.0, 1.0], [1.0, 1.0, 1.0]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let bl = single_bond_list(2);
@@ -244,7 +240,7 @@ fn r_zero_produces_zero_force() {
         1,
     )
     .unwrap();
-    let bx = device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
+    let bx = gpu.device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
     for v in &bx {
         assert!(v.is_finite() && *v == 0.0);
     }
@@ -516,7 +512,6 @@ fn newtons_third_law_holds_for_combined_force() {
 #[test] // rq-7ba4f321
 fn stretched_bond_energy_matches_closed_form() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     let r = 1.5_f32;
     let state = two_particle_state([0.0, 0.0, 0.0], [r, 0.0, 0.0]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -541,7 +536,7 @@ fn stretched_bond_energy_matches_closed_form() {
         1,
     )
     .unwrap();
-    let be = device.dtoh_sync_copy(&mb.bond_pair_energy).unwrap();
+    let be = gpu.device.dtoh_sync_copy(&mb.bond_pair_energy).unwrap();
     let dr = (r as f64) - re;
     let e = (-a * dr).exp();
     let one_minus = 1.0 - e;
