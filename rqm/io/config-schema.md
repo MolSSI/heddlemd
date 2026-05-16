@@ -273,6 +273,9 @@ rejected, and missing required fields are rejected.
     does not sample the isobaric ensemble. See
     `integration/berendsen-barostat.md` for the full caveat and
     parameter description.
+  - `"c-rescale"` — stochastic isotropic cell-rescaling barostat
+    (Bernetti-Bussi, 2020). Samples the canonical NPT distribution
+    exactly. See `integration/c-rescale-barostat.md`.
 
 Fields accepted for `kind = "berendsen"`:
 
@@ -286,6 +289,29 @@ Fields accepted for `kind = "berendsen"`:
   (= m³/J). Required. Finite and strictly positive. Typical values
   are around `4.5e-10 1/Pa` for water; an inaccurate value changes
   the effective relaxation rate but not the long-time mean pressure.
+
+Fields accepted for `kind = "c-rescale"`:
+
+- `pressure: f64` — target pressure `P_target` in pascals (Pa).
+  Required. Finite. May be any sign or zero.
+- `temperature: f64` — target temperature `T` in kelvin used in the
+  noise term. Required. Finite and strictly positive. Independent
+  of `simulation.temperature` and of any `[thermostat].temperature`;
+  the framework performs no cross-slot validation. For canonical
+  NPT sampling the user must keep this value consistent with the
+  thermostat (or, for `langevin-baoab`, with the integrator's bath
+  temperature).
+- `tau: f64` — pressure-coupling time constant in seconds. Required.
+  Finite and strictly positive. Typical values for liquid water are
+  1–5 ps.
+- `compressibility: f64` — isothermal compressibility `β` in 1/Pa
+  (= m³/J). Required. Finite and strictly positive. An inaccurate
+  value changes the effective relaxation rate but not the long-time
+  NPT distribution.
+- `seed: u64` — counter-based RNG seed for the per-step normal
+  draw. Required, independent of `simulation.seed` and any other
+  slot's seed. Two runs with identical configs on the same GPU
+  produce byte-identical trajectories.
 
 #### `[[particle_types]]` (array of tables) <!-- rq-78487f38 -->
 
@@ -666,6 +692,9 @@ Beyond per-field validation, the loader checks:
   - `Berendsen { pressure: f64, tau: f64, compressibility: f64 }` —
     selected by `kind = "berendsen"`. All three fields are required.
     Deterministic; no RNG seed.
+  - `CRescale { pressure: f64, temperature: f64, tau: f64, compressibility: f64, seed: u64 }`
+    — selected by `kind = "c-rescale"`. All five fields are
+    required. Stochastic; uses the per-step RNG seed.
 
   Variant-bearing parameters reflect the per-kind fields listed under
   the `[barostat]` section above.
@@ -1734,11 +1763,48 @@ Feature: TOML simulation config schema
     Then it returns Err(ConfigError::UnknownBarostatField {
       kind: "berendsen", field: "seed" })
 
-  # Per-field parameter-validation scenarios for the Berendsen barostat
-  # (missing pressure / tau / compressibility, non-positive tau,
-  # non-positive compressibility, negative pressure accepted, etc.) live
-  # alongside the algorithm scenarios in
-  # `integration/berendsen-barostat.md`. They reference
+  @rq-c1d79d33
+  Scenario: [barostat] kind = "c-rescale" with all required fields accepted
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [barostat] section with kind="c-rescale", pressure=1.0e5,
+      temperature=85.0, tau=1.0e-12, compressibility=4.5e-10, seed=42
+    When load_config is called
+    Then it returns Ok(config)
+    And config.barostat matches Some(BarostatKind::CRescale {
+      pressure: 1.0e5, temperature: 85.0, tau: 1.0e-12,
+      compressibility: 4.5e-10, seed: 42 })
+
+  @rq-d623f23d
+  Scenario: C-rescale barostat missing temperature is rejected
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [barostat] section with kind="c-rescale", pressure=1.0e5,
+      tau=1.0e-12, compressibility=4.5e-10, seed=1
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "barostat.temperature" })
+
+  @rq-b33d1ff0
+  Scenario: C-rescale barostat missing seed is rejected
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [barostat] section with kind="c-rescale", pressure=1.0e5,
+      temperature=85.0, tau=1.0e-12, compressibility=4.5e-10
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "barostat.seed" })
+
+  @rq-0fa153b7
+  Scenario: C-rescale barostat extra fields are rejected
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [barostat] section with kind="c-rescale", pressure=1.0e5,
+      temperature=85.0, tau=1.0e-12, compressibility=4.5e-10, seed=42,
+      friction=1.0e12
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownBarostatField {
+      kind: "c-rescale", field: "friction" })
+
+  # Per-field parameter-validation scenarios for the Berendsen and
+  # C-rescale barostats (missing pressure / tau / compressibility / seed,
+  # non-positive values, negative pressure accepted, etc.) live alongside
+  # the algorithm scenarios in `integration/berendsen-barostat.md` and
+  # `integration/c-rescale-barostat.md`. They reference
   # `ConfigError::MissingField { field: "barostat.*" }` and
   # `ConfigError::InvalidValue { field: "barostat.*", .. }` to exercise
   # the same loader path documented in this section.

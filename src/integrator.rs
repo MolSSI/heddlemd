@@ -286,7 +286,10 @@ impl BarostatRegistry {
     // rq-4901507f
     pub fn with_builtins() -> Self {
         BarostatRegistry {
-            builders: vec![Box::new(BerendsenBarostatBuilder)],
+            builders: vec![
+                Box::new(BerendsenBarostatBuilder),
+                Box::new(CRescaleBarostatBuilder),
+            ],
         }
     }
 
@@ -1370,6 +1373,179 @@ impl BarostatBuilder for BerendsenBarostatBuilder {
                 )?;
                 Ok(Box::new(state))
             }
+            other => Err(BarostatError::UnknownKind(other.name().to_string())),
+        }
+    }
+}
+
+// --- Stochastic cell-rescaling (C-rescale) barostat ------------------
+// rq-11f5dfd1
+
+// rq-11f5dfd1
+#[derive(Debug)]
+pub struct CRescaleBarostat {
+    pub pressure: f64,
+    pub temperature: f64,
+    pub tau: f64,
+    pub compressibility: f64,
+    pub seed: u64,
+    pub draw_counter: u64,
+    pub cumulative_barostat_injection: f64,
+    pub most_recent_pressure: f64,
+    pub most_recent_volume: f64,
+    ke_scratch: CudaSlice<f32>,
+    virial_scratch: CudaSlice<f32>,
+}
+
+impl CRescaleBarostat {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        gpu: &GpuContext,
+        _particle_count: usize,
+        pressure: f64,
+        temperature: f64,
+        tau: f64,
+        compressibility: f64,
+        seed: u64,
+    ) -> Result<Self, GpuError> {
+        let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
+        let virial_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
+        Ok(CRescaleBarostat {
+            pressure,
+            temperature,
+            tau,
+            compressibility,
+            seed,
+            draw_counter: 0,
+            cumulative_barostat_injection: 0.0,
+            most_recent_pressure: 0.0,
+            most_recent_volume: 0.0,
+            ke_scratch,
+            virial_scratch,
+        })
+    }
+}
+
+impl Barostat for CRescaleBarostat {
+    // rq-1179e42f
+    fn apply(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &mut crate::pbc::SimulationBox,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), BarostatError> {
+        if buffers.particle_count() == 0 {
+            self.most_recent_pressure = 0.0;
+            self.most_recent_volume = sim_box.volume() as f64;
+            return Ok(());
+        }
+
+        timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
+        let k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+        timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
+
+        timings.kernel_start(KernelStage::VIRIAL_SUM_REDUCE)?;
+        let w = compute_total_virial(buffers, &mut self.virial_scratch)? as f64;
+        timings.kernel_stop(KernelStage::VIRIAL_SUM_REDUCE)?;
+
+        let v_pre = sim_box.volume() as f64;
+        let pressure = (2.0 * k + w) / (3.0 * v_pre);
+
+        self.draw_counter += 1;
+        let seed_lo = self.seed as u32;
+        let seed_hi = (self.seed >> 32) as u32;
+        let ctr_lo = self.draw_counter as u32;
+        let ctr_hi = (self.draw_counter >> 32) as u32;
+        let r = philox_normal(seed_lo, seed_hi, ctr_lo, ctr_hi, 0, 0);
+
+        let kt = BOLTZMANN_J_PER_K * self.temperature;
+        let dt_f64 = dt as f64;
+        let deterministic = -self.compressibility * (dt_f64 / self.tau)
+            * (self.pressure - pressure);
+        let noise_amplitude =
+            (2.0 * self.compressibility * kt * dt_f64 / (self.tau * v_pre)).sqrt();
+        let mu_cubed = 1.0 + deterministic + noise_amplitude * r;
+        let mu_cubed_clamped = mu_cubed.max(MU_MIN * MU_MIN * MU_MIN);
+        let mu = mu_cubed_clamped.cbrt();
+        let mu_f32 = mu as f32;
+
+        timings.kernel_start(KernelStage::C_RESCALE_BAROSTAT_RESCALE_POSITIONS)?;
+        rescale_positions(buffers, mu_f32)?;
+        timings.kernel_stop(KernelStage::C_RESCALE_BAROSTAT_RESCALE_POSITIONS)?;
+
+        sim_box
+            .rescale_isotropic(mu_f32)
+            .map_err(|_| BarostatError::Gpu(GpuError(
+                cudarc::driver::DriverError(
+                    cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,
+                ),
+            )))?;
+
+        let v_post = sim_box.volume() as f64;
+        self.cumulative_barostat_injection += self.pressure * (v_post - v_pre);
+        self.most_recent_pressure = pressure;
+        self.most_recent_volume = v_post;
+        Ok(())
+    }
+
+    // rq-11f5dfd1
+    fn log_column_names(&self) -> &'static [&'static str] {
+        &["pressure", "box_volume", "c_rescale_conserved"]
+    }
+
+    // rq-11f5dfd1
+    fn log_column_values(
+        &self,
+        kinetic_energy: f64,
+        potential_energy: f64,
+    ) -> Vec<f64> {
+        let conserved = kinetic_energy
+            + potential_energy
+            + self.pressure * self.most_recent_volume
+            - self.cumulative_barostat_injection;
+        vec![
+            self.most_recent_pressure,
+            self.most_recent_volume,
+            conserved,
+        ]
+    }
+}
+
+#[derive(Debug)]
+pub struct CRescaleBarostatBuilder;
+
+impl BarostatBuilder for CRescaleBarostatBuilder {
+    fn kind_name(&self) -> &'static str {
+        "c-rescale"
+    }
+
+    fn build(
+        &self,
+        gpu: &GpuContext,
+        particle_count: usize,
+        kind: &BarostatKind,
+    ) -> Result<Box<dyn Barostat>, BarostatError> {
+        match kind {
+            BarostatKind::CRescale {
+                pressure,
+                temperature,
+                tau,
+                compressibility,
+                seed,
+            } => {
+                let state = CRescaleBarostat::new(
+                    gpu,
+                    particle_count,
+                    *pressure,
+                    *temperature,
+                    *tau,
+                    *compressibility,
+                    *seed,
+                )?;
+                Ok(Box::new(state))
+            }
+            other => Err(BarostatError::UnknownKind(other.name().to_string())),
         }
     }
 }

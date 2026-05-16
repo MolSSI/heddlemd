@@ -64,6 +64,9 @@ impl KernelStage {
         KernelStage::new("virial_sum_reduce");
     pub const BERENDSEN_BAROSTAT_RESCALE_POSITIONS: KernelStage =
         KernelStage::new("berendsen_barostat_rescale_positions");
+    // rq-11f5dfd1
+    pub const C_RESCALE_BAROSTAT_RESCALE_POSITIONS: KernelStage =
+        KernelStage::new("c_rescale_barostat_rescale_positions");
     pub const ACCUMULATE_FORCES: KernelStage = KernelStage::new("accumulate_forces");
     pub const NEIGHBOR_DISPLACEMENT_SQUARED: KernelStage =
         KernelStage::new("neighbor_displacement_squared");
@@ -97,6 +100,7 @@ impl KernelStage {
         Self::BERENDSEN_RESCALE_VELOCITIES,
         Self::VIRIAL_SUM_REDUCE,
         Self::BERENDSEN_BAROSTAT_RESCALE_POSITIONS,
+        Self::C_RESCALE_BAROSTAT_RESCALE_POSITIONS,
         Self::ACCUMULATE_FORCES,
         Self::VV_KICK,
         Self::VV_KICK_LOSSLESS,

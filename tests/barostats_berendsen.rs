@@ -131,8 +131,12 @@ fn barostat_build_optional_none_returns_none() {
 #[test]
 fn barostat_with_builtins_exposes_berendsen() {
     let registry = BarostatRegistry::with_builtins();
-    assert_eq!(registry.builders.len(), 1);
-    assert_eq!(registry.builders[0].kind_name(), "berendsen");
+    assert!(
+        registry
+            .builders
+            .iter()
+            .any(|b| b.kind_name() == "berendsen")
+    );
 }
 
 // --- compute_total_virial helper ---

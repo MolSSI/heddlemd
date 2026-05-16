@@ -51,11 +51,12 @@ The default registry exposes four thermostats:
 
 ### Barostat slot <!-- rq-d898f1cd -->
 
-The default registry exposes one barostat:
+The default registry exposes two barostats:
 
 | `kind` value | Implementation                                                       | File                      |
 | ------------ | -------------------------------------------------------------------- | ------------------------- |
 | `berendsen`  | weak-coupling isotropic pressure coupling (equilibration only — not canonical) | `berendsen-barostat.md`   |
+| `c-rescale`  | stochastic isotropic cell-rescaling (canonical NPT)                  | `c-rescale-barostat.md`   |
 
 ## Per-Step Interface <!-- rq-daadfc1a -->
 
@@ -358,7 +359,8 @@ successfully.
     `kind` value in the slot's "Slots" table above.
     `ThermostatRegistry::with_builtins()` pre-populates
     `nose-hoover-chain`, `csvr`, `andersen`, `berendsen`.
-    `BarostatRegistry::with_builtins()` pre-populates `berendsen`.
+    `BarostatRegistry::with_builtins()` pre-populates `berendsen`
+    and `c-rescale`.
   - `IntegratorRegistry::register(&mut self, builder: Box<dyn
     IntegratorBuilder>)` — appends a builder. Two builders sharing
     the same `kind_name()` are not detected at registration; the
@@ -617,6 +619,7 @@ Feature: Pluggable integration framework
   Scenario: BarostatRegistry::with_builtins() exposes the registered barostats
     Given a BarostatRegistry::with_builtins()
     Then the registry contains a builder whose kind_name() is "berendsen"
+    And the registry contains a builder whose kind_name() is "c-rescale"
 
   @rq-82cdabba
   Scenario: build_optional with None returns Ok(None) on the barostat registry

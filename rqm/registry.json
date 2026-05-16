@@ -491,6 +491,13 @@
     "title": "rescale_velocities",
     "type": "api-item"
   },
+  "rq-0a18c7c2": {
+    "decl": "Scenario: Missing temperature rejected",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Missing temperature rejected",
+    "type": "scenario"
+  },
   "rq-0a6a97f6": {
     "decl": "Scenario: Dispatch loop calls thermostat.apply_pre, integrator.step, thermostat.apply_post in that order",
     "file": "integration/framework",
@@ -510,6 +517,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "minimum_image handles many-period displacements (orthorhombic)",
+    "type": "scenario"
+  },
+  "rq-0b5f0881": {
+    "decl": "Scenario: Missing seed rejected",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Missing seed rejected",
     "type": "scenario"
   },
   "rq-0b71c50a": {
@@ -706,6 +720,13 @@
     "title": "Reject negative collision_rate",
     "type": "scenario"
   },
+  "rq-0f3f63c8": {
+    "decl": "Scenario: C-rescale composes with velocity-Verlet + CSVR for NPT",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "C-rescale composes with velocity-Verlet + CSVR for NPT",
+    "type": "scenario"
+  },
   "rq-0f50dade": {
     "decl": "- `compute_total_virial(buffers: &ParticleBuffers, scratch: &mut CudaSlice<f32>) -> Result<f32, GpuError>`",
     "file": "integration/berendsen-barostat",
@@ -728,6 +749,13 @@
     "refs": [],
     "title": "Berendsen \"conserved quantity\"",
     "type": "section"
+  },
+  "rq-0fa153b7": {
+    "decl": "Scenario: C-rescale barostat extra fields are rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "C-rescale barostat extra fields are rejected",
+    "type": "scenario"
   },
   "rq-0fcb5a1e": {
     "decl": "Scenario: [barostat] kind = \"berendsen\" with all required fields accepted",
@@ -909,6 +937,22 @@
     "refs": [],
     "title": "Reject positions past -L/2 along b (orthorhombic)",
     "type": "scenario"
+  },
+  "rq-11f5dfd1": {
+    "decl": "# Feature: Stochastic Cell-Rescaling (C-Rescale) Barostat",
+    "file": "integration/c-rescale-barostat",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Stochastic Cell-Rescaling (C-Rescale) Barostat",
+    "type": "file"
   },
   "rq-1217c816": {
     "decl": "- `NeighborListState::pre_step(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`",
@@ -1296,6 +1340,13 @@
     "title": "Identical inputs produce byte-identical pair-buffer outputs",
     "type": "scenario"
   },
+  "rq-1a2f0ba9": {
+    "decl": "Scenario: Missing pressure rejected",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Missing pressure rejected",
+    "type": "scenario"
+  },
   "rq-1a3ec0c8": {
     "decl": "- `SimulationBox::fractional_coords(&self, position: [f32; 3]) -> [f32; 3]`",
     "file": "simulation-box",
@@ -1569,6 +1620,13 @@
     "title": "Missing [[particle_types]] is rejected",
     "type": "scenario"
   },
+  "rq-1e27ee47": {
+    "decl": "Scenario: BarostatRegistry::with_builtins() exposes c-rescale alongside berendsen",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "BarostatRegistry::with_builtins() exposes c-rescale alongside berendsen",
+    "type": "scenario"
+  },
   "rq-1e2d749d": {
     "decl": "Scenario: vv_kick_drift on an empty state is a no-op",
     "file": "integration/velocity-verlet",
@@ -1617,6 +1675,13 @@
     "file": "forces/topology",
     "refs": [],
     "title": "Content before any section header",
+    "type": "scenario"
+  },
+  "rq-1f2b5320": {
+    "decl": "Scenario: draw_counter starts at 0 and increments by 1 per apply",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "draw_counter starts at 0 and increments by 1 per apply",
     "type": "scenario"
   },
   "rq-1f2f912b": {
@@ -2121,6 +2186,13 @@
     "title": "lan_drift_half on empty state is a no-op",
     "type": "scenario"
   },
+  "rq-26b98781": {
+    "decl": "Scenario: Construct CRescaleBarostat via the registry",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Construct CRescaleBarostat via the registry",
+    "type": "scenario"
+  },
   "rq-26ba73d0": {
     "decl": "### CUDA Kernels",
     "file": "integration/langevin-baoab",
@@ -2407,6 +2479,13 @@
     "title": "Reproducibility",
     "type": "section"
   },
+  "rq-2b405d23": {
+    "decl": "- `apply(buffers, sim_box, dt, timings)` — runs the per-step",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "apply",
+    "type": "api-item"
+  },
   "rq-2b4a324a": {
     "decl": "Scenario: Exclusion scale NaN rejected",
     "file": "forces/topology",
@@ -2521,6 +2600,13 @@
     "file": "pair-reduction",
     "refs": [],
     "title": "Reduction with all zero neighbor counts produces zero net forces",
+    "type": "scenario"
+  },
+  "rq-2d109b3a": {
+    "decl": "Scenario: C-rescale composes with langevin-baoab",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "C-rescale composes with langevin-baoab",
     "type": "scenario"
   },
   "rq-2d4efead": {
@@ -3197,6 +3283,14 @@
     "title": "Morse bond_type missing de is rejected",
     "type": "scenario"
   },
+  "rq-3b728a4a": {
+    "decl": "### Types",
+    "file": "integration/c-rescale-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-3b7da473": {
     "decl": "Scenario: Zero charges produce zero force",
     "file": "forces/coulomb-pair-force",
@@ -3209,6 +3303,13 @@
     "file": "forces/spme",
     "refs": [],
     "title": "SPME runs on a triclinic box with non-zero tilts",
+    "type": "scenario"
+  },
+  "rq-3b9e9550": {
+    "decl": "Scenario: Fractional coordinates of every particle are invariant under apply",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Fractional coordinates of every particle are invariant under apply",
     "type": "scenario"
   },
   "rq-3b9ed390": {
@@ -3356,6 +3457,13 @@
     "title": "Slot structure",
     "type": "section"
   },
+  "rq-3e57f675": {
+    "decl": "Scenario: apply launches the expected kernel set",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "apply launches the expected kernel set",
+    "type": "scenario"
+  },
   "rq-3e744fed": {
     "decl": "## Feature API",
     "file": "forces/neighbor-list",
@@ -3450,6 +3558,14 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-411906c7": {
+    "decl": "## RNG",
+    "file": "integration/c-rescale-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "RNG",
+    "type": "section"
+  },
   "rq-41389685": {
     "decl": "Scenario: lan_ou_step with friction = 0 (alpha = 1) is identity on velocities (sanity)",
     "file": "integration/langevin-baoab",
@@ -3513,6 +3629,14 @@
     "level": 2,
     "refs": [],
     "title": "Build Script",
+    "type": "section"
+  },
+  "rq-43e44a28": {
+    "decl": "## Diagnostic log columns",
+    "file": "integration/c-rescale-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Diagnostic log columns",
     "type": "section"
   },
   "rq-443a91da": {
@@ -3633,6 +3757,14 @@
     "title": "compute_temperature",
     "type": "api-item"
   },
+  "rq-46a60367": {
+    "decl": "## Per-Step Kernel Sequence",
+    "file": "integration/c-rescale-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Step Kernel Sequence",
+    "type": "section"
+  },
   "rq-46c317ef": {
     "decl": "Scenario: trajectory_write count equals frames written",
     "file": "performance-analysis",
@@ -3703,6 +3835,13 @@
     "refs": [],
     "title": "Empty file",
     "type": "section"
+  },
+  "rq-4894ae09": {
+    "decl": "Scenario: apply on empty state is a no-op",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "apply on empty state is a no-op",
+    "type": "scenario"
   },
   "rq-48d14580": {
     "decl": "Scenario: Positions written by the writer are inside the primary cell",
@@ -4515,6 +4654,14 @@
     "title": "Reduction at full max_neighbors capacity",
     "type": "scenario"
   },
+  "rq-5915b212": {
+    "decl": "## Out of Scope",
+    "file": "integration/c-rescale-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-599b2eb4": {
     "decl": "## Fill Kernel",
     "file": "build-pipeline",
@@ -4559,6 +4706,14 @@
     "level": 2,
     "refs": [],
     "title": "Empty state",
+    "type": "section"
+  },
+  "rq-5b004038": {
+    "decl": "## Empty State and degenerate cases",
+    "file": "integration/c-rescale-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State and degenerate cases",
     "type": "section"
   },
   "rq-5b097ec0": {
@@ -5511,6 +5666,13 @@
     "title": "Empty thermostat registry reports UnknownKind",
     "type": "scenario"
   },
+  "rq-6e0d6cb4": {
+    "decl": "Scenario: Two independent composed runs with identical configs and seeds are byte-identical",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Two independent composed runs with identical configs and seeds are byte-identical",
+    "type": "scenario"
+  },
   "rq-6e11554f": {
     "decl": "## Rebuild Policy",
     "file": "forces/neighbor-list",
@@ -5991,6 +6153,13 @@
     "title": "Block-non-aligned particle counts are handled by the bounds check",
     "type": "scenario"
   },
+  "rq-77f42047": {
+    "decl": "Scenario: Missing compressibility rejected",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Missing compressibility rejected",
+    "type": "scenario"
+  },
   "rq-77f53d4b": {
     "decl": "Scenario: atom_excl_offsets reflects sorted exclusion list",
     "file": "forces/topology",
@@ -6149,6 +6318,14 @@
     "refs": [],
     "title": "CoulombConfig",
     "type": "api-item"
+  },
+  "rq-79609285": {
+    "decl": "## Feature API",
+    "file": "integration/c-rescale-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-79938dbf": {
     "decl": "- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], coulomb_config: Option<&CoulombConfig>, spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>`",
@@ -6684,6 +6861,14 @@
     "title": "Launch Configuration",
     "type": "section"
   },
+  "rq-84b2667f": {
+    "decl": "## Launch Configuration",
+    "file": "integration/c-rescale-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
+    "type": "section"
+  },
   "rq-85192a05": {
     "decl": "Scenario: At the LJ minimum r = sigma * 2^(1/6), the force is zero",
     "file": "forces/lj-pair-force",
@@ -6800,6 +6985,13 @@
     ],
     "title": "Number formatting",
     "type": "section"
+  },
+  "rq-8904d7cb": {
+    "decl": "Scenario: Accept negative target pressure",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Accept negative target pressure",
+    "type": "scenario"
   },
   "rq-891232bf": {
     "decl": "# Feature: CSVR Stochastic Velocity Rescaling Thermostat",
@@ -6943,6 +7135,14 @@
     "refs": [],
     "title": "Coulomb and LJ exclusions are independent",
     "type": "scenario"
+  },
+  "rq-8d18d6ee": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/c-rescale-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-8d5a8d9c": {
     "decl": "Scenario: reduce_angle_forces on zero particles is a no-op",
@@ -7199,6 +7399,14 @@
     "title": "Valid harmonic angle_type is accepted",
     "type": "scenario"
   },
+  "rq-91c4727a": {
+    "decl": "## Determinism",
+    "file": "integration/c-rescale-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
+  },
   "rq-91cec484": {
     "decl": "### CUDA events",
     "file": "performance-analysis",
@@ -7320,11 +7528,25 @@
     "title": "NaN values are accepted at construction",
     "type": "scenario"
   },
+  "rq-94726e23": {
+    "decl": "Scenario: c_rescale_conserved drifts only by O(dt²) per step plus martingale noise",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "c_rescale_conserved drifts only by O(dt²) per step plus martingale noise",
+    "type": "scenario"
+  },
   "rq-94a43204": {
     "decl": "Scenario: Different seeds produce different trajectories",
     "file": "integration/csvr",
     "refs": [],
     "title": "Different seeds produce different trajectories",
+    "type": "scenario"
+  },
+  "rq-94d30346": {
+    "decl": "Scenario: Triclinic shape is preserved under apply",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Triclinic shape is preserved under apply",
     "type": "scenario"
   },
   "rq-9504346c": {
@@ -7583,6 +7805,13 @@
     "title": "Real-space CUDA kernel",
     "type": "section"
   },
+  "rq-9a88810a": {
+    "decl": "- `log_column_values(ke, pe) -> vec![most_recent_pressure,",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "log_column_values",
+    "type": "api-item"
+  },
   "rq-9a9523d9": {
     "decl": "Scenario: minimum_image at the +L/2 boundary maps to -L/2",
     "file": "simulation-box",
@@ -7769,6 +7998,13 @@
     "title": "Flush is idempotent",
     "type": "scenario"
   },
+  "rq-9d2d90b3": {
+    "decl": "Scenario: sim_box.generation() advances after apply",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "sim_box.generation() advances after apply",
+    "type": "scenario"
+  },
   "rq-9d68f8fb": {
     "decl": "Scenario: Repeated atom in angle rejected (j == k)",
     "file": "forces/topology",
@@ -7868,6 +8104,13 @@
     "title": "Reject duplicate pair under different orderings",
     "type": "scenario"
   },
+  "rq-9e5579bb": {
+    "decl": "Scenario: μ³ matches the analytical formula for a fixed Philox draw",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "μ³ matches the analytical formula for a fixed Philox draw",
+    "type": "scenario"
+  },
   "rq-9e5d6525": {
     "decl": "Scenario: type_indices reflects the order of type_names",
     "file": "io/init-state-file",
@@ -7926,6 +8169,14 @@
     "title": "Algorithm",
     "type": "section"
   },
+  "rq-9f95c5da": {
+    "decl": "## Algorithm",
+    "file": "integration/c-rescale-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
+  },
   "rq-9ff4fd10": {
     "decl": "Scenario: Reject upload when host particle count differs from buffers",
     "file": "particle-state",
@@ -7979,6 +8230,13 @@
     ],
     "title": "PairBuffer",
     "type": "api-item"
+  },
+  "rq-a0d0c872": {
+    "decl": "Scenario: Time-averaged pressure tracks P_target",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Time-averaged pressure tracks P_target",
+    "type": "scenario"
   },
   "rq-a1262872": {
     "decl": "- `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>`",
@@ -8118,6 +8376,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Reject unknown pair potential",
+    "type": "scenario"
+  },
+  "rq-a3b6838f": {
+    "decl": "Scenario: Reject non-positive tau",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Reject non-positive tau",
     "type": "scenario"
   },
   "rq-a3fdbd7c": {
@@ -8507,6 +8772,13 @@
     "title": "`Barostat` trait overrides",
     "type": "section"
   },
+  "rq-ac873434": {
+    "decl": "Scenario: Setting temperature very small reduces C-rescale to the Berendsen barostat",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Setting temperature very small reduces C-rescale to the Berendsen barostat",
+    "type": "scenario"
+  },
   "rq-acafdfe4": {
     "decl": "Scenario: vv_kick_lossless does not modify positions, forces, masses, or particle_ids",
     "file": "integration/velocity-verlet",
@@ -8565,6 +8837,14 @@
     "refs": [],
     "title": "Equilibrium kinetic energy approaches 1.5 * N * k_B * T after many steps",
     "type": "scenario"
+  },
+  "rq-add8ab9e": {
+    "decl": "### Counter packing",
+    "file": "integration/c-rescale-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "Counter packing",
+    "type": "section"
   },
   "rq-add95876": {
     "decl": "## Data Layout",
@@ -8912,6 +9192,13 @@
     "title": "ForceField with a short-range potential owns a shared neighbor list",
     "type": "scenario"
   },
+  "rq-b33d1ff0": {
+    "decl": "Scenario: C-rescale barostat missing seed is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "C-rescale barostat missing seed is rejected",
+    "type": "scenario"
+  },
   "rq-b39d3be7": {
     "decl": "Scenario: Displacement check uses minimum-image displacement",
     "file": "forces/neighbor-list",
@@ -8954,6 +9241,13 @@
     "file": "particle-state",
     "refs": [],
     "title": "Reject upload when one host array drifts in length",
+    "type": "scenario"
+  },
+  "rq-b4d2ac96": {
+    "decl": "Scenario: Missing tau rejected",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Missing tau rejected",
     "type": "scenario"
   },
   "rq-b4d2f559": {
@@ -9125,6 +9419,13 @@
     "title": "Reject non-positive temperature",
     "type": "scenario"
   },
+  "rq-b8e6dfb3": {
+    "decl": "- `log_column_names() -> &'static [\"pressure\", \"box_volume\",",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "log_column_names",
+    "type": "api-item"
+  },
   "rq-b8fde05b": {
     "decl": "Scenario: Unwrapped displacement is preserved under wrap",
     "file": "integration/velocity-verlet",
@@ -9151,6 +9452,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "neighbor_list all-pairs mode rejects r_skin",
+    "type": "scenario"
+  },
+  "rq-ba1e44f8": {
+    "decl": "Scenario: μ clamped to safety floor when the formula yields a non-positive μ³",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "μ clamped to safety floor when the formula yields a non-positive μ³",
     "type": "scenario"
   },
   "rq-ba37ec6b": {
@@ -9571,12 +9879,32 @@
     "title": "PTX embedding",
     "type": "section"
   },
+  "rq-c1d79d33": {
+    "decl": "Scenario: [barostat] kind = \"c-rescale\" with all required fields accepted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[barostat] kind = \"c-rescale\" with all required fields accepted",
+    "type": "scenario"
+  },
   "rq-c1ea073b": {
     "decl": "# Feature: Pluggable Potential Slot Framework",
     "file": "forces/framework",
     "refs": [],
     "title": "Feature: Pluggable Potential Slot Framework",
     "type": "file"
+  },
+  "rq-c2211c85": {
+    "decl": "## Parameters",
+    "file": "integration/c-rescale-barostat",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Parameters",
+    "type": "section"
   },
   "rq-c22483b4": {
     "decl": "Scenario: Construct an empty state",
@@ -10112,6 +10440,13 @@
     "title": "Reject when masses has the wrong length",
     "type": "scenario"
   },
+  "rq-cedda168": {
+    "decl": "Scenario: Two CRescaleBarostats at the same (seed, draw_counter)",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Two CRescaleBarostats at the same (seed, draw_counter)",
+    "type": "scenario"
+  },
   "rq-cef1e640": {
     "decl": "Scenario: Reject non-positive temperature",
     "file": "integration/berendsen",
@@ -10424,6 +10759,13 @@
     "title": "Pair `between` normalisation when both types are declared",
     "type": "scenario"
   },
+  "rq-d406cdc2": {
+    "decl": "Scenario: Reject non-positive temperature",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Reject non-positive temperature",
+    "type": "scenario"
+  },
   "rq-d47caa3d": {
     "decl": "- `NeighborListState::new_cell_list_only(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, n_cells_per_direction: [u32; 3]) -> Result<NeighborListState, NeighborListError>`",
     "file": "forces/neighbor-list",
@@ -10458,6 +10800,13 @@
     "title": "Pair `between` is normalised to lexicographic order",
     "type": "scenario"
   },
+  "rq-d521381a": {
+    "decl": "- `CRescaleBarostatBuilder` — implements `BarostatBuilder` with",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "CRescaleBarostatBuilder",
+    "type": "api-item"
+  },
   "rq-d52bcc88": {
     "decl": "Scenario: Pair inside the switching interval is smoothed",
     "file": "forces/coulomb-pair-force",
@@ -10491,6 +10840,13 @@
     "title": "Force magnitude matches closed-form Morse expression",
     "type": "scenario"
   },
+  "rq-d623f23d": {
+    "decl": "Scenario: C-rescale barostat missing temperature is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "C-rescale barostat missing temperature is rejected",
+    "type": "scenario"
+  },
   "rq-d65bcc90": {
     "decl": "Scenario: Reject image column whose value does not parse as i32",
     "file": "io/init-state-file",
@@ -10519,6 +10875,14 @@
     "level": 3,
     "refs": [],
     "title": "Rust Launcher",
+    "type": "section"
+  },
+  "rq-d6c4e0f5": {
+    "decl": "### CUDA Kernels and launch helpers",
+    "file": "integration/c-rescale-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernels and launch helpers",
     "type": "section"
   },
   "rq-d6cf8e86": {
@@ -10953,6 +11317,13 @@
     "title": "write_timings_file refuses to overwrite an existing file",
     "type": "scenario"
   },
+  "rq-de8b9cd5": {
+    "decl": "Scenario: Reject non-positive compressibility",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Reject non-positive compressibility",
+    "type": "scenario"
+  },
   "rq-de92101c": {
     "decl": "Scenario: build.rs compiles a .cu file to PTX",
     "file": "build-pipeline",
@@ -10986,6 +11357,13 @@
     ],
     "title": "`Step`",
     "type": "section"
+  },
+  "rq-df305128": {
+    "decl": "Scenario: Log file header includes pressure, box_volume, and c_rescale_conserved when C-rescale is the configured barostat",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Log file header includes pressure, box_volume, and c_rescale_conserved when C-rescale is the configured barostat",
+    "type": "scenario"
   },
   "rq-df3a50f6": {
     "decl": "Scenario: step() on a ForceField with both slots sums LJ and Morse",
@@ -11080,6 +11458,14 @@
     "level": 3,
     "refs": [],
     "title": "Sample bookkeeping",
+    "type": "section"
+  },
+  "rq-e17a3af9": {
+    "decl": "### `Barostat` trait overrides",
+    "file": "integration/c-rescale-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "`Barostat` trait overrides",
     "type": "section"
   },
   "rq-e1a6bde9": {
@@ -11224,6 +11610,13 @@
     "title": "Field reference",
     "type": "section"
   },
+  "rq-e38993a3": {
+    "decl": "- `CRescaleBarostat` — implements the `Barostat` trait declared in",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "CRescaleBarostat",
+    "type": "api-item"
+  },
   "rq-e399422c": {
     "decl": "Scenario: Harmonic angle_type rejects theta_0 outside [0, π]",
     "file": "io/config-schema",
@@ -11367,6 +11760,13 @@
     "file": "forces/spme",
     "refs": [],
     "title": "The k=0 entry is zeroed by the influence-function multiply",
+    "type": "scenario"
+  },
+  "rq-e5cb5505": {
+    "decl": "Scenario: log_column_names returns [\"pressure\", \"box_volume\", \"c_rescale_conserved\"]",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "log_column_names returns [\"pressure\", \"box_volume\", \"c_rescale_conserved\"]",
     "type": "scenario"
   },
   "rq-e5e3443f": {
@@ -11627,6 +12027,13 @@
     "title": "VelocityVerlet does not own its thermostat",
     "type": "scenario"
   },
+  "rq-e9caf013": {
+    "decl": "Scenario: Reject extra fields (e.g. Berendsen barostat doesn't have a seed)",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Reject extra fields (e.g. Berendsen barostat doesn't have a seed)",
+    "type": "scenario"
+  },
   "rq-ea0ee5ef": {
     "decl": "Scenario: Neighbor list contains every particle within r_cut + r_skin",
     "file": "forces/neighbor-list",
@@ -11866,6 +12273,14 @@
     "title": "Pair across the periodic boundary uses minimum-image displacement",
     "type": "scenario"
   },
+  "rq-ef4d2caf": {
+    "decl": "### Reproducibility",
+    "file": "integration/c-rescale-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "Reproducibility",
+    "type": "section"
+  },
   "rq-ef5aa4b7": {
     "decl": "Scenario: File does not exist",
     "file": "forces/topology",
@@ -11941,6 +12356,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "Cell-list neighbor mode records the neighbor stages and omits lj_pair_force",
+    "type": "scenario"
+  },
+  "rq-efc07f81": {
+    "decl": "Scenario: Different seeds produce different trajectories",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Different seeds produce different trajectories",
     "type": "scenario"
   },
   "rq-efea1b70": {
@@ -12082,6 +12504,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "Header line has the documented column names in the documented order",
+    "type": "scenario"
+  },
+  "rq-f1b57184": {
+    "decl": "Scenario: Construct with particle_count = 0",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "Construct with particle_count = 0",
     "type": "scenario"
   },
   "rq-f1ba909b": {
@@ -12530,6 +12959,13 @@
     "refs": [],
     "title": "Periodic-boundary operations",
     "type": "section"
+  },
+  "rq-fb78338b": {
+    "decl": "Scenario: log_column_values returns the cached pressure, post-rescale volume,",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "log_column_values returns the cached pressure, post-rescale volume,",
+    "type": "scenario"
   },
   "rq-fbdf08ff": {
     "decl": "Scenario: Minimum image is applied",

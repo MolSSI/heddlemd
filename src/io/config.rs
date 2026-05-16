@@ -198,6 +198,14 @@ pub enum BarostatKind {
         tau: f64,
         compressibility: f64,
     },
+    // rq-c2211c85
+    CRescale {
+        pressure: f64,
+        temperature: f64,
+        tau: f64,
+        compressibility: f64,
+        seed: u64,
+    },
 }
 
 impl BarostatKind {
@@ -205,6 +213,7 @@ impl BarostatKind {
     pub fn name(&self) -> &'static str {
         match self {
             BarostatKind::Berendsen { .. } => "berendsen",
+            BarostatKind::CRescale { .. } => "c-rescale",
         }
     }
 }
@@ -1458,6 +1467,50 @@ fn parse_barostat(baro_tbl: &toml::value::Table) -> Result<BarostatKind, ConfigE
                 pressure,
                 tau,
                 compressibility,
+            })
+        }
+        "c-rescale" => {
+            for key in baro_tbl.keys() {
+                if !matches!(
+                    key.as_str(),
+                    "kind"
+                        | "pressure"
+                        | "temperature"
+                        | "tau"
+                        | "compressibility"
+                        | "seed"
+                ) {
+                    return Err(ConfigError::UnknownBarostatField {
+                        kind: "c-rescale".to_string(),
+                        field: key.clone(),
+                    });
+                }
+            }
+            let pressure = get_f64(baro_tbl, "pressure")
+                .map_err(rename_field("barostat.pressure".into()))?;
+            if !pressure.is_finite() {
+                return Err(invalid(
+                    "barostat.pressure",
+                    format!("expected a finite number, got {pressure}"),
+                ));
+            }
+            let temperature = get_f64(baro_tbl, "temperature")
+                .map_err(rename_field("barostat.temperature".into()))?;
+            require_finite_positive("barostat.temperature", temperature)?;
+            let tau = get_f64(baro_tbl, "tau")
+                .map_err(rename_field("barostat.tau".into()))?;
+            require_finite_positive("barostat.tau", tau)?;
+            let compressibility = get_f64(baro_tbl, "compressibility")
+                .map_err(rename_field("barostat.compressibility".into()))?;
+            require_finite_positive("barostat.compressibility", compressibility)?;
+            let seed = get_u64(baro_tbl, "seed")
+                .map_err(rename_field("barostat.seed".into()))?;
+            Ok(BarostatKind::CRescale {
+                pressure,
+                temperature,
+                tau,
+                compressibility,
+                seed,
             })
         }
         other => Err(ConfigError::UnknownBarostatKind {

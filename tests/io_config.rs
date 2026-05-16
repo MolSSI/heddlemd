@@ -2522,6 +2522,7 @@ compressibility = 4.5e-10"#,
             assert_eq!(*tau, 1.0e-12);
             assert_eq!(*compressibility, 4.5e-10);
         }
+        other => panic!("expected Berendsen, got {other:?}"),
     }
 }
 
@@ -2642,6 +2643,177 @@ seed = 42"#,
         ConfigError::UnknownBarostatField { kind, field } => {
             assert_eq!(kind, "berendsen");
             assert_eq!(field, "seed");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn barostat_c_rescale_accepted() {
+    let dir = tmp_path("baro_c_rescale_ok");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "c-rescale"
+pressure = 1.0e5
+temperature = 85.0
+tau = 1.0e-12
+compressibility = 4.5e-10
+seed = 42"#,
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    match cfg.barostat.as_ref().unwrap() {
+        dynamics::io::BarostatKind::CRescale {
+            pressure,
+            temperature,
+            tau,
+            compressibility,
+            seed,
+        } => {
+            assert_eq!(*pressure, 1.0e5);
+            assert_eq!(*temperature, 85.0);
+            assert_eq!(*tau, 1.0e-12);
+            assert_eq!(*compressibility, 4.5e-10);
+            assert_eq!(*seed, 42);
+        }
+        other => panic!("expected CRescale, got {other:?}"),
+    }
+}
+
+#[test]
+fn barostat_c_rescale_accepts_negative_pressure() {
+    let dir = tmp_path("baro_c_rescale_neg_p");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "c-rescale"
+pressure = -1.0e5
+temperature = 85.0
+tau = 1.0e-12
+compressibility = 4.5e-10
+seed = 1"#,
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert!(cfg.barostat.is_some());
+}
+
+#[test]
+fn barostat_c_rescale_rejects_non_positive_temperature() {
+    let dir = tmp_path("baro_c_rescale_T_zero");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "c-rescale"
+pressure = 1.0e5
+temperature = 0.0
+tau = 1.0e-12
+compressibility = 4.5e-10
+seed = 1"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "barostat.temperature")
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn barostat_c_rescale_rejects_non_positive_tau() {
+    let dir = tmp_path("baro_c_rescale_tau_neg");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "c-rescale"
+pressure = 1.0e5
+temperature = 85.0
+tau = -1.0e-12
+compressibility = 4.5e-10
+seed = 1"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "barostat.tau"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn barostat_c_rescale_rejects_non_positive_compressibility() {
+    let dir = tmp_path("baro_c_rescale_beta_zero");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "c-rescale"
+pressure = 1.0e5
+temperature = 85.0
+tau = 1.0e-12
+compressibility = 0.0
+seed = 1"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "barostat.compressibility")
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn barostat_c_rescale_missing_temperature_rejected() {
+    let dir = tmp_path("baro_c_rescale_no_T");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "c-rescale"
+pressure = 1.0e5
+tau = 1.0e-12
+compressibility = 4.5e-10
+seed = 1"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => {
+            assert_eq!(field, "barostat.temperature")
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn barostat_c_rescale_missing_seed_rejected() {
+    let dir = tmp_path("baro_c_rescale_no_seed");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "c-rescale"
+pressure = 1.0e5
+temperature = 85.0
+tau = 1.0e-12
+compressibility = 4.5e-10"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "barostat.seed"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn barostat_c_rescale_rejects_extra_fields() {
+    let dir = tmp_path("baro_c_rescale_extra");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "c-rescale"
+pressure = 1.0e5
+temperature = 85.0
+tau = 1.0e-12
+compressibility = 4.5e-10
+seed = 42
+friction = 1.0e12"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownBarostatField { kind, field } => {
+            assert_eq!(kind, "c-rescale");
+            assert_eq!(field, "friction");
         }
         other => panic!("unexpected: {other:?}"),
     }
