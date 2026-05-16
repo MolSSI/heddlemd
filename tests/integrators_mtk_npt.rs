@@ -472,6 +472,154 @@ fn two_runs_with_identical_configs_are_byte_identical() {
 
 // --- Smoke test of physical correctness ---
 
+// --- Approximate time-reversibility smoke ---
+
+// Runs 50 MTK steps forward on an empty-force-field system, then flips
+// every momentum (particle velocities, p_eps, both chains' p_xi), then
+// runs 50 more steps. With a symmetric Trotter splitting (which MTTK
+// 1996 is) the second pass retraces the first, modulo f32 storage
+// round-off in the cell-coupled drift / velocity-rescale kernels.
+//
+// MTK has NO lossless mode (the rqm doc declares this out of scope: the
+// cell-coupled exp() and the chain sinh/exp rescales don't have a clean
+// compensated f32+f64 form), so this is a tolerance check, not a
+// bit-exact one. Empirically ~100 lossy kernel launches accumulate
+// ~100·ULP ≈ 1e-5 relative drift; the assertions below use 1e-3
+// relative to leave headroom.
+#[test]
+fn mtk_approximate_time_reversibility_smoke() {
+    let gpu = init_device().unwrap();
+    let n = 8usize;
+    let mass: f32 = 1.66e-27;
+    // Start at the chain's target kinetic energy so the chain isn't
+    // strongly injecting/extracting energy (which would amplify f32
+    // drift). K_target = (g_dof/2) · k_B · T with g_dof = 3N − 3.
+    let temperature = 85.0_f64;
+    let g_dof = (3 * n - 3) as f64;
+    let k_target = (g_dof / 2.0) * KB * temperature;
+    let v_each = (k_target / ((n as f64) * 0.5 * (mass as f64))).sqrt() as f32;
+    let state = symmetric_state(n, mass, v_each);
+
+    // Snapshot the initial state (positions, velocities, lattice).
+    let snap_px = state.positions_x.clone();
+    let snap_vx = state.velocities_x.clone();
+    let snap_lattice = box_small().lattice();
+
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut sim_box = box_small();
+    let mut ff = empty_force_field(&gpu, n);
+    let mut timings = Timings::new(&gpu).unwrap();
+
+    // Use a sensible dt and moderately stiff couplings.
+    let dt = 1.0e-15_f32;
+    let mut integ = unbox_mtk(build_mtk(
+        &gpu,
+        n,
+        &mtk_kind(temperature, 1.0e5, 1.0e-13, 1.0e-12, 3, 3, 1),
+    ));
+
+    // Warm up the force pipeline so virials are populated.
+    ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+
+    // --- Forward 50 steps ---
+    for _ in 0..50 {
+        integ
+            .step(&mut buffers, &mut sim_box, &mut ff, dt, &mut timings)
+            .unwrap();
+    }
+
+    // --- Flip every momentum ---
+    // 1. Particle velocities (on the device).
+    for axis_slice in [
+        &mut buffers.velocities_x,
+        &mut buffers.velocities_y,
+        &mut buffers.velocities_z,
+    ] {
+        let v = gpu.device.dtoh_sync_copy(axis_slice).unwrap();
+        let v_flipped: Vec<f32> = v.iter().map(|&x| -x).collect();
+        gpu.device
+            .htod_sync_copy_into(&v_flipped, axis_slice)
+            .unwrap();
+    }
+    // 2. Cell momentum and both chains' momenta (on the host).
+    integ.p_eps = -integ.p_eps;
+    for p in integ.p_xi_part.iter_mut() {
+        *p = -*p;
+    }
+    for p in integ.p_xi_cell.iter_mut() {
+        *p = -*p;
+    }
+
+    // Re-warm the force pipeline at the post-flip state. Forces are
+    // unchanged by velocity flip (F depends on positions), but the
+    // virial buffer would be stale only if we mutated positions —
+    // which we did not — so this is conceptually a no-op for the
+    // empty force field. We run it anyway to mirror the runner's
+    // per-step contract.
+    ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+
+    // --- Reverse 50 steps ---
+    for _ in 0..50 {
+        integ
+            .step(&mut buffers, &mut sim_box, &mut ff, dt, &mut timings)
+            .unwrap();
+    }
+
+    // --- Compare to the initial state ---
+    let px_final = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let vx_final = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+
+    // Positions should return to within accumulated f32 round-off.
+    // Use absolute tolerance scaled by the largest |x| in the system,
+    // since the symmetric_state positions span 0 → 4e-10 m and
+    // include a zero crossing where relative tolerance breaks down.
+    let max_abs_x: f32 = snap_px.iter().map(|x| x.abs()).fold(0.0, f32::max);
+    let pos_tol = max_abs_x * 1.0e-3;
+    for (i, (a, b)) in px_final.iter().zip(snap_px.iter()).enumerate() {
+        assert!(
+            (a - b).abs() < pos_tol,
+            "particle {i}: x drifted {} vs snap {} (tol {pos_tol:e})",
+            a,
+            b
+        );
+    }
+
+    // Velocities should return to NEGATIVE of the initial values
+    // (because we flipped them between the two passes, so the reverse
+    // pass leaves them at -v_initial).
+    let max_abs_v: f32 = snap_vx.iter().map(|v| v.abs()).fold(0.0, f32::max);
+    let vel_tol = max_abs_v * 1.0e-3;
+    for (i, (a, b)) in vx_final.iter().zip(snap_vx.iter()).enumerate() {
+        let expected = -*b;
+        assert!(
+            (a - expected).abs() < vel_tol,
+            "particle {i}: v drifted {} vs expected {} (tol {vel_tol:e})",
+            a,
+            expected
+        );
+    }
+
+    // Lattice should return to within accumulated f32 round-off.
+    let lat_final = sim_box.lattice();
+    for i in 0..6 {
+        let snap = snap_lattice[i];
+        let tol = snap.abs().max(1.0e-10) * 1.0e-3;
+        assert!(
+            (lat_final[i] - snap).abs() < tol,
+            "lattice[{i}]: {} vs snap {} (tol {tol:e})",
+            lat_final[i],
+            snap
+        );
+    }
+
+    // Cell momentum should also return to near zero (it started at 0).
+    assert!(
+        integ.p_eps.abs() < 1.0e-30,
+        "p_eps drifted to {}",
+        integ.p_eps
+    );
+}
+
 #[test]
 fn finite_step_keeps_velocities_and_positions_finite() {
     // No physical-correctness assertion (too short a run; no thermalisation),
