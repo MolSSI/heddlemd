@@ -1870,3 +1870,198 @@ fn empty_angle_type_name_rejected() {
         other => panic!("unexpected: {other:?}"),
     }
 }
+
+// --- Nosé-Hoover chain ---
+
+fn nhc_minimal_config() -> String {
+    r#"schema_version = 1
+init = "argon.xyz"
+
+[simulation]
+seed = 12345
+n_steps = 10
+dt = 1.0e-15
+temperature = 300.0
+
+[integrator]
+kind = "nose-hoover-chain"
+temperature = 300.0
+tau = 1.0e-13
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#
+    .to_string()
+}
+
+#[test]
+fn nhc_defaults_accepted() {
+    let dir = tmp_path("nhc_defaults");
+    let path = write_config(&dir, &nhc_minimal_config());
+    let cfg = load_config(&path).unwrap();
+    match &cfg.integrator {
+        dynamics::io::config::IntegratorKind::NoseHooverChain {
+            temperature,
+            tau,
+            chain_length,
+            yoshida_order,
+            n_resp,
+        } => {
+            assert_eq!(*temperature, 300.0);
+            assert_eq!(*tau, 1.0e-13);
+            assert_eq!(*chain_length, 3);
+            assert_eq!(*yoshida_order, 3);
+            assert_eq!(*n_resp, 1);
+        }
+        other => panic!("expected NHC, got {other:?}"),
+    }
+}
+
+#[test]
+fn nhc_explicit_chain_params_accepted() {
+    let dir = tmp_path("nhc_explicit");
+    let body = nhc_minimal_config().replace(
+        "tau = 1.0e-13\n",
+        "tau = 1.0e-13\nchain_length = 5\nyoshida_order = 5\nn_resp = 2\n",
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    match &cfg.integrator {
+        dynamics::io::config::IntegratorKind::NoseHooverChain {
+            chain_length,
+            yoshida_order,
+            n_resp,
+            ..
+        } => {
+            assert_eq!(*chain_length, 5);
+            assert_eq!(*yoshida_order, 5);
+            assert_eq!(*n_resp, 2);
+        }
+        other => panic!("expected NHC, got {other:?}"),
+    }
+}
+
+#[test]
+fn nhc_missing_temperature_rejected() {
+    let dir = tmp_path("nhc_no_t");
+    let body = nhc_minimal_config().replace("temperature = 300.0\ntau", "tau");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => {
+            assert_eq!(field, "integrator.temperature");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn nhc_missing_tau_rejected() {
+    let dir = tmp_path("nhc_no_tau");
+    let body = nhc_minimal_config().replace("\ntau = 1.0e-13\n", "\n");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => {
+            assert_eq!(field, "integrator.tau");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn nhc_rejects_non_positive_temperature() {
+    let dir = tmp_path("nhc_T_zero");
+    let body = nhc_minimal_config().replace("temperature = 300.0\ntau", "temperature = 0.0\ntau");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "integrator.temperature");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn nhc_rejects_non_positive_tau() {
+    let dir = tmp_path("nhc_tau_neg");
+    let body = nhc_minimal_config().replace("tau = 1.0e-13", "tau = -1.0e-13");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "integrator.tau");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn nhc_rejects_chain_length_zero() {
+    let dir = tmp_path("nhc_chain0");
+    let body = nhc_minimal_config().replace(
+        "tau = 1.0e-13\n",
+        "tau = 1.0e-13\nchain_length = 0\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "integrator.chain_length");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn nhc_rejects_yoshida_order_outside_allowed_set() {
+    let dir = tmp_path("nhc_yoshida_bad");
+    let body = nhc_minimal_config().replace(
+        "tau = 1.0e-13\n",
+        "tau = 1.0e-13\nyoshida_order = 2\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "integrator.yoshida_order");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn nhc_rejects_n_resp_zero() {
+    let dir = tmp_path("nhc_nresp0");
+    let body = nhc_minimal_config().replace(
+        "tau = 1.0e-13\n",
+        "tau = 1.0e-13\nn_resp = 0\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "integrator.n_resp");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn nhc_rejects_extra_fields() {
+    let dir = tmp_path("nhc_extra");
+    let body = nhc_minimal_config().replace(
+        "tau = 1.0e-13\n",
+        "tau = 1.0e-13\nfriction = 1.0e12\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownIntegratorField { kind, field } => {
+            assert_eq!(kind, "nose-hoover-chain");
+            assert_eq!(field, "friction");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}

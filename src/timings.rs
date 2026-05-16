@@ -49,6 +49,10 @@ impl KernelStage {
         KernelStage::new("harmonic_angle_force");
     pub const REDUCE_ANGLE_FORCES: KernelStage =
         KernelStage::new("reduce_angle_forces");
+    pub const KINETIC_ENERGY_REDUCE: KernelStage =
+        KernelStage::new("kinetic_energy_reduce");
+    pub const NHC_RESCALE_VELOCITIES: KernelStage =
+        KernelStage::new("nhc_rescale_velocities");
     pub const ACCUMULATE_FORCES: KernelStage = KernelStage::new("accumulate_forces");
     pub const NEIGHBOR_DISPLACEMENT_SQUARED: KernelStage =
         KernelStage::new("neighbor_displacement_squared");
@@ -75,6 +79,8 @@ impl KernelStage {
         Self::REDUCE_BOND_FORCES,
         Self::HARMONIC_ANGLE_FORCE,
         Self::REDUCE_ANGLE_FORCES,
+        Self::KINETIC_ENERGY_REDUCE,
+        Self::NHC_RESCALE_VELOCITIES,
         Self::ACCUMULATE_FORCES,
         Self::VV_KICK,
         Self::VV_KICK_LOSSLESS,

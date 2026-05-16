@@ -37,6 +37,8 @@ pub struct Kernels {
     pub reduce_bond_forces: CudaFunction,
     pub harmonic_angle_force: CudaFunction,
     pub reduce_angle_forces: CudaFunction,
+    pub kinetic_energy_reduce: CudaFunction,
+    pub rescale_velocities: CudaFunction,
     pub accumulate_forces: CudaFunction,
     pub neighbor_displacement_squared: CudaFunction,
     pub neighbor_list_build: CudaFunction,
@@ -121,6 +123,12 @@ pub fn init_device() -> Result<GpuContext, GpuError> {
         "angle",
         &["harmonic_angle_force", "reduce_angle_forces"],
     )?;
+    // rq-f606ff6f
+    device.load_ptx(
+        Ptx::from_src(kernels::NOSE_HOOVER),
+        "nose_hoover",
+        &["kinetic_energy_reduce", "rescale_velocities"],
+    )?;
     device.load_ptx(
         Ptx::from_src(kernels::FORCES),
         "forces",
@@ -170,6 +178,8 @@ pub fn init_device() -> Result<GpuContext, GpuError> {
         reduce_bond_forces: get("morse", "reduce_bond_forces")?,
         harmonic_angle_force: get("angle", "harmonic_angle_force")?,
         reduce_angle_forces: get("angle", "reduce_angle_forces")?,
+        kinetic_energy_reduce: get("nose_hoover", "kinetic_energy_reduce")?,
+        rescale_velocities: get("nose_hoover", "rescale_velocities")?,
         accumulate_forces: get("forces", "accumulate_forces")?,
         neighbor_displacement_squared: get("neighbor", "neighbor_displacement_squared")?,
         neighbor_list_build: get("neighbor", "neighbor_list_build")?,

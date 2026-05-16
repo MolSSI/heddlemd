@@ -321,6 +321,13 @@
     "title": "Spread is independent of particle order in the bin",
     "type": "scenario"
   },
+  "rq-07a18814": {
+    "decl": "Scenario: log_column_values returns the conserved Hamiltonian",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "log_column_values returns the conserved Hamiltonian",
+    "type": "scenario"
+  },
   "rq-07d003c4": {
     "decl": "- `AngleList` — host-side. Fields: `angles: Vec<Angle>`,",
     "file": "forces/topology",
@@ -386,6 +393,13 @@
     "refs": [],
     "title": "Two independent SPME runs on identical inputs produce byte-identical outputs",
     "type": "scenario"
+  },
+  "rq-09e04194": {
+    "decl": "- `rescale_velocities(buffers: &mut ParticleBuffers, factor: f32) -> Result<(), GpuError>`",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "rescale_velocities",
+    "type": "api-item"
   },
   "rq-0a8831b1": {
     "decl": "- `Bond` — `Debug, Clone, Copy`. Fields: `atom_i: u32`, `atom_j: u32`,",
@@ -874,6 +888,14 @@
     "title": "step() on empty state is a no-op",
     "type": "scenario"
   },
+  "rq-1727d6bd": {
+    "decl": "#### `kinetic_energy_reduce`",
+    "file": "integration/nose-hoover-chain",
+    "level": 4,
+    "refs": [],
+    "title": "`kinetic_energy_reduce`",
+    "type": "section"
+  },
   "rq-17666e4f": {
     "decl": "Scenario: Open fails when the parent directory does not exist",
     "file": "io/trajectory-output",
@@ -900,6 +922,13 @@
     "refs": [],
     "title": "Functions and methods",
     "type": "section"
+  },
+  "rq-17d3ddfe": {
+    "decl": "Scenario: log_column_names returns [\"nhc_conserved\"] for NHC",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "log_column_names returns [\"nhc_conserved\"] for NHC",
+    "type": "scenario"
   },
   "rq-17ed07e7": {
     "decl": "Scenario: Exclusion atom out of range",
@@ -1181,6 +1210,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Accept r_switch equal to cutoff (hard-cutoff degenerate case)",
+    "type": "scenario"
+  },
+  "rq-1dccc185": {
+    "decl": "Scenario: Nosé-Hoover chain accepts explicit chain parameters",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Nosé-Hoover chain accepts explicit chain parameters",
     "type": "scenario"
   },
   "rq-1ddf84f1": {
@@ -1618,6 +1654,13 @@
     "title": "Box-Muller transform",
     "type": "section"
   },
+  "rq-25e0208d": {
+    "decl": "Scenario: kinetic_energy_reduce of a single particle at v=0 is zero",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "kinetic_energy_reduce of a single particle at v=0 is zero",
+    "type": "scenario"
+  },
   "rq-25faef11": {
     "decl": "Scenario: Neighbor list applies minimum-image PBC",
     "file": "forces/neighbor-list",
@@ -1744,6 +1787,13 @@
     ],
     "title": "TrajectoryWriter",
     "type": "api-item"
+  },
+  "rq-28a224e3": {
+    "decl": "Scenario: Nosé-Hoover chain rejects yoshida_order outside {1, 3, 5, 7}",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Nosé-Hoover chain rejects yoshida_order outside {1, 3, 5, 7}",
+    "type": "scenario"
   },
   "rq-28d519b5": {
     "decl": "#### `[coulomb]` (optional table)",
@@ -2058,6 +2108,14 @@
     "refs": [],
     "title": "Trivial-mode state has no cell-list fields",
     "type": "scenario"
+  },
+  "rq-312906a6": {
+    "decl": "### MKT Liouville splitting",
+    "file": "integration/nose-hoover-chain",
+    "level": 3,
+    "refs": [],
+    "title": "MKT Liouville splitting",
+    "type": "section"
   },
   "rq-312e5f8e": {
     "decl": "### Kernel stages (CUDA-event timed)",
@@ -2406,6 +2464,13 @@
     "title": "Reject when explicit IDs have the wrong length",
     "type": "scenario"
   },
+  "rq-393a7932": {
+    "decl": "Scenario: rescale_velocities with factor=1.0 is the identity",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "rescale_velocities with factor=1.0 is the identity",
+    "type": "scenario"
+  },
   "rq-39881bb0": {
     "decl": "### Functions",
     "file": "io/config-schema",
@@ -2457,6 +2522,14 @@
     "title": "Scale = 1.0 is equivalent to no exclusion",
     "type": "scenario"
   },
+  "rq-3a56a657": {
+    "decl": "### Types",
+    "file": "integration/nose-hoover-chain",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-3adef71d": {
     "decl": "### Functions and methods",
     "file": "io/trajectory-output",
@@ -2497,6 +2570,13 @@
     ],
     "title": "SimulationBox",
     "type": "api-item"
+  },
+  "rq-3ba42667": {
+    "decl": "Scenario: Open with extra columns appends them to the header",
+    "file": "io/log-output",
+    "refs": [],
+    "title": "Open with extra columns appends them to the header",
+    "type": "scenario"
   },
   "rq-3bc18e1a": {
     "decl": "Scenario: Max cutoff is the largest reported by any consumer",
@@ -3048,6 +3128,13 @@
     "title": "NeighborListState with particle_count = 0 builds successfully",
     "type": "scenario"
   },
+  "rq-4bd6ff2b": {
+    "decl": "- `NoseHooverChainBuilder` — implements `IntegratorBuilder` with",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "NoseHooverChainBuilder",
+    "type": "api-item"
+  },
   "rq-4c245ce7": {
     "decl": "Scenario: Unknown section header",
     "file": "forces/topology",
@@ -3167,6 +3254,13 @@
     "title": "A wrapped error is reachable through source()",
     "type": "scenario"
   },
+  "rq-4f8f3ffb": {
+    "decl": "Scenario: Nosé-Hoover chain rejects velocity-Verlet / Langevin fields",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Nosé-Hoover chain rejects velocity-Verlet / Langevin fields",
+    "type": "scenario"
+  },
   "rq-4fd872f5": {
     "decl": "## Launch Configuration",
     "file": "forces/lj-pair-force",
@@ -3209,6 +3303,13 @@
     "refs": [],
     "title": "set_lattice rejects a non-finite tilt without mutating the box",
     "type": "scenario"
+  },
+  "rq-511f4606": {
+    "decl": "- `compute_kinetic_energy(buffers: &ParticleBuffers, scratch: &mut CudaSlice<f32>) -> Result<f32, GpuError>`",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "compute_kinetic_energy",
+    "type": "api-item"
   },
   "rq-514670c9": {
     "decl": "Scenario: Implicit 1-3 exclusion is added for an angle without explicit (i, k) entry",
@@ -3328,6 +3429,14 @@
     "title": "Performance Notes",
     "type": "section"
   },
+  "rq-550aebeb": {
+    "decl": "### Extra columns",
+    "file": "io/log-output",
+    "level": 3,
+    "refs": [],
+    "title": "Extra columns",
+    "type": "section"
+  },
   "rq-553f28a3": {
     "decl": "Scenario: KE of three particles is summed in particle order",
     "file": "io/log-output",
@@ -3441,6 +3550,13 @@
     "file": "io/init-state-file",
     "refs": [],
     "title": "Reject non-positive lattice diagonal",
+    "type": "scenario"
+  },
+  "rq-572a0431": {
+    "decl": "Scenario: init_device exposes the NHC kernels on the Kernels handle",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "init_device exposes the NHC kernels on the Kernels handle",
     "type": "scenario"
   },
   "rq-573b650b": {
@@ -3591,6 +3707,13 @@
     "title": "LosslessBuffers::new allocates six zero-initialised residual buffers",
     "type": "scenario"
   },
+  "rq-5c197a37": {
+    "decl": "Scenario: kinetic_energy_reduce is deterministic",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "kinetic_energy_reduce is deterministic",
+    "type": "scenario"
+  },
   "rq-5c1cfc93": {
     "decl": "- `RunSummary` fields:",
     "file": "simulation-runner",
@@ -3608,6 +3731,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "write_timings_file with an empty report writes only the header",
+    "type": "scenario"
+  },
+  "rq-5c799ac6": {
+    "decl": "Scenario: rescale_velocities does not modify positions, masses, or forces",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "rescale_velocities does not modify positions, masses, or forces",
     "type": "scenario"
   },
   "rq-5cb33196": {
@@ -3758,6 +3888,14 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-61528c78": {
+    "decl": "## Out of Scope",
+    "file": "integration/nose-hoover-chain",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-61606908": {
     "decl": "## Gherkin Scenarios",
     "file": "build-pipeline",
@@ -3809,6 +3947,13 @@
     "refs": [],
     "title": "morse_bond_force on zero bonds is a no-op",
     "type": "scenario"
+  },
+  "rq-62e2bef5": {
+    "decl": "- `NoseHooverChainState` — implements the `Integrator` trait declared",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "NoseHooverChainState",
+    "type": "api-item"
   },
   "rq-6340fae2": {
     "decl": "#### `[output]` (optional table; all fields have defaults)",
@@ -4101,6 +4246,13 @@
     "title": "Feature: Shared Neighbor List Service",
     "type": "file"
   },
+  "rq-6966fd4f": {
+    "decl": "Scenario: rescale_velocities multiplies every velocity component by the factor",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "rescale_velocities multiplies every velocity component by the factor",
+    "type": "scenario"
+  },
   "rq-696caf8e": {
     "decl": "Scenario: Two independent calls produce byte-identical accumulators",
     "file": "forces/morse-bonded",
@@ -4137,6 +4289,13 @@
     "title": "Determinism",
     "type": "section"
   },
+  "rq-6a4016ac": {
+    "decl": "Scenario: COM momentum is preserved under NHC velocity rescaling",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "COM momentum is preserved under NHC velocity rescaling",
+    "type": "scenario"
+  },
   "rq-6a542a0a": {
     "decl": "Scenario: from_config receives the default r_switch when the config omitted it",
     "file": "forces/lj-pair-force",
@@ -4172,6 +4331,14 @@
     "level": 2,
     "refs": [],
     "title": "Velocity-Verlet Loop",
+    "type": "section"
+  },
+  "rq-6bd0b42f": {
+    "decl": "## NHC conserved Hamiltonian",
+    "file": "integration/nose-hoover-chain",
+    "level": 2,
+    "refs": [],
+    "title": "NHC conserved Hamiltonian",
     "type": "section"
   },
   "rq-6bdfdd6d": {
@@ -4291,6 +4458,13 @@
     "title": "Path resolution and overwrite policy",
     "type": "section"
   },
+  "rq-6dc8454d": {
+    "decl": "Scenario: Reject yoshida_order outside {1, 3, 5, 7}",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "Reject yoshida_order outside {1, 3, 5, 7}",
+    "type": "scenario"
+  },
   "rq-6e11554f": {
     "decl": "## Rebuild Policy",
     "file": "forces/neighbor-list",
@@ -4361,6 +4535,20 @@
     "title": "images defaults to zero-initialised arrays when None is passed",
     "type": "scenario"
   },
+  "rq-6faf6fba": {
+    "decl": "Scenario: Two independent NHC runs with identical configs produce byte-identical outputs",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "Two independent NHC runs with identical configs produce byte-identical outputs",
+    "type": "scenario"
+  },
+  "rq-6fb70c93": {
+    "decl": "Scenario: At equilibrium, NHC drives the kinetic energy to (g/2) k_B T",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "At equilibrium, NHC drives the kinetic energy to (g/2) k_B T",
+    "type": "scenario"
+  },
   "rq-6fd5167a": {
     "decl": "Scenario: Configuration exceeding the u32 cell-addressing limit is rejected at construction",
     "file": "forces/neighbor-list",
@@ -4401,6 +4589,13 @@
     "title": "Two independent runs with identical inputs are byte-identical",
     "type": "scenario"
   },
+  "rq-70dc275e": {
+    "decl": "Scenario: Nosé-Hoover chain rejects non-positive tau",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Nosé-Hoover chain rejects non-positive tau",
+    "type": "scenario"
+  },
   "rq-70e9fd38": {
     "decl": "Scenario: A trajectory frame can be re-parsed by load_init_state",
     "file": "io/trajectory-output",
@@ -4421,6 +4616,14 @@
     "level": 2,
     "refs": [],
     "title": "Numerical Behaviour",
+    "type": "section"
+  },
+  "rq-71f469ae": {
+    "decl": "## Chain state",
+    "file": "integration/nose-hoover-chain",
+    "level": 2,
+    "refs": [],
+    "title": "Chain state",
     "type": "section"
   },
   "rq-71fbbafb": {
@@ -4544,6 +4747,13 @@
     "title": "Cadence",
     "type": "section"
   },
+  "rq-74e42489": {
+    "decl": "Scenario: kinetic_energy_reduce matches the host-side formula on small N",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "kinetic_energy_reduce matches the host-side formula on small N",
+    "type": "scenario"
+  },
   "rq-74e4bd02": {
     "decl": "Scenario: PairBuffer::new with particle_count = 0",
     "file": "pair-reduction",
@@ -4586,6 +4796,13 @@
     "refs": [],
     "title": "Test Fixture",
     "type": "section"
+  },
+  "rq-76069102": {
+    "decl": "Scenario: step() launches all expected kernel calls for default chain parameters",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "step() launches all expected kernel calls for default chain parameters",
+    "type": "scenario"
   },
   "rq-761f26c6": {
     "decl": "Scenario: Unknown top-level key is permitted",
@@ -4765,6 +4982,13 @@
     ],
     "title": "PairBuffer",
     "type": "api-item"
+  },
+  "rq-7909b92c": {
+    "decl": "Scenario: log_column_names returns empty for VelocityVerlet and Langevin",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "log_column_names returns empty for VelocityVerlet and Langevin",
+    "type": "scenario"
   },
   "rq-790c1f86": {
     "decl": "Scenario: Reject when type_indices has the wrong length",
@@ -5115,11 +5339,25 @@
     "title": "Reject row with infinite velocity",
     "type": "scenario"
   },
+  "rq-809834e7": {
+    "decl": "Scenario: Nosé-Hoover chain rejects n_resp = 0",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Nosé-Hoover chain rejects n_resp = 0",
+    "type": "scenario"
+  },
   "rq-80dcfa97": {
     "decl": "Scenario: Full exclusion (scale=0) zeros the LJ contribution for the excluded pair",
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Full exclusion (scale=0) zeros the LJ contribution for the excluded pair",
+    "type": "scenario"
+  },
+  "rq-811c598f": {
+    "decl": "Scenario: Reject chain_length = 0",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "Reject chain_length = 0",
     "type": "scenario"
   },
   "rq-81659783": {
@@ -5225,6 +5463,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "sorted_particle_ids sorts particles by (cell_index, particle_id)",
+    "type": "scenario"
+  },
+  "rq-83ab58a3": {
+    "decl": "Scenario: Nosé-Hoover chain missing tau is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Nosé-Hoover chain missing tau is rejected",
     "type": "scenario"
   },
   "rq-846bdb8b": {
@@ -5439,6 +5684,13 @@
     "title": "Reject a position whose fractional coordinate exceeds +0.5 in a triclinic box",
     "type": "scenario"
   },
+  "rq-8a571737": {
+    "decl": "- `log_column_names() -> &'static [\"nhc_conserved\"]`.",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "log_column_names",
+    "type": "api-item"
+  },
   "rq-8a9c44f8": {
     "decl": "- `Timings::new(device: Arc<CudaDevice>) -> Result<Timings, TimingsError>`",
     "file": "performance-analysis",
@@ -5457,6 +5709,21 @@
     "refs": [],
     "title": "The DriverError-to-TimingsError conversion is retained",
     "type": "scenario"
+  },
+  "rq-8afd1b7d": {
+    "decl": "Scenario: Construct with particle_count = 0",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "Construct with particle_count = 0",
+    "type": "scenario"
+  },
+  "rq-8b1827a9": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/nose-hoover-chain",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-8b4243e0": {
     "decl": "### Functions and methods",
@@ -5513,6 +5780,13 @@
     "file": "forces/harmonic-angle",
     "refs": [],
     "title": "reduce_angle_forces on zero particles is a no-op",
+    "type": "scenario"
+  },
+  "rq-8def4545": {
+    "decl": "Scenario: Nosé-Hoover chain missing temperature is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Nosé-Hoover chain missing temperature is rejected",
     "type": "scenario"
   },
   "rq-8df7fb0c": {
@@ -5765,6 +6039,13 @@
     "title": "Dependencies",
     "type": "section"
   },
+  "rq-93570a07": {
+    "decl": "Scenario: Construct with chain_length = 1 reduces to vanilla Nosé-Hoover",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "Construct with chain_length = 1 reduces to vanilla Nosé-Hoover",
+    "type": "scenario"
+  },
   "rq-93be622c": {
     "decl": "Scenario: Unknown attributes in the comment line are ignored",
     "file": "io/init-state-file",
@@ -5871,6 +6152,13 @@
     "title": "reduce_bond_forces on zero particles is a no-op",
     "type": "scenario"
   },
+  "rq-96f71d13": {
+    "decl": "Scenario: kinetic_energy_reduce on empty state returns 0.0 without launching",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "kinetic_energy_reduce on empty state returns 0.0 without launching",
+    "type": "scenario"
+  },
   "rq-96fadc6f": {
     "decl": "Scenario: Slot for a pair beyond cutoff is zero",
     "file": "forces/lj-pair-force",
@@ -5921,6 +6209,14 @@
     "refs": [],
     "title": "total_ms equals mean_us * count / 1000 within reporting precision",
     "type": "scenario"
+  },
+  "rq-98473586": {
+    "decl": "## Determinism",
+    "file": "integration/nose-hoover-chain",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
   },
   "rq-985230a5": {
     "decl": "Scenario: Loop executes exactly n_steps integration steps",
@@ -6373,6 +6669,13 @@
     "title": "neighbor_list_build",
     "type": "api-item"
   },
+  "rq-a16c37bd": {
+    "decl": "Scenario: Log file header includes nhc_conserved when NHC is the integrator",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "Log file header includes nhc_conserved when NHC is the integrator",
+    "type": "scenario"
+  },
   "rq-a199e0aa": {
     "decl": "Scenario: build.rs fails with a clear message when nvcc rejects the source",
     "file": "build-pipeline",
@@ -6401,6 +6704,14 @@
     "refs": [],
     "title": "wrap_position and minimum_image agree on the same input",
     "type": "scenario"
+  },
+  "rq-a20bd6f3": {
+    "decl": "#### `rescale_velocities`",
+    "file": "integration/nose-hoover-chain",
+    "level": 4,
+    "refs": [],
+    "title": "`rescale_velocities`",
+    "type": "section"
   },
   "rq-a2e20b02": {
     "decl": "- `ForceFieldError` — error type. Variants:",
@@ -6458,6 +6769,13 @@
     "title": "Accept the lower boundary -L/2 along an axis (orthorhombic)",
     "type": "scenario"
   },
+  "rq-a373aadd": {
+    "decl": "Scenario: Nosé-Hoover chain rejects non-positive temperature",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Nosé-Hoover chain rejects non-positive temperature",
+    "type": "scenario"
+  },
   "rq-a3a5905d": {
     "decl": "Scenario: Reject unknown pair potential",
     "file": "io/config-schema",
@@ -6501,6 +6819,14 @@
     "title": "AngleTypeConfig",
     "type": "api-item"
   },
+  "rq-a487d90c": {
+    "decl": "## Feature API",
+    "file": "integration/nose-hoover-chain",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-a4d5e711": {
     "decl": "- `SimulationBox::wrap_position_with_image_count(&self, position: [f32; 3]) -> ([f32; 3], [i32; 3])`",
     "file": "simulation-box",
@@ -6512,6 +6838,14 @@
     ],
     "title": "SimulationBox",
     "type": "api-item"
+  },
+  "rq-a4eb7957": {
+    "decl": "### CUDA Kernels",
+    "file": "integration/nose-hoover-chain",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernels",
+    "type": "section"
   },
   "rq-a5069572": {
     "decl": "- `IntegratorError` — error type returned by every integrator method.",
@@ -6786,6 +7120,13 @@
     "title": "vv_kick_lossless does not modify positions, forces, masses, or particle_ids",
     "type": "scenario"
   },
+  "rq-acb1bcd5": {
+    "decl": "Scenario: Nosé-Hoover chain rejects chain_length = 0",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Nosé-Hoover chain rejects chain_length = 0",
+    "type": "scenario"
+  },
   "rq-acbbd59a": {
     "decl": "Scenario: Disabled trajectory and log outputs are not checked, but timings is",
     "file": "simulation-runner",
@@ -6940,6 +7281,14 @@
     "refs": [],
     "title": "Timings file uses the default path derived from config stem",
     "type": "scenario"
+  },
+  "rq-aff3dafa": {
+    "decl": "## Launch Configuration",
+    "file": "integration/nose-hoover-chain",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
+    "type": "section"
   },
   "rq-b015ef15": {
     "decl": "### Accessors",
@@ -7115,6 +7464,21 @@
     "level": 3,
     "refs": [],
     "title": "Types",
+    "type": "section"
+  },
+  "rq-b43bf21c": {
+    "decl": "Scenario: Construct NoseHooverChainState with default chain parameters",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "Construct NoseHooverChainState with default chain parameters",
+    "type": "scenario"
+  },
+  "rq-b47589c9": {
+    "decl": "### `Integrator` trait extensions",
+    "file": "integration/nose-hoover-chain",
+    "level": 3,
+    "refs": [],
+    "title": "`Integrator` trait extensions",
     "type": "section"
   },
   "rq-b4bb7096": {
@@ -7390,6 +7754,13 @@
     "title": "LangevinBaoabState",
     "type": "api-item"
   },
+  "rq-bcbe7cf6": {
+    "decl": "Scenario: Write_row with mismatched extras length panics in debug builds",
+    "file": "io/log-output",
+    "refs": [],
+    "title": "Write_row with mismatched extras length panics in debug builds",
+    "type": "scenario"
+  },
   "rq-bd149f52": {
     "decl": "Scenario: Acceleration scales inversely with mass",
     "file": "integration/velocity-verlet",
@@ -7495,6 +7866,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-bef900e1": {
+    "decl": "Scenario: rescale_velocities on empty state is a no-op",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "rescale_velocities on empty state is a no-op",
+    "type": "scenario"
   },
   "rq-bf62f645": {
     "decl": "## Gherkin Scenarios",
@@ -7687,6 +8065,14 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-c465b5f4": {
+    "decl": "### PTX Module Loading",
+    "file": "integration/nose-hoover-chain",
+    "level": 3,
+    "refs": [],
+    "title": "PTX Module Loading",
+    "type": "section"
+  },
   "rq-c4845f90": {
     "decl": "- `Timings::finalize(&mut self) -> Result<TimingsReport, TimingsError>`",
     "file": "performance-analysis",
@@ -7710,6 +8096,14 @@
     ],
     "title": "NeighborListState",
     "type": "api-item"
+  },
+  "rq-c4a07fb3": {
+    "decl": "## Algorithm",
+    "file": "integration/nose-hoover-chain",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
   },
   "rq-c4d4608f": {
     "decl": "Scenario: Pair with Coulomb exclusion scale 0.0 contributes nothing",
@@ -7952,6 +8346,14 @@
     "title": "Feature: CUDA Build Pipeline and Smoke Test Kernel",
     "type": "file"
   },
+  "rq-cc34e758": {
+    "decl": "### Chain sub-step",
+    "file": "integration/nose-hoover-chain",
+    "level": 3,
+    "refs": [],
+    "title": "Chain sub-step",
+    "type": "section"
+  },
   "rq-cc4e9821": {
     "decl": "Scenario: Accept a lattice with negative tilts",
     "file": "io/init-state-file",
@@ -8104,6 +8506,14 @@
     "title": "Slots beyond neighbor_counts[i] are explicitly zeroed",
     "type": "scenario"
   },
+  "rq-d028bd1f": {
+    "decl": "### Rust Launch Helpers",
+    "file": "integration/nose-hoover-chain",
+    "level": 3,
+    "refs": [],
+    "title": "Rust Launch Helpers",
+    "type": "section"
+  },
   "rq-d065447f": {
     "decl": "Scenario: Run an empty (N=0) simulation",
     "file": "simulation-runner",
@@ -8117,6 +8527,14 @@
     "refs": [],
     "title": "Positions visibly evolve over the 100-step run",
     "type": "scenario"
+  },
+  "rq-d0cb986d": {
+    "decl": "### Chain masses",
+    "file": "integration/nose-hoover-chain",
+    "level": 3,
+    "refs": [],
+    "title": "Chain masses",
+    "type": "section"
   },
   "rq-d0f489d7": {
     "decl": "Scenario: Pair virial inside the switching window equals factor_switched * r²",
@@ -8313,6 +8731,13 @@
     "title": "Pair inside the switching interval is smoothed",
     "type": "scenario"
   },
+  "rq-d532de58": {
+    "decl": "Scenario: Reject non-positive tau",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "Reject non-positive tau",
+    "type": "scenario"
+  },
   "rq-d5a4f220": {
     "decl": "# Feature: Langevin BAOAB Integrator",
     "file": "integration/langevin-baoab",
@@ -8347,6 +8772,14 @@
     "level": 3,
     "refs": [],
     "title": "Rust Launcher",
+    "type": "section"
+  },
+  "rq-d6cf8e86": {
+    "decl": "## Parameters",
+    "file": "integration/nose-hoover-chain",
+    "level": 2,
+    "refs": [],
+    "title": "Parameters",
     "type": "section"
   },
   "rq-d6e10419": {
@@ -8428,6 +8861,13 @@
     "title": "fill kernel does not write beyond the buffer",
     "type": "scenario"
   },
+  "rq-d938350a": {
+    "decl": "Scenario: NHC conserved Hamiltonian drifts only by O(dt²) per step",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "NHC conserved Hamiltonian drifts only by O(dt²) per step",
+    "type": "scenario"
+  },
   "rq-d940ac6c": {
     "decl": "## Empty State",
     "file": "forces/harmonic-angle",
@@ -8456,6 +8896,13 @@
     "refs": [],
     "title": "Feature: Harmonic Angle Bonded Potential",
     "type": "file"
+  },
+  "rq-d9c38b9e": {
+    "decl": "Scenario: Construct Nosé-Hoover chain via the registry",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Construct Nosé-Hoover chain via the registry",
+    "type": "scenario"
   },
   "rq-dacb071c": {
     "decl": "Scenario: Generation mismatch with new box too small returns BoxTooSmallForCells",
@@ -8641,6 +9088,13 @@
     "title": "SPME slots present in the ForceField when [spme] is configured",
     "type": "scenario"
   },
+  "rq-dd6fe266": {
+    "decl": "Scenario: Reject n_resp = 0",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "Reject n_resp = 0",
+    "type": "scenario"
+  },
   "rq-dd829afb": {
     "decl": "Scenario: Bin-only cell list rebuilds every step regardless of particle displacement",
     "file": "forces/spme",
@@ -8689,6 +9143,13 @@
     "file": "build-pipeline",
     "refs": [],
     "title": "build.rs compiles a .cu file to PTX",
+    "type": "scenario"
+  },
+  "rq-ded81a4a": {
+    "decl": "Scenario: Log file header omits nhc_conserved when VV or Langevin is the integrator",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "Log file header omits nhc_conserved when VV or Langevin is the integrator",
     "type": "scenario"
   },
   "rq-df10e81f": {
@@ -8786,7 +9247,7 @@
     "type": "section"
   },
   "rq-e0ef1221": {
-    "decl": "- `LogWriter::open(path: &Path) -> Result<LogWriter, LogWriterError>`",
+    "decl": "- `LogWriter::open(path: &Path, extra_columns: &[&str]) -> Result<LogWriter, LogWriterError>`",
     "file": "io/log-output",
     "refs": [
       {
@@ -8950,7 +9411,7 @@
     "type": "scenario"
   },
   "rq-e409ce75": {
-    "decl": "- `LogWriter::write_row(&mut self, step: u64, time: f64, kinetic_energy: f64, temperature: f64) -> Result<(), LogWriterError>`",
+    "decl": "- `LogWriter::write_row(&mut self, step: u64, time: f64, kinetic_energy: f64, temperature: f64, extras: &[f64]) -> Result<(), LogWriterError>`",
     "file": "io/log-output",
     "refs": [
       {
@@ -9006,6 +9467,13 @@
     "title": "Unknown bond type name rejected",
     "type": "scenario"
   },
+  "rq-e49460ac": {
+    "decl": "Scenario: Write a row with extra columns",
+    "file": "io/log-output",
+    "refs": [],
+    "title": "Write a row with extra columns",
+    "type": "scenario"
+  },
   "rq-e4960f89": {
     "decl": "### Types",
     "file": "forces/framework",
@@ -9054,6 +9522,13 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Kernel does not write slots with k >= n",
+    "type": "scenario"
+  },
+  "rq-e5b63a73": {
+    "decl": "Scenario: Reject non-positive temperature",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "Reject non-positive temperature",
     "type": "scenario"
   },
   "rq-e5ba2e00": {
@@ -9169,6 +9644,13 @@
     "title": "Influence function",
     "type": "section"
   },
+  "rq-e7b7a451": {
+    "decl": "Scenario: Nosé-Hoover chain with all defaults accepted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Nosé-Hoover chain with all defaults accepted",
+    "type": "scenario"
+  },
   "rq-e7c05140": {
     "decl": "Scenario: Langevin-BAOAB kind rejects velocity-Verlet fields",
     "file": "io/config-schema",
@@ -9283,6 +9765,13 @@
     "file": "forces/topology",
     "refs": [],
     "title": "Explicit exclusion overrides the bond's implicit default",
+    "type": "scenario"
+  },
+  "rq-e9a5474f": {
+    "decl": "Scenario: step() on empty NHC state is a no-op",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "step() on empty NHC state is a no-op",
     "type": "scenario"
   },
   "rq-e9a67206": {
@@ -9780,6 +10269,14 @@
     "title": "nvcc invocation",
     "type": "section"
   },
+  "rq-f45cdfb6": {
+    "decl": "## Per-Step Kernel Sequence",
+    "file": "integration/nose-hoover-chain",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Step Kernel Sequence",
+    "type": "section"
+  },
   "rq-f4750851": {
     "decl": "### Field semantics",
     "file": "io/log-output",
@@ -9837,6 +10334,26 @@
     "refs": [],
     "title": "Write a frame for an empty state",
     "type": "scenario"
+  },
+  "rq-f606ff6f": {
+    "decl": "# Feature: Nosé-Hoover Chain (NHC) Thermostat Integrator",
+    "file": "integration/nose-hoover-chain",
+    "refs": [
+      {
+        "file": "src/gpu/device.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Nosé-Hoover Chain (NHC) Thermostat Integrator",
+    "type": "file"
   },
   "rq-f652bf7c": {
     "decl": "Scenario: Forces on the two members of a non-boundary pair are equal and opposite",
@@ -10013,6 +10530,13 @@
     "title": "Displacement check returns the maximum across all particles",
     "type": "scenario"
   },
+  "rq-f94f6bac": {
+    "decl": "- `log_column_values(ke, pe) -> vec![H']` where `H'` follows the",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "log_column_values",
+    "type": "api-item"
+  },
   "rq-f9a9c569": {
     "decl": "## Parameters",
     "file": "forces/coulomb-pair-force",
@@ -10126,6 +10650,14 @@
     "refs": [],
     "title": "Append frames in order",
     "type": "scenario"
+  },
+  "rq-fd90fab3": {
+    "decl": "## Empty State and degenerate cases",
+    "file": "integration/nose-hoover-chain",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State and degenerate cases",
+    "type": "section"
   },
   "rq-fdbb902d": {
     "decl": "## Timing Methodology",

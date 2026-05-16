@@ -139,6 +139,9 @@ required fields are rejected.
     `integration/velocity-verlet.md`.
   - `"langevin-baoab"` — stochastic NVT via the Leimkuhler-Matthews BAOAB
     splitting. See `integration/langevin-baoab.md`.
+  - `"nose-hoover-chain"` — deterministic NVT via the Nosé-Hoover
+    chain (Martyna-Klein-Tuckerman, 1992). See
+    `integration/nose-hoover-chain.md`.
 
 Fields accepted for `kind = "velocity-verlet"`:
 
@@ -154,6 +157,22 @@ Fields accepted for `kind = "langevin-baoab"`:
   strictly positive. Independent of `simulation.temperature`.
 - `seed: u64` — counter-based RNG seed. Required, independent of
   `simulation.seed`.
+
+Fields accepted for `kind = "nose-hoover-chain"`:
+
+- `temperature: f64` — bath temperature in kelvin. Required. Finite
+  and strictly positive. Independent of `simulation.temperature`.
+- `tau: f64` — thermostat coupling time in seconds. Required. Finite
+  and strictly positive. Typical values for liquid water are 50–100
+  fs.
+- `chain_length: u32` — number of chain elements `M`. Optional;
+  defaults to `3`. Must be `≥ 1`. `M = 1` reduces to vanilla
+  Nosé-Hoover.
+- `yoshida_order: u32` — Suzuki-Yoshida sub-step count per chain
+  half-step. Optional; defaults to `3`. Accepted values: `1`, `3`,
+  `5`, `7`.
+- `n_resp: u32` — chain RESP sub-cycle count. Optional; defaults to
+  `1`. Must be `≥ 1`.
 
 #### `[[particle_types]]` (array of tables) <!-- rq-78487f38 -->
 
@@ -487,6 +506,11 @@ Beyond per-field validation, the loader checks:
   - `VelocityVerlet { lossless: bool }` — selected by `kind = "velocity-verlet"`.
   - `LangevinBaoab { friction: f64, temperature: f64, seed: u64 }` —
     selected by `kind = "langevin-baoab"`.
+  - `NoseHooverChain { temperature: f64, tau: f64, chain_length: u32,
+    yoshida_order: u32, n_resp: u32 }` — selected by
+    `kind = "nose-hoover-chain"`. Optional fields are populated from
+    the corresponding TOML defaults (`chain_length = 3`,
+    `yoshida_order = 3`, `n_resp = 1`) when omitted.
 
   Variant-bearing parameters reflect the per-kind fields listed under the
   `[integrator]` section above.
@@ -892,6 +916,81 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Ok(config)
     And config.integrator matches IntegratorKind::VelocityVerlet { lossless: false }
+
+  # --- Nosé-Hoover chain ---
+
+  @rq-e7b7a451
+  Scenario: Nosé-Hoover chain with all defaults accepted
+    Given the Background config with [integrator] kind="nose-hoover-chain",
+      temperature=300.0, tau=1.0e-13
+    When load_config is called
+    Then it returns Ok(config)
+    And config.integrator matches IntegratorKind::NoseHooverChain {
+      temperature: 300.0, tau: 1.0e-13,
+      chain_length: 3, yoshida_order: 3, n_resp: 1 }
+
+  @rq-1dccc185
+  Scenario: Nosé-Hoover chain accepts explicit chain parameters
+    Given the Background config with [integrator] kind="nose-hoover-chain",
+      temperature=300.0, tau=1.0e-13, chain_length=5, yoshida_order=5, n_resp=2
+    When load_config is called
+    Then config.integrator matches IntegratorKind::NoseHooverChain {
+      temperature: 300.0, tau: 1.0e-13,
+      chain_length: 5, yoshida_order: 5, n_resp: 2 }
+
+  @rq-8def4545
+  Scenario: Nosé-Hoover chain missing temperature is rejected
+    Given the Background config with [integrator] kind="nose-hoover-chain", tau=1.0e-13
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.temperature" })
+
+  @rq-83ab58a3
+  Scenario: Nosé-Hoover chain missing tau is rejected
+    Given the Background config with [integrator] kind="nose-hoover-chain", temperature=300.0
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.tau" })
+
+  @rq-a373aadd
+  Scenario: Nosé-Hoover chain rejects non-positive temperature
+    Given the Background config with [integrator] kind="nose-hoover-chain",
+      temperature=0.0, tau=1.0e-13
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.temperature", reason: _ })
+
+  @rq-70dc275e
+  Scenario: Nosé-Hoover chain rejects non-positive tau
+    Given the Background config with [integrator] kind="nose-hoover-chain",
+      temperature=300.0, tau=-1.0e-13
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.tau", reason: _ })
+
+  @rq-acb1bcd5
+  Scenario: Nosé-Hoover chain rejects chain_length = 0
+    Given the Background config with [integrator] kind="nose-hoover-chain",
+      temperature=300.0, tau=1.0e-13, chain_length=0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.chain_length", reason: _ })
+
+  @rq-28a224e3
+  Scenario: Nosé-Hoover chain rejects yoshida_order outside {1, 3, 5, 7}
+    Given the Background config with [integrator] kind="nose-hoover-chain",
+      temperature=300.0, tau=1.0e-13, yoshida_order=2
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.yoshida_order", reason: _ })
+
+  @rq-809834e7
+  Scenario: Nosé-Hoover chain rejects n_resp = 0
+    Given the Background config with [integrator] kind="nose-hoover-chain",
+      temperature=300.0, tau=1.0e-13, n_resp=0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.n_resp", reason: _ })
+
+  @rq-4f8f3ffb
+  Scenario: Nosé-Hoover chain rejects velocity-Verlet / Langevin fields
+    Given the Background config with [integrator] kind="nose-hoover-chain",
+      temperature=300.0, tau=1.0e-13, friction=1.0e12 (extra field)
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownIntegratorField { kind: "nose-hoover-chain", field: "friction" })
 
   @rq-1e1c5f3b
   Scenario: Missing [[particle_types]] is rejected

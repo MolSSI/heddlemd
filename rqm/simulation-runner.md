@@ -128,7 +128,10 @@ message.
     manipulates the `PairBuffer`, neighbor-counts, or Lennard-Jones
     parameter struct directly.
 13. **Open output writers.** Open `TrajectoryWriter` and/or `LogWriter`
-    depending on the `_every` settings. Failure → exit 1.
+    depending on the `_every` settings. The `LogWriter` is opened with
+    the extra-column slice returned by
+    `integrator.log_column_names()`; the runner caches that slice for
+    the duration of the run. Failure → exit 1.
 14. **Warm up forces.** Call `force_field.step(&mut buffers, &sim_box,
     &mut timings)` once to populate `forces_*` with `F(x_0)`. This is
     the same warm-up pattern used in `pipeline-reproducibility.md`.
@@ -137,7 +140,11 @@ message.
     output is enabled, download `velocities_*` and `masses` (the
     `masses` download is cached for the remainder of the run), compute
     KE and T via `compute_kinetic_energy` and `compute_temperature`
-    (`log-output.md`), and call `write_row(0, 0.0, ke, t)`.
+    (`log-output.md`); if the cached extra-column slice is non-empty,
+    additionally download `potential_energies` and sum it on the host
+    to obtain the total PE in joules, then call
+    `integrator.log_column_values(ke, pe)`. Call
+    `write_row(0, 0.0, ke, t, &extras)`.
 16. **Timestep loop.** For each step `s` in `1 ..= n_steps`:
     a. `integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt, &mut timings)`
        — runs the integrator's full sub-step sequence (kicks, drifts,
@@ -151,8 +158,11 @@ message.
        download positions (and velocities when configured) and call
        `write_frame(step=s, ...)`.
     c. If log output is enabled and `s % log_every == 0`, download
-       velocities, compute KE and T, and call `write_row(s, s as f64 * dt,
-       ke, t)`.
+       velocities, compute KE and T; when the cached extra-column
+       slice is non-empty, additionally download `potential_energies`,
+       sum it on the host to obtain the total PE, and call
+       `integrator.log_column_values(ke, pe)`. Call
+       `write_row(s, s as f64 * dt, ke, t, &extras)`.
     d. Possibly emit a progress line (see *Progress reporting*).
 17. **Flush and close.** Call `flush()` on each open writer. The writers'
     `Drop` impls are best-effort but the runner calls `flush` explicitly

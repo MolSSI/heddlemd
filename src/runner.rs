@@ -337,9 +337,10 @@ fn run_simulation_with_phase(
     } else {
         None
     };
+    let log_extra_columns: &'static [&'static str] = integrator.log_column_names();
     let mut log_writer: Option<LogWriter> = if config.output.log_every > 0 {
         Some(
-            LogWriter::open(&config.output.log_path)
+            LogWriter::open(&config.output.log_path, log_extra_columns)
                 .map_err(|e| (RunnerError::Log(e), ExitPhase::Setup))?,
         )
     } else {
@@ -384,8 +385,16 @@ fn run_simulation_with_phase(
             &frame.velocities_z,
         );
         let t = compute_temperature(ke, n);
+        let extras = if log_extra_columns.is_empty() {
+            Vec::new()
+        } else {
+            let pe = compute_total_potential_energy(&buffers).map_err(|g| {
+                (RunnerError::Gpu(g), ExitPhase::Setup)
+            })?;
+            integrator.log_column_values(ke, pe)
+        };
         let mut lw = Duration::ZERO;
-        timed(&mut lw, || writer.write_row(0, 0.0, ke, t))
+        timed(&mut lw, || writer.write_row(0, 0.0, ke, t, &extras))
             .map_err(|e| (RunnerError::Log(e), ExitPhase::Setup))?;
         timings.record_host(HostStage::LOG_WRITE, lw);
         log_rows_written += 1;
@@ -439,8 +448,15 @@ fn run_simulation_with_phase(
             );
             let t = compute_temperature(ke, n);
             let time = (step as f64) * config.simulation.dt;
+            let extras = if log_extra_columns.is_empty() {
+                Vec::new()
+            } else {
+                let pe = compute_total_potential_energy(&buffers)
+                    .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Loop))?;
+                integrator.log_column_values(ke, pe)
+            };
             let mut lw = Duration::ZERO;
-            timed(&mut lw, || writer.write_row(step, time, ke, t))
+            timed(&mut lw, || writer.write_row(step, time, ke, t, &extras))
                 .map_err(|e| (RunnerError::Log(e), ExitPhase::Loop))?;
             timings.record_host(HostStage::LOG_WRITE, lw);
             log_rows_written += 1;
@@ -486,6 +502,28 @@ fn run_simulation_with_phase(
         log_rows_written,
         elapsed_micros,
     })
+}
+
+// Download the per-particle potential-energy buffer and sum it host-side
+// in particle-index order so the result is bit-reproducible across runs.
+// Called only when an integrator declares a diagnostic column that needs
+// total PE (currently the Nosé-Hoover chain's `nhc_conserved`).
+fn compute_total_potential_energy(
+    buffers: &ParticleBuffers,
+) -> Result<f64, crate::gpu::GpuError> {
+    let n = buffers.particle_count();
+    if n == 0 {
+        return Ok(0.0);
+    }
+    let host: Vec<f32> = buffers
+        .device
+        .dtoh_sync_copy(&buffers.potential_energies)
+        .map_err(crate::gpu::GpuError::from)?;
+    let mut sum = 0.0_f64;
+    for v in &host[..n] {
+        sum += *v as f64;
+    }
+    Ok(sum)
 }
 
 fn write_traj_frame(

@@ -9,6 +9,7 @@ pub const BOLTZMANN_J_PER_K: f64 = 1.380649e-23;
 // rq-2344fcec
 pub struct LogWriter {
     writer: BufWriter<File>,
+    extras_count: usize,
 }
 
 impl std::fmt::Debug for LogWriter {
@@ -28,14 +29,22 @@ pub enum LogWriterError {
 
 impl LogWriter {
     // rq-e0ef1221 rq-8b4243e0
-    pub fn open(path: &Path) -> Result<Self, LogWriterError> {
+    pub fn open(path: &Path, extra_columns: &[&str]) -> Result<Self, LogWriterError> {
         match OpenOptions::new().write(true).create_new(true).open(path) {
             Ok(file) => {
                 let mut writer = BufWriter::new(file);
                 writer
-                    .write_all(b"step,time,kinetic_energy,temperature\n")
+                    .write_all(b"step,time,kinetic_energy,temperature")
                     .map_err(io_err)?;
-                Ok(LogWriter { writer })
+                for col in extra_columns {
+                    writer.write_all(b",").map_err(io_err)?;
+                    writer.write_all(col.as_bytes()).map_err(io_err)?;
+                }
+                writer.write_all(b"\n").map_err(io_err)?;
+                Ok(LogWriter {
+                    writer,
+                    extras_count: extra_columns.len(),
+                })
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                 Err(LogWriterError::OutputExists {
@@ -53,12 +62,22 @@ impl LogWriter {
         time: f64,
         kinetic_energy: f64,
         temperature: f64,
+        extras: &[f64],
     ) -> Result<(), LogWriterError> {
-        writeln!(
+        debug_assert_eq!(
+            extras.len(),
+            self.extras_count,
+            "extras length does not match the count declared at open()",
+        );
+        write!(
             self.writer,
             "{step},{time:.9e},{kinetic_energy:.9e},{temperature:.9e}"
         )
-        .map_err(io_err)
+        .map_err(io_err)?;
+        for v in extras {
+            write!(self.writer, ",{v:.9e}").map_err(io_err)?;
+        }
+        writeln!(self.writer).map_err(io_err)
     }
 
     // rq-925e5583

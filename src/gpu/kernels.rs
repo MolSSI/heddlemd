@@ -817,6 +817,79 @@ pub fn reduce_angle_forces(
     Ok(())
 }
 
+// Launch helper for the NHC kinetic-energy reduction. Single-block,
+// 256 threads. Output goes to a length-1 device buffer the caller owns
+// (typically reused across calls to avoid per-step allocation). The
+// helper synchronously downloads the value and returns it as f32.
+// rq-f606ff6f
+pub fn compute_kinetic_energy(
+    particle_buffers: &ParticleBuffers,
+    scratch: &mut CudaSlice<f32>,
+) -> Result<f32, GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(0.0_f32);
+    }
+    debug_assert_eq!(scratch.len(), 1);
+    let n_u32 = n as u32;
+    let func = particle_buffers.kernels.kinetic_energy_reduce.clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0, // shared array is __shared__ static, not dynamic
+    };
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.velocities_x,
+                &particle_buffers.velocities_y,
+                &particle_buffers.velocities_z,
+                &particle_buffers.masses,
+                &mut *scratch,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    let mut out = [0.0_f32; 1];
+    particle_buffers
+        .device
+        .dtoh_sync_copy_into(scratch, &mut out)
+        .map_err(GpuError::from)?;
+    Ok(out[0])
+}
+
+// Uniform per-particle velocity rescale. Block size 256, grid
+// ceil(n / 256). When n == 0 returns Ok(()) without launching.
+// rq-f606ff6f
+pub fn rescale_velocities(
+    particle_buffers: &mut ParticleBuffers,
+    factor: f32,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let n_u32 = n as u32;
+    let func = particle_buffers.kernels.rescale_velocities.clone();
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut particle_buffers.velocities_x,
+                &mut particle_buffers.velocities_y,
+                &mut particle_buffers.velocities_z,
+                factor,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 // rq-c0f98145
 #[allow(clippy::too_many_arguments)]
 pub fn accumulate_forces(

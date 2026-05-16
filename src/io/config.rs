@@ -116,6 +116,13 @@ pub enum IntegratorKind {
         temperature: f64,
         seed: u64,
     },
+    NoseHooverChain {
+        temperature: f64,
+        tau: f64,
+        chain_length: u32,
+        yoshida_order: u32,
+        n_resp: u32,
+    },
 }
 
 impl IntegratorKind {
@@ -125,6 +132,7 @@ impl IntegratorKind {
         match self {
             IntegratorKind::VelocityVerlet { .. } => "velocity-verlet",
             IntegratorKind::LangevinBaoab { .. } => "langevin-baoab",
+            IntegratorKind::NoseHooverChain { .. } => "nose-hoover-chain",
         }
     }
 }
@@ -426,6 +434,82 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
                 friction,
                 temperature,
                 seed,
+            }
+        }
+        "nose-hoover-chain" => {
+            for key in integ_tbl.keys() {
+                if !matches!(
+                    key.as_str(),
+                    "kind"
+                        | "temperature"
+                        | "tau"
+                        | "chain_length"
+                        | "yoshida_order"
+                        | "n_resp"
+                ) {
+                    return Err(ConfigError::UnknownIntegratorField {
+                        kind: "nose-hoover-chain".to_string(),
+                        field: key.clone(),
+                    });
+                }
+            }
+            let temperature = get_f64(integ_tbl, "temperature")
+                .map_err(rename_field("integrator.temperature".into()))?;
+            require_finite_positive("integrator.temperature", temperature)?;
+            let tau = get_f64(integ_tbl, "tau")
+                .map_err(rename_field("integrator.tau".into()))?;
+            require_finite_positive("integrator.tau", tau)?;
+            let chain_length = match integ_tbl.get("chain_length") {
+                Some(toml::Value::Integer(v)) if *v >= 1 => *v as u32,
+                Some(toml::Value::Integer(_)) => {
+                    return Err(invalid(
+                        "integrator.chain_length",
+                        "chain_length must be a positive integer",
+                    ));
+                }
+                Some(_) => {
+                    return Err(invalid(
+                        "integrator.chain_length",
+                        "expected an integer",
+                    ));
+                }
+                None => 3,
+            };
+            let yoshida_order = match integ_tbl.get("yoshida_order") {
+                Some(toml::Value::Integer(v)) if matches!(*v, 1 | 3 | 5 | 7) => *v as u32,
+                Some(toml::Value::Integer(_)) => {
+                    return Err(invalid(
+                        "integrator.yoshida_order",
+                        "yoshida_order must be one of 1, 3, 5, 7",
+                    ));
+                }
+                Some(_) => {
+                    return Err(invalid(
+                        "integrator.yoshida_order",
+                        "expected an integer",
+                    ));
+                }
+                None => 3,
+            };
+            let n_resp = match integ_tbl.get("n_resp") {
+                Some(toml::Value::Integer(v)) if *v >= 1 => *v as u32,
+                Some(toml::Value::Integer(_)) => {
+                    return Err(invalid(
+                        "integrator.n_resp",
+                        "n_resp must be a positive integer",
+                    ));
+                }
+                Some(_) => {
+                    return Err(invalid("integrator.n_resp", "expected an integer"));
+                }
+                None => 1,
+            };
+            IntegratorKind::NoseHooverChain {
+                temperature,
+                tau,
+                chain_length,
+                yoshida_order,
+                n_resp,
             }
         }
         other => {

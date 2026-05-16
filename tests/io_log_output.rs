@@ -29,7 +29,7 @@ fn read(path: &Path) -> String {
 fn open_creates_log_with_header() {
     let dir = tmp_path("open_header");
     let path = dir.join("run.log");
-    let mut writer = LogWriter::open(&path).unwrap();
+    let mut writer = LogWriter::open(&path, &[]).unwrap();
     writer.flush().unwrap();
     drop(writer);
     let body = read(&path);
@@ -42,7 +42,7 @@ fn open_refuses_existing_log() {
     let dir = tmp_path("refuse_existing");
     let path = dir.join("run.log");
     std::fs::write(&path, "preexisting").unwrap();
-    match LogWriter::open(&path).unwrap_err() {
+    match LogWriter::open(&path, &[]).unwrap_err() {
         LogWriterError::OutputExists { path: p } => assert_eq!(p, path),
         other => panic!("unexpected: {other:?}"),
     }
@@ -54,7 +54,7 @@ fn open_refuses_existing_log() {
 fn open_fails_missing_parent() {
     let dir = tmp_path("missing_parent");
     let path = dir.join("missing").join("run.log");
-    match LogWriter::open(&path).unwrap_err() {
+    match LogWriter::open(&path, &[]).unwrap_err() {
         LogWriterError::Io(_) => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -65,8 +65,8 @@ fn open_fails_missing_parent() {
 fn write_single_row_step_zero() {
     let dir = tmp_path("row_step_zero");
     let path = dir.join("run.log");
-    let mut writer = LogWriter::open(&path).unwrap();
-    writer.write_row(0, 0.0, 0.0, 300.0).unwrap();
+    let mut writer = LogWriter::open(&path, &[]).unwrap();
+    writer.write_row(0, 0.0, 0.0, 300.0, &[]).unwrap();
     writer.flush().unwrap();
     let body = read(&path);
     let expected = format!(
@@ -83,10 +83,9 @@ fn write_single_row_step_zero() {
 fn write_row_non_trivial_values() {
     let dir = tmp_path("row_nontrivial");
     let path = dir.join("run.log");
-    let mut writer = LogWriter::open(&path).unwrap();
+    let mut writer = LogWriter::open(&path, &[]).unwrap();
     writer
-        .write_row(100, 1.0e-13, 4.123456789e-21, 298.7654321)
-        .unwrap();
+        .write_row(100, 1.0e-13, 4.123456789e-21, 298.7654321, &[]).unwrap();
     writer.flush().unwrap();
     let body = read(&path);
     let last = body.lines().last().unwrap();
@@ -104,10 +103,10 @@ fn write_row_non_trivial_values() {
 fn append_rows_in_order() {
     let dir = tmp_path("append_rows");
     let path = dir.join("run.log");
-    let mut writer = LogWriter::open(&path).unwrap();
-    writer.write_row(0, 0.0, 0.0, 0.0).unwrap();
-    writer.write_row(100, 1.0e-13, 1.0, 100.0).unwrap();
-    writer.write_row(200, 2.0e-13, 2.0, 200.0).unwrap();
+    let mut writer = LogWriter::open(&path, &[]).unwrap();
+    writer.write_row(0, 0.0, 0.0, 0.0, &[]).unwrap();
+    writer.write_row(100, 1.0e-13, 1.0, 100.0, &[]).unwrap();
+    writer.write_row(200, 2.0e-13, 2.0, 200.0, &[]).unwrap();
     writer.flush().unwrap();
     let body = read(&path);
     let lines: Vec<&str> = body.lines().collect();
@@ -183,8 +182,8 @@ fn temperature_uses_codata_kb() {
 fn log_header_plus_step_zero_only() {
     let dir = tmp_path("step_zero_only");
     let path = dir.join("run.log");
-    let mut writer = LogWriter::open(&path).unwrap();
-    writer.write_row(0, 0.0, 0.0, 0.0).unwrap();
+    let mut writer = LogWriter::open(&path, &[]).unwrap();
+    writer.write_row(0, 0.0, 0.0, 0.0, &[]).unwrap();
     writer.flush().unwrap();
     let body = read(&path);
     assert_eq!(body.lines().count(), 2);
@@ -195,7 +194,7 @@ fn log_header_plus_step_zero_only() {
 fn log_flush_idempotent() {
     let dir = tmp_path("flush_idem");
     let path = dir.join("run.log");
-    let mut writer = LogWriter::open(&path).unwrap();
+    let mut writer = LogWriter::open(&path, &[]).unwrap();
     writer.flush().unwrap();
     writer.flush().unwrap();
 }
@@ -206,8 +205,8 @@ fn drop_flushes_log() {
     let dir = tmp_path("drop_flush");
     let path = dir.join("run.log");
     {
-        let mut writer = LogWriter::open(&path).unwrap();
-        writer.write_row(0, 0.0, 0.0, 0.0).unwrap();
+        let mut writer = LogWriter::open(&path, &[]).unwrap();
+        writer.write_row(0, 0.0, 0.0, 0.0, &[]).unwrap();
     }
     let body = read(&path);
     assert!(body.contains("step,time,"));

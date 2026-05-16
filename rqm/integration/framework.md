@@ -17,12 +17,13 @@ name.
 
 ## Slots <!-- rq-10c79bb0 -->
 
-The default registry exposes two integrators:
+The default registry exposes three integrators:
 
-| `kind` value      | Implementation                       | File                  |
-| ----------------- | ------------------------------------ | --------------------- |
-| `velocity-verlet` | symplectic NVE (lossy or lossless)   | `velocity-verlet.md`  |
-| `langevin-baoab`  | stochastic NVT via BAOAB splitting   | `langevin-baoab.md`   |
+| `kind` value         | Implementation                          | File                     |
+| -------------------- | --------------------------------------- | ------------------------ |
+| `velocity-verlet`    | symplectic NVE (lossy or lossless)      | `velocity-verlet.md`     |
+| `langevin-baoab`     | stochastic NVT via BAOAB splitting      | `langevin-baoab.md`      |
+| `nose-hoover-chain`  | deterministic NVT via Nosé-Hoover chain | `nose-hoover-chain.md`   |
 
 Each implementation's per-step kernels, parameter set, and timings
 stages are documented in its own requirements file.
@@ -98,6 +99,24 @@ may have zero-length device slices but must construct successfully.
           dt: f32,
           timings: &mut Timings,
       ) -> Result<(), IntegratorError>;
+
+      /// Diagnostic column names this integrator wants the runner to
+      /// include in the CSV log (`io/log-output.md`). Returned slice
+      /// has `'static` lifetime so the runner can pass it to
+      /// `LogWriter::open` without copying. Default: empty.
+      fn log_column_names(&self) -> &'static [&'static str] { &[] }
+
+      /// Current values of those columns. The runner supplies the
+      /// total kinetic and potential energies it has just computed
+      /// for the log row (in joules); the integrator combines them
+      /// with its own state to produce the requested values. The
+      /// returned `Vec` must have the same length as
+      /// `log_column_names()`. Default: empty.
+      fn log_column_values(
+          &self,
+          kinetic_energy: f64,
+          potential_energy: f64,
+      ) -> Vec<f64> { Vec::new() }
   }
   ```
 
@@ -112,6 +131,16 @@ may have zero-length device slices but must construct successfully.
     the post-step positions (so the next `step()` can begin with a
     half-kick that reads `F(t)`).
   - Returns `Ok(())` immediately when `buffers.particle_count() == 0`.
+  - `log_column_names()` is queried once per run, at runner setup
+    time, immediately after the integrator is constructed. The
+    returned slice is concatenated with the runner's fixed log
+    columns (`step,time,kinetic_energy,temperature`) to form the log
+    header. The runner caches the slice for the run's duration.
+  - `log_column_values()` is queried once per log-write step, after
+    the runner has computed `kinetic_energy` and `potential_energy`
+    on the host. Integrators that need additional buffer state
+    (positions, velocities, etc.) maintain it on their own state
+    during `step()` (see `nose-hoover-chain.md` for an example).
 
 - `IntegratorKind` — `enum` carrying the parsed config-level selection <!-- rq-686b0d37 -->
   and per-kind parameters. Lives alongside the rest of the config
@@ -121,6 +150,13 @@ may have zero-length device slices but must construct successfully.
   pub enum IntegratorKind {
       VelocityVerlet { lossless: bool },
       LangevinBaoab { friction: f64, temperature: f64, seed: u64 },
+      NoseHooverChain {
+          temperature: f64,
+          tau: f64,
+          chain_length: u32,
+          yoshida_order: u32,
+          n_resp: u32,
+      },
   }
   ```
 
@@ -132,9 +168,9 @@ may have zero-length device slices but must construct successfully.
 
   `IntegratorKind::name(&self) -> &'static str` returns the same
   string the registry uses as the lookup key (`"velocity-verlet"` for
-  `VelocityVerlet`, `"langevin-baoab"` for `LangevinBaoab`). This is
-  the bridge between the closed config-level enum and the open
-  registry.
+  `VelocityVerlet`, `"langevin-baoab"` for `LangevinBaoab`,
+  `"nose-hoover-chain"` for `NoseHooverChain`). This is the bridge
+  between the closed config-level enum and the open registry.
 
 - `IntegratorBuilder` — trait describing a registered integrator. <!-- rq-87fdd9b1 -->
   Implementations are stateless and self-register at construction
@@ -164,8 +200,8 @@ may have zero-length device slices but must construct successfully.
 
   Methods:
   - `IntegratorRegistry::with_builtins() -> IntegratorRegistry` —
-    constructs a registry pre-populated with `velocity-verlet` and
-    `langevin-baoab` builders.
+    constructs a registry pre-populated with `velocity-verlet`,
+    `langevin-baoab`, and `nose-hoover-chain` builders.
   - `IntegratorRegistry::register(&mut self, builder: Box<dyn
     IntegratorBuilder>)` — appends a builder. Two builders sharing
     the same `kind_name()` are not detected at registration; the
@@ -202,6 +238,13 @@ may have zero-length device slices but must construct successfully.
       constructs a `LangevinBaoabState` that captures the friction,
       temperature, and seed (no per-particle state allocations; Philox
       is counter-based — see `langevin-baoab.md`).
+    - For `NoseHooverChain { temperature, tau, chain_length,
+      yoshida_order, n_resp }`, the builder constructs a
+      `NoseHooverChainState` that precomputes the chain masses and the
+      Suzuki-Yoshida weight table, allocates a length-1 device scratch
+      buffer for the kinetic-energy reduction, and initialises the
+      chain positions and momenta to zero (see
+      `nose-hoover-chain.md`).
   - A `particle_count` of zero is permitted: any per-particle device
     allocations have length zero.
 
@@ -287,6 +330,15 @@ Feature: Pluggable integrator framework
   Scenario: Construct Langevin BAOAB via the registry
     Given an IntegratorRegistry::with_builtins()
     And an IntegratorKind::LangevinBaoab { friction: 1.0e12, temperature: 300.0, seed: 42 }
+    When registry.build(&kind, device, particle_count=4) is called
+    Then it returns Ok(integrator)
+
+  @rq-d9c38b9e
+  Scenario: Construct Nosé-Hoover chain via the registry
+    Given an IntegratorRegistry::with_builtins()
+    And an IntegratorKind::NoseHooverChain {
+      temperature: 300.0, tau: 1.0e-13,
+      chain_length: 3, yoshida_order: 3, n_resp: 1 }
     When registry.build(&kind, device, particle_count=4) is called
     Then it returns Ok(integrator)
 
