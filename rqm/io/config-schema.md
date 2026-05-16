@@ -163,6 +163,11 @@ chosen `kind` are rejected, and missing required fields are rejected.
     BAOAB splitting. Owns its own thermostat (the OU step);
     incompatible with `[thermostat]`. See
     `integration/langevin-baoab.md`.
+  - `"mtk-npt"` — deterministic extended-system NPT via the
+    Martyna-Tobias-Klein integrator (isotropic). Owns both its
+    thermostat (Nosé-Hoover chains on particles and cell) and its
+    barostat (extended-system cell); incompatible with both
+    `[thermostat]` and `[barostat]`. See `integration/mtk-npt.md`.
 
 Fields accepted for `kind = "velocity-verlet"`:
 
@@ -178,6 +183,26 @@ Fields accepted for `kind = "langevin-baoab"`:
   strictly positive. Independent of `simulation.temperature`.
 - `seed: u64` — counter-based RNG seed. Required, independent of
   `simulation.seed`.
+
+Fields accepted for `kind = "mtk-npt"`:
+
+- `temperature: f64` — bath temperature `T` in kelvin. Required.
+  Finite and strictly positive. Independent of
+  `simulation.temperature`.
+- `pressure: f64` — target pressure `P_ext` in pascals (Pa).
+  Required. Finite. May be any sign or zero.
+- `tau_t: f64` — thermostat coupling time in seconds. Required.
+  Finite and strictly positive. Controls both the particle-chain
+  and cell-chain masses.
+- `tau_p: f64` — barostat coupling time in seconds. Required.
+  Finite and strictly positive. Controls the cell mass `W`.
+- `chain_length: u32` — length `M` of both the particle and cell
+  thermostat chains. Optional; defaults to `3`. Must be `≥ 1`.
+- `yoshida_order: u32` — Suzuki-Yoshida sub-step count per chain
+  half-step (shared by both chains). Optional; defaults to `3`.
+  Accepted values: `1`, `3`, `5`, `7`.
+- `n_resp: u32` — chain RESP sub-cycle count (shared by both
+  chains). Optional; defaults to `1`. Must be `≥ 1`.
 
 #### `[thermostat]` (optional) <!-- rq-1c2d8eba -->
 
@@ -597,8 +622,11 @@ Beyond per-field validation, the loader checks:
    The set of paths under check is `init`, `output.trajectory_path`,
    `output.log_path`, `output.timings_path`, and (when supplied) `topology`.
 4. If `[thermostat]` is present and `config.integrator.owns_thermostat()`
-   returns `true` (currently only `langevin-baoab`), the loader returns
+   returns `true` (`langevin-baoab` and `mtk-npt`), the loader returns
    `IncompatibleThermostat { integrator: <integrator kind name> }`.
+5. If `[barostat]` is present and `config.integrator.owns_barostat()`
+   returns `true` (currently only `mtk-npt`), the loader returns
+   `IncompatibleBarostat { integrator: <integrator kind name> }`.
 
 ## Feature API <!-- rq-110285ae -->
 
@@ -650,20 +678,32 @@ Beyond per-field validation, the loader checks:
 - `IntegratorKind` — tagged enum carrying the chosen integrator slot <!-- rq-661bf664 -->
   and its parameters. Variants:
   - `VelocityVerlet { lossless: bool }` — selected by
-    `kind = "velocity-verlet"`. Does not own its own thermostat.
+    `kind = "velocity-verlet"`. Does not own its own thermostat or
+    its own barostat.
   - `LangevinBaoab { friction: f64, temperature: f64, seed: u64 }` —
     selected by `kind = "langevin-baoab"`. Owns its own thermostat
-    (the OU step).
+    (the OU step); does not own its own barostat.
+  - `MtkNpt { temperature: f64, pressure: f64, tau_t: f64, tau_p: f64,
+    chain_length: u32, yoshida_order: u32, n_resp: u32 }` — selected
+    by `kind = "mtk-npt"`. Owns both its own thermostat (the
+    Nosé-Hoover chains on particles and cell) and its own barostat
+    (the extended-system cell). Optional fields are populated from
+    the corresponding TOML defaults (`chain_length = 3`,
+    `yoshida_order = 3`, `n_resp = 1`) when omitted.
 
   Variant-bearing parameters reflect the per-kind fields listed under
   the `[integrator]` section above.
 
-  Method:
+  Methods:
 
   - `IntegratorKind::owns_thermostat(&self) -> bool` — returns `true`
-    for variants that bundle their own thermostat (currently only
-    `LangevinBaoab`); `false` otherwise. Consulted by
-    cross-validation rule 4.
+    for variants that bundle their own thermostat (`LangevinBaoab`
+    and `MtkNpt`); `false` otherwise. Consulted by cross-validation
+    rule 4.
+  - `IntegratorKind::owns_barostat(&self) -> bool` — returns `true`
+    for variants that bundle their own barostat (currently only
+    `MtkNpt`); `false` otherwise. Consulted by cross-validation
+    rule 5.
 
 - `ThermostatKind` — tagged enum carrying the chosen thermostat slot <!-- rq-3fdb7e01 -->
   and its parameters. Used in `Config::thermostat: Option<ThermostatKind>`.
@@ -813,8 +853,11 @@ Beyond per-field validation, the loader checks:
   - `UnknownBarostatField { kind: String, field: String }` — a field
     in the `[barostat]` table is not recognised by the chosen `kind`.
   - `IncompatibleThermostat { integrator: String }` — the config
-    pairs an integrator that owns its own thermostat (currently only
-    `langevin-baoab`) with a `[thermostat]` table.
+    pairs an integrator that owns its own thermostat
+    (`langevin-baoab` or `mtk-npt`) with a `[thermostat]` table.
+  - `IncompatibleBarostat { integrator: String }` — the config
+    pairs an integrator that owns its own barostat (currently only
+    `mtk-npt`) with a `[barostat]` table.
   - `UnknownBondPotential { actual: String, bond_type_index: usize }` —
     a `[[bond_types]]` entry has a `potential` value that is not one of
     the supported strings.
@@ -1719,6 +1762,63 @@ Feature: TOML simulation config schema
     Then kind.owns_thermostat() returns false
     Given an IntegratorKind::LangevinBaoab { friction: 1.0, temperature: 300.0, seed: 0 }
     Then kind.owns_thermostat() returns true
+
+  @rq-23806456
+  Scenario: MtkNpt integrator with all required fields is accepted
+    Given the Background config with [integrator] kind="mtk-npt",
+      temperature=85.0, pressure=1.0e5, tau_t=1.0e-13, tau_p=1.0e-12
+    When load_config is called
+    Then it returns Ok(config)
+    And config.integrator matches IntegratorKind::MtkNpt {
+      temperature: 85.0, pressure: 1.0e5, tau_t: 1.0e-13, tau_p: 1.0e-12,
+      chain_length: 3, yoshida_order: 3, n_resp: 1 }
+
+  @rq-d572a90a
+  Scenario: MtkNpt missing tau_p is rejected
+    Given the Background config with [integrator] kind="mtk-npt",
+      temperature=85.0, pressure=1.0e5, tau_t=1.0e-13 (no tau_p)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.tau_p" })
+
+  @rq-b02ad2f9
+  Scenario: MtkNpt rejects extra fields (e.g. seed)
+    Given the Background config with [integrator] kind="mtk-npt",
+      temperature=85.0, pressure=1.0e5, tau_t=1.0e-13, tau_p=1.0e-12,
+      seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownIntegratorField {
+      kind: "mtk-npt", field: "seed" })
+
+  @rq-129edb76
+  Scenario: MtkNpt + [thermostat] is rejected (owns its thermostat)
+    Given the Background config with [integrator] kind="mtk-npt",
+      temperature=85.0, pressure=1.0e5, tau_t=1.0e-13, tau_p=1.0e-12
+    And a [thermostat] section with kind="csvr",
+      temperature=85.0, tau=1.0e-13, seed=1
+    When load_config is called
+    Then it returns Err(ConfigError::IncompatibleThermostat {
+      integrator: "mtk-npt" })
+
+  @rq-fbb836fb
+  Scenario: MtkNpt + [barostat] is rejected (owns its barostat)
+    Given the Background config with [integrator] kind="mtk-npt",
+      temperature=85.0, pressure=1.0e5, tau_t=1.0e-13, tau_p=1.0e-12
+    And a [barostat] section with kind="berendsen", pressure=1.0e5,
+      tau=1.0e-12, compressibility=4.5e-10
+    When load_config is called
+    Then it returns Err(ConfigError::IncompatibleBarostat {
+      integrator: "mtk-npt" })
+
+  @rq-014a82ef
+  Scenario: IntegratorKind::owns_barostat matrix
+    Given an IntegratorKind::VelocityVerlet { lossless: false }
+    Then kind.owns_barostat() returns false
+    Given an IntegratorKind::LangevinBaoab { friction: 1.0, temperature: 300.0, seed: 0 }
+    Then kind.owns_barostat() returns false
+    Given an IntegratorKind::MtkNpt { temperature: 85.0, pressure: 1.0e5,
+      tau_t: 1.0e-13, tau_p: 1.0e-12,
+      chain_length: 3, yoshida_order: 3, n_resp: 1 }
+    Then kind.owns_barostat() returns true
 
   # --- [barostat] section ---
 

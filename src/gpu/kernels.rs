@@ -1010,6 +1010,80 @@ pub fn rescale_positions(
     Ok(())
 }
 
+// Launch helper for the MTK cell-coupled velocity half-kick. Block
+// size 256, grid ceil(n / 256). When n == 0 returns Ok(()) without
+// launching. The host pre-computes both scalar arguments in f64 and
+// passes them as f32.
+// rq-3b6d5001
+pub fn mtk_velocity_half_kick(
+    particle_buffers: &mut ParticleBuffers,
+    exp_minus_alpha: f32,
+    phi_v_dt_half: f32,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let n_u32 = n as u32;
+    let func = particle_buffers.kernels.mtk_velocity_half_kick.clone();
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut particle_buffers.velocities_x,
+                &mut particle_buffers.velocities_y,
+                &mut particle_buffers.velocities_z,
+                &particle_buffers.forces_x,
+                &particle_buffers.forces_y,
+                &particle_buffers.forces_z,
+                &particle_buffers.masses,
+                exp_minus_alpha,
+                phi_v_dt_half,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// Launch helper for the MTK cell-coupled position drift. Block size
+// 256, grid ceil(n / 256). When n == 0 returns Ok(()) without
+// launching.
+// rq-3b6d5001
+pub fn mtk_position_drift(
+    particle_buffers: &mut ParticleBuffers,
+    exp_b_dt: f32,
+    phi_x_dt: f32,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let n_u32 = n as u32;
+    let func = particle_buffers.kernels.mtk_position_drift.clone();
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut particle_buffers.positions_x,
+                &mut particle_buffers.positions_y,
+                &mut particle_buffers.positions_z,
+                &particle_buffers.velocities_x,
+                &particle_buffers.velocities_y,
+                &particle_buffers.velocities_z,
+                exp_b_dt,
+                phi_x_dt,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 // rq-c0f98145
 #[allow(clippy::too_many_arguments)]
 pub fn accumulate_forces(

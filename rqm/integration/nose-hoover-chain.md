@@ -410,6 +410,39 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
   - General-purpose: usable by any thermostat that needs a uniform
     scalar velocity rescale.
 
+### Shared `nhc_chain_sub_step` host-side helper <!-- rq-19496703 -->
+
+The chain sub-step described under *Chain sub-step* above is exposed
+as a pure host-side helper function in `src/integrator.rs` so that
+slots that need a parallel NHC chain on a different DOF can reuse
+the same algorithm rather than duplicating it. The
+`NoseHooverChainThermostat` slot is one caller; the `mtk-npt`
+integrator (`mtk-npt.md`) is the other.
+
+```rust
+pub fn nhc_chain_sub_step(
+    xi: &mut [f64],
+    p_xi: &mut [f64],
+    q_mass: &[f64],
+    dt: f64,
+    k_thermalized: f64,    // 2K for the particle chain; p_eps²/W for an MTK cell chain
+    g_dof: f64,            // N_f for the particle chain; 1.0 for a 1-DOF chain
+    kt: f64,
+) -> f64
+```
+
+- Mutates `xi` and `p_xi` in place; reads `q_mass` and the four
+  scalar inputs.
+- Returns the multiplicative rescale factor that the caller must
+  apply to the thermalized DOF (the particle chain feeds it to
+  `rescale_velocities`; the MTK cell chain multiplies `p_eps` by it
+  host-side).
+- Slice lengths `xi.len() == p_xi.len() == q_mass.len() == M` are
+  required; the helper handles `M = 1` (no outermost-chain-momentum
+  kicks) and `M ≥ 2` uniformly.
+- Pure function in the f64 IEEE-754 sense: deterministic, no I/O,
+  no allocation, no panics under finite inputs.
+
 ## Launch Configuration <!-- rq-aff3dafa -->
 
 - `kinetic_energy_reduce`: block size 256, single block (grid 1).

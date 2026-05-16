@@ -78,6 +78,10 @@ pub enum ConfigError {
     // therefore cannot be paired with a `[thermostat]` table.
     #[error("integrator `{integrator}` owns its own thermostat and is incompatible with `[thermostat]`")]
     IncompatibleThermostat { integrator: String },
+    // Cross-validation rule 5: integrator owns its own barostat and
+    // therefore cannot be paired with a `[barostat]` table.
+    #[error("integrator `{integrator}` owns its own barostat and is incompatible with `[barostat]`")]
+    IncompatibleBarostat { integrator: String },
     #[error("bond_types[{bond_type_index}] has unknown potential `{actual}`")]
     UnknownBondPotential {
         actual: String,
@@ -130,6 +134,16 @@ pub enum IntegratorKind {
         temperature: f64,
         seed: u64,
     },
+    // rq-3b6d5001
+    MtkNpt {
+        temperature: f64,
+        pressure: f64,
+        tau_t: f64,
+        tau_p: f64,
+        chain_length: u32,
+        yoshida_order: u32,
+        n_resp: u32,
+    },
 }
 
 impl IntegratorKind {
@@ -139,15 +153,25 @@ impl IntegratorKind {
         match self {
             IntegratorKind::VelocityVerlet { .. } => "velocity-verlet",
             IntegratorKind::LangevinBaoab { .. } => "langevin-baoab",
+            IntegratorKind::MtkNpt { .. } => "mtk-npt",
         }
     }
 
-    // Returns `true` for variants that bundle their own thermostat (the
-    // OU step inside Langevin BAOAB); `false` otherwise. Consulted by
-    // `load_config`'s cross-validation rule 4 to reject co-configured
-    // `[thermostat]` tables. See `integration/framework.md`.
+    // Returns `true` for variants that bundle their own thermostat.
+    // Consulted by `load_config`'s cross-validation rule 4 to reject
+    // co-configured `[thermostat]` tables. See `integration/framework.md`.
     pub fn owns_thermostat(&self) -> bool {
-        matches!(self, IntegratorKind::LangevinBaoab { .. })
+        matches!(
+            self,
+            IntegratorKind::LangevinBaoab { .. } | IntegratorKind::MtkNpt { .. }
+        )
+    }
+
+    // Returns `true` for variants that bundle their own barostat.
+    // Consulted by `load_config`'s cross-validation rule 5 to reject
+    // co-configured `[barostat]` tables. See `integration/framework.md`.
+    pub fn owns_barostat(&self) -> bool {
+        matches!(self, IntegratorKind::MtkNpt { .. })
     }
 }
 
@@ -519,6 +543,97 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
                 seed,
             }
         }
+        "mtk-npt" => {
+            for key in integ_tbl.keys() {
+                if !matches!(
+                    key.as_str(),
+                    "kind"
+                        | "temperature"
+                        | "pressure"
+                        | "tau_t"
+                        | "tau_p"
+                        | "chain_length"
+                        | "yoshida_order"
+                        | "n_resp"
+                ) {
+                    return Err(ConfigError::UnknownIntegratorField {
+                        kind: "mtk-npt".to_string(),
+                        field: key.clone(),
+                    });
+                }
+            }
+            let temperature = get_f64(integ_tbl, "temperature")
+                .map_err(rename_field("integrator.temperature".into()))?;
+            require_finite_positive("integrator.temperature", temperature)?;
+            let pressure = get_f64(integ_tbl, "pressure")
+                .map_err(rename_field("integrator.pressure".into()))?;
+            if !pressure.is_finite() {
+                return Err(invalid(
+                    "integrator.pressure",
+                    format!("expected a finite number, got {pressure}"),
+                ));
+            }
+            let tau_t = get_f64(integ_tbl, "tau_t")
+                .map_err(rename_field("integrator.tau_t".into()))?;
+            require_finite_positive("integrator.tau_t", tau_t)?;
+            let tau_p = get_f64(integ_tbl, "tau_p")
+                .map_err(rename_field("integrator.tau_p".into()))?;
+            require_finite_positive("integrator.tau_p", tau_p)?;
+            let chain_length = match integ_tbl.get("chain_length") {
+                Some(toml::Value::Integer(v)) if *v >= 1 => *v as u32,
+                Some(toml::Value::Integer(_)) => {
+                    return Err(invalid(
+                        "integrator.chain_length",
+                        "chain_length must be a positive integer",
+                    ));
+                }
+                Some(_) => {
+                    return Err(invalid(
+                        "integrator.chain_length",
+                        "expected an integer",
+                    ));
+                }
+                None => 3,
+            };
+            let yoshida_order = match integ_tbl.get("yoshida_order") {
+                Some(toml::Value::Integer(v)) if matches!(*v, 1 | 3 | 5 | 7) => *v as u32,
+                Some(toml::Value::Integer(_)) => {
+                    return Err(invalid(
+                        "integrator.yoshida_order",
+                        "yoshida_order must be one of 1, 3, 5, 7",
+                    ));
+                }
+                Some(_) => {
+                    return Err(invalid(
+                        "integrator.yoshida_order",
+                        "expected an integer",
+                    ));
+                }
+                None => 3,
+            };
+            let n_resp = match integ_tbl.get("n_resp") {
+                Some(toml::Value::Integer(v)) if *v >= 1 => *v as u32,
+                Some(toml::Value::Integer(_)) => {
+                    return Err(invalid(
+                        "integrator.n_resp",
+                        "n_resp must be a positive integer",
+                    ));
+                }
+                Some(_) => {
+                    return Err(invalid("integrator.n_resp", "expected an integer"));
+                }
+                None => 1,
+            };
+            IntegratorKind::MtkNpt {
+                temperature,
+                pressure,
+                tau_t,
+                tau_p,
+                chain_length,
+                yoshida_order,
+                n_resp,
+            }
+        }
         other => {
             return Err(ConfigError::UnknownIntegratorKind {
                 actual: other.to_string(),
@@ -543,6 +658,12 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
     // Cross-validation rule 4: integrator-owns-thermostat compatibility.
     if thermostat.is_some() && integrator.owns_thermostat() {
         return Err(ConfigError::IncompatibleThermostat {
+            integrator: integrator.name().to_string(),
+        });
+    }
+    // Cross-validation rule 5: integrator-owns-barostat compatibility.
+    if barostat.is_some() && integrator.owns_barostat() {
+        return Err(ConfigError::IncompatibleBarostat {
             integrator: integrator.name().to_string(),
         });
     }

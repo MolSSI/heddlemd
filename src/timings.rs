@@ -67,6 +67,13 @@ impl KernelStage {
     // rq-11f5dfd1
     pub const C_RESCALE_BAROSTAT_RESCALE_POSITIONS: KernelStage =
         KernelStage::new("c_rescale_barostat_rescale_positions");
+    // rq-3b6d5001
+    pub const MTK_NPT_RESCALE_VELOCITIES: KernelStage =
+        KernelStage::new("mtk_npt_rescale_velocities");
+    pub const MTK_NPT_VELOCITY_HALF_KICK: KernelStage =
+        KernelStage::new("mtk_npt_velocity_half_kick");
+    pub const MTK_NPT_POSITION_DRIFT: KernelStage =
+        KernelStage::new("mtk_npt_position_drift");
     pub const ACCUMULATE_FORCES: KernelStage = KernelStage::new("accumulate_forces");
     pub const NEIGHBOR_DISPLACEMENT_SQUARED: KernelStage =
         KernelStage::new("neighbor_displacement_squared");
@@ -101,6 +108,9 @@ impl KernelStage {
         Self::VIRIAL_SUM_REDUCE,
         Self::BERENDSEN_BAROSTAT_RESCALE_POSITIONS,
         Self::C_RESCALE_BAROSTAT_RESCALE_POSITIONS,
+        Self::MTK_NPT_RESCALE_VELOCITIES,
+        Self::MTK_NPT_VELOCITY_HALF_KICK,
+        Self::MTK_NPT_POSITION_DRIFT,
         Self::ACCUMULATE_FORCES,
         Self::VV_KICK,
         Self::VV_KICK_LOSSLESS,

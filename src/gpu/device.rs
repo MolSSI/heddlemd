@@ -42,6 +42,8 @@ pub struct Kernels {
     pub andersen_resample: CudaFunction,
     pub virial_sum_reduce: CudaFunction,
     pub rescale_positions: CudaFunction,
+    pub mtk_velocity_half_kick: CudaFunction,
+    pub mtk_position_drift: CudaFunction,
     pub accumulate_forces: CudaFunction,
     pub neighbor_displacement_squared: CudaFunction,
     pub neighbor_list_build: CudaFunction,
@@ -144,6 +146,12 @@ pub fn init_device() -> Result<GpuContext, GpuError> {
         "barostat",
         &["virial_sum_reduce", "rescale_positions"],
     )?;
+    // rq-3b6d5001
+    device.load_ptx(
+        Ptx::from_src(kernels::MTK),
+        "mtk",
+        &["mtk_velocity_half_kick", "mtk_position_drift"],
+    )?;
     device.load_ptx(
         Ptx::from_src(kernels::FORCES),
         "forces",
@@ -198,6 +206,8 @@ pub fn init_device() -> Result<GpuContext, GpuError> {
         andersen_resample: get("andersen", "andersen_resample")?,
         virial_sum_reduce: get("barostat", "virial_sum_reduce")?,
         rescale_positions: get("barostat", "rescale_positions")?,
+        mtk_velocity_half_kick: get("mtk", "mtk_velocity_half_kick")?,
+        mtk_position_drift: get("mtk", "mtk_position_drift")?,
         accumulate_forces: get("forces", "accumulate_forces")?,
         neighbor_displacement_squared: get("neighbor", "neighbor_displacement_squared")?,
         neighbor_list_build: get("neighbor", "neighbor_list_build")?,

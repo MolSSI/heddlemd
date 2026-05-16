@@ -77,6 +77,13 @@
     "title": "rescale_positions does not modify velocities, forces, masses, or images",
     "type": "scenario"
   },
+  "rq-014a82ef": {
+    "decl": "Scenario: IntegratorKind::owns_barostat matrix",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "IntegratorKind::owns_barostat matrix",
+    "type": "scenario"
+  },
   "rq-01607062": {
     "decl": "Scenario: Reject image:I:3 ordered before velo:R:3",
     "file": "io/init-state-file",
@@ -184,6 +191,13 @@
     "title": "cuFFT smoke test fails-loud when consecutive transforms produce different output",
     "type": "scenario"
   },
+  "rq-031d3307": {
+    "decl": "Scenario: nhc_chain_sub_step produces the same numerical result for the particle chain",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "nhc_chain_sub_step produces the same numerical result for the particle chain",
+    "type": "scenario"
+  },
   "rq-03423870": {
     "decl": "## Reproducibility",
     "file": "forces/coulomb-pair-force",
@@ -258,6 +272,14 @@
       }
     ],
     "title": "CUDA Kernels",
+    "type": "section"
+  },
+  "rq-047f97da": {
+    "decl": "### Types",
+    "file": "integration/mtk-npt",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
     "type": "section"
   },
   "rq-0485e79f": {
@@ -373,11 +395,25 @@
     "title": "Reject explicit images_y of wrong length",
     "type": "scenario"
   },
+  "rq-071e19df": {
+    "decl": "Scenario: Reject non-positive temperature",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Reject non-positive temperature",
+    "type": "scenario"
+  },
   "rq-07297467": {
     "decl": "Scenario: Spread is independent of particle order in the bin",
     "file": "forces/spme",
     "refs": [],
     "title": "Spread is independent of particle order in the bin",
+    "type": "scenario"
+  },
+  "rq-07375d3f": {
+    "decl": "Scenario: step() on empty state is a no-op",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "step() on empty state is a no-op",
     "type": "scenario"
   },
   "rq-076617ab": {
@@ -450,6 +486,13 @@
     "title": "Pair beyond cutoff contributes zero",
     "type": "scenario"
   },
+  "rq-08e113ca": {
+    "decl": "Scenario: Missing tau_p rejected",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Missing tau_p rejected",
+    "type": "scenario"
+  },
   "rq-090b70bb": {
     "decl": "## Comparison Procedure",
     "file": "pipeline-reversibility",
@@ -519,6 +562,14 @@
     "title": "minimum_image handles many-period displacements (orthorhombic)",
     "type": "scenario"
   },
+  "rq-0b04b35c": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/mtk-npt",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-0b5f0881": {
     "decl": "Scenario: Missing seed rejected",
     "file": "integration/c-rescale-barostat",
@@ -532,6 +583,13 @@
     "refs": [],
     "title": "Two-particle pair virial matches r_ij · F_ij",
     "type": "scenario"
+  },
+  "rq-0b7f7023": {
+    "decl": "- `MtkNptBuilder` — implements `IntegratorBuilder` with",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "MtkNptBuilder",
+    "type": "api-item"
   },
   "rq-0b9372e8": {
     "decl": "- `ConfigError` — error type returned by `load_config`. Variants:",
@@ -590,6 +648,14 @@
     "title": "Exclusion",
     "type": "api-item"
   },
+  "rq-0c7a20a1": {
+    "decl": "## Empty State and degenerate cases",
+    "file": "integration/mtk-npt",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State and degenerate cases",
+    "type": "section"
+  },
   "rq-0c7d1ff5": {
     "decl": "Scenario: Reject extra fields (e.g. seed from CSVR/Andersen)",
     "file": "integration/berendsen",
@@ -623,6 +689,13 @@
     "file": "simulation-runner",
     "refs": [],
     "title": "Coulomb cutoff participates in box-too-small check",
+    "type": "scenario"
+  },
+  "rq-0d413b82": {
+    "decl": "Scenario: mtk_velocity_half_kick with exp_minus_alpha=1.0, phi_v_dt_half=0.5 reduces to a half-VV kick",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "mtk_velocity_half_kick with exp_minus_alpha=1.0, phi_v_dt_half=0.5 reduces to a half-VV kick",
     "type": "scenario"
   },
   "rq-0d7ebeb6": {
@@ -704,6 +777,14 @@
     "level": 2,
     "refs": [],
     "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-0f0412fd": {
+    "decl": "### CUDA Kernels",
+    "file": "integration/mtk-npt",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernels",
     "type": "section"
   },
   "rq-0f34d11b": {
@@ -1026,6 +1107,13 @@
     "title": "Parameters",
     "type": "section"
   },
+  "rq-129edb76": {
+    "decl": "Scenario: MtkNpt + [thermostat] is rejected (owns its thermostat)",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "MtkNpt + [thermostat] is rejected (owns its thermostat)",
+    "type": "scenario"
+  },
   "rq-12b7dcb6": {
     "decl": "- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str]) -> Result<(BondList, AngleList, ExclusionList), TopologyFileError>`",
     "file": "forces/topology",
@@ -1107,6 +1195,13 @@
     "refs": [],
     "title": "Atom indices are 0-based and refer to entries in the init file.",
     "type": "file"
+  },
+  "rq-14a7685e": {
+    "decl": "- `log_column_names() -> &'static [\"pressure\", \"box_volume\",",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "log_column_names",
+    "type": "api-item"
   },
   "rq-14b8e042": {
     "decl": "Scenario: Morse-bonded run records morse_bond_force, reduce_bond_forces, accumulate_forces",
@@ -1285,6 +1380,13 @@
     "title": "Exclusion atom out of range",
     "type": "scenario"
   },
+  "rq-17efb1cd": {
+    "decl": "Scenario: At equilibrium, time-averaged pressure tracks P_ext",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "At equilibrium, time-averaged pressure tracks P_ext",
+    "type": "scenario"
+  },
   "rq-18411920": {
     "decl": "- `ParticleBuffers::particle_count(&self) -> usize`",
     "file": "particle-state",
@@ -1303,6 +1405,14 @@
     "refs": [],
     "title": "trajectory_every > n_steps writes only the step-0 frame",
     "type": "scenario"
+  },
+  "rq-19496703": {
+    "decl": "### Shared `nhc_chain_sub_step` host-side helper",
+    "file": "integration/nose-hoover-chain",
+    "level": 3,
+    "refs": [],
+    "title": "Shared `nhc_chain_sub_step` host-side helper",
+    "type": "section"
   },
   "rq-19916fb0": {
     "decl": "- `rescale_positions(buffers: &mut ParticleBuffers, factor: f32) -> Result<(), GpuError>`",
@@ -1419,6 +1529,13 @@
     "file": "pipeline-reversibility",
     "refs": [],
     "title": "Lossy 100-step round trip does NOT restore observables",
+    "type": "scenario"
+  },
+  "rq-1b467c03": {
+    "decl": "Scenario: mtk-npt + [barostat] is rejected",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "mtk-npt + [barostat] is rejected",
     "type": "scenario"
   },
   "rq-1b6324c3": {
@@ -1791,6 +1908,14 @@
     "title": "Reject a config that declares both [spme] and [coulomb]",
     "type": "scenario"
   },
+  "rq-20464340": {
+    "decl": "#### `mtk_velocity_half_kick`",
+    "file": "integration/mtk-npt",
+    "level": 4,
+    "refs": [],
+    "title": "`mtk_velocity_half_kick`",
+    "type": "section"
+  },
   "rq-20530653": {
     "decl": "## Reproducibility",
     "file": "forces/spme",
@@ -2008,12 +2133,27 @@
     "title": "MorseBondedState",
     "type": "api-item"
   },
+  "rq-23806456": {
+    "decl": "Scenario: MtkNpt integrator with all required fields is accepted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "MtkNpt integrator with all required fields is accepted",
+    "type": "scenario"
+  },
   "rq-23a93703": {
     "decl": "## Launch Configuration",
     "file": "integration/berendsen-barostat",
     "level": 2,
     "refs": [],
     "title": "Launch Configuration",
+    "type": "section"
+  },
+  "rq-23e2bb88": {
+    "decl": "#### `mtk_position_drift`",
+    "file": "integration/mtk-npt",
+    "level": 4,
+    "refs": [],
+    "title": "`mtk_position_drift`",
     "type": "section"
   },
   "rq-23fc870b": {
@@ -2399,6 +2539,14 @@
     "title": "Config",
     "type": "api-item"
   },
+  "rq-2a749645": {
+    "decl": "### Shared `nhc_chain_sub_step` host-side helper",
+    "file": "integration/mtk-npt",
+    "level": 3,
+    "refs": [],
+    "title": "Shared `nhc_chain_sub_step` host-side helper",
+    "type": "section"
+  },
   "rq-2a95c46c": {
     "decl": "## Empty State and degenerate cases",
     "file": "integration/csvr",
@@ -2609,6 +2757,13 @@
     "title": "C-rescale composes with langevin-baoab",
     "type": "scenario"
   },
+  "rq-2d46cad5": {
+    "decl": "Scenario: MtkNpt owns its own barostat",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "MtkNpt owns its own barostat",
+    "type": "scenario"
+  },
   "rq-2d4efead": {
     "decl": "Scenario: Atom with one bond receives the bond's force directly",
     "file": "forces/morse-bonded",
@@ -2623,12 +2778,27 @@
     "title": "Berendsen barostat composes with langevin-baoab integrator",
     "type": "scenario"
   },
+  "rq-2db435ba": {
+    "decl": "Scenario: Construct with chain_length = 1",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Construct with chain_length = 1",
+    "type": "scenario"
+  },
   "rq-2e15fed7": {
     "decl": "## Launch Configuration",
     "file": "forces/neighbor-list",
     "level": 2,
     "refs": [],
     "title": "Launch Configuration",
+    "type": "section"
+  },
+  "rq-2e284f4b": {
+    "decl": "## MTK conserved Hamiltonian",
+    "file": "integration/mtk-npt",
+    "level": 2,
+    "refs": [],
+    "title": "MTK conserved Hamiltonian",
     "type": "section"
   },
   "rq-2e4e70b4": {
@@ -2927,6 +3097,13 @@
     "file": "integration/berendsen",
     "refs": [],
     "title": "H_berendsen drifts only by O(dt²) per step",
+    "type": "scenario"
+  },
+  "rq-34943524": {
+    "decl": "Scenario: Log file header includes pressure, box_volume, mtk_npt_conserved",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Log file header includes pressure, box_volume, mtk_npt_conserved",
     "type": "scenario"
   },
   "rq-34bfc634": {
@@ -3282,6 +3459,34 @@
     "refs": [],
     "title": "Morse bond_type missing de is rejected",
     "type": "scenario"
+  },
+  "rq-3b6d5001": {
+    "decl": "# Feature: Martyna-Tobias-Klein NPT Integrator (Isotropic)",
+    "file": "integration/mtk-npt",
+    "refs": [
+      {
+        "file": "src/gpu/device.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Martyna-Tobias-Klein NPT Integrator (Isotropic)",
+    "type": "file"
   },
   "rq-3b728a4a": {
     "decl": "### Types",
@@ -3780,6 +3985,13 @@
     "title": "`Thermostat` trait overrides",
     "type": "section"
   },
+  "rq-47129004": {
+    "decl": "Scenario: COM momentum is preserved under the MTK integrator",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "COM momentum is preserved under the MTK integrator",
+    "type": "scenario"
+  },
   "rq-47540d14": {
     "decl": "Scenario: A bonded-only ForceField step launches no neighbor-list kernels",
     "file": "forces/framework",
@@ -4012,6 +4224,13 @@
     "title": "NaN displacement propagates to NaN output",
     "type": "scenario"
   },
+  "rq-4b9bb90c": {
+    "decl": "Scenario: Box rescale leg of the integrator preserves fractional coords",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Box rescale leg of the integrator preserves fractional coords",
+    "type": "scenario"
+  },
   "rq-4b9d059e": {
     "decl": "Scenario: wrap_position wraps a position outside the primary cell (orthorhombic)",
     "file": "simulation-box",
@@ -4111,10 +4330,10 @@
     "type": "scenario"
   },
   "rq-4dd5d2d0": {
-    "decl": "Scenario: LangevinBaoab owns its thermostat",
+    "decl": "Scenario: LangevinBaoab owns its thermostat but not its barostat",
     "file": "integration/framework",
     "refs": [],
-    "title": "LangevinBaoab owns its thermostat",
+    "title": "LangevinBaoab owns its thermostat but not its barostat",
     "type": "scenario"
   },
   "rq-4ddab3c7": {
@@ -4237,6 +4456,13 @@
     "refs": [],
     "title": "Empty bond_type name rejected",
     "type": "scenario"
+  },
+  "rq-508680c7": {
+    "decl": "- `MtkNptIntegrator` — implements the `Integrator` trait declared",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "MtkNptIntegrator",
+    "type": "api-item"
   },
   "rq-50baca8c": {
     "decl": "Scenario: Variance scales with sqrt((1 - alpha^2) * kt / m)",
@@ -4555,6 +4781,14 @@
     "title": "InitStateError",
     "type": "api-item"
   },
+  "rq-574e3937": {
+    "decl": "## Out of Scope",
+    "file": "integration/mtk-npt",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-57518e01": {
     "decl": "Scenario: angle_type missing potential field",
     "file": "io/config-schema",
@@ -4872,6 +5106,13 @@
     "title": "Feature: Andersen Stochastic Thermostat",
     "type": "file"
   },
+  "rq-5e238a79": {
+    "decl": "Scenario: At equilibrium, time-averaged temperature tracks T_target",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "At equilibrium, time-averaged temperature tracks T_target",
+    "type": "scenario"
+  },
   "rq-5e5f9917": {
     "decl": "Scenario: neighbor_list all-pairs mode rejects max_neighbors",
     "file": "io/config-schema",
@@ -5137,6 +5378,13 @@
     "refs": [],
     "title": "Empty State and degenerate cases",
     "type": "section"
+  },
+  "rq-6478b9c9": {
+    "decl": "Scenario: mtk-npt + [thermostat] is rejected",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "mtk-npt + [thermostat] is rejected",
+    "type": "scenario"
   },
   "rq-64c051d4": {
     "decl": "Scenario: rescale_positions on empty state is a no-op",
@@ -6114,6 +6362,21 @@
     "title": "rescale_positions multiplies every position component by the factor",
     "type": "scenario"
   },
+  "rq-7740cfb1": {
+    "decl": "## Determinism",
+    "file": "integration/mtk-npt",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
+  },
+  "rq-775b0833": {
+    "decl": "Scenario: Reject non-positive tau_p",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Reject non-positive tau_p",
+    "type": "scenario"
+  },
   "rq-779092ca": {
     "decl": "- `TimingsError` — error type. Variants:",
     "file": "performance-analysis",
@@ -6483,6 +6746,14 @@
     "level": 3,
     "refs": [],
     "title": "Counter packing",
+    "type": "section"
+  },
+  "rq-7c6012c7": {
+    "decl": "### Rust Launch Helpers",
+    "file": "integration/mtk-npt",
+    "level": 3,
+    "refs": [],
+    "title": "Rust Launch Helpers",
     "type": "section"
   },
   "rq-7cd5fae2": {
@@ -6933,6 +7204,13 @@
     "title": "Two end-to-end Langevin runs with identical configs produce byte-identical outputs",
     "type": "scenario"
   },
+  "rq-880349c0": {
+    "decl": "Scenario: Accept any sign of pressure",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Accept any sign of pressure",
+    "type": "scenario"
+  },
   "rq-881559bd": {
     "decl": "Scenario: Spread produces zero charge density at a grid point with no particle support",
     "file": "forces/spme",
@@ -7010,6 +7288,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Defaults populate the output section when [output] is omitted",
+    "type": "scenario"
+  },
+  "rq-89b8e85c": {
+    "decl": "Scenario: step() launches the expected kernel set",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "step() launches the expected kernel set",
     "type": "scenario"
   },
   "rq-89c71321": {
@@ -7136,6 +7421,13 @@
     "title": "Coulomb and LJ exclusions are independent",
     "type": "scenario"
   },
+  "rq-8cda2c89": {
+    "decl": "- `step(buffers, sim_box, force_field, dt, timings)` — runs the",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "step",
+    "type": "api-item"
+  },
   "rq-8d18d6ee": {
     "decl": "## Gherkin Scenarios",
     "file": "integration/c-rescale-barostat",
@@ -7250,6 +7542,14 @@
     ],
     "title": "log_column_names",
     "type": "api-item"
+  },
+  "rq-8f121de5": {
+    "decl": "## Launch Configuration",
+    "file": "integration/mtk-npt",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
+    "type": "section"
   },
   "rq-8f31cb78": {
     "decl": "Scenario: Open refuses to overwrite an existing file",
@@ -7598,6 +7898,13 @@
     "title": "Download overwrites in-place after host mutation",
     "type": "scenario"
   },
+  "rq-95b66af0": {
+    "decl": "Scenario: MtkNpt owns both its thermostat and its barostat",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "MtkNpt owns both its thermostat and its barostat",
+    "type": "scenario"
+  },
   "rq-95c2f543": {
     "decl": "Scenario: Exclusion scaling applies uniformly to force, energy, and virial",
     "file": "forces/lj-pair-force",
@@ -7651,6 +7958,14 @@
     "refs": [],
     "title": "Slot for a pair beyond cutoff is zero",
     "type": "scenario"
+  },
+  "rq-971ca980": {
+    "decl": "### Per-step kernel sequence",
+    "file": "integration/mtk-npt",
+    "level": 3,
+    "refs": [],
+    "title": "Per-step kernel sequence",
+    "type": "section"
   },
   "rq-975b5ae0": {
     "decl": "Scenario: Newton's third law is bit-exact for non-boundary displacements",
@@ -8184,6 +8499,13 @@
     "title": "Reject upload when host particle count differs from buffers",
     "type": "scenario"
   },
+  "rq-a003ec43": {
+    "decl": "Scenario: Reject non-positive tau_t",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Reject non-positive tau_t",
+    "type": "scenario"
+  },
   "rq-a034083a": {
     "decl": "### PTX Module Loading",
     "file": "integration/berendsen-barostat",
@@ -8516,6 +8838,13 @@
     "title": "ParticleTypeConfig",
     "type": "api-item"
   },
+  "rq-a722f7ce": {
+    "decl": "Scenario: log_column_values returns the cached pressure, post-step volume,",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "log_column_values returns the cached pressure, post-step volume,",
+    "type": "scenario"
+  },
   "rq-a7aac794": {
     "decl": "Scenario: Cell counts reflect perpendicular widths for a tilted box",
     "file": "forces/neighbor-list",
@@ -8703,6 +9032,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Harmonic angle_type rejects non-positive k_theta",
+    "type": "scenario"
+  },
+  "rq-aae13334": {
+    "decl": "Scenario: log_column_names returns pressure, box_volume, mtk_npt_conserved",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "log_column_names returns pressure, box_volume, mtk_npt_conserved",
     "type": "scenario"
   },
   "rq-aaf3d06f": {
@@ -8987,6 +9323,13 @@
     "title": "Accessors",
     "type": "section"
   },
+  "rq-b02ad2f9": {
+    "decl": "Scenario: MtkNpt rejects extra fields (e.g. seed)",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "MtkNpt rejects extra fields (e.g. seed)",
+    "type": "scenario"
+  },
   "rq-b033ac1d": {
     "decl": "### Mutators",
     "file": "simulation-box",
@@ -9204,6 +9547,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Displacement check uses minimum-image displacement",
+    "type": "scenario"
+  },
+  "rq-b3b19b01": {
+    "decl": "Scenario: Both new kernels on empty state are no-ops",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Both new kernels on empty state are no-ops",
     "type": "scenario"
   },
   "rq-b41d8d36": {
@@ -9475,6 +9825,13 @@
     "title": "File does not exist",
     "type": "scenario"
   },
+  "rq-ba4087d7": {
+    "decl": "Scenario: sim_box.generation() advances every step",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "sim_box.generation() advances every step",
+    "type": "scenario"
+  },
   "rq-bacbf7d2": {
     "decl": "Scenario: andersen_resample is deterministic across two runs",
     "file": "integration/andersen",
@@ -9493,6 +9850,13 @@
     ],
     "title": "Timings",
     "type": "api-item"
+  },
+  "rq-bafb9cf3": {
+    "decl": "Scenario: Construct with particle_count = 0",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Construct with particle_count = 0",
+    "type": "scenario"
   },
   "rq-bafc5900": {
     "decl": "Scenario: Reject a row missing a velocity column",
@@ -10065,11 +10429,25 @@
     "title": "Missing seed rejected",
     "type": "scenario"
   },
+  "rq-c5d7891a": {
+    "decl": "Scenario: H_MTK drifts only by O(dt²) per step",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "H_MTK drifts only by O(dt²) per step",
+    "type": "scenario"
+  },
   "rq-c5e00a28": {
     "decl": "Scenario: Write a single frame with velocities and without images",
     "file": "io/trajectory-output",
     "refs": [],
     "title": "Write a single frame with velocities and without images",
+    "type": "scenario"
+  },
+  "rq-c5f04195": {
+    "decl": "Scenario: Two independent runs with identical configs are byte-identical",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Two independent runs with identical configs are byte-identical",
     "type": "scenario"
   },
   "rq-c5f66ecd": {
@@ -10313,6 +10691,13 @@
     "title": "Atom appearing as the centre of one angle and a wing of",
     "type": "scenario"
   },
+  "rq-cadfb824": {
+    "decl": "- `mtk_velocity_half_kick(buffers: &mut ParticleBuffers, exp_minus_alpha: f32, phi_v_dt_half: f32) -> Result<(), GpuError>`",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "mtk_velocity_half_kick",
+    "type": "api-item"
+  },
   "rq-cb0c9d24": {
     "decl": "## Launch Configuration",
     "file": "integration/csvr",
@@ -10416,6 +10801,14 @@
     "refs": [],
     "title": "Round-trip through load_init_state preserves a triclinic lattice",
     "type": "scenario"
+  },
+  "rq-ce37404c": {
+    "decl": "## Parameters",
+    "file": "integration/mtk-npt",
+    "level": 2,
+    "refs": [],
+    "title": "Parameters",
+    "type": "section"
   },
   "rq-ce445e13": {
     "decl": "## RNG",
@@ -10729,6 +11122,14 @@
     "title": "HostStage",
     "type": "api-item"
   },
+  "rq-d2d0fb5f": {
+    "decl": "### `Integrator` trait overrides",
+    "file": "integration/mtk-npt",
+    "level": 3,
+    "refs": [],
+    "title": "`Integrator` trait overrides",
+    "type": "section"
+  },
   "rq-d340b338": {
     "decl": "- `CoulombState` — implements the `Potential` trait with",
     "file": "forces/coulomb-pair-force",
@@ -10819,6 +11220,13 @@
     "file": "integration/nose-hoover-chain",
     "refs": [],
     "title": "Reject non-positive tau",
+    "type": "scenario"
+  },
+  "rq-d572a90a": {
+    "decl": "Scenario: MtkNpt missing tau_p is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "MtkNpt missing tau_p is rejected",
     "type": "scenario"
   },
   "rq-d5a4f220": {
@@ -10922,6 +11330,14 @@
     "title": "scale_coul to that value.",
     "type": "file"
   },
+  "rq-d77527e8": {
+    "decl": "## Feature API",
+    "file": "integration/mtk-npt",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-d801f67c": {
     "decl": "Scenario: compute_total_virial is deterministic",
     "file": "integration/berendsen-barostat",
@@ -11009,6 +11425,14 @@
     "refs": [],
     "title": "NHC conserved Hamiltonian drifts only by O(dt²) per step",
     "type": "scenario"
+  },
+  "rq-d93f05a5": {
+    "decl": "### Equations of motion",
+    "file": "integration/mtk-npt",
+    "level": 3,
+    "refs": [],
+    "title": "Equations of motion",
+    "type": "section"
   },
   "rq-d940ac6c": {
     "decl": "## Empty State",
@@ -11143,6 +11567,13 @@
     "refs": [],
     "title": "harmonic_angle_force",
     "type": "api-item"
+  },
+  "rq-db6e7977": {
+    "decl": "Scenario: mtk_position_drift with exp_b_dt=1.0, phi_x_dt=dt reduces to a plain VV drift",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "mtk_position_drift with exp_b_dt=1.0, phi_x_dt=dt reduces to a plain VV drift",
+    "type": "scenario"
   },
   "rq-db8b171d": {
     "decl": "Scenario: pre_step with unchanged box does not refresh the cell-layout cache",
@@ -11420,6 +11851,13 @@
     "title": "`Properties`",
     "type": "section"
   },
+  "rq-e08baac0": {
+    "decl": "Scenario: Reject extra fields (e.g. seed)",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Reject extra fields (e.g. seed)",
+    "type": "scenario"
+  },
   "rq-e0a0553d": {
     "decl": "# Feature: Pluggable Integration Framework",
     "file": "integration/framework",
@@ -11551,6 +11989,13 @@
     "title": "PTX Module Loading",
     "type": "section"
   },
+  "rq-e266de94": {
+    "decl": "Scenario: Construct MtkNptIntegrator with defaults",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Construct MtkNptIntegrator with defaults",
+    "type": "scenario"
+  },
   "rq-e2a31585": {
     "decl": "Scenario: Box-generation refresh handles tilt mutation",
     "file": "forces/neighbor-list",
@@ -11664,6 +12109,14 @@
     "title": "pair_virials carries half the pair's scalar virial",
     "type": "scenario"
   },
+  "rq-e43528db": {
+    "decl": "## Algorithm",
+    "file": "integration/mtk-npt",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
+  },
   "rq-e435f271": {
     "decl": "## Data Layout",
     "file": "pair-reduction",
@@ -11725,6 +12178,13 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-e4f97cc2": {
+    "decl": "Scenario: nhc_chain_sub_step handles M = 1 without panicking",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "nhc_chain_sub_step handles M = 1 without panicking",
+    "type": "scenario"
   },
   "rq-e553c05b": {
     "decl": "Scenario: Reject init = trajectory_path",
@@ -12021,10 +12481,10 @@
     "type": "section"
   },
   "rq-e9be025b": {
-    "decl": "Scenario: VelocityVerlet does not own its thermostat",
+    "decl": "Scenario: VelocityVerlet does not own its thermostat or its barostat",
     "file": "integration/framework",
     "refs": [],
-    "title": "VelocityVerlet does not own its thermostat",
+    "title": "VelocityVerlet does not own its thermostat or its barostat",
     "type": "scenario"
   },
   "rq-e9caf013": {
@@ -12228,6 +12688,13 @@
     "refs": [],
     "title": "Units",
     "type": "section"
+  },
+  "rq-ee43e3d6": {
+    "decl": "Scenario: Reject yoshida_order outside {1, 3, 5, 7}",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Reject yoshida_order outside {1, 3, 5, 7}",
+    "type": "scenario"
   },
   "rq-ee4ebbda": {
     "decl": "Scenario: A neutral system with [coulomb] present still launches and produces zeros",
@@ -12525,6 +12992,13 @@
     "title": "vv_kick_drift",
     "type": "api-item"
   },
+  "rq-f1c96a3f": {
+    "decl": "- `mtk_position_drift(buffers: &mut ParticleBuffers, exp_b_dt: f32, phi_x_dt: f32) -> Result<(), GpuError>`",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "mtk_position_drift",
+    "type": "api-item"
+  },
   "rq-f20e017d": {
     "decl": "Scenario: Open refuses to overwrite an existing file",
     "file": "io/log-output",
@@ -12653,6 +13127,14 @@
     "refs": [],
     "title": "Reduction overwrites prior net force values",
     "type": "scenario"
+  },
+  "rq-f5d16700": {
+    "decl": "### Extended-system state",
+    "file": "integration/mtk-npt",
+    "level": 3,
+    "refs": [],
+    "title": "Extended-system state",
+    "type": "section"
   },
   "rq-f5e25186": {
     "decl": "Scenario: Successful run writes a timings file",
@@ -12801,6 +13283,14 @@
     "title": "minimum_image just past +L/2 wraps by one period",
     "type": "scenario"
   },
+  "rq-f7bd47f7": {
+    "decl": "### Reversible symmetric Trotter splitting",
+    "file": "integration/mtk-npt",
+    "level": 3,
+    "refs": [],
+    "title": "Reversible symmetric Trotter splitting",
+    "type": "section"
+  },
   "rq-f7e279ee": {
     "decl": "- `main(args: Vec<String>) -> ExitCode` (in `src/main.rs`)",
     "file": "simulation-runner",
@@ -12910,6 +13400,21 @@
     "title": "Parameters",
     "type": "section"
   },
+  "rq-f9ebe53f": {
+    "decl": "- `log_column_values(ke, pe) -> vec![most_recent_pressure,",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "log_column_values",
+    "type": "api-item"
+  },
+  "rq-f9fc04a1": {
+    "decl": "### PTX Module Loading",
+    "file": "integration/mtk-npt",
+    "level": 3,
+    "refs": [],
+    "title": "PTX Module Loading",
+    "type": "section"
+  },
   "rq-fa24a8d1": {
     "decl": "Scenario: timings_path can be overridden in [output]",
     "file": "io/config-schema",
@@ -12965,6 +13470,13 @@
     "file": "integration/c-rescale-barostat",
     "refs": [],
     "title": "log_column_values returns the cached pressure, post-rescale volume,",
+    "type": "scenario"
+  },
+  "rq-fbb836fb": {
+    "decl": "Scenario: MtkNpt + [barostat] is rejected (owns its barostat)",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "MtkNpt + [barostat] is rejected (owns its barostat)",
     "type": "scenario"
   },
   "rq-fbdf08ff": {
@@ -13135,6 +13647,13 @@
     "refs": [],
     "title": "Rust Launch Helpers",
     "type": "section"
+  },
+  "rq-fecc63ef": {
+    "decl": "Scenario: MtkNpt owns its own thermostat",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "MtkNpt owns its own thermostat",
+    "type": "scenario"
   },
   "rq-fece5481": {
     "decl": "#### `rescale_positions`",

@@ -2411,8 +2411,233 @@ fn integrator_kind_owns_thermostat_matrix_config_layer() {
         temperature: 300.0,
         seed: 0,
     };
+    let mtk = dynamics::io::IntegratorKind::MtkNpt {
+        temperature: 85.0,
+        pressure: 1.0e5,
+        tau_t: 1.0e-13,
+        tau_p: 1.0e-12,
+        chain_length: 3,
+        yoshida_order: 3,
+        n_resp: 1,
+    };
     assert!(!vv.owns_thermostat());
     assert!(lan.owns_thermostat());
+    assert!(mtk.owns_thermostat());
+}
+
+#[test]
+fn integrator_kind_owns_barostat_matrix_config_layer() {
+    let vv = dynamics::io::IntegratorKind::VelocityVerlet { lossless: false };
+    let lan = dynamics::io::IntegratorKind::LangevinBaoab {
+        friction: 1.0e12,
+        temperature: 300.0,
+        seed: 0,
+    };
+    let mtk = dynamics::io::IntegratorKind::MtkNpt {
+        temperature: 85.0,
+        pressure: 1.0e5,
+        tau_t: 1.0e-13,
+        tau_p: 1.0e-12,
+        chain_length: 3,
+        yoshida_order: 3,
+        n_resp: 1,
+    };
+    assert!(!vv.owns_barostat());
+    assert!(!lan.owns_barostat());
+    assert!(mtk.owns_barostat());
+}
+
+// --- mtk-npt parsing + incompatibility ---
+
+fn mtk_minimal_body(extras: &str) -> String {
+    format!(
+        r#"schema_version = 1
+init = "argon.xyz"
+
+[simulation]
+seed = 12345
+n_steps = 10
+dt = 1.0e-15
+temperature = 85.0
+
+[integrator]
+kind = "mtk-npt"
+temperature = 85.0
+pressure = 1.0e5
+tau_t = 1.0e-13
+tau_p = 1.0e-12
+{extras}
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#
+    )
+}
+
+#[test]
+fn mtk_npt_with_defaults_accepted() {
+    let dir = tmp_path("mtk_defaults");
+    let body = mtk_minimal_body("");
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    match cfg.integrator {
+        dynamics::io::IntegratorKind::MtkNpt {
+            temperature,
+            pressure,
+            tau_t,
+            tau_p,
+            chain_length,
+            yoshida_order,
+            n_resp,
+        } => {
+            assert_eq!(temperature, 85.0);
+            assert_eq!(pressure, 1.0e5);
+            assert_eq!(tau_t, 1.0e-13);
+            assert_eq!(tau_p, 1.0e-12);
+            assert_eq!(chain_length, 3);
+            assert_eq!(yoshida_order, 3);
+            assert_eq!(n_resp, 1);
+        }
+        other => panic!("expected MtkNpt, got {other:?}"),
+    }
+}
+
+#[test]
+fn mtk_npt_missing_tau_p_rejected() {
+    let dir = tmp_path("mtk_no_tau_p");
+    let body = mtk_minimal_body("").replace("tau_p = 1.0e-12\n", "");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "integrator.tau_p"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn mtk_npt_rejects_non_positive_tau_p() {
+    let dir = tmp_path("mtk_tau_p_zero");
+    let body = mtk_minimal_body("").replace("tau_p = 1.0e-12", "tau_p = 0.0");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "integrator.tau_p"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn mtk_npt_rejects_extra_fields() {
+    let dir = tmp_path("mtk_extra");
+    let body = mtk_minimal_body("seed = 42");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownIntegratorField { kind, field } => {
+            assert_eq!(kind, "mtk-npt");
+            assert_eq!(field, "seed");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn mtk_npt_with_thermostat_is_rejected() {
+    let dir = tmp_path("mtk_plus_therm");
+    let body = format!(
+        r#"schema_version = 1
+init = "argon.xyz"
+
+[simulation]
+seed = 12345
+n_steps = 10
+dt = 1.0e-15
+temperature = 85.0
+
+[integrator]
+kind = "mtk-npt"
+temperature = 85.0
+pressure = 1.0e5
+tau_t = 1.0e-13
+tau_p = 1.0e-12
+
+[thermostat]
+kind = "csvr"
+temperature = 85.0
+tau = 1.0e-13
+seed = 1
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::IncompatibleThermostat { integrator } => {
+            assert_eq!(integrator, "mtk-npt");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn mtk_npt_with_barostat_is_rejected() {
+    let dir = tmp_path("mtk_plus_baro");
+    let body = format!(
+        r#"schema_version = 1
+init = "argon.xyz"
+
+[simulation]
+seed = 12345
+n_steps = 10
+dt = 1.0e-15
+temperature = 85.0
+
+[integrator]
+kind = "mtk-npt"
+temperature = 85.0
+pressure = 1.0e5
+tau_t = 1.0e-13
+tau_p = 1.0e-12
+
+[barostat]
+kind = "berendsen"
+pressure = 1.0e5
+tau = 1.0e-12
+compressibility = 4.5e-10
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::IncompatibleBarostat { integrator } => {
+            assert_eq!(integrator, "mtk-npt");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
 }
 
 // --- [barostat] section (always rejected with the empty registry) ---

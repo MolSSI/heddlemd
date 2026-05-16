@@ -20,20 +20,25 @@ from TOML. Omitting `[thermostat]` selects NVE; omitting `[barostat]`
 selects constant-volume.
 
 Some integrators own their own thermostat (the O step in Langevin
-BAOAB *is* the Ornstein-Uhlenbeck thermostat). Those integrators
-declare ownership through `IntegratorKind::owns_thermostat()` and the
-config loader rejects co-configured `[thermostat]` at load time.
+BAOAB *is* the Ornstein-Uhlenbeck thermostat); some additionally own
+their own barostat (the MTK NPT integrator carries an extended-system
+cell DOF and its own thermostat chains on both the particles and the
+cell). Those integrators declare ownership through
+`IntegratorKind::owns_thermostat()` and
+`IntegratorKind::owns_barostat()`, and the config loader rejects
+co-configured `[thermostat]` / `[barostat]` tables at load time.
 
 ## Slots <!-- rq-f8bb021a -->
 
 ### Integrator slot <!-- rq-d8c0e5b0 -->
 
-The default registry exposes two integrators:
+The default registry exposes three integrators:
 
-| `kind` value      | Owns thermostat? | Implementation                                    | File                  |
-| ----------------- | ---------------- | ------------------------------------------------- | --------------------- |
-| `velocity-verlet` | no               | symplectic NVE (lossy or lossless)                | `velocity-verlet.md`  |
-| `langevin-baoab`  | yes              | stochastic NVT via BAOAB splitting                | `langevin-baoab.md`   |
+| `kind` value      | Owns thermostat? | Owns barostat? | Implementation                                                   | File                  |
+| ----------------- | ---------------- | -------------- | ---------------------------------------------------------------- | --------------------- |
+| `velocity-verlet` | no               | no             | symplectic NVE (lossy or lossless)                               | `velocity-verlet.md`  |
+| `langevin-baoab`  | yes              | no             | stochastic NVT via BAOAB splitting                               | `langevin-baoab.md`   |
+| `mtk-npt`         | yes              | yes            | deterministic NPT via MTK extended-system (isotropic, fused)     | `mtk-npt.md`          |
 
 Each implementation's per-step kernels, parameter set, and timings
 stages are documented in its own requirements file.
@@ -133,8 +138,14 @@ state ever crosses to another `Arc<CudaDevice>`.
   (`IntegratorKind::owns_thermostat()` returns `true`) is incompatible
   with any configured `[thermostat]`. `load_config` returns
   `ConfigError::IncompatibleThermostat { integrator: <kind name> }`
-  when the user configures both. `langevin-baoab` is the only such
-  integrator in the default registry.
+  when the user configures both. `langevin-baoab` and `mtk-npt` are
+  the integrators in the default registry that own their thermostat.
+- An integrator that owns its own barostat
+  (`IntegratorKind::owns_barostat()` returns `true`) is incompatible
+  with any configured `[barostat]`. `load_config` returns
+  `ConfigError::IncompatibleBarostat { integrator: <kind name> }`
+  when the user configures both. `mtk-npt` is the only integrator
+  in the default registry that owns its barostat.
 - The thermostat slot is optional. When `[thermostat]` is omitted,
   the runner holds `None` and skips both `apply_pre` and `apply_post`
   hooks. This is how the user expresses NVE composition (or a
@@ -296,11 +307,17 @@ successfully.
 
   ```rust
   pub fn owns_thermostat(&self) -> bool;
+  pub fn owns_barostat(&self) -> bool;
   ```
 
-  which returns `true` for variants whose integrator fuses its own
-  thermostat. `LangevinBaoab { .. }` returns `true`; `VelocityVerlet
-  { .. }` returns `false`.
+  `owns_thermostat` returns `true` for variants whose integrator
+  fuses its own thermostat. `LangevinBaoab { .. }` and
+  `MtkNpt { .. }` return `true`; `VelocityVerlet { .. }` returns
+  `false`.
+
+  `owns_barostat` returns `true` for variants whose integrator
+  fuses its own barostat. `MtkNpt { .. }` returns `true`;
+  `VelocityVerlet { .. }` and `LangevinBaoab { .. }` return `false`.
 
 - `IntegratorBuilder`, `ThermostatBuilder`, `BarostatBuilder` — <!-- rq-29e08cb5 -->
   parallel traits describing a registered slot implementation.
@@ -693,14 +710,24 @@ Feature: Pluggable integration framework
   # --- Compatibility ---
 
   @rq-e9be025b
-  Scenario: VelocityVerlet does not own its thermostat
+  Scenario: VelocityVerlet does not own its thermostat or its barostat
     Given an IntegratorKind::VelocityVerlet { lossless: false }
     Then kind.owns_thermostat() returns false
+    And kind.owns_barostat() returns false
 
   @rq-4dd5d2d0
-  Scenario: LangevinBaoab owns its thermostat
+  Scenario: LangevinBaoab owns its thermostat but not its barostat
     Given an IntegratorKind::LangevinBaoab { friction: 1.0e12, temperature: 300.0, seed: 0 }
     Then kind.owns_thermostat() returns true
+    And kind.owns_barostat() returns false
+
+  @rq-95b66af0
+  Scenario: MtkNpt owns both its thermostat and its barostat
+    Given an IntegratorKind::MtkNpt { temperature: 85.0, pressure: 1.0e5,
+      tau_t: 1.0e-13, tau_p: 1.0e-12,
+      chain_length: 3, yoshida_order: 3, n_resp: 1 }
+    Then kind.owns_thermostat() returns true
+    And kind.owns_barostat() returns true
 
   # --- RNG-using slot state ---
 
