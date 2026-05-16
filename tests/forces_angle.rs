@@ -411,7 +411,8 @@ fn spc_single_step_satisfies_newtons_third_law() {
         },
     ];
     let bond_types = vec![spc_morse_tuned()];
-    let angle_types = vec![harmonic_type(383.0, theta_0 as f64)];
+    // Realistic flexible-SPC HOH bend stiffness (75.9 kcal/mol/rad²).
+    let angle_types = vec![harmonic_type(5.27e-19, theta_0 as f64)];
 
     // Two OH bonds (H0-O1, H2-O1); one HOH angle at centre O1.
     use dynamics::forces::topology::Bond;

@@ -1743,7 +1743,7 @@ fn angle_types_optional_empty() {
 fn valid_harmonic_angle_type_accepted() {
     let dir = tmp_path("angle_types_harmonic");
     let body = format!(
-        "{}\n[[angle_types]]\nname = \"HOH\"\npotential = \"harmonic\"\nk_theta = 383.0\ntheta_0 = 1.911\n",
+        "{}\n[[angle_types]]\nname = \"HOH\"\npotential = \"harmonic\"\nk_theta = 5.27e-19\ntheta_0 = 1.911\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -1752,7 +1752,7 @@ fn valid_harmonic_angle_type_accepted() {
     match &cfg.angle_types[0] {
         dynamics::io::config::AngleTypeConfig::Harmonic { name, k_theta, theta_0 } => {
             assert_eq!(name, "HOH");
-            assert!((k_theta - 383.0).abs() < 1.0e-9);
+            assert!((k_theta - 5.27e-19).abs() < 1.0e-28);
             assert!((theta_0 - 1.911).abs() < 1.0e-9);
         }
     }

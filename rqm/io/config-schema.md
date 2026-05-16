@@ -74,7 +74,7 @@ re = 3.40e-10       # m  (equilibrium distance)
 [[angle_types]]
 name = "HOH"
 potential = "harmonic"
-k_theta = 383.0     # J/rad²
+k_theta = 5.27e-19  # J/rad²  (75.9 kcal/mol/rad², flexible SPC)
 theta_0 = 1.911     # rad (~109.47°)
 
 [neighbor_list]
@@ -1238,11 +1238,11 @@ Feature: TOML simulation config schema
   @rq-91bf10ec
   Scenario: Valid harmonic angle_type is accepted
     Given the Background config plus
-      [[angle_types]] name="HOH" potential="harmonic" k_theta=383.0 theta_0=1.911
+      [[angle_types]] name="HOH" potential="harmonic" k_theta=5.27e-19 theta_0=1.911
     When load_config is called
     Then it returns Ok(config)
     And config.angle_types has length 1
-    And config.angle_types[0] matches AngleTypeConfig::Harmonic { name: "HOH", k_theta: 383.0, theta_0: 1.911 }
+    And config.angle_types[0] matches AngleTypeConfig::Harmonic { name: "HOH", k_theta: 5.27e-19, theta_0: 1.911 }
 
   @rq-57518e01
   Scenario: angle_type missing potential field
@@ -1270,7 +1270,7 @@ Feature: TOML simulation config schema
 
   @rq-e399422c
   Scenario: Harmonic angle_type rejects theta_0 outside [0, π]
-    Given an [[angle_types]] entry with potential="harmonic", k_theta=383.0, theta_0=4.0
+    Given an [[angle_types]] entry with potential="harmonic", k_theta=5.27e-19, theta_0=4.0
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "angle_types[0].theta_0", reason: _ })
 

@@ -22,3 +22,8 @@ target/
 # Added by cargo
 
 /target
+
+# Simulation output
+*traj.xyz
+*.timings
+*.log

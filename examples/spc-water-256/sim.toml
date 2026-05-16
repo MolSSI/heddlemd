@@ -76,7 +76,7 @@ theta_0 = 1.910611931  # rad  (109.47°)
 
 [neighbor_list]
 mode = "cell-list"
-max_neighbors = 256
+max_neighbors = 64
 r_skin = 5.0e-11
 
 [output]

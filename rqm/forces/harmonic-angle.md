@@ -354,12 +354,13 @@ Feature: Harmonic angle bonded potential
   Scenario: Construct HarmonicAngleState
     Given an AngleList with 2 angles among 5 atoms and one angle type
     And [[angle_types]] with one entry "HOH" potential="harmonic"
-      k_theta=383.0 theta_0=1.911 (J/rad², radians)
+      k_theta=5.27e-19 theta_0=1.911 (J/rad², radians; flexible-SPC
+      Toukan-Rahman bend stiffness)
     When HarmonicAngleState::new(device, &angle_list, &angle_types) is called
     Then it returns Ok(state)
     And state.angle_count equals 2
     And state.particle_count equals 5
-    And angle_k_theta and angle_theta_0 on the device equal [383.0] and [1.911]
+    And angle_k_theta and angle_theta_0 on the device equal [5.27e-19] and [1.911]
 
   # --- Force kernel correctness ---
 
@@ -398,7 +399,7 @@ Feature: Harmonic angle bonded potential
     isolated angle in vacuum
     Given positions placed at d_ij = d_kj = 1.0e-10 with θ = 1.911 + 0.1
       and theta_0 = 1.911
-    And an angle (i, j, k) with k_theta = 383.0
+    And an angle (i, j, k) with k_theta = 5.27e-19 J/rad²
     When harmonic_angle_force is launched
     Then sum of per-atom force magnitudes matches the analytical
       |F_i| + |F_j| + |F_k| within 5 × 10⁻³ relative error
@@ -517,7 +518,7 @@ Feature: Harmonic angle bonded potential
   @rq-ee7566b4
   Scenario: A bent angle's energy matches the closed-form expression
     Given an AngleList with one angle (0, 1, 2)
-    And angle type "HOH" with k_theta = 383.0, theta_0 = 1.911
+    And angle type "HOH" with k_theta = 5.27e-19 J/rad², theta_0 = 1.911 rad
     And atoms placed at θ = 1.911 + 0.2
     When harmonic_angle_force is called
     Then angle_triple_energy[0] + angle_triple_energy[1] + angle_triple_energy[2]
@@ -565,7 +566,7 @@ Feature: Harmonic angle bonded potential
       that 2·D_e·a² equals the SPC harmonic stiffness 4.515e5 J/m²
       at r_e = 1.0e-10 m
     And [[angle_types]] with one entry "HOH" potential="harmonic"
-      k_theta = 383.0 J/rad² theta_0 = 1.911 rad
+      k_theta = 5.27e-19 J/rad² theta_0 = 1.911 rad
     And a .topology file declaring two OH bonds and one HOH angle (so
       1-2 and 1-3 exclusions auto-derive to (0,0))
     When force_field.step(...) is called
