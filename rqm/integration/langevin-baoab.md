@@ -161,10 +161,18 @@ contributes no run-to-run drift.
 
 ### CUDA Kernels <!-- rq-26ba73d0 -->
 
-`kernels/langevin.cu` declares two `extern "C"` kernels and one
-`__device__` helper:
+`kernels/langevin.cu` declares two `extern "C"` kernels and
+`#include`s `kernels/philox.cuh` for the shared `__device__` Philox
+primitives (`philox4x32_10`, `philox_gaussian`,
+`u32_to_uniform_open`; see `andersen.md` for the header's full
+declaration set). The same header is consumed by every CUDA file
+that needs counter-based RNG draws (currently `langevin.cu` and
+`andersen.cu`); the algorithm description (constants, round
+structure, Box-Muller transform) lives in this file under *RNG*
+above and is its single specification site.
 
 ```c
+// in kernels/philox.cuh:
 __device__ inline void philox4x32_10(
     unsigned int key_lo, unsigned int key_hi,
     unsigned int ctr0, unsigned int ctr1,

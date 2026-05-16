@@ -578,6 +578,13 @@
     "title": "Construct a ForceField with bond_types declared but no bonds",
     "type": "scenario"
   },
+  "rq-0f3b352b": {
+    "decl": "Scenario: Reject negative collision_rate",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "Reject negative collision_rate",
+    "type": "scenario"
+  },
   "rq-0f7b8a57": {
     "decl": "## Empty State",
     "file": "integration/framework",
@@ -707,6 +714,13 @@
     "refs": [],
     "title": "Pre-flight refuses to overwrite an existing timings file",
     "type": "scenario"
+  },
+  "rq-1163481e": {
+    "decl": "- `log_column_names() -> &'static [\"andersen_conserved\"]`.",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "log_column_names",
+    "type": "api-item"
   },
   "rq-1178e005": {
     "decl": "## Out of Scope",
@@ -1359,6 +1373,20 @@
     "title": "Reject when positions_y has the wrong length",
     "type": "scenario"
   },
+  "rq-1eaff437": {
+    "decl": "Scenario: collision_rate = 0 leaves velocities unchanged by the resample",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "collision_rate = 0 leaves velocities unchanged by the resample",
+    "type": "scenario"
+  },
+  "rq-1ebcd1db": {
+    "decl": "Scenario: Andersen with all required fields accepted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Andersen with all required fields accepted",
+    "type": "scenario"
+  },
   "rq-1ed32e10": {
     "decl": "Scenario: Content before any section header",
     "file": "forces/topology",
@@ -1451,6 +1479,14 @@
     "title": "Feature: Smooth Particle-Mesh Ewald (SPME)",
     "type": "file"
   },
+  "rq-202a5a1a": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/andersen",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-203ecf81": {
     "decl": "Scenario: Reject a config that declares both [spme] and [coulomb]",
     "file": "forces/spme",
@@ -1478,6 +1514,13 @@
     ],
     "title": "Types",
     "type": "section"
+  },
+  "rq-20daf925": {
+    "decl": "Scenario: Different seeds produce different trajectories",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "Different seeds produce different trajectories",
+    "type": "scenario"
   },
   "rq-20e7cab6": {
     "decl": "### Comment-line attributes",
@@ -1807,6 +1850,13 @@
     "title": "fill kernel handles a non-block-aligned buffer size",
     "type": "scenario"
   },
+  "rq-26ff4aea": {
+    "decl": "Scenario: log_column_values returns ke + pe − cumulative_injection",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "log_column_values returns ke + pe − cumulative_injection",
+    "type": "scenario"
+  },
   "rq-26ffa053": {
     "decl": "Scenario: Doubling epsilon doubles the force at the same separation",
     "file": "forces/lj-pair-force",
@@ -1910,6 +1960,13 @@
     "file": "integration/framework",
     "refs": [],
     "title": "Velocity-Verlet step() launches vv_kick_drift, force pipeline, and vv_kick",
+    "type": "scenario"
+  },
+  "rq-299112e9": {
+    "decl": "Scenario: Variance of resampled velocity components matches MB",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "Variance of resampled velocity components matches MB",
     "type": "scenario"
   },
   "rq-2996a545": {
@@ -2510,6 +2567,14 @@
     "title": "ParticleState",
     "type": "api-item"
   },
+  "rq-37b05f03": {
+    "decl": "## Determinism",
+    "file": "integration/andersen",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
+  },
   "rq-37ccfc1f": {
     "decl": "## Gherkin Scenarios",
     "file": "forces/framework",
@@ -2653,6 +2718,14 @@
     "level": 3,
     "refs": [],
     "title": "Types",
+    "type": "section"
+  },
+  "rq-3ace72b0": {
+    "decl": "### `Integrator` trait overrides",
+    "file": "integration/andersen",
+    "level": 3,
+    "refs": [],
+    "title": "`Integrator` trait overrides",
     "type": "section"
   },
   "rq-3adef71d": {
@@ -2929,6 +3002,13 @@
     "title": "Other attributes",
     "type": "section"
   },
+  "rq-4254b707": {
+    "decl": "Scenario: andersen_resample with p_collision = 1 resamples every particle",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "andersen_resample with p_collision = 1 resamples every particle",
+    "type": "scenario"
+  },
   "rq-433c972f": {
     "decl": "Scenario: ForceField with only a bonded potential owns no neighbor list",
     "file": "forces/framework",
@@ -3034,6 +3114,14 @@
     ],
     "title": "LogWriterError",
     "type": "api-item"
+  },
+  "rq-46792e3e": {
+    "decl": "### Types",
+    "file": "integration/andersen",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
   },
   "rq-46a39249": {
     "decl": "- `compute_temperature(kinetic_energy: f64, particle_count: usize) -> f64`",
@@ -3216,6 +3304,14 @@
     "level": 3,
     "refs": [],
     "title": "CUDA kernel",
+    "type": "section"
+  },
+  "rq-4ac937ef": {
+    "decl": "### Shared Philox header",
+    "file": "integration/andersen",
+    "level": 3,
+    "refs": [],
+    "title": "Shared Philox header",
     "type": "section"
   },
   "rq-4ae7794c": {
@@ -3415,6 +3511,14 @@
     "title": "Nosé-Hoover chain rejects velocity-Verlet / Langevin fields",
     "type": "scenario"
   },
+  "rq-4fad2dd6": {
+    "decl": "## Feature API",
+    "file": "integration/andersen",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-4fd872f5": {
     "decl": "## Launch Configuration",
     "file": "forces/lj-pair-force",
@@ -3442,6 +3546,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Empty bond_type name rejected",
+    "type": "scenario"
+  },
+  "rq-50542279": {
+    "decl": "Scenario: Andersen accepts collision_rate = 0",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Andersen accepts collision_rate = 0",
     "type": "scenario"
   },
   "rq-50baca8c": {
@@ -3552,6 +3663,13 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "LJ kernel reads the shared neighbor list from ForceFieldContext",
+    "type": "scenario"
+  },
+  "rq-536457be": {
+    "decl": "Scenario: Time-averaged kinetic energy tracks (N_f / 2) k_B T",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "Time-averaged kinetic energy tracks (N_f / 2) k_B T",
     "type": "scenario"
   },
   "rq-5395785a": {
@@ -3862,6 +3980,13 @@
     "title": "`Integrator` trait overrides",
     "type": "section"
   },
+  "rq-5ac172fc": {
+    "decl": "Scenario: andersen_resample on empty state is a no-op",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "andersen_resample on empty state is a no-op",
+    "type": "scenario"
+  },
   "rq-5ad9b8b9": {
     "decl": "## Empty state",
     "file": "forces/coulomb-pair-force",
@@ -3902,6 +4027,13 @@
     ],
     "title": "RunSummary",
     "type": "api-item"
+  },
+  "rq-5c34021b": {
+    "decl": "Scenario: Andersen missing seed is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Andersen missing seed is rejected",
+    "type": "scenario"
   },
   "rq-5c716d48": {
     "decl": "Scenario: write_timings_file with an empty report writes only the header",
@@ -3985,6 +4117,26 @@
     ],
     "title": "ParticleState",
     "type": "api-item"
+  },
+  "rq-5e059f6b": {
+    "decl": "# Feature: Andersen Stochastic Thermostat",
+    "file": "integration/andersen",
+    "refs": [
+      {
+        "file": "src/gpu/device.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Andersen Stochastic Thermostat",
+    "type": "file"
   },
   "rq-5e5f9917": {
     "decl": "Scenario: neighbor_list all-pairs mode rejects max_neighbors",
@@ -4126,6 +4278,13 @@
     "title": "Example",
     "type": "section"
   },
+  "rq-62ad70f8": {
+    "decl": "Scenario: Construct with collision_rate = 0 (NVE-equivalent)",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "Construct with collision_rate = 0 (NVE-equivalent)",
+    "type": "scenario"
+  },
   "rq-62e2469f": {
     "decl": "Scenario: morse_bond_force on zero bonds is a no-op",
     "file": "forces/morse-bonded",
@@ -4203,6 +4362,14 @@
     ],
     "title": "lan_ou_step",
     "type": "api-item"
+  },
+  "rq-645252f1": {
+    "decl": "## Empty State and degenerate cases",
+    "file": "integration/andersen",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State and degenerate cases",
+    "type": "section"
   },
   "rq-650875cc": {
     "decl": "Scenario: Tilts may exceed the corresponding diagonals",
@@ -4495,6 +4662,13 @@
     "title": "Out-of-range Coulomb scale in four-column form rejected",
     "type": "scenario"
   },
+  "rq-6ac1c0f2": {
+    "decl": "Scenario: andersen_resample with p_collision = 0 is identity",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "andersen_resample with p_collision = 0 is identity",
+    "type": "scenario"
+  },
   "rq-6ad9a0f8": {
     "decl": "Scenario: bond_types is optional and defaults to empty",
     "file": "io/config-schema",
@@ -4630,6 +4804,13 @@
     "title": "Algorithm",
     "type": "section"
   },
+  "rq-6d2daea0": {
+    "decl": "- `log_column_values(ke, pe) -> vec![ke + pe − cumulative_injection]`.",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "log_column_values",
+    "type": "api-item"
+  },
   "rq-6d99f9c8": {
     "decl": "### Path resolution and overwrite policy",
     "file": "io/config-schema",
@@ -4726,6 +4907,14 @@
     "refs": [],
     "title": "Two independent NHC runs with identical configs produce byte-identical outputs",
     "type": "scenario"
+  },
+  "rq-6fb62a59": {
+    "decl": "### Reproducibility",
+    "file": "integration/andersen",
+    "level": 3,
+    "refs": [],
+    "title": "Reproducibility",
+    "type": "section"
   },
   "rq-6fb70c93": {
     "decl": "Scenario: At equilibrium, NHC drives the kinetic energy to (g/2) k_B T",
@@ -4883,6 +5072,14 @@
     "refs": [],
     "title": "Reject negative particle count",
     "type": "scenario"
+  },
+  "rq-73a3b802": {
+    "decl": "### PTX Module Loading",
+    "file": "integration/andersen",
+    "level": 3,
+    "refs": [],
+    "title": "PTX Module Loading",
+    "type": "section"
   },
   "rq-73fbb111": {
     "decl": "## Progress reporting",
@@ -5093,6 +5290,14 @@
     "title": "100-step lossless round trip restores observables bit-exactly",
     "type": "scenario"
   },
+  "rq-7843f188": {
+    "decl": "## Per-Step Kernel Sequence",
+    "file": "integration/andersen",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Step Kernel Sequence",
+    "type": "section"
+  },
   "rq-78487f38": {
     "decl": "#### `[[particle_types]]` (array of tables)",
     "file": "io/config-schema",
@@ -5292,6 +5497,13 @@
     "file": "io/init-state-file",
     "refs": [],
     "title": "Reject row with NaN position",
+    "type": "scenario"
+  },
+  "rq-7b08ee3d": {
+    "decl": "Scenario: Andersen missing temperature is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Andersen missing temperature is rejected",
     "type": "scenario"
   },
   "rq-7b13d9cf": {
@@ -5538,6 +5750,13 @@
     "file": "forces/framework",
     "refs": [],
     "title": "System total scalar virial equals sum of particle shares",
+    "type": "scenario"
+  },
+  "rq-8040ce8a": {
+    "decl": "Scenario: Different draw_counters yield different post-call velocities",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "Different draw_counters yield different post-call velocities",
     "type": "scenario"
   },
   "rq-8057cb7e": {
@@ -6042,6 +6261,13 @@
     "title": "InitState",
     "type": "api-item"
   },
+  "rq-8df9d74b": {
+    "decl": "Scenario: Reject extra fields (e.g. tau from NHC/CSVR)",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "Reject extra fields (e.g. tau from NHC/CSVR)",
+    "type": "scenario"
+  },
   "rq-8dfac0eb": {
     "decl": "## Test Fixture",
     "file": "pipeline-reproducibility",
@@ -6075,6 +6301,13 @@
     "file": "io/init-state-file",
     "refs": [],
     "title": "File without image:I:3 has images None",
+    "type": "scenario"
+  },
+  "rq-8eb14902": {
+    "decl": "Scenario: log_column_names returns [\"andersen_conserved\"]",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "log_column_names returns [\"andersen_conserved\"]",
     "type": "scenario"
   },
   "rq-8ee27e27": {
@@ -6115,6 +6348,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Reject log_path = timings_path",
+    "type": "scenario"
+  },
+  "rq-8fdfc981": {
+    "decl": "Scenario: step() on empty state is a no-op",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "step() on empty state is a no-op",
     "type": "scenario"
   },
   "rq-9004fd7a": {
@@ -6181,6 +6421,14 @@
     "refs": [],
     "title": "Write a row at step 100 with non-trivial values",
     "type": "scenario"
+  },
+  "rq-91a4634b": {
+    "decl": "### Rust Launch Helpers",
+    "file": "integration/andersen",
+    "level": 3,
+    "refs": [],
+    "title": "Rust Launch Helpers",
+    "type": "section"
   },
   "rq-91aa1f1c": {
     "decl": "Scenario: Construct an empty state with explicit empty IDs",
@@ -7203,6 +7451,13 @@
     "title": "ParticleTypeConfig",
     "type": "api-item"
   },
+  "rq-a77f2d5e": {
+    "decl": "Scenario: Andersen rejects non-positive temperature",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Andersen rejects non-positive temperature",
+    "type": "scenario"
+  },
   "rq-a7aac794": {
     "decl": "Scenario: Cell counts reflect perpendicular widths for a tilted box",
     "file": "forces/neighbor-list",
@@ -7374,6 +7629,13 @@
     "title": "Reject grid dimension below 2*spline_order along b",
     "type": "scenario"
   },
+  "rq-abcae430": {
+    "decl": "Scenario: Construct with particle_count = 0",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "Construct with particle_count = 0",
+    "type": "scenario"
+  },
   "rq-abd761d4": {
     "decl": "- `InitVelocities`",
     "file": "io/init-state-file",
@@ -7541,6 +7803,14 @@
     "title": "NeighborListError::TooManyCells renders as prose",
     "type": "scenario"
   },
+  "rq-af2461ae": {
+    "decl": "## Launch Configuration",
+    "file": "integration/andersen",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
+    "type": "section"
+  },
   "rq-af2d1628": {
     "decl": "- `LennardJonesState` — implements `Potential` with `label() == \"lennard_jones\"`.",
     "file": "forces/framework",
@@ -7673,6 +7943,13 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-b1e87ce4": {
+    "decl": "Scenario: cumulative_injection records K_new − K_old per step",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "cumulative_injection records K_new − K_old per step",
+    "type": "scenario"
+  },
   "rq-b1f33ea4": {
     "decl": "Scenario: neighbor_list cell-list with explicit parameters is accepted",
     "file": "io/config-schema",
@@ -7728,6 +8005,14 @@
     "refs": [],
     "title": "Lossless run includes lossless kick rows and excludes lossy rows",
     "type": "scenario"
+  },
+  "rq-b3086891": {
+    "decl": "## RNG",
+    "file": "integration/andersen",
+    "level": 2,
+    "refs": [],
+    "title": "RNG",
+    "type": "section"
   },
   "rq-b33243ff": {
     "decl": "## Parameters",
@@ -7884,6 +8169,14 @@
     "title": "Newton's third law",
     "type": "section"
   },
+  "rq-b7c6d7d8": {
+    "decl": "### CUDA Kernels",
+    "file": "integration/andersen",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernels",
+    "type": "section"
+  },
   "rq-b8070abb": {
     "decl": "### Constructor",
     "file": "simulation-box",
@@ -7904,6 +8197,13 @@
     "file": "pipeline-reversibility",
     "refs": [],
     "title": "Positions visibly evolve over the 100-step lossless forward run",
+    "type": "scenario"
+  },
+  "rq-b8aa57c6": {
+    "decl": "Scenario: Reject non-positive temperature",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "Reject non-positive temperature",
     "type": "scenario"
   },
   "rq-b8fde05b": {
@@ -7946,6 +8246,13 @@
     "file": "io/init-state-file",
     "refs": [],
     "title": "File does not exist",
+    "type": "scenario"
+  },
+  "rq-bacbf7d2": {
+    "decl": "Scenario: andersen_resample is deterministic across two runs",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "andersen_resample is deterministic across two runs",
     "type": "scenario"
   },
   "rq-baf03449": {
@@ -8175,6 +8482,13 @@
     "title": "rescale_velocities on empty state is a no-op",
     "type": "scenario"
   },
+  "rq-bf569129": {
+    "decl": "Scenario: Andersen missing collision_rate is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Andersen missing collision_rate is rejected",
+    "type": "scenario"
+  },
   "rq-bf62f645": {
     "decl": "## Gherkin Scenarios",
     "file": "forces/topology",
@@ -8197,6 +8511,14 @@
     "refs": [],
     "title": "Self slot in trivial-mode neighbor list yields zero",
     "type": "scenario"
+  },
+  "rq-bfa0cc5a": {
+    "decl": "## Andersen conserved quantity",
+    "file": "integration/andersen",
+    "level": 2,
+    "refs": [],
+    "title": "Andersen conserved quantity",
+    "type": "section"
   },
   "rq-bfb3b9d8": {
     "decl": "Scenario: minimum_image leaves a displacement strictly inside the primary image unchanged",
@@ -8345,6 +8667,13 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-c3564e8a": {
+    "decl": "Scenario: Different seeds yield different post-call velocities",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "Different seeds yield different post-call velocities",
+    "type": "scenario"
+  },
   "rq-c38c8f3b": {
     "decl": "### Functions",
     "file": "build-pipeline",
@@ -8357,6 +8686,13 @@
     ],
     "title": "Functions",
     "type": "section"
+  },
+  "rq-c4581536": {
+    "decl": "Scenario: collision_rate = 0 accepted",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "collision_rate = 0 accepted",
+    "type": "scenario"
   },
   "rq-c4645fa6": {
     "decl": "## Gherkin Scenarios",
@@ -8420,6 +8756,20 @@
     "title": "Pair with Coulomb exclusion scale 0.0 contributes nothing",
     "type": "scenario"
   },
+  "rq-c4f67467": {
+    "decl": "Scenario: Andersen rejects extra fields (e.g. CSVR's tau)",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Andersen rejects extra fields (e.g. CSVR's tau)",
+    "type": "scenario"
+  },
+  "rq-c50c6f84": {
+    "decl": "Scenario: Log file header includes andersen_conserved when Andersen is the integrator",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "Log file header includes andersen_conserved when Andersen is the integrator",
+    "type": "scenario"
+  },
   "rq-c525ee79": {
     "decl": "Scenario: Construct an empty (N=0) ForceField with potentials configured",
     "file": "forces/framework",
@@ -8447,12 +8797,27 @@
     "title": "`Lattice`",
     "type": "section"
   },
+  "rq-c5b42daa": {
+    "decl": "Scenario: Missing seed rejected",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "Missing seed rejected",
+    "type": "scenario"
+  },
   "rq-c5e00a28": {
     "decl": "Scenario: Write a single frame with velocities and without images",
     "file": "io/trajectory-output",
     "refs": [],
     "title": "Write a single frame with velocities and without images",
     "type": "scenario"
+  },
+  "rq-c5f66ecd": {
+    "decl": "## Out of Scope",
+    "file": "integration/andersen",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-c62bb861": {
     "decl": "## Determinism",
@@ -8521,6 +8886,13 @@
     "title": "Bond-free run omits morse_bond_force and reduce_bond_forces",
     "type": "scenario"
   },
+  "rq-c814659f": {
+    "decl": "Scenario: draw_counter starts at 0 and increments by 1 per step",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "draw_counter starts at 0 and increments by 1 per step",
+    "type": "scenario"
+  },
   "rq-c88dde28": {
     "decl": "Scenario: Reject too many data rows",
     "file": "io/init-state-file",
@@ -8582,6 +8954,13 @@
     ],
     "title": "NeighborListState",
     "type": "api-item"
+  },
+  "rq-c9865e4c": {
+    "decl": "Scenario: collision_rate · dt > 1 is clamped to p = 1 (massive Andersen)",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "collision_rate · dt > 1 is clamped to p = 1 (massive Andersen)",
+    "type": "scenario"
   },
   "rq-c9da25a7": {
     "decl": "Scenario: Reduction does not modify positions, velocities, or masses",
@@ -8759,11 +9138,25 @@
     "title": "Reject when masses has the wrong length",
     "type": "scenario"
   },
+  "rq-cee157e5": {
+    "decl": "Scenario: Andersen rejects negative collision_rate",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Andersen rejects negative collision_rate",
+    "type": "scenario"
+  },
   "rq-cef2288f": {
     "decl": "Scenario: Reject upload when images_x has the wrong length",
     "file": "particle-state",
     "refs": [],
     "title": "Reject upload when images_x has the wrong length",
+    "type": "scenario"
+  },
+  "rq-cef43ff0": {
+    "decl": "Scenario: step() launches all expected kernels",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "step() launches all expected kernels",
     "type": "scenario"
   },
   "rq-cf008c68": {
@@ -9097,6 +9490,14 @@
     "title": "Reject image column whose value does not parse as i32",
     "type": "scenario"
   },
+  "rq-d6a1b8eb": {
+    "decl": "### Counter packing",
+    "file": "integration/andersen",
+    "level": 3,
+    "refs": [],
+    "title": "Counter packing",
+    "type": "section"
+  },
   "rq-d6bd915a": {
     "decl": "Scenario: Pair exactly at cutoff yields the hard-cutoff value when switch == cutoff",
     "file": "forces/lj-pair-force",
@@ -9249,6 +9650,13 @@
     "title": "Construct Nosé-Hoover chain via the registry",
     "type": "scenario"
   },
+  "rq-da36d746": {
+    "decl": "- `andersen_resample(buffers: &mut ParticleBuffers, seed: u64, draw_counter: u64, p_collision: f32, kt: f32) -> Result<(), GpuError>`",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "andersen_resample",
+    "type": "api-item"
+  },
   "rq-dacb071c": {
     "decl": "Scenario: Generation mismatch with new box too small returns BoxTooSmallForCells",
     "file": "forces/neighbor-list",
@@ -9384,6 +9792,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Empty angle_type name rejected",
+    "type": "scenario"
+  },
+  "rq-dc3c616a": {
+    "decl": "Scenario: Construct AndersenState via the registry",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "Construct AndersenState via the registry",
     "type": "scenario"
   },
   "rq-dc51e1c3": {
@@ -9623,6 +10038,14 @@
     ],
     "title": "LogWriter",
     "type": "api-item"
+  },
+  "rq-e15cc5ac": {
+    "decl": "## Algorithm",
+    "file": "integration/andersen",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
   },
   "rq-e16e72bd": {
     "decl": "### Sample bookkeeping",
@@ -10203,12 +10626,27 @@
     "title": "Doubling all charges quadruples the reciprocal-space energy and forces scale linearly",
     "type": "scenario"
   },
+  "rq-ea6aa8c0": {
+    "decl": "Scenario: Construct Andersen via the registry",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Construct Andersen via the registry",
+    "type": "scenario"
+  },
   "rq-ea8ebebd": {
     "decl": "Scenario: Explicit 1-3 exclusion overrides the angle's implicit default",
     "file": "forces/topology",
     "refs": [],
     "title": "Explicit 1-3 exclusion overrides the angle's implicit default",
     "type": "scenario"
+  },
+  "rq-eb0bc993": {
+    "decl": "## Parameters",
+    "file": "integration/andersen",
+    "level": 2,
+    "refs": [],
+    "title": "Parameters",
+    "type": "section"
   },
   "rq-eb3a65df": {
     "decl": "Scenario: Reduction does not modify neighbor_counts",
@@ -10510,6 +10948,13 @@
     "refs": [],
     "title": "Feature: SoA Particle State and GPU Buffers",
     "type": "file"
+  },
+  "rq-f062ec85": {
+    "decl": "Scenario: Two independent Andersen runs with identical seeds produce byte-identical outputs",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "Two independent Andersen runs with identical seeds produce byte-identical outputs",
+    "type": "scenario"
   },
   "rq-f0b9b0f5": {
     "decl": "Scenario: Exclusion scale less than 0 rejected",
@@ -11052,6 +11497,13 @@
     "title": "step() on a ForceField with zero slots writes zeros to forces_*",
     "type": "scenario"
   },
+  "rq-fd0cef60": {
+    "decl": "- `AndersenBuilder` — implements `IntegratorBuilder` with",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "AndersenBuilder",
+    "type": "api-item"
+  },
   "rq-fd593357": {
     "decl": "Scenario: Append frames in order",
     "file": "io/trajectory-output",
@@ -11117,6 +11569,13 @@
     "refs": [],
     "title": "r == 0 produces zero energy and virial in addition to zero force",
     "type": "scenario"
+  },
+  "rq-feba0a88": {
+    "decl": "- `AndersenState` — implements the `Integrator` trait declared in",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "AndersenState",
+    "type": "api-item"
   },
   "rq-febdd0b3": {
     "decl": "Scenario: Reject image column declared without all three components",

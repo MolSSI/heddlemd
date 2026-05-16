@@ -145,6 +145,8 @@ required fields are rejected.
   - `"csvr"` — stochastic NVT via canonical sampling velocity
     rescaling (Bussi-Donadio-Parrinello, 2007). See
     `integration/csvr.md`.
+  - `"andersen"` — stochastic NVT via per-particle Maxwell-Boltzmann
+    resampling (Andersen, 1980). See `integration/andersen.md`.
 
 Fields accepted for `kind = "velocity-verlet"`:
 
@@ -187,6 +189,21 @@ Fields accepted for `kind = "csvr"`:
 - `seed: u64` — counter-based RNG seed for the chi-squared and
   standard-normal draws consumed by the rescale formula. Required,
   independent of `simulation.seed` and any other integrator's seed.
+
+Fields accepted for `kind = "andersen"`:
+
+- `temperature: f64` — bath temperature in kelvin. Required. Finite
+  and strictly positive. Independent of `simulation.temperature`.
+- `collision_rate: f64` — per-particle stochastic collision frequency
+  `ν` in inverse seconds. Required. Finite and `≥ 0` (`0`
+  degenerates to NVE — no resampling — and is permitted as a
+  diagnostic mode). Typical values for liquid water are
+  `10¹¹–10¹² s⁻¹`. The per-step collision probability `p` is
+  computed as `clamp(collision_rate · dt, 0.0, 1.0)`.
+- `seed: u64` — counter-based RNG seed for the Bernoulli decisions
+  and Maxwell-Boltzmann draws consumed by the resample kernel.
+  Required, independent of `simulation.seed` and any other
+  integrator's seed.
 
 #### `[[particle_types]]` (array of tables) <!-- rq-78487f38 -->
 
@@ -527,6 +544,10 @@ Beyond per-field validation, the loader checks:
     `yoshida_order = 3`, `n_resp = 1`) when omitted.
   - `Csvr { temperature: f64, tau: f64, seed: u64 }` — selected by
     `kind = "csvr"`. All three fields are required.
+  - `Andersen { temperature: f64, collision_rate: f64, seed: u64 }`
+    — selected by `kind = "andersen"`. All three fields are
+    required. `collision_rate` is the per-particle stochastic
+    collision frequency in inverse seconds and may be zero.
 
   Variant-bearing parameters reflect the per-kind fields listed under the
   `[integrator]` section above.
@@ -1058,6 +1079,66 @@ Feature: TOML simulation config schema
       temperature=300.0, tau=1.0e-13, seed=42, chain_length=3 (extra field)
     When load_config is called
     Then it returns Err(ConfigError::UnknownIntegratorField { kind: "csvr", field: "chain_length" })
+
+  # --- Andersen ---
+
+  @rq-1ebcd1db
+  Scenario: Andersen with all required fields accepted
+    Given the Background config with [integrator] kind="andersen",
+      temperature=300.0, collision_rate=1.0e12, seed=42
+    When load_config is called
+    Then it returns Ok(config)
+    And config.integrator matches IntegratorKind::Andersen {
+      temperature: 300.0, collision_rate: 1.0e12, seed: 42 }
+
+  @rq-50542279
+  Scenario: Andersen accepts collision_rate = 0
+    Given the Background config with [integrator] kind="andersen",
+      temperature=300.0, collision_rate=0.0, seed=42
+    When load_config is called
+    Then it returns Ok(config)
+
+  @rq-7b08ee3d
+  Scenario: Andersen missing temperature is rejected
+    Given the Background config with [integrator] kind="andersen",
+      collision_rate=1.0e12, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.temperature" })
+
+  @rq-bf569129
+  Scenario: Andersen missing collision_rate is rejected
+    Given the Background config with [integrator] kind="andersen",
+      temperature=300.0, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.collision_rate" })
+
+  @rq-5c34021b
+  Scenario: Andersen missing seed is rejected
+    Given the Background config with [integrator] kind="andersen",
+      temperature=300.0, collision_rate=1.0e12
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.seed" })
+
+  @rq-a77f2d5e
+  Scenario: Andersen rejects non-positive temperature
+    Given the Background config with [integrator] kind="andersen",
+      temperature=0.0, collision_rate=1.0e12, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.temperature", reason: _ })
+
+  @rq-cee157e5
+  Scenario: Andersen rejects negative collision_rate
+    Given the Background config with [integrator] kind="andersen",
+      temperature=300.0, collision_rate=-1.0, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.collision_rate", reason: _ })
+
+  @rq-c4f67467
+  Scenario: Andersen rejects extra fields (e.g. CSVR's tau)
+    Given the Background config with [integrator] kind="andersen",
+      temperature=300.0, collision_rate=1.0e12, seed=42, tau=1.0e-13 (extra field)
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownIntegratorField { kind: "andersen", field: "tau" })
 
   @rq-1e1c5f3b
   Scenario: Missing [[particle_types]] is rejected

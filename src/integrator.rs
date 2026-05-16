@@ -3,9 +3,9 @@ use cudarc::driver::CudaSlice;
 
 use crate::forces::{ForceField, ForceFieldError};
 use crate::gpu::{
-    GpuContext, GpuError, LosslessBuffers, ParticleBuffers, compute_kinetic_energy,
-    lan_drift_half, lan_ou_step, rescale_velocities, vv_kick, vv_kick_drift,
-    vv_kick_drift_lossless, vv_kick_lossless,
+    GpuContext, GpuError, LosslessBuffers, ParticleBuffers, andersen_resample,
+    compute_kinetic_energy, lan_drift_half, lan_ou_step, rescale_velocities, vv_kick,
+    vv_kick_drift, vv_kick_drift_lossless, vv_kick_lossless,
 };
 use crate::io::config::IntegratorKind;
 use crate::io::log_output::BOLTZMANN_J_PER_K;
@@ -87,6 +87,7 @@ impl IntegratorRegistry {
                 Box::new(LangevinBaoabBuilder),
                 Box::new(NoseHooverChainBuilder),
                 Box::new(CsvrBuilder),
+                Box::new(AndersenBuilder),
             ],
         }
     }
@@ -815,6 +816,139 @@ impl IntegratorBuilder for CsvrBuilder {
                 seed,
             } => {
                 let state = CsvrState::new(gpu, particle_count, *temperature, *tau, *seed)?;
+                Ok(Box::new(state))
+            }
+            other => Err(IntegratorError::UnknownKind(other.name().to_string())),
+        }
+    }
+}
+
+// --- Andersen stochastic thermostat ---
+// rq-5e059f6b
+
+#[derive(Debug)]
+pub struct AndersenState {
+    pub temperature: f64,
+    pub collision_rate: f64,
+    pub seed: u64,
+    pub draw_counter: u64,
+    pub kt: f64,
+    pub cumulative_injection: f64,
+    ke_scratch: CudaSlice<f32>,
+    most_recent_ke: f64,
+}
+
+impl AndersenState {
+    fn new(
+        gpu: &GpuContext,
+        _particle_count: usize,
+        temperature: f64,
+        collision_rate: f64,
+        seed: u64,
+    ) -> Result<Self, GpuError> {
+        let kt = BOLTZMANN_J_PER_K * temperature;
+        let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
+        Ok(AndersenState {
+            temperature,
+            collision_rate,
+            seed,
+            draw_counter: 0,
+            kt,
+            cumulative_injection: 0.0,
+            ke_scratch,
+            most_recent_ke: 0.0,
+        })
+    }
+}
+
+impl Integrator for AndersenState {
+    fn step(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &mut SimulationBox,
+        force_field: &mut ForceField,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), IntegratorError> {
+        if buffers.particle_count() == 0 {
+            return Ok(());
+        }
+
+        // Velocity-Verlet core.
+        timings.kernel_start(KernelStage::VV_KICK_DRIFT)?;
+        vv_kick_drift(buffers, sim_box, dt)?;
+        timings.kernel_stop(KernelStage::VV_KICK_DRIFT)?;
+
+        force_field.step(buffers, sim_box, timings)?;
+
+        timings.kernel_start(KernelStage::VV_KICK)?;
+        vv_kick(buffers, dt)?;
+        timings.kernel_stop(KernelStage::VV_KICK)?;
+
+        // KE before resample.
+        timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
+        let k_old = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+        timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
+
+        // Resample (per-particle Bernoulli + Maxwell-Boltzmann).
+        self.draw_counter += 1;
+        let p_collision = ((self.collision_rate as f64) * (dt as f64))
+            .clamp(0.0, 1.0) as f32;
+        let kt = self.kt as f32;
+        timings.kernel_start(KernelStage::ANDERSEN_RESAMPLE)?;
+        andersen_resample(buffers, self.seed, self.draw_counter, p_collision, kt)?;
+        timings.kernel_stop(KernelStage::ANDERSEN_RESAMPLE)?;
+
+        // KE after resample.
+        timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
+        let k_new = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+        timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
+
+        self.cumulative_injection += k_new - k_old;
+        self.most_recent_ke = k_new;
+        Ok(())
+    }
+
+    fn log_column_names(&self) -> &'static [&'static str] {
+        &["andersen_conserved"]
+    }
+
+    fn log_column_values(
+        &self,
+        kinetic_energy: f64,
+        potential_energy: f64,
+    ) -> Vec<f64> {
+        vec![kinetic_energy + potential_energy - self.cumulative_injection]
+    }
+}
+
+#[derive(Debug)]
+pub struct AndersenBuilder;
+
+impl IntegratorBuilder for AndersenBuilder {
+    fn kind_name(&self) -> &'static str {
+        "andersen"
+    }
+
+    fn build(
+        &self,
+        gpu: &GpuContext,
+        particle_count: usize,
+        kind: &IntegratorKind,
+    ) -> Result<Box<dyn Integrator>, IntegratorError> {
+        match kind {
+            IntegratorKind::Andersen {
+                temperature,
+                collision_rate,
+                seed,
+            } => {
+                let state = AndersenState::new(
+                    gpu,
+                    particle_count,
+                    *temperature,
+                    *collision_rate,
+                    *seed,
+                )?;
                 Ok(Box::new(state))
             }
             other => Err(IntegratorError::UnknownKind(other.name().to_string())),

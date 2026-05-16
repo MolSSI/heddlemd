@@ -39,6 +39,7 @@ pub struct Kernels {
     pub reduce_angle_forces: CudaFunction,
     pub kinetic_energy_reduce: CudaFunction,
     pub rescale_velocities: CudaFunction,
+    pub andersen_resample: CudaFunction,
     pub accumulate_forces: CudaFunction,
     pub neighbor_displacement_squared: CudaFunction,
     pub neighbor_list_build: CudaFunction,
@@ -129,6 +130,12 @@ pub fn init_device() -> Result<GpuContext, GpuError> {
         "nose_hoover",
         &["kinetic_energy_reduce", "rescale_velocities"],
     )?;
+    // rq-5e059f6b
+    device.load_ptx(
+        Ptx::from_src(kernels::ANDERSEN),
+        "andersen",
+        &["andersen_resample"],
+    )?;
     device.load_ptx(
         Ptx::from_src(kernels::FORCES),
         "forces",
@@ -180,6 +187,7 @@ pub fn init_device() -> Result<GpuContext, GpuError> {
         reduce_angle_forces: get("angle", "reduce_angle_forces")?,
         kinetic_energy_reduce: get("nose_hoover", "kinetic_energy_reduce")?,
         rescale_velocities: get("nose_hoover", "rescale_velocities")?,
+        andersen_resample: get("andersen", "andersen_resample")?,
         accumulate_forces: get("forces", "accumulate_forces")?,
         neighbor_displacement_squared: get("neighbor", "neighbor_displacement_squared")?,
         neighbor_list_build: get("neighbor", "neighbor_list_build")?,

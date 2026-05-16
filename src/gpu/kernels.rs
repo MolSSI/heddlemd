@@ -890,6 +890,53 @@ pub fn rescale_velocities(
     Ok(())
 }
 
+// Launch helper for the Andersen per-particle resample kernel. Block
+// size 256, grid `ceil(n / 256)`. When `n == 0` returns Ok(()) without
+// launching. Debug-asserts `p_collision ∈ [0, 1]` (caller clamps).
+// rq-5e059f6b
+#[allow(clippy::too_many_arguments)]
+pub fn andersen_resample(
+    buffers: &mut ParticleBuffers,
+    seed: u64,
+    draw_counter: u64,
+    p_collision: f32,
+    kt: f32,
+) -> Result<(), GpuError> {
+    let n = buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    debug_assert!((0.0..=1.0).contains(&p_collision));
+    let n_u32 = n as u32;
+    let func = buffers.kernels.andersen_resample.clone();
+    let cfg = launch_config(n_u32);
+    let seed_lo = seed as u32;
+    let seed_hi = (seed >> 32) as u32;
+    let draw_lo = draw_counter as u32;
+    let draw_hi = (draw_counter >> 32) as u32;
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut buffers.velocities_x,
+                &mut buffers.velocities_y,
+                &mut buffers.velocities_z,
+                &buffers.masses,
+                &buffers.particle_ids,
+                seed_lo,
+                seed_hi,
+                draw_lo,
+                draw_hi,
+                p_collision,
+                kt,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 // rq-c0f98145
 #[allow(clippy::too_many_arguments)]
 pub fn accumulate_forces(
