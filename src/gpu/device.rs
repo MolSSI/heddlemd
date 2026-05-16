@@ -40,6 +40,8 @@ pub struct Kernels {
     pub kinetic_energy_reduce: CudaFunction,
     pub rescale_velocities: CudaFunction,
     pub andersen_resample: CudaFunction,
+    pub virial_sum_reduce: CudaFunction,
+    pub rescale_positions: CudaFunction,
     pub accumulate_forces: CudaFunction,
     pub neighbor_displacement_squared: CudaFunction,
     pub neighbor_list_build: CudaFunction,
@@ -136,6 +138,12 @@ pub fn init_device() -> Result<GpuContext, GpuError> {
         "andersen",
         &["andersen_resample"],
     )?;
+    // rq-0d8c8688
+    device.load_ptx(
+        Ptx::from_src(kernels::BAROSTAT),
+        "barostat",
+        &["virial_sum_reduce", "rescale_positions"],
+    )?;
     device.load_ptx(
         Ptx::from_src(kernels::FORCES),
         "forces",
@@ -188,6 +196,8 @@ pub fn init_device() -> Result<GpuContext, GpuError> {
         kinetic_energy_reduce: get("nose_hoover", "kinetic_energy_reduce")?,
         rescale_velocities: get("nose_hoover", "rescale_velocities")?,
         andersen_resample: get("andersen", "andersen_resample")?,
+        virial_sum_reduce: get("barostat", "virial_sum_reduce")?,
+        rescale_positions: get("barostat", "rescale_positions")?,
         accumulate_forces: get("forces", "accumulate_forces")?,
         neighbor_displacement_squared: get("neighbor", "neighbor_displacement_squared")?,
         neighbor_list_build: get("neighbor", "neighbor_list_build")?,

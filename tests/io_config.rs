@@ -2426,7 +2426,7 @@ fn barostat_section_absent_yields_none() {
 }
 
 #[test]
-fn barostat_any_kind_rejected_while_registry_empty() {
+fn barostat_unknown_kind_rejected() {
     let dir = tmp_path("baro_unknown");
     let body = format!(
         r#"schema_version = 1
@@ -2443,7 +2443,7 @@ kind = "velocity-verlet"
 lossless = false
 
 [barostat]
-kind = "anything"
+kind = "not-a-real-barostat"
 
 [[particle_types]]
 name = "Ar"
@@ -2459,7 +2459,190 @@ cutoff = 1.0e-9
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::UnknownBarostatKind { actual } => assert_eq!(actual, "anything"),
+        ConfigError::UnknownBarostatKind { actual } => {
+            assert_eq!(actual, "not-a-real-barostat")
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// Helper for the [barostat] kind="berendsen" scenarios below: the
+// returned config body has `[integrator] kind="velocity-verlet"` plus
+// the supplied `[barostat]` fragment.
+fn config_with_barostat(barostat_block: &str) -> String {
+    format!(
+        r#"schema_version = 1
+init = "argon.xyz"
+
+[simulation]
+seed = 12345
+n_steps = 10
+dt = 1.0e-15
+temperature = 300.0
+
+[integrator]
+kind = "velocity-verlet"
+lossless = false
+
+{barostat_block}
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#
+    )
+}
+
+#[test]
+fn barostat_berendsen_accepted() {
+    let dir = tmp_path("baro_berendsen");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "berendsen"
+pressure = 1.0e5
+tau = 1.0e-12
+compressibility = 4.5e-10"#,
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    match cfg.barostat.as_ref().unwrap() {
+        dynamics::io::BarostatKind::Berendsen {
+            pressure,
+            tau,
+            compressibility,
+        } => {
+            assert_eq!(*pressure, 1.0e5);
+            assert_eq!(*tau, 1.0e-12);
+            assert_eq!(*compressibility, 4.5e-10);
+        }
+    }
+}
+
+#[test]
+fn barostat_berendsen_accepts_negative_pressure() {
+    let dir = tmp_path("baro_berendsen_neg");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "berendsen"
+pressure = -1.0e5
+tau = 1.0e-12
+compressibility = 4.5e-10"#,
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert!(cfg.barostat.is_some());
+}
+
+#[test]
+fn barostat_berendsen_missing_pressure_rejected() {
+    let dir = tmp_path("baro_berendsen_no_p");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "berendsen"
+tau = 1.0e-12
+compressibility = 4.5e-10"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "barostat.pressure"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn barostat_berendsen_missing_tau_rejected() {
+    let dir = tmp_path("baro_berendsen_no_tau");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "berendsen"
+pressure = 1.0e5
+compressibility = 4.5e-10"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "barostat.tau"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn barostat_berendsen_missing_compressibility_rejected() {
+    let dir = tmp_path("baro_berendsen_no_beta");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "berendsen"
+pressure = 1.0e5
+tau = 1.0e-12"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => {
+            assert_eq!(field, "barostat.compressibility")
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn barostat_berendsen_rejects_non_positive_tau() {
+    let dir = tmp_path("baro_berendsen_tau_neg");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "berendsen"
+pressure = 1.0e5
+tau = -1.0e-12
+compressibility = 4.5e-10"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "barostat.tau"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn barostat_berendsen_rejects_non_positive_compressibility() {
+    let dir = tmp_path("baro_berendsen_beta_zero");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "berendsen"
+pressure = 1.0e5
+tau = 1.0e-12
+compressibility = 0.0"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "barostat.compressibility")
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn barostat_berendsen_rejects_extra_fields() {
+    let dir = tmp_path("baro_berendsen_extra");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "berendsen"
+pressure = 1.0e5
+tau = 1.0e-12
+compressibility = 4.5e-10
+seed = 42"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownBarostatField { kind, field } => {
+            assert_eq!(kind, "berendsen");
+            assert_eq!(field, "seed");
+        }
         other => panic!("unexpected: {other:?}"),
     }
 }

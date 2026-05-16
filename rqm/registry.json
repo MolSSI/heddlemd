@@ -70,6 +70,13 @@
     "title": "Langevin BAOAB runs end-to-end through the runner",
     "type": "scenario"
   },
+  "rq-00e98375": {
+    "decl": "Scenario: rescale_positions does not modify velocities, forces, masses, or images",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "rescale_positions does not modify velocities, forces, masses, or images",
+    "type": "scenario"
+  },
   "rq-01607062": {
     "decl": "Scenario: Reject image:I:3 ordered before velo:R:3",
     "file": "io/init-state-file",
@@ -217,6 +224,14 @@
     "title": "Feature: Simulation Box and Periodic Boundary Conditions",
     "type": "file"
   },
+  "rq-03d70e2d": {
+    "decl": "## Per-Step Kernel Sequence",
+    "file": "integration/berendsen-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Step Kernel Sequence",
+    "type": "section"
+  },
   "rq-03d9869d": {
     "decl": "### Launch configuration",
     "file": "forces/spme",
@@ -296,6 +311,13 @@
     "title": "Feature: Morse Bonded Potential",
     "type": "file"
   },
+  "rq-05e8f300": {
+    "decl": "Scenario: build_optional with None returns Ok(None)",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "build_optional with None returns Ok(None)",
+    "type": "scenario"
+  },
   "rq-05eb9fbb": {
     "decl": "Scenario: Reject zero ly",
     "file": "simulation-box",
@@ -329,6 +351,13 @@
     "refs": [],
     "title": "Algorithm",
     "type": "section"
+  },
+  "rq-06772617": {
+    "decl": "Scenario: Reject non-positive compressibility",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Reject non-positive compressibility",
+    "type": "scenario"
   },
   "rq-06c0e11a": {
     "decl": "Scenario: Exclusion row with non-numeric scale",
@@ -428,6 +457,13 @@
     "refs": [],
     "title": "Comparison Procedure",
     "type": "section"
+  },
+  "rq-098fabd1": {
+    "decl": "Scenario: compute_total_virial matches the host-side sum on small N",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "compute_total_virial matches the host-side sum on small N",
+    "type": "scenario"
   },
   "rq-09a2e15f": {
     "decl": "# Feature: Velocity Verlet Time Integration",
@@ -582,6 +618,30 @@
     "title": "Custom integrator builder is selectable",
     "type": "scenario"
   },
+  "rq-0d8c8688": {
+    "decl": "# Feature: Berendsen Weak-Coupling Barostat",
+    "file": "integration/berendsen-barostat",
+    "refs": [
+      {
+        "file": "src/gpu/device.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Berendsen Weak-Coupling Barostat",
+    "type": "file"
+  },
   "rq-0da87ca1": {
     "decl": "## Feature API",
     "file": "forces/framework",
@@ -646,6 +706,13 @@
     "title": "Reject negative collision_rate",
     "type": "scenario"
   },
+  "rq-0f50dade": {
+    "decl": "- `compute_total_virial(buffers: &ParticleBuffers, scratch: &mut CudaSlice<f32>) -> Result<f32, GpuError>`",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "compute_total_virial",
+    "type": "api-item"
+  },
   "rq-0f5fba54": {
     "decl": "### Thermostat slot",
     "file": "integration/framework",
@@ -661,6 +728,13 @@
     "refs": [],
     "title": "Berendsen \"conserved quantity\"",
     "type": "section"
+  },
+  "rq-0fcb5a1e": {
+    "decl": "Scenario: [barostat] kind = \"berendsen\" with all required fields accepted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[barostat] kind = \"berendsen\" with all required fields accepted",
+    "type": "scenario"
   },
   "rq-0ffccee0": {
     "decl": "Scenario: Allocate device buffers and perform initial upload",
@@ -874,6 +948,13 @@
     "title": "OutputConfig",
     "type": "api-item"
   },
+  "rq-125677a3": {
+    "decl": "Scenario: Reject non-positive tau",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Reject non-positive tau",
+    "type": "scenario"
+  },
   "rq-12657190": {
     "decl": "- `PairBuffer::max_neighbors(&self) -> u32`",
     "file": "pair-reduction",
@@ -913,11 +994,25 @@
     "title": "load_topology_file",
     "type": "api-item"
   },
+  "rq-136f7d15": {
+    "decl": "Scenario: sim_box.generation() advances after apply",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "sim_box.generation() advances after apply",
+    "type": "scenario"
+  },
   "rq-13b931f8": {
     "decl": "Scenario: Bond row with non-integer index",
     "file": "forces/topology",
     "refs": [],
     "title": "Bond row with non-integer index",
+    "type": "scenario"
+  },
+  "rq-13bf10fc": {
+    "decl": "Scenario: Berendsen barostat composes with velocity-Verlet + CSVR thermostat (NPT)",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Berendsen barostat composes with velocity-Verlet + CSVR thermostat (NPT)",
     "type": "scenario"
   },
   "rq-13c02457": {
@@ -945,6 +1040,14 @@
     ],
     "title": "NeighborListState",
     "type": "api-item"
+  },
+  "rq-142f60e8": {
+    "decl": "## Feature API",
+    "file": "integration/berendsen-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-1434abd2": {
     "decl": "## Out of Scope",
@@ -1032,6 +1135,13 @@
     "title": "apply_pre is the trait default (no-op)",
     "type": "scenario"
   },
+  "rq-16252a37": {
+    "decl": "Scenario: Triclinic shape is preserved under apply",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Triclinic shape is preserved under apply",
+    "type": "scenario"
+  },
   "rq-1658f77d": {
     "decl": "## File Format",
     "file": "io/trajectory-output",
@@ -1058,6 +1168,14 @@
     "refs": [],
     "title": "Default apply_pre is a no-op for thermostats that don't override it",
     "type": "scenario"
+  },
+  "rq-168727b6": {
+    "decl": "### SimulationBox API",
+    "file": "integration/berendsen-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "SimulationBox API",
+    "type": "section"
   },
   "rq-16f6c7dc": {
     "decl": "- `spme_charge_spread`: one thread per real grid cell, block size 256,",
@@ -1141,6 +1259,13 @@
     "refs": [],
     "title": "trajectory_every > n_steps writes only the step-0 frame",
     "type": "scenario"
+  },
+  "rq-19916fb0": {
+    "decl": "- `rescale_positions(buffers: &mut ParticleBuffers, factor: f32) -> Result<(), GpuError>`",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "rescale_positions",
+    "type": "api-item"
   },
   "rq-19f7ffca": {
     "decl": "## Feature API",
@@ -1818,11 +1943,26 @@
     "title": "MorseBondedState",
     "type": "api-item"
   },
+  "rq-23a93703": {
+    "decl": "## Launch Configuration",
+    "file": "integration/berendsen-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
+    "type": "section"
+  },
   "rq-23fc870b": {
     "decl": "Scenario: Mixed-type pair uses the off-diagonal parameter slot",
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Mixed-type pair uses the off-diagonal parameter slot",
+    "type": "scenario"
+  },
+  "rq-24073418": {
+    "decl": "Scenario: log_column_values returns the cached most-recent pressure and post-rescale volume",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "log_column_values returns the cached most-recent pressure and post-rescale volume",
     "type": "scenario"
   },
   "rq-244fceb1": {
@@ -1910,6 +2050,14 @@
     "refs": [],
     "title": "kinetic_energy_reduce of a single particle at v=0 is zero",
     "type": "scenario"
+  },
+  "rq-25e1c7c2": {
+    "decl": "### Types",
+    "file": "integration/berendsen-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
   },
   "rq-25f24b26": {
     "decl": "# Feature: Berendsen Weak-Coupling Thermostat",
@@ -2115,6 +2263,13 @@
     "title": "Self-energy",
     "type": "section"
   },
+  "rq-29dda250": {
+    "decl": "- `apply(buffers, sim_box, dt, timings)` — runs the per-step",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "apply",
+    "type": "api-item"
+  },
   "rq-29e08cb5": {
     "decl": "- `IntegratorBuilder`, `ThermostatBuilder`, `BarostatBuilder` —",
     "file": "integration/framework",
@@ -2207,12 +2362,35 @@
     "title": "TrajectoryWriter",
     "type": "api-item"
   },
+  "rq-2adf8b58": {
+    "decl": "Scenario: Accept negative target pressure",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Accept negative target pressure",
+    "type": "scenario"
+  },
   "rq-2ae37ac3": {
     "decl": "Scenario: SPME reciprocal state's internal cell list uses one bin per FFT grid cell",
     "file": "forces/spme",
     "refs": [],
     "title": "SPME reciprocal state's internal cell list uses one bin per FFT grid cell",
     "type": "scenario"
+  },
+  "rq-2b07d8fc": {
+    "decl": "## Determinism",
+    "file": "integration/berendsen-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
+  },
+  "rq-2b0862c1": {
+    "decl": "#### `virial_sum_reduce`",
+    "file": "integration/berendsen-barostat",
+    "level": 4,
+    "refs": [],
+    "title": "`virial_sum_reduce`",
+    "type": "section"
   },
   "rq-2b114f41": {
     "decl": "Scenario: log_column_values returns ke + pe − cumulative_injection",
@@ -2352,6 +2530,13 @@
     "title": "Atom with one bond receives the bond's force directly",
     "type": "scenario"
   },
+  "rq-2d579721": {
+    "decl": "Scenario: Berendsen barostat composes with langevin-baoab integrator",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Berendsen barostat composes with langevin-baoab integrator",
+    "type": "scenario"
+  },
   "rq-2e15fed7": {
     "decl": "## Launch Configuration",
     "file": "forces/neighbor-list",
@@ -2421,6 +2606,13 @@
     "title": "vv_kick leaves velocity unchanged when force is zero",
     "type": "scenario"
   },
+  "rq-2fc35d61": {
+    "decl": "Scenario: rescale_positions with factor=1.0 is the identity",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "rescale_positions with factor=1.0 is the identity",
+    "type": "scenario"
+  },
   "rq-2fe47a86": {
     "decl": "- `Thermostat::apply_pre(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>`",
     "file": "integration/framework",
@@ -2472,10 +2664,10 @@
     "type": "scenario"
   },
   "rq-3127ab44": {
-    "decl": "Scenario: Any [barostat] kind is rejected while the registry is empty",
+    "decl": "Scenario: Unknown [barostat] kind is rejected",
     "file": "io/config-schema",
     "refs": [],
-    "title": "Any [barostat] kind is rejected while the registry is empty",
+    "title": "Unknown [barostat] kind is rejected",
     "type": "scenario"
   },
   "rq-312906a6": {
@@ -2636,6 +2828,13 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-3460c38a": {
+    "decl": "Scenario: Two independent composed runs with identical configs are byte-identical",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Two independent composed runs with identical configs are byte-identical",
+    "type": "scenario"
   },
   "rq-3486c5e9": {
     "decl": "Scenario: H_berendsen drifts only by O(dt²) per step",
@@ -2874,10 +3073,10 @@
     "type": "scenario"
   },
   "rq-386e3288": {
-    "decl": "Scenario: BarostatRegistry::with_builtins() exposes no builders",
+    "decl": "Scenario: BarostatRegistry::with_builtins() exposes the registered barostats",
     "file": "integration/framework",
     "refs": [],
-    "title": "BarostatRegistry::with_builtins() exposes no builders",
+    "title": "BarostatRegistry::with_builtins() exposes the registered barostats",
     "type": "scenario"
   },
   "rq-38b80e11": {
@@ -2907,6 +3106,13 @@
     "file": "integration/nose-hoover-chain",
     "refs": [],
     "title": "rescale_velocities with factor=1.0 is the identity",
+    "type": "scenario"
+  },
+  "rq-3975fb2d": {
+    "decl": "Scenario: Log file header omits pressure and box_volume when no barostat is configured",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Log file header omits pressure and box_volume when no barostat is configured",
     "type": "scenario"
   },
   "rq-39881bb0": {
@@ -3108,6 +3314,19 @@
     "title": "Host-side RNG utility",
     "type": "section"
   },
+  "rq-3db027c2": {
+    "decl": "## Parameters",
+    "file": "integration/berendsen-barostat",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Parameters",
+    "type": "section"
+  },
   "rq-3de16ce0": {
     "decl": "Scenario: Construct a ForceField with LennardJones and MorseBonded",
     "file": "forces/framework",
@@ -3236,6 +3455,13 @@
     "file": "integration/langevin-baoab",
     "refs": [],
     "title": "lan_ou_step with friction = 0 (alpha = 1) is identity on velocities (sanity)",
+    "type": "scenario"
+  },
+  "rq-414ed5ef": {
+    "decl": "Scenario: Missing compressibility rejected",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Missing compressibility rejected",
     "type": "scenario"
   },
   "rq-4169d3af": {
@@ -3540,6 +3766,13 @@
     "title": "Same-type pair uses the diagonal parameter slot",
     "type": "scenario"
   },
+  "rq-4a328491": {
+    "decl": "Scenario: compute_total_virial on empty state returns 0.0 without launching",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "compute_total_virial on empty state returns 0.0 without launching",
+    "type": "scenario"
+  },
   "rq-4a3feaf7": {
     "decl": "### Missing nvcc",
     "file": "build-pipeline",
@@ -3731,6 +3964,13 @@
     "title": "Re-upload after host-side mutation",
     "type": "scenario"
   },
+  "rq-4dbe4a07": {
+    "decl": "Scenario: μ clamped to μ_min when the formula yields a non-positive μ³",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "μ clamped to μ_min when the formula yields a non-positive μ³",
+    "type": "scenario"
+  },
   "rq-4dd5d2d0": {
     "decl": "Scenario: LangevinBaoab owns its thermostat",
     "file": "integration/framework",
@@ -3765,6 +4005,13 @@
     "file": "integration/velocity-verlet",
     "refs": [],
     "title": "vv_kick_lossless",
+    "type": "api-item"
+  },
+  "rq-4ef89c50": {
+    "decl": "- `BerendsenBarostatBuilder` — implements `BarostatBuilder` with",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "BerendsenBarostatBuilder",
     "type": "api-item"
   },
   "rq-4f23c656": {
@@ -3885,6 +4132,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "wrap_position is idempotent for a triclinic box",
+    "type": "scenario"
+  },
+  "rq-52b7d30e": {
+    "decl": "Scenario: Construct BerendsenBarostat via the registry",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Construct BerendsenBarostat via the registry",
     "type": "scenario"
   },
   "rq-52c483c0": {
@@ -4354,6 +4608,13 @@
     "title": "write_timings_file with an empty report writes only the header",
     "type": "scenario"
   },
+  "rq-5c758681": {
+    "decl": "- `BerendsenBarostat` — implements the `Barostat` trait declared in",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "BerendsenBarostat",
+    "type": "api-item"
+  },
   "rq-5c799ac6": {
     "decl": "Scenario: rescale_velocities does not modify positions, masses, or forces",
     "file": "integration/nose-hoover-chain",
@@ -4409,6 +4670,13 @@
     ],
     "title": "Thermostat",
     "type": "api-item"
+  },
+  "rq-5dce727f": {
+    "decl": "Scenario: Missing tau rejected",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Missing tau rejected",
+    "type": "scenario"
   },
   "rq-5ded1806": {
     "decl": "Scenario: Absolute paths are honored unchanged",
@@ -4611,6 +4879,19 @@
     "title": "Construct with collision_rate = 0 (NVE-equivalent)",
     "type": "scenario"
   },
+  "rq-62b44dc9": {
+    "decl": "## Diagnostic log columns",
+    "file": "integration/berendsen-barostat",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Diagnostic log columns",
+    "type": "section"
+  },
   "rq-62e2469f": {
     "decl": "Scenario: morse_bond_force on zero bonds is a no-op",
     "file": "forces/morse-bonded",
@@ -4701,6 +4982,13 @@
     "refs": [],
     "title": "Empty State and degenerate cases",
     "type": "section"
+  },
+  "rq-64c051d4": {
+    "decl": "Scenario: rescale_positions on empty state is a no-op",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "rescale_positions on empty state is a no-op",
+    "type": "scenario"
   },
   "rq-64f1e2a6": {
     "decl": "Scenario: Velocity-Verlet step() launches vv_kick_drift, force pipeline, and vv_kick",
@@ -4911,6 +5199,13 @@
     "title": "Bond-force reduction sums energy and virial alongside forces",
     "type": "scenario"
   },
+  "rq-693b4dba": {
+    "decl": "Scenario: Berendsen barostat extra fields are rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Berendsen barostat extra fields are rejected",
+    "type": "scenario"
+  },
   "rq-693ce6fa": {
     "decl": "# Feature: Shared Neighbor List Service",
     "file": "forces/neighbor-list",
@@ -4922,6 +5217,13 @@
     ],
     "title": "Feature: Shared Neighbor List Service",
     "type": "file"
+  },
+  "rq-69600add": {
+    "decl": "Scenario: apply on empty state is a no-op",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "apply on empty state is a no-op",
+    "type": "scenario"
   },
   "rq-6966fd4f": {
     "decl": "Scenario: rescale_velocities multiplies every velocity component by the factor",
@@ -5302,6 +5604,14 @@
     "title": "Reproducibility",
     "type": "section"
   },
+  "rq-6fb6f0b7": {
+    "decl": "## Algorithm",
+    "file": "integration/berendsen-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
+  },
   "rq-6fb70c93": {
     "decl": "Scenario: At equilibrium, NHC drives the kinetic energy to (g/2) k_B T",
     "file": "integration/nose-hoover-chain",
@@ -5556,6 +5866,13 @@
     "title": "CsvrBuilder",
     "type": "api-item"
   },
+  "rq-75297a48": {
+    "decl": "Scenario: Log file header includes pressure and box_volume when the Berendsen barostat is the configured barostat",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Log file header includes pressure and box_volume when the Berendsen barostat is the configured barostat",
+    "type": "scenario"
+  },
   "rq-7541fd8a": {
     "decl": "Scenario: Validation order is lx, ly, lz, xy, xz, yz",
     "file": "simulation-box",
@@ -5568,6 +5885,13 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "from_config builds a symmetric parameter table from an unordered pair_interactions",
+    "type": "scenario"
+  },
+  "rq-7564b1e7": {
+    "decl": "Scenario: log_column_names returns [\"pressure\", \"box_volume\"]",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "log_column_names returns [\"pressure\", \"box_volume\"]",
     "type": "scenario"
   },
   "rq-75746f64": {
@@ -5620,6 +5944,13 @@
     "refs": [],
     "title": "Determinism Guarantees",
     "type": "section"
+  },
+  "rq-77292dee": {
+    "decl": "Scenario: rescale_positions multiplies every position component by the factor",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "rescale_positions multiplies every position component by the factor",
+    "type": "scenario"
   },
   "rq-779092ca": {
     "decl": "- `TimingsError` — error type. Variants:",
@@ -5882,6 +6213,13 @@
     "file": "particle-state",
     "refs": [],
     "title": "Reject download when host particle count differs from buffers",
+    "type": "scenario"
+  },
+  "rq-7ac01c02": {
+    "decl": "Scenario: Missing pressure rejected",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Missing pressure rejected",
     "type": "scenario"
   },
   "rq-7acbda72": {
@@ -6223,11 +6561,18 @@
     "title": "Combiner is a single-threaded write per output element",
     "type": "scenario"
   },
+  "rq-82baba1a": {
+    "decl": "- `log_column_values(_ke, _pe) -> vec![most_recent_pressure,",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "log_column_values",
+    "type": "api-item"
+  },
   "rq-82cdabba": {
-    "decl": "Scenario: build_optional with None returns Ok(None) on the empty barostat registry",
+    "decl": "Scenario: build_optional with None returns Ok(None) on the barostat registry",
     "file": "integration/framework",
     "refs": [],
-    "title": "build_optional with None returns Ok(None) on the empty barostat registry",
+    "title": "build_optional with None returns Ok(None) on the barostat registry",
     "type": "scenario"
   },
   "rq-82d0c34a": {
@@ -6770,6 +7115,27 @@
     "title": "Sub-skin movement does not trigger a rebuild",
     "type": "scenario"
   },
+  "rq-909e5bb4": {
+    "decl": "Scenario: BarostatRegistry::with_builtins() exposes berendsen",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "BarostatRegistry::with_builtins() exposes berendsen",
+    "type": "scenario"
+  },
+  "rq-90eab90b": {
+    "decl": "Scenario: Reject extra fields",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Reject extra fields",
+    "type": "scenario"
+  },
+  "rq-911d9120": {
+    "decl": "Scenario: rescale_isotropic bumps the generation counter",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "rescale_isotropic bumps the generation counter",
+    "type": "scenario"
+  },
   "rq-9120ab3c": {
     "decl": "Scenario: Two independent calls produce byte-identical accumulators",
     "file": "forces/harmonic-angle",
@@ -6881,6 +7247,13 @@
     ],
     "title": "LogWriter",
     "type": "api-item"
+  },
+  "rq-92cecd28": {
+    "decl": "Scenario: apply launches the expected kernel set",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "apply launches the expected kernel set",
+    "type": "scenario"
   },
   "rq-92f5e5c4": {
     "decl": "## Out of Scope",
@@ -7277,6 +7650,13 @@
     "title": "write_timings_file",
     "type": "api-item"
   },
+  "rq-9ba11e1e": {
+    "decl": "Scenario: rescale_isotropic rejects non-finite factor",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "rescale_isotropic rejects non-finite factor",
+    "type": "scenario"
+  },
   "rq-9baf16d1": {
     "decl": "Scenario: Open fails when the parent directory does not exist",
     "file": "io/log-output",
@@ -7467,6 +7847,13 @@
     "title": "Feature: Topology File, Bond List, Angle List, and Exclusion List",
     "type": "file"
   },
+  "rq-9e2e9d4e": {
+    "decl": "- `SimulationBox::rescale_isotropic(&mut self, factor: f32) ->",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "SimulationBox",
+    "type": "api-item"
+  },
   "rq-9e487c80": {
     "decl": "Scenario: Reduction sums pair energies in left-to-right order",
     "file": "pair-reduction",
@@ -7545,6 +7932,14 @@
     "refs": [],
     "title": "Reject upload when host particle count differs from buffers",
     "type": "scenario"
+  },
+  "rq-a034083a": {
+    "decl": "### PTX Module Loading",
+    "file": "integration/berendsen-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "PTX Module Loading",
+    "type": "section"
   },
   "rq-a03de3d5": {
     "decl": "- `SpmeConfig`",
@@ -7646,6 +8041,13 @@
     "file": "integration/csvr",
     "refs": [],
     "title": "apply_post on empty CSVR state is a no-op",
+    "type": "scenario"
+  },
+  "rq-a2bb55c6": {
+    "decl": "Scenario: μ equals 1 when instantaneous pressure equals target",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "μ equals 1 when instantaneous pressure equals target",
     "type": "scenario"
   },
   "rq-a2e20b02": {
@@ -8020,7 +8422,7 @@
     "type": "api-item"
   },
   "rq-aa6ce5c0": {
-    "decl": "- `BarostatKind` — zero-variant tagged enum reserved for future",
+    "decl": "- `BarostatKind` — tagged enum carrying the chosen barostat slot and",
     "file": "io/config-schema",
     "refs": [
       {
@@ -8078,6 +8480,13 @@
     "title": "InitVelocities",
     "type": "api-item"
   },
+  "rq-abf09acf": {
+    "decl": "Scenario: Construct with particle_count = 0",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Construct with particle_count = 0",
+    "type": "scenario"
+  },
   "rq-ac035b90": {
     "decl": "- `ParticleState::particle_count(&self) -> usize`",
     "file": "particle-state",
@@ -8089,6 +8498,14 @@
     ],
     "title": "ParticleState",
     "type": "api-item"
+  },
+  "rq-ac5affb7": {
+    "decl": "### `Barostat` trait overrides",
+    "file": "integration/berendsen-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "`Barostat` trait overrides",
+    "type": "section"
   },
   "rq-acafdfe4": {
     "decl": "Scenario: vv_kick_lossless does not modify positions, forces, masses, or particle_ids",
@@ -8117,6 +8534,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "Trajectory and log files remain bit-identical between two identical runs",
+    "type": "scenario"
+  },
+  "rq-ad67b3da": {
+    "decl": "Scenario: Berendsen barostat composes with velocity-Verlet integrator (NPH)",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Berendsen barostat composes with velocity-Verlet integrator (NPH)",
     "type": "scenario"
   },
   "rq-ad7eb40f": {
@@ -8253,6 +8677,13 @@
     "title": "Real-space slot produces zero outside r_cut_real",
     "type": "scenario"
   },
+  "rq-af9257bb": {
+    "decl": "Scenario: rescale_isotropic multiplies all six lattice parameters",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "rescale_isotropic multiplies all six lattice parameters",
+    "type": "scenario"
+  },
   "rq-afb80e25": {
     "decl": "Scenario: Timings file uses the default path derived from config stem",
     "file": "performance-analysis",
@@ -8317,6 +8748,13 @@
     "refs": [],
     "title": "Reduction Algorithm",
     "type": "section"
+  },
+  "rq-b0b4c220": {
+    "decl": "Scenario: rescale_isotropic rejects zero factor",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "rescale_isotropic rejects zero factor",
+    "type": "scenario"
   },
   "rq-b0c18819": {
     "decl": "Scenario: Empty topology file is valid",
@@ -8401,6 +8839,14 @@
     "refs": [],
     "title": "apply_post on empty state is a no-op",
     "type": "scenario"
+  },
+  "rq-b2ccd87a": {
+    "decl": "## Out of Scope",
+    "file": "integration/berendsen-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-b2d5886a": {
     "decl": "Scenario: Two consecutive apply_post calls on a CSVR thermostat produce different post-call velocities",
@@ -8530,6 +8976,21 @@
     "refs": [],
     "title": "Two independent runs produce byte-identical net forces",
     "type": "scenario"
+  },
+  "rq-b6324878": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/berendsen-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-b6728f3c": {
+    "decl": "- `log_column_names() -> &'static [\"pressure\", \"box_volume\"]`.",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "log_column_names",
+    "type": "api-item"
   },
   "rq-b68b3445": {
     "decl": "Scenario: Two-particle pair energy matches the closed-form Lennard-Jones expression",
@@ -8945,6 +9406,14 @@
     "refs": [],
     "title": "rescale_velocities on empty state is a no-op",
     "type": "scenario"
+  },
+  "rq-bf3ec42e": {
+    "decl": "## Empty State and degenerate cases",
+    "file": "integration/berendsen-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State and degenerate cases",
+    "type": "section"
   },
   "rq-bf62f645": {
     "decl": "## Gherkin Scenarios",
@@ -9467,6 +9936,13 @@
     "title": "Blank trailing lines are tolerated",
     "type": "scenario"
   },
+  "rq-c9f9d550": {
+    "decl": "Scenario: μ < 1 when instantaneous pressure below target (system contracts)",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "μ < 1 when instantaneous pressure below target (system contracts)",
+    "type": "scenario"
+  },
   "rq-c9fa5cda": {
     "decl": "Scenario: Reject pair referencing an unknown type",
     "file": "io/config-schema",
@@ -9664,12 +10140,26 @@
     "title": "Construct with particle_count = 0",
     "type": "scenario"
   },
+  "rq-cf183b79": {
+    "decl": "Scenario: Fractional coordinates of every particle are invariant under apply",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Fractional coordinates of every particle are invariant under apply",
+    "type": "scenario"
+  },
   "rq-cf456bb4": {
     "decl": "# Column format: atom_i  atom_j  bond_type_name",
     "file": "forces/topology",
     "refs": [],
     "title": "Column format: atom_i  atom_j  bond_type_name",
     "type": "file"
+  },
+  "rq-cf4d6ab4": {
+    "decl": "Scenario: compute_total_virial of a single particle with virials[0]=0 is zero",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "compute_total_virial of a single particle with virials[0]=0 is zero",
+    "type": "scenario"
   },
   "rq-cf50db39": {
     "decl": "Scenario: harmonic_angle_force on zero angles is a no-op",
@@ -10053,12 +10543,27 @@
     "title": "lan_drift_half does not modify image flags when no wrap occurs",
     "type": "scenario"
   },
+  "rq-d764ea16": {
+    "decl": "### CUDA Kernels",
+    "file": "integration/berendsen-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernels",
+    "type": "section"
+  },
   "rq-d7675fb3": {
     "decl": "# scale_coul to that value.",
     "file": "forces/topology",
     "refs": [],
     "title": "scale_coul to that value.",
     "type": "file"
+  },
+  "rq-d801f67c": {
+    "decl": "Scenario: compute_total_virial is deterministic",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "compute_total_virial is deterministic",
+    "type": "scenario"
   },
   "rq-d82ce4aa": {
     "decl": "Scenario: Single-particle generated velocities are zeroed for lack of thermal degrees of freedom",
@@ -11302,6 +11807,13 @@
     "title": "Empty State and degenerate cases",
     "type": "section"
   },
+  "rq-ed3ed814": {
+    "decl": "Scenario: μ > 1 when instantaneous pressure above target (system expands)",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "μ > 1 when instantaneous pressure above target (system expands)",
+    "type": "scenario"
+  },
   "rq-ed997636": {
     "decl": "### Units",
     "file": "io/config-schema",
@@ -11395,6 +11907,13 @@
     "file": "io/trajectory-output",
     "refs": [],
     "title": "Triclinic Lattice attribute carries non-zero tilts",
+    "type": "scenario"
+  },
+  "rq-ef8b6bf5": {
+    "decl": "Scenario: Next force_field.step rebuilds the neighbor list after apply",
+    "file": "integration/berendsen-barostat",
+    "refs": [],
+    "title": "Next force_field.step rebuilds the neighbor list after apply",
     "type": "scenario"
   },
   "rq-ef8dee82": {
@@ -12110,6 +12629,14 @@
     "title": "charges round-trip through ParticleBuffers",
     "type": "scenario"
   },
+  "rq-fdc545da": {
+    "decl": "### Rust Launch Helpers",
+    "file": "integration/berendsen-barostat",
+    "level": 3,
+    "refs": [],
+    "title": "Rust Launch Helpers",
+    "type": "section"
+  },
   "rq-fdf2db79": {
     "decl": "### Types",
     "file": "simulation-box",
@@ -12171,6 +12698,14 @@
     "level": 3,
     "refs": [],
     "title": "Rust Launch Helpers",
+    "type": "section"
+  },
+  "rq-fece5481": {
+    "decl": "#### `rescale_positions`",
+    "file": "integration/berendsen-barostat",
+    "level": 4,
+    "refs": [],
+    "title": "`rescale_positions`",
     "type": "section"
   },
   "rq-fedef74d": {

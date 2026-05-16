@@ -190,19 +190,22 @@ impl ThermostatKind {
 }
 
 // rq-aa6ce5c0
-// Zero-variant enum: the default `BarostatRegistry::with_builtins()`
-// registers no implementations, so no `Some(BarostatKind)` is constructible
-// yet. Successful `load_config` therefore always returns `barostat: None`.
-// The type exists so the schema slot, parsing path, and `Config` field are
-// ready when concrete barostat slots ship.
 #[derive(Debug, Clone)]
-pub enum BarostatKind {}
+pub enum BarostatKind {
+    // rq-3db027c2
+    Berendsen {
+        pressure: f64,
+        tau: f64,
+        compressibility: f64,
+    },
+}
 
 impl BarostatKind {
+    /// Lookup key used by `BarostatRegistry` to dispatch this kind.
     pub fn name(&self) -> &'static str {
-        // No variants exist, so this method is unreachable. Pattern-match
-        // exhaustively over the empty enum to satisfy the compiler.
-        match *self {}
+        match self {
+            BarostatKind::Berendsen { .. } => "berendsen",
+        }
     }
 }
 
@@ -521,18 +524,10 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         Some(_) => return Err(invalid("thermostat", "expected a table")),
     };
 
-    // rq-d28e9105: optional [barostat] section. With the default
-    // registry empty, every kind value is rejected. We still parse the
-    // table to surface MissingField on a missing `kind` and to make the
-    // future addition trivial.
+    // rq-d28e9105: optional [barostat] section.
     let barostat: Option<BarostatKind> = match root.get("barostat") {
         None => None,
-        Some(toml::Value::Table(baro_tbl)) => {
-            let kind_str = get_str(baro_tbl, "kind")
-                .map_err(rename_field("barostat.kind".into()))?
-                .to_string();
-            return Err(ConfigError::UnknownBarostatKind { actual: kind_str });
-        }
+        Some(toml::Value::Table(baro_tbl)) => Some(parse_barostat(baro_tbl)?),
         Some(_) => return Err(invalid("barostat", "expected a table")),
     };
 
@@ -1422,6 +1417,50 @@ fn parse_thermostat(therm_tbl: &toml::value::Table) -> Result<ThermostatKind, Co
             Ok(ThermostatKind::Berendsen { temperature, tau })
         }
         other => Err(ConfigError::UnknownThermostatKind {
+            actual: other.to_string(),
+        }),
+    }
+}
+
+// rq-d28e9105 rq-aa6ce5c0 rq-3db027c2
+fn parse_barostat(baro_tbl: &toml::value::Table) -> Result<BarostatKind, ConfigError> {
+    let kind_str = get_str(baro_tbl, "kind")
+        .map_err(rename_field("barostat.kind".into()))?
+        .to_string();
+    match kind_str.as_str() {
+        "berendsen" => {
+            for key in baro_tbl.keys() {
+                if !matches!(
+                    key.as_str(),
+                    "kind" | "pressure" | "tau" | "compressibility"
+                ) {
+                    return Err(ConfigError::UnknownBarostatField {
+                        kind: "berendsen".to_string(),
+                        field: key.clone(),
+                    });
+                }
+            }
+            let pressure = get_f64(baro_tbl, "pressure")
+                .map_err(rename_field("barostat.pressure".into()))?;
+            if !pressure.is_finite() {
+                return Err(invalid(
+                    "barostat.pressure",
+                    format!("expected a finite number, got {pressure}"),
+                ));
+            }
+            let tau = get_f64(baro_tbl, "tau")
+                .map_err(rename_field("barostat.tau".into()))?;
+            require_finite_positive("barostat.tau", tau)?;
+            let compressibility = get_f64(baro_tbl, "compressibility")
+                .map_err(rename_field("barostat.compressibility".into()))?;
+            require_finite_positive("barostat.compressibility", compressibility)?;
+            Ok(BarostatKind::Berendsen {
+                pressure,
+                tau,
+                compressibility,
+            })
+        }
+        other => Err(ConfigError::UnknownBarostatKind {
             actual: other.to_string(),
         }),
     }

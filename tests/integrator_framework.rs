@@ -504,11 +504,16 @@ fn thermostat_build_optional_none_returns_none() {
     assert!(result.is_none());
 }
 
-// rq-... BarostatRegistry::with_builtins() exposes no builders.
+// BarostatRegistry::with_builtins() exposes the registered barostats.
 #[test]
-fn barostat_with_builtins_has_no_builders() {
+fn barostat_with_builtins_contains_berendsen() {
     let registry = BarostatRegistry::with_builtins();
-    assert!(registry.builders.is_empty());
+    assert!(
+        registry
+            .builders
+            .iter()
+            .any(|b| b.kind_name() == "berendsen")
+    );
 }
 
 // build_optional with None returns Ok(None) on the empty barostat registry.

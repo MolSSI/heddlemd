@@ -51,11 +51,11 @@ The default registry exposes four thermostats:
 
 ### Barostat slot <!-- rq-d898f1cd -->
 
-The default registry has no builders. The trait surface, registry,
-and `[barostat]` config schema slot exist; concrete barostat
-implementations land in subsequent requirements files. Any attempt to
-configure a `[barostat]` kind in TOML is rejected with
-`ConfigError::UnknownBarostatKind` until an implementation registers.
+The default registry exposes one barostat:
+
+| `kind` value | Implementation                                                       | File                      |
+| ------------ | -------------------------------------------------------------------- | ------------------------- |
+| `berendsen`  | weak-coupling isotropic pressure coupling (equilibration only — not canonical) | `berendsen-barostat.md`   |
 
 ## Per-Step Interface <!-- rq-daadfc1a -->
 
@@ -284,8 +284,7 @@ successfully.
   carrying the parsed config-level selection and per-kind parameters.
   All three live alongside the rest of the config types in
   `crate::io::config`; their variants, fields, and TOML mapping are
-  defined in `io/config-schema.md`. `BarostatKind` has no variants
-  while the default registry has no barostat implementations.
+  defined in `io/config-schema.md`.
 
   Each enum exposes `name(&self) -> &'static str` returning the same
   string the corresponding registry uses as the lookup key. This is
@@ -359,7 +358,7 @@ successfully.
     `kind` value in the slot's "Slots" table above.
     `ThermostatRegistry::with_builtins()` pre-populates
     `nose-hoover-chain`, `csvr`, `andersen`, `berendsen`.
-    `BarostatRegistry::with_builtins()` returns an empty registry.
+    `BarostatRegistry::with_builtins()` pre-populates `berendsen`.
   - `IntegratorRegistry::register(&mut self, builder: Box<dyn
     IntegratorBuilder>)` — appends a builder. Two builders sharing
     the same `kind_name()` are not detected at registration; the
@@ -428,11 +427,11 @@ successfully.
 - `BarostatRegistry::build_optional(&self, kind: Option<&BarostatKind>, device: Arc<CudaDevice>, particle_count: usize) -> Result<Option<Box<dyn Barostat>>, BarostatError>` <!-- rq-9548bc1a -->
   - When `kind` is `None`, returns `Ok(None)` without consulting the
     builders.
-  - When `kind` is `Some`, looks up the builder. With the default
-    registry holding no builders, every `Some` call returns
-    `BarostatError::UnknownKind(...)`; the orthogonal config schema
-    nonetheless rejects every `[barostat]` table earlier than this,
-    at config-load time, via `ConfigError::UnknownBarostatKind`.
+  - When `kind` is `Some`, looks up the builder whose `kind_name()`
+    equals `kind.name()` and delegates. Returns
+    `BarostatError::UnknownKind(...)` when no builder matches.
+  - Per-barostat builder responsibilities are documented in each
+    barostat's requirements file (`berendsen-barostat.md`).
 
 - `Integrator::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, dt: f32, timings: &mut Timings) -> Result<(), IntegratorError>` <!-- rq-aa68f468 -->
   - Runs a single timestep. Calls `force_field.step(...)` at the
@@ -615,12 +614,12 @@ Feature: Pluggable integration framework
   # --- Barostat construction ---
 
   @rq-386e3288
-  Scenario: BarostatRegistry::with_builtins() exposes no builders
+  Scenario: BarostatRegistry::with_builtins() exposes the registered barostats
     Given a BarostatRegistry::with_builtins()
-    Then the registry has zero registered builders
+    Then the registry contains a builder whose kind_name() is "berendsen"
 
   @rq-82cdabba
-  Scenario: build_optional with None returns Ok(None) on the empty barostat registry
+  Scenario: build_optional with None returns Ok(None) on the barostat registry
     Given a BarostatRegistry::with_builtins()
     When registry.build_optional(None, device, particle_count=4) is called
     Then it returns Ok(None)

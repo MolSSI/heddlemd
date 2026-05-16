@@ -99,6 +99,23 @@ impl SimulationBox {
         Ok(())
     }
 
+    // Multiply all six lattice parameters by `factor` in a single
+    // mutation that bumps the generation counter exactly once. Preserves
+    // the triclinic shape (every angle ratio is invariant). Convenience
+    // over `set_lattice(factor*lx, ...)`; provided so callers cannot
+    // accidentally apply different scale factors to the orthogonal and
+    // shear components.
+    pub fn rescale_isotropic(&mut self, factor: f32) -> Result<(), SimulationBoxError> {
+        self.set_lattice(
+            self.lx * factor,
+            self.ly * factor,
+            self.lz * factor,
+            self.xy * factor,
+            self.xz * factor,
+            self.yz * factor,
+        )
+    }
+
     // rq-dc17132d
     pub fn generation(&self) -> u64 {
         self.generation

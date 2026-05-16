@@ -58,12 +58,13 @@ lossless = false
 # tau = 1.0e-13
 # seed = 7
 
-# Optional. Omit to run constant-volume. The default barostat
-# registry is empty; concrete barostats ship in later requirements
-# files.
+# Optional. Omit to run constant-volume.
 #
 # [barostat]
-# kind = "..."
+# kind = "berendsen"
+# pressure = 1.0e5
+# tau = 1.0e-12
+# compressibility = 4.5e-10
 
 [[particle_types]]
 name = "Ar"
@@ -266,14 +267,25 @@ a required `kind` field selects one of the pluggable barostat slots
 kind-specific: extra fields not recognised by the chosen `kind` are
 rejected, and missing required fields are rejected.
 
-- `kind: String` — required when the section is present. The default
-  `BarostatRegistry::with_builtins()` registers no implementations,
-  so every value parses to
-  `ConfigError::UnknownBarostatKind { actual: <value> }` at
-  config-load time until a concrete barostat ships in a later
-  requirements file. The section exists in the schema so that the
-  field reference, validation flow, and `Config::barostat` field are
-  in place when implementations arrive.
+- `kind: String` — required when the section is present. One of:
+  - `"berendsen"` — deterministic isotropic weak-coupling barostat
+    (Berendsen et al., 1984). Suitable for **equilibration only**;
+    does not sample the isobaric ensemble. See
+    `integration/berendsen-barostat.md` for the full caveat and
+    parameter description.
+
+Fields accepted for `kind = "berendsen"`:
+
+- `pressure: f64` — target pressure `P_target` in pascals (Pa).
+  Required. Finite. May be any sign or zero.
+- `tau: f64` — pressure-coupling time constant in seconds. Required.
+  Finite and strictly positive. Typical values for liquid water are
+  1–5 ps; should be longer than the thermostat's `τ` to keep the
+  two relaxation processes decoupled.
+- `compressibility: f64` — isothermal compressibility `β` in 1/Pa
+  (= m³/J). Required. Finite and strictly positive. Typical values
+  are around `4.5e-10 1/Pa` for water; an inaccurate value changes
+  the effective relaxation rate but not the long-time mean pressure.
 
 #### `[[particle_types]]` (array of tables) <!-- rq-78487f38 -->
 
@@ -580,9 +592,7 @@ Beyond per-field validation, the loader checks:
   - `thermostat: Option<ThermostatKind>` — `Some` when the
     `[thermostat]` table is present in the config, `None` otherwise.
   - `barostat: Option<BarostatKind>` — `Some` when the `[barostat]`
-    table is present in the config, `None` otherwise. While the
-    default registry has no implementations, this field is always
-    `None` after a successful `load_config`.
+    table is present in the config, `None` otherwise.
   - `particle_types: Vec<ParticleTypeConfig>`
   - `pair_interactions: Vec<PairInteractionConfig>`
   - `bond_types: Vec<BondTypeConfig>` — empty when the `[[bond_types]]`
@@ -650,13 +660,15 @@ Beyond per-field validation, the loader checks:
   Variant-bearing parameters reflect the per-kind fields listed under
   the `[thermostat]` section above.
 
-- `BarostatKind` — zero-variant tagged enum reserved for future <!-- rq-aa6ce5c0 -->
-  barostat slots. Used in `Config::barostat: Option<BarostatKind>`.
-  With no variants, no `Some(BarostatKind)` value is constructible;
-  successful `load_config` always returns `barostat: None` until a
-  concrete barostat slot lands and adds its variant. Until then, any
-  `[barostat]` table in the config is rejected at parse time with
-  `ConfigError::UnknownBarostatKind { actual: <kind value> }`.
+- `BarostatKind` — tagged enum carrying the chosen barostat slot and <!-- rq-aa6ce5c0 -->
+  its parameters. Used in `Config::barostat: Option<BarostatKind>`.
+  Variants:
+  - `Berendsen { pressure: f64, tau: f64, compressibility: f64 }` —
+    selected by `kind = "berendsen"`. All three fields are required.
+    Deterministic; no RNG seed.
+
+  Variant-bearing parameters reflect the per-kind fields listed under
+  the `[barostat]` section above.
 
 - `ParticleTypeConfig` <!-- rq-a5ccc1de -->
   - `name: String`
@@ -768,13 +780,9 @@ Beyond per-field validation, the loader checks:
     in the `[thermostat]` table is not recognised by the chosen
     `kind`.
   - `UnknownBarostatKind { actual: String }` — `[barostat].kind` is
-    not one of the supported strings. With the default registry empty,
-    every value of `kind` produces this error.
+    not one of the supported strings.
   - `UnknownBarostatField { kind: String, field: String }` — a field
     in the `[barostat]` table is not recognised by the chosen `kind`.
-    Reserved for when concrete barostats register; with the default
-    registry empty, the kind itself fails first via
-    `UnknownBarostatKind`.
   - `IncompatibleThermostat { integrator: String }` — the config
     pairs an integrator that owns its own thermostat (currently only
     `langevin-baoab`) with a `[thermostat]` table.
@@ -1693,11 +1701,11 @@ Feature: TOML simulation config schema
     And config.barostat is None
 
   @rq-3127ab44
-  Scenario: Any [barostat] kind is rejected while the registry is empty
+  Scenario: Unknown [barostat] kind is rejected
     Given the Background config with [integrator] kind="velocity-verlet"
-    And a [barostat] section with kind="anything"
+    And a [barostat] section with kind="not-a-real-barostat"
     When load_config is called
-    Then it returns Err(ConfigError::UnknownBarostatKind { actual: "anything" })
+    Then it returns Err(ConfigError::UnknownBarostatKind { actual: "not-a-real-barostat" })
 
   @rq-bda9c0a2
   Scenario: [barostat] missing kind is rejected
@@ -1706,4 +1714,32 @@ Feature: TOML simulation config schema
       (no kind field)
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "barostat.kind" })
+
+  @rq-0fcb5a1e
+  Scenario: [barostat] kind = "berendsen" with all required fields accepted
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [barostat] section with kind="berendsen", pressure=1.0e5,
+      tau=1.0e-12, compressibility=4.5e-10
+    When load_config is called
+    Then it returns Ok(config)
+    And config.barostat matches
+      Some(BarostatKind::Berendsen { pressure: 1.0e5, tau: 1.0e-12, compressibility: 4.5e-10 })
+
+  @rq-693b4dba
+  Scenario: Berendsen barostat extra fields are rejected
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [barostat] section with kind="berendsen", pressure=1.0e5,
+      tau=1.0e-12, compressibility=4.5e-10, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownBarostatField {
+      kind: "berendsen", field: "seed" })
+
+  # Per-field parameter-validation scenarios for the Berendsen barostat
+  # (missing pressure / tau / compressibility, non-positive tau,
+  # non-positive compressibility, negative pressure accepted, etc.) live
+  # alongside the algorithm scenarios in
+  # `integration/berendsen-barostat.md`. They reference
+  # `ConfigError::MissingField { field: "barostat.*" }` and
+  # `ConfigError::InvalidValue { field: "barostat.*", .. }` to exercise
+  # the same loader path documented in this section.
 ```
