@@ -142,6 +142,9 @@ required fields are rejected.
   - `"nose-hoover-chain"` — deterministic NVT via the Nosé-Hoover
     chain (Martyna-Klein-Tuckerman, 1992). See
     `integration/nose-hoover-chain.md`.
+  - `"csvr"` — stochastic NVT via canonical sampling velocity
+    rescaling (Bussi-Donadio-Parrinello, 2007). See
+    `integration/csvr.md`.
 
 Fields accepted for `kind = "velocity-verlet"`:
 
@@ -173,6 +176,17 @@ Fields accepted for `kind = "nose-hoover-chain"`:
   `5`, `7`.
 - `n_resp: u32` — chain RESP sub-cycle count. Optional; defaults to
   `1`. Must be `≥ 1`.
+
+Fields accepted for `kind = "csvr"`:
+
+- `temperature: f64` — bath temperature in kelvin. Required. Finite
+  and strictly positive. Independent of `simulation.temperature`.
+- `tau: f64` — thermostat coupling time in seconds. Required. Finite
+  and strictly positive. Typical values for liquid water are 100 fs
+  to 1 ps; larger `τ` leaves the dynamics closer to NVE.
+- `seed: u64` — counter-based RNG seed for the chi-squared and
+  standard-normal draws consumed by the rescale formula. Required,
+  independent of `simulation.seed` and any other integrator's seed.
 
 #### `[[particle_types]]` (array of tables) <!-- rq-78487f38 -->
 
@@ -511,6 +525,8 @@ Beyond per-field validation, the loader checks:
     `kind = "nose-hoover-chain"`. Optional fields are populated from
     the corresponding TOML defaults (`chain_length = 3`,
     `yoshida_order = 3`, `n_resp = 1`) when omitted.
+  - `Csvr { temperature: f64, tau: f64, seed: u64 }` — selected by
+    `kind = "csvr"`. All three fields are required.
 
   Variant-bearing parameters reflect the per-kind fields listed under the
   `[integrator]` section above.
@@ -991,6 +1007,57 @@ Feature: TOML simulation config schema
       temperature=300.0, tau=1.0e-13, friction=1.0e12 (extra field)
     When load_config is called
     Then it returns Err(ConfigError::UnknownIntegratorField { kind: "nose-hoover-chain", field: "friction" })
+
+  # --- CSVR ---
+
+  @rq-d8527fb4
+  Scenario: CSVR with all required fields accepted
+    Given the Background config with [integrator] kind="csvr",
+      temperature=300.0, tau=1.0e-13, seed=42
+    When load_config is called
+    Then it returns Ok(config)
+    And config.integrator matches IntegratorKind::Csvr {
+      temperature: 300.0, tau: 1.0e-13, seed: 42 }
+
+  @rq-ebace0b4
+  Scenario: CSVR missing temperature is rejected
+    Given the Background config with [integrator] kind="csvr", tau=1.0e-13, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.temperature" })
+
+  @rq-0c549d09
+  Scenario: CSVR missing tau is rejected
+    Given the Background config with [integrator] kind="csvr", temperature=300.0, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.tau" })
+
+  @rq-0a4fc43f
+  Scenario: CSVR missing seed is rejected
+    Given the Background config with [integrator] kind="csvr",
+      temperature=300.0, tau=1.0e-13
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.seed" })
+
+  @rq-e1d4e8ab
+  Scenario: CSVR rejects non-positive temperature
+    Given the Background config with [integrator] kind="csvr",
+      temperature=0.0, tau=1.0e-13, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.temperature", reason: _ })
+
+  @rq-535a4569
+  Scenario: CSVR rejects non-positive tau
+    Given the Background config with [integrator] kind="csvr",
+      temperature=300.0, tau=-1.0e-13, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.tau", reason: _ })
+
+  @rq-068c64b0
+  Scenario: CSVR rejects extra fields (e.g. NHC's chain_length)
+    Given the Background config with [integrator] kind="csvr",
+      temperature=300.0, tau=1.0e-13, seed=42, chain_length=3 (extra field)
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownIntegratorField { kind: "csvr", field: "chain_length" })
 
   @rq-1e1c5f3b
   Scenario: Missing [[particle_types]] is rejected

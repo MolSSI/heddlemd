@@ -86,6 +86,7 @@ impl IntegratorRegistry {
                 Box::new(VelocityVerletBuilder),
                 Box::new(LangevinBaoabBuilder),
                 Box::new(NoseHooverChainBuilder),
+                Box::new(CsvrBuilder),
             ],
         }
     }
@@ -565,3 +566,258 @@ impl IntegratorBuilder for NoseHooverChainBuilder {
     }
 }
 
+
+// --- Host-side Philox-4×32-10 RNG ---
+// rq-891232bf
+//
+// Byte-for-byte equivalent to the device-side `philox4x32_10` in
+// `kernels/langevin.cu`. Reusable from any host-side stochastic
+// integrator that needs reproducible random draws (CSVR; future
+// Andersen / stochastic barostat / etc.).
+
+const PHILOX_M0: u32 = 0xD2511F53;
+const PHILOX_M1: u32 = 0xCD9E8D57;
+const PHILOX_W0: u32 = 0x9E3779B9;
+const PHILOX_W1: u32 = 0xBB67AE85;
+
+#[inline]
+fn mulhi32(a: u32, b: u32) -> u32 {
+    ((a as u64).wrapping_mul(b as u64) >> 32) as u32
+}
+
+/// Counter-based Philox-4×32-10. Inputs: 2-word key, 4-word counter.
+/// Output: 4-word block. Pure function; matches the device-side helper
+/// in `kernels/langevin.cu` byte-for-byte.
+pub fn philox_4x32_10(
+    key_lo: u32,
+    key_hi: u32,
+    ctr0: u32,
+    ctr1: u32,
+    ctr2: u32,
+    ctr3: u32,
+) -> [u32; 4] {
+    let mut c0 = ctr0;
+    let mut c1 = ctr1;
+    let mut c2 = ctr2;
+    let mut c3 = ctr3;
+    let mut k0 = key_lo;
+    let mut k1 = key_hi;
+    for _ in 0..10 {
+        let hi0 = mulhi32(c0, PHILOX_M0);
+        let lo0 = c0.wrapping_mul(PHILOX_M0);
+        let hi2 = mulhi32(c2, PHILOX_M1);
+        let lo2 = c2.wrapping_mul(PHILOX_M1);
+        let nc0 = hi2 ^ c1 ^ k0;
+        let nc1 = lo2;
+        let nc2 = hi0 ^ c3 ^ k1;
+        let nc3 = lo0;
+        c0 = nc0;
+        c1 = nc1;
+        c2 = nc2;
+        c3 = nc3;
+        k0 = k0.wrapping_add(PHILOX_W0);
+        k1 = k1.wrapping_add(PHILOX_W1);
+    }
+    [c0, c1, c2, c3]
+}
+
+/// One standard-normal draw via Box-Muller (cos branch), matching the
+/// device-side `philox_gaussian` formula exactly. Returns `f64` (the
+/// device-side helper truncates to `f32` for its on-device use; CSVR
+/// keeps the full `f64` because its chain math benefits from it).
+pub fn philox_normal(
+    key_lo: u32,
+    key_hi: u32,
+    ctr0: u32,
+    ctr1: u32,
+    ctr2: u32,
+    ctr3: u32,
+) -> f64 {
+    let out = philox_4x32_10(key_lo, key_hi, ctr0, ctr1, ctr2, ctr3);
+    let scale = 1.0_f64 / 4_294_967_296.0;
+    let u1 = (out[0] as f64 + 0.5) * scale;
+    let u2 = (out[1] as f64 + 0.5) * scale;
+    let r = (-2.0_f64 * u1.ln()).sqrt();
+    let theta = std::f64::consts::TAU * u2;
+    r * theta.cos()
+}
+
+// --- CSVR (Bussi-Donadio-Parrinello canonical sampling) ---
+// rq-891232bf
+
+#[derive(Debug)]
+pub struct CsvrState {
+    pub temperature: f64,
+    pub tau: f64,
+    pub seed: u64,
+    pub draw_counter: u64,
+    pub g_dof: u32,
+    pub kt_target: f64,
+    pub cumulative_injection: f64,
+    ke_scratch: CudaSlice<f32>,
+    most_recent_ke: f64,
+}
+
+impl CsvrState {
+    fn new(
+        gpu: &GpuContext,
+        particle_count: usize,
+        temperature: f64,
+        tau: f64,
+        seed: u64,
+    ) -> Result<Self, GpuError> {
+        let g_dof = ((3 * particle_count) as i64 - 3).max(1) as u32;
+        let kt_target = BOLTZMANN_J_PER_K * temperature;
+        let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
+        Ok(CsvrState {
+            temperature,
+            tau,
+            seed,
+            draw_counter: 0,
+            g_dof,
+            kt_target,
+            cumulative_injection: 0.0,
+            ke_scratch,
+            most_recent_ke: 0.0,
+        })
+    }
+
+    /// Bussi-Donadio-Parrinello transition kernel. Given the
+    /// instantaneous kinetic energy `k_old` and the timestep `dt`,
+    /// draws the new kinetic energy `k_new` from the CSVR Markov
+    /// kernel and returns it. Pure host-side function; the only
+    /// side-effect is the `draw_counter` increment performed in
+    /// `step()` before this is called.
+    ///
+    /// Canonical form (Bussi 2007 / PLUMED `csvr.cc`):
+    /// ```text
+    ///   K_new = c · K + (K_target/N_f)(1-c)(S + R²)
+    ///                 + 2 · R · sqrt(c(1-c) · K · K_target / N_f)
+    /// ```
+    /// where `c = exp(-dt/τ)`, `R ~ N(0,1)` is independent of
+    /// `S = Σ_{i=1..N_f-1} ξ_i²` (chi-squared with N_f-1 DOF). At
+    /// equilibrium `E[K_new] = K_target` exactly.
+    fn draw_new_kinetic_energy(&self, k_old: f64, dt: f32) -> f64 {
+        let c = (-(dt as f64) / self.tau).exp();
+        let nf = self.g_dof as f64;
+        let k_target = (nf / 2.0) * self.kt_target;
+        let one_minus_c = 1.0 - c;
+
+        let seed_lo = self.seed as u32;
+        let seed_hi = (self.seed >> 32) as u32;
+        let ctr_lo = self.draw_counter as u32;
+        let ctr_hi = (self.draw_counter >> 32) as u32;
+
+        // Lone normal R (sample_index = 0).
+        let r = philox_normal(seed_lo, seed_hi, ctr_lo, ctr_hi, 0, 0);
+        // Chi-squared sum S = Σ_{i=1..N_f-1} ξ_i², left-to-right f64
+        // accumulator.
+        let mut s = 0.0_f64;
+        for sample_index in 1..self.g_dof {
+            let xi = philox_normal(seed_lo, seed_hi, ctr_lo, ctr_hi, sample_index, 0);
+            s += xi * xi;
+        }
+
+        let cross = if k_old > 0.0 {
+            2.0 * r * (c * one_minus_c * k_old * k_target / nf).sqrt()
+        } else {
+            0.0
+        };
+        // (s + r*r) is chi-squared(N_f) since adding R² to S = chi²(N_f-1)
+        // gives N_f DOF total.
+        let k_new = c * k_old + (k_target / nf) * one_minus_c * (s + r * r) + cross;
+        if k_new.is_finite() && k_new > 0.0 {
+            k_new
+        } else {
+            // Degenerate path: keep K unchanged this step. Matches the
+            // safety guard documented in `csvr.md`.
+            k_old
+        }
+    }
+}
+
+impl Integrator for CsvrState {
+    fn step(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &mut SimulationBox,
+        force_field: &mut ForceField,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), IntegratorError> {
+        if buffers.particle_count() == 0 {
+            return Ok(());
+        }
+
+        // Velocity-Verlet core.
+        timings.kernel_start(KernelStage::VV_KICK_DRIFT)?;
+        vv_kick_drift(buffers, sim_box, dt)?;
+        timings.kernel_stop(KernelStage::VV_KICK_DRIFT)?;
+
+        force_field.step(buffers, sim_box, timings)?;
+
+        timings.kernel_start(KernelStage::VV_KICK)?;
+        vv_kick(buffers, dt)?;
+        timings.kernel_stop(KernelStage::VV_KICK)?;
+
+        // KE reduction.
+        timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
+        let k_old = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+        timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
+
+        // Advance counter, draw, rescale.
+        self.draw_counter += 1;
+        let k_new = self.draw_new_kinetic_energy(k_old, dt);
+        self.cumulative_injection += k_new - k_old;
+        self.most_recent_ke = k_new;
+
+        if k_old > 0.0 && (k_new - k_old).abs() > 0.0 {
+            let factor = (k_new / k_old).sqrt() as f32;
+            timings.kernel_start(KernelStage::CSVR_RESCALE_VELOCITIES)?;
+            rescale_velocities(buffers, factor)?;
+            timings.kernel_stop(KernelStage::CSVR_RESCALE_VELOCITIES)?;
+        }
+
+        Ok(())
+    }
+
+    fn log_column_names(&self) -> &'static [&'static str] {
+        &["csvr_conserved"]
+    }
+
+    fn log_column_values(
+        &self,
+        kinetic_energy: f64,
+        potential_energy: f64,
+    ) -> Vec<f64> {
+        vec![kinetic_energy + potential_energy - self.cumulative_injection]
+    }
+}
+
+#[derive(Debug)]
+pub struct CsvrBuilder;
+
+impl IntegratorBuilder for CsvrBuilder {
+    fn kind_name(&self) -> &'static str {
+        "csvr"
+    }
+
+    fn build(
+        &self,
+        gpu: &GpuContext,
+        particle_count: usize,
+        kind: &IntegratorKind,
+    ) -> Result<Box<dyn Integrator>, IntegratorError> {
+        match kind {
+            IntegratorKind::Csvr {
+                temperature,
+                tau,
+                seed,
+            } => {
+                let state = CsvrState::new(gpu, particle_count, *temperature, *tau, *seed)?;
+                Ok(Box::new(state))
+            }
+            other => Err(IntegratorError::UnknownKind(other.name().to_string())),
+        }
+    }
+}

@@ -2065,3 +2065,132 @@ fn nhc_rejects_extra_fields() {
         other => panic!("unexpected: {other:?}"),
     }
 }
+
+// --- CSVR ---
+
+fn csvr_minimal_config() -> String {
+    r#"schema_version = 1
+init = "argon.xyz"
+
+[simulation]
+seed = 12345
+n_steps = 10
+dt = 1.0e-15
+temperature = 300.0
+
+[integrator]
+kind = "csvr"
+temperature = 300.0
+tau = 1.0e-13
+seed = 42
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#
+    .to_string()
+}
+
+#[test]
+fn csvr_accepted() {
+    let dir = tmp_path("csvr_accepted");
+    let path = write_config(&dir, &csvr_minimal_config());
+    let cfg = load_config(&path).unwrap();
+    match &cfg.integrator {
+        dynamics::io::config::IntegratorKind::Csvr { temperature, tau, seed } => {
+            assert_eq!(*temperature, 300.0);
+            assert_eq!(*tau, 1.0e-13);
+            assert_eq!(*seed, 42);
+        }
+        other => panic!("expected Csvr, got {other:?}"),
+    }
+}
+
+#[test]
+fn csvr_missing_temperature_rejected() {
+    let dir = tmp_path("csvr_no_T");
+    let body = csvr_minimal_config().replace("temperature = 300.0\ntau", "tau");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => {
+            assert_eq!(field, "integrator.temperature");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn csvr_missing_tau_rejected() {
+    let dir = tmp_path("csvr_no_tau");
+    let body = csvr_minimal_config().replace("\ntau = 1.0e-13\n", "\n");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => {
+            assert_eq!(field, "integrator.tau");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn csvr_missing_seed_rejected() {
+    let dir = tmp_path("csvr_no_seed");
+    let body = csvr_minimal_config().replace("\nseed = 42\n", "\n");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => {
+            assert_eq!(field, "integrator.seed");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn csvr_rejects_non_positive_temperature() {
+    let dir = tmp_path("csvr_T_zero");
+    let body = csvr_minimal_config().replace("temperature = 300.0\ntau", "temperature = 0.0\ntau");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "integrator.temperature");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn csvr_rejects_non_positive_tau() {
+    let dir = tmp_path("csvr_tau_neg");
+    let body = csvr_minimal_config().replace("tau = 1.0e-13", "tau = -1.0e-13");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "integrator.tau");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn csvr_rejects_extra_fields() {
+    let dir = tmp_path("csvr_extra");
+    let body = csvr_minimal_config().replace(
+        "seed = 42\n",
+        "seed = 42\nchain_length = 3\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownIntegratorField { kind, field } => {
+            assert_eq!(kind, "csvr");
+            assert_eq!(field, "chain_length");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}

@@ -300,6 +300,21 @@
     "title": "NeighborListConfig",
     "type": "api-item"
   },
+  "rq-062ea284": {
+    "decl": "## Algorithm",
+    "file": "integration/csvr",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
+  },
+  "rq-068c64b0": {
+    "decl": "Scenario: CSVR rejects extra fields (e.g. NHC's chain_length)",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "CSVR rejects extra fields (e.g. NHC's chain_length)",
+    "type": "scenario"
+  },
   "rq-06c0e11a": {
     "decl": "Scenario: Exclusion row with non-numeric scale",
     "file": "forces/topology",
@@ -401,6 +416,13 @@
     "title": "rescale_velocities",
     "type": "api-item"
   },
+  "rq-0a4fc43f": {
+    "decl": "Scenario: CSVR missing seed is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "CSVR missing seed is rejected",
+    "type": "scenario"
+  },
   "rq-0a8831b1": {
     "decl": "- `Bond` — `Debug, Clone, Copy`. Fields: `atom_i: u32`, `atom_j: u32`,",
     "file": "forces/topology",
@@ -464,6 +486,13 @@
     "title": "Pair inside r_switch sees the unmodified Lennard-Jones force",
     "type": "scenario"
   },
+  "rq-0c549d09": {
+    "decl": "Scenario: CSVR missing tau is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "CSVR missing tau is rejected",
+    "type": "scenario"
+  },
   "rq-0c717392": {
     "decl": "- `Exclusion` — `Debug, Clone, Copy`. Fields: `atom_i: u32`,",
     "file": "forces/topology",
@@ -518,6 +547,13 @@
     ],
     "title": "StageStats",
     "type": "api-item"
+  },
+  "rq-0dc48f6b": {
+    "decl": "Scenario: Log file header omits csvr_conserved when VV / Langevin / NHC is the integrator",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Log file header omits csvr_conserved when VV / Langevin / NHC is the integrator",
+    "type": "scenario"
   },
   "rq-0e5ac409": {
     "decl": "## Algorithm",
@@ -670,6 +706,28 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "Pre-flight refuses to overwrite an existing timings file",
+    "type": "scenario"
+  },
+  "rq-1178e005": {
+    "decl": "## Out of Scope",
+    "file": "integration/csvr",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
+  "rq-11a953dc": {
+    "decl": "Scenario: philox_4x32_10 produces the same outputs as the device-side helper",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "philox_4x32_10 produces the same outputs as the device-side helper",
+    "type": "scenario"
+  },
+  "rq-11b0deff": {
+    "decl": "Scenario: cumulative_injection accumulates K_new − K_old across calls",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "cumulative_injection accumulates K_new − K_old across calls",
     "type": "scenario"
   },
   "rq-11dbe0a5": {
@@ -902,6 +960,14 @@
     "refs": [],
     "title": "Open fails when the parent directory does not exist",
     "type": "scenario"
+  },
+  "rq-1775255c": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/csvr",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-179ed985": {
     "decl": "- `ParticleBuffers::upload(&mut self, state: &ParticleState) -> Result<(), ParticleStateError>`",
@@ -1148,6 +1214,14 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-1c26a108": {
+    "decl": "### Types",
+    "file": "integration/csvr",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-1c729f15": {
     "decl": "Scenario: Langevin runs through the runner with N=0",
     "file": "integration/langevin-baoab",
@@ -1183,6 +1257,13 @@
     "file": "forces/morse-bonded",
     "refs": [],
     "title": "Atom with two bonds receives sum of contributions",
+    "type": "scenario"
+  },
+  "rq-1d25a0db": {
+    "decl": "Scenario: Log file header includes csvr_conserved when CSVR is the integrator",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Log file header includes csvr_conserved when CSVR is the integrator",
     "type": "scenario"
   },
   "rq-1d5b5e35": {
@@ -1247,6 +1328,13 @@
     "file": "integration/velocity-verlet",
     "refs": [],
     "title": "vv_kick_drift on an empty state is a no-op",
+    "type": "scenario"
+  },
+  "rq-1e5dcdc9": {
+    "decl": "Scenario: draw_counter starts at 0 and increments by 1 per step",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "draw_counter starts at 0 and increments by 1 per step",
     "type": "scenario"
   },
   "rq-1e7e6aa4": {
@@ -1788,6 +1876,13 @@
     "title": "TrajectoryWriter",
     "type": "api-item"
   },
+  "rq-287e8d41": {
+    "decl": "Scenario: Rescale preserves COM momentum",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Rescale preserves COM momentum",
+    "type": "scenario"
+  },
   "rq-28a224e3": {
     "decl": "Scenario: Nosé-Hoover chain rejects yoshida_order outside {1, 3, 5, 7}",
     "file": "io/config-schema",
@@ -1860,6 +1955,13 @@
     "title": "Different seeds produce different trajectories",
     "type": "scenario"
   },
+  "rq-2a5de2ab": {
+    "decl": "- `log_column_values(ke, pe) -> vec![ke + pe − self.cumulative_injection]`.",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "log_column_values",
+    "type": "api-item"
+  },
   "rq-2a6a51c8": {
     "decl": "- `Config` — parsed configuration. All fields are `pub`; field names match",
     "file": "io/config-schema",
@@ -1871,6 +1973,14 @@
     ],
     "title": "Config",
     "type": "api-item"
+  },
+  "rq-2a95c46c": {
+    "decl": "## Empty State and degenerate cases",
+    "file": "integration/csvr",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State and degenerate cases",
+    "type": "section"
   },
   "rq-2a9acb69": {
     "decl": "Scenario: Temperature of an empty system is zero",
@@ -1948,12 +2058,27 @@
     "title": "Velocity generation",
     "type": "section"
   },
+  "rq-2c1bb918": {
+    "decl": "Scenario: log_column_names returns [\"csvr_conserved\"]",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "log_column_names returns [\"csvr_conserved\"]",
+    "type": "scenario"
+  },
   "rq-2c31aa6e": {
     "decl": "Scenario: ParticleBuffers carries the image-flag device buffers",
     "file": "particle-state",
     "refs": [],
     "title": "ParticleBuffers carries the image-flag device buffers",
     "type": "scenario"
+  },
+  "rq-2c834256": {
+    "decl": "### CUDA kernels",
+    "file": "integration/csvr",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA kernels",
+    "type": "section"
   },
   "rq-2cb82d44": {
     "decl": "Scenario: Newly-constructed box reports generation 0",
@@ -2649,6 +2774,14 @@
     "title": "Combiner sums slot energies and virials in slot order",
     "type": "scenario"
   },
+  "rq-3d7c8e53": {
+    "decl": "### Host-side RNG utility",
+    "file": "integration/csvr",
+    "level": 3,
+    "refs": [],
+    "title": "Host-side RNG utility",
+    "type": "section"
+  },
   "rq-3de16ce0": {
     "decl": "Scenario: Construct a ForceField with LennardJones and MorseBonded",
     "file": "forces/framework",
@@ -2950,6 +3083,13 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-47d91c7d": {
+    "decl": "- `CsvrState` — implements the `Integrator` trait declared in",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "CsvrState",
+    "type": "api-item"
+  },
   "rq-47e800e0": {
     "decl": "Scenario: min_perpendicular_width of a c-tilted box reflects the yz contribution",
     "file": "simulation-box",
@@ -3086,6 +3226,13 @@
     "title": "Exclusion entries",
     "type": "section"
   },
+  "rq-4ae77a72": {
+    "decl": "Scenario: csvr_conserved drifts as a zero-mean martingale (no systematic bias)",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "csvr_conserved drifts as a zero-mean martingale (no systematic bias)",
+    "type": "scenario"
+  },
   "rq-4b38148c": {
     "decl": "Scenario: Reject duplicate explicit IDs",
     "file": "particle-state",
@@ -3193,6 +3340,13 @@
     "refs": [],
     "title": "CUDA Kernels",
     "type": "section"
+  },
+  "rq-4e9e09f0": {
+    "decl": "Scenario: step() launches the expected kernel set",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "step() launches the expected kernel set",
+    "type": "scenario"
   },
   "rq-4ea8bbb2": {
     "decl": "- `vv_kick_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, dt: f32) -> Result<(), GpuError>`",
@@ -3386,6 +3540,13 @@
     "title": "wrap_position_with_image_count tracks per-direction image counts for a triclinic box",
     "type": "scenario"
   },
+  "rq-535a4569": {
+    "decl": "Scenario: CSVR rejects non-positive tau",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "CSVR rejects non-positive tau",
+    "type": "scenario"
+  },
   "rq-535c2b1e": {
     "decl": "Scenario: LJ kernel reads the shared neighbor list from ForceFieldContext",
     "file": "forces/lj-pair-force",
@@ -3427,6 +3588,14 @@
     "level": 2,
     "refs": [],
     "title": "Performance Notes",
+    "type": "section"
+  },
+  "rq-54b99519": {
+    "decl": "## RNG",
+    "file": "integration/csvr",
+    "level": 2,
+    "refs": [],
+    "title": "RNG",
     "type": "section"
   },
   "rq-550aebeb": {
@@ -3685,6 +3854,14 @@
     "title": "vv_kick_drift_lossless handles a block-non-aligned particle count",
     "type": "scenario"
   },
+  "rq-5aae9633": {
+    "decl": "### `Integrator` trait overrides",
+    "file": "integration/csvr",
+    "level": 3,
+    "refs": [],
+    "title": "`Integrator` trait overrides",
+    "type": "section"
+  },
   "rq-5ad9b8b9": {
     "decl": "## Empty state",
     "file": "forces/coulomb-pair-force",
@@ -3837,6 +4014,14 @@
     "refs": [],
     "title": "Prefix scan is correct for cell counts beyond a single block-totals pass",
     "type": "scenario"
+  },
+  "rq-5f59fa80": {
+    "decl": "## Per-Step Kernel Sequence",
+    "file": "integration/csvr",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Step Kernel Sequence",
+    "type": "section"
   },
   "rq-5f7aa9ac": {
     "decl": "## Gherkin Scenarios",
@@ -4661,6 +4846,14 @@
     "title": "CUDA kernels",
     "type": "section"
   },
+  "rq-72a606e3": {
+    "decl": "## Determinism",
+    "file": "integration/csvr",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
+  },
   "rq-72aae589": {
     "decl": "Scenario: Generation mismatch is detected even when the box lattice parameters",
     "file": "forces/neighbor-list",
@@ -4767,6 +4960,13 @@
     "refs": [],
     "title": "NaN z-displacement propagates through tilt coupling for a triclinic box",
     "type": "scenario"
+  },
+  "rq-750b828f": {
+    "decl": "- `CsvrBuilder` — implements `IntegratorBuilder` with",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "CsvrBuilder",
+    "type": "api-item"
   },
   "rq-7541fd8a": {
     "decl": "Scenario: Validation order is lx, ly, lz, xy, xz, yz",
@@ -5164,6 +5364,14 @@
     "title": "KE of a single particle with v=(1, 0, 0)",
     "type": "scenario"
   },
+  "rq-7c49aae5": {
+    "decl": "### Counter packing",
+    "file": "integration/csvr",
+    "level": 3,
+    "refs": [],
+    "title": "Counter packing",
+    "type": "section"
+  },
   "rq-7cd5fae2": {
     "decl": "Scenario: lan_drift_half wraps positions across the +L/2 boundary",
     "file": "integration/langevin-baoab",
@@ -5504,6 +5712,13 @@
     "title": "Feature: Truncated Coulomb Pair Force Kernel",
     "type": "file"
   },
+  "rq-84927a79": {
+    "decl": "Scenario: Missing seed rejected",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Missing seed rejected",
+    "type": "scenario"
+  },
   "rq-84af056c": {
     "decl": "## Launch Configuration",
     "file": "forces/coulomb-pair-force",
@@ -5641,6 +5856,18 @@
     "title": "Number formatting",
     "type": "section"
   },
+  "rq-891232bf": {
+    "decl": "# Feature: CSVR Stochastic Velocity Rescaling Thermostat",
+    "file": "integration/csvr",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: CSVR Stochastic Velocity Rescaling Thermostat",
+    "type": "file"
+  },
   "rq-894c16c4": {
     "decl": "Scenario: Defaults populate the output section when [output] is omitted",
     "file": "io/config-schema",
@@ -5655,11 +5882,25 @@
     "title": "Custom builder registered after with_builtins() is selectable",
     "type": "scenario"
   },
+  "rq-89c69f7f": {
+    "decl": "Scenario: Construct CSVR via the registry",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Construct CSVR via the registry",
+    "type": "scenario"
+  },
   "rq-89c71321": {
     "decl": "Scenario: set_lattice rejects a non-positive diagonal without mutating the box",
     "file": "simulation-box",
     "refs": [],
     "title": "set_lattice rejects a non-positive diagonal without mutating the box",
+    "type": "scenario"
+  },
+  "rq-89d45c45": {
+    "decl": "Scenario: Reject extra fields (e.g., chain_length from NHC)",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Reject extra fields (e.g., chain_length from NHC)",
     "type": "scenario"
   },
   "rq-89d64ca3": {
@@ -5854,6 +6095,13 @@
     "refs": [],
     "title": "Reduction with a single particle and a single neighbor",
     "type": "scenario"
+  },
+  "rq-8ee58ec1": {
+    "decl": "- `log_column_names() -> &'static [\"csvr_conserved\"]`.",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "log_column_names",
+    "type": "api-item"
   },
   "rq-8f31cb78": {
     "decl": "Scenario: Open refuses to overwrite an existing file",
@@ -6067,6 +6315,13 @@
     "title": "NaN values are accepted at construction",
     "type": "scenario"
   },
+  "rq-94a43204": {
+    "decl": "Scenario: Different seeds produce different trajectories",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Different seeds produce different trajectories",
+    "type": "scenario"
+  },
   "rq-9504346c": {
     "decl": "Scenario: potential_energies and virials round-trip through ParticleBuffers",
     "file": "particle-state",
@@ -6266,6 +6521,14 @@
     "refs": [],
     "title": "Two identical calls produce byte-identical velocities",
     "type": "scenario"
+  },
+  "rq-99a68e09": {
+    "decl": "### Reproducibility",
+    "file": "integration/csvr",
+    "level": 3,
+    "refs": [],
+    "title": "Reproducibility",
+    "type": "section"
   },
   "rq-9a19bfa3": {
     "decl": "- `ParticleState::download_from(&mut self, buffers: &ParticleBuffers) -> Result<(), ParticleStateError>`",
@@ -6539,6 +6802,13 @@
     "title": "Successive successful set_lattice calls increment generation monotonically",
     "type": "scenario"
   },
+  "rq-9e1142aa": {
+    "decl": "Scenario: Construct CsvrState via the registry",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Construct CsvrState via the registry",
+    "type": "scenario"
+  },
   "rq-9e1eee68": {
     "decl": "# Feature: Topology File, Bond List, Angle List, and Exclusion List",
     "file": "forces/topology",
@@ -6712,6 +6982,13 @@
     "refs": [],
     "title": "`rescale_velocities`",
     "type": "section"
+  },
+  "rq-a2454a72": {
+    "decl": "Scenario: step() on empty CSVR state is a no-op",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "step() on empty CSVR state is a no-op",
+    "type": "scenario"
   },
   "rq-a2e20b02": {
     "decl": "- `ForceFieldError` — error type. Variants:",
@@ -6961,6 +7238,14 @@
     "refs": [],
     "title": "Slot-output buffers have five flat arrays sized num_slots * N",
     "type": "scenario"
+  },
+  "rq-a8da85cf": {
+    "decl": "## Parameters",
+    "file": "integration/csvr",
+    "level": 2,
+    "refs": [],
+    "title": "Parameters",
+    "type": "section"
   },
   "rq-a8df30ac": {
     "decl": "Scenario: minimum_image just past -L/2 wraps by one period",
@@ -7379,6 +7664,14 @@
     "refs": [],
     "title": "Newton's third law holds for the framework's combined force",
     "type": "scenario"
+  },
+  "rq-b1a8a6ca": {
+    "decl": "## Feature API",
+    "file": "integration/csvr",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-b1f33ea4": {
     "decl": "Scenario: neighbor_list cell-list with explicit parameters is accepted",
@@ -7802,6 +8095,14 @@
     "title": "Empty (N=0) run omits all kernel rows but retains host rows",
     "type": "scenario"
   },
+  "rq-be551127": {
+    "decl": "## CSVR conserved quantity",
+    "file": "integration/csvr",
+    "level": 2,
+    "refs": [],
+    "title": "CSVR conserved quantity",
+    "type": "section"
+  },
   "rq-be568071": {
     "decl": "### Temperature rescaling <!-- inline -->",
     "file": "simulation-runner",
@@ -8085,6 +8386,13 @@
     "title": "Timings",
     "type": "api-item"
   },
+  "rq-c4872e7e": {
+    "decl": "Scenario: Construct with particle_count = 1 (N_f = 1)",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Construct with particle_count = 1 (N_f = 1)",
+    "type": "scenario"
+  },
   "rq-c49b2fe6": {
     "decl": "- `NeighborListState::displacement_check(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<f32, NeighborListError>`",
     "file": "forces/neighbor-list",
@@ -8296,6 +8604,13 @@
     "title": "Reject pair referencing an unknown type",
     "type": "scenario"
   },
+  "rq-ca0b98cb": {
+    "decl": "Scenario: log_column_values returns ke + pe − cumulative_injection",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "log_column_values returns ke + pe − cumulative_injection",
+    "type": "scenario"
+  },
   "rq-ca49d49a": {
     "decl": "Scenario: A stretched bond's virial equals r * F_mag",
     "file": "forces/morse-bonded",
@@ -8316,6 +8631,14 @@
     "refs": [],
     "title": "Atom appearing as the centre of one angle and a wing of",
     "type": "scenario"
+  },
+  "rq-cb0c9d24": {
+    "decl": "## Launch Configuration",
+    "file": "integration/csvr",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
+    "type": "section"
   },
   "rq-cb85cf61": {
     "decl": "Scenario: Pair inside the switching window has force smaller than the unmodified value",
@@ -8441,6 +8764,13 @@
     "file": "particle-state",
     "refs": [],
     "title": "Reject upload when images_x has the wrong length",
+    "type": "scenario"
+  },
+  "rq-cf008c68": {
+    "decl": "Scenario: Construct with particle_count = 0",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Construct with particle_count = 0",
     "type": "scenario"
   },
   "rq-cf361ff5": {
@@ -8717,6 +9047,14 @@
     "title": "SimulationBox",
     "type": "api-item"
   },
+  "rq-d4b9d831": {
+    "decl": "### Box-Muller transform",
+    "file": "integration/csvr",
+    "level": 3,
+    "refs": [],
+    "title": "Box-Muller transform",
+    "type": "section"
+  },
   "rq-d5085350": {
     "decl": "Scenario: Pair `between` is normalised to lexicographic order",
     "file": "io/config-schema",
@@ -8816,6 +9154,13 @@
     "refs": [],
     "title": "Feature: End-to-End Pipeline Reversibility Test",
     "type": "file"
+  },
+  "rq-d8527fb4": {
+    "decl": "Scenario: CSVR with all required fields accepted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "CSVR with all required fields accepted",
+    "type": "scenario"
   },
   "rq-d880c228": {
     "decl": "- `cufft_determinism_smoke_test(device: &Arc<CudaDevice>) -> Result<(), CuFftError>`",
@@ -8965,6 +9310,13 @@
     "title": "LennardJonesParameterTable",
     "type": "api-item"
   },
+  "rq-db1298bd": {
+    "decl": "Scenario: philox_normal returns the standard-normal Box-Muller cos branch",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "philox_normal returns the standard-normal Box-Muller cos branch",
+    "type": "scenario"
+  },
   "rq-db3b3d5e": {
     "decl": "Scenario: System total potential energy equals sum of particle shares",
     "file": "forces/framework",
@@ -9034,6 +9386,13 @@
     "title": "Empty angle_type name rejected",
     "type": "scenario"
   },
+  "rq-dc51e1c3": {
+    "decl": "Scenario: Two independent CSVR runs with identical seeds produce byte-identical outputs",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Two independent CSVR runs with identical seeds produce byte-identical outputs",
+    "type": "scenario"
+  },
   "rq-dc5c70bf": {
     "decl": "## Feature API",
     "file": "integration/langevin-baoab",
@@ -9059,6 +9418,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Harmonic angle_type missing k_theta is rejected",
+    "type": "scenario"
+  },
+  "rq-dc95802b": {
+    "decl": "Scenario: Two CsvrStates at the same draw_counter and seed produce identical",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Two CsvrStates at the same draw_counter and seed produce identical",
     "type": "scenario"
   },
   "rq-dcba6fce": {
@@ -9266,6 +9632,13 @@
     "title": "Sample bookkeeping",
     "type": "section"
   },
+  "rq-e1a6bde9": {
+    "decl": "Scenario: Reject non-positive tau",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Reject non-positive tau",
+    "type": "scenario"
+  },
   "rq-e1b51bd9": {
     "decl": "Scenario: volume returns lx * ly * lz regardless of tilts",
     "file": "simulation-box",
@@ -9325,6 +9698,13 @@
     ],
     "title": "Trait Derivation",
     "type": "section"
+  },
+  "rq-e1d4e8ab": {
+    "decl": "Scenario: CSVR rejects non-positive temperature",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "CSVR rejects non-positive temperature",
+    "type": "scenario"
   },
   "rq-e1dd0625": {
     "decl": "Scenario: step() launches all six expected kernel calls",
@@ -9844,6 +10224,20 @@
     "title": "spme_real_pair_force",
     "type": "api-item"
   },
+  "rq-eba43990": {
+    "decl": "Scenario: Reject non-positive temperature",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Reject non-positive temperature",
+    "type": "scenario"
+  },
+  "rq-ebace0b4": {
+    "decl": "Scenario: CSVR missing temperature is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "CSVR missing temperature is rejected",
+    "type": "scenario"
+  },
   "rq-ebfa6e1f": {
     "decl": "- `SpmeError` — error type for SPME slot construction. Variants:",
     "file": "forces/spme",
@@ -10043,6 +10437,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "Cell-list neighbor mode records the neighbor stages and omits lj_pair_force",
+    "type": "scenario"
+  },
+  "rq-efea1b70": {
+    "decl": "Scenario: Rescale skipped when K == 0",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Rescale skipped when K == 0",
     "type": "scenario"
   },
   "rq-f001eaf8": {
@@ -10398,6 +10799,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Valid Morse bond_type is accepted",
+    "type": "scenario"
+  },
+  "rq-f70f7c1e": {
+    "decl": "Scenario: Equilibrium kinetic energy approaches (N_f / 2) k_B T",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Equilibrium kinetic energy approaches (N_f / 2) k_B T",
     "type": "scenario"
   },
   "rq-f721b7a1": {

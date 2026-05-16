@@ -123,6 +123,11 @@ pub enum IntegratorKind {
         yoshida_order: u32,
         n_resp: u32,
     },
+    Csvr {
+        temperature: f64,
+        tau: f64,
+        seed: u64,
+    },
 }
 
 impl IntegratorKind {
@@ -133,6 +138,7 @@ impl IntegratorKind {
             IntegratorKind::VelocityVerlet { .. } => "velocity-verlet",
             IntegratorKind::LangevinBaoab { .. } => "langevin-baoab",
             IntegratorKind::NoseHooverChain { .. } => "nose-hoover-chain",
+            IntegratorKind::Csvr { .. } => "csvr",
         }
     }
 }
@@ -510,6 +516,29 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
                 chain_length,
                 yoshida_order,
                 n_resp,
+            }
+        }
+        "csvr" => {
+            for key in integ_tbl.keys() {
+                if !matches!(key.as_str(), "kind" | "temperature" | "tau" | "seed") {
+                    return Err(ConfigError::UnknownIntegratorField {
+                        kind: "csvr".to_string(),
+                        field: key.clone(),
+                    });
+                }
+            }
+            let temperature = get_f64(integ_tbl, "temperature")
+                .map_err(rename_field("integrator.temperature".into()))?;
+            require_finite_positive("integrator.temperature", temperature)?;
+            let tau = get_f64(integ_tbl, "tau")
+                .map_err(rename_field("integrator.tau".into()))?;
+            require_finite_positive("integrator.tau", tau)?;
+            let seed = get_u64(integ_tbl, "seed")
+                .map_err(rename_field("integrator.seed".into()))?;
+            IntegratorKind::Csvr {
+                temperature,
+                tau,
+                seed,
             }
         }
         other => {
