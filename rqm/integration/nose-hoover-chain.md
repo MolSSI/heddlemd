@@ -413,9 +413,9 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
 ### Shared `nhc_chain_sub_step` host-side helper <!-- rq-19496703 -->
 
 The chain sub-step described under *Chain sub-step* above is exposed
-as a pure host-side helper function in `src/integrator.rs` so that
-slots that need a parallel NHC chain on a different DOF can reuse
-the same algorithm rather than duplicating it. The
+as a pure host-side helper function in `src/integrator/nose_hoover_chain.rs`
+so that slots that need a parallel NHC chain on a different DOF can
+reuse the same algorithm rather than duplicating it. The
 `NoseHooverChainThermostat` slot is one caller; the `mtk-npt`
 integrator (`mtk-npt.md`) is the other.
 

@@ -29,7 +29,7 @@ variant list — in the requirements file for the feature that owns it.
   construction and rebuild.
 - `ForceFieldError` (`src/forces/mod.rs`) — force-field assembly and the
   per-step force pipeline.
-- `IntegratorError` (`src/integrator.rs`) — integrator construction and
+- `IntegratorError` (`src/integrator/mod.rs`) — integrator construction and
   stepping.
 - `TimingsError` (`src/timings.rs`) — CUDA-event timing instrumentation.
 - `TimingsWriterError` (`src/timings.rs`) — timings-file output.

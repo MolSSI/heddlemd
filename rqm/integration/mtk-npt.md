@@ -388,7 +388,8 @@ preserved.)
 
 The MTK integrator and the NHC thermostat both perform identical
 Yoshida-Suzuki chain sub-steps. The host-side chain math is exposed
-as a pure helper function in `src/integrator.rs`:
+as a pure helper function in `src/integrator/nose_hoover_chain.rs`,
+which the MTK integrator imports:
 
 ```rust
 pub fn nhc_chain_sub_step(
