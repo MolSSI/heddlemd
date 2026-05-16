@@ -5,6 +5,18 @@ Langevin dynamics. One of the pluggable integrator slots (see
 `framework.md`); selected by `kind = "langevin-baoab"` in the config's
 `[integrator]` section.
 
+Langevin BAOAB is a **fused** integrator: the Ornstein-Uhlenbeck "O"
+step inside the B-A-O-A-B splitting is itself the temperature coupling,
+so the integrator owns its own thermostat.
+`IntegratorKind::LangevinBaoab { .. }.owns_thermostat()` returns
+`true`, and `load_config` rejects any config that combines
+`[integrator] kind = "langevin-baoab"` with a `[thermostat]` table
+via `ConfigError::IncompatibleThermostat { integrator:
+"langevin-baoab" }`. To compose velocity-Verlet with a thermostat
+from the registry instead, select `kind = "velocity-verlet"` and add
+a `[thermostat]` section (`csvr`, `nose-hoover-chain`, `andersen`, or
+`berendsen`).
+
 The Langevin equation of motion is
 
 ```text
@@ -275,7 +287,12 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
 - Constraints (SHAKE/RATTLE) and constrained Langevin.
 - A lossless `(f32, f64)` compensated mode. The OU step is stochastic;
   bit-exact reversibility is not meaningful.
-- Pressure coupling.
+- Composition with the `[thermostat]` slot. The integrator owns its
+  own thermostat (the OU step); `load_config` rejects configurations
+  that pair `langevin-baoab` with any `[thermostat]` entry.
+- Pressure coupling. Composition with the `[barostat]` slot is
+  permitted by the framework but no concrete barostat ships in the
+  default registry, so the question is not yet exercised.
 - The Verlet B and A steps as separate kernels with their own `_lossless`
   variants. Langevin shares `vv_kick` with velocity Verlet for the B step;
   `lan_drift_half` is its own kernel because Verlet has no half-drift

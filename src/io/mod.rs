@@ -4,9 +4,9 @@ pub mod log_output;
 pub mod trajectory;
 
 pub use config::{
-    BondTypeConfig, Config, ConfigError, IntegratorKind, NeighborListConfig, OutputConfig,
-    PairInteractionConfig, PairPotentialParams, ParticleTypeConfig, PathRole, SimulationConfig,
-    load_config,
+    BarostatKind, BondTypeConfig, Config, ConfigError, IntegratorKind, NeighborListConfig,
+    OutputConfig, PairInteractionConfig, PairPotentialParams, ParticleTypeConfig, PathRole,
+    SimulationConfig, ThermostatKind, load_config,
 };
 pub use init_state::{InitImages, InitState, InitStateError, InitVelocities, load_init_state};
 pub use log_output::{

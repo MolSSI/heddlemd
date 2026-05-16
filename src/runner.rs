@@ -12,7 +12,10 @@ use crate::forces::{
     load_topology_file,
 };
 use crate::gpu::{ParticleBuffers, init_device};
-use crate::integrator::{IntegratorError, IntegratorRegistry};
+use crate::integrator::{
+    BarostatError, BarostatRegistry, IntegratorError, IntegratorRegistry, ThermostatError,
+    ThermostatRegistry,
+};
 use crate::io::config::NeighborListConfig;
 use crate::io::{
     ConfigError, InitStateError, InitVelocities, LogWriter, LogWriterError, TrajectoryWriter,
@@ -43,6 +46,10 @@ pub enum RunnerError {
     Gpu(#[source] crate::gpu::GpuError),
     #[error("{0}")]
     Integrator(#[source] IntegratorError),
+    #[error("{0}")]
+    Thermostat(#[source] ThermostatError),
+    #[error("{0}")]
+    Barostat(#[source] BarostatError),
     #[error("{0}")]
     TopologyFile(#[source] TopologyFileError),
     #[error("{0}")]
@@ -281,10 +288,19 @@ fn run_simulation_with_phase(
         })?;
     timings.record_host(HostStage::HOST_TO_DEVICE_UPLOAD, upload);
 
-    let registry = IntegratorRegistry::with_builtins();
-    let mut integrator = registry
+    // Build the three slot handles in the framework's dispatch order.
+    let integrator_registry = IntegratorRegistry::with_builtins();
+    let mut integrator = integrator_registry
         .build(&config.integrator, &gpu, n)
         .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Setup))?;
+    let thermostat_registry = ThermostatRegistry::with_builtins();
+    let mut thermostat = thermostat_registry
+        .build_optional(config.thermostat.as_ref(), &gpu, n)
+        .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Setup))?;
+    let barostat_registry = BarostatRegistry::with_builtins();
+    let mut barostat = barostat_registry
+        .build_optional(config.barostat.as_ref(), &gpu, n)
+        .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
 
     // Load the .topology file when supplied, otherwise build empty bond /
     // angle / exclusion lists keyed to `n`.
@@ -337,10 +353,20 @@ fn run_simulation_with_phase(
     } else {
         None
     };
-    let log_extra_columns: &'static [&'static str] = integrator.log_column_names();
+    // Concatenate per-slot log columns in dispatch order: integrator,
+    // thermostat, barostat. The runner caches the joined slice for the
+    // run's duration.
+    let mut log_extra_columns: Vec<&'static str> =
+        integrator.log_column_names().to_vec();
+    if let Some(t) = thermostat.as_ref() {
+        log_extra_columns.extend_from_slice(t.log_column_names());
+    }
+    if let Some(b) = barostat.as_ref() {
+        log_extra_columns.extend_from_slice(b.log_column_names());
+    }
     let mut log_writer: Option<LogWriter> = if config.output.log_every > 0 {
         Some(
-            LogWriter::open(&config.output.log_path, log_extra_columns)
+            LogWriter::open(&config.output.log_path, &log_extra_columns)
                 .map_err(|e| (RunnerError::Log(e), ExitPhase::Setup))?,
         )
     } else {
@@ -391,7 +417,13 @@ fn run_simulation_with_phase(
             let pe = compute_total_potential_energy(&buffers).map_err(|g| {
                 (RunnerError::Gpu(g), ExitPhase::Setup)
             })?;
-            integrator.log_column_values(ke, pe)
+            collect_log_extras(
+                integrator.as_ref(),
+                thermostat.as_deref(),
+                barostat.as_deref(),
+                ke,
+                pe,
+            )
         };
         let mut lw = Duration::ZERO;
         timed(&mut lw, || writer.write_row(0, 0.0, ke, t, &extras))
@@ -405,8 +437,14 @@ fn run_simulation_with_phase(
     let progress_every = (n_steps / 100).max(1);
     let dt_f32 = config.simulation.dt as f32;
 
-    // Main loop.
+    // Main loop. Dispatch order per timestep:
+    //   thermostat.apply_pre → integrator.step → thermostat.apply_post
+    //   → barostat.apply
     for step in 1..=n_steps {
+        if let Some(t) = thermostat.as_mut() {
+            t.apply_pre(&mut buffers, dt_f32, &mut timings)
+                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
+        }
         integrator
             .step(
                 &mut buffers,
@@ -416,6 +454,14 @@ fn run_simulation_with_phase(
                 &mut timings,
             )
             .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Loop))?;
+        if let Some(t) = thermostat.as_mut() {
+            t.apply_post(&mut buffers, dt_f32, &mut timings)
+                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
+        }
+        if let Some(b) = barostat.as_mut() {
+            b.apply(&mut buffers, &mut sim_box, dt_f32, &mut timings)
+                .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
+        }
 
         let want_traj =
             config.output.trajectory_every > 0 && step % config.output.trajectory_every == 0;
@@ -453,7 +499,13 @@ fn run_simulation_with_phase(
             } else {
                 let pe = compute_total_potential_energy(&buffers)
                     .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Loop))?;
-                integrator.log_column_values(ke, pe)
+                collect_log_extras(
+                    integrator.as_ref(),
+                    thermostat.as_deref(),
+                    barostat.as_deref(),
+                    ke,
+                    pe,
+                )
             };
             let mut lw = Duration::ZERO;
             timed(&mut lw, || writer.write_row(step, time, ke, t, &extras))
@@ -502,6 +554,26 @@ fn run_simulation_with_phase(
         log_rows_written,
         elapsed_micros,
     })
+}
+
+// Concatenate the diagnostic-column values from every configured slot in
+// dispatch order (integrator, thermostat, barostat). Mirrors the
+// header-construction order in `LogWriter::open(...)` above.
+fn collect_log_extras(
+    integrator: &dyn crate::integrator::Integrator,
+    thermostat: Option<&dyn crate::integrator::Thermostat>,
+    barostat: Option<&dyn crate::integrator::Barostat>,
+    ke: f64,
+    pe: f64,
+) -> Vec<f64> {
+    let mut extras = integrator.log_column_values(ke, pe);
+    if let Some(t) = thermostat {
+        extras.extend(t.log_column_values(ke, pe));
+    }
+    if let Some(b) = barostat {
+        extras.extend(b.log_column_values(ke, pe));
+    }
+    extras
 }
 
 // Download the per-particle potential-energy buffer and sum it host-side

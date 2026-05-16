@@ -111,12 +111,23 @@ message.
    - `forces_*` zero-initialised by the constructor.
 10. **Allocate `ParticleBuffers`.** Construct `ParticleBuffers` from
     the host state.
-11. **Construct the integrator.** Call `Integrator::new(device.clone(),
-    N, &config.integrator)` to build the variant selected by
-    `IntegratorKind` (see `integration/framework.md`). The integrator
-    owns any per-run state it needs (e.g. `LosslessBuffers` for
-    `Integrator::VelocityVerlet` when `lossless == true`, or stored
-    parameters for `Integrator::LangevinBaoab`).
+11. **Construct the integrator, thermostat, and barostat.** Build the
+    three slot handles (see `integration/framework.md`):
+    - `IntegratorRegistry::with_builtins().build(&config.integrator,
+      device.clone(), N)` → `Box<dyn Integrator>`.
+    - `ThermostatRegistry::with_builtins().build_optional(config.thermostat.as_ref(),
+      device.clone(), N)` → `Option<Box<dyn Thermostat>>`.
+    - `BarostatRegistry::with_builtins().build_optional(config.barostat.as_ref(),
+      device.clone(), N)` → `Option<Box<dyn Barostat>>`.
+
+    Each slot owns any per-run state it needs (e.g. `LosslessBuffers`
+    for `velocity-verlet` when `lossless == true`; the chain state and
+    `ke_scratch` buffer for `nose-hoover-chain`). The
+    integrator-owns-its-own-thermostat compatibility check
+    (`IntegratorKind::owns_thermostat()` vs.
+    `config.thermostat.is_some()`) has already been enforced at
+    config-load time (`io/config-schema.md`); no runtime guard is
+    required here.
 12. **Construct the force field.** Call `ForceField::new(device.clone(),
     N, &sim_box, &config.pair_interactions, &config.bond_types,
     &bond_list, &exclusion_list, &config.neighbor_list)` (see
@@ -129,9 +140,12 @@ message.
     parameter struct directly.
 13. **Open output writers.** Open `TrajectoryWriter` and/or `LogWriter`
     depending on the `_every` settings. The `LogWriter` is opened with
-    the extra-column slice returned by
-    `integrator.log_column_names()`; the runner caches that slice for
-    the duration of the run. Failure → exit 1.
+    the concatenation of every slot's extra-column names, in dispatch
+    order:
+    `integrator.log_column_names() ++ thermostat.map(|t|
+    t.log_column_names()).unwrap_or_default() ++ barostat.map(|b|
+    b.log_column_names()).unwrap_or_default()`. The runner caches the
+    concatenated slice for the duration of the run. Failure → exit 1.
 14. **Warm up forces.** Call `force_field.step(&mut buffers, &sim_box,
     &mut timings)` once to populate `forces_*` with `F(x_0)`. This is
     the same warm-up pattern used in `pipeline-reproducibility.md`.
@@ -142,28 +156,47 @@ message.
     KE and T via `compute_kinetic_energy` and `compute_temperature`
     (`log-output.md`); if the cached extra-column slice is non-empty,
     additionally download `potential_energies` and sum it on the host
-    to obtain the total PE in joules, then call
-    `integrator.log_column_values(ke, pe)`. Call
-    `write_row(0, 0.0, ke, t, &extras)`.
+    to obtain the total PE in joules, then assemble the extras vector
+    as the concatenation of each slot's `log_column_values(ke, pe)` in
+    the same dispatch order used at log-open time (integrator,
+    thermostat, barostat). Call `write_row(0, 0.0, ke, t, &extras)`.
 16. **Timestep loop.** For each step `s` in `1 ..= n_steps`:
-    a. `integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt, &mut timings)`
-       — runs the integrator's full sub-step sequence (kicks, drifts,
-       thermostat updates) and calls `force_field.step(...)` internally
-       at the integrator's chosen point(s). On return,
-       `particle_buffers.forces_*`, `potential_energies`, and `virials`
-       hold the values for the post-step positions. The loop variable
-       `s` is local to the runner and gates trajectory and log writes
-       below; it is not passed to the integrator.
-    b. If trajectory output is enabled and `s % trajectory_every == 0`,
+    a. If `thermostat.is_some()`,
+       `thermostat.apply_pre(&mut buffers, dt, &mut timings)` — runs
+       the thermostat's pre-step modification (a Trotter half-step for
+       NHC; a no-op for thermostats whose `apply_pre` is left at the
+       trait default).
+    b. `integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt, &mut timings)`
+       — runs the integrator's time-stepping body and calls
+       `force_field.step(...)` internally at the integrator's chosen
+       point(s). On return, `particle_buffers.forces_*`,
+       `potential_energies`, and `virials` hold the values for the
+       post-step positions.
+    c. If `thermostat.is_some()`,
+       `thermostat.apply_post(&mut buffers, dt, &mut timings)` — runs
+       the thermostat's post-step modification (the right half-step
+       for NHC; the full single rescale for CSVR / Berendsen; the
+       Bernoulli resample for Andersen).
+    d. If `barostat.is_some()`,
+       `barostat.apply(&mut buffers, &mut sim_box, dt, &mut timings)`
+       — runs the barostat's box and position rescale. The default
+       registry has no implementations; this branch is dead code at
+       runtime until a concrete barostat lands.
+
+    The loop variable `s` is local to the runner and gates trajectory
+    and log writes below; it is not passed to any slot.
+
+    e. If trajectory output is enabled and `s % trajectory_every == 0`,
        download positions (and velocities when configured) and call
        `write_frame(step=s, ...)`.
-    c. If log output is enabled and `s % log_every == 0`, download
+    f. If log output is enabled and `s % log_every == 0`, download
        velocities, compute KE and T; when the cached extra-column
        slice is non-empty, additionally download `potential_energies`,
-       sum it on the host to obtain the total PE, and call
-       `integrator.log_column_values(ke, pe)`. Call
+       sum it on the host to obtain the total PE, and assemble the
+       extras vector as the concatenation of each slot's
+       `log_column_values(ke, pe)` in dispatch order. Call
        `write_row(s, s as f64 * dt, ke, t, &extras)`.
-    d. Possibly emit a progress line (see *Progress reporting*).
+    g. Possibly emit a progress line (see *Progress reporting*).
 17. **Flush and close.** Call `flush()` on each open writer. The writers'
     `Drop` impls are best-effort but the runner calls `flush` explicitly
     so flush errors propagate.
@@ -430,7 +463,9 @@ same hardware produce trajectory files and log files that are byte-identical.
 - Restart files and `dynamics resume` (separate planned feature).
 - Multi-GPU and multi-host execution.
 - Per-step force-field switching, time-varying parameters.
-- Thermostats and barostats. The integrator is microcanonical.
+- Thermostat / barostat composition logic. The runner chains the
+  three slot handles in a fixed order; per-slot algorithms live in
+  the respective requirements files under `integration/`.
 - Multi-type simulations. The runner rejects configs with more than one
   `[[particle_types]]` (`MultiTypeUnsupported`), pending a future
   multi-type LJ kernel.

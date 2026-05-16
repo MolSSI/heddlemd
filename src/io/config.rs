@@ -64,6 +64,20 @@ pub enum ConfigError {
     UnknownIntegratorKind { actual: String },
     #[error("unknown field `{field}` for integrator kind `{kind}`")]
     UnknownIntegratorField { kind: String, field: String },
+    // rq-1c2d8eba rq-3fdb7e01
+    #[error("unknown thermostat kind `{actual}`")]
+    UnknownThermostatKind { actual: String },
+    #[error("unknown field `{field}` for thermostat kind `{kind}`")]
+    UnknownThermostatField { kind: String, field: String },
+    // rq-d28e9105 rq-aa6ce5c0
+    #[error("unknown barostat kind `{actual}`")]
+    UnknownBarostatKind { actual: String },
+    #[error("unknown field `{field}` for barostat kind `{kind}`")]
+    UnknownBarostatField { kind: String, field: String },
+    // Cross-validation rule 4: integrator owns its own thermostat and
+    // therefore cannot be paired with a `[thermostat]` table.
+    #[error("integrator `{integrator}` owns its own thermostat and is incompatible with `[thermostat]`")]
+    IncompatibleThermostat { integrator: String },
     #[error("bond_types[{bond_type_index}] has unknown potential `{actual}`")]
     UnknownBondPotential {
         actual: String,
@@ -116,6 +130,30 @@ pub enum IntegratorKind {
         temperature: f64,
         seed: u64,
     },
+}
+
+impl IntegratorKind {
+    /// Lookup key used by `IntegratorRegistry` to dispatch this kind to its
+    /// builder. Matches the `kind` field accepted by the config parser.
+    pub fn name(&self) -> &'static str {
+        match self {
+            IntegratorKind::VelocityVerlet { .. } => "velocity-verlet",
+            IntegratorKind::LangevinBaoab { .. } => "langevin-baoab",
+        }
+    }
+
+    // Returns `true` for variants that bundle their own thermostat (the
+    // OU step inside Langevin BAOAB); `false` otherwise. Consulted by
+    // `load_config`'s cross-validation rule 4 to reject co-configured
+    // `[thermostat]` tables. See `integration/framework.md`.
+    pub fn owns_thermostat(&self) -> bool {
+        matches!(self, IntegratorKind::LangevinBaoab { .. })
+    }
+}
+
+// rq-3fdb7e01
+#[derive(Debug, Clone)]
+pub enum ThermostatKind {
     NoseHooverChain {
         temperature: f64,
         tau: f64,
@@ -139,18 +177,32 @@ pub enum IntegratorKind {
     },
 }
 
-impl IntegratorKind {
-    /// Lookup key used by `IntegratorRegistry` to dispatch this kind to its
-    /// builder. Matches the `kind` field accepted by the config parser.
+impl ThermostatKind {
+    /// Lookup key used by `ThermostatRegistry` to dispatch this kind.
     pub fn name(&self) -> &'static str {
         match self {
-            IntegratorKind::VelocityVerlet { .. } => "velocity-verlet",
-            IntegratorKind::LangevinBaoab { .. } => "langevin-baoab",
-            IntegratorKind::NoseHooverChain { .. } => "nose-hoover-chain",
-            IntegratorKind::Csvr { .. } => "csvr",
-            IntegratorKind::Andersen { .. } => "andersen",
-            IntegratorKind::Berendsen { .. } => "berendsen",
+            ThermostatKind::NoseHooverChain { .. } => "nose-hoover-chain",
+            ThermostatKind::Csvr { .. } => "csvr",
+            ThermostatKind::Andersen { .. } => "andersen",
+            ThermostatKind::Berendsen { .. } => "berendsen",
         }
+    }
+}
+
+// rq-aa6ce5c0
+// Zero-variant enum: the default `BarostatRegistry::with_builtins()`
+// registers no implementations, so no `Some(BarostatKind)` is constructible
+// yet. Successful `load_config` therefore always returns `barostat: None`.
+// The type exists so the schema slot, parsing path, and `Config` field are
+// ready when concrete barostat slots ship.
+#[derive(Debug, Clone)]
+pub enum BarostatKind {}
+
+impl BarostatKind {
+    pub fn name(&self) -> &'static str {
+        // No variants exist, so this method is unreachable. Pattern-match
+        // exhaustively over the empty enum to satisfy the compiler.
+        match *self {}
     }
 }
 
@@ -256,6 +308,8 @@ pub struct Config {
     pub topology: Option<PathBuf>,
     pub simulation: SimulationConfig,
     pub integrator: IntegratorKind,
+    pub thermostat: Option<ThermostatKind>,
+    pub barostat: Option<BarostatKind>,
     pub particle_types: Vec<ParticleTypeConfig>,
     pub pair_interactions: Vec<PairInteractionConfig>,
     pub bond_types: Vec<BondTypeConfig>,
@@ -453,154 +507,41 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
                 seed,
             }
         }
-        "nose-hoover-chain" => {
-            for key in integ_tbl.keys() {
-                if !matches!(
-                    key.as_str(),
-                    "kind"
-                        | "temperature"
-                        | "tau"
-                        | "chain_length"
-                        | "yoshida_order"
-                        | "n_resp"
-                ) {
-                    return Err(ConfigError::UnknownIntegratorField {
-                        kind: "nose-hoover-chain".to_string(),
-                        field: key.clone(),
-                    });
-                }
-            }
-            let temperature = get_f64(integ_tbl, "temperature")
-                .map_err(rename_field("integrator.temperature".into()))?;
-            require_finite_positive("integrator.temperature", temperature)?;
-            let tau = get_f64(integ_tbl, "tau")
-                .map_err(rename_field("integrator.tau".into()))?;
-            require_finite_positive("integrator.tau", tau)?;
-            let chain_length = match integ_tbl.get("chain_length") {
-                Some(toml::Value::Integer(v)) if *v >= 1 => *v as u32,
-                Some(toml::Value::Integer(_)) => {
-                    return Err(invalid(
-                        "integrator.chain_length",
-                        "chain_length must be a positive integer",
-                    ));
-                }
-                Some(_) => {
-                    return Err(invalid(
-                        "integrator.chain_length",
-                        "expected an integer",
-                    ));
-                }
-                None => 3,
-            };
-            let yoshida_order = match integ_tbl.get("yoshida_order") {
-                Some(toml::Value::Integer(v)) if matches!(*v, 1 | 3 | 5 | 7) => *v as u32,
-                Some(toml::Value::Integer(_)) => {
-                    return Err(invalid(
-                        "integrator.yoshida_order",
-                        "yoshida_order must be one of 1, 3, 5, 7",
-                    ));
-                }
-                Some(_) => {
-                    return Err(invalid(
-                        "integrator.yoshida_order",
-                        "expected an integer",
-                    ));
-                }
-                None => 3,
-            };
-            let n_resp = match integ_tbl.get("n_resp") {
-                Some(toml::Value::Integer(v)) if *v >= 1 => *v as u32,
-                Some(toml::Value::Integer(_)) => {
-                    return Err(invalid(
-                        "integrator.n_resp",
-                        "n_resp must be a positive integer",
-                    ));
-                }
-                Some(_) => {
-                    return Err(invalid("integrator.n_resp", "expected an integer"));
-                }
-                None => 1,
-            };
-            IntegratorKind::NoseHooverChain {
-                temperature,
-                tau,
-                chain_length,
-                yoshida_order,
-                n_resp,
-            }
-        }
-        "csvr" => {
-            for key in integ_tbl.keys() {
-                if !matches!(key.as_str(), "kind" | "temperature" | "tau" | "seed") {
-                    return Err(ConfigError::UnknownIntegratorField {
-                        kind: "csvr".to_string(),
-                        field: key.clone(),
-                    });
-                }
-            }
-            let temperature = get_f64(integ_tbl, "temperature")
-                .map_err(rename_field("integrator.temperature".into()))?;
-            require_finite_positive("integrator.temperature", temperature)?;
-            let tau = get_f64(integ_tbl, "tau")
-                .map_err(rename_field("integrator.tau".into()))?;
-            require_finite_positive("integrator.tau", tau)?;
-            let seed = get_u64(integ_tbl, "seed")
-                .map_err(rename_field("integrator.seed".into()))?;
-            IntegratorKind::Csvr {
-                temperature,
-                tau,
-                seed,
-            }
-        }
-        "andersen" => {
-            for key in integ_tbl.keys() {
-                if !matches!(
-                    key.as_str(),
-                    "kind" | "temperature" | "collision_rate" | "seed"
-                ) {
-                    return Err(ConfigError::UnknownIntegratorField {
-                        kind: "andersen".to_string(),
-                        field: key.clone(),
-                    });
-                }
-            }
-            let temperature = get_f64(integ_tbl, "temperature")
-                .map_err(rename_field("integrator.temperature".into()))?;
-            require_finite_positive("integrator.temperature", temperature)?;
-            let collision_rate = get_f64(integ_tbl, "collision_rate")
-                .map_err(rename_field("integrator.collision_rate".into()))?;
-            require_finite_non_negative("integrator.collision_rate", collision_rate)?;
-            let seed = get_u64(integ_tbl, "seed")
-                .map_err(rename_field("integrator.seed".into()))?;
-            IntegratorKind::Andersen {
-                temperature,
-                collision_rate,
-                seed,
-            }
-        }
-        "berendsen" => {
-            for key in integ_tbl.keys() {
-                if !matches!(key.as_str(), "kind" | "temperature" | "tau") {
-                    return Err(ConfigError::UnknownIntegratorField {
-                        kind: "berendsen".to_string(),
-                        field: key.clone(),
-                    });
-                }
-            }
-            let temperature = get_f64(integ_tbl, "temperature")
-                .map_err(rename_field("integrator.temperature".into()))?;
-            require_finite_positive("integrator.temperature", temperature)?;
-            let tau = get_f64(integ_tbl, "tau")
-                .map_err(rename_field("integrator.tau".into()))?;
-            require_finite_positive("integrator.tau", tau)?;
-            IntegratorKind::Berendsen { temperature, tau }
-        }
         other => {
             return Err(ConfigError::UnknownIntegratorKind {
                 actual: other.to_string(),
             });
         }
     };
+
+    // rq-1c2d8eba: optional [thermostat] section.
+    let thermostat: Option<ThermostatKind> = match root.get("thermostat") {
+        None => None,
+        Some(toml::Value::Table(therm_tbl)) => Some(parse_thermostat(therm_tbl)?),
+        Some(_) => return Err(invalid("thermostat", "expected a table")),
+    };
+
+    // rq-d28e9105: optional [barostat] section. With the default
+    // registry empty, every kind value is rejected. We still parse the
+    // table to surface MissingField on a missing `kind` and to make the
+    // future addition trivial.
+    let barostat: Option<BarostatKind> = match root.get("barostat") {
+        None => None,
+        Some(toml::Value::Table(baro_tbl)) => {
+            let kind_str = get_str(baro_tbl, "kind")
+                .map_err(rename_field("barostat.kind".into()))?
+                .to_string();
+            return Err(ConfigError::UnknownBarostatKind { actual: kind_str });
+        }
+        Some(_) => return Err(invalid("barostat", "expected a table")),
+    };
+
+    // Cross-validation rule 4: integrator-owns-thermostat compatibility.
+    if thermostat.is_some() && integrator.owns_thermostat() {
+        return Err(ConfigError::IncompatibleThermostat {
+            integrator: integrator.name().to_string(),
+        });
+    }
 
     let pt_array = root
         .get("particle_types")
@@ -1298,6 +1239,8 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         topology: topology_path,
         simulation,
         integrator,
+        thermostat,
+        barostat,
         particle_types,
         pair_interactions,
         bond_types,
@@ -1327,5 +1270,159 @@ fn rename_field(full: String) -> impl FnOnce(ConfigError) -> ConfigError {
             reason,
         },
         other => other,
+    }
+}
+
+// rq-1c2d8eba rq-3fdb7e01
+fn parse_thermostat(therm_tbl: &toml::value::Table) -> Result<ThermostatKind, ConfigError> {
+    let kind_str = get_str(therm_tbl, "kind")
+        .map_err(rename_field("thermostat.kind".into()))?
+        .to_string();
+    match kind_str.as_str() {
+        "nose-hoover-chain" => {
+            for key in therm_tbl.keys() {
+                if !matches!(
+                    key.as_str(),
+                    "kind"
+                        | "temperature"
+                        | "tau"
+                        | "chain_length"
+                        | "yoshida_order"
+                        | "n_resp"
+                ) {
+                    return Err(ConfigError::UnknownThermostatField {
+                        kind: "nose-hoover-chain".to_string(),
+                        field: key.clone(),
+                    });
+                }
+            }
+            let temperature = get_f64(therm_tbl, "temperature")
+                .map_err(rename_field("thermostat.temperature".into()))?;
+            require_finite_positive("thermostat.temperature", temperature)?;
+            let tau = get_f64(therm_tbl, "tau")
+                .map_err(rename_field("thermostat.tau".into()))?;
+            require_finite_positive("thermostat.tau", tau)?;
+            let chain_length = match therm_tbl.get("chain_length") {
+                Some(toml::Value::Integer(v)) if *v >= 1 => *v as u32,
+                Some(toml::Value::Integer(_)) => {
+                    return Err(invalid(
+                        "thermostat.chain_length",
+                        "chain_length must be a positive integer",
+                    ));
+                }
+                Some(_) => {
+                    return Err(invalid(
+                        "thermostat.chain_length",
+                        "expected an integer",
+                    ));
+                }
+                None => 3,
+            };
+            let yoshida_order = match therm_tbl.get("yoshida_order") {
+                Some(toml::Value::Integer(v)) if matches!(*v, 1 | 3 | 5 | 7) => *v as u32,
+                Some(toml::Value::Integer(_)) => {
+                    return Err(invalid(
+                        "thermostat.yoshida_order",
+                        "yoshida_order must be one of 1, 3, 5, 7",
+                    ));
+                }
+                Some(_) => {
+                    return Err(invalid(
+                        "thermostat.yoshida_order",
+                        "expected an integer",
+                    ));
+                }
+                None => 3,
+            };
+            let n_resp = match therm_tbl.get("n_resp") {
+                Some(toml::Value::Integer(v)) if *v >= 1 => *v as u32,
+                Some(toml::Value::Integer(_)) => {
+                    return Err(invalid(
+                        "thermostat.n_resp",
+                        "n_resp must be a positive integer",
+                    ));
+                }
+                Some(_) => {
+                    return Err(invalid("thermostat.n_resp", "expected an integer"));
+                }
+                None => 1,
+            };
+            Ok(ThermostatKind::NoseHooverChain {
+                temperature,
+                tau,
+                chain_length,
+                yoshida_order,
+                n_resp,
+            })
+        }
+        "csvr" => {
+            for key in therm_tbl.keys() {
+                if !matches!(key.as_str(), "kind" | "temperature" | "tau" | "seed") {
+                    return Err(ConfigError::UnknownThermostatField {
+                        kind: "csvr".to_string(),
+                        field: key.clone(),
+                    });
+                }
+            }
+            let temperature = get_f64(therm_tbl, "temperature")
+                .map_err(rename_field("thermostat.temperature".into()))?;
+            require_finite_positive("thermostat.temperature", temperature)?;
+            let tau = get_f64(therm_tbl, "tau")
+                .map_err(rename_field("thermostat.tau".into()))?;
+            require_finite_positive("thermostat.tau", tau)?;
+            let seed = get_u64(therm_tbl, "seed")
+                .map_err(rename_field("thermostat.seed".into()))?;
+            Ok(ThermostatKind::Csvr {
+                temperature,
+                tau,
+                seed,
+            })
+        }
+        "andersen" => {
+            for key in therm_tbl.keys() {
+                if !matches!(
+                    key.as_str(),
+                    "kind" | "temperature" | "collision_rate" | "seed"
+                ) {
+                    return Err(ConfigError::UnknownThermostatField {
+                        kind: "andersen".to_string(),
+                        field: key.clone(),
+                    });
+                }
+            }
+            let temperature = get_f64(therm_tbl, "temperature")
+                .map_err(rename_field("thermostat.temperature".into()))?;
+            require_finite_positive("thermostat.temperature", temperature)?;
+            let collision_rate = get_f64(therm_tbl, "collision_rate")
+                .map_err(rename_field("thermostat.collision_rate".into()))?;
+            require_finite_non_negative("thermostat.collision_rate", collision_rate)?;
+            let seed = get_u64(therm_tbl, "seed")
+                .map_err(rename_field("thermostat.seed".into()))?;
+            Ok(ThermostatKind::Andersen {
+                temperature,
+                collision_rate,
+                seed,
+            })
+        }
+        "berendsen" => {
+            for key in therm_tbl.keys() {
+                if !matches!(key.as_str(), "kind" | "temperature" | "tau") {
+                    return Err(ConfigError::UnknownThermostatField {
+                        kind: "berendsen".to_string(),
+                        field: key.clone(),
+                    });
+                }
+            }
+            let temperature = get_f64(therm_tbl, "temperature")
+                .map_err(rename_field("thermostat.temperature".into()))?;
+            require_finite_positive("thermostat.temperature", temperature)?;
+            let tau = get_f64(therm_tbl, "tau")
+                .map_err(rename_field("thermostat.tau".into()))?;
+            require_finite_positive("thermostat.tau", tau)?;
+            Ok(ThermostatKind::Berendsen { temperature, tau })
+        }
+        other => Err(ConfigError::UnknownThermostatKind {
+            actual: other.to_string(),
+        }),
     }
 }

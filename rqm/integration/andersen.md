@@ -1,16 +1,18 @@
 # Feature: Andersen Stochastic Thermostat <!-- rq-5e059f6b -->
 
 The Andersen thermostat (Andersen, *J. Chem. Phys.* **72**, 2384
-(1980)) is a stochastic NVT integrator. One of the pluggable
-integrator slots (see `framework.md`); selected by
-`kind = "andersen"` in the config's `[integrator]` section.
+(1980)) is a stochastic NVT thermostat. One of the pluggable
+thermostat slots (see `framework.md`); selected by
+`kind = "andersen"` in the config's `[thermostat]` section.
 
-Each timestep, after the velocity-Verlet propagation, every particle
-is independently and randomly assigned a new velocity drawn from the
-Maxwell-Boltzmann distribution at the user-specified temperature with
-probability `p = collision_rate · dt`. Particles that are not selected
-retain the velocity produced by the symplectic step. Repeated
-application produces the canonical distribution exactly.
+The thermostat runs once per timestep, as a post-only hook
+(`apply_post`); its `apply_pre` is the trait default no-op. Every
+particle is independently and randomly assigned a new velocity drawn
+from the Maxwell-Boltzmann distribution at the user-specified
+temperature with probability `p = collision_rate · dt`. Particles
+that are not selected retain the velocity produced by the symplectic
+step. Repeated application produces the canonical distribution
+exactly.
 
 The thermostat preserves no momentum: per-particle resampling makes
 each draw independent, so the centre-of-mass momentum drifts
@@ -22,13 +24,14 @@ preserving the underlying dynamics.
 
 ## Algorithm <!-- rq-e15cc5ac -->
 
-For each timestep of size `dt`:
+The thermostat is invoked through `apply_post(buffers, dt, timings)`
+after the integrator's `step()` returns. The integrator has already
+completed its velocity-Verlet substeps; the thermostat operates on
+the post-step velocities. For each invocation with timestep `dt`:
 
-1. Run the velocity-Verlet sub-step (kick / drift / force / kick), see
-   `velocity-verlet.md`.
-2. Compute the instantaneous kinetic energy `K_old` via the shared
+1. Compute the instantaneous kinetic energy `K_old` via the shared
    `compute_kinetic_energy` helper (`nose-hoover-chain.md`).
-3. For each particle `i`:
+2. For each particle `i`:
    - Draw a uniform `U_i ∈ (0, 1)` from a counter-based Philox-4×32-10
      stream (see *RNG* below).
    - If `U_i < p` where `p = clamp(collision_rate · dt, 0, 1)`:
@@ -37,8 +40,8 @@ For each timestep of size `dt`:
      `v_i ← σ_i · (ξ_x, ξ_y, ξ_z)` with `σ_i = sqrt(k_B · T / m_i)`
      and `ξ_a ~ N(0, 1)` independently per axis.
    - Otherwise leave `v_i` unchanged.
-4. Compute the instantaneous kinetic energy `K_new` via the same
-   helper, and update the integrator's running
+3. Compute the instantaneous kinetic energy `K_new` via the same
+   helper, and update the running
    `cumulative_injection += K_new − K_old`. Used by the
    `andersen_conserved` log column.
 
@@ -51,27 +54,29 @@ The collision probability is clamped to `[0, 1]` so any
 Andersen). This is mathematically valid; the canonical-distribution
 guarantee holds.
 
+`apply_pre` is the trait default (no-op): Andersen has a single
+per-step resample, applied after the integrator runs.
+
 ## Per-Step Kernel Sequence <!-- rq-7843f188 -->
 
-Per timestep the Andersen integrator's `step()` runs the following in
-fixed order:
+Per timestep the Andersen thermostat's `apply_post` runs the
+following in fixed order:
 
-| Order | Step          | Kernel / call          | Operation                                            | Stage label              |
-| ----- | ------------- | ---------------------- | ---------------------------------------------------- | ------------------------ |
-| 1     | VV kick-drift | `vv_kick_drift`        | `v += (F/m)(dt/2)`, then `x += v dt`                 | `VvKickDrift`            |
-| 2     | Force eval    | `force_field.step`     | recompute `F(x)`                                     | (slot-specific)          |
-| 3     | VV kick       | `vv_kick`              | `v += (F/m)(dt/2)`                                   | `VvKick`                 |
-| 4     | KE reduce     | `kinetic_energy_reduce` | one f32 scalar of `K_old`                            | `KineticEnergyReduce`    |
-| 5     | Resample      | `andersen_resample`    | per-particle Bernoulli + Maxwell-Boltzmann draw      | `AndersenResample`       |
-| 6     | KE reduce     | `kinetic_energy_reduce` | one f32 scalar of `K_new`                            | `KineticEnergyReduce`    |
+| Order | Step      | Kernel / call           | Operation                                            | Stage label           |
+| ----- | --------- | ----------------------- | ---------------------------------------------------- | --------------------- |
+| 1     | KE reduce | `kinetic_energy_reduce` | one f32 scalar of `K_old`                            | `KineticEnergyReduce` |
+| 2     | Resample  | `andersen_resample`     | per-particle Bernoulli + Maxwell-Boltzmann draw      | `AndersenResample`    |
+| 3     | KE reduce | `kinetic_energy_reduce` | one f32 scalar of `K_new`                            | `KineticEnergyReduce` |
 
-`vv_kick_drift`, `vv_kick`, and `kinetic_energy_reduce` are reused
-from the existing infrastructure. `andersen_resample` is the only
-new CUDA kernel introduced by this feature.
+`kinetic_energy_reduce` is reused from `nose-hoover-chain.md`.
+`andersen_resample` is the only CUDA kernel owned by this slot. The
+integrator's own kernels (`vv_kick_drift`, `vv_kick`, the force
+pipeline) are launched separately by `integrator.step()` and are not
+part of this slot's per-step sequence.
 
 ## Parameters <!-- rq-eb0bc993 -->
 
-Config layer fields set on `IntegratorKind::Andersen`:
+Config layer fields set on `ThermostatKind::Andersen`:
 
 - `temperature: f64` — bath temperature `T` in kelvin. Required.
   Finite and strictly positive. Independent of
@@ -83,29 +88,29 @@ Config layer fields set on `IntegratorKind::Andersen`:
   diagnostic mode). Typical values for liquid water are `10¹¹–10¹²
   s⁻¹` (collision probability `≈ 10⁻⁴–10⁻²` per fs).
 - `seed: u64` — counter-based RNG seed. Required, independent of
-  `simulation.seed` and any other integrator's seed.
+  `simulation.seed` and any other slot's seed.
 
 The per-step collision probability is computed as
 `p = clamp(collision_rate · dt, 0.0, 1.0)`.
 
 ## RNG <!-- rq-b3086891 -->
 
-Andersen draws, per particle per step, one uniform sample for the
-Bernoulli decision and three standard-normal samples (one per axis)
-when the decision accepts. All draws come from the same Philox-4×32-10
-RNG used by `langevin-baoab.md` and `csvr.md`; the device-side
-helpers `philox4x32_10`, `philox_gaussian`, and `u32_to_uniform_open`
-live in `kernels/philox.cuh` and are shared by every RNG-consuming
-kernel.
+Andersen draws, per particle per invocation, one uniform sample for
+the Bernoulli decision and three standard-normal samples (one per
+axis) when the decision accepts. All draws come from the same
+Philox-4×32-10 RNG used by `langevin-baoab.md` and `csvr.md`; the
+device-side helpers `philox4x32_10`, `philox_gaussian`, and
+`u32_to_uniform_open` live in `kernels/philox.cuh` and are shared by
+every RNG-consuming kernel.
 
 ### Counter packing <!-- rq-d6a1b8eb -->
 
 Each per-(particle, draw-kind) Philox invocation uses:
 
 - **Key (2 × u32)**: `(seed_lo, seed_hi)` — low and high halves of
-  the integrator's `seed`.
+  the thermostat's `seed`.
 - **Counter (4 × u32)**:
-  - `counter[0] = draw_counter_lo` — low 32 bits of the integrator's
+  - `counter[0] = draw_counter_lo` — low 32 bits of the thermostat's
     `draw_counter`.
   - `counter[1] = draw_counter_hi` — high 32 bits.
   - `counter[2] = particle_id` — the particle's `u32` ID from
@@ -116,9 +121,9 @@ Each per-(particle, draw-kind) Philox invocation uses:
     - `2` — Gaussian for the z-axis.
     - `3` — uniform for the Bernoulli decision.
 
-The `draw_counter` lives on `AndersenState`. It starts at `0` at
-construction and is pre-incremented on every `step()` call before the
-kernel launch; the first launch in a run therefore uses
+The `draw_counter` lives on `AndersenThermostat`. It starts at `0`
+at construction and is pre-incremented on every `apply_post` call
+before the kernel launch; the first launch in a run therefore uses
 `draw_counter == 1`.
 
 A non-colliding particle still consumes the uniform draw (kind `3`)
@@ -142,29 +147,29 @@ same per-axis convention as `langevin-baoab.md`.
 The diagnostic for Andersen is
 
 ```text
-H_andersen = K + U − Σ_{steps} (K_new − K_old)
+H_andersen = K + U − Σ_{invocations} (K_new − K_old)
 ```
 
 i.e., the physical Hamiltonian plus a running subtraction of the
 cumulative kinetic energy injected (or removed) by the resampling
-over all completed steps. With a correct implementation
+over all completed invocations. With a correct implementation
 `{H_andersen(t)}` drifts as a martingale (zero-mean increment per
 step) and is bounded in expectation; an implementation bug produces
 a systematic drift.
 
 `H_andersen` is exposed as a per-log-row diagnostic column named
-`andersen_conserved` when Andersen is the configured integrator (see
-`io/log-output.md`). The integrator accumulates `Σ (K_new − K_old)`
-on its host-side state across every `step()` call from the two
-kinetic-energy reductions in steps 4 and 6 of the per-step sequence
+`andersen_conserved` when Andersen is the configured thermostat (see
+`io/log-output.md`). The thermostat accumulates `Σ (K_new − K_old)`
+on its host-side state across every `apply_post` call from the two
+kinetic-energy reductions in steps 1 and 3 of the per-step sequence
 above.
 
 ## Empty State and degenerate cases <!-- rq-645252f1 -->
 
-- `particle_count == 0`: `step()` returns `Ok(())` without launching
-  any kernel.
+- `particle_count == 0`: `apply_pre` and `apply_post` return
+  `Ok(())` without launching any kernel.
 - `collision_rate == 0.0`: `p == 0`. No particle is ever resampled;
-  the integrator degenerates to NVE velocity-Verlet (plus two
+  the thermostat degenerates to an NVE pass-through (plus two
   redundant KE reductions per step). Useful as a diagnostic baseline.
 - `collision_rate · dt ≥ 1.0`: `p` is clamped to `1.0`. Every
   particle is resampled every step ("massive Andersen"). The KE
@@ -175,8 +180,8 @@ above.
 
 ### Types <!-- rq-46792e3e -->
 
-- `AndersenState` — implements the `Integrator` trait declared in <!-- rq-feba0a88 -->
-  `framework.md`. Registered in `IntegratorRegistry::with_builtins`
+- `AndersenThermostat` — implements the `Thermostat` trait declared <!-- rq-feba0a88 -->
+  in `framework.md`. Registered in `ThermostatRegistry::with_builtins`
   under `kind_name() == "andersen"`. Fields:
 
   - `device: Arc<CudaDevice>`
@@ -185,35 +190,37 @@ above.
   - `seed: u64`
   - `draw_counter: u64` — Philox counter advance for the per-step
     resample kernel. Initialised to `0`; pre-incremented on every
-    `step()` call.
+    `apply_post` call.
   - `kt: f64` — `BOLTZMANN_J_PER_K · temperature`.
   - `cumulative_injection: f64` — running sum of `K_new − K_old`
-    across every completed `step()` call. Initialised to `0.0`. Used
-    by `log_column_values`.
+    across every completed `apply_post` call. Initialised to `0.0`.
+    Used by `log_column_values`.
   - `ke_scratch: CudaSlice<f32>` — length-1 device buffer for the
     kinetic-energy reduction; reused across calls.
   - `most_recent_ke: f64` — last kinetic energy computed during the
-    current `step()`.
+    current `apply_post` invocation.
 
-  All fields private; the slot's public surface is the `Integrator`
+  All fields private; the slot's public surface is the `Thermostat`
   trait methods and construction via `AndersenBuilder`. The
   `draw_counter` and `cumulative_injection` fields are public for
-  parity with the other registered integrators so a future
+  parity with the other registered thermostats so a future
   restart-from-checkpoint flow can restore them explicitly.
 
-- `AndersenBuilder` — implements `IntegratorBuilder` with <!-- rq-fd0cef60 -->
+- `AndersenBuilder` — implements `ThermostatBuilder` with <!-- rq-fd0cef60 -->
   `kind_name() == "andersen"`. `build(device, particle_count, kind)`
-  matches against `IntegratorKind::Andersen { … }`, allocates the
+  matches against `ThermostatKind::Andersen { … }`, allocates the
   length-1 `ke_scratch` device buffer, and returns the boxed
-  `AndersenState`.
+  `AndersenThermostat`.
 
-### `Integrator` trait overrides <!-- rq-3ace72b0 -->
+### `Thermostat` trait overrides <!-- rq-3ace72b0 -->
 
-`AndersenState` overrides the diagnostic-column trait methods
+`AndersenThermostat` overrides the diagnostic-column trait methods
 declared in `framework.md`:
 
 - `log_column_names() -> &'static ["andersen_conserved"]`. <!-- rq-1163481e -->
 - `log_column_values(ke, pe) -> vec![ke + pe − cumulative_injection]`. <!-- rq-6d2daea0 -->
+
+`apply_pre` is left at its trait default (no-op).
 
 ### CUDA Kernels <!-- rq-b7c6d7d8 -->
 
@@ -309,16 +316,16 @@ One free function in `src/gpu/kernels.rs`, re-exported from
 
 ## Determinism <!-- rq-37b05f03 -->
 
-- All three reused kernels (`vv_kick_drift`, `vv_kick`,
-  `kinetic_energy_reduce`) are deterministic by construction (see
-  their respective documentation).
+- `kinetic_energy_reduce` is deterministic by construction (see
+  `nose-hoover-chain.md`).
 - `andersen_resample` reads only `(seed, draw_counter, particle_id)`
-  for its Philox input; no per-thread RNG state. Two runs on the same
-  GPU with identical inputs produce byte-identical velocities.
-- The `draw_counter` advances by exactly `+1` per `step()` call.
-- Two end-to-end Andersen runs with identical configs on the same
-  GPU produce byte-identical trajectory and log files, including the
-  `andersen_conserved` column.
+  for its Philox input; no per-thread RNG state. Two runs on the
+  same GPU with identical inputs produce byte-identical velocities.
+- The `draw_counter` advances by exactly `+1` per `apply_post` call.
+- Two end-to-end runs composing the same integrator with Andersen
+  with identical configs on the same GPU produce byte-identical
+  trajectory and log files, including the `andersen_conserved`
+  column.
 
 ## Out of Scope <!-- rq-c5f66ecd -->
 
@@ -327,14 +334,15 @@ One free function in `src/gpu/kernels.rs`, re-exported from
   promises.
 - COM-momentum-preserving variant. Andersen intrinsically breaks
   momentum conservation; a hybrid scheme that subtracts a global
-  drift after each resample would be a different integrator.
+  drift after each resample would be a different thermostat.
 - Per-type collision rates. The single `collision_rate` applies to
   every particle regardless of species.
 - Massive Andersen as a distinct `kind` name. Setting
   `collision_rate · dt ≥ 1` (clamped to `p = 1`) achieves the same
   effect under the existing `"andersen"` slot.
 - Constraint algorithms (SHAKE/RATTLE).
-- Pressure coupling.
+- Pressure coupling (Andersen does not extend to NPT; the
+  `[barostat]` slot composes orthogonally with any thermostat).
 - An off-by-one `draw_counter` mode for restart-from-checkpoint
   alignment; the `draw_counter` is a public field for explicit
   restoration.
@@ -354,68 +362,68 @@ Feature: Andersen stochastic thermostat
   # --- Construction ---
 
   @rq-dc3c616a
-  Scenario: Construct AndersenState via the registry
-    Given an IntegratorKind::Andersen {
+  Scenario: Construct AndersenThermostat via the registry
+    Given a ThermostatKind::Andersen {
       temperature: 300.0, collision_rate: 1.0e12, seed: 42 }
-    When registry.build(&kind, device, particle_count=4) is called
-    Then it returns Ok(integrator)
-    And the underlying AndersenState has draw_counter == 0
+    When registry.build_optional(Some(&kind), device, particle_count=4) is called
+    Then it returns Ok(Some(thermostat))
+    And the underlying AndersenThermostat has draw_counter == 0
     And state.cumulative_injection == 0.0
     And state.kt == k_B * 300.0
 
   @rq-abcae430
   Scenario: Construct with particle_count = 0
-    Given an IntegratorKind::Andersen {
+    Given a ThermostatKind::Andersen {
       temperature: 300.0, collision_rate: 1.0e12, seed: 1 }
-    When registry.build(&kind, device, particle_count=0) is called
-    Then it returns Ok(integrator)
+    When registry.build_optional(Some(&kind), device, particle_count=0) is called
+    Then it returns Ok(Some(thermostat))
 
   @rq-62ad70f8
   Scenario: Construct with collision_rate = 0 (NVE-equivalent)
-    Given an IntegratorKind::Andersen {
+    Given a ThermostatKind::Andersen {
       temperature: 300.0, collision_rate: 0.0, seed: 1 }
-    When registry.build(&kind, device, particle_count=4) is called
-    Then it returns Ok(integrator)
+    When registry.build_optional(Some(&kind), device, particle_count=4) is called
+    Then it returns Ok(Some(thermostat))
 
   # --- Config validation ---
 
   @rq-b8aa57c6
   Scenario: Reject non-positive temperature
-    Given a config with [integrator] kind="andersen",
+    Given a config with [thermostat] kind="andersen",
       temperature=0.0, collision_rate=1.0e12, seed=1
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue {
-      field: "integrator.temperature", reason: _ })
+      field: "thermostat.temperature", reason: _ })
 
   @rq-0f3b352b
   Scenario: Reject negative collision_rate
-    Given a config with [integrator] kind="andersen",
+    Given a config with [thermostat] kind="andersen",
       temperature=300.0, collision_rate=-1.0, seed=1
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue {
-      field: "integrator.collision_rate", reason: _ })
+      field: "thermostat.collision_rate", reason: _ })
 
   @rq-c4581536
   Scenario: collision_rate = 0 accepted
-    Given a config with [integrator] kind="andersen",
+    Given a config with [thermostat] kind="andersen",
       temperature=300.0, collision_rate=0.0, seed=1
     When load_config is called
     Then it returns Ok(config)
 
   @rq-c5b42daa
   Scenario: Missing seed rejected
-    Given a config with [integrator] kind="andersen",
+    Given a config with [thermostat] kind="andersen",
       temperature=300.0, collision_rate=1.0e12
     When load_config is called
     Then it returns Err(ConfigError::MissingField {
-      field: "integrator.seed" })
+      field: "thermostat.seed" })
 
   @rq-8df9d74b
   Scenario: Reject extra fields (e.g. tau from NHC/CSVR)
-    Given a config with [integrator] kind="andersen",
+    Given a config with [thermostat] kind="andersen",
       temperature=300.0, collision_rate=1.0e12, seed=1, tau=1.0e-13
     When load_config is called
-    Then it returns Err(ConfigError::UnknownIntegratorField {
+    Then it returns Err(ConfigError::UnknownThermostatField {
       kind: "andersen", field: "tau" })
 
   # --- andersen_resample kernel ---
@@ -465,60 +473,64 @@ Feature: Andersen stochastic thermostat
   # --- Per-step kernel sequence (slot integration) ---
 
   @rq-cef43ff0
-  Scenario: step() launches all expected kernels
-    Given an Andersen integrator with temperature=300, collision_rate=1e12,
+  Scenario: apply_post launches all expected kernels
+    Given an Andersen thermostat with temperature=300, collision_rate=1e12,
       seed=1, particle_count=4
-    And a ForceField with one LennardJones slot
-    And a warm-up force evaluation has populated forces
-    When integrator.step(...) is called with dt=1e-15
-    And timings.finalize() is queried
-    Then KernelStage::VV_KICK_DRIFT has count == 1
-    And KernelStage::VV_KICK has count == 1
-    And KernelStage::KINETIC_ENERGY_REDUCE has count == 2
+    And buffers prepared with non-zero velocities
+    When thermostat.apply_post(&mut buffers, dt=1e-15, &mut timings) is called
+    Then KernelStage::KINETIC_ENERGY_REDUCE has count == 2
     And KernelStage::ANDERSEN_RESAMPLE has count == 1
 
   @rq-8fdfc981
-  Scenario: step() on empty state is a no-op
-    Given an Andersen integrator with particle_count=0
-    When integrator.step(...) is called
+  Scenario: apply_post on empty state is a no-op
+    Given an Andersen thermostat with particle_count=0
+    When thermostat.apply_post(...) is called
     Then it returns Ok(())
+
+  @rq-15e44a1b
+  Scenario: apply_pre is the trait default (no-op)
+    Given an Andersen thermostat with particle_count=4
+    And a snapshot of buffers.velocities before the call
+    When thermostat.apply_pre(&mut buffers, dt=1e-15, &mut timings) is called
+    Then it returns Ok(())
+    And velocities are bit-identical to the snapshot
+    And no kernel launches are recorded for that call
 
   # --- draw_counter and cumulative_injection bookkeeping ---
 
   @rq-c814659f
-  Scenario: draw_counter starts at 0 and increments by 1 per step
-    Given a freshly built AndersenState
+  Scenario: draw_counter starts at 0 and increments by 1 per apply_post
+    Given a freshly built AndersenThermostat
     Then state.draw_counter == 0
-    When integrator.step(...) is called once
+    When thermostat.apply_post(...) is called once
     Then state.draw_counter == 1
-    When integrator.step(...) is called a second time
+    When thermostat.apply_post(...) is called a second time
     Then state.draw_counter == 2
 
   @rq-b1e87ce4
-  Scenario: cumulative_injection records K_new − K_old per step
-    Given an Andersen integrator and a ParticleBuffers with known non-zero velocities
-    And a ForceField with zero slots (no force contribution)
-    When integrator.step(...) is called once
+  Scenario: cumulative_injection records K_new − K_old per invocation
+    Given an Andersen thermostat and a ParticleBuffers with known non-zero velocities
+    When thermostat.apply_post(...) is called once
     Then state.cumulative_injection equals K_new − K_old
-      (with K_new and K_old measured at the two KE reductions in that step)
+      (with K_new and K_old measured at the two KE reductions in that invocation)
       to f64 round-off
 
   # --- Log columns ---
 
   @rq-8eb14902
   Scenario: log_column_names returns ["andersen_conserved"]
-    Given a constructed AndersenState
+    Given a constructed AndersenThermostat
     Then state.log_column_names() equals ["andersen_conserved"]
 
   @rq-26ff4aea
   Scenario: log_column_values returns ke + pe − cumulative_injection
-    Given an AndersenState with cumulative_injection = 1.0e-20
+    Given an AndersenThermostat with cumulative_injection = 1.0e-20
     When state.log_column_values(ke=2.5e-20, pe=3.0e-20) is called
     Then it returns [2.5e-20 + 3.0e-20 − 1.0e-20] = [4.5e-20]
 
   @rq-c50c6f84
-  Scenario: Log file header includes andersen_conserved when Andersen is the integrator
-    Given a config with [integrator].kind = "andersen"
+  Scenario: Log file header includes andersen_conserved when Andersen is the thermostat
+    Given a config with [thermostat].kind = "andersen"
     And log_every > 0
     When the runner produces the log file
     Then its header line is "step,time,kinetic_energy,temperature,andersen_conserved"
@@ -527,26 +539,25 @@ Feature: Andersen stochastic thermostat
 
   @rq-c9865e4c
   Scenario: collision_rate · dt > 1 is clamped to p = 1 (massive Andersen)
-    Given an Andersen integrator with collision_rate=1.0e16
+    Given an Andersen thermostat with collision_rate=1.0e16
     And dt=1.0e-15 (so collision_rate · dt = 10)
     And a ParticleBuffers with N=4 known velocities
-    When integrator.step(...) is called
+    When thermostat.apply_post(...) is called
     Then every particle is resampled (post-call velocities differ on every component
       with very high probability)
 
   @rq-1eaff437
   Scenario: collision_rate = 0 leaves velocities unchanged by the resample
-    Given an Andersen integrator with collision_rate=0
+    Given an Andersen thermostat with collision_rate=0
     And a ParticleBuffers with N=4 known velocities
-    And a ForceField with zero slots
-    When integrator.step(...) is called
-    Then velocities are byte-identical to the post-VV state (no resample occurred)
+    When thermostat.apply_post(...) is called
+    Then velocities are byte-identical to the pre-call state (no resample occurred)
 
   # --- Determinism ---
 
   @rq-f062ec85
-  Scenario: Two independent Andersen runs with identical seeds produce byte-identical outputs
-    Given two complete simulations with kind="andersen", identical parameters
+  Scenario: Two independent composed runs with identical seeds produce byte-identical outputs
+    Given two complete simulations composing velocity-Verlet + Andersen with identical parameters
       (including identical seed), identical initial state, n_steps=10
     When dynamics run is invoked on each
     Then the trajectory files are byte-identical
@@ -554,16 +565,16 @@ Feature: Andersen stochastic thermostat
 
   @rq-20daf925
   Scenario: Different seeds produce different trajectories
-    Given two complete simulations identical except integrator.seed = 1 and = 2
+    Given two composed runs identical except thermostat.seed = 1 and = 2
     When dynamics run is invoked on each
     Then the trajectory files differ
 
   # --- Physical correctness ---
 
   @rq-536457be
-  Scenario: Time-averaged kinetic energy tracks (N_f / 2) k_B T
-    Given an Andersen run with N=128 LJ particles, temperature=300,
-      collision_rate=1.0e13, dt=1.0e-15, n_steps=2000, seed=1
+  Scenario: Time-averaged kinetic energy tracks (3 N / 2) k_B T
+    Given a composed runner of velocity-Verlet + Andersen with N=128 LJ particles,
+      temperature=300, collision_rate=1.0e13, dt=1.0e-15, n_steps=2000, seed=1
     When the run completes
     Then the time-averaged kinetic energy over the last 1000 log rows
       is within 5% of (3 * N / 2) · k_B · 300
@@ -572,7 +583,7 @@ Feature: Andersen stochastic thermostat
   Scenario: Variance of resampled velocity components matches MB
     Given a 1000-particle system with collision_rate · dt = 1 (massive)
     And dummy initial velocities (e.g. all zero)
-    When integrator.step(...) is called once
+    When thermostat.apply_post(...) is called once
     Then the sample variance of each velocity component
       is within 5% of k_B · T / m
 ```

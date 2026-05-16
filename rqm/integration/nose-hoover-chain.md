@@ -1,16 +1,23 @@
-# Feature: Nosé-Hoover Chain (NHC) Thermostat Integrator <!-- rq-f606ff6f -->
+# Feature: Nosé-Hoover Chain (NHC) Thermostat <!-- rq-f606ff6f -->
 
-Deterministic NVT integrator using the Nosé-Hoover chain extension
-(Martyna-Klein-Tuckerman, 1992). One of the pluggable integrator slots
-(see `framework.md`); selected by `kind = "nose-hoover-chain"` in the
-config's `[integrator]` section.
+The Nosé-Hoover-chain thermostat (Martyna-Klein-Tuckerman, *J. Chem.
+Phys.* **97**, 2635 (1992)) is a deterministic NVT thermostat. One of
+the pluggable thermostat slots (see `framework.md`); selected by
+`kind = "nose-hoover-chain"` in the config's `[thermostat]` section.
 
-The chain extension augments the physical degrees of freedom with `M`
-auxiliary "thermostat" degrees of freedom that drive the system toward
-a canonical (Boltzmann) distribution at temperature `T`. The chain
-length `M ≥ 1` is configurable. `M = 1` reduces to vanilla
-Nosé-Hoover (no chain). `M ≥ 2` adds outer thermostat elements that
-restore ergodicity for stiff systems where vanilla NH fails.
+The thermostat runs twice per timestep, as a symmetric Trotter
+splitting around the integrator: a half-step before the integrator
+(`apply_pre`) and a mirror half-step after (`apply_post`). Each
+half-step combines host-side chain arithmetic with one or more
+`rescale_velocities` launches. The thermostat carries no RNG state
+and produces byte-identical trajectories across runs on the same
+GPU.
+
+This file also documents two shared GPU helpers — the kinetic-energy
+reduction (`kinetic_energy_reduce` / `compute_kinetic_energy`) and
+the uniform velocity rescale (`rescale_velocities`) — that are
+re-used by the other thermostats (CSVR, Berendsen, Andersen) and by
+any future slot needing the same primitives.
 
 ## Algorithm <!-- rq-c4a07fb3 -->
 
@@ -47,14 +54,19 @@ during the run.
 
 ### MKT Liouville splitting <!-- rq-312906a6 -->
 
-A single timestep `dt` is propagated as the symmetric product:
+A single timestep `dt` of NVT dynamics is propagated as the symmetric
+product:
 
 ```text
 e^(L · dt) ≈ e^(L_chain · dt/2) · e^(L_VV · dt) · e^(L_chain · dt/2)
 ```
 
-where `L_VV` is the velocity-Verlet operator (see
-`velocity-verlet.md`) and `L_chain` is the chain-thermostat operator.
+where `L_VV` is the velocity-Verlet operator owned by the integrator
+slot (see `velocity-verlet.md`) and `L_chain` is the chain-thermostat
+operator owned by this thermostat slot. The thermostat applies the
+left `e^(L_chain · dt/2)` factor in `apply_pre` and the right factor
+in `apply_post`; the integrator's `step()` fires in between.
+
 The chain operator is itself approximated by Yoshida-Suzuki
 sub-stepping: each `dt/2` thermostat half-step is split into
 `n_yoshida × n_resp` sub-steps with weights
@@ -130,32 +142,27 @@ reduction within a single half-step.
 
 ## Per-Step Kernel Sequence <!-- rq-f45cdfb6 -->
 
-Per timestep, the NHC integrator's `step()` runs the following in fixed
-order:
+Per timestep the NHC thermostat fires two half-steps around the
+integrator's `step()`. Both halves have the same shape:
 
-| Order | Step          | Kernel / call         | Operation                                      | Stage label             |
-| ----- | ------------- | --------------------- | ---------------------------------------------- | ----------------------- |
-| 1     | KE reduce     | `kinetic_energy_reduce` | one f32 scalar of `K = ½ Σ m_i |v_i|²`        | `KineticEnergyReduce`   |
-| 2     | Thermostat ½  | host chain + `rescale_velocities` × N_sub | NHC half-step, `N_sub = n_yoshida · n_resp` rescales | `NhcRescaleVelocities` (one per rescale) |
-| 3     | VV kick-drift | `vv_kick_drift`       | `v += (F/m)(dt/2)`, then `x += v dt`           | `VvKickDrift`           |
-| 4     | Force eval    | `force_field.step`    | recompute `F(x)`                               | (slot-specific)         |
-| 5     | VV kick       | `vv_kick`             | `v += (F/m)(dt/2)`                             | `VvKick`                |
-| 6     | KE reduce     | `kinetic_energy_reduce` | refresh `K` for the closing half-step          | `KineticEnergyReduce`   |
-| 7     | Thermostat ½  | host chain + `rescale_velocities` × N_sub | NHC half-step (mirror of step 2)               | `NhcRescaleVelocities`  |
+| Hook        | Step          | Kernel / call                             | Operation                                                  | Stage label              |
+| ----------- | ------------- | ----------------------------------------- | ---------------------------------------------------------- | ------------------------ |
+| `apply_pre` | KE reduce     | `kinetic_energy_reduce`                   | one f32 scalar of `K = ½ Σ m_i \|v_i\|²`                   | `KineticEnergyReduce`    |
+| `apply_pre` | Thermostat ½  | host chain + `rescale_velocities` × N_sub | NHC half-step, `N_sub = n_yoshida · n_resp` rescales       | `NhcRescaleVelocities`   |
+| `apply_post`| KE reduce     | `kinetic_energy_reduce`                   | refresh `K` after the integrator's VV step                 | `KineticEnergyReduce`    |
+| `apply_post`| Thermostat ½  | host chain + `rescale_velocities` × N_sub | NHC half-step (mirror of `apply_pre`)                      | `NhcRescaleVelocities`   |
 
-`vv_kick` and `vv_kick_drift` are reused from velocity Verlet; the reuse
-is reflected in the timings file under the standard `VvKickDrift` /
-`VvKick` stage names. `KineticEnergyReduce` and `NhcRescaleVelocities`
-are new kernel stages described under *Feature API* below.
+The integrator's own kernels (`vv_kick_drift`, `vv_kick`, the force
+pipeline) are launched separately by `integrator.step()` and are not
+part of this slot's per-step sequence.
 
-The total per-step launch count is `2 + 2 · N_sub` thermostat-related
-launches plus the two velocity-Verlet launches and the force-pipeline
-launches. For the recommended defaults `M = 3, n_yoshida = 3,
+The total per-step launch count owned by this thermostat is
+`2 + 2 · N_sub`. For the recommended defaults `M = 3, n_yoshida = 3,
 n_resp = 1`, that is `2 + 6 = 8` thermostat-related launches per step.
 
 ## Parameters <!-- rq-d6cf8e86 -->
 
-Config layer fields set on `IntegratorKind::NoseHooverChain`:
+Config layer fields set on `ThermostatKind::NoseHooverChain`:
 
 - `temperature: f64` — bath temperature `T` in kelvin. Required. Finite
   and strictly positive. Independent of `simulation.temperature`, which
@@ -179,7 +186,7 @@ Config layer fields set on `IntegratorKind::NoseHooverChain`:
 
 ## Chain state <!-- rq-71f469ae -->
 
-Host-side state on `NoseHooverChainState`:
+Host-side state on `NoseHooverChainThermostat`:
 
 - `xi: Vec<f64>` — length `M`, chain positions. Initialised to `0.0`
   at construction.
@@ -196,8 +203,9 @@ Host-side state on `NoseHooverChainState`:
   zero. Stored once at construction and never updated.
 
 All chain arithmetic runs in `f64` on the host. The chain state is
-read and written exclusively inside `NoseHooverChainState::step` and
-in `log_column_values` (read-only); no other code path touches it.
+read and written exclusively inside `NoseHooverChainThermostat`'s
+`apply_pre` and `apply_post` methods and in `log_column_values`
+(read-only); no other code path touches it.
 
 ## NHC conserved Hamiltonian <!-- rq-6bd0b42f -->
 
@@ -217,23 +225,23 @@ in `H'` over a run is the canonical correctness diagnostic for an
 NHC implementation.
 
 `H'` is exposed as a per-log-row diagnostic column named
-`nhc_conserved` when the NHC integrator is the configured integrator
-(see `io/log-output.md`). The integrator computes its chain term
+`nhc_conserved` when NHC is the configured thermostat (see
+`io/log-output.md`). The thermostat computes its chain term
 (`Σ p_ξ²/(2Q) + g k_B T ξ_1 + k_B T Σ_{j>1} ξ_j`) from its host-side
 state and combines it with the kinetic and potential energies supplied
 by the runner at log-write time.
 
 ## Empty State and degenerate cases <!-- rq-fd90fab3 -->
 
-- `particle_count == 0`: `step()` returns `Ok(())` without launching
-  any kernel. The chain state arrays are allocated with `M` elements
-  regardless (since `M` is a config-time constant); the `g_dof` is
-  `0`.
+- `particle_count == 0`: both `apply_pre` and `apply_post` return
+  `Ok(())` without launching any kernel. The chain state arrays are
+  allocated with `M` elements regardless (since `M` is a config-time
+  constant); the `g_dof` is `0`.
 - `particle_count == 1`: `g_dof = 0`. The chain still propagates but
   drives the kinetic energy toward zero (the target `g k_B T` is
   zero). This is the mathematically correct behaviour for a system
   with zero thermal degrees of freedom; users should not run NHC on a
-  one-particle system but the integrator does not refuse to construct.
+  one-particle system but the thermostat does not refuse to construct.
 - `M == 1`: vanilla Nosé-Hoover. The "outermost chain-momentum kick"
   steps 1 and 6 in the sub-step are skipped (no `Q_{M-1}` exists);
   the M−1 → 1 and 1 → M−1 inner-update loops both reduce to a single
@@ -244,9 +252,10 @@ by the runner at log-write time.
 
 ### Types <!-- rq-3a56a657 -->
 
-- `NoseHooverChainState` — implements the `Integrator` trait declared <!-- rq-62e2bef5 -->
-  in `framework.md`. Registered in `IntegratorRegistry::with_builtins`
-  under `kind_name() == "nose-hoover-chain"`. Fields:
+- `NoseHooverChainThermostat` — implements the `Thermostat` trait <!-- rq-62e2bef5 -->
+  declared in `framework.md`. Registered in
+  `ThermostatRegistry::with_builtins` under
+  `kind_name() == "nose-hoover-chain"`. Fields:
 
   - `device: Arc<CudaDevice>`
   - `temperature: f64` — `T`, copied from the config.
@@ -263,58 +272,37 @@ by the runner at log-write time.
   - `ke_scratch: CudaSlice<f32>` — length-1 device buffer that holds
     the kinetic energy reduction's output; reused across calls.
   - `most_recent_ke: f64` — last kinetic energy computed during the
-    current `step()`, accurate at the end of `step()`. Used by
+    current `apply_post`, accurate at the end of `apply_post`. Used by
     `log_column_values` to avoid a redundant download.
   - `particle_count: usize`
 
-  All fields private; the slot's public surface is the `Integrator`
+  All fields private; the slot's public surface is the `Thermostat`
   trait methods (see `framework.md`) and the construction via
   `NoseHooverChainBuilder`.
 
-- `NoseHooverChainBuilder` — implements `IntegratorBuilder` with <!-- rq-4bd6ff2b -->
+- `NoseHooverChainBuilder` — implements `ThermostatBuilder` with <!-- rq-4bd6ff2b -->
   `kind_name() == "nose-hoover-chain"`. `build(device, particle_count,
-  kind)` matches against `IntegratorKind::NoseHooverChain { … }`,
+  kind)` matches against `ThermostatKind::NoseHooverChain { … }`,
   allocates the chain state, precomputes `q_mass` and the
   Suzuki-Yoshida weights, allocates the length-1 `ke_scratch` device
-  buffer, and returns the boxed `NoseHooverChainState`.
+  buffer, and returns the boxed `NoseHooverChainThermostat`.
 
-### `Integrator` trait extensions <!-- rq-b47589c9 -->
+### `Thermostat` trait overrides <!-- rq-b47589c9 -->
 
-The `Integrator` trait gains two methods with default no-op
-implementations, declared in `framework.md`:
+`NoseHooverChainThermostat` overrides every method on the
+`Thermostat` trait declared in `framework.md`:
 
-```rust
-pub trait Integrator: std::fmt::Debug + Send {
-    fn step(...) -> Result<(), IntegratorError>;
-
-    /// Diagnostic column names the integrator wants the runner to
-    /// include in `io/log-output.md`. Default: empty.
-    fn log_column_names(&self) -> &'static [&'static str] { &[] }
-
-    /// Current values of those columns. The runner supplies the most
-    /// recently computed total kinetic energy and total potential
-    /// energy (both in joules); the integrator combines them with its
-    /// own state. The returned slice must have the same length as
-    /// `log_column_names()`. Default: empty.
-    fn log_column_values(
-        &self,
-        kinetic_energy: f64,
-        potential_energy: f64,
-    ) -> Vec<f64> { Vec::new() }
-}
-```
-
-`NoseHooverChainState` overrides both methods:
-
+- `apply_pre(buffers, dt, timings)` — runs the left <!-- rq-a9c46f51 -->
+  `e^(L_chain · dt/2)` factor: one `kinetic_energy_reduce` launch
+  followed by `N_sub` chain sub-steps, each of which performs the
+  host-side MKT chain math and one `rescale_velocities` launch.
+- `apply_post(buffers, dt, timings)` — runs the right <!-- rq-370bf3a8 -->
+  `e^(L_chain · dt/2)` factor: same shape as `apply_pre`.
 - `log_column_names() -> &'static ["nhc_conserved"]`. <!-- rq-8a571737 -->
 - `log_column_values(ke, pe) -> vec![H']` where `H'` follows the <!-- rq-f94f6bac -->
   formula in *NHC conserved Hamiltonian* above, with `K = ke`,
   `U = pe`, and the chain term computed from `xi`, `p_xi`, `q_mass`,
   `g_dof`, `temperature`.
-
-`VelocityVerletState` and `LangevinBaoabState` accept the trait's
-default no-op implementations, so existing logs and Gherkin
-scenarios for those integrators remain unchanged.
 
 ### CUDA Kernels <!-- rq-a4eb7957 -->
 
@@ -364,8 +352,10 @@ keeps the determinism analysis trivial; the cost is negligible
 relative to the force-pipeline launches.
 
 The output is a length-1 `CudaSlice<f32>` (held on
-`NoseHooverChainState.ke_scratch`) which the host downloads via
-`dtoh_sync_copy_into` and promotes to `f64` before the chain math.
+`NoseHooverChainThermostat.ke_scratch` for this slot, or on the
+analogous field of any other thermostat that uses the helper) which
+the host downloads via `dtoh_sync_copy_into` and promotes to `f64`
+before the chain math.
 
 #### `rescale_velocities` <!-- rq-a20bd6f3 -->
 
@@ -406,10 +396,9 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
   - Invokes the kernel through the `Kernels` handle reached from
     `buffers`; performs no string-keyed kernel lookup of its own (see
     `build-pipeline.md`).
-  - General-purpose: usable by future thermostats (CSVR, Berendsen,
-    Andersen, etc.) and by any caller that needs an instantaneous
-    kinetic energy on the host without downloading the full velocity
-    state.
+  - General-purpose: usable by every thermostat in the registry and
+    by any future slot that needs an instantaneous kinetic energy on
+    the host without downloading the full velocity state.
 
 - `rescale_velocities(buffers: &mut ParticleBuffers, factor: f32) -> Result<(), GpuError>` <!-- rq-09e04194 -->
   - Launches `rescale_velocities` over `buffers.velocities_*`.
@@ -418,8 +407,8 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
     launching.
   - Invokes the kernel through the `Kernels` handle, like
     `compute_kinetic_energy`.
-  - General-purpose: usable by any future thermostat that needs a
-    uniform scalar velocity rescale.
+  - General-purpose: usable by any thermostat that needs a uniform
+    scalar velocity rescale.
 
 ## Launch Configuration <!-- rq-aff3dafa -->
 
@@ -436,11 +425,12 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
   produce byte-identical chain state per step.
 - The two device-side kernels are deterministic by construction (see
   *CUDA Kernels*).
-- The integrator carries no RNG; there is no per-call stochastic
+- The thermostat carries no RNG; there is no per-call stochastic
   draw to seed.
-- Two end-to-end NHC runs on the same GPU with identical configs and
-  identical initial particle state produce byte-identical trajectory
-  and log files, including the `nhc_conserved` column.
+- Two end-to-end runs composing the same integrator with NHC on the
+  same GPU with identical configs and identical initial particle
+  state produce byte-identical trajectory and log files, including
+  the `nhc_conserved` column.
 
 ## Out of Scope <!-- rq-61528c78 -->
 
@@ -452,11 +442,11 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
 - Massive thermostatting (one independent chain per atom). Single
   global chain only.
 - Pressure coupling (Martyna-Tobias-Klein NPT extension). A future
-  barostat integrator would slot in alongside NHC, possibly sharing
-  the chain primitive; not in v1.
+  barostat would slot in alongside NHC via the `[barostat]` slot,
+  possibly sharing the chain primitive.
 - Constraints (SHAKE/RATTLE). The trait shape supports them; no
-  constrained-NHC integrator ships.
-- User-overrideable `g` (degrees of freedom). The integrator
+  constrained-NHC thermostat ships.
+- User-overrideable `g` (degrees of freedom). The thermostat
   hard-codes `g = max(0, 3N − 3)`. Constraint-aware `g` follows the
   constraint feature.
 - Multi-step velocity-rescale buffering. Each Yoshida sub-step's
@@ -464,14 +454,14 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
   attempt is made to fold consecutive rescales into a single launch
   because the chain's `p_ξ_1` depends on the freshly-rescaled
   kinetic energy between sub-steps.
-- Sub-stepping of the velocity-Verlet portion (RESPA over the inner
-  forces). The chain RESP factor `n_resp` only sub-steps the chain
-  itself.
+- Sub-stepping of the integrator's velocity-Verlet portion (RESPA
+  over the inner forces). The chain RESP factor `n_resp` only
+  sub-steps the chain itself.
 - A `nose-hoover` (M=1) variant under a distinct `kind` name. M=1 is
   exercised through `chain_length = 1` under the existing
   `nose-hoover-chain` slot.
-- Cross-integrator initial-chain-state seeding (e.g. running a short
-  NHC warm-up before switching to NHC-NPT). The integrator is fixed
+- Cross-thermostat initial-chain-state seeding (e.g. running a short
+  NHC warm-up before switching to NHC-NPT). The thermostat is fixed
   at construction; future restart-from-checkpoint flows expose
   `xi`/`p_xi` as public fields so they can be restored explicitly.
 
@@ -480,7 +470,7 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
 ## Gherkin Scenarios <!-- rq-8b1827a9 -->
 
 ```gherkin
-Feature: Nosé-Hoover chain (NHC) thermostat integrator
+Feature: Nosé-Hoover chain (NHC) thermostat
 
   Background:
     Given a CUDA-capable GPU available as device 0
@@ -496,13 +486,13 @@ Feature: Nosé-Hoover chain (NHC) thermostat integrator
     And the kernels handle exposes the rescale_velocities function
 
   @rq-b43bf21c
-  Scenario: Construct NoseHooverChainState with default chain parameters
-    Given an IntegratorKind::NoseHooverChain {
+  Scenario: Construct NoseHooverChainThermostat with default chain parameters
+    Given a ThermostatKind::NoseHooverChain {
       temperature: 300.0, tau: 1.0e-13,
       chain_length: 3, yoshida_order: 3, n_resp: 1 }
-    When registry.build(&kind, device, particle_count=4) is called
-    Then it returns Ok(integrator)
-    And the underlying NoseHooverChainState has chain_length=3
+    When registry.build_optional(Some(&kind), device, particle_count=4) is called
+    Then it returns Ok(Some(thermostat))
+    And the underlying NoseHooverChainThermostat has chain_length=3
     And xi equals [0.0, 0.0, 0.0]
     And p_xi equals [0.0, 0.0, 0.0]
     And q_mass[0] equals g_dof * k_B * 300 * tau²
@@ -512,10 +502,10 @@ Feature: Nosé-Hoover chain (NHC) thermostat integrator
 
   @rq-93570a07
   Scenario: Construct with chain_length = 1 reduces to vanilla Nosé-Hoover
-    Given an IntegratorKind::NoseHooverChain { temperature: 300, tau: 1e-13,
+    Given a ThermostatKind::NoseHooverChain { temperature: 300, tau: 1e-13,
       chain_length: 1, yoshida_order: 3, n_resp: 1 }
-    When registry.build(...) is called with particle_count=4
-    Then it returns Ok(integrator)
+    When registry.build_optional(Some(&kind), device, particle_count=4) is called
+    Then it returns Ok(Some(thermostat))
     And xi has length 1
     And p_xi has length 1
     And q_mass has length 1
@@ -523,40 +513,40 @@ Feature: Nosé-Hoover chain (NHC) thermostat integrator
   @rq-8afd1b7d
   Scenario: Construct with particle_count = 0
     Given an NHC kind with chain_length=3
-    When registry.build(..., particle_count=0) is called
-    Then it returns Ok(integrator)
+    When registry.build_optional(Some(&kind), device, particle_count=0) is called
+    Then it returns Ok(Some(thermostat))
     And g_dof equals 0
     And the ke_scratch device buffer has length 1
 
   @rq-6dc8454d
   Scenario: Reject yoshida_order outside {1, 3, 5, 7}
-    Given a config with [integrator].kind="nose-hoover-chain" and yoshida_order=2
+    Given a config with [thermostat].kind="nose-hoover-chain" and yoshida_order=2
     When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.yoshida_order", reason: _ })
+    Then it returns Err(ConfigError::InvalidValue { field: "thermostat.yoshida_order", reason: _ })
 
   @rq-811c598f
   Scenario: Reject chain_length = 0
-    Given a config with [integrator].kind="nose-hoover-chain" and chain_length=0
+    Given a config with [thermostat].kind="nose-hoover-chain" and chain_length=0
     When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.chain_length", reason: _ })
+    Then it returns Err(ConfigError::InvalidValue { field: "thermostat.chain_length", reason: _ })
 
   @rq-dd6fe266
   Scenario: Reject n_resp = 0
-    Given a config with [integrator].kind="nose-hoover-chain" and n_resp=0
+    Given a config with [thermostat].kind="nose-hoover-chain" and n_resp=0
     When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.n_resp", reason: _ })
+    Then it returns Err(ConfigError::InvalidValue { field: "thermostat.n_resp", reason: _ })
 
   @rq-e5b63a73
   Scenario: Reject non-positive temperature
-    Given a config with [integrator].kind="nose-hoover-chain" and temperature=0.0
+    Given a config with [thermostat].kind="nose-hoover-chain" and temperature=0.0
     When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.temperature", reason: _ })
+    Then it returns Err(ConfigError::InvalidValue { field: "thermostat.temperature", reason: _ })
 
   @rq-d532de58
   Scenario: Reject non-positive tau
-    Given a config with [integrator].kind="nose-hoover-chain" and tau=-1.0e-13
+    Given a config with [thermostat].kind="nose-hoover-chain" and tau=-1.0e-13
     When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.tau", reason: _ })
+    Then it returns Err(ConfigError::InvalidValue { field: "thermostat.tau", reason: _ })
 
   # --- kinetic_energy_reduce ---
 
@@ -620,33 +610,37 @@ Feature: Nosé-Hoover chain (NHC) thermostat integrator
   # --- Slot integration: per-step kernel sequence ---
 
   @rq-76069102
-  Scenario: step() launches all expected kernel calls for default chain parameters
-    Given an NHC integrator with chain_length=3, yoshida_order=3, n_resp=1, particle_count=4
-    And a ForceField with one LennardJones slot
-    And a warm-up force evaluation has populated forces
-    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=1e-15, &mut timings) is called
-    And timings.finalize() is queried
-    Then KernelStage::KINETIC_ENERGY_REDUCE has count == 2  (one before each thermostat half)
-    And KernelStage::NHC_RESCALE_VELOCITIES has count == 6  (3 Yoshida × 1 RESP × 2 halves)
-    And KernelStage::VV_KICK_DRIFT has count == 1
-    And KernelStage::VV_KICK has count == 1
-    And KernelStage::LJ_PAIR_FORCE has count == 1
+  Scenario: apply_pre and apply_post launch the expected kernel calls for default chain parameters
+    Given an NHC thermostat with chain_length=3, yoshida_order=3, n_resp=1, particle_count=4
+    And buffers prepared with non-zero velocities
+    When thermostat.apply_pre(&mut buffers, dt=1e-15, &mut timings) is called
+    Then KernelStage::KINETIC_ENERGY_REDUCE has count == 1
+    And KernelStage::NHC_RESCALE_VELOCITIES has count == 3  (3 Yoshida × 1 RESP × 1 half)
+    When thermostat.apply_post(&mut buffers, dt=1e-15, &mut timings) is called
+    Then KernelStage::KINETIC_ENERGY_REDUCE has total count == 2  (one per half)
+    And KernelStage::NHC_RESCALE_VELOCITIES has total count == 6  (3 + 3)
 
   @rq-e9a5474f
-  Scenario: step() on empty NHC state is a no-op
-    Given an NHC integrator with particle_count=0
-    When integrator.step(...) is called
+  Scenario: apply_pre on empty NHC state is a no-op
+    Given an NHC thermostat with particle_count=0
+    When thermostat.apply_pre(...) is called
+    Then it returns Ok(())
+
+  @rq-9b3e0e89
+  Scenario: apply_post on empty NHC state is a no-op
+    Given an NHC thermostat with particle_count=0
+    When thermostat.apply_post(...) is called
     Then it returns Ok(())
 
   # --- Integration with the runner / log column ---
 
   @rq-17d3ddfe
   Scenario: log_column_names returns ["nhc_conserved"] for NHC
-    Given a constructed NoseHooverChainState
+    Given a constructed NoseHooverChainThermostat
     Then state.log_column_names() equals ["nhc_conserved"]
 
   @rq-7909b92c
-  Scenario: log_column_names returns empty for VelocityVerlet and Langevin
+  Scenario: log_column_names returns empty for integrators (VV / Langevin)
     Given a constructed VelocityVerletState
     Then state.log_column_names() equals []
     Given a constructed LangevinBaoabState
@@ -654,7 +648,7 @@ Feature: Nosé-Hoover chain (NHC) thermostat integrator
 
   @rq-07a18814
   Scenario: log_column_values returns the conserved Hamiltonian
-    Given an NHC state with chain_length=2, temperature=300, tau=1e-13, g_dof=9,
+    Given an NHC thermostat with chain_length=2, temperature=300, tau=1e-13, g_dof=9,
       xi=[0.1, 0.2], p_xi=[0.5, -0.3]
     When state.log_column_values(ke=1.0e-20, pe=2.0e-20) is called
     Then it returns a Vec with one entry equal to
@@ -665,15 +659,15 @@ Feature: Nosé-Hoover chain (NHC) thermostat integrator
       within f64 round-off
 
   @rq-a16c37bd
-  Scenario: Log file header includes nhc_conserved when NHC is the integrator
-    Given a config with [integrator].kind="nose-hoover-chain"
+  Scenario: Log file header includes nhc_conserved when NHC is the thermostat
+    Given a config with [thermostat].kind="nose-hoover-chain"
     And log_every > 0
     When the runner produces the log file
     Then its header line is "step,time,kinetic_energy,temperature,nhc_conserved"
 
   @rq-ded81a4a
-  Scenario: Log file header omits nhc_conserved when VV or Langevin is the integrator
-    Given a config with [integrator].kind="velocity-verlet"
+  Scenario: Log file header omits nhc_conserved when no thermostat is configured
+    Given a config with [integrator].kind="velocity-verlet" and [thermostat] omitted
     And log_every > 0
     When the runner produces the log file
     Then its header line is "step,time,kinetic_energy,temperature"
@@ -682,15 +676,16 @@ Feature: Nosé-Hoover chain (NHC) thermostat integrator
 
   @rq-6fb70c93
   Scenario: At equilibrium, NHC drives the kinetic energy to (g/2) k_B T
-    Given an NHC run with N=512 LJ particles, temperature=300, tau=1e-13,
-      friction-equivalent dt=1e-15, initial v sampled at 300 K, n_steps=5000
+    Given a composed runner of velocity-Verlet + NHC with N=512 LJ particles,
+      temperature=300, tau=1e-13, dt=1e-15, initial v sampled at 300 K, n_steps=5000
     When the run completes
     Then the time-averaged kinetic energy over the last 1000 log rows is within 5%
       of (g_dof / 2) * k_B * 300
 
   @rq-d938350a
   Scenario: NHC conserved Hamiltonian drifts only by O(dt²) per step
-    Given an NHC run with N=64 LJ particles, dt=1e-15, n_steps=1000
+    Given a composed runner of velocity-Verlet + NHC with N=64 LJ particles,
+      dt=1e-15, n_steps=1000
     When the run completes
     Then |H'(n_steps) − H'(0)| / |H'(0)| is < 1.0e-3
     And the drift is dominated by O(dt²) (a halved-dt run has drift ≤ 1/4 of the original)
@@ -698,8 +693,8 @@ Feature: Nosé-Hoover chain (NHC) thermostat integrator
   # --- Determinism across runs ---
 
   @rq-6faf6fba
-  Scenario: Two independent NHC runs with identical configs produce byte-identical outputs
-    Given two complete simulations with kind="nose-hoover-chain", identical parameters,
+  Scenario: Two independent composed runs with identical configs produce byte-identical outputs
+    Given two complete simulations composing velocity-Verlet + NHC with identical parameters,
       identical initial particle state, n_steps=10
     When dynamics run is invoked on each
     Then the two trajectory files are byte-identical
@@ -707,8 +702,8 @@ Feature: Nosé-Hoover chain (NHC) thermostat integrator
 
   @rq-6a4016ac
   Scenario: COM momentum is preserved under NHC velocity rescaling
-    Given an NHC run with initial COM momentum = 0 (the runner's standard setup)
-      and n_steps=100
+    Given a composed runner of velocity-Verlet + NHC with initial COM momentum = 0
+      (the runner's standard setup) and n_steps=100
     When the run completes
     Then Σ_i m_i v_i evaluated on the final velocities is zero within f32 round-off
 ```

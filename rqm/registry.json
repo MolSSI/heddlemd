@@ -36,6 +36,13 @@
     "title": "Single-step lossless round trip restores observables bit-exactly",
     "type": "scenario"
   },
+  "rq-009bbbdc": {
+    "decl": "Scenario: Two consecutive step() calls on a Langevin integrator produce different post-call velocities",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Two consecutive step() calls on a Langevin integrator produce different post-call velocities",
+    "type": "scenario"
+  },
   "rq-00bb491c": {
     "decl": "Scenario: Angle row with non-integer index",
     "file": "forces/topology",
@@ -276,10 +283,10 @@
     "type": "scenario"
   },
   "rq-05b4c988": {
-    "decl": "Scenario: Log file header includes berendsen_conserved when Berendsen is the integrator",
+    "decl": "Scenario: Log file header includes berendsen_conserved when Berendsen is the thermostat",
     "file": "integration/berendsen",
     "refs": [],
-    "title": "Log file header includes berendsen_conserved when Berendsen is the integrator",
+    "title": "Log file header includes berendsen_conserved when Berendsen is the thermostat",
     "type": "scenario"
   },
   "rq-05d55351": {
@@ -323,13 +330,6 @@
     "title": "Algorithm",
     "type": "section"
   },
-  "rq-068c64b0": {
-    "decl": "Scenario: CSVR rejects extra fields (e.g. NHC's chain_length)",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "CSVR rejects extra fields (e.g. NHC's chain_length)",
-    "type": "scenario"
-  },
   "rq-06c0e11a": {
     "decl": "Scenario: Exclusion row with non-numeric scale",
     "file": "forces/topology",
@@ -350,6 +350,18 @@
     "refs": [],
     "title": "Spread is independent of particle order in the bin",
     "type": "scenario"
+  },
+  "rq-076617ab": {
+    "decl": "- `Barostat` — object-safe trait implemented by every concrete",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Barostat",
+    "type": "api-item"
   },
   "rq-079b4f9e": {
     "decl": "Scenario: Construct with particle_count = 1 (N_f = 1)",
@@ -420,7 +432,12 @@
   "rq-09a2e15f": {
     "decl": "# Feature: Velocity Verlet Time Integration",
     "file": "integration/velocity-verlet",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: Velocity Verlet Time Integration",
     "type": "file"
   },
@@ -438,11 +455,11 @@
     "title": "rescale_velocities",
     "type": "api-item"
   },
-  "rq-0a4fc43f": {
-    "decl": "Scenario: CSVR missing seed is rejected",
-    "file": "io/config-schema",
+  "rq-0a6a97f6": {
+    "decl": "Scenario: Dispatch loop calls thermostat.apply_pre, integrator.step, thermostat.apply_post in that order",
+    "file": "integration/framework",
     "refs": [],
-    "title": "CSVR missing seed is rejected",
+    "title": "Dispatch loop calls thermostat.apply_pre, integrator.step, thermostat.apply_post in that order",
     "type": "scenario"
   },
   "rq-0a8831b1": {
@@ -478,6 +495,14 @@
     "title": "ConfigError",
     "type": "api-item"
   },
+  "rq-0bb735c9": {
+    "decl": "## Empty State",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State",
+    "type": "section"
+  },
   "rq-0c2265eb": {
     "decl": "Scenario: Langevin kick_half count is 2 N_steps; drift_half is 2 N_steps; ou_step is N_steps",
     "file": "performance-analysis",
@@ -506,13 +531,6 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Pair inside r_switch sees the unmodified Lennard-Jones force",
-    "type": "scenario"
-  },
-  "rq-0c549d09": {
-    "decl": "Scenario: CSVR missing tau is rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "CSVR missing tau is rejected",
     "type": "scenario"
   },
   "rq-0c717392": {
@@ -557,6 +575,13 @@
     "title": "Coulomb cutoff participates in box-too-small check",
     "type": "scenario"
   },
+  "rq-0d7ebeb6": {
+    "decl": "Scenario: Custom integrator builder is selectable",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Custom integrator builder is selectable",
+    "type": "scenario"
+  },
   "rq-0da87ca1": {
     "decl": "## Feature API",
     "file": "forces/framework",
@@ -578,10 +603,10 @@
     "type": "api-item"
   },
   "rq-0dc48f6b": {
-    "decl": "Scenario: Log file header omits csvr_conserved when VV / Langevin / NHC is the integrator",
+    "decl": "Scenario: Log file header omits csvr_conserved when CSVR is not the thermostat",
     "file": "integration/csvr",
     "refs": [],
-    "title": "Log file header omits csvr_conserved when VV / Langevin / NHC is the integrator",
+    "title": "Log file header omits csvr_conserved when CSVR is not the thermostat",
     "type": "scenario"
   },
   "rq-0e5ac409": {
@@ -593,10 +618,10 @@
     "type": "section"
   },
   "rq-0e85eebc": {
-    "decl": "Scenario: step() launches the expected kernel set",
+    "decl": "Scenario: apply_post launches the expected kernel set",
     "file": "integration/berendsen",
     "refs": [],
-    "title": "step() launches the expected kernel set",
+    "title": "apply_post launches the expected kernel set",
     "type": "scenario"
   },
   "rq-0ec0f65d": {
@@ -621,12 +646,12 @@
     "title": "Reject negative collision_rate",
     "type": "scenario"
   },
-  "rq-0f7b8a57": {
-    "decl": "## Empty State",
+  "rq-0f5fba54": {
+    "decl": "### Thermostat slot",
     "file": "integration/framework",
-    "level": 2,
+    "level": 3,
     "refs": [],
-    "title": "Empty State",
+    "title": "Thermostat slot",
     "type": "section"
   },
   "rq-0f81f83f": {
@@ -668,10 +693,10 @@
     "type": "section"
   },
   "rq-102e58cf": {
-    "decl": "Scenario: Two independent Berendsen runs with identical configs are byte-identical",
+    "decl": "Scenario: Two independent composed runs with identical configs are byte-identical",
     "file": "integration/berendsen",
     "refs": [],
-    "title": "Two independent Berendsen runs with identical configs are byte-identical",
+    "title": "Two independent composed runs with identical configs are byte-identical",
     "type": "scenario"
   },
   "rq-105afb1d": {
@@ -715,14 +740,6 @@
     "refs": [],
     "title": "reduce_bond_forces",
     "type": "api-item"
-  },
-  "rq-10c79bb0": {
-    "decl": "## Slots",
-    "file": "integration/framework",
-    "level": 2,
-    "refs": [],
-    "title": "Slots",
-    "type": "section"
   },
   "rq-10cc8ddf": {
     "decl": "### CUDA Kernels",
@@ -769,7 +786,12 @@
   "rq-1163481e": {
     "decl": "- `log_column_names() -> &'static [\"andersen_conserved\"]`.",
     "file": "integration/andersen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_column_names",
     "type": "api-item"
   },
@@ -780,6 +802,18 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-1179e42f": {
+    "decl": "- `Barostat::apply(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, dt: f32, timings: &mut Timings) -> Result<(), BarostatError>`",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Barostat",
+    "type": "api-item"
   },
   "rq-11a953dc": {
     "decl": "Scenario: philox_4x32_10 produces the same outputs as the device-side helper",
@@ -977,11 +1011,25 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-15e0a433": {
+    "decl": "Scenario: Integrator owns the force evaluation inside step()",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Integrator owns the force evaluation inside step()",
+    "type": "scenario"
+  },
   "rq-15e1e995": {
     "decl": "Scenario: PairBuffer::new with max_neighbors = 0",
     "file": "pair-reduction",
     "refs": [],
     "title": "PairBuffer::new with max_neighbors = 0",
+    "type": "scenario"
+  },
+  "rq-15e44a1b": {
+    "decl": "Scenario: apply_pre is the trait default (no-op)",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "apply_pre is the trait default (no-op)",
     "type": "scenario"
   },
   "rq-1658f77d": {
@@ -1004,19 +1052,19 @@
     "title": "sort_cells_by_particle_id",
     "type": "api-item"
   },
+  "rq-167867a2": {
+    "decl": "Scenario: Default apply_pre is a no-op for thermostats that don't override it",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Default apply_pre is a no-op for thermostats that don't override it",
+    "type": "scenario"
+  },
   "rq-16f6c7dc": {
     "decl": "- `spme_charge_spread`: one thread per real grid cell, block size 256,",
     "file": "forces/spme",
     "refs": [],
     "title": "spme_charge_spread",
     "type": "api-item"
-  },
-  "rq-171b99f5": {
-    "decl": "Scenario: step() on empty state is a no-op",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "step() on empty state is a no-op",
-    "type": "scenario"
   },
   "rq-1727d6bd": {
     "decl": "#### `kinetic_energy_reduce`",
@@ -1175,11 +1223,11 @@
     "title": "Accept a position inside the primary parallelepiped of a triclinic box",
     "type": "scenario"
   },
-  "rq-1b18924f": {
-    "decl": "Scenario: Integrator owns the force evaluation inside step()",
+  "rq-1b0504e7": {
+    "decl": "Scenario: Two independent runs of the same composed configuration are byte-identical",
     "file": "integration/framework",
     "refs": [],
-    "title": "Integrator owns the force evaluation inside step()",
+    "title": "Two independent runs of the same composed configuration are byte-identical",
     "type": "scenario"
   },
   "rq-1b34278b": {
@@ -1301,6 +1349,19 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-1c2d8eba": {
+    "decl": "#### `[thermostat]` (optional)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "`[thermostat]` (optional)",
+    "type": "section"
+  },
   "rq-1c729f15": {
     "decl": "Scenario: Langevin runs through the runner with N=0",
     "file": "integration/langevin-baoab",
@@ -1339,23 +1400,11 @@
     "type": "scenario"
   },
   "rq-1d25a0db": {
-    "decl": "Scenario: Log file header includes csvr_conserved when CSVR is the integrator",
+    "decl": "Scenario: Log file header includes csvr_conserved when CSVR is the thermostat",
     "file": "integration/csvr",
     "refs": [],
-    "title": "Log file header includes csvr_conserved when CSVR is the integrator",
+    "title": "Log file header includes csvr_conserved when CSVR is the thermostat",
     "type": "scenario"
-  },
-  "rq-1d5b5e35": {
-    "decl": "- `IntegratorRegistry` — host-side registry of `IntegratorBuilder`s.",
-    "file": "integration/framework",
-    "refs": [
-      {
-        "file": "src/integrator.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "IntegratorRegistry",
-    "type": "api-item"
   },
   "rq-1d618f18": {
     "decl": "## Reversal Protocol",
@@ -1370,13 +1419,6 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Accept r_switch equal to cutoff (hard-cutoff degenerate case)",
-    "type": "scenario"
-  },
-  "rq-1dccc185": {
-    "decl": "Scenario: Nosé-Hoover chain accepts explicit chain parameters",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Nosé-Hoover chain accepts explicit chain parameters",
     "type": "scenario"
   },
   "rq-1ddf84f1": {
@@ -1410,10 +1452,10 @@
     "type": "scenario"
   },
   "rq-1e5dcdc9": {
-    "decl": "Scenario: draw_counter starts at 0 and increments by 1 per step",
+    "decl": "Scenario: draw_counter starts at 0 and increments by 1 per apply_post",
     "file": "integration/csvr",
     "refs": [],
-    "title": "draw_counter starts at 0 and increments by 1 per step",
+    "title": "draw_counter starts at 0 and increments by 1 per apply_post",
     "type": "scenario"
   },
   "rq-1e7e6aa4": {
@@ -1445,13 +1487,6 @@
     "title": "collision_rate = 0 leaves velocities unchanged by the resample",
     "type": "scenario"
   },
-  "rq-1ebcd1db": {
-    "decl": "Scenario: Andersen with all required fields accepted",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Andersen with all required fields accepted",
-    "type": "scenario"
-  },
   "rq-1ed32e10": {
     "decl": "Scenario: Content before any section header",
     "file": "forces/topology",
@@ -1474,6 +1509,13 @@
     "refs": [],
     "title": "Displacement Check",
     "type": "section"
+  },
+  "rq-1f87880c": {
+    "decl": "- `IntegratorKind`, `ThermostatKind`, `BarostatKind` — tagged enums",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "IntegratorKind",
+    "type": "api-item"
   },
   "rq-1fc57c00": {
     "decl": "- `run_simulation(config_path: &Path) -> Result<RunSummary, RunnerError>`",
@@ -1834,6 +1876,18 @@
     "title": "Effective exclusions",
     "type": "section"
   },
+  "rq-24f6b8b9": {
+    "decl": "- `IntegratorRegistry::build(&self, kind: &IntegratorKind, device: Arc<CudaDevice>, particle_count: usize) -> Result<Box<dyn Integrator>, IntegratorError>`",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "IntegratorRegistry",
+    "type": "api-item"
+  },
   "rq-25afada1": {
     "decl": "### Kernel signature",
     "file": "build-pipeline",
@@ -1874,6 +1928,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Neighbor list applies minimum-image PBC",
+    "type": "scenario"
+  },
+  "rq-2618e113": {
+    "decl": "Scenario: [thermostat] unknown kind is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[thermostat] unknown kind is rejected",
     "type": "scenario"
   },
   "rq-261fde88": {
@@ -2010,13 +2071,6 @@
     "title": "Rescale preserves COM momentum",
     "type": "scenario"
   },
-  "rq-28a224e3": {
-    "decl": "Scenario: Nosé-Hoover chain rejects yoshida_order outside {1, 3, 5, 7}",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Nosé-Hoover chain rejects yoshida_order outside {1, 3, 5, 7}",
-    "type": "scenario"
-  },
   "rq-28d519b5": {
     "decl": "#### `[coulomb]` (optional table)",
     "file": "io/config-schema",
@@ -2030,13 +2084,6 @@
     "file": "integration/velocity-verlet",
     "refs": [],
     "title": "kick_drift followed by kick reproduces closed-form constant-acceleration kinematics",
-    "type": "scenario"
-  },
-  "rq-2980a672": {
-    "decl": "Scenario: Velocity-Verlet step() launches vv_kick_drift, force pipeline, and vv_kick",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Velocity-Verlet step() launches vv_kick_drift, force pipeline, and vv_kick",
     "type": "scenario"
   },
   "rq-299112e9": {
@@ -2068,6 +2115,18 @@
     "title": "Self-energy",
     "type": "section"
   },
+  "rq-29e08cb5": {
+    "decl": "- `IntegratorBuilder`, `ThermostatBuilder`, `BarostatBuilder` —",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "IntegratorBuilder",
+    "type": "api-item"
+  },
   "rq-2a0e97f5": {
     "decl": "Scenario: Two independent lossless runs produce byte-identical results",
     "file": "integration/velocity-verlet",
@@ -2092,7 +2151,12 @@
   "rq-2a5de2ab": {
     "decl": "- `log_column_values(ke, pe) -> vec![ke + pe − self.cumulative_injection]`.",
     "file": "integration/csvr",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_column_values",
     "type": "api-item"
   },
@@ -2262,6 +2326,18 @@
     "title": "Feature: Extended-XYZ Trajectory Output",
     "type": "file"
   },
+  "rq-2ccf40de": {
+    "decl": "- `IntegratorError`, `ThermostatError`, `BarostatError` — error types",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "IntegratorError",
+    "type": "api-item"
+  },
   "rq-2d051b0c": {
     "decl": "Scenario: Reduction with all zero neighbor counts produces zero net forces",
     "file": "pair-reduction",
@@ -2345,6 +2421,18 @@
     "title": "vv_kick leaves velocity unchanged when force is zero",
     "type": "scenario"
   },
+  "rq-2fe47a86": {
+    "decl": "- `Thermostat::apply_pre(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>`",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Thermostat",
+    "type": "api-item"
+  },
   "rq-30270f03": {
     "decl": "Scenario: Velocity-Verlet kind rejects Langevin fields",
     "file": "io/config-schema",
@@ -2381,6 +2469,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Trivial-mode state has no cell-list fields",
+    "type": "scenario"
+  },
+  "rq-3127ab44": {
+    "decl": "Scenario: Any [barostat] kind is rejected while the registry is empty",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Any [barostat] kind is rejected while the registry is empty",
     "type": "scenario"
   },
   "rq-312906a6": {
@@ -2491,6 +2586,13 @@
     "title": "cell_offsets is not reallocated when n_cells_total is unchanged",
     "type": "scenario"
   },
+  "rq-3396b95f": {
+    "decl": "Scenario: Construct Andersen via the thermostat registry",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Construct Andersen via the thermostat registry",
+    "type": "scenario"
+  },
   "rq-33a054f9": {
     "decl": "### Bond entries",
     "file": "forces/topology",
@@ -2570,6 +2672,13 @@
     "title": "Morse bond_type rejects non-positive re",
     "type": "scenario"
   },
+  "rq-353da04c": {
+    "decl": "Scenario: Construct Nosé-Hoover chain via the thermostat registry",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Construct Nosé-Hoover chain via the thermostat registry",
+    "type": "scenario"
+  },
   "rq-3553aab2": {
     "decl": "### Functions",
     "file": "forces/neighbor-list",
@@ -2613,7 +2722,12 @@
   "rq-3589910b": {
     "decl": "- `log_column_values(ke, pe) -> vec![ke + pe − cumulative_injection]`.",
     "file": "integration/berendsen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_column_values",
     "type": "api-item"
   },
@@ -2638,6 +2752,13 @@
     "title": "spme_force_gather",
     "type": "api-item"
   },
+  "rq-35eef107": {
+    "decl": "Scenario: Lossless velocity-Verlet uses the lossless kernels",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Lossless velocity-Verlet uses the lossless kernels",
+    "type": "scenario"
+  },
   "rq-36105526": {
     "decl": "### Host stages (Instant-timed)",
     "file": "performance-analysis",
@@ -2660,6 +2781,13 @@
     "refs": [],
     "title": "File with image:I:3 parses three integer columns per row",
     "type": "scenario"
+  },
+  "rq-370bf3a8": {
+    "decl": "- `apply_post(buffers, dt, timings)` — runs the right",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "apply_post",
+    "type": "api-item"
   },
   "rq-3726c0f1": {
     "decl": "Scenario: Real-space slot produces zero force on an excluded pair (scale_coul=0)",
@@ -2743,6 +2871,13 @@
     "file": "integration/velocity-verlet",
     "refs": [],
     "title": "vv_kick on an empty state is a no-op",
+    "type": "scenario"
+  },
+  "rq-386e3288": {
+    "decl": "Scenario: BarostatRegistry::with_builtins() exposes no builders",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "BarostatRegistry::with_builtins() exposes no builders",
     "type": "scenario"
   },
   "rq-38b80e11": {
@@ -2834,11 +2969,11 @@
     "type": "section"
   },
   "rq-3ace72b0": {
-    "decl": "### `Integrator` trait overrides",
+    "decl": "### `Thermostat` trait overrides",
     "file": "integration/andersen",
     "level": 3,
     "refs": [],
-    "title": "`Integrator` trait overrides",
+    "title": "`Thermostat` trait overrides",
     "type": "section"
   },
   "rq-3adef71d": {
@@ -2964,7 +3099,12 @@
     "decl": "### Host-side RNG utility",
     "file": "integration/csvr",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Host-side RNG utility",
     "type": "section"
   },
@@ -3039,6 +3179,18 @@
     "refs": [],
     "title": "All output values are finite after the 100-step run",
     "type": "scenario"
+  },
+  "rq-3fdb7e01": {
+    "decl": "- `ThermostatKind` — tagged enum carrying the chosen thermostat slot",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ThermostatKind",
+    "type": "api-item"
   },
   "rq-40a34caa": {
     "decl": "- `TrajectoryWriter` — handle to an open trajectory file. Fields are",
@@ -3143,6 +3295,13 @@
     "refs": [],
     "title": "atom_j is the centre (vertex) atom; atom_i and atom_k are the wings.",
     "type": "file"
+  },
+  "rq-444903e2": {
+    "decl": "Scenario: Construct velocity-Verlet (lossy) via the integrator registry",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Construct velocity-Verlet (lossy) via the integrator registry",
+    "type": "scenario"
   },
   "rq-44ccc1cb": {
     "decl": "Scenario: Reject too few data rows",
@@ -3256,11 +3415,11 @@
     "type": "scenario"
   },
   "rq-46d980b2": {
-    "decl": "### `Integrator` trait overrides",
+    "decl": "### `Thermostat` trait overrides",
     "file": "integration/berendsen",
     "level": 3,
     "refs": [],
-    "title": "`Integrator` trait overrides",
+    "title": "`Thermostat` trait overrides",
     "type": "section"
   },
   "rq-47540d14": {
@@ -3277,13 +3436,6 @@
     "title": "Reject non-positive mass",
     "type": "scenario"
   },
-  "rq-47877631": {
-    "decl": "Scenario: Construct Langevin BAOAB via the registry",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Construct Langevin BAOAB via the registry",
-    "type": "scenario"
-  },
   "rq-47a9ef14": {
     "decl": "## Feature API",
     "file": "forces/spme",
@@ -3293,10 +3445,15 @@
     "type": "section"
   },
   "rq-47d91c7d": {
-    "decl": "- `CsvrState` — implements the `Integrator` trait declared in",
+    "decl": "- `CsvrThermostat` — implements the `Thermostat` trait declared in",
     "file": "integration/csvr",
-    "refs": [],
-    "title": "CsvrState",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "CsvrThermostat",
     "type": "api-item"
   },
   "rq-47e800e0": {
@@ -3328,12 +3485,17 @@
     "title": "Positions written by the writer are inside the primary cell",
     "type": "scenario"
   },
-  "rq-48fd88ed": {
-    "decl": "Scenario: Construct with particle_count = 0",
+  "rq-4901507f": {
+    "decl": "- `IntegratorRegistry`, `ThermostatRegistry`, `BarostatRegistry` —",
     "file": "integration/framework",
-    "refs": [],
-    "title": "Construct with particle_count = 0",
-    "type": "scenario"
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "IntegratorRegistry",
+    "type": "api-item"
   },
   "rq-491235c1": {
     "decl": "Scenario: minimum_image after set_lattice reflects new tilts",
@@ -3485,6 +3647,13 @@
     "title": "wrap_position wraps a position outside the primary cell (orthorhombic)",
     "type": "scenario"
   },
+  "rq-4bbbada4": {
+    "decl": "Scenario: [barostat] section absent yields config.barostat = None",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[barostat] section absent yields config.barostat = None",
+    "type": "scenario"
+  },
   "rq-4bc8028f": {
     "decl": "Scenario: NeighborListState with particle_count = 0 builds successfully",
     "file": "forces/neighbor-list",
@@ -3493,9 +3662,14 @@
     "type": "scenario"
   },
   "rq-4bd6ff2b": {
-    "decl": "- `NoseHooverChainBuilder` — implements `IntegratorBuilder` with",
+    "decl": "- `NoseHooverChainBuilder` — implements `ThermostatBuilder` with",
     "file": "integration/nose-hoover-chain",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "NoseHooverChainBuilder",
     "type": "api-item"
   },
@@ -3535,6 +3709,13 @@
     "title": "Wrap Algorithm",
     "type": "section"
   },
+  "rq-4cd2ec5b": {
+    "decl": "Scenario: IntegratorKind::owns_thermostat agrees with the validation rule",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "IntegratorKind::owns_thermostat agrees with the validation rule",
+    "type": "scenario"
+  },
   "rq-4cf03f96": {
     "decl": "### Overwrite policy",
     "file": "performance-analysis",
@@ -3550,6 +3731,13 @@
     "title": "Re-upload after host-side mutation",
     "type": "scenario"
   },
+  "rq-4dd5d2d0": {
+    "decl": "Scenario: LangevinBaoab owns its thermostat",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "LangevinBaoab owns its thermostat",
+    "type": "scenario"
+  },
   "rq-4ddab3c7": {
     "decl": "### CUDA Kernels",
     "file": "forces/lj-pair-force",
@@ -3558,11 +3746,18 @@
     "title": "CUDA Kernels",
     "type": "section"
   },
+  "rq-4e0e1654": {
+    "decl": "Scenario: [thermostat] extra fields for the chosen kind are rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[thermostat] extra fields for the chosen kind are rejected",
+    "type": "scenario"
+  },
   "rq-4e9e09f0": {
-    "decl": "Scenario: step() launches the expected kernel set",
+    "decl": "Scenario: apply_post launches the expected kernel set",
     "file": "integration/csvr",
     "refs": [],
-    "title": "step() launches the expected kernel set",
+    "title": "apply_post launches the expected kernel set",
     "type": "scenario"
   },
   "rq-4ea8bbb2": {
@@ -3578,18 +3773,6 @@
     "refs": [],
     "title": "Opposite-sign charges attract",
     "type": "scenario"
-  },
-  "rq-4f386df8": {
-    "decl": "# Feature: Pluggable Integrator Framework",
-    "file": "integration/framework",
-    "refs": [
-      {
-        "file": "src/integrator.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Feature: Pluggable Integrator Framework",
-    "type": "file"
   },
   "rq-4f5643f1": {
     "decl": "### Types",
@@ -3623,13 +3806,6 @@
     "file": "error-handling",
     "refs": [],
     "title": "A wrapped error is reachable through source()",
-    "type": "scenario"
-  },
-  "rq-4f8f3ffb": {
-    "decl": "Scenario: Nosé-Hoover chain rejects velocity-Verlet / Langevin fields",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Nosé-Hoover chain rejects velocity-Verlet / Langevin fields",
     "type": "scenario"
   },
   "rq-4fad2dd6": {
@@ -3674,13 +3850,6 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Empty bond_type name rejected",
-    "type": "scenario"
-  },
-  "rq-50542279": {
-    "decl": "Scenario: Andersen accepts collision_rate = 0",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Andersen accepts collision_rate = 0",
     "type": "scenario"
   },
   "rq-50baca8c": {
@@ -3779,13 +3948,6 @@
     "title": "wrap_position_with_image_count tracks per-direction image counts for a triclinic box",
     "type": "scenario"
   },
-  "rq-535a4569": {
-    "decl": "Scenario: CSVR rejects non-positive tau",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "CSVR rejects non-positive tau",
-    "type": "scenario"
-  },
   "rq-535c2b1e": {
     "decl": "Scenario: LJ kernel reads the shared neighbor list from ForceFieldContext",
     "file": "forces/lj-pair-force",
@@ -3794,10 +3956,10 @@
     "type": "scenario"
   },
   "rq-536457be": {
-    "decl": "Scenario: Time-averaged kinetic energy tracks (N_f / 2) k_B T",
+    "decl": "Scenario: Time-averaged kinetic energy tracks (3 N / 2) k_B T",
     "file": "integration/andersen",
     "refs": [],
-    "title": "Time-averaged kinetic energy tracks (N_f / 2) k_B T",
+    "title": "Time-averaged kinetic energy tracks (3 N / 2) k_B T",
     "type": "scenario"
   },
   "rq-5395785a": {
@@ -3955,6 +4117,13 @@
     "title": "PTX Module Loading",
     "type": "section"
   },
+  "rq-5711d6ce": {
+    "decl": "Scenario: Empty integrator registry reports UnknownKind",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Empty integrator registry reports UnknownKind",
+    "type": "scenario"
+  },
   "rq-5711e6b2": {
     "decl": "- `load_init_state(path: &Path, type_names: &[&str]) -> Result<InitState, InitStateError>`",
     "file": "io/init-state-file",
@@ -4100,6 +4269,14 @@
     "title": "Fill Kernel",
     "type": "section"
   },
+  "rq-5a1771b2": {
+    "decl": "## Construction and Lifetime",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Construction and Lifetime",
+    "type": "section"
+  },
   "rq-5a6d5e9e": {
     "decl": "Scenario: vv_kick_drift_lossless handles a block-non-aligned particle count",
     "file": "integration/velocity-verlet",
@@ -4108,11 +4285,11 @@
     "type": "scenario"
   },
   "rq-5aae9633": {
-    "decl": "### `Integrator` trait overrides",
+    "decl": "### `Thermostat` trait overrides",
     "file": "integration/csvr",
     "level": 3,
     "refs": [],
-    "title": "`Integrator` trait overrides",
+    "title": "`Thermostat` trait overrides",
     "type": "section"
   },
   "rq-5ac172fc": {
@@ -4163,11 +4340,11 @@
     "title": "RunSummary",
     "type": "api-item"
   },
-  "rq-5c34021b": {
-    "decl": "Scenario: Andersen missing seed is rejected",
+  "rq-5c28eee0": {
+    "decl": "Scenario: [thermostat] kind = \"csvr\" requires a seed",
     "file": "io/config-schema",
     "refs": [],
-    "title": "Andersen missing seed is rejected",
+    "title": "[thermostat] kind = \"csvr\" requires a seed",
     "type": "scenario"
   },
   "rq-5c716d48": {
@@ -4183,19 +4360,6 @@
     "refs": [],
     "title": "rescale_velocities does not modify positions, masses, or forces",
     "type": "scenario"
-  },
-  "rq-5cb33196": {
-    "decl": "## Feature API",
-    "file": "integration/framework",
-    "level": 2,
-    "refs": [
-      {
-        "file": "src/integrator.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Feature API",
-    "type": "section"
   },
   "rq-5cb58365": {
     "decl": "Scenario: NaN pair contributions propagate to NaN net forces",
@@ -4233,6 +4397,18 @@
     "refs": [],
     "title": "Display output is distinct from the Debug rendering",
     "type": "scenario"
+  },
+  "rq-5d9ed248": {
+    "decl": "- `Thermostat` — object-safe trait implemented by every concrete",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Thermostat",
+    "type": "api-item"
   },
   "rq-5ded1806": {
     "decl": "Scenario: Absolute paths are honored unchanged",
@@ -4443,10 +4619,15 @@
     "type": "scenario"
   },
   "rq-62e2bef5": {
-    "decl": "- `NoseHooverChainState` — implements the `Integrator` trait declared",
+    "decl": "- `NoseHooverChainThermostat` — implements the `Thermostat` trait",
     "file": "integration/nose-hoover-chain",
-    "refs": [],
-    "title": "NoseHooverChainState",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "NoseHooverChainThermostat",
     "type": "api-item"
   },
   "rq-6340fae2": {
@@ -4521,6 +4702,13 @@
     "title": "Empty State and degenerate cases",
     "type": "section"
   },
+  "rq-64f1e2a6": {
+    "decl": "Scenario: Velocity-Verlet step() launches vv_kick_drift, force pipeline, and vv_kick",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Velocity-Verlet step() launches vv_kick_drift, force pipeline, and vv_kick",
+    "type": "scenario"
+  },
   "rq-650875cc": {
     "decl": "Scenario: Tilts may exceed the corresponding diagonals",
     "file": "simulation-box",
@@ -4551,7 +4739,7 @@
     "type": "section"
   },
   "rq-661bf664": {
-    "decl": "- `IntegratorKind` — tagged enum carrying the chosen integrator slot and",
+    "decl": "- `IntegratorKind` — tagged enum carrying the chosen integrator slot",
     "file": "io/config-schema",
     "refs": [
       {
@@ -4616,19 +4804,6 @@
     "title": "Velocity-Verlet lossless defaults to false when omitted",
     "type": "scenario"
   },
-  "rq-67414c32": {
-    "decl": "### Types",
-    "file": "integration/framework",
-    "level": 3,
-    "refs": [
-      {
-        "file": "src/integrator.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Types",
-    "type": "section"
-  },
   "rq-674cc467": {
     "decl": "Scenario: Box compatibility picks up SPME's real-space cutoff",
     "file": "forces/spme",
@@ -4642,6 +4817,18 @@
     "refs": [],
     "title": "Switching interval r_switch == cutoff selects hard-cutoff",
     "type": "scenario"
+  },
+  "rq-678c233d": {
+    "decl": "- `ThermostatRegistry::build_optional(&self, kind: Option<&ThermostatKind>, device: Arc<CudaDevice>, particle_count: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>`",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ThermostatRegistry",
+    "type": "api-item"
   },
   "rq-679282f5": {
     "decl": "Scenario: init_device exposes the Morse kernels on the Kernels handle",
@@ -4709,18 +4896,6 @@
     "title": "Accept positions strictly inside the primary cell (orthorhombic)",
     "type": "scenario"
   },
-  "rq-686b0d37": {
-    "decl": "- `IntegratorKind` — `enum` carrying the parsed config-level selection",
-    "file": "integration/framework",
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "IntegratorKind",
-    "type": "api-item"
-  },
   "rq-6897be01": {
     "decl": "## Out of Scope",
     "file": "io/init-state-file",
@@ -4781,6 +4956,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Reject missing schema_version",
+    "type": "scenario"
+  },
+  "rq-69d2c5f5": {
+    "decl": "Scenario: Construct CSVR via the thermostat registry",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Construct CSVR via the thermostat registry",
     "type": "scenario"
   },
   "rq-69de20bd": {
@@ -4871,6 +5053,19 @@
     "title": "Unwrap invariant holds across wrap_position_with_image_count",
     "type": "scenario"
   },
+  "rq-6c5b4246": {
+    "decl": "### Types",
+    "file": "integration/framework",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-6c8415f6": {
     "decl": "Scenario: NeighborListState rebuild performs no host-device particle transfers",
     "file": "forces/neighbor-list",
@@ -4879,9 +5074,14 @@
     "type": "scenario"
   },
   "rq-6c9037a4": {
-    "decl": "- `BerendsenBuilder` — implements `IntegratorBuilder` with",
+    "decl": "- `BerendsenBuilder` — implements `ThermostatBuilder` with",
     "file": "integration/berendsen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "BerendsenBuilder",
     "type": "api-item"
   },
@@ -4898,6 +5098,19 @@
     "refs": [],
     "title": "topology field is optional and defaults to None",
     "type": "scenario"
+  },
+  "rq-6cd635cd": {
+    "decl": "## Feature API",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-6cd92c14": {
     "decl": "Scenario: Exclusion row with too few columns",
@@ -4917,10 +5130,6 @@
       },
       {
         "file": "src/forces/neighbor_list.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/integrator.rs",
         "kind": "code"
       },
       {
@@ -4964,7 +5173,12 @@
   "rq-6d2daea0": {
     "decl": "- `log_column_values(ke, pe) -> vec![ke + pe − cumulative_injection]`.",
     "file": "integration/andersen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_column_values",
     "type": "api-item"
   },
@@ -4986,6 +5200,13 @@
     "file": "integration/nose-hoover-chain",
     "refs": [],
     "title": "Reject yoshida_order outside {1, 3, 5, 7}",
+    "type": "scenario"
+  },
+  "rq-6dffb17f": {
+    "decl": "Scenario: Empty thermostat registry reports UnknownKind",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Empty thermostat registry reports UnknownKind",
     "type": "scenario"
   },
   "rq-6e11554f": {
@@ -5067,10 +5288,10 @@
     "type": "scenario"
   },
   "rq-6faf6fba": {
-    "decl": "Scenario: Two independent NHC runs with identical configs produce byte-identical outputs",
+    "decl": "Scenario: Two independent composed runs with identical configs produce byte-identical outputs",
     "file": "integration/nose-hoover-chain",
     "refs": [],
-    "title": "Two independent NHC runs with identical configs produce byte-identical outputs",
+    "title": "Two independent composed runs with identical configs produce byte-identical outputs",
     "type": "scenario"
   },
   "rq-6fb62a59": {
@@ -5121,18 +5342,11 @@
     "title": "PairPotentialParams",
     "type": "api-item"
   },
-  "rq-706001ec": {
-    "decl": "Scenario: Two independent runs with identical inputs are byte-identical",
+  "rq-706c4b80": {
+    "decl": "Scenario: Construct Langevin BAOAB via the integrator registry",
     "file": "integration/framework",
     "refs": [],
-    "title": "Two independent runs with identical inputs are byte-identical",
-    "type": "scenario"
-  },
-  "rq-70dc275e": {
-    "decl": "Scenario: Nosé-Hoover chain rejects non-positive tau",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Nosé-Hoover chain rejects non-positive tau",
+    "title": "Construct Langevin BAOAB via the integrator registry",
     "type": "scenario"
   },
   "rq-70e9fd38": {
@@ -5331,9 +5545,14 @@
     "type": "scenario"
   },
   "rq-750b828f": {
-    "decl": "- `CsvrBuilder` — implements `IntegratorBuilder` with",
+    "decl": "- `CsvrBuilder` — implements `ThermostatBuilder` with",
     "file": "integration/csvr",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "CsvrBuilder",
     "type": "api-item"
   },
@@ -5367,10 +5586,10 @@
     "type": "section"
   },
   "rq-76069102": {
-    "decl": "Scenario: step() launches all expected kernel calls for default chain parameters",
+    "decl": "Scenario: apply_pre and apply_post launch the expected kernel calls for default chain parameters",
     "file": "integration/nose-hoover-chain",
     "refs": [],
-    "title": "step() launches all expected kernel calls for default chain parameters",
+    "title": "apply_pre and apply_post launch the expected kernel calls for default chain parameters",
     "type": "scenario"
   },
   "rq-761f26c6": {
@@ -5526,12 +5745,17 @@
     "title": "PTX Module Loading",
     "type": "section"
   },
-  "rq-78da0ce9": {
-    "decl": "Scenario: Registry without a matching builder reports UnknownKind",
+  "rq-78f484d9": {
+    "decl": "- `Integrator` — object-safe trait implemented by every concrete",
     "file": "integration/framework",
-    "refs": [],
-    "title": "Registry without a matching builder reports UnknownKind",
-    "type": "scenario"
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Integrator",
+    "type": "api-item"
   },
   "rq-78f49cef": {
     "decl": "### Rust Launch Helpers",
@@ -5561,10 +5785,10 @@
     "type": "api-item"
   },
   "rq-7909b92c": {
-    "decl": "Scenario: log_column_names returns empty for VelocityVerlet and Langevin",
+    "decl": "Scenario: log_column_names returns empty for integrators (VV / Langevin)",
     "file": "integration/nose-hoover-chain",
     "refs": [],
-    "title": "log_column_names returns empty for VelocityVerlet and Langevin",
+    "title": "log_column_names returns empty for integrators (VV / Langevin)",
     "type": "scenario"
   },
   "rq-790c1f86": {
@@ -5607,6 +5831,18 @@
     "title": "ForceField",
     "type": "api-item"
   },
+  "rq-7a124d43": {
+    "decl": "- `Thermostat::apply_post(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>`",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Thermostat",
+    "type": "api-item"
+  },
   "rq-7a14d0d8": {
     "decl": "Scenario: per-cell sort canonicalises sorted_particle_ids",
     "file": "forces/neighbor-list",
@@ -5632,14 +5868,6 @@
       }
     ],
     "title": "Feature API",
-    "type": "section"
-  },
-  "rq-7a4b9cbd": {
-    "decl": "## Construction and Lifetime",
-    "file": "integration/framework",
-    "level": 2,
-    "refs": [],
-    "title": "Construction and Lifetime",
     "type": "section"
   },
   "rq-7a4ed012": {
@@ -5671,13 +5899,6 @@
     "title": "Reject row with NaN position",
     "type": "scenario"
   },
-  "rq-7b08ee3d": {
-    "decl": "Scenario: Andersen missing temperature is rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Andersen missing temperature is rejected",
-    "type": "scenario"
-  },
   "rq-7b13d9cf": {
     "decl": "#### `lj_pair_force`",
     "file": "forces/lj-pair-force",
@@ -5693,13 +5914,6 @@
     "refs": [],
     "title": "Lossless Velocity-Verlet Loop",
     "type": "section"
-  },
-  "rq-7b9aada4": {
-    "decl": "Scenario: Lossless velocity-Verlet uses the lossless kernels",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Lossless velocity-Verlet uses the lossless kernels",
-    "type": "scenario"
   },
   "rq-7ba4f321": {
     "decl": "Scenario: A stretched bond's energy matches the closed-form Morse expression",
@@ -5768,6 +5982,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Reject r_switch greater than cutoff",
+    "type": "scenario"
+  },
+  "rq-7d4c470a": {
+    "decl": "Scenario: Construct velocity-Verlet (lossless) via the integrator registry",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Construct velocity-Verlet (lossless) via the integrator registry",
     "type": "scenario"
   },
   "rq-7d5915bb": {
@@ -5945,13 +6166,6 @@
     "title": "Reject row with infinite velocity",
     "type": "scenario"
   },
-  "rq-809834e7": {
-    "decl": "Scenario: Nosé-Hoover chain rejects n_resp = 0",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Nosé-Hoover chain rejects n_resp = 0",
-    "type": "scenario"
-  },
   "rq-80dcfa97": {
     "decl": "Scenario: Full exclusion (scale=0) zeros the LJ contribution for the excluded pair",
     "file": "forces/lj-pair-force",
@@ -6007,6 +6221,13 @@
     "file": "forces/framework",
     "refs": [],
     "title": "Combiner is a single-threaded write per output element",
+    "type": "scenario"
+  },
+  "rq-82cdabba": {
+    "decl": "Scenario: build_optional with None returns Ok(None) on the empty barostat registry",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "build_optional with None returns Ok(None) on the empty barostat registry",
     "type": "scenario"
   },
   "rq-82d0c34a": {
@@ -6069,13 +6290,6 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "sorted_particle_ids sorts particles by (cell_index, particle_id)",
-    "type": "scenario"
-  },
-  "rq-83ab58a3": {
-    "decl": "Scenario: Nosé-Hoover chain missing tau is rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Nosé-Hoover chain missing tau is rejected",
     "type": "scenario"
   },
   "rq-846bdb8b": {
@@ -6189,18 +6403,6 @@
     "title": "Two end-to-end Langevin runs with identical configs produce byte-identical outputs",
     "type": "scenario"
   },
-  "rq-87fdd9b1": {
-    "decl": "- `IntegratorBuilder` — trait describing a registered integrator.",
-    "file": "integration/framework",
-    "refs": [
-      {
-        "file": "src/integrator.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "IntegratorBuilder",
-    "type": "api-item"
-  },
   "rq-881559bd": {
     "decl": "Scenario: Spread produces zero charge density at a grid point with no particle support",
     "file": "forces/spme",
@@ -6273,20 +6475,6 @@
     "title": "Defaults populate the output section when [output] is omitted",
     "type": "scenario"
   },
-  "rq-89b4b926": {
-    "decl": "Scenario: Custom builder registered after with_builtins() is selectable",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Custom builder registered after with_builtins() is selectable",
-    "type": "scenario"
-  },
-  "rq-89c69f7f": {
-    "decl": "Scenario: Construct CSVR via the registry",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Construct CSVR via the registry",
-    "type": "scenario"
-  },
   "rq-89c71321": {
     "decl": "Scenario: set_lattice rejects a non-positive diagonal without mutating the box",
     "file": "simulation-box",
@@ -6326,7 +6514,12 @@
   "rq-8a571737": {
     "decl": "- `log_column_names() -> &'static [\"nhc_conserved\"]`.",
     "file": "integration/nose-hoover-chain",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_column_names",
     "type": "api-item"
   },
@@ -6406,21 +6599,6 @@
     "title": "Coulomb and LJ exclusions are independent",
     "type": "scenario"
   },
-  "rq-8ca0bc54": {
-    "decl": "Scenario: Berendsen with all required fields accepted",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Berendsen with all required fields accepted",
-    "type": "scenario"
-  },
-  "rq-8d44fa4d": {
-    "decl": "## Determinism Guarantees",
-    "file": "integration/framework",
-    "level": 2,
-    "refs": [],
-    "title": "Determinism Guarantees",
-    "type": "section"
-  },
   "rq-8d5a8d9c": {
     "decl": "Scenario: reduce_angle_forces on zero particles is a no-op",
     "file": "forces/harmonic-angle",
@@ -6428,12 +6606,13 @@
     "title": "reduce_angle_forces on zero particles is a no-op",
     "type": "scenario"
   },
-  "rq-8def4545": {
-    "decl": "Scenario: Nosé-Hoover chain missing temperature is rejected",
-    "file": "io/config-schema",
+  "rq-8d904561": {
+    "decl": "## Out of Scope",
+    "file": "integration/framework",
+    "level": 2,
     "refs": [],
-    "title": "Nosé-Hoover chain missing temperature is rejected",
-    "type": "scenario"
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-8df7fb0c": {
     "decl": "- `InitState` — the parser's output. Fields:",
@@ -6518,7 +6697,12 @@
   "rq-8ee58ec1": {
     "decl": "- `log_column_names() -> &'static [\"csvr_conserved\"]`.",
     "file": "integration/csvr",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_column_names",
     "type": "api-item"
   },
@@ -6536,11 +6720,18 @@
     "title": "Reject log_path = timings_path",
     "type": "scenario"
   },
-  "rq-8fdfc981": {
+  "rq-8fd4e3bf": {
     "decl": "Scenario: step() on empty state is a no-op",
-    "file": "integration/andersen",
+    "file": "integration/framework",
     "refs": [],
     "title": "step() on empty state is a no-op",
+    "type": "scenario"
+  },
+  "rq-8fdfc981": {
+    "decl": "Scenario: apply_post on empty state is a no-op",
+    "file": "integration/andersen",
+    "refs": [],
+    "title": "apply_post on empty state is a no-op",
     "type": "scenario"
   },
   "rq-9004fd7a": {
@@ -6706,6 +6897,13 @@
     "title": "Langevin BAOAB missing seed is rejected",
     "type": "scenario"
   },
+  "rq-92fc3091": {
+    "decl": "Scenario: apply_pre is the trait default (no-op)",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "apply_pre is the trait default (no-op)",
+    "type": "scenario"
+  },
   "rq-931f1ab8": {
     "decl": "Scenario: neighbor_list all-pairs mode is accepted",
     "file": "io/config-schema",
@@ -6771,6 +6969,18 @@
     "title": "Influence-function multiply and inverse FFT",
     "type": "section"
   },
+  "rq-9548bc1a": {
+    "decl": "- `BarostatRegistry::build_optional(&self, kind: Option<&BarostatKind>, device: Arc<CudaDevice>, particle_count: usize) -> Result<Option<Box<dyn Barostat>>, BarostatError>`",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "BarostatRegistry",
+    "type": "api-item"
+  },
   "rq-955b55f0": {
     "decl": "# Atom indices are 0-based and refer to entries in the init file.",
     "file": "forces/topology",
@@ -6799,14 +7009,6 @@
     "refs": [],
     "title": "Exclusion scaling applies uniformly to force, energy, and virial",
     "type": "scenario"
-  },
-  "rq-9605b930": {
-    "decl": "## Gherkin Scenarios",
-    "file": "integration/framework",
-    "level": 2,
-    "refs": [],
-    "title": "Gherkin Scenarios",
-    "type": "section"
   },
   "rq-961c2ee6": {
     "decl": "Scenario: Reduction with zero count writes zero to energy and virial targets",
@@ -6942,6 +7144,14 @@
     "title": "Stretched angle produces a torque that closes the angle",
     "type": "scenario"
   },
+  "rq-9913daee": {
+    "decl": "## Compatibility Rules",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Compatibility Rules",
+    "type": "section"
+  },
   "rq-991b4695": {
     "decl": "Scenario: Box compatibility ignores SPME's reciprocal grid",
     "file": "forces/spme",
@@ -7039,6 +7249,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "Reject negative diagonal",
+    "type": "scenario"
+  },
+  "rq-9b3e0e89": {
+    "decl": "Scenario: apply_post on empty NHC state is a no-op",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "apply_post on empty NHC state is a no-op",
     "type": "scenario"
   },
   "rq-9b794cff": {
@@ -7237,10 +7454,10 @@
     "type": "scenario"
   },
   "rq-9e1142aa": {
-    "decl": "Scenario: Construct CsvrState via the registry",
+    "decl": "Scenario: Construct CsvrThermostat via the registry",
     "file": "integration/csvr",
     "refs": [],
-    "title": "Construct CsvrState via the registry",
+    "title": "Construct CsvrThermostat via the registry",
     "type": "scenario"
   },
   "rq-9e1eee68": {
@@ -7381,10 +7598,10 @@
     "type": "api-item"
   },
   "rq-a16c37bd": {
-    "decl": "Scenario: Log file header includes nhc_conserved when NHC is the integrator",
+    "decl": "Scenario: Log file header includes nhc_conserved when NHC is the thermostat",
     "file": "integration/nose-hoover-chain",
     "refs": [],
-    "title": "Log file header includes nhc_conserved when NHC is the integrator",
+    "title": "Log file header includes nhc_conserved when NHC is the thermostat",
     "type": "scenario"
   },
   "rq-a199e0aa": {
@@ -7425,10 +7642,10 @@
     "type": "section"
   },
   "rq-a2454a72": {
-    "decl": "Scenario: step() on empty CSVR state is a no-op",
+    "decl": "Scenario: apply_post on empty CSVR state is a no-op",
     "file": "integration/csvr",
     "refs": [],
-    "title": "step() on empty CSVR state is a no-op",
+    "title": "apply_post on empty CSVR state is a no-op",
     "type": "scenario"
   },
   "rq-a2e20b02": {
@@ -7465,6 +7682,13 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-a336b496": {
+    "decl": "Scenario: Construct Berendsen via the thermostat registry",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Construct Berendsen via the thermostat registry",
+    "type": "scenario"
+  },
   "rq-a33c1f4f": {
     "decl": "## File Format",
     "file": "forces/topology",
@@ -7485,13 +7709,6 @@
     "file": "io/init-state-file",
     "refs": [],
     "title": "Accept the lower boundary -L/2 along an axis (orthorhombic)",
-    "type": "scenario"
-  },
-  "rq-a373aadd": {
-    "decl": "Scenario: Nosé-Hoover chain rejects non-positive temperature",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Nosé-Hoover chain rejects non-positive temperature",
     "type": "scenario"
   },
   "rq-a3a5905d": {
@@ -7565,18 +7782,6 @@
     "title": "CUDA Kernels",
     "type": "section"
   },
-  "rq-a5069572": {
-    "decl": "- `IntegratorError` — error type returned by every integrator method.",
-    "file": "integration/framework",
-    "refs": [
-      {
-        "file": "src/integrator.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "IntegratorError",
-    "type": "api-item"
-  },
   "rq-a50cb6a1": {
     "decl": "Scenario: Pair beyond cutoff yields zero energy and virial slots",
     "file": "forces/lj-pair-force",
@@ -7644,13 +7849,6 @@
     "title": "ParticleTypeConfig",
     "type": "api-item"
   },
-  "rq-a77f2d5e": {
-    "decl": "Scenario: Andersen rejects non-positive temperature",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Andersen rejects non-positive temperature",
-    "type": "scenario"
-  },
   "rq-a7aac794": {
     "decl": "Scenario: Cell counts reflect perpendicular widths for a tilted box",
     "file": "forces/neighbor-list",
@@ -7708,6 +7906,14 @@
     "refs": [],
     "title": "Block-non-aligned particle counts are handled by the bounds check",
     "type": "scenario"
+  },
+  "rq-a93a8dc4": {
+    "decl": "## Determinism Guarantees",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism Guarantees",
+    "type": "section"
   },
   "rq-a94d2c13": {
     "decl": "Scenario: Missing [[pair_interactions]] is rejected",
@@ -7771,6 +7977,13 @@
     "title": "Kernel-stage counts match the runner's launch counts",
     "type": "scenario"
   },
+  "rq-a9c46f51": {
+    "decl": "- `apply_pre(buffers, dt, timings)` — runs the left",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "apply_pre",
+    "type": "api-item"
+  },
   "rq-aa19f894": {
     "decl": "Scenario: Reject non-positive sigma",
     "file": "io/config-schema",
@@ -7793,6 +8006,30 @@
     "refs": [],
     "title": "Empty State",
     "type": "section"
+  },
+  "rq-aa68f468": {
+    "decl": "- `Integrator::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, dt: f32, timings: &mut Timings) -> Result<(), IntegratorError>`",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Integrator",
+    "type": "api-item"
+  },
+  "rq-aa6ce5c0": {
+    "decl": "- `BarostatKind` — zero-variant tagged enum reserved for future",
+    "file": "io/config-schema",
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "BarostatKind",
+    "type": "api-item"
   },
   "rq-aad6ca63": {
     "decl": "Scenario: Harmonic angle_type rejects non-positive k_theta",
@@ -7860,13 +8097,6 @@
     "title": "vv_kick_lossless does not modify positions, forces, masses, or particle_ids",
     "type": "scenario"
   },
-  "rq-acb1bcd5": {
-    "decl": "Scenario: Nosé-Hoover chain rejects chain_length = 0",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Nosé-Hoover chain rejects chain_length = 0",
-    "type": "scenario"
-  },
   "rq-acbbd59a": {
     "decl": "Scenario: Disabled trajectory and log outputs are not checked, but timings is",
     "file": "simulation-runner",
@@ -7880,14 +8110,6 @@
     "level": 2,
     "refs": [],
     "title": "Out of Scope",
-    "type": "section"
-  },
-  "rq-ad27732e": {
-    "decl": "### Functions and methods",
-    "file": "integration/framework",
-    "level": 3,
-    "refs": [],
-    "title": "Functions and methods",
     "type": "section"
   },
   "rq-ad403fb6": {
@@ -8145,10 +8367,10 @@
     "type": "section"
   },
   "rq-b1e87ce4": {
-    "decl": "Scenario: cumulative_injection records K_new − K_old per step",
+    "decl": "Scenario: cumulative_injection records K_new − K_old per invocation",
     "file": "integration/andersen",
     "refs": [],
-    "title": "cumulative_injection records K_new − K_old per step",
+    "title": "cumulative_injection records K_new − K_old per invocation",
     "type": "scenario"
   },
   "rq-b1f33ea4": {
@@ -8173,18 +8395,18 @@
     "title": "`reduce_bond_forces`",
     "type": "section"
   },
-  "rq-b270fb04": {
-    "decl": "Scenario: Berendsen rejects extra fields (e.g. seed from CSVR/Andersen)",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Berendsen rejects extra fields (e.g. seed from CSVR/Andersen)",
-    "type": "scenario"
-  },
   "rq-b296ab12": {
-    "decl": "Scenario: step() on empty state is a no-op",
+    "decl": "Scenario: apply_post on empty state is a no-op",
     "file": "integration/berendsen",
     "refs": [],
-    "title": "step() on empty state is a no-op",
+    "title": "apply_post on empty state is a no-op",
+    "type": "scenario"
+  },
+  "rq-b2d5886a": {
+    "decl": "Scenario: Two consecutive apply_post calls on a CSVR thermostat produce different post-call velocities",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Two consecutive apply_post calls on a CSVR thermostat produce different post-call velocities",
     "type": "scenario"
   },
   "rq-b2d67b57": {
@@ -8260,18 +8482,25 @@
     "type": "section"
   },
   "rq-b43bf21c": {
-    "decl": "Scenario: Construct NoseHooverChainState with default chain parameters",
+    "decl": "Scenario: Construct NoseHooverChainThermostat with default chain parameters",
     "file": "integration/nose-hoover-chain",
     "refs": [],
-    "title": "Construct NoseHooverChainState with default chain parameters",
+    "title": "Construct NoseHooverChainThermostat with default chain parameters",
+    "type": "scenario"
+  },
+  "rq-b44769f1": {
+    "decl": "Scenario: Construct an integrator with particle_count = 0",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Construct an integrator with particle_count = 0",
     "type": "scenario"
   },
   "rq-b47589c9": {
-    "decl": "### `Integrator` trait extensions",
+    "decl": "### `Thermostat` trait overrides",
     "file": "integration/nose-hoover-chain",
     "level": 3,
     "refs": [],
-    "title": "`Integrator` trait extensions",
+    "title": "`Thermostat` trait overrides",
     "type": "section"
   },
   "rq-b4bb7096": {
@@ -8314,13 +8543,6 @@
     "file": "integration/berendsen",
     "refs": [],
     "title": "λ < 1 when K_old > K_target (system needs cooling)",
-    "type": "scenario"
-  },
-  "rq-b6ed3328": {
-    "decl": "Scenario: Berendsen missing tau is rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Berendsen missing tau is rejected",
     "type": "scenario"
   },
   "rq-b719c42c": {
@@ -8405,6 +8627,13 @@
     "refs": [],
     "title": "CUDA Kernels",
     "type": "section"
+  },
+  "rq-b7cd6d16": {
+    "decl": "Scenario: [thermostat] kind = \"berendsen\" is accepted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[thermostat] kind = \"berendsen\" is accepted",
+    "type": "scenario"
   },
   "rq-b8070abb": {
     "decl": "### Constructor",
@@ -8536,14 +8765,6 @@
     "title": "Feature: Performance Analysis and Timings Output",
     "type": "file"
   },
-  "rq-bc0e4fd5": {
-    "decl": "## Per-Step Interface",
-    "file": "integration/framework",
-    "level": 2,
-    "refs": [],
-    "title": "Per-Step Interface",
-    "type": "section"
-  },
   "rq-bc442f5b": {
     "decl": "### Particle IDs",
     "file": "io/init-state-file",
@@ -8622,6 +8843,20 @@
     "file": "forces/spme",
     "refs": [],
     "title": "Force gather on one isolated particle returns the gradient of its own spread",
+    "type": "scenario"
+  },
+  "rq-bda9c0a2": {
+    "decl": "Scenario: [barostat] missing kind is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[barostat] missing kind is rejected",
+    "type": "scenario"
+  },
+  "rq-bdd03f85": {
+    "decl": "Scenario: langevin-baoab + [thermostat] is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "langevin-baoab + [thermostat] is rejected",
     "type": "scenario"
   },
   "rq-bde625cf": {
@@ -8709,13 +8944,6 @@
     "file": "integration/nose-hoover-chain",
     "refs": [],
     "title": "rescale_velocities on empty state is a no-op",
-    "type": "scenario"
-  },
-  "rq-bf569129": {
-    "decl": "Scenario: Andersen missing collision_rate is rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Andersen missing collision_rate is rejected",
     "type": "scenario"
   },
   "rq-bf62f645": {
@@ -8978,6 +9206,20 @@
     "title": "Algorithm",
     "type": "section"
   },
+  "rq-c4a74903": {
+    "decl": "Scenario: [thermostat] missing kind is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[thermostat] missing kind is rejected",
+    "type": "scenario"
+  },
+  "rq-c4ae19e0": {
+    "decl": "Scenario: velocity-verlet + [thermostat] is accepted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "velocity-verlet + [thermostat] is accepted",
+    "type": "scenario"
+  },
   "rq-c4d4608f": {
     "decl": "Scenario: Pair with Coulomb exclusion scale 0.0 contributes nothing",
     "file": "forces/coulomb-pair-force",
@@ -8985,18 +9227,11 @@
     "title": "Pair with Coulomb exclusion scale 0.0 contributes nothing",
     "type": "scenario"
   },
-  "rq-c4f67467": {
-    "decl": "Scenario: Andersen rejects extra fields (e.g. CSVR's tau)",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Andersen rejects extra fields (e.g. CSVR's tau)",
-    "type": "scenario"
-  },
   "rq-c50c6f84": {
-    "decl": "Scenario: Log file header includes andersen_conserved when Andersen is the integrator",
+    "decl": "Scenario: Log file header includes andersen_conserved when Andersen is the thermostat",
     "file": "integration/andersen",
     "refs": [],
-    "title": "Log file header includes andersen_conserved when Andersen is the integrator",
+    "title": "Log file header includes andersen_conserved when Andersen is the thermostat",
     "type": "scenario"
   },
   "rq-c525ee79": {
@@ -9086,13 +9321,6 @@
     "title": "Feature API",
     "type": "section"
   },
-  "rq-c74dec33": {
-    "decl": "Scenario: Berendsen rejects non-positive tau",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Berendsen rejects non-positive tau",
-    "type": "scenario"
-  },
   "rq-c79a1408": {
     "decl": "Scenario: bond_type missing potential field",
     "file": "io/config-schema",
@@ -9130,11 +9358,19 @@
     "type": "scenario"
   },
   "rq-c814659f": {
-    "decl": "Scenario: draw_counter starts at 0 and increments by 1 per step",
+    "decl": "Scenario: draw_counter starts at 0 and increments by 1 per apply_post",
     "file": "integration/andersen",
     "refs": [],
-    "title": "draw_counter starts at 0 and increments by 1 per step",
+    "title": "draw_counter starts at 0 and increments by 1 per apply_post",
     "type": "scenario"
+  },
+  "rq-c8848b7f": {
+    "decl": "### Functions and methods",
+    "file": "integration/framework",
+    "level": 3,
+    "refs": [],
+    "title": "Functions and methods",
+    "type": "section"
   },
   "rq-c88dde28": {
     "decl": "Scenario: Reject too many data rows",
@@ -9175,7 +9411,12 @@
   "rq-c908bbf1": {
     "decl": "- `log_column_names() -> &'static [\"berendsen_conserved\"]`.",
     "file": "integration/berendsen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_column_names",
     "type": "api-item"
   },
@@ -9238,6 +9479,13 @@
     "file": "integration/csvr",
     "refs": [],
     "title": "log_column_values returns ke + pe − cumulative_injection",
+    "type": "scenario"
+  },
+  "rq-ca356c08": {
+    "decl": "Scenario: [thermostat] section absent yields config.thermostat = None",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[thermostat] section absent yields config.thermostat = None",
     "type": "scenario"
   },
   "rq-ca49d49a": {
@@ -9388,13 +9636,6 @@
     "title": "Reject when masses has the wrong length",
     "type": "scenario"
   },
-  "rq-cee157e5": {
-    "decl": "Scenario: Andersen rejects negative collision_rate",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Andersen rejects negative collision_rate",
-    "type": "scenario"
-  },
   "rq-cef1e640": {
     "decl": "Scenario: Reject non-positive temperature",
     "file": "integration/berendsen",
@@ -9410,10 +9651,10 @@
     "type": "scenario"
   },
   "rq-cef43ff0": {
-    "decl": "Scenario: step() launches all expected kernels",
+    "decl": "Scenario: apply_post launches all expected kernels",
     "file": "integration/andersen",
     "refs": [],
-    "title": "step() launches all expected kernels",
+    "title": "apply_post launches all expected kernels",
     "type": "scenario"
   },
   "rq-cf008c68": {
@@ -9422,18 +9663,6 @@
     "refs": [],
     "title": "Construct with particle_count = 0",
     "type": "scenario"
-  },
-  "rq-cf361ff5": {
-    "decl": "- `Integrator::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, dt: f32, timings: &mut Timings) -> Result<(), IntegratorError>`",
-    "file": "integration/framework",
-    "refs": [
-      {
-        "file": "src/integrator.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Integrator",
-    "type": "api-item"
   },
   "rq-cf456bb4": {
     "decl": "# Column format: atom_i  atom_j  bond_type_name",
@@ -9480,10 +9709,10 @@
     "type": "scenario"
   },
   "rq-cfcce369": {
-    "decl": "Scenario: cumulative_injection equals K_old · (λ² − 1) per step",
+    "decl": "Scenario: cumulative_injection equals K_old · (λ² − 1) per invocation",
     "file": "integration/berendsen",
     "refs": [],
-    "title": "cumulative_injection equals K_old · (λ² − 1) per step",
+    "title": "cumulative_injection equals K_old · (λ² − 1) per invocation",
     "type": "scenario"
   },
   "rq-d01b6fb0": {
@@ -9545,25 +9774,11 @@
     "title": "Algorithm",
     "type": "section"
   },
-  "rq-d12c24f0": {
-    "decl": "Scenario: Two consecutive step() calls on a Langevin integrator produce different post-call velocities",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Two consecutive step() calls on a Langevin integrator produce different post-call velocities",
-    "type": "scenario"
-  },
   "rq-d148149f": {
     "decl": "Scenario: Explicit [output] values override defaults",
     "file": "io/config-schema",
     "refs": [],
     "title": "Explicit [output] values override defaults",
-    "type": "scenario"
-  },
-  "rq-d1582b1a": {
-    "decl": "Scenario: Construct Berendsen via the registry",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Construct Berendsen via the registry",
     "type": "scenario"
   },
   "rq-d189e9be": {
@@ -9592,6 +9807,13 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Block-non-aligned particle count is handled by the bounds check",
+    "type": "scenario"
+  },
+  "rq-d1f1b53e": {
+    "decl": "Scenario: apply_pre is the trait default (no-op)",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "apply_pre is the trait default (no-op)",
     "type": "scenario"
   },
   "rq-d22f105f": {
@@ -9642,6 +9864,19 @@
     "level": 3,
     "refs": [],
     "title": "CUDA Kernels",
+    "type": "section"
+  },
+  "rq-d28e9105": {
+    "decl": "#### `[barostat]` (optional)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "`[barostat]` (optional)",
     "type": "section"
   },
   "rq-d29872e4": {
@@ -9750,7 +9985,12 @@
   "rq-d5a4f220": {
     "decl": "# Feature: Langevin BAOAB Integrator",
     "file": "integration/langevin-baoab",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: Langevin BAOAB Integrator",
     "type": "file"
   },
@@ -9834,13 +10074,6 @@
     "title": "Feature: End-to-End Pipeline Reversibility Test",
     "type": "file"
   },
-  "rq-d8527fb4": {
-    "decl": "Scenario: CSVR with all required fields accepted",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "CSVR with all required fields accepted",
-    "type": "scenario"
-  },
   "rq-d880c228": {
     "decl": "- `cufft_determinism_smoke_test(device: &Arc<CudaDevice>) -> Result<(), CuFftError>`",
     "file": "forces/spme",
@@ -9853,6 +10086,14 @@
     "title": "cufft_determinism_smoke_test",
     "type": "api-item"
   },
+  "rq-d898f1cd": {
+    "decl": "### Barostat slot",
+    "file": "integration/framework",
+    "level": 3,
+    "refs": [],
+    "title": "Barostat slot",
+    "type": "section"
+  },
   "rq-d8a08c7a": {
     "decl": "### Data rows",
     "file": "io/init-state-file",
@@ -9864,6 +10105,14 @@
       }
     ],
     "title": "Data rows",
+    "type": "section"
+  },
+  "rq-d8c0e5b0": {
+    "decl": "### Integrator slot",
+    "file": "integration/framework",
+    "level": 3,
+    "refs": [],
+    "title": "Integrator slot",
     "type": "section"
   },
   "rq-d8e4407a": {
@@ -9921,19 +10170,20 @@
     "title": "Feature: Harmonic Angle Bonded Potential",
     "type": "file"
   },
-  "rq-d9c38b9e": {
-    "decl": "Scenario: Construct Nosé-Hoover chain via the registry",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Construct Nosé-Hoover chain via the registry",
-    "type": "scenario"
-  },
   "rq-da36d746": {
     "decl": "- `andersen_resample(buffers: &mut ParticleBuffers, seed: u64, draw_counter: u64, p_collision: f32, kt: f32) -> Result<(), GpuError>`",
     "file": "integration/andersen",
     "refs": [],
     "title": "andersen_resample",
     "type": "api-item"
+  },
+  "rq-daadfc1a": {
+    "decl": "## Per-Step Interface",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Step Interface",
+    "type": "section"
   },
   "rq-dacb071c": {
     "decl": "Scenario: Generation mismatch with new box too small returns BoxTooSmallForCells",
@@ -10025,13 +10275,6 @@
     "title": "harmonic_angle_force",
     "type": "api-item"
   },
-  "rq-db78448e": {
-    "decl": "Scenario: Construct velocity-Verlet (lossless) via the registry",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Construct velocity-Verlet (lossless) via the registry",
-    "type": "scenario"
-  },
   "rq-db8b171d": {
     "decl": "Scenario: pre_step with unchanged box does not refresh the cell-layout cache",
     "file": "forces/neighbor-list",
@@ -10073,17 +10316,17 @@
     "type": "scenario"
   },
   "rq-dc3c616a": {
-    "decl": "Scenario: Construct AndersenState via the registry",
+    "decl": "Scenario: Construct AndersenThermostat via the registry",
     "file": "integration/andersen",
     "refs": [],
-    "title": "Construct AndersenState via the registry",
+    "title": "Construct AndersenThermostat via the registry",
     "type": "scenario"
   },
   "rq-dc51e1c3": {
-    "decl": "Scenario: Two independent CSVR runs with identical seeds produce byte-identical outputs",
+    "decl": "Scenario: Two independent composed runs with identical seeds produce byte-identical outputs",
     "file": "integration/csvr",
     "refs": [],
-    "title": "Two independent CSVR runs with identical seeds produce byte-identical outputs",
+    "title": "Two independent composed runs with identical seeds produce byte-identical outputs",
     "type": "scenario"
   },
   "rq-dc5c70bf": {
@@ -10114,10 +10357,10 @@
     "type": "scenario"
   },
   "rq-dc95802b": {
-    "decl": "Scenario: Two CsvrStates at the same draw_counter and seed produce identical",
+    "decl": "Scenario: Two CsvrThermostats at the same draw_counter and seed produce identical",
     "file": "integration/csvr",
     "refs": [],
-    "title": "Two CsvrStates at the same draw_counter and seed produce identical",
+    "title": "Two CsvrThermostats at the same draw_counter and seed produce identical",
     "type": "scenario"
   },
   "rq-dcba6fce": {
@@ -10213,10 +10456,10 @@
     "type": "scenario"
   },
   "rq-ded81a4a": {
-    "decl": "Scenario: Log file header omits nhc_conserved when VV or Langevin is the integrator",
+    "decl": "Scenario: Log file header omits nhc_conserved when no thermostat is configured",
     "file": "integration/nose-hoover-chain",
     "refs": [],
-    "title": "Log file header omits nhc_conserved when VV or Langevin is the integrator",
+    "title": "Log file header omits nhc_conserved when no thermostat is configured",
     "type": "scenario"
   },
   "rq-df10e81f": {
@@ -10238,18 +10481,6 @@
     ],
     "title": "`Step`",
     "type": "section"
-  },
-  "rq-df39d15b": {
-    "decl": "- `IntegratorRegistry::build(&self, kind: &IntegratorKind, device: Arc<CudaDevice>, particle_count: usize) -> Result<Box<dyn Integrator>, IntegratorError>`",
-    "file": "integration/framework",
-    "refs": [
-      {
-        "file": "src/integrator.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "IntegratorRegistry",
-    "type": "api-item"
   },
   "rq-df3a50f6": {
     "decl": "Scenario: step() on a ForceField with both slots sums LJ and Morse",
@@ -10293,13 +10524,6 @@
     "title": "Reject NaN dt",
     "type": "scenario"
   },
-  "rq-e02917c3": {
-    "decl": "Scenario: Construct velocity-Verlet (lossy) via the registry",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Construct velocity-Verlet (lossy) via the registry",
-    "type": "scenario"
-  },
   "rq-e06bcfb0": {
     "decl": "### `Properties`",
     "file": "io/trajectory-output",
@@ -10312,6 +10536,18 @@
     ],
     "title": "`Properties`",
     "type": "section"
+  },
+  "rq-e0a0553d": {
+    "decl": "# Feature: Pluggable Integration Framework",
+    "file": "integration/framework",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Pluggable Integration Framework",
+    "type": "file"
   },
   "rq-e0ef1221": {
     "decl": "- `LogWriter::open(path: &Path, extra_columns: &[&str]) -> Result<LogWriter, LogWriterError>`",
@@ -10373,10 +10609,6 @@
         "kind": "code"
       },
       {
-        "file": "src/integrator.rs",
-        "kind": "code"
-      },
-      {
         "file": "src/io/config.rs",
         "kind": "code"
       },
@@ -10407,13 +10639,6 @@
     ],
     "title": "Trait Derivation",
     "type": "section"
-  },
-  "rq-e1d4e8ab": {
-    "decl": "Scenario: CSVR rejects non-positive temperature",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "CSVR rejects non-positive temperature",
-    "type": "scenario"
   },
   "rq-e1dd0625": {
     "decl": "Scenario: step() launches all six expected kernel calls",
@@ -10595,18 +10820,6 @@
     "title": "Out of Scope",
     "type": "section"
   },
-  "rq-e4c4ff61": {
-    "decl": "- `Integrator` — object-safe trait implemented by every concrete",
-    "file": "integration/framework",
-    "refs": [
-      {
-        "file": "src/integrator.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Integrator",
-    "type": "api-item"
-  },
   "rq-e4f403e9": {
     "decl": "## Gherkin Scenarios",
     "file": "pipeline-reversibility",
@@ -10670,6 +10883,13 @@
     ],
     "title": "Functions",
     "type": "section"
+  },
+  "rq-e60481e9": {
+    "decl": "Scenario: apply_post on empty state is a no-op",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "apply_post on empty state is a no-op",
+    "type": "scenario"
   },
   "rq-e60a2781": {
     "decl": "Scenario: Compressed angle produces a torque that opens the angle",
@@ -10749,13 +10969,6 @@
     "title": "Influence function",
     "type": "section"
   },
-  "rq-e7b7a451": {
-    "decl": "Scenario: Nosé-Hoover chain with all defaults accepted",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Nosé-Hoover chain with all defaults accepted",
-    "type": "scenario"
-  },
   "rq-e7c05140": {
     "decl": "Scenario: Langevin-BAOAB kind rejects velocity-Verlet fields",
     "file": "io/config-schema",
@@ -10778,10 +10991,10 @@
     "type": "scenario"
   },
   "rq-e8252f10": {
-    "decl": "Scenario: Construct BerendsenState via the registry",
+    "decl": "Scenario: Construct BerendsenThermostat via the registry",
     "file": "integration/berendsen",
     "refs": [],
-    "title": "Construct BerendsenState via the registry",
+    "title": "Construct BerendsenThermostat via the registry",
     "type": "scenario"
   },
   "rq-e8259ee5": {
@@ -10880,10 +11093,10 @@
     "type": "scenario"
   },
   "rq-e9a5474f": {
-    "decl": "Scenario: step() on empty NHC state is a no-op",
+    "decl": "Scenario: apply_pre on empty NHC state is a no-op",
     "file": "integration/nose-hoover-chain",
     "refs": [],
-    "title": "step() on empty NHC state is a no-op",
+    "title": "apply_pre on empty NHC state is a no-op",
     "type": "scenario"
   },
   "rq-e9a67206": {
@@ -10901,6 +11114,13 @@
     "refs": [],
     "title": "Launch Configuration",
     "type": "section"
+  },
+  "rq-e9be025b": {
+    "decl": "Scenario: VelocityVerlet does not own its thermostat",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "VelocityVerlet does not own its thermostat",
+    "type": "scenario"
   },
   "rq-ea0ee5ef": {
     "decl": "Scenario: Neighbor list contains every particle within r_cut + r_skin",
@@ -10933,13 +11153,6 @@
     "file": "forces/spme",
     "refs": [],
     "title": "Doubling all charges quadruples the reciprocal-space energy and forces scale linearly",
-    "type": "scenario"
-  },
-  "rq-ea6aa8c0": {
-    "decl": "Scenario: Construct Andersen via the registry",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Construct Andersen via the registry",
     "type": "scenario"
   },
   "rq-ea8ebebd": {
@@ -10976,13 +11189,6 @@
     "file": "integration/csvr",
     "refs": [],
     "title": "Reject non-positive temperature",
-    "type": "scenario"
-  },
-  "rq-ebace0b4": {
-    "decl": "Scenario: CSVR missing temperature is rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "CSVR missing temperature is rejected",
     "type": "scenario"
   },
   "rq-ebfa6e1f": {
@@ -11074,13 +11280,6 @@
     "title": "Morse bond_type rejects non-positive de",
     "type": "scenario"
   },
-  "rq-ecf796d3": {
-    "decl": "Scenario: Berendsen missing temperature is rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Berendsen missing temperature is rejected",
-    "type": "scenario"
-  },
   "rq-ed048159": {
     "decl": "Scenario: All observables are finite after the 100-step lossless forward run",
     "file": "pipeline-reversibility",
@@ -11124,6 +11323,14 @@
     "refs": [],
     "title": "A bent angle's energy matches the closed-form expression",
     "type": "scenario"
+  },
+  "rq-ee777124": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-eea2f5f8": {
     "decl": "Scenario: Duplicate exclusion rejected",
@@ -11290,17 +11497,10 @@
     "type": "file"
   },
   "rq-f062ec85": {
-    "decl": "Scenario: Two independent Andersen runs with identical seeds produce byte-identical outputs",
+    "decl": "Scenario: Two independent composed runs with identical seeds produce byte-identical outputs",
     "file": "integration/andersen",
     "refs": [],
-    "title": "Two independent Andersen runs with identical seeds produce byte-identical outputs",
-    "type": "scenario"
-  },
-  "rq-f076e97c": {
-    "decl": "Scenario: Berendsen rejects extra fields (e.g. collision_rate from Andersen)",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Berendsen rejects extra fields (e.g. collision_rate from Andersen)",
+    "title": "Two independent composed runs with identical seeds produce byte-identical outputs",
     "type": "scenario"
   },
   "rq-f0b9b0f5": {
@@ -11506,14 +11706,6 @@
     "title": "Reduction overwrites prior net force values",
     "type": "scenario"
   },
-  "rq-f542b61f": {
-    "decl": "## Out of Scope",
-    "file": "integration/framework",
-    "level": 2,
-    "refs": [],
-    "title": "Out of Scope",
-    "type": "section"
-  },
   "rq-f5e25186": {
     "decl": "Scenario: Successful run writes a timings file",
     "file": "performance-analysis",
@@ -11529,7 +11721,7 @@
     "type": "scenario"
   },
   "rq-f606ff6f": {
-    "decl": "# Feature: Nosé-Hoover Chain (NHC) Thermostat Integrator",
+    "decl": "# Feature: Nosé-Hoover Chain (NHC) Thermostat",
     "file": "integration/nose-hoover-chain",
     "refs": [
       {
@@ -11545,7 +11737,7 @@
         "kind": "code"
       }
     ],
-    "title": "Feature: Nosé-Hoover Chain (NHC) Thermostat Integrator",
+    "title": "Feature: Nosé-Hoover Chain (NHC) Thermostat",
     "type": "file"
   },
   "rq-f652bf7c": {
@@ -11703,10 +11895,15 @@
     "type": "scenario"
   },
   "rq-f856f666": {
-    "decl": "- `BerendsenState` — implements the `Integrator` trait declared in",
+    "decl": "- `BerendsenThermostat` — implements the `Thermostat` trait declared",
     "file": "integration/berendsen",
-    "refs": [],
-    "title": "BerendsenState",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "BerendsenThermostat",
     "type": "api-item"
   },
   "rq-f8ad62d4": {
@@ -11715,6 +11912,14 @@
     "refs": [],
     "title": "cell_offsets is the exclusive prefix sum and ends at particle_count",
     "type": "scenario"
+  },
+  "rq-f8bb021a": {
+    "decl": "## Slots",
+    "file": "integration/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Slots",
+    "type": "section"
   },
   "rq-f8df9364": {
     "decl": "Scenario: Velocity generation is deterministic in the seed",
@@ -11740,7 +11945,12 @@
   "rq-f94f6bac": {
     "decl": "- `log_column_values(ke, pe) -> vec![H']` where `H'` follows the",
     "file": "integration/nose-hoover-chain",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_column_values",
     "type": "api-item"
   },
@@ -11771,6 +11981,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "Copy of a SimulationBox carries the original's generation",
+    "type": "scenario"
+  },
+  "rq-fb3f2189": {
+    "decl": "Scenario: build_optional with None returns Ok(None)",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "build_optional with None returns Ok(None)",
     "type": "scenario"
   },
   "rq-fb55af77": {
@@ -11852,9 +12069,14 @@
     "type": "scenario"
   },
   "rq-fd0cef60": {
-    "decl": "- `AndersenBuilder` — implements `IntegratorBuilder` with",
+    "decl": "- `AndersenBuilder` — implements `ThermostatBuilder` with",
     "file": "integration/andersen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
     "title": "AndersenBuilder",
     "type": "api-item"
   },
@@ -11872,13 +12094,6 @@
     "refs": [],
     "title": "Empty State and degenerate cases",
     "type": "section"
-  },
-  "rq-fdb8be77": {
-    "decl": "Scenario: Berendsen rejects non-positive temperature",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Berendsen rejects non-positive temperature",
-    "type": "scenario"
   },
   "rq-fdbb902d": {
     "decl": "## Timing Methodology",
@@ -11932,10 +12147,15 @@
     "type": "scenario"
   },
   "rq-feba0a88": {
-    "decl": "- `AndersenState` — implements the `Integrator` trait declared in",
+    "decl": "- `AndersenThermostat` — implements the `Thermostat` trait declared",
     "file": "integration/andersen",
-    "refs": [],
-    "title": "AndersenState",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "AndersenThermostat",
     "type": "api-item"
   },
   "rq-febdd0b3": {

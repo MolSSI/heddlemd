@@ -1,9 +1,15 @@
 # Feature: Velocity Verlet Time Integration <!-- rq-09a2e15f -->
 
 Velocity Verlet is one of the integrators selected by the pluggable-slot
-framework (see `framework.md`). It is the deterministic, symplectic NVE
-integrator and is chosen via `kind = "velocity-verlet"` in the `[integrator]`
-section of the config.
+framework (see `framework.md`). It is the deterministic, symplectic
+time-stepping core and is chosen via `kind = "velocity-verlet"` in the
+`[integrator]` section of the config. Used standalone (no `[thermostat]`,
+no `[barostat]`) the run is NVE; composed with any of the registered
+thermostats it yields the corresponding NVT-flavoured run via the
+framework's `apply_pre` / `apply_post` dispatch. The integrator itself
+makes no thermostat or barostat decisions and does not own its
+thermostat (`IntegratorKind::VelocityVerlet { .. }.owns_thermostat()`
+returns `false`).
 
 The per-particle arithmetic is split across two CUDA kernels: `vv_kick_drift`
 performs the first half-velocity update followed by the position update, and
@@ -372,7 +378,11 @@ counter.
   (the simulation-loop feature owns the dispatch; this feature only
   provides the kernels and buffers).
 - Other integrators (leapfrog, RK4, predictor-corrector).
-- Thermostats, barostats, and constraint algorithms (SHAKE/RATTLE).
+- Thermostats and barostats. Velocity-Verlet composes with the
+  `[thermostat]` and `[barostat]` slots through the framework's
+  dispatch order; the registered thermostat / barostat
+  implementations own their respective per-step state and kernels.
+- Constraint algorithms (SHAKE/RATTLE).
 - Energy diagnostics and trajectory output.
 - Numerical validation of inputs (zero/non-finite masses, dt sign).
 - The `f64` precision feature flag for the *primary* particle state

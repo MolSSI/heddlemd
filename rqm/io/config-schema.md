@@ -22,8 +22,10 @@ Sections:
 | top-level `schema_version` | yes | format version |
 | top-level `init` | yes | path to initial-state file |
 | top-level `topology` | no | path to .topology file |
-| `[simulation]` | yes | timestep, step count, RNG seed, temperature |
+| `[simulation]` | yes | timestep, step count, RNG seed, initial-velocity temperature |
 | `[integrator]` | yes | integrator slot + per-kind parameters |
+| `[thermostat]` | no | thermostat slot + per-kind parameters |
+| `[barostat]` | no | barostat slot + per-kind parameters |
 | `[[particle_types]]` | yes (>= 1) | per-type properties |
 | `[[pair_interactions]]` | yes (covers every pair) | per-pair potential + parameters |
 | `[[bond_types]]` | no | per-bond-type parameters |
@@ -46,6 +48,22 @@ temperature = 300.0 # K (used only if init file lacks a `velo` column)
 [integrator]
 kind = "velocity-verlet"
 lossless = false
+
+# Optional. Omit to run NVE. Cannot be combined with an integrator
+# that owns its own thermostat (e.g. langevin-baoab).
+#
+# [thermostat]
+# kind = "csvr"
+# temperature = 300.0
+# tau = 1.0e-13
+# seed = 7
+
+# Optional. Omit to run constant-volume. The default barostat
+# registry is empty; concrete barostats ship in later requirements
+# files.
+#
+# [barostat]
+# kind = "..."
 
 [[particle_types]]
 name = "Ar"
@@ -121,36 +139,29 @@ or unit suffixes are supported in schema v1.
   (the runner writes the initial state and exits).
 - `dt: f64` — integration timestep in seconds. Must be finite and strictly
   positive.
-- `temperature: f64` — target temperature in kelvin. Required. Used to
-  initialise velocities when the init file's `Properties` lacks a `velo:R:3`
-  field; ignored (but still required and validated) when the init file
-  supplies velocities. Must be finite and `>= 0.0`.
+- `temperature: f64` — initial-velocity temperature in kelvin. Required.
+  Used to initialise velocities at the Maxwell-Boltzmann distribution
+  when the init file's `Properties` lacks a `velo:R:3` field; ignored
+  (but still required and validated) when the init file supplies
+  velocities. Must be finite and `>= 0.0`. The thermostat's bath
+  temperature is a separate field under `[thermostat]`.
 
 #### `[integrator]` <!-- rq-27f9fae8 -->
 
-The integrator section is a tagged variant. A required `kind` field selects
-one of the pluggable integrator slots (see `integration/framework.md` for
-the slot interface). Every other field in this table is kind-specific:
-extra fields not recognised by the chosen `kind` are rejected, and missing
-required fields are rejected.
+The integrator section is a tagged variant. A required `kind` field
+selects one of the pluggable integrator slots (see
+`integration/framework.md` for the slot interface). Every other field
+in this table is kind-specific: extra fields not recognised by the
+chosen `kind` are rejected, and missing required fields are rejected.
 
 - `kind: String` — required. One of:
-  - `"velocity-verlet"` — symplectic NVE. See
+  - `"velocity-verlet"` — symplectic NVE time-stepping core. Does not
+    own a thermostat; compose with `[thermostat]` for NVT. See
     `integration/velocity-verlet.md`.
-  - `"langevin-baoab"` — stochastic NVT via the Leimkuhler-Matthews BAOAB
-    splitting. See `integration/langevin-baoab.md`.
-  - `"nose-hoover-chain"` — deterministic NVT via the Nosé-Hoover
-    chain (Martyna-Klein-Tuckerman, 1992). See
-    `integration/nose-hoover-chain.md`.
-  - `"csvr"` — stochastic NVT via canonical sampling velocity
-    rescaling (Bussi-Donadio-Parrinello, 2007). See
-    `integration/csvr.md`.
-  - `"andersen"` — stochastic NVT via per-particle Maxwell-Boltzmann
-    resampling (Andersen, 1980). See `integration/andersen.md`.
-  - `"berendsen"` — deterministic weak-coupling thermostat (Berendsen
-    et al., 1984). Suitable for **equilibration only**; does not
-    sample the canonical ensemble. See `integration/berendsen.md`
-    for the full caveat and parameter description.
+  - `"langevin-baoab"` — stochastic NVT via the Leimkuhler-Matthews
+    BAOAB splitting. Owns its own thermostat (the OU step);
+    incompatible with `[thermostat]`. See
+    `integration/langevin-baoab.md`.
 
 Fields accepted for `kind = "velocity-verlet"`:
 
@@ -166,6 +177,35 @@ Fields accepted for `kind = "langevin-baoab"`:
   strictly positive. Independent of `simulation.temperature`.
 - `seed: u64` — counter-based RNG seed. Required, independent of
   `simulation.seed`.
+
+#### `[thermostat]` (optional) <!-- rq-1c2d8eba -->
+
+The thermostat section is an optional tagged variant. When omitted,
+the runner runs no thermostat (NVE composition with the integrator,
+or whatever fused thermostat the integrator owns). When present, a
+required `kind` field selects one of the pluggable thermostat slots
+(see `integration/framework.md`). Every other field in this table is
+kind-specific: extra fields not recognised by the chosen `kind` are
+rejected, and missing required fields are rejected.
+
+Configuring `[thermostat]` alongside an integrator that owns its own
+thermostat (currently only `langevin-baoab`) is rejected at
+config-load time with
+`ConfigError::IncompatibleThermostat { integrator: <kind name> }`.
+
+- `kind: String` — required when the section is present. One of:
+  - `"nose-hoover-chain"` — deterministic NVT via the Nosé-Hoover
+    chain (Martyna-Klein-Tuckerman, 1992). See
+    `integration/nose-hoover-chain.md`.
+  - `"csvr"` — stochastic NVT via canonical sampling velocity
+    rescaling (Bussi-Donadio-Parrinello, 2007). See
+    `integration/csvr.md`.
+  - `"andersen"` — stochastic NVT via per-particle Maxwell-Boltzmann
+    resampling (Andersen, 1980). See `integration/andersen.md`.
+  - `"berendsen"` — deterministic weak-coupling thermostat (Berendsen
+    et al., 1984). Suitable for **equilibration only**; does not
+    sample the canonical ensemble. See `integration/berendsen.md`
+    for the full caveat and parameter description.
 
 Fields accepted for `kind = "nose-hoover-chain"`:
 
@@ -192,7 +232,7 @@ Fields accepted for `kind = "csvr"`:
   to 1 ps; larger `τ` leaves the dynamics closer to NVE.
 - `seed: u64` — counter-based RNG seed for the chi-squared and
   standard-normal draws consumed by the rescale formula. Required,
-  independent of `simulation.seed` and any other integrator's seed.
+  independent of `simulation.seed` and any other slot's seed.
 
 Fields accepted for `kind = "andersen"`:
 
@@ -206,8 +246,8 @@ Fields accepted for `kind = "andersen"`:
   computed as `clamp(collision_rate · dt, 0.0, 1.0)`.
 - `seed: u64` — counter-based RNG seed for the Bernoulli decisions
   and Maxwell-Boltzmann draws consumed by the resample kernel.
-  Required, independent of `simulation.seed` and any other
-  integrator's seed.
+  Required, independent of `simulation.seed` and any other slot's
+  seed.
 
 Fields accepted for `kind = "berendsen"`:
 
@@ -216,6 +256,24 @@ Fields accepted for `kind = "berendsen"`:
 - `tau: f64` — thermostat coupling time in seconds. Required. Finite
   and strictly positive. Typical values for liquid water are 100 fs
   to 1 ps; larger `τ` leaves the dynamics closer to NVE.
+
+#### `[barostat]` (optional) <!-- rq-d28e9105 -->
+
+The barostat section is an optional tagged variant. When omitted, the
+runner runs no barostat (constant-volume composition). When present,
+a required `kind` field selects one of the pluggable barostat slots
+(see `integration/framework.md`). Every other field in this table is
+kind-specific: extra fields not recognised by the chosen `kind` are
+rejected, and missing required fields are rejected.
+
+- `kind: String` — required when the section is present. The default
+  `BarostatRegistry::with_builtins()` registers no implementations,
+  so every value parses to
+  `ConfigError::UnknownBarostatKind { actual: <value> }` at
+  config-load time until a concrete barostat ships in a later
+  requirements file. The section exists in the schema so that the
+  field reference, validation flow, and `Config::barostat` field are
+  in place when implementations arrive.
 
 #### `[[particle_types]]` (array of tables) <!-- rq-78487f38 -->
 
@@ -500,6 +558,9 @@ Beyond per-field validation, the loader checks:
    every other supplied path (`PathCollision { kind_a, kind_b, path }`).
    The set of paths under check is `init`, `output.trajectory_path`,
    `output.log_path`, `output.timings_path`, and (when supplied) `topology`.
+4. If `[thermostat]` is present and `config.integrator.owns_thermostat()`
+   returns `true` (currently only `langevin-baoab`), the loader returns
+   `IncompatibleThermostat { integrator: <integrator kind name> }`.
 
 ## Feature API <!-- rq-110285ae -->
 
@@ -516,6 +577,12 @@ Beyond per-field validation, the loader checks:
     directory.
   - `simulation: SimulationConfig`
   - `integrator: IntegratorKind`
+  - `thermostat: Option<ThermostatKind>` — `Some` when the
+    `[thermostat]` table is present in the config, `None` otherwise.
+  - `barostat: Option<BarostatKind>` — `Some` when the `[barostat]`
+    table is present in the config, `None` otherwise. While the
+    default registry has no implementations, this field is always
+    `None` after a successful `load_config`.
   - `particle_types: Vec<ParticleTypeConfig>`
   - `pair_interactions: Vec<PairInteractionConfig>`
   - `bond_types: Vec<BondTypeConfig>` — empty when the `[[bond_types]]`
@@ -544,11 +611,27 @@ Beyond per-field validation, the loader checks:
   - `dt: f64`
   - `temperature: f64`
 
-- `IntegratorKind` — tagged enum carrying the chosen integrator slot and <!-- rq-661bf664 -->
-  its parameters. Variants:
-  - `VelocityVerlet { lossless: bool }` — selected by `kind = "velocity-verlet"`.
+- `IntegratorKind` — tagged enum carrying the chosen integrator slot <!-- rq-661bf664 -->
+  and its parameters. Variants:
+  - `VelocityVerlet { lossless: bool }` — selected by
+    `kind = "velocity-verlet"`. Does not own its own thermostat.
   - `LangevinBaoab { friction: f64, temperature: f64, seed: u64 }` —
-    selected by `kind = "langevin-baoab"`.
+    selected by `kind = "langevin-baoab"`. Owns its own thermostat
+    (the OU step).
+
+  Variant-bearing parameters reflect the per-kind fields listed under
+  the `[integrator]` section above.
+
+  Method:
+
+  - `IntegratorKind::owns_thermostat(&self) -> bool` — returns `true`
+    for variants that bundle their own thermostat (currently only
+    `LangevinBaoab`); `false` otherwise. Consulted by
+    cross-validation rule 4.
+
+- `ThermostatKind` — tagged enum carrying the chosen thermostat slot <!-- rq-3fdb7e01 -->
+  and its parameters. Used in `Config::thermostat: Option<ThermostatKind>`.
+  Variants:
   - `NoseHooverChain { temperature: f64, tau: f64, chain_length: u32,
     yoshida_order: u32, n_resp: u32 }` — selected by
     `kind = "nose-hoover-chain"`. Optional fields are populated from
@@ -564,8 +647,16 @@ Beyond per-field validation, the loader checks:
     `kind = "berendsen"`. Both fields are required. Deterministic;
     no RNG seed.
 
-  Variant-bearing parameters reflect the per-kind fields listed under the
-  `[integrator]` section above.
+  Variant-bearing parameters reflect the per-kind fields listed under
+  the `[thermostat]` section above.
+
+- `BarostatKind` — zero-variant tagged enum reserved for future <!-- rq-aa6ce5c0 -->
+  barostat slots. Used in `Config::barostat: Option<BarostatKind>`.
+  With no variants, no `Some(BarostatKind)` value is constructible;
+  successful `load_config` always returns `barostat: None` until a
+  concrete barostat slot lands and adds its variant. Until then, any
+  `[barostat]` table in the config is rejected at parse time with
+  `ConfigError::UnknownBarostatKind { actual: <kind value> }`.
 
 - `ParticleTypeConfig` <!-- rq-a5ccc1de -->
   - `name: String`
@@ -671,6 +762,22 @@ Beyond per-field validation, the loader checks:
     not one of the supported strings.
   - `UnknownIntegratorField { kind: String, field: String }` — a field in
     the `[integrator]` table is not recognised by the chosen `kind`.
+  - `UnknownThermostatKind { actual: String }` — `[thermostat].kind`
+    is not one of the supported strings.
+  - `UnknownThermostatField { kind: String, field: String }` — a field
+    in the `[thermostat]` table is not recognised by the chosen
+    `kind`.
+  - `UnknownBarostatKind { actual: String }` — `[barostat].kind` is
+    not one of the supported strings. With the default registry empty,
+    every value of `kind` produces this error.
+  - `UnknownBarostatField { kind: String, field: String }` — a field
+    in the `[barostat]` table is not recognised by the chosen `kind`.
+    Reserved for when concrete barostats register; with the default
+    registry empty, the kind itself fails first via
+    `UnknownBarostatKind`.
+  - `IncompatibleThermostat { integrator: String }` — the config
+    pairs an integrator that owns its own thermostat (currently only
+    `langevin-baoab`) with a `[thermostat]` table.
   - `UnknownBondPotential { actual: String, bond_type_index: usize }` —
     a `[[bond_types]]` entry has a `potential` value that is not one of
     the supported strings.
@@ -969,244 +1076,18 @@ Feature: TOML simulation config schema
     Then it returns Ok(config)
     And config.integrator matches IntegratorKind::VelocityVerlet { lossless: false }
 
-  # --- Nosé-Hoover chain ---
-
-  @rq-e7b7a451
-  Scenario: Nosé-Hoover chain with all defaults accepted
-    Given the Background config with [integrator] kind="nose-hoover-chain",
-      temperature=300.0, tau=1.0e-13
-    When load_config is called
-    Then it returns Ok(config)
-    And config.integrator matches IntegratorKind::NoseHooverChain {
-      temperature: 300.0, tau: 1.0e-13,
-      chain_length: 3, yoshida_order: 3, n_resp: 1 }
-
-  @rq-1dccc185
-  Scenario: Nosé-Hoover chain accepts explicit chain parameters
-    Given the Background config with [integrator] kind="nose-hoover-chain",
-      temperature=300.0, tau=1.0e-13, chain_length=5, yoshida_order=5, n_resp=2
-    When load_config is called
-    Then config.integrator matches IntegratorKind::NoseHooverChain {
-      temperature: 300.0, tau: 1.0e-13,
-      chain_length: 5, yoshida_order: 5, n_resp: 2 }
-
-  @rq-8def4545
-  Scenario: Nosé-Hoover chain missing temperature is rejected
-    Given the Background config with [integrator] kind="nose-hoover-chain", tau=1.0e-13
-    When load_config is called
-    Then it returns Err(ConfigError::MissingField { field: "integrator.temperature" })
-
-  @rq-83ab58a3
-  Scenario: Nosé-Hoover chain missing tau is rejected
-    Given the Background config with [integrator] kind="nose-hoover-chain", temperature=300.0
-    When load_config is called
-    Then it returns Err(ConfigError::MissingField { field: "integrator.tau" })
-
-  @rq-a373aadd
-  Scenario: Nosé-Hoover chain rejects non-positive temperature
-    Given the Background config with [integrator] kind="nose-hoover-chain",
-      temperature=0.0, tau=1.0e-13
-    When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.temperature", reason: _ })
-
-  @rq-70dc275e
-  Scenario: Nosé-Hoover chain rejects non-positive tau
-    Given the Background config with [integrator] kind="nose-hoover-chain",
-      temperature=300.0, tau=-1.0e-13
-    When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.tau", reason: _ })
-
-  @rq-acb1bcd5
-  Scenario: Nosé-Hoover chain rejects chain_length = 0
-    Given the Background config with [integrator] kind="nose-hoover-chain",
-      temperature=300.0, tau=1.0e-13, chain_length=0
-    When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.chain_length", reason: _ })
-
-  @rq-28a224e3
-  Scenario: Nosé-Hoover chain rejects yoshida_order outside {1, 3, 5, 7}
-    Given the Background config with [integrator] kind="nose-hoover-chain",
-      temperature=300.0, tau=1.0e-13, yoshida_order=2
-    When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.yoshida_order", reason: _ })
-
-  @rq-809834e7
-  Scenario: Nosé-Hoover chain rejects n_resp = 0
-    Given the Background config with [integrator] kind="nose-hoover-chain",
-      temperature=300.0, tau=1.0e-13, n_resp=0
-    When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.n_resp", reason: _ })
-
-  @rq-4f8f3ffb
-  Scenario: Nosé-Hoover chain rejects velocity-Verlet / Langevin fields
-    Given the Background config with [integrator] kind="nose-hoover-chain",
-      temperature=300.0, tau=1.0e-13, friction=1.0e12 (extra field)
-    When load_config is called
-    Then it returns Err(ConfigError::UnknownIntegratorField { kind: "nose-hoover-chain", field: "friction" })
-
-  # --- CSVR ---
-
-  @rq-d8527fb4
-  Scenario: CSVR with all required fields accepted
-    Given the Background config with [integrator] kind="csvr",
-      temperature=300.0, tau=1.0e-13, seed=42
-    When load_config is called
-    Then it returns Ok(config)
-    And config.integrator matches IntegratorKind::Csvr {
-      temperature: 300.0, tau: 1.0e-13, seed: 42 }
-
-  @rq-ebace0b4
-  Scenario: CSVR missing temperature is rejected
-    Given the Background config with [integrator] kind="csvr", tau=1.0e-13, seed=42
-    When load_config is called
-    Then it returns Err(ConfigError::MissingField { field: "integrator.temperature" })
-
-  @rq-0c549d09
-  Scenario: CSVR missing tau is rejected
-    Given the Background config with [integrator] kind="csvr", temperature=300.0, seed=42
-    When load_config is called
-    Then it returns Err(ConfigError::MissingField { field: "integrator.tau" })
-
-  @rq-0a4fc43f
-  Scenario: CSVR missing seed is rejected
-    Given the Background config with [integrator] kind="csvr",
-      temperature=300.0, tau=1.0e-13
-    When load_config is called
-    Then it returns Err(ConfigError::MissingField { field: "integrator.seed" })
-
-  @rq-e1d4e8ab
-  Scenario: CSVR rejects non-positive temperature
-    Given the Background config with [integrator] kind="csvr",
-      temperature=0.0, tau=1.0e-13, seed=42
-    When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.temperature", reason: _ })
-
-  @rq-535a4569
-  Scenario: CSVR rejects non-positive tau
-    Given the Background config with [integrator] kind="csvr",
-      temperature=300.0, tau=-1.0e-13, seed=42
-    When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.tau", reason: _ })
-
-  @rq-068c64b0
-  Scenario: CSVR rejects extra fields (e.g. NHC's chain_length)
-    Given the Background config with [integrator] kind="csvr",
-      temperature=300.0, tau=1.0e-13, seed=42, chain_length=3 (extra field)
-    When load_config is called
-    Then it returns Err(ConfigError::UnknownIntegratorField { kind: "csvr", field: "chain_length" })
-
-  # --- Andersen ---
-
-  @rq-1ebcd1db
-  Scenario: Andersen with all required fields accepted
-    Given the Background config with [integrator] kind="andersen",
-      temperature=300.0, collision_rate=1.0e12, seed=42
-    When load_config is called
-    Then it returns Ok(config)
-    And config.integrator matches IntegratorKind::Andersen {
-      temperature: 300.0, collision_rate: 1.0e12, seed: 42 }
-
-  @rq-50542279
-  Scenario: Andersen accepts collision_rate = 0
-    Given the Background config with [integrator] kind="andersen",
-      temperature=300.0, collision_rate=0.0, seed=42
-    When load_config is called
-    Then it returns Ok(config)
-
-  @rq-7b08ee3d
-  Scenario: Andersen missing temperature is rejected
-    Given the Background config with [integrator] kind="andersen",
-      collision_rate=1.0e12, seed=42
-    When load_config is called
-    Then it returns Err(ConfigError::MissingField { field: "integrator.temperature" })
-
-  @rq-bf569129
-  Scenario: Andersen missing collision_rate is rejected
-    Given the Background config with [integrator] kind="andersen",
-      temperature=300.0, seed=42
-    When load_config is called
-    Then it returns Err(ConfigError::MissingField { field: "integrator.collision_rate" })
-
-  @rq-5c34021b
-  Scenario: Andersen missing seed is rejected
-    Given the Background config with [integrator] kind="andersen",
-      temperature=300.0, collision_rate=1.0e12
-    When load_config is called
-    Then it returns Err(ConfigError::MissingField { field: "integrator.seed" })
-
-  @rq-a77f2d5e
-  Scenario: Andersen rejects non-positive temperature
-    Given the Background config with [integrator] kind="andersen",
-      temperature=0.0, collision_rate=1.0e12, seed=42
-    When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.temperature", reason: _ })
-
-  @rq-cee157e5
-  Scenario: Andersen rejects negative collision_rate
-    Given the Background config with [integrator] kind="andersen",
-      temperature=300.0, collision_rate=-1.0, seed=42
-    When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.collision_rate", reason: _ })
-
-  @rq-c4f67467
-  Scenario: Andersen rejects extra fields (e.g. CSVR's tau)
-    Given the Background config with [integrator] kind="andersen",
-      temperature=300.0, collision_rate=1.0e12, seed=42, tau=1.0e-13 (extra field)
-    When load_config is called
-    Then it returns Err(ConfigError::UnknownIntegratorField { kind: "andersen", field: "tau" })
-
-  # --- Berendsen ---
-
-  @rq-8ca0bc54
-  Scenario: Berendsen with all required fields accepted
-    Given the Background config with [integrator] kind="berendsen",
-      temperature=300.0, tau=1.0e-13
-    When load_config is called
-    Then it returns Ok(config)
-    And config.integrator matches IntegratorKind::Berendsen {
-      temperature: 300.0, tau: 1.0e-13 }
-
-  @rq-ecf796d3
-  Scenario: Berendsen missing temperature is rejected
-    Given the Background config with [integrator] kind="berendsen", tau=1.0e-13
-    When load_config is called
-    Then it returns Err(ConfigError::MissingField { field: "integrator.temperature" })
-
-  @rq-b6ed3328
-  Scenario: Berendsen missing tau is rejected
-    Given the Background config with [integrator] kind="berendsen", temperature=300.0
-    When load_config is called
-    Then it returns Err(ConfigError::MissingField { field: "integrator.tau" })
-
-  @rq-fdb8be77
-  Scenario: Berendsen rejects non-positive temperature
-    Given the Background config with [integrator] kind="berendsen",
-      temperature=0.0, tau=1.0e-13
-    When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.temperature", reason: _ })
-
-  @rq-c74dec33
-  Scenario: Berendsen rejects non-positive tau
-    Given the Background config with [integrator] kind="berendsen",
-      temperature=300.0, tau=-1.0e-13
-    When load_config is called
-    Then it returns Err(ConfigError::InvalidValue { field: "integrator.tau", reason: _ })
-
-  @rq-b270fb04
-  Scenario: Berendsen rejects extra fields (e.g. seed from CSVR/Andersen)
-    Given the Background config with [integrator] kind="berendsen",
-      temperature=300.0, tau=1.0e-13, seed=42
-    When load_config is called
-    Then it returns Err(ConfigError::UnknownIntegratorField {
-      kind: "berendsen", field: "seed" })
-
-  @rq-f076e97c
-  Scenario: Berendsen rejects extra fields (e.g. collision_rate from Andersen)
-    Given the Background config with [integrator] kind="berendsen",
-      temperature=300.0, tau=1.0e-13, collision_rate=1.0e12
-    When load_config is called
-    Then it returns Err(ConfigError::UnknownIntegratorField {
-      kind: "berendsen", field: "collision_rate" })
+  # --- Per-thermostat-kind parameter validation ---
+  # Scenarios validating temperature / tau / seed / extra-field handling
+  # for individual `[thermostat]` kinds live alongside each thermostat's
+  # algorithmic scenarios:
+  #   - nose-hoover-chain.md
+  #   - csvr.md
+  #   - andersen.md
+  #   - berendsen.md
+  # They reference `ConfigError::MissingField { field: "thermostat.*" }`,
+  # `ConfigError::InvalidValue { field: "thermostat.*", .. }`, and
+  # `ConfigError::UnknownThermostatField` to exercise the same loader path
+  # documented in this section.
 
   @rq-1e1c5f3b
   Scenario: Missing [[particle_types]] is rejected
@@ -1723,4 +1604,106 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Ok(config)
     And config.output.log_every equals 0
+
+  # --- [thermostat] presence and absence ---
+
+  @rq-ca356c08
+  Scenario: [thermostat] section absent yields config.thermostat = None
+    Given the Background config with no [thermostat] section
+    When load_config is called
+    Then it returns Ok(config)
+    And config.thermostat is None
+
+  @rq-b7cd6d16
+  Scenario: [thermostat] kind = "berendsen" is accepted
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [thermostat] section with kind="berendsen", temperature=300.0, tau=1.0e-13
+    When load_config is called
+    Then it returns Ok(config)
+    And config.thermostat matches Some(ThermostatKind::Berendsen { temperature: 300.0, tau: 1.0e-13 })
+
+  @rq-5c28eee0
+  Scenario: [thermostat] kind = "csvr" requires a seed
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [thermostat] section with kind="csvr", temperature=300.0, tau=1.0e-13
+      (no seed)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "thermostat.seed" })
+
+  @rq-2618e113
+  Scenario: [thermostat] unknown kind is rejected
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [thermostat] section with kind="not-a-real-thermostat"
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownThermostatKind { actual: "not-a-real-thermostat" })
+
+  @rq-c4a74903
+  Scenario: [thermostat] missing kind is rejected
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [thermostat] section containing only temperature=300.0
+      (no kind field)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "thermostat.kind" })
+
+  @rq-4e0e1654
+  Scenario: [thermostat] extra fields for the chosen kind are rejected
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [thermostat] section with kind="berendsen", temperature=300.0,
+      tau=1.0e-13, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownThermostatField {
+      kind: "berendsen", field: "seed" })
+
+  # --- Integrator-owns-thermostat compatibility ---
+
+  @rq-bdd03f85
+  Scenario: langevin-baoab + [thermostat] is rejected
+    Given the Background config with [integrator] kind="langevin-baoab",
+      friction=1.0e12, temperature=300.0, seed=1
+    And a [thermostat] section with kind="csvr", temperature=300.0,
+      tau=1.0e-13, seed=2
+    When load_config is called
+    Then it returns Err(ConfigError::IncompatibleThermostat {
+      integrator: "langevin-baoab" })
+
+  @rq-c4ae19e0
+  Scenario: velocity-verlet + [thermostat] is accepted
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [thermostat] section with kind="csvr", temperature=300.0,
+      tau=1.0e-13, seed=1
+    When load_config is called
+    Then it returns Ok(config)
+    And config.integrator matches IntegratorKind::VelocityVerlet { .. }
+    And config.thermostat matches Some(ThermostatKind::Csvr { .. })
+
+  @rq-4cd2ec5b
+  Scenario: IntegratorKind::owns_thermostat agrees with the validation rule
+    Given an IntegratorKind::VelocityVerlet { lossless: false }
+    Then kind.owns_thermostat() returns false
+    Given an IntegratorKind::LangevinBaoab { friction: 1.0, temperature: 300.0, seed: 0 }
+    Then kind.owns_thermostat() returns true
+
+  # --- [barostat] section ---
+
+  @rq-4bbbada4
+  Scenario: [barostat] section absent yields config.barostat = None
+    Given the Background config with no [barostat] section
+    When load_config is called
+    Then it returns Ok(config)
+    And config.barostat is None
+
+  @rq-3127ab44
+  Scenario: Any [barostat] kind is rejected while the registry is empty
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [barostat] section with kind="anything"
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownBarostatKind { actual: "anything" })
+
+  @rq-bda9c0a2
+  Scenario: [barostat] missing kind is rejected
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [barostat] section containing only an arbitrary field
+      (no kind field)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "barostat.kind" })
 ```

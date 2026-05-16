@@ -1,4 +1,8 @@
-// rq-4f386df8 rq-5cb33196 rq-67414c32
+// rq-e0a0553d rq-6cd635cd rq-6c5b4246
+//
+// Three orthogonal slot frameworks: integrator, thermostat, barostat.
+// The runner chains the slots `apply_pre → step → apply_post → apply`
+// per timestep (see `simulation-runner.md` and `framework.md`).
 use cudarc::driver::CudaSlice;
 
 use crate::forces::{ForceField, ForceFieldError};
@@ -7,12 +11,12 @@ use crate::gpu::{
     compute_kinetic_energy, lan_drift_half, lan_ou_step, rescale_velocities, vv_kick,
     vv_kick_drift, vv_kick_drift_lossless, vv_kick_lossless,
 };
-use crate::io::config::IntegratorKind;
+use crate::io::config::{BarostatKind, IntegratorKind, ThermostatKind};
 use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
 
-// rq-a5069572 rq-e1ceb5c0 rq-6cf916af
+// rq-2ccf40de
 #[derive(Debug, thiserror::Error)]
 pub enum IntegratorError {
     #[error("{0}")]
@@ -25,8 +29,33 @@ pub enum IntegratorError {
     UnknownKind(String),
 }
 
-// rq-e4c4ff61
+// rq-2ccf40de
+#[derive(Debug, thiserror::Error)]
+pub enum ThermostatError {
+    #[error("{0}")]
+    Gpu(#[from] GpuError),
+    #[error("{0}")]
+    Timings(#[from] TimingsError),
+    #[error("unknown thermostat kind `{0}`")]
+    UnknownKind(String),
+}
+
+// rq-2ccf40de
+#[derive(Debug, thiserror::Error)]
+pub enum BarostatError {
+    #[error("{0}")]
+    Gpu(#[from] GpuError),
+    #[error("{0}")]
+    Timings(#[from] TimingsError),
+    #[error("unknown barostat kind `{0}`")]
+    UnknownKind(String),
+}
+
+// --- Integrator trait, builder, registry ------------------------------
+
+// rq-78f484d9
 pub trait Integrator: std::fmt::Debug + Send {
+    // rq-aa68f468
     fn step(
         &mut self,
         buffers: &mut ParticleBuffers,
@@ -36,19 +65,10 @@ pub trait Integrator: std::fmt::Debug + Send {
         timings: &mut Timings,
     ) -> Result<(), IntegratorError>;
 
-    /// Diagnostic column names this integrator wants the runner to
-    /// include in the CSV log (`io/log-output.md`). Returned slice has
-    /// `'static` lifetime so the runner can pass it to `LogWriter::open`
-    /// without copying. Default: empty.
     fn log_column_names(&self) -> &'static [&'static str] {
         &[]
     }
 
-    /// Current values of those columns. The runner supplies the total
-    /// kinetic and potential energies (in joules) it has just computed
-    /// for the log row; the integrator combines them with its own state
-    /// to produce the requested values. Returned `Vec` length must
-    /// equal `log_column_names().len()`. Default: empty.
     fn log_column_values(
         &self,
         _kinetic_energy: f64,
@@ -58,7 +78,7 @@ pub trait Integrator: std::fmt::Debug + Send {
     }
 }
 
-// rq-87fdd9b1
+// rq-29e08cb5
 pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
     fn kind_name(&self) -> &'static str;
     fn build(
@@ -69,7 +89,7 @@ pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
     ) -> Result<Box<dyn Integrator>, IntegratorError>;
 }
 
-// rq-1d5b5e35
+// rq-4901507f
 #[derive(Debug)]
 pub struct IntegratorRegistry {
     pub builders: Vec<Box<dyn IntegratorBuilder>>,
@@ -80,15 +100,12 @@ impl IntegratorRegistry {
         IntegratorRegistry { builders: Vec::new() }
     }
 
+    // rq-4901507f
     pub fn with_builtins() -> Self {
         IntegratorRegistry {
             builders: vec![
                 Box::new(VelocityVerletBuilder),
                 Box::new(LangevinBaoabBuilder),
-                Box::new(NoseHooverChainBuilder),
-                Box::new(CsvrBuilder),
-                Box::new(AndersenBuilder),
-                Box::new(BerendsenBuilder),
             ],
         }
     }
@@ -97,7 +114,7 @@ impl IntegratorRegistry {
         self.builders.push(builder);
     }
 
-    // rq-df39d15b
+    // rq-24f6b8b9
     pub fn build(
         &self,
         kind: &IntegratorKind,
@@ -120,7 +137,194 @@ impl Default for IntegratorRegistry {
     }
 }
 
-// --- Velocity Verlet ---
+// --- Thermostat trait, builder, registry ------------------------------
+
+// rq-5d9ed248
+pub trait Thermostat: std::fmt::Debug + Send {
+    // rq-2fe47a86
+    fn apply_pre(
+        &mut self,
+        _buffers: &mut ParticleBuffers,
+        _dt: f32,
+        _timings: &mut Timings,
+    ) -> Result<(), ThermostatError> {
+        Ok(())
+    }
+
+    // rq-7a124d43
+    fn apply_post(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), ThermostatError>;
+
+    fn log_column_names(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    fn log_column_values(
+        &self,
+        _kinetic_energy: f64,
+        _potential_energy: f64,
+    ) -> Vec<f64> {
+        Vec::new()
+    }
+}
+
+// rq-29e08cb5
+pub trait ThermostatBuilder: std::fmt::Debug + Send + Sync {
+    fn kind_name(&self) -> &'static str;
+    fn build(
+        &self,
+        gpu: &GpuContext,
+        particle_count: usize,
+        kind: &ThermostatKind,
+    ) -> Result<Box<dyn Thermostat>, ThermostatError>;
+}
+
+// rq-4901507f
+#[derive(Debug)]
+pub struct ThermostatRegistry {
+    pub builders: Vec<Box<dyn ThermostatBuilder>>,
+}
+
+impl ThermostatRegistry {
+    pub fn new() -> Self {
+        ThermostatRegistry { builders: Vec::new() }
+    }
+
+    // rq-4901507f
+    pub fn with_builtins() -> Self {
+        ThermostatRegistry {
+            builders: vec![
+                Box::new(NoseHooverChainBuilder),
+                Box::new(CsvrBuilder),
+                Box::new(AndersenBuilder),
+                Box::new(BerendsenBuilder),
+            ],
+        }
+    }
+
+    pub fn register(&mut self, builder: Box<dyn ThermostatBuilder>) {
+        self.builders.push(builder);
+    }
+
+    // rq-678c233d
+    pub fn build_optional(
+        &self,
+        kind: Option<&ThermostatKind>,
+        gpu: &GpuContext,
+        particle_count: usize,
+    ) -> Result<Option<Box<dyn Thermostat>>, ThermostatError> {
+        let Some(kind) = kind else { return Ok(None) };
+        let target = kind.name();
+        for b in &self.builders {
+            if b.kind_name() == target {
+                return Ok(Some(b.build(gpu, particle_count, kind)?));
+            }
+        }
+        Err(ThermostatError::UnknownKind(target.to_string()))
+    }
+}
+
+impl Default for ThermostatRegistry {
+    fn default() -> Self {
+        ThermostatRegistry::with_builtins()
+    }
+}
+
+// --- Barostat trait, builder, registry --------------------------------
+
+// rq-076617ab
+pub trait Barostat: std::fmt::Debug + Send {
+    // rq-1179e42f
+    fn apply(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &mut SimulationBox,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), BarostatError>;
+
+    fn log_column_names(&self) -> &'static [&'static str] {
+        &[]
+    }
+
+    fn log_column_values(
+        &self,
+        _kinetic_energy: f64,
+        _potential_energy: f64,
+    ) -> Vec<f64> {
+        Vec::new()
+    }
+}
+
+// rq-29e08cb5
+pub trait BarostatBuilder: std::fmt::Debug + Send + Sync {
+    fn kind_name(&self) -> &'static str;
+    fn build(
+        &self,
+        gpu: &GpuContext,
+        particle_count: usize,
+        kind: &BarostatKind,
+    ) -> Result<Box<dyn Barostat>, BarostatError>;
+}
+
+// rq-4901507f
+#[derive(Debug)]
+pub struct BarostatRegistry {
+    pub builders: Vec<Box<dyn BarostatBuilder>>,
+}
+
+impl BarostatRegistry {
+    pub fn new() -> Self {
+        BarostatRegistry { builders: Vec::new() }
+    }
+
+    // rq-4901507f
+    // The default registry registers no barostat implementations. The
+    // trait surface and config slot exist so that the Berendsen barostat
+    // (and future barostats) can be added without further framework
+    // changes; see `framework.md`.
+    pub fn with_builtins() -> Self {
+        BarostatRegistry { builders: Vec::new() }
+    }
+
+    pub fn register(&mut self, builder: Box<dyn BarostatBuilder>) {
+        self.builders.push(builder);
+    }
+
+    // rq-9548bc1a
+    pub fn build_optional(
+        &self,
+        kind: Option<&BarostatKind>,
+        gpu: &GpuContext,
+        particle_count: usize,
+    ) -> Result<Option<Box<dyn Barostat>>, BarostatError> {
+        let Some(kind) = kind else { return Ok(None) };
+        let target = kind.name();
+        for b in &self.builders {
+            if b.kind_name() == target {
+                return Ok(Some(b.build(gpu, particle_count, kind)?));
+            }
+        }
+        Err(BarostatError::UnknownKind(target.to_string()))
+    }
+}
+
+impl Default for BarostatRegistry {
+    fn default() -> Self {
+        BarostatRegistry::with_builtins()
+    }
+}
+
+// =====================================================================
+// Concrete integrators
+// =====================================================================
+
+// --- Velocity Verlet --------------------------------------------------
+// rq-09a2e15f
 
 #[derive(Debug)]
 pub struct VelocityVerletState {
@@ -128,7 +332,6 @@ pub struct VelocityVerletState {
 }
 
 impl Integrator for VelocityVerletState {
-    // rq-cf361ff5
     fn step(
         &mut self,
         buffers: &mut ParticleBuffers,
@@ -195,7 +398,8 @@ impl IntegratorBuilder for VelocityVerletBuilder {
     }
 }
 
-// --- Langevin BAOAB ---
+// --- Langevin BAOAB ---------------------------------------------------
+// rq-d5a4f220
 
 #[derive(Debug)]
 pub struct LangevinBaoabState {
@@ -282,295 +486,10 @@ impl IntegratorBuilder for LangevinBaoabBuilder {
     }
 }
 
-// --- Nosé-Hoover chain (NHC) ---
-// rq-f606ff6f
-
-// Suzuki-Yoshida sub-step weights. The arrays are exposed as `&'static`
-// slices via `yoshida_weights`. The n=3 and n=5 values come from
-// `1/(2 − 2^(1/3))` and `1/(4 − 4^(1/3))`, precomputed in `f64`. The
-// n=7 sequence is the standard Yoshida 1990 / Suzuki 1990 7-stage
-// symmetric splitting.
-static YOSHIDA_1: [f64; 1] = [1.0];
-static YOSHIDA_3: [f64; 3] = [
-    1.3512071919596577,
-    -1.7024143839193155,
-    1.3512071919596577,
-];
-static YOSHIDA_5: [f64; 5] = [
-    0.41449077179437574,
-    0.41449077179437574,
-    -0.6579630871775030,
-    0.41449077179437574,
-    0.41449077179437574,
-];
-static YOSHIDA_7: [f64; 7] = [
-    0.7845136104775573,
-    0.2355732133593582,
-    -1.1776799841788710,
-    1.3151863206839023,
-    -1.1776799841788710,
-    0.2355732133593582,
-    0.7845136104775573,
-];
-
-fn yoshida_weights(n: u32) -> &'static [f64] {
-    match n {
-        1 => &YOSHIDA_1,
-        3 => &YOSHIDA_3,
-        5 => &YOSHIDA_5,
-        7 => &YOSHIDA_7,
-        _ => panic!("invalid yoshida_order {n}: must be 1, 3, 5, or 7"),
-    }
-}
-
-#[derive(Debug)]
-pub struct NoseHooverChainState {
-    pub temperature: f64,
-    pub tau: f64,
-    pub chain_length: u32,
-    pub yoshida_order: u32,
-    pub n_resp: u32,
-    pub g_dof: u32,
-    pub kt: f64,
-    pub q_mass: Vec<f64>,
-    pub xi: Vec<f64>,
-    pub p_xi: Vec<f64>,
-    yoshida: &'static [f64],
-    ke_scratch: CudaSlice<f32>,
-    most_recent_ke: f64,
-}
-
-impl NoseHooverChainState {
-    fn new(
-        gpu: &GpuContext,
-        particle_count: usize,
-        temperature: f64,
-        tau: f64,
-        chain_length: u32,
-        yoshida_order: u32,
-        n_resp: u32,
-    ) -> Result<Self, GpuError> {
-        let m = chain_length as usize;
-        let g_dof = ((3 * particle_count) as i64 - 3).max(0) as u32;
-        let kt = BOLTZMANN_J_PER_K * temperature;
-        let tau2 = tau * tau;
-        let mut q_mass = vec![0.0_f64; m];
-        if m > 0 {
-            q_mass[0] = (g_dof as f64) * kt * tau2;
-            for j in 1..m {
-                q_mass[j] = kt * tau2;
-            }
-        }
-        let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
-        Ok(NoseHooverChainState {
-            temperature,
-            tau,
-            chain_length,
-            yoshida_order,
-            n_resp,
-            g_dof,
-            kt,
-            q_mass,
-            xi: vec![0.0_f64; m],
-            p_xi: vec![0.0_f64; m],
-            yoshida: yoshida_weights(yoshida_order),
-            ke_scratch,
-            most_recent_ke: 0.0,
-        })
-    }
-
-    // One MKT chain sub-step of length `dt`. `k` is the current kinetic
-    // energy in joules; the returned value is `k` after the velocity
-    // rescale this sub-step performed. Mutates `self.xi`, `self.p_xi`,
-    // and `buffers.velocities_*`.
-    fn chain_sub_step(
-        &mut self,
-        dt: f64,
-        buffers: &mut ParticleBuffers,
-        mut k: f64,
-        timings: &mut Timings,
-    ) -> Result<f64, IntegratorError> {
-        let m = self.chain_length as usize;
-        if m == 0 {
-            return Ok(k);
-        }
-        let kt = self.kt;
-        let g = self.g_dof as f64;
-
-        // High-to-low cascade.
-        for j in (0..m).rev() {
-            let s = if j == m - 1 {
-                1.0
-            } else {
-                (-dt / 8.0 * self.p_xi[j + 1] / self.q_mass[j + 1]).exp()
-            };
-            self.p_xi[j] *= s;
-            let g_j = if j == 0 {
-                2.0 * k - g * kt
-            } else {
-                self.p_xi[j - 1].powi(2) / self.q_mass[j - 1] - kt
-            };
-            self.p_xi[j] += dt / 4.0 * g_j;
-            self.p_xi[j] *= s;
-        }
-
-        // Particle velocity rescale.
-        let factor = (-dt / 2.0 * self.p_xi[0] / self.q_mass[0]).exp() as f32;
-        timings.kernel_start(KernelStage::NHC_RESCALE_VELOCITIES)?;
-        rescale_velocities(buffers, factor)?;
-        timings.kernel_stop(KernelStage::NHC_RESCALE_VELOCITIES)?;
-        let factor_f64 = factor as f64;
-        k *= factor_f64 * factor_f64;
-
-        // Chain position update.
-        for j in 0..m {
-            self.xi[j] += dt / 2.0 * self.p_xi[j] / self.q_mass[j];
-        }
-
-        // Low-to-high cascade.
-        for j in 0..m {
-            let s = if j == m - 1 {
-                1.0
-            } else {
-                (-dt / 8.0 * self.p_xi[j + 1] / self.q_mass[j + 1]).exp()
-            };
-            self.p_xi[j] *= s;
-            let g_j = if j == 0 {
-                2.0 * k - g * kt
-            } else {
-                self.p_xi[j - 1].powi(2) / self.q_mass[j - 1] - kt
-            };
-            self.p_xi[j] += dt / 4.0 * g_j;
-            self.p_xi[j] *= s;
-        }
-
-        Ok(k)
-    }
-
-    fn thermostat_half_step(
-        &mut self,
-        dt: f32,
-        buffers: &mut ParticleBuffers,
-        mut k: f64,
-        timings: &mut Timings,
-    ) -> Result<f64, IntegratorError> {
-        let dt = dt as f64;
-        let n_resp = self.n_resp as f64;
-        for w in self.yoshida.to_vec() {
-            for _ in 0..self.n_resp {
-                let delta_t = w * dt / (2.0 * n_resp);
-                k = self.chain_sub_step(delta_t, buffers, k, timings)?;
-            }
-        }
-        Ok(k)
-    }
-}
-
-impl Integrator for NoseHooverChainState {
-    fn step(
-        &mut self,
-        buffers: &mut ParticleBuffers,
-        sim_box: &mut SimulationBox,
-        force_field: &mut ForceField,
-        dt: f32,
-        timings: &mut Timings,
-    ) -> Result<(), IntegratorError> {
-        if buffers.particle_count() == 0 {
-            return Ok(());
-        }
-
-        // First KE reduce + thermostat half-step.
-        timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        let k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
-        timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        let k = self.thermostat_half_step(dt, buffers, k, timings)?;
-        let _ = k;
-
-        // Velocity-Verlet core.
-        timings.kernel_start(KernelStage::VV_KICK_DRIFT)?;
-        vv_kick_drift(buffers, sim_box, dt)?;
-        timings.kernel_stop(KernelStage::VV_KICK_DRIFT)?;
-
-        force_field.step(buffers, sim_box, timings)?;
-
-        timings.kernel_start(KernelStage::VV_KICK)?;
-        vv_kick(buffers, dt)?;
-        timings.kernel_stop(KernelStage::VV_KICK)?;
-
-        // Second KE reduce + thermostat half-step.
-        timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        let k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
-        timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        let k = self.thermostat_half_step(dt, buffers, k, timings)?;
-        self.most_recent_ke = k;
-
-        Ok(())
-    }
-
-    fn log_column_names(&self) -> &'static [&'static str] {
-        &["nhc_conserved"]
-    }
-
-    fn log_column_values(
-        &self,
-        kinetic_energy: f64,
-        potential_energy: f64,
-    ) -> Vec<f64> {
-        let mut chain_term = 0.0_f64;
-        for (p, q) in self.p_xi.iter().zip(self.q_mass.iter()) {
-            chain_term += (*p) * (*p) / (2.0 * (*q));
-        }
-        if !self.xi.is_empty() {
-            chain_term += (self.g_dof as f64) * self.kt * self.xi[0];
-            for &xi_j in self.xi.iter().skip(1) {
-                chain_term += self.kt * xi_j;
-            }
-        }
-        vec![kinetic_energy + potential_energy + chain_term]
-    }
-}
-
-#[derive(Debug)]
-pub struct NoseHooverChainBuilder;
-
-impl IntegratorBuilder for NoseHooverChainBuilder {
-    fn kind_name(&self) -> &'static str {
-        "nose-hoover-chain"
-    }
-
-    fn build(
-        &self,
-        gpu: &GpuContext,
-        particle_count: usize,
-        kind: &IntegratorKind,
-    ) -> Result<Box<dyn Integrator>, IntegratorError> {
-        match kind {
-            IntegratorKind::NoseHooverChain {
-                temperature,
-                tau,
-                chain_length,
-                yoshida_order,
-                n_resp,
-            } => {
-                let state = NoseHooverChainState::new(
-                    gpu,
-                    particle_count,
-                    *temperature,
-                    *tau,
-                    *chain_length,
-                    *yoshida_order,
-                    *n_resp,
-                )?;
-                Ok(Box::new(state))
-            }
-            other => Err(IntegratorError::UnknownKind(other.name().to_string())),
-        }
-    }
-}
-
-
-// --- Host-side Philox-4×32-10 RNG ---
-// rq-891232bf
+// =====================================================================
+// Host-side Philox-4×32-10 RNG (shared utility for stochastic thermostats)
+// =====================================================================
+// rq-3d7c8e53
 //
 // Byte-for-byte equivalent to the device-side `philox4x32_10` in
 // `kernels/langevin.cu`. Reusable from any host-side stochastic
@@ -644,11 +563,294 @@ pub fn philox_normal(
     r * theta.cos()
 }
 
-// --- CSVR (Bussi-Donadio-Parrinello canonical sampling) ---
+// =====================================================================
+// Concrete thermostats
+// =====================================================================
+
+// --- Nosé-Hoover chain (NHC) -----------------------------------------
+// rq-f606ff6f
+
+// Suzuki-Yoshida sub-step weights. The arrays are exposed as `&'static`
+// slices via `yoshida_weights`.
+static YOSHIDA_1: [f64; 1] = [1.0];
+static YOSHIDA_3: [f64; 3] = [
+    1.3512071919596577,
+    -1.7024143839193155,
+    1.3512071919596577,
+];
+static YOSHIDA_5: [f64; 5] = [
+    0.41449077179437574,
+    0.41449077179437574,
+    -0.6579630871775030,
+    0.41449077179437574,
+    0.41449077179437574,
+];
+static YOSHIDA_7: [f64; 7] = [
+    0.7845136104775573,
+    0.2355732133593582,
+    -1.1776799841788710,
+    1.3151863206839023,
+    -1.1776799841788710,
+    0.2355732133593582,
+    0.7845136104775573,
+];
+
+fn yoshida_weights(n: u32) -> &'static [f64] {
+    match n {
+        1 => &YOSHIDA_1,
+        3 => &YOSHIDA_3,
+        5 => &YOSHIDA_5,
+        7 => &YOSHIDA_7,
+        _ => panic!("invalid yoshida_order {n}: must be 1, 3, 5, or 7"),
+    }
+}
+
+// rq-62e2bef5
+#[derive(Debug)]
+pub struct NoseHooverChainThermostat {
+    pub temperature: f64,
+    pub tau: f64,
+    pub chain_length: u32,
+    pub yoshida_order: u32,
+    pub n_resp: u32,
+    pub g_dof: u32,
+    pub kt: f64,
+    pub q_mass: Vec<f64>,
+    pub xi: Vec<f64>,
+    pub p_xi: Vec<f64>,
+    yoshida: &'static [f64],
+    ke_scratch: CudaSlice<f32>,
+    most_recent_ke: f64,
+}
+
+impl NoseHooverChainThermostat {
+    fn new(
+        gpu: &GpuContext,
+        particle_count: usize,
+        temperature: f64,
+        tau: f64,
+        chain_length: u32,
+        yoshida_order: u32,
+        n_resp: u32,
+    ) -> Result<Self, GpuError> {
+        let m = chain_length as usize;
+        let g_dof = ((3 * particle_count) as i64 - 3).max(0) as u32;
+        let kt = BOLTZMANN_J_PER_K * temperature;
+        let tau2 = tau * tau;
+        let mut q_mass = vec![0.0_f64; m];
+        if m > 0 {
+            q_mass[0] = (g_dof as f64) * kt * tau2;
+            for j in 1..m {
+                q_mass[j] = kt * tau2;
+            }
+        }
+        let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
+        Ok(NoseHooverChainThermostat {
+            temperature,
+            tau,
+            chain_length,
+            yoshida_order,
+            n_resp,
+            g_dof,
+            kt,
+            q_mass,
+            xi: vec![0.0_f64; m],
+            p_xi: vec![0.0_f64; m],
+            yoshida: yoshida_weights(yoshida_order),
+            ke_scratch,
+            most_recent_ke: 0.0,
+        })
+    }
+
+    fn chain_sub_step(
+        &mut self,
+        dt: f64,
+        buffers: &mut ParticleBuffers,
+        mut k: f64,
+        timings: &mut Timings,
+    ) -> Result<f64, ThermostatError> {
+        let m = self.chain_length as usize;
+        if m == 0 {
+            return Ok(k);
+        }
+        let kt = self.kt;
+        let g = self.g_dof as f64;
+
+        // High-to-low cascade.
+        for j in (0..m).rev() {
+            let s = if j == m - 1 {
+                1.0
+            } else {
+                (-dt / 8.0 * self.p_xi[j + 1] / self.q_mass[j + 1]).exp()
+            };
+            self.p_xi[j] *= s;
+            let g_j = if j == 0 {
+                2.0 * k - g * kt
+            } else {
+                self.p_xi[j - 1].powi(2) / self.q_mass[j - 1] - kt
+            };
+            self.p_xi[j] += dt / 4.0 * g_j;
+            self.p_xi[j] *= s;
+        }
+
+        // Particle velocity rescale.
+        let factor = (-dt / 2.0 * self.p_xi[0] / self.q_mass[0]).exp() as f32;
+        timings.kernel_start(KernelStage::NHC_RESCALE_VELOCITIES)?;
+        rescale_velocities(buffers, factor)?;
+        timings.kernel_stop(KernelStage::NHC_RESCALE_VELOCITIES)?;
+        let factor_f64 = factor as f64;
+        k *= factor_f64 * factor_f64;
+
+        // Chain position update.
+        for j in 0..m {
+            self.xi[j] += dt / 2.0 * self.p_xi[j] / self.q_mass[j];
+        }
+
+        // Low-to-high cascade.
+        for j in 0..m {
+            let s = if j == m - 1 {
+                1.0
+            } else {
+                (-dt / 8.0 * self.p_xi[j + 1] / self.q_mass[j + 1]).exp()
+            };
+            self.p_xi[j] *= s;
+            let g_j = if j == 0 {
+                2.0 * k - g * kt
+            } else {
+                self.p_xi[j - 1].powi(2) / self.q_mass[j - 1] - kt
+            };
+            self.p_xi[j] += dt / 4.0 * g_j;
+            self.p_xi[j] *= s;
+        }
+
+        Ok(k)
+    }
+
+    fn thermostat_half_step(
+        &mut self,
+        dt: f32,
+        buffers: &mut ParticleBuffers,
+        mut k: f64,
+        timings: &mut Timings,
+    ) -> Result<f64, ThermostatError> {
+        let dt = dt as f64;
+        let n_resp = self.n_resp as f64;
+        for w in self.yoshida.to_vec() {
+            for _ in 0..self.n_resp {
+                let delta_t = w * dt / (2.0 * n_resp);
+                k = self.chain_sub_step(delta_t, buffers, k, timings)?;
+            }
+        }
+        Ok(k)
+    }
+}
+
+impl Thermostat for NoseHooverChainThermostat {
+    // rq-2fe47a86
+    fn apply_pre(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), ThermostatError> {
+        if buffers.particle_count() == 0 {
+            return Ok(());
+        }
+        timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
+        let k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+        timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
+        self.thermostat_half_step(dt, buffers, k, timings)?;
+        Ok(())
+    }
+
+    // rq-7a124d43
+    fn apply_post(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), ThermostatError> {
+        if buffers.particle_count() == 0 {
+            return Ok(());
+        }
+        timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
+        let k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+        timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
+        let k = self.thermostat_half_step(dt, buffers, k, timings)?;
+        self.most_recent_ke = k;
+        Ok(())
+    }
+
+    // rq-8a571737
+    fn log_column_names(&self) -> &'static [&'static str] {
+        &["nhc_conserved"]
+    }
+
+    // rq-f94f6bac
+    fn log_column_values(
+        &self,
+        kinetic_energy: f64,
+        potential_energy: f64,
+    ) -> Vec<f64> {
+        let mut chain_term = 0.0_f64;
+        for (p, q) in self.p_xi.iter().zip(self.q_mass.iter()) {
+            chain_term += (*p) * (*p) / (2.0 * (*q));
+        }
+        if !self.xi.is_empty() {
+            chain_term += (self.g_dof as f64) * self.kt * self.xi[0];
+            for &xi_j in self.xi.iter().skip(1) {
+                chain_term += self.kt * xi_j;
+            }
+        }
+        vec![kinetic_energy + potential_energy + chain_term]
+    }
+}
+
+// rq-4bd6ff2b
+#[derive(Debug)]
+pub struct NoseHooverChainBuilder;
+
+impl ThermostatBuilder for NoseHooverChainBuilder {
+    fn kind_name(&self) -> &'static str {
+        "nose-hoover-chain"
+    }
+
+    fn build(
+        &self,
+        gpu: &GpuContext,
+        particle_count: usize,
+        kind: &ThermostatKind,
+    ) -> Result<Box<dyn Thermostat>, ThermostatError> {
+        match kind {
+            ThermostatKind::NoseHooverChain {
+                temperature,
+                tau,
+                chain_length,
+                yoshida_order,
+                n_resp,
+            } => {
+                let state = NoseHooverChainThermostat::new(
+                    gpu,
+                    particle_count,
+                    *temperature,
+                    *tau,
+                    *chain_length,
+                    *yoshida_order,
+                    *n_resp,
+                )?;
+                Ok(Box::new(state))
+            }
+            other => Err(ThermostatError::UnknownKind(other.name().to_string())),
+        }
+    }
+}
+
+// --- CSVR (Bussi-Donadio-Parrinello canonical sampling) --------------
 // rq-891232bf
 
+// rq-47d91c7d
 #[derive(Debug)]
-pub struct CsvrState {
+pub struct CsvrThermostat {
     pub temperature: f64,
     pub tau: f64,
     pub seed: u64,
@@ -660,7 +862,7 @@ pub struct CsvrState {
     most_recent_ke: f64,
 }
 
-impl CsvrState {
+impl CsvrThermostat {
     fn new(
         gpu: &GpuContext,
         particle_count: usize,
@@ -671,7 +873,7 @@ impl CsvrState {
         let g_dof = ((3 * particle_count) as i64 - 3).max(1) as u32;
         let kt_target = BOLTZMANN_J_PER_K * temperature;
         let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
-        Ok(CsvrState {
+        Ok(CsvrThermostat {
             temperature,
             tau,
             seed,
@@ -684,21 +886,6 @@ impl CsvrState {
         })
     }
 
-    /// Bussi-Donadio-Parrinello transition kernel. Given the
-    /// instantaneous kinetic energy `k_old` and the timestep `dt`,
-    /// draws the new kinetic energy `k_new` from the CSVR Markov
-    /// kernel and returns it. Pure host-side function; the only
-    /// side-effect is the `draw_counter` increment performed in
-    /// `step()` before this is called.
-    ///
-    /// Canonical form (Bussi 2007 / PLUMED `csvr.cc`):
-    /// ```text
-    ///   K_new = c · K + (K_target/N_f)(1-c)(S + R²)
-    ///                 + 2 · R · sqrt(c(1-c) · K · K_target / N_f)
-    /// ```
-    /// where `c = exp(-dt/τ)`, `R ~ N(0,1)` is independent of
-    /// `S = Σ_{i=1..N_f-1} ξ_i²` (chi-squared with N_f-1 DOF). At
-    /// equilibrium `E[K_new] = K_target` exactly.
     fn draw_new_kinetic_energy(&self, k_old: f64, dt: f32) -> f64 {
         let c = (-(dt as f64) / self.tau).exp();
         let nf = self.g_dof as f64;
@@ -710,10 +897,7 @@ impl CsvrState {
         let ctr_lo = self.draw_counter as u32;
         let ctr_hi = (self.draw_counter >> 32) as u32;
 
-        // Lone normal R (sample_index = 0).
         let r = philox_normal(seed_lo, seed_hi, ctr_lo, ctr_hi, 0, 0);
-        // Chi-squared sum S = Σ_{i=1..N_f-1} ξ_i², left-to-right f64
-        // accumulator.
         let mut s = 0.0_f64;
         for sample_index in 1..self.g_dof {
             let xi = philox_normal(seed_lo, seed_hi, ctr_lo, ctr_hi, sample_index, 0);
@@ -725,49 +909,31 @@ impl CsvrState {
         } else {
             0.0
         };
-        // (s + r*r) is chi-squared(N_f) since adding R² to S = chi²(N_f-1)
-        // gives N_f DOF total.
         let k_new = c * k_old + (k_target / nf) * one_minus_c * (s + r * r) + cross;
         if k_new.is_finite() && k_new > 0.0 {
             k_new
         } else {
-            // Degenerate path: keep K unchanged this step. Matches the
-            // safety guard documented in `csvr.md`.
             k_old
         }
     }
 }
 
-impl Integrator for CsvrState {
-    fn step(
+impl Thermostat for CsvrThermostat {
+    // rq-7a124d43
+    fn apply_post(
         &mut self,
         buffers: &mut ParticleBuffers,
-        sim_box: &mut SimulationBox,
-        force_field: &mut ForceField,
         dt: f32,
         timings: &mut Timings,
-    ) -> Result<(), IntegratorError> {
+    ) -> Result<(), ThermostatError> {
         if buffers.particle_count() == 0 {
             return Ok(());
         }
 
-        // Velocity-Verlet core.
-        timings.kernel_start(KernelStage::VV_KICK_DRIFT)?;
-        vv_kick_drift(buffers, sim_box, dt)?;
-        timings.kernel_stop(KernelStage::VV_KICK_DRIFT)?;
-
-        force_field.step(buffers, sim_box, timings)?;
-
-        timings.kernel_start(KernelStage::VV_KICK)?;
-        vv_kick(buffers, dt)?;
-        timings.kernel_stop(KernelStage::VV_KICK)?;
-
-        // KE reduction.
         timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
         let k_old = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
 
-        // Advance counter, draw, rescale.
         self.draw_counter += 1;
         let k_new = self.draw_new_kinetic_energy(k_old, dt);
         self.cumulative_injection += k_new - k_old;
@@ -783,10 +949,12 @@ impl Integrator for CsvrState {
         Ok(())
     }
 
+    // rq-8ee58ec1
     fn log_column_names(&self) -> &'static [&'static str] {
         &["csvr_conserved"]
     }
 
+    // rq-2a5de2ab
     fn log_column_values(
         &self,
         kinetic_energy: f64,
@@ -796,10 +964,11 @@ impl Integrator for CsvrState {
     }
 }
 
+// rq-750b828f
 #[derive(Debug)]
 pub struct CsvrBuilder;
 
-impl IntegratorBuilder for CsvrBuilder {
+impl ThermostatBuilder for CsvrBuilder {
     fn kind_name(&self) -> &'static str {
         "csvr"
     }
@@ -808,27 +977,28 @@ impl IntegratorBuilder for CsvrBuilder {
         &self,
         gpu: &GpuContext,
         particle_count: usize,
-        kind: &IntegratorKind,
-    ) -> Result<Box<dyn Integrator>, IntegratorError> {
+        kind: &ThermostatKind,
+    ) -> Result<Box<dyn Thermostat>, ThermostatError> {
         match kind {
-            IntegratorKind::Csvr {
+            ThermostatKind::Csvr {
                 temperature,
                 tau,
                 seed,
             } => {
-                let state = CsvrState::new(gpu, particle_count, *temperature, *tau, *seed)?;
+                let state = CsvrThermostat::new(gpu, particle_count, *temperature, *tau, *seed)?;
                 Ok(Box::new(state))
             }
-            other => Err(IntegratorError::UnknownKind(other.name().to_string())),
+            other => Err(ThermostatError::UnknownKind(other.name().to_string())),
         }
     }
 }
 
-// --- Andersen stochastic thermostat ---
+// --- Andersen stochastic thermostat ----------------------------------
 // rq-5e059f6b
 
+// rq-feba0a88
 #[derive(Debug)]
-pub struct AndersenState {
+pub struct AndersenThermostat {
     pub temperature: f64,
     pub collision_rate: f64,
     pub seed: u64,
@@ -839,7 +1009,7 @@ pub struct AndersenState {
     most_recent_ke: f64,
 }
 
-impl AndersenState {
+impl AndersenThermostat {
     fn new(
         gpu: &GpuContext,
         _particle_count: usize,
@@ -849,7 +1019,7 @@ impl AndersenState {
     ) -> Result<Self, GpuError> {
         let kt = BOLTZMANN_J_PER_K * temperature;
         let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
-        Ok(AndersenState {
+        Ok(AndersenThermostat {
             temperature,
             collision_rate,
             seed,
@@ -862,36 +1032,22 @@ impl AndersenState {
     }
 }
 
-impl Integrator for AndersenState {
-    fn step(
+impl Thermostat for AndersenThermostat {
+    // rq-7a124d43
+    fn apply_post(
         &mut self,
         buffers: &mut ParticleBuffers,
-        sim_box: &mut SimulationBox,
-        force_field: &mut ForceField,
         dt: f32,
         timings: &mut Timings,
-    ) -> Result<(), IntegratorError> {
+    ) -> Result<(), ThermostatError> {
         if buffers.particle_count() == 0 {
             return Ok(());
         }
 
-        // Velocity-Verlet core.
-        timings.kernel_start(KernelStage::VV_KICK_DRIFT)?;
-        vv_kick_drift(buffers, sim_box, dt)?;
-        timings.kernel_stop(KernelStage::VV_KICK_DRIFT)?;
-
-        force_field.step(buffers, sim_box, timings)?;
-
-        timings.kernel_start(KernelStage::VV_KICK)?;
-        vv_kick(buffers, dt)?;
-        timings.kernel_stop(KernelStage::VV_KICK)?;
-
-        // KE before resample.
         timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
         let k_old = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
 
-        // Resample (per-particle Bernoulli + Maxwell-Boltzmann).
         self.draw_counter += 1;
         let p_collision = ((self.collision_rate as f64) * (dt as f64))
             .clamp(0.0, 1.0) as f32;
@@ -900,7 +1056,6 @@ impl Integrator for AndersenState {
         andersen_resample(buffers, self.seed, self.draw_counter, p_collision, kt)?;
         timings.kernel_stop(KernelStage::ANDERSEN_RESAMPLE)?;
 
-        // KE after resample.
         timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
         let k_new = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
@@ -910,10 +1065,12 @@ impl Integrator for AndersenState {
         Ok(())
     }
 
+    // rq-1163481e
     fn log_column_names(&self) -> &'static [&'static str] {
         &["andersen_conserved"]
     }
 
+    // rq-6d2daea0
     fn log_column_values(
         &self,
         kinetic_energy: f64,
@@ -923,10 +1080,11 @@ impl Integrator for AndersenState {
     }
 }
 
+// rq-fd0cef60
 #[derive(Debug)]
 pub struct AndersenBuilder;
 
-impl IntegratorBuilder for AndersenBuilder {
+impl ThermostatBuilder for AndersenBuilder {
     fn kind_name(&self) -> &'static str {
         "andersen"
     }
@@ -935,15 +1093,15 @@ impl IntegratorBuilder for AndersenBuilder {
         &self,
         gpu: &GpuContext,
         particle_count: usize,
-        kind: &IntegratorKind,
-    ) -> Result<Box<dyn Integrator>, IntegratorError> {
+        kind: &ThermostatKind,
+    ) -> Result<Box<dyn Thermostat>, ThermostatError> {
         match kind {
-            IntegratorKind::Andersen {
+            ThermostatKind::Andersen {
                 temperature,
                 collision_rate,
                 seed,
             } => {
-                let state = AndersenState::new(
+                let state = AndersenThermostat::new(
                     gpu,
                     particle_count,
                     *temperature,
@@ -952,16 +1110,17 @@ impl IntegratorBuilder for AndersenBuilder {
                 )?;
                 Ok(Box::new(state))
             }
-            other => Err(IntegratorError::UnknownKind(other.name().to_string())),
+            other => Err(ThermostatError::UnknownKind(other.name().to_string())),
         }
     }
 }
 
-// --- Berendsen weak-coupling thermostat ---
+// --- Berendsen weak-coupling thermostat -------------------------------
 // rq-25f24b26
 
+// rq-f856f666
 #[derive(Debug)]
-pub struct BerendsenState {
+pub struct BerendsenThermostat {
     pub temperature: f64,
     pub tau: f64,
     pub g_dof: u32,
@@ -971,7 +1130,7 @@ pub struct BerendsenState {
     most_recent_ke: f64,
 }
 
-impl BerendsenState {
+impl BerendsenThermostat {
     fn new(
         gpu: &GpuContext,
         particle_count: usize,
@@ -981,7 +1140,7 @@ impl BerendsenState {
         let g_dof = ((3 * particle_count) as i64 - 3).max(1) as u32;
         let kt_target = BOLTZMANN_J_PER_K * temperature;
         let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
-        Ok(BerendsenState {
+        Ok(BerendsenThermostat {
             temperature,
             tau,
             g_dof,
@@ -993,42 +1152,27 @@ impl BerendsenState {
     }
 }
 
-impl Integrator for BerendsenState {
-    fn step(
+impl Thermostat for BerendsenThermostat {
+    // rq-7a124d43
+    fn apply_post(
         &mut self,
         buffers: &mut ParticleBuffers,
-        sim_box: &mut SimulationBox,
-        force_field: &mut ForceField,
         dt: f32,
         timings: &mut Timings,
-    ) -> Result<(), IntegratorError> {
+    ) -> Result<(), ThermostatError> {
         if buffers.particle_count() == 0 {
             return Ok(());
         }
 
-        // Velocity-Verlet core.
-        timings.kernel_start(KernelStage::VV_KICK_DRIFT)?;
-        vv_kick_drift(buffers, sim_box, dt)?;
-        timings.kernel_stop(KernelStage::VV_KICK_DRIFT)?;
-
-        force_field.step(buffers, sim_box, timings)?;
-
-        timings.kernel_start(KernelStage::VV_KICK)?;
-        vv_kick(buffers, dt)?;
-        timings.kernel_stop(KernelStage::VV_KICK)?;
-
-        // Read instantaneous KE.
         timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
         let k_old = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
 
-        // K = 0: skip the rescale this step.
         if k_old <= 0.0 {
             self.most_recent_ke = 0.0;
             return Ok(());
         }
 
-        // Compute λ via the Berendsen formula. K_target = (N_f / 2) k_B T.
         let nf = self.g_dof as f64;
         let k_target = (nf / 2.0) * self.kt_target;
         let lambda_sq = (1.0 + ((dt as f64) / self.tau) * (k_target / k_old - 1.0)).max(0.0);
@@ -1045,10 +1189,12 @@ impl Integrator for BerendsenState {
         Ok(())
     }
 
+    // rq-c908bbf1
     fn log_column_names(&self) -> &'static [&'static str] {
         &["berendsen_conserved"]
     }
 
+    // rq-3589910b
     fn log_column_values(
         &self,
         kinetic_energy: f64,
@@ -1058,10 +1204,11 @@ impl Integrator for BerendsenState {
     }
 }
 
+// rq-6c9037a4
 #[derive(Debug)]
 pub struct BerendsenBuilder;
 
-impl IntegratorBuilder for BerendsenBuilder {
+impl ThermostatBuilder for BerendsenBuilder {
     fn kind_name(&self) -> &'static str {
         "berendsen"
     }
@@ -1070,14 +1217,14 @@ impl IntegratorBuilder for BerendsenBuilder {
         &self,
         gpu: &GpuContext,
         particle_count: usize,
-        kind: &IntegratorKind,
-    ) -> Result<Box<dyn Integrator>, IntegratorError> {
+        kind: &ThermostatKind,
+    ) -> Result<Box<dyn Thermostat>, ThermostatError> {
         match kind {
-            IntegratorKind::Berendsen { temperature, tau } => {
-                let state = BerendsenState::new(gpu, particle_count, *temperature, *tau)?;
+            ThermostatKind::Berendsen { temperature, tau } => {
+                let state = BerendsenThermostat::new(gpu, particle_count, *temperature, *tau)?;
                 Ok(Box::new(state))
             }
-            other => Err(IntegratorError::UnknownKind(other.name().to_string())),
+            other => Err(ThermostatError::UnknownKind(other.name().to_string())),
         }
     }
 }

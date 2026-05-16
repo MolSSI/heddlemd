@@ -1871,10 +1871,18 @@ fn empty_angle_type_name_rejected() {
     }
 }
 
-// --- Nosé-Hoover chain ---
+// =====================================================================
+// [thermostat] section
+// =====================================================================
 
-fn nhc_minimal_config() -> String {
-    r#"schema_version = 1
+// Build a config body with `[integrator] kind="velocity-verlet"` and
+// an injected `[thermostat]` block. The `[thermostat]` body is
+// supplied by callers as a complete TOML fragment beginning with the
+// `[thermostat]` header so they can omit individual fields to test
+// MissingField paths.
+fn config_with_thermostat(thermostat_block: &str) -> String {
+    format!(
+        r#"schema_version = 1
 init = "argon.xyz"
 
 [simulation]
@@ -1884,9 +1892,10 @@ dt = 1.0e-15
 temperature = 300.0
 
 [integrator]
-kind = "nose-hoover-chain"
-temperature = 300.0
-tau = 1.0e-13
+kind = "velocity-verlet"
+lossless = false
+
+{thermostat_block}
 
 [[particle_types]]
 name = "Ar"
@@ -1899,16 +1908,64 @@ sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
 "#
-    .to_string()
+    )
+}
+
+// --- [thermostat] presence / absence ---
+
+#[test]
+fn thermostat_section_absent_yields_none() {
+    let dir = tmp_path("therm_absent");
+    let path = write_config(&dir, &minimal_config());
+    let cfg = load_config(&path).unwrap();
+    assert!(cfg.thermostat.is_none());
 }
 
 #[test]
-fn nhc_defaults_accepted() {
+fn thermostat_unknown_kind_rejected() {
+    let dir = tmp_path("therm_unknown");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "not-a-real-thermostat""#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownThermostatKind { actual } => {
+            assert_eq!(actual, "not-a-real-thermostat");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn thermostat_missing_kind_rejected() {
+    let dir = tmp_path("therm_no_kind");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+temperature = 300.0"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "thermostat.kind"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// --- Nosé-Hoover chain ---
+
+#[test]
+fn thermostat_nhc_defaults_accepted() {
     let dir = tmp_path("nhc_defaults");
-    let path = write_config(&dir, &nhc_minimal_config());
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "nose-hoover-chain"
+temperature = 300.0
+tau = 1.0e-13"#,
+    );
+    let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match &cfg.integrator {
-        dynamics::io::config::IntegratorKind::NoseHooverChain {
+    match cfg.thermostat.as_ref().unwrap() {
+        dynamics::io::ThermostatKind::NoseHooverChain {
             temperature,
             tau,
             chain_length,
@@ -1926,16 +1983,21 @@ fn nhc_defaults_accepted() {
 }
 
 #[test]
-fn nhc_explicit_chain_params_accepted() {
+fn thermostat_nhc_explicit_chain_params_accepted() {
     let dir = tmp_path("nhc_explicit");
-    let body = nhc_minimal_config().replace(
-        "tau = 1.0e-13\n",
-        "tau = 1.0e-13\nchain_length = 5\nyoshida_order = 5\nn_resp = 2\n",
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "nose-hoover-chain"
+temperature = 300.0
+tau = 1.0e-13
+chain_length = 5
+yoshida_order = 5
+n_resp = 2"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match &cfg.integrator {
-        dynamics::io::config::IntegratorKind::NoseHooverChain {
+    match cfg.thermostat.as_ref().unwrap() {
+        dynamics::io::ThermostatKind::NoseHooverChain {
             chain_length,
             yoshida_order,
             n_resp,
@@ -1950,115 +2012,131 @@ fn nhc_explicit_chain_params_accepted() {
 }
 
 #[test]
-fn nhc_missing_temperature_rejected() {
+fn thermostat_nhc_missing_temperature_rejected() {
     let dir = tmp_path("nhc_no_t");
-    let body = nhc_minimal_config().replace("temperature = 300.0\ntau", "tau");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "nose-hoover-chain"
+tau = 1.0e-13"#,
+    );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::MissingField { field } => {
-            assert_eq!(field, "integrator.temperature");
-        }
+        ConfigError::MissingField { field } => assert_eq!(field, "thermostat.temperature"),
         other => panic!("unexpected: {other:?}"),
     }
 }
 
 #[test]
-fn nhc_missing_tau_rejected() {
+fn thermostat_nhc_missing_tau_rejected() {
     let dir = tmp_path("nhc_no_tau");
-    let body = nhc_minimal_config().replace("\ntau = 1.0e-13\n", "\n");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "nose-hoover-chain"
+temperature = 300.0"#,
+    );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::MissingField { field } => {
-            assert_eq!(field, "integrator.tau");
-        }
+        ConfigError::MissingField { field } => assert_eq!(field, "thermostat.tau"),
         other => panic!("unexpected: {other:?}"),
     }
 }
 
 #[test]
-fn nhc_rejects_non_positive_temperature() {
+fn thermostat_nhc_rejects_non_positive_temperature() {
     let dir = tmp_path("nhc_T_zero");
-    let body = nhc_minimal_config().replace("temperature = 300.0\ntau", "temperature = 0.0\ntau");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "nose-hoover-chain"
+temperature = 0.0
+tau = 1.0e-13"#,
+    );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => {
-            assert_eq!(field, "integrator.temperature");
-        }
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "thermostat.temperature"),
         other => panic!("unexpected: {other:?}"),
     }
 }
 
 #[test]
-fn nhc_rejects_non_positive_tau() {
+fn thermostat_nhc_rejects_non_positive_tau() {
     let dir = tmp_path("nhc_tau_neg");
-    let body = nhc_minimal_config().replace("tau = 1.0e-13", "tau = -1.0e-13");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "nose-hoover-chain"
+temperature = 300.0
+tau = -1.0e-13"#,
+    );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => {
-            assert_eq!(field, "integrator.tau");
-        }
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "thermostat.tau"),
         other => panic!("unexpected: {other:?}"),
     }
 }
 
 #[test]
-fn nhc_rejects_chain_length_zero() {
+fn thermostat_nhc_rejects_chain_length_zero() {
     let dir = tmp_path("nhc_chain0");
-    let body = nhc_minimal_config().replace(
-        "tau = 1.0e-13\n",
-        "tau = 1.0e-13\nchain_length = 0\n",
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "nose-hoover-chain"
+temperature = 300.0
+tau = 1.0e-13
+chain_length = 0"#,
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => {
-            assert_eq!(field, "integrator.chain_length");
-        }
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "thermostat.chain_length"),
         other => panic!("unexpected: {other:?}"),
     }
 }
 
 #[test]
-fn nhc_rejects_yoshida_order_outside_allowed_set() {
-    let dir = tmp_path("nhc_yoshida_bad");
-    let body = nhc_minimal_config().replace(
-        "tau = 1.0e-13\n",
-        "tau = 1.0e-13\nyoshida_order = 2\n",
+fn thermostat_nhc_rejects_yoshida_order_outside_allowed_set() {
+    let dir = tmp_path("nhc_yoshida2");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "nose-hoover-chain"
+temperature = 300.0
+tau = 1.0e-13
+yoshida_order = 2"#,
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => {
-            assert_eq!(field, "integrator.yoshida_order");
-        }
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "thermostat.yoshida_order"),
         other => panic!("unexpected: {other:?}"),
     }
 }
 
 #[test]
-fn nhc_rejects_n_resp_zero() {
+fn thermostat_nhc_rejects_n_resp_zero() {
     let dir = tmp_path("nhc_nresp0");
-    let body = nhc_minimal_config().replace(
-        "tau = 1.0e-13\n",
-        "tau = 1.0e-13\nn_resp = 0\n",
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "nose-hoover-chain"
+temperature = 300.0
+tau = 1.0e-13
+n_resp = 0"#,
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => {
-            assert_eq!(field, "integrator.n_resp");
-        }
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "thermostat.n_resp"),
         other => panic!("unexpected: {other:?}"),
     }
 }
 
 #[test]
-fn nhc_rejects_extra_fields() {
+fn thermostat_nhc_rejects_extra_fields() {
     let dir = tmp_path("nhc_extra");
-    let body = nhc_minimal_config().replace(
-        "tau = 1.0e-13\n",
-        "tau = 1.0e-13\nfriction = 1.0e12\n",
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "nose-hoover-chain"
+temperature = 300.0
+tau = 1.0e-13
+friction = 1.0e12"#,
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::UnknownIntegratorField { kind, field } => {
+        ConfigError::UnknownThermostatField { kind, field } => {
             assert_eq!(kind, "nose-hoover-chain");
             assert_eq!(field, "friction");
         }
@@ -2068,43 +2146,20 @@ fn nhc_rejects_extra_fields() {
 
 // --- CSVR ---
 
-fn csvr_minimal_config() -> String {
-    r#"schema_version = 1
-init = "argon.xyz"
-
-[simulation]
-seed = 12345
-n_steps = 10
-dt = 1.0e-15
-temperature = 300.0
-
-[integrator]
+#[test]
+fn thermostat_csvr_accepted() {
+    let dir = tmp_path("csvr_accepted");
+    let body = config_with_thermostat(
+        r#"[thermostat]
 kind = "csvr"
 temperature = 300.0
 tau = 1.0e-13
-seed = 42
-
-[[particle_types]]
-name = "Ar"
-mass = 6.6335e-26
-
-[[pair_interactions]]
-between = ["Ar", "Ar"]
-potential = "lennard-jones"
-sigma = 3.40e-10
-epsilon = 1.65e-21
-cutoff = 1.0e-9
-"#
-    .to_string()
-}
-
-#[test]
-fn csvr_accepted() {
-    let dir = tmp_path("csvr_accepted");
-    let path = write_config(&dir, &csvr_minimal_config());
+seed = 42"#,
+    );
+    let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match &cfg.integrator {
-        dynamics::io::config::IntegratorKind::Csvr { temperature, tau, seed } => {
+    match cfg.thermostat.as_ref().unwrap() {
+        dynamics::io::ThermostatKind::Csvr { temperature, tau, seed } => {
             assert_eq!(*temperature, 300.0);
             assert_eq!(*tau, 1.0e-13);
             assert_eq!(*seed, 42);
@@ -2114,80 +2169,35 @@ fn csvr_accepted() {
 }
 
 #[test]
-fn csvr_missing_temperature_rejected() {
-    let dir = tmp_path("csvr_no_T");
-    let body = csvr_minimal_config().replace("temperature = 300.0\ntau", "tau");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::MissingField { field } => {
-            assert_eq!(field, "integrator.temperature");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn csvr_missing_tau_rejected() {
-    let dir = tmp_path("csvr_no_tau");
-    let body = csvr_minimal_config().replace("\ntau = 1.0e-13\n", "\n");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::MissingField { field } => {
-            assert_eq!(field, "integrator.tau");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn csvr_missing_seed_rejected() {
+fn thermostat_csvr_missing_seed_rejected() {
     let dir = tmp_path("csvr_no_seed");
-    let body = csvr_minimal_config().replace("\nseed = 42\n", "\n");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::MissingField { field } => {
-            assert_eq!(field, "integrator.seed");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn csvr_rejects_non_positive_temperature() {
-    let dir = tmp_path("csvr_T_zero");
-    let body = csvr_minimal_config().replace("temperature = 300.0\ntau", "temperature = 0.0\ntau");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => {
-            assert_eq!(field, "integrator.temperature");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn csvr_rejects_non_positive_tau() {
-    let dir = tmp_path("csvr_tau_neg");
-    let body = csvr_minimal_config().replace("tau = 1.0e-13", "tau = -1.0e-13");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => {
-            assert_eq!(field, "integrator.tau");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn csvr_rejects_extra_fields() {
-    let dir = tmp_path("csvr_extra");
-    let body = csvr_minimal_config().replace(
-        "seed = 42\n",
-        "seed = 42\nchain_length = 3\n",
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "csvr"
+temperature = 300.0
+tau = 1.0e-13"#,
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::UnknownIntegratorField { kind, field } => {
+        ConfigError::MissingField { field } => assert_eq!(field, "thermostat.seed"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn thermostat_csvr_rejects_extra_fields() {
+    let dir = tmp_path("csvr_extra");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "csvr"
+temperature = 300.0
+tau = 1.0e-13
+seed = 42
+chain_length = 3"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownThermostatField { kind, field } => {
             assert_eq!(kind, "csvr");
             assert_eq!(field, "chain_length");
         }
@@ -2197,43 +2207,20 @@ fn csvr_rejects_extra_fields() {
 
 // --- Andersen ---
 
-fn andersen_minimal_config() -> String {
-    r#"schema_version = 1
-init = "argon.xyz"
-
-[simulation]
-seed = 12345
-n_steps = 10
-dt = 1.0e-15
-temperature = 300.0
-
-[integrator]
+#[test]
+fn thermostat_andersen_accepted() {
+    let dir = tmp_path("andersen_accepted");
+    let body = config_with_thermostat(
+        r#"[thermostat]
 kind = "andersen"
 temperature = 300.0
 collision_rate = 1.0e12
-seed = 42
-
-[[particle_types]]
-name = "Ar"
-mass = 6.6335e-26
-
-[[pair_interactions]]
-between = ["Ar", "Ar"]
-potential = "lennard-jones"
-sigma = 3.40e-10
-epsilon = 1.65e-21
-cutoff = 1.0e-9
-"#
-    .to_string()
-}
-
-#[test]
-fn andersen_accepted() {
-    let dir = tmp_path("andersen_accepted");
-    let path = write_config(&dir, &andersen_minimal_config());
+seed = 42"#,
+    );
+    let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match &cfg.integrator {
-        dynamics::io::config::IntegratorKind::Andersen {
+    match cfg.thermostat.as_ref().unwrap() {
+        dynamics::io::ThermostatKind::Andersen {
             temperature,
             collision_rate,
             seed,
@@ -2247,13 +2234,19 @@ fn andersen_accepted() {
 }
 
 #[test]
-fn andersen_accepts_collision_rate_zero() {
+fn thermostat_andersen_accepts_collision_rate_zero() {
     let dir = tmp_path("andersen_rate_zero");
-    let body = andersen_minimal_config().replace("collision_rate = 1.0e12", "collision_rate = 0.0");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "andersen"
+temperature = 300.0
+collision_rate = 0.0
+seed = 42"#,
+    );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match &cfg.integrator {
-        dynamics::io::config::IntegratorKind::Andersen { collision_rate, .. } => {
+    match cfg.thermostat.as_ref().unwrap() {
+        dynamics::io::ThermostatKind::Andersen { collision_rate, .. } => {
             assert_eq!(*collision_rate, 0.0);
         }
         other => panic!("unexpected: {other:?}"),
@@ -2261,81 +2254,36 @@ fn andersen_accepts_collision_rate_zero() {
 }
 
 #[test]
-fn andersen_missing_temperature_rejected() {
-    let dir = tmp_path("andersen_no_T");
-    let body = andersen_minimal_config().replace("temperature = 300.0\ncollision_rate", "collision_rate");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::MissingField { field } => {
-            assert_eq!(field, "integrator.temperature");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn andersen_missing_collision_rate_rejected() {
-    let dir = tmp_path("andersen_no_rate");
-    let body = andersen_minimal_config().replace("\ncollision_rate = 1.0e12\n", "\n");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::MissingField { field } => {
-            assert_eq!(field, "integrator.collision_rate");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn andersen_missing_seed_rejected() {
-    let dir = tmp_path("andersen_no_seed");
-    let body = andersen_minimal_config().replace("\nseed = 42\n", "\n");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::MissingField { field } => {
-            assert_eq!(field, "integrator.seed");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn andersen_rejects_non_positive_temperature() {
-    let dir = tmp_path("andersen_T_zero");
-    let body = andersen_minimal_config()
-        .replace("temperature = 300.0\ncollision_rate", "temperature = 0.0\ncollision_rate");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => {
-            assert_eq!(field, "integrator.temperature");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn andersen_rejects_negative_collision_rate() {
+fn thermostat_andersen_rejects_negative_collision_rate() {
     let dir = tmp_path("andersen_rate_neg");
-    let body = andersen_minimal_config().replace("collision_rate = 1.0e12", "collision_rate = -1.0");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => {
-            assert_eq!(field, "integrator.collision_rate");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn andersen_rejects_extra_fields() {
-    let dir = tmp_path("andersen_extra");
-    let body = andersen_minimal_config().replace(
-        "seed = 42\n",
-        "seed = 42\ntau = 1.0e-13\n",
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "andersen"
+temperature = 300.0
+collision_rate = -1.0
+seed = 42"#,
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::UnknownIntegratorField { kind, field } => {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "thermostat.collision_rate"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn thermostat_andersen_rejects_extra_fields() {
+    let dir = tmp_path("andersen_extra");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "andersen"
+temperature = 300.0
+collision_rate = 1.0e12
+seed = 42
+tau = 1.0e-13"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownThermostatField { kind, field } => {
             assert_eq!(kind, "andersen");
             assert_eq!(field, "tau");
         }
@@ -2345,8 +2293,53 @@ fn andersen_rejects_extra_fields() {
 
 // --- Berendsen ---
 
-fn berendsen_minimal_config() -> String {
-    r#"schema_version = 1
+#[test]
+fn thermostat_berendsen_accepted() {
+    let dir = tmp_path("berendsen_accepted");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "berendsen"
+temperature = 300.0
+tau = 1.0e-13"#,
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    match cfg.thermostat.as_ref().unwrap() {
+        dynamics::io::ThermostatKind::Berendsen { temperature, tau } => {
+            assert_eq!(*temperature, 300.0);
+            assert_eq!(*tau, 1.0e-13);
+        }
+        other => panic!("expected Berendsen, got {other:?}"),
+    }
+}
+
+#[test]
+fn thermostat_berendsen_rejects_seed_field() {
+    let dir = tmp_path("berendsen_seed");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "berendsen"
+temperature = 300.0
+tau = 1.0e-13
+seed = 42"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownThermostatField { kind, field } => {
+            assert_eq!(kind, "berendsen");
+            assert_eq!(field, "seed");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// --- Integrator-owns-thermostat compatibility ---
+
+#[test]
+fn langevin_with_thermostat_is_rejected() {
+    let dir = tmp_path("incompat_langevin_therm");
+    let body = format!(
+        r#"schema_version = 1
 init = "argon.xyz"
 
 [simulation]
@@ -2356,9 +2349,16 @@ dt = 1.0e-15
 temperature = 300.0
 
 [integrator]
-kind = "berendsen"
+kind = "langevin-baoab"
+friction = 1.0e12
+temperature = 300.0
+seed = 1
+
+[thermostat]
+kind = "csvr"
 temperature = 300.0
 tau = 1.0e-13
+seed = 2
 
 [[particle_types]]
 name = "Ar"
@@ -2371,95 +2371,134 @@ sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
 "#
-    .to_string()
-}
-
-#[test]
-fn berendsen_accepted() {
-    let dir = tmp_path("berendsen_accepted");
-    let path = write_config(&dir, &berendsen_minimal_config());
-    let cfg = load_config(&path).unwrap();
-    match &cfg.integrator {
-        dynamics::io::config::IntegratorKind::Berendsen { temperature, tau } => {
-            assert_eq!(*temperature, 300.0);
-            assert_eq!(*tau, 1.0e-13);
-        }
-        other => panic!("expected Berendsen, got {other:?}"),
-    }
-}
-
-#[test]
-fn berendsen_missing_temperature_rejected() {
-    let dir = tmp_path("berendsen_no_T");
-    let body = berendsen_minimal_config().replace("temperature = 300.0\ntau", "tau");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::MissingField { field } => assert_eq!(field, "integrator.temperature"),
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn berendsen_missing_tau_rejected() {
-    let dir = tmp_path("berendsen_no_tau");
-    let body = berendsen_minimal_config().replace("\ntau = 1.0e-13\n", "\n");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::MissingField { field } => assert_eq!(field, "integrator.tau"),
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn berendsen_rejects_non_positive_temperature() {
-    let dir = tmp_path("berendsen_T_zero");
-    let body = berendsen_minimal_config()
-        .replace("temperature = 300.0\ntau", "temperature = 0.0\ntau");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "integrator.temperature"),
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn berendsen_rejects_non_positive_tau() {
-    let dir = tmp_path("berendsen_tau_neg");
-    let body = berendsen_minimal_config().replace("tau = 1.0e-13", "tau = -1.0e-13");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "integrator.tau"),
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn berendsen_rejects_seed_field() {
-    let dir = tmp_path("berendsen_seed");
-    let body = berendsen_minimal_config().replace("tau = 1.0e-13\n", "tau = 1.0e-13\nseed = 42\n");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownIntegratorField { kind, field } => {
-            assert_eq!(kind, "berendsen");
-            assert_eq!(field, "seed");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-#[test]
-fn berendsen_rejects_collision_rate_field() {
-    let dir = tmp_path("berendsen_collision");
-    let body = berendsen_minimal_config().replace(
-        "tau = 1.0e-13\n",
-        "tau = 1.0e-13\ncollision_rate = 1.0e12\n",
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::UnknownIntegratorField { kind, field } => {
-            assert_eq!(kind, "berendsen");
-            assert_eq!(field, "collision_rate");
+        ConfigError::IncompatibleThermostat { integrator } => {
+            assert_eq!(integrator, "langevin-baoab");
         }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn velocity_verlet_with_thermostat_is_accepted() {
+    let dir = tmp_path("vv_plus_csvr");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "csvr"
+temperature = 300.0
+tau = 1.0e-13
+seed = 1"#,
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert!(matches!(
+        cfg.integrator,
+        dynamics::io::IntegratorKind::VelocityVerlet { .. }
+    ));
+    assert!(matches!(
+        cfg.thermostat,
+        Some(dynamics::io::ThermostatKind::Csvr { .. })
+    ));
+}
+
+#[test]
+fn integrator_kind_owns_thermostat_matrix_config_layer() {
+    let vv = dynamics::io::IntegratorKind::VelocityVerlet { lossless: false };
+    let lan = dynamics::io::IntegratorKind::LangevinBaoab {
+        friction: 1.0e12,
+        temperature: 300.0,
+        seed: 0,
+    };
+    assert!(!vv.owns_thermostat());
+    assert!(lan.owns_thermostat());
+}
+
+// --- [barostat] section (always rejected with the empty registry) ---
+
+#[test]
+fn barostat_section_absent_yields_none() {
+    let dir = tmp_path("baro_absent");
+    let path = write_config(&dir, &minimal_config());
+    let cfg = load_config(&path).unwrap();
+    assert!(cfg.barostat.is_none());
+}
+
+#[test]
+fn barostat_any_kind_rejected_while_registry_empty() {
+    let dir = tmp_path("baro_unknown");
+    let body = format!(
+        r#"schema_version = 1
+init = "argon.xyz"
+
+[simulation]
+seed = 12345
+n_steps = 10
+dt = 1.0e-15
+temperature = 300.0
+
+[integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[barostat]
+kind = "anything"
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownBarostatKind { actual } => assert_eq!(actual, "anything"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn barostat_missing_kind_rejected() {
+    let dir = tmp_path("baro_no_kind");
+    let body = format!(
+        r#"schema_version = 1
+init = "argon.xyz"
+
+[simulation]
+seed = 12345
+n_steps = 10
+dt = 1.0e-15
+temperature = 300.0
+
+[integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[barostat]
+placeholder = true
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "barostat.kind"),
         other => panic!("unexpected: {other:?}"),
     }
 }
