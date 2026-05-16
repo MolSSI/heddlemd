@@ -6,6 +6,14 @@
     "title": "Reject negative dt",
     "type": "scenario"
   },
+  "rq-0076e6b4": {
+    "decl": "## Out of Scope",
+    "file": "integration/berendsen",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-0087f355": {
     "decl": "## Out of Scope",
     "file": "particle-state",
@@ -267,6 +275,13 @@
     "title": "init_device succeeds on a machine with a CUDA GPU",
     "type": "scenario"
   },
+  "rq-05b4c988": {
+    "decl": "Scenario: Log file header includes berendsen_conserved when Berendsen is the integrator",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Log file header includes berendsen_conserved when Berendsen is the integrator",
+    "type": "scenario"
+  },
   "rq-05d55351": {
     "decl": "# Feature: Morse Bonded Potential",
     "file": "forces/morse-bonded",
@@ -334,6 +349,13 @@
     "file": "forces/spme",
     "refs": [],
     "title": "Spread is independent of particle order in the bin",
+    "type": "scenario"
+  },
+  "rq-079b4f9e": {
+    "decl": "Scenario: Construct with particle_count = 1 (N_f = 1)",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Construct with particle_count = 1 (N_f = 1)",
     "type": "scenario"
   },
   "rq-07a18814": {
@@ -500,6 +522,13 @@
     "title": "Exclusion",
     "type": "api-item"
   },
+  "rq-0c7d1ff5": {
+    "decl": "Scenario: Reject extra fields (e.g. seed from CSVR/Andersen)",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Reject extra fields (e.g. seed from CSVR/Andersen)",
+    "type": "scenario"
+  },
   "rq-0c9dc32b": {
     "decl": "Scenario: Reject NaN tilt",
     "file": "simulation-box",
@@ -563,6 +592,13 @@
     "title": "Algorithm",
     "type": "section"
   },
+  "rq-0e85eebc": {
+    "decl": "Scenario: step() launches the expected kernel set",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "step() launches the expected kernel set",
+    "type": "scenario"
+  },
   "rq-0ec0f65d": {
     "decl": "## Gherkin Scenarios",
     "file": "io/trajectory-output",
@@ -591,6 +627,14 @@
     "level": 2,
     "refs": [],
     "title": "Empty State",
+    "type": "section"
+  },
+  "rq-0f81f83f": {
+    "decl": "## Berendsen \"conserved quantity\"",
+    "file": "integration/berendsen",
+    "level": 2,
+    "refs": [],
+    "title": "Berendsen \"conserved quantity\"",
     "type": "section"
   },
   "rq-0ffccee0": {
@@ -622,6 +666,13 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-102e58cf": {
+    "decl": "Scenario: Two independent Berendsen runs with identical configs are byte-identical",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Two independent Berendsen runs with identical configs are byte-identical",
+    "type": "scenario"
   },
   "rq-105afb1d": {
     "decl": "Scenario: min <= mean <= max for every row",
@@ -888,6 +939,13 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Kernel does not modify positions, velocities, masses, or net forces",
+    "type": "scenario"
+  },
+  "rq-14fdd6ef": {
+    "decl": "Scenario: Reject non-positive tau",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Reject non-positive tau",
     "type": "scenario"
   },
   "rq-151cb099": {
@@ -1227,6 +1285,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-1c1022f0": {
+    "decl": "Scenario: λ = 1 when K_old already equals K_target",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "λ = 1 when K_old already equals K_target",
+    "type": "scenario"
   },
   "rq-1c26a108": {
     "decl": "### Types",
@@ -1792,6 +1857,18 @@
     "title": "kinetic_energy_reduce of a single particle at v=0 is zero",
     "type": "scenario"
   },
+  "rq-25f24b26": {
+    "decl": "# Feature: Berendsen Weak-Coupling Thermostat",
+    "file": "integration/berendsen",
+    "refs": [
+      {
+        "file": "src/integrator.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Berendsen Weak-Coupling Thermostat",
+    "type": "file"
+  },
   "rq-25faef11": {
     "decl": "Scenario: Neighbor list applies minimum-image PBC",
     "file": "forces/neighbor-list",
@@ -2046,6 +2123,14 @@
     "title": "Temperature of an empty system is zero",
     "type": "scenario"
   },
+  "rq-2aadbec9": {
+    "decl": "### CUDA Kernels",
+    "file": "integration/berendsen",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernels",
+    "type": "section"
+  },
   "rq-2ad32a7b": {
     "decl": "- `TrajectoryWriter::flush(&mut self) -> Result<(), TrajectoryWriterError>`",
     "file": "io/trajectory-output",
@@ -2063,6 +2148,13 @@
     "file": "forces/spme",
     "refs": [],
     "title": "SPME reciprocal state's internal cell list uses one bin per FFT grid cell",
+    "type": "scenario"
+  },
+  "rq-2b114f41": {
+    "decl": "Scenario: log_column_values returns ke + pe − cumulative_injection",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "log_column_values returns ke + pe − cumulative_injection",
     "type": "scenario"
   },
   "rq-2b21f93c": {
@@ -2322,6 +2414,13 @@
     "title": "Half-strength exclusion (scale=0.5) halves the LJ contribution",
     "type": "scenario"
   },
+  "rq-314d24cf": {
+    "decl": "Scenario: Temperature relaxes toward target on the time scale τ",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Temperature relaxes toward target on the time scale τ",
+    "type": "scenario"
+  },
   "rq-318cd47d": {
     "decl": "Scenario: log_every = 0 is accepted (disables log output)",
     "file": "io/config-schema",
@@ -2436,6 +2535,13 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-3486c5e9": {
+    "decl": "Scenario: H_berendsen drifts only by O(dt²) per step",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "H_berendsen drifts only by O(dt²) per step",
+    "type": "scenario"
+  },
   "rq-34bfc634": {
     "decl": "Scenario: log_write count equals log rows written",
     "file": "performance-analysis",
@@ -2502,6 +2608,13 @@
       }
     ],
     "title": "ForceField",
+    "type": "api-item"
+  },
+  "rq-3589910b": {
+    "decl": "- `log_column_values(ke, pe) -> vec![ke + pe − cumulative_injection]`.",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "log_column_values",
     "type": "api-item"
   },
   "rq-358de3e6": {
@@ -3142,6 +3255,14 @@
     "title": "trajectory_write count equals frames written",
     "type": "scenario"
   },
+  "rq-46d980b2": {
+    "decl": "### `Integrator` trait overrides",
+    "file": "integration/berendsen",
+    "level": 3,
+    "refs": [],
+    "title": "`Integrator` trait overrides",
+    "type": "section"
+  },
   "rq-47540d14": {
     "decl": "Scenario: A bonded-only ForceField step launches no neighbor-list kernels",
     "file": "forces/framework",
@@ -3527,6 +3648,13 @@
     "title": "Launch Configuration",
     "type": "section"
   },
+  "rq-4fe2658a": {
+    "decl": "Scenario: λ² is clamped to zero when (K_target/K_old − 1) · dt/τ < −1",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "λ² is clamped to zero when (K_target/K_old − 1) · dt/τ < −1",
+    "type": "scenario"
+  },
   "rq-4ffdad62": {
     "decl": "Scenario: Degenerate geometry (atom_i overlaps atom_j) produces zero",
     "file": "forces/harmonic-angle",
@@ -3729,6 +3857,13 @@
     "file": "io/log-output",
     "refs": [],
     "title": "KE of three particles is summed in particle order",
+    "type": "scenario"
+  },
+  "rq-5541d869": {
+    "decl": "Scenario: Berendsen preserves centre-of-mass momentum",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Berendsen preserves centre-of-mass momentum",
     "type": "scenario"
   },
   "rq-55640f03": {
@@ -4145,6 +4280,14 @@
     "title": "neighbor_list all-pairs mode rejects max_neighbors",
     "type": "scenario"
   },
+  "rq-5e802037": {
+    "decl": "## Determinism",
+    "file": "integration/berendsen",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
+  },
   "rq-5e8125ac": {
     "decl": "Scenario: lan_drift_half leaves velocities, forces, masses unchanged",
     "file": "integration/langevin-baoab",
@@ -4255,6 +4398,13 @@
     "refs": [],
     "title": "Bin structure",
     "type": "section"
+  },
+  "rq-61a19da3": {
+    "decl": "Scenario: Missing temperature is rejected",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Missing temperature is rejected",
+    "type": "scenario"
   },
   "rq-621ce7b6": {
     "decl": "Scenario: Sampled velocities round-trip to the configured temperature",
@@ -4728,6 +4878,13 @@
     "title": "NeighborListState rebuild performs no host-device particle transfers",
     "type": "scenario"
   },
+  "rq-6c9037a4": {
+    "decl": "- `BerendsenBuilder` — implements `IntegratorBuilder` with",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "BerendsenBuilder",
+    "type": "api-item"
+  },
   "rq-6cac8251": {
     "decl": "# Column format: atom_i  atom_j  atom_k  angle_type_name",
     "file": "forces/topology",
@@ -4893,6 +5050,14 @@
     "refs": [],
     "title": "Default r_switch to 0.9 * cutoff when omitted",
     "type": "scenario"
+  },
+  "rq-6f7ad4ad": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/berendsen",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-6f897168": {
     "decl": "Scenario: images defaults to zero-initialised arrays when None is passed",
@@ -5071,6 +5236,13 @@
     "file": "io/init-state-file",
     "refs": [],
     "title": "Reject negative particle count",
+    "type": "scenario"
+  },
+  "rq-73384fea": {
+    "decl": "Scenario: Construct with particle_count = 0",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Construct with particle_count = 0",
     "type": "scenario"
   },
   "rq-73a3b802": {
@@ -5626,6 +5798,13 @@
     "refs": [],
     "title": "Parameter-table symmetry",
     "type": "section"
+  },
+  "rq-7d9f2da7": {
+    "decl": "Scenario: Rescale is skipped when K_old = 0",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Rescale is skipped when K_old = 0",
+    "type": "scenario"
   },
   "rq-7db97132": {
     "decl": "- `NeighborListState::rebuild(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`",
@@ -6225,6 +6404,13 @@
     "file": "forces/coulomb-pair-force",
     "refs": [],
     "title": "Coulomb and LJ exclusions are independent",
+    "type": "scenario"
+  },
+  "rq-8ca0bc54": {
+    "decl": "Scenario: Berendsen with all required fields accepted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Berendsen with all required fields accepted",
     "type": "scenario"
   },
   "rq-8d44fa4d": {
@@ -7163,6 +7349,13 @@
     "title": "Cell List Construction",
     "type": "section"
   },
+  "rq-a0b746c6": {
+    "decl": "Scenario: log_column_names returns [\"berendsen_conserved\"]",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "log_column_names returns [\"berendsen_conserved\"]",
+    "type": "scenario"
+  },
   "rq-a0c0992f": {
     "decl": "- `PairBuffer` — host-side wrapper around the five device per-pair",
     "file": "pair-reduction",
@@ -7712,6 +7905,14 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-adba6f8a": {
+    "decl": "## Algorithm",
+    "file": "integration/berendsen",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
+  },
   "rq-adc3a32f": {
     "decl": "Scenario: Equilibrium kinetic energy approaches 1.5 * N * k_B * T after many steps",
     "file": "integration/langevin-baoab",
@@ -7972,6 +8173,20 @@
     "title": "`reduce_bond_forces`",
     "type": "section"
   },
+  "rq-b270fb04": {
+    "decl": "Scenario: Berendsen rejects extra fields (e.g. seed from CSVR/Andersen)",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Berendsen rejects extra fields (e.g. seed from CSVR/Andersen)",
+    "type": "scenario"
+  },
+  "rq-b296ab12": {
+    "decl": "Scenario: step() on empty state is a no-op",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "step() on empty state is a no-op",
+    "type": "scenario"
+  },
   "rq-b2d67b57": {
     "decl": "Scenario: Forward then negated step returns to the original state for a free particle",
     "file": "integration/velocity-verlet",
@@ -8092,6 +8307,20 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Two-particle pair energy matches the closed-form Lennard-Jones expression",
+    "type": "scenario"
+  },
+  "rq-b6c8867f": {
+    "decl": "Scenario: λ < 1 when K_old > K_target (system needs cooling)",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "λ < 1 when K_old > K_target (system needs cooling)",
+    "type": "scenario"
+  },
+  "rq-b6ed3328": {
+    "decl": "Scenario: Berendsen missing tau is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Berendsen missing tau is rejected",
     "type": "scenario"
   },
   "rq-b719c42c": {
@@ -8835,6 +9064,13 @@
     "title": "Smoke Test",
     "type": "section"
   },
+  "rq-c6adba60": {
+    "decl": "Scenario: λ > 1 when K_old < K_target (system needs heating)",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "λ > 1 when K_old < K_target (system needs heating)",
+    "type": "scenario"
+  },
   "rq-c6f6a13c": {
     "decl": "- `spme_force_gather(particle_buffers, spme_state, slot_output) -> Result<(), GpuError>`",
     "file": "forces/spme",
@@ -8849,6 +9085,13 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-c74dec33": {
+    "decl": "Scenario: Berendsen rejects non-positive tau",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Berendsen rejects non-positive tau",
+    "type": "scenario"
   },
   "rq-c79a1408": {
     "decl": "Scenario: bond_type missing potential field",
@@ -8928,6 +9171,13 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-c908bbf1": {
+    "decl": "- `log_column_names() -> &'static [\"berendsen_conserved\"]`.",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "log_column_names",
+    "type": "api-item"
   },
   "rq-c921ba22": {
     "decl": "Scenario: Unknown neighbor_list mode is rejected",
@@ -9145,6 +9395,13 @@
     "title": "Andersen rejects negative collision_rate",
     "type": "scenario"
   },
+  "rq-cef1e640": {
+    "decl": "Scenario: Reject non-positive temperature",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Reject non-positive temperature",
+    "type": "scenario"
+  },
   "rq-cef2288f": {
     "decl": "Scenario: Reject upload when images_x has the wrong length",
     "file": "particle-state",
@@ -9222,6 +9479,13 @@
     "title": "Repeated atom in angle rejected (i == j)",
     "type": "scenario"
   },
+  "rq-cfcce369": {
+    "decl": "Scenario: cumulative_injection equals K_old · (λ² − 1) per step",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "cumulative_injection equals K_old · (λ² − 1) per step",
+    "type": "scenario"
+  },
   "rq-d01b6fb0": {
     "decl": "Scenario: Slots beyond neighbor_counts[i] are explicitly zeroed",
     "file": "forces/coulomb-pair-force",
@@ -9293,6 +9557,20 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Explicit [output] values override defaults",
+    "type": "scenario"
+  },
+  "rq-d1582b1a": {
+    "decl": "Scenario: Construct Berendsen via the registry",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Construct Berendsen via the registry",
+    "type": "scenario"
+  },
+  "rq-d189e9be": {
+    "decl": "Scenario: Missing tau is rejected",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Missing tau is rejected",
     "type": "scenario"
   },
   "rq-d19fc020": {
@@ -9883,6 +10161,14 @@
     "title": "Bin-only cell list rebuilds every step regardless of particle displacement",
     "type": "scenario"
   },
+  "rq-dd953328": {
+    "decl": "## Per-Step Kernel Sequence",
+    "file": "integration/berendsen",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Step Kernel Sequence",
+    "type": "section"
+  },
   "rq-dddcbf07": {
     "decl": "### Exclusion scaling <!-- inline-edit -->",
     "file": "forces/lj-pair-force",
@@ -10156,6 +10442,14 @@
     "title": "Box-generation refresh handles tilt mutation",
     "type": "scenario"
   },
+  "rq-e2f03a25": {
+    "decl": "## Launch Configuration",
+    "file": "integration/berendsen",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
+    "type": "section"
+  },
   "rq-e2f2de4f": {
     "decl": "Scenario: Different draw_counter values give different velocity outputs",
     "file": "integration/langevin-baoab",
@@ -10169,6 +10463,14 @@
     "refs": [],
     "title": "neighbor_list defaults to cell-list with derived r_skin when [neighbor_list] is omitted",
     "type": "scenario"
+  },
+  "rq-e3243e24": {
+    "decl": "## Parameters",
+    "file": "integration/berendsen",
+    "level": 2,
+    "refs": [],
+    "title": "Parameters",
+    "type": "section"
   },
   "rq-e34d764e": {
     "decl": "Scenario: bond_type unknown potential is rejected",
@@ -10475,6 +10777,13 @@
     "title": "Empty exclusion list leaves all pair forces unchanged",
     "type": "scenario"
   },
+  "rq-e8252f10": {
+    "decl": "Scenario: Construct BerendsenState via the registry",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Construct BerendsenState via the registry",
+    "type": "scenario"
+  },
   "rq-e8259ee5": {
     "decl": "- `load_config(path: &Path) -> Result<Config, ConfigError>`",
     "file": "io/config-schema",
@@ -10707,6 +11016,14 @@
     "title": "MorseBondedState",
     "type": "api-item"
   },
+  "rq-ec1fc04e": {
+    "decl": "## Feature API",
+    "file": "integration/berendsen",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-ec28cbfb": {
     "decl": "Scenario: neighbor_list rejects non-finite r_skin",
     "file": "io/config-schema",
@@ -10757,6 +11074,13 @@
     "title": "Morse bond_type rejects non-positive de",
     "type": "scenario"
   },
+  "rq-ecf796d3": {
+    "decl": "Scenario: Berendsen missing temperature is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Berendsen missing temperature is rejected",
+    "type": "scenario"
+  },
   "rq-ed048159": {
     "decl": "Scenario: All observables are finite after the 100-step lossless forward run",
     "file": "pipeline-reversibility",
@@ -10770,6 +11094,14 @@
     "refs": [],
     "title": "Reject duplicate bond_type names",
     "type": "scenario"
+  },
+  "rq-ed2ebeca": {
+    "decl": "## Empty State and degenerate cases",
+    "file": "integration/berendsen",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State and degenerate cases",
+    "type": "section"
   },
   "rq-ed997636": {
     "decl": "### Units",
@@ -10799,6 +11131,14 @@
     "refs": [],
     "title": "Duplicate exclusion rejected",
     "type": "scenario"
+  },
+  "rq-ef1feb38": {
+    "decl": "### Types",
+    "file": "integration/berendsen",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
   },
   "rq-ef3083cd": {
     "decl": "Scenario: Pair across the periodic boundary uses minimum-image displacement",
@@ -10954,6 +11294,13 @@
     "file": "integration/andersen",
     "refs": [],
     "title": "Two independent Andersen runs with identical seeds produce byte-identical outputs",
+    "type": "scenario"
+  },
+  "rq-f076e97c": {
+    "decl": "Scenario: Berendsen rejects extra fields (e.g. collision_rate from Andersen)",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Berendsen rejects extra fields (e.g. collision_rate from Andersen)",
     "type": "scenario"
   },
   "rq-f0b9b0f5": {
@@ -11355,6 +11702,13 @@
     "title": "Timings path equal to trajectory path is rejected",
     "type": "scenario"
   },
+  "rq-f856f666": {
+    "decl": "- `BerendsenState` — implements the `Integrator` trait declared in",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "BerendsenState",
+    "type": "api-item"
+  },
   "rq-f8ad62d4": {
     "decl": "Scenario: cell_offsets is the exclusive prefix sum and ends at particle_count",
     "file": "forces/neighbor-list",
@@ -11519,6 +11873,13 @@
     "title": "Empty State and degenerate cases",
     "type": "section"
   },
+  "rq-fdb8be77": {
+    "decl": "Scenario: Berendsen rejects non-positive temperature",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Berendsen rejects non-positive temperature",
+    "type": "scenario"
+  },
   "rq-fdbb902d": {
     "decl": "## Timing Methodology",
     "file": "performance-analysis",
@@ -11640,5 +12001,12 @@
     ],
     "title": "Feature: Extended-XYZ Initial-State File",
     "type": "file"
+  },
+  "rq-fff341e9": {
+    "decl": "Scenario: Reject extra fields (e.g. collision_rate from Andersen)",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Reject extra fields (e.g. collision_rate from Andersen)",
+    "type": "scenario"
   }
 }

@@ -2342,3 +2342,124 @@ fn andersen_rejects_extra_fields() {
         other => panic!("unexpected: {other:?}"),
     }
 }
+
+// --- Berendsen ---
+
+fn berendsen_minimal_config() -> String {
+    r#"schema_version = 1
+init = "argon.xyz"
+
+[simulation]
+seed = 12345
+n_steps = 10
+dt = 1.0e-15
+temperature = 300.0
+
+[integrator]
+kind = "berendsen"
+temperature = 300.0
+tau = 1.0e-13
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#
+    .to_string()
+}
+
+#[test]
+fn berendsen_accepted() {
+    let dir = tmp_path("berendsen_accepted");
+    let path = write_config(&dir, &berendsen_minimal_config());
+    let cfg = load_config(&path).unwrap();
+    match &cfg.integrator {
+        dynamics::io::config::IntegratorKind::Berendsen { temperature, tau } => {
+            assert_eq!(*temperature, 300.0);
+            assert_eq!(*tau, 1.0e-13);
+        }
+        other => panic!("expected Berendsen, got {other:?}"),
+    }
+}
+
+#[test]
+fn berendsen_missing_temperature_rejected() {
+    let dir = tmp_path("berendsen_no_T");
+    let body = berendsen_minimal_config().replace("temperature = 300.0\ntau", "tau");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "integrator.temperature"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn berendsen_missing_tau_rejected() {
+    let dir = tmp_path("berendsen_no_tau");
+    let body = berendsen_minimal_config().replace("\ntau = 1.0e-13\n", "\n");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "integrator.tau"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn berendsen_rejects_non_positive_temperature() {
+    let dir = tmp_path("berendsen_T_zero");
+    let body = berendsen_minimal_config()
+        .replace("temperature = 300.0\ntau", "temperature = 0.0\ntau");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "integrator.temperature"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn berendsen_rejects_non_positive_tau() {
+    let dir = tmp_path("berendsen_tau_neg");
+    let body = berendsen_minimal_config().replace("tau = 1.0e-13", "tau = -1.0e-13");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "integrator.tau"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn berendsen_rejects_seed_field() {
+    let dir = tmp_path("berendsen_seed");
+    let body = berendsen_minimal_config().replace("tau = 1.0e-13\n", "tau = 1.0e-13\nseed = 42\n");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownIntegratorField { kind, field } => {
+            assert_eq!(kind, "berendsen");
+            assert_eq!(field, "seed");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn berendsen_rejects_collision_rate_field() {
+    let dir = tmp_path("berendsen_collision");
+    let body = berendsen_minimal_config().replace(
+        "tau = 1.0e-13\n",
+        "tau = 1.0e-13\ncollision_rate = 1.0e12\n",
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownIntegratorField { kind, field } => {
+            assert_eq!(kind, "berendsen");
+            assert_eq!(field, "collision_rate");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}

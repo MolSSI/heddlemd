@@ -147,6 +147,10 @@ required fields are rejected.
     `integration/csvr.md`.
   - `"andersen"` — stochastic NVT via per-particle Maxwell-Boltzmann
     resampling (Andersen, 1980). See `integration/andersen.md`.
+  - `"berendsen"` — deterministic weak-coupling thermostat (Berendsen
+    et al., 1984). Suitable for **equilibration only**; does not
+    sample the canonical ensemble. See `integration/berendsen.md`
+    for the full caveat and parameter description.
 
 Fields accepted for `kind = "velocity-verlet"`:
 
@@ -204,6 +208,14 @@ Fields accepted for `kind = "andersen"`:
   and Maxwell-Boltzmann draws consumed by the resample kernel.
   Required, independent of `simulation.seed` and any other
   integrator's seed.
+
+Fields accepted for `kind = "berendsen"`:
+
+- `temperature: f64` — bath temperature in kelvin. Required. Finite
+  and strictly positive. Independent of `simulation.temperature`.
+- `tau: f64` — thermostat coupling time in seconds. Required. Finite
+  and strictly positive. Typical values for liquid water are 100 fs
+  to 1 ps; larger `τ` leaves the dynamics closer to NVE.
 
 #### `[[particle_types]]` (array of tables) <!-- rq-78487f38 -->
 
@@ -548,6 +560,9 @@ Beyond per-field validation, the loader checks:
     — selected by `kind = "andersen"`. All three fields are
     required. `collision_rate` is the per-particle stochastic
     collision frequency in inverse seconds and may be zero.
+  - `Berendsen { temperature: f64, tau: f64 }` — selected by
+    `kind = "berendsen"`. Both fields are required. Deterministic;
+    no RNG seed.
 
   Variant-bearing parameters reflect the per-kind fields listed under the
   `[integrator]` section above.
@@ -1139,6 +1154,59 @@ Feature: TOML simulation config schema
       temperature=300.0, collision_rate=1.0e12, seed=42, tau=1.0e-13 (extra field)
     When load_config is called
     Then it returns Err(ConfigError::UnknownIntegratorField { kind: "andersen", field: "tau" })
+
+  # --- Berendsen ---
+
+  @rq-8ca0bc54
+  Scenario: Berendsen with all required fields accepted
+    Given the Background config with [integrator] kind="berendsen",
+      temperature=300.0, tau=1.0e-13
+    When load_config is called
+    Then it returns Ok(config)
+    And config.integrator matches IntegratorKind::Berendsen {
+      temperature: 300.0, tau: 1.0e-13 }
+
+  @rq-ecf796d3
+  Scenario: Berendsen missing temperature is rejected
+    Given the Background config with [integrator] kind="berendsen", tau=1.0e-13
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.temperature" })
+
+  @rq-b6ed3328
+  Scenario: Berendsen missing tau is rejected
+    Given the Background config with [integrator] kind="berendsen", temperature=300.0
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.tau" })
+
+  @rq-fdb8be77
+  Scenario: Berendsen rejects non-positive temperature
+    Given the Background config with [integrator] kind="berendsen",
+      temperature=0.0, tau=1.0e-13
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.temperature", reason: _ })
+
+  @rq-c74dec33
+  Scenario: Berendsen rejects non-positive tau
+    Given the Background config with [integrator] kind="berendsen",
+      temperature=300.0, tau=-1.0e-13
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.tau", reason: _ })
+
+  @rq-b270fb04
+  Scenario: Berendsen rejects extra fields (e.g. seed from CSVR/Andersen)
+    Given the Background config with [integrator] kind="berendsen",
+      temperature=300.0, tau=1.0e-13, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownIntegratorField {
+      kind: "berendsen", field: "seed" })
+
+  @rq-f076e97c
+  Scenario: Berendsen rejects extra fields (e.g. collision_rate from Andersen)
+    Given the Background config with [integrator] kind="berendsen",
+      temperature=300.0, tau=1.0e-13, collision_rate=1.0e12
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownIntegratorField {
+      kind: "berendsen", field: "collision_rate" })
 
   @rq-1e1c5f3b
   Scenario: Missing [[particle_types]] is rejected

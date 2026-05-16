@@ -17,7 +17,7 @@ name.
 
 ## Slots <!-- rq-10c79bb0 -->
 
-The default registry exposes five integrators:
+The default registry exposes six integrators:
 
 | `kind` value         | Implementation                                          | File                     |
 | -------------------- | ------------------------------------------------------- | ------------------------ |
@@ -26,6 +26,7 @@ The default registry exposes five integrators:
 | `nose-hoover-chain`  | deterministic NVT via Nosé-Hoover chain                 | `nose-hoover-chain.md`   |
 | `csvr`               | stochastic NVT via canonical sampling velocity rescaling | `csvr.md`                |
 | `andersen`           | stochastic NVT via per-particle Maxwell-Boltzmann resampling | `andersen.md`        |
+| `berendsen`          | deterministic weak-coupling thermostat (equilibration only — not canonical) | `berendsen.md`           |
 
 Each implementation's per-step kernels, parameter set, and timings
 stages are documented in its own requirements file.
@@ -169,6 +170,10 @@ may have zero-length device slices but must construct successfully.
           collision_rate: f64,
           seed: u64,
       },
+      Berendsen {
+          temperature: f64,
+          tau: f64,
+      },
   }
   ```
 
@@ -182,8 +187,9 @@ may have zero-length device slices but must construct successfully.
   string the registry uses as the lookup key (`"velocity-verlet"` for
   `VelocityVerlet`, `"langevin-baoab"` for `LangevinBaoab`,
   `"nose-hoover-chain"` for `NoseHooverChain`, `"csvr"` for `Csvr`,
-  `"andersen"` for `Andersen`). This is the bridge between the closed
-  config-level enum and the open registry.
+  `"andersen"` for `Andersen`, `"berendsen"` for `Berendsen`). This is
+  the bridge between the closed config-level enum and the open
+  registry.
 
 - `IntegratorBuilder` — trait describing a registered integrator. <!-- rq-87fdd9b1 -->
   Implementations are stateless and self-register at construction
@@ -214,8 +220,8 @@ may have zero-length device slices but must construct successfully.
   Methods:
   - `IntegratorRegistry::with_builtins() -> IntegratorRegistry` —
     constructs a registry pre-populated with `velocity-verlet`,
-    `langevin-baoab`, `nose-hoover-chain`, `csvr`, and `andersen`
-    builders.
+    `langevin-baoab`, `nose-hoover-chain`, `csvr`, `andersen`, and
+    `berendsen` builders.
   - `IntegratorRegistry::register(&mut self, builder: Box<dyn
     IntegratorBuilder>)` — appends a builder. Two builders sharing
     the same `kind_name()` are not detected at registration; the
@@ -272,6 +278,13 @@ may have zero-length device slices but must construct successfully.
       buffer for the kinetic-energy reduction; and initialises the
       `draw_counter` and `cumulative_injection` to zero (see
       `andersen.md`).
+    - For `Berendsen { temperature, tau }`, the builder constructs a
+      `BerendsenState` that captures the temperature and coupling
+      time; precomputes `kt_target = k_B · temperature` and the
+      degree-of-freedom count `g_dof = max(1, 3N − 3)`; allocates a
+      length-1 device scratch buffer for the kinetic-energy
+      reduction; and initialises `cumulative_injection` to zero (see
+      `berendsen.md`).
   - A `particle_count` of zero is permitted: any per-particle device
     allocations have length zero.
 
@@ -382,6 +395,13 @@ Feature: Pluggable integrator framework
     Given an IntegratorRegistry::with_builtins()
     And an IntegratorKind::Andersen {
       temperature: 300.0, collision_rate: 1.0e12, seed: 42 }
+    When registry.build(&kind, device, particle_count=4) is called
+    Then it returns Ok(integrator)
+
+  @rq-d1582b1a
+  Scenario: Construct Berendsen via the registry
+    Given an IntegratorRegistry::with_builtins()
+    And an IntegratorKind::Berendsen { temperature: 300.0, tau: 1.0e-13 }
     When registry.build(&kind, device, particle_count=4) is called
     Then it returns Ok(integrator)
 

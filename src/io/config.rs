@@ -133,6 +133,10 @@ pub enum IntegratorKind {
         collision_rate: f64,
         seed: u64,
     },
+    Berendsen {
+        temperature: f64,
+        tau: f64,
+    },
 }
 
 impl IntegratorKind {
@@ -145,6 +149,7 @@ impl IntegratorKind {
             IntegratorKind::NoseHooverChain { .. } => "nose-hoover-chain",
             IntegratorKind::Csvr { .. } => "csvr",
             IntegratorKind::Andersen { .. } => "andersen",
+            IntegratorKind::Berendsen { .. } => "berendsen",
         }
     }
 }
@@ -572,6 +577,23 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
                 collision_rate,
                 seed,
             }
+        }
+        "berendsen" => {
+            for key in integ_tbl.keys() {
+                if !matches!(key.as_str(), "kind" | "temperature" | "tau") {
+                    return Err(ConfigError::UnknownIntegratorField {
+                        kind: "berendsen".to_string(),
+                        field: key.clone(),
+                    });
+                }
+            }
+            let temperature = get_f64(integ_tbl, "temperature")
+                .map_err(rename_field("integrator.temperature".into()))?;
+            require_finite_positive("integrator.temperature", temperature)?;
+            let tau = get_f64(integ_tbl, "tau")
+                .map_err(rename_field("integrator.tau".into()))?;
+            require_finite_positive("integrator.tau", tau)?;
+            IntegratorKind::Berendsen { temperature, tau }
         }
         other => {
             return Err(ConfigError::UnknownIntegratorKind {

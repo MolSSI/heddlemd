@@ -88,6 +88,7 @@ impl IntegratorRegistry {
                 Box::new(NoseHooverChainBuilder),
                 Box::new(CsvrBuilder),
                 Box::new(AndersenBuilder),
+                Box::new(BerendsenBuilder),
             ],
         }
     }
@@ -949,6 +950,131 @@ impl IntegratorBuilder for AndersenBuilder {
                     *collision_rate,
                     *seed,
                 )?;
+                Ok(Box::new(state))
+            }
+            other => Err(IntegratorError::UnknownKind(other.name().to_string())),
+        }
+    }
+}
+
+// --- Berendsen weak-coupling thermostat ---
+// rq-25f24b26
+
+#[derive(Debug)]
+pub struct BerendsenState {
+    pub temperature: f64,
+    pub tau: f64,
+    pub g_dof: u32,
+    pub kt_target: f64,
+    pub cumulative_injection: f64,
+    ke_scratch: CudaSlice<f32>,
+    most_recent_ke: f64,
+}
+
+impl BerendsenState {
+    fn new(
+        gpu: &GpuContext,
+        particle_count: usize,
+        temperature: f64,
+        tau: f64,
+    ) -> Result<Self, GpuError> {
+        let g_dof = ((3 * particle_count) as i64 - 3).max(1) as u32;
+        let kt_target = BOLTZMANN_J_PER_K * temperature;
+        let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
+        Ok(BerendsenState {
+            temperature,
+            tau,
+            g_dof,
+            kt_target,
+            cumulative_injection: 0.0,
+            ke_scratch,
+            most_recent_ke: 0.0,
+        })
+    }
+}
+
+impl Integrator for BerendsenState {
+    fn step(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &mut SimulationBox,
+        force_field: &mut ForceField,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), IntegratorError> {
+        if buffers.particle_count() == 0 {
+            return Ok(());
+        }
+
+        // Velocity-Verlet core.
+        timings.kernel_start(KernelStage::VV_KICK_DRIFT)?;
+        vv_kick_drift(buffers, sim_box, dt)?;
+        timings.kernel_stop(KernelStage::VV_KICK_DRIFT)?;
+
+        force_field.step(buffers, sim_box, timings)?;
+
+        timings.kernel_start(KernelStage::VV_KICK)?;
+        vv_kick(buffers, dt)?;
+        timings.kernel_stop(KernelStage::VV_KICK)?;
+
+        // Read instantaneous KE.
+        timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
+        let k_old = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+        timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
+
+        // K = 0: skip the rescale this step.
+        if k_old <= 0.0 {
+            self.most_recent_ke = 0.0;
+            return Ok(());
+        }
+
+        // Compute λ via the Berendsen formula. K_target = (N_f / 2) k_B T.
+        let nf = self.g_dof as f64;
+        let k_target = (nf / 2.0) * self.kt_target;
+        let lambda_sq = (1.0 + ((dt as f64) / self.tau) * (k_target / k_old - 1.0)).max(0.0);
+        let lambda = lambda_sq.sqrt();
+        let factor = lambda as f32;
+
+        timings.kernel_start(KernelStage::BERENDSEN_RESCALE_VELOCITIES)?;
+        rescale_velocities(buffers, factor)?;
+        timings.kernel_stop(KernelStage::BERENDSEN_RESCALE_VELOCITIES)?;
+
+        let k_new = lambda_sq * k_old;
+        self.cumulative_injection += k_new - k_old;
+        self.most_recent_ke = k_new;
+        Ok(())
+    }
+
+    fn log_column_names(&self) -> &'static [&'static str] {
+        &["berendsen_conserved"]
+    }
+
+    fn log_column_values(
+        &self,
+        kinetic_energy: f64,
+        potential_energy: f64,
+    ) -> Vec<f64> {
+        vec![kinetic_energy + potential_energy - self.cumulative_injection]
+    }
+}
+
+#[derive(Debug)]
+pub struct BerendsenBuilder;
+
+impl IntegratorBuilder for BerendsenBuilder {
+    fn kind_name(&self) -> &'static str {
+        "berendsen"
+    }
+
+    fn build(
+        &self,
+        gpu: &GpuContext,
+        particle_count: usize,
+        kind: &IntegratorKind,
+    ) -> Result<Box<dyn Integrator>, IntegratorError> {
+        match kind {
+            IntegratorKind::Berendsen { temperature, tau } => {
+                let state = BerendsenState::new(gpu, particle_count, *temperature, *tau)?;
                 Ok(Box::new(state))
             }
             other => Err(IntegratorError::UnknownKind(other.name().to_string())),
