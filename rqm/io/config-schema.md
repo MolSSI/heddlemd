@@ -21,12 +21,13 @@ Sections:
 | ------- | -------- | ------- |
 | top-level `schema_version` | yes | format version |
 | top-level `init` | yes | path to initial-state file |
-| top-level `bonds` | no | path to .bonds topology file |
+| top-level `topology` | no | path to .topology file |
 | `[simulation]` | yes | timestep, step count, RNG seed, temperature |
 | `[integrator]` | yes | integrator slot + per-kind parameters |
 | `[[particle_types]]` | yes (>= 1) | per-type properties |
 | `[[pair_interactions]]` | yes (covers every pair) | per-pair potential + parameters |
 | `[[bond_types]]` | no | per-bond-type parameters |
+| `[[angle_types]]` | no | per-angle-type parameters |
 | `[neighbor_list]` | no | non-bonded pair-evaluation algorithm |
 | `[output]` | no | trajectory & log paths and cadences |
 
@@ -58,10 +59,10 @@ epsilon = 1.65e-21  # J
 cutoff = 1.0e-9     # m
 r_switch = 9.0e-10  # m  (defaults to 0.9 * cutoff when omitted)
 
-# Optional: path to a .bonds file declaring bonds and explicit non-bonded
-# exclusions. When omitted, no bonded forces are computed and the LJ kernel
-# sees no exclusions.
-bonds = "argon.bonds"
+# Optional: path to a .topology file declaring bonds, angles, and
+# explicit non-bonded exclusions. When omitted, no bonded forces are
+# computed and the LJ / Coulomb kernels see no exclusions.
+topology = "argon.topology"
 
 [[bond_types]]
 name = "ArAr"
@@ -69,6 +70,12 @@ potential = "morse"
 de = 1.65e-21       # J  (well depth)
 a = 1.9e10          # 1/m (width)
 re = 3.40e-10       # m  (equilibrium distance)
+
+[[angle_types]]
+name = "HOH"
+potential = "harmonic"
+k_theta = 383.0     # J/rad²
+theta_0 = 1.911     # rad (~109.47°)
 
 [neighbor_list]
 mode = "cell-list"
@@ -98,12 +105,13 @@ or unit suffixes are supported in schema v1.
 - `schema_version: u64` — must equal `1`. See *Schema version handling* below.
 - `init: String` — path to the extended-XYZ initial-state file. Resolved
   relative to the config file's directory; absolute paths are honored as-is.
-- `bonds: String` — optional path to a `.bonds` topology file (see
-  `forces/bonds.md`). Resolved relative to the config file's directory;
-  absolute paths are honored as-is. When omitted, no bonded forces are
-  computed and the LJ kernel sees an empty exclusion list. When supplied,
-  the file is loaded after the init file (so atom-index bounds checking
-  has access to the particle count).
+- `topology: String` — optional path to a `.topology` file (see
+  `forces/topology.md`). Resolved relative to the config file's
+  directory; absolute paths are honored as-is. When omitted, no
+  bonded forces are computed and the LJ and Coulomb kernels see an
+  empty exclusion list. When supplied, the file is loaded after the
+  init file (so atom-index bounds checking has access to the
+  particle count).
 
 #### `[simulation]` <!-- rq-a84e1c76 -->
 
@@ -207,10 +215,11 @@ Same-type pairs are required even when only one type is declared:
 #### `[[bond_types]]` (optional array of tables) <!-- rq-e4420955 -->
 
 Declares the parameter sets for bonded potentials referenced by name from
-the `.bonds` file. The array is optional and may be empty. When supplied,
-every bond type's `name` field appears as the third column of one or more
-rows in the `.bonds` file's `[bonds]` section. Bond types whose `name`
-is never used in the file are permitted (declared-but-unused).
+the `.topology` file. The array is optional and may be empty. When
+supplied, every bond type's `name` field appears as the third column of
+one or more rows in the `.topology` file's `[bonds]` section. Bond
+types whose `name` is never used in the file are permitted
+(declared-but-unused).
 
 Common fields:
 
@@ -228,6 +237,34 @@ Fields accepted for `potential = "morse"` (see `forces/morse-bonded.md`):
   strictly positive.
 - `re: f64` — Morse equilibrium distance in metres. Required. Finite,
   strictly positive.
+
+Names must be unique within the array. Unknown fields for the chosen
+`potential` are rejected.
+
+#### `[[angle_types]]` (optional array of tables) <!-- rq-f2946c4a -->
+
+Declares the parameter sets for angle potentials referenced by name from
+the `.topology` file. The array is optional and may be empty. When
+supplied, every angle type's `name` field appears as the fourth column
+of one or more rows in the `.topology` file's `[angles]` section. Angle
+types whose `name` is never used in the file are permitted
+(declared-but-unused).
+
+Common fields:
+
+- `name: String` — unique identifier within the `[[angle_types]]`
+  array. Empty strings are rejected. Case-sensitive.
+- `potential: String` — selects the angle potential. The only
+  supported value is `"harmonic"`. Future values
+  (`"cosine-harmonic"`, `"urey-bradley"`, ...) are reserved.
+
+Fields accepted for `potential = "harmonic"` (see
+`forces/harmonic-angle.md`):
+
+- `k_theta: f64` — angle force constant in joules per radian². Required.
+  Finite, strictly positive.
+- `theta_0: f64` — equilibrium angle in radians. Required. Finite, in
+  `[0, π]`.
 
 Names must be unique within the array. Unknown fields for the chosen
 `potential` are rejected.
@@ -361,14 +398,15 @@ Cross-validation:
 
 ### Path resolution and overwrite policy <!-- rq-6d99f9c8 -->
 
-- All file paths (`init`, `bonds`, `output.trajectory_path`,
-  `output.log_path`, `output.timings_path`) are interpreted relative to
-  the **config file's containing directory** when not absolute. The loader
-  resolves them before returning. The `bonds` field is optional; when
-  absent the resolved bonds path is `None` and no bonds file is loaded.
-- After resolution, every supplied path must be pairwise distinct from
-  every other supplied path. When `bonds` is supplied, that path is
-  included in the distinctness check.
+- All file paths (`init`, `topology`, `output.trajectory_path`,
+  `output.log_path`, `output.timings_path`) are interpreted relative
+  to the **config file's containing directory** when not absolute.
+  The loader resolves them before returning. The `topology` field is
+  optional; when absent the resolved topology path is `None` and no
+  topology file is loaded.
+- After resolution, every supplied path must be pairwise distinct
+  from every other supplied path. When `topology` is supplied, that
+  path is included in the distinctness check.
 - The loader does not check whether the resolved output files already
   exist; that check lives in the runner (`simulation-runner.md`) so that
   configs can be loaded for validation without filesystem side effects.
@@ -399,7 +437,7 @@ Beyond per-field validation, the loader checks:
 3. After path resolution, every supplied path is pairwise distinct from
    every other supplied path (`PathCollision { kind_a, kind_b, path }`).
    The set of paths under check is `init`, `output.trajectory_path`,
-   `output.log_path`, `output.timings_path`, and (when supplied) `bonds`.
+   `output.log_path`, `output.timings_path`, and (when supplied) `topology`.
 
 ## Feature API <!-- rq-110285ae -->
 
@@ -411,8 +449,8 @@ Beyond per-field validation, the loader checks:
   Fields:
   - `schema_version: u64`
   - `init: PathBuf` — resolved against the config file's directory.
-  - `bonds: Option<PathBuf>` — `Some(_)` when the optional top-level
-    `bonds` field is present; resolved against the config file's
+  - `topology: Option<PathBuf>` — `Some(_)` when the optional top-level
+    `topology` field is present; resolved against the config file's
     directory.
   - `simulation: SimulationConfig`
   - `integrator: IntegratorKind`
@@ -420,6 +458,8 @@ Beyond per-field validation, the loader checks:
   - `pair_interactions: Vec<PairInteractionConfig>`
   - `bond_types: Vec<BondTypeConfig>` — empty when the `[[bond_types]]`
     array is absent.
+  - `angle_types: Vec<AngleTypeConfig>` — empty when the
+    `[[angle_types]]` array is absent.
   - `coulomb: Option<CoulombConfig>` — `Some` when the `[coulomb]` table
     is present in the config, `None` otherwise. Mutually exclusive with
     `spme`.
@@ -478,8 +518,16 @@ Beyond per-field validation, the loader checks:
   - `Morse { name: String, de: f64, a: f64, re: f64 }` — selected by
     `potential = "morse"`.
 
-  The `name` field is the lookup key referenced from the `.bonds` file's
-  `[bonds]` section.
+  The `name` field is the lookup key referenced from the `.topology`
+  file's `[bonds]` section.
+
+- `AngleTypeConfig` — tagged enum carrying the chosen angle-potential <!-- rq-a47beb76 -->
+  parameters. Variants:
+  - `Harmonic { name: String, k_theta: f64, theta_0: f64 }` — selected
+    by `potential = "harmonic"`.
+
+  The `name` field is the lookup key referenced from the `.topology`
+  file's `[angles]` section.
 
 - `CoulombConfig` <!-- rq-793a7cbb -->
   - `cutoff: f64` — real-space cutoff in metres.
@@ -516,7 +564,7 @@ Beyond per-field validation, the loader checks:
   - `log_every: u64`
   - `timings_path: PathBuf` — resolved.
 
-- `PathRole` — `enum { Init, Trajectory, Log, Timings, Bonds }`. Used in `PathCollision`. <!-- rq-f0084057 -->
+- `PathRole` — `enum { Init, Trajectory, Log, Timings, Topology }`. Used in `PathCollision`. <!-- rq-f0084057 -->
 
 - `ConfigError` — error type returned by `load_config`. Variants: <!-- rq-0b9372e8 -->
   - `Io(String)` — failed to read the config file (with the OS error
@@ -554,6 +602,14 @@ Beyond per-field validation, the loader checks:
     — a field in a `[[bond_types]]` entry is not recognised by the
     chosen `potential`.
   - `DuplicateBondTypeName { name: String }` — two `[[bond_types]]`
+    entries share a `name`.
+  - `UnknownAnglePotential { actual: String, angle_type_index: usize }`
+    — an `[[angle_types]]` entry has a `potential` value that is not
+    one of the supported strings.
+  - `UnknownAngleTypeField { potential: String, field: String, angle_type_index: usize }`
+    — a field in an `[[angle_types]]` entry is not recognised by the
+    chosen `potential`.
+  - `DuplicateAngleTypeName { name: String }` — two `[[angle_types]]`
     entries share a `name`.
   - `UnknownNeighborListMode { actual: String }` —
     `[neighbor_list].mode` is not one of the supported strings.
@@ -1068,35 +1124,35 @@ Feature: TOML simulation config schema
   # --- Bonds field ---
 
   @rq-6cb9ab62
-  Scenario: bonds field is optional and defaults to None
-    Given the Background config without a top-level `bonds` field
+  Scenario: topology field is optional and defaults to None
+    Given the Background config without a top-level `topology` field
     When load_config is called
     Then it returns Ok(config)
-    And config.bonds equals None
+    And config.topology equals None
 
   @rq-027153d9
-  Scenario: bonds field is resolved relative to the config directory
-    Given the Background config at "/tmp/sim/sim.toml" with bonds="topology.bonds"
+  Scenario: topology field is resolved relative to the config directory
+    Given the Background config at "/tmp/sim/sim.toml" with topology="argon.topology"
     When load_config is called
-    Then config.bonds equals Some("/tmp/sim/topology.bonds")
+    Then config.topology equals Some("/tmp/sim/argon.topology")
 
   @rq-576561a2
-  Scenario: bonds absolute path is preserved
-    Given the Background config with bonds="/data/topology.bonds"
+  Scenario: topology absolute path is preserved
+    Given the Background config with topology="/data/argon.topology"
     When load_config is called
-    Then config.bonds equals Some("/data/topology.bonds")
+    Then config.topology equals Some("/data/argon.topology")
 
   @rq-4186d4f4
-  Scenario: Reject bonds = init
-    Given the Background config with init="argon.xyz" and bonds="argon.xyz"
+  Scenario: Reject topology = init
+    Given the Background config with init="argon.xyz" and topology="argon.xyz"
     When load_config is called
-    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Init, kind_b: PathRole::Bonds, path: _ })
+    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Init, kind_b: PathRole::Topology, path: _ })
 
   @rq-98180119
-  Scenario: Reject bonds = trajectory_path
-    Given the Background config with [output].trajectory_path="run.dat" and bonds="run.dat"
+  Scenario: Reject topology = trajectory_path
+    Given the Background config with [output].trajectory_path="run.dat" and topology="run.dat"
     When load_config is called
-    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Trajectory, kind_b: PathRole::Bonds, path: _ })
+    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Trajectory, kind_b: PathRole::Topology, path: _ })
 
   # --- Bond types ---
 
@@ -1169,6 +1225,72 @@ Feature: TOML simulation config schema
     Given a [[bond_types]] entry with name=""
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].name", reason: _ })
+
+  # --- Angle types ---
+
+  @rq-24dc9578
+  Scenario: angle_types is optional and defaults to empty
+    Given the Background config without an [[angle_types]] array
+    When load_config is called
+    Then it returns Ok(config)
+    And config.angle_types is empty
+
+  @rq-91bf10ec
+  Scenario: Valid harmonic angle_type is accepted
+    Given the Background config plus
+      [[angle_types]] name="HOH" potential="harmonic" k_theta=383.0 theta_0=1.911
+    When load_config is called
+    Then it returns Ok(config)
+    And config.angle_types has length 1
+    And config.angle_types[0] matches AngleTypeConfig::Harmonic { name: "HOH", k_theta: 383.0, theta_0: 1.911 }
+
+  @rq-57518e01
+  Scenario: angle_type missing potential field
+    Given the Background config plus an [[angle_types]] entry with name="X" but no potential
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "angle_types[0].potential" })
+
+  @rq-22699c4c
+  Scenario: angle_type unknown potential is rejected
+    Given an [[angle_types]] entry with potential="cosine-harmonic"
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownAnglePotential { actual: "cosine-harmonic", angle_type_index: 0 })
+
+  @rq-dc94d9e3
+  Scenario: Harmonic angle_type missing k_theta is rejected
+    Given an [[angle_types]] entry with potential="harmonic", theta_0=1.911 (no k_theta)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "angle_types[0].k_theta" })
+
+  @rq-aad6ca63
+  Scenario: Harmonic angle_type rejects non-positive k_theta
+    Given an [[angle_types]] entry with potential="harmonic", k_theta=0.0, theta_0=1.911
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "angle_types[0].k_theta", reason: _ })
+
+  @rq-e399422c
+  Scenario: Harmonic angle_type rejects theta_0 outside [0, π]
+    Given an [[angle_types]] entry with potential="harmonic", k_theta=383.0, theta_0=4.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "angle_types[0].theta_0", reason: _ })
+
+  @rq-e3544b10
+  Scenario: Harmonic angle_type rejects extra fields
+    Given an [[angle_types]] entry with potential="harmonic" and an unknown field stiffness=1.0
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownAngleTypeField { potential: "harmonic", field: "stiffness", angle_type_index: 0 })
+
+  @rq-9255c192
+  Scenario: Reject duplicate angle_type names
+    Given two [[angle_types]] entries with the same name "HOH"
+    When load_config is called
+    Then it returns Err(ConfigError::DuplicateAngleTypeName { name: "HOH" })
+
+  @rq-dc35ae30
+  Scenario: Empty angle_type name rejected
+    Given an [[angle_types]] entry with name=""
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "angle_types[0].name", reason: _ })
 
   # --- Neighbor list ---
 

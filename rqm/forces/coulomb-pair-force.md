@@ -107,7 +107,7 @@ neighbor_counts[i]`:
    polynomial branch is never entered; the kernel writes `factor` and
    `energy` unchanged for any `r2 ≤ r_c2`, producing the hard-cutoff
    case.
-10. Apply the per-pair Coulomb exclusion scale (see `bonds.md`). The
+10. Apply the per-pair Coulomb exclusion scale (see `topology.md`). The
     kernel walks the per-atom exclusion slice
     `atom_excl_partners[atom_excl_offsets[i] .. atom_excl_offsets[i+1]]`
     looking for `j`; if present, the corresponding entry in
@@ -155,7 +155,7 @@ The displacements differ only in sign, the wrap formula respects sign
 symmetry for displacements not exactly at the primary-image boundary,
 and the Coulomb factor depends only on `r²` and on the product `q_i · q_j`
 (commutative). The exclusion lookup table is constructed so the
-`(i, j)` and `(j, i)` scales are equal (see `bonds.md`). The two
+`(i, j)` and `(j, i)` scales are equal (see `topology.md`). The two
 threads' Cartesian forces therefore differ by a sign bit-for-bit for
 all displacements except the measure-zero exact-boundary case
 documented in `lj-pair-force.md`.

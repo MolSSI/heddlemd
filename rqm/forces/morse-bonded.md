@@ -1,12 +1,13 @@
 # Feature: Morse Bonded Potential <!-- rq-05d55351 -->
 
 The `MorseBonded` potential slot evaluates a Morse bond force for each bond
-in the system's bond list (see `bonds.md`). Bonds are pairs of atoms whose
+in the system's bond list (see `topology.md`). Bonds are pairs of atoms whose
 distance interaction is described by the Morse functional form with
 per-bond-type parameters. The slot plugs into the pluggable potential
 framework (`framework.md`); selection is implicit — the slot is present
-whenever the config's `bonds` field references a non-empty `.bonds` file
-and at least one `[[bond_types]]` entry has `potential = "morse"`.
+whenever the config's `topology` field references a non-empty `.topology`
+file whose `[bonds]` section is non-empty and at least one
+`[[bond_types]]` entry has `potential = "morse"`.
 
 ## Algorithm <!-- rq-cbeeea3c -->
 
@@ -58,7 +59,7 @@ the system total sum over slots equals `Σ_k U_k` and `Σ_k W_k`
 respectively, counting each bond exactly once.
 
 The reduction kernel reads the precomputed `atom_bond_offsets` /
-`atom_bond_indices` tables (see `bonds.md`) and sums each atom's
+`atom_bond_indices` tables (see `topology.md`) and sums each atom's
 contributions in fixed order. For atom `a`, the kernel computes five
 sequential left-to-right sums:
 
@@ -89,7 +90,7 @@ device:
 
 The parameter table on the device is three `CudaSlice<f32>` arrays
 (`de`, `a`, `re`), one per bond type, cast from `f64` to `f32` at
-upload time. Each bond carries a `bond_type_index` (see `bonds.md`)
+upload time. Each bond carries a `bond_type_index` (see `topology.md`)
 into this table.
 
 In v1 the only supported `potential` value for bond types is `"morse"`;

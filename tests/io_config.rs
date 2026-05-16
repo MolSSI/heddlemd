@@ -1300,7 +1300,7 @@ fn bonds_field_optional_defaults_none() {
     let dir = tmp_path("bonds_optional");
     let path = write_config(&dir, &minimal_config());
     let cfg = load_config(&path).unwrap();
-    assert!(cfg.bonds.is_none());
+    assert!(cfg.topology.is_none());
 }
 
 // rq-027153d9
@@ -1309,12 +1309,12 @@ fn bonds_field_resolved_relative() {
     let dir = tmp_path("bonds_relative");
     let body = minimal_config().replace(
         "init = \"argon.xyz\"\n",
-        "init = \"argon.xyz\"\nbonds = \"topology.bonds\"\n",
+        "init = \"argon.xyz\"\ntopology = \"argon.topology\"\n",
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.bonds, Some(canonical_dir.join("topology.bonds")));
+    assert_eq!(cfg.topology, Some(canonical_dir.join("argon.topology")));
 }
 
 // rq-576561a2
@@ -1323,11 +1323,11 @@ fn bonds_absolute_preserved() {
     let dir = tmp_path("bonds_absolute");
     let body = minimal_config().replace(
         "init = \"argon.xyz\"\n",
-        "init = \"argon.xyz\"\nbonds = \"/data/topology.bonds\"\n",
+        "init = \"argon.xyz\"\ntopology = \"/data/argon.topology\"\n",
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.bonds, Some(std::path::PathBuf::from("/data/topology.bonds")));
+    assert_eq!(cfg.topology, Some(std::path::PathBuf::from("/data/argon.topology")));
 }
 
 // rq-4186d4f4
@@ -1336,13 +1336,13 @@ fn reject_bonds_eq_init() {
     let dir = tmp_path("bonds_eq_init");
     let body = minimal_config().replace(
         "init = \"argon.xyz\"\n",
-        "init = \"argon.xyz\"\nbonds = \"argon.xyz\"\n",
+        "init = \"argon.xyz\"\ntopology = \"argon.xyz\"\n",
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
         ConfigError::PathCollision { kind_a, kind_b, .. } => {
             assert_eq!(kind_a, PathRole::Init);
-            assert_eq!(kind_b, PathRole::Bonds);
+            assert_eq!(kind_b, PathRole::Topology);
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -1356,14 +1356,14 @@ fn reject_bonds_eq_trajectory() {
         "{}\n[output]\ntrajectory_path = \"run.dat\"\n",
         minimal_config().replace(
             "init = \"argon.xyz\"\n",
-            "init = \"argon.xyz\"\nbonds = \"run.dat\"\n",
+            "init = \"argon.xyz\"\ntopology = \"run.dat\"\n",
         )
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
         ConfigError::PathCollision { kind_a, kind_b, .. } => {
-            assert!(matches!(kind_a, PathRole::Trajectory | PathRole::Bonds));
-            assert!(matches!(kind_b, PathRole::Trajectory | PathRole::Bonds));
+            assert!(matches!(kind_a, PathRole::Trajectory | PathRole::Topology));
+            assert!(matches!(kind_b, PathRole::Trajectory | PathRole::Topology));
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -1727,4 +1727,146 @@ fn neighbor_list_rejects_non_positive_r_skin() {
         err,
         ConfigError::InvalidValue { ref field, .. } if field == "neighbor_list.r_skin"
     ), "got {err:?}");
+}
+
+// --- Angle types ---
+
+#[test]
+fn angle_types_optional_empty() {
+    let dir = tmp_path("angle_types_optional");
+    let path = write_config(&dir, &minimal_config());
+    let cfg = load_config(&path).unwrap();
+    assert!(cfg.angle_types.is_empty());
+}
+
+#[test]
+fn valid_harmonic_angle_type_accepted() {
+    let dir = tmp_path("angle_types_harmonic");
+    let body = format!(
+        "{}\n[[angle_types]]\nname = \"HOH\"\npotential = \"harmonic\"\nk_theta = 383.0\ntheta_0 = 1.911\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.angle_types.len(), 1);
+    match &cfg.angle_types[0] {
+        dynamics::io::config::AngleTypeConfig::Harmonic { name, k_theta, theta_0 } => {
+            assert_eq!(name, "HOH");
+            assert!((k_theta - 383.0).abs() < 1.0e-9);
+            assert!((theta_0 - 1.911).abs() < 1.0e-9);
+        }
+    }
+}
+
+#[test]
+fn angle_type_missing_potential_rejected() {
+    let dir = tmp_path("angle_no_pot");
+    let body = format!(
+        "{}\n[[angle_types]]\nname = \"X\"\nk_theta = 1.0\ntheta_0 = 1.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => {
+            assert_eq!(field, "angle_types[0].potential");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn angle_type_unknown_potential_rejected() {
+    let dir = tmp_path("angle_unk_pot");
+    let body = format!(
+        "{}\n[[angle_types]]\nname = \"X\"\npotential = \"cosine-harmonic\"\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownAnglePotential { actual, angle_type_index } => {
+            assert_eq!(actual, "cosine-harmonic");
+            assert_eq!(angle_type_index, 0);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn harmonic_angle_rejects_non_positive_k_theta() {
+    let dir = tmp_path("angle_k_neg");
+    let body = format!(
+        "{}\n[[angle_types]]\nname = \"X\"\npotential = \"harmonic\"\nk_theta = 0.0\ntheta_0 = 1.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "angle_types[0].k_theta");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn harmonic_angle_rejects_theta_0_outside_zero_pi() {
+    let dir = tmp_path("angle_t0_oor");
+    let body = format!(
+        "{}\n[[angle_types]]\nname = \"X\"\npotential = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 4.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "angle_types[0].theta_0");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn harmonic_angle_rejects_extra_fields() {
+    let dir = tmp_path("angle_extra");
+    let body = format!(
+        "{}\n[[angle_types]]\nname = \"X\"\npotential = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 1.0\nstiffness = 2.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownAngleTypeField { potential, field, angle_type_index } => {
+            assert_eq!(potential, "harmonic");
+            assert_eq!(field, "stiffness");
+            assert_eq!(angle_type_index, 0);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn reject_duplicate_angle_type_name() {
+    let dir = tmp_path("angle_dup_name");
+    let body = format!(
+        "{}\n[[angle_types]]\nname = \"X\"\npotential = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 1.0\n\n[[angle_types]]\nname = \"X\"\npotential = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 1.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::DuplicateAngleTypeName { name } => assert_eq!(name, "X"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn empty_angle_type_name_rejected() {
+    let dir = tmp_path("angle_empty_name");
+    let body = format!(
+        "{}\n[[angle_types]]\nname = \"\"\npotential = \"harmonic\"\nk_theta = 1.0\ntheta_0 = 1.0\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "angle_types[0].name");
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
 }

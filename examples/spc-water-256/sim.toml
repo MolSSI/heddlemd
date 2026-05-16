@@ -1,0 +1,88 @@
+schema_version = 1
+init = "init.xyz"
+topology = "spc.topology"
+
+[simulation]
+seed = 1
+n_steps = 100
+dt = 0.5e-15        # 0.5 fs (short enough to integrate the stiff OH bond)
+temperature = 300.0
+
+[integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[[particle_types]]
+name = "O"
+mass = 2.6566e-26   # kg
+charge = -1.3138e-19   # C (-0.82 · elementary charge)
+
+[[particle_types]]
+name = "H"
+mass = 1.6735e-27   # kg
+charge = 6.569e-20     # C (+0.41 · elementary charge)
+
+# LJ on O–O only; both other pair interactions carry a negligibly small
+# epsilon (the loader rejects exactly zero).
+[[pair_interactions]]
+between = ["O", "O"]
+potential = "lennard-jones"
+sigma = 3.166e-10
+epsilon = 6.502e-22
+cutoff = 6.0e-10
+r_switch = 6.0e-10
+
+[[pair_interactions]]
+between = ["H", "H"]
+potential = "lennard-jones"
+sigma = 1.0e-10
+epsilon = 1.0e-30
+cutoff = 6.0e-10
+r_switch = 6.0e-10
+
+[[pair_interactions]]
+between = ["H", "O"]
+potential = "lennard-jones"
+sigma = 1.0e-10
+epsilon = 1.0e-30
+cutoff = 6.0e-10
+r_switch = 6.0e-10
+
+# Short-range Coulomb (no SPME on this small box).
+[coulomb]
+cutoff = 6.0e-10
+r_switch = 6.0e-10
+
+# Morse bond tuned so U''(r_e) = 2·D_e·a² matches the OH harmonic
+# stiffness k_b ≈ 800 J/m² inferred from the gas-phase OH stretching
+# frequency ω ≈ 6.88×10¹⁴ rad/s (3650 cm⁻¹) and the H–O reduced mass
+# μ ≈ 1.57×10⁻²⁷ kg (k_b = ω²·μ).
+# Solving 2·D_e·a² = k_b with D_e = 4.0×10⁻¹⁹ J (≈ 0.4 aJ, near the
+# OH dissociation energy) gives a = √(800 / 8×10⁻¹⁹) ≈ 3.16×10¹⁰ 1/m.
+[[bond_types]]
+name = "OH"
+potential = "morse"
+de = 4.0e-19        # J
+a = 3.16e10         # 1/m
+re = 1.0e-10        # m
+
+# Harmonic angle stiffness from flexible SPC (Toukan-Rahman):
+# k_HOH = 75.9 kcal/mol/rad² = 5.27e-19 J/rad².
+[[angle_types]]
+name = "HOH"
+potential = "harmonic"
+k_theta = 5.27e-19  # J/rad²  (75.9 kcal/mol/rad²)
+theta_0 = 1.910611931  # rad  (109.47°)
+
+[neighbor_list]
+mode = "cell-list"
+max_neighbors = 256
+r_skin = 5.0e-11
+
+[output]
+trajectory_path = "spc-traj.xyz"
+trajectory_every = 10
+include_velocities = false
+log_path = "spc.log"
+log_every = 5
+timings_path = "spc.timings"

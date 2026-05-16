@@ -20,7 +20,8 @@ variant list — in the requirements file for the feature that owns it.
   `cudarc::driver::DriverError`; returned by every GPU operation.
 - `ConfigError` (`src/io/config.rs`) — TOML config loading and validation.
 - `InitStateError` (`src/io/init_state.rs`) — extended-XYZ init-file parsing.
-- `BondsFileError` (`src/forces/bonds.rs`) — `.bonds` topology-file parsing.
+- `TopologyFileError` (`src/forces/topology.rs`) — `.topology`-file parsing
+  (bonds, angles, and exclusions).
 - `ParticleStateError` (`src/state.rs`) — particle-state construction and
   host/device transfer.
 - `SimulationBoxError` (`src/pbc.rs`) — simulation-box construction.

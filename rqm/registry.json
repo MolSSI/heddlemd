@@ -28,6 +28,13 @@
     "title": "Single-step lossless round trip restores observables bit-exactly",
     "type": "scenario"
   },
+  "rq-00bb491c": {
+    "decl": "Scenario: Angle row with non-integer index",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Angle row with non-integer index",
+    "type": "scenario"
+  },
   "rq-00c68095": {
     "decl": "### Data rows",
     "file": "io/trajectory-output",
@@ -91,6 +98,13 @@
     "title": "Build kernel signals overflow when an atom exceeds max_neighbors",
     "type": "scenario"
   },
+  "rq-021e6d82": {
+    "decl": "Scenario: Angle row with wrong column count",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Angle row with wrong column count",
+    "type": "scenario"
+  },
   "rq-025b2c3b": {
     "decl": "Scenario: Reject non-positive dt",
     "file": "io/config-schema",
@@ -99,10 +113,10 @@
     "type": "scenario"
   },
   "rq-027153d9": {
-    "decl": "Scenario: bonds field is resolved relative to the config directory",
+    "decl": "Scenario: topology field is resolved relative to the config directory",
     "file": "io/config-schema",
     "refs": [],
-    "title": "bonds field is resolved relative to the config directory",
+    "title": "topology field is resolved relative to the config directory",
     "type": "scenario"
   },
   "rq-02a15197": {
@@ -288,7 +302,7 @@
   },
   "rq-06c0e11a": {
     "decl": "Scenario: Exclusion row with non-numeric scale",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Exclusion row with non-numeric scale",
     "type": "scenario"
@@ -306,6 +320,13 @@
     "refs": [],
     "title": "Spread is independent of particle order in the bin",
     "type": "scenario"
+  },
+  "rq-07d003c4": {
+    "decl": "- `AngleList` — host-side. Fields: `angles: Vec<Angle>`,",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "AngleList",
+    "type": "api-item"
   },
   "rq-08066bdf": {
     "decl": "### Types",
@@ -328,6 +349,13 @@
     "file": "forces/spme",
     "refs": [],
     "title": "Reciprocal-space virial is distributed equally per particle",
+    "type": "scenario"
+  },
+  "rq-086a1bd9": {
+    "decl": "Scenario: Unknown angle type name rejected",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Unknown angle type name rejected",
     "type": "scenario"
   },
   "rq-0896c33a": {
@@ -361,7 +389,7 @@
   },
   "rq-0a8831b1": {
     "decl": "- `Bond` — `Debug, Clone, Copy`. Fields: `atom_i: u32`, `atom_j: u32`,",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Bond",
     "type": "api-item"
@@ -424,7 +452,7 @@
   },
   "rq-0c717392": {
     "decl": "- `Exclusion` — `Debug, Clone, Copy`. Fields: `atom_i: u32`,",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Exclusion",
     "type": "api-item"
@@ -568,7 +596,7 @@
   },
   "rq-10956a4e": {
     "decl": "# A single scale column (3-column form) sets both scale_lj and",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "A single scale column (3-column form) sets both scale_lj and",
     "type": "file"
@@ -598,7 +626,7 @@
   },
   "rq-10d1da56": {
     "decl": "Scenario: Self-bond rejected",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Self-bond rejected",
     "type": "scenario"
@@ -651,7 +679,7 @@
   },
   "rq-1221d020": {
     "decl": "Scenario: Single-scale form sets both LJ and Coulomb scales equally",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Single-scale form sets both LJ and Coulomb scales equally",
     "type": "scenario"
@@ -703,15 +731,20 @@
     "type": "section"
   },
   "rq-12b7dcb6": {
-    "decl": "- `load_bonds_file(path: &Path, particle_count: usize, bond_type_names: &[&str]) -> Result<(BondList, ExclusionList), BondsFileError>`",
-    "file": "forces/bonds",
-    "refs": [],
-    "title": "load_bonds_file",
+    "decl": "- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str]) -> Result<(BondList, AngleList, ExclusionList), TopologyFileError>`",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "load_topology_file",
     "type": "api-item"
   },
   "rq-13b931f8": {
     "decl": "Scenario: Bond row with non-integer index",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Bond row with non-integer index",
     "type": "scenario"
@@ -725,7 +758,7 @@
   },
   "rq-13e15b90": {
     "decl": "Scenario: Bond row with atom index out of range",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Bond row with atom index out of range",
     "type": "scenario"
@@ -749,6 +782,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-147f5ea6": {
+    "decl": "# Atom indices are 0-based and refer to entries in the init file.",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Atom indices are 0-based and refer to entries in the init file.",
+    "type": "file"
   },
   "rq-14b8e042": {
     "decl": "Scenario: Morse-bonded run records morse_bond_force, reduce_bond_forces, accumulate_forces",
@@ -863,7 +903,7 @@
   },
   "rq-17ed07e7": {
     "decl": "Scenario: Exclusion atom out of range",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Exclusion atom out of range",
     "type": "scenario"
@@ -886,6 +926,14 @@
     "refs": [],
     "title": "trajectory_every > n_steps writes only the step-0 frame",
     "type": "scenario"
+  },
+  "rq-19f7ffca": {
+    "decl": "## Feature API",
+    "file": "forces/harmonic-angle",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-19fd5b09": {
     "decl": "Scenario: cell_counts is the device-computed per-cell histogram",
@@ -1080,7 +1128,7 @@
   },
   "rq-1c794f95": {
     "decl": "### Empty file",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "level": 3,
     "refs": [],
     "title": "Empty file",
@@ -1145,7 +1193,7 @@
   },
   "rq-1e1b4e02": {
     "decl": "### Exclusion list",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "level": 3,
     "refs": [],
     "title": "Exclusion list",
@@ -1189,7 +1237,7 @@
   },
   "rq-1ed32e10": {
     "decl": "Scenario: Content before any section header",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Content before any section header",
     "type": "scenario"
@@ -1243,7 +1291,7 @@
   },
   "rq-1fde7f32": {
     "decl": "Scenario: Four-column form sets LJ and Coulomb scales independently",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Four-column form sets LJ and Coulomb scales independently",
     "type": "scenario"
@@ -1348,6 +1396,18 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-21a8063c": {
+    "decl": "- `HarmonicAngleState` — implements the `Potential` trait with",
+    "file": "forces/harmonic-angle",
+    "refs": [
+      {
+        "file": "src/forces/angle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "HarmonicAngleState",
+    "type": "api-item"
+  },
   "rq-21acd57c": {
     "decl": "## Empty State",
     "file": "forces/morse-bonded",
@@ -1361,6 +1421,13 @@
     "file": "simulation-runner",
     "refs": [],
     "title": "All-pairs mode skips the box-too-small check",
+    "type": "scenario"
+  },
+  "rq-220f3f10": {
+    "decl": "Scenario: Repeated atom in angle rejected (i == k)",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Repeated atom in angle rejected (i == k)",
     "type": "scenario"
   },
   "rq-2214f0a1": {
@@ -1397,9 +1464,23 @@
     "title": "Sampling order",
     "type": "section"
   },
+  "rq-225633c4": {
+    "decl": "Scenario: Config angle_type with potential != \"harmonic\" is rejected",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Config angle_type with potential != \"harmonic\" is rejected",
+    "type": "scenario"
+  },
+  "rq-22699c4c": {
+    "decl": "Scenario: angle_type unknown potential is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "angle_type unknown potential is rejected",
+    "type": "scenario"
+  },
   "rq-22d0ce50": {
     "decl": "### Types",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "level": 3,
     "refs": [],
     "title": "Types",
@@ -1499,6 +1580,13 @@
     "title": "Comparison Procedure",
     "type": "section"
   },
+  "rq-24dc9578": {
+    "decl": "Scenario: angle_types is optional and defaults to empty",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "angle_types is optional and defaults to empty",
+    "type": "scenario"
+  },
   "rq-24e36eba": {
     "decl": "- `spme_forward_fft(spme_state) -> Result<(), CuFftError>`",
     "file": "forces/spme",
@@ -1508,7 +1596,7 @@
   },
   "rq-24f280af": {
     "decl": "### Effective exclusions",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "level": 3,
     "refs": [],
     "title": "Effective exclusions",
@@ -1595,6 +1683,13 @@
     "title": "Doubling epsilon doubles the force at the same separation",
     "type": "scenario"
   },
+  "rq-27efd6a0": {
+    "decl": "Scenario: Atom appearing in one angle receives that angle's force",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Atom appearing in one angle receives that angle's force",
+    "type": "scenario"
+  },
   "rq-27f9fae8": {
     "decl": "#### `[integrator]`",
     "file": "io/config-schema",
@@ -1621,6 +1716,14 @@
       }
     ],
     "title": "Box Generation Tracking",
+    "type": "section"
+  },
+  "rq-284584c3": {
+    "decl": "## Gherkin Scenarios",
+    "file": "forces/harmonic-angle",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
     "type": "section"
   },
   "rq-2846ee8b": {
@@ -1755,7 +1858,7 @@
   },
   "rq-2b4a324a": {
     "decl": "Scenario: Exclusion scale NaN rejected",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Exclusion scale NaN rejected",
     "type": "scenario"
@@ -1866,7 +1969,7 @@
   },
   "rq-2e98a75d": {
     "decl": "# ignored.",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "ignored.",
     "type": "file"
@@ -1964,6 +2067,14 @@
     "title": "Kernel stages (CUDA-event timed)",
     "type": "section"
   },
+  "rq-312f30ee": {
+    "decl": "#### `harmonic_angle_force`",
+    "file": "forces/harmonic-angle",
+    "level": 4,
+    "refs": [],
+    "title": "`harmonic_angle_force`",
+    "type": "section"
+  },
   "rq-31430003": {
     "decl": "Scenario: Half-strength exclusion (scale=0.5) halves the LJ contribution",
     "file": "forces/lj-pair-force",
@@ -2043,7 +2154,7 @@
   },
   "rq-33a054f9": {
     "decl": "### Bond entries",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "level": 3,
     "refs": [],
     "title": "Bond entries",
@@ -2091,6 +2202,13 @@
     "refs": [],
     "title": "log_write count equals log rows written",
     "type": "scenario"
+  },
+  "rq-34bfe79a": {
+    "decl": "- `reduce_angle_forces(state: &mut HarmonicAngleState, output_force_x: &mut CudaViewMut<'_, f32>, output_force_y: &mut CudaViewMut<'_, f32>, output_force_z: &mut CudaViewMut<'_, f32>, output_energy: &mut CudaViewMut<'_, f32>, output_virial: &mut CudaViewMut<'_, f32>) -> Result<(), GpuError>`",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "reduce_angle_forces",
+    "type": "api-item"
   },
   "rq-34db7b7b": {
     "decl": "Scenario: Refuse to run with multiple types",
@@ -2177,7 +2295,7 @@
   },
   "rq-361623d8": {
     "decl": "## Data Model",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "level": 2,
     "refs": [],
     "title": "Data Model",
@@ -2233,7 +2351,7 @@
   },
   "rq-38285db7": {
     "decl": "# Comments start with '#' and run to end of line. Blank lines are",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Comments start with '#' and run to end of line. Blank lines are",
     "type": "file"
@@ -2265,6 +2383,14 @@
     "refs": [],
     "title": "vv_kick on an empty state is a no-op",
     "type": "scenario"
+  },
+  "rq-38b80e11": {
+    "decl": "## Out of Scope",
+    "file": "forces/harmonic-angle",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-38ebe278": {
     "decl": "Scenario: Load a two-particle file with no velocities",
@@ -2496,7 +2622,7 @@
   },
   "rq-3eb8fe40": {
     "decl": "Scenario: atom_bond_offsets reflects sorted bond list",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "atom_bond_offsets reflects sorted bond list",
     "type": "scenario"
@@ -2535,10 +2661,10 @@
     "type": "scenario"
   },
   "rq-40f02b6a": {
-    "decl": "Scenario: Empty [bonds] and [exclusions] sections are valid",
-    "file": "forces/bonds",
+    "decl": "Scenario: Empty [bonds], [angles], and [exclusions] sections are valid",
+    "file": "forces/topology",
     "refs": [],
-    "title": "Empty [bonds] and [exclusions] sections are valid",
+    "title": "Empty [bonds], [angles], and [exclusions] sections are valid",
     "type": "scenario"
   },
   "rq-410afcd3": {
@@ -2569,10 +2695,10 @@
     "type": "scenario"
   },
   "rq-4186d4f4": {
-    "decl": "Scenario: Reject bonds = init",
+    "decl": "Scenario: Reject topology = init",
     "file": "io/config-schema",
     "refs": [],
-    "title": "Reject bonds = init",
+    "title": "Reject topology = init",
     "type": "scenario"
   },
   "rq-41d9e514": {
@@ -2604,6 +2730,13 @@
     "refs": [],
     "title": "Build Script",
     "type": "section"
+  },
+  "rq-443a91da": {
+    "decl": "# atom_j is the centre (vertex) atom; atom_i and atom_k are the wings.",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "atom_j is the centre (vertex) atom; atom_i and atom_k are the wings.",
+    "type": "file"
   },
   "rq-44ccc1cb": {
     "decl": "Scenario: Reject too few data rows",
@@ -2640,6 +2773,13 @@
     "refs": [],
     "title": "Temperature uses k_B = 1.380649e-23",
     "type": "scenario"
+  },
+  "rq-454ad2cf": {
+    "decl": "- `HarmonicAngleState` — implements `Potential` with `label() == \"harmonic_angle\"`.",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "HarmonicAngleState",
+    "type": "api-item"
   },
   "rq-455db9c2": {
     "decl": "Scenario: Slot accumulator buffers are sized num_slots * particle_count",
@@ -2860,7 +3000,7 @@
   },
   "rq-4ae7794c": {
     "decl": "### Exclusion entries",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "level": 3,
     "refs": [],
     "title": "Exclusion entries",
@@ -2910,7 +3050,7 @@
   },
   "rq-4c245ce7": {
     "decl": "Scenario: Unknown section header",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Unknown section header",
     "type": "scenario"
@@ -2921,6 +3061,14 @@
     "level": 4,
     "refs": [],
     "title": "Top level",
+    "type": "section"
+  },
+  "rq-4c88ee0e": {
+    "decl": "### CUDA Kernels",
+    "file": "forces/harmonic-angle",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernels",
     "type": "section"
   },
   "rq-4ca9b179": {
@@ -3000,7 +3148,7 @@
   },
   "rq-4f78f4a2": {
     "decl": "Scenario: Duplicate bond rejected (same canonical pair)",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Duplicate bond rejected (same canonical pair)",
     "type": "scenario"
@@ -3027,6 +3175,20 @@
     "title": "Launch Configuration",
     "type": "section"
   },
+  "rq-4ffdad62": {
+    "decl": "Scenario: Degenerate geometry (atom_i overlaps atom_j) produces zero",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Degenerate geometry (atom_i overlaps atom_j) produces zero",
+    "type": "scenario"
+  },
+  "rq-501bce66": {
+    "decl": "Scenario: Single-step force evaluation on one SPC water molecule",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Single-step force evaluation on one SPC water molecule",
+    "type": "scenario"
+  },
   "rq-50521f04": {
     "decl": "Scenario: Empty bond_type name rejected",
     "file": "io/config-schema",
@@ -3046,6 +3208,13 @@
     "file": "simulation-box",
     "refs": [],
     "title": "set_lattice rejects a non-finite tilt without mutating the box",
+    "type": "scenario"
+  },
+  "rq-514670c9": {
+    "decl": "Scenario: Implicit 1-3 exclusion is added for an angle without explicit (i, k) entry",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Implicit 1-3 exclusion is added for an angle without explicit (i, k) entry",
     "type": "scenario"
   },
   "rq-5269221c": {
@@ -3286,11 +3455,18 @@
     "title": "InitStateError",
     "type": "api-item"
   },
-  "rq-576561a2": {
-    "decl": "Scenario: bonds absolute path is preserved",
+  "rq-57518e01": {
+    "decl": "Scenario: angle_type missing potential field",
     "file": "io/config-schema",
     "refs": [],
-    "title": "bonds absolute path is preserved",
+    "title": "angle_type missing potential field",
+    "type": "scenario"
+  },
+  "rq-576561a2": {
+    "decl": "Scenario: topology absolute path is preserved",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "topology absolute path is preserved",
     "type": "scenario"
   },
   "rq-57c1b6a3": {
@@ -3339,7 +3515,7 @@
   },
   "rq-583d3df1": {
     "decl": "Scenario: Duplicate section header",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Duplicate section header",
     "type": "scenario"
@@ -3403,7 +3579,7 @@
   },
   "rq-5b097ec0": {
     "decl": "Scenario: Comments and blank lines are tolerated",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Comments and blank lines are tolerated",
     "type": "scenario"
@@ -3539,6 +3715,13 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-5fcdc437": {
+    "decl": "Scenario: Atom with no angles gets zero accumulator",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Atom with no angles gets zero accumulator",
+    "type": "scenario"
   },
   "rq-5fe22acb": {
     "decl": "- `SimulationBox::min_perpendicular_width(&self) -> f32`",
@@ -3925,6 +4108,13 @@
     "title": "Two independent calls produce byte-identical accumulators",
     "type": "scenario"
   },
+  "rq-699192b2": {
+    "decl": "Scenario: Reduction summation order is sorted angle index",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Reduction summation order is sorted angle index",
+    "type": "scenario"
+  },
   "rq-699cccff": {
     "decl": "Scenario: Two pre_steps after a single box mutation refresh only once",
     "file": "forces/neighbor-list",
@@ -3939,6 +4129,14 @@
     "title": "Reject missing schema_version",
     "type": "scenario"
   },
+  "rq-69de20bd": {
+    "decl": "## Determinism",
+    "file": "forces/harmonic-angle",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
+  },
   "rq-6a542a0a": {
     "decl": "Scenario: from_config receives the default r_switch when the config omitted it",
     "file": "forces/lj-pair-force",
@@ -3948,7 +4146,7 @@
   },
   "rq-6a9f0a18": {
     "decl": "Scenario: Out-of-range Coulomb scale in four-column form rejected",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Out-of-range Coulomb scale in four-column form rejected",
     "type": "scenario"
@@ -4004,16 +4202,23 @@
     "title": "NeighborListState rebuild performs no host-device particle transfers",
     "type": "scenario"
   },
+  "rq-6cac8251": {
+    "decl": "# Column format: atom_i  atom_j  atom_k  angle_type_name",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Column format: atom_i  atom_j  atom_k  angle_type_name",
+    "type": "file"
+  },
   "rq-6cb9ab62": {
-    "decl": "Scenario: bonds field is optional and defaults to None",
+    "decl": "Scenario: topology field is optional and defaults to None",
     "file": "io/config-schema",
     "refs": [],
-    "title": "bonds field is optional and defaults to None",
+    "title": "topology field is optional and defaults to None",
     "type": "scenario"
   },
   "rq-6cd92c14": {
     "decl": "Scenario: Exclusion row with too few columns",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Exclusion row with too few columns",
     "type": "scenario"
@@ -4268,6 +4473,14 @@
     "title": "Empty simulation",
     "type": "section"
   },
+  "rq-73054857": {
+    "decl": "### Angle entries",
+    "file": "forces/topology",
+    "level": 3,
+    "refs": [],
+    "title": "Angle entries",
+    "type": "section"
+  },
   "rq-7306fc6f": {
     "decl": "Scenario: Reject negative particle count",
     "file": "io/init-state-file",
@@ -4444,7 +4657,7 @@
   },
   "rq-77f53d4b": {
     "decl": "Scenario: atom_excl_offsets reflects sorted exclusion list",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "atom_excl_offsets reflects sorted exclusion list",
     "type": "scenario"
@@ -4474,6 +4687,14 @@
       }
     ],
     "title": "`[[particle_types]]` (array of tables)",
+    "type": "section"
+  },
+  "rq-7884e3ff": {
+    "decl": "## Per-Step Kernel Sequence",
+    "file": "forces/harmonic-angle",
+    "level": 2,
+    "refs": [],
+    "title": "Per-Step Kernel Sequence",
     "type": "section"
   },
   "rq-789b7a33": {
@@ -4517,6 +4738,14 @@
     "refs": [],
     "title": "Registry without a matching builder reports UnknownKind",
     "type": "scenario"
+  },
+  "rq-78f49cef": {
+    "decl": "### Rust Launch Helpers",
+    "file": "forces/harmonic-angle",
+    "level": 3,
+    "refs": [],
+    "title": "Rust Launch Helpers",
+    "type": "section"
   },
   "rq-78fc2fbb": {
     "decl": "Scenario: Slots beyond neighbor_counts[i] are not summed",
@@ -4566,7 +4795,7 @@
     "type": "api-item"
   },
   "rq-79938dbf": {
-    "decl": "- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], bond_list: &BondList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>`",
+    "decl": "- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], coulomb_config: Option<&CoulombConfig>, spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>`",
     "file": "forces/framework",
     "refs": [
       {
@@ -4857,6 +5086,14 @@
     "title": "Reject infinite diagonal",
     "type": "scenario"
   },
+  "rq-7f8dba1b": {
+    "decl": "### Angle list",
+    "file": "forces/topology",
+    "level": 3,
+    "refs": [],
+    "title": "Angle list",
+    "type": "section"
+  },
   "rq-7fd19f00": {
     "decl": "Scenario: Reject when charges has the wrong length",
     "file": "particle-state",
@@ -4887,7 +5124,7 @@
   },
   "rq-81659783": {
     "decl": "## Feature API",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "level": 2,
     "refs": [],
     "title": "Feature API",
@@ -5189,10 +5426,10 @@
     "type": "section"
   },
   "rq-8a16e6d6": {
-    "decl": "Scenario: Load a typical .bonds file",
-    "file": "forces/bonds",
+    "decl": "Scenario: Load a typical topology file",
+    "file": "forces/topology",
     "refs": [],
-    "title": "Load a typical .bonds file",
+    "title": "Load a typical topology file",
     "type": "scenario"
   },
   "rq-8a3858fd": {
@@ -5270,6 +5507,13 @@
     "refs": [],
     "title": "Determinism Guarantees",
     "type": "section"
+  },
+  "rq-8d5a8d9c": {
+    "decl": "Scenario: reduce_angle_forces on zero particles is a no-op",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "reduce_angle_forces on zero particles is a no-op",
+    "type": "scenario"
   },
   "rq-8df7fb0c": {
     "decl": "- `InitState` — the parser's output. Fields:",
@@ -5387,6 +5631,13 @@
     "title": "Sub-skin movement does not trigger a rebuild",
     "type": "scenario"
   },
+  "rq-9120ab3c": {
+    "decl": "Scenario: Two independent calls produce byte-identical accumulators",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Two independent calls produce byte-identical accumulators",
+    "type": "scenario"
+  },
   "rq-916f99f3": {
     "decl": "Scenario: switch == cutoff reproduces the hard-cutoff behaviour everywhere inside the cutoff",
     "file": "forces/lj-pair-force",
@@ -5428,6 +5679,13 @@
     "title": "Error Handling Convention",
     "type": "file"
   },
+  "rq-91bf10ec": {
+    "decl": "Scenario: Valid harmonic angle_type is accepted",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Valid harmonic angle_type is accepted",
+    "type": "scenario"
+  },
   "rq-91cec484": {
     "decl": "### CUDA events",
     "file": "performance-analysis",
@@ -5438,10 +5696,17 @@
   },
   "rq-922c9a86": {
     "decl": "# Both scales default to 0.0 (full exclusion) when omitted.",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Both scales default to 0.0 (full exclusion) when omitted.",
     "type": "file"
+  },
+  "rq-922e1683": {
+    "decl": "Scenario: Force magnitude matches closed-form expression for an",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Force magnitude matches closed-form expression for an",
+    "type": "scenario"
   },
   "rq-9244aae4": {
     "decl": "#### `[[pair_interactions]]` (array of tables)",
@@ -5450,6 +5715,13 @@
     "refs": [],
     "title": "`[[pair_interactions]]` (array of tables)",
     "type": "section"
+  },
+  "rq-9255c192": {
+    "decl": "Scenario: Reject duplicate angle_type names",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject duplicate angle_type names",
+    "type": "scenario"
   },
   "rq-925e5583": {
     "decl": "- `LogWriter::flush(&mut self) -> Result<(), LogWriterError>`",
@@ -5531,7 +5803,7 @@
   },
   "rq-955b55f0": {
     "decl": "# Atom indices are 0-based and refer to entries in the init file.",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Atom indices are 0-based and refer to entries in the init file.",
     "type": "file"
@@ -5637,10 +5909,10 @@
     "type": "section"
   },
   "rq-98180119": {
-    "decl": "Scenario: Reject bonds = trajectory_path",
+    "decl": "Scenario: Reject topology = trajectory_path",
     "file": "io/config-schema",
     "refs": [],
-    "title": "Reject bonds = trajectory_path",
+    "title": "Reject topology = trajectory_path",
     "type": "scenario"
   },
   "rq-9818f429": {
@@ -5678,6 +5950,13 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-98fd2e40": {
+    "decl": "Scenario: Stretched angle produces a torque that closes the angle",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Stretched angle produces a torque that closes the angle",
+    "type": "scenario"
+  },
   "rq-991b4695": {
     "decl": "Scenario: Box compatibility ignores SPME's reciprocal grid",
     "file": "forces/spme",
@@ -5703,6 +5982,13 @@
     ],
     "title": "ParticleState",
     "type": "api-item"
+  },
+  "rq-9a386c23": {
+    "decl": "Scenario: atom_angle_offsets reflects sorted angle list",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "atom_angle_offsets reflects sorted angle list",
+    "type": "scenario"
   },
   "rq-9a512ed1": {
     "decl": "### Real-space CUDA kernel",
@@ -5788,6 +6074,13 @@
     "title": "Open fails when the parent directory does not exist",
     "type": "scenario"
   },
+  "rq-9bb3094c": {
+    "decl": "Scenario: Triatomic at equilibrium gives zero net force on all atoms",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Triatomic at equilibrium gives zero net force on all atoms",
+    "type": "scenario"
+  },
   "rq-9be271aa": {
     "decl": "## Launch Configuration",
     "file": "pair-reduction",
@@ -5813,7 +6106,7 @@
   },
   "rq-9c1c58ef": {
     "decl": "Scenario: Exclusion scales default to 0.0 when both columns omitted",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Exclusion scales default to 0.0 when both columns omitted",
     "type": "scenario"
@@ -5886,6 +6179,13 @@
     "title": "Flush is idempotent",
     "type": "scenario"
   },
+  "rq-9d68f8fb": {
+    "decl": "Scenario: Repeated atom in angle rejected (j == k)",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Repeated atom in angle rejected (j == k)",
+    "type": "scenario"
+  },
   "rq-9d7966f4": {
     "decl": "## Out of Scope",
     "file": "forces/lj-pair-force",
@@ -5914,16 +6214,24 @@
     "title": "Perpendicular Widths",
     "type": "section"
   },
-  "rq-9da14aa1": {
-    "decl": "Scenario: Sections may appear in either order",
-    "file": "forces/bonds",
+  "rq-9d9ca545": {
+    "decl": "#### `reduce_angle_forces`",
+    "file": "forces/harmonic-angle",
+    "level": 4,
     "refs": [],
-    "title": "Sections may appear in either order",
+    "title": "`reduce_angle_forces`",
+    "type": "section"
+  },
+  "rq-9da14aa1": {
+    "decl": "Scenario: Sections may appear in any order",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Sections may appear in any order",
     "type": "scenario"
   },
   "rq-9df1eedb": {
     "decl": "Scenario: Bond row with wrong column count",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Bond row with wrong column count",
     "type": "scenario"
@@ -5936,10 +6244,10 @@
     "type": "scenario"
   },
   "rq-9e1eee68": {
-    "decl": "# Feature: Bond List, Exclusion List, and `.bonds` File",
-    "file": "forces/bonds",
+    "decl": "# Feature: Topology File, Bond List, Angle List, and Exclusion List",
+    "file": "forces/topology",
     "refs": [],
-    "title": "Feature: Bond List, Exclusion List, and `.bonds` File",
+    "title": "Feature: Topology File, Bond List, Angle List, and Exclusion List",
     "type": "file"
   },
   "rq-9e487c80": {
@@ -6001,7 +6309,7 @@
   },
   "rq-9f658edf": {
     "decl": "Scenario: Exclusion scale greater than 1 rejected",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Exclusion scale greater than 1 rejected",
     "type": "scenario"
@@ -6130,7 +6438,7 @@
   },
   "rq-a33c1f4f": {
     "decl": "## File Format",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "level": 2,
     "refs": [],
     "title": "File Format",
@@ -6186,6 +6494,13 @@
     "title": "init_device exposes the reduction kernel on the Kernels handle",
     "type": "scenario"
   },
+  "rq-a47beb76": {
+    "decl": "- `AngleTypeConfig` — tagged enum carrying the chosen angle-potential",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "AngleTypeConfig",
+    "type": "api-item"
+  },
   "rq-a4d5e711": {
     "decl": "- `SimulationBox::wrap_position_with_image_count(&self, position: [f32; 3]) -> ([f32; 3], [i32; 3])`",
     "file": "simulation-box",
@@ -6222,6 +6537,20 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "Velocity generation row is present when init lacks velocities",
+    "type": "scenario"
+  },
+  "rq-a57bcebe": {
+    "decl": "Scenario: Three atoms at equilibrium angle produce zero force on each",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Three atoms at equilibrium angle produce zero force on each",
+    "type": "scenario"
+  },
+  "rq-a587753e": {
+    "decl": "Scenario: Degenerate angle produces zero energy and virial in",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Degenerate angle produces zero energy and virial in",
     "type": "scenario"
   },
   "rq-a5a919df": {
@@ -6398,6 +6727,13 @@
     "title": "Empty State",
     "type": "section"
   },
+  "rq-aad6ca63": {
+    "decl": "Scenario: Harmonic angle_type rejects non-positive k_theta",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Harmonic angle_type rejects non-positive k_theta",
+    "type": "scenario"
+  },
   "rq-aaf3d06f": {
     "decl": "Scenario: vv_kick_drift wraps in the negative-x direction",
     "file": "integration/velocity-verlet",
@@ -6459,7 +6795,7 @@
   },
   "rq-ad0edc95": {
     "decl": "## Out of Scope",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "level": 2,
     "refs": [],
     "title": "Out of Scope",
@@ -6621,6 +6957,13 @@
     "title": "Mutators",
     "type": "section"
   },
+  "rq-b05f8682": {
+    "decl": "Scenario: Angle row with atom index out of range",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Angle row with atom index out of range",
+    "type": "scenario"
+  },
   "rq-b07abbd4": {
     "decl": "Scenario: Pair inside the inner plateau is unsmoothed",
     "file": "forces/coulomb-pair-force",
@@ -6649,10 +6992,10 @@
     "type": "section"
   },
   "rq-b0c18819": {
-    "decl": "Scenario: Empty .bonds file is valid",
-    "file": "forces/bonds",
+    "decl": "Scenario: Empty topology file is valid",
+    "file": "forces/topology",
     "refs": [],
-    "title": "Empty .bonds file is valid",
+    "title": "Empty topology file is valid",
     "type": "scenario"
   },
   "rq-b1148667": {
@@ -6680,6 +7023,13 @@
     ],
     "title": "Timings",
     "type": "api-item"
+  },
+  "rq-b19189c2": {
+    "decl": "Scenario: Newton's third law holds for the framework's combined force",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Newton's third law holds for the framework's combined force",
+    "type": "scenario"
   },
   "rq-b1f33ea4": {
     "decl": "Scenario: neighbor_list cell-list with explicit parameters is accepted",
@@ -6724,7 +7074,7 @@
   },
   "rq-b2f23140": {
     "decl": "## Device-side Exclusion Helper",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "level": 2,
     "refs": [],
     "title": "Device-side Exclusion Helper",
@@ -6736,6 +7086,14 @@
     "refs": [],
     "title": "Lossless run includes lossless kick rows and excludes lossy rows",
     "type": "scenario"
+  },
+  "rq-b33243ff": {
+    "decl": "## Parameters",
+    "file": "forces/harmonic-angle",
+    "level": 2,
+    "refs": [],
+    "title": "Parameters",
+    "type": "section"
   },
   "rq-b33cf896": {
     "decl": "Scenario: ForceField with a short-range potential owns a shared neighbor list",
@@ -6919,6 +7277,13 @@
     "title": "neighbor_list all-pairs mode rejects r_skin",
     "type": "scenario"
   },
+  "rq-ba37ec6b": {
+    "decl": "Scenario: Angles are sorted by (atom_j, atom_i, atom_k)",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Angles are sorted by (atom_j, atom_i, atom_k)",
+    "type": "scenario"
+  },
   "rq-ba380d56": {
     "decl": "Scenario: File does not exist",
     "file": "io/init-state-file",
@@ -7007,10 +7372,15 @@
     "type": "scenario"
   },
   "rq-bca0adbc": {
-    "decl": "- `BondsFileError` — error type returned by the parser. Variants:",
-    "file": "forces/bonds",
-    "refs": [],
-    "title": "BondsFileError",
+    "decl": "- `TopologyFileError` — error type returned by the parser. Variants:",
+    "file": "forces/topology",
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "TopologyFileError",
     "type": "api-item"
   },
   "rq-bcb0f58a": {
@@ -7039,6 +7409,13 @@
     ],
     "title": "Cross-validation",
     "type": "section"
+  },
+  "rq-bd367201": {
+    "decl": "Scenario: Near-collinear geometry (sin θ ≈ 0) produces zero force",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Near-collinear geometry (sin θ ≈ 0) produces zero force",
+    "type": "scenario"
   },
   "rq-bd684a0d": {
     "decl": "Scenario: Force gather on one isolated particle returns the gradient of its own spread",
@@ -7121,7 +7498,7 @@
   },
   "rq-bf62f645": {
     "decl": "## Gherkin Scenarios",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "level": 2,
     "refs": [],
     "title": "Gherkin Scenarios",
@@ -7172,6 +7549,14 @@
     "level": 2,
     "refs": [],
     "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-c07d7c28": {
+    "decl": "### PTX Module Loading",
+    "file": "forces/harmonic-angle",
+    "level": 3,
+    "refs": [],
+    "title": "PTX Module Loading",
     "type": "section"
   },
   "rq-c0aa3b5c": {
@@ -7420,6 +7805,13 @@
     "title": "Diatomic equilibrium gives zero net force on both atoms",
     "type": "scenario"
   },
+  "rq-c7c3f66a": {
+    "decl": "Scenario: Duplicate angle rejected after canonicalisation",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Duplicate angle rejected after canonicalisation",
+    "type": "scenario"
+  },
   "rq-c7df5714": {
     "decl": "Scenario: Bond-free run omits morse_bond_force and reduce_bond_forces",
     "file": "performance-analysis",
@@ -7450,7 +7842,7 @@
   },
   "rq-c8ea0a96": {
     "decl": "# Column format: atom_i  atom_j  [scale_lj]  [scale_coul]",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Column format: atom_i  atom_j  [scale_lj]  [scale_coul]",
     "type": "file"
@@ -7522,6 +7914,13 @@
     "file": "io/init-state-file",
     "refs": [],
     "title": "Reject row with unparseable position",
+    "type": "scenario"
+  },
+  "rq-ca76fc02": {
+    "decl": "Scenario: Atom appearing as the centre of one angle and a wing of",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Atom appearing as the centre of one angle and a wing of",
     "type": "scenario"
   },
   "rq-cb85cf61": {
@@ -7656,10 +8055,17 @@
   },
   "rq-cf456bb4": {
     "decl": "# Column format: atom_i  atom_j  bond_type_name",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Column format: atom_i  atom_j  bond_type_name",
     "type": "file"
+  },
+  "rq-cf50db39": {
+    "decl": "Scenario: harmonic_angle_force on zero angles is a no-op",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "harmonic_angle_force on zero angles is a no-op",
+    "type": "scenario"
   },
   "rq-cf6116b8": {
     "decl": "### Real-space reproducibility",
@@ -7682,6 +8088,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Box generation increment refreshes cell layout and forces a rebuild",
+    "type": "scenario"
+  },
+  "rq-cfc7a794": {
+    "decl": "Scenario: Repeated atom in angle rejected (i == j)",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Repeated atom in angle rejected (i == j)",
     "type": "scenario"
   },
   "rq-d01b6fb0": {
@@ -7718,6 +8131,14 @@
     "refs": [],
     "title": "Pair interaction rejects an extra field for the chosen potential",
     "type": "scenario"
+  },
+  "rq-d12b8b49": {
+    "decl": "## Algorithm",
+    "file": "forces/harmonic-angle",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
   },
   "rq-d12c24f0": {
     "decl": "Scenario: Two consecutive step() calls on a Langevin integrator produce different post-call velocities",
@@ -7774,6 +8195,13 @@
     "refs": [],
     "title": "Pair with Coulomb exclusion scale 0.5 contributes half",
     "type": "scenario"
+  },
+  "rq-d278bb01": {
+    "decl": "- `Angle` — `Debug, Clone, Copy`. Fields: `atom_i: u32`, `atom_j: u32`",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Angle",
+    "type": "api-item"
   },
   "rq-d28737dd": {
     "decl": "Scenario: dt=0 leaves state unchanged for vv_kick",
@@ -7937,7 +8365,7 @@
   },
   "rq-d7675fb3": {
     "decl": "# scale_coul to that value.",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "scale_coul to that value.",
     "type": "file"
@@ -8000,9 +8428,17 @@
     "title": "fill kernel does not write beyond the buffer",
     "type": "scenario"
   },
+  "rq-d940ac6c": {
+    "decl": "## Empty State",
+    "file": "forces/harmonic-angle",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State",
+    "type": "section"
+  },
   "rq-d998b5c0": {
     "decl": "Scenario: Bonds are sorted by (atom_i, atom_j)",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Bonds are sorted by (atom_i, atom_j)",
     "type": "scenario"
@@ -8013,6 +8449,13 @@
     "refs": [],
     "title": "Pre-flight refuses to overwrite existing trajectory",
     "type": "scenario"
+  },
+  "rq-d9adc4cb": {
+    "decl": "# Feature: Harmonic Angle Bonded Potential",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Feature: Harmonic Angle Bonded Potential",
+    "type": "file"
   },
   "rq-dacb071c": {
     "decl": "Scenario: Generation mismatch with new box too small returns BoxTooSmallForCells",
@@ -8082,6 +8525,21 @@
     "title": "System total potential energy equals sum of particle shares",
     "type": "scenario"
   },
+  "rq-db54cffa": {
+    "decl": "### Types",
+    "file": "forces/harmonic-angle",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
+  "rq-db5924d8": {
+    "decl": "- `harmonic_angle_force(state: &mut HarmonicAngleState, particle_buffers: &ParticleBuffers, sim_box: &SimulationBox) -> Result<(), GpuError>`",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "harmonic_angle_force",
+    "type": "api-item"
+  },
   "rq-db78448e": {
     "decl": "Scenario: Construct velocity-Verlet (lossless) via the registry",
     "file": "integration/framework",
@@ -8103,6 +8561,13 @@
     "title": "Bit-exact reproducibility across runs with switching active",
     "type": "scenario"
   },
+  "rq-dbee9f45": {
+    "decl": "Scenario: Construct HarmonicAngleState",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Construct HarmonicAngleState",
+    "type": "scenario"
+  },
   "rq-dc17132d": {
     "decl": "- `SimulationBox::generation(&self) -> u64`",
     "file": "simulation-box",
@@ -8114,6 +8579,13 @@
     ],
     "title": "SimulationBox",
     "type": "api-item"
+  },
+  "rq-dc35ae30": {
+    "decl": "Scenario: Empty angle_type name rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Empty angle_type name rejected",
+    "type": "scenario"
   },
   "rq-dc5c70bf": {
     "decl": "## Feature API",
@@ -8135,9 +8607,16 @@
     "title": "KernelStage",
     "type": "api-item"
   },
+  "rq-dc94d9e3": {
+    "decl": "Scenario: Harmonic angle_type missing k_theta is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Harmonic angle_type missing k_theta is rejected",
+    "type": "scenario"
+  },
   "rq-dcba6fce": {
     "decl": "Scenario: Implicit exclusion is added for a bond without explicit entry",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Implicit exclusion is added for a bond without explicit entry",
     "type": "scenario"
@@ -8186,7 +8665,7 @@
   },
   "rq-ddf51309": {
     "decl": "- `BondList` — host-side. Fields: `bonds: Vec<Bond>`,",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "BondList",
     "type": "api-item"
@@ -8214,7 +8693,7 @@
   },
   "rq-df10e81f": {
     "decl": "Scenario: Self-exclusion rejected",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Self-exclusion rejected",
     "type": "scenario"
@@ -8339,10 +8818,6 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/forces/bonds.rs",
-        "kind": "code"
-      },
-      {
         "file": "src/forces/mod.rs",
         "kind": "code"
       },
@@ -8438,6 +8913,13 @@
     "title": "bond_type unknown potential is rejected",
     "type": "scenario"
   },
+  "rq-e3544b10": {
+    "decl": "Scenario: Harmonic angle_type rejects extra fields",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Harmonic angle_type rejects extra fields",
+    "type": "scenario"
+  },
   "rq-e367855a": {
     "decl": "### Field reference",
     "file": "io/config-schema",
@@ -8445,6 +8927,13 @@
     "refs": [],
     "title": "Field reference",
     "type": "section"
+  },
+  "rq-e399422c": {
+    "decl": "Scenario: Harmonic angle_type rejects theta_0 outside [0, π]",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Harmonic angle_type rejects theta_0 outside [0, π]",
+    "type": "scenario"
   },
   "rq-e39d0ed8": {
     "decl": "Scenario: max_cutoff aggregation determines the neighbor-list radius",
@@ -8512,7 +9001,7 @@
   },
   "rq-e4563eec": {
     "decl": "Scenario: Unknown bond type name rejected",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Unknown bond type name rejected",
     "type": "scenario"
@@ -8602,6 +9091,13 @@
     "title": "Functions",
     "type": "section"
   },
+  "rq-e60a2781": {
+    "decl": "Scenario: Compressed angle produces a torque that opens the angle",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Compressed angle produces a torque that opens the angle",
+    "type": "scenario"
+  },
   "rq-e643b070": {
     "decl": "Scenario: neighbor_list cell-list mode omitting max_neighbors uses default 256",
     "file": "io/config-schema",
@@ -8624,7 +9120,7 @@
   },
   "rq-e66012e0": {
     "decl": "### Functions",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "level": 3,
     "refs": [],
     "title": "Functions",
@@ -8649,6 +9145,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Neighbor list excludes the self atom",
+    "type": "scenario"
+  },
+  "rq-e768a2b1": {
+    "decl": "Scenario: Load a topology file containing an angle",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Load a topology file containing an angle",
     "type": "scenario"
   },
   "rq-e794b794": {
@@ -8777,7 +9280,7 @@
   },
   "rq-e9a421ef": {
     "decl": "Scenario: Explicit exclusion overrides the bond's implicit default",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Explicit exclusion overrides the bond's implicit default",
     "type": "scenario"
@@ -8788,6 +9291,14 @@
     "level": 2,
     "refs": [],
     "title": "Out of Scope",
+    "type": "section"
+  },
+  "rq-e9b9f528": {
+    "decl": "## Launch Configuration",
+    "file": "forces/harmonic-angle",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
     "type": "section"
   },
   "rq-ea0ee5ef": {
@@ -8821,6 +9332,13 @@
     "file": "forces/spme",
     "refs": [],
     "title": "Doubling all charges quadruples the reciprocal-space energy and forces scale linearly",
+    "type": "scenario"
+  },
+  "rq-ea8ebebd": {
+    "decl": "Scenario: Explicit 1-3 exclusion overrides the angle's implicit default",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Explicit 1-3 exclusion overrides the angle's implicit default",
     "type": "scenario"
   },
   "rq-eb3a65df": {
@@ -8947,9 +9465,16 @@
     "title": "A neutral system with [coulomb] present still launches and produces zeros",
     "type": "scenario"
   },
+  "rq-ee7566b4": {
+    "decl": "Scenario: A bent angle's energy matches the closed-form expression",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "A bent angle's energy matches the closed-form expression",
+    "type": "scenario"
+  },
   "rq-eea2f5f8": {
     "decl": "Scenario: Duplicate exclusion rejected",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Duplicate exclusion rejected",
     "type": "scenario"
@@ -8963,7 +9488,7 @@
   },
   "rq-ef5aa4b7": {
     "decl": "Scenario: File does not exist",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "File does not exist",
     "type": "scenario"
@@ -9052,7 +9577,7 @@
     "type": "section"
   },
   "rq-f0084057": {
-    "decl": "- `PathRole` — `enum { Init, Trajectory, Log, Timings, Bonds }`. Used in `PathCollision`.",
+    "decl": "- `PathRole` — `enum { Init, Trajectory, Log, Timings, Topology }`. Used in `PathCollision`.",
     "file": "io/config-schema",
     "refs": [
       {
@@ -9098,7 +9623,7 @@
   },
   "rq-f0b9b0f5": {
     "decl": "Scenario: Exclusion scale less than 0 rejected",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Exclusion scale less than 0 rejected",
     "type": "scenario"
@@ -9138,7 +9663,7 @@
   },
   "rq-f1210419": {
     "decl": "### Bond list",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "level": 3,
     "refs": [],
     "title": "Bond list",
@@ -9199,6 +9724,14 @@
     "title": "Forward FFT",
     "type": "section"
   },
+  "rq-f2946c4a": {
+    "decl": "#### `[[angle_types]]` (optional array of tables)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[[angle_types]]` (optional array of tables)",
+    "type": "section"
+  },
   "rq-f2e3fa58": {
     "decl": "- `vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>`",
     "file": "integration/velocity-verlet",
@@ -9218,6 +9751,13 @@
     "title": "Cell-list scratch is reallocated alongside cell_offsets on box generation refresh",
     "type": "scenario"
   },
+  "rq-f33ca120": {
+    "decl": "Scenario: Angle wings are canonicalised so atom_i < atom_k",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Angle wings are canonicalised so atom_i < atom_k",
+    "type": "scenario"
+  },
   "rq-f357fe5a": {
     "decl": "Scenario: Reject a row with an extra column",
     "file": "io/init-state-file",
@@ -9227,7 +9767,7 @@
   },
   "rq-f371677d": {
     "decl": "Scenario: Exclusion row with too many columns",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Exclusion row with too many columns",
     "type": "scenario"
@@ -9390,6 +9930,13 @@
     "title": "Compressed bond produces a repulsive force",
     "type": "scenario"
   },
+  "rq-f7a71238": {
+    "decl": "Scenario: init_device exposes the harmonic-angle kernels on the Kernels handle",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "init_device exposes the harmonic-angle kernels on the Kernels handle",
+    "type": "scenario"
+  },
   "rq-f7b922df": {
     "decl": "Scenario: minimum_image just past +L/2 wraps by one period",
     "file": "simulation-box",
@@ -9426,7 +9973,7 @@
   },
   "rq-f807cd11": {
     "decl": "- `ExclusionList` — host-side. Fields: `entries: Vec<Exclusion>`,",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "ExclusionList",
     "type": "api-item"
@@ -9504,7 +10051,7 @@
   },
   "rq-fb608f06": {
     "decl": "Scenario: Bonds are canonicalised to (min, max)",
-    "file": "forces/bonds",
+    "file": "forces/topology",
     "refs": [],
     "title": "Bonds are canonicalised to (min, max)",
     "type": "scenario"
@@ -9516,6 +10063,13 @@
     "refs": [],
     "title": "Periodic-boundary operations",
     "type": "section"
+  },
+  "rq-fbdf08ff": {
+    "decl": "Scenario: Minimum image is applied",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Minimum image is applied",
+    "type": "scenario"
   },
   "rq-fc0de81b": {
     "decl": "## Gherkin Scenarios",
@@ -9610,6 +10164,13 @@
     "title": "Reproducibility byte-for-byte across two identical runs",
     "type": "scenario"
   },
+  "rq-fe95ff5f": {
+    "decl": "Scenario: Angle virial equals r_ij · F_i + r_kj · F_k",
+    "file": "forces/harmonic-angle",
+    "refs": [],
+    "title": "Angle virial equals r_ij · F_i + r_kj · F_k",
+    "type": "scenario"
+  },
   "rq-fe9f2ebe": {
     "decl": "Scenario: r == 0 produces zero energy and virial in addition to zero force",
     "file": "forces/morse-bonded",
@@ -9660,6 +10221,14 @@
     "refs": [],
     "title": "n_steps = 0 writes only step-0 outputs",
     "type": "scenario"
+  },
+  "rq-ff895387": {
+    "decl": "## Force Accumulation",
+    "file": "forces/harmonic-angle",
+    "level": 2,
+    "refs": [],
+    "title": "Force Accumulation",
+    "type": "section"
   },
   "rq-ff8e283d": {
     "decl": "# Feature: Extended-XYZ Initial-State File",

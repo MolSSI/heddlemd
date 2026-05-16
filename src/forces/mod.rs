@@ -1,9 +1,10 @@
-pub mod bonds;
+pub mod angle;
 pub mod coulomb;
 pub mod lj;
 pub mod morse;
 pub mod neighbor_list;
 pub mod spme;
+pub mod topology;
 
 use std::sync::Arc;
 
@@ -13,22 +14,23 @@ use crate::gpu::{
     GpuContext, GpuError, Kernels, LennardJonesParameterTable, ParticleBuffers, accumulate_forces,
 };
 use crate::io::config::{
-    BondTypeConfig, CoulombConfig, NeighborListConfig, PairInteractionConfig, ParticleTypeConfig,
-    SpmeConfig,
+    AngleTypeConfig, BondTypeConfig, CoulombConfig, NeighborListConfig, PairInteractionConfig,
+    ParticleTypeConfig, SpmeConfig,
 };
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
 
-pub use bonds::{
-    Bond, BondList, BondsFileError, DeviceExclusionList, Exclusion, ExclusionList,
-    load_bonds_file,
-};
+pub use angle::HarmonicAngleState;
 pub use coulomb::{CoulombParameters, CoulombState};
 pub use spme::{
     SpmeError, SpmeParameters, SpmeReciprocalGrid, SpmeReciprocalState, SpmeRealSpaceState,
 };
 pub use lj::LennardJonesState;
 pub use morse::MorseBondedState;
+pub use topology::{
+    Angle, AngleList, Bond, BondList, DeviceExclusionList, Exclusion, ExclusionList,
+    TopologyFileError, load_topology_file,
+};
 pub use neighbor_list::{
     CellListData, NeighborListError, NeighborListMode, NeighborListState,
 };
@@ -109,10 +111,12 @@ impl ForceField {
         particle_types: &[ParticleTypeConfig],
         pair_interactions: &[PairInteractionConfig],
         bond_types: &[BondTypeConfig],
+        angle_types: &[AngleTypeConfig],
         coulomb_config: Option<&CoulombConfig>,
         spme_config: Option<&SpmeConfig>,
         charges: &[f32],
         bond_list: &BondList,
+        angle_list: &AngleList,
         exclusion_list: &ExclusionList,
         neighbor_list_config: &NeighborListConfig,
     ) -> Result<Self, ForceFieldError> {
@@ -197,6 +201,12 @@ impl ForceField {
         if !bond_list.is_empty() {
             let morse_state = MorseBondedState::new(gpu, bond_list, bond_types)?;
             slots.push(Box::new(morse_state));
+        }
+
+        // Slot 5: harmonic angle when at least one angle is present.
+        if !angle_list.is_empty() {
+            let angle_state = HarmonicAngleState::new(gpu, angle_list, angle_types)?;
+            slots.push(Box::new(angle_state));
         }
 
         for i in 0..slots.len() {

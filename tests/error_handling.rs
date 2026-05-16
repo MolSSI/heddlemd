@@ -2,7 +2,7 @@
 use std::error::Error;
 use std::path::PathBuf;
 
-use dynamics::forces::{BondsFileError, ForceFieldError, NeighborListError};
+use dynamics::forces::{TopologyFileError, ForceFieldError, NeighborListError};
 use dynamics::gpu::GpuError;
 use dynamics::integrator::IntegratorError;
 use dynamics::io::{ConfigError, InitStateError, LogWriterError, TrajectoryWriterError};
@@ -33,7 +33,7 @@ fn every_governed_error_type_implements_std_error() {
     assert_error::<GpuError>();
     assert_error::<ConfigError>();
     assert_error::<InitStateError>();
-    assert_error::<BondsFileError>();
+    assert_error::<TopologyFileError>();
     assert_error::<ParticleStateError>();
     assert_error::<SimulationBoxError>();
     assert_error::<NeighborListError>();

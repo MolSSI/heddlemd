@@ -460,10 +460,12 @@ fn diatomic_equilibrium_produces_zero_net_force() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[pair],
         &bt,
+        &[],
         None,
         None,
         &[],
         &bl,
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -495,10 +497,12 @@ fn newtons_third_law_holds_for_combined_force() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[pair],
         &bt,
+        &[],
         None,
         None,
         &[],
         &bl,
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();

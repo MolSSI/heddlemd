@@ -45,6 +45,10 @@ impl KernelStage {
     pub const LANGEVIN_OU_STEP: KernelStage = KernelStage::new("langevin_ou_step");
     pub const MORSE_BOND_FORCE: KernelStage = KernelStage::new("morse_bond_force");
     pub const REDUCE_BOND_FORCES: KernelStage = KernelStage::new("reduce_bond_forces");
+    pub const HARMONIC_ANGLE_FORCE: KernelStage =
+        KernelStage::new("harmonic_angle_force");
+    pub const REDUCE_ANGLE_FORCES: KernelStage =
+        KernelStage::new("reduce_angle_forces");
     pub const ACCUMULATE_FORCES: KernelStage = KernelStage::new("accumulate_forces");
     pub const NEIGHBOR_DISPLACEMENT_SQUARED: KernelStage =
         KernelStage::new("neighbor_displacement_squared");
@@ -69,6 +73,8 @@ impl KernelStage {
         Self::REDUCE_PAIR_FORCES,
         Self::MORSE_BOND_FORCE,
         Self::REDUCE_BOND_FORCES,
+        Self::HARMONIC_ANGLE_FORCE,
+        Self::REDUCE_ANGLE_FORCES,
         Self::ACCUMULATE_FORCES,
         Self::VV_KICK,
         Self::VV_KICK_LOSSLESS,

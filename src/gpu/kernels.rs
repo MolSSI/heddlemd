@@ -718,6 +718,105 @@ pub fn reduce_bond_forces(
     Ok(())
 }
 
+// Launch helper for the harmonic-angle kernel. One thread per angle.
+#[allow(clippy::too_many_arguments)]
+pub fn harmonic_angle_force(
+    particle_buffers: &ParticleBuffers,
+    angles: &CudaSlice<u32>,
+    angle_k_theta: &CudaSlice<f32>,
+    angle_theta_0: &CudaSlice<f32>,
+    sim_box: &SimulationBox,
+    angle_triple_x: &mut CudaSlice<f32>,
+    angle_triple_y: &mut CudaSlice<f32>,
+    angle_triple_z: &mut CudaSlice<f32>,
+    angle_triple_energy: &mut CudaSlice<f32>,
+    angle_triple_virial: &mut CudaSlice<f32>,
+    n_angles: usize,
+) -> Result<(), GpuError> {
+    if n_angles == 0 {
+        return Ok(());
+    }
+    let n_u32 = n_angles as u32;
+    let func = particle_buffers.kernels.harmonic_angle_force.clone();
+    let cfg = launch_config(n_u32);
+    let lat = sim_box.lattice();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.positions_x,
+                &particle_buffers.positions_y,
+                &particle_buffers.positions_z,
+                angles,
+                angle_k_theta,
+                angle_theta_0,
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
+                angle_triple_x,
+                angle_triple_y,
+                angle_triple_z,
+                angle_triple_energy,
+                angle_triple_virial,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// Launch helper for the per-atom angle reduction. One thread per atom.
+#[allow(clippy::too_many_arguments)]
+pub fn reduce_angle_forces(
+    kernels: &Kernels,
+    angle_triple_x: &CudaSlice<f32>,
+    angle_triple_y: &CudaSlice<f32>,
+    angle_triple_z: &CudaSlice<f32>,
+    angle_triple_energy: &CudaSlice<f32>,
+    angle_triple_virial: &CudaSlice<f32>,
+    atom_angle_offsets: &CudaSlice<u32>,
+    atom_angle_indices: &CudaSlice<u32>,
+    slot_force_x: &mut CudaViewMut<'_, f32>,
+    slot_force_y: &mut CudaViewMut<'_, f32>,
+    slot_force_z: &mut CudaViewMut<'_, f32>,
+    slot_energy: &mut CudaViewMut<'_, f32>,
+    slot_virial: &mut CudaViewMut<'_, f32>,
+    particle_count: usize,
+) -> Result<(), GpuError> {
+    if particle_count == 0 {
+        return Ok(());
+    }
+    let n_u32 = particle_count as u32;
+    let func = kernels.reduce_angle_forces.clone();
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                angle_triple_x,
+                angle_triple_y,
+                angle_triple_z,
+                angle_triple_energy,
+                angle_triple_virial,
+                atom_angle_offsets,
+                atom_angle_indices,
+                slot_force_x,
+                slot_force_y,
+                slot_force_z,
+                slot_energy,
+                slot_virial,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 // rq-c0f98145
 #[allow(clippy::too_many_arguments)]
 pub fn accumulate_forces(

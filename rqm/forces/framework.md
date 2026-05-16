@@ -26,7 +26,8 @@ config:
 | `coulomb` | non-bonded truncated electrostatics via `[coulomb]` | `coulomb-pair-force.md` |
 | `spme_real` | non-bonded `erfc`-screened pair force via `[spme]` | `spme.md` |
 | `spme_reciprocal` | reciprocal-space FFT pipeline via `[spme]` | `spme.md` |
-| `morse-bonded` | bonded pairwise via `[[bond_types]]` + `.bonds` file | `morse-bonded.md` |
+| `morse-bonded` | bonded pairwise via `[[bond_types]]` + `.topology` file | `morse-bonded.md` |
+| `harmonic-angle` | three-body angle force via `[[angle_types]]` + `.topology` file | `harmonic-angle.md` |
 
 Slots are present in the `ForceField` according to the config:
 
@@ -37,8 +38,13 @@ Slots are present in the `ForceField` according to the config:
 - The `SpmeRealSpace` and `SpmeReciprocal` slots are both present when
   the config supplies a `[spme]` table.
 - The `MorseBonded` slot is present when the config supplies a
-  `bonds = "..."` path *and* at least one `[[bond_types]]` entry uses
+  `topology = "..."` path, the topology file's `[bonds]` section is
+  non-empty, and at least one `[[bond_types]]` entry uses
   `potential = "morse"`.
+- The `HarmonicAngle` slot is present when the config supplies a
+  `topology = "..."` path, the topology file's `[angles]` section is
+  non-empty, and at least one `[[angle_types]]` entry uses
+  `potential = "harmonic"`.
 
 The `[coulomb]` and `[spme]` tables are mutually exclusive at config
 load (see `io/config-schema.md`); a `ForceField` therefore contains at
@@ -56,6 +62,7 @@ list in a fixed order determined at construction:
 3. `SpmeRealSpace`
 4. `SpmeReciprocal`
 5. `MorseBonded`
+6. `HarmonicAngle`
 
 Future potentials are inserted into this order at fixed positions defined
 in `ForceField::new`.
@@ -225,7 +232,7 @@ slots must carry valid zeros in their rows.)
 
 - `LennardJonesState` — implements `Potential` with `label() == "lennard_jones"`. <!-- rq-af2d1628 -->
   Owns the slot's `PairBuffer`, `LennardJonesParameters`, and the
-  `DeviceExclusionList` (see `bonds.md`). Its internal state is one of
+  `DeviceExclusionList` (see `topology.md`). Its internal state is one of
   two variants determined at construction time by the parsed
   `NeighborListConfig`:
   - `AllPairs` — additionally carries a `neighbor_counts` device slice
@@ -246,6 +253,12 @@ slots must carry valid zeros in their rows.)
   the per-bond-type parameter table. Construction requires a non-empty
   bond list; see `morse-bonded.md`. Its reduction writes per-particle
   output into the `SlotOutputView` it receives.
+
+- `HarmonicAngleState` — implements `Potential` with `label() == "harmonic_angle"`. <!-- rq-454ad2cf -->
+  Owns the slot's `AnglePairBuffer`, the angle index/offset tables,
+  and the per-angle-type parameter table. Construction requires a
+  non-empty angle list; see `harmonic-angle.md`. Its reduction writes
+  per-particle output into the `SlotOutputView` it receives.
 
 - `ForceField` — handle owning the slot collection, the flat slot-output buffers, and the shared neighbor list. <!-- rq-684a29f1 -->
 
@@ -274,14 +287,19 @@ slots must carry valid zeros in their rows.)
 
 ### Functions and methods <!-- rq-17abcb76 -->
 
-- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], bond_list: &BondList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>` <!-- rq-79938dbf -->
+- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], coulomb_config: Option<&CoulombConfig>, spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>` <!-- rq-79938dbf -->
   - Constructs the slot collection in fixed evaluation order:
     - Appends a `LennardJonesState` slot when `pair_interactions` is
       non-empty.
-    - Appends a `MorseBondedState` slot when `bond_list.is_empty()` is
-      false.
-  - When both inputs are absent, returns a `ForceField` with
-    `slots.len() == 0`.
+    - Appends a `CoulombState` slot when `coulomb_config.is_some()`.
+    - Appends `SpmeRealSpaceState` and `SpmeReciprocalState` slots
+      when `spme_config.is_some()`.
+    - Appends a `MorseBondedState` slot when `bond_list.is_empty()`
+      is false.
+    - Appends a `HarmonicAngleState` slot when
+      `angle_list.is_empty()` is false.
+  - When every slot-bearing input is absent, returns a `ForceField`
+    with `slots.len() == 0`.
   - Allocates the five flat slot-output buffers (`slot_forces_x/y/z`,
     `slot_energies`, `slot_virials`) of length
     `slots.len() * particle_count` on `device`. When either factor is

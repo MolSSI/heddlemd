@@ -8,7 +8,8 @@ use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
 use crate::forces::{
-    BondList, BondsFileError, ExclusionList, ForceField, ForceFieldError, load_bonds_file,
+    AngleList, BondList, ExclusionList, ForceField, ForceFieldError, TopologyFileError,
+    load_topology_file,
 };
 use crate::gpu::{ParticleBuffers, init_device};
 use crate::integrator::{IntegratorError, IntegratorRegistry};
@@ -43,7 +44,7 @@ pub enum RunnerError {
     #[error("{0}")]
     Integrator(#[source] IntegratorError),
     #[error("{0}")]
-    BondsFile(#[source] BondsFileError),
+    TopologyFile(#[source] TopologyFileError),
     #[error("{0}")]
     ForceField(#[source] ForceFieldError),
     #[error("{0}")]
@@ -285,15 +286,24 @@ fn run_simulation_with_phase(
         .build(&config.integrator, &gpu, n)
         .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Setup))?;
 
-    // Load the .bonds file when supplied, otherwise build empty bond / exclusion
-    // lists keyed to `n`.
+    // Load the .topology file when supplied, otherwise build empty bond /
+    // angle / exclusion lists keyed to `n`.
     let bond_type_names: Vec<&str> =
         config.bond_types.iter().map(|bt| bt.name()).collect();
-    let (bond_list, exclusion_list): (BondList, ExclusionList) = match config.bonds.as_ref() {
-        Some(path) => load_bonds_file(path, n, &bond_type_names)
-            .map_err(|e| (RunnerError::BondsFile(e), ExitPhase::Setup))?,
-        None => (BondList::empty(n), ExclusionList::empty(n)),
-    };
+    let angle_type_names: Vec<&str> =
+        config.angle_types.iter().map(|at| at.name()).collect();
+    let (bond_list, angle_list, exclusion_list): (BondList, AngleList, ExclusionList) =
+        match config.topology.as_ref() {
+            Some(path) => {
+                load_topology_file(path, n, &bond_type_names, &angle_type_names)
+                    .map_err(|e| (RunnerError::TopologyFile(e), ExitPhase::Setup))?
+            }
+            None => (
+                BondList::empty(n),
+                AngleList::empty(n),
+                ExclusionList::empty(n),
+            ),
+        };
 
     let mut force_field = ForceField::new(
         &gpu,
@@ -302,10 +312,12 @@ fn run_simulation_with_phase(
         &config.particle_types,
         &config.pair_interactions,
         &config.bond_types,
+        &config.angle_types,
         config.coulomb.as_ref(),
         config.spme.as_ref(),
         &charges_for_force_field,
         &bond_list,
+        &angle_list,
         &exclusion_list,
         &config.neighbor_list,
     )

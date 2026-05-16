@@ -75,10 +75,12 @@ fn force_field_lj_only() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -103,10 +105,12 @@ fn force_field_lj_and_morse() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &bt,
+        &[],
         None,
         None,
         &[],
         &bl,
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -131,10 +135,12 @@ fn bond_types_declared_no_bonds() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &bt,
+        &[],
         None,
         None,
         &[],
         &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -152,10 +158,12 @@ fn force_field_zero_slots() {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -182,10 +190,12 @@ fn slot_buffers_sized_num_slots_times_particle_count() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &bt,
+        &[],
         None,
         None,
         &[],
         &bl,
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(8),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -205,10 +215,12 @@ fn empty_force_field() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(0),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(0),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -285,10 +297,12 @@ fn step_lj_only_writes_lj_forces() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(2),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -325,10 +339,12 @@ fn step_both_slots_sums_lj_and_morse() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(2),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -348,10 +364,12 @@ fn step_both_slots_sums_lj_and_morse() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_tiny],
         &bt,
+        &[],
         None,
         None,
         &[],
         &bl,
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -365,10 +383,12 @@ fn step_both_slots_sums_lj_and_morse() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &bt,
+        &[],
         None,
         None,
         &[],
         &bl,
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -422,10 +442,12 @@ fn step_zero_slots_writes_zero_forces() {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -475,10 +497,12 @@ fn step_empty_launches_no_kernels() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(0),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(0),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -508,10 +532,12 @@ fn each_slot_writes_its_own_row() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &bt,
+        &[],
         None,
         None,
         &[],
         &bl,
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -526,10 +552,12 @@ fn each_slot_writes_its_own_row() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(3),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -551,10 +579,12 @@ fn each_slot_writes_its_own_row() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_tiny],
         &bt,
+        &[],
         None,
         None,
         &[],
         &bl,
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -640,10 +670,12 @@ fn third_potential_extensibility() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(3),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -674,10 +706,12 @@ fn third_potential_extensibility() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(3),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -717,10 +751,12 @@ fn two_independent_runs_byte_identical() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -730,10 +766,12 @@ fn two_independent_runs_byte_identical() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -763,10 +801,12 @@ fn combiner_sums_slot_rows_in_slot_order() {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(2),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -850,10 +890,12 @@ fn combiner_with_zero_slots_writes_zeros() {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -879,10 +921,12 @@ fn combiner_idempotent_across_two_calls() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -907,10 +951,12 @@ fn force_field_with_lj_owns_shared_neighbor_list() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::CellList { max_neighbors: 16, r_skin: 0.3 },
     )
@@ -935,10 +981,12 @@ fn force_field_with_only_bonded_owns_no_neighbor_list() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[],
         &bt,
+        &[],
         None,
         None,
         &[],
         &bl,
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -967,10 +1015,12 @@ fn bonded_only_step_launches_no_neighbor_list_kernels() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[],
         &bt,
+        &[],
         None,
         None,
         &[],
         &bl,
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -1035,10 +1085,12 @@ fn context_exposes_shared_neighbor_list_to_contribute() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(2),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -1105,10 +1157,12 @@ fn max_cutoff_aggregation_determines_neighbor_list_radius() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()], // cutoff = 5.0
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::CellList { max_neighbors: 32, r_skin },
     )
@@ -1139,10 +1193,12 @@ fn force_field_lj_only_populates_energy_and_virial() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -1172,10 +1228,12 @@ fn slot_output_buffers_have_five_flat_arrays() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &bt,
+        &[],
         None,
         None,
         &[],
         &bl,
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(8),
         &NeighborListConfig::AllPairs,
     )
@@ -1201,10 +1259,12 @@ fn combiner_sums_slot_energies_and_virials_in_slot_order() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(2),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -1271,10 +1331,12 @@ fn zero_slot_step_writes_zeros_to_energy_and_virial() {
         &[],
         &[],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -1312,10 +1374,12 @@ fn system_total_potential_energy_equals_sum_of_particle_shares() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(2),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -1358,10 +1422,12 @@ fn system_total_virial_equals_sum_of_particle_shares() {
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[lj_pair_config()],
         &[],
+        &[],
         None,
         None,
         &[],
         &BondList::empty(2),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )

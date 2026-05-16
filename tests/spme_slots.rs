@@ -77,10 +77,12 @@ fn force_field_registers_spme_slots_when_configured() {
         &particle_types,
         &[],
         &[],
+        &[],
         None,
         Some(&spme),
         &charges,
         &dynamics::forces::BondList::empty(1),
+        &dynamics::forces::AngleList::empty(0),
         &ExclusionList::empty(1),
         &NeighborListConfig::AllPairs,
     )

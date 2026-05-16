@@ -559,7 +559,7 @@ Feature: Performance analysis and timings output
 
   @rq-14b8e042
   Scenario: Morse-bonded run records morse_bond_force, reduce_bond_forces, accumulate_forces
-    Given a valid config with `bonds = "topology.bonds"` and a non-empty bond list
+    Given a valid config with `topology = "sim.topology"` and a non-empty bond list
     And n_steps = 10
     When dynamics run sim.toml is invoked
     Then tmp/sim.timings has rows whose stage columns equal
@@ -568,7 +568,7 @@ Feature: Performance analysis and timings output
 
   @rq-c7df5714
   Scenario: Bond-free run omits morse_bond_force and reduce_bond_forces
-    Given a valid config without a `bonds` field
+    Given a valid config without a `topology` field
     When dynamics run sim.toml is invoked
     Then tmp/sim.timings has no row whose stage column equals "morse_bond_force"
     And tmp/sim.timings has no row whose stage column equals "reduce_bond_forces"

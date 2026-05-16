@@ -20,7 +20,7 @@ size of the shared list differ.
 
 The kernel reads the per-particle `type_indices` buffer (see
 `particle-state.md`) and the per-pair-type parameter arrays, applies
-the `ExclusionList` (see `bonds.md`) per-pair scaling, and writes into
+the `ExclusionList` (see `topology.md`) per-pair scaling, and writes into
 the `PairBuffer`. Reduction uses `reduce_pair_forces` (see
 `pair-reduction.md`).
 
@@ -320,7 +320,7 @@ After computing the closed-form Lennard-Jones force `(fx, fy, fz)`,
 energy, and virial for pair `(i, k)` and before writing the results to
 the pair-buffer slots, the kernel scales all five quantities by the
 factor returned by the shared device helper `exclusion_scale` declared
-in `kernels/exclusions.cuh` (see `bonds.md` for the helper's API and
+in `kernels/exclusions.cuh` (see `topology.md` for the helper's API and
 semantics):
 
 ```
@@ -373,7 +373,7 @@ A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
   The `DeviceExclusionList` argument is a host-side handle holding the
   four device buffers `atom_excl_offsets`, `atom_excl_partners`,
   `atom_excl_lj_scales`, and `atom_excl_coul_scales`. It is constructed
-  from the host-side `ExclusionList` (see `bonds.md`) once at force-field
+  from the host-side `ExclusionList` (see `topology.md`) once at force-field
   construction time and shared between the LJ and Coulomb slots; each
   slot consumes the scale array appropriate to itself. An empty exclusion
   list is represented by a `DeviceExclusionList` whose offsets buffer has

@@ -9,7 +9,7 @@ use crate::io::config::BondTypeConfig;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
-use super::bonds::BondList;
+use super::topology::BondList;
 use super::{ForceFieldError, Potential, SlotOutputView};
 
 // rq-2361f2b8 rq-ec18d174

@@ -8,7 +8,7 @@ pub enum PathRole {
     Trajectory,
     Log,
     Timings,
-    Bonds,
+    Topology,
 }
 
 impl std::fmt::Display for PathRole {
@@ -18,7 +18,7 @@ impl std::fmt::Display for PathRole {
             PathRole::Trajectory => write!(f, "trajectory"),
             PathRole::Log => write!(f, "log"),
             PathRole::Timings => write!(f, "timings"),
-            PathRole::Bonds => write!(f, "bonds"),
+            PathRole::Topology => write!(f, "topology"),
         }
     }
 }
@@ -77,6 +77,19 @@ pub enum ConfigError {
     },
     #[error("duplicate bond type name `{name}`")]
     DuplicateBondTypeName { name: String },
+    #[error("angle_types[{angle_type_index}] has unknown potential `{actual}`")]
+    UnknownAnglePotential {
+        actual: String,
+        angle_type_index: usize,
+    },
+    #[error("angle_types[{angle_type_index}] has unknown field `{field}` for potential `{potential}`")]
+    UnknownAngleTypeField {
+        potential: String,
+        field: String,
+        angle_type_index: usize,
+    },
+    #[error("duplicate angle type name `{name}`")]
+    DuplicateAngleTypeName { name: String },
     #[error("unknown neighbor_list mode `{actual}`")]
     UnknownNeighborListMode { actual: String },
     #[error("unknown field `{field}` for neighbor_list mode `{mode}`")]
@@ -157,6 +170,24 @@ impl BondTypeConfig {
     }
 }
 
+// AngleTypeConfig — variants for the [[angle_types]] array.
+#[derive(Debug, Clone)]
+pub enum AngleTypeConfig {
+    Harmonic {
+        name: String,
+        k_theta: f64,
+        theta_0: f64,
+    },
+}
+
+impl AngleTypeConfig {
+    pub fn name(&self) -> &str {
+        match self {
+            AngleTypeConfig::Harmonic { name, .. } => name,
+        }
+    }
+}
+
 // rq-060b1fab
 #[derive(Debug, Clone, PartialEq)]
 pub enum NeighborListConfig {
@@ -197,12 +228,13 @@ pub struct OutputConfig {
 pub struct Config {
     pub schema_version: u64,
     pub init: PathBuf,
-    pub bonds: Option<PathBuf>,
+    pub topology: Option<PathBuf>,
     pub simulation: SimulationConfig,
     pub integrator: IntegratorKind,
     pub particle_types: Vec<ParticleTypeConfig>,
     pub pair_interactions: Vec<PairInteractionConfig>,
     pub bond_types: Vec<BondTypeConfig>,
+    pub angle_types: Vec<AngleTypeConfig>,
     pub coulomb: Option<CoulombConfig>,
     pub spme: Option<SpmeConfig>,
     pub neighbor_list: NeighborListConfig,
@@ -318,9 +350,9 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
     }
 
     let init_raw = get_str(root, "init")?.to_string();
-    let bonds_raw: Option<String> = match root.get("bonds") {
+    let topology_raw: Option<String> = match root.get("topology") {
         Some(toml::Value::String(s)) => Some(s.clone()),
-        Some(_) => return Err(invalid("bonds", "expected a string")),
+        Some(_) => return Err(invalid("topology", "expected a string")),
         None => None,
     };
 
@@ -676,6 +708,79 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
         }
     }
 
+    // Angle types (optional)
+    let mut angle_types: Vec<AngleTypeConfig> = Vec::new();
+    if let Some(at_value) = root.get("angle_types") {
+        let at_array = at_value
+            .as_array()
+            .ok_or_else(|| invalid("angle_types", "expected an array of tables"))?;
+        let mut seen_names: Vec<String> = Vec::new();
+        for (i, entry) in at_array.iter().enumerate() {
+            let tbl = entry
+                .as_table()
+                .ok_or_else(|| invalid(&format!("angle_types[{i}]"), "expected a table"))?;
+            let name = get_str(tbl, "name")
+                .map_err(rename_field(format!("angle_types[{i}].name")))?
+                .to_string();
+            if name.is_empty() {
+                return Err(invalid(
+                    &format!("angle_types[{i}].name"),
+                    "name must not be empty",
+                ));
+            }
+            if seen_names.contains(&name) {
+                return Err(ConfigError::DuplicateAngleTypeName { name });
+            }
+            let potential = get_str(tbl, "potential")
+                .map_err(rename_field(format!("angle_types[{i}].potential")))?
+                .to_string();
+            match potential.as_str() {
+                "harmonic" => {
+                    for key in tbl.keys() {
+                        if !matches!(
+                            key.as_str(),
+                            "name" | "potential" | "k_theta" | "theta_0"
+                        ) {
+                            return Err(ConfigError::UnknownAngleTypeField {
+                                potential: "harmonic".to_string(),
+                                field: key.clone(),
+                                angle_type_index: i,
+                            });
+                        }
+                    }
+                    let k_theta = get_f64(tbl, "k_theta")
+                        .map_err(rename_field(format!("angle_types[{i}].k_theta")))?;
+                    require_finite_positive(
+                        &format!("angle_types[{i}].k_theta"),
+                        k_theta,
+                    )?;
+                    let theta_0 = get_f64(tbl, "theta_0")
+                        .map_err(rename_field(format!("angle_types[{i}].theta_0")))?;
+                    if !theta_0.is_finite()
+                        || !(0.0..=std::f64::consts::PI).contains(&theta_0)
+                    {
+                        return Err(invalid(
+                            &format!("angle_types[{i}].theta_0"),
+                            "theta_0 must be finite and in [0, π]",
+                        ));
+                    }
+                    seen_names.push(name.clone());
+                    angle_types.push(AngleTypeConfig::Harmonic {
+                        name,
+                        k_theta,
+                        theta_0,
+                    });
+                }
+                other => {
+                    return Err(ConfigError::UnknownAnglePotential {
+                        actual: other.to_string(),
+                        angle_type_index: i,
+                    });
+                }
+            }
+        }
+    }
+
     // Neighbor list (optional table)
     // rq-060b1fab
     let max_cutoff: f64 = pair_interactions
@@ -973,9 +1078,9 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
 
     // rq-6d99f9c8
     let init_path = resolve_path(&base_dir, &init_raw);
-    let bonds_path: Option<PathBuf> = bonds_raw.as_deref().map(|s| resolve_path(&base_dir, s));
+    let topology_path: Option<PathBuf> = topology_raw.as_deref().map(|s| resolve_path(&base_dir, s));
 
-    // Path collision checks (init/traj/log/timings/bonds pairwise distinct)
+    // Path collision checks (init/traj/log/timings/topology pairwise distinct)
     let check_collision = |kind_a: PathRole, path_a: &PathBuf, kind_b: PathRole, path_b: &PathBuf| {
         if path_a == path_b {
             Some(ConfigError::PathCollision {
@@ -1005,17 +1110,17 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
     if let Some(e) = check_collision(PathRole::Log, &log_path, PathRole::Timings, &timings_path) {
         return Err(e);
     }
-    if let Some(b) = bonds_path.as_ref() {
-        if let Some(e) = check_collision(PathRole::Init, &init_path, PathRole::Bonds, b) {
+    if let Some(b) = topology_path.as_ref() {
+        if let Some(e) = check_collision(PathRole::Init, &init_path, PathRole::Topology, b) {
             return Err(e);
         }
-        if let Some(e) = check_collision(PathRole::Trajectory, &trajectory_path, PathRole::Bonds, b) {
+        if let Some(e) = check_collision(PathRole::Trajectory, &trajectory_path, PathRole::Topology, b) {
             return Err(e);
         }
-        if let Some(e) = check_collision(PathRole::Log, &log_path, PathRole::Bonds, b) {
+        if let Some(e) = check_collision(PathRole::Log, &log_path, PathRole::Topology, b) {
             return Err(e);
         }
-        if let Some(e) = check_collision(PathRole::Timings, &timings_path, PathRole::Bonds, b) {
+        if let Some(e) = check_collision(PathRole::Timings, &timings_path, PathRole::Topology, b) {
             return Err(e);
         }
     }
@@ -1023,12 +1128,13 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
     Ok(Config {
         schema_version,
         init: init_path,
-        bonds: bonds_path,
+        topology: topology_path,
         simulation,
         integrator,
         particle_types,
         pair_interactions,
         bond_types,
+        angle_types,
         coulomb,
         spme,
         neighbor_list,

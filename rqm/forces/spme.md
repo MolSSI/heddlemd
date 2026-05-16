@@ -40,7 +40,7 @@ SPME contributes two `Potential` slots to the `ForceField`:
 
 Both slots share the per-particle `charges` buffer on `ParticleBuffers`
 (see `particle-state.md`) and the shared `DeviceExclusionList` (see
-`bonds.md`). The two slots are constructed together when `[spme]` is
+`topology.md`). The two slots are constructed together when `[spme]` is
 present in the config; they share the parsed `alpha` and per-particle
 charges but are otherwise independent.
 
@@ -110,7 +110,7 @@ neighbor_counts[i]`:
    `j`. The derivative form combines the `1/r²` decay of `erfc(αr)/r` with
    the Gaussian term from `d(erfc)/dr = −(2α/√π) · exp(−α²r²)`.
 
-7. Apply the per-pair Coulomb exclusion scale (see `bonds.md`):
+7. Apply the per-pair Coulomb exclusion scale (see `topology.md`):
    `scale = exclusion_scale(i, j, atom_excl_offsets, atom_excl_partners,
    atom_excl_coul_scales)`. Multiply `factor`, `energy`, and the scalar
    virial `w = factor · r²` by `scale`.
@@ -608,7 +608,7 @@ not use unordered atomic-add for the scalar accumulation.
   zero-scaled in `atom_excl_coul_scales` (the standard convention for
   excluded pairs in PME). Codes that retain a portion of the bonded
   Coulomb (e.g. via 1-4 scaling) use the `scale_coul` field of
-  `bonds.md`'s exclusion entries; no special PME-only excluded-pair
+  `topology.md`'s exclusion entries; no special PME-only excluded-pair
   treatment is added.
 - Non-tinfoil boundary conditions. The `k = 0` entry of the influence
   function is fixed at zero; conductive ("tinfoil") boundary conditions

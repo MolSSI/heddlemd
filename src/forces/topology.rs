@@ -1,4 +1,4 @@
-// rq-c2dbaa72 (bonds module — defined in forces/bonds.md)
+// rq-c2dbaa72 (topology module — defined in forces/topology.md)
 use std::path::Path;
 use std::sync::Arc;
 
@@ -11,6 +11,14 @@ pub struct Bond {
     pub atom_i: u32,
     pub atom_j: u32,
     pub bond_type_index: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Angle {
+    pub atom_i: u32,
+    pub atom_j: u32,
+    pub atom_k: u32,
+    pub angle_type_index: u32,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -41,6 +49,29 @@ impl BondList {
 
     pub fn is_empty(&self) -> bool {
         self.bonds.is_empty()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AngleList {
+    pub angles: Vec<Angle>,
+    pub atom_angle_offsets: Vec<u32>,
+    pub atom_angle_indices: Vec<u32>,
+    pub particle_count: usize,
+}
+
+impl AngleList {
+    pub fn empty(particle_count: usize) -> Self {
+        AngleList {
+            angles: Vec::new(),
+            atom_angle_offsets: vec![0; particle_count + 1],
+            atom_angle_indices: Vec::new(),
+            particle_count,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.angles.is_empty()
     }
 }
 
@@ -118,10 +149,10 @@ impl DeviceExclusionList {
     }
 }
 
-// rq-e1ceb5c0 — errors for bond file parsing.
+// rq-bca0adbc — errors for topology file parsing.
 #[derive(Debug, thiserror::Error)]
-pub enum BondsFileError {
-    #[error("failed to read bonds file: {0}")]
+pub enum TopologyFileError {
+    #[error("failed to read topology file: {0}")]
     Io(String),
     #[error("line {line_number}: unknown section `{name}`")]
     UnknownSection { name: String, line_number: usize },
@@ -131,6 +162,8 @@ pub enum BondsFileError {
     ContentOutsideSection { line_number: usize },
     #[error("line {line_number}: invalid bond row: {reason}")]
     InvalidBondRow { line_number: usize, reason: String },
+    #[error("line {line_number}: invalid angle row: {reason}")]
+    InvalidAngleRow { line_number: usize, reason: String },
     #[error("line {line_number}: invalid exclusion row: {reason}")]
     InvalidExclusionRow { line_number: usize, reason: String },
     #[error("line {line_number}: atom index {index} is out of range (max {max})")]
@@ -141,26 +174,38 @@ pub enum BondsFileError {
     },
     #[error("line {line_number}: atom {atom} is bonded to itself")]
     SelfBond { line_number: usize, atom: u32 },
+    #[error("line {line_number}: atom {atom} appears more than once in this angle")]
+    RepeatedAtomInAngle { line_number: usize, atom: u32 },
     #[error("line {line_number}: atom {atom} is excluded from itself")]
     SelfExclusion { line_number: usize, atom: u32 },
     #[error("duplicate bond between atoms {atom_i} and {atom_j}")]
     DuplicateBond { atom_i: u32, atom_j: u32 },
+    #[error("duplicate angle between atoms ({atom_i}, {atom_j}, {atom_k})")]
+    DuplicateAngle {
+        atom_i: u32,
+        atom_j: u32,
+        atom_k: u32,
+    },
     #[error("duplicate exclusion between atoms {atom_i} and {atom_j}")]
     DuplicateExclusion { atom_i: u32, atom_j: u32 },
     #[error("line {line_number}: unknown bond type `{name}`")]
     UnknownBondType { line_number: usize, name: String },
+    #[error("line {line_number}: unknown angle type `{name}`")]
+    UnknownAngleType { line_number: usize, name: String },
     #[error("line {line_number}: exclusion scale {scale} is out of the range [0, 1]")]
     ScaleOutOfRange { line_number: usize, scale: f32 },
 }
 
-pub fn load_bonds_file(
+// rq-12b7dcb6
+pub fn load_topology_file(
     path: &Path,
     particle_count: usize,
     bond_type_names: &[&str],
-) -> Result<(BondList, ExclusionList), BondsFileError> {
+    angle_type_names: &[&str],
+) -> Result<(BondList, AngleList, ExclusionList), TopologyFileError> {
     let raw = std::fs::read_to_string(path)
-        .map_err(|e| BondsFileError::Io(format!("{}: {}", path.display(), e)))?;
-    parse_bonds_file(&raw, particle_count, bond_type_names)
+        .map_err(|e| TopologyFileError::Io(format!("{}: {}", path.display(), e)))?;
+    parse_topology_file(&raw, particle_count, bond_type_names, angle_type_names)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -168,20 +213,24 @@ enum Section {
     None,
     Bonds,
     Exclusions,
+    Angles,
 }
 
-pub(crate) fn parse_bonds_file(
+pub(crate) fn parse_topology_file(
     raw: &str,
     particle_count: usize,
     bond_type_names: &[&str],
-) -> Result<(BondList, ExclusionList), BondsFileError> {
+    angle_type_names: &[&str],
+) -> Result<(BondList, AngleList, ExclusionList), TopologyFileError> {
     let max_index_for_check: i64 = particle_count as i64 - 1;
 
     let mut current: Section = Section::None;
     let mut bonds_seen = false;
     let mut exclusions_seen = false;
-    let mut raw_bonds: Vec<(usize, u32, u32, u32)> = Vec::new(); // (line, i, j, type_idx)
-    let mut raw_excl: Vec<(usize, u32, u32, f32, f32)> = Vec::new(); // (line, i, j, scale_lj, scale_coul)
+    let mut angles_seen = false;
+    let mut raw_bonds: Vec<(usize, u32, u32, u32)> = Vec::new();
+    let mut raw_excl: Vec<(usize, u32, u32, f32, f32)> = Vec::new();
+    let mut raw_angles: Vec<(usize, u32, u32, u32, u32)> = Vec::new();
 
     for (idx, line) in raw.lines().enumerate() {
         let line_number = idx + 1;
@@ -194,7 +243,7 @@ pub(crate) fn parse_bonds_file(
             match header {
                 "bonds" => {
                     if bonds_seen {
-                        return Err(BondsFileError::DuplicateSection {
+                        return Err(TopologyFileError::DuplicateSection {
                             name: "bonds".to_string(),
                             line_number,
                         });
@@ -204,7 +253,7 @@ pub(crate) fn parse_bonds_file(
                 }
                 "exclusions" => {
                     if exclusions_seen {
-                        return Err(BondsFileError::DuplicateSection {
+                        return Err(TopologyFileError::DuplicateSection {
                             name: "exclusions".to_string(),
                             line_number,
                         });
@@ -212,8 +261,18 @@ pub(crate) fn parse_bonds_file(
                     exclusions_seen = true;
                     current = Section::Exclusions;
                 }
+                "angles" => {
+                    if angles_seen {
+                        return Err(TopologyFileError::DuplicateSection {
+                            name: "angles".to_string(),
+                            line_number,
+                        });
+                    }
+                    angles_seen = true;
+                    current = Section::Angles;
+                }
                 other => {
-                    return Err(BondsFileError::UnknownSection {
+                    return Err(TopologyFileError::UnknownSection {
                         name: other.to_string(),
                         line_number,
                     });
@@ -224,44 +283,44 @@ pub(crate) fn parse_bonds_file(
 
         match current {
             Section::None => {
-                return Err(BondsFileError::ContentOutsideSection { line_number });
+                return Err(TopologyFileError::ContentOutsideSection { line_number });
             }
             Section::Bonds => {
                 let cols: Vec<&str> = trimmed.split_ascii_whitespace().collect();
                 if cols.len() != 3 {
-                    return Err(BondsFileError::InvalidBondRow {
+                    return Err(TopologyFileError::InvalidBondRow {
                         line_number,
                         reason: format!("expected 3 columns, got {}", cols.len()),
                     });
                 }
                 let atom_i = cols[0].parse::<u32>().map_err(|_| {
-                    BondsFileError::InvalidBondRow {
+                    TopologyFileError::InvalidBondRow {
                         line_number,
                         reason: format!("atom_i {:?} is not a u32", cols[0]),
                     }
                 })?;
                 let atom_j = cols[1].parse::<u32>().map_err(|_| {
-                    BondsFileError::InvalidBondRow {
+                    TopologyFileError::InvalidBondRow {
                         line_number,
                         reason: format!("atom_j {:?} is not a u32", cols[1]),
                     }
                 })?;
                 if (atom_i as i64) > max_index_for_check {
-                    return Err(BondsFileError::AtomIndexOutOfRange {
+                    return Err(TopologyFileError::AtomIndexOutOfRange {
                         line_number,
                         index: atom_i,
                         max: max_index_for_check.max(0) as u32,
                     });
                 }
                 if (atom_j as i64) > max_index_for_check {
-                    return Err(BondsFileError::AtomIndexOutOfRange {
+                    return Err(TopologyFileError::AtomIndexOutOfRange {
                         line_number,
                         index: atom_j,
                         max: max_index_for_check.max(0) as u32,
                     });
                 }
                 if atom_i == atom_j {
-                    return Err(BondsFileError::SelfBond {
+                    return Err(TopologyFileError::SelfBond {
                         line_number,
                         atom: atom_i,
                     });
@@ -269,55 +328,114 @@ pub(crate) fn parse_bonds_file(
                 let type_idx = bond_type_names
                     .iter()
                     .position(|n| *n == cols[2])
-                    .ok_or_else(|| BondsFileError::UnknownBondType {
+                    .ok_or_else(|| TopologyFileError::UnknownBondType {
                         line_number,
                         name: cols[2].to_string(),
                     })? as u32;
                 raw_bonds.push((line_number, atom_i, atom_j, type_idx));
             }
-            Section::Exclusions => {
+            Section::Angles => {
                 let cols: Vec<&str> = trimmed.split_ascii_whitespace().collect();
-                if cols.len() < 2 || cols.len() > 4 {
-                    return Err(BondsFileError::InvalidExclusionRow {
+                if cols.len() != 4 {
+                    return Err(TopologyFileError::InvalidAngleRow {
                         line_number,
-                        reason: format!("expected 2, 3, or 4 columns, got {}", cols.len()),
+                        reason: format!("expected 4 columns, got {}", cols.len()),
                     });
                 }
                 let atom_i = cols[0].parse::<u32>().map_err(|_| {
-                    BondsFileError::InvalidExclusionRow {
+                    TopologyFileError::InvalidAngleRow {
                         line_number,
                         reason: format!("atom_i {:?} is not a u32", cols[0]),
                     }
                 })?;
                 let atom_j = cols[1].parse::<u32>().map_err(|_| {
-                    BondsFileError::InvalidExclusionRow {
+                    TopologyFileError::InvalidAngleRow {
+                        line_number,
+                        reason: format!("atom_j {:?} is not a u32", cols[1]),
+                    }
+                })?;
+                let atom_k = cols[2].parse::<u32>().map_err(|_| {
+                    TopologyFileError::InvalidAngleRow {
+                        line_number,
+                        reason: format!("atom_k {:?} is not a u32", cols[2]),
+                    }
+                })?;
+                for &a in &[atom_i, atom_j, atom_k] {
+                    if (a as i64) > max_index_for_check {
+                        return Err(TopologyFileError::AtomIndexOutOfRange {
+                            line_number,
+                            index: a,
+                            max: max_index_for_check.max(0) as u32,
+                        });
+                    }
+                }
+                if atom_i == atom_j {
+                    return Err(TopologyFileError::RepeatedAtomInAngle {
+                        line_number,
+                        atom: atom_i,
+                    });
+                }
+                if atom_j == atom_k {
+                    return Err(TopologyFileError::RepeatedAtomInAngle {
+                        line_number,
+                        atom: atom_j,
+                    });
+                }
+                if atom_i == atom_k {
+                    return Err(TopologyFileError::RepeatedAtomInAngle {
+                        line_number,
+                        atom: atom_i,
+                    });
+                }
+                let type_idx = angle_type_names
+                    .iter()
+                    .position(|n| *n == cols[3])
+                    .ok_or_else(|| TopologyFileError::UnknownAngleType {
+                        line_number,
+                        name: cols[3].to_string(),
+                    })? as u32;
+                raw_angles.push((line_number, atom_i, atom_j, atom_k, type_idx));
+            }
+            Section::Exclusions => {
+                let cols: Vec<&str> = trimmed.split_ascii_whitespace().collect();
+                if !(2..=4).contains(&cols.len()) {
+                    return Err(TopologyFileError::InvalidExclusionRow {
+                        line_number,
+                        reason: format!("expected 2, 3, or 4 columns, got {}", cols.len()),
+                    });
+                }
+                let atom_i = cols[0].parse::<u32>().map_err(|_| {
+                    TopologyFileError::InvalidExclusionRow {
+                        line_number,
+                        reason: format!("atom_i {:?} is not a u32", cols[0]),
+                    }
+                })?;
+                let atom_j = cols[1].parse::<u32>().map_err(|_| {
+                    TopologyFileError::InvalidExclusionRow {
                         line_number,
                         reason: format!("atom_j {:?} is not a u32", cols[1]),
                     }
                 })?;
                 if (atom_i as i64) > max_index_for_check {
-                    return Err(BondsFileError::AtomIndexOutOfRange {
+                    return Err(TopologyFileError::AtomIndexOutOfRange {
                         line_number,
                         index: atom_i,
                         max: max_index_for_check.max(0) as u32,
                     });
                 }
                 if (atom_j as i64) > max_index_for_check {
-                    return Err(BondsFileError::AtomIndexOutOfRange {
+                    return Err(TopologyFileError::AtomIndexOutOfRange {
                         line_number,
                         index: atom_j,
                         max: max_index_for_check.max(0) as u32,
                     });
                 }
                 if atom_i == atom_j {
-                    return Err(BondsFileError::SelfExclusion {
+                    return Err(TopologyFileError::SelfExclusion {
                         line_number,
                         atom: atom_i,
                     });
                 }
-                // Two-column form: both scales default to 0.0 (full exclusion).
-                // Three-column form: single scale applied to both potentials.
-                // Four-column form: independent (scale_lj, scale_coul).
                 let (scale_lj, scale_coul) = match cols.len() {
                     2 => (0.0_f32, 0.0_f32),
                     3 => {
@@ -351,9 +469,38 @@ pub(crate) fn parse_bonds_file(
     bonds.sort_by_key(|b| (b.atom_i, b.atom_j));
     for w in bonds.windows(2) {
         if w[0].atom_i == w[1].atom_i && w[0].atom_j == w[1].atom_j {
-            return Err(BondsFileError::DuplicateBond {
+            return Err(TopologyFileError::DuplicateBond {
                 atom_i: w[0].atom_i,
                 atom_j: w[0].atom_j,
+            });
+        }
+    }
+
+    // Canonicalise + sort angles. Wings swap so atom_i < atom_k;
+    // sorting is by (atom_j, atom_i, atom_k); duplicates after
+    // canonicalisation are rejected.
+    let mut angles: Vec<Angle> = raw_angles
+        .iter()
+        .map(|&(_, i, j, k, t)| {
+            let (a, c) = if i < k { (i, k) } else { (k, i) };
+            Angle {
+                atom_i: a,
+                atom_j: j,
+                atom_k: c,
+                angle_type_index: t,
+            }
+        })
+        .collect();
+    angles.sort_by_key(|a| (a.atom_j, a.atom_i, a.atom_k));
+    for w in angles.windows(2) {
+        if w[0].atom_i == w[1].atom_i
+            && w[0].atom_j == w[1].atom_j
+            && w[0].atom_k == w[1].atom_k
+        {
+            return Err(TopologyFileError::DuplicateAngle {
+                atom_i: w[0].atom_i,
+                atom_j: w[0].atom_j,
+                atom_k: w[0].atom_k,
             });
         }
     }
@@ -374,15 +521,20 @@ pub(crate) fn parse_bonds_file(
     explicit.sort_by_key(|e| (e.atom_i, e.atom_j));
     for w in explicit.windows(2) {
         if w[0].atom_i == w[1].atom_i && w[0].atom_j == w[1].atom_j {
-            return Err(BondsFileError::DuplicateExclusion {
+            return Err(TopologyFileError::DuplicateExclusion {
                 atom_i: w[0].atom_i,
                 atom_j: w[0].atom_j,
             });
         }
     }
 
-    // Build the effective exclusion list: explicit entries plus implicit
-    // (0.0, 0.0) entries for any bonded pair that does not already appear.
+    // Build the effective exclusion list:
+    //   1. Every explicit entry kept as-is.
+    //   2. For every bond (i, j) lacking an explicit (i, j) entry,
+    //      add implicit (i, j, 0.0, 0.0).
+    //   3. For every angle (i, j, k), consider the 1-3 pair (i, k).
+    //      If neither an explicit entry nor an already-added implicit
+    //      bond entry covers (i, k), add implicit (i, k, 0.0, 0.0).
     let mut effective = explicit.clone();
     for b in &bonds {
         let already = effective
@@ -392,6 +544,22 @@ pub(crate) fn parse_bonds_file(
             effective.push(Exclusion {
                 atom_i: b.atom_i,
                 atom_j: b.atom_j,
+                scale_lj: 0.0,
+                scale_coul: 0.0,
+            });
+            effective.sort_by_key(|e| (e.atom_i, e.atom_j));
+        }
+    }
+    for a in &angles {
+        // 1-3 pair: angle's two wings, already sorted so atom_i < atom_k.
+        let (lo, hi) = (a.atom_i, a.atom_k);
+        let already = effective
+            .binary_search_by_key(&(lo, hi), |e| (e.atom_i, e.atom_j))
+            .is_ok();
+        if !already {
+            effective.push(Exclusion {
+                atom_i: lo,
+                atom_j: hi,
                 scale_lj: 0.0,
                 scale_coul: 0.0,
             });
@@ -419,6 +587,36 @@ pub(crate) fn parse_bonds_file(
         cursor[pi] += 1;
         atom_bond_indices[cursor[pj] as usize] = slot_j;
         cursor[pj] += 1;
+    }
+
+    // Build the atom-to-angle indexing. Each angle contributes three
+    // slots (3·k for atom_i, 3·k+1 for atom_j, 3·k+2 for atom_k).
+    // Entries within each atom's slice are sorted by underlying angle
+    // index since we iterate the sorted `angles` vec in order.
+    let mut atom_angle_offsets = vec![0u32; particle_count + 1];
+    for a in &angles {
+        atom_angle_offsets[a.atom_i as usize + 1] += 1;
+        atom_angle_offsets[a.atom_j as usize + 1] += 1;
+        atom_angle_offsets[a.atom_k as usize + 1] += 1;
+    }
+    for i in 1..=particle_count {
+        atom_angle_offsets[i] += atom_angle_offsets[i - 1];
+    }
+    let mut atom_angle_indices = vec![0u32; angles.len() * 3];
+    let mut cursor_a: Vec<u32> = atom_angle_offsets[..particle_count].to_vec();
+    for (k, a) in angles.iter().enumerate() {
+        let slot_i = (3 * k) as u32;
+        let slot_j = (3 * k + 1) as u32;
+        let slot_k = (3 * k + 2) as u32;
+        let pi = a.atom_i as usize;
+        let pj = a.atom_j as usize;
+        let pk = a.atom_k as usize;
+        atom_angle_indices[cursor_a[pi] as usize] = slot_i;
+        cursor_a[pi] += 1;
+        atom_angle_indices[cursor_a[pj] as usize] = slot_j;
+        cursor_a[pj] += 1;
+        atom_angle_indices[cursor_a[pk] as usize] = slot_k;
+        cursor_a[pk] += 1;
     }
 
     // Build the atom-to-exclusion indexing.
@@ -454,6 +652,12 @@ pub(crate) fn parse_bonds_file(
         atom_bond_indices,
         particle_count,
     };
+    let angle_list = AngleList {
+        angles,
+        atom_angle_offsets,
+        atom_angle_indices,
+        particle_count,
+    };
     let exclusion_list = ExclusionList {
         entries: effective,
         atom_excl_offsets,
@@ -462,22 +666,22 @@ pub(crate) fn parse_bonds_file(
         atom_excl_coul_scales,
         particle_count,
     };
-    Ok((bond_list, exclusion_list))
+    Ok((bond_list, angle_list, exclusion_list))
 }
 
 fn parse_scale(
     line_number: usize,
     column: &'static str,
     raw: &str,
-) -> Result<f32, BondsFileError> {
+) -> Result<f32, TopologyFileError> {
     let scale = raw.parse::<f32>().map_err(|_| {
-        BondsFileError::InvalidExclusionRow {
+        TopologyFileError::InvalidExclusionRow {
             line_number,
             reason: format!("{column} {:?} is not an f32", raw),
         }
     })?;
     if !scale.is_finite() || !(0.0..=1.0).contains(&scale) {
-        return Err(BondsFileError::ScaleOutOfRange { line_number, scale });
+        return Err(TopologyFileError::ScaleOutOfRange { line_number, scale });
     }
     Ok(scale)
 }

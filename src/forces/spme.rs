@@ -21,7 +21,7 @@ use crate::io::config::SpmeConfig;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
-use super::bonds::{DeviceExclusionList, ExclusionList};
+use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::{NeighborListError, NeighborListState};
 use super::{ForceFieldContext, ForceFieldError, Potential, SlotOutputView};
 

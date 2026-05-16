@@ -79,12 +79,15 @@ message.
    A violation surfaces as `RunnerError::CellListBoxTooSmall {
    direction, width, required }` and exits with code `1`.
    `NeighborListConfig::AllPairs` skips this check.
-6a. **Load bonds file (if supplied).** When `config.bonds.is_some()`,
-    build the slice of bond type names from `config.bond_types`,
-    call `load_bonds_file(path, particle_count, &bond_type_names)`
-    (`forces/bonds.md`), and capture the resulting `(BondList,
-    ExclusionList)`. Failure → exit 1. When `config.bonds.is_none()`,
-    use an empty `BondList` and `ExclusionList`.
+6a. **Load topology file (if supplied).** When
+    `config.topology.is_some()`, build the slice of bond type names
+    from `config.bond_types` and the slice of angle type names from
+    `config.angle_types`, call
+    `load_topology_file(path, particle_count, &bond_type_names,
+    &angle_type_names)` (`forces/topology.md`), and capture the
+    resulting `(BondList, AngleList, ExclusionList)`. Failure → exit
+    1. When `config.topology.is_none()`, use an empty `BondList`, an
+    empty `AngleList`, and an empty `ExclusionList`.
 7. **Initialise CUDA.** Call `init_device()` (`build-pipeline.md`).
    Failure → exit 1. When `config.spme.is_some()`, `init_device` runs
    the cuFFT determinism smoke test described in `forces/spme.md`. A
@@ -348,8 +351,8 @@ wrapper that calls into the library.
   - `Integrator(IntegratorError)` — from `Integrator::new` or the per-step
     methods on the chosen integrator variant (see
     `integration/framework.md`).
-  - `BondsFile(BondsFileError)` — from `load_bonds_file` (see
-    `forces/bonds.md`).
+  - `TopologyFile(TopologyFileError)` — from `load_topology_file`
+    (see `forces/topology.md`).
   - `ForceField(ForceFieldError)` — from `ForceField::new` or
     `ForceField::step` (see `forces/framework.md`).
   - `Trajectory(TrajectoryWriterError)` — from trajectory writer
