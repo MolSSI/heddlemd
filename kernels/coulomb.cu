@@ -1,7 +1,7 @@
 // rq-846bdb8b
 
 #include "exclusions.cuh"
-#include "pbc.cuh"
+#include "pair_frame.cuh"
 
 // rq-bfd7004c
 extern "C" __global__ void coulomb_pair_force(
@@ -26,52 +26,29 @@ extern "C" __global__ void coulomb_pair_force(
     const unsigned int *neighbor_counts,
     unsigned int n)
 {
-  unsigned int i = blockIdx.y * blockDim.y + threadIdx.y;
-  unsigned int k = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i >= n || k >= max_neighbors) {
-    return;
-  }
-  unsigned int slot = i * max_neighbors + k;
-  if (k >= neighbor_counts[i]) {
-    pair_forces_x[slot] = 0.0f;
-    pair_forces_y[slot] = 0.0f;
-    pair_forces_z[slot] = 0.0f;
-    pair_energies[slot] = 0.0f;
-    pair_virials[slot]  = 0.0f;
-    return;
-  }
-  unsigned int j = neighbor_list[slot];
-
-  if (i == j) {
-    pair_forces_x[slot] = 0.0f;
-    pair_forces_y[slot] = 0.0f;
-    pair_forces_z[slot] = 0.0f;
-    pair_energies[slot] = 0.0f;
-    pair_virials[slot]  = 0.0f;
+  PairFrame f = pair_frame_setup(
+      n, max_neighbors,
+      positions_x, positions_y, positions_z,
+      neighbor_list, neighbor_counts,
+      lx, ly, lz, xy, xz, yz,
+      pair_forces_x, pair_forces_y, pair_forces_z,
+      pair_energies, pair_virials);
+  if (!f.active) {
     return;
   }
 
-  float qi = charges[i];
-  float qj = charges[j];
-
-  float dx = positions_x[i] - positions_x[j];
-  float dy = positions_y[i] - positions_y[j];
-  float dz = positions_z[i] - positions_z[j];
-
-  triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
+  float qi = charges[f.i];
+  float qj = charges[f.j];
 
   float r_c2 = cutoff * cutoff;
-  float r2 = dx * dx + dy * dy + dz * dz;
-  if (r2 > r_c2) {
-    pair_forces_x[slot] = 0.0f;
-    pair_forces_y[slot] = 0.0f;
-    pair_forces_z[slot] = 0.0f;
-    pair_energies[slot] = 0.0f;
-    pair_virials[slot]  = 0.0f;
+  if (f.r2 > r_c2) {
+    pair_frame_write_zero(f.slot,
+        pair_forces_x, pair_forces_y, pair_forces_z,
+        pair_energies, pair_virials);
     return;
   }
 
-  float inv_r2 = 1.0f / r2;
+  float inv_r2 = 1.0f / f.r2;
   float inv_r  = sqrtf(inv_r2);
   float qq     = qi * qj;
   float energy = k_coulomb * qq * inv_r;
@@ -82,10 +59,10 @@ extern "C" __global__ void coulomb_pair_force(
   // CHARMM-style C1 switching function applied over [r_switch, r_cut].
   // Identical structure to lj_pair_force; see lj-pair-force.md.
   float r_s2 = r_switch * r_switch;
-  if (r2 > r_s2) {
+  if (f.r2 > r_s2) {
     float delta = r_c2 - r_s2;
     float inv_delta = 1.0f / delta;
-    float tau = (r2 - r_s2) * inv_delta;
+    float tau = (f.r2 - r_s2) * inv_delta;
     float one_minus_tau = 1.0f - tau;
     float s = one_minus_tau * one_minus_tau * (1.0f + 2.0f * tau);
     // chain_coeff = -2 * dS/d(r^2) = 12 * tau * (1 - tau) / delta
@@ -94,22 +71,15 @@ extern "C" __global__ void coulomb_pair_force(
     energy = s * energy;
   }
 
-  float fx = factor * dx;
-  float fy = factor * dy;
-  float fz = factor * dz;
-  float w  = fx * dx + fy * dy + fz * dz;
+  float fx = factor * f.dx;
+  float fy = factor * f.dy;
+  float fz = factor * f.dz;
+  float w  = fx * f.dx + fy * f.dy + fz * f.dz;
 
   float scale = exclusion_scale(
-      i, j, atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales);
-  fx *= scale;
-  fy *= scale;
-  fz *= scale;
-  energy *= scale;
-  w *= scale;
-
-  pair_forces_x[slot] = fx;
-  pair_forces_y[slot] = fy;
-  pair_forces_z[slot] = fz;
-  pair_energies[slot] = energy * 0.5f;
-  pair_virials[slot]  = w * 0.5f;
+      f.i, f.j, atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales);
+  pair_frame_write(
+      f.slot, fx, fy, fz, energy, w, scale,
+      pair_forces_x, pair_forces_y, pair_forces_z,
+      pair_energies, pair_virials);
 }

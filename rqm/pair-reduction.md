@@ -83,6 +83,191 @@ slices — the reduction does not accumulate.
 When `count == 0`, the loop runs zero iterations and the five output
 slices receive `0.0_f32` at index `i`.
 
+## Device-side Pair-Force Frame Helper <!-- rq-73c4d574 -->
+
+Every pair-force kernel writes into the pair buffer through a small
+shared device-side helper, declared in `kernels/pair_frame.cuh` and
+included by `kernels/pair_force.cu`, `kernels/coulomb.cu`, and
+`kernels/spme_real.cu`. The helper centralises the universal pair-buffer
+write protocol — thread→slot mapping, the three skip-the-pair guards,
+the displacement and minimum-image reduction, the exclusion-scale apply,
+and the per-pair `* 0.5f` halving — so each pair-force kernel reduces
+to (1) a setup call, (2) the per-potential cutoff test and pair
+functional form, and (3) a write call. The header declares no kernels of
+its own; `init_device()` performs no `load_ptx` call for it.
+
+The helper has three `__device__` entry points:
+
+```c
+struct PairFrame {
+    bool active;
+    unsigned int i;
+    unsigned int j;
+    unsigned int slot;
+    float dx;
+    float dy;
+    float dz;
+    float r2;
+};
+
+__device__ static inline PairFrame pair_frame_setup(
+    unsigned int n,
+    unsigned int max_neighbors,
+    const float *positions_x,
+    const float *positions_y,
+    const float *positions_z,
+    const unsigned int *neighbor_list,
+    const unsigned int *neighbor_counts,
+    float lx, float ly, float lz,
+    float xy, float xz, float yz,
+    float *pair_forces_x,
+    float *pair_forces_y,
+    float *pair_forces_z,
+    float *pair_energies,
+    float *pair_virials);
+
+__device__ static inline void pair_frame_write_zero(
+    unsigned int slot,
+    float *pair_forces_x,
+    float *pair_forces_y,
+    float *pair_forces_z,
+    float *pair_energies,
+    float *pair_virials);
+
+__device__ static inline void pair_frame_write(
+    unsigned int slot,
+    float fx, float fy, float fz,
+    float energy,
+    float virial,
+    float scale,
+    float *pair_forces_x,
+    float *pair_forces_y,
+    float *pair_forces_z,
+    float *pair_energies,
+    float *pair_virials);
+```
+
+`pair_frame_setup` performs the steps a pair-force kernel needs before
+the per-potential math runs:
+
+1. Computes the thread indices
+   `i = blockIdx.y * blockDim.y + threadIdx.y` and
+   `k = blockIdx.x * blockDim.x + threadIdx.x`. If `i >= n` or
+   `k >= max_neighbors`, returns a `PairFrame` with `active == false`
+   and performs no buffer writes. The thread has no assigned slot in
+   this case.
+2. Computes `slot = i * max_neighbors + k`.
+3. If `k >= neighbor_counts[i]`, writes `0.0_f32` to all five pair-buffer
+   slots at index `slot` and returns a `PairFrame` with `active == false`
+   and `slot` populated.
+4. Reads `j = neighbor_list[slot]`. If `i == j` (the trivial-mode
+   self-pair), writes `0.0_f32` to all five pair-buffer slots and
+   returns a `PairFrame` with `active == false` and `slot` populated.
+5. Computes the displacement `dx = positions_x[i] - positions_x[j]` and
+   similarly `dy`, `dz`. Applies the triclinic minimum-image convention
+   using the six lattice parameters `(lx, ly, lz, xy, xz, yz)` defined
+   in `simulation-box.md`.
+6. Computes `r2 = dx*dx + dy*dy + dz*dz`.
+7. Returns a `PairFrame` with `active == true`, the populated `i`, `j`,
+   `slot`, `dx`, `dy`, `dz`, and `r2`. The cutoff test itself is the
+   caller's responsibility: the cutoff value differs per pair potential
+   (per-pair-type table for Lennard-Jones, a single global scalar for
+   the Coulomb and SPME real-space slots), so the helper does not
+   attempt to share it.
+
+`pair_frame_write_zero(slot, ...)` writes `0.0_f32` to
+`pair_forces_x[slot]`, `pair_forces_y[slot]`, `pair_forces_z[slot]`,
+`pair_energies[slot]`, and `pair_virials[slot]`. The caller invokes it
+on the cutoff-exceeded branch (after `pair_frame_setup` returned
+`active == true` but the kernel's per-potential cutoff test failed).
+
+`pair_frame_write(slot, fx, fy, fz, energy, virial, scale, ...)`
+multiplies all five inputs by `scale`, multiplies `energy` and `virial`
+by an additional `0.5f`, and writes the results into the five pair-buffer
+slots at index `slot`. The caller computes `fx = factor * dx`,
+`fy = factor * dy`, `fz = factor * dz`, and the scalar virial
+`virial = fx * dx + fy * dy + fz * dz` before invoking write; the
+exclusion scale comes from `exclusion_scale(...)` declared in
+`kernels/exclusions.cuh` (see `forces/topology.md`). The `0.5f` factor
+is what distributes each pair's energy and virial across its two slots
+`(i, j)` and `(j, i)` so the segmented reduction counts each pair
+exactly once when summed over all particles.
+
+A typical pair-force kernel using the frame is structured as:
+
+```c
+extern "C" __global__ void some_pair_force(
+    const float *positions_x, const float *positions_y, const float *positions_z,
+    /* per-potential parameter arrays */,
+    float *pair_forces_x, float *pair_forces_y, float *pair_forces_z,
+    float *pair_energies, float *pair_virials,
+    unsigned int max_neighbors,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    /* per-potential cutoff inputs and exclusion arrays */,
+    const unsigned int *neighbor_list,
+    const unsigned int *neighbor_counts,
+    unsigned int n)
+{
+    PairFrame f = pair_frame_setup(
+        n, max_neighbors,
+        positions_x, positions_y, positions_z,
+        neighbor_list, neighbor_counts,
+        lx, ly, lz, xy, xz, yz,
+        pair_forces_x, pair_forces_y, pair_forces_z,
+        pair_energies, pair_virials);
+    if (!f.active) {
+        return;
+    }
+    /* Per-potential cutoff lookup + test. */
+    float cutoff = /* per-potential */;
+    if (f.r2 > cutoff * cutoff) {
+        pair_frame_write_zero(
+            f.slot,
+            pair_forces_x, pair_forces_y, pair_forces_z,
+            pair_energies, pair_virials);
+        return;
+    }
+    /* Per-potential pair functional: produces `factor` and `energy`. */
+    float factor = /* per-potential */;
+    float energy = /* per-potential */;
+    /* Optional: per-potential switching function adjusts (factor, energy). */
+    float fx = factor * f.dx;
+    float fy = factor * f.dy;
+    float fz = factor * f.dz;
+    float virial = fx * f.dx + fy * f.dy + fz * f.dz;
+    float scale = exclusion_scale(
+        f.i, f.j, atom_excl_offsets, atom_excl_partners, /* lj_scales | coul_scales */);
+    pair_frame_write(
+        f.slot, fx, fy, fz, energy, virial, scale,
+        pair_forces_x, pair_forces_y, pair_forces_z,
+        pair_energies, pair_virials);
+}
+```
+
+Adding a new pair potential (Buckingham, tabulated, ...) consists of
+writing a new `extern "C"` kernel that follows this shape and supplies
+its own cutoff source, pair functional form, switching policy, and
+exclusion-scale array. The frame holds the universal protocol invariant
+across every such addition.
+
+### Determinism <!-- rq-d8a08c4a -->
+
+Each pair-buffer slot is written by exactly one thread, whether through
+`pair_frame_setup`'s skip-write path, the caller's
+`pair_frame_write_zero` call, or `pair_frame_write`. There are no
+atomics. The arithmetic inside `pair_frame_setup` (displacement,
+minimum-image, `r2`) and inside `pair_frame_write` (scale apply, halving)
+is performed in the documented order on identical inputs on every run.
+Two runs of any kernel that uses the frame, with identical inputs and on
+the same GPU, produce byte-identical pair-buffer contents.
+
+### Empty state <!-- rq-efc6f7f7 -->
+
+When `n == 0` or `max_neighbors == 0`, every thread's index check in
+step 1 returns `active == false` and the kernel returns without
+launching any per-slot writes. The pair-buffer slices that are length
+zero in this case receive no writes.
+
 ## Feature API <!-- rq-c7420b98 -->
 
 ### Types <!-- rq-9197d752 -->

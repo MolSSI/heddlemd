@@ -6183,6 +6183,14 @@
     "title": "PTX Module Loading",
     "type": "section"
   },
+  "rq-73c4d574": {
+    "decl": "## Device-side Pair-Force Frame Helper",
+    "file": "pair-reduction",
+    "level": 2,
+    "refs": [],
+    "title": "Device-side Pair-Force Frame Helper",
+    "type": "section"
+  },
   "rq-73fbb111": {
     "decl": "## Progress reporting",
     "file": "simulation-runner",
@@ -11352,6 +11360,14 @@
     "title": "Barostat slot",
     "type": "section"
   },
+  "rq-d8a08c4a": {
+    "decl": "### Determinism",
+    "file": "pair-reduction",
+    "level": 3,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
+  },
   "rq-d8a08c7a": {
     "decl": "### Data rows",
     "file": "io/init-state-file",
@@ -12771,6 +12787,14 @@
     "refs": [],
     "title": "Different seeds produce different trajectories",
     "type": "scenario"
+  },
+  "rq-efc6f7f7": {
+    "decl": "### Empty state",
+    "file": "pair-reduction",
+    "level": 3,
+    "refs": [],
+    "title": "Empty state",
+    "type": "section"
   },
   "rq-efea1b70": {
     "decl": "Scenario: Rescale skipped when K == 0",
