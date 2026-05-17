@@ -44,6 +44,9 @@ pub struct Kernels {
     pub rescale_positions: CudaFunction,
     pub mtk_velocity_half_kick: CudaFunction,
     pub mtk_position_drift: CudaFunction,
+    pub settle_snapshot: CudaFunction,
+    pub settle_positions: CudaFunction,
+    pub settle_velocities: CudaFunction,
     pub accumulate_forces: CudaFunction,
     pub neighbor_displacement_squared: CudaFunction,
     pub neighbor_list_build: CudaFunction,
@@ -152,6 +155,12 @@ pub fn init_device() -> Result<GpuContext, GpuError> {
         "mtk",
         &["mtk_velocity_half_kick", "mtk_position_drift"],
     )?;
+    // rq-67e62f4b
+    device.load_ptx(
+        Ptx::from_src(kernels::SETTLE),
+        "settle",
+        &["settle_snapshot", "settle_positions", "settle_velocities"],
+    )?;
     device.load_ptx(
         Ptx::from_src(kernels::FORCES),
         "forces",
@@ -208,6 +217,9 @@ pub fn init_device() -> Result<GpuContext, GpuError> {
         rescale_positions: get("barostat", "rescale_positions")?,
         mtk_velocity_half_kick: get("mtk", "mtk_velocity_half_kick")?,
         mtk_position_drift: get("mtk", "mtk_position_drift")?,
+        settle_snapshot: get("settle", "settle_snapshot")?,
+        settle_positions: get("settle", "settle_positions")?,
+        settle_velocities: get("settle", "settle_velocities")?,
         accumulate_forces: get("forces", "accumulate_forces")?,
         neighbor_displacement_squared: get("neighbor", "neighbor_displacement_squared")?,
         neighbor_list_build: get("neighbor", "neighbor_list_build")?,

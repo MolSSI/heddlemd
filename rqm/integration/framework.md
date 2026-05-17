@@ -1,6 +1,6 @@
 # Feature: Pluggable Integration Framework <!-- rq-e0a0553d -->
 
-The runner drives time integration through three orthogonal slots that
+The runner drives time integration through four orthogonal slots that
 compose at every timestep:
 
 1. An `Integrator` — the core time-stepping algorithm. Owns the velocity
@@ -14,10 +14,18 @@ compose at every timestep:
    after the thermostat's post-step, so it consumes the freshest
    virial / kinetic-energy data and mutates the box for the next
    step's force evaluation.
+4. An optional `Constraint` — holonomic constraint projection (rigid
+   bonds, rigid groups). Threaded through `integrator.step()` so its
+   hooks fire at intra-step boundaries the integrator owns (before
+   drift, after drift, after the final velocity kick). The slot, its
+   trait, its data layout, and its compatibility rules are defined
+   in `constraint-framework.md`; the v1 implementation (SETTLE for
+   three-atom rigid water) lives in `settle.md`.
 
 Each slot is independently registered and independently selectable
 from TOML. Omitting `[thermostat]` selects NVE; omitting `[barostat]`
-selects constant-volume.
+selects constant-volume; an empty (or absent) `[constraints]` section
+of the topology file selects no constraints.
 
 Some integrators own their own thermostat (the O step in Langevin
 BAOAB *is* the Ornstein-Uhlenbeck thermostat); some additionally own
@@ -26,7 +34,11 @@ cell DOF and its own thermostat chains on both the particles and the
 cell). Those integrators declare ownership through
 `IntegratorKind::owns_thermostat()` and
 `IntegratorKind::owns_barostat()`, and the config loader rejects
-co-configured `[thermostat]` / `[barostat]` tables at load time.
+co-configured `[thermostat]` / `[barostat]` tables at load time. An
+analogous predicate `IntegratorKind::supports_constraints()` gates
+the constraint slot: integrators that do not drive the constraint
+hooks are incompatible with a non-empty `[constraints]` topology
+section. See `constraint-framework.md` for the full rule.
 
 ## Slots <!-- rq-f8bb021a -->
 
@@ -70,11 +82,22 @@ The runner drives the timestep loop in a fixed pattern:
 ```text
 loop step in 1..=n_steps:
     if let Some(t) = thermostat { t.apply_pre(buffers, dt, timings) }
-    integrator.step(buffers, sim_box, force_field, dt, timings)
+    integrator.step(
+        buffers, sim_box, force_field,
+        constraint.as_deref_mut(),
+        dt, timings)
     if let Some(t) = thermostat { t.apply_post(buffers, dt, timings) }
     if let Some(b) = barostat   { b.apply(buffers, sim_box, dt, timings) }
     ...trajectory / log output...
 ```
+
+When the constraint slot is `None`, integrators skip every constraint
+hook. Integrators that do not support constraints (every default
+registry entry other than `velocity-verlet { lossless = false }`)
+ignore a `None` argument and return
+`IntegratorError::ConstraintNotSupported` if passed `Some(_)`; the
+config loader's `IncompatibleConstraint` rule prevents that
+combination from being constructed in the first place.
 
 The runner's `step` value is local to the timestep loop; it gates
 trajectory and log writes via `step % trajectory_every == 0` and
@@ -178,6 +201,7 @@ successfully.
           buffers: &mut ParticleBuffers,
           sim_box: &mut SimulationBox,
           force_field: &mut ForceField,
+          constraint: Option<&mut dyn Constraint>,
           dt: f32,
           timings: &mut Timings,
       ) -> Result<(), IntegratorError>;
@@ -308,6 +332,7 @@ successfully.
   ```rust
   pub fn owns_thermostat(&self) -> bool;
   pub fn owns_barostat(&self) -> bool;
+  pub fn supports_constraints(&self) -> bool;
   ```
 
   `owns_thermostat` returns `true` for variants whose integrator
@@ -318,6 +343,13 @@ successfully.
   `owns_barostat` returns `true` for variants whose integrator
   fuses its own barostat. `MtkNpt { .. }` returns `true`;
   `VelocityVerlet { .. }` and `LangevinBaoab { .. }` return `false`.
+
+  `supports_constraints` returns `true` for variants whose
+  integrator drives the three `Constraint` hooks (see
+  `constraint-framework.md`). `VelocityVerlet { lossless: false }`
+  returns `true`; every other variant in the default registry
+  (including `VelocityVerlet { lossless: true }`, `LangevinBaoab`,
+  and `MtkNpt`) returns `false`.
 
 - `IntegratorBuilder`, `ThermostatBuilder`, `BarostatBuilder` — <!-- rq-29e08cb5 -->
   parallel traits describing a registered slot implementation.
@@ -406,11 +438,21 @@ successfully.
     `IntegratorError`).
   - `UnknownKind(String)` — the registry has no builder for the
     requested `kind` name.
+  - `Constraint(ConstraintError)` — surfaces failures from a
+    `Constraint` hook (only the integrator drives constraint hooks;
+    the variant is therefore present only on `IntegratorError`).
+  - `ConstraintNotSupported` — the integrator received a `Some(_)`
+    constraint argument but its
+    `IntegratorKind::supports_constraints()` returns `false`. Only
+    present on `IntegratorError`; ordinarily prevented at config
+    load by the `IncompatibleConstraint` rule.
 
   The runner's `RunnerError` wraps all three via
   `RunnerError::Integrator(IntegratorError)`,
   `RunnerError::Thermostat(ThermostatError)`, and
-  `RunnerError::Barostat(BarostatError)`.
+  `RunnerError::Barostat(BarostatError)`, plus
+  `RunnerError::Constraint(ConstraintError)` for constraint-slot
+  construction failures.
 
 ### Functions and methods <!-- rq-c8848b7f -->
 
@@ -510,10 +552,10 @@ invariant under the same conditions each slot individually guarantees:
   `force_field.step` multiple times per `step()` with different
   effective `dt`s), but no RESPA implementation ships in the default
   registry.
-- Constraint algorithms (SHAKE, RATTLE, LINCS). The integrator trait
-  shape supports them (constraints fit between drift and the next
-  velocity update inside `step()`), but no constraint integrator
-  ships in the default registry.
+- Constraint algorithms other than SETTLE. M-SHAKE, P-LINCS, and
+  every other constraint algorithm are out of scope for this
+  framework file; they share the `Constraint` slot defined in
+  `constraint-framework.md` and arrive in their own feature files.
 - Concrete barostat implementations. The trait, registry, and config
   schema slot exist; the default registry has no builders.
 - Multiple simultaneous thermostats per run. The runner holds at most

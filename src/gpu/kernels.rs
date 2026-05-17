@@ -1698,3 +1698,143 @@ pub fn vv_kick_lossless(
     }
     Ok(())
 }
+
+// rq-67e62f4b — SETTLE launchers
+
+#[allow(clippy::too_many_arguments)]
+pub fn settle_snapshot(
+    particle_buffers: &ParticleBuffers,
+    group_atoms: &CudaSlice<u32>,
+    snapshot_x: &mut CudaSlice<f32>,
+    snapshot_y: &mut CudaSlice<f32>,
+    snapshot_z: &mut CudaSlice<f32>,
+    n_groups: usize,
+) -> Result<(), GpuError> {
+    if n_groups == 0 {
+        return Ok(());
+    }
+    let n_u32 = n_groups as u32;
+    let func = particle_buffers.kernels.settle_snapshot.clone();
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.positions_x,
+                &particle_buffers.positions_y,
+                &particle_buffers.positions_z,
+                group_atoms,
+                snapshot_x,
+                snapshot_y,
+                snapshot_z,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn settle_positions(
+    particle_buffers: &mut ParticleBuffers,
+    snapshot_x: &CudaSlice<f32>,
+    snapshot_y: &CudaSlice<f32>,
+    snapshot_z: &CudaSlice<f32>,
+    group_atoms: &CudaSlice<u32>,
+    group_type_index: &CudaSlice<u32>,
+    type_canonical_x: &CudaSlice<f32>,
+    type_canonical_y: &CudaSlice<f32>,
+    type_canonical_z: &CudaSlice<f32>,
+    type_mass_o: &CudaSlice<f32>,
+    type_mass_h: &CudaSlice<f32>,
+    sim_box: &SimulationBox,
+    dt: f32,
+    n_groups: usize,
+) -> Result<(), GpuError> {
+    if n_groups == 0 {
+        return Ok(());
+    }
+    let n_u32 = n_groups as u32;
+    let func = particle_buffers.kernels.settle_positions.clone();
+    let cfg = launch_config(n_u32);
+    let lat = sim_box.lattice();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut particle_buffers.positions_x,
+                &mut particle_buffers.positions_y,
+                &mut particle_buffers.positions_z,
+                &mut particle_buffers.velocities_x,
+                &mut particle_buffers.velocities_y,
+                &mut particle_buffers.velocities_z,
+                snapshot_x,
+                snapshot_y,
+                snapshot_z,
+                group_atoms,
+                group_type_index,
+                type_canonical_x,
+                type_canonical_y,
+                type_canonical_z,
+                type_mass_o,
+                type_mass_h,
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
+                dt,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn settle_velocities(
+    particle_buffers: &mut ParticleBuffers,
+    group_atoms: &CudaSlice<u32>,
+    group_type_index: &CudaSlice<u32>,
+    type_mass_o: &CudaSlice<f32>,
+    type_mass_h: &CudaSlice<f32>,
+    sim_box: &SimulationBox,
+    n_groups: usize,
+) -> Result<(), GpuError> {
+    if n_groups == 0 {
+        return Ok(());
+    }
+    let n_u32 = n_groups as u32;
+    let func = particle_buffers.kernels.settle_velocities.clone();
+    let cfg = launch_config(n_u32);
+    let lat = sim_box.lattice();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.positions_x,
+                &particle_buffers.positions_y,
+                &particle_buffers.positions_z,
+                &mut particle_buffers.velocities_x,
+                &mut particle_buffers.velocities_y,
+                &mut particle_buffers.velocities_z,
+                group_atoms,
+                group_type_index,
+                type_mass_o,
+                type_mass_h,
+                lat[0],
+                lat[1],
+                lat[2],
+                lat[3],
+                lat[4],
+                lat[5],
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}

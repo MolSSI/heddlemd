@@ -15,7 +15,7 @@ use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::nose_hoover_chain::{nhc_chain_sub_step, yoshida_weights};
-use super::{Integrator, IntegratorBuilder, IntegratorError};
+use super::{Constraint, Integrator, IntegratorBuilder, IntegratorError};
 
 // Host-side Φ_v / Φ_x factor. Computes sinh(α)/α with a Taylor
 // fallback when |α| < TAYLOR_THRESHOLD so the result stays finite and
@@ -222,9 +222,13 @@ impl Integrator for MtkNptIntegrator {
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
+        constraint: Option<&mut dyn Constraint>,
         dt: f32,
         timings: &mut Timings,
     ) -> Result<(), IntegratorError> {
+        if constraint.is_some() {
+            return Err(IntegratorError::ConstraintNotSupported);
+        }
         if buffers.particle_count() == 0 {
             return Ok(());
         }

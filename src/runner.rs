@@ -8,13 +8,14 @@ use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
 use crate::forces::{
-    AngleList, BondList, ExclusionList, ForceField, ForceFieldError, TopologyFileError,
+    AngleList, BondList, ConstraintList, ExclusionList, ForceField, ForceFieldError,
+    TopologyFileError,
     load_topology_file,
 };
 use crate::gpu::{ParticleBuffers, compute_total_potential_energy, init_device};
 use crate::integrator::{
-    BarostatError, BarostatRegistry, IntegratorError, IntegratorRegistry, ThermostatError,
-    ThermostatRegistry,
+    BarostatError, BarostatRegistry, ConstraintError, ConstraintRegistry, IntegratorError,
+    IntegratorRegistry, ThermostatError, ThermostatRegistry,
 };
 use crate::io::config::NeighborListConfig;
 use crate::io::{
@@ -50,6 +51,8 @@ pub enum RunnerError {
     Thermostat(#[source] ThermostatError),
     #[error("{0}")]
     Barostat(#[source] BarostatError),
+    #[error("{0}")]
+    Constraint(#[source] ConstraintError),
     #[error("{0}")]
     TopologyFile(#[source] TopologyFileError),
     #[error("{0}")]
@@ -316,18 +319,45 @@ fn run_simulation_with_phase(
         config.bond_types.iter().map(|bt| bt.name()).collect();
     let angle_type_names: Vec<&str> =
         config.angle_types.iter().map(|at| at.name()).collect();
-    let (bond_list, angle_list, exclusion_list): (BondList, AngleList, ExclusionList) =
-        match config.topology.as_ref() {
-            Some(path) => {
-                load_topology_file(path, n, &bond_type_names, &angle_type_names)
-                    .map_err(|e| (RunnerError::TopologyFile(e), ExitPhase::Setup))?
-            }
-            None => (
-                BondList::empty(n),
-                AngleList::empty(n),
-                ExclusionList::empty(n),
-            ),
-        };
+    let (bond_list, angle_list, exclusion_list, constraint_list): (
+        BondList,
+        AngleList,
+        ExclusionList,
+        ConstraintList,
+    ) = match config.topology.as_ref() {
+        Some(path) => load_topology_file(
+            path,
+            n,
+            &bond_type_names,
+            &angle_type_names,
+            &config.constraint_types,
+        )
+        .map_err(|e| (RunnerError::TopologyFile(e), ExitPhase::Setup))?,
+        None => (
+            BondList::empty(n),
+            AngleList::empty(n),
+            ExclusionList::empty(n),
+            ConstraintList::empty(n),
+        ),
+    };
+    // rq-acfda5d4 — runner-side enforcement of the integrator/constraint
+    // compatibility rule; `Config::validate` cannot run this check
+    // because it does not load the topology file itself.
+    config
+        .validate_constraint_compatibility(!constraint_list.is_empty())
+        .map_err(|e| (RunnerError::Config(e), ExitPhase::Setup))?;
+    // rq-3d5f2e98 — construct the constraint slot. `build_optional`
+    // returns `None` for an empty list.
+    let constraint_registry = ConstraintRegistry::with_builtins();
+    let mut constraint = constraint_registry
+        .build_optional(
+            &constraint_list,
+            &gpu,
+            n,
+            &masses_f32,
+            &config.constraint_types,
+        )
+        .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
 
     let mut force_field = ForceField::new(
         &gpu,
@@ -476,15 +506,24 @@ fn run_simulation_with_phase(
             t.apply_pre(&mut buffers, dt_f32, &mut timings)
                 .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
         }
-        integrator
-            .step(
-                &mut buffers,
-                &mut sim_box,
-                &mut force_field,
-                dt_f32,
-                &mut timings,
-            )
-            .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Loop))?;
+        {
+            let constraint_arg: Option<&mut dyn crate::integrator::Constraint> = match constraint
+                .as_mut()
+            {
+                Some(b) => Some(b.as_mut()),
+                None => None,
+            };
+            integrator
+                .step(
+                    &mut buffers,
+                    &mut sim_box,
+                    &mut force_field,
+                    constraint_arg,
+                    dt_f32,
+                    &mut timings,
+                )
+                .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Loop))?;
+        }
         if let Some(t) = thermostat.as_mut() {
             t.apply_post(&mut buffers, dt_f32, &mut timings)
                 .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;

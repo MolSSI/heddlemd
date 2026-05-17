@@ -141,6 +141,13 @@
     "title": "Angle row with wrong column count",
     "type": "scenario"
   },
+  "rq-025702ac": {
+    "decl": "Scenario: A single SETTLE water under free streaming (no forces) maintains rigid geometry indefinitely",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "A single SETTLE water under free streaming (no forces) maintains rigid geometry indefinitely",
+    "type": "scenario"
+  },
   "rq-025b2c3b": {
     "decl": "Scenario: Reject non-positive dt",
     "file": "io/config-schema",
@@ -160,6 +167,13 @@
     "file": "forces/coulomb-pair-force",
     "refs": [],
     "title": "Mixed charge magnitudes scale linearly",
+    "type": "scenario"
+  },
+  "rq-02b066b6": {
+    "decl": "Scenario: SETTLE hooks on an empty ParticleBuffers return Ok(())",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SETTLE hooks on an empty ParticleBuffers return Ok(())",
     "type": "scenario"
   },
   "rq-02bde767": {
@@ -203,6 +217,13 @@
     "file": "integration/mtk-npt",
     "refs": [],
     "title": "nhc_chain_sub_step produces the same numerical result for the particle chain",
+    "type": "scenario"
+  },
+  "rq-03329010": {
+    "decl": "Scenario: apply_before_drift on empty state is a no-op",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "apply_before_drift on empty state is a no-op",
     "type": "scenario"
   },
   "rq-03423870": {
@@ -280,6 +301,13 @@
     ],
     "title": "CUDA Kernels",
     "type": "section"
+  },
+  "rq-047c1f4d": {
+    "decl": "Scenario: langevin-baoab does not support constraints",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "langevin-baoab does not support constraints",
+    "type": "scenario"
   },
   "rq-047f97da": {
     "decl": "### Types",
@@ -387,6 +415,13 @@
     "refs": [],
     "title": "Algorithm",
     "type": "section"
+  },
+  "rq-064c9df1": {
+    "decl": "Scenario: Reject [constraints] with an integrator that does not support them",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Reject [constraints] with an integrator that does not support them",
+    "type": "scenario"
   },
   "rq-06772617": {
     "decl": "Scenario: Reject non-positive compressibility",
@@ -520,6 +555,13 @@
     "file": "integration/berendsen-barostat",
     "refs": [],
     "title": "compute_total_virial matches the host-side sum on small N",
+    "type": "scenario"
+  },
+  "rq-09a19014": {
+    "decl": "Scenario: mtk-npt does not support constraints",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "mtk-npt does not support constraints",
     "type": "scenario"
   },
   "rq-09a2e15f": {
@@ -847,6 +889,13 @@
     "title": "check_min_perpendicular_width returns Ok when every width meets the threshold",
     "type": "scenario"
   },
+  "rq-0faddd62": {
+    "decl": "- `ConstraintGroup` — `Debug, Clone, Copy`. Fields: `atom_offset: u32`,",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "ConstraintGroup",
+    "type": "api-item"
+  },
   "rq-0fcb5a1e": {
     "decl": "Scenario: [barostat] kind = \"berendsen\" with all required fields accepted",
     "file": "io/config-schema",
@@ -947,6 +996,14 @@
     "refs": [],
     "title": "Self-bond rejected",
     "type": "scenario"
+  },
+  "rq-10ee978e": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-10f6f831": {
     "decl": "- `compute_cell_indices_and_histogram(particle_buffers, sim_box, n_cells, cell_indices, cell_counts) -> Result<(), GpuError>`",
@@ -1124,6 +1181,13 @@
     "title": "Parameters",
     "type": "section"
   },
+  "rq-129cb281": {
+    "decl": "Scenario: apply_after_drift on empty state is a no-op",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "apply_after_drift on empty state is a no-op",
+    "type": "scenario"
+  },
   "rq-129edb76": {
     "decl": "Scenario: MtkNpt + [thermostat] is rejected (owns its thermostat)",
     "file": "io/config-schema",
@@ -1132,7 +1196,7 @@
     "type": "scenario"
   },
   "rq-12b7dcb6": {
-    "decl": "- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str]) -> Result<(BondList, AngleList, ExclusionList), TopologyFileError>`",
+    "decl": "- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], constraint_types: &[ConstraintTypeConfig]) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError>`",
     "file": "forces/topology",
     "refs": [
       {
@@ -1148,6 +1212,13 @@
     "file": "integration/berendsen-barostat",
     "refs": [],
     "title": "sim_box.generation() advances after apply",
+    "type": "scenario"
+  },
+  "rq-13af93b9": {
+    "decl": "Scenario: settle_velocities preserves the centre-of-mass velocity",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "settle_velocities preserves the centre-of-mass velocity",
     "type": "scenario"
   },
   "rq-13b931f8": {
@@ -1277,6 +1348,13 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-15b6d3a4": {
+    "decl": "Scenario: Two constraint rows sharing an atom are rejected",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Two constraint rows sharing an atom are rejected",
+    "type": "scenario"
+  },
   "rq-15e0a433": {
     "decl": "Scenario: Integrator owns the force evaluation inside step()",
     "file": "integration/framework",
@@ -1340,6 +1418,13 @@
     "title": "SimulationBox API",
     "type": "section"
   },
+  "rq-16b29d27": {
+    "decl": "- `SettleError` — error type returned by `SettleConstraintsState::new`.",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SettleError",
+    "type": "api-item"
+  },
   "rq-16f6c7dc": {
     "decl": "- `spme_charge_spread`: one thread per real grid cell, block size 256,",
     "file": "forces/spme",
@@ -1390,6 +1475,13 @@
     "title": "Functions and methods",
     "type": "section"
   },
+  "rq-17c0a358": {
+    "decl": "Scenario: SETTLE kernels do not modify image flags",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SETTLE kernels do not modify image flags",
+    "type": "scenario"
+  },
   "rq-17d3ddfe": {
     "decl": "Scenario: log_column_names returns [\"nhc_conserved\"] for NHC",
     "file": "integration/nose-hoover-chain",
@@ -1411,6 +1503,13 @@
     "title": "At equilibrium, time-averaged pressure tracks P_ext",
     "type": "scenario"
   },
+  "rq-18165336": {
+    "decl": "Scenario: Empty ConstraintRegistry on a non-empty list reports UnsupportedKind",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Empty ConstraintRegistry on a non-empty list reports UnsupportedKind",
+    "type": "scenario"
+  },
   "rq-18411920": {
     "decl": "- `ParticleBuffers::particle_count(&self) -> usize`",
     "file": "particle-state",
@@ -1422,6 +1521,13 @@
     ],
     "title": "ParticleBuffers",
     "type": "api-item"
+  },
+  "rq-18f5ef7a": {
+    "decl": "Scenario: Constraint group adds implicit exclusions for every intra-group pair",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Constraint group adds implicit exclusions for every intra-group pair",
+    "type": "scenario"
   },
   "rq-18f7fce9": {
     "decl": "Scenario: trajectory_every > n_steps writes only the step-0 frame",
@@ -1488,6 +1594,14 @@
     "title": "Missing pressure rejected",
     "type": "scenario"
   },
+  "rq-1a3e432c": {
+    "decl": "## Empty State",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State",
+    "type": "section"
+  },
   "rq-1a3ec0c8": {
     "decl": "- `SimulationBox::fractional_coords(&self, position: [f32; 3]) -> [f32; 3]`",
     "file": "simulation-box",
@@ -1510,7 +1624,12 @@
   "rq-1a7bd47a": {
     "decl": "- `SimulationBox::check_min_perpendicular_width(&self, required: f32) -> Result<(), SimulationBoxError>`",
     "file": "simulation-box",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/pbc.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SimulationBox",
     "type": "api-item"
   },
@@ -2073,6 +2192,14 @@
     "title": "Missing [simulation].dt",
     "type": "scenario"
   },
+  "rq-2220db6a": {
+    "decl": "### Types",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-2249f685": {
     "decl": "### Sampling order",
     "file": "simulation-runner",
@@ -2259,6 +2386,21 @@
     "title": "IntegratorRegistry",
     "type": "api-item"
   },
+  "rq-2523992c": {
+    "decl": "## Construction and Lifetime",
+    "file": "integration/constraint-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Construction and Lifetime",
+    "type": "section"
+  },
+  "rq-25acc667": {
+    "decl": "Scenario: settle_positions updates the half-step velocities consistently with the position correction",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "settle_positions updates the half-step velocities consistently with the position correction",
+    "type": "scenario"
+  },
   "rq-25afada1": {
     "decl": "### Kernel signature",
     "file": "build-pipeline",
@@ -2381,6 +2523,13 @@
     "title": "Doubling epsilon doubles the force at the same separation",
     "type": "scenario"
   },
+  "rq-278cb574": {
+    "decl": "- `SettleBuilder` — implements `ConstraintBuilder` with",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SettleBuilder",
+    "type": "api-item"
+  },
   "rq-27efd6a0": {
     "decl": "Scenario: Atom appearing in one angle receives that angle's force",
     "file": "forces/harmonic-angle",
@@ -2450,12 +2599,28 @@
     "title": "Rescale preserves COM momentum",
     "type": "scenario"
   },
+  "rq-289ab328": {
+    "decl": "### Types",
+    "file": "integration/constraint-framework",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-28d519b5": {
     "decl": "#### `[coulomb]` (optional table)",
     "file": "io/config-schema",
     "level": 4,
     "refs": [],
     "title": "`[coulomb]` (optional table)",
+    "type": "section"
+  },
+  "rq-2941eebb": {
+    "decl": "## Feature API",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
     "type": "section"
   },
   "rq-29718dcf": {
@@ -2881,6 +3046,13 @@
     "title": "vv_kick leaves velocity unchanged when force is zero",
     "type": "scenario"
   },
+  "rq-2fbcb56c": {
+    "decl": "Scenario: SettleWater group with the wrong atom count is rejected",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "SettleWater group with the wrong atom count is rejected",
+    "type": "scenario"
+  },
   "rq-2fc35d61": {
     "decl": "Scenario: rescale_positions with factor=1.0 is the identity",
     "file": "integration/berendsen-barostat",
@@ -2979,6 +3151,14 @@
     "refs": [],
     "title": "Temperature relaxes toward target on the time scale τ",
     "type": "scenario"
+  },
+  "rq-31518680": {
+    "decl": "## Sources of Constraint Topology",
+    "file": "integration/constraint-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Sources of Constraint Topology",
+    "type": "section"
   },
   "rq-318cd47d": {
     "decl": "Scenario: log_every = 0 is accepted (disables log output)",
@@ -3274,6 +3454,13 @@
     "title": "Real-space slot produces zero force on an excluded pair (scale_coul=0)",
     "type": "scenario"
   },
+  "rq-375aba37": {
+    "decl": "Scenario: apply_after_kick on empty state is a no-op",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "apply_after_kick on empty state is a no-op",
+    "type": "scenario"
+  },
   "rq-3766be01": {
     "decl": "- `ParticleState` — host-side SoA state. All eighteen per-particle arrays",
     "file": "particle-state",
@@ -3315,6 +3502,14 @@
     "refs": [],
     "title": "Per-pair-type r_switch dispatches correctly",
     "type": "scenario"
+  },
+  "rq-38199bd4": {
+    "decl": "### Group Ordering",
+    "file": "integration/constraint-framework",
+    "level": 3,
+    "refs": [],
+    "title": "Group Ordering",
+    "type": "section"
   },
   "rq-38285db7": {
     "decl": "# Comments start with '#' and run to end of line. Blank lines are",
@@ -3454,6 +3649,13 @@
     "refs": [],
     "title": "Types",
     "type": "section"
+  },
+  "rq-3abb71cd": {
+    "decl": "Scenario: Construct a SETTLE slot for one water",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "Construct a SETTLE slot for one water",
+    "type": "scenario"
   },
   "rq-3ace72b0": {
     "decl": "### `Thermostat` trait overrides",
@@ -3614,6 +3816,13 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-3cca2cb1": {
+    "decl": "- `ConstraintRegistry` — host-side registry of constraint builders.",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "ConstraintRegistry",
+    "type": "api-item"
+  },
   "rq-3d3679d0": {
     "decl": "#### `Properties` (required)",
     "file": "io/init-state-file",
@@ -3628,6 +3837,26 @@
     "refs": [],
     "title": "Combiner sums slot energies and virials in slot order",
     "type": "scenario"
+  },
+  "rq-3d5f2e98": {
+    "decl": "# Feature: Constraint Slot Framework",
+    "file": "integration/constraint-framework",
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/constraint.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: Constraint Slot Framework",
+    "type": "file"
   },
   "rq-3d7c8e53": {
     "decl": "### Host-side RNG utility",
@@ -3748,6 +3977,13 @@
     "title": "All output values are finite after the 100-step run",
     "type": "scenario"
   },
+  "rq-3f889ad8": {
+    "decl": "# The atom-listing order is preserved verbatim: algorithm-specific",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "The atom-listing order is preserved verbatim: algorithm-specific",
+    "type": "file"
+  },
   "rq-3fdb7e01": {
     "decl": "- `ThermostatKind` — tagged enum carrying the chosen thermostat slot",
     "file": "io/config-schema",
@@ -3759,6 +3995,14 @@
     ],
     "title": "ThermostatKind",
     "type": "api-item"
+  },
+  "rq-402cea33": {
+    "decl": "## Constraint-Type Validation",
+    "file": "integration/constraint-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Constraint-Type Validation",
+    "type": "section"
   },
   "rq-40a34caa": {
     "decl": "- `TrajectoryWriter` — handle to an open trajectory file. Fields are",
@@ -3812,6 +4056,13 @@
     "file": "integration/langevin-baoab",
     "refs": [],
     "title": "lan_ou_step with friction = 0 (alpha = 1) is identity on velocities (sanity)",
+    "type": "scenario"
+  },
+  "rq-413d9c2b": {
+    "decl": "Scenario: Explicit [exclusions] entry overrides constraint-derived default",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Explicit [exclusions] entry overrides constraint-derived default",
     "type": "scenario"
   },
   "rq-414ed5ef": {
@@ -3921,6 +4172,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "Each single-occurrence host stage has count = 1",
+    "type": "scenario"
+  },
+  "rq-44feffc6": {
+    "decl": "Scenario: Constraint row with atom index out of range is rejected",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Constraint row with atom index out of range is rejected",
     "type": "scenario"
   },
   "rq-4518fa47": {
@@ -4239,6 +4497,13 @@
     "title": "csvr_conserved drifts as a zero-mean martingale (no systematic bias)",
     "type": "scenario"
   },
+  "rq-4b375476": {
+    "decl": "Scenario: settle_positions restores the equilibrium geometry after a small uniform translation",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "settle_positions restores the equilibrium geometry after a small uniform translation",
+    "type": "scenario"
+  },
   "rq-4b38148c": {
     "decl": "Scenario: Reject duplicate explicit IDs",
     "file": "particle-state",
@@ -4401,6 +4666,13 @@
     "title": "vv_kick_lossless",
     "type": "api-item"
   },
+  "rq-4ec4d1d6": {
+    "decl": "Scenario: settle_snapshot copies pre-drift positions verbatim",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "settle_snapshot copies pre-drift positions verbatim",
+    "type": "scenario"
+  },
   "rq-4ef89c50": {
     "decl": "- `BerendsenBarostatBuilder` — implements `BarostatBuilder` with",
     "file": "integration/berendsen-barostat",
@@ -4440,6 +4712,13 @@
     "file": "integration/velocity-verlet",
     "refs": [],
     "title": "vv_kick_drift advances position and leaves velocity unchanged when force is zero",
+    "type": "scenario"
+  },
+  "rq-4f88e13c": {
+    "decl": "Scenario: Two independently constructed ConstraintLists are byte-identical",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Two independently constructed ConstraintLists are byte-identical",
     "type": "scenario"
   },
   "rq-4f8e37af": {
@@ -4528,6 +4807,14 @@
     "title": "Implicit 1-3 exclusion is added for an angle without explicit (i, k) entry",
     "type": "scenario"
   },
+  "rq-52412463": {
+    "decl": "## Reproducibility",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Reproducibility",
+    "type": "section"
+  },
   "rq-5269221c": {
     "decl": "Scenario: wrap_position is idempotent for a triclinic box",
     "file": "simulation-box",
@@ -4596,11 +4883,25 @@
     "title": "ForceField with N=4 LJ-only step populates potential_energies and virials",
     "type": "scenario"
   },
+  "rq-53237ec4": {
+    "decl": "Scenario: velocity-verlet (lossless) does not support constraints",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "velocity-verlet (lossless) does not support constraints",
+    "type": "scenario"
+  },
   "rq-5355f3f0": {
     "decl": "Scenario: wrap_position_with_image_count tracks per-direction image counts for a triclinic box",
     "file": "simulation-box",
     "refs": [],
     "title": "wrap_position_with_image_count tracks per-direction image counts for a triclinic box",
+    "type": "scenario"
+  },
+  "rq-535abb5b": {
+    "decl": "Scenario: Reject infeasible SETTLE geometry at config load",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "Reject infeasible SETTLE geometry at config load",
     "type": "scenario"
   },
   "rq-535c2b1e": {
@@ -4890,6 +5191,13 @@
     "title": "Duplicate section header",
     "type": "scenario"
   },
+  "rq-58476106": {
+    "decl": "Scenario: Reject [constraints] with lossless velocity-verlet",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Reject [constraints] with lossless velocity-verlet",
+    "type": "scenario"
+  },
   "rq-58981e16": {
     "decl": "- `Timings::kernel_start(&mut self, stage: KernelStage) -> Result<(), TimingsError>`",
     "file": "performance-analysis",
@@ -4976,6 +5284,14 @@
     "level": 2,
     "refs": [],
     "title": "Empty state",
+    "type": "section"
+  },
+  "rq-5adb53ee": {
+    "decl": "## Out of Scope",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
     "type": "section"
   },
   "rq-5b004038": {
@@ -5084,6 +5400,13 @@
     "title": "[barostat] rejects an unknown field for the chosen kind",
     "type": "scenario"
   },
+  "rq-5d972f15": {
+    "decl": "Scenario: SETTLE hooks on a zero-group slot are no-ops",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SETTLE hooks on a zero-group slot are no-ops",
+    "type": "scenario"
+  },
   "rq-5d9d7f83": {
     "decl": "Scenario: Display output is distinct from the Debug rendering",
     "file": "error-handling",
@@ -5115,6 +5438,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Absolute paths are honored unchanged",
+    "type": "scenario"
+  },
+  "rq-5dfc02a9": {
+    "decl": "Scenario: SETTLE constraint row with wrong atom count is rejected",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "SETTLE constraint row with wrong atom count is rejected",
     "type": "scenario"
   },
   "rq-5e0598cb": {
@@ -5177,6 +5507,14 @@
     "level": 2,
     "refs": [],
     "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-5f29f928": {
+    "decl": "### Constraint entries",
+    "file": "forces/topology",
+    "level": 3,
+    "refs": [],
+    "title": "Constraint entries",
     "type": "section"
   },
   "rq-5f2c42be": {
@@ -5382,6 +5720,13 @@
     "title": "cuFFT smoke test passes on a determinism-conforming installation",
     "type": "scenario"
   },
+  "rq-6381db33": {
+    "decl": "Scenario: Unknown constraint type name is rejected",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Unknown constraint type name is rejected",
+    "type": "scenario"
+  },
   "rq-63f3e0b9": {
     "decl": "## Feature API",
     "file": "simulation-box",
@@ -5538,6 +5883,13 @@
     "title": "Reject a two-type config that omits a pair",
     "type": "scenario"
   },
+  "rq-66e657bf": {
+    "decl": "Scenario: settle_velocities zeroes the time-derivative of every constraint distance",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "settle_velocities zeroes the time-derivative of every constraint distance",
+    "type": "scenario"
+  },
   "rq-66ec7ee4": {
     "decl": "Scenario: Velocity-Verlet lossless defaults to false when omitted",
     "file": "io/config-schema",
@@ -5584,6 +5936,26 @@
     "refs": [],
     "title": "Tilts may be negative",
     "type": "scenario"
+  },
+  "rq-67e62f4b": {
+    "decl": "# Feature: SETTLE Analytic Three-Atom Rigid-Water Constraint",
+    "file": "integration/settle",
+    "refs": [
+      {
+        "file": "src/gpu/device.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/settle.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Feature: SETTLE Analytic Three-Atom Rigid-Water Constraint",
+    "type": "file"
   },
   "rq-67ebf3b1": {
     "decl": "- `Potential` — object-safe trait implemented by every slot.",
@@ -5637,6 +6009,14 @@
     "title": "Accept positions strictly inside the primary cell (orthorhombic)",
     "type": "scenario"
   },
+  "rq-68847ade": {
+    "decl": "#### `settle_snapshot`",
+    "file": "integration/settle",
+    "level": 4,
+    "refs": [],
+    "title": "`settle_snapshot`",
+    "type": "section"
+  },
   "rq-6897be01": {
     "decl": "## Out of Scope",
     "file": "io/init-state-file",
@@ -5651,6 +6031,13 @@
     "refs": [],
     "title": "Bond-force reduction sums energy and virial alongside forces",
     "type": "scenario"
+  },
+  "rq-68f5acd3": {
+    "decl": "- `ConstraintTypeKind` — closed enum naming the algorithm that",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "ConstraintTypeKind",
+    "type": "api-item"
   },
   "rq-693ce6fa": {
     "decl": "# Feature: Shared Neighbor List Service",
@@ -5833,6 +6220,14 @@
     "title": "BerendsenBuilder",
     "type": "api-item"
   },
+  "rq-6c9357db": {
+    "decl": "#### `settle_velocities`",
+    "file": "integration/settle",
+    "level": 4,
+    "refs": [],
+    "title": "`settle_velocities`",
+    "type": "section"
+  },
   "rq-6cac8251": {
     "decl": "# Column format: atom_i  atom_j  atom_k  angle_type_name",
     "file": "forces/topology",
@@ -5945,6 +6340,13 @@
     "title": "Reject yoshida_order outside {1, 3, 5, 7}",
     "type": "scenario"
   },
+  "rq-6dfec7f4": {
+    "decl": "# conventions are encoded by position (for SETTLE waters, the first",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "conventions are encoded by position (for SETTLE waters, the first",
+    "type": "file"
+  },
   "rq-6dffb17f": {
     "decl": "Scenario: Empty thermostat registry reports UnknownKind",
     "file": "integration/framework",
@@ -6037,6 +6439,14 @@
     "title": "images defaults to zero-initialised arrays when None is passed",
     "type": "scenario"
   },
+  "rq-6f8f049b": {
+    "decl": "## Feature API",
+    "file": "integration/constraint-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-6faf6fba": {
     "decl": "Scenario: Two independent composed runs with identical configs produce byte-identical outputs",
     "file": "integration/nose-hoover-chain",
@@ -6099,6 +6509,13 @@
     ],
     "title": "PairPotentialParams",
     "type": "api-item"
+  },
+  "rq-7047ea32": {
+    "decl": "Scenario: Integrator without constraints skips all three hooks",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Integrator without constraints skips all three hooks",
+    "type": "scenario"
   },
   "rq-706c4b80": {
     "decl": "Scenario: Construct Langevin BAOAB via the integrator registry",
@@ -6253,6 +6670,21 @@
     "title": "check_min_perpendicular_width reports the first failing direction when multiple fail",
     "type": "scenario"
   },
+  "rq-744ae79d": {
+    "decl": "### CUDA Kernels",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernels",
+    "type": "section"
+  },
+  "rq-744ddd67": {
+    "decl": "Scenario: Construct on particle_count == 0 with an empty list",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Construct on particle_count == 0 with an empty list",
+    "type": "scenario"
+  },
   "rq-7453115b": {
     "decl": "- `TimingsReport` — public, `Clone`, `Debug`. Carries an ordered",
     "file": "performance-analysis",
@@ -6362,6 +6794,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "neighbor_displacement_squared count equals one warm-up plus per-step launches",
+    "type": "scenario"
+  },
+  "rq-75a9815d": {
+    "decl": "Scenario: Constraint groups are sorted by minimum particle index",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Constraint groups are sorted by minimum particle index",
     "type": "scenario"
   },
   "rq-7600786b": {
@@ -6528,6 +6967,13 @@
     "title": "Per-Step Kernel Sequence",
     "type": "section"
   },
+  "rq-7896e33a": {
+    "decl": "- `ConstraintBuilder` — trait describing a registered constraint",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "ConstraintBuilder",
+    "type": "api-item"
+  },
   "rq-789b7a33": {
     "decl": "Scenario: Langevin BAOAB rejects non-positive temperature",
     "file": "io/config-schema",
@@ -6614,6 +7060,13 @@
     "file": "particle-state",
     "refs": [],
     "title": "Reject when type_indices has the wrong length",
+    "type": "scenario"
+  },
+  "rq-7921e537": {
+    "decl": "Scenario: Construct a constraint slot for a non-empty constraint list",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Construct a constraint slot for a non-empty constraint list",
     "type": "scenario"
   },
   "rq-79291197": {
@@ -6917,6 +7370,20 @@
     "title": "vv_kick_drift does not modify forces or masses",
     "type": "scenario"
   },
+  "rq-7e0437ab": {
+    "decl": "Scenario: Reject inconsistent masses",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "Reject inconsistent masses",
+    "type": "scenario"
+  },
+  "rq-7e2c482a": {
+    "decl": "# atom is the oxygen and the next two are the hydrogens).",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "atom is the oxygen and the next two are the hydrogens).",
+    "type": "file"
+  },
   "rq-7e5cb9f8": {
     "decl": "### Usage error messages",
     "file": "simulation-runner",
@@ -6944,6 +7411,14 @@
     "title": "total_runtime is at least as large as the maximum single-stage total",
     "type": "scenario"
   },
+  "rq-7e9cb164": {
+    "decl": "#### `[[constraint_types]]` (optional array of tables)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[[constraint_types]]` (optional array of tables)",
+    "type": "section"
+  },
   "rq-7eb22aad": {
     "decl": "### Synthetic stages",
     "file": "performance-analysis",
@@ -6959,6 +7434,13 @@
     "title": "set_lattice non-finite check precedes non-positive check on a diagonal",
     "type": "scenario"
   },
+  "rq-7ef08958": {
+    "decl": "Scenario: Unsupported constraint kind reports UnsupportedKind",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Unsupported constraint kind reports UnsupportedKind",
+    "type": "scenario"
+  },
   "rq-7f018040": {
     "decl": "Scenario: cartesian_coords of unit fractional triples yields the lattice vectors",
     "file": "simulation-box",
@@ -6971,6 +7453,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "neighbor_list_build and copy_positions_into_reference counts match rebuilds",
+    "type": "scenario"
+  },
+  "rq-7f5b3a74": {
+    "decl": "Scenario: Two constraint rows sharing an atom are rejected",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Two constraint rows sharing an atom are rejected",
     "type": "scenario"
   },
   "rq-7f867e37": {
@@ -7259,6 +7748,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Reject non-finite r_switch",
+    "type": "scenario"
+  },
+  "rq-87330eaa": {
+    "decl": "Scenario: SETTLE kernels do not modify forces, masses, particle_ids, type_indices, potential_energies, or virials",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SETTLE kernels do not modify forces, masses, particle_ids, type_indices, potential_energies, or virials",
     "type": "scenario"
   },
   "rq-874dbfec": {
@@ -7569,6 +8065,13 @@
     "title": "NaN forces propagate to NaN velocities and positions",
     "type": "scenario"
   },
+  "rq-8ea6cf9c": {
+    "decl": "Scenario: Pair appearing in both [bonds] and [constraints] is rejected",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Pair appearing in both [bonds] and [constraints] is rejected",
+    "type": "scenario"
+  },
   "rq-8eb0050f": {
     "decl": "Scenario: File without image:I:3 has images None",
     "file": "io/init-state-file",
@@ -7684,6 +8187,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Sub-skin movement does not trigger a rebuild",
+    "type": "scenario"
+  },
+  "rq-90538790": {
+    "decl": "Scenario: Dispatch loop calls all three constraint hooks in order",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Dispatch loop calls all three constraint hooks in order",
     "type": "scenario"
   },
   "rq-909e5bb4": {
@@ -7856,12 +8366,26 @@
     "title": "apply_pre is the trait default (no-op)",
     "type": "scenario"
   },
+  "rq-930121d6": {
+    "decl": "Scenario: Group order is determined by minimum particle index",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Group order is determined by minimum particle index",
+    "type": "scenario"
+  },
   "rq-931f1ab8": {
     "decl": "Scenario: neighbor_list all-pairs mode is accepted",
     "file": "io/config-schema",
     "refs": [],
     "title": "neighbor_list all-pairs mode is accepted",
     "type": "scenario"
+  },
+  "rq-9331ede2": {
+    "decl": "- `IntegratorKind::supports_constraints(&self) -> bool` — added to the",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "IntegratorKind",
+    "type": "api-item"
   },
   "rq-93367a8f": {
     "decl": "## Dependencies",
@@ -7870,6 +8394,13 @@
     "refs": [],
     "title": "Dependencies",
     "type": "section"
+  },
+  "rq-93506647": {
+    "decl": "Scenario: Constraint row with repeated atom is rejected",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Constraint row with repeated atom is rejected",
+    "type": "scenario"
   },
   "rq-93570a07": {
     "decl": "Scenario: Construct with chain_length = 1 reduces to vanilla Nosé-Hoover",
@@ -7912,6 +8443,13 @@
     "refs": [],
     "title": "Different seeds produce different trajectories",
     "type": "scenario"
+  },
+  "rq-94cb21a5": {
+    "decl": "# atom_count per row is determined by the constraint_type's `kind`.",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "atom_count per row is determined by the constraint_type's `kind`.",
+    "type": "file"
   },
   "rq-94d30346": {
     "decl": "Scenario: Triclinic shape is preserved under apply",
@@ -8161,6 +8699,13 @@
     "refs": [],
     "title": "Reproducibility",
     "type": "section"
+  },
+  "rq-99ee814d": {
+    "decl": "Scenario: Two independent SETTLE runs produce byte-identical outputs",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "Two independent SETTLE runs produce byte-identical outputs",
+    "type": "scenario"
   },
   "rq-9a19bfa3": {
     "decl": "- `ParticleState::download_from(&mut self, buffers: &ParticleBuffers) -> Result<(), ParticleStateError>`",
@@ -8463,10 +9008,10 @@
     "type": "scenario"
   },
   "rq-9e1eee68": {
-    "decl": "# Feature: Topology File, Bond List, Angle List, and Exclusion List",
+    "decl": "# Feature: Topology File, Bond List, Angle List, Exclusion List, and Constraint List",
     "file": "forces/topology",
     "refs": [],
-    "title": "Feature: Topology File, Bond List, Angle List, and Exclusion List",
+    "title": "Feature: Topology File, Bond List, Angle List, Exclusion List, and Constraint List",
     "type": "file"
   },
   "rq-9e2e9d4e": {
@@ -8563,6 +9108,14 @@
     "title": "Algorithm",
     "type": "section"
   },
+  "rq-9fe1d656": {
+    "decl": "## Determinism Guarantees",
+    "file": "integration/constraint-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism Guarantees",
+    "type": "section"
+  },
   "rq-9ff4fd10": {
     "decl": "Scenario: Reject upload when host particle count differs from buffers",
     "file": "particle-state",
@@ -8624,12 +9177,28 @@
     "title": "PairBuffer",
     "type": "api-item"
   },
+  "rq-a0cb32bf": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/constraint-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-a0d0c872": {
     "decl": "Scenario: Time-averaged pressure tracks P_target",
     "file": "integration/c-rescale-barostat",
     "refs": [],
     "title": "Time-averaged pressure tracks P_target",
     "type": "scenario"
+  },
+  "rq-a0f7c746": {
+    "decl": "### Builder",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "Builder",
+    "type": "section"
   },
   "rq-a1262872": {
     "decl": "- `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>`",
@@ -8959,6 +9528,13 @@
     "title": "Slot-output buffers have five flat arrays sized num_slots * N",
     "type": "scenario"
   },
+  "rq-a8b68f59": {
+    "decl": "Scenario: settle_positions restores constraint distances after a small bond stretch",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "settle_positions restores constraint distances after a small bond stretch",
+    "type": "scenario"
+  },
   "rq-a8da85cf": {
     "decl": "## Parameters",
     "file": "integration/csvr",
@@ -9130,6 +9706,13 @@
     "title": "vv_kick_drift wraps in the negative-x direction",
     "type": "scenario"
   },
+  "rq-ab21511c": {
+    "decl": "# Each row declares one rigid constraint group of k atoms.",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Each row declares one rigid constraint group of k atoms.",
+    "type": "file"
+  },
   "rq-ab40fe6d": {
     "decl": "Scenario: Reject non-blank content after the last data row",
     "file": "io/init-state-file",
@@ -9197,6 +9780,13 @@
     "title": "Setting temperature very small reduces C-rescale to the Berendsen barostat",
     "type": "scenario"
   },
+  "rq-ac8fc96a": {
+    "decl": "- `ConstraintTypeConfig` — tagged enum carrying the chosen",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "ConstraintTypeConfig",
+    "type": "api-item"
+  },
   "rq-acafdfe4": {
     "decl": "Scenario: vv_kick_lossless does not modify positions, forces, masses, or particle_ids",
     "file": "integration/velocity-verlet",
@@ -9204,12 +9794,33 @@
     "title": "vv_kick_lossless does not modify positions, forces, masses, or particle_ids",
     "type": "scenario"
   },
+  "rq-acb86c9b": {
+    "decl": "## Out of Scope",
+    "file": "integration/constraint-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-acbbd59a": {
     "decl": "Scenario: Disabled trajectory and log outputs are not checked, but timings is",
     "file": "simulation-runner",
     "refs": [],
     "title": "Disabled trajectory and log outputs are not checked, but timings is",
     "type": "scenario"
+  },
+  "rq-acfda5d4": {
+    "decl": "## Compatibility Rules",
+    "file": "integration/constraint-framework",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Compatibility Rules",
+    "type": "section"
   },
   "rq-ad0edc95": {
     "decl": "## Out of Scope",
@@ -9315,6 +9926,13 @@
     "title": "Morse bond_type rejects non-positive a",
     "type": "scenario"
   },
+  "rq-aea6734a": {
+    "decl": "Scenario: Empty constraint list yields None",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Empty constraint list yields None",
+    "type": "scenario"
+  },
   "rq-aeb23925": {
     "decl": "Scenario: Reject grid dimension below 2*spline_order",
     "file": "forces/spme",
@@ -9396,6 +10014,13 @@
     "refs": [],
     "title": "Launch Configuration",
     "type": "section"
+  },
+  "rq-b004196f": {
+    "decl": "- `ConstraintRegistry::build_optional(&self, list: &ConstraintList, device: Arc<CudaDevice>, particle_count: usize) -> Result<Option<Box<dyn Constraint>>, ConstraintError>`",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "ConstraintRegistry",
+    "type": "api-item"
   },
   "rq-b015ef15": {
     "decl": "### Accessors",
@@ -9725,6 +10350,13 @@
     "title": "λ < 1 when K_old > K_target (system needs cooling)",
     "type": "scenario"
   },
+  "rq-b6f167a4": {
+    "decl": "- `ConstraintList` — host-side parsed-and-validated constraint data.",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "ConstraintList",
+    "type": "api-item"
+  },
   "rq-b719c42c": {
     "decl": "### Types",
     "file": "io/config-schema",
@@ -9900,6 +10532,14 @@
     "title": "sim_box.generation() advances every step",
     "type": "scenario"
   },
+  "rq-ba4d55e6": {
+    "decl": "### PTX Module Loading",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "PTX Module Loading",
+    "type": "section"
+  },
   "rq-bacbf7d2": {
     "decl": "Scenario: andersen_resample is deterministic across two runs",
     "file": "integration/andersen",
@@ -10048,6 +10688,13 @@
     "title": "[barostat] missing kind is rejected",
     "type": "scenario"
   },
+  "rq-bdb4af60": {
+    "decl": "Scenario: init_device exposes the SETTLE kernels",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "init_device exposes the SETTLE kernels",
+    "type": "scenario"
+  },
   "rq-bdd03f85": {
     "decl": "Scenario: langevin-baoab + [thermostat] is rejected",
     "file": "io/config-schema",
@@ -10083,6 +10730,14 @@
     "title": "Temperature rescaling <!-- inline -->",
     "type": "section"
   },
+  "rq-be5d5b33": {
+    "decl": "## Constraint Data Layout",
+    "file": "integration/constraint-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Constraint Data Layout",
+    "type": "section"
+  },
   "rq-be5fe064": {
     "decl": "### Constructor and Accessors",
     "file": "pair-reduction",
@@ -10114,6 +10769,13 @@
     ],
     "title": "TrajectoryWriter",
     "type": "api-item"
+  },
+  "rq-be8dfaa5": {
+    "decl": "Scenario: Constraint-derived implicit exclusion is overridden by an explicit entry",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Constraint-derived implicit exclusion is overridden by an explicit entry",
+    "type": "scenario"
   },
   "rq-bec7b519": {
     "decl": "- `ParticleStateError` — error type returned by construction and host↔device",
@@ -10348,6 +11010,13 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-c2e0c1fa": {
+    "decl": "Scenario: SettleWater group with a missing constraint pair is rejected",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "SettleWater group with a missing constraint pair is rejected",
+    "type": "scenario"
+  },
   "rq-c3564e8a": {
     "decl": "Scenario: Different seeds yield different post-call velocities",
     "file": "integration/andersen",
@@ -10409,6 +11078,14 @@
     "refs": [],
     "title": "Construct with particle_count = 1 (N_f = 1)",
     "type": "scenario"
+  },
+  "rq-c491802b": {
+    "decl": "## Empty State",
+    "file": "integration/constraint-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Empty State",
+    "type": "section"
   },
   "rq-c49b2fe6": {
     "decl": "- `NeighborListState::displacement_check(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<f32, NeighborListError>`",
@@ -10740,6 +11417,13 @@
     "title": "A stretched bond's virial equals r * F_mag",
     "type": "scenario"
   },
+  "rq-ca6db610": {
+    "decl": "- `Constraint` — object-safe trait implemented by every concrete",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Constraint",
+    "type": "api-item"
+  },
   "rq-ca6f69f2": {
     "decl": "Scenario: Reject row with unparseable position",
     "file": "io/init-state-file",
@@ -10889,6 +11573,14 @@
     "title": "Reciprocal-space virial",
     "type": "section"
   },
+  "rq-ce77d9fb": {
+    "decl": "## Algorithm",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
+  },
   "rq-ce89d4a4": {
     "decl": "Scenario: Reject when masses has the wrong length",
     "file": "particle-state",
@@ -11010,6 +11702,13 @@
     "refs": [],
     "title": "Rust Launch Helpers",
     "type": "section"
+  },
+  "rq-d05a8f16": {
+    "decl": "Scenario: Pair appearing in both [bonds] and [constraints] is rejected",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Pair appearing in both [bonds] and [constraints] is rejected",
+    "type": "scenario"
   },
   "rq-d065447f": {
     "decl": "Scenario: Run an empty (N=0) simulation",
@@ -11278,6 +11977,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "MtkNpt missing tau_p is rejected",
+    "type": "scenario"
+  },
+  "rq-d5790d66": {
+    "decl": "Scenario: Multiple water groups evolve independently",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "Multiple water groups evolve independently",
     "type": "scenario"
   },
   "rq-d5a4f220": {
@@ -11605,6 +12311,14 @@
     "title": "philox_normal returns the standard-normal Box-Muller cos branch",
     "type": "scenario"
   },
+  "rq-db2321aa": {
+    "decl": "#### `settle_positions`",
+    "file": "integration/settle",
+    "level": 4,
+    "refs": [],
+    "title": "`settle_positions`",
+    "type": "section"
+  },
   "rq-db3b3d5e": {
     "decl": "Scenario: System total potential energy equals sum of particle shares",
     "file": "forces/framework",
@@ -11756,6 +12470,13 @@
     "title": "Reject n_resp = 0",
     "type": "scenario"
   },
+  "rq-dd7065b9": {
+    "decl": "- `SettleConstraintsState` — implements the `Constraint` trait declared",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SettleConstraintsState",
+    "type": "api-item"
+  },
   "rq-dd829afb": {
     "decl": "Scenario: Bin-only cell list rebuilds every step regardless of particle displacement",
     "file": "forces/spme",
@@ -11806,6 +12527,19 @@
     "refs": [],
     "title": "write_timings_file refuses to overwrite an existing file",
     "type": "scenario"
+  },
+  "rq-de7601cd": {
+    "decl": "## Per-Step Kernel Sequence",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Per-Step Kernel Sequence",
+    "type": "section"
   },
   "rq-de8b9cd5": {
     "decl": "Scenario: Reject non-positive compressibility",
@@ -11889,6 +12623,14 @@
     "refs": [],
     "title": "Two independent runs produce byte-identical pair-force buffers",
     "type": "scenario"
+  },
+  "rq-dfd47225": {
+    "decl": "### Functions and Methods",
+    "file": "integration/constraint-framework",
+    "level": 3,
+    "refs": [],
+    "title": "Functions and Methods",
+    "type": "section"
   },
   "rq-dffdd81c": {
     "decl": "Scenario: Reject NaN dt",
@@ -12231,6 +12973,13 @@
     "title": "nhc_chain_sub_step handles M = 1 without panicking",
     "type": "scenario"
   },
+  "rq-e538c545": {
+    "decl": "- `Constraint::apply_before_drift`, `Constraint::apply_after_drift`,",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Constraint",
+    "type": "api-item"
+  },
   "rq-e553c05b": {
     "decl": "Scenario: Reject init = trajectory_path",
     "file": "io/config-schema",
@@ -12559,6 +13308,13 @@
     "refs": [],
     "title": "Explicit 1-3 exclusion overrides the angle's implicit default",
     "type": "scenario"
+  },
+  "rq-eadadcb4": {
+    "decl": "# Column format: atom_1 atom_2 ... atom_k  constraint_type_name",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Column format: atom_1 atom_2 ... atom_k  constraint_type_name",
+    "type": "file"
   },
   "rq-eb0bc993": {
     "decl": "## Parameters",
@@ -12959,12 +13715,33 @@
     "title": "[integrator] rejects an unknown field for the chosen kind",
     "type": "scenario"
   },
+  "rq-f08d7a33": {
+    "decl": "## Per-Step Interface",
+    "file": "integration/constraint-framework",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/integrator/constraint.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Per-Step Interface",
+    "type": "section"
+  },
   "rq-f0b9b0f5": {
     "decl": "Scenario: Exclusion scale less than 0 rejected",
     "file": "forces/topology",
     "refs": [],
     "title": "Exclusion scale less than 0 rejected",
     "type": "scenario"
+  },
+  "rq-f0d44c8f": {
+    "decl": "## Parameters",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Parameters",
+    "type": "section"
   },
   "rq-f0da71ea": {
     "decl": "- `SimulationBox::new(lx: f32, ly: f32, lz: f32, xy: f32, xz: f32, yz: f32) -> Result<SimulationBox, SimulationBoxError>`",
@@ -13075,6 +13852,20 @@
     "refs": [],
     "title": "Forward FFT",
     "type": "section"
+  },
+  "rq-f26ae0cc": {
+    "decl": "Scenario: settle_positions preserves the centre of mass of the unconstrained positions",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "settle_positions preserves the centre of mass of the unconstrained positions",
+    "type": "scenario"
+  },
+  "rq-f28b82a7": {
+    "decl": "- `GroupConstraint` — `Debug, Clone, Copy`. Fields: `local_i: u8`,",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "GroupConstraint",
+    "type": "api-item"
   },
   "rq-f2946c4a": {
     "decl": "#### `[[angle_types]]` (optional array of tables)",
@@ -13534,6 +14325,13 @@
     "title": "MtkNpt + [barostat] is rejected (owns its barostat)",
     "type": "scenario"
   },
+  "rq-fbd32983": {
+    "decl": "- `ConstraintList` — host-side. The per-group SoA layout, including",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "ConstraintList",
+    "type": "api-item"
+  },
   "rq-fbdf08ff": {
     "decl": "Scenario: Minimum image is applied",
     "file": "forces/harmonic-angle",
@@ -13594,11 +14392,32 @@
     "title": "compute_total_potential_energy",
     "type": "api-item"
   },
+  "rq-fc6ec19e": {
+    "decl": "Scenario: SETTLE kernels do not modify atoms outside any constraint group",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SETTLE kernels do not modify atoms outside any constraint group",
+    "type": "scenario"
+  },
   "rq-fc7b1565": {
     "decl": "Scenario: step() on a ForceField with zero slots writes zeros to forces_*",
     "file": "forces/framework",
     "refs": [],
     "title": "step() on a ForceField with zero slots writes zeros to forces_*",
+    "type": "scenario"
+  },
+  "rq-fd07b4dc": {
+    "decl": "Scenario: velocity-verlet (lossy) supports constraints",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "velocity-verlet (lossy) supports constraints",
+    "type": "scenario"
+  },
+  "rq-fd0add61": {
+    "decl": "Scenario: Construct on an empty ConstraintList yields a zero-group slot",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "Construct on an empty ConstraintList yields a zero-group slot",
     "type": "scenario"
   },
   "rq-fd0cef60": {
@@ -13626,6 +14445,14 @@
     "level": 2,
     "refs": [],
     "title": "Empty State and degenerate cases",
+    "type": "section"
+  },
+  "rq-fdac1afb": {
+    "decl": "### Implicit Exclusions from Constraint Groups",
+    "file": "integration/constraint-framework",
+    "level": 3,
+    "refs": [],
+    "title": "Implicit Exclusions from Constraint Groups",
     "type": "section"
   },
   "rq-fdbb902d": {
@@ -13673,6 +14500,20 @@
     "title": "Reproducibility byte-for-byte across two identical runs",
     "type": "scenario"
   },
+  "rq-fe2cb7ee": {
+    "decl": "Scenario: Empty [constraints] with a non-supporting integrator is permitted",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Empty [constraints] with a non-supporting integrator is permitted",
+    "type": "scenario"
+  },
+  "rq-fe3b32cf": {
+    "decl": "Scenario: Load a topology file with one SETTLE constraint",
+    "file": "forces/topology",
+    "refs": [],
+    "title": "Load a topology file with one SETTLE constraint",
+    "type": "scenario"
+  },
   "rq-fe95ff5f": {
     "decl": "Scenario: Angle virial equals r_ij · F_i + r_kj · F_k",
     "file": "forces/harmonic-angle",
@@ -13686,6 +14527,13 @@
     "refs": [],
     "title": "r == 0 produces zero energy and virial in addition to zero force",
     "type": "scenario"
+  },
+  "rq-feb0501c": {
+    "decl": "- `ConstraintError` — error type returned by every trait method.",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "ConstraintError",
+    "type": "api-item"
   },
   "rq-feba0a88": {
     "decl": "- `AndersenThermostat` — implements the `Thermostat` trait declared",

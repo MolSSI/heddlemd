@@ -1,26 +1,33 @@
-# Feature: Topology File, Bond List, Angle List, and Exclusion List <!-- rq-9e1eee68 -->
+# Feature: Topology File, Bond List, Angle List, Exclusion List, and Constraint List <!-- rq-9e1eee68 -->
 
 A simulation's bonded topology is described by a `.topology` file referenced
 from the TOML config (`io/config-schema.md`) and consumed by the
 `MorseBonded` slot (`morse-bonded.md`), the `HarmonicAngle` slot
-(`harmonic-angle.md`), and the Lennard-Jones and Coulomb slots' exclusion
-logic (`lj-pair-force.md`, `coulomb-pair-force.md`). The file lists bond
-instances, angle instances, and per-pair non-bonded exclusions; bond and
-angle *types* (parameters) live in the config alongside particle types.
+(`harmonic-angle.md`), the `Constraint` slot
+(`integration/constraint-framework.md`, `integration/settle.md`), and the
+Lennard-Jones and Coulomb slots' exclusion logic (`lj-pair-force.md`,
+`coulomb-pair-force.md`). The file lists bond instances, angle instances,
+per-pair non-bonded exclusions, and rigid constraint groups; bond, angle,
+and constraint *types* (parameters) live in the config alongside particle
+types.
 
-The file produces three host-side structures: a `BondList` (bonds, with
+The file produces four host-side structures: a `BondList` (bonds, with
 precomputed per-atom indexing tables for deterministic reduction), an
-`AngleList` (angles, with the same indexing pattern), and an
-`ExclusionList` (per-pair scaling factors for non-bonded interactions
-between bonded, angle-coupled, or otherwise excluded atoms).
+`AngleList` (angles, with the same indexing pattern), an `ExclusionList`
+(per-pair scaling factors for non-bonded interactions between bonded,
+angle-coupled, constraint-coupled, or otherwise excluded atoms), and a
+`ConstraintList` (rigid constraint groups; see
+`integration/constraint-framework.md` for the SoA layout and the kernel
+contract).
 
 ## File Format <!-- rq-a33c1f4f -->
 
-The `.topology` file is UTF-8 text organised into three named sections,
-`[bonds]`, `[exclusions]`, and `[angles]`. Each section may appear at
-most once; each may be empty; each may be absent (an absent `[bonds]`
-means no bonds, an absent `[exclusions]` means no explicit exclusions,
-an absent `[angles]` means no angles). Section headers are
+The `.topology` file is UTF-8 text organised into four named sections,
+`[bonds]`, `[exclusions]`, `[angles]`, and `[constraints]`. Each section
+may appear at most once; each may be empty; each may be absent (an absent
+`[bonds]` means no bonds, an absent `[exclusions]` means no explicit
+exclusions, an absent `[angles]` means no angles, an absent
+`[constraints]` means no rigid constraint groups). Section headers are
 case-sensitive and must appear on their own line. Sections may appear
 in any order.
 
@@ -46,6 +53,15 @@ in any order.
 # A single scale column (3-column form) sets both scale_lj and <!-- rq-10956a4e -->
 # scale_coul to that value. <!-- rq-d7675fb3 -->
 1 2 0.5 0.833
+
+[constraints]
+# Column format: atom_1 atom_2 ... atom_k  constraint_type_name <!-- rq-eadadcb4 -->
+# Each row declares one rigid constraint group of k atoms. <!-- rq-ab21511c -->
+# The atom-listing order is preserved verbatim: algorithm-specific <!-- rq-3f889ad8 -->
+# conventions are encoded by position (for SETTLE waters, the first <!-- rq-6dfec7f4 -->
+# atom is the oxygen and the next two are the hydrogens). <!-- rq-7e2c482a -->
+# atom_count per row is determined by the constraint_type's `kind`. <!-- rq-94cb21a5 -->
+0 1 2 SPCE
 ```
 
 Inside a section, columns are separated by ASCII whitespace (one or
@@ -116,11 +132,48 @@ Coulomb-1-4 = 1/1.2 ≈ 0.833.
 Like bonds, exclusions are canonicalised to `(min, max)` and sorted by
 `(min, max)`. Duplicate pairs (after canonicalisation) are rejected.
 
+### Constraint entries <!-- rq-5f29f928 -->
+
+Each non-comment line in `[constraints]` has the form
+`atom_1 atom_2 ... atom_k constraint_type_name` where:
+
+- Every `atom_*: u32` is a zero-based particle index. Every index must
+  be `< particle_count`. No atom may repeat within a single row
+  (`SelfConstraint`).
+- The atom count `k` is determined by the algorithm consumed by the
+  named constraint type. `kind = "settle-water"` requires exactly
+  three atoms; other future kinds will declare their own required
+  counts. Wrong atom count is rejected as
+  `InvalidConstraintRow` with a reason that names the expected count.
+- `constraint_type_name: String` must match the `name` field of an
+  entry in the config's `[[constraint_types]]` array. Unknown names
+  are rejected as `UnknownConstraintType`.
+
+Each row defines one *constraint group*. v1 requires that the
+constraint graph's connected components match rows one-to-one: no atom
+may appear in more than one `[constraints]` row. Two rows that share
+any atom are rejected as `DuplicateConstraintAtom`. (Future M-SHAKE
+work will lift this restriction; the data layout already accommodates
+multi-row groups via the connected-component build described in
+`integration/constraint-framework.md`.)
+
+The atom-listing order within a row is preserved verbatim through the
+parsed `ConstraintList`. For `settle-water`, the first listed atom is
+treated as the oxygen and the next two as the hydrogens; the algorithm
+relies on this convention.
+
+A pair of atoms `(min, max)` that appears as a constraint pair (every
+1-2 pair generated by the group's expansion into pairwise constraints
+— see `integration/constraint-framework.md`) is forbidden from also
+appearing in `[bonds]`. Conflicting rows are rejected as
+`BondIsAlsoConstraint`.
+
 ### Effective exclusions <!-- rq-24f280af -->
 
 After parsing, the consumer-facing `ExclusionList` is the *effective
 exclusion list*, formed by combining the explicit `[exclusions]`
-entries with implicit exclusions derived from `[bonds]` and `[angles]`:
+entries with implicit exclusions derived from `[bonds]`, `[angles]`,
+and `[constraints]`:
 
 - Every explicit `(i, j, scale_lj, scale_coul)` entry from the file
   becomes an effective exclusion with those two scales.
@@ -132,6 +185,13 @@ entries with implicit exclusions derived from `[bonds]` and `[angles]`:
   `(i, k, _, _)` entry *and* is not already covered by an implicit
   bond-derived entry, an implicit exclusion `(i, k, 0.0, 0.0)` is
   added.
+- For every constraint group in `[constraints]`, every pair `(p, q)`
+  of distinct atoms drawn from the group's atom set is considered.
+  When `(p, q)` does **not** have a matching explicit `(p, q, _, _)`
+  entry *and* is not already covered by an implicit bond-derived or
+  angle-derived entry, an implicit exclusion `(p, q, 0.0, 0.0)` is
+  added. For a SETTLE water group `(O, H1, H2)` this produces three
+  implicit exclusions: `(O, H1)`, `(O, H2)`, and `(H1, H2)`.
 
 The result is the set of `(i, j, scale_lj, scale_coul)` tuples
 consulted by the LJ and Coulomb pair-force kernels. The LJ kernel reads
@@ -152,10 +212,12 @@ documented here, in `lj-pair-force.md`, and in `coulomb-pair-force.md`.
 
 ### Empty file <!-- rq-1c794f95 -->
 
-A `.topology` file containing zero bonds, zero exclusions, and zero
-angles is valid (all sections empty or absent). The runner produces an
-empty `BondList`, an empty `AngleList`, and an empty `ExclusionList`;
-the `MorseBonded` and `HarmonicAngle` slots are not constructed.
+A `.topology` file containing zero bonds, zero exclusions, zero
+angles, and zero constraints is valid (all sections empty or absent).
+The runner produces an empty `BondList`, an empty `AngleList`, an
+empty `ExclusionList`, and an empty `ConstraintList`; the
+`MorseBonded`, `HarmonicAngle`, and `Constraint` slots are not
+constructed.
 
 ## Data Model <!-- rq-361623d8 -->
 
@@ -301,6 +363,15 @@ contribution flows through to the caller without a separate code path.
   `atom_excl_lj_scales: Vec<f32>`, `atom_excl_coul_scales: Vec<f32>`,
   `particle_count: usize`.
 
+- `ConstraintList` — host-side. The per-group SoA layout, including <!-- rq-fbd32983 -->
+  fields, group ordering rules, and intra-group atom-order
+  conventions, is defined in `integration/constraint-framework.md`.
+  The parser populates an instance with the validated groups drawn
+  from the `[constraints]` section.
+
+  Method `ConstraintList::is_empty(&self) -> bool` —
+  `self.groups.is_empty()`.
+
 - `TopologyFileError` — error type returned by the parser. Variants: <!-- rq-bca0adbc -->
   - `Io(String)` — failed to read the file.
   - `UnknownSection { name: String, line_number: usize }` — a section
@@ -326,20 +397,39 @@ contribution flows through to the caller without a separate code path.
   - `UnknownAngleType { line_number: usize, name: String }`.
   - `ScaleOutOfRange { line_number: usize, scale: f32 }` — not in
     `[0.0, 1.0]` or non-finite.
+  - `InvalidConstraintRow { line_number: usize, reason: String }` —
+    column count wrong for the constraint type, atom index
+    unparseable, or any other malformed-row condition.
+  - `SelfConstraint { line_number: usize, atom: u32 }` — the same
+    atom appears more than once in a single `[constraints]` row.
+  - `UnknownConstraintType { line_number: usize, name: String }` —
+    the row's `constraint_type_name` does not match any
+    `[[constraint_types]]` entry.
+  - `DuplicateConstraintAtom { atom: u32 }` — two `[constraints]`
+    rows share at least one atom.
+  - `BondIsAlsoConstraint { atom_i: u32, atom_j: u32 }` — a pair
+    appears in both `[bonds]` and (after expansion) in
+    `[constraints]`.
 
 ### Functions <!-- rq-e66012e0 -->
 
-- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str]) -> Result<(BondList, AngleList, ExclusionList), TopologyFileError>` <!-- rq-12b7dcb6 -->
-  - Reads the file at `path` and parses all three sections.
+- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], constraint_types: &[ConstraintTypeConfig]) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError>` <!-- rq-12b7dcb6 -->
+  - Reads the file at `path` and parses all four sections.
   - Validates every constraint described in *File Format*.
-  - Returns the canonicalised, sorted `BondList`, `AngleList`, and
-    the *effective* `ExclusionList` (explicit entries plus implicit
-    bond-derived and angle-derived defaults).
+  - Returns the canonicalised, sorted `BondList`, `AngleList`, the
+    *effective* `ExclusionList` (explicit entries plus implicit
+    bond-derived, angle-derived, and constraint-derived defaults),
+    and the `ConstraintList` (groups sorted by minimum particle
+    index per `integration/constraint-framework.md`).
   - The caller passes `particle_count` (used to bound atom indices),
     `bond_type_names` (used to resolve `bond_type_name` strings to
-    indices in the config's `[[bond_types]]` array), and
+    indices in the config's `[[bond_types]]` array),
     `angle_type_names` (used to resolve `angle_type_name` strings to
-    indices in the config's `[[angle_types]]` array).
+    indices in the config's `[[angle_types]]` array), and
+    `constraint_types` (the full parsed `[[constraint_types]]`
+    array, used both to resolve `constraint_type_name` strings to
+    indices and to look up each type's expected atom count for
+    constraint-row validation).
 
 ## Out of Scope <!-- rq-ad0edc95 -->
 
@@ -348,9 +438,12 @@ contribution flows through to the caller without a separate code path.
 - Per-bond and per-angle parameter overrides (every bond's parameters
   come from its bond type; every angle's parameters come from its
   angle type).
-- Constraint algorithms (rigid bonds via SHAKE/RATTLE).
-- Forming or breaking bonds or angles during a simulation. Both lists
-  are fixed at start of run.
+- Connected-component merging of `[constraints]` rows that share
+  atoms. v1 requires disjoint clusters; cross-row groups arrive with
+  M-SHAKE. The on-disk format and the in-memory `ConstraintList`
+  layout already accommodate the merged case.
+- Forming or breaking bonds, angles, or constraints during a
+  simulation. All four lists are fixed at start of run.
 - A separate `[scaled_exclusions]` section or 1-4-specific syntax.
   Every exclusion is an `(i, j, scale_lj, scale_coul)` tuple; the
   user is responsible for emitting whichever 1-4 exclusions they
@@ -729,4 +822,72 @@ Feature: Topology file with bonds, angles, and exclusions
     And atom 0's angle indices reference slot 0 (its slot in angle 0) and slot 3 (its slot in angle 1)
     And atom 2's angle indices reference slot 2 (its wing slot in angle 0)
       and slot 4 (its centre slot in angle 1)
+
+  # --- Constraint rows ---
+
+  @rq-fe3b32cf
+  Scenario: Load a topology file with one SETTLE constraint
+    Given tmp/sim.topology containing
+      """
+      [constraints]
+      0 1 2 SPCE
+      """
+    And constraint_types contains an SPCE entry with kind = "settle-water"
+    When load_topology_file(tmp/sim.topology, 3, &["CC","CN","OH"], &["HOH"], &constraint_types) is called
+    Then it returns Ok((bond_list, angle_list, exclusion_list, constraint_list))
+    And constraint_list.groups has length 1
+    And the first group's atoms (in their declared order) are [0, 1, 2]
+    And the first group's constraint_type_kind is SettleWater
+    And exclusion_list.entries contains (0, 1, 0.0, 0.0), (0, 2, 0.0, 0.0), and (1, 2, 0.0, 0.0)
+
+  @rq-5dfc02a9
+  Scenario: SETTLE constraint row with wrong atom count is rejected
+    Given a [constraints] row "0 1 SPCE" (two atoms instead of three)
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::InvalidConstraintRow { reason: contains "3 atoms", .. })
+
+  @rq-93506647
+  Scenario: Constraint row with repeated atom is rejected
+    Given a [constraints] row "0 1 1 SPCE"
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::SelfConstraint { atom: 1, .. })
+
+  @rq-44feffc6
+  Scenario: Constraint row with atom index out of range is rejected
+    Given particle_count = 3 and a [constraints] row "0 1 9 SPCE"
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::AtomIndexOutOfRange { index: 9, max: 2, .. })
+
+  @rq-6381db33
+  Scenario: Unknown constraint type name is rejected
+    Given a [constraints] row "0 1 2 UNKNOWN"
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::UnknownConstraintType { name: "UNKNOWN", .. })
+
+  @rq-15b6d3a4
+  Scenario: Two constraint rows sharing an atom are rejected
+    Given [constraints] rows "0 1 2 SPCE" and "2 3 4 SPCE" with particle_count = 5
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::DuplicateConstraintAtom { atom: 2 })
+
+  @rq-8ea6cf9c
+  Scenario: Pair appearing in both [bonds] and [constraints] is rejected
+    Given a [bonds] row "0 1 OH" and a [constraints] row "0 1 2 SPCE"
+    When load_topology_file is called
+    Then it returns Err(TopologyFileError::BondIsAlsoConstraint { atom_i: 0, atom_j: 1 })
+
+  @rq-be8dfaa5
+  Scenario: Constraint-derived implicit exclusion is overridden by an explicit entry
+    Given a [constraints] row "0 1 2 SPCE" and an explicit exclusion "1 2 0.25 0.25"
+    When load_topology_file is called
+    Then exclusion_list.entries contains (1, 2, 0.25, 0.25)
+    And exclusion_list.entries does not contain (1, 2, 0.0, 0.0)
+
+  @rq-75a9815d
+  Scenario: Constraint groups are sorted by minimum particle index
+    Given [constraints] rows "100 101 102 SPCE", "4 5 6 SPCE", "50 51 52 SPCE"
+    When load_topology_file is called
+    Then constraint_list.groups[0]'s atoms start with 4
+    And constraint_list.groups[1]'s atoms start with 50
+    And constraint_list.groups[2]'s atoms start with 100
 ```

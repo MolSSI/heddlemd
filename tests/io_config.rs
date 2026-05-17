@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use dynamics::io::config::ConstraintTypeConfig;
 use dynamics::io::{ConfigError, NeighborListConfig, PathRole, load_config};
 
 fn tmp_path(name: &str) -> PathBuf {
@@ -3038,5 +3039,185 @@ cutoff = 1.0e-9
     match load_config(&path).unwrap_err() {
         ConfigError::MissingField { field } => assert_eq!(field, "barostat.kind"),
         other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-67e62f4b — [[constraint_types]] schema + IntegratorKind::supports_constraints tests.
+
+#[test]
+fn load_constraint_types_settle_water() {
+    let dir = tmp_path("constraint_types_settle");
+    let body = format!(
+        "{}\n[[constraint_types]]\nname = \"SPCE\"\nkind = \"settle-water\"\nr_oh = 1.0e-10\nr_hh = 1.633e-10\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.constraint_types.len(), 1);
+    match &cfg.constraint_types[0] {
+        ConstraintTypeConfig::SettleWater { name, r_oh, r_hh } => {
+            assert_eq!(name, "SPCE");
+            assert_eq!(*r_oh, 1.0e-10);
+            assert_eq!(*r_hh, 1.633e-10);
+            assert_eq!(
+                cfg.constraint_types[0].expected_atom_count(),
+                3
+            );
+        }
+    }
+}
+
+#[test]
+fn reject_settle_geometry_infeasible() {
+    let dir = tmp_path("constraint_infeasible");
+    let body = format!(
+        "{}\n[[constraint_types]]\nname = \"BAD\"\nkind = \"settle-water\"\nr_oh = 1.0e-10\nr_hh = 3.0e-10\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::SettleGeometryInfeasible { name, .. } => {
+            assert_eq!(name, "BAD");
+        }
+        other => panic!("expected SettleGeometryInfeasible, got {other:?}"),
+    }
+}
+
+#[test]
+fn reject_duplicate_constraint_type_name() {
+    let dir = tmp_path("constraint_dup_name");
+    let body = format!(
+        "{}\n[[constraint_types]]\nname = \"X\"\nkind = \"settle-water\"\nr_oh = 1.0e-10\nr_hh = 1.6e-10\n\n[[constraint_types]]\nname = \"X\"\nkind = \"settle-water\"\nr_oh = 1.0e-10\nr_hh = 1.6e-10\n",
+        minimal_config()
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::DuplicateConstraintTypeName { name } => assert_eq!(name, "X"),
+        other => panic!("expected DuplicateConstraintTypeName, got {other:?}"),
+    }
+}
+
+#[test]
+fn supports_constraints_velocity_verlet_lossy_true() {
+    let kind = dynamics::io::config::IntegratorKind::VelocityVerlet { lossless: false };
+    assert!(kind.supports_constraints());
+}
+
+#[test]
+fn supports_constraints_velocity_verlet_lossless_false() {
+    let kind = dynamics::io::config::IntegratorKind::VelocityVerlet { lossless: true };
+    assert!(!kind.supports_constraints());
+}
+
+#[test]
+fn supports_constraints_langevin_baoab_false() {
+    let kind = dynamics::io::config::IntegratorKind::LangevinBaoab {
+        friction: 1.0e12,
+        temperature: 300.0,
+        seed: 0,
+    };
+    assert!(!kind.supports_constraints());
+}
+
+#[test]
+fn supports_constraints_mtk_npt_false() {
+    let kind = dynamics::io::config::IntegratorKind::MtkNpt {
+        temperature: 85.0,
+        pressure: 1.0e5,
+        tau_t: 1.0e-13,
+        tau_p: 1.0e-12,
+        chain_length: 3,
+        yoshida_order: 3,
+        n_resp: 1,
+    };
+    assert!(!kind.supports_constraints());
+}
+
+#[test]
+fn validate_constraint_compatibility_rejects_langevin_with_constraints() {
+    let dir = tmp_path("compat_langevin");
+    let body = format!(
+        r#"schema_version = 1
+init = "argon.xyz"
+
+[simulation]
+seed = 12345
+n_steps = 10
+dt = 1.0e-15
+temperature = 300.0
+
+[integrator]
+kind = "langevin-baoab"
+friction = 1.0e12
+temperature = 300.0
+seed = 1
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    match cfg.validate_constraint_compatibility(true).unwrap_err() {
+        ConfigError::IncompatibleConstraint { integrator } => {
+            assert_eq!(integrator, "langevin-baoab");
+        }
+        other => panic!("expected IncompatibleConstraint, got {other:?}"),
+    }
+}
+
+#[test]
+fn validate_constraint_compatibility_accepts_velocity_verlet_lossy() {
+    let dir = tmp_path("compat_vv_lossy");
+    let body = minimal_config();
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert!(cfg.validate_constraint_compatibility(true).is_ok());
+}
+
+#[test]
+fn validate_constraint_compatibility_rejects_lossless_with_constraints() {
+    let dir = tmp_path("compat_vv_lossless");
+    let body = format!(
+        r#"schema_version = 1
+init = "argon.xyz"
+
+[simulation]
+seed = 12345
+n_steps = 10
+dt = 1.0e-15
+temperature = 300.0
+
+[integrator]
+kind = "velocity-verlet"
+lossless = true
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#
+    );
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    match cfg.validate_constraint_compatibility(true).unwrap_err() {
+        ConfigError::IncompatibleConstraint { integrator } => {
+            assert_eq!(integrator, "velocity-verlet");
+        }
+        other => panic!("expected IncompatibleConstraint, got {other:?}"),
     }
 }

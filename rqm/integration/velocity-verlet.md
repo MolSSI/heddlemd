@@ -343,20 +343,42 @@ the parsed `IntegratorKind::VelocityVerlet { lossless }` config variant
 and, when `lossless == true`, allocates a `LosslessBuffers` of the
 runner's particle count on the same `Arc<CudaDevice>`.
 
-The implementation's `step(buffers, sim_box, force_field, dt,
-timings)` performs the following sequence:
+The implementation's `step(buffers, sim_box, force_field, constraint,
+dt, timings)` performs the following sequence:
 
-1. Launch `vv_kick_drift` (or `vv_kick_drift_lossless`), bracketed by
+1. If `constraint` is `Some`, call
+   `constraint.apply_before_drift(buffers, sim_box, dt, timings)` so
+   the constraint slot can snapshot pre-drift positions for its
+   owned atoms.
+2. Launch `vv_kick_drift` (or `vv_kick_drift_lossless`), bracketed by
    `timings.kernel_start(KernelStage::VV_KICK_DRIFT)` /
    `timings.kernel_stop(KernelStage::VV_KICK_DRIFT)` (or the
    `*_LOSSLESS` stage names — see `performance-analysis.md`). This
    applies the first half-kick using the cached `F(t)` and drifts
    positions to `x(t+dt)`.
-2. Call `force_field.step(buffers, sim_box, timings)`, which writes
+3. If `constraint` is `Some`, call
+   `constraint.apply_after_drift(buffers, sim_box, dt, timings)` so
+   the slot can project the unconstrained drifted positions back
+   onto the constraint manifold and update the half-step velocities
+   for position consistency.
+4. Call `force_field.step(buffers, sim_box, timings)`, which writes
    `F(t+dt)` into `buffers.forces_*` and the per-particle energy /
    virial buffers.
-3. Launch `vv_kick` (or `vv_kick_lossless`) with matching timing
+5. Launch `vv_kick` (or `vv_kick_lossless`) with matching timing
    bracketing. This applies the second half-kick using `F(t+dt)`.
+6. If `constraint` is `Some`, call
+   `constraint.apply_after_kick(buffers, sim_box, dt, timings)` so
+   the slot can project the post-kick velocities onto the constraint
+   manifold.
+
+When `constraint` is `None`, steps 1, 3, and 6 are skipped without
+launching any kernel.
+
+When `constraint` is `Some` and `lossless == true`, the lossless
+variant of `VelocityVerletState` returns
+`IntegratorError::ConstraintNotSupported`: the config loader's
+`IncompatibleConstraint` rule prevents that combination in practice
+(see `io/config-schema.md` and `constraint-framework.md`).
 
 `sim_box` is borrowed mutably but velocity-Verlet does not modify it.
 Velocity Verlet is deterministic and stateless across `step()` calls
@@ -382,7 +404,10 @@ counter.
   `[thermostat]` and `[barostat]` slots through the framework's
   dispatch order; the registered thermostat / barostat
   implementations own their respective per-step state and kernels.
-- Constraint algorithms (SHAKE/RATTLE).
+- The concrete constraint algorithms themselves. This file describes
+  the integrator's three hook-call points; the constraint slot, its
+  trait, and the SETTLE implementation live in
+  `constraint-framework.md` and `settle.md`.
 - Energy diagnostics and trajectory output.
 - Numerical validation of inputs (zero/non-finite masses, dt sign).
 - The `f64` precision feature flag for the *primary* particle state

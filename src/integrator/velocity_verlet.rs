@@ -9,7 +9,7 @@ use crate::io::config::IntegratorKind;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
-use super::{Integrator, IntegratorBuilder, IntegratorError};
+use super::{Constraint, Integrator, IntegratorBuilder, IntegratorError};
 
 #[derive(Debug)]
 pub struct VelocityVerletState {
@@ -22,11 +22,22 @@ impl Integrator for VelocityVerletState {
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
+        mut constraint: Option<&mut dyn Constraint>,
         dt: f32,
         timings: &mut Timings,
     ) -> Result<(), IntegratorError> {
         if buffers.particle_count() == 0 {
             return Ok(());
+        }
+        // The lossless variant does not yet drive constraint hooks; the
+        // config loader rejects the combination, but enforce here too so
+        // direct callers cannot bypass it.
+        if self.lossless.is_some() && constraint.is_some() {
+            return Err(IntegratorError::ConstraintNotSupported);
+        }
+
+        if let Some(c) = constraint.as_deref_mut() {
+            c.apply_before_drift(buffers, sim_box, dt, timings)?;
         }
 
         if let Some(ll) = self.lossless.as_mut() {
@@ -39,6 +50,10 @@ impl Integrator for VelocityVerletState {
             timings.kernel_stop(KernelStage::VV_KICK_DRIFT)?;
         }
 
+        if let Some(c) = constraint.as_deref_mut() {
+            c.apply_after_drift(buffers, sim_box, dt, timings)?;
+        }
+
         force_field.step(buffers, sim_box, timings)?;
 
         if let Some(ll) = self.lossless.as_mut() {
@@ -49,6 +64,10 @@ impl Integrator for VelocityVerletState {
             timings.kernel_start(KernelStage::VV_KICK)?;
             vv_kick(buffers, dt)?;
             timings.kernel_stop(KernelStage::VV_KICK)?;
+        }
+
+        if let Some(c) = constraint.as_deref_mut() {
+            c.apply_after_kick(buffers, sim_box, dt, timings)?;
         }
 
         Ok(())

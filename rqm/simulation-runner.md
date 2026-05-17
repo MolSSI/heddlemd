@@ -86,10 +86,12 @@ message.
     from `config.bond_types` and the slice of angle type names from
     `config.angle_types`, call
     `load_topology_file(path, particle_count, &bond_type_names,
-    &angle_type_names)` (`forces/topology.md`), and capture the
-    resulting `(BondList, AngleList, ExclusionList)`. Failure → exit
-    1. When `config.topology.is_none()`, use an empty `BondList`, an
-    empty `AngleList`, and an empty `ExclusionList`.
+    &angle_type_names, &config.constraint_types)`
+    (`forces/topology.md`), and capture the resulting `(BondList,
+    AngleList, ExclusionList, ConstraintList)`. Failure → exit 1.
+    When `config.topology.is_none()`, use an empty `BondList`, an
+    empty `AngleList`, an empty `ExclusionList`, and an empty
+    `ConstraintList`.
 7. **Initialise CUDA.** Call `init_device()` (`build-pipeline.md`).
    Failure → exit 1. When `config.spme.is_some()`, `init_device` runs
    the cuFFT determinism smoke test described in `forces/spme.md`. A
@@ -113,23 +115,36 @@ message.
    - `forces_*` zero-initialised by the constructor.
 10. **Allocate `ParticleBuffers`.** Construct `ParticleBuffers` from
     the host state.
-11. **Construct the integrator, thermostat, and barostat.** Build the
-    three slot handles (see `integration/framework.md`):
+11. **Construct the integrator, thermostat, barostat, and constraint.**
+    Build the four slot handles (see `integration/framework.md` and
+    `integration/constraint-framework.md`):
     - `IntegratorRegistry::with_builtins().build(&config.integrator,
       device.clone(), N)` → `Box<dyn Integrator>`.
     - `ThermostatRegistry::with_builtins().build_optional(config.thermostat.as_ref(),
       device.clone(), N)` → `Option<Box<dyn Thermostat>>`.
     - `BarostatRegistry::with_builtins().build_optional(config.barostat.as_ref(),
       device.clone(), N)` → `Option<Box<dyn Barostat>>`.
+    - `ConstraintRegistry::with_builtins().build_optional(&constraint_list,
+      device.clone(), N)` → `Option<Box<dyn Constraint>>`. Returns
+      `None` when the topology file's `[constraints]` section is
+      empty or absent.
 
     Each slot owns any per-run state it needs (e.g. `LosslessBuffers`
     for `velocity-verlet` when `lossless == true`; the chain state and
-    `ke_scratch` buffer for `nose-hoover-chain`). The
-    integrator-owns-its-own-thermostat compatibility check
+    `ke_scratch` buffer for `nose-hoover-chain`; the per-group
+    snapshot, atom-index, and per-type parameter buffers for
+    `settle`). The integrator-owns-its-own-thermostat and
+    integrator-supports-constraints compatibility checks
     (`IntegratorKind::owns_thermostat()` vs.
-    `config.thermostat.is_some()`) has already been enforced at
+    `config.thermostat.is_some()`, and
+    `IntegratorKind::supports_constraints()` vs.
+    `!constraint_list.is_empty()`) have already been enforced at
     config-load time (`io/config-schema.md`); no runtime guard is
     required here.
+
+    The constraint slot is threaded through `integrator.step()` each
+    timestep as `constraint.as_deref_mut()`; see
+    `integration/framework.md` for the dispatch sequence.
 12. **Construct the force field.** Call `ForceField::new(device.clone(),
     N, &sim_box, &config.pair_interactions, &config.bond_types,
     &bond_list, &exclusion_list, &config.neighbor_list)` (see

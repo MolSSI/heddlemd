@@ -492,7 +492,7 @@ fn nhc_preserves_com_momentum_to_round_off() {
             .apply_pre(&mut buffers, 1.0e-15, &mut timings)
             .unwrap();
         integ
-            .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
             .unwrap();
         therm
             .apply_post(&mut buffers, 1.0e-15, &mut timings)

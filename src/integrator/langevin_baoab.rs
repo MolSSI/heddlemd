@@ -7,7 +7,7 @@ use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
-use super::{Integrator, IntegratorBuilder, IntegratorError};
+use super::{Constraint, Integrator, IntegratorBuilder, IntegratorError};
 
 #[derive(Debug)]
 pub struct LangevinBaoabState {
@@ -23,9 +23,13 @@ impl Integrator for LangevinBaoabState {
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
+        constraint: Option<&mut dyn Constraint>,
         dt: f32,
         timings: &mut Timings,
     ) -> Result<(), IntegratorError> {
+        if constraint.is_some() {
+            return Err(IntegratorError::ConstraintNotSupported);
+        }
         if buffers.particle_count() == 0 {
             return Ok(());
         }

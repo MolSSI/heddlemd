@@ -14,17 +14,20 @@ pub mod andersen;
 pub mod berendsen;
 pub mod berendsen_barostat;
 pub mod c_rescale_barostat;
+pub mod constraint;
 pub mod csvr;
 pub mod langevin_baoab;
 pub mod mtk_npt;
 pub mod nose_hoover_chain;
 pub mod philox;
+pub mod settle;
 pub mod velocity_verlet;
 
 pub use andersen::{AndersenBuilder, AndersenThermostat};
 pub use berendsen::{BerendsenBuilder, BerendsenThermostat};
 pub use berendsen_barostat::{BerendsenBarostat, BerendsenBarostatBuilder};
 pub use c_rescale_barostat::{CRescaleBarostat, CRescaleBarostatBuilder};
+pub use constraint::{Constraint, ConstraintBuilder, ConstraintError, ConstraintRegistry};
 pub use csvr::{CsvrBuilder, CsvrThermostat};
 pub use langevin_baoab::{LangevinBaoabBuilder, LangevinBaoabState};
 pub use mtk_npt::{MtkNptBuilder, MtkNptIntegrator};
@@ -32,6 +35,7 @@ pub use nose_hoover_chain::{
     NoseHooverChainBuilder, NoseHooverChainThermostat, nhc_chain_sub_step,
 };
 pub use philox::{philox_4x32_10, philox_normal};
+pub use settle::{SettleBuilder, SettleConstraintsState, SettleError};
 pub use velocity_verlet::{VelocityVerletBuilder, VelocityVerletState};
 
 // rq-2ccf40de
@@ -45,6 +49,10 @@ pub enum IntegratorError {
     ForceField(#[from] ForceFieldError),
     #[error("unknown integrator kind `{0}`")]
     UnknownKind(String),
+    #[error("{0}")]
+    Constraint(#[from] ConstraintError),
+    #[error("integrator does not support holonomic constraints")]
+    ConstraintNotSupported,
 }
 
 // rq-2ccf40de
@@ -79,6 +87,7 @@ pub trait Integrator: std::fmt::Debug + Send {
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
+        constraint: Option<&mut dyn Constraint>,
         dt: f32,
         timings: &mut Timings,
     ) -> Result<(), IntegratorError>;

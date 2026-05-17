@@ -86,7 +86,7 @@ fn construct_vv_lossless_via_registry() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = registry.build(&vv_kind(true), &gpu, 4).unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, None, 0.1, &mut timings)
         .unwrap();
     // The lossless build is observable through the lossless KernelStage labels.
     let report = timings.finalize().unwrap();
@@ -151,6 +151,7 @@ impl Integrator for StubIntegrator {
         _buffers: &mut ParticleBuffers,
         _sim_box: &mut SimulationBox,
         _force_field: &mut ForceField,
+        _constraint: Option<&mut dyn dynamics::integrator::Constraint>,
         _dt: f32,
         _timings: &mut Timings,
     ) -> Result<(), IntegratorError> {
@@ -173,7 +174,7 @@ fn custom_builder_registered_takes_priority_over_builtin() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = registry.build(&vv_kind(false), &gpu, 4).unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, None, 0.1, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     // Stub launches no kernels, so neither vv_kick_drift nor vv_kick should
@@ -202,7 +203,7 @@ fn step_on_empty_state_is_noop() {
         .build(&vv_kind(false), &gpu, 0)
         .unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, None, 0.1, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     assert!(report.stages.is_empty());
@@ -226,7 +227,7 @@ fn vv_step_launches_kick_drift_force_and_kick() {
         .unwrap();
     let snap_positions = state.positions_x.clone();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, None, 0.1, &mut timings)
         .unwrap();
     let mut after = state.clone();
     after.download_from(&buffers).unwrap();
@@ -259,7 +260,7 @@ fn lossless_vv_step_uses_lossless_kernels() {
         .build(&vv_kind(true), &gpu, 4)
         .unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 0.1, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, None, 0.1, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let names: Vec<&str> = report.stages.iter().map(|s| s.name.as_str()).collect();
@@ -304,7 +305,7 @@ fn integrator_owns_force_evaluation_inside_step() {
         .build(&vv_kind(false), &gpu, 4)
         .unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, None, 0.001, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count = |name: &str| {
@@ -333,12 +334,12 @@ fn two_consecutive_langevin_steps_produce_different_velocities() {
         .build(&langevin_kind(1), &gpu, 2)
         .unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
         .unwrap();
     let mut state_after_first = state.clone();
     state_after_first.download_from(&buffers).unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
         .unwrap();
     let mut state_after_second = state.clone();
     state_after_second.download_from(&buffers).unwrap();
@@ -368,10 +369,10 @@ fn two_independent_runs_byte_identical() {
 
     for _ in 1..=10 {
         integrator_a
-            .step(&mut buffers_a, &mut sim_box_a, &mut ff_a, 0.001, &mut timings_a)
+            .step(&mut buffers_a, &mut sim_box_a, &mut ff_a, None, 0.001, &mut timings_a)
             .unwrap();
         integrator_b
-            .step(&mut buffers_b, &mut sim_box_b, &mut ff_b, 0.001, &mut timings_b)
+            .step(&mut buffers_b, &mut sim_box_b, &mut ff_b, None, 0.001, &mut timings_b)
             .unwrap();
     }
 
@@ -400,11 +401,11 @@ fn langevin_draw_counter_starts_at_zero_and_increments_per_step() {
     };
     assert_eq!(integrator.draw_counter, 0);
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
         .unwrap();
     assert_eq!(integrator.draw_counter, 1);
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
         .unwrap();
     assert_eq!(integrator.draw_counter, 2);
 }
@@ -434,9 +435,9 @@ fn langevin_states_at_same_draw_counter_and_seed_produce_identical_draws() {
         seed: 7,
         draw_counter: 5,
     };
-    a.step(&mut buffers_a, &mut sim_box_a, &mut ff_a, 1.0e-15, &mut timings_a)
+    a.step(&mut buffers_a, &mut sim_box_a, &mut ff_a, None, 1.0e-15, &mut timings_a)
         .unwrap();
-    b.step(&mut buffers_b, &mut sim_box_b, &mut ff_b, 1.0e-15, &mut timings_b)
+    b.step(&mut buffers_b, &mut sim_box_b, &mut ff_b, None, 1.0e-15, &mut timings_b)
         .unwrap();
     let mut state_a = state.clone();
     let mut state_b = state.clone();
@@ -574,6 +575,7 @@ impl Integrator for RecordingIntegrator {
         _b: &mut ParticleBuffers,
         _sb: &mut SimulationBox,
         _ff: &mut ForceField,
+        _constraint: Option<&mut dyn dynamics::integrator::Constraint>,
         _dt: f32,
         _t: &mut Timings,
     ) -> Result<(), IntegratorError> {
@@ -627,7 +629,7 @@ fn dispatch_loop_orders_apply_pre_step_apply_post() {
         .apply_pre(&mut buffers, 1.0e-15, &mut timings)
         .unwrap();
     integ
-        .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
         .unwrap();
     therm
         .apply_post(&mut buffers, 1.0e-15, &mut timings)

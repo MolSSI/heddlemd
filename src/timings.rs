@@ -76,6 +76,10 @@ impl KernelStage {
         KernelStage::new("mtk_npt_velocity_half_kick");
     pub const MTK_NPT_POSITION_DRIFT: KernelStage =
         KernelStage::new("mtk_npt_position_drift");
+    // rq-de7601cd
+    pub const SETTLE_SNAPSHOT: KernelStage = KernelStage::new("settle_snapshot");
+    pub const SETTLE_POSITIONS: KernelStage = KernelStage::new("settle_positions");
+    pub const SETTLE_VELOCITIES: KernelStage = KernelStage::new("settle_velocities");
     pub const ACCUMULATE_FORCES: KernelStage = KernelStage::new("accumulate_forces");
     pub const NEIGHBOR_DISPLACEMENT_SQUARED: KernelStage =
         KernelStage::new("neighbor_displacement_squared");
@@ -114,6 +118,9 @@ impl KernelStage {
         Self::MTK_NPT_RESCALE_VELOCITIES,
         Self::MTK_NPT_VELOCITY_HALF_KICK,
         Self::MTK_NPT_POSITION_DRIFT,
+        Self::SETTLE_SNAPSHOT,
+        Self::SETTLE_POSITIONS,
+        Self::SETTLE_VELOCITIES,
         Self::ACCUMULATE_FORCES,
         Self::VV_KICK,
         Self::VV_KICK_LOSSLESS,

@@ -5,6 +5,7 @@ use std::sync::Arc;
 use cudarc::driver::{CudaDevice, CudaSlice};
 
 use crate::gpu::GpuError;
+use crate::io::config::ConstraintTypeConfig;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Bond {
@@ -95,6 +96,67 @@ impl ExclusionList {
             atom_excl_coul_scales: Vec::new(),
             particle_count,
         }
+    }
+}
+
+// rq-3d5f2e98 — constraint slot framework data layout. See
+// `integration/constraint-framework.md` for the SoA contract.
+
+/// Algorithm-tag for a `[[constraint_types]]` entry. Drives the
+/// constraint slot's per-group kernel dispatch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConstraintTypeKind {
+    SettleWater,
+}
+
+/// One pairwise distance constraint inside a `ConstraintGroup`. The
+/// local indices `(local_i, local_j)` refer to slots in the group's
+/// own atom slice (`0..group.atom_count`) — not into the global
+/// `ParticleBuffers`.
+#[derive(Debug, Clone, Copy)]
+pub struct GroupConstraint {
+    pub local_i: u8,
+    pub local_j: u8,
+    pub r0: f32,
+}
+
+/// One connected component of the constraint graph: a set of atoms
+/// rigidified by a set of pairwise distance constraints. Algorithms
+/// (SETTLE in v1; M-SHAKE in a future feature) dispatch one thread per
+/// group.
+#[derive(Debug, Clone, Copy)]
+pub struct ConstraintGroup {
+    pub atom_offset: u32,
+    pub atom_count: u32,
+    pub constraint_offset: u32,
+    pub constraint_count: u32,
+    pub constraint_type_index: u32,
+}
+
+/// Host-side parsed-and-validated view of every constraint declared by
+/// the topology file. See `integration/constraint-framework.md`.
+#[derive(Debug, Clone)]
+pub struct ConstraintList {
+    pub groups: Vec<ConstraintGroup>,
+    pub group_atoms: Vec<u32>,
+    pub group_constraints: Vec<GroupConstraint>,
+    pub constraint_type_kind: Vec<ConstraintTypeKind>,
+    pub particle_count: usize,
+}
+
+impl ConstraintList {
+    pub fn empty(particle_count: usize) -> Self {
+        ConstraintList {
+            groups: Vec::new(),
+            group_atoms: Vec::new(),
+            group_constraints: Vec::new(),
+            constraint_type_kind: Vec::new(),
+            particle_count,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.groups.is_empty()
     }
 }
 
@@ -194,6 +256,16 @@ pub enum TopologyFileError {
     UnknownAngleType { line_number: usize, name: String },
     #[error("line {line_number}: exclusion scale {scale} is out of the range [0, 1]")]
     ScaleOutOfRange { line_number: usize, scale: f32 },
+    #[error("line {line_number}: invalid constraint row: {reason}")]
+    InvalidConstraintRow { line_number: usize, reason: String },
+    #[error("line {line_number}: atom {atom} appears more than once in this constraint row")]
+    SelfConstraint { line_number: usize, atom: u32 },
+    #[error("line {line_number}: unknown constraint type `{name}`")]
+    UnknownConstraintType { line_number: usize, name: String },
+    #[error("atom {atom} appears in more than one [constraints] row")]
+    DuplicateConstraintAtom { atom: u32 },
+    #[error("pair (atoms {atom_i}, {atom_j}) appears in both [bonds] and [constraints]")]
+    BondIsAlsoConstraint { atom_i: u32, atom_j: u32 },
 }
 
 // rq-12b7dcb6
@@ -202,10 +274,17 @@ pub fn load_topology_file(
     particle_count: usize,
     bond_type_names: &[&str],
     angle_type_names: &[&str],
-) -> Result<(BondList, AngleList, ExclusionList), TopologyFileError> {
+    constraint_types: &[ConstraintTypeConfig],
+) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError> {
     let raw = std::fs::read_to_string(path)
         .map_err(|e| TopologyFileError::Io(format!("{}: {}", path.display(), e)))?;
-    parse_topology_file(&raw, particle_count, bond_type_names, angle_type_names)
+    parse_topology_file(
+        &raw,
+        particle_count,
+        bond_type_names,
+        angle_type_names,
+        constraint_types,
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,6 +293,7 @@ enum Section {
     Bonds,
     Exclusions,
     Angles,
+    Constraints,
 }
 
 pub(crate) fn parse_topology_file(
@@ -221,16 +301,20 @@ pub(crate) fn parse_topology_file(
     particle_count: usize,
     bond_type_names: &[&str],
     angle_type_names: &[&str],
-) -> Result<(BondList, AngleList, ExclusionList), TopologyFileError> {
+    constraint_types: &[ConstraintTypeConfig],
+) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError> {
     let max_index_for_check: i64 = particle_count as i64 - 1;
 
     let mut current: Section = Section::None;
     let mut bonds_seen = false;
     let mut exclusions_seen = false;
     let mut angles_seen = false;
+    let mut constraints_seen = false;
     let mut raw_bonds: Vec<(usize, u32, u32, u32)> = Vec::new();
     let mut raw_excl: Vec<(usize, u32, u32, f32, f32)> = Vec::new();
     let mut raw_angles: Vec<(usize, u32, u32, u32, u32)> = Vec::new();
+    // (line_number, atom_indices_in_declared_order, constraint_type_index)
+    let mut raw_constraint_rows: Vec<(usize, Vec<u32>, u32)> = Vec::new();
 
     for (idx, line) in raw.lines().enumerate() {
         let line_number = idx + 1;
@@ -270,6 +354,16 @@ pub(crate) fn parse_topology_file(
                     }
                     angles_seen = true;
                     current = Section::Angles;
+                }
+                "constraints" => {
+                    if constraints_seen {
+                        return Err(TopologyFileError::DuplicateSection {
+                            name: "constraints".to_string(),
+                            line_number,
+                        });
+                    }
+                    constraints_seen = true;
+                    current = Section::Constraints;
                 }
                 other => {
                     return Err(TopologyFileError::UnknownSection {
@@ -451,6 +545,67 @@ pub(crate) fn parse_topology_file(
                 };
                 raw_excl.push((line_number, atom_i, atom_j, scale_lj, scale_coul));
             }
+            Section::Constraints => {
+                let cols: Vec<&str> = trimmed.split_ascii_whitespace().collect();
+                if cols.len() < 2 {
+                    return Err(TopologyFileError::InvalidConstraintRow {
+                        line_number,
+                        reason: format!(
+                            "expected at least one atom index and one constraint_type_name, got {} columns",
+                            cols.len()
+                        ),
+                    });
+                }
+                let type_name = cols[cols.len() - 1];
+                let type_idx = constraint_types
+                    .iter()
+                    .position(|t| t.name() == type_name)
+                    .ok_or_else(|| TopologyFileError::UnknownConstraintType {
+                        line_number,
+                        name: type_name.to_string(),
+                    })? as u32;
+                let expected_atoms =
+                    constraint_types[type_idx as usize].expected_atom_count();
+                let atom_cols = &cols[..cols.len() - 1];
+                if atom_cols.len() != expected_atoms {
+                    return Err(TopologyFileError::InvalidConstraintRow {
+                        line_number,
+                        reason: format!(
+                            "constraint type `{type_name}` requires {expected_atoms} atoms, got {}",
+                            atom_cols.len()
+                        ),
+                    });
+                }
+                let mut atoms: Vec<u32> = Vec::with_capacity(expected_atoms);
+                for (idx, col) in atom_cols.iter().enumerate() {
+                    let a = col.parse::<u32>().map_err(|_| {
+                        TopologyFileError::InvalidConstraintRow {
+                            line_number,
+                            reason: format!("atom[{idx}] {:?} is not a u32", col),
+                        }
+                    })?;
+                    if (a as i64) > max_index_for_check {
+                        return Err(TopologyFileError::AtomIndexOutOfRange {
+                            line_number,
+                            index: a,
+                            max: max_index_for_check.max(0) as u32,
+                        });
+                    }
+                    atoms.push(a);
+                }
+                // Reject duplicate atoms within a single row.
+                for i in 0..atoms.len() {
+                    for j in (i + 1)..atoms.len() {
+                        if atoms[i] == atoms[j] {
+                            return Err(TopologyFileError::SelfConstraint {
+                                line_number,
+                                atom: atoms[i],
+                            });
+                        }
+                    }
+                }
+                raw_constraint_rows.push((line_number, atoms, type_idx));
+            }
         }
     }
 
@@ -528,6 +683,117 @@ pub(crate) fn parse_topology_file(
         }
     }
 
+    // Build the per-group ConstraintList. Each [constraints] row is
+    // its own group in v1; verify no atom appears in more than one row.
+    let mut constraint_groups: Vec<ConstraintGroup> = Vec::with_capacity(raw_constraint_rows.len());
+    let mut group_atoms: Vec<u32> = Vec::new();
+    let mut group_constraints: Vec<GroupConstraint> = Vec::new();
+    let mut atom_to_row: std::collections::HashMap<u32, usize> =
+        std::collections::HashMap::new();
+    for (row_idx, (_line, atoms, type_idx)) in raw_constraint_rows.iter().enumerate() {
+        for &a in atoms {
+            if atom_to_row.insert(a, row_idx).is_some() {
+                return Err(TopologyFileError::DuplicateConstraintAtom { atom: a });
+            }
+        }
+        let atom_offset = group_atoms.len() as u32;
+        let atom_count = atoms.len() as u32;
+        let constraint_offset = group_constraints.len() as u32;
+        // Expand every group into its pairwise constraints. The
+        // per-algorithm shape check (SETTLE wants exactly 3 atoms and
+        // the (0,1)/(0,2)/(1,2) pattern) is enforced by the slot's
+        // builder; the topology parser produces the complete pairwise
+        // expansion so the data layout already matches the framework
+        // contract.
+        for &a in atoms {
+            group_atoms.push(a);
+        }
+        for i in 0..atoms.len() {
+            for j in (i + 1)..atoms.len() {
+                group_constraints.push(GroupConstraint {
+                    local_i: i as u8,
+                    local_j: j as u8,
+                    r0: 0.0,
+                });
+            }
+        }
+        let constraint_count = group_constraints.len() as u32 - constraint_offset;
+        constraint_groups.push(ConstraintGroup {
+            atom_offset,
+            atom_count,
+            constraint_offset,
+            constraint_count,
+            constraint_type_index: *type_idx,
+        });
+    }
+    // Sort groups by minimum particle index for reproducibility.
+    let mut order: Vec<usize> = (0..constraint_groups.len()).collect();
+    order.sort_by_key(|&i| {
+        let g = constraint_groups[i];
+        let slice = &group_atoms[g.atom_offset as usize
+            ..(g.atom_offset + g.atom_count) as usize];
+        slice.iter().copied().min().unwrap_or(u32::MAX)
+    });
+    let mut sorted_groups: Vec<ConstraintGroup> = Vec::with_capacity(constraint_groups.len());
+    let mut sorted_atoms: Vec<u32> = Vec::with_capacity(group_atoms.len());
+    let mut sorted_constraints: Vec<GroupConstraint> =
+        Vec::with_capacity(group_constraints.len());
+    for &orig_idx in &order {
+        let g = constraint_groups[orig_idx];
+        let new_atom_offset = sorted_atoms.len() as u32;
+        let new_constraint_offset = sorted_constraints.len() as u32;
+        sorted_atoms.extend_from_slice(
+            &group_atoms[g.atom_offset as usize
+                ..(g.atom_offset + g.atom_count) as usize],
+        );
+        sorted_constraints.extend_from_slice(
+            &group_constraints[g.constraint_offset as usize
+                ..(g.constraint_offset + g.constraint_count) as usize],
+        );
+        sorted_groups.push(ConstraintGroup {
+            atom_offset: new_atom_offset,
+            atom_count: g.atom_count,
+            constraint_offset: new_constraint_offset,
+            constraint_count: g.constraint_count,
+            constraint_type_index: g.constraint_type_index,
+        });
+    }
+    let constraint_groups = sorted_groups;
+    let group_atoms = sorted_atoms;
+    let group_constraints = sorted_constraints;
+
+    // Reject any (atom_i, atom_j) pair that appears in both [bonds]
+    // and (after expansion) [constraints].
+    {
+        let bond_set: std::collections::HashSet<(u32, u32)> =
+            bonds.iter().map(|b| (b.atom_i, b.atom_j)).collect();
+        for g in &constraint_groups {
+            let atom_slice = &group_atoms[g.atom_offset as usize
+                ..(g.atom_offset + g.atom_count) as usize];
+            let cstr_slice = &group_constraints[g.constraint_offset as usize
+                ..(g.constraint_offset + g.constraint_count) as usize];
+            for c in cstr_slice {
+                let a = atom_slice[c.local_i as usize];
+                let b = atom_slice[c.local_j as usize];
+                let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+                if bond_set.contains(&(lo, hi)) {
+                    return Err(TopologyFileError::BondIsAlsoConstraint {
+                        atom_i: lo,
+                        atom_j: hi,
+                    });
+                }
+            }
+        }
+    }
+
+    // Algorithm-tag table: one entry per [[constraint_types]] entry.
+    let constraint_type_kind: Vec<ConstraintTypeKind> = constraint_types
+        .iter()
+        .map(|t| match t {
+            ConstraintTypeConfig::SettleWater { .. } => ConstraintTypeKind::SettleWater,
+        })
+        .collect();
+
     // Build the effective exclusion list:
     //   1. Every explicit entry kept as-is.
     //   2. For every bond (i, j) lacking an explicit (i, j) entry,
@@ -535,6 +801,9 @@ pub(crate) fn parse_topology_file(
     //   3. For every angle (i, j, k), consider the 1-3 pair (i, k).
     //      If neither an explicit entry nor an already-added implicit
     //      bond entry covers (i, k), add implicit (i, k, 0.0, 0.0).
+    //   4. For every constraint group, add implicit (i, j, 0.0, 0.0)
+    //      for every distinct intra-group pair (1-2 and 1-3) not
+    //      already covered by an explicit or earlier-implicit entry.
     let mut effective = explicit.clone();
     for b in &bonds {
         let already = effective
@@ -564,6 +833,29 @@ pub(crate) fn parse_topology_file(
                 scale_coul: 0.0,
             });
             effective.sort_by_key(|e| (e.atom_i, e.atom_j));
+        }
+    }
+    for g in &constraint_groups {
+        let atom_slice = &group_atoms[g.atom_offset as usize
+            ..(g.atom_offset + g.atom_count) as usize];
+        for i in 0..atom_slice.len() {
+            for j in (i + 1)..atom_slice.len() {
+                let a = atom_slice[i];
+                let b = atom_slice[j];
+                let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+                let already = effective
+                    .binary_search_by_key(&(lo, hi), |e| (e.atom_i, e.atom_j))
+                    .is_ok();
+                if !already {
+                    effective.push(Exclusion {
+                        atom_i: lo,
+                        atom_j: hi,
+                        scale_lj: 0.0,
+                        scale_coul: 0.0,
+                    });
+                    effective.sort_by_key(|e| (e.atom_i, e.atom_j));
+                }
+            }
         }
     }
 
@@ -666,7 +958,14 @@ pub(crate) fn parse_topology_file(
         atom_excl_coul_scales,
         particle_count,
     };
-    Ok((bond_list, angle_list, exclusion_list))
+    let constraint_list = ConstraintList {
+        groups: constraint_groups,
+        group_atoms,
+        group_constraints,
+        constraint_type_kind,
+        particle_count,
+    };
+    Ok((bond_list, angle_list, exclusion_list, constraint_list))
 }
 
 fn parse_scale(

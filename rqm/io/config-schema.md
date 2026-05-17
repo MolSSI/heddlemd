@@ -30,6 +30,7 @@ Sections:
 | `[[pair_interactions]]` | yes (covers every pair) | per-pair potential + parameters |
 | `[[bond_types]]` | no | per-bond-type parameters |
 | `[[angle_types]]` | no | per-angle-type parameters |
+| `[[constraint_types]]` | no | per-constraint-type parameters |
 | `[neighbor_list]` | no | non-bonded pair-evaluation algorithm |
 | `[output]` | no | trajectory & log paths and cadences |
 
@@ -95,6 +96,15 @@ name = "HOH"
 potential = "harmonic"
 k_theta = 5.27e-19  # J/rad²  (75.9 kcal/mol/rad², flexible SPC)
 theta_0 = 1.911     # rad (~109.47°)
+
+# Constraint types are referenced from the `.topology` file's
+# [constraints] section. Each entry's `kind` selects the algorithm
+# that processes any group declared with this type.
+[[constraint_types]]
+name = "SPCE"
+kind = "settle-water"
+r_oh = 1.0e-10        # m (O-H constraint distance)
+r_hh = 1.633e-10      # m (H-H constraint distance)
 
 [neighbor_list]
 mode = "cell-list"
@@ -173,7 +183,12 @@ Fields accepted for `kind = "velocity-verlet"`:
 
 - `lossless: bool` — selects the lossless compensated-summation variant.
   Optional; defaults to `false`. When `true`, the runner allocates
-  `LosslessBuffers` and launches the `*_lossless` kernels.
+  `LosslessBuffers` and launches the `*_lossless` kernels. Composing
+  `lossless = true` with a non-empty `[constraints]` topology section
+  is rejected at config load (see
+  `integration/constraint-framework.md`); the lossy variant
+  (`lossless = false`) is the only integrator in the default registry
+  that supports constraints.
 
 Fields accepted for `kind = "langevin-baoab"`:
 
@@ -452,6 +467,44 @@ Fields accepted for `potential = "harmonic"` (see
 Names must be unique within the array. Unknown fields for the chosen
 `potential` are rejected.
 
+#### `[[constraint_types]]` (optional array of tables) <!-- rq-7e9cb164 -->
+
+Declares the parameter sets for rigid constraint groups referenced by
+name from the `.topology` file's `[constraints]` section. The array is
+optional and may be empty. When supplied, every constraint type's
+`name` field appears as the final column of one or more rows in the
+`.topology` file's `[constraints]` section. Constraint types whose
+`name` is never used in the file are permitted (declared-but-unused).
+
+The presence of at least one constraint group in the topology file
+triggers construction of the `Constraint` slot (see
+`integration/constraint-framework.md`) and is incompatible with any
+integrator whose `IntegratorKind::supports_constraints()` returns
+`false`. Cross-validation handles this incompatibility and returns
+`ConfigError::IncompatibleConstraint { integrator: <kind name> }`.
+
+Common fields:
+
+- `name: String` — unique identifier within the `[[constraint_types]]`
+  array. Empty strings are rejected. Case-sensitive.
+- `kind: String` — selects the algorithm that processes any group
+  declared with this type. The only supported value is
+  `"settle-water"`. Future values (`"m-shake"`, `"lincs"`, ...) are
+  reserved.
+
+Fields accepted for `kind = "settle-water"` (see
+`integration/settle.md`):
+
+- `r_oh: f64` — O–H constraint distance in metres. Required. Finite,
+  strictly positive.
+- `r_hh: f64` — H–H constraint distance in metres. Required. Finite,
+  strictly positive. Must satisfy `r_hh < 2 · r_oh`; otherwise the
+  loader returns `ConfigError::SettleGeometryInfeasible { name,
+  r_oh, r_hh }`.
+
+Names must be unique within the array. Unknown fields for the chosen
+`kind` are rejected.
+
 #### `[coulomb]` (optional table) <!-- rq-28d519b5 -->
 
 Activates the truncated Coulomb pair-force slot (see
@@ -630,6 +683,22 @@ memory can invoke it directly to obtain the same guarantees.
 5. If `[barostat]` is present and `config.integrator.owns_barostat()`
    returns `true` (currently only `mtk-npt`), validation returns
    `IncompatibleBarostat { integrator: <integrator kind name> }`.
+6. If the topology file's `[constraints]` section is non-empty (which
+   the loader detects after `load_topology_file` has run) and
+   `config.integrator.supports_constraints()` returns `false`,
+   validation returns
+   `IncompatibleConstraint { integrator: <integrator kind name> }`. In
+   the default registry this rejects every combination of constraints
+   with `langevin-baoab`, `mtk-npt`, or `velocity-verlet { lossless =
+   true }`.
+7. Every `[[constraint_types]]` entry's algorithm-specific geometry is
+   feasible. For `kind = "settle-water"`, the loader requires `r_hh <
+   2 · r_oh` and returns `SettleGeometryInfeasible { name, r_oh,
+   r_hh }` otherwise.
+8. Every constraint type name referenced from the topology file's
+   `[constraints]` section appears in `[[constraint_types]]`.
+   Unknown names surface through `load_topology_file` as
+   `TopologyFileError::UnknownConstraintType { .. }`.
 
 ## Feature API <!-- rq-110285ae -->
 
@@ -656,6 +725,8 @@ memory can invoke it directly to obtain the same guarantees.
     array is absent.
   - `angle_types: Vec<AngleTypeConfig>` — empty when the
     `[[angle_types]]` array is absent.
+  - `constraint_types: Vec<ConstraintTypeConfig>` — empty when the
+    `[[constraint_types]]` array is absent.
   - `coulomb: Option<CoulombConfig>` — `Some` when the `[coulomb]` table
     is present in the config, `None` otherwise. Mutually exclusive with
     `spme`.
@@ -780,6 +851,16 @@ memory can invoke it directly to obtain the same guarantees.
   The `name` field is the lookup key referenced from the `.topology`
   file's `[angles]` section.
 
+- `ConstraintTypeConfig` — tagged enum carrying the chosen <!-- rq-ac8fc96a -->
+  constraint-algorithm parameters. Variants:
+  - `SettleWater { name: String, r_oh: f64, r_hh: f64 }` — selected by
+    `kind = "settle-water"`.
+
+  The `name` field is the lookup key referenced from the `.topology`
+  file's `[constraints]` section. Each variant additionally exposes a
+  `expected_atom_count(&self) -> usize` method used by the topology
+  parser to validate row column counts (`SettleWater` returns `3`).
+
 - `CoulombConfig` <!-- rq-793a7cbb -->
   - `cutoff: f64` — real-space cutoff in metres.
   - `r_switch: f64` — populated from the optional `r_switch` field with
@@ -881,6 +962,16 @@ memory can invoke it directly to obtain the same guarantees.
     entries share a `name`.
   - `DuplicateAngleTypeName { name: String }` — two `[[angle_types]]`
     entries share a `name`.
+  - `DuplicateConstraintTypeName { name: String }` — two
+    `[[constraint_types]]` entries share a `name`.
+  - `IncompatibleConstraint { integrator: String }` — the topology
+    file's `[constraints]` section is non-empty and
+    `IntegratorKind::supports_constraints()` returns `false` for the
+    chosen integrator (in the default registry: `langevin-baoab`,
+    `mtk-npt`, or `velocity-verlet { lossless = true }`).
+  - `SettleGeometryInfeasible { name: String, r_oh: f64, r_hh: f64 }`
+    — a `[[constraint_types]]` entry with `kind = "settle-water"`
+    declares `r_hh ≥ 2 · r_oh`.
 
   `Parse` covers every shape error the typed deserialiser flags
   structurally: unknown fields under a tagged-enum table

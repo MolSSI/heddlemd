@@ -67,6 +67,12 @@ pub enum ConfigError {
     DuplicateBondTypeName { name: String },
     #[error("duplicate angle type name `{name}`")]
     DuplicateAngleTypeName { name: String },
+    #[error("duplicate constraint type name `{name}`")]
+    DuplicateConstraintTypeName { name: String },
+    #[error("integrator `{integrator}` does not support holonomic constraints; remove the topology file's [constraints] section or choose a different integrator")]
+    IncompatibleConstraint { integrator: String },
+    #[error("constraint type `{name}` has infeasible SETTLE geometry: r_hh = {r_hh} must be < 2 * r_oh ({r_oh})")]
+    SettleGeometryInfeasible { name: String, r_oh: f64, r_hh: f64 },
 }
 
 // =====================================================================
@@ -131,6 +137,13 @@ impl IntegratorKind {
 
     pub fn owns_barostat(&self) -> bool {
         matches!(self, IntegratorKind::MtkNpt { .. })
+    }
+
+    /// Returns `true` for integrator variants whose `step()` drives the
+    /// three `Constraint` slot hooks. In the default registry only the
+    /// lossy `velocity-verlet` qualifies.
+    pub fn supports_constraints(&self) -> bool {
+        matches!(self, IntegratorKind::VelocityVerlet { lossless: false })
     }
 }
 
@@ -264,6 +277,31 @@ impl AngleTypeConfig {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum ConstraintTypeConfig {
+    SettleWater {
+        name: String,
+        r_oh: f64,
+        r_hh: f64,
+    },
+}
+
+impl ConstraintTypeConfig {
+    pub fn name(&self) -> &str {
+        match self {
+            ConstraintTypeConfig::SettleWater { name, .. } => name,
+        }
+    }
+
+    /// Number of atoms a single `[constraints]` row of this type must
+    /// declare. Used by the topology parser to validate row column counts.
+    pub fn expected_atom_count(&self) -> usize {
+        match self {
+            ConstraintTypeConfig::SettleWater { .. } => 3,
+        }
+    }
+}
+
 // rq-060b1fab
 #[derive(Debug, Clone, PartialEq)]
 pub enum NeighborListConfig {
@@ -315,6 +353,7 @@ pub struct Config {
     pub pair_interactions: Vec<PairInteractionConfig>,
     pub bond_types: Vec<BondTypeConfig>,
     pub angle_types: Vec<AngleTypeConfig>,
+    pub constraint_types: Vec<ConstraintTypeConfig>,
     pub coulomb: Option<CoulombConfig>,
     pub spme: Option<SpmeConfig>,
     pub neighbor_list: NeighborListConfig,
@@ -380,6 +419,8 @@ struct RawConfig {
     #[serde(default)]
     angle_types: Vec<RawAngleType>,
     #[serde(default)]
+    constraint_types: Vec<RawConstraintType>,
+    #[serde(default)]
     coulomb: Option<RawCoulombConfig>,
     #[serde(default)]
     spme: Option<SpmeConfig>,
@@ -443,6 +484,26 @@ impl From<RawAngleType> for AngleTypeConfig {
                 k_theta,
                 theta_0,
             },
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
+enum RawConstraintType {
+    SettleWater {
+        name: String,
+        r_oh: f64,
+        r_hh: f64,
+    },
+}
+
+impl From<RawConstraintType> for ConstraintTypeConfig {
+    fn from(r: RawConstraintType) -> Self {
+        match r {
+            RawConstraintType::SettleWater { name, r_oh, r_hh } => {
+                ConstraintTypeConfig::SettleWater { name, r_oh, r_hh }
+            }
         }
     }
 }
@@ -625,6 +686,8 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
 
     let bond_types: Vec<BondTypeConfig> = raw.bond_types.into_iter().map(Into::into).collect();
     let angle_types: Vec<AngleTypeConfig> = raw.angle_types.into_iter().map(Into::into).collect();
+    let constraint_types: Vec<ConstraintTypeConfig> =
+        raw.constraint_types.into_iter().map(Into::into).collect();
     let coulomb: Option<CoulombConfig> = raw.coulomb.map(Into::into);
     let spme = raw.spme;
 
@@ -716,6 +779,7 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
         pair_interactions,
         bond_types,
         angle_types,
+        constraint_types,
         coulomb,
         spme,
         neighbor_list,
@@ -743,6 +807,7 @@ impl Config {
         validate_pair_interactions(&self.pair_interactions, &self.particle_types)?;
         validate_bond_types(&self.bond_types)?;
         validate_angle_types(&self.angle_types)?;
+        validate_constraint_types(&self.constraint_types)?;
         if let Some(c) = &self.coulomb {
             validate_coulomb(c)?;
         }
@@ -775,6 +840,23 @@ impl Config {
         // Electrostatics exclusivity (covered by ConflictingElectrostatics).
         if self.coulomb.is_some() && self.spme.is_some() {
             return Err(ConfigError::ConflictingElectrostatics);
+        }
+        Ok(())
+    }
+
+    /// Topology-coupled cross-validation: rejects a non-empty constraint
+    /// list when the chosen integrator's
+    /// `IntegratorKind::supports_constraints()` returns `false`. The
+    /// runner calls this after `load_topology_file` so the check can see
+    /// the parsed `[constraints]` section.
+    pub fn validate_constraint_compatibility(
+        &self,
+        has_constraints: bool,
+    ) -> Result<(), ConfigError> {
+        if has_constraints && !self.integrator.supports_constraints() {
+            return Err(ConfigError::IncompatibleConstraint {
+                integrator: self.integrator.name().to_string(),
+            });
         }
         Ok(())
     }
@@ -1056,6 +1138,38 @@ fn validate_bond_types(bts: &[BondTypeConfig]) -> Result<(), ConfigError> {
                 require_finite_positive(&format!("bond_types[{i}].de"), *de)?;
                 require_finite_positive(&format!("bond_types[{i}].a"), *a)?;
                 require_finite_positive(&format!("bond_types[{i}].re"), *re)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_constraint_types(cts: &[ConstraintTypeConfig]) -> Result<(), ConfigError> {
+    let mut seen: Vec<&str> = Vec::with_capacity(cts.len());
+    for (i, ct) in cts.iter().enumerate() {
+        match ct {
+            ConstraintTypeConfig::SettleWater { name, r_oh, r_hh } => {
+                if name.is_empty() {
+                    return Err(invalid(
+                        format!("constraint_types[{i}].name"),
+                        "name must not be empty",
+                    ));
+                }
+                if seen.iter().any(|n| *n == name) {
+                    return Err(ConfigError::DuplicateConstraintTypeName {
+                        name: name.clone(),
+                    });
+                }
+                seen.push(name);
+                require_finite_positive(&format!("constraint_types[{i}].r_oh"), *r_oh)?;
+                require_finite_positive(&format!("constraint_types[{i}].r_hh"), *r_hh)?;
+                if *r_hh >= 2.0 * *r_oh {
+                    return Err(ConfigError::SettleGeometryInfeasible {
+                        name: name.clone(),
+                        r_oh: *r_oh,
+                        r_hh: *r_hh,
+                    });
+                }
             }
         }
     }
