@@ -18,6 +18,12 @@ pub enum SimulationBoxError {
     NonFiniteLatticeValue { name: &'static str, value: f32 },
     #[error("non-positive simulation-box diagonal for `{name}`: {value}")]
     NonPositiveDiagonal { name: &'static str, value: f32 },
+    #[error("simulation-box perpendicular width along lattice direction `{direction}` is {width}, below the required {required}")]
+    PerpendicularWidthTooSmall {
+        direction: &'static str,
+        width: f32,
+        required: f32,
+    },
 }
 
 fn check_finite(name: &'static str, value: f32) -> Result<(), SimulationBoxError> {
@@ -190,6 +196,30 @@ impl SimulationBox {
     pub fn min_perpendicular_width(&self) -> f32 {
         let [w_a, w_b, w_c] = self.perpendicular_widths();
         w_a.min(w_b).min(w_c)
+    }
+
+    // rq-1a7bd47a
+    //
+    // Scans the three perpendicular widths in lattice-direction order
+    // (a, b, c) and returns the first one whose width is strictly less
+    // than `required`. `required` is taken verbatim — no sign or
+    // finiteness pre-check is applied.
+    pub fn check_min_perpendicular_width(
+        &self,
+        required: f32,
+    ) -> Result<(), SimulationBoxError> {
+        let widths = self.perpendicular_widths();
+        let directions: [&'static str; 3] = ["a", "b", "c"];
+        for d in 0..3 {
+            if widths[d] < required {
+                return Err(SimulationBoxError::PerpendicularWidthTooSmall {
+                    direction: directions[d],
+                    width: widths[d],
+                    required,
+                });
+            }
+        }
+        Ok(())
     }
 
     // rq-d49c9093

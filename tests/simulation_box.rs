@@ -604,3 +604,145 @@ fn mutating_a_copy_does_not_affect_the_original() {
     assert_eq!(b.lattice(), [10.0_f32, 8.0, 6.0, 0.0, 0.0, 0.0]);
     assert_eq!(b.generation(), 0);
 }
+
+// --- check_min_perpendicular_width ---
+
+#[test] // rq-0fa3b49f
+fn check_min_perpendicular_width_ok_when_every_width_meets_threshold() {
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).unwrap();
+    assert!(b.check_min_perpendicular_width(5.0).is_ok());
+}
+
+#[test] // rq-0061906c
+fn check_min_perpendicular_width_ok_at_exact_equality() {
+    // Smallest width is lz = 6.0; threshold of 6.0 must still pass.
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).unwrap();
+    assert!(b.check_min_perpendicular_width(6.0).is_ok());
+}
+
+#[test] // rq-394a4bb1
+fn check_min_perpendicular_width_flags_direction_a_when_only_w_a_fails() {
+    let b = SimulationBox::new(4.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
+    let err = b.check_min_perpendicular_width(5.0).unwrap_err();
+    match err {
+        SimulationBoxError::PerpendicularWidthTooSmall {
+            direction,
+            width,
+            required,
+        } => {
+            assert_eq!(direction, "a");
+            assert_eq!(width, 4.0_f32);
+            assert_eq!(required, 5.0_f32);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test] // rq-7600d28c
+fn check_min_perpendicular_width_flags_direction_b_when_only_w_b_fails() {
+    let b = SimulationBox::new(10.0, 4.0, 10.0, 0.0, 0.0, 0.0).unwrap();
+    let err = b.check_min_perpendicular_width(5.0).unwrap_err();
+    match err {
+        SimulationBoxError::PerpendicularWidthTooSmall {
+            direction,
+            width,
+            required,
+        } => {
+            assert_eq!(direction, "b");
+            assert_eq!(width, 4.0_f32);
+            assert_eq!(required, 5.0_f32);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn check_min_perpendicular_width_flags_direction_c_when_only_w_c_fails() {
+    let b = SimulationBox::new(10.0, 10.0, 4.0, 0.0, 0.0, 0.0).unwrap();
+    let err = b.check_min_perpendicular_width(5.0).unwrap_err();
+    match err {
+        SimulationBoxError::PerpendicularWidthTooSmall {
+            direction,
+            width,
+            required,
+        } => {
+            assert_eq!(direction, "c");
+            assert_eq!(width, 4.0_f32);
+            assert_eq!(required, 5.0_f32);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn check_min_perpendicular_width_reports_first_failing_direction_when_multiple_fail() {
+    // All three widths fail; only direction "a" should be reported.
+    let b = SimulationBox::new(4.0, 4.0, 4.0, 0.0, 0.0, 0.0).unwrap();
+    let err = b.check_min_perpendicular_width(5.0).unwrap_err();
+    match err {
+        SimulationBoxError::PerpendicularWidthTooSmall {
+            direction, width, ..
+        } => {
+            assert_eq!(direction, "a");
+            assert_eq!(width, 4.0_f32);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn check_min_perpendicular_width_on_triclinic_uses_perpendicular_width_not_edge() {
+    // A box with yz tilt: w_b = (ly * lz) / sqrt(lz^2 + yz^2) =
+    // 100 / sqrt(200) ≈ 7.071. Edge length ly = 10.0 would pass an 8.0
+    // threshold; the perpendicular width fails.
+    let b = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 10.0).unwrap();
+    let err = b.check_min_perpendicular_width(8.0).unwrap_err();
+    match err {
+        SimulationBoxError::PerpendicularWidthTooSmall {
+            direction,
+            width,
+            required,
+        } => {
+            assert_eq!(direction, "b");
+            let expected = 100.0_f32 / 200.0_f32.sqrt();
+            assert!((width - expected).abs() < 1.0e-6_f32);
+            assert_eq!(required, 8.0_f32);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+#[test]
+fn check_min_perpendicular_width_with_non_positive_threshold_always_ok() {
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).unwrap();
+    assert!(b.check_min_perpendicular_width(-1.0).is_ok());
+    assert!(b.check_min_perpendicular_width(0.0).is_ok());
+}
+
+#[test]
+fn check_min_perpendicular_width_is_deterministic() {
+    let b1 = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).unwrap();
+    let b2 = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).unwrap();
+    let r1 = b1.check_min_perpendicular_width(7.0);
+    let r2 = b2.check_min_perpendicular_width(7.0);
+    match (r1, r2) {
+        (Ok(()), Ok(())) => {}
+        (
+            Err(SimulationBoxError::PerpendicularWidthTooSmall {
+                direction: d1,
+                width: w1,
+                required: r1,
+            }),
+            Err(SimulationBoxError::PerpendicularWidthTooSmall {
+                direction: d2,
+                width: w2,
+                required: r2,
+            }),
+        ) => {
+            assert_eq!(d1, d2);
+            assert_eq!(w1.to_bits(), w2.to_bits());
+            assert_eq!(r1.to_bits(), r2.to_bits());
+        }
+        other => panic!("non-deterministic outcomes: {other:?}"),
+    }
+}

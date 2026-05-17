@@ -167,8 +167,8 @@ width.
   invariants on each subsequent mutation and increments the generation
   on success. All accessors are total.
 
-- `SimulationBoxError` — error type returned by the constructor and <!-- rq-aef9888b -->
-  mutator:
+- `SimulationBoxError` — error type returned by the constructor, the <!-- rq-aef9888b -->
+  mutator, and `check_min_perpendicular_width`:
   - `NonFiniteLatticeValue { name: &'static str, value: f32 }` — at least
     one lattice parameter is NaN or infinite. `name` is one of `"lx"`,
     `"ly"`, `"lz"`, `"xy"`, `"xz"`, `"yz"`.
@@ -176,6 +176,15 @@ width.
     one diagonal is finite but `<= 0.0`. `name` is one of `"lx"`, `"ly"`,
     `"lz"`. Tilts (`xy`, `xz`, `yz`) are not subject to this check; any
     finite sign or magnitude is accepted.
+  - `PerpendicularWidthTooSmall { direction: &'static str, width: f32, required: f32 }`
+    — at least one of the box's perpendicular widths is strictly less
+    than the supplied `required` value. `direction` is one of `"a"`,
+    `"b"`, `"c"` and identifies the first lattice direction (scanning
+    `a → b → c`) whose perpendicular width fails the threshold. `width`
+    is the failing direction's `f32` perpendicular width; `required` is
+    the supplied threshold. Only produced by
+    `check_min_perpendicular_width`; the constructor and mutator never
+    surface this variant.
 
 ### Constructor <!-- rq-b8070abb -->
 
@@ -211,6 +220,29 @@ width.
   - Returns `min(w_a, w_b, w_c)` computed via the closed-form expressions
     in *Perpendicular Widths*. All intermediate operations are `f32` in
     the order shown.
+
+- `SimulationBox::check_min_perpendicular_width(&self, required: f32) -> Result<(), SimulationBoxError>` <!-- rq-1a7bd47a -->
+  - Computes the three perpendicular widths via the closed-form
+    expressions in *Perpendicular Widths* (no allocation), then scans
+    them in lattice-direction order `a → b → c` and returns
+    `Err(SimulationBoxError::PerpendicularWidthTooSmall { direction,
+    width, required })` on the first direction whose width is strictly
+    less than `required`. `direction` is `"a"`, `"b"`, or `"c"`
+    matching the failing direction; `width` is that direction's
+    `f32` perpendicular width. Returns `Ok(())` when every direction
+    has `width >= required`.
+  - The scan order is fixed at `a → b → c`. When more than one
+    direction fails, the variant reports the lowest-indexed failing
+    direction; remaining directions are not inspected.
+  - `required` is taken verbatim — no transformation or sign check is
+    applied. A `required <= 0` always returns `Ok(())` because every
+    `f32` perpendicular width produced by a valid box is strictly
+    positive. A non-finite `required` (NaN or infinity) yields
+    `Err(...)` for direction `"a"` because every `f32 < NaN` and every
+    finite width is `< +inf`.
+  - The widths' computation is pure `f32` in the order shown by
+    `perpendicular_widths`; two calls with identical `required` on the
+    same `SimulationBox` produce byte-identical outcomes.
 
 - `SimulationBox::generation(&self) -> u64` <!-- rq-dc17132d -->
   - Returns the box's generation counter. The counter is `0` immediately
@@ -697,4 +729,69 @@ Feature: Simulation box and periodic boundary conditions
     And copy.generation() equals 1
     And box.lattice() equals [10.0, 8.0, 6.0, 0.0, 0.0, 0.0]
     And box.generation() equals 0
+
+  # --- check_min_perpendicular_width ---
+
+  @rq-0fa3b49f
+  Scenario: check_min_perpendicular_width returns Ok when every width meets the threshold
+    Given an orthorhombic SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    When box.check_min_perpendicular_width(5.0) is called
+    Then it returns Ok(())
+
+  @rq-0061906c
+  Scenario: check_min_perpendicular_width returns Ok at exact equality
+    Given an orthorhombic SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    When box.check_min_perpendicular_width(6.0) is called
+    Then it returns Ok(()) (smallest width is 6.0, threshold is 6.0)
+
+  @rq-394a4bb1
+  Scenario: check_min_perpendicular_width flags direction "a" when w_a fails
+    Given an orthorhombic SimulationBox::new(4.0, 10.0, 10.0, 0.0, 0.0, 0.0)
+    When box.check_min_perpendicular_width(5.0) is called
+    Then it returns Err(SimulationBoxError::PerpendicularWidthTooSmall {
+      direction: "a", width: 4.0, required: 5.0 })
+
+  @rq-7600d28c
+  Scenario: check_min_perpendicular_width flags direction "b" when only w_b fails
+    Given an orthorhombic SimulationBox::new(10.0, 4.0, 10.0, 0.0, 0.0, 0.0)
+    When box.check_min_perpendicular_width(5.0) is called
+    Then it returns Err(SimulationBoxError::PerpendicularWidthTooSmall {
+      direction: "b", width: 4.0, required: 5.0 })
+
+  @rq-5ffa0551
+  Scenario: check_min_perpendicular_width flags direction "c" when only w_c fails
+    Given an orthorhombic SimulationBox::new(10.0, 10.0, 4.0, 0.0, 0.0, 0.0)
+    When box.check_min_perpendicular_width(5.0) is called
+    Then it returns Err(SimulationBoxError::PerpendicularWidthTooSmall {
+      direction: "c", width: 4.0, required: 5.0 })
+
+  @rq-743ae35c
+  Scenario: check_min_perpendicular_width reports the first failing direction when multiple fail
+    Given an orthorhombic SimulationBox::new(4.0, 4.0, 4.0, 0.0, 0.0, 0.0)
+    When box.check_min_perpendicular_width(5.0) is called
+    Then it returns Err(SimulationBoxError::PerpendicularWidthTooSmall {
+      direction: "a", width: 4.0, required: 5.0 })
+    And the "b" and "c" directions are not reported
+
+  @rq-8ac1a52f
+  Scenario: check_min_perpendicular_width on a triclinic box uses perpendicular widths, not edge lengths
+    Given a SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 10.0)
+    And w_b equals 100.0 / sqrt(200.0) ≈ 7.071
+    When box.check_min_perpendicular_width(8.0) is called
+    Then it returns Err(SimulationBoxError::PerpendicularWidthTooSmall {
+      direction: "b", width: ≈ 7.071, required: 8.0 })
+
+  @rq-98ac1915
+  Scenario: check_min_perpendicular_width with non-positive threshold always returns Ok
+    Given an orthorhombic SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    When box.check_min_perpendicular_width(-1.0) is called
+    Then it returns Ok(())
+    When box.check_min_perpendicular_width(0.0) is called
+    Then it returns Ok(())
+
+  @rq-3eaf65b6
+  Scenario: check_min_perpendicular_width is deterministic
+    Given two SimulationBox instances constructed from identical six-parameter tuples
+    When check_min_perpendicular_width(required) is called on each with the same required value
+    Then both calls return byte-identical outcomes
 ```

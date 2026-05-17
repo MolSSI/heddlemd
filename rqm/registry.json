@@ -6,6 +6,13 @@
     "title": "Reject negative dt",
     "type": "scenario"
   },
+  "rq-0061906c": {
+    "decl": "Scenario: check_min_perpendicular_width returns Ok at exact equality",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "check_min_perpendicular_width returns Ok at exact equality",
+    "type": "scenario"
+  },
   "rq-0076e6b4": {
     "decl": "## Out of Scope",
     "file": "integration/berendsen",
@@ -833,6 +840,13 @@
     "title": "Berendsen \"conserved quantity\"",
     "type": "section"
   },
+  "rq-0fa3b49f": {
+    "decl": "Scenario: check_min_perpendicular_width returns Ok when every width meets the threshold",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "check_min_perpendicular_width returns Ok when every width meets the threshold",
+    "type": "scenario"
+  },
   "rq-0fcb5a1e": {
     "decl": "Scenario: [barostat] kind = \"berendsen\" with all required fields accepted",
     "file": "io/config-schema",
@@ -1492,6 +1506,13 @@
     "refs": [],
     "title": "Single-step round-trip restores the observable state bit-exactly under zero force",
     "type": "scenario"
+  },
+  "rq-1a7bd47a": {
+    "decl": "- `SimulationBox::check_min_perpendicular_width(&self, required: f32) -> Result<(), SimulationBoxError>`",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "SimulationBox",
+    "type": "api-item"
   },
   "rq-1ad7e751": {
     "decl": "- `CuFftError` — wrapper around cuFFT failure codes from the underlying",
@@ -3366,6 +3387,13 @@
     "title": "rescale_velocities with factor=1.0 is the identity",
     "type": "scenario"
   },
+  "rq-394a4bb1": {
+    "decl": "Scenario: check_min_perpendicular_width flags direction \"a\" when w_a fails",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "check_min_perpendicular_width flags direction \"a\" when w_a fails",
+    "type": "scenario"
+  },
   "rq-3975fb2d": {
     "decl": "Scenario: Log file header omits pressure and box_volume when no barostat is configured",
     "file": "integration/berendsen-barostat",
@@ -3683,6 +3711,13 @@
     "file": "forces/framework",
     "refs": [],
     "title": "Combiner with num_slots == 0 writes zeros",
+    "type": "scenario"
+  },
+  "rq-3eaf65b6": {
+    "decl": "Scenario: check_min_perpendicular_width is deterministic",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "check_min_perpendicular_width is deterministic",
     "type": "scenario"
   },
   "rq-3eb8fe40": {
@@ -5186,6 +5221,13 @@
     "title": "SimulationBox",
     "type": "api-item"
   },
+  "rq-5ffa0551": {
+    "decl": "Scenario: check_min_perpendicular_width flags direction \"c\" when only w_c fails",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "check_min_perpendicular_width flags direction \"c\" when only w_c fails",
+    "type": "scenario"
+  },
   "rq-606197d5": {
     "decl": "### Cadence",
     "file": "io/log-output",
@@ -6204,6 +6246,13 @@
     "title": "Progress reporting",
     "type": "section"
   },
+  "rq-743ae35c": {
+    "decl": "Scenario: check_min_perpendicular_width reports the first failing direction when multiple fail",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "check_min_perpendicular_width reports the first failing direction when multiple fail",
+    "type": "scenario"
+  },
   "rq-7453115b": {
     "decl": "- `TimingsReport` — public, `Clone`, `Debug`. Carries an ordered",
     "file": "performance-analysis",
@@ -6322,6 +6371,13 @@
     "refs": [],
     "title": "Test Fixture",
     "type": "section"
+  },
+  "rq-7600d28c": {
+    "decl": "Scenario: check_min_perpendicular_width flags direction \"b\" when only w_b fails",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "check_min_perpendicular_width flags direction \"b\" when only w_b fails",
+    "type": "scenario"
   },
   "rq-76069102": {
     "decl": "Scenario: apply_pre and apply_post launch the expected kernel calls for default chain parameters",
@@ -7372,6 +7428,13 @@
     "title": "The DriverError-to-TimingsError conversion is retained",
     "type": "scenario"
   },
+  "rq-8ac1a52f": {
+    "decl": "Scenario: check_min_perpendicular_width on a triclinic box uses perpendicular widths, not edge lengths",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "check_min_perpendicular_width on a triclinic box uses perpendicular widths, not edge lengths",
+    "type": "scenario"
+  },
   "rq-8afd1b7d": {
     "decl": "Scenario: Construct with particle_count = 0",
     "file": "integration/nose-hoover-chain",
@@ -8054,6 +8117,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-98ac1915": {
+    "decl": "Scenario: check_min_perpendicular_width with non-positive threshold always returns Ok",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "check_min_perpendicular_width with non-positive threshold always returns Ok",
+    "type": "scenario"
   },
   "rq-98fd2e40": {
     "decl": "Scenario: Stretched angle produces a torque that closes the angle",
@@ -9253,7 +9323,7 @@
     "type": "scenario"
   },
   "rq-aef9888b": {
-    "decl": "- `SimulationBoxError` — error type returned by the constructor and",
+    "decl": "- `SimulationBoxError` — error type returned by the constructor, the",
     "file": "simulation-box",
     "refs": [
       {
@@ -13511,7 +13581,16 @@
   "rq-fc6859df": {
     "decl": "- `compute_total_potential_energy(buffers: &ParticleBuffers, scratch: &mut CudaSlice<f32>) -> Result<f32, GpuError>`",
     "file": "integration/nose-hoover-chain",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "compute_total_potential_energy",
     "type": "api-item"
   },

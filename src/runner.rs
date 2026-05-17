@@ -163,8 +163,8 @@ fn run_simulation_with_phase(
     let n = init.particle_count;
 
     // Cell-list box-compatibility check (uses the init file's box).
-    // For a triclinic box the constraint is on the perpendicular widths
-    // along each lattice direction, not on the diagonal edge lengths.
+    // Cutoff aggregation stays here because it walks the config; the
+    // per-direction width check is delegated to `SimulationBox`.
     if let NeighborListConfig::CellList { r_skin, .. } = &config.neighbor_list {
         let mut cutoff_max: f64 = config
             .pair_interactions
@@ -178,19 +178,27 @@ fn run_simulation_with_phase(
             cutoff_max = cutoff_max.max(s.r_cut_real);
         }
         let required = (3.0 * (cutoff_max + r_skin)) as f32;
-        let widths = sim_box.perpendicular_widths();
-        let direction_names: [&'static str; 3] = ["a", "b", "c"];
-        for d in 0..3 {
-            if widths[d] < required {
-                return Err((
+        if let Err(e) = sim_box.check_min_perpendicular_width(required) {
+            return Err(match e {
+                crate::pbc::SimulationBoxError::PerpendicularWidthTooSmall {
+                    direction,
+                    width,
+                    required,
+                } => (
                     RunnerError::CellListBoxTooSmall {
-                        direction: direction_names[d],
-                        width: widths[d],
+                        direction,
+                        width,
                         required,
                     },
                     ExitPhase::Setup,
-                ));
-            }
+                ),
+                // The constructor / mutator variants are unreachable here:
+                // `check_min_perpendicular_width` only produces
+                // `PerpendicularWidthTooSmall`.
+                _ => unreachable!(
+                    "check_min_perpendicular_width only produces PerpendicularWidthTooSmall"
+                ),
+            });
         }
     }
 

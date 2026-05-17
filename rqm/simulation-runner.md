@@ -70,14 +70,16 @@ message.
    simulation uses; the config does not specify a box. Immediately
    after the box is known, verify the cell-list compatibility check:
    when `config.neighbor_list` is `NeighborListConfig::CellList { r_skin, .. }`,
-   every lattice direction `d ∈ {a, b, c}` must satisfy
-   `w_d >= 3 * (cutoff_max + r_skin)` where `w_d` is the box's
-   perpendicular width along direction `d` (see `simulation-box.md`)
-   and `cutoff_max` is the largest cutoff across
+   the runner computes `cutoff_max` as the largest cutoff across
    `config.pair_interactions`, `config.coulomb.cutoff`, and
-   `config.spme.r_cut_real` (whichever are present).
-   A violation surfaces as `RunnerError::CellListBoxTooSmall {
-   direction, width, required }` and exits with code `1`.
+   `config.spme.r_cut_real` (whichever are present), forms
+   `required = 3 * (cutoff_max + r_skin)`, and delegates the
+   per-direction check to
+   `sim_box.check_min_perpendicular_width(required)` (see
+   `simulation-box.md`). On `Err(SimulationBoxError::PerpendicularWidthTooSmall
+   { direction, width, required })` the runner translates the payload
+   verbatim into `RunnerError::CellListBoxTooSmall { direction, width,
+   required }` and exits with code `1`.
    `NeighborListConfig::AllPairs` skips this check.
 6a. **Load topology file (if supplied).** When
     `config.topology.is_some()`, build the slice of bond type names
@@ -425,7 +427,13 @@ wrapper that calls into the library.
     that is shorter than `3 * (cutoff_max + r_skin)`, where `cutoff_max`
     is the largest cutoff across `config.pair_interactions`,
     `config.coulomb.cutoff`, and `config.spme.r_cut_real` (whichever
-    are present). `direction` is one of `"a"`, `"b"`, `"c"`.
+    are present). `direction` is one of `"a"`, `"b"`, `"c"`. The
+    payload is filled by translating
+    `SimulationBoxError::PerpendicularWidthTooSmall` returned by
+    `sim_box.check_min_perpendicular_width(required)` (see
+    `simulation-box.md`); the runner aggregates `cutoff_max`,
+    computes `required = 3 * (cutoff_max + r_skin)`, and invokes the
+    method.
   - `CuFftNonDeterministic { differences: usize }` — `init_device`'s
     cuFFT determinism smoke test detected `differences > 0` bytes
     differing between two consecutive R2C transforms of the same
