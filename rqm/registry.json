@@ -304,6 +304,13 @@
     "title": "New state has zero-initialised potential_energies and virials",
     "type": "scenario"
   },
+  "rq-053613b6": {
+    "decl": "Scenario: Pair interaction rejects an extra field for the chosen potential",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Pair interaction rejects an extra field for the chosen potential",
+    "type": "scenario"
+  },
   "rq-0540b862": {
     "decl": "## Launch Configuration",
     "file": "integration/velocity-verlet",
@@ -421,7 +428,7 @@
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mod.rs",
         "kind": "code"
       }
     ],
@@ -513,7 +520,7 @@
     "file": "integration/velocity-verlet",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/velocity_verlet.rs",
         "kind": "code"
       }
     ],
@@ -555,6 +562,13 @@
     "title": "Bond",
     "type": "api-item"
   },
+  "rq-0a92d90b": {
+    "decl": "Scenario: Unknown neighbor_list mode is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Unknown neighbor_list mode is rejected",
+    "type": "scenario"
+  },
   "rq-0ae304bc": {
     "decl": "Scenario: minimum_image handles many-period displacements (orthorhombic)",
     "file": "simulation-box",
@@ -589,18 +603,6 @@
     "file": "integration/mtk-npt",
     "refs": [],
     "title": "MtkNptBuilder",
-    "type": "api-item"
-  },
-  "rq-0b9372e8": {
-    "decl": "- `ConfigError` — error type returned by `load_config`. Variants:",
-    "file": "io/config-schema",
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "ConfigError",
     "type": "api-item"
   },
   "rq-0bb735c9": {
@@ -718,7 +720,7 @@
         "kind": "code"
       },
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/berendsen_barostat.rs",
         "kind": "code"
       },
       {
@@ -830,13 +832,6 @@
     "refs": [],
     "title": "Berendsen \"conserved quantity\"",
     "type": "section"
-  },
-  "rq-0fa153b7": {
-    "decl": "Scenario: C-rescale barostat extra fields are rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "C-rescale barostat extra fields are rejected",
-    "type": "scenario"
   },
   "rq-0fcb5a1e": {
     "decl": "Scenario: [barostat] kind = \"berendsen\" with all required fields accepted",
@@ -971,7 +966,7 @@
     "file": "integration/andersen",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/andersen.rs",
         "kind": "code"
       }
     ],
@@ -991,7 +986,15 @@
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/berendsen_barostat.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/c_rescale_barostat.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/mod.rs",
         "kind": "code"
       }
     ],
@@ -1024,7 +1027,7 @@
     "file": "integration/c-rescale-barostat",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/c_rescale_barostat.rs",
         "kind": "code"
       },
       {
@@ -1153,6 +1156,13 @@
     "refs": [],
     "title": "Feature: Lennard-Jones Pair Force Kernel",
     "type": "file"
+  },
+  "rq-13ca0415": {
+    "decl": "Scenario: [neighbor_list] rejects unknown fields for the chosen mode",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[neighbor_list] rejects unknown fields for the chosen mode",
+    "type": "scenario"
   },
   "rq-13e15b90": {
     "decl": "Scenario: Bond row with atom index out of range",
@@ -1421,6 +1431,13 @@
     "title": "rescale_positions",
     "type": "api-item"
   },
+  "rq-19ccc047": {
+    "decl": "Scenario: [thermostat] unknown kind is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[thermostat] unknown kind is rejected",
+    "type": "scenario"
+  },
   "rq-19f7ffca": {
     "decl": "## Feature API",
     "file": "forces/harmonic-angle",
@@ -1646,12 +1663,7 @@
     "decl": "#### `[thermostat]` (optional)",
     "file": "io/config-schema",
     "level": 4,
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "`[thermostat]` (optional)",
     "type": "section"
   },
@@ -2060,13 +2072,6 @@
     "title": "Config angle_type with potential != \"harmonic\" is rejected",
     "type": "scenario"
   },
-  "rq-22699c4c": {
-    "decl": "Scenario: angle_type unknown potential is rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "angle_type unknown potential is rejected",
-    "type": "scenario"
-  },
   "rq-22d0ce50": {
     "decl": "### Types",
     "file": "forces/topology",
@@ -2226,7 +2231,7 @@
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mod.rs",
         "kind": "code"
       }
     ],
@@ -2269,7 +2274,7 @@
     "file": "integration/berendsen",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/berendsen.rs",
         "kind": "code"
       }
     ],
@@ -2281,13 +2286,6 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Neighbor list applies minimum-image PBC",
-    "type": "scenario"
-  },
-  "rq-2618e113": {
-    "decl": "Scenario: [thermostat] unknown kind is rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "[thermostat] unknown kind is rejected",
     "type": "scenario"
   },
   "rq-261fde88": {
@@ -2487,7 +2485,7 @@
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mod.rs",
         "kind": "code"
       }
     ],
@@ -2520,7 +2518,7 @@
     "file": "integration/csvr",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/csvr.rs",
         "kind": "code"
       }
     ],
@@ -2736,7 +2734,7 @@
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mod.rs",
         "kind": "code"
       }
     ],
@@ -2874,19 +2872,16 @@
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/nose_hoover_chain.rs",
         "kind": "code"
       }
     ],
     "title": "Thermostat",
     "type": "api-item"
-  },
-  "rq-30270f03": {
-    "decl": "Scenario: Velocity-Verlet kind rejects Langevin fields",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Velocity-Verlet kind rejects Langevin fields",
-    "type": "scenario"
   },
   "rq-303211d9": {
     "decl": "- `LosslessBuffers` — host-side wrapper around the six device residual",
@@ -2919,12 +2914,12 @@
     "title": "Trivial-mode state has no cell-list fields",
     "type": "scenario"
   },
-  "rq-3127ab44": {
-    "decl": "Scenario: Unknown [barostat] kind is rejected",
+  "rq-3108381e": {
+    "decl": "- `ConfigError` — error type returned by `load_config` and by",
     "file": "io/config-schema",
     "refs": [],
-    "title": "Unknown [barostat] kind is rejected",
-    "type": "scenario"
+    "title": "ConfigError",
+    "type": "api-item"
   },
   "rq-312906a6": {
     "decl": "### MKT Liouville splitting",
@@ -3186,7 +3181,7 @@
     "file": "integration/berendsen",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/berendsen.rs",
         "kind": "code"
       }
     ],
@@ -3378,16 +3373,11 @@
     "title": "Log file header omits pressure and box_volume when no barostat is configured",
     "type": "scenario"
   },
-  "rq-39881bb0": {
+  "rq-39891001": {
     "decl": "### Functions",
     "file": "io/config-schema",
     "level": 3,
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Functions",
     "type": "section"
   },
@@ -3473,7 +3463,11 @@
         "kind": "code"
       },
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mtk_npt.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/nose_hoover_chain.rs",
         "kind": "code"
       },
       {
@@ -3613,7 +3607,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/philox.rs",
         "kind": "code"
       }
     ],
@@ -3703,6 +3697,13 @@
     "file": "io/log-output",
     "refs": [],
     "title": "Append rows in source order",
+    "type": "scenario"
+  },
+  "rq-3f01c746": {
+    "decl": "Scenario: bond_type unknown potential is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "bond_type unknown potential is rejected",
     "type": "scenario"
   },
   "rq-3f46fb2e": {
@@ -3930,6 +3931,13 @@
     "title": "Lennard-Jones pair interaction missing sigma is rejected",
     "type": "scenario"
   },
+  "rq-45bb8194": {
+    "decl": "- `load_config(path: &Path) -> Result<Config, ConfigError>`",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "load_config",
+    "type": "api-item"
+  },
   "rq-45eb243b": {
     "decl": "- `LogWriterError` — error type. Variants:",
     "file": "io/log-output",
@@ -4019,7 +4027,7 @@
     "file": "integration/csvr",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/csvr.rs",
         "kind": "code"
       }
     ],
@@ -4067,7 +4075,7 @@
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mod.rs",
         "kind": "code"
       }
     ],
@@ -4257,7 +4265,7 @@
     "file": "integration/nose-hoover-chain",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/nose_hoover_chain.rs",
         "kind": "code"
       }
     ],
@@ -4343,13 +4351,6 @@
     "refs": [],
     "title": "CUDA Kernels",
     "type": "section"
-  },
-  "rq-4e0e1654": {
-    "decl": "Scenario: [thermostat] extra fields for the chosen kind are rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "[thermostat] extra fields for the chosen kind are rejected",
-    "type": "scenario"
   },
   "rq-4e9e09f0": {
     "decl": "Scenario: apply_post launches the expected kernel set",
@@ -5041,6 +5042,13 @@
     "title": "A direct error-to-error conversion is generated by #[from]",
     "type": "scenario"
   },
+  "rq-5d91f07d": {
+    "decl": "Scenario: [barostat] rejects an unknown field for the chosen kind",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[barostat] rejects an unknown field for the chosen kind",
+    "type": "scenario"
+  },
   "rq-5d9d7f83": {
     "decl": "Scenario: Display output is distinct from the Debug rendering",
     "file": "error-handling",
@@ -5053,7 +5061,7 @@
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mod.rs",
         "kind": "code"
       }
     ],
@@ -5099,7 +5107,7 @@
         "kind": "code"
       },
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/andersen.rs",
         "kind": "code"
       }
     ],
@@ -5111,13 +5119,6 @@
     "file": "integration/mtk-npt",
     "refs": [],
     "title": "At equilibrium, time-averaged temperature tracks T_target",
-    "type": "scenario"
-  },
-  "rq-5e5f9917": {
-    "decl": "Scenario: neighbor_list all-pairs mode rejects max_neighbors",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "neighbor_list all-pairs mode rejects max_neighbors",
     "type": "scenario"
   },
   "rq-5e802037": {
@@ -5281,7 +5282,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/berendsen_barostat.rs",
         "kind": "code"
       }
     ],
@@ -5300,7 +5301,7 @@
     "file": "integration/nose-hoover-chain",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/nose_hoover_chain.rs",
         "kind": "code"
       }
     ],
@@ -5414,6 +5415,13 @@
     "title": "Reject non-integer particle count",
     "type": "scenario"
   },
+  "rq-657bbbd6": {
+    "decl": "Scenario: Unknown integrator kind is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Unknown integrator kind is rejected",
+    "type": "scenario"
+  },
   "rq-6606584b": {
     "decl": "Scenario: Config rejected by load_config",
     "file": "simulation-runner",
@@ -5514,7 +5522,7 @@
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mod.rs",
         "kind": "code"
       }
     ],
@@ -5600,13 +5608,6 @@
     "file": "forces/morse-bonded",
     "refs": [],
     "title": "Bond-force reduction sums energy and virial alongside forces",
-    "type": "scenario"
-  },
-  "rq-693b4dba": {
-    "decl": "Scenario: Berendsen barostat extra fields are rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Berendsen barostat extra fields are rejected",
     "type": "scenario"
   },
   "rq-693ce6fa": {
@@ -5764,7 +5765,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mod.rs",
         "kind": "code"
       }
     ],
@@ -5783,7 +5784,7 @@
     "file": "integration/berendsen",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/berendsen.rs",
         "kind": "code"
       }
     ],
@@ -5810,7 +5811,7 @@
     "level": 2,
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mod.rs",
         "kind": "code"
       }
     ],
@@ -5880,7 +5881,7 @@
     "file": "integration/andersen",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/andersen.rs",
         "kind": "code"
       }
     ],
@@ -5891,12 +5892,7 @@
     "decl": "### Path resolution and overwrite policy",
     "file": "io/config-schema",
     "level": 3,
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Path resolution and overwrite policy",
     "type": "section"
   },
@@ -6269,7 +6265,7 @@
     "file": "integration/csvr",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/csvr.rs",
         "kind": "code"
       }
     ],
@@ -6456,12 +6452,7 @@
     "decl": "#### `[[particle_types]]` (array of tables)",
     "file": "io/config-schema",
     "level": 4,
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "`[[particle_types]]` (array of tables)",
     "type": "section"
   },
@@ -6513,7 +6504,7 @@
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mod.rs",
         "kind": "code"
       }
     ],
@@ -6607,7 +6598,23 @@
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/andersen.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/berendsen.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/csvr.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/nose_hoover_chain.rs",
         "kind": "code"
       }
     ],
@@ -6871,13 +6878,6 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "total_runtime is at least as large as the maximum single-stage total",
-    "type": "scenario"
-  },
-  "rq-7e902717": {
-    "decl": "Scenario: neighbor_list cell-list rejects unknown field",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "neighbor_list cell-list rejects unknown field",
     "type": "scenario"
   },
   "rq-7eb22aad": {
@@ -7276,7 +7276,7 @@
     "file": "integration/csvr",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/csvr.rs",
         "kind": "code"
       }
     ],
@@ -7338,7 +7338,7 @@
     "file": "integration/nose-hoover-chain",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/nose_hoover_chain.rs",
         "kind": "code"
       }
     ],
@@ -7536,7 +7536,7 @@
     "file": "integration/csvr",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/csvr.rs",
         "kind": "code"
       }
     ],
@@ -7869,7 +7869,7 @@
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mod.rs",
         "kind": "code"
       }
     ],
@@ -8335,13 +8335,6 @@
     "title": "Out of Scope",
     "type": "section"
   },
-  "rq-9d882742": {
-    "decl": "Scenario: Unknown integrator kind is rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Unknown integrator kind is rejected",
-    "type": "scenario"
-  },
   "rq-9d8d96f1": {
     "decl": "## Perpendicular Widths",
     "file": "simulation-box",
@@ -8608,6 +8601,13 @@
     "title": "wrap_position and minimum_image agree on the same input",
     "type": "scenario"
   },
+  "rq-a208c9ba": {
+    "decl": "Scenario: Morse bond_type rejects extra fields",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Morse bond_type rejects extra fields",
+    "type": "scenario"
+  },
   "rq-a20bd6f3": {
     "decl": "#### `rescale_velocities`",
     "file": "integration/nose-hoover-chain",
@@ -8693,13 +8693,6 @@
     "title": "Accept the lower boundary -L/2 along an axis (orthorhombic)",
     "type": "scenario"
   },
-  "rq-a3a5905d": {
-    "decl": "Scenario: Reject unknown pair potential",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Reject unknown pair potential",
-    "type": "scenario"
-  },
   "rq-a3b6838f": {
     "decl": "Scenario: Reject non-positive tau",
     "file": "integration/c-rescale-barostat",
@@ -8777,6 +8770,13 @@
     "refs": [],
     "title": "Pair beyond cutoff yields zero energy and virial slots",
     "type": "scenario"
+  },
+  "rq-a54cc657": {
+    "decl": "- `Config::validate(&self) -> Result<(), ConfigError>`",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Config",
+    "type": "api-item"
   },
   "rq-a555a750": {
     "decl": "Scenario: Velocity generation row is present when init lacks velocities",
@@ -9008,7 +9008,11 @@
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/mtk_npt.rs",
         "kind": "code"
       }
     ],
@@ -9322,13 +9326,6 @@
     "refs": [],
     "title": "Accessors",
     "type": "section"
-  },
-  "rq-b02ad2f9": {
-    "decl": "Scenario: MtkNpt rejects extra fields (e.g. seed)",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "MtkNpt rejects extra fields (e.g. seed)",
-    "type": "scenario"
   },
   "rq-b033ac1d": {
     "decl": "### Mutators",
@@ -9797,13 +9794,6 @@
     "title": "Non-finite check precedes non-positive check on a diagonal",
     "type": "scenario"
   },
-  "rq-ba0724dc": {
-    "decl": "Scenario: neighbor_list all-pairs mode rejects r_skin",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "neighbor_list all-pairs mode rejects r_skin",
-    "type": "scenario"
-  },
   "rq-ba1e44f8": {
     "decl": "Scenario: μ clamped to safety floor when the formula yields a non-positive μ³",
     "file": "integration/c-rescale-barostat",
@@ -9955,12 +9945,7 @@
     "decl": "### Cross-validation",
     "file": "io/config-schema",
     "level": 3,
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Cross-validation",
     "type": "section"
   },
@@ -10458,6 +10443,13 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-c5fa34f5": {
+    "decl": "Scenario: Harmonic angle_type rejects extra fields",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Harmonic angle_type rejects extra fields",
+    "type": "scenario"
+  },
   "rq-c62bb861": {
     "decl": "## Determinism",
     "file": "forces/neighbor-list",
@@ -10588,19 +10580,12 @@
     "file": "integration/berendsen",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/berendsen.rs",
         "kind": "code"
       }
     ],
     "title": "log_column_names",
     "type": "api-item"
-  },
-  "rq-c921ba22": {
-    "decl": "Scenario: Unknown neighbor_list mode is rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Unknown neighbor_list mode is rejected",
-    "type": "scenario"
   },
   "rq-c9618bdd": {
     "decl": "Scenario: minimum_image is per-axis independent for an orthorhombic box",
@@ -10977,13 +10962,6 @@
     "title": "Pair virial inside the switching window equals factor_switched * r²",
     "type": "scenario"
   },
-  "rq-d10e8c7f": {
-    "decl": "Scenario: Pair interaction rejects an extra field for the chosen potential",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Pair interaction rejects an extra field for the chosen potential",
-    "type": "scenario"
-  },
   "rq-d12b8b49": {
     "decl": "## Algorithm",
     "file": "forces/harmonic-angle",
@@ -11088,12 +11066,7 @@
     "decl": "#### `[barostat]` (optional)",
     "file": "io/config-schema",
     "level": 4,
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "`[barostat]` (optional)",
     "type": "section"
   },
@@ -11234,7 +11207,7 @@
     "file": "integration/langevin-baoab",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/langevin_baoab.rs",
         "kind": "code"
       }
     ],
@@ -11863,7 +11836,7 @@
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/mod.rs",
         "kind": "code"
       }
     ],
@@ -12033,20 +12006,6 @@
     "title": "Parameters",
     "type": "section"
   },
-  "rq-e34d764e": {
-    "decl": "Scenario: bond_type unknown potential is rejected",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "bond_type unknown potential is rejected",
-    "type": "scenario"
-  },
-  "rq-e3544b10": {
-    "decl": "Scenario: Harmonic angle_type rejects extra fields",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Harmonic angle_type rejects extra fields",
-    "type": "scenario"
-  },
   "rq-e367855a": {
     "decl": "### Field reference",
     "file": "io/config-schema",
@@ -12061,6 +12020,13 @@
     "refs": [],
     "title": "CRescaleBarostat",
     "type": "api-item"
+  },
+  "rq-e38aac7b": {
+    "decl": "Scenario: Reject unknown pair potential",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject unknown pair potential",
+    "type": "scenario"
   },
   "rq-e399422c": {
     "decl": "Scenario: Harmonic angle_type rejects theta_0 outside [0, π]",
@@ -12094,13 +12060,6 @@
     ],
     "title": "LogWriter",
     "type": "api-item"
-  },
-  "rq-e40d2722": {
-    "decl": "Scenario: Morse bond_type rejects extra fields",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Morse bond_type rejects extra fields",
-    "type": "scenario"
   },
   "rq-e412e54a": {
     "decl": "Scenario: pair_virials carries half the pair's scalar virial",
@@ -12334,13 +12293,6 @@
     "title": "Influence function",
     "type": "section"
   },
-  "rq-e7c05140": {
-    "decl": "Scenario: Langevin-BAOAB kind rejects velocity-Verlet fields",
-    "file": "io/config-schema",
-    "refs": [],
-    "title": "Langevin-BAOAB kind rejects velocity-Verlet fields",
-    "type": "scenario"
-  },
   "rq-e7ddefaf": {
     "decl": "Scenario: Flush is idempotent",
     "file": "io/trajectory-output",
@@ -12361,18 +12313,6 @@
     "refs": [],
     "title": "Construct BerendsenThermostat via the registry",
     "type": "scenario"
-  },
-  "rq-e8259ee5": {
-    "decl": "- `load_config(path: &Path) -> Result<Config, ConfigError>`",
-    "file": "io/config-schema",
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "load_config",
-    "type": "api-item"
   },
   "rq-e84d3bac": {
     "decl": "Scenario: Reject a tilted box whose perpendicular width drops below 3*(r_cut+r_skin)",
@@ -12897,6 +12837,13 @@
     "title": "Inverse FFT round-trips the forward FFT",
     "type": "scenario"
   },
+  "rq-f03e2af2": {
+    "decl": "Scenario: Unknown [barostat] kind is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Unknown [barostat] kind is rejected",
+    "type": "scenario"
+  },
   "rq-f04e473c": {
     "decl": "# Feature: SoA Particle State and GPU Buffers",
     "file": "particle-state",
@@ -12909,6 +12856,13 @@
     "file": "integration/andersen",
     "refs": [],
     "title": "Two independent composed runs with identical seeds produce byte-identical outputs",
+    "type": "scenario"
+  },
+  "rq-f067338a": {
+    "decl": "Scenario: [integrator] rejects an unknown field for the chosen kind",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[integrator] rejects an unknown field for the chosen kind",
     "type": "scenario"
   },
   "rq-f0b9b0f5": {
@@ -13121,6 +13075,13 @@
     "title": "Download reflects device-side changes pushed by an interim re-upload",
     "type": "scenario"
   },
+  "rq-f4eeb849": {
+    "decl": "Scenario: [thermostat] rejects an unknown field for the chosen kind",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[thermostat] rejects an unknown field for the chosen kind",
+    "type": "scenario"
+  },
   "rq-f5299d6e": {
     "decl": "Scenario: Reduction overwrites prior net force values",
     "file": "pair-reduction",
@@ -13163,7 +13124,7 @@
         "kind": "code"
       },
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/nose_hoover_chain.rs",
         "kind": "code"
       }
     ],
@@ -13337,7 +13298,7 @@
     "file": "integration/berendsen",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/berendsen.rs",
         "kind": "code"
       }
     ],
@@ -13385,7 +13346,7 @@
     "file": "integration/nose-hoover-chain",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/nose_hoover_chain.rs",
         "kind": "code"
       }
     ],
@@ -13512,12 +13473,7 @@
     "decl": "### Schema version handling",
     "file": "io/config-schema",
     "level": 3,
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Schema version handling",
     "type": "section"
   },
@@ -13540,7 +13496,7 @@
     "file": "integration/andersen",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/andersen.rs",
         "kind": "code"
       }
     ],
@@ -13626,7 +13582,7 @@
     "file": "integration/andersen",
     "refs": [
       {
-        "file": "src/integrator.rs",
+        "file": "src/integrator/andersen.rs",
         "kind": "code"
       }
     ],
@@ -13711,6 +13667,13 @@
     ],
     "title": "Feature: Extended-XYZ Initial-State File",
     "type": "file"
+  },
+  "rq-ffa771bd": {
+    "decl": "Scenario: angle_type unknown potential is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "angle_type unknown potential is rejected",
+    "type": "scenario"
   },
   "rq-fff341e9": {
     "decl": "Scenario: Reject extra fields (e.g. collision_rate from Andersen)",

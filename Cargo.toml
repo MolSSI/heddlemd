@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 cudarc = { version = "0.13.9", default-features = false, features = ["driver", "nvrtc", "std", "cuda-11080"] }
 toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_path_to_error = "0.1"
 rand = "0.8"
 rand_chacha = "0.3"
 thiserror = "2"

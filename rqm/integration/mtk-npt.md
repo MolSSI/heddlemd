@@ -604,8 +604,9 @@ Feature: MTK NPT integrator (isotropic)
   Scenario: Reject extra fields (e.g. seed)
     Given a config with [integrator] kind="mtk-npt" and seed=42 (extra)
     When load_config is called
-    Then it returns Err(ConfigError::UnknownIntegratorField {
-      kind: "mtk-npt", field: "seed" })
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "integrator"
+    And message mentions "seed"
 
   # --- Incompatibility ---
 

@@ -474,8 +474,9 @@ Feature: Berendsen weak-coupling barostat
     Given a config with [barostat] kind="berendsen",
       pressure=1.0e5, tau=1.0e-12, compressibility=4.5e-10, seed=42
     When load_config is called
-    Then it returns Err(ConfigError::UnknownBarostatField {
-      kind: "berendsen", field: "seed" })
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "barostat"
+    And message mentions "seed"
 
   # --- compute_total_virial helper ---
 

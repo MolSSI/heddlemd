@@ -304,16 +304,18 @@ Feature: Berendsen weak-coupling thermostat
     Given a config with [thermostat] kind="berendsen",
       temperature=300.0, tau=1.0e-13, seed=42
     When load_config is called
-    Then it returns Err(ConfigError::UnknownThermostatField {
-      kind: "berendsen", field: "seed" })
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "thermostat"
+    And message mentions "seed"
 
   @rq-fff341e9
   Scenario: Reject extra fields (e.g. collision_rate from Andersen)
     Given a config with [thermostat] kind="berendsen",
       temperature=300.0, tau=1.0e-13, collision_rate=1.0e12
     When load_config is called
-    Then it returns Err(ConfigError::UnknownThermostatField {
-      kind: "berendsen", field: "collision_rate" })
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "thermostat"
+    And message mentions "collision_rate"
 
   # --- Per-step kernel sequence ---
 

@@ -396,7 +396,9 @@ Feature: CSVR stochastic velocity-rescaling thermostat
     Given a config with [thermostat] kind="csvr", temperature=300.0, tau=1.0e-13, seed=1,
       chain_length=3
     When load_config is called
-    Then it returns Err(ConfigError::UnknownThermostatField { kind: "csvr", field: "chain_length" })
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "thermostat"
+    And message mentions "chain_length"
 
   # --- Host-side Philox parity with the device ---
 

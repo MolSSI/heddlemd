@@ -423,8 +423,9 @@ Feature: Andersen stochastic thermostat
     Given a config with [thermostat] kind="andersen",
       temperature=300.0, collision_rate=1.0e12, seed=1, tau=1.0e-13
     When load_config is called
-    Then it returns Err(ConfigError::UnknownThermostatField {
-      kind: "andersen", field: "tau" })
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "thermostat"
+    And message mentions "tau"
 
   # --- andersen_resample kernel ---
 

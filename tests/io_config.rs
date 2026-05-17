@@ -52,6 +52,38 @@ fn write_config(dir: &Path, contents: &str) -> PathBuf {
     path
 }
 
+fn assert_parse(err: &ConfigError, expected_path: &str) {
+    match err {
+        ConfigError::Parse { path, message } => {
+            assert_eq!(
+                path, expected_path,
+                "expected Parse path `{expected_path}`, got `{path}` (message: {message})"
+            );
+        }
+        other => panic!("expected ConfigError::Parse, got {other:?}"),
+    }
+}
+
+/// For "unknown field" errors the deserialiser reports the *enclosing*
+/// table's path (e.g. `thermostat` or `pair_interactions[0]`) and names
+/// the offending field inside the message string. This helper checks
+/// both.
+fn assert_parse_path_and_field(err: &ConfigError, expected_path: &str, unknown_field: &str) {
+    match err {
+        ConfigError::Parse { path, message } => {
+            assert_eq!(
+                path, expected_path,
+                "expected Parse path `{expected_path}`, got `{path}` (message: {message})"
+            );
+            assert!(
+                message.contains(unknown_field),
+                "expected message to mention `{unknown_field}`, got `{message}`"
+            );
+        }
+        other => panic!("expected ConfigError::Parse, got {other:?}"),
+    }
+}
+
 // rq-7df1515f
 #[test]
 fn load_valid_minimal_config() {
@@ -284,7 +316,7 @@ fn malformed_toml() {
     let dir = tmp_path("malformed_toml");
     let path = write_config(&dir, "schema_version = [");
     match load_config(&path).unwrap_err() {
-        ConfigError::Parse(_) => {}
+        ConfigError::Parse { .. } => {}
         other => panic!("unexpected: {other:?}"),
     }
 }
@@ -628,13 +660,10 @@ fn reject_unknown_potential() {
     let dir = tmp_path("unknown_potential");
     let body = minimal_config().replace("potential = \"lennard-jones\"", "potential = \"morse\"");
     let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownPairPotential { actual, pair_index } => {
-            assert_eq!(actual, "morse");
-            assert_eq!(pair_index, 0);
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
+    assert_parse(
+        &load_config(&path).unwrap_err(),
+        "pair_interactions[0].potential",
+    );
 }
 
 // rq-45a14d49
@@ -660,18 +689,11 @@ fn reject_unknown_pair_interaction_field() {
         "cutoff = 1.0e-9\nstiffness = 1.0\n",
     );
     let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownPairInteractionField {
-            potential,
-            field,
-            pair_index,
-        } => {
-            assert_eq!(potential, "lennard-jones");
-            assert_eq!(field, "stiffness");
-            assert_eq!(pair_index, 0);
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
+    assert_parse_path_and_field(
+        &load_config(&path).unwrap_err(),
+        "pair_interactions[0]",
+        "stiffness",
+    );
 }
 
 // rq-a30ac09f
@@ -1122,10 +1144,7 @@ fn unknown_integrator_kind() {
     let dir = tmp_path("unknown_integrator_kind");
     let body = minimal_config().replace("kind = \"velocity-verlet\"", "kind = \"custom\"");
     let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownIntegratorKind { actual } => assert_eq!(actual, "custom"),
-        other => panic!("unexpected: {other:?}"),
-    }
+    assert_parse(&load_config(&path).unwrap_err(), "integrator.kind");
 }
 
 // rq-86aa2be7
@@ -1242,39 +1261,43 @@ fn langevin_temperature_zero_rejected() {
     }
 }
 
-// rq-30270f03
+// rq-f067338a
 #[test]
-fn vv_rejects_langevin_fields() {
-    let dir = tmp_path("vv_rejects_langevin");
-    let body = minimal_config().replace(
-        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
-        "[integrator]\nkind = \"velocity-verlet\"\nfriction = 1.0e12\n",
-    );
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownIntegratorField { kind, field } => {
-            assert_eq!(kind, "velocity-verlet");
-            assert_eq!(field, "friction");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
-
-// rq-e7c05140
-#[test]
-fn langevin_rejects_vv_fields() {
-    let dir = tmp_path("langevin_rejects_vv");
-    let body = minimal_config().replace(
-        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
-        "[integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 300.0\nseed = 42\nlossless = false\n",
-    );
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownIntegratorField { kind, field } => {
-            assert_eq!(kind, "langevin-baoab");
-            assert_eq!(field, "lossless");
-        }
-        other => panic!("unexpected: {other:?}"),
+fn integrator_rejects_unknown_field_for_chosen_kind() {
+    // Consolidates the per-kind "unknown integrator field" check across
+    // every variant in IntegratorKind. Each row is one (kind, body,
+    // expected-path) tuple.
+    // Each row: (label, integrator-block, unknown-field-name). The
+    // deserialiser reports the parent table's path on the Parse error;
+    // the message itself names the unknown field. Each case checks both:
+    // the path equals "integrator" and the message mentions the offending
+    // field name.
+    let cases: &[(&str, &str, &str)] = &[
+        (
+            "velocity-verlet",
+            "[integrator]\nkind = \"velocity-verlet\"\nfriction = 1.0e12\n",
+            "friction",
+        ),
+        (
+            "langevin-baoab",
+            "[integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 300.0\nseed = 42\nlossless = false\n",
+            "lossless",
+        ),
+        (
+            "mtk-npt",
+            "[integrator]\nkind = \"mtk-npt\"\ntemperature = 85.0\npressure = 1.0e5\ntau_t = 1.0e-13\ntau_p = 1.0e-12\nseed = 42\n",
+            "seed",
+        ),
+    ];
+    for (label, integrator_block, unknown_field) in cases {
+        let dir = tmp_path(&format!("integrator_unknown_field_{label}"));
+        let body = minimal_config().replace(
+            "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+            integrator_block,
+        );
+        let path = write_config(&dir, &body);
+        let err = load_config(&path).unwrap_err();
+        assert_parse_path_and_field(&err, "integrator", unknown_field);
     }
 }
 
@@ -1423,16 +1446,10 @@ fn bond_type_unknown_potential() {
         minimal_config()
     );
     let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownBondPotential {
-            actual,
-            bond_type_index,
-        } => {
-            assert_eq!(actual, "harmonic");
-            assert_eq!(bond_type_index, 0);
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
+    assert_parse(
+        &load_config(&path).unwrap_err(),
+        "bond_types[0].potential",
+    );
 }
 
 // rq-3b0e8140
@@ -1504,18 +1521,11 @@ fn morse_bond_type_rejects_extra_field() {
         minimal_config()
     );
     let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownBondTypeField {
-            potential,
-            field,
-            bond_type_index,
-        } => {
-            assert_eq!(potential, "morse");
-            assert_eq!(field, "stiffness");
-            assert_eq!(bond_type_index, 0);
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
+    assert_parse_path_and_field(
+        &load_config(&path).unwrap_err(),
+        "bond_types[0]",
+        "stiffness",
+    );
 }
 
 // rq-ed1d6c71
@@ -1656,46 +1666,38 @@ fn neighbor_list_unknown_mode_rejected() {
         minimal_config()
     );
     let path = write_config(&dir, &body);
-    let err = load_config(&path).unwrap_err();
-    match err {
-        ConfigError::UnknownNeighborListMode { actual } => assert_eq!(actual, "kd-tree"),
-        other => panic!("got {other:?}"),
-    }
+    assert_parse(&load_config(&path).unwrap_err(), "neighbor_list.mode");
 }
 
+// rq-13ca0415
 #[test]
-fn neighbor_list_all_pairs_rejects_max_neighbors() {
-    let dir = tmp_path("nl_all_pairs_rejects_max");
-    let body = format!(
-        "{}\n[neighbor_list]\nmode = \"all-pairs\"\nmax_neighbors = 64\n",
-        minimal_config()
-    );
-    let path = write_config(&dir, &body);
-    let err = load_config(&path).unwrap_err();
-    match err {
-        ConfigError::UnknownNeighborListField { mode, field } => {
-            assert_eq!(mode, "all-pairs");
-            assert_eq!(field, "max_neighbors");
-        }
-        other => panic!("got {other:?}"),
-    }
-}
-
-#[test]
-fn neighbor_list_cell_list_rejects_unknown_field() {
-    let dir = tmp_path("nl_cell_unknown_field");
-    let body = format!(
-        "{}\n[neighbor_list]\nmode = \"cell-list\"\nstencil = \"huge\"\n",
-        minimal_config()
-    );
-    let path = write_config(&dir, &body);
-    let err = load_config(&path).unwrap_err();
-    match err {
-        ConfigError::UnknownNeighborListField { mode, field } => {
-            assert_eq!(mode, "cell-list");
-            assert_eq!(field, "stencil");
-        }
-        other => panic!("got {other:?}"),
+fn neighbor_list_rejects_unknown_field_for_chosen_mode() {
+    // Consolidates the per-mode "unknown neighbor_list field" check.
+    // Each row is one (label, body, expected-path) tuple.
+    // Each row: (label, neighbor_list-block, unknown-field-name).
+    let cases: &[(&str, &str, &str)] = &[
+        (
+            "all_pairs_rejects_max_neighbors",
+            "[neighbor_list]\nmode = \"all-pairs\"\nmax_neighbors = 64\n",
+            "max_neighbors",
+        ),
+        (
+            "all_pairs_rejects_r_skin",
+            "[neighbor_list]\nmode = \"all-pairs\"\nr_skin = 1.0e-10\n",
+            "r_skin",
+        ),
+        (
+            "cell_list_rejects_stencil",
+            "[neighbor_list]\nmode = \"cell-list\"\nstencil = \"huge\"\n",
+            "stencil",
+        ),
+    ];
+    for (label, nl_block, unknown_field) in cases {
+        let dir = tmp_path(label);
+        let body = format!("{}\n{}", minimal_config(), nl_block);
+        let path = write_config(&dir, &body);
+        let err = load_config(&path).unwrap_err();
+        assert_parse_path_and_field(&err, "neighbor_list", unknown_field);
     }
 }
 
@@ -1782,13 +1784,10 @@ fn angle_type_unknown_potential_rejected() {
         minimal_config()
     );
     let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownAnglePotential { actual, angle_type_index } => {
-            assert_eq!(actual, "cosine-harmonic");
-            assert_eq!(angle_type_index, 0);
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
+    assert_parse(
+        &load_config(&path).unwrap_err(),
+        "angle_types[0].potential",
+    );
 }
 
 #[test]
@@ -1831,14 +1830,11 @@ fn harmonic_angle_rejects_extra_fields() {
         minimal_config()
     );
     let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownAngleTypeField { potential, field, angle_type_index } => {
-            assert_eq!(potential, "harmonic");
-            assert_eq!(field, "stiffness");
-            assert_eq!(angle_type_index, 0);
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
+    assert_parse_path_and_field(
+        &load_config(&path).unwrap_err(),
+        "angle_types[0]",
+        "stiffness",
+    );
 }
 
 #[test]
@@ -1929,12 +1925,7 @@ fn thermostat_unknown_kind_rejected() {
 kind = "not-a-real-thermostat""#,
     );
     let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownThermostatKind { actual } => {
-            assert_eq!(actual, "not-a-real-thermostat");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
+    assert_parse(&load_config(&path).unwrap_err(), "thermostat.kind");
 }
 
 #[test]
@@ -2124,23 +2115,61 @@ n_resp = 0"#,
     }
 }
 
+// rq-f4eeb849
 #[test]
-fn thermostat_nhc_rejects_extra_fields() {
-    let dir = tmp_path("nhc_extra");
-    let body = config_with_thermostat(
-        r#"[thermostat]
+fn thermostat_rejects_unknown_field_for_chosen_kind() {
+    // Consolidates the per-kind "unknown thermostat field" check across
+    // every variant in ThermostatKind. Each row is one (label,
+    // thermostat-block, expected-path) tuple.
+    // Each row: (label, thermostat-block, unknown-field-name). The
+    // deserialiser reports `path = "thermostat"`; the message names the
+    // offending field.
+    let cases: &[(&str, &str, &str)] = &[
+        (
+            "nhc_extra_friction",
+            r#"[thermostat]
 kind = "nose-hoover-chain"
 temperature = 300.0
 tau = 1.0e-13
 friction = 1.0e12"#,
-    );
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownThermostatField { kind, field } => {
-            assert_eq!(kind, "nose-hoover-chain");
-            assert_eq!(field, "friction");
-        }
-        other => panic!("unexpected: {other:?}"),
+            "friction",
+        ),
+        (
+            "csvr_extra_chain_length",
+            r#"[thermostat]
+kind = "csvr"
+temperature = 300.0
+tau = 1.0e-13
+seed = 1
+chain_length = 3"#,
+            "chain_length",
+        ),
+        (
+            "andersen_extra_tau",
+            r#"[thermostat]
+kind = "andersen"
+temperature = 300.0
+collision_rate = 1.0e12
+seed = 1
+tau = 1.0e-13"#,
+            "tau",
+        ),
+        (
+            "berendsen_extra_seed",
+            r#"[thermostat]
+kind = "berendsen"
+temperature = 300.0
+tau = 1.0e-13
+seed = 42"#,
+            "seed",
+        ),
+    ];
+    for (label, thermostat_block, unknown_field) in cases {
+        let dir = tmp_path(label);
+        let body = config_with_thermostat(thermostat_block);
+        let path = write_config(&dir, &body);
+        let err = load_config(&path).unwrap_err();
+        assert_parse_path_and_field(&err, "thermostat", unknown_field);
     }
 }
 
@@ -2184,26 +2213,8 @@ tau = 1.0e-13"#,
     }
 }
 
-#[test]
-fn thermostat_csvr_rejects_extra_fields() {
-    let dir = tmp_path("csvr_extra");
-    let body = config_with_thermostat(
-        r#"[thermostat]
-kind = "csvr"
-temperature = 300.0
-tau = 1.0e-13
-seed = 42
-chain_length = 3"#,
-    );
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownThermostatField { kind, field } => {
-            assert_eq!(kind, "csvr");
-            assert_eq!(field, "chain_length");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
+// CSVR extra-fields coverage lives in the parameterised
+// `thermostat_rejects_unknown_field_for_chosen_kind` test above.
 
 // --- Andersen ---
 
@@ -2270,26 +2281,8 @@ seed = 42"#,
     }
 }
 
-#[test]
-fn thermostat_andersen_rejects_extra_fields() {
-    let dir = tmp_path("andersen_extra");
-    let body = config_with_thermostat(
-        r#"[thermostat]
-kind = "andersen"
-temperature = 300.0
-collision_rate = 1.0e12
-seed = 42
-tau = 1.0e-13"#,
-    );
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownThermostatField { kind, field } => {
-            assert_eq!(kind, "andersen");
-            assert_eq!(field, "tau");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
+// Andersen extra-fields coverage lives in the parameterised
+// `thermostat_rejects_unknown_field_for_chosen_kind` test above.
 
 // --- Berendsen ---
 
@@ -2313,25 +2306,8 @@ tau = 1.0e-13"#,
     }
 }
 
-#[test]
-fn thermostat_berendsen_rejects_seed_field() {
-    let dir = tmp_path("berendsen_seed");
-    let body = config_with_thermostat(
-        r#"[thermostat]
-kind = "berendsen"
-temperature = 300.0
-tau = 1.0e-13
-seed = 42"#,
-    );
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownThermostatField { kind, field } => {
-            assert_eq!(kind, "berendsen");
-            assert_eq!(field, "seed");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
+// Berendsen extra-fields coverage lives in the parameterised
+// `thermostat_rejects_unknown_field_for_chosen_kind` test above.
 
 // --- Integrator-owns-thermostat compatibility ---
 
@@ -2532,19 +2508,8 @@ fn mtk_npt_rejects_non_positive_tau_p() {
     }
 }
 
-#[test]
-fn mtk_npt_rejects_extra_fields() {
-    let dir = tmp_path("mtk_extra");
-    let body = mtk_minimal_body("seed = 42");
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownIntegratorField { kind, field } => {
-            assert_eq!(kind, "mtk-npt");
-            assert_eq!(field, "seed");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
+// `mtk-npt` extra-fields coverage lives in the parameterised
+// `integrator_rejects_unknown_field_for_chosen_kind` test above.
 
 #[test]
 fn mtk_npt_with_thermostat_is_rejected() {
@@ -2683,12 +2648,7 @@ cutoff = 1.0e-9
 "#
     );
     let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownBarostatKind { actual } => {
-            assert_eq!(actual, "not-a-real-barostat")
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
+    assert_parse(&load_config(&path).unwrap_err(), "barostat.kind");
 }
 
 // Helper for the [barostat] kind="berendsen" scenarios below: the
@@ -2852,24 +2812,42 @@ compressibility = 0.0"#,
     }
 }
 
+// rq-5d91f07d
 #[test]
-fn barostat_berendsen_rejects_extra_fields() {
-    let dir = tmp_path("baro_berendsen_extra");
-    let body = config_with_barostat(
-        r#"[barostat]
+fn barostat_rejects_unknown_field_for_chosen_kind() {
+    // Consolidates the per-kind "unknown barostat field" check across
+    // every variant in BarostatKind.
+    // Each row: (label, barostat-block, unknown-field-name).
+    let cases: &[(&str, &str, &str)] = &[
+        (
+            "berendsen_extra_seed",
+            r#"[barostat]
 kind = "berendsen"
 pressure = 1.0e5
 tau = 1.0e-12
 compressibility = 4.5e-10
 seed = 42"#,
-    );
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownBarostatField { kind, field } => {
-            assert_eq!(kind, "berendsen");
-            assert_eq!(field, "seed");
-        }
-        other => panic!("unexpected: {other:?}"),
+            "seed",
+        ),
+        (
+            "c_rescale_extra_friction",
+            r#"[barostat]
+kind = "c-rescale"
+pressure = 1.0e5
+temperature = 85.0
+tau = 1.0e-12
+compressibility = 4.5e-10
+seed = 42
+friction = 1.0e12"#,
+            "friction",
+        ),
+    ];
+    for (label, barostat_block, unknown_field) in cases {
+        let dir = tmp_path(label);
+        let body = config_with_barostat(barostat_block);
+        let path = write_config(&dir, &body);
+        let err = load_config(&path).unwrap_err();
+        assert_parse_path_and_field(&err, "barostat", unknown_field);
     }
 }
 
@@ -3021,28 +2999,8 @@ compressibility = 4.5e-10"#,
     }
 }
 
-#[test]
-fn barostat_c_rescale_rejects_extra_fields() {
-    let dir = tmp_path("baro_c_rescale_extra");
-    let body = config_with_barostat(
-        r#"[barostat]
-kind = "c-rescale"
-pressure = 1.0e5
-temperature = 85.0
-tau = 1.0e-12
-compressibility = 4.5e-10
-seed = 42
-friction = 1.0e12"#,
-    );
-    let path = write_config(&dir, &body);
-    match load_config(&path).unwrap_err() {
-        ConfigError::UnknownBarostatField { kind, field } => {
-            assert_eq!(kind, "c-rescale");
-            assert_eq!(field, "friction");
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
-}
+// c-rescale extra-fields coverage lives in the parameterised
+// `barostat_rejects_unknown_field_for_chosen_kind` test above.
 
 #[test]
 fn barostat_missing_kind_rejected() {

@@ -605,7 +605,10 @@ Cross-validation:
 
 ### Cross-validation <!-- rq-bd228ef7 -->
 
-Beyond per-field validation, the loader checks:
+The checks below run inside `Config::validate(&self)`, after the
+typed deserialiser populates `Config`. `load_config` invokes
+`Config::validate` automatically; callers that build a `Config` in
+memory can invoke it directly to obtain the same guarantees.
 
 1. Every name in `[[pair_interactions]]`'s `between` refers to a declared
    `[[particle_types]]`. Unknown names produce `UnknownTypeInPair { name,
@@ -622,10 +625,10 @@ Beyond per-field validation, the loader checks:
    The set of paths under check is `init`, `output.trajectory_path`,
    `output.log_path`, `output.timings_path`, and (when supplied) `topology`.
 4. If `[thermostat]` is present and `config.integrator.owns_thermostat()`
-   returns `true` (`langevin-baoab` and `mtk-npt`), the loader returns
+   returns `true` (`langevin-baoab` and `mtk-npt`), validation returns
    `IncompatibleThermostat { integrator: <integrator kind name> }`.
 5. If `[barostat]` is present and `config.integrator.owns_barostat()`
-   returns `true` (currently only `mtk-npt`), the loader returns
+   returns `true` (currently only `mtk-npt`), validation returns
    `IncompatibleBarostat { integrator: <integrator kind name> }`.
 
 ## Feature API <!-- rq-110285ae -->
@@ -814,84 +817,131 @@ Beyond per-field validation, the loader checks:
 
 - `PathRole` — `enum { Init, Trajectory, Log, Timings, Topology }`. Used in `PathCollision`. <!-- rq-f0084057 -->
 
-- `ConfigError` — error type returned by `load_config`. Variants: <!-- rq-0b9372e8 -->
+- `ConfigError` — error type returned by `load_config` and by <!-- rq-3108381e -->
+  `Config::validate`. Variants:
   - `Io(String)` — failed to read the config file (with the OS error
-    message).
-  - `Parse(String)` — TOML parser rejected the file (with location info
-    from the underlying parser).
-  - `MissingField { field: &'static str }` — required field absent. `field`
-    uses dot notation (e.g. `"simulation.dt"`, `"schema_version"`,
-    `"particle_types[0].name"`).
-  - `UnsupportedSchemaVersion { actual: u64, supported: u64 }`.
-  - `InvalidValue { field: &'static str, reason: String }` — finite or
-    positivity constraint violated, or a type/pair name is empty.
-  - `DuplicateTypeName { name: String }`.
-  - `UnknownTypeInPair { name: String, pair_index: usize }`.
-  - `MissingPairInteraction { types: (String, String) }`.
-  - `DuplicatePairInteraction { types: (String, String) }`.
-  - `UnknownPairPotential { actual: String, pair_index: usize }` — a
-    `[[pair_interactions]]` entry has a `potential` value that is not
-    one of the supported strings.
-  - `UnknownPairInteractionField { potential: String, field: String, pair_index: usize }`
-    — a field in a `[[pair_interactions]]` entry is not recognised by
-    the chosen `potential` (neither a common field nor a field of that
-    potential).
-  - `PathCollision { kind_a: PathRole, kind_b: PathRole, path: PathBuf }`.
+    message). Only produced by `load_config`.
+  - `Parse { path: String, message: String }` — the TOML deserialiser
+    rejected the document for a structural reason: a syntax error, a
+    type mismatch, a field that is unknown for its enclosing table,
+    or an enum tag (`kind`, `potential`, `mode`) whose string does not
+    match any registered variant. `path` is a dotted, JSON-pointer-like
+    location within the document; `message` is the underlying
+    parser/deserialiser message.
+    - For an **unknown enum tag** (e.g. `[integrator] kind =
+      "custom"`), `path` is the path of the tag field itself
+      (`"integrator.kind"`, `"pair_interactions[0].potential"`,
+      `"bond_types[0].potential"`, `"angle_types[0].potential"`,
+      `"neighbor_list.mode"`, etc.).
+    - For an **unknown field** (e.g. `[integrator] kind =
+      "velocity-verlet" friction = 1.0e12`), `path` is the path of
+      the enclosing table (`"integrator"`, `"thermostat"`,
+      `"barostat"`, `"pair_interactions[0]"`, `"bond_types[0]"`,
+      `"angle_types[0]"`, `"neighbor_list"`). The offending field
+      name appears in `message`.
+    - For a **type mismatch or syntax error**, `path` is the path
+      reached before the failure (empty string for top-level syntax
+      errors).
+  - `UnsupportedSchemaVersion { actual: u64, supported: u64 }` —
+    `schema_version` was structurally a u64 but its value is not the
+    supported version (`1`).
+  - `MissingField { field: String }` — a required field is absent at
+    deserialisation time. `field` uses the same dotted notation as
+    `Parse.path` (e.g. `"simulation.dt"`, `"integrator.kind"`,
+    `"pair_interactions[0].sigma"`).
+  - `InvalidValue { field: String, reason: String }` — a field
+    deserialised to the right type but failed a range, finiteness, or
+    domain check (positive, non-NaN, in `[0, π]`, non-empty string,
+    `r_switch <= cutoff`, etc.). Produced exclusively by the post-parse
+    `Config::validate` pass; the deserialiser itself never emits this
+    variant.
+  - `DuplicateTypeName { name: String }` — two `[[particle_types]]`
+    entries share a `name`.
+  - `UnknownTypeInPair { name: String, pair_index: usize }` — a
+    `[[pair_interactions]]` entry's `between` field names a type not
+    declared in `[[particle_types]]`.
+  - `MissingPairInteraction { types: (String, String) }` — the
+    declared types omit an unordered pair from `[[pair_interactions]]`.
+    Tuple is normalised so the lexicographically smaller name comes
+    first.
+  - `DuplicatePairInteraction { types: (String, String) }` — two
+    `[[pair_interactions]]` entries cover the same unordered pair.
+    Tuple normalised as above.
+  - `PathCollision { kind_a: PathRole, kind_b: PathRole, path: PathBuf }`
+    — two supplied file paths resolve to the same location.
   - `ConflictingElectrostatics` — the config declares both `[coulomb]`
     and `[spme]`. Only one electrostatics method may be active per run.
-  - `UnknownIntegratorKind { actual: String }` — `[integrator].kind` is
-    not one of the supported strings.
-  - `UnknownIntegratorField { kind: String, field: String }` — a field in
-    the `[integrator]` table is not recognised by the chosen `kind`.
-  - `UnknownThermostatKind { actual: String }` — `[thermostat].kind`
-    is not one of the supported strings.
-  - `UnknownThermostatField { kind: String, field: String }` — a field
-    in the `[thermostat]` table is not recognised by the chosen
-    `kind`.
-  - `UnknownBarostatKind { actual: String }` — `[barostat].kind` is
-    not one of the supported strings.
-  - `UnknownBarostatField { kind: String, field: String }` — a field
-    in the `[barostat]` table is not recognised by the chosen `kind`.
   - `IncompatibleThermostat { integrator: String }` — the config
     pairs an integrator that owns its own thermostat
     (`langevin-baoab` or `mtk-npt`) with a `[thermostat]` table.
   - `IncompatibleBarostat { integrator: String }` — the config
     pairs an integrator that owns its own barostat (currently only
     `mtk-npt`) with a `[barostat]` table.
-  - `UnknownBondPotential { actual: String, bond_type_index: usize }` —
-    a `[[bond_types]]` entry has a `potential` value that is not one of
-    the supported strings.
-  - `UnknownBondTypeField { potential: String, field: String, bond_type_index: usize }`
-    — a field in a `[[bond_types]]` entry is not recognised by the
-    chosen `potential`.
   - `DuplicateBondTypeName { name: String }` — two `[[bond_types]]`
     entries share a `name`.
-  - `UnknownAnglePotential { actual: String, angle_type_index: usize }`
-    — an `[[angle_types]]` entry has a `potential` value that is not
-    one of the supported strings.
-  - `UnknownAngleTypeField { potential: String, field: String, angle_type_index: usize }`
-    — a field in an `[[angle_types]]` entry is not recognised by the
-    chosen `potential`.
   - `DuplicateAngleTypeName { name: String }` — two `[[angle_types]]`
     entries share a `name`.
-  - `UnknownNeighborListMode { actual: String }` —
-    `[neighbor_list].mode` is not one of the supported strings.
-  - `UnknownNeighborListField { mode: String, field: String }` — a
-    field in the `[neighbor_list]` table is not recognised by the
-    chosen `mode` (for example, `max_neighbors` under
-    `mode = "all-pairs"`).
 
-### Functions <!-- rq-39881bb0 -->
+  `Parse` covers every shape error the typed deserialiser flags
+  structurally: unknown fields under a tagged-enum table
+  (e.g. `lossless` under `[integrator] kind = "langevin-baoab"`,
+  `seed` under `[barostat] kind = "berendsen"`, `max_neighbors` under
+  `[neighbor_list] mode = "all-pairs"`); unknown enum tags
+  (e.g. `kind = "not-a-real-integrator"`, `potential = "harmonic"` in
+  `[[pair_interactions]]`, `mode = "kd-tree"` in `[neighbor_list]`);
+  wrong TOML types (e.g. a string where an integer is required); and
+  raw TOML syntax errors. `path` carries the document location so
+  callers can present a useful diagnostic without inspecting
+  `message`.
 
-- `load_config(path: &Path) -> Result<Config, ConfigError>` <!-- rq-e8259ee5 -->
-  - Reads the file at `path`, parses TOML, performs every validation in
-    *Field reference* and *Cross-validation*, resolves the three paths
-    against `path.parent()` (or `"."` if `path` has no parent), and
-    returns the populated `Config`.
+### Functions <!-- rq-39891001 -->
+
+- `load_config(path: &Path) -> Result<Config, ConfigError>` <!-- rq-45bb8194 -->
+  - Reads the file at `path`, runs the typed TOML deserialiser, fills
+    in field-derived defaults (`r_switch = 0.9 * cutoff` for
+    `[[pair_interactions]]` and `[coulomb]`, `r_skin = 0.3 * max_cutoff`
+    for the `cell-list` `[neighbor_list]` mode, `[output]` defaults
+    derived from the config-file stem), resolves every supplied path
+    against `path.parent()` (or `"."` if `path` has no parent), calls
+    `Config::validate(&config)` on the resulting `Config`, and returns
+    it.
+  - File-read failure yields `Io(String)`. Deserialiser failures yield
+    either `MissingField`, `UnsupportedSchemaVersion`, or `Parse`
+    depending on the failure kind (see the `ConfigError` description
+    above). Range, finiteness, domain, and cross-validation failures
+    yield the variant emitted by `Config::validate`.
   - On any validation failure, returns the first error encountered in
-    declaration order: top-level fields first, then `[simulation]`, then
-    `[integrator]`, then `[[particle_types]]`, then `[[pair_interactions]]`,
-    then `[output]`, then cross-validation steps 1–4 in that order.
+    declaration order: deserialiser errors first (top-level fields,
+    then `[simulation]`, then `[integrator]`, then
+    `[[particle_types]]`, then `[[pair_interactions]]`, then
+    `[bond_types]` / `[angle_types]` / `[coulomb]` / `[spme]` /
+    `[neighbor_list]` / `[output]`); then `Config::validate`'s
+    field-domain checks in the same declaration order; then
+    cross-validation rules 1–5 in the order listed under
+    *Cross-validation*.
+
+- `Config::validate(&self) -> Result<(), ConfigError>` <!-- rq-a54cc657 -->
+  - Pure host-side function. Takes a `Config` (typically obtained from
+    `load_config` after deserialisation, but also constructable in
+    memory by callers) and applies every check documented under
+    *Field reference* that is not already enforceable by the typed
+    deserialiser: range/finiteness/domain constraints on numeric
+    fields (positivity, NaN-rejection, `theta_0 in [0, π]`,
+    `r_switch <= cutoff`, non-empty string identifiers), plus the
+    five rules listed under *Cross-validation*.
+  - On the first failure, returns the structured error variant
+    documented for that check (`InvalidValue` for per-field domain
+    failures; `DuplicateTypeName`, `UnknownTypeInPair`,
+    `MissingPairInteraction`, `DuplicatePairInteraction`,
+    `PathCollision`, `ConflictingElectrostatics`,
+    `IncompatibleThermostat`, `IncompatibleBarostat`,
+    `DuplicateBondTypeName`, or `DuplicateAngleTypeName` for the
+    cross-validation rules).
+  - Order of checks: per-field domain checks in the section order
+    above, then cross-validation rules 1, 2, 3, 4, 5 in that order.
+  - Calling `Config::validate` on a `Config` returned by
+    `load_config` is a no-op (returns `Ok(())`): `load_config` already
+    invoked it.
 
 ## Out of Scope <!-- rq-35722a66 -->
 
@@ -1033,7 +1083,7 @@ Feature: TOML simulation config schema
   Scenario: Malformed TOML
     Given a file at "/tmp/sim.toml" containing the bytes "schema_version = ["
     When load_config("/tmp/sim.toml") is called
-    Then it returns Err(ConfigError::Parse(_))
+    Then it returns Err(ConfigError::Parse { .. })
 
   @rq-761f26c6
   Scenario: Unknown top-level key is permitted
@@ -1079,11 +1129,27 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "integrator.kind" })
 
-  @rq-9d882742
+  @rq-657bbbd6
   Scenario: Unknown integrator kind is rejected
     Given the Background config with [integrator] kind="custom"
     When load_config is called
-    Then it returns Err(ConfigError::UnknownIntegratorKind { actual: "custom" })
+    Then it returns Err(ConfigError::Parse { path, .. })
+    And path equals "integrator.kind"
+
+  @rq-f067338a
+  Scenario: [integrator] rejects an unknown field for the chosen kind
+    Given the Background config with [integrator] kind="velocity-verlet"
+      plus the unknown field friction=1.0e12
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "integrator"
+    And message mentions "friction"
+    # The deserialiser reports the enclosing table's path; the offending
+    # field name appears in the message. The same rejection applies to
+    # every (kind, unknown-field) pair the parameterised unit test
+    # enumerates. At minimum the test exercises
+    #   (velocity-verlet, friction), (langevin-baoab, lossless),
+    #   (mtk-npt, seed). Adding an integrator kind extends the matrix.
 
   @rq-86aa2be7
   Scenario: Langevin BAOAB kind with valid parameters is accepted
@@ -1135,20 +1201,6 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "integrator.temperature", reason: _ })
 
-  @rq-30270f03
-  Scenario: Velocity-Verlet kind rejects Langevin fields
-    Given the Background config with [integrator] kind="velocity-verlet",
-      friction=1.0e12 (extra field)
-    When load_config is called
-    Then it returns Err(ConfigError::UnknownIntegratorField { kind: "velocity-verlet", field: "friction" })
-
-  @rq-e7c05140
-  Scenario: Langevin-BAOAB kind rejects velocity-Verlet fields
-    Given the Background config with [integrator] kind="langevin-baoab",
-      friction=1.0e12, temperature=300.0, seed=42, lossless=false (extra field)
-    When load_config is called
-    Then it returns Err(ConfigError::UnknownIntegratorField { kind: "langevin-baoab", field: "lossless" })
-
   @rq-66ec7ee4
   Scenario: Velocity-Verlet lossless defaults to false when omitted
     Given the Background config with [integrator] containing only kind="velocity-verlet"
@@ -1166,8 +1218,8 @@ Feature: TOML simulation config schema
   #   - berendsen.md
   # They reference `ConfigError::MissingField { field: "thermostat.*" }`,
   # `ConfigError::InvalidValue { field: "thermostat.*", .. }`, and
-  # `ConfigError::UnknownThermostatField` to exercise the same loader path
-  # documented in this section.
+  # `ConfigError::Parse { path: "thermostat.*", .. }` to exercise the
+  # same loader path documented in this section.
 
   @rq-1e1c5f3b
   Scenario: Missing [[particle_types]] is rejected
@@ -1281,11 +1333,12 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].r_switch", reason: _ })
 
-  @rq-a3a5905d
+  @rq-e38aac7b
   Scenario: Reject unknown pair potential
     Given the Background config with pair_interactions[0].potential="morse"
     When load_config is called
-    Then it returns Err(ConfigError::UnknownPairPotential { actual: "morse", pair_index: 0 })
+    Then it returns Err(ConfigError::Parse { path, .. })
+    And path equals "pair_interactions[0].potential"
 
   @rq-45a14d49
   Scenario: Lennard-Jones pair interaction missing sigma is rejected
@@ -1294,12 +1347,14 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "pair_interactions[0].sigma" })
 
-  @rq-d10e8c7f
+  @rq-053613b6
   Scenario: Pair interaction rejects an extra field for the chosen potential
     Given the Background config with pair_interactions[0] having potential="lennard-jones"
       and an unknown field stiffness=1.0
     When load_config is called
-    Then it returns Err(ConfigError::UnknownPairInteractionField { potential: "lennard-jones", field: "stiffness", pair_index: 0 })
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "pair_interactions[0]"
+    And message mentions "stiffness"
 
   @rq-a30ac09f
   Scenario: Reject empty type name
@@ -1454,11 +1509,12 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "bond_types[0].potential" })
 
-  @rq-e34d764e
+  @rq-3f01c746
   Scenario: bond_type unknown potential is rejected
     Given a [[bond_types]] entry with potential="harmonic"
     When load_config is called
-    Then it returns Err(ConfigError::UnknownBondPotential { actual: "harmonic", bond_type_index: 0 })
+    Then it returns Err(ConfigError::Parse { path, .. })
+    And path equals "bond_types[0].potential"
 
   @rq-3b0e8140
   Scenario: Morse bond_type missing de is rejected
@@ -1484,11 +1540,13 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].re", reason: _ })
 
-  @rq-e40d2722
+  @rq-a208c9ba
   Scenario: Morse bond_type rejects extra fields
     Given a [[bond_types]] entry with potential="morse" and an unknown field stiffness=1.0
     When load_config is called
-    Then it returns Err(ConfigError::UnknownBondTypeField { potential: "morse", field: "stiffness", bond_type_index: 0 })
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "bond_types[0]"
+    And message mentions "stiffness"
 
   @rq-ed1d6c71
   Scenario: Reject duplicate bond_type names
@@ -1526,11 +1584,12 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "angle_types[0].potential" })
 
-  @rq-22699c4c
+  @rq-ffa771bd
   Scenario: angle_type unknown potential is rejected
     Given an [[angle_types]] entry with potential="cosine-harmonic"
     When load_config is called
-    Then it returns Err(ConfigError::UnknownAnglePotential { actual: "cosine-harmonic", angle_type_index: 0 })
+    Then it returns Err(ConfigError::Parse { path, .. })
+    And path equals "angle_types[0].potential"
 
   @rq-dc94d9e3
   Scenario: Harmonic angle_type missing k_theta is rejected
@@ -1550,11 +1609,13 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { field: "angle_types[0].theta_0", reason: _ })
 
-  @rq-e3544b10
+  @rq-c5fa34f5
   Scenario: Harmonic angle_type rejects extra fields
     Given an [[angle_types]] entry with potential="harmonic" and an unknown field stiffness=1.0
     When load_config is called
-    Then it returns Err(ConfigError::UnknownAngleTypeField { potential: "harmonic", field: "stiffness", angle_type_index: 0 })
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "angle_types[0]"
+    And message mentions "stiffness"
 
   @rq-9255c192
   Scenario: Reject duplicate angle_type names
@@ -1608,30 +1669,25 @@ Feature: TOML simulation config schema
     Then it returns Ok(config)
     And config.neighbor_list matches NeighborListConfig::AllPairs
 
-  @rq-c921ba22
+  @rq-0a92d90b
   Scenario: Unknown neighbor_list mode is rejected
     Given the Background config plus [neighbor_list] mode="kd-tree"
     When load_config is called
-    Then it returns Err(ConfigError::UnknownNeighborListMode { actual: "kd-tree" })
+    Then it returns Err(ConfigError::Parse { path, .. })
+    And path equals "neighbor_list.mode"
 
-  @rq-5e5f9917
-  Scenario: neighbor_list all-pairs mode rejects max_neighbors
-    Given the Background config plus [neighbor_list] mode="all-pairs" max_neighbors=128
+  @rq-13ca0415
+  Scenario: [neighbor_list] rejects unknown fields for the chosen mode
+    Given the Background config plus [neighbor_list] mode="all-pairs"
+      and the unknown field max_neighbors=128
     When load_config is called
-    Then it returns Err(ConfigError::UnknownNeighborListField { mode: "all-pairs", field: "max_neighbors" })
-
-  @rq-ba0724dc
-  Scenario: neighbor_list all-pairs mode rejects r_skin
-    Given the Background config plus [neighbor_list] mode="all-pairs" r_skin=1.0e-10
-    When load_config is called
-    Then it returns Err(ConfigError::UnknownNeighborListField { mode: "all-pairs", field: "r_skin" })
-
-  @rq-7e902717
-  Scenario: neighbor_list cell-list rejects unknown field
-    Given the Background config plus
-      [neighbor_list] mode="cell-list" max_neighbors=128 r_skin=1.0e-10 stencil="huge"
-    When load_config is called
-    Then it returns Err(ConfigError::UnknownNeighborListField { mode: "cell-list", field: "stencil" })
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "neighbor_list"
+    And message mentions "max_neighbors"
+    # The same rejection applies to every (mode, unknown-field) pair the
+    # parameterised unit test enumerates. At minimum the test exercises
+    #   (all-pairs, max_neighbors), (all-pairs, r_skin),
+    #   (cell-list, stencil="huge").
 
   @rq-fedef74d
   Scenario: neighbor_list rejects zero max_neighbors
@@ -1710,12 +1766,13 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "thermostat.seed" })
 
-  @rq-2618e113
+  @rq-19ccc047
   Scenario: [thermostat] unknown kind is rejected
     Given the Background config with [integrator] kind="velocity-verlet"
     And a [thermostat] section with kind="not-a-real-thermostat"
     When load_config is called
-    Then it returns Err(ConfigError::UnknownThermostatKind { actual: "not-a-real-thermostat" })
+    Then it returns Err(ConfigError::Parse { path, .. })
+    And path equals "thermostat.kind"
 
   @rq-c4a74903
   Scenario: [thermostat] missing kind is rejected
@@ -1725,14 +1782,20 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "thermostat.kind" })
 
-  @rq-4e0e1654
-  Scenario: [thermostat] extra fields for the chosen kind are rejected
+  @rq-f4eeb849
+  Scenario: [thermostat] rejects an unknown field for the chosen kind
     Given the Background config with [integrator] kind="velocity-verlet"
     And a [thermostat] section with kind="berendsen", temperature=300.0,
-      tau=1.0e-13, seed=42
+      tau=1.0e-13, plus the unknown field seed=42
     When load_config is called
-    Then it returns Err(ConfigError::UnknownThermostatField {
-      kind: "berendsen", field: "seed" })
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "thermostat"
+    And message mentions "seed"
+    # The same rejection applies to every (kind, unknown-field) pair the
+    # parameterised unit test enumerates. At minimum the test exercises
+    #   (berendsen, seed), (csvr, chain_length), (andersen, tau),
+    #   (nose-hoover-chain, collision_rate). Adding a kind extends the
+    #   matrix.
 
   # --- Integrator-owns-thermostat compatibility ---
 
@@ -1780,15 +1843,6 @@ Feature: TOML simulation config schema
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "integrator.tau_p" })
 
-  @rq-b02ad2f9
-  Scenario: MtkNpt rejects extra fields (e.g. seed)
-    Given the Background config with [integrator] kind="mtk-npt",
-      temperature=85.0, pressure=1.0e5, tau_t=1.0e-13, tau_p=1.0e-12,
-      seed=42
-    When load_config is called
-    Then it returns Err(ConfigError::UnknownIntegratorField {
-      kind: "mtk-npt", field: "seed" })
-
   @rq-129edb76
   Scenario: MtkNpt + [thermostat] is rejected (owns its thermostat)
     Given the Background config with [integrator] kind="mtk-npt",
@@ -1829,12 +1883,27 @@ Feature: TOML simulation config schema
     Then it returns Ok(config)
     And config.barostat is None
 
-  @rq-3127ab44
+  @rq-f03e2af2
   Scenario: Unknown [barostat] kind is rejected
     Given the Background config with [integrator] kind="velocity-verlet"
     And a [barostat] section with kind="not-a-real-barostat"
     When load_config is called
-    Then it returns Err(ConfigError::UnknownBarostatKind { actual: "not-a-real-barostat" })
+    Then it returns Err(ConfigError::Parse { path, .. })
+    And path equals "barostat.kind"
+
+  @rq-5d91f07d
+  Scenario: [barostat] rejects an unknown field for the chosen kind
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [barostat] section with kind="berendsen", pressure=1.0e5,
+      tau=1.0e-12, compressibility=4.5e-10, plus the unknown field seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "barostat"
+    And message mentions "seed"
+    # The same rejection applies to every (kind, unknown-field) pair the
+    # parameterised unit test enumerates. At minimum the test exercises
+    #   (berendsen, seed), (c-rescale, friction). Adding a kind extends
+    #   the matrix.
 
   @rq-bda9c0a2
   Scenario: [barostat] missing kind is rejected
@@ -1853,15 +1922,6 @@ Feature: TOML simulation config schema
     Then it returns Ok(config)
     And config.barostat matches
       Some(BarostatKind::Berendsen { pressure: 1.0e5, tau: 1.0e-12, compressibility: 4.5e-10 })
-
-  @rq-693b4dba
-  Scenario: Berendsen barostat extra fields are rejected
-    Given the Background config with [integrator] kind="velocity-verlet"
-    And a [barostat] section with kind="berendsen", pressure=1.0e5,
-      tau=1.0e-12, compressibility=4.5e-10, seed=42
-    When load_config is called
-    Then it returns Err(ConfigError::UnknownBarostatField {
-      kind: "berendsen", field: "seed" })
 
   @rq-c1d79d33
   Scenario: [barostat] kind = "c-rescale" with all required fields accepted
@@ -1889,16 +1949,6 @@ Feature: TOML simulation config schema
       temperature=85.0, tau=1.0e-12, compressibility=4.5e-10
     When load_config is called
     Then it returns Err(ConfigError::MissingField { field: "barostat.seed" })
-
-  @rq-0fa153b7
-  Scenario: C-rescale barostat extra fields are rejected
-    Given the Background config with [integrator] kind="velocity-verlet"
-    And a [barostat] section with kind="c-rescale", pressure=1.0e5,
-      temperature=85.0, tau=1.0e-12, compressibility=4.5e-10, seed=42,
-      friction=1.0e12
-    When load_config is called
-    Then it returns Err(ConfigError::UnknownBarostatField {
-      kind: "c-rescale", field: "friction" })
 
   # Per-field parameter-validation scenarios for the Berendsen and
   # C-rescale barostats (missing pressure / tau / compressibility / seed,

@@ -490,8 +490,9 @@ Feature: Stochastic cell-rescaling (C-rescale) barostat
       pressure=1.0e5, temperature=85.0, tau=1.0e-12, compressibility=4.5e-10,
       seed=42, friction=1.0e12
     When load_config is called
-    Then it returns Err(ConfigError::UnknownBarostatField {
-      kind: "c-rescale", field: "friction" })
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "barostat"
+    And message mentions "friction"
 
   # --- Per-step kernel sequence ---
 
