@@ -379,7 +379,7 @@ module `"nose_hoover"` and captures `kinetic_energy_reduce` and
 
 ### Rust Launch Helpers <!-- rq-d028bd1f -->
 
-Two free functions in `src/gpu/kernels.rs`, re-exported from
+Three free functions in `src/gpu/kernels.rs`, re-exported from
 `crate::gpu`:
 
 - `compute_kinetic_energy(buffers: &ParticleBuffers, scratch: &mut CudaSlice<f32>) -> Result<f32, GpuError>` <!-- rq-511f4606 -->
@@ -409,6 +409,32 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
     `compute_kinetic_energy`.
   - General-purpose: usable by any thermostat that needs a uniform
     scalar velocity rescale.
+
+- `compute_total_potential_energy(buffers: &ParticleBuffers, scratch: &mut CudaSlice<f32>) -> Result<f32, GpuError>` <!-- rq-fc6859df -->
+  - Launches `virial_sum_reduce` (the generic single-block deterministic
+    f32 sum-reduction kernel declared in `kernels/barostat.cu` and
+    documented in `berendsen-barostat.md`) over
+    `buffers.potential_energies`, with output `scratch` (a length-1
+    device buffer the caller owns; reused across calls to avoid per-step
+    allocation).
+  - Downloads `scratch[0]` host-side via `dtoh_sync_copy_into` and
+    returns the value in joules.
+  - Block size 256, single block, no shared-memory tuning beyond what
+    the kernel declares. Tracked under
+    `KernelStage::POTENTIAL_ENERGY_REDUCE` (distinct from
+    `KernelStage::VIRIAL_SUM_REDUCE`, which counts the barostat-driven
+    launches of the same kernel binary).
+  - When `buffers.particle_count() == 0`, returns `Ok(0.0_f32)`
+    without launching.
+  - Invokes the kernel through the `Kernels` handle reached from
+    `buffers`; performs no string-keyed kernel lookup of its own.
+  - General-purpose: the runner calls it whenever it needs the
+    instantaneous total potential energy for a slot's
+    `log_column_values(ke, pe)` invocation (currently
+    `NoseHooverChainThermostat::log_column_values` and
+    `MtkNptIntegrator::log_column_values`); any future slot that
+    declares a PE-using diagnostic column observes the same value
+    through the same path.
 
 ### Shared `nhc_chain_sub_step` host-side helper <!-- rq-19496703 -->
 

@@ -11,7 +11,7 @@ use crate::forces::{
     AngleList, BondList, ExclusionList, ForceField, ForceFieldError, TopologyFileError,
     load_topology_file,
 };
-use crate::gpu::{ParticleBuffers, init_device};
+use crate::gpu::{ParticleBuffers, compute_total_potential_energy, init_device};
 use crate::integrator::{
     BarostatError, BarostatRegistry, IntegratorError, IntegratorRegistry, ThermostatError,
     ThermostatRegistry,
@@ -24,7 +24,7 @@ use crate::io::{
 use crate::io::log_output::{BOLTZMANN_J_PER_K, compute_kinetic_energy, compute_temperature};
 use crate::state::{ParticleState, ParticleStateError};
 use crate::timings::{
-    HostStage, Timings, TimingsError, TimingsWriterError, write_timings_file,
+    HostStage, KernelStage, Timings, TimingsError, TimingsWriterError, write_timings_file,
 };
 
 // rq-8ee27e27 rq-e1ceb5c0 rq-6cf916af
@@ -373,6 +373,20 @@ fn run_simulation_with_phase(
         None
     };
 
+    // rq-fc6859df: length-1 scratch for the runner's per-log-row PE
+    // reduction. Only constructed when at least one slot declares a
+    // PE-using log column; otherwise the device allocation is skipped.
+    let mut pe_scratch: Option<cudarc::driver::CudaSlice<f32>> =
+        if !log_extra_columns.is_empty() {
+            Some(
+                gpu.device
+                    .alloc_zeros::<f32>(1)
+                    .map_err(|e| (RunnerError::Gpu(crate::gpu::GpuError(e)), ExitPhase::Setup))?,
+            )
+        } else {
+            None
+        };
+
     let started = Instant::now();
 
     // Warm-up: populate forces with F(x_0) via the force-field pipeline.
@@ -414,15 +428,24 @@ fn run_simulation_with_phase(
         let extras = if log_extra_columns.is_empty() {
             Vec::new()
         } else {
-            let pe = compute_total_potential_energy(&buffers).map_err(|g| {
+            let scratch = pe_scratch
+                .as_mut()
+                .expect("pe_scratch allocated when log_extra_columns non-empty");
+            timings
+                .kernel_start(KernelStage::POTENTIAL_ENERGY_REDUCE)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
+            let pe = compute_total_potential_energy(&buffers, scratch).map_err(|g| {
                 (RunnerError::Gpu(g), ExitPhase::Setup)
             })?;
+            timings
+                .kernel_stop(KernelStage::POTENTIAL_ENERGY_REDUCE)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
             collect_log_extras(
                 integrator.as_ref(),
                 thermostat.as_deref(),
                 barostat.as_deref(),
                 ke,
-                pe,
+                pe as f64,
             )
         };
         let mut lw = Duration::ZERO;
@@ -497,14 +520,23 @@ fn run_simulation_with_phase(
             let extras = if log_extra_columns.is_empty() {
                 Vec::new()
             } else {
-                let pe = compute_total_potential_energy(&buffers)
+                let scratch = pe_scratch
+                    .as_mut()
+                    .expect("pe_scratch allocated when log_extra_columns non-empty");
+                timings
+                    .kernel_start(KernelStage::POTENTIAL_ENERGY_REDUCE)
+                    .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+                let pe = compute_total_potential_energy(&buffers, scratch)
                     .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Loop))?;
+                timings
+                    .kernel_stop(KernelStage::POTENTIAL_ENERGY_REDUCE)
+                    .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
                 collect_log_extras(
                     integrator.as_ref(),
                     thermostat.as_deref(),
                     barostat.as_deref(),
                     ke,
-                    pe,
+                    pe as f64,
                 )
             };
             let mut lw = Duration::ZERO;
@@ -574,28 +606,6 @@ fn collect_log_extras(
         extras.extend(b.log_column_values(ke, pe));
     }
     extras
-}
-
-// Download the per-particle potential-energy buffer and sum it host-side
-// in particle-index order so the result is bit-reproducible across runs.
-// Called only when an integrator declares a diagnostic column that needs
-// total PE (currently the Nosé-Hoover chain's `nhc_conserved`).
-fn compute_total_potential_energy(
-    buffers: &ParticleBuffers,
-) -> Result<f64, crate::gpu::GpuError> {
-    let n = buffers.particle_count();
-    if n == 0 {
-        return Ok(0.0);
-    }
-    let host: Vec<f32> = buffers
-        .device
-        .dtoh_sync_copy(&buffers.potential_energies)
-        .map_err(crate::gpu::GpuError::from)?;
-    let mut sum = 0.0_f64;
-    for v in &host[..n] {
-        sum += *v as f64;
-    }
-    Ok(sum)
 }
 
 fn write_traj_frame(

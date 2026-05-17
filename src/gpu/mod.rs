@@ -10,7 +10,8 @@ pub use device::{GpuContext, GpuError, Kernels, init_device};
 pub use kernels::{
     K_COULOMB_F32, LennardJonesParameterTable, SPATIAL_HASH_SCAN_BLOCK_SIZE,
     accumulate_forces, andersen_resample, compute_cell_indices_and_histogram,
-    compute_kinetic_energy, compute_total_virial, copy_positions_into_reference,
+    compute_kinetic_energy, compute_total_potential_energy, compute_total_virial,
+    copy_positions_into_reference,
     coulomb_pair_force, harmonic_angle_force, lan_drift_half, lan_ou_step, lj_pair_force,
     morse_bond_force, mtk_position_drift, mtk_velocity_half_kick,
     neighbor_displacement_squared, neighbor_list_build,

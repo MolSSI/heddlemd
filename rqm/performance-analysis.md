@@ -287,6 +287,12 @@ partial timings are discarded).
   - `KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED` → `"neighbor_displacement_squared"`
   - `KernelStage::NEIGHBOR_LIST_BUILD` → `"neighbor_list_build"`
   - `KernelStage::COPY_POSITIONS_INTO_REFERENCE` → `"copy_positions_into_reference"`
+  - `KernelStage::POTENTIAL_ENERGY_REDUCE` → `"potential_energy_reduce"` —
+    the runner's per-log-row launch of `virial_sum_reduce` against
+    `buffers.potential_energies` (see
+    `integration/nose-hoover-chain.md`'s `compute_total_potential_energy`).
+    Distinct from `KernelStage::VIRIAL_SUM_REDUCE`, which counts
+    barostat-driven launches of the same kernel binary.
 
   The associated const `KernelStage::ORDER: &'static [KernelStage]`
   is the canonical registry of known kernel stages and fixes the row

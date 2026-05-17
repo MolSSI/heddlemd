@@ -978,6 +978,48 @@ pub fn compute_total_virial(
     Ok(out[0])
 }
 
+// rq-fc6859df
+//
+// Reuses `virial_sum_reduce` (the generic single-block deterministic
+// f32 sum-reduction kernel) against `particle_buffers.potential_energies`.
+// Runner-side helper for assembling integrator/thermostat log columns
+// that need the total potential energy without downloading the
+// per-particle buffer.
+pub fn compute_total_potential_energy(
+    particle_buffers: &ParticleBuffers,
+    scratch: &mut CudaSlice<f32>,
+) -> Result<f32, GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(0.0_f32);
+    }
+    debug_assert_eq!(scratch.len(), 1);
+    let n_u32 = n as u32;
+    let func = particle_buffers.kernels.virial_sum_reduce.clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.potential_energies,
+                &mut *scratch,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    let mut out = [0.0_f32; 1];
+    particle_buffers
+        .device
+        .dtoh_sync_copy_into(scratch, &mut out)
+        .map_err(GpuError::from)?;
+    Ok(out[0])
+}
+
 // Uniform per-particle position rescale used by the Berendsen barostat.
 // Block size 256, grid ceil(n / 256). When n == 0 returns Ok(()) without
 // launching. Does NOT touch velocities, forces, image flags, or any

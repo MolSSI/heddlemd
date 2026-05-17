@@ -62,6 +62,8 @@ impl KernelStage {
     // rq-0d8c8688
     pub const VIRIAL_SUM_REDUCE: KernelStage =
         KernelStage::new("virial_sum_reduce");
+    pub const POTENTIAL_ENERGY_REDUCE: KernelStage =
+        KernelStage::new("potential_energy_reduce");
     pub const BERENDSEN_BAROSTAT_RESCALE_POSITIONS: KernelStage =
         KernelStage::new("berendsen_barostat_rescale_positions");
     // rq-11f5dfd1
@@ -106,6 +108,7 @@ impl KernelStage {
         Self::ANDERSEN_RESAMPLE,
         Self::BERENDSEN_RESCALE_VELOCITIES,
         Self::VIRIAL_SUM_REDUCE,
+        Self::POTENTIAL_ENERGY_REDUCE,
         Self::BERENDSEN_BAROSTAT_RESCALE_POSITIONS,
         Self::C_RESCALE_BAROSTAT_RESCALE_POSITIONS,
         Self::MTK_NPT_RESCALE_VELOCITIES,

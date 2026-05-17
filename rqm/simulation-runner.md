@@ -145,7 +145,11 @@ message.
     `integrator.log_column_names() ++ thermostat.map(|t|
     t.log_column_names()).unwrap_or_default() ++ barostat.map(|b|
     b.log_column_names()).unwrap_or_default()`. The runner caches the
-    concatenated slice for the duration of the run. Failure → exit 1.
+    concatenated slice for the duration of the run. When that cached
+    slice is non-empty, the runner additionally allocates a length-1
+    `CudaSlice<f32>` named `pe_scratch` (the per-log-row scratch buffer
+    passed to `compute_total_potential_energy` in steps 15 and 16.f).
+    Failure → exit 1.
 14. **Warm up forces.** Call `force_field.step(&mut buffers, &sim_box,
     &mut timings)` once to populate `forces_*` with `F(x_0)`. This is
     the same warm-up pattern used in `pipeline-reproducibility.md`.
@@ -155,11 +159,15 @@ message.
     `masses` download is cached for the remainder of the run), compute
     KE and T via `compute_kinetic_energy` and `compute_temperature`
     (`log-output.md`); if the cached extra-column slice is non-empty,
-    additionally download `potential_energies` and sum it on the host
-    to obtain the total PE in joules, then assemble the extras vector
-    as the concatenation of each slot's `log_column_values(ke, pe)` in
-    the same dispatch order used at log-open time (integrator,
-    thermostat, barostat). Call `write_row(0, 0.0, ke, t, &extras)`.
+    additionally call
+    `compute_total_potential_energy(&buffers, &mut pe_scratch)` (see
+    `integration/nose-hoover-chain.md`) to obtain the total PE in
+    joules via a single-block deterministic GPU reduction of
+    `buffers.potential_energies` followed by a one-scalar download.
+    Assemble the extras vector as the concatenation of each slot's
+    `log_column_values(ke, pe)` in the same dispatch order used at
+    log-open time (integrator, thermostat, barostat). Call
+    `write_row(0, 0.0, ke, t, &extras)`.
 16. **Timestep loop.** For each step `s` in `1 ..= n_steps`:
     a. If `thermostat.is_some()`,
        `thermostat.apply_pre(&mut buffers, dt, &mut timings)` — runs
@@ -191,10 +199,12 @@ message.
        `write_frame(step=s, ...)`.
     f. If log output is enabled and `s % log_every == 0`, download
        velocities, compute KE and T; when the cached extra-column
-       slice is non-empty, additionally download `potential_energies`,
-       sum it on the host to obtain the total PE, and assemble the
-       extras vector as the concatenation of each slot's
-       `log_column_values(ke, pe)` in dispatch order. Call
+       slice is non-empty, additionally call
+       `compute_total_potential_energy(&buffers, &mut pe_scratch)` to
+       obtain the total PE via a single-block deterministic GPU
+       reduction (one f32 scalar downloaded; no per-particle download),
+       and assemble the extras vector as the concatenation of each
+       slot's `log_column_values(ke, pe)` in dispatch order. Call
        `write_row(s, s as f64 * dt, ke, t, &extras)`.
     g. Possibly emit a progress line (see *Progress reporting*).
 17. **Flush and close.** Call `flush()` on each open writer. The writers'

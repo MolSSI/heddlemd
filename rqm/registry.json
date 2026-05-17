@@ -13508,6 +13508,13 @@
     "title": "Reject missing Lattice attribute",
     "type": "scenario"
   },
+  "rq-fc6859df": {
+    "decl": "- `compute_total_potential_energy(buffers: &ParticleBuffers, scratch: &mut CudaSlice<f32>) -> Result<f32, GpuError>`",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "compute_total_potential_energy",
+    "type": "api-item"
+  },
   "rq-fc7b1565": {
     "decl": "Scenario: step() on a ForceField with zero slots writes zeros to forces_*",
     "file": "forces/framework",
