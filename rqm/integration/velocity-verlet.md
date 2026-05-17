@@ -13,9 +13,11 @@ returns `false`).
 
 The per-particle arithmetic is split across two CUDA kernels: `vv_kick_drift`
 performs the first half-velocity update followed by the position update, and
-`vv_kick` performs the second half-velocity update. The trait's `step()`
-launches `vv_kick_drift`, then calls `force_field.step(...)` for the new
-force evaluation, then launches `vv_kick`.
+`vv_kick` performs the second half-velocity update. The integrator declares a
+three-element `StepPlan` (`KickDrift`, `ForceEval`, `KickHalf`) and the runner
+walks it, dispatching `KickDrift` and `KickHalf` to `execute()` (which launches
+the corresponding kernel) and `ForceEval` directly to `force_field.step(...)`
+(see `framework.md`).
 
 The integrator ships in two modes:
 
@@ -343,47 +345,64 @@ the parsed `IntegratorKind::VelocityVerlet { lossless }` config variant
 and, when `lossless == true`, allocates a `LosslessBuffers` of the
 runner's particle count on the same `Arc<CudaDevice>`.
 
-The implementation's `step(buffers, sim_box, force_field, constraint,
-dt, timings)` performs the following sequence:
+### Step Plan <!-- rq-a097b162 -->
 
-1. If `constraint` is `Some`, call
-   `constraint.apply_before_drift(buffers, sim_box, dt, timings)` so
-   the constraint slot can snapshot pre-drift positions for its
-   owned atoms.
-2. Launch `vv_kick_drift` (or `vv_kick_drift_lossless`), bracketed by
-   `timings.kernel_start(KernelStage::VV_KICK_DRIFT)` /
-   `timings.kernel_stop(KernelStage::VV_KICK_DRIFT)` (or the
-   `*_LOSSLESS` stage names — see `performance-analysis.md`). This
-   applies the first half-kick using the cached `F(t)` and drifts
-   positions to `x(t+dt)`.
-3. If `constraint` is `Some`, call
-   `constraint.apply_after_drift(buffers, sim_box, dt, timings)` so
-   the slot can project the unconstrained drifted positions back
-   onto the constraint manifold and update the half-step velocities
-   for position consistency.
-4. Call `force_field.step(buffers, sim_box, timings)`, which writes
-   `F(t+dt)` into `buffers.forces_*` and the per-particle energy /
-   virial buffers.
-5. Launch `vv_kick` (or `vv_kick_lossless`) with matching timing
-   bracketing. This applies the second half-kick using `F(t+dt)`.
-6. If `constraint` is `Some`, call
-   `constraint.apply_after_kick(buffers, sim_box, dt, timings)` so
-   the slot can project the post-kick velocities onto the constraint
-   manifold.
+`VelocityVerletState::plan(dt)` returns a fixed three-element plan:
 
-When `constraint` is `None`, steps 1, 3, and 6 are skipped without
-launching any kernel.
+```rust
+StepPlan { steps: vec![
+    SubStep::KickDrift { dt, label: "vv_kick_drift" },
+    SubStep::ForceEval,
+    SubStep::KickHalf  { dt, label: "vv_kick"       },
+]}
+```
 
-When `constraint` is `Some` and `lossless == true`, the lossless
-variant of `VelocityVerletState` returns
-`IntegratorError::ConstraintNotSupported`: the config loader's
-`IncompatibleConstraint` rule prevents that combination in practice
-(see `io/config-schema.md` and `constraint-framework.md`).
+The plan shape is identical for the lossy and lossless variants; the
+`lossless` flag is carried on the integrator's `&mut self` and read
+inside `execute()` to choose between the lossy and lossless kernels.
 
-`sim_box` is borrowed mutably but velocity-Verlet does not modify it.
-Velocity Verlet is deterministic and stateless across `step()` calls
-(beyond the particle buffers themselves); it carries no per-call
-counter.
+### Sub-step Execution <!-- rq-51e5a0cd -->
+
+`VelocityVerletState::execute(sub, buffers, sim_box, timings)`
+dispatches:
+
+- `SubStep::KickDrift { dt, .. }` → launches `vv_kick_drift` (lossy) or
+  `vv_kick_drift_lossless` (lossless), bracketed by
+  `timings.kernel_start(KernelStage::VV_KICK_DRIFT)` /
+  `timings.kernel_stop(KernelStage::VV_KICK_DRIFT)` (or the
+  `*_LOSSLESS` stage names — see `performance-analysis.md`). Applies
+  the first half-kick using the cached `F(t)` and drifts positions
+  to `x(t+dt)`.
+- `SubStep::KickHalf { dt, .. }` → launches `vv_kick` (lossy) or
+  `vv_kick_lossless` (lossless) with matching timing bracketing.
+  Applies the second half-kick using `F(t+dt)`.
+- Any other variant → returns
+  `IntegratorError::UnexpectedSubStep { variant: <name> }`. A
+  conforming runner never produces this case: `ForceEval` is
+  dispatched directly by the runner, and Velocity Verlet's plan
+  contains no `Drift` or `Custom` sub-steps.
+
+### Runner-Driven Constraint Hooks <!-- rq-9b03044f -->
+
+The runner walks the plan (see `framework.md` and
+`constraint-framework.md`). When a constraint slot is configured and
+the integrator's `IntegratorKind::supports_constraints()` returns
+`true`, the runner inserts `apply_before_drift` / `apply_after_drift`
+around the `KickDrift` sub-step and fires `apply_after_kick` after
+the final `KickHalf`. Velocity Verlet's `execute()` is unaware of
+the constraint slot.
+
+`IntegratorKind::VelocityVerlet { lossless: false }` returns `true`
+from `supports_constraints()`; `IntegratorKind::VelocityVerlet
+{ lossless: true }` returns `false`. The config loader rejects the
+`lossless = true` + non-empty `[constraints]` combination with
+`ConfigError::IncompatibleConstraint` (see
+`integration/constraint-framework.md` and `io/config-schema.md`).
+
+`sim_box` is borrowed mutably during `execute()` but velocity-Verlet
+does not modify it. Velocity Verlet is deterministic and stateless
+across timesteps (beyond the particle buffers themselves); it
+carries no per-call counter.
 
 ## Launch Configuration <!-- rq-0540b862 -->
 

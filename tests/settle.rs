@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use cudarc::driver::CudaDevice;
+use dynamics::integrator::IntegratorStepExt;
 use dynamics::forces::{
     ConstraintGroup, ConstraintList, ConstraintTypeKind, GroupConstraint,
 };
@@ -718,58 +719,19 @@ fn settle_builder_kind_name_is_settle() {
     assert_eq!(b.kind_name(), "settle");
 }
 
-// --- Lossless rejection at integration time ------------------------------
-
+// --- Lossless rejection moved to config-load time ----------------------
+//
+// The runner-side `IncompatibleConstraint` rule
+// (`validate_constraint_compatibility_rejects_lossless_with_constraints`
+// in `tests/io_config.rs`) is the canonical test for the lossless +
+// constraints rejection. The integrator's `execute()` no longer
+// receives a constraint slot, so it cannot itself return any
+// "unsupported" error at run time.
 #[test]
-fn lossless_velocity_verlet_with_constraint_returns_unsupported() {
-    use dynamics::forces::AngleList;
-    use dynamics::forces::ForceField;
-    use dynamics::integrator::{Integrator, IntegratorError, IntegratorRegistry, VelocityVerletBuilder};
+fn lossless_velocity_verlet_kind_does_not_support_constraints() {
     use dynamics::io::IntegratorKind;
-    use dynamics::io::config::NeighborListConfig;
-    let _ = VelocityVerletBuilder;
-    let gpu = init_device().unwrap();
-    let list = sequential_settle_list(1);
-    let state = water_state(1, 5.0e-10);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = big_box();
-    let mut ff = ForceField::new(
-        &gpu,
-        3,
-        &sim_box,
-        &[],
-        &[],
-        &[],
-        &[],
-        None,
-        None,
-        &[],
-        &dynamics::forces::BondList::empty(3),
-        &AngleList::empty(0),
-        &dynamics::forces::ExclusionList::empty(3),
-        &NeighborListConfig::AllPairs,
-    )
-    .unwrap();
-    let registry = IntegratorRegistry::with_builtins();
-    let mut integrator = registry
-        .build(&IntegratorKind::VelocityVerlet { lossless: true }, &gpu, 3)
-        .unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    let mut slot = SettleConstraintsState::new(
-        gpu.device.clone(),
-        &list,
-        &state.masses,
-        &[spce_type()],
-    )
-    .unwrap();
-    let constraint_arg: Option<&mut dyn Constraint> = Some(&mut slot);
-    let err = integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, constraint_arg, 1.0e-15, &mut timings)
-        .unwrap_err();
-    match err {
-        IntegratorError::ConstraintNotSupported => {}
-        other => panic!("expected ConstraintNotSupported, got {other:?}"),
-    }
+    let kind = IntegratorKind::VelocityVerlet { lossless: true };
+    assert!(!kind.supports_constraints());
 }
 
 // --- Integration through Integrator::step --------------------------------

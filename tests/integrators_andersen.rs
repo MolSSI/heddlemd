@@ -8,6 +8,7 @@ use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, andersen_resample, compute_kinetic_energy, init_device,
 };
+use dynamics::integrator::IntegratorStepExt;
 use dynamics::integrator::{
     AndersenThermostat, Thermostat, ThermostatRegistry,
 };

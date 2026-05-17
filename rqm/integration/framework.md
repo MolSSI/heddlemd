@@ -15,12 +15,15 @@ compose at every timestep:
    virial / kinetic-energy data and mutates the box for the next
    step's force evaluation.
 4. An optional `Constraint` — holonomic constraint projection (rigid
-   bonds, rigid groups). Threaded through `integrator.step()` so its
-   hooks fire at intra-step boundaries the integrator owns (before
-   drift, after drift, after the final velocity kick). The slot, its
-   trait, its data layout, and its compatibility rules are defined
-   in `constraint-framework.md`; the v1 implementation (SETTLE for
-   three-atom rigid water) lives in `settle.md`.
+   bonds, rigid groups). Driven by the runner during its walk of the
+   integrator's `StepPlan` (see *Per-Step Interface*): the runner
+   inserts the constraint's hooks at the canonical sub-step
+   boundaries (before / after every `Drift` or `KickDrift`, and after
+   the final velocity update). Integrators never reference the
+   constraint slot. The slot, its trait, its data layout, and its
+   compatibility rules are defined in `constraint-framework.md`; the
+   v1 implementation (SETTLE for three-atom rigid water) lives in
+   `settle.md`.
 
 Each slot is independently registered and independently selectable
 from TOML. Omitting `[thermostat]` selects NVE; omitting `[barostat]`
@@ -77,27 +80,62 @@ The default registry exposes two barostats:
 
 ## Per-Step Interface <!-- rq-daadfc1a -->
 
+An integrator describes its work as an ordered sequence of typed
+*sub-steps* (a `StepPlan`) and exposes a method that executes one
+sub-step at a time. The runner walks the plan, dispatching each
+sub-step to either `integrator.execute(...)` or `force_field.step(...)`
+depending on the sub-step's variant, and inserts the constraint slot's
+hooks at the canonical sub-step boundaries (see `constraint-framework.md`
+for the hook contract). Integrators never reference the constraint
+slot directly.
+
 The runner drives the timestep loop in a fixed pattern:
 
 ```text
 loop step in 1..=n_steps:
     if let Some(t) = thermostat { t.apply_pre(buffers, dt, timings) }
-    integrator.step(
-        buffers, sim_box, force_field,
-        constraint.as_deref_mut(),
-        dt, timings)
+    let plan = integrator.plan(dt)
+    let install_hooks = constraint.is_some() && integrator_kind.supports_constraints()
+    for (i, sub) in plan.steps.iter().enumerate():
+        let is_drift = matches!(sub, SubStep::Drift{..} | SubStep::KickDrift{..})
+        if install_hooks && is_drift {
+            constraint.apply_before_drift(buffers, sim_box, dt, timings)
+        }
+        match sub:
+            SubStep::ForceEval =>
+                force_field.step(buffers, sim_box, timings)
+            other =>
+                integrator.execute(other, buffers, sim_box, timings)
+        if install_hooks && is_drift {
+            constraint.apply_after_drift(buffers, sim_box, dt, timings)
+        }
+    let last_is_kick = matches!(
+        plan.steps.last(),
+        Some(SubStep::KickHalf{..} | SubStep::KickDrift{..}))
+    if install_hooks && last_is_kick {
+        constraint.apply_after_kick(buffers, sim_box, dt, timings)
+    }
     if let Some(t) = thermostat { t.apply_post(buffers, dt, timings) }
     if let Some(b) = barostat   { b.apply(buffers, sim_box, dt, timings) }
     ...trajectory / log output...
 ```
 
-When the constraint slot is `None`, integrators skip every constraint
-hook. Integrators that do not support constraints (every default
-registry entry other than `velocity-verlet { lossless = false }`)
-ignore a `None` argument and return
-`IntegratorError::ConstraintNotSupported` if passed `Some(_)`; the
-config loader's `IncompatibleConstraint` rule prevents that
-combination from being constructed in the first place.
+The runner calls `integrator.plan(dt)` once per timestep. `plan(dt)` is
+a pure function of `dt` and the integrator's static configuration; it
+returns the same `StepPlan` shape every call with the same `dt` (no
+per-step branching on simulation state). Plans may contain zero or
+more sub-steps; an empty plan is a no-op for that timestep.
+
+`integrator.execute(sub, buffers, sim_box, timings)` runs one sub-step.
+It receives no `&mut ForceField` because force evaluation is dispatched
+by the runner, not the integrator. The integrator's per-sub-step
+kernel launches bracket their own timings stages.
+
+When `constraint` is `None`, when the integrator's
+`IntegratorKind::supports_constraints()` returns `false`, or when the
+plan has no Drift / KickDrift sub-steps, no constraint hooks fire and
+the loop reduces to a straight plan walk. The integrator code never
+mentions the constraint slot.
 
 The runner's `step` value is local to the timestep loop; it gates
 trajectory and log writes via `step % trajectory_every == 0` and
@@ -105,14 +143,6 @@ trajectory and log writes via `step % trajectory_every == 0` and
 need a monotone counter (for example a stochastic thermostat that
 needs reproducible RNG draws) maintain their own counter on their
 state and increment it on every invocation.
-
-`integrator.step()` is responsible for all velocity and position
-updates within its splitting (the kicks, the drift, the in-step force
-evaluation), plus any state the integrator itself owns. The
-integrator calls `force_field.step(buffers, sim_box, timings)` at the
-point(s) of its choice. For the symplectic and Leimkuhler–Matthews
-integrators in the default registry this happens exactly once per
-`step()`.
 
 `thermostat.apply_pre()` and `thermostat.apply_post()` mutate
 velocities (and read kinetic energy). They never touch positions, box,
@@ -124,16 +154,18 @@ virial / kinetic data from `buffers`. The integrator has already
 populated `buffers.virials` and `buffers.forces_*` during its
 in-step force evaluation; the barostat consumes those without
 re-launching the force pipeline. The mutated box is observed by the
-next iteration's `integrator.step()` through the existing
+next iteration's plan walk through the existing
 `SimulationBox::generation()` change-detection path
 (`forces/neighbor-list.md`, `forces/spme.md`).
 
 The runner performs one warm-up `force_field.step(...)` call before
-entering the timestep loop so the first iteration's
-`integrator.step()` reads valid `forces_*` and `virials`. Integrators
-that follow the symplectic-with-cached-F contract assume
-`buffers.forces_*` holds `F(t)` on entry and produce `F(t+dt)` on
-exit; the current registry's integrators all follow this contract.
+entering the timestep loop so the first iteration's plan walk reads
+valid `forces_*` and `virials`. Integrators that follow the
+symplectic-with-cached-F contract place a `KickHalf` or `KickDrift`
+sub-step before the `ForceEval` so they consume `F(t)`, and place
+their final velocity update (a `KickHalf` or `KickDrift`) after the
+`ForceEval` so it consumes `F(t+dt)`. Every integrator in the
+default registry follows this contract.
 
 ## Construction and Lifetime <!-- rq-5a1771b2 -->
 
@@ -191,18 +223,80 @@ successfully.
 
 ### Types <!-- rq-6c5b4246 -->
 
+- `SubStep` — closed enum describing one piece of an integrator's <!-- rq-dbbffa7d -->
+  per-timestep work. Variants:
+
+  ```rust
+  pub enum SubStep {
+      /// Velocity half-kick: v ← v + (F/m) · dt/2 (or the
+      /// integrator-private equivalent). No position update.
+      KickHalf { dt: f32, label: &'static str },
+
+      /// Position drift: x ← x + v · dt (or the integrator-private
+      /// equivalent). No velocity update.
+      Drift { dt: f32, label: &'static str },
+
+      /// Fused KickHalf + Drift in a single kernel launch (e.g. the
+      /// `vv_kick_drift` kernel for velocity-Verlet).
+      KickDrift { dt: f32, label: &'static str },
+
+      /// Full force-pipeline evaluation. Dispatched by the runner,
+      /// not by the integrator's `execute()`; the runner calls
+      /// `force_field.step(buffers, sim_box, timings)` directly.
+      ForceEval,
+
+      /// Integrator-private sub-step that doesn't fit the
+      /// kick/drift/force triad (Langevin's OU step, MTK's chain or
+      /// barostat sub-steps, kinetic-energy reductions for a
+      /// barostat, etc.). The `label` lets the integrator's
+      /// `execute()` dispatch to the right kernel.
+      Custom { label: &'static str },
+  }
+  ```
+
+  - `label` on every variant is integrator-private and exists for
+    debugging, timings stage selection, and (for `Custom`) dispatch
+    inside `execute()`. The runner does not interpret the label.
+  - The constraint slot's hook insertion logic
+    (`constraint-framework.md`) reads only the variant tag, not the
+    label.
+
+- `StepPlan` — ordered list of `SubStep`s describing one full <!-- rq-9fbba3be -->
+  timestep. `Debug + Clone`.
+
+  ```rust
+  pub struct StepPlan {
+      pub steps: Vec<SubStep>,
+  }
+  ```
+
+  - `steps.len() == 0` is allowed and represents an integrator that
+    does nothing this timestep. The runner walks an empty plan
+    without launching any kernel.
+  - The plan may contain zero, one, or more `ForceEval` sub-steps.
+    Zero: forces stay at their previous value (suitable for inertial
+    drift or analytic propagation). One: the standard symplectic
+    pattern. More than one: predictor-corrector or future multi-step
+    integrators.
+
 - `Integrator` — object-safe trait implemented by every concrete <!-- rq-78f484d9 -->
   integrator. Owns the core time-stepping algorithm.
 
   ```rust
   pub trait Integrator: std::fmt::Debug + Send {
-      fn step(
+      /// Return the ordered sequence of sub-steps that constitute one
+      /// timestep of size `dt`. Pure: must return the same shape for
+      /// the same `dt` and the same integrator state across calls.
+      fn plan(&self, dt: f32) -> StepPlan;
+
+      /// Execute one sub-step from this integrator's plan. Receives
+      /// every sub-step except `SubStep::ForceEval` (which the runner
+      /// dispatches directly to the force field).
+      fn execute(
           &mut self,
+          substep: &SubStep,
           buffers: &mut ParticleBuffers,
           sim_box: &mut SimulationBox,
-          force_field: &mut ForceField,
-          constraint: Option<&mut dyn Constraint>,
-          dt: f32,
           timings: &mut Timings,
       ) -> Result<(), IntegratorError>;
 
@@ -226,17 +320,31 @@ successfully.
   }
   ```
 
-  - The integrator runs every sub-step the time-stepping algorithm
-    requires (velocity kicks, position drifts, force evaluations).
-    It calls `force_field.step(buffers, sim_box, timings)` at the
-    appropriate point(s).
-  - `sim_box` is passed mutably so future integrators that mutate the
-    box during the step (e.g. integrated barostats) can do so.
-    Integrators that do not mutate the box leave it unchanged.
-  - On a successful return, `buffers.forces_*` holds `F` evaluated at
-    the post-step positions (so the next iteration's pipeline can
-    begin with a half-kick that reads `F(t)`).
-  - Returns `Ok(())` immediately when `buffers.particle_count() == 0`.
+  - `plan(dt)` is called once per timestep by the runner. It does
+    no I/O, launches no kernels, and may not allocate per-particle
+    GPU buffers (those are constructed once at slot construction).
+  - `execute(sub, ...)` is called once per non-`ForceEval` sub-step,
+    in plan order, by the runner. The integrator dispatches on
+    `sub`'s variant and label to choose the right kernel. Sub-steps
+    are independent of each other apart from their effect on
+    `buffers` and the integrator's `&mut self`.
+  - `execute()` is never called with `SubStep::ForceEval`; the runner
+    dispatches force evaluation directly via `force_field.step(...)`.
+    An integrator that places `ForceEval` in its plan but receives a
+    `ForceEval` in `execute()` (e.g. due to misuse) should return an
+    `IntegratorError` describing the misuse; conforming runners
+    never produce this call.
+  - `sim_box` is passed mutably to `execute()` so future integrators
+    that mutate the box during the step (integrated barostats) can
+    do so. Integrators that do not mutate the box leave it
+    unchanged.
+  - On a successful return from the runner's plan walk,
+    `buffers.forces_*` holds `F` evaluated at the post-step positions
+    (so the next iteration's plan can begin with a `KickHalf` /
+    `KickDrift` that reads `F(t)`).
+  - `plan(dt)` returns an empty plan when the integrator has nothing
+    to do for that timestep; this is the canonical way to express a
+    no-op step.
 
 - `Thermostat` — object-safe trait implemented by every concrete <!-- rq-5d9ed248 -->
   thermostat.
@@ -432,27 +540,26 @@ successfully.
   returned by the corresponding trait methods. Variants for each:
   - `Gpu(GpuError)` — CUDA driver / kernel-launch failure.
   - `Timings(TimingsError)` — CUDA event recording failure.
-  - `ForceField(ForceFieldError)` — surfaces failures from
-    `force_field.step(...)` (only the integrator triggers force
-    evaluations; the variant is therefore present only on
-    `IntegratorError`).
   - `UnknownKind(String)` — the registry has no builder for the
     requested `kind` name.
-  - `Constraint(ConstraintError)` — surfaces failures from a
-    `Constraint` hook (only the integrator drives constraint hooks;
-    the variant is therefore present only on `IntegratorError`).
-  - `ConstraintNotSupported` — the integrator received a `Some(_)`
-    constraint argument but its
-    `IntegratorKind::supports_constraints()` returns `false`. Only
-    present on `IntegratorError`; ordinarily prevented at config
-    load by the `IncompatibleConstraint` rule.
+  - `UnexpectedSubStep { variant: &'static str }` — the integrator's
+    `execute()` was called with a sub-step variant it does not
+    handle (e.g., the integrator received `SubStep::ForceEval`,
+    which the runner is supposed to dispatch directly). Only present
+    on `IntegratorError`. Conforming runners never produce this.
+
+  Force-field errors raised by `force_field.step(...)` surface to the
+  runner as `RunnerError::ForceField(ForceFieldError)` directly; the
+  call site is the runner's plan walk, not the integrator's
+  `execute()`, so `IntegratorError` does not wrap `ForceFieldError`.
 
   The runner's `RunnerError` wraps all three via
   `RunnerError::Integrator(IntegratorError)`,
   `RunnerError::Thermostat(ThermostatError)`, and
   `RunnerError::Barostat(BarostatError)`, plus
   `RunnerError::Constraint(ConstraintError)` for constraint-slot
-  construction failures.
+  construction failures and hook-invocation failures
+  (`constraint-framework.md`).
 
 ### Functions and methods <!-- rq-c8848b7f -->
 
@@ -494,9 +601,19 @@ successfully.
   - Per-barostat builder responsibilities are documented in each
     barostat's requirements file (`berendsen-barostat.md`).
 
-- `Integrator::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, dt: f32, timings: &mut Timings) -> Result<(), IntegratorError>` <!-- rq-aa68f468 -->
-  - Runs a single timestep. Calls `force_field.step(...)` at the
-    point(s) of the integrator's choice.
+- `Integrator::plan(&self, dt: f32) -> StepPlan` <!-- rq-aa68f468 -->
+  - Returns the integrator's ordered sub-step sequence for a
+    timestep of size `dt`. Pure: same `dt` and same integrator
+    state must yield the same plan shape across calls. Allocates a
+    short `Vec<SubStep>`; does not touch GPU buffers.
+  - May return an empty plan; the runner walks it as a no-op.
+
+- `Integrator::execute(&mut self, substep: &SubStep, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, timings: &mut Timings) -> Result<(), IntegratorError>` <!-- rq-83e752cd -->
+  - Executes one sub-step from the plan. Dispatches on `substep`'s
+    variant and label to launch the appropriate kernel(s).
+  - Never receives `SubStep::ForceEval` from a conforming runner;
+    if it does, returns
+    `IntegratorError::UnexpectedSubStep { variant: "ForceEval" }`.
   - Returns `Ok(())` without launching any kernel when
     `buffers.particle_count() == 0`.
 
@@ -525,8 +642,12 @@ invariant under the same conditions each slot individually guarantees:
 - All slot kernels and the force pipeline run on the default stream
   of the same `Arc<CudaDevice>` carried by `ParticleBuffers`. No
   additional streams are introduced.
-- The dispatch order (`apply_pre`, then `step`, then `apply_post`,
-  then `apply`) is fixed and identical across runs.
+- The outer dispatch order (`apply_pre`, then the plan walk, then
+  `apply_post`, then `apply`) is fixed and identical across runs.
+- The plan walk visits sub-steps in `StepPlan::steps` order; the plan
+  is a pure function of `dt` and the integrator's static
+  configuration, so identical inputs across runs produce identical
+  plans and identical sub-step orderings.
 - The trait surfaces carry no loop-position parameter; the runner's
   loop counter stays local to the runner. Slots that need a monotone,
   reproducible counter (such as `LangevinBaoab` for its RNG draws, or
@@ -689,21 +810,25 @@ Feature: Pluggable integration framework
   # --- Per-step dispatch ---
 
   @rq-0a6a97f6
-  Scenario: Dispatch loop calls thermostat.apply_pre, integrator.step, thermostat.apply_post in that order
+  Scenario: Dispatch loop calls thermostat.apply_pre, plan walk, thermostat.apply_post in that order
     Given a velocity-Verlet integrator
     And a Nosé-Hoover-chain thermostat
-    And a recording wrapper that timestamps every trait call
+    And a recording wrapper that timestamps every trait call (apply_pre,
+      apply_post, plan, every execute, force_field.step)
     When the runner executes one timestep
-    Then the recorded order is exactly [apply_pre, step, apply_post]
+    Then the first recorded event is apply_pre
+    And the last recorded event is apply_post
+    And between apply_pre and apply_post the recorded sub-calls are exactly
+      [plan, execute(KickDrift), force_field.step, execute(KickHalf)]
     And no barostat hook is recorded
 
   @rq-8fd4e3bf
-  Scenario: step() on empty state is a no-op
+  Scenario: plan walk on empty state is a no-op
     Given a ParticleBuffers with particle_count() == 0
     And any constructed Integrator
-    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=0.1, &mut timings) is called
-    Then it returns Ok(())
-    And no kernel launches are recorded for that call
+    When the runner walks integrator.plan(0.1) and dispatches each sub-step
+    Then every execute(...) call returns Ok(())
+    And no kernel launches are recorded for any call
 
   @rq-e60481e9
   Scenario: apply_post on empty state is a no-op
@@ -722,32 +847,70 @@ Feature: Pluggable integration framework
     And velocities are bit-identical to the snapshot
     And no kernel launches are recorded for that call
 
-  @rq-64f1e2a6
-  Scenario: Velocity-Verlet step() launches vv_kick_drift, force pipeline, and vv_kick
+  @rq-d3bd619e
+  Scenario: Velocity-Verlet plan walk launches vv_kick_drift, force pipeline, and vv_kick
     Given a velocity-Verlet integrator (lossless=false) with particle_count=4
     And a snapshot of buffers.positions_x and buffers.velocities_x before the call
-    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=0.1, &mut timings) is called
-    Then it returns Ok(())
+    When the runner walks integrator.plan(0.1)
+    Then every dispatch returns Ok(())
     And positions_x differs from the snapshot
     And velocities_x differs from the snapshot
     And timings.finalize() reports count==1 for KernelStage::VV_KICK_DRIFT
     And timings.finalize() reports count==1 for KernelStage::VV_KICK
 
-  @rq-35eef107
+  @rq-17def001
   Scenario: Lossless velocity-Verlet uses the lossless kernels
     Given a velocity-Verlet integrator (lossless=true) with particle_count=4
-    When integrator.step(...) is called
+    When the runner walks integrator.plan(0.1)
     Then timings.finalize() reports count==1 for KernelStage::VV_KICK_DRIFT_LOSSLESS
     And timings.finalize() reports count==1 for KernelStage::VV_KICK_LOSSLESS
     And KernelStage::VV_KICK_DRIFT and KernelStage::VV_KICK have count==0
 
-  @rq-15e0a433
-  Scenario: Integrator owns the force evaluation inside step()
+  @rq-812e88d5
+  Scenario: Force evaluation is dispatched by the runner, not the integrator
     Given a velocity-Verlet integrator and a ForceField with one LennardJones slot
-    When integrator.step(...) is called once
+    When the runner walks integrator.plan(0.1) once
     Then timings.finalize() reports count==1 for KernelStage::LJ_PAIR_FORCE
     And KernelStage::REDUCE_PAIR_FORCES has count==1
     And KernelStage::ACCUMULATE_FORCES has count==1
+    And integrator.execute(...) is never called with SubStep::ForceEval
+
+  # --- Plan structure ---
+
+  @rq-94a67d95
+  Scenario: plan(dt) returns the same StepPlan shape across repeated calls
+    Given a velocity-Verlet integrator
+    When integrator.plan(dt=0.1) is called twice
+    Then both calls return StepPlans with identical variant + label sequences
+
+  @rq-4300cafc
+  Scenario: plan(dt) is pure; it does not launch kernels or touch buffers
+    Given a velocity-Verlet integrator
+    And a snapshot of buffers before the call
+    When integrator.plan(0.1) is called
+    Then buffers are byte-identical to the snapshot
+    And no kernel launches are recorded
+
+  @rq-384ed838
+  Scenario: Empty plan walks as a no-op
+    Given a stub integrator whose plan(dt) returns StepPlan { steps: vec![] }
+    When the runner executes one timestep with this integrator
+    Then no execute(...) call is made
+    And no force_field.step(...) call is made
+    And no kernel launches are recorded
+
+  @rq-07ead62b
+  Scenario: Plan with multiple ForceEvals invokes force_field.step that many times
+    Given a stub integrator whose plan(dt) returns
+      [KickHalf, Drift, ForceEval, KickHalf, Drift, ForceEval, KickHalf]
+    When the runner executes one timestep with this integrator
+    Then force_field.step(...) is invoked exactly twice
+
+  @rq-d4d435c8
+  Scenario: integrator.execute receiving ForceEval surfaces UnexpectedSubStep
+    Given any concrete integrator
+    When execute(&SubStep::ForceEval, ...) is called directly (bypassing the runner)
+    Then it returns Err(IntegratorError::UnexpectedSubStep { variant: "ForceEval" })
 
   # --- Compatibility ---
 

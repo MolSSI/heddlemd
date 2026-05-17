@@ -9,6 +9,7 @@ use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, compute_kinetic_energy, init_device, rescale_velocities,
 };
+use dynamics::integrator::IntegratorStepExt;
 use dynamics::integrator::{
     NoseHooverChainThermostat, Thermostat, ThermostatRegistry,
 };

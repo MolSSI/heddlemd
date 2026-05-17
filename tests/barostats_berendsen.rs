@@ -9,6 +9,7 @@ use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, compute_total_virial, init_device, rescale_positions,
 };
+use dynamics::integrator::IntegratorStepExt;
 use dynamics::integrator::{
     Barostat, BarostatRegistry, BerendsenBarostat, IntegratorRegistry, ThermostatRegistry,
 };

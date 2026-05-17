@@ -45,14 +45,23 @@ pub enum IntegratorError {
     Gpu(#[from] GpuError),
     #[error("{0}")]
     Timings(#[from] TimingsError),
-    #[error("{0}")]
-    ForceField(#[from] ForceFieldError),
     #[error("unknown integrator kind `{0}`")]
     UnknownKind(String),
+    #[error("integrator's execute() received unsupported sub-step variant {variant}")]
+    UnexpectedSubStep { variant: &'static str },
+}
+
+/// Unified error returned by [`run_step`]: the plan walker can surface
+/// failures from the integrator's `execute()`, from the runner-dispatched
+/// `force_field.step(...)`, or from any constraint hook.
+#[derive(Debug, thiserror::Error)]
+pub enum StepError {
+    #[error("{0}")]
+    Integrator(#[from] IntegratorError),
+    #[error("{0}")]
+    ForceField(#[from] ForceFieldError),
     #[error("{0}")]
     Constraint(#[from] ConstraintError),
-    #[error("integrator does not support holonomic constraints")]
-    ConstraintNotSupported,
 }
 
 // rq-2ccf40de
@@ -79,16 +88,87 @@ pub enum BarostatError {
 
 // --- Integrator trait, builder, registry ------------------------------
 
+/// One piece of an integrator's per-timestep work, described in the
+/// `StepPlan` returned by [`Integrator::plan`].
+#[derive(Debug, Clone, Copy)]
+pub enum SubStep {
+    /// Velocity half-kick: `v ← v + (F/m) · dt/2` (or the integrator's
+    /// equivalent). No position update.
+    KickHalf { dt: f32, label: &'static str },
+    /// Position drift: `x ← x + v · dt` (or the integrator's
+    /// equivalent). No velocity update.
+    Drift { dt: f32, label: &'static str },
+    /// Fused KickHalf + Drift in a single kernel launch
+    /// (e.g. `vv_kick_drift`).
+    KickDrift { dt: f32, label: &'static str },
+    /// Full force-pipeline evaluation. Dispatched by the runner via
+    /// `force_field.step(...)`, not by the integrator's `execute()`.
+    ForceEval,
+    /// Integrator-private sub-step (e.g. Langevin's OU step, MTK's
+    /// chain or barostat sub-steps). `dt` carries the outer plan
+    /// timestep so the integrator's `execute()` can compute its
+    /// substep-specific factors without needing to cache `dt` in
+    /// `&mut self`; the `label` lets `execute()` dispatch to the right
+    /// kernel.
+    Custom { dt: f32, label: &'static str },
+}
+
+impl SubStep {
+    /// Returns the variant name (without the payload) as a static
+    /// string. Useful for error reporting and the runner's hook-position
+    /// inference.
+    pub fn variant_name(&self) -> &'static str {
+        match self {
+            SubStep::KickHalf { .. } => "KickHalf",
+            SubStep::Drift { .. } => "Drift",
+            SubStep::KickDrift { .. } => "KickDrift",
+            SubStep::ForceEval => "ForceEval",
+            SubStep::Custom { .. } => "Custom",
+        }
+    }
+
+    /// True iff a constraint slot's `apply_before_drift` /
+    /// `apply_after_drift` hooks should fire around this sub-step.
+    pub fn is_drift(&self) -> bool {
+        matches!(self, SubStep::Drift { .. } | SubStep::KickDrift { .. })
+    }
+
+    /// True iff a constraint slot's `apply_after_kick` hook should fire
+    /// after this sub-step when it is the final sub-step of the plan.
+    pub fn is_velocity_update(&self) -> bool {
+        matches!(self, SubStep::KickHalf { .. } | SubStep::KickDrift { .. })
+    }
+}
+
+/// Ordered list of sub-steps that constitute one full timestep.
+#[derive(Debug, Clone)]
+pub struct StepPlan {
+    pub steps: Vec<SubStep>,
+}
+
+impl StepPlan {
+    pub fn empty() -> Self {
+        StepPlan { steps: Vec::new() }
+    }
+}
+
 // rq-78f484d9
 pub trait Integrator: std::fmt::Debug + Send {
-    // rq-aa68f468
-    fn step(
+    /// Return the ordered sequence of sub-steps that constitute one
+    /// timestep of size `dt`. Pure: must return the same shape for the
+    /// same `dt` and the same integrator state across calls.
+    fn plan(&self, dt: f32) -> StepPlan;
+
+    /// Execute one sub-step from this integrator's plan. The runner
+    /// calls this for every sub-step EXCEPT `SubStep::ForceEval`, which
+    /// the runner dispatches directly via `force_field.step(...)`. An
+    /// integrator that receives `SubStep::ForceEval` here returns
+    /// `IntegratorError::UnexpectedSubStep`.
+    fn execute(
         &mut self,
+        substep: &SubStep,
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
-        force_field: &mut ForceField,
-        constraint: Option<&mut dyn Constraint>,
-        dt: f32,
         timings: &mut Timings,
     ) -> Result<(), IntegratorError>;
 
@@ -102,6 +182,163 @@ pub trait Integrator: std::fmt::Debug + Send {
         _potential_energy: f64,
     ) -> Vec<f64> {
         Vec::new()
+    }
+}
+
+/// Walk an integrator's plan for one timestep.
+///
+/// The runner uses this to execute integrator sub-steps and the
+/// force pipeline together, optionally weaving constraint-slot hook
+/// calls around any `Drift` or `KickDrift` sub-step and after the
+/// final velocity update.
+///
+/// `install_constraint_hooks` must be `true` only when both
+/// `constraint.is_some()` and the integrator's
+/// `IntegratorKind::supports_constraints()` predicate would return
+/// `true`. When `false`, no constraint hooks fire regardless of the
+/// `constraint` argument.
+#[allow(clippy::too_many_arguments)]
+pub fn run_step(
+    integrator: &mut dyn Integrator,
+    buffers: &mut ParticleBuffers,
+    sim_box: &mut SimulationBox,
+    force_field: &mut ForceField,
+    mut constraint: Option<&mut dyn Constraint>,
+    install_constraint_hooks: bool,
+    dt: f32,
+    timings: &mut Timings,
+) -> Result<(), StepError> {
+    let plan = integrator.plan(dt);
+    let install = install_constraint_hooks && constraint.is_some();
+    for sub in &plan.steps {
+        let is_drift = sub.is_drift();
+        if install && is_drift {
+            if let Some(c) = constraint.as_mut() {
+                c.apply_before_drift(buffers, sim_box, dt, timings)?;
+            }
+        }
+        match sub {
+            SubStep::ForceEval => {
+                force_field.step(buffers, sim_box, timings)?;
+            }
+            other => {
+                integrator.execute(other, buffers, sim_box, timings)?;
+            }
+        }
+        if install && is_drift {
+            if let Some(c) = constraint.as_mut() {
+                c.apply_after_drift(buffers, sim_box, dt, timings)?;
+            }
+        }
+    }
+    let last_is_kick = plan
+        .steps
+        .last()
+        .map(|s| s.is_velocity_update())
+        .unwrap_or(false);
+    if install && last_is_kick {
+        if let Some(c) = constraint.as_mut() {
+            c.apply_after_kick(buffers, sim_box, dt, timings)?;
+        }
+    }
+    Ok(())
+}
+
+/// Walk an integrator's plan without any constraint-slot hooks.
+/// Convenience for tests and callers that don't need constraints.
+pub fn run_step_no_constraint(
+    integrator: &mut dyn Integrator,
+    buffers: &mut ParticleBuffers,
+    sim_box: &mut SimulationBox,
+    force_field: &mut ForceField,
+    dt: f32,
+    timings: &mut Timings,
+) -> Result<(), StepError> {
+    run_step(
+        integrator,
+        buffers,
+        sim_box,
+        force_field,
+        None,
+        false,
+        dt,
+        timings,
+    )
+}
+
+/// Extension trait offering a single-call `step()` convenience method
+/// on top of the core `Integrator` trait's `plan()` + `execute()`
+/// methods. The trait itself defines only the plan/execute pair (see
+/// `framework.md`); this extension is purely a convenience wrapper for
+/// callers — chiefly tests — that want a single method invocation per
+/// timestep. The runner uses the lower-level [`run_step`] free
+/// function directly so it can thread the kind-level
+/// `supports_constraints()` predicate into hook insertion.
+///
+/// When `constraint` is `Some(_)`, the extension installs constraint
+/// hooks unconditionally (the caller is responsible for the
+/// integrator/constraint compatibility check that the runner enforces
+/// via `IntegratorKind::supports_constraints()`).
+pub trait IntegratorStepExt {
+    fn step(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &mut SimulationBox,
+        force_field: &mut ForceField,
+        constraint: Option<&mut dyn Constraint>,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), StepError>;
+}
+
+impl IntegratorStepExt for dyn Integrator + '_ {
+    fn step(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &mut SimulationBox,
+        force_field: &mut ForceField,
+        constraint: Option<&mut dyn Constraint>,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), StepError> {
+        let install = constraint.is_some();
+        run_step(
+            self,
+            buffers,
+            sim_box,
+            force_field,
+            constraint,
+            install,
+            dt,
+            timings,
+        )
+    }
+}
+
+// Blanket impl for concrete (Sized) integrators so tests can call
+// `langevin_state.step(...)` directly without first coercing to
+// `&mut dyn Integrator`.
+impl<T: Integrator> IntegratorStepExt for T {
+    fn step(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &mut SimulationBox,
+        force_field: &mut ForceField,
+        constraint: Option<&mut dyn Constraint>,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), StepError> {
+        let install = constraint.is_some();
+        run_step(
+            self,
+            buffers,
+            sim_box,
+            force_field,
+            constraint,
+            install,
+            dt,
+            timings,
+        )
     }
 }
 

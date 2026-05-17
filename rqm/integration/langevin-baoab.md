@@ -41,10 +41,11 @@ For each timestep of size `dt` with `α = exp(-γ dt)`:
 5. **Force evaluation**: recompute `F(x)` using the new positions.
 6. **B(dt/2)**: `v ← v + (F/m) (dt/2)`
 
-Steps 1–4, step 5 (a call to `force_field.step(...)` for the force
-pipeline), and step 6 all run inside the trait's `step()` method in
-order. The initial force evaluation needed to seed step 1 of the first
-iteration is provided by the runner's standard warm-up pass.
+Steps 1–4, step 5 (a `SubStep::ForceEval` that the runner dispatches
+to `force_field.step(...)`), and step 6 are emitted as the
+integrator's `StepPlan` and walked by the runner. The initial force
+evaluation needed to seed step 1 of the first iteration is provided
+by the runner's standard warm-up pass.
 
 `ξ` is a vector of independent standard normal random variables, one per
 particle per axis, generated as described in *RNG* below.
@@ -52,27 +53,55 @@ particle per axis, generated as described in *RNG* below.
 The constant `k_B = 1.380649e-23 J/K` is the same CODATA-2019 value used
 by the log-output feature.
 
-## Per-Step Kernel Sequence <!-- rq-ff46e833 -->
+## Step Plan <!-- rq-ff46e833 -->
 
-Per timestep, the Langevin integrator's `step()` launches six kernels in
-fixed order, interleaved with one call to `force_field.step(...)`:
+`LangevinBaoabState::plan(dt)` returns the fixed six-element BAOAB
+sequence the runner walks:
 
-| Order | Step | Kernel name      | Operation                              | Stage label              |
-| ----- | ---- | ---------------- | -------------------------------------- | ------------------------ |
-| 1     | B    | `vv_kick`        | `v += (F/m) (dt/2)`                    | `LangevinKickHalf`       |
-| 2     | A    | `lan_drift_half` | `x += v (dt/2)`                        | `LangevinDriftHalf`      |
-| 3     | O    | `lan_ou_step`    | `v ← α v + sqrt((1-α²) k_B T/m) ξ`     | `LangevinOuStep`         |
-| 4     | A    | `lan_drift_half` | `x += v (dt/2)`                        | `LangevinDriftHalf`      |
-| 5     | —    | force pipeline   | recompute `F(x)` via `force_field.step` | `LjPairForce`/`ReducePairForces` |
-| 6     | B    | `vv_kick`        | `v += (F/m) (dt/2)`                    | `LangevinKickHalf`       |
+```rust
+StepPlan { steps: vec![
+    SubStep::KickHalf { dt, label: "B"          },   // first half-kick
+    SubStep::Drift    { dt, label: "A_pre"      },   // first half-drift
+    SubStep::Custom   {     label: "O"          },   // Ornstein-Uhlenbeck
+    SubStep::Drift    { dt, label: "A_post"     },   // second half-drift
+    SubStep::ForceEval,                              // recompute F(x)
+    SubStep::KickHalf { dt, label: "B"          },   // second half-kick
+]}
+```
 
-`vv_kick` is reused from velocity Verlet because the half-kick operation
-is identical. The reuse is reflected in the timings file by labelling
-calls from the Langevin slot with distinct `Langevin*` stage names — see
-`performance-analysis.md`.
+The `Drift` sub-steps internally use `dt/2`; the integrator's
+`execute()` reads the `dt` carried on the sub-step and applies the
+appropriate factor. Likewise both `KickHalf`s apply `dt/2` internally.
 
-`lan_drift_half` and `lan_ou_step` are new CUDA kernels in
+`LangevinBaoabState::execute(sub, ...)` dispatches to the kernels:
+
+| Sub-step variant         | Label    | Kernel           | Operation                              | Stage label          |
+| ------------------------ | -------- | ---------------- | -------------------------------------- | -------------------- |
+| `SubStep::KickHalf`      | `B`      | `vv_kick`        | `v += (F/m) (dt/2)`                    | `LangevinKickHalf`   |
+| `SubStep::Drift`         | `A_pre`  | `lan_drift_half` | `x += v (dt/2)`                        | `LangevinDriftHalf`  |
+| `SubStep::Custom`        | `O`      | `lan_ou_step`    | `v ← α v + sqrt((1-α²) k_B T/m) ξ`     | `LangevinOuStep`     |
+| `SubStep::Drift`         | `A_post` | `lan_drift_half` | `x += v (dt/2)`                        | `LangevinDriftHalf`  |
+| (`SubStep::ForceEval`)   |          | force pipeline   | dispatched by runner                   | (force-pipeline stages) |
+| `SubStep::KickHalf`      | `B`      | `vv_kick`        | `v += (F/m) (dt/2)`                    | `LangevinKickHalf`   |
+
+`vv_kick` is reused from velocity Verlet because the half-kick
+operation is identical. The reuse is reflected in the timings file
+by labelling calls from the Langevin slot with the `Langevin*` stage
+names — see `performance-analysis.md`.
+
+`lan_drift_half` and `lan_ou_step` are the CUDA kernels in
 `kernels/langevin.cu`.
+
+The Custom `"O"` sub-step is also where the integrator's
+`draw_counter` increments. The counter advances exactly once per
+timestep because `"O"` appears exactly once in the plan.
+
+`IntegratorKind::LangevinBaoab` returns `false` from
+`supports_constraints()`; the runner therefore inserts no constraint
+hooks around this integrator's two `Drift` sub-steps or its final
+`KickHalf`. Composing constraints with Langevin BAOAB is rejected at
+config load by `ConfigError::IncompatibleConstraint` (see
+`integration/constraint-framework.md`).
 
 ## Parameters <!-- rq-1b6324c3 -->
 
@@ -421,11 +450,11 @@ Feature: Langevin BAOAB integrator
   # --- Slot integration ---
 
   @rq-e1dd0625
-  Scenario: step() launches all six expected kernel calls
+  Scenario: One plan walk launches all six expected kernel calls
     Given a Langevin-BAOAB integrator with friction=1e12, temperature=300, seed=1
     And a ParticleBuffers with N=4 nonzero values
     And a warm-up force evaluation has populated forces
-    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=1e-15, &mut timings) is called
+    When the runner walks integrator.plan(dt=1e-15) once
     And timings.finalize() is queried
     Then KernelStage::LANGEVIN_KICK_HALF has count == 2  (one before the drifts, one after the force eval)
     And KernelStage::LANGEVIN_DRIFT_HALF has count == 2
@@ -434,19 +463,20 @@ Feature: Langevin BAOAB integrator
     And KernelStage::REDUCE_PAIR_FORCES has count == 1
 
   @rq-6e98222c
-  Scenario: step() on empty Langevin state is a no-op
+  Scenario: Plan walk on empty Langevin state is a no-op
     Given a Langevin-BAOAB integrator with friction=1e12, temperature=300, seed=1
     And a ParticleBuffers with particle_count() == 0
-    When integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt=1e-15, &mut timings) is called
-    Then it returns Ok(())
+    When the runner walks integrator.plan(dt=1e-15) once
+    Then every execute(...) call returns Ok(())
+    And no kernel launches are recorded
 
   @rq-01784049
-  Scenario: draw_counter starts at 0 and increments per step()
+  Scenario: draw_counter starts at 0 and increments per plan walk
     Given a freshly built LangevinBaoabState
     Then state.draw_counter equals 0
-    When integrator.step(...) is called once
+    When the runner walks integrator.plan(dt) once (executing the "O" Custom sub-step)
     Then state.draw_counter equals 1
-    When integrator.step(...) is called a second time
+    When the runner walks integrator.plan(dt) a second time
     Then state.draw_counter equals 2
 
   @rq-e70ee09e
@@ -454,7 +484,7 @@ Feature: Langevin BAOAB integrator
     Given LangevinBaoabState A and B built from the same IntegratorKind
     And A.draw_counter and B.draw_counter both equal 5
     And identical buffer state and dt
-    When integrator.step(...) is called once on each
+    When the runner walks plan(dt) once on each
     Then the post-call velocities of A and B agree byte-for-byte
 
   # --- End-to-end determinism ---

@@ -1,3 +1,4 @@
+use dynamics::integrator::IntegratorStepExt;
 use dynamics::forces::{BondList, ExclusionList, ForceField};
 use dynamics::gpu::{GpuContext, ParticleBuffers, init_device};
 use dynamics::integrator::{
@@ -146,13 +147,15 @@ impl IntegratorBuilder for StubBuilder {
 }
 
 impl Integrator for StubIntegrator {
-    fn step(
+    fn plan(&self, _dt: f32) -> dynamics::integrator::StepPlan {
+        dynamics::integrator::StepPlan::empty()
+    }
+
+    fn execute(
         &mut self,
+        _substep: &dynamics::integrator::SubStep,
         _buffers: &mut ParticleBuffers,
         _sim_box: &mut SimulationBox,
-        _force_field: &mut ForceField,
-        _constraint: Option<&mut dyn dynamics::integrator::Constraint>,
-        _dt: f32,
         _timings: &mut Timings,
     ) -> Result<(), IntegratorError> {
         Ok(())
@@ -570,16 +573,20 @@ struct RecordingIntegrator {
 }
 
 impl Integrator for RecordingIntegrator {
-    fn step(
+    fn plan(&self, dt: f32) -> dynamics::integrator::StepPlan {
+        dynamics::integrator::StepPlan {
+            steps: vec![dynamics::integrator::SubStep::KickDrift { dt, label: "rec" }],
+        }
+    }
+
+    fn execute(
         &mut self,
+        _substep: &dynamics::integrator::SubStep,
         _b: &mut ParticleBuffers,
         _sb: &mut SimulationBox,
-        _ff: &mut ForceField,
-        _constraint: Option<&mut dyn dynamics::integrator::Constraint>,
-        _dt: f32,
         _t: &mut Timings,
     ) -> Result<(), IntegratorError> {
-        self.log.record("step");
+        self.log.record("execute");
         Ok(())
     }
 }
@@ -636,5 +643,398 @@ fn dispatch_loop_orders_apply_pre_step_apply_post() {
         .unwrap();
 
     let events = log.events.lock().unwrap().clone();
-    assert_eq!(events, vec!["apply_pre", "step", "apply_post"]);
+    // The RecordingIntegrator's plan has one KickDrift sub-step; the
+    // extension method walks the plan and the integrator's execute()
+    // records the single "execute" event between the two thermostat
+    // calls.
+    assert_eq!(events, vec!["apply_pre", "execute", "apply_post"]);
+}
+
+// =============================================================================
+// Plan/execute trait surface tests (introduced with the step-decomposition
+// refactor, see rqm/integration/framework.md).
+// =============================================================================
+
+use dynamics::integrator::{
+    ConstraintError, run_step, run_step_no_constraint, StepPlan, SubStep,
+};
+
+/// A configurable stub Integrator whose plan and execute() behaviour
+/// is controlled by the test. Records every execute() invocation as
+/// ("execute", substep variant name) into the supplied log.
+#[derive(Debug)]
+struct PlanStub {
+    plan: StepPlan,
+    log: CallLog,
+}
+
+impl Integrator for PlanStub {
+    fn plan(&self, _dt: f32) -> StepPlan {
+        self.plan.clone()
+    }
+    fn execute(
+        &mut self,
+        substep: &SubStep,
+        _b: &mut ParticleBuffers,
+        _sb: &mut SimulationBox,
+        _t: &mut Timings,
+    ) -> Result<(), IntegratorError> {
+        self.log.record(match substep {
+            SubStep::KickHalf { .. } => "exec_kick_half",
+            SubStep::Drift { .. } => "exec_drift",
+            SubStep::KickDrift { .. } => "exec_kick_drift",
+            SubStep::ForceEval => "exec_force_eval",
+            SubStep::Custom { .. } => "exec_custom",
+        });
+        if matches!(substep, SubStep::ForceEval) {
+            return Err(IntegratorError::UnexpectedSubStep {
+                variant: substep.variant_name(),
+            });
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct RecordingConstraint {
+    log: CallLog,
+}
+
+impl dynamics::integrator::Constraint for RecordingConstraint {
+    fn apply_before_drift(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _sb: &SimulationBox,
+        _dt: f32,
+        _t: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        self.log.record("before_drift");
+        Ok(())
+    }
+    fn apply_after_drift(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _sb: &SimulationBox,
+        _dt: f32,
+        _t: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        self.log.record("after_drift");
+        Ok(())
+    }
+    fn apply_after_kick(
+        &mut self,
+        _b: &mut ParticleBuffers,
+        _sb: &SimulationBox,
+        _dt: f32,
+        _t: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        self.log.record("after_kick");
+        Ok(())
+    }
+}
+
+fn fixture() -> (
+    GpuContext,
+    ParticleBuffers,
+    SimulationBox,
+    ForceField,
+    Timings,
+) {
+    let gpu = init_device().unwrap();
+    let state = small_state(4);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let sim_box = box_10();
+    let ff = empty_force_field(&gpu, 4);
+    let timings = Timings::new(&gpu).unwrap();
+    (gpu, buffers, sim_box, ff, timings)
+}
+
+#[test]
+fn plan_returns_same_shape_across_repeated_calls() {
+    let registry = IntegratorRegistry::with_builtins();
+    let gpu = init_device().unwrap();
+    let integ = registry.build(&vv_kind(false), &gpu, 4).unwrap();
+    let p1 = integ.plan(0.1);
+    let p2 = integ.plan(0.1);
+    assert_eq!(p1.steps.len(), p2.steps.len());
+    for (a, b) in p1.steps.iter().zip(p2.steps.iter()) {
+        assert_eq!(a.variant_name(), b.variant_name());
+    }
+}
+
+#[test]
+fn plan_is_pure_does_not_launch_kernels_or_touch_buffers() {
+    let registry = IntegratorRegistry::with_builtins();
+    let (gpu, buffers, _sim_box, _ff, _timings) = fixture();
+    let pre_x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let integ = registry.build(&vv_kind(false), &gpu, 4).unwrap();
+    let _plan = integ.plan(0.1);
+    let post_x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    assert_eq!(pre_x, post_x);
+}
+
+#[test]
+fn empty_plan_walks_as_a_noop() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan::empty(),
+        log: CallLog { events: log.events.clone() },
+    };
+    run_step_no_constraint(
+        &mut stub,
+        &mut buffers,
+        &mut sim_box,
+        &mut ff,
+        0.1,
+        &mut timings,
+    )
+    .unwrap();
+    let events = log.events.lock().unwrap().clone();
+    assert!(events.is_empty(), "expected no events, got {:?}", events);
+}
+
+#[test]
+fn plan_with_multiple_force_evals_dispatches_each() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![
+                SubStep::KickHalf { dt: 0.1, label: "k1" },
+                SubStep::Drift { dt: 0.1, label: "d1" },
+                SubStep::ForceEval,
+                SubStep::KickHalf { dt: 0.1, label: "k2" },
+                SubStep::Drift { dt: 0.1, label: "d2" },
+                SubStep::ForceEval,
+                SubStep::KickHalf { dt: 0.1, label: "k3" },
+            ],
+        },
+        log: CallLog { events: log.events.clone() },
+    };
+    run_step_no_constraint(
+        &mut stub,
+        &mut buffers,
+        &mut sim_box,
+        &mut ff,
+        0.1,
+        &mut timings,
+    )
+    .unwrap();
+    // Two ForceEval substeps means two force_field.step calls. The
+    // ForceField in fixture() has zero slots so the only thing that
+    // gets recorded in stub.log is the non-ForceEval calls. We assert
+    // by counting that ForceEval was NEVER routed through execute().
+    let events = log.events.lock().unwrap().clone();
+    assert_eq!(
+        events,
+        vec![
+            "exec_kick_half",
+            "exec_drift",
+            // (force_eval handled by runner, not stub.execute)
+            "exec_kick_half",
+            "exec_drift",
+            "exec_kick_half",
+        ]
+    );
+}
+
+#[test]
+fn execute_with_force_eval_directly_returns_unexpected_substep() {
+    let (gpu, mut buffers, mut sim_box, _ff, mut timings) = fixture();
+    let _ = gpu;
+    let log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan::empty(),
+        log: CallLog { events: log.events.clone() },
+    };
+    let err = stub
+        .execute(&SubStep::ForceEval, &mut buffers, &mut sim_box, &mut timings)
+        .unwrap_err();
+    match err {
+        IntegratorError::UnexpectedSubStep { variant } => {
+            assert_eq!(variant, "ForceEval");
+        }
+        other => panic!("expected UnexpectedSubStep, got {other:?}"),
+    }
+}
+
+#[test]
+fn plan_with_one_drift_fires_before_after_drift() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![
+                SubStep::Drift { dt: 0.1, label: "d" },
+                SubStep::ForceEval,
+                SubStep::KickHalf { dt: 0.1, label: "k" },
+            ],
+        },
+        log: CallLog { events: log.events.clone() },
+    };
+    let constraint_log = CallLog::default();
+    let mut constraint = RecordingConstraint {
+        log: CallLog { events: constraint_log.events.clone() },
+    };
+    run_step(
+        &mut stub,
+        &mut buffers,
+        &mut sim_box,
+        &mut ff,
+        Some(&mut constraint),
+        true,
+        0.1,
+        &mut timings,
+    )
+    .unwrap();
+    let events = constraint_log.events.lock().unwrap().clone();
+    assert_eq!(events, vec!["before_drift", "after_drift", "after_kick"]);
+}
+
+#[test]
+fn plan_with_two_drifts_fires_before_after_drift_twice() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let stub_log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![
+                SubStep::KickHalf { dt: 0.1, label: "B" },
+                SubStep::Drift { dt: 0.1, label: "A_pre" },
+                SubStep::Custom { dt: 0.1, label: "O" },
+                SubStep::Drift { dt: 0.1, label: "A_post" },
+                SubStep::ForceEval,
+                SubStep::KickHalf { dt: 0.1, label: "B" },
+            ],
+        },
+        log: CallLog { events: stub_log.events.clone() },
+    };
+    let constraint_log = CallLog::default();
+    let mut constraint = RecordingConstraint {
+        log: CallLog { events: constraint_log.events.clone() },
+    };
+    run_step(
+        &mut stub,
+        &mut buffers,
+        &mut sim_box,
+        &mut ff,
+        Some(&mut constraint),
+        true,
+        0.1,
+        &mut timings,
+    )
+    .unwrap();
+    let events = constraint_log.events.lock().unwrap().clone();
+    assert_eq!(
+        events,
+        vec![
+            "before_drift",
+            "after_drift",
+            "before_drift",
+            "after_drift",
+            "after_kick",
+        ]
+    );
+}
+
+#[test]
+fn plan_whose_final_substep_is_not_a_kick_does_not_fire_after_kick() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let stub_log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![
+                SubStep::KickHalf { dt: 0.1, label: "k" },
+                SubStep::ForceEval,
+                SubStep::Custom { dt: 0.1, label: "post" },
+            ],
+        },
+        log: CallLog { events: stub_log.events.clone() },
+    };
+    let constraint_log = CallLog::default();
+    let mut constraint = RecordingConstraint {
+        log: CallLog { events: constraint_log.events.clone() },
+    };
+    run_step(
+        &mut stub,
+        &mut buffers,
+        &mut sim_box,
+        &mut ff,
+        Some(&mut constraint),
+        true,
+        0.1,
+        &mut timings,
+    )
+    .unwrap();
+    let events = constraint_log.events.lock().unwrap().clone();
+    assert!(!events.contains(&"after_kick"));
+}
+
+#[test]
+fn custom_substep_alone_fires_no_constraint_hooks() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let stub_log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![SubStep::Custom { dt: 0.1, label: "only" }],
+        },
+        log: CallLog { events: stub_log.events.clone() },
+    };
+    let constraint_log = CallLog::default();
+    let mut constraint = RecordingConstraint {
+        log: CallLog { events: constraint_log.events.clone() },
+    };
+    run_step(
+        &mut stub,
+        &mut buffers,
+        &mut sim_box,
+        &mut ff,
+        Some(&mut constraint),
+        true,
+        0.1,
+        &mut timings,
+    )
+    .unwrap();
+    let events = constraint_log.events.lock().unwrap().clone();
+    assert!(events.is_empty(), "expected no constraint events, got {events:?}");
+}
+
+#[test]
+fn install_constraint_hooks_false_suppresses_all_hooks() {
+    let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
+    let _ = gpu;
+    let stub_log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![
+                SubStep::KickDrift { dt: 0.1, label: "kd" },
+                SubStep::ForceEval,
+                SubStep::KickHalf { dt: 0.1, label: "k" },
+            ],
+        },
+        log: CallLog { events: stub_log.events.clone() },
+    };
+    let constraint_log = CallLog::default();
+    let mut constraint = RecordingConstraint {
+        log: CallLog { events: constraint_log.events.clone() },
+    };
+    run_step(
+        &mut stub,
+        &mut buffers,
+        &mut sim_box,
+        &mut ff,
+        Some(&mut constraint),
+        false, // install_constraint_hooks == false
+        0.1,
+        &mut timings,
+    )
+    .unwrap();
+    let events = constraint_log.events.lock().unwrap().clone();
+    assert!(events.is_empty(), "expected no constraint events, got {events:?}");
 }

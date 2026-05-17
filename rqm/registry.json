@@ -99,10 +99,10 @@
     "type": "scenario"
   },
   "rq-01784049": {
-    "decl": "Scenario: draw_counter starts at 0 and increments per step()",
+    "decl": "Scenario: draw_counter starts at 0 and increments per plan walk",
     "file": "integration/langevin-baoab",
     "refs": [],
-    "title": "draw_counter starts at 0 and increments per step()",
+    "title": "draw_counter starts at 0 and increments per plan walk",
     "type": "scenario"
   },
   "rq-017a61a4": {
@@ -459,10 +459,10 @@
     "type": "scenario"
   },
   "rq-07375d3f": {
-    "decl": "Scenario: step() on empty state is a no-op",
+    "decl": "Scenario: Plan walk on empty state is a no-op",
     "file": "integration/mtk-npt",
     "refs": [],
-    "title": "step() on empty state is a no-op",
+    "title": "Plan walk on empty state is a no-op",
     "type": "scenario"
   },
   "rq-076617ab": {
@@ -497,6 +497,13 @@
     "refs": [],
     "title": "AngleList",
     "type": "api-item"
+  },
+  "rq-07ead62b": {
+    "decl": "Scenario: Plan with multiple ForceEvals invokes force_field.step that many times",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Plan with multiple ForceEvals invokes force_field.step that many times",
+    "type": "scenario"
   },
   "rq-08066bdf": {
     "decl": "### Types",
@@ -598,10 +605,10 @@
     "type": "scenario"
   },
   "rq-0a6a97f6": {
-    "decl": "Scenario: Dispatch loop calls thermostat.apply_pre, integrator.step, thermostat.apply_post in that order",
+    "decl": "Scenario: Dispatch loop calls thermostat.apply_pre, plan walk, thermostat.apply_post in that order",
     "file": "integration/framework",
     "refs": [],
-    "title": "Dispatch loop calls thermostat.apply_pre, integrator.step, thermostat.apply_post in that order",
+    "title": "Dispatch loop calls thermostat.apply_pre, plan walk, thermostat.apply_post in that order",
     "type": "scenario"
   },
   "rq-0a8831b1": {
@@ -1355,13 +1362,6 @@
     "title": "Two constraint rows sharing an atom are rejected",
     "type": "scenario"
   },
-  "rq-15e0a433": {
-    "decl": "Scenario: Integrator owns the force evaluation inside step()",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Integrator owns the force evaluation inside step()",
-    "type": "scenario"
-  },
   "rq-15e1e995": {
     "decl": "Scenario: PairBuffer::new with max_neighbors = 0",
     "file": "pair-reduction",
@@ -1487,6 +1487,13 @@
     "file": "integration/nose-hoover-chain",
     "refs": [],
     "title": "log_column_names returns [\"nhc_conserved\"] for NHC",
+    "type": "scenario"
+  },
+  "rq-17def001": {
+    "decl": "Scenario: Lossless velocity-Verlet uses the lossless kernels",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Lossless velocity-Verlet uses the lossless kernels",
     "type": "scenario"
   },
   "rq-17ed07e7": {
@@ -3100,6 +3107,13 @@
     "title": "SlotOutputView",
     "type": "api-item"
   },
+  "rq-309d8d50": {
+    "decl": "Scenario: supports_constraints == false suppresses all hook insertion",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "supports_constraints == false suppresses all hook insertion",
+    "type": "scenario"
+  },
   "rq-30f85829": {
     "decl": "Scenario: Trivial-mode state has no cell-list fields",
     "file": "forces/neighbor-list",
@@ -3410,13 +3424,6 @@
     "title": "spme_force_gather",
     "type": "api-item"
   },
-  "rq-35eef107": {
-    "decl": "Scenario: Lossless velocity-Verlet uses the lossless kernels",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Lossless velocity-Verlet uses the lossless kernels",
-    "type": "scenario"
-  },
   "rq-36105526": {
     "decl": "### Host stages (Instant-timed)",
     "file": "performance-analysis",
@@ -3523,6 +3530,13 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Pair exactly at r_switch sees the unmodified Lennard-Jones force",
+    "type": "scenario"
+  },
+  "rq-384ed838": {
+    "decl": "Scenario: Empty plan walks as a no-op",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Empty plan walks as a no-op",
     "type": "scenario"
   },
   "rq-385408d0": {
@@ -3678,6 +3692,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Morse bond_type missing de is rejected",
+    "type": "scenario"
+  },
+  "rq-3b42c2ff": {
+    "decl": "Scenario: Plan with two Drift sub-steps fires before/after_drift twice",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Plan with two Drift sub-steps fires before/after_drift twice",
     "type": "scenario"
   },
   "rq-3b6d5001": {
@@ -4106,6 +4127,13 @@
     "file": "integration/andersen",
     "refs": [],
     "title": "andersen_resample with p_collision = 1 resamples every particle",
+    "type": "scenario"
+  },
+  "rq-4300cafc": {
+    "decl": "Scenario: plan(dt) is pure; it does not launch kernels or touch buffers",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "plan(dt) is pure; it does not launch kernels or touch buffers",
     "type": "scenario"
   },
   "rq-433c972f": {
@@ -4572,6 +4600,13 @@
     "title": "NoseHooverChainBuilder",
     "type": "api-item"
   },
+  "rq-4c21c386": {
+    "decl": "- `execute(sub, buffers, sim_box, timings)` — dispatches each",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "execute",
+    "type": "api-item"
+  },
   "rq-4c245ce7": {
     "decl": "Scenario: Unknown section header",
     "file": "forces/topology",
@@ -4806,6 +4841,14 @@
     "refs": [],
     "title": "Implicit 1-3 exclusion is added for an angle without explicit (i, k) entry",
     "type": "scenario"
+  },
+  "rq-51e5a0cd": {
+    "decl": "### Sub-step Execution",
+    "file": "integration/velocity-verlet",
+    "level": 3,
+    "refs": [],
+    "title": "Sub-step Execution",
+    "type": "section"
   },
   "rq-52412463": {
     "decl": "## Reproducibility",
@@ -5781,13 +5824,6 @@
     "title": "rescale_positions on empty state is a no-op",
     "type": "scenario"
   },
-  "rq-64f1e2a6": {
-    "decl": "Scenario: Velocity-Verlet step() launches vv_kick_drift, force pipeline, and vv_kick",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Velocity-Verlet step() launches vv_kick_drift, force pipeline, and vv_kick",
-    "type": "scenario"
-  },
   "rq-650875cc": {
     "decl": "Scenario: Tilts may exceed the corresponding diagonals",
     "file": "simulation-box",
@@ -6390,10 +6426,10 @@
     "type": "api-item"
   },
   "rq-6e98222c": {
-    "decl": "Scenario: step() on empty Langevin state is a no-op",
+    "decl": "Scenario: Plan walk on empty Langevin state is a no-op",
     "file": "integration/langevin-baoab",
     "refs": [],
-    "title": "step() on empty Langevin state is a no-op",
+    "title": "Plan walk on empty Langevin state is a no-op",
     "type": "scenario"
   },
   "rq-6ec75323": {
@@ -7519,6 +7555,13 @@
     "title": "Reject chain_length = 0",
     "type": "scenario"
   },
+  "rq-812e88d5": {
+    "decl": "Scenario: Force evaluation is dispatched by the runner, not the integrator",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Force evaluation is dispatched by the runner, not the integrator",
+    "type": "scenario"
+  },
   "rq-81659783": {
     "decl": "## Feature API",
     "file": "forces/topology",
@@ -7637,6 +7680,13 @@
     "refs": [],
     "title": "sorted_particle_ids sorts particles by (cell_index, particle_id)",
     "type": "scenario"
+  },
+  "rq-83e752cd": {
+    "decl": "- `Integrator::execute(&mut self, substep: &SubStep, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, timings: &mut Timings) -> Result<(), IntegratorError>`",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Integrator",
+    "type": "api-item"
   },
   "rq-846bdb8b": {
     "decl": "# Feature: Truncated Coulomb Pair Force Kernel",
@@ -7989,10 +8039,10 @@
     "type": "scenario"
   },
   "rq-8cda2c89": {
-    "decl": "- `step(buffers, sim_box, force_field, dt, timings)` — runs the",
+    "decl": "- `plan(dt)` — returns the fourteen-element `StepPlan` defined in",
     "file": "integration/mtk-npt",
     "refs": [],
-    "title": "step",
+    "title": "plan",
     "type": "api-item"
   },
   "rq-8d18d6ee": {
@@ -8140,10 +8190,10 @@
     "type": "scenario"
   },
   "rq-8fd4e3bf": {
-    "decl": "Scenario: step() on empty state is a no-op",
+    "decl": "Scenario: plan walk on empty state is a no-op",
     "file": "integration/framework",
     "refs": [],
-    "title": "step() on empty state is a no-op",
+    "title": "plan walk on empty state is a no-op",
     "type": "scenario"
   },
   "rq-8fdfc981": {
@@ -8444,6 +8494,13 @@
     "title": "Different seeds produce different trajectories",
     "type": "scenario"
   },
+  "rq-94a67d95": {
+    "decl": "Scenario: plan(dt) returns the same StepPlan shape across repeated calls",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "plan(dt) returns the same StepPlan shape across repeated calls",
+    "type": "scenario"
+  },
   "rq-94cb21a5": {
     "decl": "# atom_count per row is determined by the constraint_type's `kind`.",
     "file": "forces/topology",
@@ -8569,11 +8626,11 @@
     "type": "scenario"
   },
   "rq-971ca980": {
-    "decl": "### Per-step kernel sequence",
+    "decl": "### Step Plan",
     "file": "integration/mtk-npt",
     "level": 3,
     "refs": [],
-    "title": "Per-step kernel sequence",
+    "title": "Step Plan",
     "type": "section"
   },
   "rq-975b5ae0": {
@@ -8670,6 +8727,13 @@
     "title": "Stretched angle produces a torque that closes the angle",
     "type": "scenario"
   },
+  "rq-99034e90": {
+    "decl": "Scenario: Plan with a single Drift sub-step fires before_drift and after_drift around it",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Plan with a single Drift sub-step fires before_drift and after_drift around it",
+    "type": "scenario"
+  },
   "rq-9913daee": {
     "decl": "## Compatibility Rules",
     "file": "integration/framework",
@@ -8763,6 +8827,14 @@
     "refs": [],
     "title": "Minimum-image works for a triclinic box",
     "type": "scenario"
+  },
+  "rq-9b03044f": {
+    "decl": "### Runner-Driven Constraint Hooks",
+    "file": "integration/velocity-verlet",
+    "level": 3,
+    "refs": [],
+    "title": "Runner-Driven Constraint Hooks",
+    "type": "section"
   },
   "rq-9b0aad2c": {
     "decl": "## Gherkin Scenarios",
@@ -9108,6 +9180,13 @@
     "title": "Algorithm",
     "type": "section"
   },
+  "rq-9fbba3be": {
+    "decl": "- `StepPlan` — ordered list of `SubStep`s describing one full",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "StepPlan",
+    "type": "api-item"
+  },
   "rq-9fe1d656": {
     "decl": "## Determinism Guarantees",
     "file": "integration/constraint-framework",
@@ -9156,6 +9235,14 @@
       }
     ],
     "title": "Cell List Construction",
+    "type": "section"
+  },
+  "rq-a097b162": {
+    "decl": "### Step Plan",
+    "file": "integration/velocity-verlet",
+    "level": 3,
+    "refs": [],
+    "title": "Step Plan",
     "type": "section"
   },
   "rq-a0b746c6": {
@@ -9550,6 +9637,13 @@
     "title": "minimum_image just past -L/2 wraps by one period",
     "type": "scenario"
   },
+  "rq-a90e4189": {
+    "decl": "Scenario: Plan whose final sub-step is not a Kick does not fire after_kick",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Plan whose final sub-step is not a Kick does not fire after_kick",
+    "type": "scenario"
+  },
   "rq-a93a5b14": {
     "decl": "Scenario: Block-non-aligned particle counts are handled by the bounds check",
     "file": "integration/velocity-verlet",
@@ -9658,15 +9752,19 @@
     "type": "section"
   },
   "rq-aa68f468": {
-    "decl": "- `Integrator::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, dt: f32, timings: &mut Timings) -> Result<(), IntegratorError>`",
+    "decl": "- `Integrator::plan(&self, dt: f32) -> StepPlan`",
     "file": "integration/framework",
     "refs": [
       {
-        "file": "src/integrator/mod.rs",
+        "file": "src/integrator/langevin_baoab.rs",
         "kind": "code"
       },
       {
         "file": "src/integrator/mtk_npt.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/velocity_verlet.rs",
         "kind": "code"
       }
     ],
@@ -10526,10 +10624,10 @@
     "type": "scenario"
   },
   "rq-ba4087d7": {
-    "decl": "Scenario: sim_box.generation() advances every step",
+    "decl": "Scenario: sim_box.generation() advances every plan walk",
     "file": "integration/mtk-npt",
     "refs": [],
-    "title": "sim_box.generation() advances every step",
+    "title": "sim_box.generation() advances every plan walk",
     "type": "scenario"
   },
   "rq-ba4d55e6": {
@@ -11036,6 +11134,13 @@
     ],
     "title": "Functions",
     "type": "section"
+  },
+  "rq-c3b3ec99": {
+    "decl": "Scenario: Custom sub-step alone fires no constraint hooks",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Custom sub-step alone fires no constraint hooks",
+    "type": "scenario"
   },
   "rq-c4581536": {
     "decl": "Scenario: collision_rate = 0 accepted",
@@ -11903,6 +12008,13 @@
     "title": "lj_pair_force",
     "type": "api-item"
   },
+  "rq-d3bd619e": {
+    "decl": "Scenario: Velocity-Verlet plan walk launches vv_kick_drift, force pipeline, and vv_kick",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Velocity-Verlet plan walk launches vv_kick_drift, force pipeline, and vv_kick",
+    "type": "scenario"
+  },
   "rq-d3d4b6b3": {
     "decl": "Scenario: Pair `between` normalisation when both types are declared",
     "file": "io/config-schema",
@@ -11943,6 +12055,13 @@
     "refs": [],
     "title": "Box-Muller transform",
     "type": "section"
+  },
+  "rq-d4d435c8": {
+    "decl": "Scenario: integrator.execute receiving ForceEval surfaces UnexpectedSubStep",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "integrator.execute receiving ForceEval surfaces UnexpectedSubStep",
+    "type": "scenario"
   },
   "rq-d5085350": {
     "decl": "Scenario: Pair `between` is normalised to lexicographic order",
@@ -12354,6 +12473,13 @@
     "refs": [],
     "title": "pre_step with unchanged box does not refresh the cell-layout cache",
     "type": "scenario"
+  },
+  "rq-dbbffa7d": {
+    "decl": "- `SubStep` — closed enum describing one piece of an integrator's",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "SubStep",
+    "type": "api-item"
   },
   "rq-dbd3c689": {
     "decl": "Scenario: Bit-exact reproducibility across runs with switching active",
@@ -12771,10 +12897,10 @@
     "type": "section"
   },
   "rq-e1dd0625": {
-    "decl": "Scenario: step() launches all six expected kernel calls",
+    "decl": "Scenario: One plan walk launches all six expected kernel calls",
     "file": "integration/langevin-baoab",
     "refs": [],
-    "title": "step() launches all six expected kernel calls",
+    "title": "One plan walk launches all six expected kernel calls",
     "type": "scenario"
   },
   "rq-e20b2f39": {
@@ -14592,11 +14718,11 @@
     "type": "api-item"
   },
   "rq-ff46e833": {
-    "decl": "## Per-Step Kernel Sequence",
+    "decl": "## Step Plan",
     "file": "integration/langevin-baoab",
     "level": 2,
     "refs": [],
-    "title": "Per-Step Kernel Sequence",
+    "title": "Step Plan",
     "type": "section"
   },
   "rq-ff707382": {

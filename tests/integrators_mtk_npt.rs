@@ -10,6 +10,7 @@ use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, init_device, mtk_position_drift, mtk_velocity_half_kick,
 };
+use dynamics::integrator::IntegratorStepExt;
 use dynamics::integrator::{
     Integrator, IntegratorRegistry, MtkNptIntegrator, nhc_chain_sub_step,
 };

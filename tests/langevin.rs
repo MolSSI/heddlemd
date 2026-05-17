@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use dynamics::gpu::{ParticleBuffers, init_device, lan_drift_half, lan_ou_step};
+use dynamics::integrator::IntegratorStepExt;
 use dynamics::integrator::{LangevinBaoabBuilder, IntegratorBuilder, IntegratorRegistry};
 use dynamics::io::IntegratorKind;
 use dynamics::io::log_output::BOLTZMANN_J_PER_K;

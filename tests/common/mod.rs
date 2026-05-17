@@ -112,3 +112,4 @@ pub fn reduce_pair_forces_into_buffers(
     let mut vw = particle_buffers.virials.slice_mut(..);
     reduce_pair_forces(pair, counts, &mut vx, &mut vy, &mut vz, &mut ve, &mut vw, n)
 }
+

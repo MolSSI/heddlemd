@@ -7,6 +7,7 @@ use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, compute_kinetic_energy, init_device, lan_ou_step,
 };
+use dynamics::integrator::IntegratorStepExt;
 use dynamics::integrator::{
     CsvrThermostat, Thermostat, ThermostatRegistry, philox_4x32_10, philox_normal,
 };

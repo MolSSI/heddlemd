@@ -128,42 +128,74 @@ sequentially within each half-step: cell chain first, then
 particle chain. Each chain's sub-step uses the shared
 `nhc_chain_sub_step` host-side helper.
 
-### Per-step kernel sequence <!-- rq-971ca980 -->
+### Step Plan <!-- rq-971ca980 -->
 
-Per timestep, `MtkNptIntegrator::step()` runs the following in fixed
-order. Steps without a kernel column are pure host arithmetic:
+`MtkNptIntegrator::plan(dt)` returns the fourteen-element MTK
+symmetric Trotter sequence the runner walks:
 
-| Order | Hook         | Operation                                                                       | Kernel / call                             | Stage label                       |
-| ----- | ------------ | ------------------------------------------------------------------------------- | ----------------------------------------- | --------------------------------- |
-| 1     | KE reduce    | `K ← compute_kinetic_energy`                                                    | `kinetic_energy_reduce`                   | `KineticEnergyReduce`             |
-| 2     | Virial reduce| `W_virial ← compute_total_virial`                                               | `virial_sum_reduce`                       | `VirialSumReduce`                 |
-| 3     | Cell chain ½ | host chain math; `p_ε ← p_ε · factor_cell` (host)                               | —                                         | —                                 |
-| 4     | Particle ½   | host chain math; `v ← v · factor_part`                                          | `rescale_velocities` × N_sub              | `MtkNptRescaleVelocities`         |
-| 5     | Baro kick ½  | `p_ε ← p_ε + (dt/2) · (3V(P−P_ext) + 6K/N_f)` (host)                            | —                                         | —                                 |
-| 6     | Vel kick ½   | `v ← exp(−a·dt/2)·v + (F/m)·(dt/2)·Φ_v` (cell-coupled half-kick)                | `mtk_velocity_half_kick`                  | `MtkNptVelocityHalfKick`          |
-| 7     | Drift+box    | `x ← exp(b·dt)·x + v·dt·Φ_x·exp(b·dt/2)`; `sim_box.rescale_isotropic(μ_box)`    | `mtk_position_drift`                      | `MtkNptPositionDrift`             |
-| 8     | Force eval   | `force_field.step(...)`                                                         | (slot-specific)                           | —                                 |
-| 9     | KE reduce    | refresh `K`                                                                     | `kinetic_energy_reduce`                   | `KineticEnergyReduce`             |
-| 10    | Virial reduce| refresh `W_virial`                                                              | `virial_sum_reduce`                       | `VirialSumReduce`                 |
-| 11    | Vel kick ½   | mirror of step 6                                                                | `mtk_velocity_half_kick`                  | `MtkNptVelocityHalfKick`          |
-| 12    | Baro kick ½  | mirror of step 5                                                                | —                                         | —                                 |
-| 13    | Particle ½   | mirror of step 4                                                                | `rescale_velocities` × N_sub              | `MtkNptRescaleVelocities`         |
-| 14    | Cell chain ½ | mirror of step 3                                                                | —                                         | —                                 |
+```rust
+StepPlan { steps: vec![
+    SubStep::Custom   { label: "ke_reduce_pre"      },  // 1: KE reduce
+    SubStep::Custom   { label: "vir_reduce_pre"     },  // 2: Virial reduce
+    SubStep::Custom   { label: "cell_chain_pre"     },  // 3: Cell chain ½ (host)
+    SubStep::Custom   { label: "particle_chain_pre" },  // 4: Particle chain ½
+    SubStep::Custom   { label: "baro_kick_pre"      },  // 5: Baro kick ½ (host)
+    SubStep::KickHalf { dt, label: "vel_kick_pre"   },  // 6: Cell-coupled vel kick ½
+    SubStep::Drift    { dt, label: "drift_box"      },  // 7: Drift + box rescale
+    SubStep::ForceEval,                                  // 8: Force eval
+    SubStep::Custom   { label: "ke_reduce_post"     },  // 9: KE reduce
+    SubStep::Custom   { label: "vir_reduce_post"    },  // 10: Virial reduce
+    SubStep::KickHalf { dt, label: "vel_kick_post"  },  // 11: Cell-coupled vel kick ½
+    SubStep::Custom   { label: "baro_kick_post"     },  // 12: Baro kick ½ (host)
+    SubStep::Custom   { label: "particle_chain_post"},  // 13: Particle chain ½
+    SubStep::Custom   { label: "cell_chain_post"    },  // 14: Cell chain ½ (host)
+]}
+```
+
+`MtkNptIntegrator::execute(sub, ...)` dispatches each non-`ForceEval`
+sub-step to the appropriate kernel sequence:
+
+| Order | Sub-step variant     | Label                | Kernel / call                  | Stage label                   |
+| ----- | -------------------- | -------------------- | ------------------------------ | ----------------------------- |
+| 1     | `Custom`             | `ke_reduce_pre`      | `kinetic_energy_reduce`        | `KineticEnergyReduce`         |
+| 2     | `Custom`             | `vir_reduce_pre`     | `virial_sum_reduce`            | `VirialSumReduce`             |
+| 3     | `Custom`             | `cell_chain_pre`     | host arithmetic on `p_ε`       | —                             |
+| 4     | `Custom`             | `particle_chain_pre` | `rescale_velocities` × N_sub   | `MtkNptRescaleVelocities`     |
+| 5     | `Custom`             | `baro_kick_pre`      | host arithmetic on `p_ε`       | —                             |
+| 6     | `KickHalf`           | `vel_kick_pre`       | `mtk_velocity_half_kick`       | `MtkNptVelocityHalfKick`      |
+| 7     | `Drift`              | `drift_box`          | `mtk_position_drift` + `sim_box.rescale_isotropic` | `MtkNptPositionDrift` |
+| 8     | (`ForceEval`)        |                      | force pipeline (runner)        | (force-pipeline stages)       |
+| 9     | `Custom`             | `ke_reduce_post`     | `kinetic_energy_reduce`        | `KineticEnergyReduce`         |
+| 10    | `Custom`             | `vir_reduce_post`    | `virial_sum_reduce`            | `VirialSumReduce`             |
+| 11    | `KickHalf`           | `vel_kick_post`      | `mtk_velocity_half_kick`       | `MtkNptVelocityHalfKick`      |
+| 12    | `Custom`             | `baro_kick_post`     | host arithmetic on `p_ε`       | —                             |
+| 13    | `Custom`             | `particle_chain_post`| `rescale_velocities` × N_sub   | `MtkNptRescaleVelocities`     |
+| 14    | `Custom`             | `cell_chain_post`    | host arithmetic on `p_ε`       | —                             |
 
 `a = (1 + 3/N_f) · (p_ε / W)` and `b = (p_ε / W)` are scalars
-recomputed on the host from the current `p_ε` before each kernel
-launch and passed as kernel arguments.
+recomputed on the host from the current `p_ε` inside the appropriate
+`execute()` call before each kernel launch and passed as kernel
+arguments. The intermediate scalars (`K`, `W_virial`, `pressure`,
+`a`, `b`, `μ_box`, etc.) flow between sub-steps through the
+integrator's `&mut self` state.
 
 `N_sub = n_yoshida · n_resp` (matches `nose-hoover-chain.md`). The
-particle-chain half-step launches `N_sub`
+particle-chain Custom sub-steps each launch `N_sub`
 `rescale_velocities` kernel calls (one per Yoshida sub-step), each
-labelled `MtkNptRescaleVelocities`. The cell-chain half-step is
-pure host arithmetic on `p_ε`; no kernel launches.
+labelled `MtkNptRescaleVelocities`. The cell-chain Custom sub-steps
+are pure host arithmetic on `p_ε`; no kernel launches.
 
-`mtk_velocity_half_kick` and `mtk_position_drift` are the two new
-CUDA kernels owned by this slot. They replace `vv_kick` /
-`vv_kick_drift` for the cell-coupled `L_kick` and `L_drift`
-operators; the standard VV kernels are not used by this integrator.
+`mtk_velocity_half_kick` and `mtk_position_drift` are the two CUDA
+kernels owned by this slot. They replace `vv_kick` / `vv_kick_drift`
+for the cell-coupled `L_kick` and `L_drift` operators; the standard
+VV kernels are not used by this integrator.
+
+`IntegratorKind::MtkNpt` returns `false` from
+`supports_constraints()`; the runner therefore inserts no constraint
+hooks around the `Drift` or `KickHalf` sub-steps. Composing MTK NPT
+with constraints is rejected at config load by
+`ConfigError::IncompatibleConstraint` (see
+`integration/constraint-framework.md`).
 
 ## Parameters <!-- rq-ce37404c -->
 
@@ -312,11 +344,16 @@ post-step `V`.
 
 ### `Integrator` trait overrides <!-- rq-d2d0fb5f -->
 
-- `step(buffers, sim_box, force_field, dt, timings)` — runs the <!-- rq-8cda2c89 -->
-  per-step sequence above. The initial `V_0` for the `eps`
-  bookkeeping is captured from `sim_box.volume()` on the very first
-  call (when `eps == 0.0` and `p_eps == 0.0`). Subsequent calls
-  evolve `eps` according to the `L_drift` operator.
+- `plan(dt)` — returns the fourteen-element `StepPlan` defined in <!-- rq-8cda2c89 -->
+  *Step Plan* above. Pure; reads only the integrator's static
+  configuration.
+- `execute(sub, buffers, sim_box, timings)` — dispatches each <!-- rq-4c21c386 -->
+  non-`ForceEval` sub-step to the kernel sequence enumerated in the
+  per-step kernel table. The initial `V_0` for the `eps` bookkeeping
+  is captured from `sim_box.volume()` on the very first `execute()`
+  call of the `vel_kick_pre` sub-step (when `eps == 0.0` and `p_eps
+  == 0.0`). Subsequent calls evolve `eps` according to the `L_drift`
+  operator inside the `drift_box` sub-step.
 - `log_column_names() -> &'static ["pressure", "box_volume", <!-- rq-14a7685e -->
   "mtk_npt_conserved"]`.
 - `log_column_values(ke, pe) -> vec![most_recent_pressure, <!-- rq-f9ebe53f -->
@@ -634,7 +671,7 @@ Feature: MTK NPT integrator (isotropic)
       particle_count=4
     And a ForceField with one LennardJones slot
     And a warm-up force evaluation has populated forces and virials
-    When integrator.step(...) is called once with dt=1e-15
+    When the runner walks integrator.plan(dt=1e-15) once
     Then KernelStage::KINETIC_ENERGY_REDUCE has count == 2
     And KernelStage::VIRIAL_SUM_REDUCE has count == 2
     And KernelStage::MTK_NPT_RESCALE_VELOCITIES has count == 6  (3 Yoshida × 1 RESP × 2 halves)
@@ -644,10 +681,10 @@ Feature: MTK NPT integrator (isotropic)
     And KernelStage::VV_KICK_DRIFT has count == 0
 
   @rq-07375d3f
-  Scenario: step() on empty state is a no-op
+  Scenario: Plan walk on empty state is a no-op
     Given an MtkNptIntegrator with particle_count=0
-    When integrator.step(...) is called
-    Then it returns Ok(())
+    When the runner walks integrator.plan(dt) once
+    Then every execute(...) call returns Ok(())
     And sim_box.generation() is unchanged
     And p_eps, eps, and all chain DOFs are unchanged
 
@@ -695,7 +732,7 @@ Feature: MTK NPT integrator (isotropic)
     Given an MtkNptIntegrator and a system whose particle velocities are all zero
     And p_eps is non-zero (e.g. 1.0e-25 kg·m²/s, set by hand)
     And a snapshot of fractional coordinates per particle
-    When integrator.step(...) is called once
+    When the runner walks integrator.plan(dt) once
     Then the post-step fractional coordinates of every particle equal the
       snapshot within f32 round-off
       (with v ≡ 0 the drift collapses to the pure box rescale x ← exp(b·dt)·x;
@@ -729,11 +766,11 @@ Feature: MTK NPT integrator (isotropic)
   # --- Box-generation propagation ---
 
   @rq-ba4087d7
-  Scenario: sim_box.generation() advances every step
+  Scenario: sim_box.generation() advances every plan walk
     Given an MtkNptIntegrator and a SimulationBox at generation g
-    When integrator.step(...) is called once
+    When the runner walks integrator.plan(dt) once
     Then sim_box.generation() ≥ g + 1
-      (the integrator calls sim_box.rescale_isotropic(μ_box) once per step)
+      (the integrator's `drift_box` sub-step calls sim_box.rescale_isotropic(μ_box) once per plan walk)
 
   # --- Determinism ---
 

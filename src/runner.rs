@@ -506,23 +506,34 @@ fn run_simulation_with_phase(
             t.apply_pre(&mut buffers, dt_f32, &mut timings)
                 .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
         }
+        // Walk the integrator's plan. The constraint slot's hooks are
+        // inserted by run_step around any Drift/KickDrift sub-step and
+        // after the final velocity update, gated by the kind-level
+        // supports_constraints() predicate (`framework.md`).
         {
-            let constraint_arg: Option<&mut dyn crate::integrator::Constraint> = match constraint
-                .as_mut()
-            {
-                Some(b) => Some(b.as_mut()),
-                None => None,
-            };
-            integrator
-                .step(
-                    &mut buffers,
-                    &mut sim_box,
-                    &mut force_field,
-                    constraint_arg,
-                    dt_f32,
-                    &mut timings,
-                )
-                .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Loop))?;
+            let constraint_arg: Option<&mut dyn crate::integrator::Constraint> =
+                match constraint.as_mut() {
+                    Some(b) => Some(b.as_mut()),
+                    None => None,
+                };
+            crate::integrator::run_step(
+                integrator.as_mut(),
+                &mut buffers,
+                &mut sim_box,
+                &mut force_field,
+                constraint_arg,
+                config.integrator.supports_constraints(),
+                dt_f32,
+                &mut timings,
+            )
+            .map_err(|e| {
+                let runner_err = match e {
+                    crate::integrator::StepError::Integrator(e) => RunnerError::Integrator(e),
+                    crate::integrator::StepError::ForceField(e) => RunnerError::ForceField(e),
+                    crate::integrator::StepError::Constraint(e) => RunnerError::Constraint(e),
+                };
+                (runner_err, ExitPhase::Loop)
+            })?;
         }
         if let Some(t) = thermostat.as_mut() {
             t.apply_post(&mut buffers, dt_f32, &mut timings)

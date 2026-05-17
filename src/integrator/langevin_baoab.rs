@@ -1,13 +1,12 @@
 // rq-d5a4f220
 
-use crate::forces::ForceField;
 use crate::gpu::{GpuContext, ParticleBuffers, lan_drift_half, lan_ou_step, vv_kick};
 use crate::io::config::IntegratorKind;
 use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
-use super::{Constraint, Integrator, IntegratorBuilder, IntegratorError};
+use super::{Integrator, IntegratorBuilder, IntegratorError, StepPlan, SubStep};
 
 #[derive(Debug)]
 pub struct LangevinBaoabState {
@@ -18,51 +17,59 @@ pub struct LangevinBaoabState {
 }
 
 impl Integrator for LangevinBaoabState {
-    fn step(
+    // rq-aa68f468
+    fn plan(&self, dt: f32) -> StepPlan {
+        // The two Drift sub-steps internally use dt/2; the integrator's
+        // execute() reads `dt` from the SubStep and applies the
+        // appropriate factor inside the `lan_drift_half` kernel.
+        StepPlan {
+            steps: vec![
+                SubStep::KickHalf { dt, label: "B" },
+                SubStep::Drift { dt, label: "A_pre" },
+                SubStep::Custom { dt, label: "O" },
+                SubStep::Drift { dt, label: "A_post" },
+                SubStep::ForceEval,
+                SubStep::KickHalf { dt, label: "B" },
+            ],
+        }
+    }
+
+    fn execute(
         &mut self,
+        substep: &SubStep,
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
-        force_field: &mut ForceField,
-        constraint: Option<&mut dyn Constraint>,
-        dt: f32,
         timings: &mut Timings,
     ) -> Result<(), IntegratorError> {
-        if constraint.is_some() {
-            return Err(IntegratorError::ConstraintNotSupported);
-        }
         if buffers.particle_count() == 0 {
             return Ok(());
         }
-
-        // BAOAB pre-force: B(dt/2), A(dt/2), O(dt), A(dt/2)
-        timings.kernel_start(KernelStage::LANGEVIN_KICK_HALF)?;
-        vv_kick(buffers, dt)?;
-        timings.kernel_stop(KernelStage::LANGEVIN_KICK_HALF)?;
-
-        timings.kernel_start(KernelStage::LANGEVIN_DRIFT_HALF)?;
-        lan_drift_half(buffers, sim_box, dt)?;
-        timings.kernel_stop(KernelStage::LANGEVIN_DRIFT_HALF)?;
-
-        let alpha = (-(self.friction as f32) * dt).exp();
-        let kt = (BOLTZMANN_J_PER_K * self.temperature) as f32;
-        self.draw_counter += 1;
-        timings.kernel_start(KernelStage::LANGEVIN_OU_STEP)?;
-        lan_ou_step(buffers, self.seed, self.draw_counter, alpha, kt)?;
-        timings.kernel_stop(KernelStage::LANGEVIN_OU_STEP)?;
-
-        timings.kernel_start(KernelStage::LANGEVIN_DRIFT_HALF)?;
-        lan_drift_half(buffers, sim_box, dt)?;
-        timings.kernel_stop(KernelStage::LANGEVIN_DRIFT_HALF)?;
-
-        // Force evaluation at the new positions.
-        force_field.step(buffers, sim_box, timings)?;
-
-        // BAOAB post-force: B(dt/2)
-        timings.kernel_start(KernelStage::LANGEVIN_KICK_HALF)?;
-        vv_kick(buffers, dt)?;
-        timings.kernel_stop(KernelStage::LANGEVIN_KICK_HALF)?;
-
-        Ok(())
+        match substep {
+            SubStep::KickHalf { dt, .. } => {
+                timings.kernel_start(KernelStage::LANGEVIN_KICK_HALF)?;
+                vv_kick(buffers, *dt)?;
+                timings.kernel_stop(KernelStage::LANGEVIN_KICK_HALF)?;
+                Ok(())
+            }
+            SubStep::Drift { dt, .. } => {
+                timings.kernel_start(KernelStage::LANGEVIN_DRIFT_HALF)?;
+                lan_drift_half(buffers, sim_box, *dt)?;
+                timings.kernel_stop(KernelStage::LANGEVIN_DRIFT_HALF)?;
+                Ok(())
+            }
+            SubStep::Custom { dt, label } if *label == "O" => {
+                let alpha = (-(self.friction as f32) * *dt).exp();
+                let kt = (BOLTZMANN_J_PER_K * self.temperature) as f32;
+                self.draw_counter += 1;
+                timings.kernel_start(KernelStage::LANGEVIN_OU_STEP)?;
+                lan_ou_step(buffers, self.seed, self.draw_counter, alpha, kt)?;
+                timings.kernel_stop(KernelStage::LANGEVIN_OU_STEP)?;
+                Ok(())
+            }
+            other => Err(IntegratorError::UnexpectedSubStep {
+                variant: other.variant_name(),
+            }),
+        }
     }
 }
 

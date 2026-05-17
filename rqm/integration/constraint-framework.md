@@ -43,55 +43,52 @@ of the run, dropped at end of run.
 
 ## Per-Step Interface <!-- rq-f08d7a33 -->
 
-The runner's timestep loop is the same shape described in
-`framework.md`, with the constraint slot threaded through the
-integrator's `step()` rather than fired as a separate top-level call:
+The constraint slot's hooks are fired by the runner during its walk of
+the integrator's `StepPlan` (see `framework.md`). The integrator
+describes its work as an ordered sequence of `SubStep`s; the runner
+identifies the canonical hook positions by inspecting the variant of
+each sub-step and inserts the corresponding hook call. Integrators
+never reference the constraint slot.
 
-```text
-loop step in 1..=n_steps:
-    if let Some(t) = thermostat { t.apply_pre(buffers, dt, timings) }
-    integrator.step(
-        buffers, sim_box, force_field,
-        constraint.as_deref_mut(),
-        dt, timings)
-    if let Some(t) = thermostat { t.apply_post(buffers, dt, timings) }
-    if let Some(b) = barostat   { b.apply(buffers, sim_box, dt, timings) }
-```
+The three hook positions are inferred from sub-step variants:
 
-The constraint slot is passed into `integrator.step` because its hooks
-fire at sub-step boundaries that only the integrator can identify (the
-moment between a position drift and the next force evaluation, and the
-moment after the final velocity kick). Integrators that support
-constraints invoke the slot's hooks at three fixed points:
+| Hook                   | When the runner fires it                                                                | What the slot does                                                                                                                            |
+| ---------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apply_before_drift`   | Immediately before every `SubStep::Drift` or `SubStep::KickDrift` the integrator executes | Snapshots the pre-drift positions of every atom the slot owns into the slot's internal buffer.                                                |
+| `apply_after_drift`    | Immediately after every `SubStep::Drift` or `SubStep::KickDrift` the integrator executes | Projects positions back onto the constraint manifold; updates the corresponding half-step velocities so they remain consistent with the projected displacement. |
+| `apply_after_kick`     | Once per timestep, after the final sub-step in the plan, iff that sub-step is a `SubStep::KickHalf` or `SubStep::KickDrift` | Projects velocities onto the constraint manifold so the time-derivative of every constraint is zero at the new positions.                     |
 
-| Hook                   | When fired                                      | What it does                                                                                                                            |
-| ---------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `apply_before_drift`   | After any pre-drift velocity update, before the drift kernel modifies positions | Snapshots the pre-drift positions of every atom the slot owns into the slot's internal buffer.                                          |
-| `apply_after_drift`    | After the drift kernel completes               | Projects positions back onto the constraint manifold; updates the corresponding half-step velocities so they remain consistent with the projected displacement. |
-| `apply_after_kick`     | After the integrator's final velocity kick      | Projects velocities onto the constraint manifold so the time-derivative of every constraint is zero at the new positions.               |
-
-For the registered `velocity-verlet` (lossy) integrator, the call
-sequence inside `step()` becomes:
+For the registered `velocity-verlet` (lossy) integrator, whose plan is
+`[KickDrift, ForceEval, KickHalf]` (see `velocity-verlet.md`), the
+runner's interleaved sequence becomes:
 
 ```text
 constraint.apply_before_drift(buffers, sim_box, dt, timings)
-vv_kick_drift(buffers, sim_box, dt)
+integrator.execute(SubStep::KickDrift { .. }, buffers, sim_box, timings)
 constraint.apply_after_drift(buffers, sim_box, dt, timings)
 force_field.step(buffers, sim_box, timings)
-vv_kick(buffers, dt)
+integrator.execute(SubStep::KickHalf { .. }, buffers, sim_box, timings)
 constraint.apply_after_kick(buffers, sim_box, dt, timings)
 ```
 
-When the constraint slot is `None`, the integrator skips all three hook
-sites without launching any kernel. The integrator's hook calls bracket
-their own timings stage (`ConstraintBeforeDrift`,
-`ConstraintAfterDrift`, `ConstraintAfterKick`) using
-`timings.kernel_start` / `timings.kernel_stop`; the slot's internal
-kernels record their own stages within those brackets.
+When the constraint slot is `None`, the runner skips hook insertion
+entirely; the plan walk reduces to the bare sub-step dispatch. When
+`IntegratorKind::supports_constraints()` returns `false` the runner
+also skips hook insertion (and the config loader rejects this
+combination with a non-empty `[constraints]` section before the run
+starts). When the plan contains no `Drift` or `KickDrift` sub-steps,
+only the final-velocity `apply_after_kick` hook can fire — and only
+if the plan's last sub-step is a `KickHalf` or `KickDrift`.
+
+The runner brackets each hook call with its own timings stage
+(`CONSTRAINT_BEFORE_DRIFT`, `CONSTRAINT_AFTER_DRIFT`,
+`CONSTRAINT_AFTER_KICK`) using `timings.kernel_start` /
+`timings.kernel_stop`; the slot's internal kernels record their own
+finer-grained stages within those brackets.
 
 `apply_before_drift`, `apply_after_drift`, and `apply_after_kick` each
-receive `&mut SimulationBox` to read lattice parameters for minimum-image
-distance evaluation; none mutates the box.
+receive `&SimulationBox` (immutably) to read lattice parameters for
+minimum-image distance evaluation; none mutates the box.
 
 ## Compatibility Rules <!-- rq-acfda5d4 -->
 
@@ -546,6 +543,52 @@ Feature: Constraint slot framework
     And a recording stub Constraint that records every call
     When the runner executes one timestep
     Then no constraint hooks are recorded
+
+  @rq-99034e90
+  Scenario: Plan with a single Drift sub-step fires before_drift and after_drift around it
+    Given a stub integrator whose plan(dt) returns [Drift, ForceEval, KickHalf]
+      and supports_constraints() returns true
+    And a recording Constraint slot
+    When the runner executes one timestep
+    Then the recorded order is exactly
+      [apply_before_drift, apply_after_drift, apply_after_kick]
+
+  @rq-3b42c2ff
+  Scenario: Plan with two Drift sub-steps fires before/after_drift twice
+    Given a stub integrator whose plan(dt) returns
+      [KickHalf, Drift, Custom("ou"), Drift, ForceEval, KickHalf]
+      and supports_constraints() returns true
+    And a recording Constraint slot
+    When the runner executes one timestep
+    Then apply_before_drift fires exactly twice (once before each Drift)
+    And apply_after_drift fires exactly twice (once after each Drift)
+    And apply_after_kick fires exactly once after the final KickHalf
+
+  @rq-a90e4189
+  Scenario: Plan whose final sub-step is not a Kick does not fire after_kick
+    Given a stub integrator whose plan(dt) returns [KickHalf, ForceEval, Custom("post")]
+      and supports_constraints() returns true
+    And a recording Constraint slot
+    When the runner executes one timestep
+    Then apply_after_kick is not recorded
+
+  @rq-c3b3ec99
+  Scenario: Custom sub-step alone fires no constraint hooks
+    Given a stub integrator whose plan(dt) returns [Custom("ou")]
+      and supports_constraints() returns true
+    And a recording Constraint slot
+    When the runner executes one timestep
+    Then no constraint hooks are recorded
+
+  @rq-309d8d50
+  Scenario: supports_constraints == false suppresses all hook insertion
+    Given a stub integrator whose plan(dt) returns [KickDrift, ForceEval, KickHalf]
+      and supports_constraints() returns false
+    And a recording Constraint slot
+    When the runner executes one timestep
+    Then no constraint hooks are recorded
+    (the config loader would normally reject this combination before reaching the loop;
+     this scenario exercises the runner-side safety check.)
 
   @rq-03329010
   Scenario: apply_before_drift on empty state is a no-op

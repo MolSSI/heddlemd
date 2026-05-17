@@ -4,7 +4,6 @@
 
 use cudarc::driver::CudaSlice;
 
-use crate::forces::ForceField;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy, compute_total_virial,
     mtk_position_drift, mtk_velocity_half_kick, rescale_velocities,
@@ -15,7 +14,7 @@ use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::nose_hoover_chain::{nhc_chain_sub_step, yoshida_weights};
-use super::{Constraint, Integrator, IntegratorBuilder, IntegratorError};
+use super::{Integrator, IntegratorBuilder, IntegratorError, StepPlan, SubStep};
 
 // Host-side Φ_v / Φ_x factor. Computes sinh(α)/α with a Taylor
 // fallback when |α| < TAYLOR_THRESHOLD so the result stays finite and
@@ -25,8 +24,6 @@ const SINH_OVER_X_TAYLOR_THRESHOLD: f64 = 1.0e-6;
 #[inline]
 fn sinh_over_x(alpha: f64) -> f64 {
     if alpha.abs() < SINH_OVER_X_TAYLOR_THRESHOLD {
-        // sinh(α)/α ≈ 1 + α²/6 + O(α⁴); the linear term is zero by
-        // symmetry. f64 precision suffices for α down to ~1e-308.
         1.0 + alpha * alpha / 6.0
     } else {
         alpha.sinh() / alpha
@@ -60,6 +57,13 @@ pub struct MtkNptIntegrator {
     pub most_recent_pressure: f64,
     pub most_recent_volume: f64,
     pub most_recent_ke: f64,
+    // Per-plan-walk scratch values that flow between sub-steps. Set
+    // and consumed within a single plan walk; values left over from
+    // one walk are harmlessly overwritten at the start of the next.
+    scratch_k: f64,
+    scratch_volume: f64,
+    scratch_pressure: f64,
+    scratch_k_post_kick: f64,
 }
 
 impl MtkNptIntegrator {
@@ -81,7 +85,6 @@ impl MtkNptIntegrator {
         let tau_t2 = tau_t * tau_t;
         let tau_p2 = tau_p * tau_p;
 
-        // Particle chain masses: Q_1 = g · k_B · T · τ_t², Q_j = k_B · T · τ_t² for j > 1.
         let mut q_mass_part = vec![0.0_f64; m];
         if m > 0 {
             q_mass_part[0] = (g_dof as f64) * kt * tau_t2;
@@ -89,9 +92,7 @@ impl MtkNptIntegrator {
                 q_mass_part[j] = kt * tau_t2;
             }
         }
-        // Cell chain masses: Q'_j = k_B · T · τ_t² for all j (1-DOF chain).
         let q_mass_cell = vec![kt * tau_t2; m];
-        // Cell mass: W = (g + 3) · k_B · T · τ_p².
         let w_cell = (g_dof as f64 + 3.0) * kt * tau_p2;
 
         let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
@@ -122,14 +123,16 @@ impl MtkNptIntegrator {
             most_recent_pressure: 0.0,
             most_recent_volume: 0.0,
             most_recent_ke: 0.0,
+            scratch_k: 0.0,
+            scratch_volume: 0.0,
+            scratch_pressure: 0.0,
+            scratch_k_post_kick: 0.0,
         })
     }
 
     // Particle-chain half-step using the shared NHC helper. Mutates
-    // particle velocities via rescale_velocities (one kernel launch per
-    // Yoshida sub-step) and updates the particle-chain state.
-    // Threads `k` through Yoshida sub-steps host-side (factor² update)
-    // to avoid re-launching kinetic_energy_reduce.
+    // particle velocities via rescale_velocities (one kernel launch
+    // per Yoshida sub-step) and updates the particle-chain state.
     fn particle_chain_half_step(
         &mut self,
         dt: f32,
@@ -163,9 +166,6 @@ impl MtkNptIntegrator {
         Ok(k)
     }
 
-    // Cell-chain half-step using the shared NHC helper. Pure host
-    // arithmetic; mutates the cell-chain state and `p_eps`. The "DOF"
-    // it thermostats is the single scalar cell momentum, so g_dof = 1.
     fn cell_chain_half_step(&mut self, dt: f32) {
         let dt = dt as f64;
         let n_resp = self.n_resp as f64;
@@ -187,27 +187,22 @@ impl MtkNptIntegrator {
         }
     }
 
-    // Conserved Hamiltonian for the diagnostic column.
     fn conserved_hamiltonian(&self, ke: f64, pe: f64) -> f64 {
         let mut h = ke + pe;
         h += self.pressure * self.most_recent_volume;
         h += 0.5 * self.p_eps * self.p_eps / self.w_cell;
-        // Particle chain kinetic terms.
         for (p, q) in self.p_xi_part.iter().zip(self.q_mass_part.iter()) {
             h += (*p) * (*p) / (2.0 * (*q));
         }
-        // Cell chain kinetic terms.
         for (p, q) in self.p_xi_cell.iter().zip(self.q_mass_cell.iter()) {
             h += (*p) * (*p) / (2.0 * (*q));
         }
-        // Particle chain potential terms.
         if !self.xi_part.is_empty() {
             h += (self.g_dof as f64) * self.kt * self.xi_part[0];
             for &xi_j in self.xi_part.iter().skip(1) {
                 h += self.kt * xi_j;
             }
         }
-        // Cell chain potential terms (each DOF carries one k_B T).
         for &xi_j in &self.xi_cell {
             h += self.kt * xi_j;
         }
@@ -217,127 +212,171 @@ impl MtkNptIntegrator {
 
 impl Integrator for MtkNptIntegrator {
     // rq-aa68f468
-    fn step(
+    fn plan(&self, dt: f32) -> StepPlan {
+        // The MTK symmetric Trotter splitting. Most sub-steps are
+        // integrator-private (`Custom`) because they involve host-side
+        // chain arithmetic or KE / virial reductions that the constraint
+        // framework's hook insertion machinery (Drift / KickDrift /
+        // final KickHalf) does not want to interleave. The KickHalf
+        // sub-step is the cell-coupled velocity update; the Drift
+        // sub-step is the cell-coupled position update plus the
+        // SimulationBox rescale.
+        StepPlan {
+            steps: vec![
+                SubStep::Custom { dt, label: "ke_reduce_pre" },
+                SubStep::Custom { dt, label: "vir_reduce_pre" },
+                SubStep::Custom { dt, label: "cell_chain_pre" },
+                SubStep::Custom { dt, label: "particle_chain_pre" },
+                SubStep::Custom { dt, label: "baro_kick_pre" },
+                SubStep::KickHalf { dt, label: "vel_kick_pre" },
+                SubStep::Drift { dt, label: "drift_box" },
+                SubStep::ForceEval,
+                SubStep::Custom { dt, label: "ke_reduce_post" },
+                SubStep::Custom { dt, label: "vir_reduce_post" },
+                SubStep::KickHalf { dt, label: "vel_kick_post" },
+                SubStep::Custom { dt, label: "ke_reduce_post_kick" },
+                SubStep::Custom { dt, label: "baro_kick_post" },
+                SubStep::Custom { dt, label: "particle_chain_post" },
+                SubStep::Custom { dt, label: "cell_chain_post" },
+            ],
+        }
+    }
+
+    fn execute(
         &mut self,
+        substep: &SubStep,
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
-        force_field: &mut ForceField,
-        constraint: Option<&mut dyn Constraint>,
-        dt: f32,
         timings: &mut Timings,
     ) -> Result<(), IntegratorError> {
-        if constraint.is_some() {
-            return Err(IntegratorError::ConstraintNotSupported);
-        }
         if buffers.particle_count() == 0 {
             return Ok(());
         }
-
-        let dt_f64 = dt as f64;
+        let dt_f32 = match substep {
+            SubStep::KickHalf { dt, .. }
+            | SubStep::Drift { dt, .. }
+            | SubStep::Custom { dt, .. } => *dt,
+            other => {
+                return Err(IntegratorError::UnexpectedSubStep {
+                    variant: other.variant_name(),
+                });
+            }
+        };
+        let dt_f64 = dt_f32 as f64;
         let nf = self.g_dof as f64;
 
-        // --- Pre: KE + virial + pressure -----------------------------
-        timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        let mut k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
-        timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
-
-        timings.kernel_start(KernelStage::VIRIAL_SUM_REDUCE)?;
-        let w_vir = compute_total_virial(buffers, &mut self.virial_scratch)? as f64;
-        timings.kernel_stop(KernelStage::VIRIAL_SUM_REDUCE)?;
-
-        let mut volume = sim_box.volume() as f64;
-        let mut pressure = (2.0 * k + w_vir) / (3.0 * volume);
-
-        // --- 1: cell chain ½ (host-only) -----------------------------
-        self.cell_chain_half_step(dt);
-
-        // --- 2: particle chain ½ -------------------------------------
-        k = self.particle_chain_half_step(dt, buffers, k, timings)?;
-
-        // --- 3: baro kick ½ ------------------------------------------
-        // p_eps ← p_eps + (dt/2) · (3V(P − P_ext) + (3/N_f) · 2K)
-        self.p_eps += 0.5 * dt_f64
-            * (3.0 * volume * (pressure - self.pressure) + 6.0 / nf * k);
-
-        // --- 4: vel kick ½ (cell-coupled half-kick from F) -----------
-        // α_v = (1 + 3/N_f) · (p_eps / W); v solves dv/dt = F/m - α_v · v
-        // over dt/2: v ← exp(-α_v·dt/2) · v + (dt/2) · Φ_v · F/m
-        // where Φ_v = sinh(α_v·dt/4)/(α_v·dt/4) · exp(-α_v·dt/4) · 2
-        // (standard MTTK form). We package the two coefficients into
-        // the kernel arguments exp_minus_alpha and phi_v_dt_half so the
-        // device just does v ← A·v + B·(F/m).
-        let alpha_v = (1.0 + 3.0 / nf) * (self.p_eps / self.w_cell);
-        let exp_ma_half = (-alpha_v * dt_f64 / 2.0).exp();
-        let phi_v_dt_half = 0.5 * dt_f64
-            * sinh_over_x(alpha_v * dt_f64 / 4.0)
-            * (-alpha_v * dt_f64 / 4.0).exp();
-        timings.kernel_start(KernelStage::MTK_NPT_VELOCITY_HALF_KICK)?;
-        mtk_velocity_half_kick(buffers, exp_ma_half as f32, phi_v_dt_half as f32)?;
-        timings.kernel_stop(KernelStage::MTK_NPT_VELOCITY_HALF_KICK)?;
-
-        // --- 5: drift + box -----------------------------------------
-        // β = p_eps / W; x solves dx/dt = v + β·x over dt:
-        //   x ← exp(β·dt) · x + dt · Φ_x · exp(β·dt/2) · v
-        // ε ← ε + β·dt; V ← V · exp(3β·dt); μ_box = exp(β·dt).
-        let beta = self.p_eps / self.w_cell;
-        let exp_b_dt = (beta * dt_f64).exp();
-        let phi_x_dt = dt_f64 * sinh_over_x(beta * dt_f64 / 2.0) * (beta * dt_f64 / 2.0).exp();
-        timings.kernel_start(KernelStage::MTK_NPT_POSITION_DRIFT)?;
-        mtk_position_drift(buffers, exp_b_dt as f32, phi_x_dt as f32)?;
-        timings.kernel_stop(KernelStage::MTK_NPT_POSITION_DRIFT)?;
-        self.eps += beta * dt_f64;
-        let mu_box = exp_b_dt as f32;
-        sim_box
-            .rescale_isotropic(mu_box)
-            .map_err(|_| IntegratorError::Gpu(GpuError(
-                cudarc::driver::DriverError(
-                    cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,
-                ),
-            )))?;
-
-        // --- 6: force eval ------------------------------------------
-        force_field.step(buffers, sim_box, timings)?;
-
-        // --- Refresh K, W_vir, V, P at the post-drift state ---------
-        timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
-        timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        timings.kernel_start(KernelStage::VIRIAL_SUM_REDUCE)?;
-        let w_vir = compute_total_virial(buffers, &mut self.virial_scratch)? as f64;
-        timings.kernel_stop(KernelStage::VIRIAL_SUM_REDUCE)?;
-        volume = sim_box.volume() as f64;
-        pressure = (2.0 * k + w_vir) / (3.0 * volume);
-
-        // --- 7: vel kick ½ (mirror) ----------------------------------
-        let alpha_v = (1.0 + 3.0 / nf) * (self.p_eps / self.w_cell);
-        let exp_ma_half = (-alpha_v * dt_f64 / 2.0).exp();
-        let phi_v_dt_half = 0.5 * dt_f64
-            * sinh_over_x(alpha_v * dt_f64 / 4.0)
-            * (-alpha_v * dt_f64 / 4.0).exp();
-        timings.kernel_start(KernelStage::MTK_NPT_VELOCITY_HALF_KICK)?;
-        mtk_velocity_half_kick(buffers, exp_ma_half as f32, phi_v_dt_half as f32)?;
-        timings.kernel_stop(KernelStage::MTK_NPT_VELOCITY_HALF_KICK)?;
-
-        // Refresh K after the closing velocity half-kick so the closing
-        // particle chain uses the right value.
-        timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        let k_post_kick = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
-        timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
-
-        // --- 8: baro kick ½ (mirror) ---------------------------------
-        self.p_eps += 0.5 * dt_f64
-            * (3.0 * volume * (pressure - self.pressure) + 6.0 / nf * k_post_kick);
-
-        // --- 9: particle chain ½ (mirror) ----------------------------
-        let k_after_part = self.particle_chain_half_step(dt, buffers, k_post_kick, timings)?;
-
-        // --- 10: cell chain ½ (mirror; host-only) --------------------
-        self.cell_chain_half_step(dt);
-
-        self.most_recent_pressure = pressure;
-        self.most_recent_volume = volume;
-        self.most_recent_ke = k_after_part;
-        Ok(())
+        match substep {
+            SubStep::Custom { label: "ke_reduce_pre", .. } => {
+                timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
+                self.scratch_k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+                timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
+                Ok(())
+            }
+            SubStep::Custom { label: "vir_reduce_pre", .. } => {
+                timings.kernel_start(KernelStage::VIRIAL_SUM_REDUCE)?;
+                let w_vir = compute_total_virial(buffers, &mut self.virial_scratch)? as f64;
+                timings.kernel_stop(KernelStage::VIRIAL_SUM_REDUCE)?;
+                self.scratch_volume = sim_box.volume() as f64;
+                self.scratch_pressure =
+                    (2.0 * self.scratch_k + w_vir) / (3.0 * self.scratch_volume);
+                Ok(())
+            }
+            SubStep::Custom { label: "cell_chain_pre", .. } => {
+                self.cell_chain_half_step(dt_f32);
+                Ok(())
+            }
+            SubStep::Custom { label: "particle_chain_pre", .. } => {
+                self.scratch_k =
+                    self.particle_chain_half_step(dt_f32, buffers, self.scratch_k, timings)?;
+                Ok(())
+            }
+            SubStep::Custom { label: "baro_kick_pre", .. } => {
+                // p_eps ← p_eps + (dt/2) · (3V(P − P_ext) + (6/N_f) · K)
+                self.p_eps += 0.5
+                    * dt_f64
+                    * (3.0 * self.scratch_volume * (self.scratch_pressure - self.pressure)
+                        + 6.0 / nf * self.scratch_k);
+                Ok(())
+            }
+            SubStep::KickHalf { label: "vel_kick_pre", .. }
+            | SubStep::KickHalf { label: "vel_kick_post", .. } => {
+                let alpha_v = (1.0 + 3.0 / nf) * (self.p_eps / self.w_cell);
+                let exp_ma_half = (-alpha_v * dt_f64 / 2.0).exp();
+                let phi_v_dt_half = 0.5
+                    * dt_f64
+                    * sinh_over_x(alpha_v * dt_f64 / 4.0)
+                    * (-alpha_v * dt_f64 / 4.0).exp();
+                timings.kernel_start(KernelStage::MTK_NPT_VELOCITY_HALF_KICK)?;
+                mtk_velocity_half_kick(buffers, exp_ma_half as f32, phi_v_dt_half as f32)?;
+                timings.kernel_stop(KernelStage::MTK_NPT_VELOCITY_HALF_KICK)?;
+                Ok(())
+            }
+            SubStep::Drift { label: "drift_box", .. } => {
+                let beta = self.p_eps / self.w_cell;
+                let exp_b_dt = (beta * dt_f64).exp();
+                let phi_x_dt =
+                    dt_f64 * sinh_over_x(beta * dt_f64 / 2.0) * (beta * dt_f64 / 2.0).exp();
+                timings.kernel_start(KernelStage::MTK_NPT_POSITION_DRIFT)?;
+                mtk_position_drift(buffers, exp_b_dt as f32, phi_x_dt as f32)?;
+                timings.kernel_stop(KernelStage::MTK_NPT_POSITION_DRIFT)?;
+                self.eps += beta * dt_f64;
+                let mu_box = exp_b_dt as f32;
+                sim_box.rescale_isotropic(mu_box).map_err(|_| {
+                    IntegratorError::Gpu(GpuError(cudarc::driver::DriverError(
+                        cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,
+                    )))
+                })?;
+                Ok(())
+            }
+            SubStep::Custom { label: "ke_reduce_post", .. } => {
+                timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
+                self.scratch_k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+                timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
+                Ok(())
+            }
+            SubStep::Custom { label: "vir_reduce_post", .. } => {
+                timings.kernel_start(KernelStage::VIRIAL_SUM_REDUCE)?;
+                let w_vir = compute_total_virial(buffers, &mut self.virial_scratch)? as f64;
+                timings.kernel_stop(KernelStage::VIRIAL_SUM_REDUCE)?;
+                self.scratch_volume = sim_box.volume() as f64;
+                self.scratch_pressure =
+                    (2.0 * self.scratch_k + w_vir) / (3.0 * self.scratch_volume);
+                Ok(())
+            }
+            SubStep::Custom { label: "ke_reduce_post_kick", .. } => {
+                timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
+                self.scratch_k_post_kick =
+                    compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+                timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
+                Ok(())
+            }
+            SubStep::Custom { label: "baro_kick_post", .. } => {
+                self.p_eps += 0.5
+                    * dt_f64
+                    * (3.0 * self.scratch_volume * (self.scratch_pressure - self.pressure)
+                        + 6.0 / nf * self.scratch_k_post_kick);
+                Ok(())
+            }
+            SubStep::Custom { label: "particle_chain_post", .. } => {
+                let k_after_part = self.particle_chain_half_step(
+                    dt_f32,
+                    buffers,
+                    self.scratch_k_post_kick,
+                    timings,
+                )?;
+                self.most_recent_pressure = self.scratch_pressure;
+                self.most_recent_volume = self.scratch_volume;
+                self.most_recent_ke = k_after_part;
+                Ok(())
+            }
+            SubStep::Custom { label: "cell_chain_post", .. } => {
+                self.cell_chain_half_step(dt_f32);
+                Ok(())
+            }
+            other => Err(IntegratorError::UnexpectedSubStep {
+                variant: other.variant_name(),
+            }),
+        }
     }
 
     // rq-3b6d5001
