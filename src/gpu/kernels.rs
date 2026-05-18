@@ -1130,23 +1130,34 @@ pub fn mtk_position_drift(
 #[allow(clippy::too_many_arguments)]
 pub fn accumulate_forces(
     particle_buffers: &mut ParticleBuffers,
-    slot_forces_x: &CudaSlice<f32>,
-    slot_forces_y: &CudaSlice<f32>,
-    slot_forces_z: &CudaSlice<f32>,
-    slot_energies: &CudaSlice<f32>,
-    slot_virials: &CudaSlice<f32>,
-    num_slots: u32,
+    fast_slot_forces_x: &CudaSlice<f32>,
+    fast_slot_forces_y: &CudaSlice<f32>,
+    fast_slot_forces_z: &CudaSlice<f32>,
+    fast_slot_energies: &CudaSlice<f32>,
+    fast_slot_virials: &CudaSlice<f32>,
+    num_fast_slots: u32,
+    slow_slot_forces_x: &CudaSlice<f32>,
+    slow_slot_forces_y: &CudaSlice<f32>,
+    slow_slot_forces_z: &CudaSlice<f32>,
+    slow_slot_energies: &CudaSlice<f32>,
+    slow_slot_virials: &CudaSlice<f32>,
+    num_slow_slots: u32,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
         return Ok(());
     }
     let n_u32 = n as u32;
-    debug_assert_eq!(slot_forces_x.len(), num_slots as usize * n);
-    debug_assert_eq!(slot_forces_y.len(), num_slots as usize * n);
-    debug_assert_eq!(slot_forces_z.len(), num_slots as usize * n);
-    debug_assert_eq!(slot_energies.len(), num_slots as usize * n);
-    debug_assert_eq!(slot_virials.len(), num_slots as usize * n);
+    debug_assert_eq!(fast_slot_forces_x.len(), num_fast_slots as usize * n);
+    debug_assert_eq!(fast_slot_forces_y.len(), num_fast_slots as usize * n);
+    debug_assert_eq!(fast_slot_forces_z.len(), num_fast_slots as usize * n);
+    debug_assert_eq!(fast_slot_energies.len(), num_fast_slots as usize * n);
+    debug_assert_eq!(fast_slot_virials.len(), num_fast_slots as usize * n);
+    debug_assert_eq!(slow_slot_forces_x.len(), num_slow_slots as usize * n);
+    debug_assert_eq!(slow_slot_forces_y.len(), num_slow_slots as usize * n);
+    debug_assert_eq!(slow_slot_forces_z.len(), num_slow_slots as usize * n);
+    debug_assert_eq!(slow_slot_energies.len(), num_slow_slots as usize * n);
+    debug_assert_eq!(slow_slot_virials.len(), num_slow_slots as usize * n);
 
     let func = particle_buffers.kernels.accumulate_forces.clone();
     let cfg = launch_config(n_u32);
@@ -1155,12 +1166,18 @@ pub fn accumulate_forces(
         func.launch(
             cfg,
             (
-                slot_forces_x,
-                slot_forces_y,
-                slot_forces_z,
-                slot_energies,
-                slot_virials,
-                num_slots,
+                fast_slot_forces_x,
+                fast_slot_forces_y,
+                fast_slot_forces_z,
+                fast_slot_energies,
+                fast_slot_virials,
+                num_fast_slots,
+                slow_slot_forces_x,
+                slow_slot_forces_y,
+                slow_slot_forces_z,
+                slow_slot_energies,
+                slow_slot_virials,
+                num_slow_slots,
                 &mut particle_buffers.forces_x,
                 &mut particle_buffers.forces_y,
                 &mut particle_buffers.forces_z,

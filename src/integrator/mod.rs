@@ -38,6 +38,9 @@ pub use philox::{philox_4x32_10, philox_normal};
 pub use settle::{SettleBuilder, SettleConstraintsState, SettleError};
 pub use velocity_verlet::{VelocityVerletBuilder, VelocityVerletState};
 
+// rq-df6d79a1
+pub use crate::forces::ForceClass;
+
 // rq-2ccf40de
 #[derive(Debug, thiserror::Error)]
 pub enum IntegratorError {
@@ -101,9 +104,16 @@ pub enum SubStep {
     /// Fused KickHalf + Drift in a single kernel launch
     /// (e.g. `vv_kick_drift`).
     KickDrift { dt: f32, label: &'static str },
-    /// Full force-pipeline evaluation. Dispatched by the runner via
-    /// `force_field.step(...)`, not by the integrator's `execute()`.
-    ForceEval,
+    /// Force-pipeline evaluation. Dispatched by the runner, not by
+    /// the integrator's `execute()`. `class` selects which force
+    /// class(es) to re-evaluate:
+    /// - `None` → runner calls `force_field.step(...)` (every slot).
+    /// - `Some(class)` → runner calls
+    ///   `force_field.step_class(class, ...)` (only matching slots).
+    /// In both cases the combiner refreshes
+    /// `ParticleBuffers.forces_*` from every class's slot-output
+    /// buffers.
+    ForceEval { class: Option<crate::forces::ForceClass> },
     /// Integrator-private sub-step (e.g. Langevin's OU step, MTK's
     /// chain or barostat sub-steps). `dt` carries the outer plan
     /// timestep so the integrator's `execute()` can compute its
@@ -122,7 +132,7 @@ impl SubStep {
             SubStep::KickHalf { .. } => "KickHalf",
             SubStep::Drift { .. } => "Drift",
             SubStep::KickDrift { .. } => "KickDrift",
-            SubStep::ForceEval => "ForceEval",
+            SubStep::ForceEval { .. } => "ForceEval",
             SubStep::Custom { .. } => "Custom",
         }
     }
@@ -218,8 +228,11 @@ pub fn run_step(
             }
         }
         match sub {
-            SubStep::ForceEval => {
+            SubStep::ForceEval { class: None } => {
                 force_field.step(buffers, sim_box, timings)?;
+            }
+            SubStep::ForceEval { class: Some(c) } => {
+                force_field.step_class(*c, buffers, sim_box, timings)?;
             }
             other => {
                 integrator.execute(other, buffers, sim_box, timings)?;

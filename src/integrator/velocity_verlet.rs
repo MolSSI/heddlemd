@@ -40,7 +40,7 @@ impl Integrator for VelocityVerletState {
         StepPlan {
             steps: vec![
                 SubStep::KickDrift { dt, label: "vv_kick_drift" },
-                SubStep::ForceEval,
+                SubStep::ForceEval { class: None },
                 SubStep::KickHalf { dt, label: "vv_kick" },
             ],
         }

@@ -104,8 +104,10 @@ loop step in 1..=n_steps:
             constraint.apply_before_drift(buffers, sim_box, dt, timings)
         }
         match sub:
-            SubStep::ForceEval =>
+            SubStep::ForceEval { class: None } =>
                 force_field.step(buffers, sim_box, timings)
+            SubStep::ForceEval { class: Some(c) } =>
+                force_field.step_class(c, buffers, sim_box, timings)
             other =>
                 integrator.execute(other, buffers, sim_box, timings)
         if install_hooks && is_drift {
@@ -265,10 +267,18 @@ successfully.
       /// `vv_kick_drift` kernel for velocity-Verlet).
       KickDrift { dt: f32, label: &'static str },
 
-      /// Full force-pipeline evaluation. Dispatched by the runner,
-      /// not by the integrator's `execute()`; the runner calls
-      /// `force_field.step(buffers, sim_box, timings)` directly.
-      ForceEval,
+      /// Force-pipeline evaluation. Dispatched by the runner, not by
+      /// the integrator's `execute()`. The `class` field selects
+      /// which force class(es) to re-evaluate (see
+      /// `rqm/forces/framework.md`):
+      ///   - `None` → runner calls `force_field.step(...)` (every
+      ///     slot, every class).
+      ///   - `Some(class)` → runner calls
+      ///     `force_field.step_class(class, ...)` (only slots whose
+      ///     `frequency_class() == class`).
+      /// In both cases the combiner re-runs across every class so
+      /// `ParticleBuffers.forces_*` always holds the latest total.
+      ForceEval { class: Option<ForceClass> },
 
       /// Integrator-private sub-step that doesn't fit the
       /// kick/drift/force triad (Langevin's OU step, MTK's chain or
@@ -284,7 +294,15 @@ successfully.
     inside `execute()`. The runner does not interpret the label.
   - The constraint slot's hook insertion logic
     (`constraint-framework.md`) reads only the variant tag, not the
-    label.
+    label or the `class` payload.
+  - Single-step integrators (velocity-Verlet, Langevin BAOAB,
+    NHC/CSVR/Andersen/Berendsen-paired plans, MTK-NPT) emit
+    `ForceEval { class: None }` so the runner re-evaluates every
+    slot. A future RESPA-style integrator emits
+    `ForceEval { class: Some(Fast) }` many times per outer step and
+    `ForceEval { class: Some(Slow) }` once.
+  - `ForceClass` is re-exported from `crate::forces` (see
+    `rqm/forces/framework.md` for its definition).
 
 - `StepPlan` — ordered list of `SubStep`s describing one full <!-- rq-9fbba3be -->
   timestep. `Debug + Clone`.
@@ -700,8 +718,8 @@ successfully.
 - `Integrator::execute(&mut self, substep: &SubStep, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, timings: &mut Timings) -> Result<(), IntegratorError>` <!-- rq-83e752cd -->
   - Executes one sub-step from the plan. Dispatches on `substep`'s
     variant and label to launch the appropriate kernel(s).
-  - Never receives `SubStep::ForceEval` from a conforming runner;
-    if it does, returns
+  - Never receives `SubStep::ForceEval { .. }` from a conforming
+    runner regardless of the `class` payload; if it does, returns
     `IntegratorError::UnexpectedSubStep { variant: "ForceEval" }`.
   - Returns `Ok(())` without launching any kernel when
     `buffers.particle_count() == 0`.
@@ -757,11 +775,13 @@ invariant under the same conditions each slot individually guarantees:
   OpenMM's `CustomIntegrator`). New slot implementations are Rust
   source code that implement the corresponding trait and register a
   builder.
-- Multi-time-step / RESPA integrators that split forces by frequency.
-  The integrator trait shape supports them (the integrator can call
-  `force_field.step` multiple times per `step()` with different
-  effective `dt`s), but no RESPA implementation ships in the default
-  registry.
+- Concrete multi-time-step / RESPA integrators. The integrator and
+  force-field trait shapes support RESPA-style plans: an integrator
+  can emit `SubStep::ForceEval { class: Some(Fast) }` many times per
+  outer step and `SubStep::ForceEval { class: Some(Slow) }` once, and
+  the runner dispatches each via `ForceField::step` / `step_class`
+  (see `rqm/forces/framework.md`). No RESPA implementation ships in
+  the default `IntegratorRegistry`.
 - Constraint algorithms other than SETTLE. M-SHAKE, P-LINCS, and
   every other constraint algorithm are out of scope for this
   framework file; they share the `Constraint` slot defined in
@@ -985,7 +1005,7 @@ Feature: Pluggable integration framework
     Then timings.finalize() reports count==1 for KernelStage::LJ_PAIR_FORCE
     And KernelStage::REDUCE_PAIR_FORCES has count==1
     And KernelStage::ACCUMULATE_FORCES has count==1
-    And integrator.execute(...) is never called with SubStep::ForceEval
+    And integrator.execute(...) is never called with SubStep::ForceEval { .. } regardless of the `class` payload
 
   # --- Plan structure ---
 
@@ -1012,16 +1032,35 @@ Feature: Pluggable integration framework
     And no kernel launches are recorded
 
   @rq-07ead62b
-  Scenario: Plan with multiple ForceEvals invokes force_field.step that many times
+  Scenario: Plan with multiple ForceEval { class: None } sub-steps invokes force_field.step that many times
     Given a stub integrator whose plan(dt) returns
-      [KickHalf, Drift, ForceEval, KickHalf, Drift, ForceEval, KickHalf]
+      [KickHalf, Drift, ForceEval { class: None }, KickHalf, Drift,
+       ForceEval { class: None }, KickHalf]
     When the runner executes one timestep with this integrator
     Then force_field.step(...) is invoked exactly twice
+    And force_field.step_class(...) is invoked exactly zero times
+
+  @rq-5257ec08
+  Scenario: Plan with mixed-class ForceEval sub-steps dispatches step and step_class
+    Given a stub integrator whose plan(dt) returns
+      [ForceEval { class: None },
+       ForceEval { class: Some(ForceClass::Fast) },
+       ForceEval { class: Some(ForceClass::Slow) }]
+    When the runner executes one timestep with this integrator
+    Then force_field.step(...) is invoked exactly once
+    And force_field.step_class(ForceClass::Fast, ...) is invoked exactly once
+    And force_field.step_class(ForceClass::Slow, ...) is invoked exactly once
 
   @rq-d4d435c8
   Scenario: integrator.execute receiving ForceEval surfaces UnexpectedSubStep
     Given any concrete integrator
-    When execute(&SubStep::ForceEval, ...) is called directly (bypassing the runner)
+    When execute(&SubStep::ForceEval { class: None }, ...) is called directly (bypassing the runner)
+    Then it returns Err(IntegratorError::UnexpectedSubStep { variant: "ForceEval" })
+
+  @rq-751bbb3c
+  Scenario: integrator.execute receiving ForceEval with a class also surfaces UnexpectedSubStep
+    Given any concrete integrator
+    When execute(&SubStep::ForceEval { class: Some(ForceClass::Fast) }, ...) is called directly
     Then it returns Err(IntegratorError::UnexpectedSubStep { variant: "ForceEval" })
 
   # --- Compatibility ---

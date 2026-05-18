@@ -20,6 +20,18 @@ is a one-line edit to `PotentialRegistry::with_builtins()`. Implementing
 a new `Potential` requires no edits to `ForceField::new`, to the combiner
 kernel, or to any other potential's code.
 
+Every slot belongs to one *frequency class* (`ForceClass::Fast` or
+`ForceClass::Slow`) reported by its `Potential::frequency_class()`
+method. The framework exposes two force-evaluation entry points:
+`ForceField::step(...)` re-evaluates every slot regardless of class, and
+`ForceField::step_class(class, ...)` re-evaluates only slots whose class
+matches. Both entry points re-run the combiner across every class so
+`ParticleBuffers.forces_*`, `potential_energies`, and `virials` always
+hold the most recent total. The class system carries the framework's
+support for multi-time-step (RESPA-style) integrators that want to
+evaluate slow forces (e.g. SPME reciprocal-space) less often than fast
+forces (e.g. short-range pair).
+
 ## Slots <!-- rq-cc73f184 -->
 
 `PotentialRegistry::with_builtins()` registers six built-in `PotentialBuilder`s,
@@ -28,14 +40,14 @@ condition is met. The registry's registration order is the slot evaluation
 order; the registry is the single canonical source of slot ordering, and
 `ForceField::new` reads from it without making its own decisions.
 
-| Builder | `label()` of the slot it builds | Activation condition (`build(cx)` returns `Some(_)` iff …) | Implementation file |
-| --- | --- | --- | --- |
-| `LennardJonesBuilder` | `"lennard_jones"` | `cx.pair_interactions` is non-empty | `lj-pair-force.md` |
-| `CoulombBuilder` | `"coulomb"` | `cx.coulomb_config.is_some()` | `coulomb-pair-force.md` |
-| `SpmeRealBuilder` | `"spme_real"` | `cx.spme_config.is_some()` | `spme.md` |
-| `SpmeReciprocalBuilder` | `"spme_reciprocal"` | `cx.spme_config.is_some()` | `spme.md` |
-| `MorseBondedBuilder` | `"morse_bonded"` | `!cx.bond_list.is_empty()` | `morse-bonded.md` |
-| `HarmonicAngleBuilder` | `"harmonic_angle"` | `!cx.angle_list.is_empty()` | `harmonic-angle.md` |
+| Builder | `label()` of the slot it builds | Activation condition (`build(cx)` returns `Some(_)` iff …) | `frequency_class()` | Implementation file |
+| --- | --- | --- | --- | --- |
+| `LennardJonesBuilder` | `"lennard_jones"` | `cx.pair_interactions` is non-empty | `Fast` | `lj-pair-force.md` |
+| `CoulombBuilder` | `"coulomb"` | `cx.coulomb_config.is_some()` | `Fast` | `coulomb-pair-force.md` |
+| `SpmeRealBuilder` | `"spme_real"` | `cx.spme_config.is_some()` | `Fast` | `spme.md` |
+| `SpmeReciprocalBuilder` | `"spme_reciprocal"` | `cx.spme_config.is_some()` | `Slow` | `spme.md` |
+| `MorseBondedBuilder` | `"morse_bonded"` | `!cx.bond_list.is_empty()` | `Fast` | `morse-bonded.md` |
+| `HarmonicAngleBuilder` | `"harmonic_angle"` | `!cx.angle_list.is_empty()` | `Fast` | `harmonic-angle.md` |
 
 The two SPME builders share the same activation condition; they always
 appear together because the Ewald split is exact only when both halves
@@ -62,83 +74,179 @@ A built-in potential is added by writing a `PotentialBuilder` and inserting
 it at the appropriate position in `PotentialRegistry::with_builtins()`.
 The `ForceField::new` body does not change.
 
+## Force Classes <!-- rq-df6d79a1 -->
+
+`ForceClass` is a two-variant enum that partitions every slot into one of
+two evaluation cadences:
+
+- `Fast` — short-range and inexpensive contributions: short-range pair
+  forces (LJ, Coulomb, SPME real-space), bonded pair forces, three-body
+  angle forces. A RESPA-style integrator evaluates Fast slots once per
+  inner step.
+- `Slow` — long-range and expensive contributions: SPME reciprocal-space
+  (the FFT pipeline). A RESPA-style integrator evaluates Slow slots once
+  per outer step.
+
+Every concrete `Potential` reports its class via
+`Potential::frequency_class()`. The default implementation returns
+`ForceClass::Fast`; only `SpmeReciprocalState` overrides to `Slow`. A
+user-defined `Potential` that does not override `frequency_class()` is
+treated as `Fast`, which is the right default for short-range / bonded /
+intramolecular contributions.
+
+A `ForceField` populates a per-class slot-output buffer set when its
+matching evaluation entry point runs:
+
+- `ForceField::step(...)` re-evaluates every slot in slot order,
+  refreshing every per-class buffer, then runs the combiner.
+- `ForceField::step_class(class, ...)` re-evaluates only slots whose
+  class matches, refreshing that class's buffer, then runs the combiner.
+  Non-matching slots' buffers retain their last-written contents.
+
+In both cases the combiner sums per-particle contributions across every
+class into `ParticleBuffers.forces_*`, `potential_energies`, and
+`virials`. Single-step integrators emit a `SubStep::ForceEval` with
+`class: None` and consume the total; multi-step (RESPA) integrators emit
+`class: Some(Fast)` many times and `class: Some(Slow)` once per outer
+step, and the per-particle total visible at each kick reflects the most
+recent evaluation of every class — Slow contributions are stale by up to
+`n − 1` inner steps, exactly the RESPA approximation.
+
+The two SPME builders contribute slots in different classes (Real → Fast,
+Reciprocal → Slow). The Ewald split remains exact only when both classes
+have been evaluated at the same simulation time; integrators that mix
+`step_class(Fast)` calls with stale Slow contributions are using the
+RESPA approximation, not a different splitting of the Ewald sum.
+
 ## Force Evaluation Pipeline <!-- rq-7bab5c1e -->
 
-The runner's force evaluation does the following per step:
+Each `ForceField::step(...)` or `ForceField::step_class(class, ...)`
+call performs the following, in order:
 
 1. **Shared neighbor-list update.** If `ForceField::neighbor_list` is
    `Some`, call its `pre_step` method (see `neighbor-list.md`). In
    cell-list mode this runs the displacement-check kernel and rebuilds
    the neighbor list when an atom's reference displacement exceeds
    `r_skin / 2`. In trivial mode and when `neighbor_list` is `None`,
-   this step launches no kernels.
-2. **Contribution kernels.** For each slot, in slot order, invoke
-   `Potential::contribute`, passing a `ForceFieldContext` that carries
-   a reference to the shared `NeighborListState` (when present) and any
-   other shared services. The slot fills its private intermediate
-   buffers (e.g. a `PairBuffer` or a `BondPairBuffer`) with per-pair
-   force, energy, and virial contributions; the framework does not
-   inspect them.
-3. **Per-slot reductions.** For each slot, in slot order, invoke
-   `Potential::reduce`, passing a `SlotOutputView` that points to the
-   slot's assigned row of the framework's flat slot-output buffers.
-   The reduction overwrites that row with the slot's per-particle
-   reduced contributions: three force components, one potential-energy
-   share, and one scalar-virial share (five quantities total).
-4. **Combiner.** Run `accumulate_forces` once. The combiner reads the
-   flat slot-output buffers and writes, for each per-particle quantity
-   `Q` in `{force_x, force_y, force_z, potential_energy, virial}`:
-   `particle_buffers.Q[i] = sum over k in 0..num_slots of slot_Q[k * n + i]`.
-   The summation is left-to-right in `k`; each thread handles one `i`.
+   this step launches no kernels. The update runs at the cadence of
+   whichever entry point is called: every `step` / `step_class` call
+   may trigger a rebuild.
+2. **Class filter.** Restrict the slot iteration to slots whose
+   `frequency_class()` matches the entry-point's class selector:
+   - `step(...)` and `step_class(None, ...)` (when offered as `step`'s
+     default) iterate every slot.
+   - `step_class(class, ...)` iterates only slots whose
+     `frequency_class() == class`.
+3. **Contribution kernels.** For each selected slot, in canonical slot
+   order, invoke `Potential::contribute`, passing a
+   `ForceFieldContext` that carries a reference to the shared
+   `NeighborListState` (when present) and any other shared services.
+   The slot fills its private intermediate buffers (e.g. a
+   `PairBuffer` or a `BondPairBuffer`) with per-pair force, energy,
+   and virial contributions; the framework does not inspect them.
+4. **Per-slot reductions.** For each selected slot, in canonical slot
+   order, invoke `Potential::reduce`, passing a `SlotOutputView` that
+   points to the slot's assigned row of its class's flat slot-output
+   buffer. The reduction overwrites that row with the slot's
+   per-particle reduced contributions: three force components, one
+   potential-energy share, and one scalar-virial share (five
+   quantities total).
+5. **Combiner.** Run `accumulate_forces` once. The combiner reads
+   every class's slot-output buffers and writes, for each per-particle
+   quantity `Q` in `{force_x, force_y, force_z, potential_energy,
+   virial}`:
+   `particle_buffers.Q[i] = sum over all (class, k) in canonical class+slot order of class_slot_Q[k * n + i]`.
+   The summation is left-to-right with classes ordered Fast, then Slow,
+   and within each class by registration order; each thread handles
+   one `i`. Unselected slots' rows still contribute their last-written
+   values, so the total reflects the most recent evaluation of every
+   class.
 
-Identical runs on the same GPU with the same config produce byte-identical
+Identical runs on the same GPU with the same config and the same
+sequence of `step` / `step_class` calls produce byte-identical
 `particle_buffers.forces_*`, `potential_energies`, and `virials`, and
 therefore byte-identical trajectories.
 
 ## Slot Output Buffers <!-- rq-cd28340e -->
 
-`ForceField` owns five contiguous device buffers, one per per-particle
-output quantity, named `slot_forces_x`, `slot_forces_y`, `slot_forces_z`,
-`slot_energies`, and `slot_virials`. Each has length
-`num_slots * particle_count`. The row for slot `k` is the half-open range
-`[k * particle_count, (k + 1) * particle_count)` within each buffer.
+`ForceField` owns five contiguous device buffers per force class —
+`fast_slot_forces_x`, `fast_slot_forces_y`, `fast_slot_forces_z`,
+`fast_slot_energies`, `fast_slot_virials` for `Fast`, and the matching
+`slow_*` set for `Slow`. Each class's buffer has length
+`num_slots_in_class * particle_count`. Within a class, the row for the
+`k`-th slot of that class (in canonical registration order, filtered to
+that class) is the half-open range
+`[k * particle_count, (k + 1) * particle_count)`.
 
-After slot `k`'s `reduce()` returns, row `k` contains that slot's
-per-particle reduced contribution along that axis or scalar quantity:
-three force components, one potential-energy share, and one scalar-virial
-share. The combiner reads every row and sums in slot order, producing the
-five per-particle aggregates on `ParticleBuffers`.
+After slot `k`'s `reduce()` returns, row `k` of its class's buffers
+contains that slot's per-particle reduced contribution along that axis
+or scalar quantity: three force components, one potential-energy share,
+and one scalar-virial share. The combiner reads every class's rows in
+canonical class+slot order (`Fast` first, then `Slow`; within each
+class, registration order) and sums them, producing the five
+per-particle aggregates on `ParticleBuffers`.
 
-Memory cost: `5 * num_slots * particle_count * 4 bytes`. For
+Memory cost: `5 * (num_fast_slots + num_slow_slots) * particle_count * 4
+bytes`, which equals the single-buffer cost from before the class split
+because `num_fast_slots + num_slow_slots == slots.len()`. For
 `particle_count = 10⁴` and four slots, this is ~800 KB — negligible.
 For `particle_count = 10⁵` and four slots, ~8 MB.
 
-When `num_slots == 0` the five buffers have length zero. When
-`particle_count == 0` the five buffers have length zero regardless of
-`num_slots`.
+When a class has zero slots its five buffers have length zero. When
+`particle_count == 0` every class's buffers have length zero regardless
+of slot counts. Class-output buffers are zero-initialised at
+construction so that the combiner reads valid zero contributions for
+any class that has not yet been evaluated.
 
 ## Empty State <!-- rq-aa52268c -->
 
-When `particle_count == 0`, every slot's `contribute` and `reduce` methods
-early-return without launching, and the combiner returns without
-launching. `ForceField::step` returns `Ok(())` having done no GPU work.
+When `particle_count == 0`, every slot's `contribute` and `reduce`
+methods early-return without launching, and the combiner returns
+without launching. `ForceField::step` and `ForceField::step_class`
+return `Ok(())` having done no GPU work.
 
-When `num_slots == 0`, the combiner kernel still launches (with
-`num_slots = 0`) and writes zeros to every entry of
-`particle_buffers.forces_*`, `potential_energies`, and `virials`. The
-contribution and reduction phases launch no kernels. `ForceField::step`
-returns `Ok(())`.
+When the slot list is empty (across every class), the combiner kernel
+still launches (with all class counts equal to zero) and writes zeros
+to every entry of `particle_buffers.forces_*`, `potential_energies`,
+and `virials`. The contribution and reduction phases launch no kernels.
+`ForceField::step` returns `Ok(())`.
 
-When a slot's *input list* is empty (e.g. a `MorseBonded` slot constructed
-with `bonds.is_empty()`), the slot's `contribute` does not launch any
-contribution kernel, the slot's `reduce` writes zeros into its assigned
-rows of all five slot-output buffers, and the rest of the pipeline runs
-normally. (The combiner reads every row unconditionally; empty-input
-slots must carry valid zeros in their rows.)
+When `step_class(class, ...)` is called and the `ForceField` contains
+zero slots in that class, the call is a no-op: it launches no kernels
+(no contributions, no reductions, no combiner) and leaves
+`ParticleBuffers.forces_*` untouched. The semantics are correct because
+nothing to recompute means the existing total is already current.
+
+When a slot's *input list* is empty (e.g. a `MorseBonded` slot
+constructed with `bonds.is_empty()`), the slot's `contribute` does not
+launch any contribution kernel, the slot's `reduce` writes zeros into
+its assigned rows of its class's slot-output buffers, and the rest of
+the pipeline runs normally. (The combiner reads every row
+unconditionally; empty-input slots must carry valid zeros in their
+rows.)
 
 ## Feature API <!-- rq-0da87ca1 -->
 
 ### Types <!-- rq-e4960f89 -->
+
+- `ForceClass` — two-variant enum partitioning every slot into one of <!-- rq-c4861786 -->
+  two evaluation cadences.
+
+  ```rust
+  #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+  pub enum ForceClass {
+      Fast,
+      Slow,
+  }
+  ```
+
+  - `Fast` is the default class returned by `Potential::frequency_class()`.
+  - `Slow` is for long-range / FFT-driven contributions (today: SPME
+    reciprocal-space). RESPA integrators evaluate `Slow` slots less
+    frequently than `Fast` slots.
+  - The set of variants is closed. Extending to a third class (e.g.
+    RESPA-3's "extra-slow") is a deliberate API change, not a default
+    extension point.
 
 - `Potential` — object-safe trait implemented by every slot. <!-- rq-67ebf3b1 -->
 
@@ -147,6 +255,10 @@ slots must carry valid zeros in their rows.)
       fn label(&self) -> &'static str;
 
       fn max_cutoff(&self) -> Option<f32>;
+
+      fn frequency_class(&self) -> ForceClass {
+          ForceClass::Fast
+      }
 
       fn contribute(
           &mut self,
@@ -175,6 +287,11 @@ slots must carry valid zeros in their rows.)
     the neighbor list (bonded potentials, intramolecular potentials
     keyed by index, etc.). `ForceField::new` aggregates these values to
     size the shared `NeighborListState`.
+  - `frequency_class` reports the class at which the framework should
+    evaluate this slot. Provided default returns `ForceClass::Fast`;
+    only slots whose contribution is expensive enough to justify a
+    different cadence override. Today only `SpmeReciprocalState`
+    overrides, returning `ForceClass::Slow`.
   - `contribute` runs the slot's contribution kernel(s) against the
     current `ParticleBuffers` and `SimulationBox`. The slot reads any
     shared resources it needs from `cx`. Implementations may read from
@@ -221,11 +338,12 @@ slots must carry valid zeros in their rows.)
   ```
 
   Each field is a `CudaViewMut` of length `particle_count` onto the
-  corresponding row of the framework's flat slot-output buffer. The
-  view borrows the framework's storage for the duration of the
-  `reduce` call.
+  corresponding row of one of the framework's per-class flat
+  slot-output buffers (the class is determined by the slot's
+  `frequency_class()`). The view borrows the framework's storage for
+  the duration of the `reduce` call.
 
-- `LennardJonesState` — implements `Potential` with `label() == "lennard_jones"`. <!-- rq-af2d1628 -->
+- `LennardJonesState` — implements `Potential` with `label() == "lennard_jones"` and `frequency_class() == ForceClass::Fast` (the trait default). <!-- rq-af2d1628 -->
   Owns the slot's `PairBuffer`, `LennardJonesParameters`, and the
   `DeviceExclusionList` (see `topology.md`). Its internal state is one of
   two variants determined at construction time by the parsed
@@ -243,32 +361,44 @@ slots must carry valid zeros in their rows.)
   branching) and writes its per-particle output into the
   `SlotOutputView` it receives.
 
-- `MorseBondedState` — implements `Potential` with `label() == "morse_bonded"`. <!-- rq-2361f2b8 -->
+- `MorseBondedState` — implements `Potential` with `label() == "morse_bonded"` and `frequency_class() == ForceClass::Fast` (the trait default). <!-- rq-2361f2b8 -->
   Owns the slot's `BondPairBuffer`, the bond index/offset tables, and
   the per-bond-type parameter table. Construction requires a non-empty
   bond list; see `morse-bonded.md`. Its reduction writes per-particle
   output into the `SlotOutputView` it receives.
 
-- `HarmonicAngleState` — implements `Potential` with `label() == "harmonic_angle"`. <!-- rq-454ad2cf -->
+- `HarmonicAngleState` — implements `Potential` with `label() == "harmonic_angle"` and `frequency_class() == ForceClass::Fast` (the trait default). <!-- rq-454ad2cf -->
   Owns the slot's `AnglePairBuffer`, the angle index/offset tables,
   and the per-angle-type parameter table. Construction requires a
   non-empty angle list; see `harmonic-angle.md`. Its reduction writes
   per-particle output into the `SlotOutputView` it receives.
 
-- `ForceField` — handle owning the slot collection, the flat slot-output buffers, and the shared neighbor list. <!-- rq-684a29f1 -->
+- `ForceField` — handle owning the slot collection, the per-class flat slot-output buffers, and the shared neighbor list. <!-- rq-684a29f1 -->
 
   Fields:
   - `device: Arc<CudaDevice>`
-  - `slots: Vec<Box<dyn Potential>>` — in fixed evaluation order. May
+  - `slots: Vec<Box<dyn Potential>>` — in canonical evaluation order
+    (the order produced by `PotentialRegistry::with_builtins()`). May
     be empty.
-  - `slot_forces_x: CudaSlice<f32>` — length `slots.len() * N`.
-  - `slot_forces_y: CudaSlice<f32>` — length `slots.len() * N`.
-  - `slot_forces_z: CudaSlice<f32>` — length `slots.len() * N`.
-  - `slot_energies: CudaSlice<f32>` — length `slots.len() * N`.
-  - `slot_virials: CudaSlice<f32>` — length `slots.len() * N`.
+  - `fast_slot_forces_x: CudaSlice<f32>` — length `num_fast_slots * N`.
+  - `fast_slot_forces_y: CudaSlice<f32>` — length `num_fast_slots * N`.
+  - `fast_slot_forces_z: CudaSlice<f32>` — length `num_fast_slots * N`.
+  - `fast_slot_energies: CudaSlice<f32>` — length `num_fast_slots * N`.
+  - `fast_slot_virials: CudaSlice<f32>` — length `num_fast_slots * N`.
+  - `slow_slot_forces_x: CudaSlice<f32>` — length `num_slow_slots * N`.
+  - `slow_slot_forces_y: CudaSlice<f32>` — length `num_slow_slots * N`.
+  - `slow_slot_forces_z: CudaSlice<f32>` — length `num_slow_slots * N`.
+  - `slow_slot_energies: CudaSlice<f32>` — length `num_slow_slots * N`.
+  - `slow_slot_virials: CudaSlice<f32>` — length `num_slow_slots * N`.
   - `neighbor_list: Option<NeighborListState>` — `Some(_)` when at
     least one slot returns `max_cutoff() == Some(_)`, `None`
     otherwise (bonded-only and zero-slot configurations).
+
+  Within each class, the row index of a slot is its position among
+  same-class slots in the canonical slot order (e.g. with `Fast` slots
+  `LennardJones`, `Coulomb`, `SpmeReal`, `MorseBonded`, `HarmonicAngle`
+  and `Slow` slot `SpmeReciprocal`, the LJ slot's row is 0 within
+  `fast_*` and the SPME-reciprocal slot's row is 0 within `slow_*`).
 
 - `ForceFieldError` — error type. Variants: <!-- rq-a2e20b02 -->
   - `Gpu(GpuError)` — CUDA driver / kernel-launch failure from any
@@ -384,6 +514,9 @@ slots must carry valid zeros in their rows.)
     with the same `label()`.
 
 - `ForceField::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings) -> Result<(), ForceFieldError>` <!-- rq-3579df3b -->
+  - Evaluates every slot regardless of class. Equivalent to invoking
+    `step_class` once for each class present, except that the
+    neighbor-list update and combiner each run exactly once.
   - When `self.neighbor_list` is `Some(nl)`, calls `nl.pre_step(sim_box,
     buffers, timings)` to run the generation-cache check, the
     displacement check, and the rebuild as needed. When `None`, this
@@ -391,20 +524,33 @@ slots must carry valid zeros in their rows.)
   - Constructs a `ForceFieldContext { neighbor_list:
     self.neighbor_list.as_ref() }` valid for the duration of the
     contribution phase.
-  - For each slot in `self.slots`, in order, calls
+  - For each slot in `self.slots`, in canonical slot order, calls
     `slot.contribute(buffers, sim_box, &cx, timings)`.
-  - For each slot in `self.slots`, in order, calls `slot.reduce(view,
-    &cx, timings)` where `view` is a `SlotOutputView` whose five fields
-    point into the row `slot_index * particle_count ..
-    (slot_index + 1) * particle_count` of the five flat slot-output
-    buffers.
+  - For each slot in `self.slots`, in canonical slot order, calls
+    `slot.reduce(view, &cx, timings)` where `view` is a `SlotOutputView`
+    whose five fields point into the row
+    `class_local_index * particle_count ..  (class_local_index + 1) *
+    particle_count` of the slot's class's flat slot-output buffers.
   - Launches `accumulate_forces` once (with
-    `KernelStage::AccumulateForces`). When `slots.is_empty()`,
-    `accumulate_forces` still launches and writes zeros to
-    `buffers.forces_*`, `buffers.potential_energies`, and
+    `KernelStage::AccumulateForces`). When the slot list is empty
+    across every class, `accumulate_forces` still launches and writes
+    zeros to `buffers.forces_*`, `buffers.potential_energies`, and
     `buffers.virials`.
   - Returns `Ok(())` on success.
   - Empty-state contract per *Empty State* above.
+
+- `ForceField::step_class(&mut self, class: ForceClass, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings) -> Result<(), ForceFieldError>` <!-- rq-be1eb548 -->
+  - Re-evaluates only slots whose `frequency_class() == class`.
+  - When the framework contains no slots of `class`, returns `Ok(())`
+    immediately, launching no kernels and leaving
+    `ParticleBuffers.forces_*` untouched (no-op semantics; see
+    *Empty State*).
+  - Otherwise, performs the same neighbor-list-update / contribute /
+    reduce / combiner sequence as `step`, but restricted to slots in
+    `class`. The combiner still reads every class's slot-output buffers
+    (not just `class`'s) so that `ParticleBuffers.forces_*` reflects
+    the most recent total across both classes.
+  - Returns `Ok(())` when `particle_count == 0`, launching no kernels.
 
 ### Combiner Kernel <!-- rq-c0f98145 -->
 
@@ -412,12 +558,18 @@ slots must carry valid zeros in their rows.)
 
 ```c
 extern "C" __global__ void accumulate_forces(
-    const float *slot_forces_x,    // shape [num_slots * n]
-    const float *slot_forces_y,    // shape [num_slots * n]
-    const float *slot_forces_z,    // shape [num_slots * n]
-    const float *slot_energies,    // shape [num_slots * n]
-    const float *slot_virials,     // shape [num_slots * n]
-    unsigned int num_slots,
+    const float *fast_slot_forces_x,   // shape [num_fast_slots * n]
+    const float *fast_slot_forces_y,
+    const float *fast_slot_forces_z,
+    const float *fast_slot_energies,
+    const float *fast_slot_virials,
+    unsigned int num_fast_slots,
+    const float *slow_slot_forces_x,   // shape [num_slow_slots * n]
+    const float *slow_slot_forces_y,
+    const float *slow_slot_forces_z,
+    const float *slow_slot_energies,
+    const float *slow_slot_virials,
+    unsigned int num_slow_slots,
     float *forces_x,
     float *forces_y,
     float *forces_z,
@@ -434,20 +586,24 @@ Each thread maps to one particle index
 
 ```text
 sum_Q = 0
-for k in 0..num_slots:
-    sum_Q += slot_Q[k * n + i]
+for k in 0..num_fast_slots:
+    sum_Q += fast_slot_Q[k * n + i]
+for k in 0..num_slow_slots:
+    sum_Q += slow_slot_Q[k * n + i]
 Q[i] = sum_Q
 ```
 
-The sums are performed left-to-right in slot order, so identical inputs
-yield byte-identical outputs across runs.
+The sums are performed left-to-right with classes ordered Fast then
+Slow, and within each class in registration order; the order is fixed
+across runs so identical inputs yield byte-identical outputs.
 
-When `num_slots == 0`, the inner loop does not execute and the five
-output slices are set to zero at index `i`.
+When `num_fast_slots + num_slow_slots == 0`, neither loop executes and
+the five output slices are set to zero at index `i`. When one class
+has zero slots, only the other class's loop contributes.
 
 The kernel does not branch on slot identity and does not read pointers
-beyond `slot_*[num_slots * n - 1]`. Adding a new slot does not change
-the kernel's signature.
+beyond each class's `[num_{class}_slots * n - 1]`. Adding a new slot
+in either class does not change the kernel's signature.
 
 ## Determinism Guarantees <!-- rq-76cb9922 -->
 
@@ -455,20 +611,36 @@ the kernel's signature.
   same `Arc<CudaDevice>` carried by `ParticleBuffers`.
 - The slot order produced by `ForceField::new` is deterministic and
   identical across runs with the same config.
-- Each slot writes into its assigned row of the five flat slot-output
-  buffers; rows are disjoint and written by exactly one slot.
-- The combiner's left-to-right summation across slots is fixed by the
-  slot order, so per-atom force, potential-energy, and virial values are
+- Each slot writes into its assigned row of its class's flat
+  slot-output buffers; rows are disjoint and written by exactly one
+  slot.
+- The combiner's summation orders classes Fast-then-Slow and orders
+  slots within each class by registration. The order is fixed across
+  runs, so per-atom force, potential-energy, and virial values are
   byte-reproducible.
+- Two runs that issue the same sequence of `step` / `step_class` calls
+  with the same arguments produce byte-identical
+  `ParticleBuffers.forces_*`, `potential_energies`, and `virials` at
+  every step. The class system does not introduce non-determinism;
+  RESPA's staleness of Slow contributions between Slow-class
+  evaluations is deterministic.
 
 ## Out of Scope <!-- rq-e448909a -->
 
 - A user-supplied DSL for custom potentials. Implementing `Potential`
   is a Rust source-code change; potentials are not loaded from
   configuration or shared libraries.
-- Multi-time-step (RESPA) force splitting; every slot runs every step.
-- Long-range Ewald / PME electrostatics; the framework today only
-  evaluates short-range potentials.
+- Concrete RESPA-style integrators. The framework exposes the
+  per-class evaluation surface that a RESPA integrator would consume,
+  but no in-tree integrator splits its plan by `ForceClass` today.
+- A per-class read API on `ForceField` (e.g. `class_force_view(class)`)
+  that lets an integrator kick by class-only force. RESPA integrators
+  that need this land alongside their own dedicated read API; v1 of
+  the class system only decomposes evaluation and aggregates back into
+  the single `ParticleBuffers.forces_*` total.
+- A third force class beyond `Fast` and `Slow` (e.g. for RESPA-3).
+  Adding a variant is a deliberate API change rather than an
+  open-extension point.
 - Per-slot streams or async overlap of contribution and reduction
   kernels.
 - Mid-run reconfiguration of slot membership. The slot list is fixed
@@ -698,6 +870,124 @@ Feature: Pluggable potential slot framework
       coul, spme, charges, bonds, angles, excl, nl_config) is called
     Then the recorded pointers match the addresses of the function arguments
       passed in by the caller
+
+  # --- Force classes and per-class evaluation ---
+
+  @rq-db2253db
+  Scenario: Potential::frequency_class default returns Fast
+    Given a custom Potential implementation that does not override frequency_class
+    Then potential.frequency_class() returns ForceClass::Fast
+
+  @rq-2dbda7ec
+  Scenario: Built-in potentials report their canonical class
+    Given a ForceField with every built-in slot present
+    Then slot "lennard_jones"   reports frequency_class() == Fast
+    And  slot "coulomb"         reports frequency_class() == Fast
+    And  slot "spme_real"       reports frequency_class() == Fast
+    And  slot "spme_reciprocal" reports frequency_class() == Slow
+    And  slot "morse_bonded"    reports frequency_class() == Fast
+    And  slot "harmonic_angle"  reports frequency_class() == Fast
+
+  @rq-57fd217e
+  Scenario: step() evaluates every class and produces the total in ParticleBuffers
+    Given a ForceField with one Fast slot (LennardJones) and one Slow stub
+      whose reduce writes a known per-particle pattern S into its row
+    When force_field.step(&mut buffers, &sim_box, &mut timings) is called
+    Then ParticleBuffers.forces_x[i] equals lj_force_x[i] + S[i] for every i
+    And  the LJ slot's contribute / reduce kernels each fire exactly once
+    And  the Slow stub's contribute / reduce each fire exactly once
+
+  @rq-1a996f5d
+  Scenario: step_class(Fast) refreshes only Fast slots' contributions
+    Given a ForceField with one Fast slot (LennardJones) and one Slow stub
+      whose reduce writes a known per-particle pattern S into its row
+    And  force_field.step(...) has been called once so every class buffer is populated
+    When ParticleBuffers.positions are advanced (e.g. by a drift)
+    And  force_field.step_class(ForceClass::Fast, ...) is called
+    Then the LJ slot's contribute / reduce each fire exactly once (new LJ values)
+    And  the Slow stub's contribute / reduce do NOT fire (stale S contributions)
+    And  ParticleBuffers.forces_x[i] equals new_lj_force_x[i] + S[i] for every i
+
+  @rq-33cfb9fc
+  Scenario: step_class(Slow) refreshes only Slow slots' contributions
+    Given a ForceField with one Fast slot whose reduce writes a known
+      per-particle pattern F into its row
+    And  one Slow stub whose reduce writes a known per-particle pattern S
+      that changes between successive calls (e.g. via an internal counter)
+    And  force_field.step(...) has been called once so every class buffer is populated
+    When force_field.step_class(ForceClass::Slow, ...) is called
+    Then the Slow stub's contribute / reduce each fire exactly once (new S values)
+    And  the Fast slot's contribute / reduce do NOT fire (stale F contributions)
+    And  ParticleBuffers.forces_x[i] equals F[i] + new_S[i] for every i
+
+  @rq-cc66d208
+  Scenario: step_class(Slow) on a ForceField with no Slow slots is a no-op
+    Given a ForceField with only Fast slots (e.g. one LennardJones slot)
+    And  ParticleBuffers.forces_* snapshot S_before captured after a prior step()
+    When force_field.step_class(ForceClass::Slow, ...) is called
+    Then it returns Ok(())
+    And  ParticleBuffers.forces_* equal S_before byte-for-byte
+    And  timings reports zero samples for every KernelStage that any slot would launch
+    And  timings reports zero samples for KernelStage::AccumulateForces
+
+  @rq-b80f2ddb
+  Scenario: step_class(Fast) on a ForceField with no Fast slots is a no-op
+    Given a ForceField with only Slow slots (e.g. one stub Slow potential)
+    And  ParticleBuffers.forces_* snapshot S_before captured after a prior step()
+    When force_field.step_class(ForceClass::Fast, ...) is called
+    Then it returns Ok(())
+    And  ParticleBuffers.forces_* equal S_before byte-for-byte
+
+  @rq-8eb7a546
+  Scenario: step_class with N=0 launches no kernels
+    Given a ForceField constructed with particle_count == 0 and any registry
+    When force_field.step_class(ForceClass::Fast, ...) is called
+    Then it returns Ok(())
+    And  timings.finalize() reports zero samples for every KernelStage
+
+  @rq-79068d4d
+  Scenario: Per-class slot-output buffers have length num_class_slots * N
+    Given a ForceField with particle_count = 8 and a registry whose
+      with_builtins() registers all six builders, with config that activates
+      LennardJones (Fast) and SpmeReal+SpmeReciprocal (Fast, Slow)
+    Then force_field.fast_slot_forces_x.len() == 2 * 8
+    And  force_field.slow_slot_forces_x.len() == 1 * 8
+    And  force_field.fast_slot_energies.len() == 2 * 8
+    And  force_field.slow_slot_virials.len()  == 1 * 8
+
+  @rq-52d4b245
+  Scenario: Per-class slot-output buffers are zero-initialised
+    Given a freshly-constructed ForceField with at least one Slow slot
+    When ParticleBuffers.forces_* is downloaded immediately after construction
+      (no step_* call yet)
+    Then every entry is 0.0
+    And  force_field.slow_slot_forces_x downloads to all zeros
+    And  force_field.fast_slot_forces_x downloads to all zeros
+
+  @rq-40f9d35a
+  Scenario: Two RESPA-style call sequences with the same plan produce identical state
+    Given two ForceFields constructed from identical registries and inputs,
+      each holding one Fast slot and one Slow slot
+    And  two ParticleBuffers built from byte-identical ParticleStates
+    When each runner issues the call sequence
+      [step(), step_class(Fast), step_class(Fast), step_class(Slow)]
+      with identical inputs to each call
+    Then run A's ParticleBuffers and run B's ParticleBuffers agree
+      byte-for-byte after every call
+
+  @rq-5855473b
+  Scenario: SubStep::ForceEval { class: None } dispatches to step()
+    Given a runner walking a StepPlan containing SubStep::ForceEval { class: None }
+    When the runner reaches the ForceEval sub-step
+    Then force_field.step(...) is invoked (every slot's kernels fire)
+
+  @rq-256287cb
+  Scenario: SubStep::ForceEval { class: Some(Fast) } dispatches to step_class(Fast)
+    Given a runner walking a StepPlan containing
+      SubStep::ForceEval { class: Some(ForceClass::Fast) }
+    When the runner reaches the ForceEval sub-step
+    Then force_field.step_class(ForceClass::Fast, ...) is invoked
+    And  no Slow slot's contribute / reduce kernels fire during this sub-step
 
   # --- Reproducibility ---
 

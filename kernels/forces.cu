@@ -1,21 +1,28 @@
 // rq-c0f98145
 //
 // Combiner kernel for the pluggable potential framework. The framework
-// owns five flat device buffers of length `num_slots * n` carrying the
-// per-particle reduced contributions from every slot: three force
-// components, one potential-energy share, and one scalar-virial share.
-// Each slot `k` writes into row `k` of all five buffers during its
-// `Potential::reduce` step. This kernel sums every row in slot order
-// and writes the per-particle totals into ParticleBuffers.forces_*,
-// potential_energies, and virials.
+// owns one set of five flat device buffers per ForceClass — Fast and
+// Slow — each of length `num_class_slots * n`, carrying the
+// per-particle reduced contributions from every slot in that class.
+// Each slot writes into its row of its class's buffers during its
+// `Potential::reduce` step. This kernel sums every row, ordering
+// classes Fast then Slow and ordering slots within each class by
+// registration, and writes the per-particle totals into
+// ParticleBuffers.forces_*, potential_energies, and virials.
 
 extern "C" __global__ void accumulate_forces(
-    const float *slot_forces_x,
-    const float *slot_forces_y,
-    const float *slot_forces_z,
-    const float *slot_energies,
-    const float *slot_virials,
-    unsigned int num_slots,
+    const float *fast_slot_forces_x,
+    const float *fast_slot_forces_y,
+    const float *fast_slot_forces_z,
+    const float *fast_slot_energies,
+    const float *fast_slot_virials,
+    unsigned int num_fast_slots,
+    const float *slow_slot_forces_x,
+    const float *slow_slot_forces_y,
+    const float *slow_slot_forces_z,
+    const float *slow_slot_energies,
+    const float *slow_slot_virials,
+    unsigned int num_slow_slots,
     float *forces_x,
     float *forces_y,
     float *forces_z,
@@ -34,13 +41,21 @@ extern "C" __global__ void accumulate_forces(
   float se = 0.0f;
   float sw = 0.0f;
 
-  for (unsigned int k = 0; k < num_slots; ++k) {
+  for (unsigned int k = 0; k < num_fast_slots; ++k) {
     unsigned int idx = k * n + i;
-    sx += slot_forces_x[idx];
-    sy += slot_forces_y[idx];
-    sz += slot_forces_z[idx];
-    se += slot_energies[idx];
-    sw += slot_virials[idx];
+    sx += fast_slot_forces_x[idx];
+    sy += fast_slot_forces_y[idx];
+    sz += fast_slot_forces_z[idx];
+    se += fast_slot_energies[idx];
+    sw += fast_slot_virials[idx];
+  }
+  for (unsigned int k = 0; k < num_slow_slots; ++k) {
+    unsigned int idx = k * n + i;
+    sx += slow_slot_forces_x[idx];
+    sy += slow_slot_forces_y[idx];
+    sz += slow_slot_forces_z[idx];
+    se += slow_slot_energies[idx];
+    sw += slow_slot_virials[idx];
   }
 
   forces_x[i] = sx;

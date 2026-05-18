@@ -165,9 +165,9 @@ fn force_field_zero_slots() {
         &NeighborListConfig::AllPairs)
     .unwrap();
     assert!(ff.slots.is_empty());
-    assert_eq!(ff.slot_forces_x.len(), 0);
-    assert_eq!(ff.slot_forces_y.len(), 0);
-    assert_eq!(ff.slot_forces_z.len(), 0);
+    assert_eq!(ff.fast_slot_forces_x.len(), 0);
+    assert_eq!(ff.fast_slot_forces_y.len(), 0);
+    assert_eq!(ff.fast_slot_forces_z.len(), 0);
 }
 
 // rq-455db9c2
@@ -197,9 +197,9 @@ fn slot_buffers_sized_num_slots_times_particle_count() {
         &NeighborListConfig::AllPairs)
     .unwrap();
     assert_eq!(ff.slots.len(), 2);
-    assert_eq!(ff.slot_forces_x.len(), 16);
-    assert_eq!(ff.slot_forces_y.len(), 16);
-    assert_eq!(ff.slot_forces_z.len(), 16);
+    assert_eq!(ff.fast_slot_forces_x.len(), 16);
+    assert_eq!(ff.fast_slot_forces_y.len(), 16);
+    assert_eq!(ff.fast_slot_forces_z.len(), 16);
 }
 
 // rq-c525ee79
@@ -222,9 +222,9 @@ fn empty_force_field() {
         &NeighborListConfig::AllPairs)
     .unwrap();
     assert_eq!(ff.slots.len(), 1);
-    assert_eq!(ff.slot_forces_x.len(), 0);
-    assert_eq!(ff.slot_forces_y.len(), 0);
-    assert_eq!(ff.slot_forces_z.len(), 0);
+    assert_eq!(ff.fast_slot_forces_x.len(), 0);
+    assert_eq!(ff.fast_slot_forces_y.len(), 0);
+    assert_eq!(ff.fast_slot_forces_z.len(), 0);
 }
 
 // rq-c170c0b7
@@ -588,7 +588,7 @@ fn each_slot_writes_its_own_row() {
     ff_m.step(&mut buffers_m, &box_10(), &mut t_m).unwrap();
     let morse_x = device.dtoh_sync_copy(&buffers_m.forces_x).unwrap();
 
-    let row_x = device.dtoh_sync_copy(&ff.slot_forces_x).unwrap();
+    let row_x = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
     assert_eq!(row_x.len(), 6);
     for i in 0..3 {
         assert!((row_x[i] - lj_x[i]).abs() < 1.0e-6, "row 0 mismatch at {i}");
@@ -654,6 +654,30 @@ impl Potential for ConstStub {
     }
 }
 
+// Builder that emits a `ConstStub` slot writing per-particle constants.
+// Used by `third_potential_extensibility` to register a custom Fast slot
+// through the canonical `ForceField::new` path.
+#[derive(Debug)]
+struct ConstStubBuilder {
+    value_x: f32,
+    value_y: f32,
+    value_z: f32,
+}
+
+impl dynamics::forces::PotentialBuilder for ConstStubBuilder {
+    fn build(
+        &self,
+        cx: &dynamics::forces::PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        Ok(Some(Box::new(ConstStub {
+            value_x: self.value_x,
+            value_y: self.value_y,
+            value_z: self.value_z,
+            device: cx.gpu.device.clone(),
+        })))
+    }
+}
+
 #[test]
 fn third_potential_extensibility() {
     let gpu = init_device().unwrap();
@@ -661,7 +685,15 @@ fn third_potential_extensibility() {
     let state = state_n(3);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
+    // Register the stub builder after the built-ins so its slot lands
+    // at index 1 (right after LJ). Both slots are Fast.
+    let mut registry = PotentialRegistry::with_builtins();
+    registry.register(Box::new(ConstStubBuilder {
+        value_x: 1.0,
+        value_y: 2.0,
+        value_z: 3.0,
+    }));
+    let mut ff = ForceField::new(&registry, &gpu,
         3,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -676,20 +708,6 @@ fn third_potential_extensibility() {
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    // Splice in a third slot manually.
-    ff.slots.push(Box::new(ConstStub {
-        value_x: 1.0,
-        value_y: 2.0,
-        value_z: 3.0,
-        device: device.clone(),
-    }));
-    // Re-allocate the flat buffers for 2 slots.
-    let new_len = ff.slots.len() * 3;
-    ff.slot_forces_x = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_forces_y = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_forces_z = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_energies = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_virials = device.alloc_zeros::<f32>(new_len).unwrap();
 
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
 
@@ -727,7 +745,7 @@ fn third_potential_extensibility() {
         assert!((mixed_z[i] - lj_z[i] - 3.0).abs() < 1.0e-6);
     }
     // Row 1 of slot_forces_x should hold the stub's value.
-    let row_x = device.dtoh_sync_copy(&ff.slot_forces_x).unwrap();
+    let row_x = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
     for v in &row_x[3..6] {
         assert_eq!(*v, 1.0);
     }
@@ -783,6 +801,64 @@ fn two_independent_runs_byte_identical() {
     assert_eq!(state_a.forces_z, state_b.forces_z);
 }
 
+// Second stub Potential with a different label so the duplicate-label
+// guard doesn't trip when paired with `ConstStub`.
+#[derive(Debug)]
+struct ConstStubB {
+    device: std::sync::Arc<cudarc::driver::CudaDevice>,
+}
+
+impl Potential for ConstStubB {
+    fn label(&self) -> &'static str {
+        "const_stub_b"
+    }
+    fn max_cutoff(&self) -> Option<f32> {
+        None
+    }
+    fn contribute(
+        &mut self,
+        _b: &ParticleBuffers,
+        _s: &SimulationBox,
+        _cx: &ForceFieldContext<'_>,
+        _t: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        Ok(())
+    }
+    fn reduce(
+        &mut self,
+        mut output: SlotOutputView<'_>,
+        _cx: &ForceFieldContext<'_>,
+        _t: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        let n = output.force_x.len();
+        let vx = vec![10.0_f32; n];
+        self.device
+            .htod_sync_copy_into(&vx, &mut output.force_x)
+            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
+        self.device
+            .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.force_y)
+            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
+        self.device
+            .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.force_z)
+            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct ConstStubBBuilder;
+
+impl dynamics::forces::PotentialBuilder for ConstStubBBuilder {
+    fn build(
+        &self,
+        cx: &dynamics::forces::PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        Ok(Some(Box::new(ConstStubB {
+            device: cx.gpu.device.clone(),
+        })))
+    }
+}
+
 // rq-a5aa743e
 #[test]
 fn combiner_sums_slot_rows_in_slot_order() {
@@ -791,8 +867,16 @@ fn combiner_sums_slot_rows_in_slot_order() {
     let state = state_n(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    // Build a ForceField with two ConstStub slots that write distinct rows.
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
+    // Two custom Fast-class stub builders registered in canonical order:
+    // ConstStub writes value_x = 1.0; ConstStubB writes 10.0. Combiner sum is 11.
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(ConstStubBuilder {
+        value_x: 1.0,
+        value_y: 0.0,
+        value_z: 0.0,
+    }));
+    registry.register(Box::new(ConstStubBBuilder));
+    let mut ff = ForceField::new(&registry, &gpu,
         2,
         &box_10(),
         &[],
@@ -807,60 +891,6 @@ fn combiner_sums_slot_rows_in_slot_order() {
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff.slots.push(Box::new(ConstStub {
-        value_x: 1.0,
-        value_y: 0.0,
-        value_z: 0.0,
-        device: device.clone(),
-    }));
-    // Second slot — a different label so duplicate-label doesn't trip.
-    #[derive(Debug)]
-    struct ConstStubB {
-        device: std::sync::Arc<cudarc::driver::CudaDevice>,
-    }
-    impl Potential for ConstStubB {
-        fn label(&self) -> &'static str {
-            "const_stub_b"
-        }
-        fn max_cutoff(&self) -> Option<f32> {
-            None
-        }
-        fn contribute(
-            &mut self,
-            _b: &ParticleBuffers,
-            _s: &SimulationBox,
-            _cx: &ForceFieldContext<'_>,
-            _t: &mut Timings,
-        ) -> Result<(), ForceFieldError> {
-            Ok(())
-        }
-        fn reduce(
-            &mut self,
-            mut output: SlotOutputView<'_>,
-            _cx: &ForceFieldContext<'_>,
-            _t: &mut Timings,
-        ) -> Result<(), ForceFieldError> {
-            let n = output.force_x.len();
-            let vx = vec![10.0_f32; n];
-            self.device
-                .htod_sync_copy_into(&vx, &mut output.force_x)
-                .map_err(|e| ForceFieldError::Gpu(e.into()))?;
-            self.device
-                .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.force_y)
-                .map_err(|e| ForceFieldError::Gpu(e.into()))?;
-            self.device
-                .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.force_z)
-                .map_err(|e| ForceFieldError::Gpu(e.into()))?;
-            Ok(())
-        }
-    }
-    ff.slots.push(Box::new(ConstStubB { device: device.clone() }));
-    let new_len = ff.slots.len() * 2;
-    ff.slot_forces_x = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_forces_y = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_forces_z = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_energies = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_virials = device.alloc_zeros::<f32>(new_len).unwrap();
 
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
     let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
@@ -1069,14 +1099,36 @@ impl Potential for ContextProbeStub {
     }
 }
 
+#[derive(Debug)]
+struct ContextProbeStubBuilder {
+    last_seen_nl_some: std::sync::Arc<std::sync::Mutex<Option<bool>>>,
+}
+
+impl dynamics::forces::PotentialBuilder for ContextProbeStubBuilder {
+    fn build(
+        &self,
+        _cx: &dynamics::forces::PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        Ok(Some(Box::new(ContextProbeStub {
+            last_seen_nl_some: self.last_seen_nl_some.clone(),
+        })))
+    }
+}
+
 #[test] // rq-81e84c73 rq-2ed643ad
 fn context_exposes_shared_neighbor_list_to_contribute() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     let state = state_n(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
+    // Register the probe stub after the built-ins; LJ provides the
+    // shared neighbor list the probe expects to see in cx.
+    let probe = std::sync::Arc::new(std::sync::Mutex::new(None::<bool>));
+    let mut registry = PotentialRegistry::with_builtins();
+    registry.register(Box::new(ContextProbeStubBuilder {
+        last_seen_nl_some: probe.clone(),
+    }));
+    let mut ff = ForceField::new(&registry, &gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -1092,18 +1144,6 @@ fn context_exposes_shared_neighbor_list_to_contribute() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    // Append a probe stub that records the context it sees.
-    let probe = std::sync::Arc::new(std::sync::Mutex::new(None::<bool>));
-    ff.slots.push(Box::new(ContextProbeStub {
-        last_seen_nl_some: probe.clone(),
-    }));
-    // Re-allocate slot-accumulator buffers to match the new slot count.
-    let new_len = ff.slots.len() * 2;
-    ff.slot_forces_x = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_forces_y = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_forces_z = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_energies = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_virials = device.alloc_zeros::<f32>(new_len).unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
     assert_eq!(*probe.lock().unwrap(), Some(true));
 }
@@ -1236,11 +1276,11 @@ fn slot_output_buffers_have_five_flat_arrays() {
     )
     .unwrap();
     assert_eq!(ff.slots.len(), 2);
-    assert_eq!(ff.slot_forces_x.len(), 16);
-    assert_eq!(ff.slot_forces_y.len(), 16);
-    assert_eq!(ff.slot_forces_z.len(), 16);
-    assert_eq!(ff.slot_energies.len(), 16);
-    assert_eq!(ff.slot_virials.len(), 16);
+    assert_eq!(ff.fast_slot_forces_x.len(), 16);
+    assert_eq!(ff.fast_slot_forces_y.len(), 16);
+    assert_eq!(ff.fast_slot_forces_z.len(), 16);
+    assert_eq!(ff.fast_slot_energies.len(), 16);
+    assert_eq!(ff.fast_slot_virials.len(), 16);
 }
 
 #[test] // rq-3d38868e
@@ -1250,7 +1290,19 @@ fn combiner_sums_slot_energies_and_virials_in_slot_order() {
     let state = state_n(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
+    // Two Fast-class stub slots (ConstStub + ConstStubB) registered
+    // through the canonical ForceField::new path. Each writes zeros to
+    // its force-x output and ignores energy / virial, so pre-seeding
+    // the per-slot energy and virial rows lets the combiner sum them
+    // unmodified.
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(ConstStubBuilder {
+        value_x: 0.0,
+        value_y: 0.0,
+        value_z: 0.0,
+    }));
+    registry.register(Box::new(ConstStubBBuilder));
+    let mut ff = ForceField::new(&registry, &gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -1266,38 +1318,12 @@ fn combiner_sums_slot_energies_and_virials_in_slot_order() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    // Push two ConstStub slots and pre-fill their assigned rows.
-    ff.slots.push(Box::new(ConstStub {
-        value_x: 0.0,
-        value_y: 0.0,
-        value_z: 0.0,
-        device: device.clone(),
-    }));
-    ff.slots.push(Box::new(ConstStub {
-        value_x: 0.0,
-        value_y: 0.0,
-        value_z: 0.0,
-        device: device.clone(),
-    }));
-    // The label uniqueness check normally rejects duplicate "const_stub" labels,
-    // but here we bypass ForceField::new and inject directly. Two slots → label
-    // collision is not checked during step.
-    let new_len = ff.slots.len() * 2;
-    ff.slot_forces_x = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_forces_y = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_forces_z = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_energies = device.alloc_zeros::<f32>(new_len).unwrap();
-    ff.slot_virials = device.alloc_zeros::<f32>(new_len).unwrap();
-
-    // Pre-seed the slot energy/virial rows. ConstStub.reduce writes only
-    // force_x/y/z (zeros here); we want the combiner to see specific
-    // energy/virial values. ConstStub doesn't touch energy/virial, so the
-    // pre-seeded values pass through into the combiner.
+    // Pre-seed the Fast-class slot energy/virial rows with known values.
     device
-        .htod_sync_copy_into(&vec![1.0_f32, 2.0, 10.0, 20.0], &mut ff.slot_energies)
+        .htod_sync_copy_into(&vec![1.0_f32, 2.0, 10.0, 20.0], &mut ff.fast_slot_energies)
         .unwrap();
     device
-        .htod_sync_copy_into(&vec![0.5_f32, 1.0, 5.0, 10.0], &mut ff.slot_virials)
+        .htod_sync_copy_into(&vec![0.5_f32, 1.0, 5.0, 10.0], &mut ff.fast_slot_virials)
         .unwrap();
 
     ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
@@ -1877,4 +1903,592 @@ fn _builtin_builders_are_pub() {
     let _ = SpmeReciprocalBuilder;
     let _ = MorseBondedBuilder;
     let _ = HarmonicAngleBuilder;
+}
+
+// =====================================================================
+// Force class system — per-class evaluation, per-class buffers,
+// empty-class no-op, RESPA-style determinism. See the "Force classes
+// and per-class evaluation" block in rqm/forces/framework.md.
+// =====================================================================
+
+use dynamics::forces::ForceClass;
+
+/// Slow-class stub Potential that writes a per-particle constant on
+/// each reduce call. The constant increments every time `reduce` runs,
+/// so tests can detect whether a given call refreshed this slot or
+/// re-used the previous value from the slot-output buffer.
+#[derive(Debug)]
+struct CountingSlowStub {
+    device: std::sync::Arc<cudarc::driver::CudaDevice>,
+    counter: std::sync::Arc<std::sync::Mutex<f32>>,
+}
+
+impl Potential for CountingSlowStub {
+    fn label(&self) -> &'static str {
+        "counting_slow_stub"
+    }
+    fn max_cutoff(&self) -> Option<f32> {
+        None
+    }
+    fn frequency_class(&self) -> ForceClass {
+        ForceClass::Slow
+    }
+    fn contribute(
+        &mut self,
+        _b: &ParticleBuffers,
+        _s: &SimulationBox,
+        _cx: &ForceFieldContext<'_>,
+        _t: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        Ok(())
+    }
+    fn reduce(
+        &mut self,
+        mut output: SlotOutputView<'_>,
+        _cx: &ForceFieldContext<'_>,
+        _t: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        let n = output.force_x.len();
+        if n == 0 {
+            return Ok(());
+        }
+        let mut c = self.counter.lock().unwrap();
+        *c += 1.0;
+        let v = vec![*c; n];
+        self.device
+            .htod_sync_copy_into(&v, &mut output.force_x)
+            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
+        self.device
+            .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.force_y)
+            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
+        self.device
+            .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.force_z)
+            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
+        self.device
+            .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.energy)
+            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
+        self.device
+            .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.virial)
+            .map_err(|e| ForceFieldError::Gpu(e.into()))?;
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct CountingSlowStubBuilder {
+    counter: std::sync::Arc<std::sync::Mutex<f32>>,
+}
+
+impl dynamics::forces::PotentialBuilder for CountingSlowStubBuilder {
+    fn build(
+        &self,
+        cx: &dynamics::forces::PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        Ok(Some(Box::new(CountingSlowStub {
+            device: cx.gpu.device.clone(),
+            counter: self.counter.clone(),
+        })))
+    }
+}
+
+#[test]
+fn potential_frequency_class_default_is_fast() {
+    // ConstStub doesn't override frequency_class, so it inherits Fast.
+    let gpu = init_device().unwrap();
+    let stub = ConstStub {
+        value_x: 0.0,
+        value_y: 0.0,
+        value_z: 0.0,
+        device: gpu.device.clone(),
+    };
+    assert_eq!(stub.frequency_class(), ForceClass::Fast);
+}
+
+#[test]
+fn builtin_potentials_report_canonical_class() {
+    let gpu = init_device().unwrap();
+    let sim_box = SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap();
+    let spme = dynamics::io::config::SpmeConfig {
+        r_cut_real: 4.0,
+        alpha: 0.5,
+        grid: [8, 8, 8],
+        spline_order: 4,
+    };
+    let charges = vec![0.0_f32; 4];
+    let ff = ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        &gpu,
+        4,
+        &sim_box,
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
+        &[lj_pair_config()],
+        &[],
+        &[],
+        None,
+        Some(&spme),
+        &charges,
+        &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    let expected = [
+        ("lennard_jones", ForceClass::Fast),
+        ("spme_real", ForceClass::Fast),
+        ("spme_reciprocal", ForceClass::Slow),
+    ];
+    for (label, class) in expected {
+        let slot = ff
+            .slots
+            .iter()
+            .find(|s| s.label() == label)
+            .unwrap_or_else(|| panic!("no slot with label `{label}`"));
+        assert_eq!(slot.frequency_class(), class, "slot {label}");
+    }
+}
+
+#[test]
+fn per_class_slot_output_buffers_have_length_num_class_slots_times_n() {
+    // Custom registry with one Fast slot (LJ-equivalent stub) and one
+    // Slow slot (CountingSlowStub). N = 8.
+    let gpu = init_device().unwrap();
+    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(ConstStubBuilder {
+        value_x: 0.0,
+        value_y: 0.0,
+        value_z: 0.0,
+    }));
+    registry.register(Box::new(CountingSlowStubBuilder {
+        counter: counter.clone(),
+    }));
+    let ff = ForceField::new(
+        &registry,
+        &gpu,
+        8,
+        &box_10(),
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(8),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(8),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    assert_eq!(ff.fast_slot_forces_x.len(), 1 * 8);
+    assert_eq!(ff.fast_slot_energies.len(), 1 * 8);
+    assert_eq!(ff.slow_slot_forces_x.len(), 1 * 8);
+    assert_eq!(ff.slow_slot_virials.len(), 1 * 8);
+}
+
+#[test]
+fn per_class_slot_output_buffers_are_zero_initialised() {
+    // Slow buffers should be all-zero immediately after construction,
+    // before any step_* call has touched them.
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
+    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(ConstStubBuilder {
+        value_x: 0.0,
+        value_y: 0.0,
+        value_z: 0.0,
+    }));
+    registry.register(Box::new(CountingSlowStubBuilder {
+        counter: counter.clone(),
+    }));
+    let ff = ForceField::new(
+        &registry,
+        &gpu,
+        4,
+        &box_10(),
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    let fast = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
+    let slow = device.dtoh_sync_copy(&ff.slow_slot_forces_x).unwrap();
+    assert!(fast.iter().all(|v| *v == 0.0));
+    assert!(slow.iter().all(|v| *v == 0.0));
+}
+
+#[test]
+fn step_class_slow_with_no_slow_slots_is_noop() {
+    // ForceField with only Fast slots: step_class(Slow) must launch
+    // no kernels and leave ParticleBuffers.forces_* unchanged.
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
+    let state = state_n(4);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut ff = ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        &gpu,
+        4,
+        &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
+        &[lj_pair_config()],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    // Prime the total via step() so forces_* hold the canonical LJ total.
+    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    let snap_x = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    let snap_y = device.dtoh_sync_copy(&buffers.forces_y).unwrap();
+    let snap_z = device.dtoh_sync_copy(&buffers.forces_z).unwrap();
+    let baseline_report = timings.finalize().unwrap();
+    let baseline_counts: std::collections::HashMap<String, u64> = baseline_report
+        .stages
+        .iter()
+        .map(|s| (s.name.clone(), s.count))
+        .collect();
+    let mut timings = Timings::new(&gpu).unwrap();
+
+    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(), &mut timings)
+        .unwrap();
+
+    let after_x = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    let after_y = device.dtoh_sync_copy(&buffers.forces_y).unwrap();
+    let after_z = device.dtoh_sync_copy(&buffers.forces_z).unwrap();
+    assert_eq!(after_x, snap_x);
+    assert_eq!(after_y, snap_y);
+    assert_eq!(after_z, snap_z);
+    let after_report = timings.finalize().unwrap();
+    // No kernels should have launched. baseline_counts is only here to
+    // make the failure mode "we launched kernels in the empty-class
+    // path" visible if this test ever regresses.
+    let _ = baseline_counts;
+    assert!(
+        after_report.stages.iter().all(|s| s.count == 0),
+        "step_class(Slow) on Fast-only ForceField launched kernels: {:?}",
+        after_report.stages
+    );
+}
+
+#[test]
+fn step_class_fast_with_no_fast_slots_is_noop() {
+    // ForceField with only one Slow stub: step_class(Fast) must launch
+    // no kernels and leave ParticleBuffers.forces_* unchanged.
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
+    let state = state_n(4);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(CountingSlowStubBuilder {
+        counter: counter.clone(),
+    }));
+    let mut ff = ForceField::new(
+        &registry,
+        &gpu,
+        4,
+        &box_10(),
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    // Prime the total so forces_* hold the Slow stub's value.
+    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    let snap_x = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+
+    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings)
+        .unwrap();
+
+    let after_x = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    assert_eq!(after_x, snap_x);
+    let after_report = timings.finalize().unwrap();
+    assert!(
+        after_report.stages.iter().all(|s| s.count == 0),
+        "step_class(Fast) on Slow-only ForceField launched kernels: {:?}",
+        after_report.stages
+    );
+}
+
+#[test]
+fn step_class_n0_launches_no_kernels() {
+    let gpu = init_device().unwrap();
+    let state = state_n(0);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(ConstStubBuilder {
+        value_x: 0.0,
+        value_y: 0.0,
+        value_z: 0.0,
+    }));
+    registry.register(Box::new(CountingSlowStubBuilder {
+        counter: counter.clone(),
+    }));
+    let mut ff = ForceField::new(
+        &registry,
+        &gpu,
+        0,
+        &box_10(),
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(0),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(0),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings)
+        .unwrap();
+    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(), &mut timings)
+        .unwrap();
+    let report = timings.finalize().unwrap();
+    assert!(
+        report.stages.iter().all(|s| s.count == 0),
+        "step_class on N=0 ForceField launched kernels: {:?}",
+        report.stages
+    );
+}
+
+#[test]
+fn step_evaluates_every_class_and_produces_total_in_particle_buffers() {
+    // One Fast slot writing value 1.0 and one Slow stub whose counter
+    // resets after construction so the first reduce writes 1.0 too.
+    // The combined per-particle total should be 2.0.
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
+    let state = state_n(2);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(ConstStubBuilder {
+        value_x: 1.0,
+        value_y: 0.0,
+        value_z: 0.0,
+    }));
+    registry.register(Box::new(CountingSlowStubBuilder {
+        counter: counter.clone(),
+    }));
+    let mut ff = ForceField::new(
+        &registry,
+        &gpu,
+        2,
+        &box_10(),
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(2),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    // Fast contributes 1.0; Slow contributes counter=1.0 → total 2.0.
+    assert_eq!(fx, vec![2.0_f32, 2.0]);
+}
+
+#[test]
+fn step_class_fast_refreshes_only_fast_slots_contributions() {
+    // After step(), forces_x = ConstStub(value_x=1.0) + Slow(counter=1.0) = 2.0.
+    // step_class(Fast) re-runs ConstStub (still 1.0); Slow's row holds
+    // the stale 1.0, so forces_x stays at 2.0 — but importantly the
+    // counter does NOT advance.
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
+    let state = state_n(2);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(ConstStubBuilder {
+        value_x: 1.0,
+        value_y: 0.0,
+        value_z: 0.0,
+    }));
+    registry.register(Box::new(CountingSlowStubBuilder {
+        counter: counter.clone(),
+    }));
+    let mut ff = ForceField::new(
+        &registry,
+        &gpu,
+        2,
+        &box_10(),
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(2),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    assert_eq!(*counter.lock().unwrap(), 1.0); // Slow ran once
+
+    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings)
+        .unwrap();
+    assert_eq!(*counter.lock().unwrap(), 1.0); // Slow did NOT run again
+    let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    assert_eq!(fx, vec![2.0_f32, 2.0]); // stale Slow=1.0 + fresh Fast=1.0
+}
+
+#[test]
+fn step_class_slow_refreshes_only_slow_slots_contributions() {
+    // After step(): counter=1, forces_x=2.0.
+    // step_class(Slow): counter advances to 2, but Fast=1.0 stays
+    // stale, so forces_x = 1.0 (stale Fast) + 2.0 (fresh Slow) = 3.0.
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
+    let state = state_n(2);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(ConstStubBuilder {
+        value_x: 1.0,
+        value_y: 0.0,
+        value_z: 0.0,
+    }));
+    registry.register(Box::new(CountingSlowStubBuilder {
+        counter: counter.clone(),
+    }));
+    let mut ff = ForceField::new(
+        &registry,
+        &gpu,
+        2,
+        &box_10(),
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(2),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    assert_eq!(*counter.lock().unwrap(), 1.0);
+
+    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(), &mut timings)
+        .unwrap();
+    assert_eq!(*counter.lock().unwrap(), 2.0); // Slow advanced
+    let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    assert_eq!(fx, vec![3.0_f32, 3.0]); // stale Fast=1.0 + fresh Slow=2.0
+}
+
+#[test]
+fn respa_style_call_sequence_is_deterministic_across_two_runs() {
+    // Two independent ForceFields each issue
+    //   [step(), step_class(Fast), step_class(Fast), step_class(Slow)]
+    // with identical inputs. The final ParticleBuffers.forces_* should
+    // be byte-identical between the two runs.
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
+    let state = state_n(4);
+    let counter_a = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let counter_b = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+
+    let build_ff = |counter: std::sync::Arc<std::sync::Mutex<f32>>| {
+        let mut registry = PotentialRegistry::new();
+        registry.register(Box::new(ConstStubBuilder {
+            value_x: 1.0,
+            value_y: 0.5,
+            value_z: -0.25,
+        }));
+        registry.register(Box::new(CountingSlowStubBuilder { counter }));
+        ForceField::new(
+            &registry,
+            &gpu,
+            4,
+            &box_10(),
+            &[],
+            &[],
+            &[],
+            &[],
+            None,
+            None,
+            &[],
+            &BondList::empty(4),
+            &dynamics::forces::AngleList::empty(0),
+            &ExclusionList::empty(4),
+            &NeighborListConfig::AllPairs,
+        )
+        .unwrap()
+    };
+    let mut ff_a = build_ff(counter_a);
+    let mut ff_b = build_ff(counter_b);
+    let mut buf_a = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buf_b = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut t_a = Timings::new(&gpu).unwrap();
+    let mut t_b = Timings::new(&gpu).unwrap();
+
+    let run_sequence = |ff: &mut ForceField,
+                        buf: &mut ParticleBuffers,
+                        tt: &mut Timings| {
+        ff.step(buf, &box_10(), tt).unwrap();
+        ff.step_class(ForceClass::Fast, buf, &box_10(), tt).unwrap();
+        ff.step_class(ForceClass::Fast, buf, &box_10(), tt).unwrap();
+        ff.step_class(ForceClass::Slow, buf, &box_10(), tt).unwrap();
+    };
+    run_sequence(&mut ff_a, &mut buf_a, &mut t_a);
+    run_sequence(&mut ff_b, &mut buf_b, &mut t_b);
+
+    let ax = device.dtoh_sync_copy(&buf_a.forces_x).unwrap();
+    let bx = device.dtoh_sync_copy(&buf_b.forces_x).unwrap();
+    let ay = device.dtoh_sync_copy(&buf_a.forces_y).unwrap();
+    let by = device.dtoh_sync_copy(&buf_b.forces_y).unwrap();
+    let az = device.dtoh_sync_copy(&buf_a.forces_z).unwrap();
+    let bz = device.dtoh_sync_copy(&buf_b.forces_z).unwrap();
+    assert_eq!(ax, bx);
+    assert_eq!(ay, by);
+    assert_eq!(az, bz);
 }

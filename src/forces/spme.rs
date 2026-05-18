@@ -608,6 +608,11 @@ impl Potential for SpmeReciprocalState {
         None
     }
 
+    // rq-df6d79a1
+    fn frequency_class(&self) -> super::ForceClass {
+        super::ForceClass::Slow
+    }
+
     fn contribute(
         &mut self,
         buffers: &ParticleBuffers,

@@ -686,10 +686,10 @@ impl Integrator for PlanStub {
             SubStep::KickHalf { .. } => "exec_kick_half",
             SubStep::Drift { .. } => "exec_drift",
             SubStep::KickDrift { .. } => "exec_kick_drift",
-            SubStep::ForceEval => "exec_force_eval",
+            SubStep::ForceEval { .. } => "exec_force_eval",
             SubStep::Custom { .. } => "exec_custom",
         });
-        if matches!(substep, SubStep::ForceEval) {
+        if matches!(substep, SubStep::ForceEval { .. }) {
             return Err(IntegratorError::UnexpectedSubStep {
                 variant: substep.variant_name(),
             });
@@ -808,10 +808,10 @@ fn plan_with_multiple_force_evals_dispatches_each() {
             steps: vec![
                 SubStep::KickHalf { dt: 0.1, label: "k1" },
                 SubStep::Drift { dt: 0.1, label: "d1" },
-                SubStep::ForceEval,
+                SubStep::ForceEval { class: None },
                 SubStep::KickHalf { dt: 0.1, label: "k2" },
                 SubStep::Drift { dt: 0.1, label: "d2" },
-                SubStep::ForceEval,
+                SubStep::ForceEval { class: None },
                 SubStep::KickHalf { dt: 0.1, label: "k3" },
             ],
         },
@@ -854,7 +854,7 @@ fn execute_with_force_eval_directly_returns_unexpected_substep() {
         log: CallLog { events: log.events.clone() },
     };
     let err = stub
-        .execute(&SubStep::ForceEval, &mut buffers, &mut sim_box, &mut timings)
+        .execute(&SubStep::ForceEval { class: None }, &mut buffers, &mut sim_box, &mut timings)
         .unwrap_err();
     match err {
         IntegratorError::UnexpectedSubStep { variant } => {
@@ -873,7 +873,7 @@ fn plan_with_one_drift_fires_before_after_drift() {
         plan: StepPlan {
             steps: vec![
                 SubStep::Drift { dt: 0.1, label: "d" },
-                SubStep::ForceEval,
+                SubStep::ForceEval { class: None },
                 SubStep::KickHalf { dt: 0.1, label: "k" },
             ],
         },
@@ -910,7 +910,7 @@ fn plan_with_two_drifts_fires_before_after_drift_twice() {
                 SubStep::Drift { dt: 0.1, label: "A_pre" },
                 SubStep::Custom { dt: 0.1, label: "O" },
                 SubStep::Drift { dt: 0.1, label: "A_post" },
-                SubStep::ForceEval,
+                SubStep::ForceEval { class: None },
                 SubStep::KickHalf { dt: 0.1, label: "B" },
             ],
         },
@@ -953,7 +953,7 @@ fn plan_whose_final_substep_is_not_a_kick_does_not_fire_after_kick() {
         plan: StepPlan {
             steps: vec![
                 SubStep::KickHalf { dt: 0.1, label: "k" },
-                SubStep::ForceEval,
+                SubStep::ForceEval { class: None },
                 SubStep::Custom { dt: 0.1, label: "post" },
             ],
         },
@@ -1017,7 +1017,7 @@ fn install_constraint_hooks_false_suppresses_all_hooks() {
         plan: StepPlan {
             steps: vec![
                 SubStep::KickDrift { dt: 0.1, label: "kd" },
-                SubStep::ForceEval,
+                SubStep::ForceEval { class: None },
                 SubStep::KickHalf { dt: 0.1, label: "k" },
             ],
         },
@@ -1158,4 +1158,212 @@ fn validate_params_rejects_unknown_field() {
         dynamics::io::ConfigError::Parse { .. } => {}
         other => panic!("expected Parse, got {other:?}"),
     }
+}
+
+// =====================================================================
+// SubStep::ForceEval { class: Option<ForceClass> } scenarios. See the
+// `Force classes and per-class evaluation` block in
+// rqm/forces/framework.md and the SubStep section in
+// rqm/integration/framework.md.
+// =====================================================================
+
+use dynamics::forces::ForceClass;
+
+// rq-d4d435c8
+#[test]
+fn execute_with_force_eval_some_class_also_returns_unexpected_substep() {
+    let (gpu, mut buffers, mut sim_box, _ff, mut timings) = fixture();
+    let _ = gpu;
+    let log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan::empty(),
+        log: CallLog { events: log.events.clone() },
+    };
+    let err = stub
+        .execute(
+            &SubStep::ForceEval { class: Some(ForceClass::Fast) },
+            &mut buffers,
+            &mut sim_box,
+            &mut timings,
+        )
+        .unwrap_err();
+    match err {
+        IntegratorError::UnexpectedSubStep { variant } => {
+            assert_eq!(variant, "ForceEval");
+        }
+        other => panic!("expected UnexpectedSubStep, got {other:?}"),
+    }
+}
+
+#[test]
+fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
+    // Walk a plan with one ForceEval{class: Some(Fast)} against a
+    // ForceField that has one Fast slot (LJ). step_class(Fast) launches
+    // its slot kernels and the accumulator.
+    let gpu = init_device().unwrap();
+    let state = small_state(2);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut sim_box = box_10();
+    let mut ff = ForceField::new(
+        &dynamics::forces::PotentialRegistry::with_builtins(),
+        &gpu,
+        2,
+        &sim_box,
+        &[dynamics::io::config::ParticleTypeConfig {
+            name: "Ar".to_string(),
+            mass: 1.0,
+            charge: 0.0,
+        }],
+        &[dynamics::io::config::PairInteractionConfig {
+            between: ("Ar".to_string(), "Ar".to_string()),
+            cutoff: 1.0,
+            r_switch: 1.0,
+            potential: dynamics::io::config::PairPotentialParams::LennardJones {
+                sigma: 1.0,
+                epsilon: 1.0,
+            },
+        }],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(2),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![SubStep::ForceEval { class: Some(ForceClass::Fast) }],
+        },
+        log: CallLog { events: log.events.clone() },
+    };
+    run_step_no_constraint(&mut stub, &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
+        .unwrap();
+    let report = timings.finalize().unwrap();
+    let count_of = |name: &str| {
+        report.stages.iter().find(|s| s.name == name).map(|s| s.count).unwrap_or(0)
+    };
+    // The Fast LJ slot's kernels fire; the accumulator fires once.
+    assert_eq!(count_of("lj_pair_force"), 1);
+    assert_eq!(count_of("reduce_pair_forces"), 1);
+    assert_eq!(count_of("accumulate_forces"), 1);
+}
+
+#[test]
+fn force_eval_some_slow_class_on_fast_only_ff_is_noop() {
+    // Plan emits ForceEval{class: Some(Slow)} against a Fast-only LJ
+    // ForceField. step_class(Slow) finds no Slow slots and returns
+    // without launching anything — no LJ kernels, no accumulator.
+    let gpu = init_device().unwrap();
+    let state = small_state(2);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut sim_box = box_10();
+    let mut ff = ForceField::new(
+        &dynamics::forces::PotentialRegistry::with_builtins(),
+        &gpu,
+        2,
+        &sim_box,
+        &[dynamics::io::config::ParticleTypeConfig {
+            name: "Ar".to_string(),
+            mass: 1.0,
+            charge: 0.0,
+        }],
+        &[dynamics::io::config::PairInteractionConfig {
+            between: ("Ar".to_string(), "Ar".to_string()),
+            cutoff: 1.0,
+            r_switch: 1.0,
+            potential: dynamics::io::config::PairPotentialParams::LennardJones {
+                sigma: 1.0,
+                epsilon: 1.0,
+            },
+        }],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(2),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![SubStep::ForceEval { class: Some(ForceClass::Slow) }],
+        },
+        log: CallLog { events: log.events.clone() },
+    };
+    run_step_no_constraint(&mut stub, &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
+        .unwrap();
+    let report = timings.finalize().unwrap();
+    assert!(
+        report.stages.iter().all(|s| s.count == 0),
+        "ForceEval{{Slow}} on Fast-only ForceField launched kernels: {:?}",
+        report.stages,
+    );
+}
+
+#[test]
+fn force_eval_none_class_continues_to_dispatch_to_step() {
+    // Plan emits ForceEval{class: None} against a Fast-only LJ ForceField.
+    // Runner calls step() which evaluates every slot and runs the
+    // combiner — one accumulator launch.
+    let gpu = init_device().unwrap();
+    let state = small_state(2);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut sim_box = box_10();
+    let mut ff = ForceField::new(
+        &dynamics::forces::PotentialRegistry::with_builtins(),
+        &gpu,
+        2,
+        &sim_box,
+        &[dynamics::io::config::ParticleTypeConfig {
+            name: "Ar".to_string(),
+            mass: 1.0,
+            charge: 0.0,
+        }],
+        &[dynamics::io::config::PairInteractionConfig {
+            between: ("Ar".to_string(), "Ar".to_string()),
+            cutoff: 1.0,
+            r_switch: 1.0,
+            potential: dynamics::io::config::PairPotentialParams::LennardJones {
+                sigma: 1.0,
+                epsilon: 1.0,
+            },
+        }],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(2),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(2),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let log = CallLog::default();
+    let mut stub = PlanStub {
+        plan: StepPlan {
+            steps: vec![SubStep::ForceEval { class: None }],
+        },
+        log: CallLog { events: log.events.clone() },
+    };
+    run_step_no_constraint(&mut stub, &mut buffers, &mut sim_box, &mut ff, 0.001, &mut timings)
+        .unwrap();
+    let report = timings.finalize().unwrap();
+    let count_of = |name: &str| {
+        report.stages.iter().find(|s| s.name == name).map(|s| s.count).unwrap_or(0)
+    };
+    assert_eq!(count_of("accumulate_forces"), 1);
+    assert_eq!(count_of("lj_pair_force"), 1);
 }

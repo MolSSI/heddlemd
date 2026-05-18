@@ -37,11 +37,22 @@ pub use neighbor_list::{
     CellListData, NeighborListError, NeighborListMode, NeighborListState,
 };
 
+// rq-df6d79a1
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ForceClass {
+    Fast,
+    Slow,
+}
+
 // rq-67ebf3b1
 pub trait Potential: std::fmt::Debug + Send {
     fn label(&self) -> &'static str;
 
     fn max_cutoff(&self) -> Option<f32>;
+
+    fn frequency_class(&self) -> ForceClass {
+        ForceClass::Fast
+    }
 
     fn contribute(
         &mut self,
@@ -162,12 +173,24 @@ pub struct ForceField {
     pub device: Arc<CudaDevice>,
     pub kernels: Arc<Kernels>,
     pub slots: Vec<Box<dyn Potential>>,
-    pub slot_forces_x: CudaSlice<f32>,
-    pub slot_forces_y: CudaSlice<f32>,
-    pub slot_forces_z: CudaSlice<f32>,
-    pub slot_energies: CudaSlice<f32>,
-    pub slot_virials: CudaSlice<f32>,
+    pub fast_slot_forces_x: CudaSlice<f32>,
+    pub fast_slot_forces_y: CudaSlice<f32>,
+    pub fast_slot_forces_z: CudaSlice<f32>,
+    pub fast_slot_energies: CudaSlice<f32>,
+    pub fast_slot_virials: CudaSlice<f32>,
+    pub slow_slot_forces_x: CudaSlice<f32>,
+    pub slow_slot_forces_y: CudaSlice<f32>,
+    pub slow_slot_forces_z: CudaSlice<f32>,
+    pub slow_slot_energies: CudaSlice<f32>,
+    pub slow_slot_virials: CudaSlice<f32>,
     pub neighbor_list: Option<NeighborListState>,
+    /// For each slot in `slots`, in canonical slot order, the row
+    /// index of that slot within its class's slot-output buffers
+    /// (i.e. the slot's position among same-class slots, also in
+    /// canonical order).
+    class_row: Vec<u32>,
+    num_fast_slots: usize,
+    num_slow_slots: usize,
     particle_count: usize,
 }
 
@@ -226,12 +249,37 @@ impl ForceField {
             }
         }
 
-        let flat_len = slots.len() * particle_count;
-        let slot_forces_x = device.alloc_zeros::<f32>(flat_len).map_err(GpuError::from)?;
-        let slot_forces_y = device.alloc_zeros::<f32>(flat_len).map_err(GpuError::from)?;
-        let slot_forces_z = device.alloc_zeros::<f32>(flat_len).map_err(GpuError::from)?;
-        let slot_energies = device.alloc_zeros::<f32>(flat_len).map_err(GpuError::from)?;
-        let slot_virials = device.alloc_zeros::<f32>(flat_len).map_err(GpuError::from)?;
+        // Map each slot in canonical order to its row index within its
+        // class's slot-output buffers. Counts of slots per class drive
+        // the per-class buffer lengths.
+        let mut class_row: Vec<u32> = Vec::with_capacity(slots.len());
+        let mut num_fast_slots: usize = 0;
+        let mut num_slow_slots: usize = 0;
+        for slot in &slots {
+            match slot.frequency_class() {
+                ForceClass::Fast => {
+                    class_row.push(num_fast_slots as u32);
+                    num_fast_slots += 1;
+                }
+                ForceClass::Slow => {
+                    class_row.push(num_slow_slots as u32);
+                    num_slow_slots += 1;
+                }
+            }
+        }
+
+        let fast_len = num_fast_slots * particle_count;
+        let slow_len = num_slow_slots * particle_count;
+        let fast_slot_forces_x = device.alloc_zeros::<f32>(fast_len).map_err(GpuError::from)?;
+        let fast_slot_forces_y = device.alloc_zeros::<f32>(fast_len).map_err(GpuError::from)?;
+        let fast_slot_forces_z = device.alloc_zeros::<f32>(fast_len).map_err(GpuError::from)?;
+        let fast_slot_energies = device.alloc_zeros::<f32>(fast_len).map_err(GpuError::from)?;
+        let fast_slot_virials = device.alloc_zeros::<f32>(fast_len).map_err(GpuError::from)?;
+        let slow_slot_forces_x = device.alloc_zeros::<f32>(slow_len).map_err(GpuError::from)?;
+        let slow_slot_forces_y = device.alloc_zeros::<f32>(slow_len).map_err(GpuError::from)?;
+        let slow_slot_forces_z = device.alloc_zeros::<f32>(slow_len).map_err(GpuError::from)?;
+        let slow_slot_energies = device.alloc_zeros::<f32>(slow_len).map_err(GpuError::from)?;
+        let slow_slot_virials = device.alloc_zeros::<f32>(slow_len).map_err(GpuError::from)?;
 
         // Build the shared NeighborListState when any slot reports a cutoff.
         let aggregated_cutoff: Option<f32> = slots
@@ -264,12 +312,20 @@ impl ForceField {
             device,
             kernels,
             slots,
-            slot_forces_x,
-            slot_forces_y,
-            slot_forces_z,
-            slot_energies,
-            slot_virials,
+            fast_slot_forces_x,
+            fast_slot_forces_y,
+            fast_slot_forces_z,
+            fast_slot_energies,
+            fast_slot_virials,
+            slow_slot_forces_x,
+            slow_slot_forces_y,
+            slow_slot_forces_z,
+            slow_slot_energies,
+            slow_slot_virials,
             neighbor_list,
+            class_row,
+            num_fast_slots,
+            num_slow_slots,
             particle_count,
         })
     }
@@ -277,6 +333,36 @@ impl ForceField {
     // rq-3579df3b
     pub fn step(
         &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        timings: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        self.run(None, buffers, sim_box, timings)
+    }
+
+    pub fn step_class(
+        &mut self,
+        class: ForceClass,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        timings: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        // No-op when the class has no slots: nothing to recompute and
+        // the existing combined total in ParticleBuffers.forces_* is
+        // already current.
+        let class_count = match class {
+            ForceClass::Fast => self.num_fast_slots,
+            ForceClass::Slow => self.num_slow_slots,
+        };
+        if class_count == 0 {
+            return Ok(());
+        }
+        self.run(Some(class), buffers, sim_box, timings)
+    }
+
+    fn run(
+        &mut self,
+        class_filter: Option<ForceClass>,
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,
         timings: &mut Timings,
@@ -293,6 +379,11 @@ impl ForceField {
 
         let nl_ref = self.neighbor_list.as_ref();
         for slot in self.slots.iter_mut() {
+            if let Some(c) = class_filter {
+                if slot.frequency_class() != c {
+                    continue;
+                }
+            }
             let cx = ForceFieldContext {
                 neighbor_list: nl_ref,
                 buffers: &*buffers,
@@ -301,40 +392,69 @@ impl ForceField {
             slot.contribute(buffers, sim_box, &cx, timings)?;
         }
 
-        let num_slots = self.slots.len();
+        // Per-slot reductions. Each slot writes into the row of its
+        // class's slot-output buffers indexed by class_row[slot_index].
+        let class_row = &self.class_row;
         let slots = &mut self.slots;
-        let sfx = &mut self.slot_forces_x;
-        let sfy = &mut self.slot_forces_y;
-        let sfz = &mut self.slot_forces_z;
-        let sen = &mut self.slot_energies;
-        let svi = &mut self.slot_virials;
-        for k in 0..num_slots {
-            let start = k * n;
-            let end = (k + 1) * n;
-            let view = SlotOutputView {
-                force_x: sfx.slice_mut(start..end),
-                force_y: sfy.slice_mut(start..end),
-                force_z: sfz.slice_mut(start..end),
-                energy: sen.slice_mut(start..end),
-                virial: svi.slice_mut(start..end),
+        let fast_x = &mut self.fast_slot_forces_x;
+        let fast_y = &mut self.fast_slot_forces_y;
+        let fast_z = &mut self.fast_slot_forces_z;
+        let fast_e = &mut self.fast_slot_energies;
+        let fast_w = &mut self.fast_slot_virials;
+        let slow_x = &mut self.slow_slot_forces_x;
+        let slow_y = &mut self.slow_slot_forces_y;
+        let slow_z = &mut self.slow_slot_forces_z;
+        let slow_e = &mut self.slow_slot_energies;
+        let slow_w = &mut self.slow_slot_virials;
+        for (i, slot) in slots.iter_mut().enumerate() {
+            let slot_class = slot.frequency_class();
+            if let Some(c) = class_filter {
+                if slot_class != c {
+                    continue;
+                }
+            }
+            let row = class_row[i] as usize;
+            let start = row * n;
+            let end = (row + 1) * n;
+            let view = match slot_class {
+                ForceClass::Fast => SlotOutputView {
+                    force_x: fast_x.slice_mut(start..end),
+                    force_y: fast_y.slice_mut(start..end),
+                    force_z: fast_z.slice_mut(start..end),
+                    energy: fast_e.slice_mut(start..end),
+                    virial: fast_w.slice_mut(start..end),
+                },
+                ForceClass::Slow => SlotOutputView {
+                    force_x: slow_x.slice_mut(start..end),
+                    force_y: slow_y.slice_mut(start..end),
+                    force_z: slow_z.slice_mut(start..end),
+                    energy: slow_e.slice_mut(start..end),
+                    virial: slow_w.slice_mut(start..end),
+                },
             };
             let cx = ForceFieldContext {
                 neighbor_list: nl_ref,
                 buffers: &*buffers,
                 sim_box,
             };
-            slots[k].reduce(view, &cx, timings)?;
+            slot.reduce(view, &cx, timings)?;
         }
 
         timings.kernel_start(KernelStage::ACCUMULATE_FORCES)?;
         accumulate_forces(
             buffers,
-            &self.slot_forces_x,
-            &self.slot_forces_y,
-            &self.slot_forces_z,
-            &self.slot_energies,
-            &self.slot_virials,
-            num_slots as u32,
+            &self.fast_slot_forces_x,
+            &self.fast_slot_forces_y,
+            &self.fast_slot_forces_z,
+            &self.fast_slot_energies,
+            &self.fast_slot_virials,
+            self.num_fast_slots as u32,
+            &self.slow_slot_forces_x,
+            &self.slow_slot_forces_y,
+            &self.slow_slot_forces_z,
+            &self.slow_slot_energies,
+            &self.slow_slot_virials,
+            self.num_slow_slots as u32,
         )?;
         timings.kernel_stop(KernelStage::ACCUMULATE_FORCES)?;
         Ok(())

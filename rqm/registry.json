@@ -520,10 +520,10 @@
     "type": "api-item"
   },
   "rq-07ead62b": {
-    "decl": "Scenario: Plan with multiple ForceEvals invokes force_field.step that many times",
+    "decl": "Scenario: Plan with multiple ForceEval { class: None } sub-steps invokes force_field.step that many times",
     "file": "integration/framework",
     "refs": [],
-    "title": "Plan with multiple ForceEvals invokes force_field.step that many times",
+    "title": "Plan with multiple ForceEval { class: None } sub-steps invokes force_field.step that many times",
     "type": "scenario"
   },
   "rq-08066bdf": {
@@ -1668,6 +1668,13 @@
     "title": "SimulationBox",
     "type": "api-item"
   },
+  "rq-1a996f5d": {
+    "decl": "Scenario: step_class(Fast) refreshes only Fast slots' contributions",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "step_class(Fast) refreshes only Fast slots' contributions",
+    "type": "scenario"
+  },
   "rq-1ad7e751": {
     "decl": "- `CuFftError` — wrapper around cuFFT failure codes from the underlying",
     "file": "forces/spme",
@@ -2366,7 +2373,7 @@
     "type": "api-item"
   },
   "rq-2361f2b8": {
-    "decl": "- `MorseBondedState` — implements `Potential` with `label() == \"morse_bonded\"`.",
+    "decl": "- `MorseBondedState` — implements `Potential` with `label() == \"morse_bonded\"` and `frequency_class() == ForceClass::Fast` (the trait default).",
     "file": "forces/framework",
     "refs": [
       {
@@ -2491,6 +2498,13 @@
     "refs": [],
     "title": "Construction and Lifetime",
     "type": "section"
+  },
+  "rq-256287cb": {
+    "decl": "Scenario: SubStep::ForceEval { class: Some(Fast) } dispatches to step_class(Fast)",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "SubStep::ForceEval { class: Some(Fast) } dispatches to step_class(Fast)",
+    "type": "scenario"
   },
   "rq-25acc667": {
     "decl": "Scenario: settle_positions updates the half-step velocities consistently with the position correction",
@@ -3074,6 +3088,13 @@
     "title": "Construct with chain_length = 1",
     "type": "scenario"
   },
+  "rq-2dbda7ec": {
+    "decl": "Scenario: Built-in potentials report their canonical class",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Built-in potentials report their canonical class",
+    "type": "scenario"
+  },
   "rq-2e15fed7": {
     "decl": "## Launch Configuration",
     "file": "forces/neighbor-list",
@@ -3379,6 +3400,13 @@
     "refs": [],
     "title": "Types",
     "type": "section"
+  },
+  "rq-33cfb9fc": {
+    "decl": "Scenario: step_class(Slow) refreshes only Slow slots' contributions",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "step_class(Slow) refreshes only Slow slots' contributions",
+    "type": "scenario"
   },
   "rq-344f7af0": {
     "decl": "- `copy_positions_into_reference(particle_buffers, reference_x, reference_y, reference_z) -> Result<(), GpuError>`",
@@ -4147,6 +4175,13 @@
     "title": "Empty [bonds], [angles], and [exclusions] sections are valid",
     "type": "scenario"
   },
+  "rq-40f9d35a": {
+    "decl": "Scenario: Two RESPA-style call sequences with the same plan produce identical state",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Two RESPA-style call sequences with the same plan produce identical state",
+    "type": "scenario"
+  },
   "rq-410afcd3": {
     "decl": "## Feature API",
     "file": "performance-analysis",
@@ -4313,7 +4348,7 @@
     "type": "scenario"
   },
   "rq-454ad2cf": {
-    "decl": "- `HarmonicAngleState` — implements `Potential` with `label() == \"harmonic_angle\"`.",
+    "decl": "- `HarmonicAngleState` — implements `Potential` with `label() == \"harmonic_angle\"` and `frequency_class() == ForceClass::Fast` (the trait default).",
     "file": "forces/framework",
     "refs": [],
     "title": "HarmonicAngleState",
@@ -4973,6 +5008,13 @@
     "title": "Reproducibility",
     "type": "section"
   },
+  "rq-5257ec08": {
+    "decl": "Scenario: Plan with mixed-class ForceEval sub-steps dispatches step and step_class",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Plan with mixed-class ForceEval sub-steps dispatches step and step_class",
+    "type": "scenario"
+  },
   "rq-5269221c": {
     "decl": "Scenario: wrap_position is idempotent for a triclinic box",
     "file": "simulation-box",
@@ -4999,6 +5041,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Missing [simulation].temperature",
+    "type": "scenario"
+  },
+  "rq-52d4b245": {
+    "decl": "Scenario: Per-class slot-output buffers are zero-initialised",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Per-class slot-output buffers are zero-initialised",
     "type": "scenario"
   },
   "rq-52f547fd": {
@@ -5312,6 +5361,13 @@
     "title": "Malformed TOML",
     "type": "scenario"
   },
+  "rq-57fd217e": {
+    "decl": "Scenario: step() evaluates every class and produces the total in ParticleBuffers",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "step() evaluates every class and produces the total in ParticleBuffers",
+    "type": "scenario"
+  },
   "rq-580fe6f7": {
     "decl": "### Lossless mode: compensated summation",
     "file": "integration/velocity-verlet",
@@ -5354,6 +5410,13 @@
     "file": "integration/constraint-framework",
     "refs": [],
     "title": "Reject [constraints] with lossless velocity-verlet",
+    "type": "scenario"
+  },
+  "rq-5855473b": {
+    "decl": "Scenario: SubStep::ForceEval { class: None } dispatches to step()",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "SubStep::ForceEval { class: None } dispatches to step()",
     "type": "scenario"
   },
   "rq-58981e16": {
@@ -6149,7 +6212,7 @@
     "type": "scenario"
   },
   "rq-684a29f1": {
-    "decl": "- `ForceField` — handle owning the slot collection, the flat slot-output buffers, and the shared neighbor list.",
+    "decl": "- `ForceField` — handle owning the slot collection, the per-class flat slot-output buffers, and the shared neighbor list.",
     "file": "forces/framework",
     "refs": [
       {
@@ -6926,6 +6989,13 @@
     "title": "CsvrBuilder",
     "type": "api-item"
   },
+  "rq-751bbb3c": {
+    "decl": "Scenario: integrator.execute receiving ForceEval with a class also surfaces UnexpectedSubStep",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "integrator.execute receiving ForceEval with a class also surfaces UnexpectedSubStep",
+    "type": "scenario"
+  },
   "rq-75297a48": {
     "decl": "Scenario: Log file header includes pressure and box_volume when the Berendsen barostat is the configured barostat",
     "file": "integration/berendsen-barostat",
@@ -7219,6 +7289,13 @@
     ],
     "title": "PairBuffer",
     "type": "api-item"
+  },
+  "rq-79068d4d": {
+    "decl": "Scenario: Per-class slot-output buffers have length num_class_slots * N",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Per-class slot-output buffers have length num_class_slots * N",
+    "type": "scenario"
   },
   "rq-7909b92c": {
     "decl": "Scenario: log_column_names returns empty for integrators (VV / Langevin)",
@@ -8298,6 +8375,13 @@
     "file": "integration/andersen",
     "refs": [],
     "title": "log_column_names returns [\"andersen_conserved\"]",
+    "type": "scenario"
+  },
+  "rq-8eb7a546": {
+    "decl": "Scenario: step_class with N=0 launches no kernels",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "step_class with N=0 launches no kernels",
     "type": "scenario"
   },
   "rq-8ee27e27": {
@@ -10260,7 +10344,7 @@
     "type": "section"
   },
   "rq-af2d1628": {
-    "decl": "- `LennardJonesState` — implements `Potential` with `label() == \"lennard_jones\"`.",
+    "decl": "- `LennardJonesState` — implements `Potential` with `label() == \"lennard_jones\"` and `frequency_class() == ForceClass::Fast` (the trait default).",
     "file": "forces/framework",
     "refs": [
       {
@@ -10754,6 +10838,13 @@
     "title": "Constructor",
     "type": "section"
   },
+  "rq-b80f2ddb": {
+    "decl": "Scenario: step_class(Fast) on a ForceField with no Fast slots is a no-op",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "step_class(Fast) on a ForceField with no Fast slots is a no-op",
+    "type": "scenario"
+  },
   "rq-b8463a3b": {
     "decl": "Scenario: Frame Properties carries image:I:3 when include_images=true and include_velocities=false",
     "file": "io/trajectory-output",
@@ -11007,6 +11098,13 @@
     "refs": [],
     "title": "Empty (N=0) run omits all kernel rows but retains host rows",
     "type": "scenario"
+  },
+  "rq-be1eb548": {
+    "decl": "- `ForceField::step_class(&mut self, class: ForceClass, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings) -> Result<(), ForceFieldError>`",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "ForceField",
+    "type": "api-item"
   },
   "rq-be551127": {
     "decl": "## CSVR conserved quantity",
@@ -11378,6 +11476,13 @@
       }
     ],
     "title": "Timings",
+    "type": "api-item"
+  },
+  "rq-c4861786": {
+    "decl": "- `ForceClass` — two-variant enum partitioning every slot into one of",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "ForceClass",
     "type": "api-item"
   },
   "rq-c4872e7e": {
@@ -11810,6 +11915,13 @@
     "file": "io/init-state-file",
     "refs": [],
     "title": "Accept a lattice with negative tilts",
+    "type": "scenario"
+  },
+  "rq-cc66d208": {
+    "decl": "Scenario: step_class(Slow) on a ForceField with no Slow slots is a no-op",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "step_class(Slow) on a ForceField with no Slow slots is a no-op",
     "type": "scenario"
   },
   "rq-cc73f184": {
@@ -12666,6 +12778,13 @@
     "title": "philox_normal returns the standard-normal Box-Muller cos branch",
     "type": "scenario"
   },
+  "rq-db2253db": {
+    "decl": "Scenario: Potential::frequency_class default returns Fast",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Potential::frequency_class default returns Fast",
+    "type": "scenario"
+  },
   "rq-db2321aa": {
     "decl": "#### `settle_positions`",
     "file": "integration/settle",
@@ -12957,6 +13076,27 @@
     "refs": [],
     "title": "step() on a ForceField with both slots sums LJ and Morse",
     "type": "scenario"
+  },
+  "rq-df6d79a1": {
+    "decl": "## Force Classes",
+    "file": "forces/framework",
+    "level": 2,
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Force Classes",
+    "type": "section"
   },
   "rq-df8766ae": {
     "decl": "### Force gather",
