@@ -191,21 +191,26 @@ _fix_duplicates() {
 
       [[ "$fence" != "" ]] && continue
 
-      if [[ "$line" =~ ^(#{1,3})[[:space:]] ]] && _has_id "$line"; then
-        local id; id=$(_get_id "$line")
-        local decl; decl=$(_strip_annot "$line")
-        local n="${occ_count[$id]:-0}"
-        occ_count[$id]=$(( n + 1 ))
-        occ_file["${id}__${n}"]="$f"
-        occ_lineno["${id}__${n}"]="$lineno"
-        occ_decl["${id}__${n}"]="$decl"
+      if [[ "$line" =~ ^(#{1,6})[[:space:]] ]]; then
+        # Capture the heading-hash count BEFORE calling _has_id, which
+        # runs its own regex match and would otherwise clobber
+        # BASH_REMATCH.
         local hashes="${BASH_REMATCH[1]}"
-        local level=${#hashes}
-        local stripped; stripped=$(sed -E 's/^#{1,3} //' <<< "$decl")
-        [[ $level -eq 2 && "$stripped" == "Feature API" ]] && in_api=true
-        [[ $level -eq 2 && "$stripped" != "Feature API" ]] && in_api=false
-        [[ $level -eq 1 ]] && in_api=false
-        continue
+        if _has_id "$line"; then
+          local id; id=$(_get_id "$line")
+          local decl; decl=$(_strip_annot "$line")
+          local n="${occ_count[$id]:-0}"
+          occ_count[$id]=$(( n + 1 ))
+          occ_file["${id}__${n}"]="$f"
+          occ_lineno["${id}__${n}"]="$lineno"
+          occ_decl["${id}__${n}"]="$decl"
+          local level=${#hashes}
+          local stripped; stripped=$(sed -E 's/^#{1,6} //' <<< "$decl")
+          [[ $level -eq 2 && "$stripped" == "Feature API" ]] && in_api=true
+          [[ $level -eq 2 && "$stripped" != "Feature API" ]] && in_api=false
+          [[ $level -eq 1 ]] && in_api=false
+          continue
+        fi
       fi
 
       if $in_api && [[ "$line" =~ ^-[[:space:]]\` ]] && _has_id "$line"; then
