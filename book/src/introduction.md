@@ -6,9 +6,8 @@ identical inputs produce byte-identical trajectory and log files across runs
 on the same GPU.
 
 This book is the user-facing guide. If you want the internal design — data
-flow, kernel-by-kernel breakdown, the deterministic-reduction strategy — see
-the [architecture document](https://github.com/) in the repository's `docs/`
-directory instead.
+flow, kernel-by-kernel breakdown, the deterministic-reduction strategy — read
+`docs/architecture.md` in the repository instead.
 
 ## What's in this book
 
