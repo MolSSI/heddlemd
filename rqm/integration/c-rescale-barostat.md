@@ -146,7 +146,7 @@ sequence.
 
 ## Parameters <!-- rq-c2211c85 -->
 
-Config-layer fields set on `BarostatKind::CRescale`:
+The matching builder deserialises a typed `CRescaleBarostatParams` from the `[barostat]` section's `SlotConfig::params` (see `framework.md`); the per-field reference below documents that parameter struct:
 
 - `pressure: f64` — target pressure `P_target` in pascals (Pa).
   Required. Finite. May be any sign or zero (the formula handles
@@ -284,7 +284,7 @@ is configured (see `io/log-output.md`):
 
 - `CRescaleBarostatBuilder` — implements `BarostatBuilder` with <!-- rq-d521381a -->
   `kind_name() == "c-rescale"`. `build(device, particle_count,
-  kind)` matches against `BarostatKind::CRescale { … }`, allocates
+  kind)` deserialises `CRescaleBarostatParams` from `params`, allocates
   the two length-1 device scratch buffers, and returns the boxed
   `CRescaleBarostat`.
 

@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 use cudarc::driver::CudaDevice;
 
-use crate::forces::{ConstraintList, ConstraintTypeKind};
+use crate::forces::{ConstraintList, GroupConstraint};
 use crate::gpu::{GpuContext, GpuError, ParticleBuffers};
-use crate::io::config::ConstraintTypeConfig;
+use crate::io::config::{ConfigError, NamedSlotConfig};
 use crate::pbc::SimulationBox;
 use crate::timings::{Timings, TimingsError};
 
@@ -17,18 +17,16 @@ pub enum ConstraintError {
     Gpu(#[from] GpuError),
     #[error("{0}")]
     Timings(#[from] TimingsError),
-    #[error("constraint slot has no builder for algorithm kind {0:?}")]
-    UnsupportedKind(ConstraintTypeKind),
+    #[error("constraint slot has no builder for algorithm kind `{0}`")]
+    UnsupportedKind(String),
     #[error("[constraints] row references unknown constraint type `{0}`")]
     UnknownConstraintType(String),
     #[error("atom {atom} appears in more than one constraint group")]
     DuplicateConstraintAtom { atom: u32 },
-    #[error(
-        "constraint group {group_index} ({kind:?}) has invalid shape: {reason}"
-    )]
+    #[error("constraint group {group_index} (kind `{kind}`) has invalid shape: {reason}")]
     InvalidGroupShape {
         group_index: usize,
-        kind: ConstraintTypeKind,
+        kind: String,
         reason: String,
     },
     #[error(
@@ -81,6 +79,31 @@ pub trait Constraint: std::fmt::Debug + Send {
 // `ConstraintRegistry::with_builtins()`.
 pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
     fn kind_name(&self) -> &'static str;
+
+    /// Validate the kind-specific parameters of a
+    /// `[[constraint_types]]` entry at config-load time. Called by
+    /// `Config::validate_against(&registries)` before any GPU work.
+    fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError>;
+
+    /// Number of atoms a single `[constraints]` topology row of this
+    /// kind must declare. The topology parser uses this value to
+    /// validate row column counts. Pure function of the parameters.
+    fn expected_atom_count(&self, params: &toml::Value) -> usize;
+
+    /// Validate the cluster shape of a single constraint group against
+    /// this algorithm's requirements (atom count, constraint-pair
+    /// pattern, mass consistency, etc.). Called by
+    /// `ConstraintRegistry::build_optional` for every group whose
+    /// algorithm matches this builder.
+    fn validate_group_shape(
+        &self,
+        group_index: usize,
+        atoms: &[u32],
+        constraints: &[GroupConstraint],
+        params: &toml::Value,
+        masses: &[f32],
+    ) -> Result<(), ConstraintError>;
+
     fn build(
         &self,
         device: Arc<CudaDevice>,
@@ -88,7 +111,7 @@ pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
         particle_count: usize,
         list: &ConstraintList,
         masses: &[f32],
-        constraint_types: &[ConstraintTypeConfig],
+        constraint_types: &[NamedSlotConfig],
     ) -> Result<Box<dyn Constraint>, ConstraintError>;
 }
 
@@ -115,41 +138,60 @@ impl ConstraintRegistry {
         self.builders.push(builder);
     }
 
-    /// Construct the constraint slot, if any, that handles every group in
-    /// `list`. v1 produces a single slot implementation covering every
-    /// supported algorithm kind referenced by `list`. Returns `Ok(None)`
-    /// when `list.is_empty()`.
+    pub fn lookup(&self, kind: &str) -> Option<&dyn ConstraintBuilder> {
+        for b in &self.builders {
+            if b.kind_name() == kind {
+                return Some(b.as_ref());
+            }
+        }
+        None
+    }
+
+    /// Construct the constraint slot, if any, that handles every group
+    /// in `list`. v1 produces a single slot implementation covering
+    /// every supported algorithm kind referenced by `list`. Returns
+    /// `Ok(None)` when `list.is_empty()`.
+    ///
+    /// For every group, looks up the algorithm via
+    /// `constraint_types[group.constraint_type_index].kind`, finds the
+    /// matching builder, calls `validate_group_shape(...)`, and
+    /// finally delegates to the slot constructor.
     pub fn build_optional(
         &self,
         list: &ConstraintList,
         gpu: &GpuContext,
         particle_count: usize,
         masses: &[f32],
-        constraint_types: &[ConstraintTypeConfig],
+        constraint_types: &[NamedSlotConfig],
     ) -> Result<Option<Box<dyn Constraint>>, ConstraintError> {
         if list.is_empty() {
             return Ok(None);
         }
-        // v1: every group's kind must be SettleWater (the only registered
-        // algorithm). Future M-SHAKE work introduces a second kind and a
-        // dispatch wrapper that combines the per-algorithm slots.
+        // First, verify every group's algorithm is registered.
         for g in &list.groups {
-            let kind = list.constraint_type_kind[g.constraint_type_index as usize];
-            let builder_name = match kind {
-                ConstraintTypeKind::SettleWater => "settle",
-            };
-            if !self.builders.iter().any(|b| b.kind_name() == builder_name) {
-                return Err(ConstraintError::UnsupportedKind(kind));
+            let kind = &constraint_types[g.constraint_type_index as usize].kind;
+            if self.lookup(kind).is_none() {
+                return Err(ConstraintError::UnsupportedKind(kind.clone()));
             }
         }
-        // In v1 there is exactly one builder ("settle") and it consumes
-        // every group. When M-SHAKE arrives, this dispatch will fan out
-        // to per-algorithm builders and combine their results.
+        // Run per-builder validate_group_shape on every group.
+        for (gi, g) in list.groups.iter().enumerate() {
+            let cfg = &constraint_types[g.constraint_type_index as usize];
+            let builder = self
+                .lookup(&cfg.kind)
+                .ok_or_else(|| ConstraintError::UnsupportedKind(cfg.kind.clone()))?;
+            let atoms = &list.group_atoms[g.atom_offset as usize
+                ..(g.atom_offset + g.atom_count) as usize];
+            let cstrs = &list.group_constraints[g.constraint_offset as usize
+                ..(g.constraint_offset + g.constraint_count) as usize];
+            builder.validate_group_shape(gi, atoms, cstrs, &cfg.params, masses)?;
+        }
+        // v1: every group is "settle-water"; one builder consumes all
+        // groups. When M-SHAKE arrives, this dispatch fans out per
+        // algorithm and the per-algorithm slots are combined.
         let settle = self
-            .builders
-            .iter()
-            .find(|b| b.kind_name() == "settle")
-            .ok_or(ConstraintError::UnsupportedKind(ConstraintTypeKind::SettleWater))?;
+            .lookup("settle-water")
+            .ok_or_else(|| ConstraintError::UnsupportedKind("settle-water".to_string()))?;
         let slot = settle.build(
             gpu.device.clone(),
             gpu,

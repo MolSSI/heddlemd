@@ -121,7 +121,7 @@ sequence.
 
 ## Parameters <!-- rq-3db027c2 -->
 
-Config-layer fields set on `BarostatKind::Berendsen`:
+The matching builder deserialises a typed `BerendsenBarostatParams` from the `[barostat]` section's `SlotConfig::params` (see `framework.md`); the per-field reference below documents that parameter struct:
 
 - `pressure: f64` — target pressure `P_target` in pascals (Pa).
   Required. Finite. May be any sign or zero; the formula handles
@@ -200,7 +200,7 @@ and does not preserve any natural extended Hamiltonian.
 
 - `BerendsenBarostatBuilder` — implements `BarostatBuilder` with <!-- rq-4ef89c50 -->
   `kind_name() == "berendsen"`. `build(device, particle_count, kind)`
-  matches against `BarostatKind::Berendsen { … }`, allocates the
+  deserialises `BerendsenBarostatParams` from `params`, allocates the
   two length-1 device scratch buffers, and returns the boxed
   `BerendsenBarostat`.
 

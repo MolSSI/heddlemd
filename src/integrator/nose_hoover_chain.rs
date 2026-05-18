@@ -2,14 +2,58 @@
 
 use cudarc::driver::CudaSlice;
 
+use serde::Deserialize;
+
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy, rescale_velocities,
 };
-use crate::io::config::ThermostatKind;
+use crate::io::config::ConfigError;
 use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::timings::{KernelStage, Timings};
 
 use super::{Thermostat, ThermostatBuilder, ThermostatError};
+
+// rq-1f87880c
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NoseHooverChainParams {
+    pub temperature: f64,
+    pub tau: f64,
+    #[serde(default = "default_chain_length")]
+    pub chain_length: u32,
+    #[serde(default = "default_yoshida_order")]
+    pub yoshida_order: u32,
+    #[serde(default = "default_n_resp")]
+    pub n_resp: u32,
+}
+
+fn default_chain_length() -> u32 { 3 }
+fn default_yoshida_order() -> u32 { 3 }
+fn default_n_resp() -> u32 { 1 }
+
+fn deserialize_params(params: &toml::Value) -> Result<NoseHooverChainParams, ConfigError> {
+    params
+        .clone()
+        .try_into::<NoseHooverChainParams>()
+        .map_err(|e| crate::io::config::translate_params_error("thermostat", e))
+}
+
+fn invalid(field: impl Into<String>, reason: impl Into<String>) -> ConfigError {
+    ConfigError::InvalidValue {
+        field: field.into(),
+        reason: reason.into(),
+    }
+}
+
+fn require_finite_positive(field: &str, value: f64) -> Result<(), ConfigError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(invalid(
+            field,
+            format!("value must be finite and strictly positive, got {value}"),
+        ));
+    }
+    Ok(())
+}
 
 // Suzuki-Yoshida sub-step weights. The arrays are exposed as `&'static`
 // slices via `yoshida_weights`.
@@ -289,32 +333,49 @@ impl ThermostatBuilder for NoseHooverChainBuilder {
         "nose-hoover-chain"
     }
 
+    fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
+        let p = deserialize_params(params)?;
+        require_finite_positive("thermostat.temperature", p.temperature)?;
+        require_finite_positive("thermostat.tau", p.tau)?;
+        if p.chain_length < 1 {
+            return Err(invalid(
+                "thermostat.chain_length",
+                "chain_length must be a positive integer",
+            ));
+        }
+        if !matches!(p.yoshida_order, 1 | 3 | 5 | 7) {
+            return Err(invalid(
+                "thermostat.yoshida_order",
+                "yoshida_order must be one of 1, 3, 5, 7",
+            ));
+        }
+        if p.n_resp < 1 {
+            return Err(invalid(
+                "thermostat.n_resp",
+                "n_resp must be a positive integer",
+            ));
+        }
+        Ok(())
+    }
+
     fn build(
         &self,
         gpu: &GpuContext,
         particle_count: usize,
-        kind: &ThermostatKind,
+        params: &toml::Value,
     ) -> Result<Box<dyn Thermostat>, ThermostatError> {
-        match kind {
-            ThermostatKind::NoseHooverChain {
-                temperature,
-                tau,
-                chain_length,
-                yoshida_order,
-                n_resp,
-            } => {
-                let state = NoseHooverChainThermostat::new(
-                    gpu,
-                    particle_count,
-                    *temperature,
-                    *tau,
-                    *chain_length,
-                    *yoshida_order,
-                    *n_resp,
-                )?;
-                Ok(Box::new(state))
-            }
-            other => Err(ThermostatError::UnknownKind(other.name().to_string())),
-        }
+        let p = deserialize_params(params).map_err(|_| {
+            ThermostatError::UnknownKind("nose-hoover-chain (malformed params)".into())
+        })?;
+        let state = NoseHooverChainThermostat::new(
+            gpu,
+            particle_count,
+            p.temperature,
+            p.tau,
+            p.chain_length,
+            p.yoshida_order,
+            p.n_resp,
+        )?;
+        Ok(Box::new(state))
     }
 }

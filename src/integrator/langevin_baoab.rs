@@ -1,12 +1,42 @@
 // rq-d5a4f220
 
+use serde::Deserialize;
+
 use crate::gpu::{GpuContext, ParticleBuffers, lan_drift_half, lan_ou_step, vv_kick};
-use crate::io::config::IntegratorKind;
+use crate::io::config::ConfigError;
 use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::{Integrator, IntegratorBuilder, IntegratorError, StepPlan, SubStep};
+
+// rq-1f87880c — typed parameter struct for the "langevin-baoab"
+// builder, deserialised from the `[integrator]` section's
+// `SlotConfig::params`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LangevinBaoabParams {
+    pub friction: f64,
+    pub temperature: f64,
+    pub seed: u64,
+}
+
+fn deserialize_params(params: &toml::Value) -> Result<LangevinBaoabParams, ConfigError> {
+    params
+        .clone()
+        .try_into::<LangevinBaoabParams>()
+        .map_err(|e| crate::io::config::translate_params_error("integrator", e))
+}
+
+fn require_finite_positive(field: &str, value: f64) -> Result<(), ConfigError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(ConfigError::InvalidValue {
+            field: field.to_string(),
+            reason: format!("value must be finite and strictly positive, got {value}"),
+        });
+    }
+    Ok(())
+}
 
 #[derive(Debug)]
 pub struct LangevinBaoabState {
@@ -81,26 +111,32 @@ impl IntegratorBuilder for LangevinBaoabBuilder {
         "langevin-baoab"
     }
 
+    fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
+        let p = deserialize_params(params)?;
+        require_finite_positive("integrator.friction", p.friction)?;
+        require_finite_positive("integrator.temperature", p.temperature)?;
+        Ok(())
+    }
+
+    fn owns_thermostat(&self, _params: &toml::Value) -> bool {
+        true
+    }
+
     fn build(
         &self,
         gpu: &GpuContext,
         particle_count: usize,
-        kind: &IntegratorKind,
+        params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
         let _ = gpu;
         let _ = particle_count;
-        match kind {
-            IntegratorKind::LangevinBaoab {
-                friction,
-                temperature,
-                seed,
-            } => Ok(Box::new(LangevinBaoabState {
-                friction: *friction,
-                temperature: *temperature,
-                seed: *seed,
-                draw_counter: 0,
-            })),
-            other => Err(IntegratorError::UnknownKind(other.name().to_string())),
-        }
+        let p = deserialize_params(params)
+            .map_err(|_| IntegratorError::UnknownKind("langevin-baoab (malformed params)".into()))?;
+        Ok(Box::new(LangevinBaoabState {
+            friction: p.friction,
+            temperature: p.temperature,
+            seed: p.seed,
+            draw_counter: 0,
+        }))
     }
 }

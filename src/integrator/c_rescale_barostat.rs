@@ -2,17 +2,57 @@
 
 use cudarc::driver::CudaSlice;
 
+use serde::Deserialize;
+
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy, compute_total_virial,
     rescale_positions,
 };
-use crate::io::config::BarostatKind;
+use crate::io::config::ConfigError;
 use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::philox::philox_normal;
 use super::{Barostat, BarostatBuilder, BarostatError};
+
+// rq-1f87880c
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CRescaleBarostatParams {
+    pub pressure: f64,
+    pub temperature: f64,
+    pub tau: f64,
+    pub compressibility: f64,
+    pub seed: u64,
+}
+
+fn deserialize_params(params: &toml::Value) -> Result<CRescaleBarostatParams, ConfigError> {
+    params
+        .clone()
+        .try_into::<CRescaleBarostatParams>()
+        .map_err(|e| crate::io::config::translate_params_error("barostat", e))
+}
+
+fn require_finite(field: &str, value: f64) -> Result<(), ConfigError> {
+    if !value.is_finite() {
+        return Err(ConfigError::InvalidValue {
+            field: field.to_string(),
+            reason: format!("value must be finite, got {value}"),
+        });
+    }
+    Ok(())
+}
+
+fn require_finite_positive(field: &str, value: f64) -> Result<(), ConfigError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(ConfigError::InvalidValue {
+            field: field.to_string(),
+            reason: format!("value must be finite and strictly positive, got {value}"),
+        });
+    }
+    Ok(())
+}
 
 // Host-side safety floor on μ. Sensible parameters never approach it;
 // the floor only triggers under pathological combinations.
@@ -157,32 +197,33 @@ impl BarostatBuilder for CRescaleBarostatBuilder {
         "c-rescale"
     }
 
+    fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
+        let p = deserialize_params(params)?;
+        require_finite("barostat.pressure", p.pressure)?;
+        require_finite_positive("barostat.temperature", p.temperature)?;
+        require_finite_positive("barostat.tau", p.tau)?;
+        require_finite_positive("barostat.compressibility", p.compressibility)?;
+        Ok(())
+    }
+
     fn build(
         &self,
         gpu: &GpuContext,
         particle_count: usize,
-        kind: &BarostatKind,
+        params: &toml::Value,
     ) -> Result<Box<dyn Barostat>, BarostatError> {
-        match kind {
-            BarostatKind::CRescale {
-                pressure,
-                temperature,
-                tau,
-                compressibility,
-                seed,
-            } => {
-                let state = CRescaleBarostat::new(
-                    gpu,
-                    particle_count,
-                    *pressure,
-                    *temperature,
-                    *tau,
-                    *compressibility,
-                    *seed,
-                )?;
-                Ok(Box::new(state))
-            }
-            other => Err(BarostatError::UnknownKind(other.name().to_string())),
-        }
+        let p = deserialize_params(params).map_err(|_| {
+            BarostatError::UnknownKind("c-rescale (malformed params)".into())
+        })?;
+        let state = CRescaleBarostat::new(
+            gpu,
+            particle_count,
+            p.pressure,
+            p.temperature,
+            p.tau,
+            p.compressibility,
+            p.seed,
+        )?;
+        Ok(Box::new(state))
     }
 }

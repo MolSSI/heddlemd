@@ -6,7 +6,7 @@
 
 use crate::forces::{ForceField, ForceFieldError};
 use crate::gpu::{GpuContext, GpuError, ParticleBuffers};
-use crate::io::config::{BarostatKind, IntegratorKind, ThermostatKind};
+use crate::io::config::{ConfigError, SlotConfig};
 use crate::pbc::SimulationBox;
 use crate::timings::{Timings, TimingsError};
 
@@ -345,11 +345,38 @@ impl<T: Integrator> IntegratorStepExt for T {
 // rq-29e08cb5
 pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
     fn kind_name(&self) -> &'static str;
+
+    /// Validate the kind-specific parameters of an `[integrator]`
+    /// section at config-load time. Implementations deserialise the
+    /// `toml::Value` into their typed parameter struct and surface
+    /// every domain check as a `ConfigError::InvalidValue` (or one
+    /// of the more specific `ConfigError` variants).
+    fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError>;
+
+    /// `true` iff the integrator fuses its own thermostat (so
+    /// composing it with a `[thermostat]` slot is rejected at load
+    /// time). The default returns `false`.
+    fn owns_thermostat(&self, _params: &toml::Value) -> bool {
+        false
+    }
+
+    /// `true` iff the integrator fuses its own barostat. Default
+    /// `false`.
+    fn owns_barostat(&self, _params: &toml::Value) -> bool {
+        false
+    }
+
+    /// `true` iff the integrator drives the three `Constraint` slot
+    /// hooks (see `constraint-framework.md`). Default `false`.
+    fn supports_constraints(&self, _params: &toml::Value) -> bool {
+        false
+    }
+
     fn build(
         &self,
         gpu: &GpuContext,
         particle_count: usize,
-        kind: &IntegratorKind,
+        params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError>;
 }
 
@@ -379,20 +406,29 @@ impl IntegratorRegistry {
         self.builders.push(builder);
     }
 
+    /// Return the first registered builder whose `kind_name()` equals
+    /// `kind`. The runner uses this both to query compatibility
+    /// predicates and to drive `validate_params` at config-load time.
+    pub fn lookup(&self, kind: &str) -> Option<&dyn IntegratorBuilder> {
+        for b in &self.builders {
+            if b.kind_name() == kind {
+                return Some(b.as_ref());
+            }
+        }
+        None
+    }
+
     // rq-24f6b8b9
     pub fn build(
         &self,
-        kind: &IntegratorKind,
+        slot: &SlotConfig,
         gpu: &GpuContext,
         particle_count: usize,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
-        let target = kind.name();
-        for b in &self.builders {
-            if b.kind_name() == target {
-                return b.build(gpu, particle_count, kind);
-            }
-        }
-        Err(IntegratorError::UnknownKind(target.to_string()))
+        let b = self
+            .lookup(&slot.kind)
+            .ok_or_else(|| IntegratorError::UnknownKind(slot.kind.clone()))?;
+        b.build(gpu, particle_count, &slot.params)
     }
 }
 
@@ -440,11 +476,16 @@ pub trait Thermostat: std::fmt::Debug + Send {
 // rq-29e08cb5
 pub trait ThermostatBuilder: std::fmt::Debug + Send + Sync {
     fn kind_name(&self) -> &'static str;
+
+    /// Validate the kind-specific parameters of a `[thermostat]`
+    /// section at config-load time.
+    fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError>;
+
     fn build(
         &self,
         gpu: &GpuContext,
         particle_count: usize,
-        kind: &ThermostatKind,
+        params: &toml::Value,
     ) -> Result<Box<dyn Thermostat>, ThermostatError>;
 }
 
@@ -475,21 +516,27 @@ impl ThermostatRegistry {
         self.builders.push(builder);
     }
 
+    pub fn lookup(&self, kind: &str) -> Option<&dyn ThermostatBuilder> {
+        for b in &self.builders {
+            if b.kind_name() == kind {
+                return Some(b.as_ref());
+            }
+        }
+        None
+    }
+
     // rq-678c233d
     pub fn build_optional(
         &self,
-        kind: Option<&ThermostatKind>,
+        slot: Option<&SlotConfig>,
         gpu: &GpuContext,
         particle_count: usize,
     ) -> Result<Option<Box<dyn Thermostat>>, ThermostatError> {
-        let Some(kind) = kind else { return Ok(None) };
-        let target = kind.name();
-        for b in &self.builders {
-            if b.kind_name() == target {
-                return Ok(Some(b.build(gpu, particle_count, kind)?));
-            }
-        }
-        Err(ThermostatError::UnknownKind(target.to_string()))
+        let Some(slot) = slot else { return Ok(None) };
+        let b = self
+            .lookup(&slot.kind)
+            .ok_or_else(|| ThermostatError::UnknownKind(slot.kind.clone()))?;
+        Ok(Some(b.build(gpu, particle_count, &slot.params)?))
     }
 }
 
@@ -528,11 +575,16 @@ pub trait Barostat: std::fmt::Debug + Send {
 // rq-29e08cb5
 pub trait BarostatBuilder: std::fmt::Debug + Send + Sync {
     fn kind_name(&self) -> &'static str;
+
+    /// Validate the kind-specific parameters of a `[barostat]`
+    /// section at config-load time.
+    fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError>;
+
     fn build(
         &self,
         gpu: &GpuContext,
         particle_count: usize,
-        kind: &BarostatKind,
+        params: &toml::Value,
     ) -> Result<Box<dyn Barostat>, BarostatError>;
 }
 
@@ -561,26 +613,62 @@ impl BarostatRegistry {
         self.builders.push(builder);
     }
 
+    pub fn lookup(&self, kind: &str) -> Option<&dyn BarostatBuilder> {
+        for b in &self.builders {
+            if b.kind_name() == kind {
+                return Some(b.as_ref());
+            }
+        }
+        None
+    }
+
     // rq-9548bc1a
     pub fn build_optional(
         &self,
-        kind: Option<&BarostatKind>,
+        slot: Option<&SlotConfig>,
         gpu: &GpuContext,
         particle_count: usize,
     ) -> Result<Option<Box<dyn Barostat>>, BarostatError> {
-        let Some(kind) = kind else { return Ok(None) };
-        let target = kind.name();
-        for b in &self.builders {
-            if b.kind_name() == target {
-                return Ok(Some(b.build(gpu, particle_count, kind)?));
-            }
-        }
-        Err(BarostatError::UnknownKind(target.to_string()))
+        let Some(slot) = slot else { return Ok(None) };
+        let b = self
+            .lookup(&slot.kind)
+            .ok_or_else(|| BarostatError::UnknownKind(slot.kind.clone()))?;
+        Ok(Some(b.build(gpu, particle_count, &slot.params)?))
     }
 }
 
 impl Default for BarostatRegistry {
     fn default() -> Self {
         BarostatRegistry::with_builtins()
+    }
+}
+
+// rq-1f87880c — bundled handle to the four open registries the
+// config-validation API consults. The runner constructs this once via
+// `Registries::with_builtins()` and threads it through
+// `Config::validate_against` and
+// `Config::validate_constraint_compatibility`.
+#[derive(Debug)]
+pub struct Registries {
+    pub integrators: IntegratorRegistry,
+    pub thermostats: ThermostatRegistry,
+    pub barostats: BarostatRegistry,
+    pub constraint_types: ConstraintRegistry,
+}
+
+impl Registries {
+    pub fn with_builtins() -> Self {
+        Registries {
+            integrators: IntegratorRegistry::with_builtins(),
+            thermostats: ThermostatRegistry::with_builtins(),
+            barostats: BarostatRegistry::with_builtins(),
+            constraint_types: ConstraintRegistry::with_builtins(),
+        }
+    }
+}
+
+impl Default for Registries {
+    fn default() -> Self {
+        Registries::with_builtins()
     }
 }

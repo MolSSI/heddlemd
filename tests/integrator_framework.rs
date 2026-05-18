@@ -5,7 +5,7 @@ use dynamics::integrator::{
     Integrator, IntegratorBuilder, IntegratorError, IntegratorRegistry, LangevinBaoabBuilder,
     LangevinBaoabState, VelocityVerletBuilder,
 };
-use dynamics::io::IntegratorKind;
+use dynamics::io::SlotConfig;
 use dynamics::io::config::NeighborListConfig;
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
@@ -31,16 +31,18 @@ fn small_state(n: usize) -> ParticleState {
     .unwrap()
 }
 
-fn vv_kind(lossless: bool) -> IntegratorKind {
-    IntegratorKind::VelocityVerlet { lossless }
+fn vv_kind(lossless: bool) -> SlotConfig {
+    SlotConfig::from_params_str(
+        "velocity-verlet",
+        &format!("lossless = {lossless}\n"),
+    )
 }
 
-fn langevin_kind(seed: u64) -> IntegratorKind {
-    IntegratorKind::LangevinBaoab {
-        friction: 1.0e12,
-        temperature: 300.0,
-        seed,
-    }
+fn langevin_kind(seed: u64) -> SlotConfig {
+    SlotConfig::from_params_str(
+        "langevin-baoab",
+        &format!("friction = 1.0e12\ntemperature = 300.0\nseed = {seed}\n"),
+    )
 }
 
 fn box_10() -> SimulationBox {
@@ -136,11 +138,14 @@ impl IntegratorBuilder for StubBuilder {
         // when the stub is first in the builders Vec.
         "velocity-verlet"
     }
+    fn validate_params(&self, _params: &toml::Value) -> Result<(), dynamics::io::ConfigError> {
+        Ok(())
+    }
     fn build(
         &self,
         _gpu: &GpuContext,
         _particle_count: usize,
-        _kind: &IntegratorKind,
+        _params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
         Ok(Box::new(StubIntegrator))
     }
@@ -466,8 +471,6 @@ fn _imports_used() {
 use dynamics::integrator::{
     BarostatError, BarostatRegistry, ThermostatError, ThermostatRegistry,
 };
-use dynamics::io::ThermostatKind;
-
 // rq-78da0ce9
 #[test]
 fn empty_integrator_registry_reports_unknown_kind() {
@@ -489,10 +492,10 @@ fn empty_integrator_registry_reports_unknown_kind() {
 fn empty_thermostat_registry_reports_unknown_kind() {
     let gpu = init_device().unwrap();
     let registry = ThermostatRegistry::new();
-    let kind = ThermostatKind::Berendsen {
-        temperature: 300.0,
-        tau: 1.0e-13,
-    };
+    let kind = SlotConfig::from_params_str(
+        "berendsen",
+        "temperature = 300.0\ntau = 1.0e-13\n",
+    );
     let err = registry
         .build_optional(Some(&kind), &gpu, 4)
         .unwrap_err();
@@ -543,14 +546,13 @@ fn barostat_error_unknown_kind_is_constructible() {
 // VelocityVerlet does not own its thermostat; LangevinBaoab does.
 #[test]
 fn integrator_kind_owns_thermostat_matrix() {
-    let vv = IntegratorKind::VelocityVerlet { lossless: false };
-    let lan = IntegratorKind::LangevinBaoab {
-        friction: 1.0e12,
-        temperature: 300.0,
-        seed: 0,
-    };
-    assert!(!vv.owns_thermostat());
-    assert!(lan.owns_thermostat());
+    let vv = vv_kind(false);
+    let lan = langevin_kind(0);
+    let registry = IntegratorRegistry::with_builtins();
+    let vv_b = registry.lookup(&vv.kind).expect("vv builder registered");
+    let lan_b = registry.lookup(&lan.kind).expect("langevin builder registered");
+    assert!(!vv_b.owns_thermostat(&vv.params));
+    assert!(lan_b.owns_thermostat(&lan.params));
 }
 
 // Dispatch loop calls thermostat.apply_pre, integrator.step,
@@ -1037,4 +1039,122 @@ fn install_constraint_hooks_false_suppresses_all_hooks() {
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
     assert!(events.is_empty(), "expected no constraint events, got {events:?}");
+}
+
+// =====================================================================
+// Open-registry scenarios (SlotConfig + Builder predicates +
+// validate_params + lookup). See rqm/integration/framework.md.
+// =====================================================================
+
+// rq-79c53582
+#[test]
+fn populated_registry_unknown_kind_reports_unknown_kind() {
+    let gpu = init_device().unwrap();
+    let registry = IntegratorRegistry::with_builtins();
+    let slot = SlotConfig::from_params_str("no-such-integrator", "");
+    let err = registry.build(&slot, &gpu, 4).unwrap_err();
+    match err {
+        IntegratorError::UnknownKind(name) => assert_eq!(name, "no-such-integrator"),
+        other => panic!("expected UnknownKind, got {other:?}"),
+    }
+}
+
+// rq-8fbdbc0c
+#[test]
+fn lookup_returns_builder_for_registered_kind() {
+    let registry = IntegratorRegistry::with_builtins();
+    let b = registry.lookup("velocity-verlet").expect("registered");
+    assert_eq!(b.kind_name(), "velocity-verlet");
+}
+
+// rq-e8adaa9c
+#[test]
+fn lookup_returns_none_for_unregistered_kind() {
+    let registry = IntegratorRegistry::with_builtins();
+    assert!(registry.lookup("no-such-integrator").is_none());
+}
+
+// rq-e9be025b
+#[test]
+fn velocity_verlet_builder_does_not_own_thermostat_or_barostat() {
+    let registry = IntegratorRegistry::with_builtins();
+    let b = registry.lookup("velocity-verlet").unwrap();
+    let vv = SlotConfig::from_params_str("velocity-verlet", "lossless = false\n");
+    assert!(!b.owns_thermostat(&vv.params));
+    assert!(!b.owns_barostat(&vv.params));
+}
+
+// rq-4dd5d2d0
+#[test]
+fn langevin_baoab_builder_owns_thermostat_not_barostat() {
+    let registry = IntegratorRegistry::with_builtins();
+    let b = registry.lookup("langevin-baoab").unwrap();
+    let lan = SlotConfig::from_params_str(
+        "langevin-baoab",
+        "friction = 1.0e12\ntemperature = 300.0\nseed = 0\n",
+    );
+    assert!(b.owns_thermostat(&lan.params));
+    assert!(!b.owns_barostat(&lan.params));
+}
+
+// rq-95b66af0
+#[test]
+fn mtk_npt_builder_owns_thermostat_and_barostat() {
+    let registry = IntegratorRegistry::with_builtins();
+    let b = registry.lookup("mtk-npt").unwrap();
+    let mtk = SlotConfig::from_params_str(
+        "mtk-npt",
+        "temperature = 85.0\npressure = 1.0e5\ntau_t = 1.0e-13\ntau_p = 1.0e-12\nchain_length = 3\nyoshida_order = 3\nn_resp = 1\n",
+    );
+    assert!(b.owns_thermostat(&mtk.params));
+    assert!(b.owns_barostat(&mtk.params));
+}
+
+// rq-7d37c707
+#[test]
+fn velocity_verlet_supports_constraints_depends_on_lossless() {
+    let registry = IntegratorRegistry::with_builtins();
+    let b = registry.lookup("velocity-verlet").unwrap();
+    let lossy = SlotConfig::from_params_str("velocity-verlet", "lossless = false\n");
+    let lossless = SlotConfig::from_params_str("velocity-verlet", "lossless = true\n");
+    assert!(b.supports_constraints(&lossy.params));
+    assert!(!b.supports_constraints(&lossless.params));
+}
+
+// rq-084ba25b
+#[test]
+fn validate_params_accepts_well_formed_params() {
+    let registry = IntegratorRegistry::with_builtins();
+    let b = registry.lookup("velocity-verlet").unwrap();
+    let p = SlotConfig::from_params_str("velocity-verlet", "lossless = false\n");
+    b.validate_params(&p.params).unwrap();
+}
+
+// rq-cb52dec0
+#[test]
+fn validate_params_rejects_out_of_domain_field() {
+    let registry = IntegratorRegistry::with_builtins();
+    let b = registry.lookup("langevin-baoab").unwrap();
+    let p = SlotConfig::from_params_str(
+        "langevin-baoab",
+        "friction = -1.0\ntemperature = 300.0\nseed = 1\n",
+    );
+    match b.validate_params(&p.params).unwrap_err() {
+        dynamics::io::ConfigError::InvalidValue { field, .. } => {
+            assert_eq!(field, "integrator.friction");
+        }
+        other => panic!("expected InvalidValue, got {other:?}"),
+    }
+}
+
+// rq-7a076bc9
+#[test]
+fn validate_params_rejects_unknown_field() {
+    let registry = IntegratorRegistry::with_builtins();
+    let b = registry.lookup("velocity-verlet").unwrap();
+    let p = SlotConfig::from_params_str("velocity-verlet", "lossless = false\njunk = true\n");
+    match b.validate_params(&p.params).unwrap_err() {
+        dynamics::io::ConfigError::Parse { .. } => {}
+        other => panic!("expected Parse, got {other:?}"),
+    }
 }

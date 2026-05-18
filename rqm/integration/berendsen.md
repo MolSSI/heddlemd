@@ -92,7 +92,7 @@ and are not part of this slot's per-step sequence.
 
 ## Parameters <!-- rq-e3243e24 -->
 
-Config layer fields set on `ThermostatKind::Berendsen`:
+The matching builder deserialises a typed `BerendsenParams` from the `[thermostat]` section's `SlotConfig::params` (see `framework.md`); the per-field reference below documents that parameter struct:
 
 - `temperature: f64` — bath temperature `T` in kelvin. Required.
   Finite and strictly positive. Independent of
@@ -169,7 +169,7 @@ systematic non-`O(dt²)` drift indicates an implementation bug.
 
 - `BerendsenBuilder` — implements `ThermostatBuilder` with <!-- rq-6c9037a4 -->
   `kind_name() == "berendsen"`. `build(device, particle_count, kind)`
-  matches against `ThermostatKind::Berendsen { … }`, allocates the
+  deserialises `BerendsenParams` from `params`, allocates the
   length-1 `ke_scratch` device buffer, and returns the boxed
   `BerendsenThermostat`.
 

@@ -1,7 +1,36 @@
 use std::path::{Path, PathBuf};
 
-use dynamics::io::config::ConstraintTypeConfig;
-use dynamics::io::{ConfigError, NeighborListConfig, PathRole, load_config};
+use dynamics::integrator::{
+    IntegratorRegistry, Registries,
+};
+use dynamics::io::config::NamedSlotConfig;
+use dynamics::io::{ConfigError, NeighborListConfig, PathRole, SlotConfig, load_config};
+
+fn param_f64(slot: &SlotConfig, key: &str) -> f64 {
+    slot.params.get(key).and_then(|v| v.as_float()).unwrap()
+}
+
+fn param_u64(slot: &SlotConfig, key: &str) -> u64 {
+    slot.params
+        .get(key)
+        .and_then(|v| v.as_integer())
+        .map(|i| i as u64)
+        .unwrap()
+}
+
+fn param_bool(slot: &SlotConfig, key: &str) -> bool {
+    slot.params.get(key).and_then(|v| v.as_bool()).unwrap()
+}
+
+/// Same as `param_bool` but returns `default` when the field is absent.
+/// Useful for testing that optional kind-specific fields like
+/// `lossless` are not required to round-trip through `Config`.
+fn param_bool_or(slot: &SlotConfig, key: &str, default: bool) -> bool {
+    slot.params
+        .get(key)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(default)
+}
 
 fn tmp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -96,10 +125,8 @@ fn load_valid_minimal_config() {
     assert_eq!(cfg.simulation.n_steps, 10);
     assert_eq!(cfg.simulation.dt, 1.0e-15);
     assert_eq!(cfg.simulation.temperature, 300.0);
-    assert!(matches!(
-        cfg.integrator,
-        dynamics::io::IntegratorKind::VelocityVerlet { lossless: false }
-    ));
+    assert_eq!(cfg.integrator.kind, "velocity-verlet");
+    assert!(!param_bool(&cfg.integrator, "lossless"));
     assert_eq!(cfg.particle_types.len(), 1);
     assert_eq!(cfg.particle_types[0].name, "Ar");
     assert_eq!(cfg.particle_types[0].mass, 6.6335e-26);
@@ -1145,7 +1172,13 @@ fn unknown_integrator_kind() {
     let dir = tmp_path("unknown_integrator_kind");
     let body = minimal_config().replace("kind = \"velocity-verlet\"", "kind = \"custom\"");
     let path = write_config(&dir, &body);
-    assert_parse(&load_config(&path).unwrap_err(), "integrator.kind");
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownKind { slot, kind } => {
+            assert_eq!(slot, "integrator");
+            assert_eq!(kind, "custom");
+        }
+        other => panic!("expected UnknownKind, got {other:?}"),
+    }
 }
 
 // rq-86aa2be7
@@ -1158,18 +1191,10 @@ fn langevin_with_valid_parameters_accepted() {
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match cfg.integrator {
-        dynamics::io::IntegratorKind::LangevinBaoab {
-            friction,
-            temperature,
-            seed,
-        } => {
-            assert_eq!(friction, 1.0e12);
-            assert_eq!(temperature, 300.0);
-            assert_eq!(seed, 42);
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
+    assert_eq!(cfg.integrator.kind, "langevin-baoab");
+    assert_eq!(param_f64(&cfg.integrator, "friction"), 1.0e12);
+    assert_eq!(param_f64(&cfg.integrator, "temperature"), 300.0);
+    assert_eq!(param_u64(&cfg.integrator, "seed"), 42);
 }
 
 // rq-40ed9975
@@ -1312,10 +1337,8 @@ fn vv_lossless_defaults_to_false() {
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert!(matches!(
-        cfg.integrator,
-        dynamics::io::IntegratorKind::VelocityVerlet { lossless: false }
-    ));
+    assert_eq!(cfg.integrator.kind, "velocity-verlet");
+    assert!(!param_bool_or(&cfg.integrator, "lossless", false));
 }
 
 // rq-6cb9ab62
@@ -1926,7 +1949,13 @@ fn thermostat_unknown_kind_rejected() {
 kind = "not-a-real-thermostat""#,
     );
     let path = write_config(&dir, &body);
-    assert_parse(&load_config(&path).unwrap_err(), "thermostat.kind");
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownKind { slot, kind } => {
+            assert_eq!(slot, "thermostat");
+            assert_eq!(kind, "not-a-real-thermostat");
+        }
+        other => panic!("expected UnknownKind, got {other:?}"),
+    }
 }
 
 #[test]
@@ -1956,22 +1985,16 @@ tau = 1.0e-13"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match cfg.thermostat.as_ref().unwrap() {
-        dynamics::io::ThermostatKind::NoseHooverChain {
-            temperature,
-            tau,
-            chain_length,
-            yoshida_order,
-            n_resp,
-        } => {
-            assert_eq!(*temperature, 300.0);
-            assert_eq!(*tau, 1.0e-13);
-            assert_eq!(*chain_length, 3);
-            assert_eq!(*yoshida_order, 3);
-            assert_eq!(*n_resp, 1);
-        }
-        other => panic!("expected NHC, got {other:?}"),
-    }
+    let t = cfg.thermostat.as_ref().unwrap();
+    assert_eq!(t.kind, "nose-hoover-chain");
+    assert_eq!(param_f64(t, "temperature"), 300.0);
+    assert_eq!(param_f64(t, "tau"), 1.0e-13);
+    // Defaults for the optional fields are applied by the builder's
+    // validate_params / build at consume time; not present in the
+    // parsed params (they were not in the TOML).
+    assert!(t.params.get("chain_length").is_none());
+    assert!(t.params.get("yoshida_order").is_none());
+    assert!(t.params.get("n_resp").is_none());
 }
 
 #[test]
@@ -1988,19 +2011,11 @@ n_resp = 2"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match cfg.thermostat.as_ref().unwrap() {
-        dynamics::io::ThermostatKind::NoseHooverChain {
-            chain_length,
-            yoshida_order,
-            n_resp,
-            ..
-        } => {
-            assert_eq!(*chain_length, 5);
-            assert_eq!(*yoshida_order, 5);
-            assert_eq!(*n_resp, 2);
-        }
-        other => panic!("expected NHC, got {other:?}"),
-    }
+    let t = cfg.thermostat.as_ref().unwrap();
+    assert_eq!(t.kind, "nose-hoover-chain");
+    assert_eq!(param_u64(t, "chain_length"), 5);
+    assert_eq!(param_u64(t, "yoshida_order"), 5);
+    assert_eq!(param_u64(t, "n_resp"), 2);
 }
 
 #[test]
@@ -2188,14 +2203,11 @@ seed = 42"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match cfg.thermostat.as_ref().unwrap() {
-        dynamics::io::ThermostatKind::Csvr { temperature, tau, seed } => {
-            assert_eq!(*temperature, 300.0);
-            assert_eq!(*tau, 1.0e-13);
-            assert_eq!(*seed, 42);
-        }
-        other => panic!("expected Csvr, got {other:?}"),
-    }
+    let t = cfg.thermostat.as_ref().unwrap();
+    assert_eq!(t.kind, "csvr");
+    assert_eq!(param_f64(t, "temperature"), 300.0);
+    assert_eq!(param_f64(t, "tau"), 1.0e-13);
+    assert_eq!(param_u64(t, "seed"), 42);
 }
 
 #[test]
@@ -2231,18 +2243,11 @@ seed = 42"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match cfg.thermostat.as_ref().unwrap() {
-        dynamics::io::ThermostatKind::Andersen {
-            temperature,
-            collision_rate,
-            seed,
-        } => {
-            assert_eq!(*temperature, 300.0);
-            assert_eq!(*collision_rate, 1.0e12);
-            assert_eq!(*seed, 42);
-        }
-        other => panic!("expected Andersen, got {other:?}"),
-    }
+    let t = cfg.thermostat.as_ref().unwrap();
+    assert_eq!(t.kind, "andersen");
+    assert_eq!(param_f64(t, "temperature"), 300.0);
+    assert_eq!(param_f64(t, "collision_rate"), 1.0e12);
+    assert_eq!(param_u64(t, "seed"), 42);
 }
 
 #[test]
@@ -2257,12 +2262,9 @@ seed = 42"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match cfg.thermostat.as_ref().unwrap() {
-        dynamics::io::ThermostatKind::Andersen { collision_rate, .. } => {
-            assert_eq!(*collision_rate, 0.0);
-        }
-        other => panic!("unexpected: {other:?}"),
-    }
+    let t = cfg.thermostat.as_ref().unwrap();
+    assert_eq!(t.kind, "andersen");
+    assert_eq!(param_f64(t, "collision_rate"), 0.0);
 }
 
 #[test]
@@ -2298,13 +2300,10 @@ tau = 1.0e-13"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match cfg.thermostat.as_ref().unwrap() {
-        dynamics::io::ThermostatKind::Berendsen { temperature, tau } => {
-            assert_eq!(*temperature, 300.0);
-            assert_eq!(*tau, 1.0e-13);
-        }
-        other => panic!("expected Berendsen, got {other:?}"),
-    }
+    let t = cfg.thermostat.as_ref().unwrap();
+    assert_eq!(t.kind, "berendsen");
+    assert_eq!(param_f64(t, "temperature"), 300.0);
+    assert_eq!(param_f64(t, "tau"), 1.0e-13);
 }
 
 // Berendsen extra-fields coverage lives in the parameterised
@@ -2370,58 +2369,54 @@ seed = 1"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert!(matches!(
-        cfg.integrator,
-        dynamics::io::IntegratorKind::VelocityVerlet { .. }
-    ));
-    assert!(matches!(
-        cfg.thermostat,
-        Some(dynamics::io::ThermostatKind::Csvr { .. })
-    ));
+    assert_eq!(cfg.integrator.kind, "velocity-verlet");
+    assert_eq!(cfg.thermostat.as_ref().unwrap().kind, "csvr");
 }
 
 #[test]
 fn integrator_kind_owns_thermostat_matrix_config_layer() {
-    let vv = dynamics::io::IntegratorKind::VelocityVerlet { lossless: false };
-    let lan = dynamics::io::IntegratorKind::LangevinBaoab {
-        friction: 1.0e12,
-        temperature: 300.0,
-        seed: 0,
+    let registry = IntegratorRegistry::with_builtins();
+    let vv = SlotConfig::from_params_str("velocity-verlet", "lossless = false\n");
+    let lan = SlotConfig::from_params_str(
+        "langevin-baoab",
+        "friction = 1.0e12\ntemperature = 300.0\nseed = 0\n",
+    );
+    let mtk = SlotConfig::from_params_str(
+        "mtk-npt",
+        "temperature = 85.0\npressure = 1.0e5\ntau_t = 1.0e-13\ntau_p = 1.0e-12\nchain_length = 3\nyoshida_order = 3\nn_resp = 1\n",
+    );
+    let owns = |slot: &SlotConfig| {
+        registry
+            .lookup(&slot.kind)
+            .unwrap()
+            .owns_thermostat(&slot.params)
     };
-    let mtk = dynamics::io::IntegratorKind::MtkNpt {
-        temperature: 85.0,
-        pressure: 1.0e5,
-        tau_t: 1.0e-13,
-        tau_p: 1.0e-12,
-        chain_length: 3,
-        yoshida_order: 3,
-        n_resp: 1,
-    };
-    assert!(!vv.owns_thermostat());
-    assert!(lan.owns_thermostat());
-    assert!(mtk.owns_thermostat());
+    assert!(!owns(&vv));
+    assert!(owns(&lan));
+    assert!(owns(&mtk));
 }
 
 #[test]
 fn integrator_kind_owns_barostat_matrix_config_layer() {
-    let vv = dynamics::io::IntegratorKind::VelocityVerlet { lossless: false };
-    let lan = dynamics::io::IntegratorKind::LangevinBaoab {
-        friction: 1.0e12,
-        temperature: 300.0,
-        seed: 0,
+    let registry = IntegratorRegistry::with_builtins();
+    let vv = SlotConfig::from_params_str("velocity-verlet", "lossless = false\n");
+    let lan = SlotConfig::from_params_str(
+        "langevin-baoab",
+        "friction = 1.0e12\ntemperature = 300.0\nseed = 0\n",
+    );
+    let mtk = SlotConfig::from_params_str(
+        "mtk-npt",
+        "temperature = 85.0\npressure = 1.0e5\ntau_t = 1.0e-13\ntau_p = 1.0e-12\nchain_length = 3\nyoshida_order = 3\nn_resp = 1\n",
+    );
+    let owns = |slot: &SlotConfig| {
+        registry
+            .lookup(&slot.kind)
+            .unwrap()
+            .owns_barostat(&slot.params)
     };
-    let mtk = dynamics::io::IntegratorKind::MtkNpt {
-        temperature: 85.0,
-        pressure: 1.0e5,
-        tau_t: 1.0e-13,
-        tau_p: 1.0e-12,
-        chain_length: 3,
-        yoshida_order: 3,
-        n_resp: 1,
-    };
-    assert!(!vv.owns_barostat());
-    assert!(!lan.owns_barostat());
-    assert!(mtk.owns_barostat());
+    assert!(!owns(&vv));
+    assert!(!owns(&lan));
+    assert!(owns(&mtk));
 }
 
 // --- mtk-npt parsing + incompatibility ---
@@ -2465,26 +2460,18 @@ fn mtk_npt_with_defaults_accepted() {
     let body = mtk_minimal_body("");
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match cfg.integrator {
-        dynamics::io::IntegratorKind::MtkNpt {
-            temperature,
-            pressure,
-            tau_t,
-            tau_p,
-            chain_length,
-            yoshida_order,
-            n_resp,
-        } => {
-            assert_eq!(temperature, 85.0);
-            assert_eq!(pressure, 1.0e5);
-            assert_eq!(tau_t, 1.0e-13);
-            assert_eq!(tau_p, 1.0e-12);
-            assert_eq!(chain_length, 3);
-            assert_eq!(yoshida_order, 3);
-            assert_eq!(n_resp, 1);
-        }
-        other => panic!("expected MtkNpt, got {other:?}"),
-    }
+    let i = &cfg.integrator;
+    assert_eq!(i.kind, "mtk-npt");
+    assert_eq!(param_f64(i, "temperature"), 85.0);
+    assert_eq!(param_f64(i, "pressure"), 1.0e5);
+    assert_eq!(param_f64(i, "tau_t"), 1.0e-13);
+    assert_eq!(param_f64(i, "tau_p"), 1.0e-12);
+    // chain_length, yoshida_order, n_resp are not in the TOML; the
+    // builder applies its serde defaults during build, but the raw
+    // params on the SlotConfig only carry the user-provided fields.
+    assert!(i.params.get("chain_length").is_none());
+    assert!(i.params.get("yoshida_order").is_none());
+    assert!(i.params.get("n_resp").is_none());
 }
 
 #[test]
@@ -2649,7 +2636,13 @@ cutoff = 1.0e-9
 "#
     );
     let path = write_config(&dir, &body);
-    assert_parse(&load_config(&path).unwrap_err(), "barostat.kind");
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownKind { slot, kind } => {
+            assert_eq!(slot, "barostat");
+            assert_eq!(kind, "not-a-real-barostat");
+        }
+        other => panic!("expected UnknownKind, got {other:?}"),
+    }
 }
 
 // Helper for the [barostat] kind="berendsen" scenarios below: the
@@ -2698,18 +2691,11 @@ compressibility = 4.5e-10"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match cfg.barostat.as_ref().unwrap() {
-        dynamics::io::BarostatKind::Berendsen {
-            pressure,
-            tau,
-            compressibility,
-        } => {
-            assert_eq!(*pressure, 1.0e5);
-            assert_eq!(*tau, 1.0e-12);
-            assert_eq!(*compressibility, 4.5e-10);
-        }
-        other => panic!("expected Berendsen, got {other:?}"),
-    }
+    let b = cfg.barostat.as_ref().unwrap();
+    assert_eq!(b.kind, "berendsen");
+    assert_eq!(param_f64(b, "pressure"), 1.0e5);
+    assert_eq!(param_f64(b, "tau"), 1.0e-12);
+    assert_eq!(param_f64(b, "compressibility"), 4.5e-10);
 }
 
 #[test]
@@ -2866,22 +2852,13 @@ seed = 42"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match cfg.barostat.as_ref().unwrap() {
-        dynamics::io::BarostatKind::CRescale {
-            pressure,
-            temperature,
-            tau,
-            compressibility,
-            seed,
-        } => {
-            assert_eq!(*pressure, 1.0e5);
-            assert_eq!(*temperature, 85.0);
-            assert_eq!(*tau, 1.0e-12);
-            assert_eq!(*compressibility, 4.5e-10);
-            assert_eq!(*seed, 42);
-        }
-        other => panic!("expected CRescale, got {other:?}"),
-    }
+    let b = cfg.barostat.as_ref().unwrap();
+    assert_eq!(b.kind, "c-rescale");
+    assert_eq!(param_f64(b, "pressure"), 1.0e5);
+    assert_eq!(param_f64(b, "temperature"), 85.0);
+    assert_eq!(param_f64(b, "tau"), 1.0e-12);
+    assert_eq!(param_f64(b, "compressibility"), 4.5e-10);
+    assert_eq!(param_u64(b, "seed"), 42);
 }
 
 #[test]
@@ -3054,17 +3031,15 @@ fn load_constraint_types_settle_water() {
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
     assert_eq!(cfg.constraint_types.len(), 1);
-    match &cfg.constraint_types[0] {
-        ConstraintTypeConfig::SettleWater { name, r_oh, r_hh } => {
-            assert_eq!(name, "SPCE");
-            assert_eq!(*r_oh, 1.0e-10);
-            assert_eq!(*r_hh, 1.633e-10);
-            assert_eq!(
-                cfg.constraint_types[0].expected_atom_count(),
-                3
-            );
-        }
-    }
+    let ct = &cfg.constraint_types[0];
+    assert_eq!(ct.name, "SPCE");
+    assert_eq!(ct.kind, "settle-water");
+    assert_eq!(ct.params.get("r_oh").unwrap().as_float().unwrap(), 1.0e-10);
+    assert_eq!(ct.params.get("r_hh").unwrap().as_float().unwrap(), 1.633e-10);
+    // SETTLE expects three atoms per group; resolved via the registry.
+    let registries = Registries::with_builtins();
+    let builder = registries.constraint_types.lookup("settle-water").unwrap();
+    assert_eq!(builder.expected_atom_count(&ct.params), 3);
 }
 
 #[test]
@@ -3097,40 +3072,42 @@ fn reject_duplicate_constraint_type_name() {
     }
 }
 
+fn supports_constraints_for(kind: &SlotConfig) -> bool {
+    let registry = IntegratorRegistry::with_builtins();
+    registry
+        .lookup(&kind.kind)
+        .unwrap()
+        .supports_constraints(&kind.params)
+}
+
 #[test]
 fn supports_constraints_velocity_verlet_lossy_true() {
-    let kind = dynamics::io::config::IntegratorKind::VelocityVerlet { lossless: false };
-    assert!(kind.supports_constraints());
+    let k = SlotConfig::from_params_str("velocity-verlet", "lossless = false\n");
+    assert!(supports_constraints_for(&k));
 }
 
 #[test]
 fn supports_constraints_velocity_verlet_lossless_false() {
-    let kind = dynamics::io::config::IntegratorKind::VelocityVerlet { lossless: true };
-    assert!(!kind.supports_constraints());
+    let k = SlotConfig::from_params_str("velocity-verlet", "lossless = true\n");
+    assert!(!supports_constraints_for(&k));
 }
 
 #[test]
 fn supports_constraints_langevin_baoab_false() {
-    let kind = dynamics::io::config::IntegratorKind::LangevinBaoab {
-        friction: 1.0e12,
-        temperature: 300.0,
-        seed: 0,
-    };
-    assert!(!kind.supports_constraints());
+    let k = SlotConfig::from_params_str(
+        "langevin-baoab",
+        "friction = 1.0e12\ntemperature = 300.0\nseed = 0\n",
+    );
+    assert!(!supports_constraints_for(&k));
 }
 
 #[test]
 fn supports_constraints_mtk_npt_false() {
-    let kind = dynamics::io::config::IntegratorKind::MtkNpt {
-        temperature: 85.0,
-        pressure: 1.0e5,
-        tau_t: 1.0e-13,
-        tau_p: 1.0e-12,
-        chain_length: 3,
-        yoshida_order: 3,
-        n_resp: 1,
-    };
-    assert!(!kind.supports_constraints());
+    let k = SlotConfig::from_params_str(
+        "mtk-npt",
+        "temperature = 85.0\npressure = 1.0e5\ntau_t = 1.0e-13\ntau_p = 1.0e-12\nchain_length = 3\nyoshida_order = 3\nn_resp = 1\n",
+    );
+    assert!(!supports_constraints_for(&k));
 }
 
 #[test]
@@ -3166,7 +3143,8 @@ cutoff = 1.0e-9
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match cfg.validate_constraint_compatibility(true).unwrap_err() {
+    let registries = Registries::with_builtins();
+    match cfg.validate_constraint_compatibility(&registries, true).unwrap_err() {
         ConfigError::IncompatibleConstraint { integrator } => {
             assert_eq!(integrator, "langevin-baoab");
         }
@@ -3180,7 +3158,8 @@ fn validate_constraint_compatibility_accepts_velocity_verlet_lossy() {
     let body = minimal_config();
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert!(cfg.validate_constraint_compatibility(true).is_ok());
+    let registries = Registries::with_builtins();
+    assert!(cfg.validate_constraint_compatibility(&registries, true).is_ok());
 }
 
 #[test]
@@ -3214,7 +3193,8 @@ cutoff = 1.0e-9
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    match cfg.validate_constraint_compatibility(true).unwrap_err() {
+    let registries = Registries::with_builtins();
+    match cfg.validate_constraint_compatibility(&registries, true).unwrap_err() {
         ConfigError::IncompatibleConstraint { integrator } => {
             assert_eq!(integrator, "velocity-verlet");
         }

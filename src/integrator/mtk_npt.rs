@@ -8,7 +8,59 @@ use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy, compute_total_virial,
     mtk_position_drift, mtk_velocity_half_kick, rescale_velocities,
 };
-use crate::io::config::IntegratorKind;
+use crate::io::config::ConfigError;
+use serde::Deserialize;
+
+// rq-1f87880c — typed parameter struct for the "mtk-npt" builder.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MtkNptParams {
+    pub temperature: f64,
+    pub pressure: f64,
+    pub tau_t: f64,
+    pub tau_p: f64,
+    #[serde(default = "default_chain_length")]
+    pub chain_length: u32,
+    #[serde(default = "default_yoshida_order")]
+    pub yoshida_order: u32,
+    #[serde(default = "default_n_resp")]
+    pub n_resp: u32,
+}
+
+fn default_chain_length() -> u32 { 3 }
+fn default_yoshida_order() -> u32 { 3 }
+fn default_n_resp() -> u32 { 1 }
+
+fn deserialize_params(params: &toml::Value) -> Result<MtkNptParams, ConfigError> {
+    params
+        .clone()
+        .try_into::<MtkNptParams>()
+        .map_err(|e| crate::io::config::translate_params_error("integrator", e))
+}
+
+fn invalid(field: impl Into<String>, reason: impl Into<String>) -> ConfigError {
+    ConfigError::InvalidValue {
+        field: field.into(),
+        reason: reason.into(),
+    }
+}
+
+fn require_finite(field: &str, value: f64) -> Result<(), ConfigError> {
+    if !value.is_finite() {
+        return Err(invalid(field, format!("value must be finite, got {value}")));
+    }
+    Ok(())
+}
+
+fn require_finite_positive(field: &str, value: f64) -> Result<(), ConfigError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(invalid(
+            field,
+            format!("value must be finite and strictly positive, got {value}"),
+        ));
+    }
+    Ok(())
+}
 use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -398,36 +450,55 @@ impl IntegratorBuilder for MtkNptBuilder {
         "mtk-npt"
     }
 
+    fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
+        let p = deserialize_params(params)?;
+        require_finite_positive("integrator.temperature", p.temperature)?;
+        require_finite("integrator.pressure", p.pressure)?;
+        require_finite_positive("integrator.tau_t", p.tau_t)?;
+        require_finite_positive("integrator.tau_p", p.tau_p)?;
+        if p.chain_length < 1 {
+            return Err(invalid(
+                "integrator.chain_length",
+                "chain_length must be a positive integer",
+            ));
+        }
+        if !matches!(p.yoshida_order, 1 | 3 | 5 | 7) {
+            return Err(invalid(
+                "integrator.yoshida_order",
+                "yoshida_order must be one of 1, 3, 5, 7",
+            ));
+        }
+        if p.n_resp < 1 {
+            return Err(invalid(
+                "integrator.n_resp",
+                "n_resp must be a positive integer",
+            ));
+        }
+        Ok(())
+    }
+
+    fn owns_thermostat(&self, _params: &toml::Value) -> bool { true }
+    fn owns_barostat(&self, _params: &toml::Value) -> bool { true }
+
     fn build(
         &self,
         gpu: &GpuContext,
         particle_count: usize,
-        kind: &IntegratorKind,
+        params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
-        match kind {
-            IntegratorKind::MtkNpt {
-                temperature,
-                pressure,
-                tau_t,
-                tau_p,
-                chain_length,
-                yoshida_order,
-                n_resp,
-            } => {
-                let state = MtkNptIntegrator::new(
-                    gpu,
-                    particle_count,
-                    *temperature,
-                    *pressure,
-                    *tau_t,
-                    *tau_p,
-                    *chain_length,
-                    *yoshida_order,
-                    *n_resp,
-                )?;
-                Ok(Box::new(state))
-            }
-            other => Err(IntegratorError::UnknownKind(other.name().to_string())),
-        }
+        let p = deserialize_params(params)
+            .map_err(|_| IntegratorError::UnknownKind("mtk-npt (malformed params)".into()))?;
+        let state = MtkNptIntegrator::new(
+            gpu,
+            particle_count,
+            p.temperature,
+            p.pressure,
+            p.tau_t,
+            p.tau_p,
+            p.chain_length,
+            p.yoshida_order,
+            p.n_resp,
+        )?;
+        Ok(Box::new(state))
     }
 }

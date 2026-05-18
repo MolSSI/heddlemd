@@ -162,7 +162,7 @@ n_resp = 1`, that is `2 + 6 = 8` thermostat-related launches per step.
 
 ## Parameters <!-- rq-d6cf8e86 -->
 
-Config layer fields set on `ThermostatKind::NoseHooverChain`:
+The matching builder deserialises a typed `NoseHooverChainParams` from the `[thermostat]` section's `SlotConfig::params` (see `framework.md`); the per-field reference below documents that parameter struct:
 
 - `temperature: f64` — bath temperature `T` in kelvin. Required. Finite
   and strictly positive. Independent of `simulation.temperature`, which
@@ -282,7 +282,7 @@ by the runner at log-write time.
 
 - `NoseHooverChainBuilder` — implements `ThermostatBuilder` with <!-- rq-4bd6ff2b -->
   `kind_name() == "nose-hoover-chain"`. `build(device, particle_count,
-  kind)` matches against `ThermostatKind::NoseHooverChain { … }`,
+  kind)` deserialises `NoseHooverChainParams` from `params`,
   allocates the chain state, precomputes `q_mass` and the
   Suzuki-Yoshida weights, allocates the length-1 `ke_scratch` device
   buffer, and returns the boxed `NoseHooverChainThermostat`.

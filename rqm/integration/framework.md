@@ -34,14 +34,15 @@ Some integrators own their own thermostat (the O step in Langevin
 BAOAB *is* the Ornstein-Uhlenbeck thermostat); some additionally own
 their own barostat (the MTK NPT integrator carries an extended-system
 cell DOF and its own thermostat chains on both the particles and the
-cell). Those integrators declare ownership through
-`IntegratorKind::owns_thermostat()` and
-`IntegratorKind::owns_barostat()`, and the config loader rejects
-co-configured `[thermostat]` / `[barostat]` tables at load time. An
-analogous predicate `IntegratorKind::supports_constraints()` gates
-the constraint slot: integrators that do not drive the constraint
-hooks are incompatible with a non-empty `[constraints]` topology
-section. See `constraint-framework.md` for the full rule.
+cell). Those integrators declare ownership through their builder's
+`IntegratorBuilder::owns_thermostat(&params)` and
+`IntegratorBuilder::owns_barostat(&params)` predicate methods, and
+the config loader rejects co-configured `[thermostat]` /
+`[barostat]` tables at load time. An analogous predicate
+`IntegratorBuilder::supports_constraints(&params)` gates the
+constraint slot: integrators that do not drive the constraint hooks
+are incompatible with a non-empty `[constraints]` topology section.
+See `constraint-framework.md` for the full rule.
 
 ## Slots <!-- rq-f8bb021a -->
 
@@ -95,7 +96,8 @@ The runner drives the timestep loop in a fixed pattern:
 loop step in 1..=n_steps:
     if let Some(t) = thermostat { t.apply_pre(buffers, dt, timings) }
     let plan = integrator.plan(dt)
-    let install_hooks = constraint.is_some() && integrator_kind.supports_constraints()
+    let install_hooks = constraint.is_some()
+        && integrator_builder.supports_constraints(&integrator_slot.params)
     for (i, sub) in plan.steps.iter().enumerate():
         let is_drift = matches!(sub, SubStep::Drift{..} | SubStep::KickDrift{..})
         if install_hooks && is_drift {
@@ -131,10 +133,10 @@ It receives no `&mut ForceField` because force evaluation is dispatched
 by the runner, not the integrator. The integrator's per-sub-step
 kernel launches bracket their own timings stages.
 
-When `constraint` is `None`, when the integrator's
-`IntegratorKind::supports_constraints()` returns `false`, or when the
-plan has no Drift / KickDrift sub-steps, no constraint hooks fire and
-the loop reduces to a straight plan walk. The integrator code never
+When `constraint` is `None`, when the integrator's builder's
+`supports_constraints(&params)` returns `false`, or when the plan
+has no Drift / KickDrift sub-steps, no constraint hooks fire and the
+loop reduces to a straight plan walk. The integrator code never
 mentions the constraint slot.
 
 The runner's `step` value is local to the timestep loop; it gates
@@ -171,16 +173,20 @@ default registry follows this contract.
 
 The runner constructs all three slots after `init_device` returns and
 immediately after the `Timings` instance is created. Construction
-draws from the parsed `IntegratorKind`, optional `ThermostatKind`,
-and optional `BarostatKind` config variants; the runner queries an
-`IntegratorRegistry`, `ThermostatRegistry`, and `BarostatRegistry`
-with the parsed kind's name and payload to obtain
-`Box<dyn Integrator>`, `Option<Box<dyn Thermostat>>`, and
-`Option<Box<dyn Barostat>>`. Per-particle device buffers (when an
-implementation needs them — for example, `LosslessBuffers` for the
-lossless velocity-Verlet mode, or `ke_scratch` for the kinetic-energy
-reduction used by every thermostat) are allocated on the runner's
-`Arc<CudaDevice>` inside each builder.
+draws from one parsed `SlotConfig` for the integrator and optional
+`SlotConfig`s for the thermostat and barostat (see
+`io/config-schema.md`). Each `SlotConfig` carries a `kind: String`
+naming one of the registered builders plus a `params: toml::Value`
+holding the kind-specific parameters in raw form. The runner consults
+the corresponding `IntegratorRegistry`, `ThermostatRegistry`, or
+`BarostatRegistry`, looks up the builder by name, and calls its
+`build` method to obtain a `Box<dyn Integrator>`,
+`Option<Box<dyn Thermostat>>`, or `Option<Box<dyn Barostat>>`.
+Per-particle device buffers (when an implementation needs them — for
+example, `LosslessBuffers` for the lossless velocity-Verlet mode, or
+`ke_scratch` for the kinetic-energy reduction used by every
+thermostat) are allocated on the runner's `Arc<CudaDevice>` inside
+each builder.
 
 Every slot's allocations persist for the lifetime of the run and are
 dropped together with the rest of the runner's GPU resources at end
@@ -189,18 +195,31 @@ state ever crosses to another `Arc<CudaDevice>`.
 
 ## Compatibility Rules <!-- rq-9913daee -->
 
-- An integrator that owns its own thermostat
-  (`IntegratorKind::owns_thermostat()` returns `true`) is incompatible
-  with any configured `[thermostat]`. `load_config` returns
+The compatibility predicates an integrator answers — `owns_thermostat`,
+`owns_barostat`, `supports_constraints` — live on the
+`IntegratorBuilder` trait and take the integrator's parsed
+`toml::Value` parameters as input. The runner consults the registered
+builder (looked up by `kind` name) and asks the predicate after
+parsing the config and before constructing any GPU state.
+
+- An integrator whose
+  `IntegratorBuilder::owns_thermostat(&params)` returns `true` is
+  incompatible with any configured `[thermostat]`. `load_config` (with
+  registry access via `Config::validate_against`, see
+  `io/config-schema.md`) returns
   `ConfigError::IncompatibleThermostat { integrator: <kind name> }`
   when the user configures both. `langevin-baoab` and `mtk-npt` are
   the integrators in the default registry that own their thermostat.
-- An integrator that owns its own barostat
-  (`IntegratorKind::owns_barostat()` returns `true`) is incompatible
-  with any configured `[barostat]`. `load_config` returns
+- An integrator whose
+  `IntegratorBuilder::owns_barostat(&params)` returns `true` is
+  incompatible with any configured `[barostat]`.
   `ConfigError::IncompatibleBarostat { integrator: <kind name> }`
-  when the user configures both. `mtk-npt` is the only integrator
-  in the default registry that owns its barostat.
+  fires for the same reason. `mtk-npt` is the only integrator in the
+  default registry that owns its barostat.
+- An integrator whose
+  `IntegratorBuilder::supports_constraints(&params)` returns `false`
+  is incompatible with a non-empty topology `[constraints]` section
+  (see `constraint-framework.md`).
 - The thermostat slot is optional. When `[thermostat]` is omitted,
   the runner holds `None` and skips both `apply_pre` and `apply_post`
   hooks. This is how the user expresses NVE composition (or a
@@ -211,6 +230,12 @@ state ever crosses to another `Arc<CudaDevice>`.
 - The `[thermostat]` and `[barostat]` slots accept at most one entry
   each per run. Composing multiple simultaneous thermostats or
   multiple simultaneous barostats is out of scope.
+
+The predicates may depend on the slot's parsed `params`. For example,
+`velocity-verlet`'s `supports_constraints` returns `true` when
+`params.lossless == false` and `false` when `params.lossless == true`.
+The builder is the single authority on these predicates because it is
+the only component that understands its own parameter shape.
 
 ## Empty State <!-- rq-0bb735c9 -->
 
@@ -424,84 +449,124 @@ successfully.
     change-detection path (`forces/neighbor-list.md`,
     `forces/spme.md`).
 
-- `IntegratorKind`, `ThermostatKind`, `BarostatKind` — tagged enums <!-- rq-1f87880c -->
-  carrying the parsed config-level selection and per-kind parameters.
-  All three live alongside the rest of the config types in
-  `crate::io::config`; their variants, fields, and TOML mapping are
-  defined in `io/config-schema.md`.
-
-  Each enum exposes `name(&self) -> &'static str` returning the same
-  string the corresponding registry uses as the lookup key. This is
-  the bridge between the closed config-level enums and the open
-  registries.
-
-  `IntegratorKind` additionally exposes:
+- `SlotConfig` — open-shaped parsed slot selection. Lives alongside <!-- rq-1f87880c -->
+  the rest of the config types in `crate::io::config`. Its TOML
+  mapping is defined in `io/config-schema.md`.
 
   ```rust
-  pub fn owns_thermostat(&self) -> bool;
-  pub fn owns_barostat(&self) -> bool;
-  pub fn supports_constraints(&self) -> bool;
+  pub struct SlotConfig {
+      pub kind: String,
+      pub params: toml::Value,
+  }
   ```
 
-  `owns_thermostat` returns `true` for variants whose integrator
-  fuses its own thermostat. `LangevinBaoab { .. }` and
-  `MtkNpt { .. }` return `true`; `VelocityVerlet { .. }` returns
-  `false`.
+  - `kind` is the registry lookup key (e.g. `"velocity-verlet"`,
+    `"csvr"`, `"berendsen"`). It is the bridge between the open
+    config layer and the open registries.
+  - `params` carries every TOML field of the section other than
+    `kind`, flattened into a `toml::Value`. Each registered builder
+    deserialises its own typed parameter struct from this value (see
+    `IntegratorBuilder::validate_params` and
+    `IntegratorBuilder::build`); the framework never inspects
+    `params` itself.
 
-  `owns_barostat` returns `true` for variants whose integrator
-  fuses its own barostat. `MtkNpt { .. }` returns `true`;
-  `VelocityVerlet { .. }` and `LangevinBaoab { .. }` return `false`.
-
-  `supports_constraints` returns `true` for variants whose
-  integrator drives the three `Constraint` hooks (see
-  `constraint-framework.md`). `VelocityVerlet { lossless: false }`
-  returns `true`; every other variant in the default registry
-  (including `VelocityVerlet { lossless: true }`, `LangevinBaoab`,
-  and `MtkNpt`) returns `false`.
+  The same `SlotConfig` shape is used by the `[integrator]`,
+  `[thermostat]`, and `[barostat]` sections. The `[[constraint_types]]`
+  array uses a closely related `NamedSlotConfig { name, kind, params }`
+  shape that adds the type's user-facing name (see
+  `io/config-schema.md`).
 
 - `IntegratorBuilder`, `ThermostatBuilder`, `BarostatBuilder` — <!-- rq-29e08cb5 -->
   parallel traits describing a registered slot implementation.
   Implementations are stateless and self-register at construction
-  time. Each builder produces a boxed trait object from the
-  corresponding `*Kind` payload and the runner's device.
+  time. Each builder owns its parameter shape: it deserialises a
+  typed parameter struct from the `params: toml::Value` carried by
+  the `SlotConfig`, validates per-kind constraints, exposes the
+  compatibility predicates the runner needs, and constructs a boxed
+  trait object on demand.
 
   ```rust
   pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
+      /// Lookup key used by `IntegratorRegistry` to dispatch a parsed
+      /// `SlotConfig` to this builder. Matches the TOML `kind` field.
       fn kind_name(&self) -> &'static str;
+
+      /// Validate the kind-specific parameters at config-load time,
+      /// before any GPU setup runs. Implementations deserialise the
+      /// `toml::Value` into their typed parameter struct and surface
+      /// every domain check (finite, positive, in-range, allowed
+      /// enum value, …) as a `ConfigError::InvalidValue` (or one of
+      /// the more specific `ConfigError` variants documented in
+      /// `io/config-schema.md`).
+      fn validate_params(&self, params: &toml::Value)
+          -> Result<(), ConfigError>;
+
+      /// `true` iff the integrator fuses its own thermostat (so
+      /// composing it with a `[thermostat]` slot is rejected at
+      /// load time). The default returns `false`.
+      fn owns_thermostat(&self, _params: &toml::Value) -> bool { false }
+
+      /// `true` iff the integrator fuses its own barostat. Default
+      /// `false`.
+      fn owns_barostat(&self, _params: &toml::Value) -> bool { false }
+
+      /// `true` iff the integrator drives the three `Constraint`
+      /// slot hooks (see `constraint-framework.md`). Default
+      /// `false`.
+      fn supports_constraints(&self, _params: &toml::Value) -> bool { false }
+
+      /// Construct the integrator. The caller has already invoked
+      /// `validate_params(&params)`, so the builder may unwrap
+      /// trusted fields; any failure inside `build` surfaces as
+      /// `IntegratorError::Gpu` (the typical case is a failed GPU
+      /// allocation).
       fn build(
           &self,
-          device: Arc<CudaDevice>,
+          gpu: &GpuContext,
           particle_count: usize,
-          kind: &IntegratorKind,
+          params: &toml::Value,
       ) -> Result<Box<dyn Integrator>, IntegratorError>;
   }
 
   pub trait ThermostatBuilder: std::fmt::Debug + Send + Sync {
       fn kind_name(&self) -> &'static str;
+      fn validate_params(&self, params: &toml::Value)
+          -> Result<(), ConfigError>;
       fn build(
           &self,
-          device: Arc<CudaDevice>,
+          gpu: &GpuContext,
           particle_count: usize,
-          kind: &ThermostatKind,
+          params: &toml::Value,
       ) -> Result<Box<dyn Thermostat>, ThermostatError>;
   }
 
   pub trait BarostatBuilder: std::fmt::Debug + Send + Sync {
       fn kind_name(&self) -> &'static str;
+      fn validate_params(&self, params: &toml::Value)
+          -> Result<(), ConfigError>;
       fn build(
           &self,
-          device: Arc<CudaDevice>,
+          gpu: &GpuContext,
           particle_count: usize,
-          kind: &BarostatKind,
+          params: &toml::Value,
       ) -> Result<Box<dyn Barostat>, BarostatError>;
   }
   ```
 
-  - `kind_name` returns the lookup key.
-  - `build` inspects `kind` (typically by matching the relevant
-    variant) and constructs the concrete slot. Returns
-    `*Error::UnknownKind` if the variant does not match the expected
-    one.
+  - `kind_name` returns the registry's lookup key.
+  - `validate_params` is a pure function of the supplied parameters
+    and is called by `Config::validate_against` before any GPU work.
+    It must not allocate device memory.
+  - The integrator-specific predicates
+    (`owns_thermostat`, `owns_barostat`, `supports_constraints`) are
+    pure functions of the supplied parameters. Predicate
+    implementations that depend on the params (e.g.
+    `velocity-verlet`'s `supports_constraints` flipping on
+    `lossless`) deserialise the relevant field on demand.
+  - `build` constructs the concrete slot. The caller is responsible
+    for having passed the same `params` through `validate_params`
+    first; conforming registry helpers (`build_or_validate_first`
+    below) chain the two calls.
 
 - `IntegratorRegistry`, `ThermostatRegistry`, `BarostatRegistry` — <!-- rq-4901507f -->
   parallel host-side registries of builders. Each holds:
@@ -522,19 +587,24 @@ successfully.
     IntegratorBuilder>)` — appends a builder. Two builders sharing
     the same `kind_name()` are not detected at registration; the
     lookup returns the first match.
-  - `IntegratorRegistry::build(&self, kind: &IntegratorKind, device:
-    Arc<CudaDevice>, particle_count: usize) -> Result<Box<dyn
-    Integrator>, IntegratorError>` — looks up the builder whose
-    `kind_name()` equals `kind.name()` and delegates to it. Returns
-    `IntegratorError::UnknownKind(kind.name().to_string())` when no
-    builder matches.
+  - `IntegratorRegistry::lookup(&self, kind: &str) -> Option<&dyn IntegratorBuilder>`
+    — returns the first registered builder whose `kind_name()`
+    equals `kind`, or `None` when no builder matches. The runner
+    uses this both to query compatibility predicates
+    (`owns_thermostat`, `supports_constraints`) and to drive
+    `validate_params` against the parsed config before any GPU
+    work runs.
+  - `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize) -> Result<Box<dyn Integrator>, IntegratorError>`
+    — looks up the builder whose `kind_name()` equals `slot.kind`
+    and delegates `build(gpu, particle_count, &slot.params)` to it.
+    Returns `IntegratorError::UnknownKind(slot.kind.clone())` when
+    no builder matches.
   - The thermostat and barostat registries expose
-    `build_optional(&self, kind: Option<&ThermostatKind>, device,
-    particle_count) -> Result<Option<Box<dyn Thermostat>>,
-    ThermostatError>` (and the corresponding barostat variant): if
-    `kind` is `None`, returns `Ok(None)` without consulting the
-    builders; otherwise dispatches the same way as `build` and wraps
-    the result in `Some(..)`.
+    `build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>`
+    (and the corresponding barostat variant): if `slot` is `None`,
+    returns `Ok(None)` without consulting the builders; otherwise
+    dispatches the same way as `build` and wraps the result in
+    `Some(..)`.
 
 - `IntegratorError`, `ThermostatError`, `BarostatError` — error types <!-- rq-2ccf40de -->
   returned by the corresponding trait methods. Variants for each:
@@ -563,28 +633,41 @@ successfully.
 
 ### Functions and methods <!-- rq-c8848b7f -->
 
-- `IntegratorRegistry::build(&self, kind: &IntegratorKind, device: Arc<CudaDevice>, particle_count: usize) -> Result<Box<dyn Integrator>, IntegratorError>` <!-- rq-24f6b8b9 -->
-  - Looks up the builder whose `kind_name()` equals `kind.name()`.
-    Delegates construction to that builder.
-  - Returns `IntegratorError::UnknownKind(...)` when no builder
-    matches.
+- `IntegratorRegistry::lookup(&self, kind: &str) -> Option<&dyn IntegratorBuilder>` <!-- rq-24f6b8b9 -->
+  - Returns the first registered builder whose `kind_name()` equals
+    `kind`. The runner uses this to query the integrator's
+    compatibility predicates (`owns_thermostat`,
+    `owns_barostat`, `supports_constraints`) and to drive
+    `validate_params` before any GPU work.
+
+- `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize) -> Result<Box<dyn Integrator>, IntegratorError>` <!-- rq-1e30bbf4 -->
+  - Looks up the builder whose `kind_name()` equals `slot.kind` and
+    delegates `build(gpu, particle_count, &slot.params)`.
+  - Returns `IntegratorError::UnknownKind(slot.kind.clone())` when
+    no builder matches.
   - The builder is responsible for kind-specific allocations:
-    - For `VelocityVerlet { lossless }`, the builder constructs a
-      `VelocityVerletState` that allocates `LosslessBuffers` when
+    - For `velocity-verlet`, the builder reads the `lossless` bool
+      from `params` and allocates `LosslessBuffers` when
       `lossless == true`.
-    - For `LangevinBaoab { friction, temperature, seed }`, the
-      builder constructs a `LangevinBaoabState` that captures the
-      friction, temperature, and seed (no per-particle state
-      allocations; Philox is counter-based — see `langevin-baoab.md`).
+    - For `langevin-baoab`, the builder reads `friction`,
+      `temperature`, `seed` from `params` and captures them (no
+      per-particle state allocations; Philox is counter-based —
+      see `langevin-baoab.md`).
   - A `particle_count` of zero is permitted: any per-particle device
     allocations have length zero.
 
-- `ThermostatRegistry::build_optional(&self, kind: Option<&ThermostatKind>, device: Arc<CudaDevice>, particle_count: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>` <!-- rq-678c233d -->
-  - When `kind` is `None`, returns `Ok(None)` without consulting the
+- `ThermostatRegistry::lookup(&self, kind: &str) -> Option<&dyn ThermostatBuilder>` <!-- rq-c44b25af -->
+  - Parallel to `IntegratorRegistry::lookup`. Returns `None` when no
+    registered builder matches.
+
+- `ThermostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>` <!-- rq-678c233d -->
+  - When `slot` is `None`, returns `Ok(None)` without consulting the
     builders.
-  - When `kind` is `Some`, looks up the builder whose `kind_name()`
-    equals `kind.name()` and delegates. Returns
-    `ThermostatError::UnknownKind(...)` when no builder matches.
+  - When `slot` is `Some`, looks up the builder whose `kind_name()`
+    equals `slot.kind` and delegates
+    `build(gpu, particle_count, &slot.params)`. Returns
+    `ThermostatError::UnknownKind(slot.kind.clone())` when no builder
+    matches.
   - Per-thermostat builder responsibilities are documented in each
     thermostat's requirements file (`nose-hoover-chain.md`,
     `csvr.md`, `andersen.md`, `berendsen.md`).
@@ -592,14 +675,20 @@ successfully.
     allocations (such as `ke_scratch`) still allocate at their fixed
     length (length 1 for the scalar reductions).
 
-- `BarostatRegistry::build_optional(&self, kind: Option<&BarostatKind>, device: Arc<CudaDevice>, particle_count: usize) -> Result<Option<Box<dyn Barostat>>, BarostatError>` <!-- rq-9548bc1a -->
-  - When `kind` is `None`, returns `Ok(None)` without consulting the
+- `BarostatRegistry::lookup(&self, kind: &str) -> Option<&dyn BarostatBuilder>` <!-- rq-acbb6d0e -->
+  - Parallel to `IntegratorRegistry::lookup`.
+
+- `BarostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize) -> Result<Option<Box<dyn Barostat>>, BarostatError>` <!-- rq-9548bc1a -->
+  - When `slot` is `None`, returns `Ok(None)` without consulting the
     builders.
-  - When `kind` is `Some`, looks up the builder whose `kind_name()`
-    equals `kind.name()` and delegates. Returns
-    `BarostatError::UnknownKind(...)` when no builder matches.
+  - When `slot` is `Some`, looks up the builder whose `kind_name()`
+    equals `slot.kind` and delegates
+    `build(gpu, particle_count, &slot.params)`. Returns
+    `BarostatError::UnknownKind(slot.kind.clone())` when no builder
+    matches.
   - Per-barostat builder responsibilities are documented in each
-    barostat's requirements file (`berendsen-barostat.md`).
+    barostat's requirements file (`berendsen-barostat.md`,
+    `c-rescale-barostat.md`).
 
 - `Integrator::plan(&self, dt: f32) -> StepPlan` <!-- rq-aa68f468 -->
   - Returns the integrator's ordered sub-step sequence for a
@@ -703,94 +792,117 @@ Feature: Pluggable integration framework
   @rq-444903e2
   Scenario: Construct velocity-Verlet (lossy) via the integrator registry
     Given an IntegratorRegistry::with_builtins()
-    And an IntegratorKind::VelocityVerlet { lossless: false }
-    When registry.build(&kind, device, particle_count=4) is called
+    And a SlotConfig { kind: "velocity-verlet", params: { lossless: false } }
+    When registry.build(&slot, &gpu, particle_count=4) is called
     Then it returns Ok(integrator)
     And integrator's underlying type implements `Integrator`
 
   @rq-7d4c470a
   Scenario: Construct velocity-Verlet (lossless) via the integrator registry
     Given an IntegratorRegistry::with_builtins()
-    And an IntegratorKind::VelocityVerlet { lossless: true }
-    When registry.build(&kind, device, particle_count=4) is called
+    And a SlotConfig { kind: "velocity-verlet", params: { lossless: true } }
+    When registry.build(&slot, &gpu, particle_count=4) is called
     Then it returns Ok(integrator)
     And the underlying integrator allocates LosslessBuffers with particle_count == 4
 
   @rq-706c4b80
   Scenario: Construct Langevin BAOAB via the integrator registry
     Given an IntegratorRegistry::with_builtins()
-    And an IntegratorKind::LangevinBaoab { friction: 1.0e12, temperature: 300.0, seed: 42 }
-    When registry.build(&kind, device, particle_count=4) is called
+    And a SlotConfig { kind: "langevin-baoab",
+      params: { friction: 1.0e12, temperature: 300.0, seed: 42 } }
+    When registry.build(&slot, &gpu, particle_count=4) is called
     Then it returns Ok(integrator)
 
   @rq-b44769f1
   Scenario: Construct an integrator with particle_count = 0
     Given an IntegratorRegistry::with_builtins()
-    And an IntegratorKind::VelocityVerlet { lossless: true }
-    When registry.build(&kind, device, particle_count=0) is called
+    And a SlotConfig { kind: "velocity-verlet", params: { lossless: true } }
+    When registry.build(&slot, &gpu, particle_count=0) is called
     Then it returns Ok(integrator)
     And every per-particle device allocation has length 0
 
   @rq-5711d6ce
   Scenario: Empty integrator registry reports UnknownKind
     Given an empty IntegratorRegistry (no builders registered)
-    And an IntegratorKind::VelocityVerlet { lossless: false }
-    When registry.build(&kind, device, particle_count=4) is called
+    And a SlotConfig { kind: "velocity-verlet", params: { lossless: false } }
+    When registry.build(&slot, &gpu, particle_count=4) is called
     Then it returns Err(IntegratorError::UnknownKind("velocity-verlet"))
+
+  @rq-79c53582
+  Scenario: Unknown kind in a populated registry reports UnknownKind
+    Given an IntegratorRegistry::with_builtins()
+    And a SlotConfig { kind: "no-such-integrator", params: { } }
+    When registry.build(&slot, &gpu, particle_count=4) is called
+    Then it returns Err(IntegratorError::UnknownKind("no-such-integrator"))
+
+  @rq-8fbdbc0c
+  Scenario: lookup returns the builder for a registered kind
+    Given an IntegratorRegistry::with_builtins()
+    When registry.lookup("velocity-verlet") is called
+    Then it returns Some(builder)
+    And builder.kind_name() equals "velocity-verlet"
+
+  @rq-e8adaa9c
+  Scenario: lookup returns None for an unregistered kind
+    Given an IntegratorRegistry::with_builtins()
+    When registry.lookup("no-such-integrator") is called
+    Then it returns None
 
   @rq-0d7ebeb6
   Scenario: Custom integrator builder is selectable
     Given an IntegratorRegistry::with_builtins()
     And a custom IntegratorBuilder whose kind_name() is "test-stub"
     When registry.register(custom_builder) is called
-    Then registry.build(...) routes test-stub-kind requests to the custom builder
+    Then registry.build(...) routes "test-stub" kind requests to the custom builder
 
   # --- Thermostat construction ---
 
   @rq-353da04c
   Scenario: Construct Nosé-Hoover chain via the thermostat registry
     Given a ThermostatRegistry::with_builtins()
-    And a ThermostatKind::NoseHooverChain {
-      temperature: 300.0, tau: 1.0e-13,
-      chain_length: 3, yoshida_order: 3, n_resp: 1 }
-    When registry.build_optional(Some(&kind), device, particle_count=4) is called
+    And a SlotConfig { kind: "nose-hoover-chain", params:
+      { temperature: 300.0, tau: 1.0e-13,
+        chain_length: 3, yoshida_order: 3, n_resp: 1 } }
+    When registry.build_optional(Some(&slot), &gpu, particle_count=4) is called
     Then it returns Ok(Some(thermostat))
 
   @rq-69d2c5f5
   Scenario: Construct CSVR via the thermostat registry
     Given a ThermostatRegistry::with_builtins()
-    And a ThermostatKind::Csvr {
-      temperature: 300.0, tau: 1.0e-13, seed: 42 }
-    When registry.build_optional(Some(&kind), device, particle_count=4) is called
+    And a SlotConfig { kind: "csvr", params:
+      { temperature: 300.0, tau: 1.0e-13, seed: 42 } }
+    When registry.build_optional(Some(&slot), &gpu, particle_count=4) is called
     Then it returns Ok(Some(thermostat))
 
   @rq-3396b95f
   Scenario: Construct Andersen via the thermostat registry
     Given a ThermostatRegistry::with_builtins()
-    And a ThermostatKind::Andersen {
-      temperature: 300.0, collision_rate: 1.0e12, seed: 42 }
-    When registry.build_optional(Some(&kind), device, particle_count=4) is called
+    And a SlotConfig { kind: "andersen", params:
+      { temperature: 300.0, collision_rate: 1.0e12, seed: 42 } }
+    When registry.build_optional(Some(&slot), &gpu, particle_count=4) is called
     Then it returns Ok(Some(thermostat))
 
   @rq-a336b496
   Scenario: Construct Berendsen via the thermostat registry
     Given a ThermostatRegistry::with_builtins()
-    And a ThermostatKind::Berendsen { temperature: 300.0, tau: 1.0e-13 }
-    When registry.build_optional(Some(&kind), device, particle_count=4) is called
+    And a SlotConfig { kind: "berendsen", params:
+      { temperature: 300.0, tau: 1.0e-13 } }
+    When registry.build_optional(Some(&slot), &gpu, particle_count=4) is called
     Then it returns Ok(Some(thermostat))
 
   @rq-fb3f2189
   Scenario: build_optional with None returns Ok(None)
     Given a ThermostatRegistry::with_builtins()
-    When registry.build_optional(None, device, particle_count=4) is called
+    When registry.build_optional(None, &gpu, particle_count=4) is called
     Then it returns Ok(None)
     And no builder is consulted
 
   @rq-6dffb17f
   Scenario: Empty thermostat registry reports UnknownKind
     Given an empty ThermostatRegistry (no builders registered)
-    And a ThermostatKind::Berendsen { temperature: 300.0, tau: 1.0e-13 }
-    When registry.build_optional(Some(&kind), device, particle_count=4) is called
+    And a SlotConfig { kind: "berendsen", params:
+      { temperature: 300.0, tau: 1.0e-13 } }
+    When registry.build_optional(Some(&slot), &gpu, particle_count=4) is called
     Then it returns Err(ThermostatError::UnknownKind("berendsen"))
 
   # --- Barostat construction ---
@@ -915,24 +1027,53 @@ Feature: Pluggable integration framework
   # --- Compatibility ---
 
   @rq-e9be025b
-  Scenario: VelocityVerlet does not own its thermostat or its barostat
-    Given an IntegratorKind::VelocityVerlet { lossless: false }
-    Then kind.owns_thermostat() returns false
-    And kind.owns_barostat() returns false
+  Scenario: VelocityVerlet builder does not own its thermostat or its barostat
+    Given the "velocity-verlet" builder from IntegratorRegistry::with_builtins()
+    And params = { lossless: false }
+    Then builder.owns_thermostat(&params) returns false
+    And builder.owns_barostat(&params) returns false
 
   @rq-4dd5d2d0
-  Scenario: LangevinBaoab owns its thermostat but not its barostat
-    Given an IntegratorKind::LangevinBaoab { friction: 1.0e12, temperature: 300.0, seed: 0 }
-    Then kind.owns_thermostat() returns true
-    And kind.owns_barostat() returns false
+  Scenario: LangevinBaoab builder owns its thermostat but not its barostat
+    Given the "langevin-baoab" builder from IntegratorRegistry::with_builtins()
+    And params = { friction: 1.0e12, temperature: 300.0, seed: 0 }
+    Then builder.owns_thermostat(&params) returns true
+    And builder.owns_barostat(&params) returns false
 
   @rq-95b66af0
-  Scenario: MtkNpt owns both its thermostat and its barostat
-    Given an IntegratorKind::MtkNpt { temperature: 85.0, pressure: 1.0e5,
+  Scenario: MtkNpt builder owns both its thermostat and its barostat
+    Given the "mtk-npt" builder from IntegratorRegistry::with_builtins()
+    And params = { temperature: 85.0, pressure: 1.0e5,
       tau_t: 1.0e-13, tau_p: 1.0e-12,
       chain_length: 3, yoshida_order: 3, n_resp: 1 }
-    Then kind.owns_thermostat() returns true
-    And kind.owns_barostat() returns true
+    Then builder.owns_thermostat(&params) returns true
+    And builder.owns_barostat(&params) returns true
+
+  @rq-7d37c707
+  Scenario: VelocityVerlet builder's supports_constraints depends on the lossless flag
+    Given the "velocity-verlet" builder from IntegratorRegistry::with_builtins()
+    Then builder.supports_constraints(&{ lossless: false }) returns true
+    And builder.supports_constraints(&{ lossless: true }) returns false
+
+  @rq-084ba25b
+  Scenario: Builder validate_params accepts a well-formed params object
+    Given the "velocity-verlet" builder
+    When builder.validate_params(&{ lossless: false }) is called
+    Then it returns Ok(())
+
+  @rq-cb52dec0
+  Scenario: Builder validate_params rejects an out-of-domain field
+    Given the "langevin-baoab" builder
+    And params = { friction: -1.0, temperature: 300.0, seed: 1 }
+    When builder.validate_params(&params) is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.friction", .. })
+
+  @rq-7a076bc9
+  Scenario: Builder validate_params rejects an unknown field
+    Given the "velocity-verlet" builder
+    And params = { lossless: false, junk: true }
+    When builder.validate_params(&params) is called
+    Then it returns Err(ConfigError::Parse { .. })
 
   # --- RNG-using slot state ---
 
@@ -954,7 +1095,8 @@ Feature: Pluggable integration framework
 
   @rq-1b0504e7
   Scenario: Two independent runs of the same composed configuration are byte-identical
-    Given two runners constructed from identical (IntegratorKind, Option<ThermostatKind>, Option<BarostatKind>) tuples
+    Given two runners constructed from identical
+      (SlotConfig integrator, Option<SlotConfig> thermostat, Option<SlotConfig> barostat) tuples
     And two ParticleBuffers built from byte-identical ParticleStates
     When each runs N=10 timesteps with the same dt
     Then the two final ParticleStates agree byte-for-byte

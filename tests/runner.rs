@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use dynamics::io::{BOLTZMANN_J_PER_K, IntegratorKind, load_config};
+use dynamics::io::{BOLTZMANN_J_PER_K, load_config};
 use dynamics::runner::{RunnerError, cli_main_u8, run_simulation};
 
 fn tmp_path(name: &str) -> PathBuf {
@@ -485,10 +485,14 @@ cutoff = 1.0
     let path = dir.join("sim.toml");
     std::fs::write(&path, body).unwrap();
     let cfg = load_config(&path).unwrap();
-    match cfg.integrator {
-        IntegratorKind::VelocityVerlet { lossless } => assert!(!lossless),
-        other => panic!("unexpected variant: {other:?}"),
-    }
+    assert_eq!(cfg.integrator.kind, "velocity-verlet");
+    let lossless = cfg
+        .integrator
+        .params
+        .get("lossless")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    assert!(!lossless);
 }
 
 // rq-00cbbf51

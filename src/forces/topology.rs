@@ -5,7 +5,8 @@ use std::sync::Arc;
 use cudarc::driver::{CudaDevice, CudaSlice};
 
 use crate::gpu::GpuError;
-use crate::io::config::ConstraintTypeConfig;
+use crate::integrator::ConstraintRegistry;
+use crate::io::config::NamedSlotConfig;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Bond {
@@ -102,13 +103,6 @@ impl ExclusionList {
 // rq-3d5f2e98 — constraint slot framework data layout. See
 // `integration/constraint-framework.md` for the SoA contract.
 
-/// Algorithm-tag for a `[[constraint_types]]` entry. Drives the
-/// constraint slot's per-group kernel dispatch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConstraintTypeKind {
-    SettleWater,
-}
-
 /// One pairwise distance constraint inside a `ConstraintGroup`. The
 /// local indices `(local_i, local_j)` refer to slots in the group's
 /// own atom slice (`0..group.atom_count`) — not into the global
@@ -135,12 +129,15 @@ pub struct ConstraintGroup {
 
 /// Host-side parsed-and-validated view of every constraint declared by
 /// the topology file. See `integration/constraint-framework.md`.
+///
+/// Each group's algorithm is resolved at consume time from
+/// `constraint_types[group.constraint_type_index].kind` (the
+/// `NamedSlotConfig`'s `kind` string), not stored on the list itself.
 #[derive(Debug, Clone)]
 pub struct ConstraintList {
     pub groups: Vec<ConstraintGroup>,
     pub group_atoms: Vec<u32>,
     pub group_constraints: Vec<GroupConstraint>,
-    pub constraint_type_kind: Vec<ConstraintTypeKind>,
     pub particle_count: usize,
 }
 
@@ -150,7 +147,6 @@ impl ConstraintList {
             groups: Vec::new(),
             group_atoms: Vec::new(),
             group_constraints: Vec::new(),
-            constraint_type_kind: Vec::new(),
             particle_count,
         }
     }
@@ -274,7 +270,8 @@ pub fn load_topology_file(
     particle_count: usize,
     bond_type_names: &[&str],
     angle_type_names: &[&str],
-    constraint_types: &[ConstraintTypeConfig],
+    constraint_types: &[NamedSlotConfig],
+    constraint_registry: &ConstraintRegistry,
 ) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError> {
     let raw = std::fs::read_to_string(path)
         .map_err(|e| TopologyFileError::Io(format!("{}: {}", path.display(), e)))?;
@@ -284,6 +281,7 @@ pub fn load_topology_file(
         bond_type_names,
         angle_type_names,
         constraint_types,
+        constraint_registry,
     )
 }
 
@@ -301,7 +299,8 @@ pub(crate) fn parse_topology_file(
     particle_count: usize,
     bond_type_names: &[&str],
     angle_type_names: &[&str],
-    constraint_types: &[ConstraintTypeConfig],
+    constraint_types: &[NamedSlotConfig],
+    constraint_registry: &ConstraintRegistry,
 ) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError> {
     let max_index_for_check: i64 = particle_count as i64 - 1;
 
@@ -559,13 +558,22 @@ pub(crate) fn parse_topology_file(
                 let type_name = cols[cols.len() - 1];
                 let type_idx = constraint_types
                     .iter()
-                    .position(|t| t.name() == type_name)
+                    .position(|t| t.name == type_name)
                     .ok_or_else(|| TopologyFileError::UnknownConstraintType {
                         line_number,
                         name: type_name.to_string(),
                     })? as u32;
-                let expected_atoms =
-                    constraint_types[type_idx as usize].expected_atom_count();
+                let entry = &constraint_types[type_idx as usize];
+                let builder = constraint_registry.lookup(&entry.kind).ok_or_else(|| {
+                    TopologyFileError::UnknownConstraintType {
+                        line_number,
+                        name: format!(
+                            "{} (kind `{}` not registered)",
+                            entry.name, entry.kind
+                        ),
+                    }
+                })?;
+                let expected_atoms = builder.expected_atom_count(&entry.params);
                 let atom_cols = &cols[..cols.len() - 1];
                 if atom_cols.len() != expected_atoms {
                     return Err(TopologyFileError::InvalidConstraintRow {
@@ -786,14 +794,6 @@ pub(crate) fn parse_topology_file(
         }
     }
 
-    // Algorithm-tag table: one entry per [[constraint_types]] entry.
-    let constraint_type_kind: Vec<ConstraintTypeKind> = constraint_types
-        .iter()
-        .map(|t| match t {
-            ConstraintTypeConfig::SettleWater { .. } => ConstraintTypeKind::SettleWater,
-        })
-        .collect();
-
     // Build the effective exclusion list:
     //   1. Every explicit entry kept as-is.
     //   2. For every bond (i, j) lacking an explicit (i, j) entry,
@@ -962,7 +962,6 @@ pub(crate) fn parse_topology_file(
         groups: constraint_groups,
         group_atoms,
         group_constraints,
-        constraint_type_kind,
         particle_count,
     };
     Ok((bond_list, angle_list, exclusion_list, constraint_list))

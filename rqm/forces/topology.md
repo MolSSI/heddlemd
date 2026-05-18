@@ -413,7 +413,7 @@ contribution flows through to the caller without a separate code path.
 
 ### Functions <!-- rq-e66012e0 -->
 
-- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], constraint_types: &[ConstraintTypeConfig]) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError>` <!-- rq-12b7dcb6 -->
+- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], constraint_types: &[NamedSlotConfig], constraint_registry: &ConstraintRegistry) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError>` <!-- rq-12b7dcb6 -->
   - Reads the file at `path` and parses all four sections.
   - Validates every constraint described in *File Format*.
   - Returns the canonicalised, sorted `BondList`, `AngleList`, the
@@ -425,11 +425,13 @@ contribution flows through to the caller without a separate code path.
     `bond_type_names` (used to resolve `bond_type_name` strings to
     indices in the config's `[[bond_types]]` array),
     `angle_type_names` (used to resolve `angle_type_name` strings to
-    indices in the config's `[[angle_types]]` array), and
+    indices in the config's `[[angle_types]]` array),
     `constraint_types` (the full parsed `[[constraint_types]]`
-    array, used both to resolve `constraint_type_name` strings to
-    indices and to look up each type's expected atom count for
-    constraint-row validation).
+    array of `NamedSlotConfig` entries, used to resolve
+    `constraint_type_name` strings to indices), and
+    `constraint_registry` (used to look up each constraint type's
+    builder for the `expected_atom_count(&params)` query that
+    size-checks `[constraints]` rows).
 
 ## Out of Scope <!-- rq-ad0edc95 -->
 
@@ -833,11 +835,12 @@ Feature: Topology file with bonds, angles, and exclusions
       0 1 2 SPCE
       """
     And constraint_types contains an SPCE entry with kind = "settle-water"
-    When load_topology_file(tmp/sim.topology, 3, &["CC","CN","OH"], &["HOH"], &constraint_types) is called
+    And constraint_registry is ConstraintRegistry::with_builtins()
+    When load_topology_file(tmp/sim.topology, 3, &["CC","CN","OH"], &["HOH"], &constraint_types, &constraint_registry) is called
     Then it returns Ok((bond_list, angle_list, exclusion_list, constraint_list))
     And constraint_list.groups has length 1
     And the first group's atoms (in their declared order) are [0, 1, 2]
-    And the first group's constraint_type_kind is SettleWater
+    And the first group's constraint_type_index resolves to constraint_types[0] (kind = "settle-water")
     And exclusion_list.entries contains (0, 1, 0.0, 0.0), (0, 2, 0.0, 0.0), and (1, 2, 0.0, 0.0)
 
   @rq-5dfc02a9

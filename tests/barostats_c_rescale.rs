@@ -14,7 +14,7 @@ use dynamics::integrator::{
     philox_normal,
 };
 use dynamics::io::config::NeighborListConfig;
-use dynamics::io::{BarostatKind, IntegratorKind, ThermostatKind};
+use dynamics::io::SlotConfig;
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 use dynamics::timings::{KernelStage, Timings};
@@ -51,23 +51,22 @@ fn c_rescale_kind(
     tau: f64,
     compressibility: f64,
     seed: u64,
-) -> BarostatKind {
-    BarostatKind::CRescale {
-        pressure,
-        temperature,
-        tau,
-        compressibility,
-        seed,
-    }
+) -> SlotConfig {
+    SlotConfig::from_params_str(
+        "c-rescale",
+        &format!(
+            "pressure = {pressure:e}\ntemperature = {temperature:e}\ntau = {tau:e}\ncompressibility = {compressibility:e}\nseed = {seed}\n"
+        ),
+    )
 }
 
 fn build_c_rescale(
     gpu: &GpuContext,
     n: usize,
-    kind: &BarostatKind,
+    slot: &SlotConfig,
 ) -> Box<dyn Barostat> {
     BarostatRegistry::with_builtins()
-        .build_optional(Some(kind), gpu, n)
+        .build_optional(Some(slot), gpu, n)
         .unwrap()
         .unwrap()
 }
@@ -465,15 +464,18 @@ fn composes_with_velocity_verlet_and_csvr_thermostat() {
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = IntegratorRegistry::with_builtins()
-        .build(&IntegratorKind::VelocityVerlet { lossless: false }, &gpu, n)
+        .build(
+            &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
+            &gpu,
+            n,
+        )
         .unwrap();
     let mut therm = ThermostatRegistry::with_builtins()
         .build_optional(
-            Some(&ThermostatKind::Csvr {
-                temperature: 85.0,
-                tau: 1.0e-13,
-                seed: 17,
-            }),
+            Some(&SlotConfig::from_params_str(
+                "csvr",
+                "temperature = 85.0\ntau = 1.0e-13\nseed = 17\n",
+            )),
             &gpu,
             n,
         )

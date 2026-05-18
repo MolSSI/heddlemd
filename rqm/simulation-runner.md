@@ -134,17 +134,17 @@ message.
     `ke_scratch` buffer for `nose-hoover-chain`; the per-group
     snapshot, atom-index, and per-type parameter buffers for
     `settle`). The integrator-owns-its-own-thermostat and
-    integrator-supports-constraints compatibility checks
-    (`IntegratorKind::owns_thermostat()` vs.
-    `config.thermostat.is_some()`, and
-    `IntegratorKind::supports_constraints()` vs.
-    `!constraint_list.is_empty()`) have already been enforced at
-    config-load time (`io/config-schema.md`); no runtime guard is
+    integrator-supports-constraints compatibility checks (builder
+    predicates `IntegratorBuilder::owns_thermostat(&params)`,
+    `owns_barostat(&params)`, and `supports_constraints(&params)`
+    queried via `Config::validate_against(&registries)` and
+    `Config::validate_constraint_compatibility(&registries, has_constraints)`)
+    have already been enforced at this point; no runtime guard is
     required here.
 
-    The constraint slot is threaded through `integrator.step()` each
-    timestep as `constraint.as_deref_mut()`; see
-    `integration/framework.md` for the dispatch sequence.
+    The constraint slot is threaded through the runner's plan walk
+    (via the `run_step` helper in `integration/framework.md`); see
+    that file for the dispatch sequence.
 12. **Construct the force field.** Call `ForceField::new(device.clone(),
     N, &sim_box, &config.pair_interactions, &config.bond_types,
     &bond_list, &exclusion_list, &config.neighbor_list)` (see
@@ -716,7 +716,8 @@ Feature: dynamics run simulation runner
   Scenario: Lossy mode is the default for velocity-Verlet
     Given a config with [integrator] kind="velocity-verlet" and no lossless field
     When the config is loaded
-    Then config.integrator matches IntegratorKind::VelocityVerlet { lossless: false }
+    Then config.integrator.kind equals "velocity-verlet"
+    And config.integrator.params.get("lossless") equals Some(toml::Value::Boolean(false))
 
   @rq-00cbbf51
   Scenario: Langevin BAOAB runs end-to-end through the runner

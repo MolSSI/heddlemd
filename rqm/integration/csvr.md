@@ -100,7 +100,7 @@ per-step sequence.
 
 ## Parameters <!-- rq-a8da85cf -->
 
-Config layer fields set on `ThermostatKind::Csvr`:
+The matching builder deserialises a typed `CsvrParams` from the `[thermostat]` section's `SlotConfig::params` (see `framework.md`); the per-field reference below documents that parameter struct:
 
 - `temperature: f64` — bath temperature `T` in kelvin. Required.
   Finite and strictly positive. Independent of `simulation.temperature`,
@@ -241,7 +241,7 @@ log-write time.
 
 - `CsvrBuilder` — implements `ThermostatBuilder` with <!-- rq-750b828f -->
   `kind_name() == "csvr"`. `build(device, particle_count, kind)`
-  matches against `ThermostatKind::Csvr { … }`, allocates the
+  deserialises `CsvrParams` from `params`, allocates the
   length-1 `ke_scratch` device buffer, and returns the boxed
   `CsvrThermostat`.
 

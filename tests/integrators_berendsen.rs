@@ -14,7 +14,7 @@ use dynamics::integrator::IntegratorStepExt;
 use dynamics::integrator::{
     BerendsenThermostat, Thermostat, ThermostatRegistry,
 };
-use dynamics::io::ThermostatKind;
+use dynamics::io::SlotConfig;
 use dynamics::io::config::NeighborListConfig;
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
@@ -46,13 +46,16 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
     .unwrap()
 }
 
-fn berendsen_kind(temperature: f64, tau: f64) -> ThermostatKind {
-    ThermostatKind::Berendsen { temperature, tau }
+fn berendsen_kind(temperature: f64, tau: f64) -> SlotConfig {
+    SlotConfig::from_params_str(
+        "berendsen",
+        &format!("temperature = {temperature:e}\ntau = {tau:e}\n"),
+    )
 }
 
-fn build_berendsen(gpu: &GpuContext, n: usize, kind: &ThermostatKind) -> Box<dyn Thermostat> {
+fn build_berendsen(gpu: &GpuContext, n: usize, slot: &SlotConfig) -> Box<dyn Thermostat> {
     ThermostatRegistry::with_builtins()
-        .build_optional(Some(kind), gpu, n)
+        .build_optional(Some(slot), gpu, n)
         .unwrap()
         .unwrap()
 }
@@ -429,7 +432,7 @@ fn berendsen_temperature_relaxes_toward_target() {
 
     let mut integrator = dynamics::integrator::IntegratorRegistry::with_builtins()
         .build(
-            &dynamics::io::IntegratorKind::VelocityVerlet { lossless: false },
+            &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
             &gpu,
             n,
         )

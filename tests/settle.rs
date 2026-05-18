@@ -5,12 +5,12 @@ use std::sync::Arc;
 use cudarc::driver::CudaDevice;
 use dynamics::integrator::IntegratorStepExt;
 use dynamics::forces::{
-    ConstraintGroup, ConstraintList, ConstraintTypeKind, GroupConstraint,
+    ConstraintGroup, ConstraintList, GroupConstraint,
 };
 use dynamics::gpu::{GpuContext, ParticleBuffers, init_device};
 use dynamics::integrator::settle::{SettleBuilder, SettleConstraintsState, SettleError};
 use dynamics::integrator::{Constraint, ConstraintError, ConstraintRegistry};
-use dynamics::io::config::ConstraintTypeConfig;
+use dynamics::io::config::NamedSlotConfig;
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 use dynamics::timings::Timings;
@@ -18,12 +18,12 @@ use dynamics::timings::Timings;
 const R_OH: f32 = 1.0e-10;
 const R_HH: f32 = 1.633e-10;
 
-fn spce_type() -> ConstraintTypeConfig {
-    ConstraintTypeConfig::SettleWater {
-        name: "SPCE".to_string(),
-        r_oh: R_OH as f64,
-        r_hh: R_HH as f64,
-    }
+fn spce_type() -> NamedSlotConfig {
+    NamedSlotConfig::from_params_str(
+        "SPCE",
+        "settle-water",
+        &format!("r_oh = {}\nr_hh = {}\n", R_OH as f64, R_HH as f64),
+    )
 }
 
 /// Build a ConstraintList containing `n_waters` SETTLE groups whose
@@ -64,7 +64,6 @@ fn sequential_settle_list(n_waters: usize) -> ConstraintList {
         groups,
         group_atoms,
         group_constraints,
-        constraint_type_kind: vec![ConstraintTypeKind::SettleWater],
         particle_count: 3 * n_waters,
     }
 }
@@ -181,7 +180,7 @@ fn empty_constraint_registry_reports_unsupported_kind() {
         .unwrap_err();
     match err {
         ConstraintError::UnsupportedKind(kind) => {
-            assert_eq!(kind, ConstraintTypeKind::SettleWater);
+            assert_eq!(kind, "settle-water");
         }
         other => panic!("expected UnsupportedKind, got {other:?}"),
     }
@@ -713,10 +712,10 @@ fn init_device_exposes_settle_kernels() {
 }
 
 #[test]
-fn settle_builder_kind_name_is_settle() {
+fn settle_builder_kind_name_is_settle_water() {
     let b = SettleBuilder;
     use dynamics::integrator::ConstraintBuilder;
-    assert_eq!(b.kind_name(), "settle");
+    assert_eq!(b.kind_name(), "settle-water");
 }
 
 // --- Lossless rejection moved to config-load time ----------------------
@@ -729,9 +728,12 @@ fn settle_builder_kind_name_is_settle() {
 // "unsupported" error at run time.
 #[test]
 fn lossless_velocity_verlet_kind_does_not_support_constraints() {
-    use dynamics::io::IntegratorKind;
-    let kind = IntegratorKind::VelocityVerlet { lossless: true };
-    assert!(!kind.supports_constraints());
+    use dynamics::integrator::IntegratorRegistry;
+    use dynamics::io::SlotConfig;
+    let kind = SlotConfig::from_params_str("velocity-verlet", "lossless = true\n");
+    let registry = IntegratorRegistry::with_builtins();
+    let builder = registry.lookup(&kind.kind).unwrap();
+    assert!(!builder.supports_constraints(&kind.params));
 }
 
 // --- Integration through Integrator::step --------------------------------
@@ -742,7 +744,7 @@ fn integrator_step_dispatches_all_three_constraint_hooks() {
     use dynamics::forces::AngleList;
     use dynamics::forces::ForceField;
     use dynamics::integrator::{Integrator, IntegratorRegistry};
-    use dynamics::io::IntegratorKind;
+    use dynamics::io::SlotConfig;
     use dynamics::io::config::NeighborListConfig;
 
     #[derive(Debug)]
@@ -804,9 +806,8 @@ fn integrator_step_dispatches_all_three_constraint_hooks() {
     )
     .unwrap();
     let registry = IntegratorRegistry::with_builtins();
-    let mut integrator = registry
-        .build(&IntegratorKind::VelocityVerlet { lossless: false }, &gpu, 3)
-        .unwrap();
+    let vv = SlotConfig::from_params_str("velocity-verlet", "lossless = false\n");
+    let mut integrator = registry.build(&vv, &gpu, 3).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     let log = StdArc::new(Mutex::new(Vec::new()));
     let mut rec = RecordingConstraint { log: log.clone() };
@@ -826,7 +827,7 @@ fn integrator_step_with_none_constraint_skips_all_hooks() {
     use dynamics::forces::AngleList;
     use dynamics::forces::ForceField;
     use dynamics::integrator::{Integrator, IntegratorRegistry};
-    use dynamics::io::IntegratorKind;
+    use dynamics::io::SlotConfig;
     use dynamics::io::config::NeighborListConfig;
     let gpu = init_device().unwrap();
     let state = water_state(1, 5.0e-10);
@@ -850,9 +851,8 @@ fn integrator_step_with_none_constraint_skips_all_hooks() {
     )
     .unwrap();
     let registry = IntegratorRegistry::with_builtins();
-    let mut integrator = registry
-        .build(&IntegratorKind::VelocityVerlet { lossless: false }, &gpu, 3)
-        .unwrap();
+    let vv = SlotConfig::from_params_str("velocity-verlet", "lossless = false\n");
+    let mut integrator = registry.build(&vv, &gpu, 3).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     integrator
         .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)

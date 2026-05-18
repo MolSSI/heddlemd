@@ -7,12 +7,13 @@ Langevin dynamics. One of the pluggable integrator slots (see
 
 Langevin BAOAB is a **fused** integrator: the Ornstein-Uhlenbeck "O"
 step inside the B-A-O-A-B splitting is itself the temperature coupling,
-so the integrator owns its own thermostat.
-`IntegratorKind::LangevinBaoab { .. }.owns_thermostat()` returns
-`true`, and `load_config` rejects any config that combines
-`[integrator] kind = "langevin-baoab"` with a `[thermostat]` table
-via `ConfigError::IncompatibleThermostat { integrator:
-"langevin-baoab" }`. To compose velocity-Verlet with a thermostat
+so the integrator owns its own thermostat. The
+`"langevin-baoab"` builder's
+`IntegratorBuilder::owns_thermostat(&params)` returns `true`, and
+`Config::validate_against(&registries)` rejects any config that
+combines `[integrator] kind = "langevin-baoab"` with a
+`[thermostat]` table via `ConfigError::IncompatibleThermostat
+{ integrator: "langevin-baoab" }`. To compose velocity-Verlet with a thermostat
 from the registry instead, select `kind = "velocity-verlet"` and add
 a `[thermostat]` section (`csvr`, `nose-hoover-chain`, `andersen`, or
 `berendsen`).
@@ -96,8 +97,9 @@ The Custom `"O"` sub-step is also where the integrator's
 `draw_counter` increments. The counter advances exactly once per
 timestep because `"O"` appears exactly once in the plan.
 
-`IntegratorKind::LangevinBaoab` returns `false` from
-`supports_constraints()`; the runner therefore inserts no constraint
+The `"langevin-baoab"` builder's
+`IntegratorBuilder::supports_constraints(&params)` returns `false`
+regardless of params; the runner therefore inserts no constraint
 hooks around this integrator's two `Drift` sub-steps or its final
 `KickHalf`. Composing constraints with Langevin BAOAB is rejected at
 config load by `ConfigError::IncompatibleConstraint` (see
@@ -105,7 +107,9 @@ config load by `ConfigError::IncompatibleConstraint` (see
 
 ## Parameters <!-- rq-1b6324c3 -->
 
-Config layer field set on `IntegratorKind::LangevinBaoab`:
+The `"langevin-baoab"` builder deserialises
+`LangevinBaoabParams { friction: f64, temperature: f64, seed: u64 }`
+from the `[integrator]` section's `SlotConfig::params` field:
 
 - `friction: f64` — the damping coefficient `γ` in inverse seconds.
   Required. Finite and strictly positive; `friction = 0` is rejected
@@ -198,7 +202,7 @@ contributes no run-to-run drift.
 
   All fields are public for parity with the other registered
   integrators' state; construction goes through `LangevinBaoabBuilder`
-  with an `IntegratorKind::LangevinBaoab` config variant.
+  with the `SlotConfig` whose `kind == "langevin-baoab"`.
 
 ### CUDA Kernels <!-- rq-26ba73d0 -->
 

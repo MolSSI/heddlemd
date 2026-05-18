@@ -2,14 +2,41 @@
 
 use cudarc::driver::CudaSlice;
 
+use serde::Deserialize;
+
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy, rescale_velocities,
 };
-use crate::io::config::ThermostatKind;
+use crate::io::config::ConfigError;
 use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::timings::{KernelStage, Timings};
 
 use super::{Thermostat, ThermostatBuilder, ThermostatError};
+
+// rq-1f87880c
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BerendsenParams {
+    pub temperature: f64,
+    pub tau: f64,
+}
+
+fn deserialize_params(params: &toml::Value) -> Result<BerendsenParams, ConfigError> {
+    params
+        .clone()
+        .try_into::<BerendsenParams>()
+        .map_err(|e| crate::io::config::translate_params_error("thermostat", e))
+}
+
+fn require_finite_positive(field: &str, value: f64) -> Result<(), ConfigError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(ConfigError::InvalidValue {
+            field: field.to_string(),
+            reason: format!("value must be finite and strictly positive, got {value}"),
+        });
+    }
+    Ok(())
+}
 
 // rq-f856f666
 #[derive(Debug)]
@@ -106,18 +133,22 @@ impl ThermostatBuilder for BerendsenBuilder {
         "berendsen"
     }
 
+    fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
+        let p = deserialize_params(params)?;
+        require_finite_positive("thermostat.temperature", p.temperature)?;
+        require_finite_positive("thermostat.tau", p.tau)?;
+        Ok(())
+    }
+
     fn build(
         &self,
         gpu: &GpuContext,
         particle_count: usize,
-        kind: &ThermostatKind,
+        params: &toml::Value,
     ) -> Result<Box<dyn Thermostat>, ThermostatError> {
-        match kind {
-            ThermostatKind::Berendsen { temperature, tau } => {
-                let state = BerendsenThermostat::new(gpu, particle_count, *temperature, *tau)?;
-                Ok(Box::new(state))
-            }
-            other => Err(ThermostatError::UnknownKind(other.name().to_string())),
-        }
+        let p = deserialize_params(params)
+            .map_err(|_| ThermostatError::UnknownKind("berendsen (malformed params)".into()))?;
+        let state = BerendsenThermostat::new(gpu, particle_count, p.temperature, p.tau)?;
+        Ok(Box::new(state))
     }
 }

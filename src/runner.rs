@@ -14,8 +14,7 @@ use crate::forces::{
 };
 use crate::gpu::{ParticleBuffers, compute_total_potential_energy, init_device};
 use crate::integrator::{
-    BarostatError, BarostatRegistry, ConstraintError, ConstraintRegistry, IntegratorError,
-    IntegratorRegistry, ThermostatError, ThermostatRegistry,
+    BarostatError, ConstraintError, IntegratorError, ThermostatError,
 };
 use crate::io::config::NeighborListConfig;
 use crate::io::{
@@ -299,17 +298,25 @@ fn run_simulation_with_phase(
         })?;
     timings.record_host(HostStage::HOST_TO_DEVICE_UPLOAD, upload);
 
+    // Construct the four open registries once and run the
+    // registry-dispatched validation (per-kind validate_params plus
+    // integrator-thermostat / integrator-barostat compatibility).
+    let registries = crate::integrator::Registries::with_builtins();
+    config
+        .validate_against(&registries)
+        .map_err(|e| (RunnerError::Config(e), ExitPhase::Setup))?;
+
     // Build the three slot handles in the framework's dispatch order.
-    let integrator_registry = IntegratorRegistry::with_builtins();
-    let mut integrator = integrator_registry
+    let mut integrator = registries
+        .integrators
         .build(&config.integrator, &gpu, n)
         .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Setup))?;
-    let thermostat_registry = ThermostatRegistry::with_builtins();
-    let mut thermostat = thermostat_registry
+    let mut thermostat = registries
+        .thermostats
         .build_optional(config.thermostat.as_ref(), &gpu, n)
         .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Setup))?;
-    let barostat_registry = BarostatRegistry::with_builtins();
-    let mut barostat = barostat_registry
+    let mut barostat = registries
+        .barostats
         .build_optional(config.barostat.as_ref(), &gpu, n)
         .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
 
@@ -331,6 +338,7 @@ fn run_simulation_with_phase(
             &bond_type_names,
             &angle_type_names,
             &config.constraint_types,
+            &registries.constraint_types,
         )
         .map_err(|e| (RunnerError::TopologyFile(e), ExitPhase::Setup))?,
         None => (
@@ -341,15 +349,16 @@ fn run_simulation_with_phase(
         ),
     };
     // rq-acfda5d4 — runner-side enforcement of the integrator/constraint
-    // compatibility rule; `Config::validate` cannot run this check
-    // because it does not load the topology file itself.
+    // compatibility rule; consults the builder predicate via the
+    // registry. Cannot run during `Config::validate_against` because
+    // the topology file is loaded separately.
     config
-        .validate_constraint_compatibility(!constraint_list.is_empty())
+        .validate_constraint_compatibility(&registries, !constraint_list.is_empty())
         .map_err(|e| (RunnerError::Config(e), ExitPhase::Setup))?;
     // rq-3d5f2e98 — construct the constraint slot. `build_optional`
     // returns `None` for an empty list.
-    let constraint_registry = ConstraintRegistry::with_builtins();
-    let mut constraint = constraint_registry
+    let mut constraint = registries
+        .constraint_types
         .build_optional(
             &constraint_list,
             &gpu,
@@ -516,13 +525,18 @@ fn run_simulation_with_phase(
                     Some(b) => Some(b.as_mut()),
                     None => None,
                 };
+            let supports_constraints = registries
+                .integrators
+                .lookup(&config.integrator.kind)
+                .map(|b| b.supports_constraints(&config.integrator.params))
+                .unwrap_or(false);
             crate::integrator::run_step(
                 integrator.as_mut(),
                 &mut buffers,
                 &mut sim_box,
                 &mut force_field,
                 constraint_arg,
-                config.integrator.supports_constraints(),
+                supports_constraints,
                 dt_f32,
                 &mut timings,
             )

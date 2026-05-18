@@ -159,11 +159,16 @@ or unit suffixes are supported in schema v1.
 
 #### `[integrator]` <!-- rq-27f9fae8 -->
 
-The integrator section is a tagged variant. A required `kind` field
-selects one of the pluggable integrator slots (see
-`integration/framework.md` for the slot interface). Every other field
-in this table is kind-specific: extra fields not recognised by the
-chosen `kind` are rejected, and missing required fields are rejected.
+The integrator section carries a required `kind` field that selects
+one of the registered integrator slots (see `integration/framework.md`
+for the slot interface) plus any number of kind-specific parameter
+fields at the same level. The Rust-side deserialiser captures `kind`
+into a `SlotConfig` (see *Feature API* below) and flattens the rest of
+the section into a `toml::Value` for the builder to consume. Each
+registered builder validates its own parameter schema:
+fields not recognised by the chosen `kind`'s builder are rejected at
+config load via the builder's `validate_params(&toml::Value)` method,
+and missing required fields are rejected the same way.
 
 - `kind: String` — required. One of:
   - `"velocity-verlet"` — symplectic NVE time-stepping core. Does not
@@ -221,17 +226,20 @@ Fields accepted for `kind = "mtk-npt"`:
 
 #### `[thermostat]` (optional) <!-- rq-1c2d8eba -->
 
-The thermostat section is an optional tagged variant. When omitted,
-the runner runs no thermostat (NVE composition with the integrator,
-or whatever fused thermostat the integrator owns). When present, a
-required `kind` field selects one of the pluggable thermostat slots
-(see `integration/framework.md`). Every other field in this table is
-kind-specific: extra fields not recognised by the chosen `kind` are
-rejected, and missing required fields are rejected.
+The thermostat section is optional. When omitted, the runner runs no
+thermostat (NVE composition with the integrator, or whatever fused
+thermostat the integrator owns). When present, a required `kind`
+field selects one of the registered thermostat slots (see
+`integration/framework.md`) and the kind-specific parameter fields
+sit at the same level. The Rust-side deserialiser captures `kind`
+into a `SlotConfig` and flattens the rest of the section into a
+`toml::Value`; the chosen builder's `validate_params(&toml::Value)`
+enforces required fields, domains, and rejects unknown fields.
 
-Configuring `[thermostat]` alongside an integrator that owns its own
-thermostat (currently only `langevin-baoab`) is rejected at
-config-load time with
+Configuring `[thermostat]` alongside an integrator whose builder's
+`owns_thermostat(&params)` returns `true` (currently the
+`langevin-baoab` and `mtk-npt` builders) is rejected at config-load
+time with
 `ConfigError::IncompatibleThermostat { integrator: <kind name> }`.
 
 - `kind: String` — required when the section is present. One of:
@@ -300,12 +308,19 @@ Fields accepted for `kind = "berendsen"`:
 
 #### `[barostat]` (optional) <!-- rq-d28e9105 -->
 
-The barostat section is an optional tagged variant. When omitted, the
-runner runs no barostat (constant-volume composition). When present,
-a required `kind` field selects one of the pluggable barostat slots
-(see `integration/framework.md`). Every other field in this table is
-kind-specific: extra fields not recognised by the chosen `kind` are
-rejected, and missing required fields are rejected.
+The barostat section is optional. When omitted, the runner runs no
+barostat (constant-volume composition). When present, a required
+`kind` field selects one of the registered barostat slots (see
+`integration/framework.md`) and the kind-specific parameter fields
+sit at the same level. The Rust-side deserialiser captures `kind`
+into a `SlotConfig` and flattens the rest of the section into a
+`toml::Value`; the chosen builder's `validate_params(&toml::Value)`
+enforces required fields, domains, and rejects unknown fields.
+
+Configuring `[barostat]` alongside an integrator whose builder's
+`owns_barostat(&params)` returns `true` (currently the `mtk-npt`
+builder) is rejected at config-load time with
+`ConfigError::IncompatibleBarostat { integrator: <kind name> }`.
 
 - `kind: String` — required when the section is present. One of:
   - `"berendsen"` — deterministic isotropic weak-coupling barostat
@@ -476,34 +491,42 @@ optional and may be empty. When supplied, every constraint type's
 `.topology` file's `[constraints]` section. Constraint types whose
 `name` is never used in the file are permitted (declared-but-unused).
 
-The presence of at least one constraint group in the topology file
-triggers construction of the `Constraint` slot (see
-`integration/constraint-framework.md`) and is incompatible with any
-integrator whose `IntegratorKind::supports_constraints()` returns
-`false`. Cross-validation handles this incompatibility and returns
-`ConfigError::IncompatibleConstraint { integrator: <kind name> }`.
-
-Common fields:
+Each array entry deserialises into a `NamedSlotConfig` (see *Feature
+API* below). Two fields are common to every entry; everything else is
+captured into a `toml::Value` `params` field for the chosen
+algorithm's builder to consume:
 
 - `name: String` — unique identifier within the `[[constraint_types]]`
   array. Empty strings are rejected. Case-sensitive.
 - `kind: String` — selects the algorithm that processes any group
-  declared with this type. The only supported value is
-  `"settle-water"`. Future values (`"m-shake"`, `"lincs"`, ...) are
-  reserved.
+  declared with this type. The currently registered value is
+  `"settle-water"` (see `integration/settle.md`). Future values
+  (`"m-shake"`, `"lincs"`, ...) are added by registering additional
+  `ConstraintBuilder`s.
 
-Fields accepted for `kind = "settle-water"` (see
-`integration/settle.md`):
+Per-kind parameter fields are validated by the matching
+`ConstraintBuilder`'s `validate_params(&toml::Value)` method (see
+`integration/constraint-framework.md`). For `kind = "settle-water"`
+(documented in `integration/settle.md`):
 
 - `r_oh: f64` — O–H constraint distance in metres. Required. Finite,
   strictly positive.
 - `r_hh: f64` — H–H constraint distance in metres. Required. Finite,
   strictly positive. Must satisfy `r_hh < 2 · r_oh`; otherwise the
-  loader returns `ConfigError::SettleGeometryInfeasible { name,
+  builder returns `ConfigError::SettleGeometryInfeasible { name,
   r_oh, r_hh }`.
 
-Names must be unique within the array. Unknown fields for the chosen
-`kind` are rejected.
+Names must be unique within the array. Unknown parameter fields for
+the chosen `kind` are rejected by the matching builder's
+`validate_params`.
+
+The presence of at least one constraint group in the topology file
+triggers construction of the `Constraint` slot (see
+`integration/constraint-framework.md`) and is incompatible with any
+integrator whose builder's
+`IntegratorBuilder::supports_constraints(&params)` returns `false`.
+`Config::validate_against(&registries)` enforces this and returns
+`ConfigError::IncompatibleConstraint { integrator: <kind name> }`.
 
 #### `[coulomb]` (optional table) <!-- rq-28d519b5 -->
 
@@ -656,12 +679,18 @@ Cross-validation:
   before any other validation so that future formats fail loudly before
   any other field is read.
 
-### Cross-validation <!-- rq-bd228ef7 -->
+### Validation <!-- rq-bd228ef7 -->
 
-The checks below run inside `Config::validate(&self)`, after the
-typed deserialiser populates `Config`. `load_config` invokes
-`Config::validate` automatically; callers that build a `Config` in
-memory can invoke it directly to obtain the same guarantees.
+Config validation is split between two methods. `Config::validate(&self)`
+runs the structural and topology-independent checks; the open registries
+do not need to be available for it. `Config::validate_against(&self,
+registries: &Registries)` runs the per-kind and cross-cutting checks
+that consult the registered builders. `load_config` invokes
+`Config::validate` automatically; the runner invokes
+`Config::validate_against` after constructing the registries it
+intends to use.
+
+`Config::validate(&self)` checks:
 
 1. Every name in `[[pair_interactions]]`'s `between` refers to a declared
    `[[particle_types]]`. Unknown names produce `UnknownTypeInPair { name,
@@ -677,28 +706,48 @@ memory can invoke it directly to obtain the same guarantees.
    every other supplied path (`PathCollision { kind_a, kind_b, path }`).
    The set of paths under check is `init`, `output.trajectory_path`,
    `output.log_path`, `output.timings_path`, and (when supplied) `topology`.
-4. If `[thermostat]` is present and `config.integrator.owns_thermostat()`
-   returns `true` (`langevin-baoab` and `mtk-npt`), validation returns
-   `IncompatibleThermostat { integrator: <integrator kind name> }`.
-5. If `[barostat]` is present and `config.integrator.owns_barostat()`
-   returns `true` (currently only `mtk-npt`), validation returns
-   `IncompatibleBarostat { integrator: <integrator kind name> }`.
-6. If the topology file's `[constraints]` section is non-empty (which
-   the loader detects after `load_topology_file` has run) and
-   `config.integrator.supports_constraints()` returns `false`,
-   validation returns
-   `IncompatibleConstraint { integrator: <integrator kind name> }`. In
-   the default registry this rejects every combination of constraints
-   with `langevin-baoab`, `mtk-npt`, or `velocity-verlet { lossless =
-   true }`.
-7. Every `[[constraint_types]]` entry's algorithm-specific geometry is
-   feasible. For `kind = "settle-water"`, the loader requires `r_hh <
-   2 · r_oh` and returns `SettleGeometryInfeasible { name, r_oh,
-   r_hh }` otherwise.
-8. Every constraint type name referenced from the topology file's
-   `[constraints]` section appears in `[[constraint_types]]`.
-   Unknown names surface through `load_topology_file` as
-   `TopologyFileError::UnknownConstraintType { .. }`.
+4. Every `[[constraint_types]]` entry has a unique `name`; duplicates
+   surface as `DuplicateConstraintTypeName { name }`.
+5. The electrostatics tables are mutually exclusive: declaring both
+   `[coulomb]` and `[spme]` surfaces as `ConflictingElectrostatics`.
+
+`Config::validate_against(&self, registries: &Registries)` checks:
+
+6. The `[integrator]` section's `kind` is a registered key of
+   `registries.integrators`. Unknown kinds surface as
+   `ConfigError::UnknownKind { slot: "integrator", kind }`.
+7. The chosen integrator builder's `validate_params(&integrator.params)`
+   succeeds; otherwise the builder-produced `ConfigError` propagates.
+8. Same as (6) and (7) for `[thermostat]` (when present) against
+   `registries.thermostats`, and for `[barostat]` (when present)
+   against `registries.barostats`.
+9. Same as (6) and (7) for every `[[constraint_types]]` entry against
+   `registries.constraint_types`.
+10. If `[thermostat]` is present and
+    `registries.integrators.lookup(&integrator.kind).unwrap()
+    .owns_thermostat(&integrator.params)` returns `true`, validation
+    returns
+    `IncompatibleThermostat { integrator: <integrator kind name> }`.
+11. If `[barostat]` is present and
+    `registries.integrators.lookup(&integrator.kind).unwrap()
+    .owns_barostat(&integrator.params)` returns `true`, validation
+    returns
+    `IncompatibleBarostat { integrator: <integrator kind name> }`.
+12. Every constraint type name referenced from the topology file's
+    `[constraints]` section appears in `[[constraint_types]]`.
+    Unknown names surface through `load_topology_file` as
+    `TopologyFileError::UnknownConstraintType { .. }`. This check is
+    performed by `load_topology_file`, not by `Config::validate_against`,
+    because the topology file is loaded separately.
+
+The runner additionally calls `Config::validate_constraint_compatibility(&self, registries: &Registries, has_constraints: bool)`
+after `load_topology_file` returns. This method runs the
+`IncompatibleConstraint` check (the topology-coupled one) using the
+chosen integrator builder's
+`supports_constraints(&integrator.params)` predicate. In the default
+registry it rejects every combination of a non-empty `[constraints]`
+section with `langevin-baoab`, `mtk-npt`, or `velocity-verlet`'s
+lossless variant.
 
 ## Feature API <!-- rq-110285ae -->
 
@@ -714,10 +763,11 @@ memory can invoke it directly to obtain the same guarantees.
     `topology` field is present; resolved against the config file's
     directory.
   - `simulation: SimulationConfig`
-  - `integrator: IntegratorKind`
-  - `thermostat: Option<ThermostatKind>` — `Some` when the
-    `[thermostat]` table is present in the config, `None` otherwise.
-  - `barostat: Option<BarostatKind>` — `Some` when the `[barostat]`
+  - `integrator: SlotConfig` — the chosen integrator kind plus its
+    raw `toml::Value` parameters.
+  - `thermostat: Option<SlotConfig>` — `Some` when the `[thermostat]`
+    table is present in the config, `None` otherwise.
+  - `barostat: Option<SlotConfig>` — `Some` when the `[barostat]`
     table is present in the config, `None` otherwise.
   - `particle_types: Vec<ParticleTypeConfig>`
   - `pair_interactions: Vec<PairInteractionConfig>`
@@ -725,7 +775,7 @@ memory can invoke it directly to obtain the same guarantees.
     array is absent.
   - `angle_types: Vec<AngleTypeConfig>` — empty when the
     `[[angle_types]]` array is absent.
-  - `constraint_types: Vec<ConstraintTypeConfig>` — empty when the
+  - `constraint_types: Vec<NamedSlotConfig>` — empty when the
     `[[constraint_types]]` array is absent.
   - `coulomb: Option<CoulombConfig>` — `Some` when the `[coulomb]` table
     is present in the config, `None` otherwise. Mutually exclusive with
@@ -749,69 +799,50 @@ memory can invoke it directly to obtain the same guarantees.
   - `dt: f64`
   - `temperature: f64`
 
-- `IntegratorKind` — tagged enum carrying the chosen integrator slot <!-- rq-661bf664 -->
-  and its parameters. Variants:
-  - `VelocityVerlet { lossless: bool }` — selected by
-    `kind = "velocity-verlet"`. Does not own its own thermostat or
-    its own barostat.
-  - `LangevinBaoab { friction: f64, temperature: f64, seed: u64 }` —
-    selected by `kind = "langevin-baoab"`. Owns its own thermostat
-    (the OU step); does not own its own barostat.
-  - `MtkNpt { temperature: f64, pressure: f64, tau_t: f64, tau_p: f64,
-    chain_length: u32, yoshida_order: u32, n_resp: u32 }` — selected
-    by `kind = "mtk-npt"`. Owns both its own thermostat (the
-    Nosé-Hoover chains on particles and cell) and its own barostat
-    (the extended-system cell). Optional fields are populated from
-    the corresponding TOML defaults (`chain_length = 3`,
-    `yoshida_order = 3`, `n_resp = 1`) when omitted.
+- `SlotConfig` — open-shaped parsed selection for the singleton <!-- rq-661bf664 -->
+  `[integrator]`, `[thermostat]`, and `[barostat]` sections.
 
-  Variant-bearing parameters reflect the per-kind fields listed under
-  the `[integrator]` section above.
+  ```rust
+  pub struct SlotConfig {
+      pub kind: String,
+      pub params: toml::Value,
+  }
+  ```
 
-  Methods:
+  - `kind` carries the user-supplied `kind = "..."` field verbatim
+    (case-sensitive). It is the lookup key the runner uses against
+    the corresponding registry (`integration/framework.md`).
+  - `params` carries every other field of the section flattened into
+    a `toml::Value` (via `#[serde(flatten)]`). The framework never
+    inspects `params`; each registered builder deserialises its own
+    typed parameter struct from it via `validate_params(&toml::Value)`
+    and `build(...)`.
 
-  - `IntegratorKind::owns_thermostat(&self) -> bool` — returns `true`
-    for variants that bundle their own thermostat (`LangevinBaoab`
-    and `MtkNpt`); `false` otherwise. Consulted by cross-validation
-    rule 4.
-  - `IntegratorKind::owns_barostat(&self) -> bool` — returns `true`
-    for variants that bundle their own barostat (currently only
-    `MtkNpt`); `false` otherwise. Consulted by cross-validation
-    rule 5.
+- `NamedSlotConfig` — open-shaped parsed entry for the <!-- rq-3fdb7e01 -->
+  `[[constraint_types]]` array (and any future similarly-shaped array
+  of named, kind-tagged entries).
 
-- `ThermostatKind` — tagged enum carrying the chosen thermostat slot <!-- rq-3fdb7e01 -->
-  and its parameters. Used in `Config::thermostat: Option<ThermostatKind>`.
-  Variants:
-  - `NoseHooverChain { temperature: f64, tau: f64, chain_length: u32,
-    yoshida_order: u32, n_resp: u32 }` — selected by
-    `kind = "nose-hoover-chain"`. Optional fields are populated from
-    the corresponding TOML defaults (`chain_length = 3`,
-    `yoshida_order = 3`, `n_resp = 1`) when omitted.
-  - `Csvr { temperature: f64, tau: f64, seed: u64 }` — selected by
-    `kind = "csvr"`. All three fields are required.
-  - `Andersen { temperature: f64, collision_rate: f64, seed: u64 }`
-    — selected by `kind = "andersen"`. All three fields are
-    required. `collision_rate` is the per-particle stochastic
-    collision frequency in inverse seconds and may be zero.
-  - `Berendsen { temperature: f64, tau: f64 }` — selected by
-    `kind = "berendsen"`. Both fields are required. Deterministic;
-    no RNG seed.
+  ```rust
+  pub struct NamedSlotConfig {
+      pub name: String,
+      pub kind: String,
+      pub params: toml::Value,
+  }
+  ```
 
-  Variant-bearing parameters reflect the per-kind fields listed under
-  the `[thermostat]` section above.
+  - `name` is the user-facing identifier referenced from elsewhere in
+    the config (for `[[constraint_types]]`, from the topology file's
+    `[constraints]` section).
+  - `kind` and `params` work the same as `SlotConfig`'s fields; the
+    matching builder (`ConstraintBuilder` for constraint types)
+    deserialises and validates `params`.
 
-- `BarostatKind` — tagged enum carrying the chosen barostat slot and <!-- rq-aa6ce5c0 -->
-  its parameters. Used in `Config::barostat: Option<BarostatKind>`.
-  Variants:
-  - `Berendsen { pressure: f64, tau: f64, compressibility: f64 }` —
-    selected by `kind = "berendsen"`. All three fields are required.
-    Deterministic; no RNG seed.
-  - `CRescale { pressure: f64, temperature: f64, tau: f64, compressibility: f64, seed: u64 }`
-    — selected by `kind = "c-rescale"`. All five fields are
-    required. Stochastic; uses the per-step RNG seed.
-
-  Variant-bearing parameters reflect the per-kind fields listed under
-  the `[barostat]` section above.
+  See `integration/framework.md` for the integrator / thermostat /
+  barostat builder traits and `integration/constraint-framework.md`
+  for the `ConstraintBuilder` trait; each defines the
+  `validate_params`, `build`, and (where relevant) compatibility
+  predicate methods that consume `SlotConfig`'s and
+  `NamedSlotConfig`'s `params`.
 
 - `ParticleTypeConfig` <!-- rq-a5ccc1de -->
   - `name: String`
@@ -851,15 +882,15 @@ memory can invoke it directly to obtain the same guarantees.
   The `name` field is the lookup key referenced from the `.topology`
   file's `[angles]` section.
 
-- `ConstraintTypeConfig` — tagged enum carrying the chosen <!-- rq-ac8fc96a -->
-  constraint-algorithm parameters. Variants:
-  - `SettleWater { name: String, r_oh: f64, r_hh: f64 }` — selected by
-    `kind = "settle-water"`.
-
-  The `name` field is the lookup key referenced from the `.topology`
-  file's `[constraints]` section. Each variant additionally exposes a
-  `expected_atom_count(&self) -> usize` method used by the topology
-  parser to validate row column counts (`SettleWater` returns `3`).
+- `[[constraint_types]]` entries deserialise into `NamedSlotConfig` <!-- rq-ac8fc96a -->
+  values (see `NamedSlotConfig` above). Each entry's `kind` selects
+  the algorithm; each registered `ConstraintBuilder` (see
+  `integration/constraint-framework.md`) deserialises its own typed
+  parameter struct from `params` via `validate_params(&toml::Value)`
+  and answers `expected_atom_count(&toml::Value)` for the topology
+  parser's row-column-count check. For
+  `kind = "settle-water"`, the builder's typed params are
+  `{ r_oh: f64, r_hh: f64 }` (see `integration/settle.md`).
 
 - `CoulombConfig` <!-- rq-793a7cbb -->
   - `cutoff: f64` — real-space cutoff in metres.
@@ -965,25 +996,38 @@ memory can invoke it directly to obtain the same guarantees.
   - `DuplicateConstraintTypeName { name: String }` — two
     `[[constraint_types]]` entries share a `name`.
   - `IncompatibleConstraint { integrator: String }` — the topology
-    file's `[constraints]` section is non-empty and
-    `IntegratorKind::supports_constraints()` returns `false` for the
-    chosen integrator (in the default registry: `langevin-baoab`,
-    `mtk-npt`, or `velocity-verlet { lossless = true }`).
+    file's `[constraints]` section is non-empty and the chosen
+    integrator builder's
+    `IntegratorBuilder::supports_constraints(&params)` returns
+    `false` (in the default registry: `langevin-baoab`, `mtk-npt`,
+    or `velocity-verlet` with `lossless = true`).
+  - `UnknownKind { slot: &'static str, kind: String }` — a
+    `[integrator]`, `[thermostat]`, `[barostat]`, or
+    `[[constraint_types]]` entry's `kind` field does not match any
+    registered builder in the corresponding registry. `slot` carries
+    `"integrator"`, `"thermostat"`, `"barostat"`, or
+    `"constraint_types"`.
   - `SettleGeometryInfeasible { name: String, r_oh: f64, r_hh: f64 }`
     — a `[[constraint_types]]` entry with `kind = "settle-water"`
     declares `r_hh ≥ 2 · r_oh`.
 
   `Parse` covers every shape error the typed deserialiser flags
-  structurally: unknown fields under a tagged-enum table
-  (e.g. `lossless` under `[integrator] kind = "langevin-baoab"`,
-  `seed` under `[barostat] kind = "berendsen"`, `max_neighbors` under
-  `[neighbor_list] mode = "all-pairs"`); unknown enum tags
-  (e.g. `kind = "not-a-real-integrator"`, `potential = "harmonic"` in
-  `[[pair_interactions]]`, `mode = "kd-tree"` in `[neighbor_list]`);
-  wrong TOML types (e.g. a string where an integer is required); and
-  raw TOML syntax errors. `path` carries the document location so
-  callers can present a useful diagnostic without inspecting
-  `message`.
+  structurally that does not require registry knowledge: unknown
+  fields under a closed-enum table (e.g. `mode` outside the accepted
+  set in `[neighbor_list]`, an unknown `potential` in
+  `[[pair_interactions]]`); wrong TOML types (e.g. a string where an
+  integer is required); and raw TOML syntax errors. `path` carries the
+  document location so callers can present a useful diagnostic without
+  inspecting `message`.
+
+  Per-kind parameter shape errors for the open-builder slots
+  (`[integrator]`, `[thermostat]`, `[barostat]`,
+  `[[constraint_types]]`) — including unknown fields under the chosen
+  `kind` and out-of-domain numeric values — surface from the matching
+  builder's `validate_params(&toml::Value)` during
+  `Config::validate_against(&registries)`. Builders return
+  `ConfigError::InvalidValue`, `ConfigError::SettleGeometryInfeasible`,
+  or `ConfigError::Parse` as appropriate for their parameter shape.
 
 ### Functions <!-- rq-39891001 -->
 
@@ -995,12 +1039,14 @@ memory can invoke it directly to obtain the same guarantees.
     derived from the config-file stem), resolves every supplied path
     against `path.parent()` (or `"."` if `path` has no parent), calls
     `Config::validate(&config)` on the resulting `Config`, and returns
-    it.
+    it. The registry-dispatched per-kind parameter validation
+    (`Config::validate_against`) is the caller's responsibility — the
+    runner runs it after constructing the registries it intends to use.
   - File-read failure yields `Io(String)`. Deserialiser failures yield
     either `MissingField`, `UnsupportedSchemaVersion`, or `Parse`
     depending on the failure kind (see the `ConfigError` description
-    above). Range, finiteness, domain, and cross-validation failures
-    yield the variant emitted by `Config::validate`.
+    above). Range, finiteness, domain, and structural cross-validation
+    failures yield the variant emitted by `Config::validate`.
   - On any validation failure, returns the first error encountered in
     declaration order: deserialiser errors first (top-level fields,
     then `[simulation]`, then `[integrator]`, then
@@ -1008,18 +1054,23 @@ memory can invoke it directly to obtain the same guarantees.
     `[bond_types]` / `[angle_types]` / `[coulomb]` / `[spme]` /
     `[neighbor_list]` / `[output]`); then `Config::validate`'s
     field-domain checks in the same declaration order; then
-    cross-validation rules 1–5 in the order listed under
-    *Cross-validation*.
+    `Config::validate`'s structural cross-validation rules in the
+    order listed under *Validation*.
 
 - `Config::validate(&self) -> Result<(), ConfigError>` <!-- rq-a54cc657 -->
   - Pure host-side function. Takes a `Config` (typically obtained from
     `load_config` after deserialisation, but also constructable in
-    memory by callers) and applies every check documented under
-    *Field reference* that is not already enforceable by the typed
-    deserialiser: range/finiteness/domain constraints on numeric
-    fields (positivity, NaN-rejection, `theta_0 in [0, π]`,
-    `r_switch <= cutoff`, non-empty string identifiers), plus the
-    five rules listed under *Cross-validation*.
+    memory by callers) and applies every structural check documented
+    under *Field reference* that is not already enforceable by the
+    typed deserialiser and that does not require registry knowledge:
+    range/finiteness/domain constraints on numeric fields (positivity,
+    NaN-rejection, `theta_0 in [0, π]`, `r_switch <= cutoff`, non-empty
+    string identifiers), plus the structural cross-validation rules
+    listed under *Validation*.
+  - Per-kind parameter validation for the open-builder slots
+    (`[integrator]`, `[thermostat]`, `[barostat]`,
+    `[[constraint_types]]`) lives in `Config::validate_against`
+    because it requires registry access.
   - On the first failure, returns the structured error variant
     documented for that check (`InvalidValue` for per-field domain
     failures; `DuplicateTypeName`, `UnknownTypeInPair`,
@@ -1029,10 +1080,60 @@ memory can invoke it directly to obtain the same guarantees.
     `DuplicateBondTypeName`, or `DuplicateAngleTypeName` for the
     cross-validation rules).
   - Order of checks: per-field domain checks in the section order
-    above, then cross-validation rules 1, 2, 3, 4, 5 in that order.
+    above, then the structural cross-validation rules listed under
+    *Validation* in that order.
   - Calling `Config::validate` on a `Config` returned by
     `load_config` is a no-op (returns `Ok(())`): `load_config` already
     invoked it.
+
+- `Config::validate_against(&self, registries: &Registries) -> Result<(), ConfigError>` <!-- rq-6082cd2d -->
+  - Runs the registry-dispatched per-kind validation: looks up each
+    open-builder slot's `kind` in the corresponding registry, calls
+    the builder's `validate_params(&toml::Value)`, and then queries
+    `owns_thermostat(&params)` / `owns_barostat(&params)` to enforce
+    the integrator-thermostat and integrator-barostat compatibility
+    rules.
+  - Returns `ConfigError::UnknownKind { slot, kind }` for any
+    `kind` that does not match a registered builder.
+  - Surfaces every builder-produced `ConfigError` (typically
+    `InvalidValue`, `SettleGeometryInfeasible`, or `Parse`).
+  - Runs the `[thermostat]` integrator-ownership check and the
+    `[barostat]` integrator-ownership check as documented in
+    *Validation*; these produce `IncompatibleThermostat` and
+    `IncompatibleBarostat` respectively.
+  - The runner invokes this method after `load_config` returns and
+    after constructing its registries; the constraint compatibility
+    check (which also requires the topology file's
+    `[constraints]` count) lives in
+    `Config::validate_constraint_compatibility`.
+
+- `Config::validate_constraint_compatibility(&self, registries: &Registries, has_constraints: bool) -> Result<(), ConfigError>` <!-- rq-723d202b -->
+  - When `has_constraints` is `true` and the chosen integrator
+    builder's `supports_constraints(&integrator.params)` returns
+    `false`, returns
+    `ConfigError::IncompatibleConstraint { integrator: <kind name> }`.
+  - When `has_constraints` is `false`, always returns `Ok(())`.
+  - The runner calls this method after `load_topology_file` returns
+    so the topology's `[constraints]` count is known.
+
+- `Registries` — host-side bundle of the four open registries the <!-- rq-32308250 -->
+  config-validation API consults.
+
+  ```rust
+  pub struct Registries {
+      pub integrators: IntegratorRegistry,
+      pub thermostats: ThermostatRegistry,
+      pub barostats: BarostatRegistry,
+      pub constraint_types: ConstraintRegistry,
+  }
+  ```
+
+  Each field is the open registry documented in its own requirements
+  file (`integration/framework.md` for the first three;
+  `integration/constraint-framework.md` for the constraint registry).
+  `Registries::with_builtins()` constructs a `Registries` whose four
+  sub-registries are each `*Registry::with_builtins()` — the default
+  set the runner uses.
 
 ## Out of Scope <!-- rq-35722a66 -->
 
@@ -1911,11 +2012,11 @@ Feature: TOML simulation config schema
     And config.thermostat matches Some(ThermostatKind::Csvr { .. })
 
   @rq-4cd2ec5b
-  Scenario: IntegratorKind::owns_thermostat agrees with the validation rule
-    Given an IntegratorKind::VelocityVerlet { lossless: false }
-    Then kind.owns_thermostat() returns false
-    Given an IntegratorKind::LangevinBaoab { friction: 1.0, temperature: 300.0, seed: 0 }
-    Then kind.owns_thermostat() returns true
+  Scenario: IntegratorBuilder::owns_thermostat agrees with the validation rule
+    Given the "velocity-verlet" builder from IntegratorRegistry::with_builtins()
+    Then builder.owns_thermostat(&{ lossless: false }) returns false
+    Given the "langevin-baoab" builder from IntegratorRegistry::with_builtins()
+    Then builder.owns_thermostat(&{ friction: 1.0, temperature: 300.0, seed: 0 }) returns true
 
   @rq-23806456
   Scenario: MtkNpt integrator with all required fields is accepted
@@ -1955,15 +2056,15 @@ Feature: TOML simulation config schema
       integrator: "mtk-npt" })
 
   @rq-014a82ef
-  Scenario: IntegratorKind::owns_barostat matrix
-    Given an IntegratorKind::VelocityVerlet { lossless: false }
-    Then kind.owns_barostat() returns false
-    Given an IntegratorKind::LangevinBaoab { friction: 1.0, temperature: 300.0, seed: 0 }
-    Then kind.owns_barostat() returns false
-    Given an IntegratorKind::MtkNpt { temperature: 85.0, pressure: 1.0e5,
+  Scenario: IntegratorBuilder::owns_barostat matrix
+    Given the "velocity-verlet" builder from IntegratorRegistry::with_builtins()
+    Then builder.owns_barostat(&{ lossless: false }) returns false
+    Given the "langevin-baoab" builder
+    Then builder.owns_barostat(&{ friction: 1.0, temperature: 300.0, seed: 0 }) returns false
+    Given the "mtk-npt" builder
+    Then builder.owns_barostat(&{ temperature: 85.0, pressure: 1.0e5,
       tau_t: 1.0e-13, tau_p: 1.0e-12,
-      chain_length: 3, yoshida_order: 3, n_resp: 1 }
-    Then kind.owns_barostat() returns true
+      chain_length: 3, yoshida_order: 3, n_resp: 1 }) returns true
 
   # --- [barostat] section ---
 
@@ -2049,4 +2150,58 @@ Feature: TOML simulation config schema
   # `ConfigError::MissingField { field: "barostat.*" }` and
   # `ConfigError::InvalidValue { field: "barostat.*", .. }` to exercise
   # the same loader path documented in this section.
+
+  # --- SlotConfig shape and registry-dispatched validation ---
+
+  @rq-993ec182
+  Scenario: [integrator] section parses into a SlotConfig
+    Given the Background config with [integrator] kind="velocity-verlet" and lossless=false
+    When load_config is called
+    Then config.integrator.kind equals "velocity-verlet"
+    And config.integrator.params.get("lossless") equals Some(toml::Value::Boolean(false))
+
+  @rq-9ce1bd52
+  Scenario: validate_against accepts a well-formed config
+    Given a Config returned by load_config from the Background config
+    And the default Registries::with_builtins()
+    When config.validate_against(&registries) is called
+    Then it returns Ok(())
+
+  @rq-aa1492a7
+  Scenario: validate_against rejects an unknown integrator kind
+    Given a Config whose integrator.kind equals "no-such-integrator"
+    And the default Registries::with_builtins()
+    When config.validate_against(&registries) is called
+    Then it returns Err(ConfigError::UnknownKind {
+      slot: "integrator", kind: "no-such-integrator" })
+
+  @rq-2afb76f2
+  Scenario: validate_against surfaces per-builder validate_params errors
+    Given a Config whose integrator is the "langevin-baoab" kind with friction = -1.0
+    And the default Registries::with_builtins()
+    When config.validate_against(&registries) is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.friction", .. })
+
+  @rq-0040baca
+  Scenario: validate_against enforces IncompatibleThermostat from the builder predicate
+    Given a Config whose integrator is "langevin-baoab" and whose thermostat is "csvr"
+    And the default Registries::with_builtins()
+    When config.validate_against(&registries) is called
+    Then it returns Err(ConfigError::IncompatibleThermostat {
+      integrator: "langevin-baoab" })
+
+  @rq-d370907d
+  Scenario: validate_constraint_compatibility rejects lossless velocity-Verlet with constraints
+    Given a Config whose integrator is "velocity-verlet" with lossless = true
+    And the default Registries::with_builtins()
+    When config.validate_constraint_compatibility(&registries, true) is called
+    Then it returns Err(ConfigError::IncompatibleConstraint {
+      integrator: "velocity-verlet" })
+
+  @rq-8a3c0426
+  Scenario: validate_constraint_compatibility accepts lossy velocity-Verlet with constraints
+    Given a Config whose integrator is "velocity-verlet" with lossless = false
+    And the default Registries::with_builtins()
+    When config.validate_constraint_compatibility(&registries, true) is called
+    Then it returns Ok(())
 ```

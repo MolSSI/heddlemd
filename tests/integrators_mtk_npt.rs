@@ -14,7 +14,7 @@ use dynamics::integrator::IntegratorStepExt;
 use dynamics::integrator::{
     Integrator, IntegratorRegistry, MtkNptIntegrator, nhc_chain_sub_step,
 };
-use dynamics::io::IntegratorKind;
+use dynamics::io::SlotConfig;
 use dynamics::io::config::NeighborListConfig;
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
@@ -54,21 +54,24 @@ fn mtk_kind(
     chain_length: u32,
     yoshida_order: u32,
     n_resp: u32,
-) -> IntegratorKind {
-    IntegratorKind::MtkNpt {
-        temperature,
-        pressure,
-        tau_t,
-        tau_p,
-        chain_length,
-        yoshida_order,
-        n_resp,
-    }
+) -> SlotConfig {
+    SlotConfig::from_params_str(
+        "mtk-npt",
+        &format!(
+            "temperature = {temperature:e}\n\
+             pressure = {pressure:e}\n\
+             tau_t = {tau_t:e}\n\
+             tau_p = {tau_p:e}\n\
+             chain_length = {chain_length}\n\
+             yoshida_order = {yoshida_order}\n\
+             n_resp = {n_resp}\n"
+        ),
+    )
 }
 
-fn build_mtk(gpu: &GpuContext, n: usize, kind: &IntegratorKind) -> Box<dyn Integrator> {
+fn build_mtk(gpu: &GpuContext, n: usize, slot: &SlotConfig) -> Box<dyn Integrator> {
     IntegratorRegistry::with_builtins()
-        .build(kind, gpu, n)
+        .build(slot, gpu, n)
         .unwrap()
 }
 
@@ -163,9 +166,12 @@ fn registry_builds_mtk_npt_with_particle_count_zero() {
 
 #[test]
 fn mtk_npt_owns_thermostat_and_barostat() {
+    use dynamics::integrator::IntegratorRegistry;
     let kind = mtk_kind(85.0, 1.0e5, 1.0e-13, 1.0e-12, 3, 3, 1);
-    assert!(kind.owns_thermostat());
-    assert!(kind.owns_barostat());
+    let registry = IntegratorRegistry::with_builtins();
+    let b = registry.lookup(&kind.kind).unwrap();
+    assert!(b.owns_thermostat(&kind.params));
+    assert!(b.owns_barostat(&kind.params));
 }
 
 // --- Per-step kernel sequence ---

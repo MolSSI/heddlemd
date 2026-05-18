@@ -4,15 +4,42 @@ use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice};
 
-use crate::forces::{ConstraintList, ConstraintTypeKind};
+use serde::Deserialize;
+
+use crate::forces::{ConstraintList, GroupConstraint};
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, settle_positions, settle_snapshot, settle_velocities,
 };
-use crate::io::config::ConstraintTypeConfig;
+use crate::io::config::{ConfigError, NamedSlotConfig};
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
 
 use super::constraint::{Constraint, ConstraintBuilder, ConstraintError};
+
+// rq-1f87880c — typed parameter struct for the "settle-water" builder.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SettleWaterParams {
+    pub r_oh: f64,
+    pub r_hh: f64,
+}
+
+fn deserialize_params(params: &toml::Value) -> Result<SettleWaterParams, ConfigError> {
+    params
+        .clone()
+        .try_into::<SettleWaterParams>()
+        .map_err(|e| crate::io::config::translate_params_error("constraint_types", e))
+}
+
+fn require_finite_positive(field: &str, value: f64) -> Result<(), ConfigError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(ConfigError::InvalidValue {
+            field: field.to_string(),
+            reason: format!("value must be finite and strictly positive, got {value}"),
+        });
+    }
+    Ok(())
+}
 
 // rq-67e62f4b
 #[derive(Debug, thiserror::Error)]
@@ -52,14 +79,14 @@ impl From<SettleError> for ConstraintError {
             SettleError::InconsistentMasses { group_index, .. } => {
                 ConstraintError::InvalidGroupShape {
                     group_index,
-                    kind: ConstraintTypeKind::SettleWater,
+                    kind: "settle-water".to_string(),
                     reason: format!("{e}"),
                 }
             }
             SettleError::MalformedSettleType { name, reason } => {
                 ConstraintError::InvalidGroupShape {
                     group_index: 0,
-                    kind: ConstraintTypeKind::SettleWater,
+                    kind: "settle-water".to_string(),
                     reason: format!("settle type {name}: {reason}"),
                 }
             }
@@ -69,7 +96,7 @@ impl From<SettleError> for ConstraintError {
                 actual_constraints,
             } => ConstraintError::InvalidGroupShape {
                 group_index,
-                kind: ConstraintTypeKind::SettleWater,
+                kind: "settle-water".to_string(),
                 reason: format!(
                     "{actual_atoms} atoms / {actual_constraints} constraints, expected 3 / 3"
                 ),
@@ -106,7 +133,7 @@ impl SettleConstraintsState {
         device: Arc<CudaDevice>,
         list: &ConstraintList,
         masses: &[f32],
-        constraint_types: &[ConstraintTypeConfig],
+        constraint_types: &[NamedSlotConfig],
     ) -> Result<Self, SettleError> {
         // Validate group shapes and pack the group-atoms flat array in
         // group order. SETTLE requires exactly 3 atoms and 3
@@ -169,16 +196,22 @@ impl SettleConstraintsState {
         let mut type_mass_o_host: Vec<f32> = vec![0.0; n_types];
         let mut type_mass_h_host: Vec<f32> = vec![0.0; n_types];
         for (_ti, ct) in constraint_types.iter().enumerate() {
-            match ct {
-                ConstraintTypeConfig::SettleWater { name, r_oh, r_hh } => {
-                    let r_oh = *r_oh as f32;
-                    let r_hh = *r_hh as f32;
-                    if r_hh >= 2.0 * r_oh {
-                        return Err(SettleError::MalformedSettleType {
-                            name: name.clone(),
-                            reason: format!("r_hh {r_hh} >= 2 r_oh {}", 2.0 * r_oh),
-                        });
+            if ct.kind == "settle-water" {
+                let p = ct.params.clone().try_into::<SettleWaterParams>().map_err(|e| {
+                    SettleError::MalformedSettleType {
+                        name: ct.name.clone(),
+                        reason: e.to_string(),
                     }
+                })?;
+                let name = &ct.name;
+                let r_oh = p.r_oh as f32;
+                let r_hh = p.r_hh as f32;
+                if r_hh >= 2.0 * r_oh {
+                    return Err(SettleError::MalformedSettleType {
+                        name: name.clone(),
+                        reason: format!("r_hh {r_hh} >= 2 r_oh {}", 2.0 * r_oh),
+                    });
+                }
                     // Canonical geometry with mass-weighted COM at the
                     // origin. We place the molecule in the xy-plane
                     // with H-H along y and O on the +x axis. The
@@ -189,20 +222,25 @@ impl SettleConstraintsState {
                     // (taken from the placeholder masses until the
                     // first group that references this type provides
                     // the actual m_O, m_H — we revisit below).
-                    let d_oh = (r_oh * r_oh - (r_hh * 0.5) * (r_hh * 0.5)).sqrt();
-                    // Defer COM-anchoring until per-group masses are
-                    // applied below; store the geometry in the H-H
-                    // midpoint frame for now.
-                    type_canonical_x_host.push(d_oh); // O on +x
-                    type_canonical_y_host.push(0.0);
-                    type_canonical_z_host.push(0.0);
-                    type_canonical_x_host.push(0.0); // H1 at (0, -r_hh/2, 0)
-                    type_canonical_y_host.push(-r_hh * 0.5);
-                    type_canonical_z_host.push(0.0);
-                    type_canonical_x_host.push(0.0); // H2 at (0, +r_hh/2, 0)
-                    type_canonical_y_host.push(r_hh * 0.5);
-                    type_canonical_z_host.push(0.0);
-                }
+                let d_oh = (r_oh * r_oh - (r_hh * 0.5) * (r_hh * 0.5)).sqrt();
+                // Defer COM-anchoring until per-group masses are
+                // applied below; store the geometry in the H-H
+                // midpoint frame for now.
+                type_canonical_x_host.push(d_oh); // O on +x
+                type_canonical_y_host.push(0.0);
+                type_canonical_z_host.push(0.0);
+                type_canonical_x_host.push(0.0); // H1 at (0, -r_hh/2, 0)
+                type_canonical_y_host.push(-r_hh * 0.5);
+                type_canonical_z_host.push(0.0);
+                type_canonical_x_host.push(0.0); // H2 at (0, +r_hh/2, 0)
+                type_canonical_y_host.push(r_hh * 0.5);
+                type_canonical_z_host.push(0.0);
+            } else {
+                // Non-settle-water entries: push placeholder zeros to
+                // keep the per-type array sized in lock-step.
+                type_canonical_x_host.extend([0.0_f32; 3]);
+                type_canonical_y_host.extend([0.0_f32; 3]);
+                type_canonical_z_host.extend([0.0_f32; 3]);
             }
         }
 
@@ -429,7 +467,87 @@ pub struct SettleBuilder;
 
 impl ConstraintBuilder for SettleBuilder {
     fn kind_name(&self) -> &'static str {
-        "settle"
+        "settle-water"
+    }
+
+    fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
+        let p = deserialize_params(params)?;
+        require_finite_positive("constraint_types.r_oh", p.r_oh)?;
+        require_finite_positive("constraint_types.r_hh", p.r_hh)?;
+        if p.r_hh >= 2.0 * p.r_oh {
+            return Err(ConfigError::SettleGeometryInfeasible {
+                name: String::new(),
+                r_oh: p.r_oh,
+                r_hh: p.r_hh,
+            });
+        }
+        Ok(())
+    }
+
+    fn expected_atom_count(&self, _params: &toml::Value) -> usize {
+        3
+    }
+
+    fn validate_group_shape(
+        &self,
+        group_index: usize,
+        atoms: &[u32],
+        constraints: &[GroupConstraint],
+        _params: &toml::Value,
+        masses: &[f32],
+    ) -> Result<(), ConstraintError> {
+        if atoms.len() != 3 || constraints.len() != 3 {
+            return Err(ConstraintError::InvalidGroupShape {
+                group_index,
+                kind: "settle-water".to_string(),
+                reason: format!(
+                    "{} atoms / {} constraints, expected 3 / 3",
+                    atoms.len(),
+                    constraints.len()
+                ),
+            });
+        }
+        let mut seen: [bool; 3] = [false; 3];
+        for c in constraints {
+            let pair = (c.local_i.min(c.local_j), c.local_i.max(c.local_j));
+            let idx = match pair {
+                (0, 1) => 0,
+                (0, 2) => 1,
+                (1, 2) => 2,
+                _ => {
+                    return Err(ConstraintError::InvalidGroupShape {
+                        group_index,
+                        kind: "settle-water".to_string(),
+                        reason: format!(
+                            "unexpected constraint pair ({}, {}); expected (0,1), (0,2), (1,2)",
+                            c.local_i, c.local_j
+                        ),
+                    });
+                }
+            };
+            seen[idx] = true;
+        }
+        if !(seen[0] && seen[1] && seen[2]) {
+            return Err(ConstraintError::InvalidGroupShape {
+                group_index,
+                kind: "settle-water".to_string(),
+                reason: "missing one of the constraint pairs (0,1), (0,2), (1,2)".to_string(),
+            });
+        }
+        // Mass consistency between the two hydrogens.
+        let m_h1 = masses[atoms[1] as usize];
+        let m_h2 = masses[atoms[2] as usize];
+        let mh_scale = m_h1.abs().max(m_h2.abs());
+        if mh_scale > 0.0 && (m_h1 - m_h2).abs() > 1.0e-6 * mh_scale {
+            return Err(ConstraintError::InvalidGroupShape {
+                group_index,
+                kind: "settle-water".to_string(),
+                reason: format!(
+                    "H1 and H2 masses differ: {m_h1} vs {m_h2}"
+                ),
+            });
+        }
+        Ok(())
     }
 
     fn build(
@@ -439,7 +557,7 @@ impl ConstraintBuilder for SettleBuilder {
         _particle_count: usize,
         list: &ConstraintList,
         masses: &[f32],
-        constraint_types: &[ConstraintTypeConfig],
+        constraint_types: &[NamedSlotConfig],
     ) -> Result<Box<dyn Constraint>, ConstraintError> {
         let state = SettleConstraintsState::new(device, list, masses, constraint_types)?;
         Ok(Box::new(state))

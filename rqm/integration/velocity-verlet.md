@@ -8,8 +8,8 @@ no `[barostat]`) the run is NVE; composed with any of the registered
 thermostats it yields the corresponding NVT-flavoured run via the
 framework's `apply_pre` / `apply_post` dispatch. The integrator itself
 makes no thermostat or barostat decisions and does not own its
-thermostat (`IntegratorKind::VelocityVerlet { .. }.owns_thermostat()`
-returns `false`).
+thermostat (the `"velocity-verlet"` builder's
+`IntegratorBuilder::owns_thermostat(&params)` returns `false`).
 
 The per-particle arithmetic is split across two CUDA kernels: `vv_kick_drift`
 performs the first half-velocity update followed by the position update, and
@@ -340,10 +340,22 @@ memory or kernel-launch cost from the lossless code path.
 
 `VelocityVerletState` implements the `Integrator` trait declared in
 `framework.md`. The `velocity-verlet` builder registered in
-`IntegratorRegistry::with_builtins()` takes the `lossless` flag from
-the parsed `IntegratorKind::VelocityVerlet { lossless }` config variant
+`IntegratorRegistry::with_builtins()` deserialises a
+`VelocityVerletParams { lossless: bool }` (with `lossless` defaulting
+to `false` when omitted) from the `SlotConfig`'s `params: toml::Value`
 and, when `lossless == true`, allocates a `LosslessBuffers` of the
 runner's particle count on the same `Arc<CudaDevice>`.
+
+The `"velocity-verlet"` builder's predicate methods (see
+`integration/framework.md`):
+
+- `validate_params(&params)` deserialises `VelocityVerletParams` from
+  `params`, rejecting unknown fields with `ConfigError::Parse`.
+- `owns_thermostat(&params)` and `owns_barostat(&params)` always
+  return `false`.
+- `supports_constraints(&params)` returns
+  `!VelocityVerletParams::from(params).lossless` — `true` for the
+  lossy variant, `false` for the lossless variant.
 
 ### Step Plan <!-- rq-a097b162 -->
 
@@ -386,18 +398,19 @@ dispatches:
 
 The runner walks the plan (see `framework.md` and
 `constraint-framework.md`). When a constraint slot is configured and
-the integrator's `IntegratorKind::supports_constraints()` returns
-`true`, the runner inserts `apply_before_drift` / `apply_after_drift`
-around the `KickDrift` sub-step and fires `apply_after_kick` after
-the final `KickHalf`. Velocity Verlet's `execute()` is unaware of
-the constraint slot.
+the `"velocity-verlet"` builder's
+`IntegratorBuilder::supports_constraints(&params)` returns `true`,
+the runner inserts `apply_before_drift` / `apply_after_drift` around
+the `KickDrift` sub-step and fires `apply_after_kick` after the final
+`KickHalf`. Velocity Verlet's `execute()` is unaware of the
+constraint slot.
 
-`IntegratorKind::VelocityVerlet { lossless: false }` returns `true`
-from `supports_constraints()`; `IntegratorKind::VelocityVerlet
-{ lossless: true }` returns `false`. The config loader rejects the
-`lossless = true` + non-empty `[constraints]` combination with
-`ConfigError::IncompatibleConstraint` (see
-`integration/constraint-framework.md` and `io/config-schema.md`).
+The builder's `supports_constraints(&params)` returns `true` when
+`params.lossless == false` and `false` when `params.lossless == true`.
+The config loader rejects the `lossless = true` + non-empty
+`[constraints]` combination with `ConfigError::IncompatibleConstraint`
+(see `integration/constraint-framework.md` and
+`io/config-schema.md`).
 
 `sim_box` is borrowed mutably during `execute()` but velocity-Verlet
 does not modify it. Velocity Verlet is deterministic and stateless

@@ -1,4 +1,11 @@
 {
+  "rq-0040baca": {
+    "decl": "Scenario: validate_against enforces IncompatibleThermostat from the builder predicate",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "validate_against enforces IncompatibleThermostat from the builder predicate",
+    "type": "scenario"
+  },
   "rq-0051b248": {
     "decl": "Scenario: Reject negative dt",
     "file": "io/config-schema",
@@ -85,10 +92,10 @@
     "type": "scenario"
   },
   "rq-014a82ef": {
-    "decl": "Scenario: IntegratorKind::owns_barostat matrix",
+    "decl": "Scenario: IntegratorBuilder::owns_barostat matrix",
     "file": "io/config-schema",
     "refs": [],
-    "title": "IntegratorKind::owns_barostat matrix",
+    "title": "IntegratorBuilder::owns_barostat matrix",
     "type": "scenario"
   },
   "rq-01607062": {
@@ -526,6 +533,13 @@
     "file": "forces/spme",
     "refs": [],
     "title": "Reciprocal-space virial is distributed equally per particle",
+    "type": "scenario"
+  },
+  "rq-084ba25b": {
+    "decl": "Scenario: Builder validate_params accepts a well-formed params object",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Builder validate_params accepts a well-formed params object",
     "type": "scenario"
   },
   "rq-086a1bd9": {
@@ -1203,7 +1217,7 @@
     "type": "scenario"
   },
   "rq-12b7dcb6": {
-    "decl": "- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], constraint_types: &[ConstraintTypeConfig]) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError>`",
+    "decl": "- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], constraint_types: &[NamedSlotConfig], constraint_registry: &ConstraintRegistry) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError>`",
     "file": "forces/topology",
     "refs": [
       {
@@ -1910,6 +1924,13 @@
     "title": "vv_kick_drift on an empty state is a no-op",
     "type": "scenario"
   },
+  "rq-1e30bbf4": {
+    "decl": "- `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize) -> Result<Box<dyn Integrator>, IntegratorError>`",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "IntegratorRegistry",
+    "type": "api-item"
+  },
   "rq-1e5dcdc9": {
     "decl": "Scenario: draw_counter starts at 0 and increments by 1 per apply_post",
     "file": "integration/csvr",
@@ -1977,10 +1998,59 @@
     "type": "section"
   },
   "rq-1f87880c": {
-    "decl": "- `IntegratorKind`, `ThermostatKind`, `BarostatKind` — tagged enums",
+    "decl": "- `SlotConfig` — open-shaped parsed slot selection. Lives alongside",
     "file": "integration/framework",
-    "refs": [],
-    "title": "IntegratorKind",
+    "refs": [
+      {
+        "file": "src/integrator/andersen.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/berendsen.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/berendsen_barostat.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/c_rescale_barostat.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/csvr.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/langevin_baoab.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/mtk_npt.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/nose_hoover_chain.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/settle.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/velocity_verlet.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SlotConfig",
     "type": "api-item"
   },
   "rq-1fc57c00": {
@@ -2382,7 +2452,7 @@
     "type": "section"
   },
   "rq-24f6b8b9": {
-    "decl": "- `IntegratorRegistry::build(&self, kind: &IntegratorKind, device: Arc<CudaDevice>, particle_count: usize) -> Result<Box<dyn Integrator>, IntegratorError>`",
+    "decl": "- `IntegratorRegistry::lookup(&self, kind: &str) -> Option<&dyn IntegratorBuilder>`",
     "file": "integration/framework",
     "refs": [
       {
@@ -2785,6 +2855,13 @@
     "file": "forces/spme",
     "refs": [],
     "title": "SPME reciprocal state's internal cell list uses one bin per FFT grid cell",
+    "type": "scenario"
+  },
+  "rq-2afb76f2": {
+    "decl": "Scenario: validate_against surfaces per-builder validate_params errors",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "validate_against surfaces per-builder validate_params errors",
     "type": "scenario"
   },
   "rq-2b07d8fc": {
@@ -3208,6 +3285,13 @@
     ],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-32308250": {
+    "decl": "- `Registries` — host-side bundle of the four open registries the",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Registries",
+    "type": "api-item"
   },
   "rq-3298bdc5": {
     "decl": "Scenario: ConfigError::InvalidValue renders as prose",
@@ -3722,10 +3806,6 @@
         "kind": "code"
       },
       {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      },
-      {
         "file": "src/timings.rs",
         "kind": "code"
       }
@@ -3896,12 +3976,7 @@
     "decl": "## Parameters",
     "file": "integration/berendsen-barostat",
     "level": 2,
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Parameters",
     "type": "section"
   },
@@ -4006,7 +4081,7 @@
     "type": "file"
   },
   "rq-3fdb7e01": {
-    "decl": "- `ThermostatKind` — tagged enum carrying the chosen thermostat slot",
+    "decl": "- `NamedSlotConfig` — open-shaped parsed entry for the",
     "file": "io/config-schema",
     "refs": [
       {
@@ -4014,7 +4089,7 @@
         "kind": "code"
       }
     ],
-    "title": "ThermostatKind",
+    "title": "NamedSlotConfig",
     "type": "api-item"
   },
   "rq-402cea33": {
@@ -4644,10 +4719,10 @@
     "type": "section"
   },
   "rq-4cd2ec5b": {
-    "decl": "Scenario: IntegratorKind::owns_thermostat agrees with the validation rule",
+    "decl": "Scenario: IntegratorBuilder::owns_thermostat agrees with the validation rule",
     "file": "io/config-schema",
     "refs": [],
-    "title": "IntegratorKind::owns_thermostat agrees with the validation rule",
+    "title": "IntegratorBuilder::owns_thermostat agrees with the validation rule",
     "type": "scenario"
   },
   "rq-4cf03f96": {
@@ -4673,10 +4748,10 @@
     "type": "scenario"
   },
   "rq-4dd5d2d0": {
-    "decl": "Scenario: LangevinBaoab owns its thermostat but not its barostat",
+    "decl": "Scenario: LangevinBaoab builder owns its thermostat but not its barostat",
     "file": "integration/framework",
     "refs": [],
-    "title": "LangevinBaoab owns its thermostat but not its barostat",
+    "title": "LangevinBaoab builder owns its thermostat but not its barostat",
     "type": "scenario"
   },
   "rq-4ddab3c7": {
@@ -5617,6 +5692,13 @@
     "title": "Cadence",
     "type": "section"
   },
+  "rq-6082cd2d": {
+    "decl": "- `Config::validate_against(&self, registries: &Registries) -> Result<(), ConfigError>`",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Config",
+    "type": "api-item"
+  },
   "rq-60f445b2": {
     "decl": "Scenario: Construct a ForceField with zero slots",
     "file": "forces/framework",
@@ -5861,7 +5943,7 @@
     "type": "section"
   },
   "rq-661bf664": {
-    "decl": "- `IntegratorKind` — tagged enum carrying the chosen integrator slot",
+    "decl": "- `SlotConfig` — open-shaped parsed selection for the singleton",
     "file": "io/config-schema",
     "refs": [
       {
@@ -5869,7 +5951,7 @@
         "kind": "code"
       }
     ],
-    "title": "IntegratorKind",
+    "title": "SlotConfig",
     "type": "api-item"
   },
   "rq-66233215": {
@@ -5948,7 +6030,7 @@
     "type": "scenario"
   },
   "rq-678c233d": {
-    "decl": "- `ThermostatRegistry::build_optional(&self, kind: Option<&ThermostatKind>, device: Arc<CudaDevice>, particle_count: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>`",
+    "decl": "- `ThermostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>`",
     "file": "integration/framework",
     "refs": [
       {
@@ -6067,13 +6149,6 @@
     "refs": [],
     "title": "Bond-force reduction sums energy and virial alongside forces",
     "type": "scenario"
-  },
-  "rq-68f5acd3": {
-    "decl": "- `ConstraintTypeKind` — closed enum naming the algorithm that",
-    "file": "integration/constraint-framework",
-    "refs": [],
-    "title": "ConstraintTypeKind",
-    "type": "api-item"
   },
   "rq-693ce6fa": {
     "decl": "# Feature: Shared Neighbor List Service",
@@ -6625,6 +6700,13 @@
     "title": "CUDA kernels",
     "type": "section"
   },
+  "rq-723d202b": {
+    "decl": "- `Config::validate_constraint_compatibility(&self, registries: &Registries, has_constraints: bool) -> Result<(), ConfigError>`",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Config",
+    "type": "api-item"
+  },
   "rq-72a606e3": {
     "decl": "## Determinism",
     "file": "integration/csvr",
@@ -7146,6 +7228,20 @@
     "title": "ForceField",
     "type": "api-item"
   },
+  "rq-79c53582": {
+    "decl": "Scenario: Unknown kind in a populated registry reports UnknownKind",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Unknown kind in a populated registry reports UnknownKind",
+    "type": "scenario"
+  },
+  "rq-7a076bc9": {
+    "decl": "Scenario: Builder validate_params rejects an unknown field",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Builder validate_params rejects an unknown field",
+    "type": "scenario"
+  },
   "rq-7a124d43": {
     "decl": "- `Thermostat::apply_post(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>`",
     "file": "integration/framework",
@@ -7328,6 +7424,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Reject r_switch greater than cutoff",
+    "type": "scenario"
+  },
+  "rq-7d37c707": {
+    "decl": "Scenario: VelocityVerlet builder's supports_constraints depends on the lossless flag",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "VelocityVerlet builder's supports_constraints depends on the lossless flag",
     "type": "scenario"
   },
   "rq-7d4c470a": {
@@ -7943,6 +8046,13 @@
     "title": "Reject a position whose fractional coordinate exceeds +0.5 in a triclinic box",
     "type": "scenario"
   },
+  "rq-8a3c0426": {
+    "decl": "Scenario: validate_constraint_compatibility accepts lossy velocity-Verlet with constraints",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "validate_constraint_compatibility accepts lossy velocity-Verlet with constraints",
+    "type": "scenario"
+  },
   "rq-8a571737": {
     "decl": "- `log_column_names() -> &'static [\"nhc_conserved\"]`.",
     "file": "integration/nose-hoover-chain",
@@ -8189,6 +8299,13 @@
     "title": "Reject log_path = timings_path",
     "type": "scenario"
   },
+  "rq-8fbdbc0c": {
+    "decl": "Scenario: lookup returns the builder for a registered kind",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "lookup returns the builder for a registered kind",
+    "type": "scenario"
+  },
   "rq-8fd4e3bf": {
     "decl": "Scenario: plan walk on empty state is a no-op",
     "file": "integration/framework",
@@ -8431,10 +8548,10 @@
     "type": "scenario"
   },
   "rq-9331ede2": {
-    "decl": "- `IntegratorKind::supports_constraints(&self) -> bool` — added to the",
+    "decl": "- `IntegratorBuilder::supports_constraints(&self, params: &toml::Value) -> bool`",
     "file": "integration/constraint-framework",
     "refs": [],
-    "title": "IntegratorKind",
+    "title": "IntegratorBuilder",
     "type": "api-item"
   },
   "rq-93367a8f": {
@@ -8531,7 +8648,7 @@
     "type": "section"
   },
   "rq-9548bc1a": {
-    "decl": "- `BarostatRegistry::build_optional(&self, kind: Option<&BarostatKind>, device: Arc<CudaDevice>, particle_count: usize) -> Result<Option<Box<dyn Barostat>>, BarostatError>`",
+    "decl": "- `BarostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize) -> Result<Option<Box<dyn Barostat>>, BarostatError>`",
     "file": "integration/framework",
     "refs": [
       {
@@ -8565,10 +8682,10 @@
     "type": "scenario"
   },
   "rq-95b66af0": {
-    "decl": "Scenario: MtkNpt owns both its thermostat and its barostat",
+    "decl": "Scenario: MtkNpt builder owns both its thermostat and its barostat",
     "file": "integration/framework",
     "refs": [],
-    "title": "MtkNpt owns both its thermostat and its barostat",
+    "title": "MtkNpt builder owns both its thermostat and its barostat",
     "type": "scenario"
   },
   "rq-95c2f543": {
@@ -8754,6 +8871,13 @@
     "file": "integration/langevin-baoab",
     "refs": [],
     "title": "Two identical calls produce byte-identical velocities",
+    "type": "scenario"
+  },
+  "rq-993ec182": {
+    "decl": "Scenario: [integrator] section parses into a SlotConfig",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "[integrator] section parses into a SlotConfig",
     "type": "scenario"
   },
   "rq-99a68e09": {
@@ -8985,6 +9109,13 @@
     "file": "integration/velocity-verlet",
     "refs": [],
     "title": "vv_kick does not modify image flags",
+    "type": "scenario"
+  },
+  "rq-9ce1bd52": {
+    "decl": "Scenario: validate_against accepts a well-formed config",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "validate_against accepts a well-formed config",
     "type": "scenario"
   },
   "rq-9cf657ed": {
@@ -9728,6 +9859,13 @@
     "title": "apply_pre",
     "type": "api-item"
   },
+  "rq-aa1492a7": {
+    "decl": "Scenario: validate_against rejects an unknown integrator kind",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "validate_against rejects an unknown integrator kind",
+    "type": "scenario"
+  },
   "rq-aa19f894": {
     "decl": "Scenario: Reject non-positive sigma",
     "file": "io/config-schema",
@@ -9769,18 +9907,6 @@
       }
     ],
     "title": "Integrator",
-    "type": "api-item"
-  },
-  "rq-aa6ce5c0": {
-    "decl": "- `BarostatKind` — tagged enum carrying the chosen barostat slot and",
-    "file": "io/config-schema",
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "BarostatKind",
     "type": "api-item"
   },
   "rq-aad6ca63": {
@@ -9879,10 +10005,10 @@
     "type": "scenario"
   },
   "rq-ac8fc96a": {
-    "decl": "- `ConstraintTypeConfig` — tagged enum carrying the chosen",
+    "decl": "- `[[constraint_types]]` entries deserialise into `NamedSlotConfig`",
     "file": "io/config-schema",
     "refs": [],
-    "title": "ConstraintTypeConfig",
+    "title": "- `[[constraint_types]]` entries deserialise into `NamedSlotConfig`",
     "type": "api-item"
   },
   "rq-acafdfe4": {
@@ -9899,6 +10025,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-acbb6d0e": {
+    "decl": "- `BarostatRegistry::lookup(&self, kind: &str) -> Option<&dyn BarostatBuilder>`",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "BarostatRegistry",
+    "type": "api-item"
   },
   "rq-acbbd59a": {
     "decl": "Scenario: Disabled trajectory and log outputs are not checked, but timings is",
@@ -10114,7 +10247,7 @@
     "type": "section"
   },
   "rq-b004196f": {
-    "decl": "- `ConstraintRegistry::build_optional(&self, list: &ConstraintList, device: Arc<CudaDevice>, particle_count: usize) -> Result<Option<Box<dyn Constraint>>, ConstraintError>`",
+    "decl": "- `ConstraintRegistry::build_optional(&self, list: &ConstraintList, gpu: &GpuContext, particle_count: usize, masses: &[f32], constraint_types: &[NamedSlotConfig]) -> Result<Option<Box<dyn Constraint>>, ConstraintError>`",
     "file": "integration/constraint-framework",
     "refs": [],
     "title": "ConstraintRegistry",
@@ -10758,11 +10891,11 @@
     "type": "scenario"
   },
   "rq-bd228ef7": {
-    "decl": "### Cross-validation",
+    "decl": "### Validation",
     "file": "io/config-schema",
     "level": 3,
     "refs": [],
-    "title": "Cross-validation",
+    "title": "Validation",
     "type": "section"
   },
   "rq-bd367201": {
@@ -11084,12 +11217,7 @@
     "decl": "## Parameters",
     "file": "integration/c-rescale-barostat",
     "level": 2,
-    "refs": [
-      {
-        "file": "src/io/config.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Parameters",
     "type": "section"
   },
@@ -11141,6 +11269,13 @@
     "refs": [],
     "title": "Custom sub-step alone fires no constraint hooks",
     "type": "scenario"
+  },
+  "rq-c44b25af": {
+    "decl": "- `ThermostatRegistry::lookup(&self, kind: &str) -> Option<&dyn ThermostatBuilder>`",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "ThermostatRegistry",
+    "type": "api-item"
   },
   "rq-c4581536": {
     "decl": "Scenario: collision_rate = 0 accepted",
@@ -11557,6 +11692,13 @@
     "refs": [],
     "title": "Launch Configuration",
     "type": "section"
+  },
+  "rq-cb52dec0": {
+    "decl": "Scenario: Builder validate_params rejects an out-of-domain field",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Builder validate_params rejects an out-of-domain field",
+    "type": "scenario"
   },
   "rq-cb85cf61": {
     "decl": "Scenario: Pair inside the switching window has force smaller than the unmodified value",
@@ -11991,6 +12133,13 @@
     "refs": [],
     "title": "CoulombState",
     "type": "api-item"
+  },
+  "rq-d370907d": {
+    "decl": "Scenario: validate_constraint_compatibility rejects lossless velocity-Verlet with constraints",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "validate_constraint_compatibility rejects lossless velocity-Verlet with constraints",
+    "type": "scenario"
   },
   "rq-d3a14184": {
     "decl": "- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>`",
@@ -13290,6 +13439,13 @@
     "title": "Newton's third law",
     "type": "section"
   },
+  "rq-e8adaa9c": {
+    "decl": "Scenario: lookup returns None for an unregistered kind",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "lookup returns None for an unregistered kind",
+    "type": "scenario"
+  },
   "rq-e8be1a1c": {
     "decl": "- `SimulationBox::lattice(&self) -> [f32; 6]`",
     "file": "simulation-box",
@@ -13382,10 +13538,10 @@
     "type": "section"
   },
   "rq-e9be025b": {
-    "decl": "Scenario: VelocityVerlet does not own its thermostat or its barostat",
+    "decl": "Scenario: VelocityVerlet builder does not own its thermostat or its barostat",
     "file": "integration/framework",
     "refs": [],
-    "title": "VelocityVerlet does not own its thermostat or its barostat",
+    "title": "VelocityVerlet builder does not own its thermostat or its barostat",
     "type": "scenario"
   },
   "rq-e9caf013": {

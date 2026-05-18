@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use dynamics::gpu::{ParticleBuffers, init_device, lan_drift_half, lan_ou_step};
 use dynamics::integrator::IntegratorStepExt;
 use dynamics::integrator::{LangevinBaoabBuilder, IntegratorBuilder, IntegratorRegistry};
-use dynamics::io::IntegratorKind;
+use dynamics::io::SlotConfig;
 use dynamics::io::log_output::BOLTZMANN_J_PER_K;
 use dynamics::pbc::SimulationBox;
 use dynamics::runner::run_simulation;
@@ -81,13 +81,12 @@ fn construct_langevin_state_stores_parameters() {
     // we can inspect by calling build() on the concrete builder type and
     // downcasting the result.
     let gpu = init_device().unwrap();
-    let kind = IntegratorKind::LangevinBaoab {
-        friction: 1.0e12,
-        temperature: 300.0,
-        seed: 42,
-    };
+    let slot = SlotConfig::from_params_str(
+        "langevin-baoab",
+        "friction = 1.0e12\ntemperature = 300.0\nseed = 42\n",
+    );
     let builder = LangevinBaoabBuilder;
-    let boxed = builder.build(&gpu, 4, &kind).unwrap();
+    let boxed = builder.build(&gpu, 4, &slot.params).unwrap();
     // The integrator is a `Box<dyn Integrator>`; we can't downcast without
     // `Any`. Instead verify behaviour: a single step with seed=42 yields
     // post-call velocities specific to that seed.
@@ -99,12 +98,11 @@ fn construct_langevin_state_stores_parameters() {
 #[test]
 fn construct_langevin_with_zero_particles() {
     let gpu = init_device().unwrap();
-    let kind = IntegratorKind::LangevinBaoab {
-        friction: 1.0e12,
-        temperature: 300.0,
-        seed: 42,
-    };
-    let _ = IntegratorRegistry::with_builtins().build(&kind, &gpu, 0).unwrap();
+    let slot = SlotConfig::from_params_str(
+        "langevin-baoab",
+        "friction = 1.0e12\ntemperature = 300.0\nseed = 42\n",
+    );
+    let _ = IntegratorRegistry::with_builtins().build(&slot, &gpu, 0).unwrap();
 }
 
 // rq-358de3e6
@@ -336,11 +334,10 @@ fn step_launches_all_six_expected_kernel_calls() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
         .build(
-            &IntegratorKind::LangevinBaoab {
-                friction: 1.0e12,
-                temperature: 300.0,
-                seed: 1,
-            },
+            &SlotConfig::from_params_str(
+                "langevin-baoab",
+                "friction = 1.0e12\ntemperature = 300.0\nseed = 1\n",
+            ),
             &gpu,
             4,
         )
@@ -396,11 +393,10 @@ fn langevin_step_on_empty_is_noop() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
         .build(
-            &IntegratorKind::LangevinBaoab {
-                friction: 1.0e12,
-                temperature: 300.0,
-                seed: 1,
-            },
+            &SlotConfig::from_params_str(
+                "langevin-baoab",
+                "friction = 1.0e12\ntemperature = 300.0\nseed = 1\n",
+            ),
             &gpu,
             0,
         )

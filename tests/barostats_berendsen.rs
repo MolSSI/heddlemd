@@ -16,7 +16,7 @@ use dynamics::integrator::{
 #[allow(unused_imports)]
 use dynamics::integrator::Thermostat; // needed for trait-method calls below
 use dynamics::io::config::NeighborListConfig;
-use dynamics::io::{BarostatKind, IntegratorKind, ThermostatKind};
+use dynamics::io::SlotConfig;
 use dynamics::pbc::{SimulationBox, SimulationBoxError};
 use dynamics::state::ParticleState;
 use dynamics::timings::{KernelStage, Timings};
@@ -49,21 +49,22 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
     .unwrap()
 }
 
-fn berendsen_kind(pressure: f64, tau: f64, compressibility: f64) -> BarostatKind {
-    BarostatKind::Berendsen {
-        pressure,
-        tau,
-        compressibility,
-    }
+fn berendsen_kind(pressure: f64, tau: f64, compressibility: f64) -> SlotConfig {
+    SlotConfig::from_params_str(
+        "berendsen",
+        &format!(
+            "pressure = {pressure:e}\ntau = {tau:e}\ncompressibility = {compressibility:e}\n"
+        ),
+    )
 }
 
 fn build_berendsen_barostat(
     gpu: &GpuContext,
     n: usize,
-    kind: &BarostatKind,
+    slot: &SlotConfig,
 ) -> Box<dyn Barostat> {
     BarostatRegistry::with_builtins()
-        .build_optional(Some(kind), gpu, n)
+        .build_optional(Some(slot), gpu, n)
         .unwrap()
         .unwrap()
 }
@@ -642,14 +643,18 @@ fn composes_with_velocity_verlet_and_berendsen_thermostat() {
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = IntegratorRegistry::with_builtins()
-        .build(&IntegratorKind::VelocityVerlet { lossless: false }, &gpu, n)
+        .build(
+            &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
+            &gpu,
+            n,
+        )
         .unwrap();
     let mut therm = ThermostatRegistry::with_builtins()
         .build_optional(
-            Some(&ThermostatKind::Berendsen {
-                temperature: 85.0,
-                tau: 1.0e-13,
-            }),
+            Some(&SlotConfig::from_params_str(
+                "berendsen",
+                "temperature = 85.0\ntau = 1.0e-13\n",
+            )),
             &gpu,
             n,
         )

@@ -11,7 +11,7 @@ use dynamics::integrator::IntegratorStepExt;
 use dynamics::integrator::{
     CsvrThermostat, Thermostat, ThermostatRegistry, philox_4x32_10, philox_normal,
 };
-use dynamics::io::ThermostatKind;
+use dynamics::io::SlotConfig;
 use dynamics::io::config::NeighborListConfig;
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
@@ -43,17 +43,16 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
     .unwrap()
 }
 
-fn csvr_kind(temperature: f64, tau: f64, seed: u64) -> ThermostatKind {
-    ThermostatKind::Csvr {
-        temperature,
-        tau,
-        seed,
-    }
+fn csvr_kind(temperature: f64, tau: f64, seed: u64) -> SlotConfig {
+    SlotConfig::from_params_str(
+        "csvr",
+        &format!("temperature = {temperature:e}\ntau = {tau:e}\nseed = {seed}\n"),
+    )
 }
 
-fn build_csvr(gpu: &GpuContext, n: usize, kind: &ThermostatKind) -> Box<dyn Thermostat> {
+fn build_csvr(gpu: &GpuContext, n: usize, slot: &SlotConfig) -> Box<dyn Thermostat> {
     ThermostatRegistry::with_builtins()
-        .build_optional(Some(kind), gpu, n)
+        .build_optional(Some(slot), gpu, n)
         .unwrap()
         .unwrap()
 }
@@ -443,7 +442,7 @@ fn csvr_time_averaged_ke_tracks_k_target() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = dynamics::integrator::IntegratorRegistry::with_builtins()
         .build(
-            &dynamics::io::IntegratorKind::VelocityVerlet { lossless: false },
+            &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
             &gpu,
             n,
         )

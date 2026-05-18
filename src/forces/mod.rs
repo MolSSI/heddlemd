@@ -28,7 +28,7 @@ pub use spme::{
 pub use lj::LennardJonesState;
 pub use morse::MorseBondedState;
 pub use topology::{
-    Angle, AngleList, Bond, BondList, ConstraintGroup, ConstraintList, ConstraintTypeKind,
+    Angle, AngleList, Bond, BondList, ConstraintGroup, ConstraintList,
     DeviceExclusionList, Exclusion, ExclusionList, GroupConstraint, TopologyFileError,
     load_topology_file,
 };

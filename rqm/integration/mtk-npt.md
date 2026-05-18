@@ -12,9 +12,10 @@ The integrator is **fused**: it owns its own thermostat (a
 Nosé-Hoover chain on the particle kinetic energy) **and** its own
 barostat (an extended-system cell with mass `W` and a separate
 Nosé-Hoover chain on the cell kinetic energy). It rejects
-co-configured `[thermostat]` and `[barostat]` tables;
-`IntegratorKind::MtkNpt { .. }.owns_thermostat()` and
-`IntegratorKind::MtkNpt { .. }.owns_barostat()` both return `true`.
+co-configured `[thermostat]` and `[barostat]` tables: the
+`"mtk-npt"` builder's
+`IntegratorBuilder::owns_thermostat(&params)` and
+`IntegratorBuilder::owns_barostat(&params)` both return `true`.
 
 This file documents the isotropic variant: one cell-volume degree of
 freedom (the logarithmic volume `ε = (1/3) ln(V/V_0)`), one cell
@@ -190,8 +191,9 @@ kernels owned by this slot. They replace `vv_kick` / `vv_kick_drift`
 for the cell-coupled `L_kick` and `L_drift` operators; the standard
 VV kernels are not used by this integrator.
 
-`IntegratorKind::MtkNpt` returns `false` from
-`supports_constraints()`; the runner therefore inserts no constraint
+The `"mtk-npt"` builder's
+`IntegratorBuilder::supports_constraints(&params)` returns `false`
+regardless of params; the runner therefore inserts no constraint
 hooks around the `Drift` or `KickHalf` sub-steps. Composing MTK NPT
 with constraints is rejected at config load by
 `ConfigError::IncompatibleConstraint` (see
@@ -199,7 +201,9 @@ with constraints is rejected at config load by
 
 ## Parameters <!-- rq-ce37404c -->
 
-Config layer fields set on `IntegratorKind::MtkNpt`:
+The `"mtk-npt"` builder deserialises `MtkNptParams` (with the fields
+listed below) from the `[integrator]` section's `SlotConfig::params`
+field:
 
 - `temperature: f64` — bath temperature `T` in kelvin. Required.
   Finite and strictly positive. Independent of
@@ -335,8 +339,11 @@ post-step `V`.
   them explicitly.
 
 - `MtkNptBuilder` — implements `IntegratorBuilder` with <!-- rq-0b7f7023 -->
-  `kind_name() == "mtk-npt"`. `build(device, particle_count, kind)`
-  matches against `IntegratorKind::MtkNpt { … }`, allocates the two
+  `kind_name() == "mtk-npt"`. `validate_params(&params)`
+  deserialises a `MtkNptParams` struct from `params` and enforces
+  per-field domains (positivity, allowed `yoshida_order`, etc.) plus
+  default values for the optional fields. `build(gpu, particle_count,
+  &params)` re-deserialises `MtkNptParams`, allocates the two
   length-1 device scratch buffers, precomputes `g_dof`, `kt`,
   `w_cell`, `q_mass_part`, `q_mass_cell`, and the Suzuki-Yoshida
   weights, initialises every chain DOF to `0.0`, and returns the

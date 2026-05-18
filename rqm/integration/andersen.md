@@ -76,7 +76,7 @@ part of this slot's per-step sequence.
 
 ## Parameters <!-- rq-eb0bc993 -->
 
-Config layer fields set on `ThermostatKind::Andersen`:
+The matching builder deserialises a typed `AndersenParams` from the `[thermostat]` section's `SlotConfig::params` (see `framework.md`); the per-field reference below documents that parameter struct:
 
 - `temperature: f64` — bath temperature `T` in kelvin. Required.
   Finite and strictly positive. Independent of
@@ -208,7 +208,7 @@ above.
 
 - `AndersenBuilder` — implements `ThermostatBuilder` with <!-- rq-fd0cef60 -->
   `kind_name() == "andersen"`. `build(device, particle_count, kind)`
-  matches against `ThermostatKind::Andersen { … }`, allocates the
+  deserialises `AndersenParams` from `params`, allocates the
   length-1 `ke_scratch` device buffer, and returns the boxed
   `AndersenThermostat`.
 

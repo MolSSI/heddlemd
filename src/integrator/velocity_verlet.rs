@@ -1,14 +1,33 @@
 // rq-09a2e15f
 
+use serde::Deserialize;
+
 use crate::gpu::{
     GpuContext, LosslessBuffers, ParticleBuffers, vv_kick, vv_kick_drift,
     vv_kick_drift_lossless, vv_kick_lossless,
 };
-use crate::io::config::IntegratorKind;
+use crate::io::config::ConfigError;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::{Integrator, IntegratorBuilder, IntegratorError, StepPlan, SubStep};
+
+// rq-1f87880c — typed parameter struct for the "velocity-verlet"
+// builder, deserialised from the `[integrator]` section's
+// `SlotConfig::params`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct VelocityVerletParams {
+    #[serde(default)]
+    pub lossless: bool,
+}
+
+fn deserialize_params(params: &toml::Value) -> Result<VelocityVerletParams, ConfigError> {
+    params
+        .clone()
+        .try_into::<VelocityVerletParams>()
+        .map_err(|e| crate::io::config::translate_params_error("integrator", e))
+}
 
 #[derive(Debug)]
 pub struct VelocityVerletState {
@@ -77,22 +96,30 @@ impl IntegratorBuilder for VelocityVerletBuilder {
         "velocity-verlet"
     }
 
+    fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
+        deserialize_params(params).map(|_| ())
+    }
+
+    fn supports_constraints(&self, params: &toml::Value) -> bool {
+        // Reads `params.lossless`; falls back to `false` if params are
+        // malformed (callers should run validate_params first).
+        let lossless = deserialize_params(params).map(|p| p.lossless).unwrap_or(false);
+        !lossless
+    }
+
     fn build(
         &self,
         gpu: &GpuContext,
         particle_count: usize,
-        kind: &IntegratorKind,
+        params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
-        match kind {
-            IntegratorKind::VelocityVerlet { lossless } => {
-                let buffers = if *lossless {
-                    Some(LosslessBuffers::new(gpu, particle_count)?)
-                } else {
-                    None
-                };
-                Ok(Box::new(VelocityVerletState { lossless: buffers }))
-            }
-            other => Err(IntegratorError::UnknownKind(other.name().to_string())),
-        }
+        let params = deserialize_params(params)
+            .map_err(|_| IntegratorError::UnknownKind("velocity-verlet (malformed params)".into()))?;
+        let buffers = if params.lossless {
+            Some(LosslessBuffers::new(gpu, particle_count)?)
+        } else {
+            None
+        };
+        Ok(Box::new(VelocityVerletState { lossless: buffers }))
     }
 }

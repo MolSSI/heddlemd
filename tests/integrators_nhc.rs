@@ -13,7 +13,7 @@ use dynamics::integrator::IntegratorStepExt;
 use dynamics::integrator::{
     NoseHooverChainThermostat, Thermostat, ThermostatRegistry,
 };
-use dynamics::io::ThermostatKind;
+use dynamics::io::SlotConfig;
 use dynamics::io::config::NeighborListConfig;
 use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
@@ -70,19 +70,18 @@ fn nhc_kind(
     chain_length: u32,
     yoshida_order: u32,
     n_resp: u32,
-) -> ThermostatKind {
-    ThermostatKind::NoseHooverChain {
-        temperature,
-        tau,
-        chain_length,
-        yoshida_order,
-        n_resp,
-    }
+) -> SlotConfig {
+    SlotConfig::from_params_str(
+        "nose-hoover-chain",
+        &format!(
+            "temperature = {temperature:e}\ntau = {tau:e}\nchain_length = {chain_length}\nyoshida_order = {yoshida_order}\nn_resp = {n_resp}\n"
+        ),
+    )
 }
 
-fn build_nhc(gpu: &GpuContext, n: usize, kind: &ThermostatKind) -> Box<dyn Thermostat> {
+fn build_nhc(gpu: &GpuContext, n: usize, slot: &SlotConfig) -> Box<dyn Thermostat> {
     ThermostatRegistry::with_builtins()
-        .build_optional(Some(kind), gpu, n)
+        .build_optional(Some(slot), gpu, n)
         .unwrap()
         .unwrap()
 }
@@ -363,19 +362,21 @@ fn nhc_log_column_names_returns_nhc_conserved() {
 #[test]
 fn vv_and_langevin_log_column_names_are_empty() {
     use dynamics::integrator::IntegratorRegistry;
-    use dynamics::io::IntegratorKind;
     let gpu = init_device().unwrap();
     let vv = IntegratorRegistry::with_builtins()
-        .build(&IntegratorKind::VelocityVerlet { lossless: false }, &gpu, 4)
+        .build(
+            &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
+            &gpu,
+            4,
+        )
         .unwrap();
     assert!(vv.log_column_names().is_empty());
     let lan = IntegratorRegistry::with_builtins()
         .build(
-            &IntegratorKind::LangevinBaoab {
-                friction: 1.0e12,
-                temperature: 300.0,
-                seed: 1,
-            },
+            &SlotConfig::from_params_str(
+                "langevin-baoab",
+                "friction = 1.0e12\ntemperature = 300.0\nseed = 1\n",
+            ),
             &gpu,
             4,
         )
@@ -481,7 +482,7 @@ fn nhc_preserves_com_momentum_to_round_off() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = dynamics::integrator::IntegratorRegistry::with_builtins()
         .build(
-            &dynamics::io::IntegratorKind::VelocityVerlet { lossless: false },
+            &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
             &gpu,
             n,
         )

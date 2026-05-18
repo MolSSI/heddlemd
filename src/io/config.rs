@@ -1,7 +1,7 @@
 // rq-6432ab1f rq-110285ae rq-b719c42c
 use std::path::{Path, PathBuf};
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 // rq-f0084057
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,6 +73,8 @@ pub enum ConfigError {
     IncompatibleConstraint { integrator: String },
     #[error("constraint type `{name}` has infeasible SETTLE geometry: r_hh = {r_hh} must be < 2 * r_oh ({r_oh})")]
     SettleGeometryInfeasible { name: String, r_oh: f64, r_hh: f64 },
+    #[error("[{slot}] section's `kind = \"{kind}\"` does not match any registered builder")]
+    UnknownKind { slot: &'static str, kind: String },
 }
 
 // =====================================================================
@@ -90,130 +92,149 @@ pub struct SimulationConfig {
 }
 
 // rq-661bf664 rq-686b0d37
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum IntegratorKind {
-    VelocityVerlet {
-        #[serde(default)]
-        lossless: bool,
-    },
-    LangevinBaoab {
-        friction: f64,
-        temperature: f64,
-        seed: u64,
-    },
-    // rq-3b6d5001
-    MtkNpt {
-        temperature: f64,
-        pressure: f64,
-        tau_t: f64,
-        tau_p: f64,
-        #[serde(default = "default_chain_length")]
-        chain_length: u32,
-        #[serde(default = "default_yoshida_order")]
-        yoshida_order: u32,
-        #[serde(default = "default_n_resp")]
-        n_resp: u32,
-    },
+/// Open-shaped parsed selection for a singleton `[integrator]`,
+/// `[thermostat]`, or `[barostat]` config section. The Rust-side
+/// deserialiser captures the user's `kind = "..."` field into `kind`
+/// and flattens every other field of the section into a `toml::Value`
+/// (a `toml::Table`) that the chosen builder consumes via
+/// `validate_params(&toml::Value)` and `build(...)`.
+#[derive(Debug, Clone)]
+pub struct SlotConfig {
+    pub kind: String,
+    pub params: toml::Value,
 }
 
-impl IntegratorKind {
-    /// Lookup key used by `IntegratorRegistry` to dispatch this kind to its
-    /// builder. Matches the `kind` field accepted by the config parser.
-    pub fn name(&self) -> &'static str {
-        match self {
-            IntegratorKind::VelocityVerlet { .. } => "velocity-verlet",
-            IntegratorKind::LangevinBaoab { .. } => "langevin-baoab",
-            IntegratorKind::MtkNpt { .. } => "mtk-npt",
+impl SlotConfig {
+    pub fn new(kind: impl Into<String>, params: toml::Value) -> Self {
+        SlotConfig {
+            kind: kind.into(),
+            params,
         }
     }
 
-    pub fn owns_thermostat(&self) -> bool {
-        matches!(
-            self,
-            IntegratorKind::LangevinBaoab { .. } | IntegratorKind::MtkNpt { .. }
-        )
+    /// Convenience for tests: parse a TOML fragment into the
+    /// `params` field. Panics on malformed input.
+    pub fn from_params_str(kind: &str, params_toml: &str) -> Self {
+        let value: toml::Value = toml::from_str(params_toml)
+            .unwrap_or_else(|e| panic!("malformed params TOML: {e}"));
+        SlotConfig {
+            kind: kind.to_string(),
+            params: value,
+        }
     }
+}
 
-    pub fn owns_barostat(&self) -> bool {
-        matches!(self, IntegratorKind::MtkNpt { .. })
-    }
-
-    /// Returns `true` for integrator variants whose `step()` drives the
-    /// three `Constraint` slot hooks. In the default registry only the
-    /// lossy `velocity-verlet` qualifies.
-    pub fn supports_constraints(&self) -> bool {
-        matches!(self, IntegratorKind::VelocityVerlet { lossless: false })
+impl<'de> Deserialize<'de> for SlotConfig {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut table = <toml::Table as Deserialize>::deserialize(d)?;
+        let kind = table
+            .remove("kind")
+            .ok_or_else(|| serde::de::Error::missing_field("kind"))?;
+        let kind = match kind {
+            toml::Value::String(s) => s,
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "field `kind` must be a string",
+                ));
+            }
+        };
+        Ok(SlotConfig {
+            kind,
+            params: toml::Value::Table(table),
+        })
     }
 }
 
 // rq-3fdb7e01
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum ThermostatKind {
-    NoseHooverChain {
-        temperature: f64,
-        tau: f64,
-        #[serde(default = "default_chain_length")]
-        chain_length: u32,
-        #[serde(default = "default_yoshida_order")]
-        yoshida_order: u32,
-        #[serde(default = "default_n_resp")]
-        n_resp: u32,
-    },
-    Csvr {
-        temperature: f64,
-        tau: f64,
-        seed: u64,
-    },
-    Andersen {
-        temperature: f64,
-        collision_rate: f64,
-        seed: u64,
-    },
-    Berendsen {
-        temperature: f64,
-        tau: f64,
-    },
+/// Open-shaped parsed entry for an array-of-named-slots config
+/// section (currently only `[[constraint_types]]`). Adds a `name`
+/// field that other parts of the config reference by string.
+#[derive(Debug, Clone)]
+pub struct NamedSlotConfig {
+    pub name: String,
+    pub kind: String,
+    pub params: toml::Value,
 }
 
-impl ThermostatKind {
-    pub fn name(&self) -> &'static str {
-        match self {
-            ThermostatKind::NoseHooverChain { .. } => "nose-hoover-chain",
-            ThermostatKind::Csvr { .. } => "csvr",
-            ThermostatKind::Andersen { .. } => "andersen",
-            ThermostatKind::Berendsen { .. } => "berendsen",
+impl NamedSlotConfig {
+    pub fn new(
+        name: impl Into<String>,
+        kind: impl Into<String>,
+        params: toml::Value,
+    ) -> Self {
+        NamedSlotConfig {
+            name: name.into(),
+            kind: kind.into(),
+            params,
+        }
+    }
+
+    /// Convenience for tests: parse a TOML fragment into the
+    /// `params` field. Panics on malformed input.
+    pub fn from_params_str(name: &str, kind: &str, params_toml: &str) -> Self {
+        let value: toml::Value = toml::from_str(params_toml)
+            .unwrap_or_else(|e| panic!("malformed params TOML: {e}"));
+        NamedSlotConfig {
+            name: name.to_string(),
+            kind: kind.to_string(),
+            params: value,
         }
     }
 }
 
-// rq-aa6ce5c0
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-pub enum BarostatKind {
-    // rq-3db027c2
-    Berendsen {
-        pressure: f64,
-        tau: f64,
-        compressibility: f64,
-    },
-    // rq-c2211c85
-    CRescale {
-        pressure: f64,
-        temperature: f64,
-        tau: f64,
-        compressibility: f64,
-        seed: u64,
-    },
+/// Translate a `toml::de::Error` (typically from
+/// `toml::Value::try_into::<Params>()`) into a `ConfigError` for use
+/// from per-builder `validate_params` impls. Routes the
+/// "missing field `x`" case to `MissingField { field: "<slot>.x" }`
+/// to preserve the user-visible error shape, and otherwise wraps the
+/// message in `Parse { path: <slot>, message }`.
+pub fn translate_params_error(slot: &str, e: toml::de::Error) -> ConfigError {
+    let msg = e.to_string();
+    // serde's missing-field message starts with "missing field `<name>`".
+    if let Some(rest) = msg.strip_prefix("missing field `") {
+        if let Some(end) = rest.find('`') {
+            let field = &rest[..end];
+            return ConfigError::MissingField {
+                field: format!("{slot}.{field}"),
+            };
+        }
+    }
+    ConfigError::Parse {
+        path: slot.to_string(),
+        message: msg,
+    }
 }
 
-impl BarostatKind {
-    pub fn name(&self) -> &'static str {
-        match self {
-            BarostatKind::Berendsen { .. } => "berendsen",
-            BarostatKind::CRescale { .. } => "c-rescale",
-        }
+impl<'de> Deserialize<'de> for NamedSlotConfig {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut table = <toml::Table as Deserialize>::deserialize(d)?;
+        let name = table
+            .remove("name")
+            .ok_or_else(|| serde::de::Error::missing_field("name"))?;
+        let name = match name {
+            toml::Value::String(s) => s,
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "field `name` must be a string",
+                ));
+            }
+        };
+        let kind = table
+            .remove("kind")
+            .ok_or_else(|| serde::de::Error::missing_field("kind"))?;
+        let kind = match kind {
+            toml::Value::String(s) => s,
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "field `kind` must be a string",
+                ));
+            }
+        };
+        Ok(NamedSlotConfig {
+            name,
+            kind,
+            params: toml::Value::Table(table),
+        })
     }
 }
 
@@ -277,31 +298,6 @@ impl AngleTypeConfig {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum ConstraintTypeConfig {
-    SettleWater {
-        name: String,
-        r_oh: f64,
-        r_hh: f64,
-    },
-}
-
-impl ConstraintTypeConfig {
-    pub fn name(&self) -> &str {
-        match self {
-            ConstraintTypeConfig::SettleWater { name, .. } => name,
-        }
-    }
-
-    /// Number of atoms a single `[constraints]` row of this type must
-    /// declare. Used by the topology parser to validate row column counts.
-    pub fn expected_atom_count(&self) -> usize {
-        match self {
-            ConstraintTypeConfig::SettleWater { .. } => 3,
-        }
-    }
-}
-
 // rq-060b1fab
 #[derive(Debug, Clone, PartialEq)]
 pub enum NeighborListConfig {
@@ -346,14 +342,14 @@ pub struct Config {
     pub init: PathBuf,
     pub topology: Option<PathBuf>,
     pub simulation: SimulationConfig,
-    pub integrator: IntegratorKind,
-    pub thermostat: Option<ThermostatKind>,
-    pub barostat: Option<BarostatKind>,
+    pub integrator: SlotConfig,
+    pub thermostat: Option<SlotConfig>,
+    pub barostat: Option<SlotConfig>,
     pub particle_types: Vec<ParticleTypeConfig>,
     pub pair_interactions: Vec<PairInteractionConfig>,
     pub bond_types: Vec<BondTypeConfig>,
     pub angle_types: Vec<AngleTypeConfig>,
-    pub constraint_types: Vec<ConstraintTypeConfig>,
+    pub constraint_types: Vec<NamedSlotConfig>,
     pub coulomb: Option<CoulombConfig>,
     pub spme: Option<SpmeConfig>,
     pub neighbor_list: NeighborListConfig,
@@ -365,15 +361,6 @@ pub struct Config {
 // Default-value helpers used by `#[serde(default = "...")]`
 // =====================================================================
 
-fn default_chain_length() -> u32 {
-    3
-}
-fn default_yoshida_order() -> u32 {
-    3
-}
-fn default_n_resp() -> u32 {
-    1
-}
 fn default_spline_order() -> u32 {
     4
 }
@@ -406,11 +393,11 @@ struct RawConfig {
     #[serde(default)]
     topology: Option<String>,
     simulation: SimulationConfig,
-    integrator: IntegratorKind,
+    integrator: SlotConfig,
     #[serde(default)]
-    thermostat: Option<ThermostatKind>,
+    thermostat: Option<SlotConfig>,
     #[serde(default)]
-    barostat: Option<BarostatKind>,
+    barostat: Option<SlotConfig>,
     particle_types: Vec<ParticleTypeConfig>,
     #[serde(default)]
     pair_interactions: Vec<RawPairInteraction>,
@@ -419,7 +406,7 @@ struct RawConfig {
     #[serde(default)]
     angle_types: Vec<RawAngleType>,
     #[serde(default)]
-    constraint_types: Vec<RawConstraintType>,
+    constraint_types: Vec<NamedSlotConfig>,
     #[serde(default)]
     coulomb: Option<RawCoulombConfig>,
     #[serde(default)]
@@ -484,26 +471,6 @@ impl From<RawAngleType> for AngleTypeConfig {
                 k_theta,
                 theta_0,
             },
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
-enum RawConstraintType {
-    SettleWater {
-        name: String,
-        r_oh: f64,
-        r_hh: f64,
-    },
-}
-
-impl From<RawConstraintType> for ConstraintTypeConfig {
-    fn from(r: RawConstraintType) -> Self {
-        match r {
-            RawConstraintType::SettleWater { name, r_oh, r_hh } => {
-                ConstraintTypeConfig::SettleWater { name, r_oh, r_hh }
-            }
         }
     }
 }
@@ -583,6 +550,16 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
     let base_dir = path.parent().unwrap_or(Path::new("."));
     let config = build_config(raw_config, path, base_dir);
     config.validate()?;
+    // Run the registry-dispatched per-kind validation with the
+    // default registries so the loader surfaces per-builder
+    // ConfigError variants (Parse, MissingField, InvalidValue,
+    // SettleGeometryInfeasible, IncompatibleThermostat,
+    // IncompatibleBarostat, UnknownKind) without callers having to
+    // remember to invoke `validate_against`. Callers that
+    // register custom builders must call `validate_against` themselves
+    // against their custom registries.
+    let registries = crate::integrator::Registries::with_builtins();
+    config.validate_against(&registries)?;
     Ok(config)
 }
 
@@ -686,8 +663,7 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
 
     let bond_types: Vec<BondTypeConfig> = raw.bond_types.into_iter().map(Into::into).collect();
     let angle_types: Vec<AngleTypeConfig> = raw.angle_types.into_iter().map(Into::into).collect();
-    let constraint_types: Vec<ConstraintTypeConfig> =
-        raw.constraint_types.into_iter().map(Into::into).collect();
+    let constraint_types: Vec<NamedSlotConfig> = raw.constraint_types;
     let coulomb: Option<CoulombConfig> = raw.coulomb.map(Into::into);
     let spme = raw.spme;
 
@@ -793,21 +769,20 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
 // =====================================================================
 
 impl Config {
+    /// Structural validation that does not require registry access.
+    /// Per-field domain checks for the per-slot `params` and the
+    /// integrator-thermostat / integrator-barostat / lossless-with-
+    /// constraints compatibility checks live in
+    /// [`Config::validate_against`] because they consult the open
+    /// builder registries.
     pub fn validate(&self) -> Result<(), ConfigError> {
         // Per-field domain checks in declaration order.
         validate_simulation(&self.simulation)?;
-        validate_integrator(&self.integrator)?;
-        if let Some(t) = &self.thermostat {
-            validate_thermostat(t)?;
-        }
-        if let Some(b) = &self.barostat {
-            validate_barostat(b)?;
-        }
         validate_particle_types(&self.particle_types)?;
         validate_pair_interactions(&self.pair_interactions, &self.particle_types)?;
         validate_bond_types(&self.bond_types)?;
         validate_angle_types(&self.angle_types)?;
-        validate_constraint_types(&self.constraint_types)?;
+        validate_constraint_type_names(&self.constraint_types)?;
         if let Some(c) = &self.coulomb {
             validate_coulomb(c)?;
         }
@@ -816,46 +791,128 @@ impl Config {
         }
         validate_neighbor_list(&self.neighbor_list)?;
 
-        // Cross-validation rules.
-        // 1: every name in `between` refers to a declared type.
-        // 2: every unordered pair of declared types appears in pair_interactions
-        //    exactly once. The pair-coverage check requires at least one
-        //    declared particle type; that "at least one" check fired earlier
-        //    via validate_particle_types.
+        // Structural cross-validation: pair coverage, path collisions,
+        // and electrostatics exclusivity. The integrator/thermostat/
+        // barostat compatibility rules require builder predicates, so
+        // they live in `validate_against`.
         check_pair_coverage(&self.particle_types, &self.pair_interactions)?;
-        // 3: every supplied path is pairwise distinct.
         check_path_collisions(self)?;
-        // 4: integrator-thermostat compatibility.
-        if self.thermostat.is_some() && self.integrator.owns_thermostat() {
-            return Err(ConfigError::IncompatibleThermostat {
-                integrator: self.integrator.name().to_string(),
-            });
-        }
-        // 5: integrator-barostat compatibility.
-        if self.barostat.is_some() && self.integrator.owns_barostat() {
-            return Err(ConfigError::IncompatibleBarostat {
-                integrator: self.integrator.name().to_string(),
-            });
-        }
-        // Electrostatics exclusivity (covered by ConflictingElectrostatics).
         if self.coulomb.is_some() && self.spme.is_some() {
             return Err(ConfigError::ConflictingElectrostatics);
         }
         Ok(())
     }
 
+    /// Registry-dispatched validation: looks up each slot's `kind` in
+    /// the corresponding registry, calls
+    /// `builder.validate_params(&params)`, and enforces the
+    /// integrator-thermostat and integrator-barostat compatibility
+    /// rules using the integrator builder's `owns_thermostat` /
+    /// `owns_barostat` predicates.
+    pub fn validate_against(
+        &self,
+        registries: &crate::integrator::Registries,
+    ) -> Result<(), ConfigError> {
+        // Integrator.
+        let integ_builder = registries
+            .integrators
+            .lookup(&self.integrator.kind)
+            .ok_or_else(|| ConfigError::UnknownKind {
+                slot: "integrator",
+                kind: self.integrator.kind.clone(),
+            })?;
+        integ_builder.validate_params(&self.integrator.params)?;
+
+        // Thermostat.
+        if let Some(t) = &self.thermostat {
+            let b = registries
+                .thermostats
+                .lookup(&t.kind)
+                .ok_or_else(|| ConfigError::UnknownKind {
+                    slot: "thermostat",
+                    kind: t.kind.clone(),
+                })?;
+            b.validate_params(&t.params)?;
+        }
+
+        // Barostat.
+        if let Some(b) = &self.barostat {
+            let bb = registries
+                .barostats
+                .lookup(&b.kind)
+                .ok_or_else(|| ConfigError::UnknownKind {
+                    slot: "barostat",
+                    kind: b.kind.clone(),
+                })?;
+            bb.validate_params(&b.params)?;
+        }
+
+        // Constraint types.
+        for ct in &self.constraint_types {
+            let cb = registries
+                .constraint_types
+                .lookup(&ct.kind)
+                .ok_or_else(|| ConfigError::UnknownKind {
+                    slot: "constraint_types",
+                    kind: ct.kind.clone(),
+                })?;
+            cb.validate_params(&ct.params).map_err(|e| match e {
+                // Promote the entry's `name` into name-bearing errors
+                // that the builder couldn't fill in itself (it only
+                // sees the params, not the entry's name).
+                ConfigError::SettleGeometryInfeasible {
+                    name: _,
+                    r_oh,
+                    r_hh,
+                } => ConfigError::SettleGeometryInfeasible {
+                    name: ct.name.clone(),
+                    r_oh,
+                    r_hh,
+                },
+                other => other,
+            })?;
+        }
+
+        // Integrator-thermostat / integrator-barostat compatibility,
+        // driven by the integrator builder's predicate methods.
+        if self.thermostat.is_some()
+            && integ_builder.owns_thermostat(&self.integrator.params)
+        {
+            return Err(ConfigError::IncompatibleThermostat {
+                integrator: self.integrator.kind.clone(),
+            });
+        }
+        if self.barostat.is_some() && integ_builder.owns_barostat(&self.integrator.params) {
+            return Err(ConfigError::IncompatibleBarostat {
+                integrator: self.integrator.kind.clone(),
+            });
+        }
+        Ok(())
+    }
+
     /// Topology-coupled cross-validation: rejects a non-empty constraint
-    /// list when the chosen integrator's
-    /// `IntegratorKind::supports_constraints()` returns `false`. The
-    /// runner calls this after `load_topology_file` so the check can see
-    /// the parsed `[constraints]` section.
+    /// list when the chosen integrator's builder
+    /// `IntegratorBuilder::supports_constraints(&params)` returns `false`.
+    /// The runner calls this after `load_topology_file` so the check
+    /// can see the parsed `[constraints]` section.
     pub fn validate_constraint_compatibility(
         &self,
+        registries: &crate::integrator::Registries,
         has_constraints: bool,
     ) -> Result<(), ConfigError> {
-        if has_constraints && !self.integrator.supports_constraints() {
+        if !has_constraints {
+            return Ok(());
+        }
+        let integ_builder = registries
+            .integrators
+            .lookup(&self.integrator.kind)
+            .ok_or_else(|| ConfigError::UnknownKind {
+                slot: "integrator",
+                kind: self.integrator.kind.clone(),
+            })?;
+        if !integ_builder.supports_constraints(&self.integrator.params) {
             return Err(ConfigError::IncompatibleConstraint {
-                integrator: self.integrator.name().to_string(),
+                integrator: self.integrator.kind.clone(),
             });
         }
         Ok(())
@@ -909,136 +966,29 @@ fn validate_simulation(s: &SimulationConfig) -> Result<(), ConfigError> {
     Ok(())
 }
 
-fn validate_integrator(i: &IntegratorKind) -> Result<(), ConfigError> {
-    match i {
-        IntegratorKind::VelocityVerlet { .. } => Ok(()),
-        IntegratorKind::LangevinBaoab {
-            friction,
-            temperature,
-            ..
-        } => {
-            require_finite_positive("integrator.friction", *friction)?;
-            require_finite_positive("integrator.temperature", *temperature)?;
-            Ok(())
-        }
-        IntegratorKind::MtkNpt {
-            temperature,
-            pressure,
-            tau_t,
-            tau_p,
-            chain_length,
-            yoshida_order,
-            n_resp,
-            ..
-        } => {
-            require_finite_positive("integrator.temperature", *temperature)?;
-            require_finite("integrator.pressure", *pressure)?;
-            require_finite_positive("integrator.tau_t", *tau_t)?;
-            require_finite_positive("integrator.tau_p", *tau_p)?;
-            if *chain_length < 1 {
-                return Err(invalid(
-                    "integrator.chain_length",
-                    "chain_length must be a positive integer",
-                ));
-            }
-            if !matches!(*yoshida_order, 1 | 3 | 5 | 7) {
-                return Err(invalid(
-                    "integrator.yoshida_order",
-                    "yoshida_order must be one of 1, 3, 5, 7",
-                ));
-            }
-            if *n_resp < 1 {
-                return Err(invalid(
-                    "integrator.n_resp",
-                    "n_resp must be a positive integer",
-                ));
-            }
-            Ok(())
-        }
-    }
-}
+// rq-1f87880c — per-kind validation lives in each builder's
+// `validate_params(&toml::Value)` method (see `integration/framework.md`).
+// `Config::validate_against` looks up the right builder and dispatches.
 
-fn validate_thermostat(t: &ThermostatKind) -> Result<(), ConfigError> {
-    match t {
-        ThermostatKind::NoseHooverChain {
-            temperature,
-            tau,
-            chain_length,
-            yoshida_order,
-            n_resp,
-        } => {
-            require_finite_positive("thermostat.temperature", *temperature)?;
-            require_finite_positive("thermostat.tau", *tau)?;
-            if *chain_length < 1 {
-                return Err(invalid(
-                    "thermostat.chain_length",
-                    "chain_length must be a positive integer",
-                ));
-            }
-            if !matches!(*yoshida_order, 1 | 3 | 5 | 7) {
-                return Err(invalid(
-                    "thermostat.yoshida_order",
-                    "yoshida_order must be one of 1, 3, 5, 7",
-                ));
-            }
-            if *n_resp < 1 {
-                return Err(invalid(
-                    "thermostat.n_resp",
-                    "n_resp must be a positive integer",
-                ));
-            }
-            Ok(())
+// Used by Config::validate to enforce just the structural constraints
+// of `[[constraint_types]]` that do not require registry knowledge.
+fn validate_constraint_type_names(cts: &[NamedSlotConfig]) -> Result<(), ConfigError> {
+    let mut seen: Vec<&str> = Vec::with_capacity(cts.len());
+    for (i, ct) in cts.iter().enumerate() {
+        if ct.name.is_empty() {
+            return Err(invalid(
+                format!("constraint_types[{i}].name"),
+                "name must not be empty",
+            ));
         }
-        ThermostatKind::Csvr {
-            temperature, tau, ..
-        } => {
-            require_finite_positive("thermostat.temperature", *temperature)?;
-            require_finite_positive("thermostat.tau", *tau)?;
-            Ok(())
+        if seen.iter().any(|n| *n == ct.name.as_str()) {
+            return Err(ConfigError::DuplicateConstraintTypeName {
+                name: ct.name.clone(),
+            });
         }
-        ThermostatKind::Andersen {
-            temperature,
-            collision_rate,
-            ..
-        } => {
-            require_finite_positive("thermostat.temperature", *temperature)?;
-            require_finite_non_negative("thermostat.collision_rate", *collision_rate)?;
-            Ok(())
-        }
-        ThermostatKind::Berendsen { temperature, tau } => {
-            require_finite_positive("thermostat.temperature", *temperature)?;
-            require_finite_positive("thermostat.tau", *tau)?;
-            Ok(())
-        }
+        seen.push(ct.name.as_str());
     }
-}
-
-fn validate_barostat(b: &BarostatKind) -> Result<(), ConfigError> {
-    match b {
-        BarostatKind::Berendsen {
-            pressure,
-            tau,
-            compressibility,
-        } => {
-            require_finite("barostat.pressure", *pressure)?;
-            require_finite_positive("barostat.tau", *tau)?;
-            require_finite_positive("barostat.compressibility", *compressibility)?;
-            Ok(())
-        }
-        BarostatKind::CRescale {
-            pressure,
-            temperature,
-            tau,
-            compressibility,
-            ..
-        } => {
-            require_finite("barostat.pressure", *pressure)?;
-            require_finite_positive("barostat.temperature", *temperature)?;
-            require_finite_positive("barostat.tau", *tau)?;
-            require_finite_positive("barostat.compressibility", *compressibility)?;
-            Ok(())
-        }
-    }
+    Ok(())
 }
 
 fn validate_particle_types(pts: &[ParticleTypeConfig]) -> Result<(), ConfigError> {
@@ -1138,38 +1088,6 @@ fn validate_bond_types(bts: &[BondTypeConfig]) -> Result<(), ConfigError> {
                 require_finite_positive(&format!("bond_types[{i}].de"), *de)?;
                 require_finite_positive(&format!("bond_types[{i}].a"), *a)?;
                 require_finite_positive(&format!("bond_types[{i}].re"), *re)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn validate_constraint_types(cts: &[ConstraintTypeConfig]) -> Result<(), ConfigError> {
-    let mut seen: Vec<&str> = Vec::with_capacity(cts.len());
-    for (i, ct) in cts.iter().enumerate() {
-        match ct {
-            ConstraintTypeConfig::SettleWater { name, r_oh, r_hh } => {
-                if name.is_empty() {
-                    return Err(invalid(
-                        format!("constraint_types[{i}].name"),
-                        "name must not be empty",
-                    ));
-                }
-                if seen.iter().any(|n| *n == name) {
-                    return Err(ConfigError::DuplicateConstraintTypeName {
-                        name: name.clone(),
-                    });
-                }
-                seen.push(name);
-                require_finite_positive(&format!("constraint_types[{i}].r_oh"), *r_oh)?;
-                require_finite_positive(&format!("constraint_types[{i}].r_hh"), *r_hh)?;
-                if *r_hh >= 2.0 * *r_oh {
-                    return Err(ConfigError::SettleGeometryInfeasible {
-                        name: name.clone(),
-                        r_oh: *r_oh,
-                        r_hh: *r_hh,
-                    });
-                }
             }
         }
     }

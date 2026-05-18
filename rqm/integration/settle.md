@@ -194,20 +194,24 @@ consistent per constraint type; mismatch is rejected with
 
   Constructor:
 
-  - `SettleConstraintsState::new(device: Arc<CudaDevice>, list: &ConstraintList, particle_count: usize, masses: &[f32], constraint_types: &[ConstraintTypeConfig]) -> Result<SettleConstraintsState, SettleError>`
-    - Filters `constraint_types` to entries with `kind ==
-      "settle-water"`. For each, computes the derived H–O–H angle
-      and the canonical body-frame positions.
-    - Iterates `list.groups`. For each group whose
-      `constraint_type_kind` is `SettleWater`, packs the three atom
-      indices in the order declared by the original `[constraints]`
-      row (oxygen first) into `group_atoms`.
+  - `SettleConstraintsState::new(device: Arc<CudaDevice>, list: &ConstraintList, particle_count: usize, masses: &[f32], constraint_types: &[NamedSlotConfig]) -> Result<SettleConstraintsState, SettleError>`
+    - Filters `constraint_types` to entries with
+      `kind == "settle-water"`. For each, deserialises
+      `SettleWaterParams { r_oh, r_hh }` from the entry's `params`
+      field and computes the derived H–O–H angle and the canonical
+      body-frame positions.
+    - Iterates `list.groups`. For each group whose constraint type
+      resolves (via
+      `constraint_types[group.constraint_type_index].kind`) to
+      `"settle-water"`, packs the three atom indices in the order
+      declared by the original `[constraints]` row (oxygen first)
+      into `group_atoms`.
     - Reads `masses[atom_O]`, `masses[atom_H1]`, `masses[atom_H2]`
       for each group and verifies they match the constraint type's
       expected `(m_O, m_H, m_H)` pattern. Returns
       `SettleError::InconsistentMasses { .. }` on mismatch.
     - Uploads all device buffers.
-    - When `list.is_empty()` or the list contains no `SettleWater`
+    - When `list.is_empty()` or the list contains no `settle-water`
       groups, allocates zero-length device buffers and returns a
       slot whose hooks are all no-ops.
 
@@ -346,14 +350,44 @@ Positions are not modified.
 ### Builder <!-- rq-a0f7c746 -->
 
 - `SettleBuilder` — implements `ConstraintBuilder` with <!-- rq-278cb574 -->
-  `kind_name() == "settle"`.
-  - `build(device, particle_count, list)` constructs a
-    `SettleConstraintsState` from the subset of `list.groups` whose
-    `constraint_type_kind` is `SettleWater`. Returns
-    `ConstraintError::UnsupportedKind(kind)` if any group references a
-    different `ConstraintTypeKind`; the v1 framework expects every
-    constraint to be SETTLE, so the builder is the only constraint
-    builder registered.
+  `kind_name() == "settle-water"`. The `kind_name` matches the user's
+  `kind = "settle-water"` field in a `[[constraint_types]]` entry.
+  - `validate_params(&params)` deserialises a
+    `SettleWaterParams { r_oh: f64, r_hh: f64 }` from `params`,
+    requires both to be finite and strictly positive, and requires
+    `r_hh < 2 · r_oh` (the rigid-triangle feasibility condition).
+    Returns `ConfigError::SettleGeometryInfeasible { name, r_oh,
+    r_hh }` for the feasibility violation and
+    `ConfigError::InvalidValue { field, reason }` for the per-field
+    finiteness / positivity check failures. Unknown fields under
+    `[[constraint_types]]` (e.g. a stray `theta_0`) surface as
+    `ConfigError::Parse { path, message }`.
+  - `expected_atom_count(&params)` returns `3` regardless of the
+    parameter values. Used by the topology parser to size-check
+    `[constraints]` rows that reference a `settle-water` type.
+  - `validate_group_shape(group_index, atoms, constraints, params,
+    masses)` verifies the cluster shape required by the SETTLE
+    algorithm:
+    - `atoms.len() == 3`.
+    - `constraints.len() == 3` with local pairs `(0, 1)`, `(0, 2)`,
+      `(1, 2)`.
+    - The two H masses `masses[atoms[1]]` and `masses[atoms[2]]`
+      agree to within a tight relative tolerance (the SETTLE
+      analytic solution assumes a single hydrogen mass).
+    - Per-constraint-type mass consistency: two groups that share
+      the same `constraint_type_index` must agree on
+      `(masses[atom_O], masses[atom_H])`.
+    Failures surface as `ConstraintError::InvalidGroupShape` (or
+    `SettleError::InconsistentMasses`, which converts via `From`
+    into `ConstraintError::InvalidGroupShape`).
+  - `build(gpu, particle_count, list, masses, constraint_types)`
+    constructs a `SettleConstraintsState` from the subset of
+    `list.groups` whose constraint type resolves (via
+    `constraint_types[group.constraint_type_index].kind`) to
+    `"settle-water"`. Returns `ConstraintError::UnsupportedKind(kind)`
+    if any group references a different algorithm; the v1 framework
+    expects every constraint to be SETTLE, so the builder is the only
+    constraint builder registered.
 
 ## Empty State <!-- rq-1a3e432c -->
 
@@ -375,7 +409,7 @@ constructed with `particle_count == 0` and a non-empty group list.
   only SETTLE.
 - Composition with `velocity-verlet { lossless = true }`. The slot's
   builder rejects the combination via the framework-level
-  `IntegratorKind::supports_constraints()` check; lossless
+  `IntegratorBuilder::supports_constraints(&params)` check; lossless
   compensated summation for SETTLE corrections is a follow-up
   feature.
 - Composition with `langevin-baoab` or `mtk-npt`. Same reason.

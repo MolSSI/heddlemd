@@ -16,7 +16,7 @@ The default registry exposes one constraint algorithm:
 | `settle`     | analytic three-atom rigid-water projection (Miyamoto & Kollman 1992) | `settle.md` |
 
 The slot is selectable in any simulation whose declared integrator
-returns `IntegratorKind::supports_constraints() == true`. In the default
+returns `IntegratorBuilder::supports_constraints(&params) == true`. In the default
 registry, only `velocity-verlet { lossless = false }` supports
 constraints. Composing constraints with any other integrator — or with
 `velocity-verlet { lossless = true }` — is rejected at config load.
@@ -73,8 +73,8 @@ constraint.apply_after_kick(buffers, sim_box, dt, timings)
 
 When the constraint slot is `None`, the runner skips hook insertion
 entirely; the plan walk reduces to the bare sub-step dispatch. When
-`IntegratorKind::supports_constraints()` returns `false` the runner
-also skips hook insertion (and the config loader rejects this
+`IntegratorBuilder::supports_constraints(&params)` returns `false`
+the runner also skips hook insertion (and the config loader rejects this
 combination with a non-empty `[constraints]` section before the run
 starts). When the plan contains no `Drift` or `KickDrift` sub-steps,
 only the final-velocity `apply_after_kick` hook can fire — and only
@@ -92,20 +92,24 @@ minimum-image distance evaluation; none mutates the box.
 
 ## Compatibility Rules <!-- rq-acfda5d4 -->
 
-- An integrator whose `IntegratorKind::supports_constraints()` returns
-  `false` is incompatible with a non-empty `[constraints]` section of
-  the topology file. `load_config` returns
-  `ConfigError::IncompatibleConstraint { integrator: <kind name> }` at
-  config load.
-- `velocity-verlet { lossless = true }` returns `false` from
-  `supports_constraints()` in the default registry. Combining lossless
-  velocity-Verlet with constraints is therefore rejected with the same
-  error; lossless support is deferred to a future feature.
-- `langevin-baoab` and `mtk-npt` return `false` from
-  `supports_constraints()` in the default registry.
-- When `IntegratorKind::supports_constraints()` returns `true` but the
-  topology has no `[constraints]` section, the runner holds `None` for
-  the constraint slot and the integrator's hooks are skipped.
+- An integrator whose builder's
+  `IntegratorBuilder::supports_constraints(&params)` returns `false`
+  is incompatible with a non-empty `[constraints]` section of the
+  topology file. `Config::validate_against(&registries)` (see
+  `io/config-schema.md`) returns
+  `ConfigError::IncompatibleConstraint { integrator: <kind name> }`
+  at config load.
+- The `"velocity-verlet"` builder returns `false` from
+  `supports_constraints(&{ lossless: true })`. Combining lossless
+  velocity-Verlet with constraints is therefore rejected with the
+  same error; lossless support is deferred to a future feature.
+- The `"langevin-baoab"` and `"mtk-npt"` builders return `false`
+  from `supports_constraints(&params)` regardless of the params they
+  receive.
+- When the chosen integrator's builder's
+  `supports_constraints(&params)` returns `true` but the topology has
+  no `[constraints]` section, the runner holds `None` for the
+  constraint slot and the integrator's hooks are skipped.
 
 ## Constraint Data Layout <!-- rq-be5d5b33 -->
 
@@ -119,7 +123,6 @@ case in v1. The layout follows the project SoA convention.
 groups:              Vec<ConstraintGroup>
 group_atoms:         Vec<u32>             # length = sum of group.atom_count
 group_constraints:   Vec<GroupConstraint> # length = sum of group.constraint_count
-constraint_type_kind: Vec<ConstraintTypeKind>  # length = n_constraint_types
 particle_count:      usize
 ```
 
@@ -153,10 +156,14 @@ Local indices restrict any single group to at most 256 atoms — sufficient
 for all known SETTLE and M-SHAKE clusters; LINCS-class systems use a
 different layout outside this framework.
 
-`constraint_type_kind[t]` records the algorithm that processes any
-group declared with constraint-type index `t`. The v1 enum has one
-variant: `ConstraintTypeKind::SettleWater`. New variants are appended
-when new algorithms join the framework.
+Each group's algorithm is determined by looking up
+`constraint_types[group.constraint_type_index]` (a `NamedSlotConfig`
+from `io/config-schema.md`), then resolving the entry's `kind`
+string against the `ConstraintRegistry` to obtain the registered
+builder. The framework never tracks the algorithm tag separately —
+the kind string carried by the config entry is the single source of
+truth, and consumers (the topology parser, the `Constraint` slot
+constructor, the registry) all resolve it the same way.
 
 ### Group Ordering <!-- rq-38199bd4 -->
 
@@ -193,20 +200,31 @@ default for that pair.
 
 ## Constraint-Type Validation <!-- rq-402cea33 -->
 
-When `ConstraintList::new` is called, it validates each group against
-the cluster shape required by its `constraint_type_kind`:
+Per-group shape validation lives on the `ConstraintBuilder` trait
+(see *Feature API* below). When `ConstraintRegistry::build_optional`
+constructs the slot, it iterates the `ConstraintList`'s groups, looks
+up each group's algorithm via
+`constraint_types[group.constraint_type_index].kind`, and calls the
+matching builder's `validate_group_shape(...)` before delegating to
+`build(...)`. The topology parser also calls the builder's
+`expected_atom_count(&params)` to size-check `[constraints]` rows.
 
-- `ConstraintTypeKind::SettleWater`: the group must have exactly 3
-  atoms and exactly 3 constraints. The constraint pairs (after local
-  re-indexing) must be `(0, 1)`, `(0, 2)`, and `(1, 2)`. The two
-  constraints incident to local atom 0 must have the same `r0`
-  (the O–H distance); the third constraint's `r0` is the H–H distance.
-  Both distances are read from the named `[[constraint_types]]` entry
-  (which carries `r_oh` and `r_hh`), and the parsed `r0` values are
-  populated from those config fields, not from the topology file.
+Per-builder shape rules are documented in each algorithm's
+requirements file. For SETTLE (see `settle.md`):
+
+- `expected_atom_count(&params)` returns `3`.
+- `validate_group_shape(...)` requires exactly 3 atoms and exactly 3
+  constraints. The constraint pairs (after local re-indexing) must be
+  `(0, 1)`, `(0, 2)`, and `(1, 2)`. The two constraints incident to
+  local atom 0 must have the same `r0` (the O–H distance); the third
+  constraint's `r0` is the H–H distance. Both distances are read from
+  the named `[[constraint_types]]` entry's `params` (`r_oh` and
+  `r_hh` fields), and the populated `r0` values come from those
+  config fields, not from the topology file.
 
 Shape-mismatch failures surface as
-`ConstraintError::InvalidGroupShape { group_index, kind, reason }`.
+`ConstraintError::InvalidGroupShape { group_index, kind, reason }`
+where `kind` is the algorithm's kind string.
 
 ## Feature API <!-- rq-6f8f049b -->
 
@@ -259,20 +277,19 @@ Shape-mismatch failures surface as
 - `GroupConstraint` — `Debug, Clone, Copy`. Fields: `local_i: u8`, <!-- rq-f28b82a7 -->
   `local_j: u8`, `r0: f32`. Invariant: `local_i < local_j`.
 
-- `ConstraintTypeKind` — closed enum naming the algorithm that <!-- rq-68f5acd3 -->
-  processes a constraint type. v1 variants:
-  - `SettleWater` — three-atom rigid water (`settle.md`).
-
 - `ConstraintList` — host-side parsed-and-validated constraint data. <!-- rq-b6f167a4 -->
   Fields:
   - `groups: Vec<ConstraintGroup>`
   - `group_atoms: Vec<u32>`
   - `group_constraints: Vec<GroupConstraint>`
-  - `constraint_type_kind: Vec<ConstraintTypeKind>`
   - `particle_count: usize`
 
   Method `ConstraintList::is_empty(&self) -> bool` —
   `self.groups.is_empty()`.
+
+  Each group's algorithm is resolved at consume time from
+  `constraint_types[group.constraint_type_index].kind` (the
+  `NamedSlotConfig`'s `kind` string), not stored on the list itself.
 
 - `ConstraintRegistry` — host-side registry of constraint builders. <!-- rq-3cca2cb1 -->
   Holds `builders: Vec<Box<dyn ConstraintBuilder>>`.
@@ -287,12 +304,20 @@ Shape-mismatch failures surface as
     — appends a builder. Two builders sharing the same `kind_name()`
     are not detected at registration; the lookup returns the first
     match.
-  - `ConstraintRegistry::build_optional(&self, list: &ConstraintList, device: Arc<CudaDevice>, particle_count: usize) -> Result<Option<Box<dyn Constraint>>, ConstraintError>`
-    — when `list.is_empty()`, returns `Ok(None)`. Otherwise constructs
-    the single slot implementation that handles every algorithm
-    referenced by the list. In v1 every group's
-    `constraint_type_kind` must be `SettleWater`; presence of any
-    other variant returns `ConstraintError::UnsupportedKind(...)`.
+  - `ConstraintRegistry::lookup(&self, kind: &str) -> Option<&dyn ConstraintBuilder>`
+    — returns the first registered builder whose `kind_name()` equals
+    `kind`. The topology parser uses this to call
+    `expected_atom_count(&params)` per constraint-type entry; the
+    runner uses it to drive `validate_params` and
+    `validate_group_shape` at config-validation time.
+  - `ConstraintRegistry::build_optional(&self, list: &ConstraintList, gpu: &GpuContext, particle_count: usize, masses: &[f32], constraint_types: &[NamedSlotConfig]) -> Result<Option<Box<dyn Constraint>>, ConstraintError>`
+    — when `list.is_empty()`, returns `Ok(None)`. Otherwise, for every
+    group in `list`, looks up the algorithm via
+    `constraint_types[group.constraint_type_index].kind`, finds the
+    matching builder, calls `validate_group_shape(...)`, and finally
+    delegates to the slot constructor. Returns
+    `ConstraintError::UnsupportedKind(kind)` when any group references
+    a kind not present in the registry.
 
 - `ConstraintBuilder` — trait describing a registered constraint <!-- rq-7896e33a -->
   implementation. Implementations are stateless and self-register at
@@ -300,34 +325,73 @@ Shape-mismatch failures surface as
 
   ```rust
   pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
+      /// Lookup key used by ConstraintRegistry to dispatch a
+      /// `NamedSlotConfig`'s `kind` string to this builder.
       fn kind_name(&self) -> &'static str;
+
+      /// Validate the kind-specific parameters of a
+      /// `[[constraint_types]]` entry at config-load time. Called by
+      /// `Config::validate_against(&registries)` before any GPU work.
+      fn validate_params(&self, params: &toml::Value)
+          -> Result<(), ConfigError>;
+
+      /// Number of atoms a single `[constraints]` topology row of
+      /// this kind must declare. The topology parser uses this value
+      /// to validate row column counts.
+      fn expected_atom_count(&self, params: &toml::Value) -> usize;
+
+      /// Validate the cluster shape of a single constraint group
+      /// against this algorithm's requirements (atom count,
+      /// constraint-pair pattern, mass consistency, etc.). Called by
+      /// `ConstraintRegistry::build_optional` for every group whose
+      /// algorithm matches this builder.
+      fn validate_group_shape(
+          &self,
+          group_index: usize,
+          atoms: &[u32],
+          constraints: &[GroupConstraint],
+          params: &toml::Value,
+          masses: &[f32],
+      ) -> Result<(), ConstraintError>;
+
+      /// Construct the slot implementation. Receives the full
+      /// `ConstraintList` and the `NamedSlotConfig` array; the
+      /// builder filters internally to the groups whose algorithm
+      /// matches its `kind_name()`. In v1 the single registered
+      /// builder consumes every group.
       fn build(
           &self,
-          device: Arc<CudaDevice>,
+          gpu: &GpuContext,
           particle_count: usize,
           list: &ConstraintList,
+          masses: &[f32],
+          constraint_types: &[NamedSlotConfig],
       ) -> Result<Box<dyn Constraint>, ConstraintError>;
   }
   ```
 
-  - The builder receives the full `ConstraintList`. It is responsible
-    for inspecting only the groups whose
-    `constraint_type_kind` matches the algorithm it implements; in v1
-    only `SettleWater` exists and the `settle` builder consumes every
-    group.
+  - `validate_params` is a pure function of the supplied parameters
+    and must not allocate device memory.
+  - `expected_atom_count` is also a pure function of the supplied
+    parameters. SETTLE returns `3` regardless of `params`.
+  - `validate_group_shape` runs before `build` and surfaces
+    algorithm-specific cluster-shape errors as
+    `ConstraintError::InvalidGroupShape`.
+  - `build` constructs the device-side slot.
 
 - `ConstraintError` — error type returned by every trait method. <!-- rq-feb0501c -->
   Variants:
   - `Gpu(GpuError)` — CUDA driver / kernel-launch failure.
   - `Timings(TimingsError)` — CUDA event recording failure.
-  - `UnsupportedKind(ConstraintTypeKind)` — the registry has no
-    builder for the requested algorithm.
+  - `UnsupportedKind(String)` — the registry has no builder for the
+    requested algorithm kind. The string is the unresolved `kind`
+    from the corresponding `NamedSlotConfig`.
   - `UnknownConstraintType(String)` — the `[constraints]` row
     references a constraint-type name that does not appear in the
     config's `[[constraint_types]]` array.
   - `DuplicateConstraintAtom { atom: u32 }` — two constraint rows
     share an atom (forbidden in v1; clusters are disjoint).
-  - `InvalidGroupShape { group_index: usize, kind: ConstraintTypeKind, reason: String }`
+  - `InvalidGroupShape { group_index: usize, kind: String, reason: String }`
     — the parsed group does not satisfy the algorithm's required
     cluster shape (atom count, constraint pattern, etc.).
   - `ConstraintBondPairOverlap { atom_i: u32, atom_j: u32 }` — an
@@ -340,15 +404,18 @@ Shape-mismatch failures surface as
 
 ### Functions and Methods <!-- rq-dfd47225 -->
 
-- `IntegratorKind::supports_constraints(&self) -> bool` — added to the <!-- rq-9331ede2 -->
-  existing enum. Returns `true` for variants whose integrator drives
-  the three `Constraint` hooks. Default-registry returns:
-  - `VelocityVerlet { lossless: false }` → `true`.
-  - `VelocityVerlet { lossless: true }` → `false`.
-  - `LangevinBaoab { .. }` → `false`.
-  - `MtkNpt { .. }` → `false`.
+- `IntegratorBuilder::supports_constraints(&self, params: &toml::Value) -> bool` <!-- rq-9331ede2 -->
+  — defined on the `IntegratorBuilder` trait (see `framework.md`).
+  Returns `true` for builders whose integrator drives the three
+  `Constraint` hooks. Default-registry returns:
+  - `"velocity-verlet"` builder with `params.lossless == false` →
+    `true`.
+  - `"velocity-verlet"` builder with `params.lossless == true` →
+    `false`.
+  - `"langevin-baoab"` builder → `false` (regardless of `params`).
+  - `"mtk-npt"` builder → `false` (regardless of `params`).
 
-- `ConstraintRegistry::build_optional(&self, list: &ConstraintList, device: Arc<CudaDevice>, particle_count: usize) -> Result<Option<Box<dyn Constraint>>, ConstraintError>` <!-- rq-b004196f -->
+- `ConstraintRegistry::build_optional(&self, list: &ConstraintList, gpu: &GpuContext, particle_count: usize, masses: &[f32], constraint_types: &[NamedSlotConfig]) -> Result<Option<Box<dyn Constraint>>, ConstraintError>` <!-- rq-b004196f -->
   — as described above.
 
 - `Constraint::apply_before_drift`, `Constraint::apply_after_drift`, <!-- rq-e538c545 -->
@@ -364,7 +431,13 @@ from the `ConstraintList` returned by `load_topology_file`:
 
 ```rust
 let constraint = ConstraintRegistry::with_builtins()
-    .build_optional(&constraint_list, device.clone(), particle_count)?;
+    .build_optional(
+        &constraint_list,
+        &gpu,
+        particle_count,
+        &masses,
+        &config.constraint_types,
+    )?;
 ```
 
 The slot's per-group device buffers are allocated on the runner's
@@ -410,10 +483,11 @@ algorithm individually guarantees:
   framework.
 - Composing constraints with `velocity-verlet { lossless: true }`,
   with `langevin-baoab`, or with `mtk-npt`. Each is rejected at
-  config load via the `IntegratorKind::supports_constraints()`
-  predicate. Lossless support is the target of a follow-up feature
-  that designs how constraint corrections fold into the
-  `(f32 high, f64 low)` compensated sum.
+  config load via the
+  `IntegratorBuilder::supports_constraints(&params)` predicate.
+  Lossless support is the target of a follow-up feature that designs
+  how constraint corrections fold into the `(f32 high, f64 low)`
+  compensated sum.
 - Cluster building that merges constraint rows sharing atoms. Each
   row in `[constraints]` is its own group in v1; the parser rejects
   overlap. The connected-components algorithm needed to merge shared
@@ -461,17 +535,17 @@ Feature: Constraint slot framework
 
   @rq-7ef08958
   Scenario: Unsupported constraint kind reports UnsupportedKind
-    Given a ConstraintRegistry whose builders cover only SettleWater
-    And a ConstraintList containing one group with constraint_type_kind = MShake
-    When registry.build_optional(&list, device, particle_count=4) is called
-    Then it returns Err(ConstraintError::UnsupportedKind(MShake))
+    Given a ConstraintRegistry whose builders cover only "settle"
+    And a ConstraintList referencing a constraint type with kind = "m-shake"
+    When registry.build_optional(&list, &gpu, particle_count=4, &masses, &constraint_types) is called
+    Then it returns Err(ConstraintError::UnsupportedKind("m-shake"))
 
   @rq-18165336
   Scenario: Empty ConstraintRegistry on a non-empty list reports UnsupportedKind
     Given an empty ConstraintRegistry (no builders registered)
-    And a ConstraintList containing one SettleWater group with atoms [0, 1, 2]
-    When registry.build_optional(&list, device, particle_count=3) is called
-    Then it returns Err(ConstraintError::UnsupportedKind(SettleWater))
+    And a ConstraintList referencing one group with constraint type kind = "settle-water"
+    When registry.build_optional(&list, &gpu, particle_count=3, &masses, &constraint_types) is called
+    Then it returns Err(ConstraintError::UnsupportedKind("settle-water"))
 
   @rq-744ddd67
   Scenario: Construct on particle_count == 0 with an empty list
@@ -480,30 +554,33 @@ Feature: Constraint slot framework
     When registry.build_optional(&list, device, particle_count=0) is called
     Then it returns Ok(None)
 
-  # --- IntegratorKind::supports_constraints() ---
+  # --- IntegratorBuilder::supports_constraints(&params) ---
 
   @rq-fd07b4dc
   Scenario: velocity-verlet (lossy) supports constraints
-    Given IntegratorKind::VelocityVerlet { lossless: false }
-    Then kind.supports_constraints() returns true
+    Given the "velocity-verlet" builder from IntegratorRegistry::with_builtins()
+    And params = { lossless: false }
+    Then builder.supports_constraints(&params) returns true
 
   @rq-53237ec4
   Scenario: velocity-verlet (lossless) does not support constraints
-    Given IntegratorKind::VelocityVerlet { lossless: true }
-    Then kind.supports_constraints() returns false
+    Given the "velocity-verlet" builder from IntegratorRegistry::with_builtins()
+    And params = { lossless: true }
+    Then builder.supports_constraints(&params) returns false
 
   @rq-047c1f4d
   Scenario: langevin-baoab does not support constraints
-    Given IntegratorKind::LangevinBaoab { friction: 1.0e12, temperature: 300.0, seed: 0 }
-    Then kind.supports_constraints() returns false
+    Given the "langevin-baoab" builder from IntegratorRegistry::with_builtins()
+    And params = { friction: 1.0e12, temperature: 300.0, seed: 0 }
+    Then builder.supports_constraints(&params) returns false
 
   @rq-09a19014
   Scenario: mtk-npt does not support constraints
-    Given IntegratorKind::MtkNpt {
-      temperature: 85.0, pressure: 1.0e5,
+    Given the "mtk-npt" builder from IntegratorRegistry::with_builtins()
+    And params = { temperature: 85.0, pressure: 1.0e5,
       tau_t: 1.0e-13, tau_p: 1.0e-12,
       chain_length: 3, yoshida_order: 3, n_resp: 1 }
-    Then kind.supports_constraints() returns false
+    Then builder.supports_constraints(&params) returns false
 
   # --- Compatibility rules at config load ---
 
