@@ -1,4 +1,4 @@
-  #!/bin/bash
+#!/bin/bash
   # .claude/hooks/check-container.sh
 
   # Check if running in a container
