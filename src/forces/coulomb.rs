@@ -1,9 +1,14 @@
 // rq-846bdb8b
 use std::sync::Arc;
 
-use cudarc::driver::CudaDevice;
+use cudarc::driver::{CudaDevice, CudaFunction};
+use cudarc::nvrtc::Ptx;
 
-use crate::gpu::{GpuContext, PairBuffer, ParticleBuffers, coulomb_pair_force, reduce_pair_forces};
+use crate::gpu::device::get_func;
+use crate::gpu::{
+    GpuContext, GpuError, PairBuffer, ParticleBuffers, coulomb_pair_force, reduce_pair_forces,
+};
+use crate::kernels;
 use crate::io::config::CoulombConfig;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -158,5 +163,24 @@ impl PotentialBuilder for CoulombBuilder {
             cx.exclusion_list,
         )?;
         Ok(Some(Box::new(state)))
+    }
+}
+
+// rq-2093594f rq-846bdb8b
+#[derive(Debug, Clone)]
+pub struct CoulombKernels {
+    pub coulomb_pair_force: CudaFunction,
+}
+
+impl CoulombKernels {
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        device.load_ptx(
+            Ptx::from_src(kernels::COULOMB),
+            "coulomb",
+            &["coulomb_pair_force"],
+        )?;
+        Ok(CoulombKernels {
+            coulomb_pair_force: get_func(device, "coulomb", "coulomb_pair_force")?,
+        })
     }
 }

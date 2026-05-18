@@ -1,8 +1,30 @@
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaSlice};
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
+use cudarc::nvrtc::Ptx;
 
+use crate::gpu::device::get_func;
 use crate::gpu::{GpuContext, GpuError, Kernels};
+use crate::kernels;
+
+// rq-2093594f rq-56d8375d
+#[derive(Debug, Clone)]
+pub struct ReduceKernels {
+    pub reduce_pair_forces: CudaFunction,
+}
+
+impl ReduceKernels {
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        device.load_ptx(
+            Ptx::from_src(kernels::REDUCE),
+            "reduce",
+            &["reduce_pair_forces"],
+        )?;
+        Ok(ReduceKernels {
+            reduce_pair_forces: get_func(device, "reduce", "reduce_pair_forces")?,
+        })
+    }
+}
 
 // rq-a0c0992f
 #[derive(Debug)]

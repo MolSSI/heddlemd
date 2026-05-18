@@ -69,8 +69,8 @@ fn init_device_loads_langevin_module() {
     let device = gpu.device.clone();
     assert!(device.get_func("langevin", "lan_drift_half").is_some());
     assert!(device.get_func("langevin", "lan_ou_step").is_some());
-    let _ = gpu.kernels.lan_drift_half.clone();
-    let _ = gpu.kernels.lan_ou_step.clone();
+    let _ = gpu.kernels.langevin.lan_drift_half.clone();
+    let _ = gpu.kernels.langevin.lan_ou_step.clone();
 }
 
 // rq-457b5271

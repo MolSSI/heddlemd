@@ -8,11 +8,14 @@ pub mod topology;
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaSlice, CudaViewMut};
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice, CudaViewMut};
+use cudarc::nvrtc::Ptx;
 
+use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, Kernels, ParticleBuffers, accumulate_forces,
 };
+use crate::kernels;
 use crate::io::config::{
     AngleTypeConfig, BondTypeConfig, CoulombConfig, NeighborListConfig, PairInteractionConfig,
     ParticleTypeConfig, SpmeConfig,
@@ -458,5 +461,24 @@ impl ForceField {
         )?;
         timings.kernel_stop(KernelStage::ACCUMULATE_FORCES)?;
         Ok(())
+    }
+}
+
+// rq-2093594f
+#[derive(Debug, Clone)]
+pub struct ForcesKernels {
+    pub accumulate_forces: CudaFunction,
+}
+
+impl ForcesKernels {
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        device.load_ptx(
+            Ptx::from_src(kernels::FORCES),
+            "forces",
+            &["accumulate_forces"],
+        )?;
+        Ok(ForcesKernels {
+            accumulate_forces: get_func(device, "forces", "accumulate_forces")?,
+        })
     }
 }

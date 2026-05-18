@@ -1,11 +1,17 @@
 // rq-09a2e15f
 
+use std::sync::Arc;
+
+use cudarc::driver::{CudaDevice, CudaFunction};
+use cudarc::nvrtc::Ptx;
 use serde::Deserialize;
 
+use crate::gpu::device::get_func;
 use crate::gpu::{
-    GpuContext, LosslessBuffers, ParticleBuffers, vv_kick, vv_kick_drift,
+    GpuContext, GpuError, LosslessBuffers, ParticleBuffers, vv_kick, vv_kick_drift,
     vv_kick_drift_lossless, vv_kick_lossless,
 };
+use crate::kernels;
 use crate::io::config::ConfigError;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -121,5 +127,35 @@ impl IntegratorBuilder for VelocityVerletBuilder {
             None
         };
         Ok(Box::new(VelocityVerletState { lossless: buffers }))
+    }
+}
+
+// rq-2093594f rq-e20b2f39
+#[derive(Debug, Clone)]
+pub struct IntegrateKernels {
+    pub vv_kick_drift: CudaFunction,
+    pub vv_kick: CudaFunction,
+    pub vv_kick_drift_lossless: CudaFunction,
+    pub vv_kick_lossless: CudaFunction,
+}
+
+impl IntegrateKernels {
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        device.load_ptx(
+            Ptx::from_src(kernels::INTEGRATE),
+            "integrate",
+            &[
+                "vv_kick_drift",
+                "vv_kick",
+                "vv_kick_drift_lossless",
+                "vv_kick_lossless",
+            ],
+        )?;
+        Ok(IntegrateKernels {
+            vv_kick_drift: get_func(device, "integrate", "vv_kick_drift")?,
+            vv_kick: get_func(device, "integrate", "vv_kick")?,
+            vv_kick_drift_lossless: get_func(device, "integrate", "vv_kick_drift_lossless")?,
+            vv_kick_lossless: get_func(device, "integrate", "vv_kick_lossless")?,
+        })
     }
 }

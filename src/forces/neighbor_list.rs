@@ -2,14 +2,17 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use cudarc::driver::{CudaDevice, CudaSlice};
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
+use cudarc::nvrtc::Ptx;
 
+use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, Kernels, ParticleBuffers, SPATIAL_HASH_SCAN_BLOCK_SIZE,
     compute_cell_indices_and_histogram, copy_positions_into_reference,
     neighbor_displacement_squared, neighbor_list_build, prefix_scan_cell_counts,
     scatter_atoms_into_cells, sort_cells_by_particle_id,
 };
+use crate::kernels;
 use crate::pbc::SimulationBox;
 use crate::timings::{HostStage, KernelStage, Timings};
 
@@ -683,5 +686,70 @@ fn alloc_scan_block_totals(
 fn map_timings_err(e: crate::timings::TimingsError) -> NeighborListError {
     match e {
         crate::timings::TimingsError::Gpu(g) => NeighborListError::Gpu(g),
+    }
+}
+
+// rq-2093594f rq-0469400b
+#[derive(Debug, Clone)]
+pub struct NeighborKernels {
+    pub neighbor_displacement_squared: CudaFunction,
+    pub neighbor_list_build: CudaFunction,
+    pub copy_positions_into_reference: CudaFunction,
+    pub compute_cell_indices_and_histogram: CudaFunction,
+    pub prefix_scan_local_blocks: CudaFunction,
+    pub prefix_scan_apply_block_totals: CudaFunction,
+    pub prefix_scan_finalize_offsets: CudaFunction,
+    pub scatter_atoms_into_cells: CudaFunction,
+    pub sort_cells_by_particle_id: CudaFunction,
+}
+
+impl NeighborKernels {
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        device.load_ptx(
+            Ptx::from_src(kernels::NEIGHBOR),
+            "neighbor",
+            &[
+                "neighbor_displacement_squared",
+                "neighbor_list_build",
+                "copy_positions_into_reference",
+                "compute_cell_indices_and_histogram",
+                "prefix_scan_local_blocks",
+                "prefix_scan_apply_block_totals",
+                "prefix_scan_finalize_offsets",
+                "scatter_atoms_into_cells",
+                "sort_cells_by_particle_id",
+            ],
+        )?;
+        Ok(NeighborKernels {
+            neighbor_displacement_squared: get_func(
+                device,
+                "neighbor",
+                "neighbor_displacement_squared",
+            )?,
+            neighbor_list_build: get_func(device, "neighbor", "neighbor_list_build")?,
+            copy_positions_into_reference: get_func(
+                device,
+                "neighbor",
+                "copy_positions_into_reference",
+            )?,
+            compute_cell_indices_and_histogram: get_func(
+                device,
+                "neighbor",
+                "compute_cell_indices_and_histogram",
+            )?,
+            prefix_scan_local_blocks: get_func(device, "neighbor", "prefix_scan_local_blocks")?,
+            prefix_scan_apply_block_totals: get_func(
+                device,
+                "neighbor",
+                "prefix_scan_apply_block_totals",
+            )?,
+            prefix_scan_finalize_offsets: get_func(
+                device,
+                "neighbor",
+                "prefix_scan_finalize_offsets",
+            )?,
+            scatter_atoms_into_cells: get_func(device, "neighbor", "scatter_atoms_into_cells")?,
+            sort_cells_by_particle_id: get_func(device, "neighbor", "sort_cells_by_particle_id")?,
+        })
     }
 }

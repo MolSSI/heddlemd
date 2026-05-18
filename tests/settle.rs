@@ -704,9 +704,9 @@ fn init_device_exposes_settle_kernels() {
     let gpu = init_device().unwrap();
     // If the kernels were missing, init_device would have errored. Just
     // confirm the Kernels handle is populated.
-    let _ = &gpu.kernels.settle_snapshot;
-    let _ = &gpu.kernels.settle_positions;
-    let _ = &gpu.kernels.settle_velocities;
+    let _ = &gpu.kernels.settle.settle_snapshot;
+    let _ = &gpu.kernels.settle.settle_positions;
+    let _ = &gpu.kernels.settle.settle_velocities;
 }
 
 #[test]

@@ -309,7 +309,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/gpu/device.rs",
+        "file": "src/forces/neighbor_list.rs",
         "kind": "code"
       }
     ],
@@ -796,7 +796,7 @@
     "file": "integration/berendsen-barostat",
     "refs": [
       {
-        "file": "src/gpu/device.rs",
+        "file": "src/gpu/barostat_kernels.rs",
         "kind": "code"
       },
       {
@@ -2180,7 +2180,71 @@
     "level": 3,
     "refs": [
       {
+        "file": "src/forces/angle.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/coulomb.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/lj.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/morse.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/barostat_kernels.rs",
+        "kind": "code"
+      },
+      {
         "file": "src/gpu/device.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/fill.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/gpu/pair_buffer.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/andersen.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/langevin_baoab.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/mtk_npt.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/nose_hoover_chain.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/settle.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/velocity_verlet.rs",
         "kind": "code"
       }
     ],
@@ -3839,10 +3903,6 @@
     "file": "integration/mtk-npt",
     "refs": [
       {
-        "file": "src/gpu/device.rs",
-        "kind": "code"
-      },
-      {
         "file": "src/gpu/kernels.rs",
         "kind": "code"
       },
@@ -5273,7 +5333,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/gpu/device.rs",
+        "file": "src/gpu/pair_buffer.rs",
         "kind": "code"
       }
     ],
@@ -5685,10 +5745,6 @@
     "file": "integration/andersen",
     "refs": [
       {
-        "file": "src/gpu/device.rs",
-        "kind": "code"
-      },
-      {
         "file": "src/gpu/kernels.rs",
         "kind": "code"
       },
@@ -5853,6 +5909,13 @@
     "file": "integration/berendsen",
     "refs": [],
     "title": "Missing temperature is rejected",
+    "type": "scenario"
+  },
+  "rq-6211a82f": {
+    "decl": "Scenario: Kernels is composed of per-subsystem sub-structs",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "Kernels is composed of per-subsystem sub-structs",
     "type": "scenario"
   },
   "rq-621ce7b6": {
@@ -6118,6 +6181,13 @@
     "title": "Velocity-Verlet lossless defaults to false when omitted",
     "type": "scenario"
   },
+  "rq-6745e7c5": {
+    "decl": "Scenario: Each subsystem's XKernels::load returns its kernel handle",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "Each subsystem's XKernels::load returns its kernel handle",
+    "type": "scenario"
+  },
   "rq-674cc467": {
     "decl": "Scenario: Box compatibility picks up SPME's real-space cutoff",
     "file": "forces/spme",
@@ -6162,10 +6232,6 @@
     "decl": "# Feature: SETTLE Analytic Three-Atom Rigid-Water Constraint",
     "file": "integration/settle",
     "refs": [
-      {
-        "file": "src/gpu/device.rs",
-        "kind": "code"
-      },
       {
         "file": "src/gpu/kernels.rs",
         "kind": "code"
@@ -7244,7 +7310,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/gpu/device.rs",
+        "file": "src/forces/lj.rs",
         "kind": "code"
       }
     ],
@@ -7479,6 +7545,13 @@
     "refs": [],
     "title": "Lossless Velocity-Verlet Loop",
     "type": "section"
+  },
+  "rq-7b651edb": {
+    "decl": "Scenario: Cross-subsystem reads pull from the kernel's home sub-struct",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "Cross-subsystem reads pull from the kernel's home sub-struct",
+    "type": "scenario"
   },
   "rq-7ba4f321": {
     "decl": "Scenario: A stretched bond's energy matches the closed-form Morse expression",
@@ -7936,10 +8009,6 @@
       },
       {
         "file": "src/gpu/cufft.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/gpu/device.rs",
         "kind": "code"
       },
       {
@@ -9058,7 +9127,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/gpu/device.rs",
+        "file": "src/forces/spme.rs",
         "kind": "code"
       },
       {
@@ -9228,10 +9297,6 @@
       },
       {
         "file": "src/forces/spme.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/gpu/device.rs",
         "kind": "code"
       },
       {
@@ -12115,6 +12180,13 @@
     "title": "Repeated atom in angle rejected (i == j)",
     "type": "scenario"
   },
+  "rq-cfc89131": {
+    "decl": "Scenario: A subsystem load that names a missing kernel surfaces as GpuError at init_device",
+    "file": "build-pipeline",
+    "refs": [],
+    "title": "A subsystem load that names a missing kernel surfaces as GpuError at init_device",
+    "type": "scenario"
+  },
   "rq-cfcce369": {
     "decl": "Scenario: cumulative_injection equals K_old · (λ² − 1) per invocation",
     "file": "integration/berendsen",
@@ -13285,7 +13357,7 @@
     "level": 3,
     "refs": [
       {
-        "file": "src/gpu/device.rs",
+        "file": "src/integrator/velocity_verlet.rs",
         "kind": "code"
       }
     ],
@@ -14541,10 +14613,6 @@
     "decl": "# Feature: Nosé-Hoover Chain (NHC) Thermostat",
     "file": "integration/nose-hoover-chain",
     "refs": [
-      {
-        "file": "src/gpu/device.rs",
-        "kind": "code"
-      },
       {
         "file": "src/gpu/kernels.rs",
         "kind": "code"

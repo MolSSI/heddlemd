@@ -67,8 +67,8 @@ fn init_device_loads_integrate_module_with_both_kernels() {
     // The GpuContext's kernels handle exposes both functions through typed
     // field access; referencing the fields is a compile-time assertion that
     // they exist on `Kernels`.
-    let _ = gpu.kernels.vv_kick_drift.clone();
-    let _ = gpu.kernels.vv_kick.clone();
+    let _ = gpu.kernels.integrate.vv_kick_drift.clone();
+    let _ = gpu.kernels.integrate.vv_kick.clone();
 }
 
 // rq-4f7dc024

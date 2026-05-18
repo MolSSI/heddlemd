@@ -52,21 +52,23 @@ The generated file is included in the Rust source tree with
 ## GPU Device Module <!-- rq-0c3a23bb -->
 
 `src/gpu/device.rs` exposes a function for obtaining an initialized CUDA
-device with all compiled PTX modules loaded, together with a typed handle
-to every kernel function.
+device with all compiled PTX modules loaded, together with a typed,
+per-subsystem nested handle to every kernel function.
 
 ### Functions <!-- rq-c38c8f3b -->
 
 - `init_device() -> Result<GpuContext, GpuError>`
   - Calls `CudaDevice::new(0)` to initialize the default CUDA device.
-  - Loads each embedded PTX constant onto the device with
-    `CudaDevice::load_ptx`.
-  - Captures every kernel function declared by the loaded modules into a
-    `Kernels` handle, keyed by name.
+  - Calls `Kernels::load(&device)`, which in turn invokes every
+    subsystem's `XKernels::load(device)` associated function. Each
+    `load` is responsible for loading its own PTX module onto the
+    device with `CudaDevice::load_ptx` and pulling its function
+    handles with `CudaDevice::get_func`.
   - Returns a `GpuContext` bundling the `Arc<CudaDevice>` and the
-    `Arc<Kernels>` handle.
-  - Returns `Err(GpuError)` if device creation, PTX loading, or the
-    lookup of any expected kernel fails.
+    composed `Arc<Kernels>` handle.
+  - Returns `Err(GpuError)` if device creation, any subsystem's PTX
+    loading, or any subsystem's kernel lookup fails. The first
+    failing subsystem short-circuits the rest.
 
 ### Types <!-- rq-2093594f -->
 
@@ -82,15 +84,57 @@ to every kernel function.
   Both fields are cheap to clone, so each GPU-resource struct stores its
   own clones rather than borrowing the `GpuContext`.
 
-- `Kernels` — a handle holding, for every CUDA kernel compiled from
-  `kernels/*.cu`, its launchable function. It carries one field per
-  kernel, each named after the kernel; the field set is exactly the
-  kernels enumerated in the per-feature *PTX Module Loading* sections.
-  `init_device` populates every field once, so kernel launch sites
-  obtain their function through typed field access on `Kernels` rather
-  than a string-keyed lookup: a reference to a non-existent kernel is a
+- `Kernels` — composed handle holding, for every CUDA kernel compiled
+  from `kernels/*.cu`, its launchable function. The composition is
+  per-subsystem-nested: `Kernels` carries one field per subsystem,
+  each holding that subsystem's typed sub-struct. Kernel launch sites
+  obtain their function through a two-level field chain
+  (`particle_buffers.kernels.<subsystem>.<kernel_name>`) rather than a
+  string-keyed lookup. A reference to a non-existent kernel is a
   compile error, and a kernel missing from its PTX module is caught
-  once, by `init_device`, rather than on first launch.
+  once, by `init_device`, rather than on first launch. Adding a new
+  kernel to an existing subsystem is a one-line edit to the
+  subsystem's own kernel struct, and adding a new subsystem is a
+  one-line edit to `Kernels` (plus the new subsystem file). `device.rs`
+  does not name any individual kernel.
+
+  The subsystem field set is:
+
+  | Field         | Sub-struct type      | Sub-struct home                                | PTX module      | Kernels                                                                                           |
+  | ---           | ---                  | ---                                            | ---             | ---                                                                                              |
+  | `fill`        | `FillKernels`        | `src/gpu/fill.rs`                              | `fill`          | `fill`                                                                                            |
+  | `integrate`   | `IntegrateKernels`   | `src/integrator/velocity_verlet.rs`            | `integrate`     | `vv_kick_drift`, `vv_kick`, `vv_kick_drift_lossless`, `vv_kick_lossless`                          |
+  | `reduce`      | `ReduceKernels`      | `src/gpu/pair_buffer.rs`                       | `reduce`        | `reduce_pair_forces`                                                                              |
+  | `lj`          | `LjKernels`          | `src/forces/lj.rs`                             | `pair_force`    | `lj_pair_force`                                                                                   |
+  | `coulomb`     | `CoulombKernels`     | `src/forces/coulomb.rs`                        | `coulomb`       | `coulomb_pair_force`                                                                              |
+  | `spme_real`   | `SpmeRealKernels`    | `src/forces/spme.rs`                           | `spme_real`     | `spme_real_pair_force`                                                                            |
+  | `spme_recip`  | `SpmeRecipKernels`   | `src/forces/spme.rs`                           | `spme_recip`    | `spme_charge_spread`, `spme_influence_multiply`, `spme_force_gather`                              |
+  | `langevin`    | `LangevinKernels`    | `src/integrator/langevin_baoab.rs`             | `langevin`      | `lan_drift_half`, `lan_ou_step`                                                                   |
+  | `morse`       | `MorseKernels`       | `src/forces/morse.rs`                          | `morse`         | `morse_bond_force`, `reduce_bond_forces`                                                          |
+  | `angle`       | `AngleKernels`       | `src/forces/angle.rs`                          | `angle`         | `harmonic_angle_force`, `reduce_angle_forces`                                                     |
+  | `nose_hoover` | `NoseHooverKernels`  | `src/integrator/nose_hoover_chain.rs`          | `nose_hoover`   | `kinetic_energy_reduce`, `rescale_velocities`                                                     |
+  | `andersen`    | `AndersenKernels`    | `src/integrator/andersen.rs`                   | `andersen`      | `andersen_resample`                                                                               |
+  | `barostat`    | `BarostatKernels`    | `src/gpu/barostat_kernels.rs`                  | `barostat`      | `virial_sum_reduce`, `rescale_positions`                                                          |
+  | `mtk`         | `MtkKernels`         | `src/integrator/mtk_npt.rs`                    | `mtk`           | `mtk_velocity_half_kick`, `mtk_position_drift`                                                    |
+  | `settle`      | `SettleKernels`      | `src/integrator/settle.rs`                     | `settle`        | `settle_snapshot`, `settle_positions`, `settle_velocities`                                        |
+  | `forces`      | `ForcesKernels`      | `src/forces/mod.rs`                            | `forces`        | `accumulate_forces`                                                                               |
+  | `neighbor`    | `NeighborKernels`    | `src/forces/neighbor_list.rs`                  | `neighbor`      | `neighbor_displacement_squared`, `neighbor_list_build`, `copy_positions_into_reference`, `compute_cell_indices_and_histogram`, `prefix_scan_local_blocks`, `prefix_scan_apply_block_totals`, `prefix_scan_finalize_offsets`, `scatter_atoms_into_cells`, `sort_cells_by_particle_id` |
+
+  Each subsystem's sub-struct carries one `pub <name>: CudaFunction`
+  field per kernel listed in its row, and provides an associated
+  function `pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError>`
+  that loads the PTX module and pulls the function handles. The struct
+  derives `Debug + Clone` (a `CudaFunction` is itself cheap to clone).
+
+  Cross-subsystem reads follow the home rule: a kernel lives in the
+  sub-struct named after its `.cu` file, and consumers in other
+  subsystems reach into that sub-struct directly. For example, the
+  pair-reduction kernel lives in `kernels.reduce.reduce_pair_forces`
+  and is consumed by `lj_pair_force`, `coulomb_pair_force`, and
+  `spme_real_pair_force` launch wrappers; the
+  `kinetic_energy_reduce` and `rescale_velocities` kernels live in
+  `kernels.nose_hoover.*` and are consumed by NHC, CSVR, and the MTK
+  barostat substep. No kernel handle is duplicated across sub-structs.
 
 ## Fill Kernel <!-- rq-599b2eb4 -->
 
@@ -141,10 +185,18 @@ src/
   gpu/
     mod.rs                # re-exports gpu submodules
     device.rs             # init_device(), GpuContext, Kernels, GpuError
+    fill.rs               # FillKernels (smoke-test kernel handle)
+    barostat_kernels.rs   # BarostatKernels (shared by Berendsen + c-rescale)
 tests/
   smoke_gpu.rs            # integration test for fill kernel
 Cargo.toml                # depends on cudarc
 ```
+
+Subsystem `*Kernels` sub-structs live next to the code that owns each
+PTX module (see the *Types* table above for the full home list).
+`src/gpu/device.rs` carries `init_device`, `GpuContext`, `GpuError`,
+and the central `Kernels` struct whose fields are typed sub-structs —
+it does not name any individual kernel.
 
 ## Dependencies <!-- rq-93367a8f -->
 
@@ -214,13 +266,52 @@ Feature: CUDA build pipeline and smoke test kernel
     Given a CUDA-capable GPU is available as device 0
     When init_device() is called
     Then it returns Ok containing a GpuContext
-    And the GpuContext's kernels handle exposes the fill function
+    And the GpuContext's kernels handle exposes the fill function as
+      `gpu_context.kernels.fill.fill`
 
   @rq-299c69c9
   Scenario: init_device fails when no GPU is available
     Given no CUDA-capable GPU is available
     When init_device() is called
     Then it returns Err(GpuError)
+
+  # --- Per-subsystem kernel composition ---
+
+  @rq-6211a82f
+  Scenario: Kernels is composed of per-subsystem sub-structs
+    Given a GpuContext obtained from init_device()
+    Then gpu_context.kernels has fields named after each subsystem
+      in the Types table: fill, integrate, reduce, lj, coulomb,
+      spme_real, spme_recip, langevin, morse, angle, nose_hoover,
+      andersen, barostat, mtk, settle, forces, neighbor
+    And each field is the matching subsystem's typed kernel struct
+
+  @rq-6745e7c5
+  Scenario: Each subsystem's XKernels::load returns its kernel handle
+    Given a CUDA-capable GPU initialized via CudaDevice::new(0)
+    When LjKernels::load(&device) is called
+    Then it returns Ok(LjKernels) whose `pair_force` field is a
+      launchable CudaFunction
+    And the PTX module `pair_force` is now loaded on the device
+
+  @rq-cfc89131
+  Scenario: A subsystem load that names a missing kernel surfaces as GpuError at init_device
+    Given a CUDA-capable GPU is available
+    And a subsystem's load(...) names a kernel that does not appear in
+      its PTX module (e.g. via a typo)
+    When init_device() is called
+    Then it returns Err(GpuError) at that subsystem's load step
+    And no subsequent subsystem's load is invoked
+
+  @rq-7b651edb
+  Scenario: Cross-subsystem reads pull from the kernel's home sub-struct
+    Given a GpuContext obtained from init_device()
+    Then the LJ pair-force launch wrapper reads
+      `particle_buffers.kernels.lj.pair_force` for its own kernel
+    And reads `particle_buffers.kernels.reduce.reduce_pair_forces` for
+      the shared pair-reduction kernel
+    And the same `reduce_pair_forces` handle is used by the Coulomb
+      and SPME-real launch wrappers
 
   # --- Fill kernel correctness ---
 

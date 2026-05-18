@@ -109,7 +109,7 @@ fn upload_counts(device: &Arc<CudaDevice>, counts: &[u32]) -> CudaSlice<u32> {
 fn init_device_loads_pair_force_module() {
     let gpu = init_device().expect("init_device");
     assert!(gpu.device.has_func("pair_force", "lj_pair_force"));
-    let _ = gpu.kernels.lj_pair_force.clone();
+    let _ = gpu.kernels.lj.pair_force.clone();
 }
 
 // --- Two-particle correctness ---

@@ -1,12 +1,16 @@
+pub mod barostat_kernels;
 pub mod buffers;
 pub mod cufft;
 pub mod device;
+pub mod fill;
 pub mod kernels;
 pub mod lossless_buffers;
 pub mod pair_buffer;
 
+pub use barostat_kernels::BarostatKernels;
 pub use buffers::ParticleBuffers;
 pub use device::{GpuContext, GpuError, Kernels, init_device};
+pub use fill::FillKernels;
 pub use kernels::{
     K_COULOMB_F32, LennardJonesParameterTable, SPATIAL_HASH_SCAN_BLOCK_SIZE,
     accumulate_forces, andersen_resample, compute_cell_indices_and_histogram,
@@ -23,4 +27,4 @@ pub use kernels::{
     vv_kick_drift, vv_kick_drift_lossless, vv_kick_lossless,
 };
 pub use lossless_buffers::LosslessBuffers;
-pub use pair_buffer::PairBuffer;
+pub use pair_buffer::{PairBuffer, ReduceKernels};

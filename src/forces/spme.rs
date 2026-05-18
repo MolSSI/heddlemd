@@ -10,13 +10,16 @@
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaSlice};
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
+use cudarc::nvrtc::Ptx;
 
 use crate::gpu::cufft::{CuFftError, Plan3dC2R, Plan3dR2C};
+use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, K_COULOMB_F32, PairBuffer, ParticleBuffers, reduce_pair_forces,
     spme_charge_spread, spme_force_gather, spme_influence_multiply, spme_real_pair_force,
 };
+use crate::kernels;
 use crate::io::config::SpmeConfig;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -745,5 +748,47 @@ impl PotentialBuilder for SpmeReciprocalBuilder {
         )
         .map_err(map_spme_err)?;
         Ok(Some(Box::new(state)))
+    }
+}
+
+// rq-2093594f rq-9a512ed1
+#[derive(Debug, Clone)]
+pub struct SpmeRealKernels {
+    pub spme_real_pair_force: CudaFunction,
+}
+
+impl SpmeRealKernels {
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        device.load_ptx(
+            Ptx::from_src(kernels::SPME_REAL),
+            "spme_real",
+            &["spme_real_pair_force"],
+        )?;
+        Ok(SpmeRealKernels {
+            spme_real_pair_force: get_func(device, "spme_real", "spme_real_pair_force")?,
+        })
+    }
+}
+
+// rq-2093594f rq-9ca00d25
+#[derive(Debug, Clone)]
+pub struct SpmeRecipKernels {
+    pub spme_charge_spread: CudaFunction,
+    pub spme_influence_multiply: CudaFunction,
+    pub spme_force_gather: CudaFunction,
+}
+
+impl SpmeRecipKernels {
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        device.load_ptx(
+            Ptx::from_src(kernels::SPME_RECIP),
+            "spme_recip",
+            &["spme_charge_spread", "spme_influence_multiply", "spme_force_gather"],
+        )?;
+        Ok(SpmeRecipKernels {
+            spme_charge_spread: get_func(device, "spme_recip", "spme_charge_spread")?,
+            spme_influence_multiply: get_func(device, "spme_recip", "spme_influence_multiply")?,
+            spme_force_gather: get_func(device, "spme_recip", "spme_force_gather")?,
+        })
     }
 }

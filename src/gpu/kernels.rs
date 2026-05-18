@@ -28,7 +28,7 @@ pub fn vv_kick_drift(
         return Ok(());
     }
     let n_u32 = n as u32;
-    let func = buffers.kernels.vv_kick_drift.clone();
+    let func = buffers.kernels.integrate.vv_kick_drift.clone();
     let cfg = launch_config(n_u32);
     let lat = sim_box.lattice();
     unsafe {
@@ -70,7 +70,7 @@ pub fn vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError> {
         return Ok(());
     }
     let n_u32 = n as u32;
-    let func = buffers.kernels.vv_kick.clone();
+    let func = buffers.kernels.integrate.vv_kick.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -122,7 +122,7 @@ pub fn reduce_pair_forces(
     );
 
     let n_u32 = n as u32;
-    let func = pair_buffer.kernels.reduce_pair_forces.clone();
+    let func = pair_buffer.kernels.reduce.reduce_pair_forces.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -252,7 +252,7 @@ pub fn lj_pair_force(
     debug_assert_eq!(params.switch.len(), table_len);
 
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.lj_pair_force.clone();
+    let func = particle_buffers.kernels.lj.pair_force.clone();
 
     let grid_y = n_u32.div_ceil(16);
     let grid_x = max_neighbors.div_ceil(16).max(1);
@@ -332,7 +332,7 @@ pub fn coulomb_pair_force(
     debug_assert_eq!(particle_buffers.charges.len(), n);
 
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.coulomb_pair_force.clone();
+    let func = particle_buffers.kernels.coulomb.coulomb_pair_force.clone();
 
     let grid_y = n_u32.div_ceil(16);
     let grid_x = max_neighbors.div_ceil(16).max(1);
@@ -406,7 +406,7 @@ pub fn spme_real_pair_force(
     debug_assert_eq!(particle_buffers.charges.len(), n);
 
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.spme_real_pair_force.clone();
+    let func = particle_buffers.kernels.spme_real.spme_real_pair_force.clone();
 
     let grid_y = n_u32.div_ceil(16);
     let grid_x = max_neighbors.div_ceil(16).max(1);
@@ -475,7 +475,7 @@ pub fn spme_charge_spread(
     debug_assert_eq!(particle_buffers.charges.len(), n);
 
     let m_u32 = m as u32;
-    let func = particle_buffers.kernels.spme_charge_spread.clone();
+    let func = particle_buffers.kernels.spme_recip.spme_charge_spread.clone();
     let cfg = launch_config(m_u32);
     let lat = sim_box.lattice();
     let n_u32 = n as u32;
@@ -527,7 +527,7 @@ pub fn spme_influence_multiply(
     debug_assert_eq!(virial_factor.len(), n_complex as usize);
     debug_assert_eq!(rho_hat_interleaved.len(), 2 * n_complex as usize);
     debug_assert_eq!(virial_per_cell.len(), n_complex as usize);
-    let func = kernels.spme_influence_multiply.clone();
+    let func = kernels.spme_recip.spme_influence_multiply.clone();
     let cfg = launch_config(n_complex);
     unsafe {
         func.launch(
@@ -579,7 +579,7 @@ pub fn spme_force_gather(
     debug_assert_eq!(slot_virial.len(), n);
 
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.spme_force_gather.clone();
+    let func = particle_buffers.kernels.spme_recip.spme_force_gather.clone();
     let cfg = launch_config(n_u32);
     let lat = sim_box.lattice();
     unsafe {
@@ -636,7 +636,7 @@ pub fn morse_bond_force(
         return Ok(());
     }
     let n_u32 = n_bonds as u32;
-    let func = particle_buffers.kernels.morse_bond_force.clone();
+    let func = particle_buffers.kernels.morse.morse_bond_force.clone();
     let cfg = launch_config(n_u32);
     let lat = sim_box.lattice();
     unsafe {
@@ -692,7 +692,7 @@ pub fn reduce_bond_forces(
         return Ok(());
     }
     let n_u32 = particle_count as u32;
-    let func = kernels.reduce_bond_forces.clone();
+    let func = kernels.morse.reduce_bond_forces.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -737,7 +737,7 @@ pub fn harmonic_angle_force(
         return Ok(());
     }
     let n_u32 = n_angles as u32;
-    let func = particle_buffers.kernels.harmonic_angle_force.clone();
+    let func = particle_buffers.kernels.angle.harmonic_angle_force.clone();
     let cfg = launch_config(n_u32);
     let lat = sim_box.lattice();
     unsafe {
@@ -791,7 +791,7 @@ pub fn reduce_angle_forces(
         return Ok(());
     }
     let n_u32 = particle_count as u32;
-    let func = kernels.reduce_angle_forces.clone();
+    let func = kernels.angle.reduce_angle_forces.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -832,7 +832,7 @@ pub fn compute_kinetic_energy(
     }
     debug_assert_eq!(scratch.len(), 1);
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.kinetic_energy_reduce.clone();
+    let func = particle_buffers.kernels.nose_hoover.kinetic_energy_reduce.clone();
     let cfg = LaunchConfig {
         grid_dim: (1, 1, 1),
         block_dim: (256, 1, 1),
@@ -872,7 +872,7 @@ pub fn rescale_velocities(
         return Ok(());
     }
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.rescale_velocities.clone();
+    let func = particle_buffers.kernels.nose_hoover.rescale_velocities.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -908,7 +908,7 @@ pub fn andersen_resample(
     }
     debug_assert!((0.0..=1.0).contains(&p_collision));
     let n_u32 = n as u32;
-    let func = buffers.kernels.andersen_resample.clone();
+    let func = buffers.kernels.andersen.andersen_resample.clone();
     let cfg = launch_config(n_u32);
     let seed_lo = seed as u32;
     let seed_hi = (seed >> 32) as u32;
@@ -953,7 +953,7 @@ pub fn compute_total_virial(
     }
     debug_assert_eq!(scratch.len(), 1);
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.virial_sum_reduce.clone();
+    let func = particle_buffers.kernels.barostat.virial_sum_reduce.clone();
     let cfg = LaunchConfig {
         grid_dim: (1, 1, 1),
         block_dim: (256, 1, 1),
@@ -995,7 +995,7 @@ pub fn compute_total_potential_energy(
     }
     debug_assert_eq!(scratch.len(), 1);
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.virial_sum_reduce.clone();
+    let func = particle_buffers.kernels.barostat.virial_sum_reduce.clone();
     let cfg = LaunchConfig {
         grid_dim: (1, 1, 1),
         block_dim: (256, 1, 1),
@@ -1034,7 +1034,7 @@ pub fn rescale_positions(
         return Ok(());
     }
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.rescale_positions.clone();
+    let func = particle_buffers.kernels.barostat.rescale_positions.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -1067,7 +1067,7 @@ pub fn mtk_velocity_half_kick(
         return Ok(());
     }
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.mtk_velocity_half_kick.clone();
+    let func = particle_buffers.kernels.mtk.mtk_velocity_half_kick.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -1104,7 +1104,7 @@ pub fn mtk_position_drift(
         return Ok(());
     }
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.mtk_position_drift.clone();
+    let func = particle_buffers.kernels.mtk.mtk_position_drift.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -1159,7 +1159,7 @@ pub fn accumulate_forces(
     debug_assert_eq!(slow_slot_energies.len(), num_slow_slots as usize * n);
     debug_assert_eq!(slow_slot_virials.len(), num_slow_slots as usize * n);
 
-    let func = particle_buffers.kernels.accumulate_forces.clone();
+    let func = particle_buffers.kernels.forces.accumulate_forces.clone();
     let cfg = launch_config(n_u32);
 
     unsafe {
@@ -1209,7 +1209,7 @@ pub fn neighbor_displacement_squared(
     debug_assert_eq!(reference_z.len(), n);
     debug_assert_eq!(disp_sq.len(), n);
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.neighbor_displacement_squared.clone();
+    let func = particle_buffers.kernels.neighbor.neighbor_displacement_squared.clone();
     let cfg = launch_config(n_u32);
     let lat = sim_box.lattice();
     unsafe {
@@ -1265,7 +1265,7 @@ pub fn neighbor_list_build(
     debug_assert_eq!(overflow_flag.len(), 1);
 
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.neighbor_list_build.clone();
+    let func = particle_buffers.kernels.neighbor.neighbor_list_build.clone();
     let cfg = launch_config(n_u32);
     let lat = sim_box.lattice();
     unsafe {
@@ -1314,7 +1314,7 @@ pub fn copy_positions_into_reference(
     debug_assert_eq!(reference_y.len(), n);
     debug_assert_eq!(reference_z.len(), n);
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.copy_positions_into_reference.clone();
+    let func = particle_buffers.kernels.neighbor.copy_positions_into_reference.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -1358,6 +1358,7 @@ pub fn compute_cell_indices_and_histogram(
     let n_u32 = n as u32;
     let func = particle_buffers
         .kernels
+        .neighbor
         .compute_cell_indices_and_histogram
         .clone();
     let cfg = launch_config(n_u32);
@@ -1424,7 +1425,7 @@ pub fn prefix_scan_cell_counts(
     // Phase 1: per-block local scan of cell_counts into cell_offsets,
     // emitting the level-0 block totals.
     {
-        let func = kernels.prefix_scan_local_blocks.clone();
+        let func = kernels.neighbor.prefix_scan_local_blocks.clone();
         unsafe {
             func.launch(
                 launch_config(n_cells_total_u32),
@@ -1453,7 +1454,7 @@ pub fn prefix_scan_cell_counts(
         let (head, tail) = scan_block_totals.split_at_mut(l + 1);
         let level = &head[l];
         let totals = &mut tail[0];
-        let func = kernels.prefix_scan_local_blocks.clone();
+        let func = kernels.neighbor.prefix_scan_local_blocks.clone();
         unsafe {
             func.launch(launch_config(len), (level, level, totals, len))
                 .map_err(GpuError::from)?;
@@ -1463,7 +1464,7 @@ pub fn prefix_scan_cell_counts(
     // Phase 3: ascend — add each scanned level's totals back into the
     // level below (level 0's target is `cell_offsets`).
     for l in (0..descent_levels).rev() {
-        let func = kernels.prefix_scan_apply_block_totals.clone();
+        let func = kernels.neighbor.prefix_scan_apply_block_totals.clone();
         if l == 0 {
             unsafe {
                 func.launch(
@@ -1486,7 +1487,7 @@ pub fn prefix_scan_cell_counts(
 
     // Phase 4: write the trailing cell_offsets[n_cells_total] sentinel.
     {
-        let func = kernels.prefix_scan_finalize_offsets.clone();
+        let func = kernels.neighbor.prefix_scan_finalize_offsets.clone();
         unsafe {
             func.launch(
                 launch_config(1),
@@ -1514,7 +1515,7 @@ pub fn scatter_atoms_into_cells(
     debug_assert_eq!(sorted_particle_ids.len(), particle_count);
     device.memset_zeros(write_cursors).map_err(GpuError::from)?;
     let n_u32 = particle_count as u32;
-    let func = kernels.scatter_atoms_into_cells.clone();
+    let func = kernels.neighbor.scatter_atoms_into_cells.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(cfg, (cell_indices, cell_offsets, write_cursors, sorted_particle_ids, n_u32))
@@ -1534,7 +1535,7 @@ pub fn sort_cells_by_particle_id(
     }
     debug_assert_eq!(cell_offsets.len(), n_cells_total + 1);
     let n_u32 = n_cells_total as u32;
-    let func = kernels.sort_cells_by_particle_id.clone();
+    let func = kernels.neighbor.sort_cells_by_particle_id.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(cfg, (cell_offsets, sorted_particle_ids, n_u32))
@@ -1555,7 +1556,7 @@ pub fn vv_kick_drift_lossless(
     }
     debug_assert_eq!(lossless.particle_count(), n);
     let n_u32 = n as u32;
-    let func = buffers.kernels.vv_kick_drift_lossless.clone();
+    let func = buffers.kernels.integrate.vv_kick_drift_lossless.clone();
     let cfg = launch_config(n_u32);
     let lat = sim_box.lattice();
     unsafe {
@@ -1607,7 +1608,7 @@ pub fn lan_drift_half(
         return Ok(());
     }
     let n_u32 = n as u32;
-    let func = buffers.kernels.lan_drift_half.clone();
+    let func = buffers.kernels.langevin.lan_drift_half.clone();
     let cfg = launch_config(n_u32);
     let lat = sim_box.lattice();
     unsafe {
@@ -1651,7 +1652,7 @@ pub fn lan_ou_step(
         return Ok(());
     }
     let n_u32 = n as u32;
-    let func = buffers.kernels.lan_ou_step.clone();
+    let func = buffers.kernels.langevin.lan_ou_step.clone();
     let cfg = launch_config(n_u32);
     let seed_lo = (seed & 0xFFFF_FFFF) as u32;
     let seed_hi = (seed >> 32) as u32;
@@ -1691,7 +1692,7 @@ pub fn vv_kick_lossless(
     }
     debug_assert_eq!(lossless.particle_count(), n);
     let n_u32 = n as u32;
-    let func = buffers.kernels.vv_kick_lossless.clone();
+    let func = buffers.kernels.integrate.vv_kick_lossless.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -1731,7 +1732,7 @@ pub fn settle_snapshot(
         return Ok(());
     }
     let n_u32 = n_groups as u32;
-    let func = particle_buffers.kernels.settle_snapshot.clone();
+    let func = particle_buffers.kernels.settle.settle_snapshot.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -1773,7 +1774,7 @@ pub fn settle_positions(
         return Ok(());
     }
     let n_u32 = n_groups as u32;
-    let func = particle_buffers.kernels.settle_positions.clone();
+    let func = particle_buffers.kernels.settle.settle_positions.clone();
     let cfg = launch_config(n_u32);
     let lat = sim_box.lattice();
     unsafe {
@@ -1825,7 +1826,7 @@ pub fn settle_velocities(
         return Ok(());
     }
     let n_u32 = n_groups as u32;
-    let func = particle_buffers.kernels.settle_velocities.clone();
+    let func = particle_buffers.kernels.settle.settle_velocities.clone();
     let cfg = launch_config(n_u32);
     let lat = sim_box.lattice();
     unsafe {

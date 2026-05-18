@@ -116,7 +116,7 @@ fn pair_buffer_new_with_zero_max_neighbors() {
 fn init_device_loads_reduce_module() {
     let gpu = init_device().expect("init_device");
     assert!(gpu.device.has_func("reduce", "reduce_pair_forces"));
-    let _ = gpu.kernels.reduce_pair_forces.clone();
+    let _ = gpu.kernels.reduce.reduce_pair_forces.clone();
 }
 
 // --- Reduction correctness: trivial cases ---

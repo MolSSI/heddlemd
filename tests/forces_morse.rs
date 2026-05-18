@@ -69,8 +69,8 @@ fn init_device_loads_morse_module() {
     let device = gpu.device.clone();
     assert!(device.get_func("morse", "morse_bond_force").is_some());
     assert!(device.get_func("morse", "reduce_bond_forces").is_some());
-    let _ = gpu.kernels.morse_bond_force.clone();
-    let _ = gpu.kernels.reduce_bond_forces.clone();
+    let _ = gpu.kernels.morse.morse_bond_force.clone();
+    let _ = gpu.kernels.morse.reduce_bond_forces.clone();
 }
 
 // rq-9f2de58c

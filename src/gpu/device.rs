@@ -2,61 +2,81 @@ use std::sync::Arc;
 
 use cudarc::driver::sys::CUresult;
 use cudarc::driver::{CudaDevice, CudaFunction, DriverError};
-use cudarc::nvrtc::Ptx;
-
-use crate::kernels;
 
 // rq-91ac50d0 rq-e1ceb5c0
 #[derive(Debug, thiserror::Error)]
 #[error("GPU error: {0}")]
 pub struct GpuError(#[from] pub DriverError);
 
+// Shared helper used by every subsystem's `XKernels::load`. Looks up a
+// kernel function on the device; absence surfaces as `GpuError` rather
+// than `Option::None`. Kernels missing from a loaded PTX module are
+// caught once at startup, not on first launch.
+pub(crate) fn get_func(
+    device: &Arc<CudaDevice>,
+    module: &str,
+    name: &str,
+) -> Result<CudaFunction, GpuError> {
+    device
+        .get_func(module, name)
+        .ok_or(GpuError(DriverError(CUresult::CUDA_ERROR_NOT_FOUND)))
+}
+
 // rq-2093594f
 //
-// Typed handle to every CUDA kernel compiled from `kernels/*.cu`. One
-// field per kernel, each named after the kernel. `init_device` populates
-// every field once, so launch sites obtain their function through typed
-// field access rather than a string-keyed lookup.
+// Typed handle to every CUDA kernel compiled from `kernels/*.cu`,
+// organized as one field per subsystem (one field per `.cu` file).
+// Each subsystem owns its own kernel struct, its loader, and the
+// names of its kernels. `device.rs` does not name any individual
+// kernel — adding one is a one-line edit to the relevant
+// subsystem's `XKernels::load`. Adding a whole new subsystem is a
+// one-line edit here.
 #[derive(Debug, Clone)]
 pub struct Kernels {
-    pub fill: CudaFunction,
-    pub vv_kick_drift: CudaFunction,
-    pub vv_kick: CudaFunction,
-    pub vv_kick_drift_lossless: CudaFunction,
-    pub vv_kick_lossless: CudaFunction,
-    pub reduce_pair_forces: CudaFunction,
-    pub lj_pair_force: CudaFunction,
-    pub coulomb_pair_force: CudaFunction,
-    pub spme_real_pair_force: CudaFunction,
-    pub spme_charge_spread: CudaFunction,
-    pub spme_influence_multiply: CudaFunction,
-    pub spme_force_gather: CudaFunction,
-    pub lan_drift_half: CudaFunction,
-    pub lan_ou_step: CudaFunction,
-    pub morse_bond_force: CudaFunction,
-    pub reduce_bond_forces: CudaFunction,
-    pub harmonic_angle_force: CudaFunction,
-    pub reduce_angle_forces: CudaFunction,
-    pub kinetic_energy_reduce: CudaFunction,
-    pub rescale_velocities: CudaFunction,
-    pub andersen_resample: CudaFunction,
-    pub virial_sum_reduce: CudaFunction,
-    pub rescale_positions: CudaFunction,
-    pub mtk_velocity_half_kick: CudaFunction,
-    pub mtk_position_drift: CudaFunction,
-    pub settle_snapshot: CudaFunction,
-    pub settle_positions: CudaFunction,
-    pub settle_velocities: CudaFunction,
-    pub accumulate_forces: CudaFunction,
-    pub neighbor_displacement_squared: CudaFunction,
-    pub neighbor_list_build: CudaFunction,
-    pub copy_positions_into_reference: CudaFunction,
-    pub compute_cell_indices_and_histogram: CudaFunction,
-    pub prefix_scan_local_blocks: CudaFunction,
-    pub prefix_scan_apply_block_totals: CudaFunction,
-    pub prefix_scan_finalize_offsets: CudaFunction,
-    pub scatter_atoms_into_cells: CudaFunction,
-    pub sort_cells_by_particle_id: CudaFunction,
+    pub fill: crate::gpu::fill::FillKernels,
+    pub integrate: crate::integrator::velocity_verlet::IntegrateKernels,
+    pub reduce: crate::gpu::pair_buffer::ReduceKernels,
+    pub lj: crate::forces::lj::LjKernels,
+    pub coulomb: crate::forces::coulomb::CoulombKernels,
+    pub spme_real: crate::forces::spme::SpmeRealKernels,
+    pub spme_recip: crate::forces::spme::SpmeRecipKernels,
+    pub langevin: crate::integrator::langevin_baoab::LangevinKernels,
+    pub morse: crate::forces::morse::MorseKernels,
+    pub angle: crate::forces::angle::AngleKernels,
+    pub nose_hoover: crate::integrator::nose_hoover_chain::NoseHooverKernels,
+    pub andersen: crate::integrator::andersen::AndersenKernels,
+    pub barostat: crate::gpu::barostat_kernels::BarostatKernels,
+    pub mtk: crate::integrator::mtk_npt::MtkKernels,
+    pub settle: crate::integrator::settle::SettleKernels,
+    pub forces: crate::forces::ForcesKernels,
+    pub neighbor: crate::forces::neighbor_list::NeighborKernels,
+}
+
+impl Kernels {
+    // rq-2093594f — composes every subsystem's `XKernels::load` in
+    // registration order. The first failing subsystem short-circuits
+    // the rest.
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        Ok(Kernels {
+            fill: crate::gpu::fill::FillKernels::load(device)?,
+            integrate: crate::integrator::velocity_verlet::IntegrateKernels::load(device)?,
+            reduce: crate::gpu::pair_buffer::ReduceKernels::load(device)?,
+            lj: crate::forces::lj::LjKernels::load(device)?,
+            coulomb: crate::forces::coulomb::CoulombKernels::load(device)?,
+            spme_real: crate::forces::spme::SpmeRealKernels::load(device)?,
+            spme_recip: crate::forces::spme::SpmeRecipKernels::load(device)?,
+            langevin: crate::integrator::langevin_baoab::LangevinKernels::load(device)?,
+            morse: crate::forces::morse::MorseKernels::load(device)?,
+            angle: crate::forces::angle::AngleKernels::load(device)?,
+            nose_hoover: crate::integrator::nose_hoover_chain::NoseHooverKernels::load(device)?,
+            andersen: crate::integrator::andersen::AndersenKernels::load(device)?,
+            barostat: crate::gpu::barostat_kernels::BarostatKernels::load(device)?,
+            mtk: crate::integrator::mtk_npt::MtkKernels::load(device)?,
+            settle: crate::integrator::settle::SettleKernels::load(device)?,
+            forces: crate::forces::ForcesKernels::load(device)?,
+            neighbor: crate::forces::neighbor_list::NeighborKernels::load(device)?,
+        })
+    }
 }
 
 // rq-2093594f
@@ -74,167 +94,7 @@ pub struct GpuContext {
 // rq-c38c8f3b
 pub fn init_device() -> Result<GpuContext, GpuError> {
     let device = CudaDevice::new(0)?;
-    device.load_ptx(Ptx::from_src(kernels::FILL), "fill", &["fill"])?;
-    // rq-e20b2f39
-    device.load_ptx(
-        Ptx::from_src(kernels::INTEGRATE),
-        "integrate",
-        &[
-            "vv_kick_drift",
-            "vv_kick",
-            "vv_kick_drift_lossless",
-            "vv_kick_lossless",
-        ],
-    )?;
-    // rq-56d8375d
-    device.load_ptx(
-        Ptx::from_src(kernels::REDUCE),
-        "reduce",
-        &["reduce_pair_forces"],
-    )?;
-    // rq-78d9fd1c
-    device.load_ptx(
-        Ptx::from_src(kernels::PAIR_FORCE),
-        "pair_force",
-        &["lj_pair_force"],
-    )?;
-    // rq-846bdb8b
-    device.load_ptx(
-        Ptx::from_src(kernels::COULOMB),
-        "coulomb",
-        &["coulomb_pair_force"],
-    )?;
-    // rq-9a512ed1
-    device.load_ptx(
-        Ptx::from_src(kernels::SPME_REAL),
-        "spme_real",
-        &["spme_real_pair_force"],
-    )?;
-    // rq-9ca00d25
-    device.load_ptx(
-        Ptx::from_src(kernels::SPME_RECIP),
-        "spme_recip",
-        &["spme_charge_spread", "spme_influence_multiply", "spme_force_gather"],
-    )?;
-    device.load_ptx(
-        Ptx::from_src(kernels::LANGEVIN),
-        "langevin",
-        &["lan_drift_half", "lan_ou_step"],
-    )?;
-    device.load_ptx(
-        Ptx::from_src(kernels::MORSE),
-        "morse",
-        &["morse_bond_force", "reduce_bond_forces"],
-    )?;
-    device.load_ptx(
-        Ptx::from_src(kernels::ANGLE),
-        "angle",
-        &["harmonic_angle_force", "reduce_angle_forces"],
-    )?;
-    // rq-f606ff6f
-    device.load_ptx(
-        Ptx::from_src(kernels::NOSE_HOOVER),
-        "nose_hoover",
-        &["kinetic_energy_reduce", "rescale_velocities"],
-    )?;
-    // rq-5e059f6b
-    device.load_ptx(
-        Ptx::from_src(kernels::ANDERSEN),
-        "andersen",
-        &["andersen_resample"],
-    )?;
-    // rq-0d8c8688
-    device.load_ptx(
-        Ptx::from_src(kernels::BAROSTAT),
-        "barostat",
-        &["virial_sum_reduce", "rescale_positions"],
-    )?;
-    // rq-3b6d5001
-    device.load_ptx(
-        Ptx::from_src(kernels::MTK),
-        "mtk",
-        &["mtk_velocity_half_kick", "mtk_position_drift"],
-    )?;
-    // rq-67e62f4b
-    device.load_ptx(
-        Ptx::from_src(kernels::SETTLE),
-        "settle",
-        &["settle_snapshot", "settle_positions", "settle_velocities"],
-    )?;
-    device.load_ptx(
-        Ptx::from_src(kernels::FORCES),
-        "forces",
-        &["accumulate_forces"],
-    )?;
-    // rq-0469400b
-    device.load_ptx(
-        Ptx::from_src(kernels::NEIGHBOR),
-        "neighbor",
-        &[
-            "neighbor_displacement_squared",
-            "neighbor_list_build",
-            "copy_positions_into_reference",
-            "compute_cell_indices_and_histogram",
-            "prefix_scan_local_blocks",
-            "prefix_scan_apply_block_totals",
-            "prefix_scan_finalize_offsets",
-            "scatter_atoms_into_cells",
-            "sort_cells_by_particle_id",
-        ],
-    )?;
-
-    // A kernel that is missing from its loaded module surfaces here, once,
-    // as a `GpuError` rather than on first launch.
-    let get = |module: &str, name: &str| -> Result<CudaFunction, GpuError> {
-        device
-            .get_func(module, name)
-            .ok_or(GpuError(DriverError(CUresult::CUDA_ERROR_NOT_FOUND)))
-    };
-
-    let kernels = Kernels {
-        fill: get("fill", "fill")?,
-        vv_kick_drift: get("integrate", "vv_kick_drift")?,
-        vv_kick: get("integrate", "vv_kick")?,
-        vv_kick_drift_lossless: get("integrate", "vv_kick_drift_lossless")?,
-        vv_kick_lossless: get("integrate", "vv_kick_lossless")?,
-        reduce_pair_forces: get("reduce", "reduce_pair_forces")?,
-        lj_pair_force: get("pair_force", "lj_pair_force")?,
-        coulomb_pair_force: get("coulomb", "coulomb_pair_force")?,
-        spme_real_pair_force: get("spme_real", "spme_real_pair_force")?,
-        spme_charge_spread: get("spme_recip", "spme_charge_spread")?,
-        spme_influence_multiply: get("spme_recip", "spme_influence_multiply")?,
-        spme_force_gather: get("spme_recip", "spme_force_gather")?,
-        lan_drift_half: get("langevin", "lan_drift_half")?,
-        lan_ou_step: get("langevin", "lan_ou_step")?,
-        morse_bond_force: get("morse", "morse_bond_force")?,
-        reduce_bond_forces: get("morse", "reduce_bond_forces")?,
-        harmonic_angle_force: get("angle", "harmonic_angle_force")?,
-        reduce_angle_forces: get("angle", "reduce_angle_forces")?,
-        kinetic_energy_reduce: get("nose_hoover", "kinetic_energy_reduce")?,
-        rescale_velocities: get("nose_hoover", "rescale_velocities")?,
-        andersen_resample: get("andersen", "andersen_resample")?,
-        virial_sum_reduce: get("barostat", "virial_sum_reduce")?,
-        rescale_positions: get("barostat", "rescale_positions")?,
-        mtk_velocity_half_kick: get("mtk", "mtk_velocity_half_kick")?,
-        mtk_position_drift: get("mtk", "mtk_position_drift")?,
-        settle_snapshot: get("settle", "settle_snapshot")?,
-        settle_positions: get("settle", "settle_positions")?,
-        settle_velocities: get("settle", "settle_velocities")?,
-        accumulate_forces: get("forces", "accumulate_forces")?,
-        neighbor_displacement_squared: get("neighbor", "neighbor_displacement_squared")?,
-        neighbor_list_build: get("neighbor", "neighbor_list_build")?,
-        copy_positions_into_reference: get("neighbor", "copy_positions_into_reference")?,
-        compute_cell_indices_and_histogram: get(
-            "neighbor",
-            "compute_cell_indices_and_histogram",
-        )?,
-        prefix_scan_local_blocks: get("neighbor", "prefix_scan_local_blocks")?,
-        prefix_scan_apply_block_totals: get("neighbor", "prefix_scan_apply_block_totals")?,
-        prefix_scan_finalize_offsets: get("neighbor", "prefix_scan_finalize_offsets")?,
-        scatter_atoms_into_cells: get("neighbor", "scatter_atoms_into_cells")?,
-        sort_cells_by_particle_id: get("neighbor", "sort_cells_by_particle_id")?,
-    };
-
+    let kernels = Kernels::load(&device)?;
     Ok(GpuContext {
         device,
         kernels: Arc::new(kernels),

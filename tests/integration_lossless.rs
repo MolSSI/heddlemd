@@ -128,8 +128,8 @@ fn init_device_loads_lossless_kernels() {
     let device = gpu.device.clone();
     assert!(device.has_func("integrate", "vv_kick_drift_lossless"));
     assert!(device.has_func("integrate", "vv_kick_lossless"));
-    let _ = gpu.kernels.vv_kick_drift_lossless.clone();
-    let _ = gpu.kernels.vv_kick_lossless.clone();
+    let _ = gpu.kernels.integrate.vv_kick_drift_lossless.clone();
+    let _ = gpu.kernels.integrate.vv_kick_lossless.clone();
 }
 
 // --- LosslessBuffers construction ---

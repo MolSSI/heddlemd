@@ -1,12 +1,16 @@
 // rq-f606ff6f
 
-use cudarc::driver::CudaSlice;
+use std::sync::Arc;
 
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
+use cudarc::nvrtc::Ptx;
 use serde::Deserialize;
 
+use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy, rescale_velocities,
 };
+use crate::kernels;
 use crate::io::config::ConfigError;
 use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::timings::{KernelStage, Timings};
@@ -377,5 +381,26 @@ impl ThermostatBuilder for NoseHooverChainBuilder {
             p.n_resp,
         )?;
         Ok(Box::new(state))
+    }
+}
+
+// rq-2093594f rq-f606ff6f
+#[derive(Debug, Clone)]
+pub struct NoseHooverKernels {
+    pub kinetic_energy_reduce: CudaFunction,
+    pub rescale_velocities: CudaFunction,
+}
+
+impl NoseHooverKernels {
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        device.load_ptx(
+            Ptx::from_src(kernels::NOSE_HOOVER),
+            "nose_hoover",
+            &["kinetic_energy_reduce", "rescale_velocities"],
+        )?;
+        Ok(NoseHooverKernels {
+            kinetic_energy_reduce: get_func(device, "nose_hoover", "kinetic_energy_reduce")?,
+            rescale_velocities: get_func(device, "nose_hoover", "rescale_velocities")?,
+        })
     }
 }

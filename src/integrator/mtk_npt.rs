@@ -2,12 +2,17 @@
 //
 // MTK NPT integrator (isotropic, fused thermostat + barostat).
 
-use cudarc::driver::CudaSlice;
+use std::sync::Arc;
 
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
+use cudarc::nvrtc::Ptx;
+
+use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy, compute_total_virial,
     mtk_position_drift, mtk_velocity_half_kick, rescale_velocities,
 };
+use crate::kernels;
 use crate::io::config::ConfigError;
 use serde::Deserialize;
 
@@ -500,5 +505,26 @@ impl IntegratorBuilder for MtkNptBuilder {
             p.n_resp,
         )?;
         Ok(Box::new(state))
+    }
+}
+
+// rq-2093594f rq-3b6d5001
+#[derive(Debug, Clone)]
+pub struct MtkKernels {
+    pub mtk_velocity_half_kick: CudaFunction,
+    pub mtk_position_drift: CudaFunction,
+}
+
+impl MtkKernels {
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        device.load_ptx(
+            Ptx::from_src(kernels::MTK),
+            "mtk",
+            &["mtk_velocity_half_kick", "mtk_position_drift"],
+        )?;
+        Ok(MtkKernels {
+            mtk_velocity_half_kick: get_func(device, "mtk", "mtk_velocity_half_kick")?,
+            mtk_position_drift: get_func(device, "mtk", "mtk_position_drift")?,
+        })
     }
 }

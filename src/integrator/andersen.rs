@@ -1,12 +1,16 @@
 // rq-5e059f6b
 
-use cudarc::driver::CudaSlice;
+use std::sync::Arc;
 
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
+use cudarc::nvrtc::Ptx;
 use serde::Deserialize;
 
+use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, andersen_resample, compute_kinetic_energy,
 };
+use crate::kernels;
 use crate::io::config::ConfigError;
 use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::timings::{KernelStage, Timings};
@@ -165,5 +169,24 @@ impl ThermostatBuilder for AndersenBuilder {
             p.seed,
         )?;
         Ok(Box::new(state))
+    }
+}
+
+// rq-2093594f rq-5e059f6b
+#[derive(Debug, Clone)]
+pub struct AndersenKernels {
+    pub andersen_resample: CudaFunction,
+}
+
+impl AndersenKernels {
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        device.load_ptx(
+            Ptx::from_src(kernels::ANDERSEN),
+            "andersen",
+            &["andersen_resample"],
+        )?;
+        Ok(AndersenKernels {
+            andersen_resample: get_func(device, "andersen", "andersen_resample")?,
+        })
     }
 }

@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaSlice};
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
+use cudarc::nvrtc::Ptx;
 
+use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, Kernels, ParticleBuffers, harmonic_angle_force, reduce_angle_forces,
 };
+use crate::kernels;
 use crate::io::config::AngleTypeConfig;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -210,5 +213,26 @@ impl PotentialBuilder for HarmonicAngleBuilder {
         }
         let state = HarmonicAngleState::new(cx.gpu, cx.angle_list, cx.angle_types)?;
         Ok(Some(Box::new(state)))
+    }
+}
+
+// rq-2093594f
+#[derive(Debug, Clone)]
+pub struct AngleKernels {
+    pub harmonic_angle_force: CudaFunction,
+    pub reduce_angle_forces: CudaFunction,
+}
+
+impl AngleKernels {
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        device.load_ptx(
+            Ptx::from_src(kernels::ANGLE),
+            "angle",
+            &["harmonic_angle_force", "reduce_angle_forces"],
+        )?;
+        Ok(AngleKernels {
+            harmonic_angle_force: get_func(device, "angle", "harmonic_angle_force")?,
+            reduce_angle_forces: get_func(device, "angle", "reduce_angle_forces")?,
+        })
     }
 }

@@ -1,12 +1,15 @@
 // rq-a5a919df rq-d3a14184
 use std::sync::Arc;
 
-use cudarc::driver::CudaDevice;
+use cudarc::driver::{CudaDevice, CudaFunction};
+use cudarc::nvrtc::Ptx;
 
+use crate::gpu::device::get_func;
 use crate::gpu::{
-    GpuContext, LennardJonesParameterTable, PairBuffer, ParticleBuffers, lj_pair_force,
+    GpuContext, GpuError, LennardJonesParameterTable, PairBuffer, ParticleBuffers, lj_pair_force,
     reduce_pair_forces,
 };
+use crate::kernels;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
@@ -154,6 +157,25 @@ impl PotentialBuilder for LennardJonesBuilder {
             cx.exclusion_list,
         )?;
         Ok(Some(Box::new(state)))
+    }
+}
+
+// rq-2093594f rq-78d9fd1c
+#[derive(Debug, Clone)]
+pub struct LjKernels {
+    pub pair_force: CudaFunction,
+}
+
+impl LjKernels {
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        device.load_ptx(
+            Ptx::from_src(kernels::PAIR_FORCE),
+            "pair_force",
+            &["lj_pair_force"],
+        )?;
+        Ok(LjKernels {
+            pair_force: get_func(device, "pair_force", "lj_pair_force")?,
+        })
     }
 }
 

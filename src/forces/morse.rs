@@ -1,10 +1,13 @@
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaSlice};
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
+use cudarc::nvrtc::Ptx;
 
+use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, Kernels, ParticleBuffers, morse_bond_force, reduce_bond_forces,
 };
+use crate::kernels;
 use crate::io::config::BondTypeConfig;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
@@ -214,5 +217,26 @@ impl PotentialBuilder for MorseBondedBuilder {
         }
         let state = MorseBondedState::new(cx.gpu, cx.bond_list, cx.bond_types)?;
         Ok(Some(Box::new(state)))
+    }
+}
+
+// rq-2093594f
+#[derive(Debug, Clone)]
+pub struct MorseKernels {
+    pub morse_bond_force: CudaFunction,
+    pub reduce_bond_forces: CudaFunction,
+}
+
+impl MorseKernels {
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        device.load_ptx(
+            Ptx::from_src(kernels::MORSE),
+            "morse",
+            &["morse_bond_force", "reduce_bond_forces"],
+        )?;
+        Ok(MorseKernels {
+            morse_bond_force: get_func(device, "morse", "morse_bond_force")?,
+            reduce_bond_forces: get_func(device, "morse", "reduce_bond_forces")?,
+        })
     }
 }

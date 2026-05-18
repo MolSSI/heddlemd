@@ -2,14 +2,17 @@
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaSlice};
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
+use cudarc::nvrtc::Ptx;
 
 use serde::Deserialize;
 
 use crate::forces::{ConstraintList, GroupConstraint};
+use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, settle_positions, settle_snapshot, settle_velocities,
 };
+use crate::kernels;
 use crate::io::config::{ConfigError, NamedSlotConfig};
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
@@ -561,5 +564,28 @@ impl ConstraintBuilder for SettleBuilder {
     ) -> Result<Box<dyn Constraint>, ConstraintError> {
         let state = SettleConstraintsState::new(device, list, masses, constraint_types)?;
         Ok(Box::new(state))
+    }
+}
+
+// rq-2093594f rq-67e62f4b
+#[derive(Debug, Clone)]
+pub struct SettleKernels {
+    pub settle_snapshot: CudaFunction,
+    pub settle_positions: CudaFunction,
+    pub settle_velocities: CudaFunction,
+}
+
+impl SettleKernels {
+    pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
+        device.load_ptx(
+            Ptx::from_src(kernels::SETTLE),
+            "settle",
+            &["settle_snapshot", "settle_positions", "settle_velocities"],
+        )?;
+        Ok(SettleKernels {
+            settle_snapshot: get_func(device, "settle", "settle_snapshot")?,
+            settle_positions: get_func(device, "settle", "settle_positions")?,
+            settle_velocities: get_func(device, "settle", "settle_velocities")?,
+        })
     }
 }
