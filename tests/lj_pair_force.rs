@@ -1594,12 +1594,12 @@ fn switching_from_config_receives_default_r_switch_when_omitted() {
         std::fs::create_dir_all(&p).expect("create temp dir");
         p
     };
-    let config_path = dir.join("sim.toml");
+    let config_path = dir.join("sim.in.toml");
     std::fs::write(
         &config_path,
         r#"
 schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = 1

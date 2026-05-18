@@ -72,8 +72,8 @@ ConfigError::InvalidValue { field: "simulation.dt", reason: "must be finite and 
 NeighborListError::TooManyCells { n_cells_total: 4298942376, max_supported: 4294967295 }
   ->  cell grid has 4298942376 cells, exceeding the device limit of 4294967295
 
-RunnerError::OutputExists { path: "/tmp/sim/sim-traj.xyz" }
-  ->  output file already exists: `/tmp/sim/sim-traj.xyz`
+RunnerError::OutputExists { path: "/tmp/sim/argon.out.xyz" }
+  ->  output file already exists: `/tmp/sim/argon.out.xyz`
 ```
 
 ## Conversions and Source Chains <!-- rq-6cf916af -->
@@ -164,9 +164,9 @@ Feature: Error handling convention
 
   @rq-77c04470
   Scenario: RunnerError::OutputExists renders as prose
-    Given RunnerError::OutputExists { path: "/tmp/sim/sim-traj.xyz" }
+    Given RunnerError::OutputExists { path: "/tmp/sim/argon.out.xyz" }
     When it is formatted with Display
-    Then the output equals "output file already exists: `/tmp/sim/sim-traj.xyz`"
+    Then the output equals "output file already exists: `/tmp/sim/argon.out.xyz`"
 
   @rq-5d9d7f83
   Scenario: Display output is distinct from the Debug rendering

@@ -240,6 +240,13 @@
     "title": "nhc_chain_sub_step produces the same numerical result for the particle chain",
     "type": "scenario"
   },
+  "rq-032b4b79": {
+    "decl": "Scenario: Reject a config whose derived root is empty",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject a config whose derived root is empty",
+    "type": "scenario"
+  },
   "rq-03329010": {
     "decl": "Scenario: apply_before_drift on empty state is a no-op",
     "file": "integration/constraint-framework",
@@ -435,6 +442,13 @@
     ],
     "title": "NeighborListConfig",
     "type": "api-item"
+  },
+  "rq-0622d4b0": {
+    "decl": "Scenario: Default output paths drop a single trailing `.in` from the config-file root",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Default output paths drop a single trailing `.in` from the config-file root",
+    "type": "scenario"
   },
   "rq-062ea284": {
     "decl": "## Algorithm",
@@ -1359,6 +1373,13 @@
     "file": "integration/berendsen",
     "refs": [],
     "title": "Reject non-positive tau",
+    "type": "scenario"
+  },
+  "rq-1514bec6": {
+    "decl": "Scenario: Reject a config with an upper-case `.IN.toml` suffix",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject a config with an upper-case `.IN.toml` suffix",
     "type": "scenario"
   },
   "rq-151cb099": {
@@ -4337,6 +4358,13 @@
     "title": "ForceField with only a bonded potential owns no neighbor list",
     "type": "scenario"
   },
+  "rq-43819abc": {
+    "decl": "Scenario: Reject a config whose filename does not end in `.in.toml`",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject a config whose filename does not end in `.in.toml`",
+    "type": "scenario"
+  },
   "rq-438b895b": {
     "decl": "## Build Script",
     "file": "build-pipeline",
@@ -5535,6 +5563,14 @@
     "level": 2,
     "refs": [],
     "title": "Fill Kernel",
+    "type": "section"
+  },
+  "rq-5a0f5c00": {
+    "decl": "### Config filename convention",
+    "file": "io/config-schema",
+    "level": 3,
+    "refs": [],
+    "title": "Config filename convention",
     "type": "section"
   },
   "rq-5a1771b2": {
@@ -8701,6 +8737,13 @@
     "title": "CUDA events",
     "type": "section"
   },
+  "rq-91f5f34e": {
+    "decl": "Scenario: Config rejected by the filename convention",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Config rejected by the filename convention",
+    "type": "scenario"
+  },
   "rq-922c9a86": {
     "decl": "# Both scales default to 0.0 (full exclusion) when omitted.",
     "file": "forces/topology",
@@ -9500,6 +9543,13 @@
     "title": "Lossless mode selects the lossless integrator kernels",
     "type": "scenario"
   },
+  "rq-9ecf5a3a": {
+    "decl": "Scenario: Filename-convention check runs before schema_version check",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Filename-convention check runs before schema_version check",
+    "type": "scenario"
+  },
   "rq-9f080e19": {
     "decl": "## Out of Scope",
     "file": "io/log-output",
@@ -9926,10 +9976,10 @@
     "type": "scenario"
   },
   "rq-a5c86770": {
-    "decl": "Scenario: timings_path defaults to <stem>.timings",
+    "decl": "Scenario: timings_path defaults to <config-root>.out.timings",
     "file": "io/config-schema",
     "refs": [],
-    "title": "timings_path defaults to <stem>.timings",
+    "title": "timings_path defaults to <config-root>.out.timings",
     "type": "scenario"
   },
   "rq-a5ccc1de": {
@@ -10485,10 +10535,10 @@
     "type": "scenario"
   },
   "rq-afb80e25": {
-    "decl": "Scenario: Timings file uses the default path derived from config stem",
+    "decl": "Scenario: Timings file uses the default path derived from <config-root>",
     "file": "performance-analysis",
     "refs": [],
-    "title": "Timings file uses the default path derived from config stem",
+    "title": "Timings file uses the default path derived from <config-root>",
     "type": "scenario"
   },
   "rq-aff3dafa": {

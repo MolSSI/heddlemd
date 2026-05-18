@@ -33,7 +33,7 @@ fn write_pair(
     let lossless_str = if lossless { "true" } else { "false" };
     let config = format!(
         r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = {seed}
@@ -61,7 +61,7 @@ trajectory_every = {traj_every}
 log_every = {log_every}
 "#
     );
-    let config_path = dir.join("sim.toml");
+    let config_path = dir.join("sim.in.toml");
     std::fs::write(&config_path, config).unwrap();
     write_init(dir, n_particles, init_velocities);
     config_path
@@ -95,7 +95,7 @@ fn write_init(dir: &Path, n: usize, include_velocities: bool) {
             body.push_str(&format!("Ar {x:.9e} 0.0 0.0\n"));
         }
     }
-    std::fs::write(dir.join("init.xyz"), body).unwrap();
+    std::fs::write(dir.join("sim.in.xyz"), body).unwrap();
 }
 
 // rq-1ae622bb
@@ -108,8 +108,8 @@ fn run_valid_minimal() {
     assert_eq!(summary.frames_written, 3);
     assert_eq!(summary.log_rows_written, 3);
     // Output files exist
-    let traj = std::fs::canonicalize(&dir).unwrap().join("sim-traj.xyz");
-    let log = std::fs::canonicalize(&dir).unwrap().join("sim.log");
+    let traj = std::fs::canonicalize(&dir).unwrap().join("sim.out.xyz");
+    let log = std::fs::canonicalize(&dir).unwrap().join("sim.out.log");
     assert!(traj.exists());
     assert!(log.exists());
 }
@@ -145,7 +145,7 @@ fn config_does_not_exist() {
 #[test]
 fn config_rejected_by_load_config() {
     let dir = tmp_path("schema_v2");
-    let path = dir.join("sim.toml");
+    let path = dir.join("sim.in.toml");
     std::fs::write(&path, "schema_version = 2\n").unwrap();
     let code = cli_main_u8(vec![
         "dynamics".to_string(),
@@ -161,9 +161,9 @@ fn init_file_rejected_by_loader() {
     let dir = tmp_path("init_bad_pos");
     // Write a valid config but invalid init (position outside box).
     let path = write_pair(&dir, 1, 0, 0, 0.0, false, false, 1, 1);
-    // Overwrite init.xyz with a bad row.
+    // Overwrite the init file with a bad row.
     std::fs::write(
-        dir.join("init.xyz"),
+        dir.join("sim.in.xyz"),
         "1\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3\nAr 3.0e-9 0.0 0.0\n",
     )
     .unwrap();
@@ -178,11 +178,11 @@ fn preflight_refuses_existing_trajectory() {
     let path = write_pair(&dir, 1, 5, 5, 0.0, true, false, 1, 1);
     // Pre-create the trajectory file
     let canon = std::fs::canonicalize(&dir).unwrap();
-    std::fs::write(canon.join("sim-traj.xyz"), "existing").unwrap();
+    std::fs::write(canon.join("sim.out.xyz"), "existing").unwrap();
     let err = run_simulation(&path).unwrap_err();
     match err {
         RunnerError::OutputExists { path: p } => {
-            assert_eq!(p.file_name().unwrap(), "sim-traj.xyz");
+            assert_eq!(p.file_name().unwrap(), "sim.out.xyz");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -194,11 +194,11 @@ fn preflight_refuses_existing_log() {
     let dir = tmp_path("preflight_log");
     let path = write_pair(&dir, 1, 5, 5, 0.0, true, false, 1, 1);
     let canon = std::fs::canonicalize(&dir).unwrap();
-    std::fs::write(canon.join("sim.log"), "existing").unwrap();
+    std::fs::write(canon.join("sim.out.log"), "existing").unwrap();
     let err = run_simulation(&path).unwrap_err();
     match err {
         RunnerError::OutputExists { path: p } => {
-            assert_eq!(p.file_name().unwrap(), "sim.log");
+            assert_eq!(p.file_name().unwrap(), "sim.out.log");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -210,9 +210,9 @@ fn disabled_outputs_not_checked() {
     let dir = tmp_path("disabled_outputs");
     let path = write_pair(&dir, 1, 0, 0, 0.0, true, false, 1, 1);
     let canon = std::fs::canonicalize(&dir).unwrap();
-    let traj = canon.join("sim-traj.xyz");
-    let log = canon.join("sim.log");
-    let timings = canon.join("sim.timings");
+    let traj = canon.join("sim.out.xyz");
+    let log = canon.join("sim.out.log");
+    let timings = canon.join("sim.out.timings");
     std::fs::write(&traj, "preexisting_traj").unwrap();
     std::fs::write(&log, "preexisting_log").unwrap();
     // Timings file MUST NOT exist; the pre-flight check rejects it otherwise.
@@ -232,11 +232,11 @@ fn preflight_refuses_existing_timings() {
     let dir = tmp_path("preflight_timings");
     let path = write_pair(&dir, 1, 5, 5, 0.0, true, false, 1, 1);
     let canon = std::fs::canonicalize(&dir).unwrap();
-    std::fs::write(canon.join("sim.timings"), "existing").unwrap();
+    std::fs::write(canon.join("sim.out.timings"), "existing").unwrap();
     let err = run_simulation(&path).unwrap_err();
     match err {
         RunnerError::OutputExists { path: p } => {
-            assert_eq!(p.file_name().unwrap(), "sim.timings");
+            assert_eq!(p.file_name().unwrap(), "sim.out.timings");
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -249,7 +249,7 @@ fn velocities_sampled_when_init_lacks_velo() {
     let path = write_pair(&dir, 0, 0, 1, 300.0, false, false, 1, 64);
     let summary = run_simulation(&path).unwrap();
     assert_eq!(summary.log_rows_written, 1);
-    let log_path = std::fs::canonicalize(&dir).unwrap().join("sim.log");
+    let log_path = std::fs::canonicalize(&dir).unwrap().join("sim.out.log");
     let body = std::fs::read_to_string(&log_path).unwrap();
     let last = body.lines().last().unwrap();
     let cols: Vec<&str> = last.split(',').collect();
@@ -267,7 +267,7 @@ fn explicit_init_velocities_override_sampling() {
     let dir = tmp_path("explicit_velo_override");
     let path = write_pair(&dir, 0, 0, 1, 300.0, true, false, 1, 4);
     let summary = run_simulation(&path).unwrap();
-    let log_path = std::fs::canonicalize(&dir).unwrap().join("sim.log");
+    let log_path = std::fs::canonicalize(&dir).unwrap().join("sim.out.log");
     let body = std::fs::read_to_string(&log_path).unwrap();
     let last = body.lines().last().unwrap();
     let cols: Vec<&str> = last.split(',').collect();
@@ -286,10 +286,10 @@ fn velocity_generation_deterministic_in_seed() {
     let path_b = write_pair(&dir_b, 5, 1, 1, 300.0, false, false, 999, 8);
     run_simulation(&path_a).unwrap();
     run_simulation(&path_b).unwrap();
-    let a_traj = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim-traj.xyz")).unwrap();
-    let b_traj = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim-traj.xyz")).unwrap();
-    let a_log = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.log")).unwrap();
-    let b_log = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.log")).unwrap();
+    let a_traj = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.out.xyz")).unwrap();
+    let b_traj = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.out.xyz")).unwrap();
+    let a_log = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.out.log")).unwrap();
+    let b_log = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.out.log")).unwrap();
     assert_eq!(a_traj, b_traj);
     assert_eq!(a_log, b_log);
 }
@@ -303,8 +303,8 @@ fn different_seeds_produce_different_velocities() {
     let path_b = write_pair(&dir_b, 0, 0, 1, 300.0, false, false, 2, 8);
     run_simulation(&path_a).unwrap();
     run_simulation(&path_b).unwrap();
-    let a_log = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.log")).unwrap();
-    let b_log = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.log")).unwrap();
+    let a_log = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.out.log")).unwrap();
+    let b_log = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.out.log")).unwrap();
     assert_ne!(a_log, b_log);
 }
 
@@ -316,7 +316,7 @@ fn total_momentum_is_zero() {
     let path = write_pair(&dir, 0, 1, 0, 300.0, false, false, 42, 64);
     let summary = run_simulation(&path).unwrap();
     assert_eq!(summary.frames_written, 1);
-    let traj_path = std::fs::canonicalize(&dir).unwrap().join("sim-traj.xyz");
+    let traj_path = std::fs::canonicalize(&dir).unwrap().join("sim.out.xyz");
     let body = std::fs::read_to_string(&traj_path).unwrap();
     let lines: Vec<&str> = body.lines().collect();
     let mass = 6.6335e-26_f64;
@@ -352,7 +352,7 @@ fn temperature_zero_yields_zero_velocities() {
     let dir = tmp_path("temperature_zero");
     let path = write_pair(&dir, 0, 1, 0, 0.0, false, false, 999, 4);
     run_simulation(&path).unwrap();
-    let traj_path = std::fs::canonicalize(&dir).unwrap().join("sim-traj.xyz");
+    let traj_path = std::fs::canonicalize(&dir).unwrap().join("sim.out.xyz");
     let body = std::fs::read_to_string(&traj_path).unwrap();
     let lines: Vec<&str> = body.lines().collect();
     for line in &lines[2..] {
@@ -380,7 +380,7 @@ fn single_particle_generated_velocities_zeroed_for_no_thermal_dof() {
     let path = write_pair(&dir, 0, 0, 1, 300.0, false, false, 1, 1);
     let summary = run_simulation(&path).unwrap();
     assert_eq!(summary.log_rows_written, 1);
-    let log_path = std::fs::canonicalize(&dir).unwrap().join("sim.log");
+    let log_path = std::fs::canonicalize(&dir).unwrap().join("sim.out.log");
     let body = std::fs::read_to_string(&log_path).unwrap();
     let last = body.lines().last().unwrap();
     let cols: Vec<&str> = last.split(',').collect();
@@ -438,10 +438,10 @@ fn reproducibility_byte_for_byte() {
     let path_b = write_pair(&dir_b, 50, 5, 5, 0.0, true, false, 1, 4);
     run_simulation(&path_a).unwrap();
     run_simulation(&path_b).unwrap();
-    let a_traj = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim-traj.xyz")).unwrap();
-    let b_traj = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim-traj.xyz")).unwrap();
-    let a_log = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.log")).unwrap();
-    let b_log = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.log")).unwrap();
+    let a_traj = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.out.xyz")).unwrap();
+    let b_traj = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.out.xyz")).unwrap();
+    let a_log = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.out.log")).unwrap();
+    let b_log = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.out.log")).unwrap();
     assert_eq!(a_traj, b_traj);
     assert_eq!(a_log, b_log);
 }
@@ -460,7 +460,7 @@ fn lossless_mode_completes() {
 fn lossy_is_default() {
     let dir = tmp_path("lossy_default");
     let body = r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = 1
@@ -482,7 +482,7 @@ sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 "#;
-    let path = dir.join("sim.toml");
+    let path = dir.join("sim.in.toml");
     std::fs::write(&path, body).unwrap();
     let cfg = load_config(&path).unwrap();
     assert_eq!(cfg.integrator.kind, "velocity-verlet");
@@ -500,7 +500,7 @@ cutoff = 1.0
 fn langevin_runs_end_to_end() {
     let dir = tmp_path("langevin_end_to_end");
     let cfg = r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = 1
@@ -529,10 +529,10 @@ cutoff = 1.0e-9
 trajectory_every = 1
 log_every = 1
 "#;
-    let path = dir.join("sim.toml");
+    let path = dir.join("sim.in.toml");
     std::fs::write(&path, cfg).unwrap();
     std::fs::write(
-        dir.join("init.xyz"),
+        dir.join("sim.in.xyz"),
         "2\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3\n\
          Ar -5.0e-10 0 0\nAr 5.0e-10 0 0\n",
     )
@@ -540,9 +540,9 @@ log_every = 1
     let summary = run_simulation(&path).unwrap();
     assert_eq!(summary.n_steps, 5);
     let canon = std::fs::canonicalize(&dir).unwrap();
-    assert!(canon.join("sim-traj.xyz").exists());
-    assert!(canon.join("sim.log").exists());
-    let timings_body = std::fs::read_to_string(canon.join("sim.timings")).unwrap();
+    assert!(canon.join("sim.out.xyz").exists());
+    assert!(canon.join("sim.out.log").exists());
+    let timings_body = std::fs::read_to_string(canon.join("sim.out.timings")).unwrap();
     assert!(timings_body.contains("langevin_kick_half"));
     assert!(timings_body.contains("langevin_drift_half"));
     assert!(timings_body.contains("langevin_ou_step"));
@@ -555,7 +555,7 @@ fn switching_integrator_kind_changes_trajectory() {
         let dir = tmp_path(name);
         let cfg = format!(
             r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = 1
@@ -581,10 +581,10 @@ trajectory_every = 1
 log_every = 1
 "#
         );
-        let path = dir.join("sim.toml");
+        let path = dir.join("sim.in.toml");
         std::fs::write(&path, cfg).unwrap();
         std::fs::write(
-            dir.join("init.xyz"),
+            dir.join("sim.in.xyz"),
             "2\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3\n\
              Ar -5.0e-10 0 0\nAr 5.0e-10 0 0\n",
         )
@@ -599,12 +599,12 @@ log_every = 1
         "[integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 300.0\nseed = 1",
         "switch_langevin",
     );
-    run_simulation(&dir_a.join("sim.toml")).unwrap();
-    run_simulation(&dir_b.join("sim.toml")).unwrap();
+    run_simulation(&dir_a.join("sim.in.toml")).unwrap();
+    run_simulation(&dir_b.join("sim.in.toml")).unwrap();
     let traj_a =
-        std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim-traj.xyz")).unwrap();
+        std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.out.xyz")).unwrap();
     let traj_b =
-        std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim-traj.xyz")).unwrap();
+        std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.out.xyz")).unwrap();
     assert_ne!(traj_a, traj_b);
 }
 
@@ -613,7 +613,7 @@ log_every = 1
 fn refuse_multi_type() {
     let dir = tmp_path("multi_type_runner");
     let body = r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = 1
@@ -654,9 +654,9 @@ sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 "#;
-    let path = dir.join("sim.toml");
+    let path = dir.join("sim.in.toml");
     std::fs::write(&path, body).unwrap();
-    std::fs::write(dir.join("init.xyz"), "0\nLattice=\"1 0 0 0 1 0 0 0 1\" Properties=species:S:1:pos:R:3\n").unwrap();
+    std::fs::write(dir.join("sim.in.xyz"), "0\nLattice=\"1 0 0 0 1 0 0 0 1\" Properties=species:S:1:pos:R:3\n").unwrap();
     let code = cli_main_u8(vec![
         "dynamics".to_string(),
         "run".to_string(),
@@ -674,7 +674,7 @@ fn run_empty_simulation() {
     assert_eq!(summary.n_steps, 5);
     assert_eq!(summary.frames_written, 6);
     assert_eq!(summary.log_rows_written, 6);
-    let log_path = std::fs::canonicalize(&dir).unwrap().join("sim.log");
+    let log_path = std::fs::canonicalize(&dir).unwrap().join("sim.out.log");
     let body = std::fs::read_to_string(&log_path).unwrap();
     let lines: Vec<&str> = body.lines().collect();
     assert_eq!(lines.len(), 7); // header + 6 rows
@@ -800,7 +800,7 @@ fn custom_kind_with_run_simulation_fails_with_unknown_kind() {
     // kind isn't in the built-in registry, validate_against rejects it.
     let dir = tmp_path("custom_kind_builtins_only");
     let cfg = r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = 1
@@ -822,7 +822,7 @@ sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
 "#;
-    let cfg_path = dir.join("sim.toml");
+    let cfg_path = dir.join("sim.in.toml");
     std::fs::write(&cfg_path, cfg).unwrap();
     write_init(&dir, 4, true);
     let err = run_simulation(&cfg_path).unwrap_err();
@@ -895,7 +895,7 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
 
     let dir = tmp_path("custom_kind_user_registered");
     let cfg = r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = 1
@@ -917,7 +917,7 @@ sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
 "#;
-    let cfg_path = dir.join("sim.toml");
+    let cfg_path = dir.join("sim.in.toml");
     std::fs::write(&cfg_path, cfg).unwrap();
     write_init(&dir, 4, true);
 

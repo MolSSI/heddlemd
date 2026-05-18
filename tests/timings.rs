@@ -44,7 +44,7 @@ fn write_pair(
     let lossless_str = if lossless { "true" } else { "false" };
     let config = format!(
         r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = {seed}
@@ -75,7 +75,7 @@ trajectory_every = {traj_every}
 log_every = {log_every}
 "#
     );
-    let config_path = dir.join("sim.toml");
+    let config_path = dir.join("sim.in.toml");
     std::fs::write(&config_path, config).unwrap();
     write_init(dir, n_particles, init_velocities);
     config_path
@@ -104,12 +104,12 @@ fn write_init(dir: &Path, n: usize, include_velocities: bool) {
             body.push_str(&format!("Ar {x:.9e} 0.0 0.0\n"));
         }
     }
-    std::fs::write(dir.join("init.xyz"), body).unwrap();
+    std::fs::write(dir.join("sim.in.xyz"), body).unwrap();
 }
 
 fn read_timings(dir: &Path) -> String {
     let canon = std::fs::canonicalize(dir).unwrap();
-    std::fs::read_to_string(canon.join("sim.timings")).unwrap()
+    std::fs::read_to_string(canon.join("sim.out.timings")).unwrap()
 }
 
 fn stage_row<'a>(body: &'a str, name: &str) -> Option<&'a str> {
@@ -135,7 +135,7 @@ fn successful_run_writes_timings_file() {
     let path = write_pair(&dir, 5, 5, 5, 0.0, true, false, 1, 2);
     run_simulation(&path).unwrap();
     let canon = std::fs::canonicalize(&dir).unwrap();
-    let timings = canon.join("sim.timings");
+    let timings = canon.join("sim.out.timings");
     assert!(timings.exists());
     let body = std::fs::read_to_string(&timings).unwrap();
     let header = body.lines().next().unwrap();
@@ -153,13 +153,13 @@ fn timings_absent_on_setup_failure() {
     let path = write_pair(&dir, 1, 0, 0, 0.0, false, false, 1, 1);
     // Make the init file malformed so init_load fails after config_load.
     std::fs::write(
-        dir.join("init.xyz"),
+        dir.join("sim.in.xyz"),
         "1\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3\nAr 3.0e-9 0.0 0.0\n",
     )
     .unwrap();
     let _ = run_simulation(&path);
     let canon = std::fs::canonicalize(&dir).unwrap();
-    assert!(!canon.join("sim.timings").exists());
+    assert!(!canon.join("sim.out.timings").exists());
 }
 
 // rq-afb80e25
@@ -169,7 +169,7 @@ fn timings_file_uses_default_path() {
     let path = write_pair(&dir, 1, 0, 0, 0.0, true, false, 1, 1);
     run_simulation(&path).unwrap();
     let canon = std::fs::canonicalize(&dir).unwrap();
-    assert!(canon.join("sim.timings").exists());
+    assert!(canon.join("sim.out.timings").exists());
 }
 
 // rq-a2ebdaaf
@@ -187,7 +187,7 @@ fn timings_file_can_be_overridden() {
     run_simulation(&path).unwrap();
     let canon = std::fs::canonicalize(&dir).unwrap();
     assert!(canon.join("custom.timings").exists());
-    assert!(!canon.join("sim.timings").exists());
+    assert!(!canon.join("sim.out.timings").exists());
 }
 
 // rq-11132169
@@ -196,7 +196,7 @@ fn timings_pre_flight_refuses_overwrite() {
     let dir = tmp_path("timings_overwrite");
     let path = write_pair(&dir, 1, 0, 0, 0.0, true, false, 1, 1);
     let canon = std::fs::canonicalize(&dir).unwrap();
-    let timings = canon.join("sim.timings");
+    let timings = canon.join("sim.out.timings");
     std::fs::write(&timings, "existing").unwrap();
     let err = run_simulation(&path).unwrap_err();
     match err {
@@ -235,7 +235,7 @@ fn lossless_includes_lossless_kick_rows() {
 fn write_langevin_config(dir: &Path, n_steps: u64) -> PathBuf {
     let cfg = format!(
         r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = 1
@@ -265,10 +265,10 @@ trajectory_every = 0
 log_every = 0
 "#
     );
-    let path = dir.join("sim.toml");
+    let path = dir.join("sim.in.toml");
     std::fs::write(&path, cfg).unwrap();
     std::fs::write(
-        dir.join("init.xyz"),
+        dir.join("sim.in.xyz"),
         "2\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3\n\
          Ar -5.0e-10 0 0\nAr 5.0e-10 0 0\n",
     )
@@ -574,12 +574,12 @@ fn trajectory_and_log_remain_bit_identical_with_timings_on() {
     let canon_a = std::fs::canonicalize(&dir_a).unwrap();
     let canon_b = std::fs::canonicalize(&dir_b).unwrap();
     assert_eq!(
-        std::fs::read(canon_a.join("sim-traj.xyz")).unwrap(),
-        std::fs::read(canon_b.join("sim-traj.xyz")).unwrap()
+        std::fs::read(canon_a.join("sim.out.xyz")).unwrap(),
+        std::fs::read(canon_b.join("sim.out.xyz")).unwrap()
     );
     assert_eq!(
-        std::fs::read(canon_a.join("sim.log")).unwrap(),
-        std::fs::read(canon_b.join("sim.log")).unwrap()
+        std::fs::read(canon_a.join("sim.out.log")).unwrap(),
+        std::fs::read(canon_b.join("sim.out.log")).unwrap()
     );
 }
 
@@ -623,7 +623,7 @@ fn timings_path_eq_trajectory_rejected() {
     let dir = tmp_path("collision_traj_timings");
     let body = format!(
         r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = 1
@@ -651,7 +651,7 @@ trajectory_path = "out.dat"
 timings_path = "out.dat"
 "#
     );
-    let path = dir.join("sim.toml");
+    let path = dir.join("sim.in.toml");
     std::fs::write(&path, body).unwrap();
     write_init(&dir, 0, false);
     let err = run_simulation(&path).unwrap_err();
@@ -667,7 +667,7 @@ fn timings_path_eq_log_rejected() {
     let dir = tmp_path("collision_log_timings");
     let body = format!(
         r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = 1
@@ -695,7 +695,7 @@ log_path = "out.dat"
 timings_path = "out.dat"
 "#
     );
-    let path = dir.join("sim.toml");
+    let path = dir.join("sim.in.toml");
     std::fs::write(&path, body).unwrap();
     write_init(&dir, 0, false);
     let err = run_simulation(&path).unwrap_err();
@@ -738,7 +738,7 @@ cutoff = 1.0
 timings_path = "particles.dat"
 "#
     );
-    let path = dir.join("sim.toml");
+    let path = dir.join("sim.in.toml");
     std::fs::write(&path, body).unwrap();
     let err = run_simulation(&path).unwrap_err();
     match err {

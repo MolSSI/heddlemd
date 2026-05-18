@@ -6,37 +6,37 @@ molecules (768 atoms) in a (2.0 × 2.0 × 8.0) nm box.
 
 ## Layout
 
-- `sim.toml` — simulation config (SI units; 0.5 fs timestep; 100 steps at
-  300 K)
-- `init.xyz` — 256 water molecules on a 4 × 4 × 16 lattice
+- `spc.in.toml` — simulation config (SI units; 0.5 fs timestep; 100 steps
+  at 300 K)
+- `spc.in.xyz` — 256 water molecules on a 4 × 4 × 16 lattice
   (5.0 Å spacing). Each molecule is placed with O at the lattice site,
   H₁ at `(+r_OH, 0, 0)`, and H₂ at the SPC equilibrium HOH angle
   (109.47°) from H₁ in the xy-plane.
-- `spc.topology` — bonds (512 O–H bonds), angles (256 H–O–H angles), and
-  the implicit 1-2 + 1-3 exclusions auto-derived from those.
-- `generate_init.py` — regenerates `init.xyz` deterministically.
-- `generate_topology.py` — regenerates `spc.topology` deterministically.
+- `spc.in.topology` — bonds (512 O–H bonds), angles (256 H–O–H angles),
+  and the implicit 1-2 + 1-3 exclusions auto-derived from those.
+- `generate_init.py` — regenerates `spc.in.xyz` deterministically.
+- `generate_topology.py` — regenerates `spc.in.topology` deterministically.
 
 ## Run
 
 From this directory:
 
 ```
-cargo run --release -- run sim.toml
+cargo run --release -- run spc.in.toml
 ```
 
 Or with the debug binary already built:
 
 ```
-../../target/debug/dynamics run sim.toml
+../../target/debug/dynamics run spc.in.toml
 ```
 
 A run produces three files in this directory:
 
-- `spc-traj.xyz` — 11 trajectory frames (steps 0, 10, …, 100),
+- `spc.out.xyz` — 11 trajectory frames (steps 0, 10, …, 100),
   extended-XYZ
-- `spc.log` — 21 CSV rows of step, time, kinetic energy, temperature
-- `spc.timings` — per-stage timing summary (kernels and host I/O)
+- `spc.out.log` — 21 CSV rows of step, time, kinetic energy, temperature
+- `spc.out.timings` — per-stage timing summary (kernels and host I/O)
 
 ## Parameters
 

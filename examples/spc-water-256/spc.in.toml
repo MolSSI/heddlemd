@@ -1,6 +1,6 @@
 schema_version = 1
-init = "init.xyz"
-topology = "spc.topology"
+init = "spc.in.xyz"
+topology = "spc.in.topology"
 
 [simulation]
 seed = 1
@@ -80,9 +80,6 @@ max_neighbors = 64
 r_skin = 5.0e-11
 
 [output]
-trajectory_path = "spc-traj.xyz"
 trajectory_every = 10
 include_velocities = false
-log_path = "spc.log"
 log_every = 5
-timings_path = "spc.timings"

@@ -36,7 +36,7 @@ Run the bundled example (described in detail in
 [Your First Simulation](first-simulation.md)):
 
 ```
-./target/release/dynamics run examples/lj-10000-argon/sim.toml
+./target/release/dynamics run examples/lj-10000-argon/argon.in.toml
 ```
 
 A successful run finishes in roughly a second on a recent GPU and prints

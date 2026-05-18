@@ -5,30 +5,31 @@ for 100 timesteps.
 
 ## Layout
 
-- `sim.toml` — simulation config (SI units; 1 fs timestep; 100 steps at 100 K)
-- `init.xyz` — 10,000 argon atoms on a 20 × 20 × 25 simple-cubic lattice with
-  4.0 Å spacing, centred at the origin in an 8 × 8 × 10 nm box.
-- `generate_init.py` — regenerates `init.xyz` deterministically.
+- `argon.in.toml` — simulation config (SI units; 1 fs timestep; 100 steps at
+  100 K)
+- `argon.in.xyz` — 10,000 argon atoms on a 20 × 20 × 25 simple-cubic lattice
+  with 4.0 Å spacing, centred at the origin in an 8 × 8 × 10 nm box.
+- `generate_init.py` — regenerates `argon.in.xyz` deterministically.
 
 ## Run
 
 From this directory:
 
 ```
-cargo run --release -- run sim.toml
+cargo run --release -- run argon.in.toml
 ```
 
 Or with the debug binary already built:
 
 ```
-../../target/debug/dynamics run sim.toml
+../../target/debug/dynamics run argon.in.toml
 ```
 
 A run produces three files in this directory:
 
-- `sim-traj.xyz` — 11 trajectory frames (steps 0, 10, …, 100), extended-XYZ
-- `sim.log` — 21 CSV rows of step, time, kinetic energy, temperature
-- `sim.timings` — per-stage timing summary (kernels and host I/O)
+- `argon.out.xyz` — 11 trajectory frames (steps 0, 10, …, 100), extended-XYZ
+- `argon.out.log` — 21 CSV rows of step, time, kinetic energy, temperature
+- `argon.out.timings` — per-stage timing summary (kernels and host I/O)
 
 ## Notes
 

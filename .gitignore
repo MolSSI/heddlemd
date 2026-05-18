@@ -24,9 +24,9 @@ target/
 /target
 
 # Simulation output
-*traj.xyz
-*.timings
-*.log
+*.out.xyz
+*.out.log
+*.out.timings
 
 # mdBook build output
 book/book/

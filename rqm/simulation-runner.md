@@ -611,13 +611,13 @@ Feature: dynamics run simulation runner
 
   @rq-1ae622bb
   Scenario: Run a valid minimal config to completion
-    Given tmp/sim.toml is a valid one-type config with n_steps=10, dt=1.0e-15,
+    Given tmp/sim.in.toml is a valid one-type config with n_steps=10, dt=1.0e-15,
       seed=42, temperature=0.0, trajectory_every=5, log_every=5
-    And tmp/argon.xyz is a valid init file with N=2 particles inside the box, no velocities
-    When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
+    And tmp/sim.in.xyz is a valid init file with N=2 particles inside the box, no velocities
+    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 0
-    And tmp/sim-traj.xyz exists and contains 3 frames (steps 0, 5, 10)
-    And tmp/sim.log exists and contains a header plus 3 rows (steps 0, 5, 10)
+    And tmp/sim.out.xyz exists and contains 3 frames (steps 0, 5, 10)
+    And tmp/sim.out.log exists and contains a header plus 3 rows (steps 0, 5, 10)
     And the final-summary line on stdout matches "[dynamics] complete: 10 steps in .* (frames: 3, log rows: 3)"
 
   @rq-2a36b95f
@@ -636,22 +636,30 @@ Feature: dynamics run simulation runner
 
   @rq-b746e796
   Scenario: Config does not exist
-    When dynamics is invoked with arguments ["run", "tmp/no-such.toml"]
+    When dynamics is invoked with arguments ["run", "tmp/no-such.in.toml"]
     Then it exits with code 1
-    And stderr contains "error: " and "no-such.toml"
+    And stderr contains "error: " and "no-such.in.toml"
 
   @rq-6606584b
   Scenario: Config rejected by load_config
-    Given tmp/sim.toml has schema_version=2
-    When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
+    Given tmp/sim.in.toml has schema_version=2
+    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stderr contains "UnsupportedSchemaVersion"
 
+  @rq-91f5f34e
+  Scenario: Config rejected by the filename convention
+    Given tmp/sim.toml is otherwise valid (but lacks the `.in.toml` suffix)
+    When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
+    Then it exits with code 1
+    And stderr contains "InvalidConfigFilename" and "sim.toml"
+    And the file at tmp/sim.toml was not opened
+
   @rq-f6927716
   Scenario: Init file rejected by load_init_state
-    Given tmp/sim.toml references init="bad.xyz"
+    Given tmp/sim.in.toml references init="bad.xyz"
     And tmp/bad.xyz has a position outside the primary cell
-    When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
+    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stderr contains "PositionOutsideBox"
 
@@ -659,46 +667,46 @@ Feature: dynamics run simulation runner
 
   @rq-d9a98e51
   Scenario: Pre-flight refuses to overwrite existing trajectory
-    Given tmp/sim.toml is valid with trajectory_every=5
-    And tmp/sim-traj.xyz already exists
-    When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
+    Given tmp/sim.in.toml is valid with trajectory_every=5
+    And tmp/sim.out.xyz already exists
+    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 1
-    And stderr contains "OutputExists" and "sim-traj.xyz"
+    And stderr contains "OutputExists" and "sim.out.xyz"
     And the init file is not read (verified by check that load_init_state was not entered)
 
   @rq-52c483c0
   Scenario: Pre-flight refuses to overwrite existing log
-    Given tmp/sim.toml is valid with log_every=5
-    And tmp/sim.log already exists
-    When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
+    Given tmp/sim.in.toml is valid with log_every=5
+    And tmp/sim.out.log already exists
+    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 1
-    And stderr contains "OutputExists" and "sim.log"
+    And stderr contains "OutputExists" and "sim.out.log"
 
   @rq-acbbd59a
   Scenario: Disabled trajectory and log outputs are not checked, but timings is
-    Given tmp/sim.toml has trajectory_every=0 and log_every=0
-    And tmp/sim-traj.xyz and tmp/sim.log both already exist with arbitrary content
-    And tmp/sim.timings does not exist
-    When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
+    Given tmp/sim.in.toml has trajectory_every=0 and log_every=0
+    And tmp/sim.out.xyz and tmp/sim.out.log both already exist with arbitrary content
+    And tmp/sim.out.timings does not exist
+    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 0
-    And tmp/sim-traj.xyz is unchanged
-    And tmp/sim.log is unchanged
-    And tmp/sim.timings exists
+    And tmp/sim.out.xyz is unchanged
+    And tmp/sim.out.log is unchanged
+    And tmp/sim.out.timings exists
 
   @rq-fc523f30
   Scenario: Pre-flight refuses to overwrite existing timings file
-    Given tmp/sim.toml is valid
-    And tmp/sim.timings already exists with arbitrary content
-    When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
+    Given tmp/sim.in.toml is valid
+    And tmp/sim.out.timings already exists with arbitrary content
+    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 1
-    And stderr contains "OutputExists" and "sim.timings"
+    And stderr contains "OutputExists" and "sim.out.timings"
 
   # --- Velocity generation ---
 
   @rq-621ce7b6
   Scenario: Sampled velocities round-trip to the configured temperature
-    Given tmp/sim.toml has seed=1, temperature=300.0, n_steps=0
-    And tmp/init.xyz has 100 particles with positions but no velocities
+    Given tmp/sim.in.toml has seed=1, temperature=300.0, n_steps=0
+    And tmp/sim.in.xyz has 100 particles with positions but no velocities
     When dynamics is invoked
     Then it exits with code 0
     And the step-0 log row's kinetic_energy is greater than 0
@@ -708,8 +716,8 @@ Feature: dynamics run simulation runner
 
   @rq-04fda32f
   Scenario: Explicit init velocities override sampled velocities
-    Given tmp/init.xyz declares velocities of (1.0, 0.0, 0.0) m/s for every particle
-    And tmp/sim.toml has temperature=300.0 (would normally sample)
+    Given tmp/sim.in.xyz declares velocities of (1.0, 0.0, 0.0) m/s for every particle
+    And tmp/sim.in.toml has temperature=300.0 (would normally sample)
     When dynamics is invoked
     Then the step-0 log row's kinetic_energy equals 0.5 * sum(m_i) * 1.0^2 exactly (no RNG consumed)
 
@@ -819,7 +827,7 @@ Feature: dynamics run simulation runner
 
   @rq-34db7b7b
   Scenario: Refuse to run with multiple types
-    Given tmp/sim.toml declares particle_types ["Ar", "Kr"] and all three pair interactions
+    Given tmp/sim.in.toml declares particle_types ["Ar", "Kr"] and all three pair interactions
     When dynamics is invoked
     Then it exits with code 1
     And stderr contains "MultiTypeUnsupported"
@@ -828,8 +836,8 @@ Feature: dynamics run simulation runner
 
   @rq-d065447f
   Scenario: Run an empty (N=0) simulation
-    Given tmp/init.xyz declares N=0 with a valid Lattice
-    And tmp/sim.toml is otherwise valid with n_steps=5, trajectory_every=1, log_every=1
+    Given tmp/sim.in.xyz declares N=0 with a valid Lattice
+    And tmp/sim.in.toml is otherwise valid with n_steps=5, trajectory_every=1, log_every=1
     When dynamics is invoked
     Then it exits with code 0
     And the trajectory contains 6 frames each with N=0 data rows
@@ -839,29 +847,29 @@ Feature: dynamics run simulation runner
 
   @rq-4b4f85c7
   Scenario: Box too small for cell-list rejected before forces are constructed
-    Given tmp/sim.toml has [neighbor_list] mode="cell-list" r_skin=1.0e-10
+    Given tmp/sim.in.toml has [neighbor_list] mode="cell-list" r_skin=1.0e-10
       and one [[pair_interactions]] with cutoff=1.0e-9
-    And tmp/init.xyz has an orthorhombic box with lx=2.0e-9, ly=lz=5.0e-9
-    When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
+    And tmp/sim.in.xyz has an orthorhombic box with lx=2.0e-9, ly=lz=5.0e-9
+    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stderr contains "CellListBoxTooSmall" and "a" and "2"
 
   @rq-0cb544f4
   Scenario: Coulomb cutoff participates in box-too-small check
-    Given tmp/sim.toml has [neighbor_list] mode="cell-list" r_skin=1.0e-10
+    Given tmp/sim.in.toml has [neighbor_list] mode="cell-list" r_skin=1.0e-10
       and one [[pair_interactions]] with cutoff=5.0e-10
       and a [coulomb] table with cutoff=2.0e-9 (the larger of the two)
-    And tmp/init.xyz has an orthorhombic box with lx=ly=lz=5.0e-9
+    And tmp/sim.in.xyz has an orthorhombic box with lx=ly=lz=5.0e-9
       (so 3*(2.0e-9 + 1.0e-10) = 6.3e-9 > 5.0e-9)
-    When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
+    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stderr contains "CellListBoxTooSmall"
 
   @rq-21d27f06
   Scenario: All-pairs mode skips the box-too-small check
-    Given tmp/sim.toml has [neighbor_list] mode="all-pairs"
+    Given tmp/sim.in.toml has [neighbor_list] mode="all-pairs"
       and one [[pair_interactions]] with cutoff=1.0e-9
-    And tmp/init.xyz has box edges (2.0e-9, 2.0e-9, 2.0e-9)
+    And tmp/sim.in.xyz has box edges (2.0e-9, 2.0e-9, 2.0e-9)
     When dynamics is invoked
     Then it exits with code 0
 

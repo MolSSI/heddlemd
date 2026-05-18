@@ -8,7 +8,7 @@ step further (bit-exact time reversal).
 ## The guarantee
 
 > Two runs of the same config and init file, on the same GPU, produce
-> byte-identical `*-traj.xyz` and `*.log` files.
+> byte-identical `*.out.xyz` and `*.out.log` files.
 
 "Byte-identical" is meant literally — `diff` and `sha256sum` both say
 zero. The guarantee covers:
@@ -131,13 +131,13 @@ time. The constraint-supporting integrator is the standard
 Run the bundled example, save the outputs, delete and re-run:
 
 ```
-./target/release/dynamics run examples/lj-10000-argon/sim.toml
-mv examples/lj-10000-argon/sim-traj.xyz  /tmp/traj.ref
-mv examples/lj-10000-argon/sim.log       /tmp/log.ref
-mv examples/lj-10000-argon/sim.timings   /tmp/timings.ref
-./target/release/dynamics run examples/lj-10000-argon/sim.toml
-diff examples/lj-10000-argon/sim-traj.xyz /tmp/traj.ref
-diff examples/lj-10000-argon/sim.log     /tmp/log.ref
+./target/release/dynamics run examples/lj-10000-argon/argon.in.toml
+mv examples/lj-10000-argon/argon.out.xyz     /tmp/traj.ref
+mv examples/lj-10000-argon/argon.out.log     /tmp/log.ref
+mv examples/lj-10000-argon/argon.out.timings /tmp/timings.ref
+./target/release/dynamics run examples/lj-10000-argon/argon.in.toml
+diff examples/lj-10000-argon/argon.out.xyz /tmp/traj.ref
+diff examples/lj-10000-argon/argon.out.log /tmp/log.ref
 ```
 
 Both `diff` invocations should print nothing. A `diff` on the timings

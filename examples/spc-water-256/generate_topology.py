@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Generates `spc.topology` for the spc-water-256 example.
+# Generates `spc.in.topology` for the spc-water-256 example.
 #
 # 256 waters → 256 angles (one HOH per molecule) and 512 bonds (two OH per
 # molecule). The 1-2 and 1-3 exclusions auto-derive from the bonds and
@@ -8,7 +8,7 @@
 N_WATERS = 4 * 4 * 16  # must match generate_init.py
 
 def main():
-    with open("spc.topology", "w") as f:
+    with open("spc.in.topology", "w") as f:
         f.write("# Topology for 256 SPC water molecules\n")
         f.write("# O at 3m, H1 at 3m+1, H2 at 3m+2\n\n")
         f.write("[bonds]\n")

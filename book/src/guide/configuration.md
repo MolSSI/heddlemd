@@ -6,13 +6,44 @@ velocities, box) lives in the [init file](init-files.md). Run a config
 with:
 
 ```
-dynamics run path/to/sim.toml
+dynamics run path/to/argon.in.toml
 ```
 
 This chapter is the user-facing rendering of the field reference. The
 canonical, exhaustive schema lives at `rqm/io/config-schema.md` in the
 repository — consult it for the deserialiser/validator error catalogue
 and any field this chapter elides.
+
+## Config filename convention
+
+The config-file path passed to `dynamics run` must end in `.in.toml`.
+The loader rejects any other name (`InvalidConfigFilename`) before it
+opens the file. The convention has two purposes:
+
+- An `ls` of a simulation directory groups inputs (`*.in.*`) and
+  outputs (`*.out.*`) into two visible blocks, so it is obvious which
+  files were generated and can safely be deleted before a re-run.
+- The loader derives every default output path from the **`<root>`**
+  of the config filename without an extra config field: strip the
+  `.toml` extension, then strip one trailing `.in`. The result is the
+  config's root.
+
+Examples:
+
+| Config filename       | `<root>` | Default output paths                                                |
+| --------------------- | -------- | ------------------------------------------------------------------- |
+| `argon.in.toml`       | `argon`  | `argon.out.xyz`, `argon.out.log`, `argon.out.timings`               |
+| `spc.in.toml`         | `spc`    | `spc.out.xyz`, `spc.out.log`, `spc.out.timings`                     |
+| `run-01.in.toml`      | `run-01` | `run-01.out.xyz`, `run-01.out.log`, `run-01.out.timings`            |
+| `foo.in.in.toml`      | `foo.in` | `foo.in.out.xyz`, `foo.in.out.log`, `foo.in.out.timings`            |
+
+The suffix match is case-sensitive on the whole `.in.toml` string.
+`argon.IN.toml` is rejected. Filenames whose `<root>` derivation would
+yield the empty string (e.g. `.in.toml`) are likewise rejected.
+
+The init-file path, the topology-file path, and any explicit
+`output.*_path` field are not subject to the convention — they are
+arbitrary user-supplied paths.
 
 ## Units
 
@@ -39,9 +70,11 @@ After resolution, every supplied path must be pairwise distinct.
 
 A complete config for 10,000 argon atoms in NVE:
 
+Saved as `argon.in.toml`:
+
 ```toml
 schema_version = 1
-init = "init.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 1
@@ -70,7 +103,7 @@ include_velocities = true
 log_every = 5
 ```
 
-This is the bundled `examples/lj-10000-argon/sim.toml` file. The
+This is the bundled `examples/lj-10000-argon/argon.in.toml` file. The
 [Configuration sections](#configuration-sections) below walk through
 every field.
 
@@ -297,23 +330,28 @@ the box is known.
 
 ### `[output]` (optional; all fields have defaults)
 
-| Field                | Type   | Default                       | Notes |
-|----------------------|--------|-------------------------------|-------|
-| `trajectory_path`    | string | `<stem>-traj.xyz`             | Path to the trajectory file. Relative to the config's directory. |
-| `trajectory_every`   | u64    | `100`                         | Steps between frames. `0` disables trajectory output. |
-| `include_velocities` | bool   | `true`                        | Include `velo:R:3` columns. |
-| `include_images`     | bool   | `true`                        | Include `image:I:3` columns. |
-| `log_path`           | string | `<stem>.log`                  | Path to the CSV log. |
-| `log_every`          | u64    | `100`                         | Steps between log rows. `0` disables the log. |
-| `timings_path`       | string | `<stem>.timings`              | Path to the per-stage performance summary. Always written; there is no `timings_every`. |
+| Field                | Type   | Default                  | Notes |
+|----------------------|--------|--------------------------|-------|
+| `trajectory_path`    | string | `<root>.out.xyz`         | Path to the trajectory file. Relative to the config's directory. |
+| `trajectory_every`   | u64    | `100`                    | Steps between frames. `0` disables trajectory output. |
+| `include_velocities` | bool   | `true`                   | Include `velo:R:3` columns. |
+| `include_images`     | bool   | `true`                   | Include `image:I:3` columns. |
+| `log_path`           | string | `<root>.out.log`         | Path to the CSV log. |
+| `log_every`          | u64    | `100`                    | Steps between log rows. `0` disables the log. |
+| `timings_path`       | string | `<root>.out.timings`     | Path to the per-stage performance summary. Always written; there is no `timings_every`. |
 
-`<stem>` is the config file's name without the `.toml` extension. See
+`<root>` is the config root derived from the filename per the
+[Config filename convention](#config-filename-convention). See
 [Output Files](output.md) for the full format spec.
 
 ## Validation
 
 The loader rejects configs that:
 
+- live at a path whose final filename component does not end in
+  `.in.toml`, or whose `<root>` derivation is empty
+  (`InvalidConfigFilename`; see the
+  [Config filename convention](#config-filename-convention));
 - carry an unrecognised top-level or section field;
 - choose an unknown `kind` for the integrator, thermostat, barostat, or
   any constraint type;

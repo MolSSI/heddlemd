@@ -49,28 +49,32 @@ integration timesteps in roughly a second on a recent NVIDIA GPU.
 From the project root:
 
 ```
-./target/release/dynamics run examples/lj-10000-argon/sim.toml
+./target/release/dynamics run examples/lj-10000-argon/argon.in.toml
 ```
 
-(Or `cargo run --release -- run examples/lj-10000-argon/sim.toml`.)
+(Or `cargo run --release -- run examples/lj-10000-argon/argon.in.toml`.)
 
 A run produces three files alongside the config:
 
-- **`sim-traj.xyz`** — 11 trajectory frames (steps 0, 10, …, 100) in
+- **`argon.out.xyz`** — 11 trajectory frames (steps 0, 10, …, 100) in
   extended-XYZ format. Each frame is self-describing (lattice vectors,
   column layout, simulation time). The trajectory frames can be re-loaded
   as an init file.
-- **`sim.log`** — CSV with `step,time,kinetic_energy,temperature`; one
-  header line plus 21 data rows.
-- **`sim.timings`** — a fixed-width text table with one row per
+- **`argon.out.log`** — CSV with `step,time,kinetic_energy,temperature`;
+  one header line plus 21 data rows.
+- **`argon.out.timings`** — a fixed-width text table with one row per
   instrumented stage: per-kernel timings (CUDA events) and host stages
   (`config_load`, `init_load`, `gpu_init`, `host_to_device_upload`,
   `device_to_host_download`, `trajectory_write`, `log_write`,
   `velocity_generation`, `total_runtime`). Columns: `count`,
   `total_ms`, `mean_us`, `min_us`, `max_us`.
 
-The example's [`README.md`](examples/lj-10000-argon/README.md) describes
-the lattice layout and how to regenerate `init.xyz`.
+By convention, config filenames end in `.in.toml` and the loader
+derives the default output paths from the filename root (`argon.in.toml`
+→ `argon.out.{xyz,log,timings}`). The runner rejects a config path
+that does not match the suffix. The example's
+[`README.md`](examples/lj-10000-argon/README.md) describes the lattice
+layout and how to regenerate `argon.in.xyz`.
 
 ## Writing your own simulation
 
@@ -98,10 +102,11 @@ supports them.
 
 ## Reproducibility
 
-`sim-traj.xyz` and `sim.log` are byte-identical across two runs of the
-same config on the same GPU. `sim.timings` is intentionally **not**
-reproducible: wall-clock measurements vary run-to-run and would
-corrupt the comparison if mixed with the deterministic outputs.
+The `<root>.out.xyz` trajectory and the `<root>.out.log` log are
+byte-identical across two runs of the same config on the same GPU.
+The `<root>.out.timings` file is intentionally **not** reproducible:
+wall-clock measurements vary run-to-run and would corrupt the
+comparison if mixed with the deterministic outputs.
 Cross-hardware reproducibility is not a goal; CUDA permits FMA
 contraction differences between GPUs.
 

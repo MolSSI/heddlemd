@@ -22,30 +22,34 @@ Goal: a 2 nm³ box containing 8 argon atoms on a simple-cubic lattice,
 run for 500 fs at 100 K with the standard Lennard-Jones argon
 parameters. Everything stays in SI units.
 
-We will keep the two files side by side in a directory:
+We will keep the two files side by side in a directory. The file-naming
+[convention](configuration.md#config-filename-convention) requires the
+config to end in `.in.toml`; we'll use the matching `.in.xyz` form for
+the init file too so a future `ls` of the directory keeps inputs and
+outputs visually grouped:
 
 ```
 my-run/
-├── sim.toml
-└── init.xyz
+├── argon.in.toml
+└── argon.in.xyz
 ```
 
 ### Step 1: design choices to make before writing anything
 
-| Decision                | Value here                  | Where it lives    |
-|-------------------------|-----------------------------|-------------------|
-| Box geometry            | 2 nm cube, orthorhombic     | `init.xyz`        |
-| Particle layout         | 2×2×2 lattice, 1.0 nm spacing | `init.xyz`      |
-| Number of types         | 1 (Ar)                      | `sim.toml`        |
-| Mass and charge per type| 6.6335e-26 kg, no charge    | `sim.toml`        |
-| Pair potential          | Lennard-Jones (σ=3.4 Å, ε≈120 k_B) | `sim.toml` |
-| Cutoff                  | 8.5 Å (2.5σ)                | `sim.toml`        |
-| Initial velocities      | none — let the runner sample | both             |
-| Integrator              | velocity-Verlet, NVE        | `sim.toml`        |
-| Timestep                | 1 fs                        | `sim.toml`        |
-| Number of steps         | 500                         | `sim.toml`        |
+| Decision                | Value here                         | Where it lives    |
+|-------------------------|------------------------------------|-------------------|
+| Box geometry            | 2 nm cube, orthorhombic            | `argon.in.xyz`    |
+| Particle layout         | 2×2×2 lattice, 1.0 nm spacing      | `argon.in.xyz`    |
+| Number of types         | 1 (Ar)                             | `argon.in.toml`   |
+| Mass and charge per type| 6.6335e-26 kg, no charge           | `argon.in.toml`   |
+| Pair potential          | Lennard-Jones (σ=3.4 Å, ε≈120 k_B) | `argon.in.toml`   |
+| Cutoff                  | 8.5 Å (2.5σ)                       | `argon.in.toml`   |
+| Initial velocities      | none — let the runner sample       | both              |
+| Integrator              | velocity-Verlet, NVE               | `argon.in.toml`   |
+| Timestep                | 1 fs                               | `argon.in.toml`   |
+| Number of steps         | 500                                | `argon.in.toml`   |
 
-### Step 2: write `init.xyz`
+### Step 2: write `argon.in.xyz`
 
 A 2 nm³ box centred at the origin means each position lies in
 `[-1.0e-9, 1.0e-9)` per axis. The four lattice corners at fractional
@@ -76,17 +80,17 @@ Things to remember:
   exclusive). The eight lattice points above sit safely inside the box.
 - Particle IDs are implicit (row order). No ID column is supported.
 
-### Step 3: write `sim.toml`
+### Step 3: write `argon.in.toml`
 
 ```toml
 schema_version = 1
-init = "init.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 1            # RNG seed for the initial Maxwell-Boltzmann sampling
 n_steps = 500
 dt = 1.0e-15        # 1 fs
-temperature = 100.0 # K — used because init.xyz has no `velo:R:3`
+temperature = 100.0 # K — used because argon.in.xyz has no `velo:R:3`
 
 [integrator]
 kind = "velocity-verlet"
@@ -113,7 +117,7 @@ Why these particular values:
 
 - `seed = 1` is sufficient — any `u64` is fine, but the same value gives
   the same byte-identical trajectory on the same GPU.
-- `temperature = 100.0` is *only* used because `init.xyz` lacks
+- `temperature = 100.0` is *only* used because `argon.in.xyz` lacks
   velocities. If you supply them, the field is still required and
   validated but ignored at runtime.
 - `cutoff = 8.5e-10` is well below `L/2 = 1.0e-9`, so the
@@ -122,14 +126,15 @@ Why these particular values:
   vector. The default cell-list configuration adds a `0.3·cutoff`
   skin, which keeps you comfortably under the limit here.
 - We let `output.trajectory_path`, `output.log_path`, and
-  `output.timings_path` default to `sim-traj.xyz`, `sim.log`,
-  `sim.timings`.
+  `output.timings_path` default to `argon.out.xyz`, `argon.out.log`,
+  `argon.out.timings` — derived from the config's root by the
+  [filename convention](configuration.md#config-filename-convention).
 
 ### Step 4: run it
 
 ```
 cd my-run
-dynamics run sim.toml
+dynamics run argon.in.toml
 ```
 
 On success the runner prints one line:
@@ -138,15 +143,15 @@ On success the runner prints one line:
 [dynamics] complete: 500 steps in <T> ms (frames: 11, log rows: 51)
 ```
 
-and writes `sim-traj.xyz`, `sim.log`, and `sim.timings` next to the
-config. Format details for each file live in
+and writes `argon.out.xyz`, `argon.out.log`, and `argon.out.timings`
+next to the config. Format details for each file live in
 [Output Files](output.md).
 
 ### Step 5: re-run reproducibility check
 
-Move the outputs aside, re-run, and `diff` — `sim-traj.xyz` and
-`sim.log` should match byte-for-byte. `sim.timings` will differ; that
-file is intentionally non-deterministic. See
+Move the outputs aside, re-run, and `diff` — `argon.out.xyz` and
+`argon.out.log` should match byte-for-byte. `argon.out.timings` will
+differ; that file is intentionally non-deterministic. See
 [Reproducibility](reproducibility.md).
 
 ## Common variations

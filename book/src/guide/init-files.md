@@ -139,7 +139,7 @@ Ar  3.4e-10  0.0  0.0
 ```
 
 A larger example lives at
-`examples/lj-10000-argon/init.xyz`; the Python script next to it
+`examples/lj-10000-argon/argon.in.xyz`; the Python script next to it
 regenerates it deterministically.
 
 ## What's *not* supported

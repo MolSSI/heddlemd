@@ -1,16 +1,18 @@
 # Output Files
 
 Every successful run writes three files alongside the config:
-`<stem>-traj.xyz`, `<stem>.log`, and `<stem>.timings`. Paths and cadences
-are controlled by the [`[output]` section](configuration.md) of the TOML
-config; defaults derive the file names from the config file's stem (e.g.
-`sim.toml` → `sim-traj.xyz`, `sim.log`, `sim.timings`).
+`<root>.out.xyz`, `<root>.out.log`, and `<root>.out.timings`, where
+`<root>` is the config's root derived per the
+[Config filename convention](configuration.md#config-filename-convention)
+(e.g. `argon.in.toml` → `argon.out.xyz`, `argon.out.log`,
+`argon.out.timings`). Paths and cadences are controlled by the
+[`[output]` section](configuration.md) of the TOML config.
 
 The runner refuses to start when any of these files already exists at the
 resolved path. Delete or move them before re-running. The check is done
 up front, before the init file is read, so the runner fails fast.
 
-## Trajectory file (`*-traj.xyz`)
+## Trajectory file (`*.out.xyz`)
 
 Extended-XYZ frames concatenated into a single file. Each frame is fully
 self-describing — particle count, box, column layout, step, and time —
@@ -60,7 +62,7 @@ written, and no file is created).
 Floats use Rust's `{:.9e}` formatter — nine fractional digits and a
 lower-case `e` exponent, which round-trips every `f32` value exactly.
 
-## Log file (`*.log`)
+## Log file (`*.out.log`)
 
 A plain CSV with a fixed four-column header followed by one row per log
 interval. No comment characters, no quoting, no trailing summary — easy
@@ -109,7 +111,7 @@ rows when `log_every > 0` is `floor(n_steps / log_every) + 1` plus the
 one header line. Setting `log_every = 0` disables the log entirely (no
 header, no file).
 
-## Timings file (`*.timings`)
+## Timings file (`*.out.timings`)
 
 A fixed-width text table with one row per instrumented stage that
 collected at least one sample. The runner times every kernel launch
@@ -151,7 +153,7 @@ Wall-clock measurements vary run-to-run for reasons that have nothing
 to do with the simulation: GPU clocks, OS scheduling, driver state.
 Mixing them into the deterministic outputs would silently break
 reproducibility checks. They live in their own file precisely so a
-`diff` of `*-traj.xyz` and `*.log` against a reference run is a clean
+`diff` of `*.out.xyz` and `*.out.log` against a reference run is a clean
 yes/no answer. See [Reproducibility](reproducibility.md) for the full
 guarantee.
 

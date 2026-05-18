@@ -404,7 +404,7 @@ fn box_compatibility_picks_up_spme_r_cut_real() {
 #[test]
 fn config_rejects_both_spme_and_coulomb() {
     let toml = r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = 0
@@ -443,7 +443,7 @@ trajectory_every = 0
 log_every = 0
 "#;
     let path = std::env::temp_dir().join(format!(
-        "dynamics_spme_conflict_{}.toml",
+        "dynamics_spme_conflict_{}.in.toml",
         std::process::id()
     ));
     std::fs::write(&path, toml).unwrap();

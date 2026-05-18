@@ -1,5 +1,5 @@
 schema_version = 1
-init = "init.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 1

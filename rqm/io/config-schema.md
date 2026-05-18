@@ -36,9 +36,11 @@ Sections:
 
 ### Example <!-- rq-ecc664ff -->
 
+Saved as `argon.in.toml`:
+
 ```toml
 schema_version = 1
-init = "argon.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
@@ -82,7 +84,7 @@ r_switch = 9.0e-10  # m  (defaults to 0.9 * cutoff when omitted)
 # Optional: path to a .topology file declaring bonds, angles, and
 # explicit non-bonded exclusions. When omitted, no bonded forces are
 # computed and the LJ / Coulomb kernels see no exclusions.
-topology = "argon.topology"
+topology = "argon.in.topology"
 
 [[bond_types]]
 name = "ArAr"
@@ -112,13 +114,13 @@ max_neighbors = 256
 r_skin = 1.0e-10    # m  (defaults to 0.3 * cutoff when omitted)
 
 [output]
-trajectory_path = "argon-traj.xyz"
+trajectory_path = "argon.out.xyz"
 trajectory_every = 100
 include_velocities = true
 include_images = true
-log_path = "argon.log"
+log_path = "argon.out.log"
 log_every = 100
-timings_path = "argon.timings"
+timings_path = "argon.out.timings"
 ```
 
 ### Units <!-- rq-ed997636 -->
@@ -628,9 +630,11 @@ Cross-validation:
 #### `[output]` (optional table; all fields have defaults) <!-- rq-6340fae2 -->
 
 - `trajectory_path: String` — output trajectory path. Default:
-  `<config-stem>-traj.xyz` in the same directory as the config file
-  (e.g. `sim.toml` → `sim-traj.xyz`). Resolved relative to the config
-  file's directory; absolute paths are honored as-is.
+  `<config-root>.out.xyz` in the same directory as the config file
+  (e.g. `argon.in.toml` → `argon.out.xyz`). `<config-root>` is the
+  config-filename derivation defined under *Config filename
+  convention*. Resolved relative to the config file's directory;
+  absolute paths are honored as-is.
 - `trajectory_every: u64` — write one trajectory frame every this many
   integration steps. Default `100`. `0` disables trajectory output entirely
   (not even the step-0 frame is written). TOML parses `u64` fields, so
@@ -645,15 +649,58 @@ Cross-validation:
   `pos + image · (lx, ly, lz)` for an orthorhombic box. When `false`,
   image columns are omitted from the file; positions in the trajectory
   are still wrapped into the primary image.
-- `log_path: String` — output log path. Default: `<config-stem>.log` in the
-  same directory as the config file. Resolved like `trajectory_path`.
+- `log_path: String` — output log path. Default:
+  `<config-root>.out.log` in the same directory as the config file
+  (e.g. `argon.in.toml` → `argon.out.log`). Resolved like
+  `trajectory_path`.
 - `log_every: u64` — write one log row every this many integration steps.
   Default `100`. `0` disables the log entirely.
-- `timings_path: String` — output path for the per-stage performance summary
-  file. Default: `<config-stem>.timings` in the same directory as the config
-  file (e.g. `sim.toml` → `sim.timings`). Resolved like `trajectory_path`.
-  See `performance-analysis.md` for the file format. There is no
+- `timings_path: String` — output path for the per-stage performance
+  summary file. Default: `<config-root>.out.timings` in the same
+  directory as the config file (e.g. `argon.in.toml` →
+  `argon.out.timings`). Resolved like `trajectory_path`. See
+  `performance-analysis.md` for the file format. There is no
   `timings_every` field; the file is written once at end of run.
+
+### Config filename convention <!-- rq-5a0f5c00 -->
+
+The config-file path passed to `load_config` (and `load_config_raw`)
+must end in `.in.toml` (the suffix match is case-sensitive on the
+whole `.in.toml` string). The runner inspects the path's final
+filename component and rejects any name that does not have this
+suffix with `ConfigError::InvalidConfigFilename { path }`. The rule is
+a load-time check on the path string itself; the file is not opened
+when it fails. This makes the in/out file-naming pairing visible at
+every `ls` of a simulation directory and lets the loader derive every
+output default from the config filename without an extra config field.
+
+The `<config-root>` referenced by the `[output]` defaults is derived
+as:
+
+```
+1. Take the path's final filename component.
+2. Strip the trailing `.toml` suffix.
+3. Strip one trailing `.in` suffix (and only one).
+```
+
+Examples:
+
+| Config filename       | `<config-root>` | Default trajectory path |
+| --------------------- | --------------- | ----------------------- |
+| `argon.in.toml`       | `argon`         | `argon.out.xyz`         |
+| `spc.in.toml`         | `spc`           | `spc.out.xyz`           |
+| `run-01.in.toml`      | `run-01`        | `run-01.out.xyz`        |
+| `foo.in.in.toml`      | `foo.in`        | `foo.in.out.xyz`        |
+
+The strip is case-sensitive on the `.in` segment: a filename ending in
+`.IN.toml` does not satisfy the suffix rule and is rejected at the
+filename-convention check. Filenames whose `<config-root>` derivation
+would yield the empty string (e.g. `.in.toml` itself) are likewise
+rejected with `ConfigError::InvalidConfigFilename { path }`.
+
+The init-file path, the topology-file path, and any explicit
+`output.*_path` field are not subject to the filename convention; they
+are arbitrary user-supplied paths.
 
 ### Path resolution and overwrite policy <!-- rq-6d99f9c8 -->
 
@@ -697,6 +744,17 @@ remember the second step. `load_config_raw` is the parse-only entry
 point: it runs `Config::validate` and stops. Callers that compose
 custom builders use `load_config_raw` followed by
 `config.validate_against(&registries)` with their own bundle.
+
+`load_config_raw` performs one pre-deserialiser check on the input
+path:
+
+0. The path's final filename component, lower-cased, ends in
+   `.in.toml`, and the `<config-root>` derivation (see *Config
+   filename convention*) yields a non-empty string. A failure of
+   either part returns
+   `ConfigError::InvalidConfigFilename { path: PathBuf }` and the
+   file is not opened. This check runs before
+   `schema_version` validation.
 
 `Config::validate(&self)` checks:
 
@@ -939,6 +997,12 @@ lossless variant.
 
 - `ConfigError` — error type returned by `load_config` and by <!-- rq-3108381e -->
   `Config::validate`. Variants:
+  - `InvalidConfigFilename { path: PathBuf }` — the path passed to
+    `load_config` / `load_config_raw` does not satisfy the
+    config-filename convention: either the final filename component
+    does not end in `.in.toml` (case-sensitive `.in` segment), or the
+    derived `<config-root>` is empty (e.g. the filename is `.in.toml`).
+    Produced before the file is opened.
   - `Io(String)` — failed to read the config file (with the OS error
     message). Only produced by `load_config`.
   - `Parse { path: String, message: String }` — the TOML deserialiser
@@ -1055,20 +1119,25 @@ lossless variant.
     builder set.
 
 - `load_config_raw(path: &Path) -> Result<Config, ConfigError>` <!-- rq-deaf8b59 -->
+  - Validates the config-filename convention (see *Config filename
+    convention*) on `path` before opening the file; failures return
+    `ConfigError::InvalidConfigFilename { path }` without any I/O.
   - Reads the file at `path`, runs the typed TOML deserialiser, fills
     in field-derived defaults (`r_switch = 0.9 * cutoff` for
     `[[pair_interactions]]` and `[coulomb]`, `r_skin = 0.3 * max_cutoff`
     for the `cell-list` `[neighbor_list]` mode, `[output]` defaults
-    derived from the config-file stem), resolves every supplied path
-    against `path.parent()` (or `"."` if `path` has no parent), calls
-    `Config::validate(&config)` on the resulting `Config`, and returns
-    it. Does not run `Config::validate_against` — that is the
-    caller's responsibility.
-  - File-read failure yields `Io(String)`. Deserialiser failures yield
-    either `MissingField`, `UnsupportedSchemaVersion`, or `Parse`
-    depending on the failure kind (see the `ConfigError` description
-    above). Range, finiteness, domain, and structural cross-validation
-    failures yield the variant emitted by `Config::validate`.
+    derived from `<config-root>` per *Config filename convention*),
+    resolves every supplied path against `path.parent()` (or `"."` if
+    `path` has no parent), calls `Config::validate(&config)` on the
+    resulting `Config`, and returns it. Does not run
+    `Config::validate_against` — that is the caller's responsibility.
+  - File-read failure yields `Io(String)`. Filename-convention failure
+    yields `InvalidConfigFilename { path }`. Deserialiser failures
+    yield either `MissingField`, `UnsupportedSchemaVersion`, or
+    `Parse` depending on the failure kind (see the `ConfigError`
+    description above). Range, finiteness, domain, and structural
+    cross-validation failures yield the variant emitted by
+    `Config::validate`.
   - On any validation failure, returns the first error encountered in
     declaration order: deserialiser errors first (top-level fields,
     then `[simulation]`, then `[integrator]`, then
@@ -1182,7 +1251,7 @@ lossless variant.
 Feature: TOML simulation config schema
 
   Background:
-    Given a valid minimal config containing schema_version = 1, init = "argon.xyz",
+    Given a valid minimal config containing schema_version = 1, init = "argon.in.xyz",
       one [simulation] section with seed=12345, n_steps=10, dt=1.0e-15, temperature=300.0,
       one [integrator] section with kind="velocity-verlet" and lossless=false,
       one [[particle_types]] entry with name="Ar" and mass=6.6335e-26,
@@ -1193,8 +1262,8 @@ Feature: TOML simulation config schema
 
   @rq-7df1515f
   Scenario: Load a valid minimal config
-    Given a config file written to "/tmp/sim/sim.toml" containing the Background
-    When load_config("/tmp/sim/sim.toml") is called
+    Given a config file written to "/tmp/sim/argon.in.toml" containing the Background
+    When load_config("/tmp/sim/argon.in.toml") is called
     Then it returns Ok(config)
     And config.schema_version equals 1
     And config.simulation.seed equals 12345
@@ -1209,26 +1278,36 @@ Feature: TOML simulation config schema
     And config.pair_interactions[0].between equals ("Ar", "Ar")
     And config.pair_interactions[0].cutoff equals 1.0e-9
     And config.pair_interactions[0].potential matches PairPotentialParams::LennardJones { sigma: 3.40e-10, epsilon: 1.65e-21 }
-    And config.init equals "/tmp/sim/argon.xyz"
-    And config.config_path equals "/tmp/sim/sim.toml"
+    And config.init equals "/tmp/sim/argon.in.xyz"
+    And config.config_path equals "/tmp/sim/argon.in.toml"
 
   @rq-894c16c4
   Scenario: Defaults populate the output section when [output] is omitted
-    Given the Background config with no [output] section, written to "/tmp/sim/sim.toml"
-    When load_config("/tmp/sim/sim.toml") is called
-    Then config.output.trajectory_path equals "/tmp/sim/sim-traj.xyz"
+    Given the Background config with no [output] section, written to "/tmp/sim/argon.in.toml"
+    When load_config("/tmp/sim/argon.in.toml") is called
+    Then config.output.trajectory_path equals "/tmp/sim/argon.out.xyz"
     And config.output.trajectory_every equals 100
     And config.output.include_velocities equals true
     And config.output.include_images equals true
-    And config.output.log_path equals "/tmp/sim/sim.log"
+    And config.output.log_path equals "/tmp/sim/argon.out.log"
     And config.output.log_every equals 100
+    And config.output.timings_path equals "/tmp/sim/argon.out.timings"
+
+  @rq-0622d4b0
+  Scenario: Default output paths drop a single trailing `.in` from the config-file root
+    Given the Background config with no [output] section,
+      written to "/tmp/sim/foo.in.in.toml"
+    When load_config("/tmp/sim/foo.in.in.toml") is called
+    Then config.output.trajectory_path equals "/tmp/sim/foo.in.out.xyz"
+    And config.output.log_path equals "/tmp/sim/foo.in.out.log"
+    And config.output.timings_path equals "/tmp/sim/foo.in.out.timings"
 
   @rq-d148149f
   Scenario: Explicit [output] values override defaults
     Given the Background config plus [output] with trajectory_every=50, log_every=25,
       trajectory_path="custom-traj.xyz", log_path="custom.log", include_velocities=false,
-      written to "/tmp/sim/sim.toml"
-    When load_config("/tmp/sim/sim.toml") is called
+      written to "/tmp/sim/argon.in.toml"
+    When load_config("/tmp/sim/argon.in.toml") is called
     Then config.output.trajectory_path equals "/tmp/sim/custom-traj.xyz"
     And config.output.trajectory_every equals 50
     And config.output.include_velocities equals false
@@ -1237,11 +1316,11 @@ Feature: TOML simulation config schema
 
   @rq-5ded1806
   Scenario: Absolute paths are honored unchanged
-    Given the Background config with init="/data/argon.xyz",
+    Given the Background config with init="/data/argon.in.xyz",
       [output].trajectory_path="/data/out/traj.xyz",
       [output].log_path="/data/out/run.log"
     When load_config is called
-    Then config.init equals "/data/argon.xyz"
+    Then config.init equals "/data/argon.in.xyz"
     And config.output.trajectory_path equals "/data/out/traj.xyz"
     And config.output.log_path equals "/data/out/run.log"
 
@@ -1290,14 +1369,42 @@ Feature: TOML simulation config schema
 
   @rq-ae7f8045
   Scenario: File does not exist
-    When load_config("/tmp/does-not-exist.toml") is called
+    When load_config("/tmp/does-not-exist.in.toml") is called
     Then it returns Err(ConfigError::Io(_))
 
   @rq-57f8de41
   Scenario: Malformed TOML
-    Given a file at "/tmp/sim.toml" containing the bytes "schema_version = ["
-    When load_config("/tmp/sim.toml") is called
+    Given a file at "/tmp/sim.in.toml" containing the bytes "schema_version = ["
+    When load_config("/tmp/sim.in.toml") is called
     Then it returns Err(ConfigError::Parse { .. })
+
+  # --- Filename convention ---
+
+  @rq-43819abc
+  Scenario: Reject a config whose filename does not end in `.in.toml`
+    Given a valid Background config written to "/tmp/sim/sim.toml"
+    When load_config("/tmp/sim/sim.toml") is called
+    Then it returns Err(ConfigError::InvalidConfigFilename { path: "/tmp/sim/sim.toml" })
+    And the file was not opened (verified by spy on the IO layer)
+
+  @rq-1514bec6
+  Scenario: Reject a config with an upper-case `.IN.toml` suffix
+    Given a valid Background config written to "/tmp/sim/argon.IN.toml"
+    When load_config("/tmp/sim/argon.IN.toml") is called
+    Then it returns Err(ConfigError::InvalidConfigFilename { path: "/tmp/sim/argon.IN.toml" })
+
+  @rq-032b4b79
+  Scenario: Reject a config whose derived root is empty
+    Given a valid Background config written to "/tmp/sim/.in.toml"
+    When load_config("/tmp/sim/.in.toml") is called
+    Then it returns Err(ConfigError::InvalidConfigFilename { path: "/tmp/sim/.in.toml" })
+
+  @rq-9ecf5a3a
+  Scenario: Filename-convention check runs before schema_version check
+    Given a file at "/tmp/sim/sim.toml" containing only "schema_version = 2"
+    When load_config("/tmp/sim/sim.toml") is called
+    Then it returns Err(ConfigError::InvalidConfigFilename { path: "/tmp/sim/sim.toml" })
+      (the schema_version mismatch is never reached)
 
   @rq-761f26c6
   Scenario: Unknown top-level key is permitted
@@ -1614,7 +1721,7 @@ Feature: TOML simulation config schema
 
   @rq-e553c05b
   Scenario: Reject init = trajectory_path
-    Given the Background config at "/tmp/sim/sim.toml" with init="out.xyz" and
+    Given the Background config at "/tmp/sim/argon.in.toml" with init="out.xyz" and
       [output].trajectory_path="out.xyz"
     When load_config is called
     Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Init, kind_b: PathRole::Trajectory, path: "/tmp/sim/out.xyz" })
@@ -1633,14 +1740,14 @@ Feature: TOML simulation config schema
     Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Init, kind_b: PathRole::Log, path: _ })
 
   @rq-a5c86770
-  Scenario: timings_path defaults to <stem>.timings
-    Given the Background config at "/tmp/sim/sim.toml" with no [output].timings_path
+  Scenario: timings_path defaults to <config-root>.out.timings
+    Given the Background config at "/tmp/sim/argon.in.toml" with no [output].timings_path
     When load_config is called
-    Then config.output.timings_path equals "/tmp/sim/sim.timings"
+    Then config.output.timings_path equals "/tmp/sim/argon.out.timings"
 
   @rq-fa24a8d1
   Scenario: timings_path can be overridden in [output]
-    Given the Background config at "/tmp/sim/sim.toml" with
+    Given the Background config at "/tmp/sim/argon.in.toml" with
       [output].timings_path = "custom.timings"
     When load_config is called
     Then config.output.timings_path equals "/tmp/sim/custom.timings"
@@ -1677,19 +1784,19 @@ Feature: TOML simulation config schema
 
   @rq-027153d9
   Scenario: topology field is resolved relative to the config directory
-    Given the Background config at "/tmp/sim/sim.toml" with topology="argon.topology"
+    Given the Background config at "/tmp/sim/argon.in.toml" with topology="argon.in.topology"
     When load_config is called
-    Then config.topology equals Some("/tmp/sim/argon.topology")
+    Then config.topology equals Some("/tmp/sim/argon.in.topology")
 
   @rq-576561a2
   Scenario: topology absolute path is preserved
-    Given the Background config with topology="/data/argon.topology"
+    Given the Background config with topology="/data/argon.in.topology"
     When load_config is called
-    Then config.topology equals Some("/data/argon.topology")
+    Then config.topology equals Some("/data/argon.in.topology")
 
   @rq-4186d4f4
   Scenario: Reject topology = init
-    Given the Background config with init="argon.xyz" and topology="argon.xyz"
+    Given the Background config with init="argon.in.xyz" and topology="argon.in.xyz"
     When load_config is called
     Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Init, kind_b: PathRole::Topology, path: _ })
 

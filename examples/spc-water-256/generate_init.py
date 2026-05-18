@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Generates `init.xyz` for the spc-water-256 example.
+# Generates `spc.in.xyz` for the spc-water-256 example.
 #
 # Layout: 4 x 4 x 16 simple-cubic lattice = 256 water molecules
 # (768 atoms total) on a (2.0 x 2.0 x 8.0) nm box. Lattice spacing
@@ -18,7 +18,7 @@ THETA_HOH = 1.910611931        # SPC equilibrium H–O–H angle (rad, 109.47°)
 
 def main():
     n_atoms = 3 * NX * NY * NZ
-    with open("init.xyz", "w") as f:
+    with open("spc.in.xyz", "w") as f:
         f.write(f"{n_atoms}\n")
         f.write(
             f'Lattice="{LX:.9e} 0 0 0 {LY:.9e} 0 0 0 {LZ:.9e}" '

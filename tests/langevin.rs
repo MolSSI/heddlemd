@@ -409,7 +409,7 @@ fn langevin_step_on_empty_is_noop() {
 fn write_langevin_pair(dir: &Path, friction: f64, temperature: f64, seed: u64) -> PathBuf {
     let cfg = format!(
         r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = 1
@@ -439,13 +439,13 @@ trajectory_every = 1
 log_every = 1
 "#
     );
-    let path = dir.join("sim.toml");
+    let path = dir.join("sim.in.toml");
     std::fs::write(&path, cfg).unwrap();
     let init_body = format!(
         "4\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3:velo:R:3\n\
          Ar -1.5e-9 0 0 0 0 0\nAr -5.0e-10 0 0 0 0 0\nAr 5.0e-10 0 0 0 0 0\nAr 1.5e-9 0 0 0 0 0\n"
     );
-    std::fs::write(dir.join("init.xyz"), init_body).unwrap();
+    std::fs::write(dir.join("sim.in.xyz"), init_body).unwrap();
     path
 }
 
@@ -458,10 +458,10 @@ fn two_end_to_end_langevin_runs_byte_identical() {
     let path_b = write_langevin_pair(&dir_b, 1.0e12, 300.0, 42);
     run_simulation(&path_a).unwrap();
     run_simulation(&path_b).unwrap();
-    let traj_a = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim-traj.xyz")).unwrap();
-    let traj_b = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim-traj.xyz")).unwrap();
-    let log_a = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.log")).unwrap();
-    let log_b = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.log")).unwrap();
+    let traj_a = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.out.xyz")).unwrap();
+    let traj_b = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.out.xyz")).unwrap();
+    let log_a = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.out.log")).unwrap();
+    let log_b = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.out.log")).unwrap();
     assert_eq!(traj_a, traj_b);
     assert_eq!(log_a, log_b);
 }
@@ -475,8 +475,8 @@ fn langevin_different_seeds_produce_different_trajectories() {
     let path_b = write_langevin_pair(&dir_b, 1.0e12, 300.0, 2);
     run_simulation(&path_a).unwrap();
     run_simulation(&path_b).unwrap();
-    let traj_a = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim-traj.xyz")).unwrap();
-    let traj_b = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim-traj.xyz")).unwrap();
+    let traj_a = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.out.xyz")).unwrap();
+    let traj_b = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.out.xyz")).unwrap();
     assert_ne!(traj_a, traj_b);
 }
 
@@ -504,9 +504,9 @@ fn langevin_equilibrium_kinetic_energy() {
             }
         }
     }
-    std::fs::write(dir.join("init.xyz"), body).unwrap();
+    std::fs::write(dir.join("sim.in.xyz"), body).unwrap();
     let cfg = r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = 1
@@ -535,10 +535,10 @@ cutoff = 8.5e-10
 trajectory_every = 0
 log_every = 100
 "#;
-    let path = dir.join("sim.toml");
+    let path = dir.join("sim.in.toml");
     std::fs::write(&path, cfg).unwrap();
     run_simulation(&path).unwrap();
-    let log_path = std::fs::canonicalize(&dir).unwrap().join("sim.log");
+    let log_path = std::fs::canonicalize(&dir).unwrap().join("sim.out.log");
     let log = std::fs::read_to_string(&log_path).unwrap();
     let last = log.lines().last().unwrap();
     let cols: Vec<&str> = last.split(',').collect();
@@ -554,7 +554,7 @@ log_every = 100
 fn langevin_runner_with_n_zero() {
     let dir = tmp_path("langevin_empty");
     let cfg = r#"schema_version = 1
-init = "init.xyz"
+init = "sim.in.xyz"
 
 [simulation]
 seed = 1
@@ -586,16 +586,16 @@ mode = "all-pairs"
 trajectory_every = 1
 log_every = 1
 "#;
-    let path = dir.join("sim.toml");
+    let path = dir.join("sim.in.toml");
     std::fs::write(&path, cfg).unwrap();
     std::fs::write(
-        dir.join("init.xyz"),
+        dir.join("sim.in.xyz"),
         "0\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\n",
     )
     .unwrap();
     let summary = run_simulation(&path).unwrap();
     assert_eq!(summary.n_steps, 3);
-    let timings_path = std::fs::canonicalize(&dir).unwrap().join("sim.timings");
+    let timings_path = std::fs::canonicalize(&dir).unwrap().join("sim.out.timings");
     let body = std::fs::read_to_string(&timings_path).unwrap();
     for line in body.lines().skip(1) {
         let stage = line.split_whitespace().next().unwrap();

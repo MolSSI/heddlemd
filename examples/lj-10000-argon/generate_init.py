@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Generates `init.xyz` for the lj-10000-argon example.
+# Generates `argon.in.xyz` for the lj-10000-argon example.
 #
 # Layout: 20 x 20 x 25 simple-cubic lattice = 10,000 argon atoms,
 # spacing a = 4.0e-10 m, box (Lx, Ly, Lz) = (8.0e-9, 8.0e-9, 1.0e-8) m.
@@ -10,7 +10,7 @@ nx, ny, nz = 20, 20, 25
 a = 4.0e-10                      # lattice spacing (m)
 lx, ly, lz = nx * a, ny * a, nz * a
 
-with open("init.xyz", "w") as f:
+with open("argon.in.xyz", "w") as f:
     n = nx * ny * nz
     f.write(f"{n}\n")
     f.write(

@@ -28,6 +28,12 @@ impl std::fmt::Display for PathRole {
 // rq-0b9372e8 rq-e1ceb5c0 rq-1bbcf3b7
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    // rq-5a0f5c00
+    #[error(
+        "config filename `{}` does not end in `.in.toml` (or its derived root is empty)",
+        path.display()
+    )]
+    InvalidConfigFilename { path: PathBuf },
     #[error("failed to read config file: {0}")]
     Io(String),
     // Structural error from the typed deserialiser: TOML syntax error,
@@ -546,6 +552,9 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
 // and return. Skips `Config::validate_against` so callers can register
 // custom builders and supply their own registries.
 pub fn load_config_raw(path: &Path) -> Result<Config, ConfigError> {
+    // rq-5a0f5c00 — filename-convention check runs before any I/O.
+    let _root = derive_config_root(path)?;
+
     let raw_text = std::fs::read_to_string(path)
         .map_err(|e| ConfigError::Io(format!("{}: {}", path.display(), e)))?;
 
@@ -615,6 +624,27 @@ fn normalise_path(path: &str) -> String {
         }
     }
     out
+}
+
+// rq-5a0f5c00 — derive `<config-root>` from a config path:
+//   1. Take the final filename component.
+//   2. Require it to end in `.in.toml` (case-sensitive, exact suffix).
+//   3. Strip the `.toml` and one trailing `.in`.
+//   4. Reject an empty result (e.g. the filename is `.in.toml`).
+// The check is purely syntactic; the file is not opened.
+fn derive_config_root(path: &Path) -> Result<String, ConfigError> {
+    let invalid = || ConfigError::InvalidConfigFilename {
+        path: path.to_path_buf(),
+    };
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(invalid)?;
+    let without_toml = filename.strip_suffix(".in.toml").ok_or_else(invalid)?;
+    if without_toml.is_empty() {
+        return Err(invalid());
+    }
+    Ok(without_toml.to_string())
 }
 
 // Extract `dt` from messages like ``missing field `dt` `` or
@@ -708,27 +738,38 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
         },
     };
 
-    let config_stem = config_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "sim".to_string());
+    // rq-5a0f5c00 — `<config-root>` is the filename with `.toml` stripped
+    // and one trailing `.in` stripped. `derive_config_root` is the single
+    // source of truth; `load_config_raw` has already validated the suffix
+    // before reaching this point, but `build_config` is also reachable from
+    // `Config::from_raw_for_tests`-style paths that bypass the loader, so
+    // fall back to the bare file stem if derivation fails rather than
+    // panicking — `Config::validate` will not catch this, but only the
+    // loader entry point should ever be calling `build_config` in practice.
+    let config_root = derive_config_root(config_path)
+        .unwrap_or_else(|_| {
+            config_path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "sim".to_string())
+        });
 
     let output = match raw.output {
         None => OutputConfig {
-            trajectory_path: base_dir.join(format!("{config_stem}-traj.xyz")),
+            trajectory_path: base_dir.join(format!("{config_root}.out.xyz")),
             trajectory_every: default_trajectory_every(),
             include_velocities: true,
             include_images: true,
-            log_path: base_dir.join(format!("{config_stem}.log")),
+            log_path: base_dir.join(format!("{config_root}.out.log")),
             log_every: default_log_every(),
-            timings_path: base_dir.join(format!("{config_stem}.timings")),
+            timings_path: base_dir.join(format!("{config_root}.out.timings")),
         },
         Some(o) => OutputConfig {
             trajectory_path: o
                 .trajectory_path
                 .as_deref()
                 .map(|s| resolve_path(base_dir, s))
-                .unwrap_or_else(|| base_dir.join(format!("{config_stem}-traj.xyz"))),
+                .unwrap_or_else(|| base_dir.join(format!("{config_root}.out.xyz"))),
             trajectory_every: o.trajectory_every,
             include_velocities: o.include_velocities,
             include_images: o.include_images,
@@ -736,13 +777,13 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
                 .log_path
                 .as_deref()
                 .map(|s| resolve_path(base_dir, s))
-                .unwrap_or_else(|| base_dir.join(format!("{config_stem}.log"))),
+                .unwrap_or_else(|| base_dir.join(format!("{config_root}.out.log"))),
             log_every: o.log_every,
             timings_path: o
                 .timings_path
                 .as_deref()
                 .map(|s| resolve_path(base_dir, s))
-                .unwrap_or_else(|| base_dir.join(format!("{config_stem}.timings"))),
+                .unwrap_or_else(|| base_dir.join(format!("{config_root}.out.timings"))),
         },
     };
 

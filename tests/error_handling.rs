@@ -73,11 +73,11 @@ fn neighbor_list_error_too_many_cells_renders_as_prose() {
 #[test] // rq-77c04470
 fn runner_error_output_exists_renders_as_prose() {
     let e = RunnerError::OutputExists {
-        path: PathBuf::from("/tmp/sim/sim-traj.xyz"),
+        path: PathBuf::from("/tmp/sim/argon.out.xyz"),
     };
     assert_eq!(
         format!("{e}"),
-        "output file already exists: `/tmp/sim/sim-traj.xyz`"
+        "output file already exists: `/tmp/sim/argon.out.xyz`"
     );
 }
 
@@ -92,7 +92,7 @@ fn display_output_is_distinct_from_debug_rendering() {
         max_supported: 4_294_967_295,
     };
     let output = RunnerError::OutputExists {
-        path: PathBuf::from("/tmp/sim/sim-traj.xyz"),
+        path: PathBuf::from("/tmp/sim/argon.out.xyz"),
     };
     assert_ne!(format!("{config}"), format!("{config:?}"));
     assert_ne!(format!("{cells}"), format!("{cells:?}"));

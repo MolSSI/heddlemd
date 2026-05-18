@@ -49,7 +49,7 @@ fn tmp_path(name: &str) -> PathBuf {
 
 fn minimal_config() -> String {
     r#"schema_version = 1
-init = "argon.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
@@ -76,7 +76,11 @@ cutoff = 1.0e-9
 }
 
 fn write_config(dir: &Path, contents: &str) -> PathBuf {
-    let path = dir.join("sim.toml");
+    write_config_named(dir, "sim.in.toml", contents)
+}
+
+fn write_config_named(dir: &Path, filename: &str, contents: &str) -> PathBuf {
+    let path = dir.join(filename);
     std::fs::write(&path, contents).unwrap();
     path
 }
@@ -138,8 +142,8 @@ fn load_valid_minimal_config() {
             if sigma == 3.40e-10 && epsilon == 1.65e-21
     ));
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.init, canonical_dir.join("argon.xyz"));
-    assert_eq!(cfg.config_path, canonical_dir.join("sim.toml"));
+    assert_eq!(cfg.init, canonical_dir.join("argon.in.xyz"));
+    assert_eq!(cfg.config_path, canonical_dir.join("sim.in.toml"));
 }
 
 // rq-894c16c4
@@ -149,11 +153,24 @@ fn defaults_populate_output_section() {
     let path = write_config(&dir, &minimal_config());
     let cfg = load_config(&path).unwrap();
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.output.trajectory_path, canonical_dir.join("sim-traj.xyz"));
+    assert_eq!(cfg.output.trajectory_path, canonical_dir.join("sim.out.xyz"));
     assert_eq!(cfg.output.trajectory_every, 100);
     assert!(cfg.output.include_velocities);
-    assert_eq!(cfg.output.log_path, canonical_dir.join("sim.log"));
+    assert_eq!(cfg.output.log_path, canonical_dir.join("sim.out.log"));
     assert_eq!(cfg.output.log_every, 100);
+    assert_eq!(cfg.output.timings_path, canonical_dir.join("sim.out.timings"));
+}
+
+// rq-0622d4b0 — default output paths strip exactly one trailing `.in`.
+#[test]
+fn defaults_strip_only_one_trailing_in() {
+    let dir = tmp_path("defaults_strip_one_in");
+    let path = write_config_named(&dir, "foo.in.in.toml", &minimal_config());
+    let cfg = load_config(&path).unwrap();
+    let canonical_dir = std::fs::canonicalize(&dir).unwrap();
+    assert_eq!(cfg.output.trajectory_path, canonical_dir.join("foo.in.out.xyz"));
+    assert_eq!(cfg.output.log_path, canonical_dir.join("foo.in.out.log"));
+    assert_eq!(cfg.output.timings_path, canonical_dir.join("foo.in.out.timings"));
 }
 
 // rq-d148149f
@@ -220,7 +237,7 @@ fn pair_between_normalisation_with_both_declared() {
     // Two types and all three pairs — multi-component configs are accepted;
     // verify the loaded shape rather than the legacy rejection.
     let body = r#"schema_version = 1
-init = "init.xyz"
+init = "init.in.xyz"
 
 [simulation]
 seed = 1
@@ -330,7 +347,9 @@ fn reject_schema_version_zero() {
 #[test]
 fn file_does_not_exist() {
     let dir = tmp_path("missing_file");
-    let path = dir.join("nope.toml");
+    // Use the convention-satisfying suffix so the filename-convention
+    // check passes and the loader proceeds to opening the file.
+    let path = dir.join("nope.in.toml");
     match load_config(&path).unwrap_err() {
         ConfigError::Io(_) => {}
         other => panic!("unexpected: {other:?}"),
@@ -355,8 +374,8 @@ fn unknown_top_level_key_permitted() {
     // Insert the unknown key at the genuine top level, before the first
     // section header, so it is not absorbed into a table.
     let body = minimal_config().replace(
-        "init = \"argon.xyz\"\n",
-        "init = \"argon.xyz\"\nunknown_key = \"x\"\n",
+        "init = \"argon.in.xyz\"\n",
+        "init = \"argon.in.xyz\"\nunknown_key = \"x\"\n",
     );
     let path = write_config(&dir, &body);
     load_config(&path).unwrap();
@@ -366,7 +385,7 @@ fn unknown_top_level_key_permitted() {
 #[test]
 fn missing_init_field() {
     let dir = tmp_path("missing_init");
-    let body = minimal_config().replace("init = \"argon.xyz\"\n", "");
+    let body = minimal_config().replace("init = \"argon.in.xyz\"\n", "");
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
         ConfigError::MissingField { field } => assert_eq!(field, "init"),
@@ -428,7 +447,7 @@ fn missing_integrator_section() {
 fn missing_particle_types() {
     let dir = tmp_path("missing_particle_types");
     let body = r#"schema_version = 1
-init = "init.xyz"
+init = "init.in.xyz"
 
 [simulation]
 seed = 1
@@ -459,7 +478,7 @@ cutoff = 1.0
 fn missing_pair_interactions() {
     let dir = tmp_path("missing_pair");
     let body = r#"schema_version = 1
-init = "init.xyz"
+init = "init.in.xyz"
 
 [simulation]
 seed = 1
@@ -740,7 +759,7 @@ fn reject_empty_type_name() {
 fn reject_duplicate_type_names() {
     let dir = tmp_path("duplicate_type_names");
     let body = r#"schema_version = 1
-init = "init.xyz"
+init = "init.in.xyz"
 
 [simulation]
 seed = 1
@@ -797,7 +816,7 @@ fn reject_pair_unknown_type() {
 fn reject_missing_pair() {
     let dir = tmp_path("missing_pair_interaction");
     let body = r#"schema_version = 1
-init = "init.xyz"
+init = "init.in.xyz"
 
 [simulation]
 seed = 1
@@ -862,7 +881,7 @@ fn reject_duplicate_pair() {
 fn reject_duplicate_pair_reversed() {
     let dir = tmp_path("dup_pair_reversed");
     let body = r#"schema_version = 1
-init = "init.xyz"
+init = "init.in.xyz"
 
 [simulation]
 seed = 1
@@ -924,7 +943,7 @@ cutoff = 1.0
 fn reject_init_equals_trajectory() {
     let dir = tmp_path("init_eq_traj");
     let body = format!(
-        "{}\n[output]\ntrajectory_path = \"argon.xyz\"\n",
+        "{}\n[output]\ntrajectory_path = \"argon.in.xyz\"\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -960,7 +979,7 @@ fn reject_trajectory_equals_log() {
 fn reject_init_equals_log() {
     let dir = tmp_path("init_eq_log");
     let body = format!(
-        "{}\n[output]\nlog_path = \"argon.xyz\"\n",
+        "{}\n[output]\nlog_path = \"argon.in.xyz\"\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -978,7 +997,7 @@ fn reject_init_equals_log() {
 fn accept_multi_type_with_complete_pair_table() {
     let dir = tmp_path("multi_type");
     let body = r#"schema_version = 1
-init = "init.xyz"
+init = "init.in.xyz"
 
 [simulation]
 seed = 1
@@ -1029,7 +1048,7 @@ cutoff = 1.0
 fn reject_multi_type_with_missing_pair() {
     let dir = tmp_path("multi_type_missing_pair");
     let body = r#"schema_version = 1
-init = "init.xyz"
+init = "init.in.xyz"
 
 [simulation]
 seed = 1
@@ -1079,7 +1098,7 @@ fn timings_path_defaults_to_stem_timings() {
     let path = write_config(&dir, &minimal_config());
     let cfg = load_config(&path).unwrap();
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.output.timings_path, canonical_dir.join("sim.timings"));
+    assert_eq!(cfg.output.timings_path, canonical_dir.join("sim.out.timings"));
 }
 
 // rq-fa24a8d1
@@ -1101,7 +1120,7 @@ fn timings_path_override() {
 fn reject_init_equals_timings() {
     let dir = tmp_path("init_eq_timings");
     let body = format!(
-        "{}\n[output]\ntimings_path = \"argon.xyz\"\n",
+        "{}\n[output]\ntimings_path = \"argon.in.xyz\"\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -1354,13 +1373,13 @@ fn bonds_field_optional_defaults_none() {
 fn bonds_field_resolved_relative() {
     let dir = tmp_path("bonds_relative");
     let body = minimal_config().replace(
-        "init = \"argon.xyz\"\n",
-        "init = \"argon.xyz\"\ntopology = \"argon.topology\"\n",
+        "init = \"argon.in.xyz\"\n",
+        "init = \"argon.in.xyz\"\ntopology = \"argon.in.topology\"\n",
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.topology, Some(canonical_dir.join("argon.topology")));
+    assert_eq!(cfg.topology, Some(canonical_dir.join("argon.in.topology")));
 }
 
 // rq-576561a2
@@ -1368,12 +1387,12 @@ fn bonds_field_resolved_relative() {
 fn bonds_absolute_preserved() {
     let dir = tmp_path("bonds_absolute");
     let body = minimal_config().replace(
-        "init = \"argon.xyz\"\n",
-        "init = \"argon.xyz\"\ntopology = \"/data/argon.topology\"\n",
+        "init = \"argon.in.xyz\"\n",
+        "init = \"argon.in.xyz\"\ntopology = \"/data/argon.in.topology\"\n",
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.topology, Some(std::path::PathBuf::from("/data/argon.topology")));
+    assert_eq!(cfg.topology, Some(std::path::PathBuf::from("/data/argon.in.topology")));
 }
 
 // rq-4186d4f4
@@ -1381,8 +1400,8 @@ fn bonds_absolute_preserved() {
 fn reject_bonds_eq_init() {
     let dir = tmp_path("bonds_eq_init");
     let body = minimal_config().replace(
-        "init = \"argon.xyz\"\n",
-        "init = \"argon.xyz\"\ntopology = \"argon.xyz\"\n",
+        "init = \"argon.in.xyz\"\n",
+        "init = \"argon.in.xyz\"\ntopology = \"argon.in.xyz\"\n",
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
@@ -1401,8 +1420,8 @@ fn reject_bonds_eq_trajectory() {
     let body = format!(
         "{}\n[output]\ntrajectory_path = \"run.dat\"\n",
         minimal_config().replace(
-            "init = \"argon.xyz\"\n",
-            "init = \"argon.xyz\"\ntopology = \"run.dat\"\n",
+            "init = \"argon.in.xyz\"\n",
+            "init = \"argon.in.xyz\"\ntopology = \"run.dat\"\n",
         )
     );
     let path = write_config(&dir, &body);
@@ -1902,7 +1921,7 @@ fn empty_angle_type_name_rejected() {
 fn config_with_thermostat(thermostat_block: &str) -> String {
     format!(
         r#"schema_version = 1
-init = "argon.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
@@ -2315,7 +2334,7 @@ fn langevin_with_thermostat_is_rejected() {
     let dir = tmp_path("incompat_langevin_therm");
     let body = format!(
         r#"schema_version = 1
-init = "argon.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
@@ -2423,7 +2442,7 @@ fn integrator_kind_owns_barostat_matrix_config_layer() {
 fn mtk_minimal_body(extras: &str) -> String {
     format!(
         r#"schema_version = 1
-init = "argon.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
@@ -2503,7 +2522,7 @@ fn mtk_npt_with_thermostat_is_rejected() {
     let dir = tmp_path("mtk_plus_therm");
     let body = format!(
         r#"schema_version = 1
-init = "argon.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
@@ -2550,7 +2569,7 @@ fn mtk_npt_with_barostat_is_rejected() {
     let dir = tmp_path("mtk_plus_baro");
     let body = format!(
         r#"schema_version = 1
-init = "argon.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
@@ -2607,7 +2626,7 @@ fn barostat_unknown_kind_rejected() {
     let dir = tmp_path("baro_unknown");
     let body = format!(
         r#"schema_version = 1
-init = "argon.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
@@ -2650,7 +2669,7 @@ cutoff = 1.0e-9
 fn config_with_barostat(barostat_block: &str) -> String {
     format!(
         r#"schema_version = 1
-init = "argon.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
@@ -2984,7 +3003,7 @@ fn barostat_missing_kind_rejected() {
     let dir = tmp_path("baro_no_kind");
     let body = format!(
         r#"schema_version = 1
-init = "argon.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
@@ -3114,7 +3133,7 @@ fn validate_constraint_compatibility_rejects_langevin_with_constraints() {
     let dir = tmp_path("compat_langevin");
     let body = format!(
         r#"schema_version = 1
-init = "argon.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
@@ -3166,7 +3185,7 @@ fn validate_constraint_compatibility_rejects_lossless_with_constraints() {
     let dir = tmp_path("compat_vv_lossless");
     let body = format!(
         r#"schema_version = 1
-init = "argon.xyz"
+init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
@@ -3198,5 +3217,60 @@ cutoff = 1.0e-9
             assert_eq!(integrator, "velocity-verlet");
         }
         other => panic!("expected IncompatibleConstraint, got {other:?}"),
+    }
+}
+
+// rq-43819abc — config filename must end in `.in.toml`.
+#[test]
+fn reject_config_without_in_toml_suffix() {
+    let dir = tmp_path("reject_no_in_suffix");
+    let path = write_config_named(&dir, "sim.toml", &minimal_config());
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidConfigFilename { path: p } => {
+            assert_eq!(p, path);
+        }
+        other => panic!("expected InvalidConfigFilename, got {other:?}"),
+    }
+}
+
+// rq-1514bec6 — the `.in.toml` suffix check is case-sensitive.
+#[test]
+fn reject_uppercase_in_toml_suffix() {
+    let dir = tmp_path("reject_uppercase_in");
+    let path = write_config_named(&dir, "sim.IN.toml", &minimal_config());
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidConfigFilename { path: p } => {
+            assert_eq!(p, path);
+        }
+        other => panic!("expected InvalidConfigFilename, got {other:?}"),
+    }
+}
+
+// rq-032b4b79 — a filename whose `<config-root>` derivation is empty is rejected.
+#[test]
+fn reject_empty_root_filename() {
+    let dir = tmp_path("reject_empty_root");
+    let path = write_config_named(&dir, ".in.toml", &minimal_config());
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidConfigFilename { path: p } => {
+            assert_eq!(p, path);
+        }
+        other => panic!("expected InvalidConfigFilename, got {other:?}"),
+    }
+}
+
+// rq-9ecf5a3a — filename-convention check fires before the file is opened
+// (so a non-existent path that fails the convention still surfaces
+// `InvalidConfigFilename`, not `Io`).
+#[test]
+fn filename_check_runs_before_io() {
+    let dir = tmp_path("filename_pre_io");
+    // No file is written to this path at all.
+    let path = dir.join("does-not-exist.toml");
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidConfigFilename { path: p } => {
+            assert_eq!(p, path);
+        }
+        other => panic!("expected InvalidConfigFilename, got {other:?}"),
     }
 }
