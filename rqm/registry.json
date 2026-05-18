@@ -2495,6 +2495,14 @@
     "title": "`mtk_position_drift`",
     "type": "section"
   },
+  "rq-23f05652": {
+    "decl": "### Stage order",
+    "file": "simulation-runner",
+    "level": 3,
+    "refs": [],
+    "title": "Stage order",
+    "type": "section"
+  },
   "rq-23fc870b": {
     "decl": "Scenario: Mixed-type pair uses the off-diagonal parameter slot",
     "file": "forces/lj-pair-force",
@@ -2578,6 +2586,14 @@
     ],
     "title": "IntegratorRegistry",
     "type": "api-item"
+  },
+  "rq-25185894": {
+    "decl": "### Output format",
+    "file": "simulation-runner",
+    "level": 3,
+    "refs": [],
+    "title": "Output format",
+    "type": "section"
   },
   "rq-2523992c": {
     "decl": "## Construction and Lifetime",
@@ -3032,6 +3048,13 @@
     "title": "Exclusion scale NaN rejected",
     "type": "scenario"
   },
+  "rq-2b614db6": {
+    "decl": "Scenario: Lint with --with-gpu runs init_device and surfaces a cuFFT smoke-test failure",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Lint with --with-gpu runs init_device and surfaces a cuFFT smoke-test failure",
+    "type": "scenario"
+  },
   "rq-2b7cfbaf": {
     "decl": "## Out of Scope",
     "file": "pair-reduction",
@@ -3321,6 +3344,13 @@
     "title": "supports_constraints == false suppresses all hook insertion",
     "type": "scenario"
   },
+  "rq-30c21c70": {
+    "decl": "- `LintOverall` — `enum { Ok, Fail }`. `LintReport::overall` is `Ok`",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "LintOverall",
+    "type": "api-item"
+  },
   "rq-30f85829": {
     "decl": "Scenario: Trivial-mode state has no cell-list fields",
     "file": "forces/neighbor-list",
@@ -3457,6 +3487,13 @@
     "refs": [],
     "title": "cell_offsets is not reallocated when n_cells_total is unchanged",
     "type": "scenario"
+  },
+  "rq-334f5685": {
+    "decl": "- `LintStage` — one row of the report. Fields:",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "LintStage",
+    "type": "api-item"
   },
   "rq-3396b95f": {
     "decl": "Scenario: Construct Andersen via the thermostat registry",
@@ -3708,6 +3745,13 @@
     "refs": [],
     "title": "Determinism",
     "type": "section"
+  },
+  "rq-37bfb0fc": {
+    "decl": "Scenario: Lint reports a pre-existing output file under the output paths stage",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Lint reports a pre-existing output file under the output paths stage",
+    "type": "scenario"
   },
   "rq-37ccfc1f": {
     "decl": "## Gherkin Scenarios",
@@ -5013,6 +5057,13 @@
     "title": "λ² is clamped to zero when (K_target/K_old − 1) · dt/τ < −1",
     "type": "scenario"
   },
+  "rq-4ff84310": {
+    "decl": "- `lint_simulation(config_path: &Path, with_gpu: bool) -> LintReport`",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "lint_simulation",
+    "type": "api-item"
+  },
   "rq-4ffdad62": {
     "decl": "Scenario: Degenerate geometry (atom_i overlaps atom_j) produces zero",
     "file": "forces/harmonic-angle",
@@ -5569,7 +5620,12 @@
     "decl": "### Config filename convention",
     "file": "io/config-schema",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Config filename convention",
     "type": "section"
   },
@@ -5894,6 +5950,13 @@
     "title": "check_min_perpendicular_width flags direction \"c\" when only w_c fails",
     "type": "scenario"
   },
+  "rq-60433fcd": {
+    "decl": "Scenario: Lint reports a topology-load failure under the topology stage",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Lint reports a topology-load failure under the topology stage",
+    "type": "scenario"
+  },
   "rq-606197d5": {
     "decl": "### Cadence",
     "file": "io/log-output",
@@ -6144,6 +6207,14 @@
     "title": "Unknown integrator kind is rejected",
     "type": "scenario"
   },
+  "rq-65a63eec": {
+    "decl": "#### Always-on stages (CPU only)",
+    "file": "simulation-runner",
+    "level": 4,
+    "refs": [],
+    "title": "Always-on stages (CPU only)",
+    "type": "section"
+  },
   "rq-6606584b": {
     "decl": "Scenario: Config rejected by load_config",
     "file": "simulation-runner",
@@ -6355,6 +6426,14 @@
     "title": "`settle_snapshot`",
     "type": "section"
   },
+  "rq-688fb553": {
+    "decl": "#### `--with-gpu` stages",
+    "file": "simulation-runner",
+    "level": 4,
+    "refs": [],
+    "title": "`--with-gpu` stages",
+    "type": "section"
+  },
   "rq-6897be01": {
     "decl": "## Out of Scope",
     "file": "io/init-state-file",
@@ -6422,6 +6501,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Reject missing schema_version",
+    "type": "scenario"
+  },
+  "rq-69bf814f": {
+    "decl": "Scenario: Lint short-circuits on the first failure",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Lint short-circuits on the first failure",
     "type": "scenario"
   },
   "rq-69d2c5f5": {
@@ -7906,6 +7992,13 @@
     "file": "integration/andersen",
     "refs": [],
     "title": "Different draw_counters yield different post-call velocities",
+    "type": "scenario"
+  },
+  "rq-8044a6f5": {
+    "decl": "Scenario: LintReport API short-circuits and carries the structured error",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "LintReport API short-circuits and carries the structured error",
     "type": "scenario"
   },
   "rq-8057cb7e": {
@@ -9550,6 +9643,13 @@
     "title": "Filename-convention check runs before schema_version check",
     "type": "scenario"
   },
+  "rq-9ed993de": {
+    "decl": "- `lint_simulation_with_registries(config_path: &Path, registries: &Registries, with_gpu: bool) -> LintReport`",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "lint_simulation_with_registries",
+    "type": "api-item"
+  },
   "rq-9f080e19": {
     "decl": "## Out of Scope",
     "file": "io/log-output",
@@ -9885,6 +9985,13 @@
     "title": "init_device exposes the reduction kernel on the Kernels handle",
     "type": "scenario"
   },
+  "rq-a479680a": {
+    "decl": "Scenario: Lint reports a box-too-small failure under the box/cutoff stage",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Lint reports a box-too-small failure under the box/cutoff stage",
+    "type": "scenario"
+  },
   "rq-a47beb76": {
     "decl": "- `AngleTypeConfig` — tagged enum carrying the chosen angle-potential",
     "file": "io/config-schema",
@@ -9919,6 +10026,13 @@
     "refs": [],
     "title": "CUDA Kernels",
     "type": "section"
+  },
+  "rq-a4fbc3a4": {
+    "decl": "Scenario: Lint never creates output files",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Lint never creates output files",
+    "type": "scenario"
   },
   "rq-a50cb6a1": {
     "decl": "Scenario: Pair beyond cutoff yields zero energy and virial slots",
@@ -10026,6 +10140,13 @@
     "refs": [],
     "title": "Lossy run includes lossy kick rows and excludes lossless rows",
     "type": "scenario"
+  },
+  "rq-a831fb00": {
+    "decl": "- `LintReport` — structured result of `lint_simulation`. All fields",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "LintReport",
+    "type": "api-item"
   },
   "rq-a8320030": {
     "decl": "- `NeighborListConfig` — tagged enum selecting the algorithm used by",
@@ -10862,6 +10983,13 @@
     "title": "Two independent runs produce byte-identical net forces",
     "type": "scenario"
   },
+  "rq-b54d8111": {
+    "decl": "Scenario: Lint reports filename-convention violations under the config stage",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Lint reports filename-convention violations under the config stage",
+    "type": "scenario"
+  },
   "rq-b5e263e1": {
     "decl": "Scenario: run_simulation defers to run_simulation_with_registries with built-ins",
     "file": "simulation-runner",
@@ -11443,6 +11571,14 @@
     "title": "Algorithm",
     "type": "section"
   },
+  "rq-c02c6b45": {
+    "decl": "## Lint flow",
+    "file": "simulation-runner",
+    "level": 2,
+    "refs": [],
+    "title": "Lint flow",
+    "type": "section"
+  },
   "rq-c0668cb7": {
     "decl": "## Gherkin Scenarios",
     "file": "forces/spme",
@@ -11542,6 +11678,14 @@
     "level": 3,
     "refs": [],
     "title": "PTX embedding",
+    "type": "section"
+  },
+  "rq-c1d5b25d": {
+    "decl": "### `lint` subcommand",
+    "file": "simulation-runner",
+    "level": 3,
+    "refs": [],
+    "title": "`lint` subcommand",
     "type": "section"
   },
   "rq-c1d79d33": {
@@ -11732,6 +11876,13 @@
     "file": "forces/framework",
     "refs": [],
     "title": "Construct an empty (N=0) ForceField with potentials configured",
+    "type": "scenario"
+  },
+  "rq-c52b8ece": {
+    "decl": "Scenario: Lint of a valid CPU-only config succeeds with the gpu stage not checked",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Lint of a valid CPU-only config succeeds with the gpu stage not checked",
     "type": "scenario"
   },
   "rq-c538b29d": {
@@ -12155,6 +12306,13 @@
     "title": "neighbor_list cell-list mode omitting r_skin uses 0.3 * max cutoff",
     "type": "scenario"
   },
+  "rq-cdf1cd7c": {
+    "decl": "Scenario: Lint marks box/cutoff as not applicable in all-pairs mode",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Lint marks box/cutoff as not applicable in all-pairs mode",
+    "type": "scenario"
+  },
   "rq-ce15e04e": {
     "decl": "Scenario: Round-trip through load_init_state preserves a triclinic lattice",
     "file": "io/trajectory-output",
@@ -12286,6 +12444,14 @@
     "refs": [],
     "title": "Box generation increment refreshes cell layout and forces a rebuild",
     "type": "scenario"
+  },
+  "rq-cfb6aadb": {
+    "decl": "### `run` subcommand",
+    "file": "simulation-runner",
+    "level": 3,
+    "refs": [],
+    "title": "`run` subcommand",
+    "type": "section"
   },
   "rq-cfc7a794": {
     "decl": "Scenario: Repeated atom in angle rejected (i == j)",
@@ -12769,6 +12935,13 @@
     "title": "Feature: End-to-End Pipeline Reversibility Test",
     "type": "file"
   },
+  "rq-d87f15bd": {
+    "decl": "Scenario: Lint without --with-gpu does not open a GPU device",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Lint without --with-gpu does not open a GPU device",
+    "type": "scenario"
+  },
   "rq-d880c228": {
     "decl": "- `cufft_determinism_smoke_test(device: &Arc<CudaDevice>) -> Result<(), CuFftError>`",
     "file": "forces/spme",
@@ -13020,6 +13193,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "pre_step with unchanged box does not refresh the cell-layout cache",
+    "type": "scenario"
+  },
+  "rq-dba8d096": {
+    "decl": "Scenario: Lint with --with-gpu reports successful GPU setup",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Lint with --with-gpu reports successful GPU setup",
     "type": "scenario"
   },
   "rq-dbbffa7d": {
@@ -15349,6 +15529,13 @@
     "refs": [],
     "title": "Step Plan",
     "type": "section"
+  },
+  "rq-ff560c3b": {
+    "decl": "- `LintStatus` — per-stage outcome. Variants:",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "LintStatus",
+    "type": "api-item"
   },
   "rq-ff707382": {
     "decl": "Scenario: n_steps = 0 writes only step-0 outputs",

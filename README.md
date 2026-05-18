@@ -100,6 +100,19 @@ The runner currently accepts one particle type per simulation; the
 schema is forward-compatible with multi-type runs once the kernel
 supports them.
 
+## Validating without running
+
+`dynamics lint <config>` runs every input-validation check the runner
+would perform — TOML parse, init-file load, topology load,
+output-path collisions, box-vs-cutoff geometry — without touching the
+GPU or writing any files. Designed for HPC contexts where a long
+queue makes ad-hoc trial-and-error iteration expensive: lint on a
+login node and fix the report up front. Add `--with-gpu` to extend
+the lint through `init_device`, slot construction, and force-field
+allocation when a GPU is available. See the
+[CLI Reference](book/src/reference/cli.md) chapter for the full
+specification.
+
 ## Reproducibility
 
 The `<root>.out.xyz` trajectory and the `<root>.out.log` log are

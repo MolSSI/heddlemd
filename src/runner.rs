@@ -18,8 +18,8 @@ use crate::integrator::{
 };
 use crate::io::config::NeighborListConfig;
 use crate::io::{
-    ConfigError, InitStateError, InitVelocities, LogWriter, LogWriterError, TrajectoryWriter,
-    TrajectoryWriterError, load_config_raw, load_init_state,
+    ConfigError, InitState, InitStateError, InitVelocities, LogWriter, LogWriterError,
+    TrajectoryWriter, TrajectoryWriterError, load_config_raw, load_init_state,
 };
 use crate::io::log_output::{BOLTZMANN_J_PER_K, compute_kinetic_energy, compute_temperature};
 use crate::state::{ParticleState, ParticleStateError};
@@ -96,7 +96,70 @@ enum ExitPhase {
     Loop,
 }
 
-const USAGE_LINE: &str = "usage: dynamics run <config-path>";
+const USAGE_LINE: &str = "\
+usage: dynamics run  <config-path>
+       dynamics lint <config-path> [--with-gpu]";
+
+// rq-30c21c70
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LintOverall {
+    Ok,
+    Fail,
+}
+
+// rq-ff560c3b
+#[derive(Debug)]
+pub enum LintStatus {
+    Ok { detail: String },
+    Fail { detail: String, error: RunnerError },
+    Skipped { reason: String },
+    NotChecked { reason: String },
+}
+
+// rq-334f5685
+#[derive(Debug)]
+pub struct LintStage {
+    pub label: &'static str,
+    pub status: LintStatus,
+}
+
+// rq-a831fb00
+#[derive(Debug)]
+pub struct LintReport {
+    pub stages: Vec<LintStage>,
+    pub overall: LintOverall,
+}
+
+impl LintReport {
+    pub fn ok(&self) -> bool {
+        matches!(self.overall, LintOverall::Ok)
+    }
+
+    pub fn first_failure(&self) -> Option<&RunnerError> {
+        self.stages.iter().find_map(|s| match &s.status {
+            LintStatus::Fail { error, .. } => Some(error),
+            _ => None,
+        })
+    }
+
+    pub fn write_to(&self, w: &mut dyn std::io::Write) -> std::io::Result<()> {
+        let header = match self.overall {
+            LintOverall::Ok => "[dynamics lint] OK",
+            LintOverall::Fail => "[dynamics lint] FAIL",
+        };
+        writeln!(w, "{header}")?;
+        for stage in &self.stages {
+            let desc = match &stage.status {
+                LintStatus::Ok { detail } => detail.clone(),
+                LintStatus::Fail { detail, .. } => format!("FAIL — {detail}"),
+                LintStatus::Skipped { reason } => reason.clone(),
+                LintStatus::NotChecked { reason } => reason.clone(),
+            };
+            writeln!(w, "  {label:<12} {desc}", label = stage.label, desc = desc)?;
+        }
+        Ok(())
+    }
+}
 
 // rq-1fc57c00 rq-e5e4b048 — convenience wrapper for the built-in case.
 // Equivalent to `run_simulation_with_registries(config_path,
@@ -115,6 +178,446 @@ pub fn run_simulation_with_registries(
     registries: &crate::Registries,
 ) -> Result<RunSummary, RunnerError> {
     run_simulation_with_phase(config_path, registries).map_err(|(e, _)| e)
+}
+
+// rq-4ff84310 — built-ins convenience wrapper for the lint entry point.
+pub fn lint_simulation(config_path: &Path, with_gpu: bool) -> LintReport {
+    let registries = crate::Registries::with_builtins();
+    lint_simulation_with_registries(config_path, &registries, with_gpu)
+}
+
+// rq-9ed993de — runs every stage of the lint flow against `registries`.
+// Short-circuits on the first stage that fails: that stage carries the
+// structured `RunnerError`, every subsequent stage is `Skipped`.
+pub fn lint_simulation_with_registries(
+    config_path: &Path,
+    registries: &crate::Registries,
+    with_gpu: bool,
+) -> LintReport {
+    let mut stages: Vec<LintStage> = Vec::with_capacity(6);
+
+    // Stage 1: config.
+    let config = match load_config_raw(config_path)
+        .and_then(|c| c.validate_against(registries).map(|_| c))
+    {
+        Ok(c) => {
+            stages.push(LintStage {
+                label: "config",
+                status: LintStatus::Ok {
+                    detail: config_path.display().to_string(),
+                },
+            });
+            c
+        }
+        Err(e) => {
+            stages.push(LintStage {
+                label: "config",
+                status: LintStatus::Fail {
+                    detail: format!("{e}"),
+                    error: RunnerError::Config(e),
+                },
+            });
+            return finalize_with_skips(stages, &["output paths", "init", "box/cutoff", "topology", "gpu"]);
+        }
+    };
+
+    // Stage 2: output paths.
+    let output_collision: Option<PathBuf> =
+        if config.output.trajectory_every > 0 && config.output.trajectory_path.exists() {
+            Some(config.output.trajectory_path.clone())
+        } else if config.output.log_every > 0 && config.output.log_path.exists() {
+            Some(config.output.log_path.clone())
+        } else if config.output.timings_path.exists() {
+            Some(config.output.timings_path.clone())
+        } else {
+            None
+        };
+    if let Some(path) = output_collision {
+        let detail = format!("`{}` already exists", path.display());
+        stages.push(LintStage {
+            label: "output paths",
+            status: LintStatus::Fail {
+                detail,
+                error: RunnerError::OutputExists { path },
+            },
+        });
+        return finalize_with_skips(stages, &["init", "box/cutoff", "topology", "gpu"]);
+    } else {
+        stages.push(LintStage {
+            label: "output paths",
+            status: LintStatus::Ok {
+                detail: "none pre-exist".to_string(),
+            },
+        });
+    }
+
+    // Stage 3: init.
+    let type_name_strings: Vec<String> = config
+        .particle_types
+        .iter()
+        .map(|t| t.name.clone())
+        .collect();
+    let type_name_refs: Vec<&str> = type_name_strings.iter().map(|s| s.as_str()).collect();
+    let init = match load_init_state(&config.init, &type_name_refs) {
+        Ok(i) => {
+            stages.push(LintStage {
+                label: "init",
+                status: LintStatus::Ok {
+                    detail: format!(
+                        "resolved, {} particles, box {:.1e} × {:.1e} × {:.1e} m",
+                        i.particle_count,
+                        i.sim_box.lx(),
+                        i.sim_box.ly(),
+                        i.sim_box.lz(),
+                    ),
+                },
+            });
+            i
+        }
+        Err(e) => {
+            stages.push(LintStage {
+                label: "init",
+                status: LintStatus::Fail {
+                    detail: format!("{e}"),
+                    error: RunnerError::InitState(e),
+                },
+            });
+            return finalize_with_skips(stages, &["box/cutoff", "topology", "gpu"]);
+        }
+    };
+
+    let sim_box = init.sim_box.clone();
+    let n = init.particle_count;
+
+    // Stage 4: box/cutoff.
+    match &config.neighbor_list {
+        NeighborListConfig::AllPairs => {
+            stages.push(LintStage {
+                label: "box/cutoff",
+                status: LintStatus::Skipped {
+                    reason: "not applicable (mode = all-pairs)".to_string(),
+                },
+            });
+        }
+        NeighborListConfig::CellList { r_skin, .. } => {
+            let cutoff_max = compute_cutoff_max(&config);
+            let required = (3.0 * (cutoff_max + r_skin)) as f32;
+            match sim_box.check_min_perpendicular_width(required) {
+                Ok(()) => {
+                    stages.push(LintStage {
+                        label: "box/cutoff",
+                        status: LintStatus::Ok {
+                            detail: format!(
+                                "min perp width {:.2e} m ≥ required {:.2e} m",
+                                sim_box.min_perpendicular_width(),
+                                required,
+                            ),
+                        },
+                    });
+                }
+                Err(crate::pbc::SimulationBoxError::PerpendicularWidthTooSmall {
+                    direction,
+                    width,
+                    required,
+                }) => {
+                    stages.push(LintStage {
+                        label: "box/cutoff",
+                        status: LintStatus::Fail {
+                            detail: format!(
+                                "min perp width {width:.2e} m along `{direction}` < required {required:.2e} m"
+                            ),
+                            error: RunnerError::CellListBoxTooSmall {
+                                direction,
+                                width,
+                                required,
+                            },
+                        },
+                    });
+                    return finalize_with_skips(stages, &["topology", "gpu"]);
+                }
+                Err(_) => unreachable!(
+                    "check_min_perpendicular_width only produces PerpendicularWidthTooSmall"
+                ),
+            }
+        }
+    }
+
+    // Stage 5: topology.
+    let bond_type_names: Vec<&str> = config.bond_types.iter().map(|bt| bt.name()).collect();
+    let angle_type_names: Vec<&str> = config.angle_types.iter().map(|at| at.name()).collect();
+    let topology = match config.topology.as_ref() {
+        Some(path) => match load_topology_file(
+            path,
+            n,
+            &bond_type_names,
+            &angle_type_names,
+            &config.constraint_types,
+            &registries.constraint_types,
+        ) {
+            Ok((bond_list, angle_list, exclusion_list, constraint_list)) => {
+                // Cross-check integrator/constraint compatibility now that the
+                // constraint list is known.
+                if let Err(e) = config
+                    .validate_constraint_compatibility(registries, !constraint_list.is_empty())
+                {
+                    stages.push(LintStage {
+                        label: "topology",
+                        status: LintStatus::Fail {
+                            detail: format!("{e}"),
+                            error: RunnerError::Config(e),
+                        },
+                    });
+                    return finalize_with_skips(stages, &["gpu"]);
+                }
+                stages.push(LintStage {
+                    label: "topology",
+                    status: LintStatus::Ok {
+                        detail: format!(
+                            "{}: {} bonds, {} angles, {} constraint groups",
+                            path.display(),
+                            bond_list.bonds.len(),
+                            angle_list.angles.len(),
+                            constraint_list.groups.len(),
+                        ),
+                    },
+                });
+                Some((bond_list, angle_list, exclusion_list, constraint_list))
+            }
+            Err(e) => {
+                stages.push(LintStage {
+                    label: "topology",
+                    status: LintStatus::Fail {
+                        detail: format!("{e}"),
+                        error: RunnerError::TopologyFile(e),
+                    },
+                });
+                return finalize_with_skips(stages, &["gpu"]);
+            }
+        },
+        None => {
+            stages.push(LintStage {
+                label: "topology",
+                status: LintStatus::Skipped {
+                    reason: "not supplied".to_string(),
+                },
+            });
+            None
+        }
+    };
+
+    // Stage 6: gpu.
+    if !with_gpu {
+        stages.push(LintStage {
+            label: "gpu",
+            status: LintStatus::NotChecked {
+                reason: "not checked (re-run with --with-gpu)".to_string(),
+            },
+        });
+        return LintReport {
+            stages,
+            overall: LintOverall::Ok,
+        };
+    }
+
+    match lint_gpu_full_setup(&config, &init, &sim_box, n, topology, registries) {
+        Ok(()) => {
+            stages.push(LintStage {
+                label: "gpu",
+                status: LintStatus::Ok {
+                    detail: "init_device OK; ParticleBuffers, slots, ForceField allocated"
+                        .to_string(),
+                },
+            });
+            LintReport {
+                stages,
+                overall: LintOverall::Ok,
+            }
+        }
+        Err((detail, error)) => {
+            stages.push(LintStage {
+                label: "gpu",
+                status: LintStatus::Fail { detail, error },
+            });
+            LintReport {
+                stages,
+                overall: LintOverall::Fail,
+            }
+        }
+    }
+}
+
+fn finalize_with_skips(mut stages: Vec<LintStage>, remaining: &[&'static str]) -> LintReport {
+    for label in remaining {
+        let reason = if *label == "gpu" {
+            // Without --with-gpu the gpu stage is "not checked" regardless of
+            // whether an earlier stage failed; with --with-gpu we'd still
+            // never get here on an earlier failure, so report it as skipped.
+            // The runtime call site sets the reason; we use a simple
+            // heuristic: prior-stage failure short-circuits to a skipped gpu
+            // entry, since this helper is only invoked on a failure.
+            "skipped (earlier check failed)".to_string()
+        } else {
+            "skipped (earlier check failed)".to_string()
+        };
+        stages.push(LintStage {
+            label,
+            status: LintStatus::Skipped { reason },
+        });
+    }
+    LintReport {
+        stages,
+        overall: LintOverall::Fail,
+    }
+}
+
+fn compute_cutoff_max(config: &crate::io::Config) -> f64 {
+    let mut cutoff_max: f64 = config
+        .pair_interactions
+        .iter()
+        .map(|p| p.cutoff)
+        .fold(0.0, f64::max);
+    if let Some(c) = config.coulomb.as_ref() {
+        cutoff_max = cutoff_max.max(c.cutoff);
+    }
+    if let Some(s) = config.spme.as_ref() {
+        cutoff_max = cutoff_max.max(s.r_cut_real);
+    }
+    cutoff_max
+}
+
+// Runs the GPU-touching half of the setup phase (init_device, cuFFT
+// smoke test, velocity generation, particle state, buffers, slots,
+// force field). Used by `lint_simulation_with_registries` when
+// `with_gpu = true`. Returns `(detail, error)` on failure, suitable
+// for embedding in a `LintStatus::Fail` on the `gpu` stage.
+fn lint_gpu_full_setup(
+    config: &crate::io::Config,
+    init: &InitState,
+    sim_box: &crate::pbc::SimulationBox,
+    n: usize,
+    topology: Option<(BondList, AngleList, ExclusionList, ConstraintList)>,
+    registries: &crate::Registries,
+) -> Result<(), (String, RunnerError)> {
+    let gpu = init_device().map_err(|e| (format!("{e}"), RunnerError::Gpu(e)))?;
+
+    if config.spme.is_some() {
+        let differences = crate::gpu::cufft::cufft_determinism_smoke_test(&gpu.device)
+            .map_err(|e| {
+                let synthetic = crate::gpu::GpuError(cudarc::driver::DriverError(
+                    cudarc::driver::sys::CUresult::CUDA_ERROR_UNKNOWN,
+                ));
+                (format!("cuFFT smoke test errored: {e}"), RunnerError::Gpu(synthetic))
+            })?;
+        if differences != 0 {
+            return Err((
+                format!("cuFFT produced {differences} differing bytes between two R2C transforms of the same input"),
+                RunnerError::CuFftNonDeterministic { differences },
+            ));
+        }
+    }
+
+    let mut masses_f64: Vec<f64> = Vec::with_capacity(n);
+    let mut masses_f32: Vec<f32> = Vec::with_capacity(n);
+    let mut charges_f32: Vec<f32> = Vec::with_capacity(n);
+    for &ti in &init.type_indices {
+        let pt = &config.particle_types[ti as usize];
+        masses_f64.push(pt.mass);
+        masses_f32.push(pt.mass as f32);
+        charges_f32.push(pt.charge as f32);
+    }
+
+    let (vx, vy, vz) = match &init.velocities {
+        Some(v) => (
+            v.velocities_x.clone(),
+            v.velocities_y.clone(),
+            v.velocities_z.clone(),
+        ),
+        None => generate_velocities(
+            n,
+            config.simulation.temperature,
+            config.simulation.seed,
+            &masses_f64,
+        ),
+    };
+
+    let images_arg = init
+        .images
+        .as_ref()
+        .map(|im| (im.images_x.clone(), im.images_y.clone(), im.images_z.clone()));
+    let charges_for_ff = charges_f32.clone();
+    let state = ParticleState::new(
+        init.positions_x.clone(),
+        init.positions_y.clone(),
+        init.positions_z.clone(),
+        vx,
+        vy,
+        vz,
+        masses_f32.clone(),
+        charges_f32,
+        init.type_indices.clone(),
+        None,
+        images_arg,
+    )
+    .map_err(|e| (format!("{e}"), RunnerError::ParticleState(e)))?;
+
+    let _buffers = ParticleBuffers::new(&gpu, &state).map_err(|e| match e {
+        ParticleStateError::Gpu(g) => (format!("{g}"), RunnerError::Gpu(g)),
+        other => (format!("{other}"), RunnerError::ParticleState(other)),
+    })?;
+
+    let _integrator = registries
+        .integrators
+        .build(&config.integrator, &gpu, n)
+        .map_err(|e| (format!("{e}"), RunnerError::Integrator(e)))?;
+    let _thermostat = registries
+        .thermostats
+        .build_optional(config.thermostat.as_ref(), &gpu, n)
+        .map_err(|e| (format!("{e}"), RunnerError::Thermostat(e)))?;
+    let _barostat = registries
+        .barostats
+        .build_optional(config.barostat.as_ref(), &gpu, n)
+        .map_err(|e| (format!("{e}"), RunnerError::Barostat(e)))?;
+
+    let (bond_list, angle_list, exclusion_list, constraint_list) = topology.unwrap_or_else(|| {
+        (
+            BondList::empty(n),
+            AngleList::empty(n),
+            ExclusionList::empty(n),
+            ConstraintList::empty(n),
+        )
+    });
+
+    let _constraint = registries
+        .constraint_types
+        .build_optional(
+            &constraint_list,
+            &gpu,
+            n,
+            &masses_f32,
+            &config.constraint_types,
+        )
+        .map_err(|e| (format!("{e}"), RunnerError::Constraint(e)))?;
+
+    let _force_field = ForceField::new(
+        &registries.potentials,
+        &gpu,
+        n,
+        sim_box,
+        &config.particle_types,
+        &config.pair_interactions,
+        &config.bond_types,
+        &config.angle_types,
+        config.coulomb.as_ref(),
+        config.spme.as_ref(),
+        &charges_for_ff,
+        &bond_list,
+        &angle_list,
+        &exclusion_list,
+        &config.neighbor_list,
+    )
+    .map_err(|e| (format!("{e}"), RunnerError::ForceField(e)))?;
+
+    Ok(())
 }
 
 fn timed<T>(target: &mut Duration, f: impl FnOnce() -> T) -> T {
@@ -849,10 +1352,18 @@ pub fn cli_main_u8(args: Vec<String>) -> u8 {
             return 1;
         }
     };
-    if sub != "run" {
-        eprintln!("{USAGE_LINE}");
-        return 1;
+    match sub.as_str() {
+        "run" => cli_main_run(iter.collect()),
+        "lint" => cli_main_lint(iter.collect()),
+        _ => {
+            eprintln!("{USAGE_LINE}");
+            1
+        }
     }
+}
+
+fn cli_main_run(rest: Vec<String>) -> u8 {
+    let mut iter = rest.into_iter();
     let config_path = match iter.next() {
         Some(p) => PathBuf::from(p),
         None => {
@@ -860,6 +1371,10 @@ pub fn cli_main_u8(args: Vec<String>) -> u8 {
             return 1;
         }
     };
+    if iter.next().is_some() {
+        eprintln!("{USAGE_LINE}");
+        return 1;
+    }
 
     let registries = crate::Registries::with_builtins();
     match run_simulation_with_phase(&config_path, &registries) {
@@ -885,4 +1400,42 @@ pub fn cli_main_u8(args: Vec<String>) -> u8 {
             }
         }
     }
+}
+
+fn cli_main_lint(rest: Vec<String>) -> u8 {
+    let mut config_path: Option<PathBuf> = None;
+    let mut with_gpu = false;
+    for arg in rest {
+        match arg.as_str() {
+            "--with-gpu" => with_gpu = true,
+            a if a.starts_with("--") => {
+                eprintln!("{USAGE_LINE}");
+                return 1;
+            }
+            _ => {
+                if config_path.is_some() {
+                    eprintln!("{USAGE_LINE}");
+                    return 1;
+                }
+                config_path = Some(PathBuf::from(arg));
+            }
+        }
+    }
+    let config_path = match config_path {
+        Some(p) => p,
+        None => {
+            eprintln!("{USAGE_LINE}");
+            return 1;
+        }
+    };
+
+    let report = lint_simulation(&config_path, with_gpu);
+    // Write the per-stage report to stdout. Errors from stdout writes
+    // are ignored — the report is informational and an unwritable
+    // stdout is not a lint failure.
+    let _ = report.write_to(&mut std::io::stdout());
+    if let Some(err) = report.first_failure() {
+        eprintln!("error: {err}");
+    }
+    if report.ok() { 0 } else { 1 }
 }

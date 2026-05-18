@@ -147,9 +147,18 @@ this book or in `rqm/` where the feature is documented in full.
 - **Open registries.** Custom integrator, thermostat, barostat,
   constraint, and potential builders can be registered alongside the
   built-ins via `Registries::register_*`.
-- **Single CLI subcommand** (`dynamics run <config>`); see
-  [CLI Reference](reference/cli.md). No environment variables or flags
-  — every parameter affecting the trajectory lives in the config.
+- **Two CLI subcommands**: `dynamics run <config>` to execute and
+  `dynamics lint <config> [--with-gpu]` to validate inputs without
+  running. See [CLI Reference](reference/cli.md). No environment
+  variables — every parameter affecting the trajectory lives in the
+  config.
+- **Input linter** for HPC contexts. `dynamics lint` runs the
+  setup-phase checks (TOML parse, filename convention, init-file
+  load, topology load, pre-existing-output detection, box-vs-cutoff
+  geometry) without touching the GPU; an optional `--with-gpu` flag
+  extends the lint through `init_device`, slot construction, and
+  force-field allocation. Catches input errors on a login node before
+  a long submission queue runs the job.
 
 ## Diagnostics
 

@@ -97,6 +97,20 @@ The runner refuses to overwrite existing outputs. Delete (or move)
 `argon.out.xyz`, `argon.out.log`, and `argon.out.timings` between runs,
 or set explicit `output.*_path` fields in `argon.in.toml`.
 
+## Validating without running (`dynamics lint`)
+
+Before queueing a long job on shared GPU hardware, run
+
+```
+dynamics lint examples/lj-10000-argon/argon.in.toml
+```
+
+to check the config, init file, output-path collisions, and box-vs-cutoff
+geometry on a login node without touching the GPU. Add `--with-gpu` to
+extend the lint through GPU initialisation and force-field allocation
+when you do have a GPU available. The full reference lives in the
+[CLI Reference](../reference/cli.md).
+
 ## Next steps
 
 - [Writing a Simulation](../guide/writing-simulations.md) — build a config

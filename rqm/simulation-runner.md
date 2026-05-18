@@ -14,35 +14,70 @@ subsystem; it is the integration point.
 
 ## CLI <!-- rq-82d0c34a -->
 
+The `dynamics` binary carries two subcommands:
+
 ```
-dynamics run <config-path>
+dynamics run  <config-path>
+dynamics lint <config-path> [--with-gpu]
 ```
 
-- `run` is the only subcommand.
-- `<config-path>` is the path to a TOML simulation config (see
-  `config-schema.md`). Relative paths are resolved against the current
-  working directory.
-- No other CLI flags, environment variables, or configuration sources are
-  accepted in schema v1. Every parameter lives in the config file.
+`<config-path>` is the path to a TOML simulation config (see
+`config-schema.md`). Relative paths are resolved against the current
+working directory. No environment variables or configuration sources
+beyond the config file are accepted in schema v1; every parameter
+affecting the trajectory lives in the file the path points at.
+
+Errors are reported as a single line on stderr beginning with
+`error: ` followed by a human-readable description that includes the
+responsible file path and field name where applicable.
+
+### `run` subcommand <!-- rq-cfb6aadb -->
+
+Executes the simulation described by `<config-path>` to completion.
+The full setup-and-loop pipeline is described under *Runner flow*.
+
 - Exit codes:
-  - `0` — simulation completed successfully (every requested step ran and
-    every requested output flushed).
+  - `0` — simulation completed successfully (every requested step ran
+    and every requested output flushed).
   - `1` — any error before the loop starts: malformed CLI args, config
     load failure, init-state load failure, output-file overwrite check
-    failure, GPU initialization failure.
-  - `2` — error during the loop: a kernel launch failed, a write to the
-    trajectory or log failed, or a download from the device failed.
-- Errors are reported as a single line on stderr beginning with
-  `error: ` followed by a human-readable description that includes the
-  responsible file path and field name where applicable.
+    failure, GPU initialisation failure.
+  - `2` — error during the loop: a kernel launch failed, a write to
+    the trajectory or log failed, or a download from the device
+    failed.
+
+### `lint` subcommand <!-- rq-c1d5b25d -->
+
+Validates the config and its referenced inputs against every error
+the runner can detect without executing the integration loop, then
+exits. The lint pipeline is described under *Lint flow*. Designed
+for HPC contexts where a long submission queue makes trial-and-error
+iteration expensive: `dynamics lint` runs cheaply on a login node and
+reports every issue that would cause a `run` to fail at setup time.
+
+- `--with-gpu` (optional flag) extends the lint to include device
+  initialisation and full GPU-side setup (see *Lint flow*'s
+  *`--with-gpu` stages*). Omit the flag to keep the lint CPU-only
+  (the default, suitable for login nodes without a CUDA device).
+- Exit codes:
+  - `0` — every check passed.
+  - `1` — at least one check failed.
+- Lint writes no files. Pre-existing output files are detected with
+  `Path::exists()`; the filesystem is otherwise unchanged.
+- Stops at the first failed check (short-circuit). Subsequent stages
+  are reported as **skipped (earlier check failed)** in the
+  per-stage report (see *Lint flow*'s *Output format*).
 
 ### Usage error messages <!-- rq-7e5cb9f8 -->
 
-`dynamics` with no arguments or unrecognised subcommands prints the
-following usage line to stderr and exits with code `1`:
+`dynamics` with no arguments, an unrecognised subcommand, a
+recognised subcommand without its required `<config-path>` argument,
+or `lint` with an unrecognised flag prints the following usage block
+to stderr and exits with code `1`:
 
 ```
-usage: dynamics run <config-path>
+usage: dynamics run  <config-path>
+       dynamics lint <config-path> [--with-gpu]
 ```
 
 ## Runner flow <!-- rq-ef902cf6 -->
@@ -246,6 +281,138 @@ The `dt` value passed to integrator launches is `config.simulation.dt as
 f32`. KE/temperature computation uses `f64` arithmetic on `f32`-downloaded
 values.
 
+## Lint flow <!-- rq-c02c6b45 -->
+
+`dynamics lint <config-path> [--with-gpu]` exercises every setup-phase
+check `run` performs, but stops after the last setup check, writes no
+output files, and never enters the integration loop. The pipeline
+reuses the same loader functions, the same validators, and the same
+error types as *Runner flow*; the only differences are the absence of
+side effects (no writer opens, no trajectory frames, no `.timings`
+file) and the optional skipping of every GPU-touching stage.
+
+### Stage order <!-- rq-23f05652 -->
+
+Stages run in the order below. Outcomes are recorded into a
+`LintReport` (see *Feature API*); a failed stage marks every
+subsequent stage as **skipped (earlier check failed)**.
+
+#### Always-on stages (CPU only) <!-- rq-65a63eec -->
+
+1. **`config`** — `load_config(&config_path)` (when `with_gpu = false`)
+   or `load_config_raw(&config_path)` followed by
+   `config.validate_against(&registries)` and
+   `config.validate_constraint_compatibility(&registries,
+   has_constraints)` (when `with_gpu = true`, to match `run`'s
+   registry dispatch). Covers the filename-convention check, TOML
+   parse, every per-field domain check, path-collision check, and
+   per-kind registry dispatch.
+2. **`output paths`** — for each enabled output path
+   (`trajectory_path` when `trajectory_every > 0`, `log_path` when
+   `log_every > 0`, `timings_path` always), test with
+   `Path::exists()`. A pre-existing file is a FAIL carrying the same
+   payload (`RunnerError::OutputExists { path }`) that `run`'s
+   pre-flight surfaces. No file is created or removed; multiple
+   pre-existing paths are detected but only the first is reported as
+   the stage failure (consistent with the short-circuit semantics).
+3. **`init`** — `load_init_state(&config.init, &type_names)`. On
+   success the stage description carries the particle count and the
+   box dimensions extracted from `init_state.box`.
+4. **`box/cutoff`** — when `config.neighbor_list` is `CellList`,
+   compute `cutoff_max` as in *Runner flow* step 6 and call
+   `sim_box.check_min_perpendicular_width(3 * (cutoff_max + r_skin))`.
+   A failure surfaces as `RunnerError::CellListBoxTooSmall { .. }`.
+   When `config.neighbor_list` is `AllPairs`, the stage is recorded
+   as **not applicable (mode = all-pairs)** and is not a failure.
+5. **`topology`** — when `config.topology.is_some()`, call
+   `load_topology_file(...)` as in *Runner flow* step 6a and record
+   the bond, angle, and constraint-group counts on success. When
+   `config.topology.is_none()`, the stage is recorded as **not
+   supplied** and is not a failure.
+
+#### `--with-gpu` stages <!-- rq-688fb553 -->
+
+6. **`gpu`** — when `with_gpu = true`, runs every remaining
+   setup-phase stage of *Runner flow* in order: `init_device()` (step
+   7, including the cuFFT determinism smoke test when SPME is
+   configured), velocity generation (step 8, when the init file
+   omits velocities), `ParticleState::new` (step 9), the
+   host-to-device upload via `ParticleBuffers::new` (step 10),
+   construction of the integrator / thermostat / barostat /
+   constraint slots (step 11), and `ForceField::new` (step 12). Stops
+   before step 13 (output writers). Any error from these stages —
+   `RunnerError::Gpu`, `RunnerError::CuFftNonDeterministic`,
+   `RunnerError::Integrator`, `RunnerError::Thermostat`,
+   `RunnerError::Barostat`, `RunnerError::Constraint`,
+   `RunnerError::ForceField`, `RunnerError::ParticleState` — surfaces
+   as the stage failure.
+
+   When `with_gpu = false`, the stage is recorded as **not checked
+   (re-run with `--with-gpu`)** unconditionally; no GPU device is
+   opened and no allocation is attempted.
+
+### Output format <!-- rq-25185894 -->
+
+On exit, the runner emits the lint report on stdout, followed by a
+single-line error summary on stderr when at least one stage failed.
+Each per-stage line is formatted as a left-aligned 12-column label, a
+single space, and a description.
+
+Successful CPU-only example:
+
+```
+[dynamics lint] OK
+  config       /tmp/sim/argon.in.toml
+  output paths none pre-exist
+  init         resolved, 10000 particles, box 8.0e-9 × 8.0e-9 × 1.0e-8 m
+  box/cutoff   min perp width 8.0e-9 m ≥ required 3.30e-9 m
+  topology     not supplied
+  gpu          not checked (re-run with --with-gpu)
+```
+
+Successful `--with-gpu` example:
+
+```
+[dynamics lint] OK
+  config       /tmp/sim/argon.in.toml
+  output paths none pre-exist
+  init         resolved, 10000 particles, box 8.0e-9 × 8.0e-9 × 1.0e-8 m
+  box/cutoff   min perp width 8.0e-9 m ≥ required 3.30e-9 m
+  topology     not supplied
+  gpu          init_device OK; ParticleBuffers, slots, ForceField allocated
+```
+
+Failure at `box/cutoff` (CPU-only):
+
+```
+[dynamics lint] FAIL
+  config       /tmp/sim/argon.in.toml
+  output paths none pre-exist
+  init         resolved, 10000 particles, box 2.0e-9 × 5.0e-9 × 5.0e-9 m
+  box/cutoff   FAIL — min perp width 2.0e-9 m along `a` < required 3.30e-9 m
+  topology     skipped (earlier check failed)
+  gpu          not checked (re-run with --with-gpu)
+error: simulation box perpendicular width along lattice direction `a` is 2e-9, below the required 3.3e-9
+```
+
+Failure at `config` (filename-convention violation):
+
+```
+[dynamics lint] FAIL
+  config       FAIL — /tmp/sim/argon.toml does not end in `.in.toml`
+  output paths skipped (earlier check failed)
+  init         skipped (earlier check failed)
+  box/cutoff   skipped (earlier check failed)
+  topology     skipped (earlier check failed)
+  gpu          skipped (earlier check failed)
+error: config filename `/tmp/sim/argon.toml` does not end in `.in.toml` (or its derived root is empty)
+```
+
+Description text is descriptive prose, not machine-parsed. The
+canonical, parseable surface for callers is the `LintReport` returned
+by `lint_simulation` (see *Feature API*); the stdout block is for
+human consumption.
+
 ## Velocity generation <!-- rq-2be8ef35 -->
 
 When the init file does not supply velocities, the runner samples them from
@@ -413,8 +580,10 @@ Where:
 
 ## Feature API <!-- rq-02edd314 -->
 
-The runner exposes a single entry point. The CLI in `src/main.rs` is a thin
-wrapper that calls into the library.
+The runner exposes two entry points: `run_simulation` (executes the
+full pipeline) and `lint_simulation` (validates the setup phase and
+returns a structured report). The CLI in `src/main.rs` is a thin
+wrapper that dispatches between the two on the first CLI argument.
 
 ### Types <!-- rq-77c1d5d9 -->
 
@@ -463,6 +632,57 @@ wrapper that calls into the library.
     host's cuFFT installation does not meet SPME's reproducibility
     contract.
 
+- `LintReport` — structured result of `lint_simulation`. All fields <!-- rq-a831fb00 -->
+  are `pub`. Carries one `LintStage` per stage of the lint pipeline
+  in execution order:
+  - `stages: Vec<LintStage>` — the per-stage outcomes. Length is
+    exactly `6` (one entry per stage label listed in *Lint flow*'s
+    *Stage order*) so callers can index by position; the canonical
+    label for each entry is also carried by the `LintStage` itself.
+  - `overall: LintOverall` — `Ok` iff every stage's `status` is
+    `Ok`, `Skipped`, or `NotChecked`; `Fail` iff at least one stage's
+    status is `Fail`.
+
+  Methods:
+  - `ok(&self) -> bool` — `self.overall == LintOverall::Ok`.
+  - `first_failure(&self) -> Option<&RunnerError>` — returns the
+    `RunnerError` carried by the first `LintStage` whose status is
+    `Fail`, or `None` when no stage failed.
+  - `write_to(&self, w: &mut dyn std::io::Write) -> std::io::Result<()>`
+    — emits the human-readable per-stage block documented in
+    *Lint flow*'s *Output format*: a `[dynamics lint] OK` or
+    `[dynamics lint] FAIL` header followed by one indented line per
+    stage. Does **not** emit the trailing `error: ...` line; that
+    line is written to stderr by the CLI wrapper using
+    `first_failure().map(|e| format!("error: {e}"))`.
+
+- `LintStage` — one row of the report. Fields: <!-- rq-334f5685 -->
+  - `label: &'static str` — one of `"config"`, `"output paths"`,
+    `"init"`, `"box/cutoff"`, `"topology"`, `"gpu"` (the
+    column-1 text rendered by `write_to`).
+  - `status: LintStatus` — see below.
+
+- `LintStatus` — per-stage outcome. Variants: <!-- rq-ff560c3b -->
+  - `Ok { detail: String }` — the stage ran to completion. `detail`
+    is the human-readable description rendered after the label
+    (e.g. `"resolved, 10000 particles, box 8.0e-9 × 8.0e-9 × 1.0e-8 m"`).
+  - `Fail { detail: String, error: RunnerError }` — the stage ran
+    and reported an error. `detail` is a short summary suitable for
+    the per-stage line (rendered as `"FAIL — {detail}"` by
+    `write_to`); `error` is the canonical structured error and is
+    the value returned by `LintReport::first_failure` (for the first
+    such stage).
+  - `Skipped { reason: String }` — an earlier stage failed (or this
+    stage was not applicable). Examples: `"earlier check failed"`,
+    `"not supplied"`, `"not applicable (mode = all-pairs)"`.
+  - `NotChecked { reason: String }` — the stage was deliberately not
+    attempted by the current lint mode. The `gpu` stage carries this
+    status when `with_gpu = false`, with `reason = "re-run with
+    --with-gpu"`.
+
+- `LintOverall` — `enum { Ok, Fail }`. `LintReport::overall` is `Ok` <!-- rq-30c21c70 -->
+  iff no stage has a `Fail` status.
+
 ### Functions <!-- rq-e5e4b048 -->
 
 - `run_simulation(config_path: &Path) -> Result<RunSummary, RunnerError>` <!-- rq-1fc57c00 -->
@@ -493,6 +713,36 @@ wrapper that calls into the library.
   - `frames_written: u64`
   - `log_rows_written: u64`
   - `elapsed_micros: u128`
+
+- `lint_simulation(config_path: &Path, with_gpu: bool) -> LintReport` <!-- rq-4ff84310 -->
+  - Convenience wrapper. Equivalent to
+    `lint_simulation_with_registries(config_path,
+    &Registries::with_builtins(), with_gpu)`.
+  - Returns a fully populated `LintReport` rather than a `Result`:
+    every error mode of the underlying loaders is captured as a
+    `LintStatus::Fail` carrying the structured `RunnerError`. Callers
+    inspect `report.ok()` or `report.first_failure()`.
+  - The function never panics on user input. CPU-only mode performs
+    no GPU access at all and is safe to call on a host without a
+    CUDA device.
+
+- `lint_simulation_with_registries(config_path: &Path, registries: &Registries, with_gpu: bool) -> LintReport` <!-- rq-9ed993de -->
+  - Runs every stage of *Lint flow* against `registries`. The
+    config-load stage uses `load_config_raw` followed by
+    `config.validate_against(registries)` and
+    `config.validate_constraint_compatibility(registries,
+    has_constraints)` so per-kind validation runs against the
+    caller-supplied registries (matching what
+    `run_simulation_with_registries` does).
+  - Short-circuits on the first stage that returns `Fail`: that
+    stage's status is set to `Fail { detail, error }` and every
+    subsequent stage's status is set to
+    `Skipped { reason: "earlier check failed" }`.
+  - When `with_gpu` is `false` the `gpu` stage is recorded as
+    `NotChecked { reason: "re-run with --with-gpu" }`
+    unconditionally. When `with_gpu` is `true` and every preceding
+    stage passed, the function performs the steps listed under
+    *Lint flow*'s *`--with-gpu` stages* and records the outcome.
 
 - `Registries` — bundled handle to every open builder registry the <!-- rq-74bb02cc -->
   runner consults. Lives at `dynamics::Registries` (the crate root,
@@ -545,13 +795,24 @@ wrapper that calls into the library.
   the bundle.
 
 - `main(args: Vec<String>) -> ExitCode` (in `src/main.rs`) <!-- rq-f7e279ee -->
-  - Parses the CLI, calls `run_simulation` (the built-ins
-    convenience wrapper), prints any error to stderr and the
-    final-summary line to stdout, returns the exit code described in
-    *CLI*. The bundled CLI does not expose any mechanism for
-    registering custom builders; a binary that wants custom builders
-    is a Rust program depending on `dynamics` that constructs its
-    own `Registries` and calls `run_simulation_with_registries`.
+  - Parses the CLI and dispatches on the first argument:
+    - `run <config-path>` calls `run_simulation` (the built-ins
+      convenience wrapper), prints any error to stderr and the
+      final-summary line to stdout, and returns the exit code
+      described in *CLI*'s *`run` subcommand*.
+    - `lint <config-path> [--with-gpu]` calls
+      `lint_simulation(config_path, with_gpu)`, writes the report
+      to stdout via `LintReport::write_to(&mut io::stdout())`,
+      writes `error: {first_failure}` to stderr when
+      `!report.ok()`, and returns the exit code described in
+      *CLI*'s *`lint` subcommand* (`0` on `ok()`, `1` otherwise).
+  - Any other invocation prints the usage block from
+    *Usage error messages* and exits `1`.
+  - The bundled CLI does not expose any mechanism for registering
+    custom builders; a binary that wants custom builders is a Rust
+    program depending on `dynamics` that constructs its own
+    `Registries` and calls `run_simulation_with_registries` or
+    `lint_simulation_with_registries` directly.
 
 ## Determinism guarantees <!-- rq-0485e79f -->
 
@@ -974,4 +1235,132 @@ Feature: dynamics run simulation runner
     When registries.register_potential(Box::new(MyPotentialBuilder)) is called
     Then registries.potentials.builders has length N + 1
     And registries.potentials.builders[N] is the registered MyPotentialBuilder
+
+  # --- Lint subcommand ---
+
+  @rq-c52b8ece
+  Scenario: Lint of a valid CPU-only config succeeds with the gpu stage not checked
+    Given tmp/sim.in.toml is a valid one-type config (no `--with-gpu`)
+    And tmp/sim.in.xyz is a valid init file matching the config
+    And none of tmp/sim.out.xyz, tmp/sim.out.log, tmp/sim.out.timings exist
+    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    Then it exits with code 0
+    And stdout begins with "[dynamics lint] OK"
+    And stdout contains a line whose label is "config" and whose description names tmp/sim.in.toml
+    And stdout contains a line whose label is "output paths" and whose description is "none pre-exist"
+    And stdout contains a line whose label is "init" and whose description names the particle count and box dimensions
+    And stdout contains a line whose label is "topology" and whose description is "not supplied"
+    And stdout contains a line whose label is "gpu" and whose description is "not checked (re-run with --with-gpu)"
+    And no file was written (tmp/sim.out.xyz, tmp/sim.out.log, tmp/sim.out.timings still do not exist)
+
+  @rq-b54d8111
+  Scenario: Lint reports filename-convention violations under the config stage
+    Given a valid config body is written to tmp/sim.toml (no `.in.toml` suffix)
+    When dynamics is invoked with arguments ["lint", "tmp/sim.toml"]
+    Then it exits with code 1
+    And stdout begins with "[dynamics lint] FAIL"
+    And stdout contains a line whose label is "config" and whose description begins with "FAIL —"
+    And stdout contains a line whose label is "init" and whose description is "skipped (earlier check failed)"
+    And stderr contains "error: " and "InvalidConfigFilename" or "does not end in `.in.toml`"
+
+  @rq-37bfb0fc
+  Scenario: Lint reports a pre-existing output file under the output paths stage
+    Given tmp/sim.in.toml is valid with trajectory_every=5
+    And tmp/sim.in.xyz is a valid init file
+    And tmp/sim.out.xyz already exists with arbitrary content
+    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    Then it exits with code 1
+    And stdout contains a line whose label is "output paths" and whose description begins with "FAIL —" and names tmp/sim.out.xyz
+    And stdout contains a line whose label is "init" and whose description is "skipped (earlier check failed)"
+    And stderr contains "error: " and "OutputExists" and "sim.out.xyz"
+    And tmp/sim.out.xyz is unchanged
+
+  @rq-a479680a
+  Scenario: Lint reports a box-too-small failure under the box/cutoff stage
+    Given tmp/sim.in.toml has [neighbor_list] mode="cell-list" r_skin=1.0e-10
+      and one [[pair_interactions]] with cutoff=1.0e-9
+    And tmp/sim.in.xyz has an orthorhombic box with lx=2.0e-9, ly=lz=5.0e-9
+    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    Then it exits with code 1
+    And stdout contains a line whose label is "init" and whose description names the box dimensions
+    And stdout contains a line whose label is "box/cutoff" and whose description begins with "FAIL —" and names direction `a`
+    And stderr contains "error: " and "CellListBoxTooSmall"
+
+  @rq-cdf1cd7c
+  Scenario: Lint marks box/cutoff as not applicable in all-pairs mode
+    Given tmp/sim.in.toml has [neighbor_list] mode="all-pairs"
+    And tmp/sim.in.xyz is a valid init file with an arbitrary box
+    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    Then it exits with code 0
+    And stdout contains a line whose label is "box/cutoff" and whose description contains "not applicable" and "all-pairs"
+
+  @rq-60433fcd
+  Scenario: Lint reports a topology-load failure under the topology stage
+    Given tmp/sim.in.toml sets topology = "tmp/bad.in.topology"
+    And tmp/bad.in.topology declares a bond with an atom index out of range
+    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    Then it exits with code 1
+    And stdout contains a line whose label is "topology" and whose description begins with "FAIL —"
+    And stderr contains "error: " and a description of the topology error
+
+  @rq-2b614db6
+  Scenario: Lint with --with-gpu runs init_device and surfaces a cuFFT smoke-test failure
+    Given a host whose cuFFT implementation does not satisfy SPME's determinism contract
+    And tmp/sim.in.toml configures [spme] (so the smoke test runs)
+    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml", "--with-gpu"]
+    Then it exits with code 1
+    And stdout contains a line whose label is "gpu" and whose description begins with "FAIL —"
+    And stderr contains "error: " and "CuFftNonDeterministic"
+
+  @rq-dba8d096
+  Scenario: Lint with --with-gpu reports successful GPU setup
+    Given tmp/sim.in.toml is a valid one-type config
+    And tmp/sim.in.xyz is a valid init file
+    And a CUDA-capable GPU is available
+    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml", "--with-gpu"]
+    Then it exits with code 0
+    And stdout begins with "[dynamics lint] OK"
+    And stdout contains a line whose label is "gpu" and whose description contains "init_device OK" and "ForceField"
+
+  @rq-a4fbc3a4
+  Scenario: Lint never creates output files
+    Given tmp/sim.in.toml is valid and exists
+    And tmp/sim.in.xyz is a valid init file
+    And none of tmp/sim.out.xyz, tmp/sim.out.log, tmp/sim.out.timings exist
+    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    Then it exits with code 0
+    And tmp/sim.out.xyz still does not exist
+    And tmp/sim.out.log still does not exist
+    And tmp/sim.out.timings still does not exist
+
+  @rq-69bf814f
+  Scenario: Lint short-circuits on the first failure
+    Given tmp/sim.in.toml is valid
+    And tmp/sim.in.xyz does NOT exist (init load will fail)
+    And tmp/sim.out.timings does NOT exist (the output-paths stage would pass)
+    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    Then it exits with code 1
+    And stdout contains a line whose label is "config" and whose description does NOT begin with "FAIL"
+    And stdout contains a line whose label is "init" and whose description begins with "FAIL —"
+    And stdout contains a line whose label is "box/cutoff" and whose description is "skipped (earlier check failed)"
+    And stdout contains a line whose label is "topology" and whose description is "skipped (earlier check failed)"
+    And stdout contains a line whose label is "gpu" and whose description is "not checked (re-run with --with-gpu)"
+
+  @rq-d87f15bd
+  Scenario: Lint without --with-gpu does not open a GPU device
+    Given a host with no CUDA-capable GPU
+    And tmp/sim.in.toml and tmp/sim.in.xyz are otherwise valid
+    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    Then it exits with code 0
+    And no CUDA driver call was made (verified by spy on the GpuContext constructor, or by lack of CUDA dynamic-library load)
+
+  @rq-8044a6f5
+  Scenario: LintReport API short-circuits and carries the structured error
+    Given a config whose init file declares a position outside the primary cell
+    When lint_simulation(&path, with_gpu=false) is called from a library client
+    Then the returned LintReport has overall == LintOverall::Fail
+    And report.first_failure() returns Some(RunnerError::InitState(_))
+    And the stage labelled "init" has status LintStatus::Fail
+    And the stage labelled "box/cutoff" has status LintStatus::Skipped { reason: "earlier check failed" }
+    And the stage labelled "gpu" has status LintStatus::NotChecked { reason: "re-run with --with-gpu" }
 ```
