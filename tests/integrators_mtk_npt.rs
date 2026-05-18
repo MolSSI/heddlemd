@@ -6,7 +6,7 @@
 // kernels (mtk_velocity_half_kick, mtk_position_drift) and the
 // shared nhc_chain_sub_step host helper are also exercised directly.
 
-use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField};
+use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, init_device, mtk_position_drift, mtk_velocity_half_kick,
 };
@@ -28,6 +28,7 @@ fn box_small() -> SimulationBox {
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
     ForceField::new(
+        &PotentialRegistry::with_builtins(),
         gpu,
         n,
         &box_small(),

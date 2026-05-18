@@ -4,7 +4,7 @@
 // through its `apply_post` hook; the `andersen_resample` kernel is
 // also exercised directly.
 
-use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField};
+use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, andersen_resample, compute_kinetic_energy, init_device,
 };
@@ -26,6 +26,7 @@ fn box_large() -> SimulationBox {
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
     ForceField::new(
+        &PotentialRegistry::with_builtins(),
         gpu,
         n,
         &box_large(),

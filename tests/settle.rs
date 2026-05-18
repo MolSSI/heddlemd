@@ -4,9 +4,7 @@ use std::sync::Arc;
 
 use cudarc::driver::CudaDevice;
 use dynamics::integrator::IntegratorStepExt;
-use dynamics::forces::{
-    ConstraintGroup, ConstraintList, GroupConstraint,
-};
+use dynamics::forces::{ConstraintGroup, ConstraintList, GroupConstraint, PotentialRegistry};
 use dynamics::gpu::{GpuContext, ParticleBuffers, init_device};
 use dynamics::integrator::settle::{SettleBuilder, SettleConstraintsState, SettleError};
 use dynamics::integrator::{Constraint, ConstraintError, ConstraintRegistry};
@@ -789,6 +787,7 @@ fn integrator_step_dispatches_all_three_constraint_hooks() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = big_box();
     let mut ff = ForceField::new(
+        &PotentialRegistry::with_builtins(),
         &gpu,
         3,
         &sim_box,
@@ -834,6 +833,7 @@ fn integrator_step_with_none_constraint_skips_all_hooks() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = big_box();
     let mut ff = ForceField::new(
+        &PotentialRegistry::with_builtins(),
         &gpu,
         3,
         &sim_box,

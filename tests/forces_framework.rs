@@ -1,10 +1,7 @@
 mod common;
 
 use cudarc::driver::DeviceSlice;
-use dynamics::forces::{
-    Bond, BondList, ExclusionList, ForceField, ForceFieldContext, ForceFieldError, Potential,
-    SlotOutputView,
-};
+use dynamics::forces::{Bond, BondList, ExclusionList, ForceField, ForceFieldContext, ForceFieldError, Potential, PotentialRegistry, SlotOutputView};
 use dynamics::gpu::{ParticleBuffers, init_device};
 use dynamics::io::config::{
     BondTypeConfig, NeighborListConfig, PairInteractionConfig, PairPotentialParams,
@@ -69,7 +66,7 @@ fn single_bond_list(n: usize) -> BondList {
 #[test]
 fn force_field_lj_only() {
     let gpu = init_device().unwrap();
-    let ff = ForceField::new(&gpu,
+    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -99,7 +96,7 @@ fn force_field_lj_and_morse() {
         a: 2.0,
         re: 1.0,
     }];
-    let ff = ForceField::new(&gpu,
+    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -129,7 +126,7 @@ fn bond_types_declared_no_bonds() {
         a: 2.0,
         re: 1.0,
     }];
-    let ff = ForceField::new(&gpu,
+    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -152,7 +149,7 @@ fn bond_types_declared_no_bonds() {
 #[test]
 fn force_field_zero_slots() {
     let gpu = init_device().unwrap();
-    let ff = ForceField::new(&gpu,
+    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &box_10(),
         &[],
@@ -184,7 +181,7 @@ fn slot_buffers_sized_num_slots_times_particle_count() {
         re: 1.0,
     }];
     let bl = single_bond_list(8);
-    let ff = ForceField::new(&gpu,
+    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         8,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -209,7 +206,7 @@ fn slot_buffers_sized_num_slots_times_particle_count() {
 #[test]
 fn empty_force_field() {
     let gpu = init_device().unwrap();
-    let ff = ForceField::new(&gpu,
+    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         0,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -291,7 +288,7 @@ fn step_lj_only_writes_lj_forces() {
     let state = state_n(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -333,7 +330,7 @@ fn step_both_slots_sums_lj_and_morse() {
     }];
     let bl = single_bond_list(2);
 
-    let mut ff_lj = ForceField::new(&gpu,
+    let mut ff_lj = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -358,7 +355,7 @@ fn step_both_slots_sums_lj_and_morse() {
         r_switch: 0.5,
         potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     };
-    let mut ff_morse = ForceField::new(&gpu,
+    let mut ff_morse = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -377,7 +374,7 @@ fn step_both_slots_sums_lj_and_morse() {
     let mut morse_state = state.clone();
     morse_state.download_from(&buffers_b).unwrap();
 
-    let mut ff_both = ForceField::new(&gpu,
+    let mut ff_both = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -436,7 +433,7 @@ fn step_zero_slots_writes_zero_forces() {
         .unwrap();
 
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &box_10(),
         &[],
@@ -491,7 +488,7 @@ fn step_empty_launches_no_kernels() {
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         0,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -526,7 +523,7 @@ fn each_slot_writes_its_own_row() {
         re: 1.0,
     }];
     let bl = single_bond_list(3);
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         3,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -546,7 +543,7 @@ fn each_slot_writes_its_own_row() {
     // Recompute slot 0 (LJ) in isolation to compare.
     let mut buffers_lj = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut t_lj = Timings::new(&gpu).unwrap();
-    let mut ff_lj = ForceField::new(&gpu,
+    let mut ff_lj = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         3,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -573,7 +570,7 @@ fn each_slot_writes_its_own_row() {
     };
     let mut buffers_m = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut t_m = Timings::new(&gpu).unwrap();
-    let mut ff_m = ForceField::new(&gpu,
+    let mut ff_m = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         3,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -664,7 +661,7 @@ fn third_potential_extensibility() {
     let state = state_n(3);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         3,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -700,7 +697,7 @@ fn third_potential_extensibility() {
     // to recover the stub's contribution.
     let mut buffers_lj = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut t_lj = Timings::new(&gpu).unwrap();
-    let mut ff_lj = ForceField::new(&gpu,
+    let mut ff_lj = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         3,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -745,7 +742,7 @@ fn two_independent_runs_byte_identical() {
     let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings_a = Timings::new(&gpu).unwrap();
     let mut timings_b = Timings::new(&gpu).unwrap();
-    let mut ff_a = ForceField::new(&gpu,
+    let mut ff_a = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -760,7 +757,7 @@ fn two_independent_runs_byte_identical() {
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    let mut ff_b = ForceField::new(&gpu,
+    let mut ff_b = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -795,7 +792,7 @@ fn combiner_sums_slot_rows_in_slot_order() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     // Build a ForceField with two ConstStub slots that write distinct rows.
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         2,
         &box_10(),
         &[],
@@ -884,7 +881,7 @@ fn combiner_with_zero_slots_writes_zeros() {
     device.htod_sync_copy_into(&stamp, &mut buffers.forces_z).unwrap();
 
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &box_10(),
         &[],
@@ -915,7 +912,7 @@ fn combiner_idempotent_across_two_calls() {
     let state = state_n(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -945,7 +942,7 @@ fn combiner_idempotent_across_two_calls() {
 fn force_field_with_lj_owns_shared_neighbor_list() {
     let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap();
-    let ff = ForceField::new(&gpu,
+    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &sim_box,
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -975,7 +972,7 @@ fn force_field_with_only_bonded_owns_no_neighbor_list() {
         re: 1.0,
     }];
     let bl = single_bond_list(4);
-    let ff = ForceField::new(&gpu,
+    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -1009,7 +1006,7 @@ fn bonded_only_step_launches_no_neighbor_list_kernels() {
         re: 1.0,
     }];
     let bl = single_bond_list(4);
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -1079,7 +1076,7 @@ fn context_exposes_shared_neighbor_list_to_contribute() {
     let state = state_n(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -1151,7 +1148,7 @@ fn max_cutoff_aggregation_determines_neighbor_list_radius() {
     let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap();
     let r_skin = 0.5_f64;
-    let ff = ForceField::new(&gpu,
+    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &sim_box,
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -1187,7 +1184,7 @@ fn force_field_lj_only_populates_energy_and_virial() {
     let state = state_n(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -1222,7 +1219,7 @@ fn slot_output_buffers_have_five_flat_arrays() {
         re: 1.0,
     }];
     let bl = single_bond_list(8);
-    let ff = ForceField::new(&gpu,
+    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         8,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -1253,7 +1250,7 @@ fn combiner_sums_slot_energies_and_virials_in_slot_order() {
     let state = state_n(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -1325,7 +1322,7 @@ fn zero_slot_step_writes_zeros_to_energy_and_virial() {
         .unwrap();
 
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &box_10(),
         &[],
@@ -1368,7 +1365,7 @@ fn system_total_potential_energy_equals_sum_of_particle_shares() {
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -1416,7 +1413,7 @@ fn system_total_virial_equals_sum_of_particle_shares() {
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -1440,4 +1437,444 @@ fn system_total_virial_equals_sum_of_particle_shares() {
     // F_x_on_0 = fx[0] (particle 0's net force comes entirely from particle 1).
     let expected = -1.5_f32 * fx[0];
     assert!((total_virial - expected).abs() < 1.0e-5, "got {total_virial} expected {expected}");
+}
+
+// =====================================================================
+// PotentialRegistry-driven construction scenarios. See the
+// "PotentialRegistry-driven construction" block in
+// rqm/forces/framework.md.
+// =====================================================================
+
+use dynamics::forces::{
+    CoulombBuilder, HarmonicAngleBuilder, LennardJonesBuilder, MorseBondedBuilder,
+    PotentialBuildContext, PotentialBuilder, SpmeRealBuilder, SpmeReciprocalBuilder,
+};
+use dynamics::gpu::GpuContext;
+
+// rq-053a026c
+#[test]
+fn registry_with_builtins_exposes_the_six_builders_in_evaluation_order() {
+    let registry = PotentialRegistry::with_builtins();
+    assert_eq!(registry.builders.len(), 6);
+    // For unit-struct builders, `#[derive(Debug)]` prints the type name
+    // itself ("LennardJonesBuilder") with no trailing fields. That gives
+    // us a portable handle on the concrete type behind each
+    // `Box<dyn PotentialBuilder>`.
+    let names: Vec<String> = registry
+        .builders
+        .iter()
+        .map(|b| format!("{b:?}"))
+        .collect();
+    assert_eq!(
+        names,
+        vec![
+            "LennardJonesBuilder",
+            "CoulombBuilder",
+            "SpmeRealBuilder",
+            "SpmeReciprocalBuilder",
+            "MorseBondedBuilder",
+            "HarmonicAngleBuilder",
+        ]
+    );
+}
+
+// rq-78ad9477
+#[test]
+fn registry_new_starts_empty() {
+    let registry = PotentialRegistry::new();
+    assert!(registry.builders.is_empty());
+}
+
+// rq-51af5f97
+#[test]
+fn registry_register_appends_a_builder_at_the_end() {
+    let mut registry = PotentialRegistry::with_builtins();
+    assert_eq!(registry.builders.len(), 6);
+    registry.register(Box::new(SkipBuilder));
+    assert_eq!(registry.builders.len(), 7);
+    let t = format!("{:?}", registry.builders[6]);
+    assert_eq!(t, "SkipBuilder");
+}
+
+// rq-b1a132b5
+#[test]
+fn force_field_new_iterates_registry_in_registration_order() {
+    // LJ + Morse simultaneously: with the canonical builtin order, LJ comes first.
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let ff = ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        &gpu,
+        n,
+        &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
+        &[lj_pair_config()],
+        &[BondTypeConfig::Morse {
+            name: "CC".to_string(),
+            de: 1.0,
+            a: 1.0,
+            re: 1.0,
+        }],
+        &[],
+        None,
+        None,
+        &[],
+        &single_bond_list(n),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    assert_eq!(ff.slots[0].label(), "lennard_jones");
+    assert_eq!(ff.slots[1].label(), "morse_bonded");
+}
+
+/// PotentialBuilder that always returns Ok(None). Used by scenarios that
+/// need a no-op builder to exercise the skip path or to occupy a registry
+/// slot without producing a slot.
+#[derive(Debug)]
+struct SkipBuilder;
+
+impl PotentialBuilder for SkipBuilder {
+    fn build(
+        &self,
+        _cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        Ok(None)
+    }
+}
+
+// rq-ccf4dc3f
+#[test]
+fn builder_returning_ok_none_is_skipped_without_erroring() {
+    let gpu = init_device().unwrap();
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(SkipBuilder));
+    let ff = ForceField::new(
+        &registry,
+        &gpu,
+        4,
+        &box_10(),
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    assert!(ff.slots.is_empty());
+}
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc as StdArc;
+
+/// PotentialBuilder that always errors out. Used by the short-circuit
+/// scenario.
+#[derive(Debug)]
+struct ErrBuilder;
+
+impl PotentialBuilder for ErrBuilder {
+    fn build(
+        &self,
+        _cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        Err(ForceFieldError::DuplicateLabel("ErrBuilder-marker"))
+    }
+}
+
+/// Records whether `build` was invoked. The short-circuit scenario asserts
+/// that no builder downstream of an `Err`-returning one is called.
+#[derive(Debug)]
+struct RecordingBuilder {
+    called: StdArc<AtomicBool>,
+}
+
+impl PotentialBuilder for RecordingBuilder {
+    fn build(
+        &self,
+        _cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        self.called.store(true, Ordering::SeqCst);
+        Ok(None)
+    }
+}
+
+// rq-6ed7e318
+#[test]
+fn builder_err_short_circuits_force_field_new() {
+    let gpu = init_device().unwrap();
+    let called = StdArc::new(AtomicBool::new(false));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(ErrBuilder));
+    registry.register(Box::new(RecordingBuilder { called: called.clone() }));
+    let err = ForceField::new(
+        &registry,
+        &gpu,
+        4,
+        &box_10(),
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap_err();
+    match err {
+        ForceFieldError::DuplicateLabel(name) => {
+            assert_eq!(name, "ErrBuilder-marker");
+        }
+        other => panic!("expected the ErrBuilder error, got {other:?}"),
+    }
+    assert!(
+        !called.load(Ordering::SeqCst),
+        "downstream builder was invoked despite earlier Err"
+    );
+}
+
+/// Stub Potential whose label is configurable. Used to manufacture
+/// duplicate-label scenarios without depending on which built-ins are
+/// registered.
+#[derive(Debug)]
+struct RegistryLabelStub(&'static str);
+
+impl Potential for RegistryLabelStub {
+    fn label(&self) -> &'static str {
+        self.0
+    }
+    fn max_cutoff(&self) -> Option<f32> {
+        None
+    }
+    fn contribute(
+        &mut self,
+        _b: &ParticleBuffers,
+        _s: &SimulationBox,
+        _cx: &ForceFieldContext<'_>,
+        _t: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        Ok(())
+    }
+    fn reduce(
+        &mut self,
+        _o: SlotOutputView<'_>,
+        _cx: &ForceFieldContext<'_>,
+        _t: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+struct DuplicateLabelBuilder;
+
+impl PotentialBuilder for DuplicateLabelBuilder {
+    fn build(
+        &self,
+        _cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        Ok(Some(Box::new(RegistryLabelStub("duplicate"))))
+    }
+}
+
+// rq-24c36f8d
+#[test]
+fn two_builders_producing_slots_with_same_label_fail_construction() {
+    let gpu = init_device().unwrap();
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(DuplicateLabelBuilder));
+    registry.register(Box::new(DuplicateLabelBuilder));
+    let err = ForceField::new(
+        &registry,
+        &gpu,
+        4,
+        &box_10(),
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap_err();
+    match err {
+        ForceFieldError::DuplicateLabel(label) => assert_eq!(label, "duplicate"),
+        other => panic!("expected DuplicateLabel, got {other:?}"),
+    }
+}
+
+// rq-028f5f8e
+#[test]
+fn empty_registry_produces_zero_slot_force_field() {
+    let gpu = init_device().unwrap();
+    let registry = PotentialRegistry::new();
+    let ff = ForceField::new(
+        &registry,
+        &gpu,
+        4,
+        &box_10(),
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(4),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(4),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    assert!(ff.slots.is_empty());
+    assert!(ff.neighbor_list.is_none());
+}
+
+/// Captures the addresses of every borrowed field on the
+/// `PotentialBuildContext` for the rq-b75ce71a passthrough scenario.
+#[derive(Debug)]
+struct PassthroughCaptureBuilder {
+    captured: StdArc<std::sync::Mutex<Option<CapturedAddresses>>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct CapturedAddresses {
+    gpu: usize,
+    particle_count: usize,
+    sim_box: usize,
+    particle_types: usize,
+    pair_interactions: usize,
+    bond_types: usize,
+    angle_types: usize,
+    coulomb_config: Option<usize>,
+    spme_config: Option<usize>,
+    charges: usize,
+    bond_list: usize,
+    angle_list: usize,
+    exclusion_list: usize,
+    neighbor_list_config: usize,
+}
+
+impl PotentialBuilder for PassthroughCaptureBuilder {
+    fn build(
+        &self,
+        cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        let addrs = CapturedAddresses {
+            gpu: cx.gpu as *const GpuContext as usize,
+            particle_count: cx.particle_count,
+            sim_box: cx.sim_box as *const SimulationBox as usize,
+            particle_types: cx.particle_types.as_ptr() as usize,
+            pair_interactions: cx.pair_interactions.as_ptr() as usize,
+            bond_types: cx.bond_types.as_ptr() as usize,
+            angle_types: cx.angle_types.as_ptr() as usize,
+            coulomb_config: cx
+                .coulomb_config
+                .map(|c| c as *const _ as usize),
+            spme_config: cx.spme_config.map(|s| s as *const _ as usize),
+            charges: cx.charges.as_ptr() as usize,
+            bond_list: cx.bond_list as *const BondList as usize,
+            angle_list: cx.angle_list as *const dynamics::forces::AngleList as usize,
+            exclusion_list: cx.exclusion_list as *const ExclusionList as usize,
+            neighbor_list_config: cx.neighbor_list_config as *const NeighborListConfig as usize,
+        };
+        *self.captured.lock().unwrap() = Some(addrs);
+        Ok(None)
+    }
+}
+
+// rq-b75ce71a
+#[test]
+fn build_context_exposes_every_parsed_config_input_by_reference() {
+    let gpu = init_device().unwrap();
+    let n = 3usize;
+    let sim_box = box_10();
+    let particle_types = vec![ParticleTypeConfig {
+        name: "Ar".to_string(),
+        mass: 1.0,
+        charge: 0.0,
+    }];
+    let pair_interactions: Vec<PairInteractionConfig> = vec![];
+    let bond_types: Vec<BondTypeConfig> = vec![];
+    let angle_types: Vec<dynamics::io::config::AngleTypeConfig> = vec![];
+    let charges: Vec<f32> = vec![0.0; n];
+    let bond_list = BondList::empty(n);
+    let angle_list = dynamics::forces::AngleList::empty(0);
+    let exclusion_list = ExclusionList::empty(n);
+    let nl_config = NeighborListConfig::AllPairs;
+
+    let captured = StdArc::new(std::sync::Mutex::new(None::<CapturedAddresses>));
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(PassthroughCaptureBuilder { captured: captured.clone() }));
+
+    ForceField::new(
+        &registry,
+        &gpu,
+        n,
+        &sim_box,
+        &particle_types,
+        &pair_interactions,
+        &bond_types,
+        &angle_types,
+        None,
+        None,
+        &charges,
+        &bond_list,
+        &angle_list,
+        &exclusion_list,
+        &nl_config,
+    )
+    .unwrap();
+
+    let addrs = captured.lock().unwrap().expect("captured");
+    assert_eq!(addrs.gpu, &gpu as *const GpuContext as usize);
+    assert_eq!(addrs.particle_count, n);
+    assert_eq!(addrs.sim_box, &sim_box as *const SimulationBox as usize);
+    assert_eq!(addrs.particle_types, particle_types.as_ptr() as usize);
+    assert_eq!(addrs.pair_interactions, pair_interactions.as_ptr() as usize);
+    assert_eq!(addrs.bond_types, bond_types.as_ptr() as usize);
+    assert_eq!(addrs.angle_types, angle_types.as_ptr() as usize);
+    assert_eq!(addrs.coulomb_config, None);
+    assert_eq!(addrs.spme_config, None);
+    assert_eq!(addrs.charges, charges.as_ptr() as usize);
+    assert_eq!(addrs.bond_list, &bond_list as *const BondList as usize);
+    assert_eq!(
+        addrs.angle_list,
+        &angle_list as *const dynamics::forces::AngleList as usize
+    );
+    assert_eq!(
+        addrs.exclusion_list,
+        &exclusion_list as *const ExclusionList as usize
+    );
+    assert_eq!(
+        addrs.neighbor_list_config,
+        &nl_config as *const NeighborListConfig as usize
+    );
+}
+
+// Suppress unused-import lints for the per-builder names; they're
+// reachable through the registry but not referenced by name in tests.
+#[test]
+fn _builtin_builders_are_pub() {
+    let _ = LennardJonesBuilder;
+    let _ = CoulombBuilder;
+    let _ = SpmeRealBuilder;
+    let _ = SpmeReciprocalBuilder;
+    let _ = MorseBondedBuilder;
+    let _ = HarmonicAngleBuilder;
 }

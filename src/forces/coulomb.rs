@@ -10,7 +10,10 @@ use crate::timings::{KernelStage, Timings};
 
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::NeighborListError;
-use super::{ForceFieldContext, ForceFieldError, Potential, SlotOutputView};
+use super::{
+    ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder,
+    SlotOutputView,
+};
 
 // CoulombParameters carries the runtime real-space parameters: the
 // cutoff and the inner switching radius. Per-particle charges live on
@@ -130,5 +133,30 @@ impl Potential for CoulombState {
         )?;
         timings.kernel_stop(KernelStage::REDUCE_PAIR_FORCES)?;
         Ok(())
+    }
+}
+
+// rq-e8550f96
+#[derive(Debug)]
+pub struct CoulombBuilder;
+
+impl PotentialBuilder for CoulombBuilder {
+    fn build(
+        &self,
+        cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        let Some(coul) = cx.coulomb_config else {
+            return Ok(None);
+        };
+        let params = CoulombParameters::from(coul);
+        let max_neighbors = super::max_neighbors_from(cx.neighbor_list_config, cx.particle_count);
+        let state = CoulombState::new(
+            cx.gpu,
+            cx.particle_count,
+            params,
+            max_neighbors,
+            cx.exclusion_list,
+        )?;
+        Ok(Some(Box::new(state)))
     }
 }

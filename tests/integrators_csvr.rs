@@ -3,7 +3,7 @@
 // CSVR (Bussi-Donadio-Parrinello) thermostat tests. The thermostat is
 // exercised in isolation through its `apply_post` hook.
 
-use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField};
+use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, compute_kinetic_energy, init_device, lan_ou_step,
 };
@@ -25,6 +25,7 @@ fn box_large() -> SimulationBox {
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
     ForceField::new(
+        &PotentialRegistry::with_builtins(),
         gpu,
         n,
         &box_large(),

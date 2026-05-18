@@ -1,5 +1,5 @@
 use dynamics::integrator::IntegratorStepExt;
-use dynamics::forces::{BondList, ExclusionList, ForceField};
+use dynamics::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
 use dynamics::gpu::{GpuContext, ParticleBuffers, init_device};
 use dynamics::integrator::{
     Integrator, IntegratorBuilder, IntegratorError, IntegratorRegistry, LangevinBaoabBuilder,
@@ -51,6 +51,7 @@ fn box_10() -> SimulationBox {
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
     ForceField::new(
+        &PotentialRegistry::with_builtins(),
         gpu,
         n,
         &box_10(),
@@ -287,7 +288,7 @@ fn integrator_owns_force_evaluation_inside_step() {
     let state = small_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_10();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &sim_box,
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],

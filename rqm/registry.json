@@ -169,6 +169,13 @@
     "title": "topology field is resolved relative to the config directory",
     "type": "scenario"
   },
+  "rq-028f5f8e": {
+    "decl": "Scenario: Empty registry produces a zero-slot ForceField",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Empty registry produces a zero-slot ForceField",
+    "type": "scenario"
+  },
   "rq-02a15197": {
     "decl": "Scenario: Mixed charge magnitudes scale linearly",
     "file": "forces/coulomb-pair-force",
@@ -351,6 +358,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Pair interaction rejects an extra field for the chosen potential",
+    "type": "scenario"
+  },
+  "rq-053a026c": {
+    "decl": "Scenario: PotentialRegistry::with_builtins exposes the six built-in builders in evaluation order",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "PotentialRegistry::with_builtins exposes the six built-in builders in evaluation order",
     "type": "scenario"
   },
   "rq-0540b862": {
@@ -2428,6 +2442,13 @@
     "refs": [],
     "title": "Comparison Procedure",
     "type": "section"
+  },
+  "rq-24c36f8d": {
+    "decl": "Scenario: Two builders producing slots with the same label fail construction",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Two builders producing slots with the same label fail construction",
+    "type": "scenario"
   },
   "rq-24dc9578": {
     "decl": "Scenario: angle_types is optional and defaults to empty",
@@ -4896,6 +4917,18 @@
     "title": "Variance scales with sqrt((1 - alpha^2) * kt / m)",
     "type": "scenario"
   },
+  "rq-50f0a96a": {
+    "decl": "- `PotentialRegistry` — open-extensible registry of `PotentialBuilder`s.",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PotentialRegistry",
+    "type": "api-item"
+  },
   "rq-50fa922c": {
     "decl": "Scenario: set_lattice rejects a non-finite tilt without mutating the box",
     "file": "simulation-box",
@@ -4915,6 +4948,13 @@
     "file": "forces/topology",
     "refs": [],
     "title": "Implicit 1-3 exclusion is added for an angle without explicit (i, k) entry",
+    "type": "scenario"
+  },
+  "rq-51af5f97": {
+    "decl": "Scenario: register(...) appends a builder at the end",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "register(...) appends a builder at the end",
     "type": "scenario"
   },
   "rq-51e5a0cd": {
@@ -6520,6 +6560,13 @@
     "title": "`Time`",
     "type": "section"
   },
+  "rq-6ed7e318": {
+    "decl": "Scenario: Builder Err short-circuits ForceField::new",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Builder Err short-circuits ForceField::new",
+    "type": "scenario"
+  },
   "rq-6f2452d1": {
     "decl": "### Reduction Launcher",
     "file": "pair-reduction",
@@ -7106,6 +7153,13 @@
     "title": "Trivial-mode contents",
     "type": "scenario"
   },
+  "rq-78ad9477": {
+    "decl": "Scenario: PotentialRegistry::new starts empty",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "PotentialRegistry::new starts empty",
+    "type": "scenario"
+  },
   "rq-78d2ad15": {
     "decl": "### Switching-function degenerate case <!-- inline -->",
     "file": "forces/lj-pair-force",
@@ -7217,7 +7271,7 @@
     "type": "section"
   },
   "rq-79938dbf": {
-    "decl": "- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], coulomb_config: Option<&CoulombConfig>, spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>`",
+    "decl": "- `ForceField::new(registry: &PotentialRegistry, gpu: &GpuContext, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], coulomb_config: Option<&CoulombConfig>, spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>`",
     "file": "forces/framework",
     "refs": [
       {
@@ -10350,6 +10404,13 @@
     "title": "Newton's third law holds for the framework's combined force",
     "type": "scenario"
   },
+  "rq-b1a132b5": {
+    "decl": "Scenario: ForceField::new iterates the registry in registration order",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "ForceField::new iterates the registry in registration order",
+    "type": "scenario"
+  },
   "rq-b1a8a6ca": {
     "decl": "## Feature API",
     "file": "integration/csvr",
@@ -10654,6 +10715,13 @@
     ],
     "title": "SimulationBox",
     "type": "api-item"
+  },
+  "rq-b75ce71a": {
+    "decl": "Scenario: PotentialBuildContext exposes every parsed-config input by reference",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "PotentialBuildContext exposes every parsed-config input by reference",
+    "type": "scenario"
   },
   "rq-b7bbabd0": {
     "decl": "### Newton's third law",
@@ -11759,6 +11827,13 @@
     "title": "Self-interaction slots are zero",
     "type": "scenario"
   },
+  "rq-ccf4dc3f": {
+    "decl": "Scenario: Builder returning Ok(None) is skipped without erroring",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Builder returning Ok(None) is skipped without erroring",
+    "type": "scenario"
+  },
   "rq-cd28340e": {
     "decl": "## Slot Output Buffers",
     "file": "forces/framework",
@@ -11985,6 +12060,18 @@
     "refs": [],
     "title": "Pair virial inside the switching window equals factor_switched * r²",
     "type": "scenario"
+  },
+  "rq-d116af5f": {
+    "decl": "- `PotentialBuildContext<'a>` — bundle of borrowed references to every",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PotentialBuildContext",
+    "type": "api-item"
   },
   "rq-d12b8b49": {
     "decl": "## Algorithm",
@@ -13430,6 +13517,38 @@
     "refs": [],
     "title": "Reject a tilted box whose perpendicular width drops below 3*(r_cut+r_skin)",
     "type": "scenario"
+  },
+  "rq-e8550f96": {
+    "decl": "- `PotentialBuilder` — object-safe trait implemented by every potential's",
+    "file": "forces/framework",
+    "refs": [
+      {
+        "file": "src/forces/angle.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/coulomb.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/lj.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/morse.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "PotentialBuilder",
+    "type": "api-item"
   },
   "rq-e858417a": {
     "decl": "## Newton's third law",

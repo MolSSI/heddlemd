@@ -882,7 +882,7 @@ fn lj_param_table_from_config_builds_symmetric_table() {
 #[test] // rq-9004fd7a
 fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
     // Build a ForceField with one LJ slot whose largest cutoff is 4.0.
-    use dynamics::forces::{BondList, ExclusionList, ForceField};
+    use dynamics::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
     use dynamics::io::config::{
         NeighborListConfig, PairInteractionConfig, PairPotentialParams, ParticleTypeConfig,
     };
@@ -895,7 +895,7 @@ fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
         potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     }];
     let sim_box = SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap();
-    let ff = ForceField::new(&gpu,
+    let ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &sim_box,
         &particle_types,
@@ -918,7 +918,7 @@ fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
 #[test] // rq-e90c6feb
 fn trivial_mode_and_cell_list_mode_forces_agree() {
     use dynamics::forces::{
-        BondList, ExclusionList, ForceField,
+        BondList, ExclusionList, ForceField, PotentialRegistry,
     };
     use dynamics::io::config::{
         NeighborListConfig, PairInteractionConfig, PairPotentialParams, ParticleTypeConfig,
@@ -947,7 +947,7 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
     let mut t_a = dynamics::timings::Timings::new(&gpu).unwrap();
     let mut t_b = dynamics::timings::Timings::new(&gpu).unwrap();
 
-    let mut ff_trivial = ForceField::new(&gpu,
+    let mut ff_trivial = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &sim_box,
         &particle_types,
@@ -963,7 +963,7 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    let mut ff_cell = ForceField::new(&gpu,
+    let mut ff_cell = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &sim_box,
         &particle_types,

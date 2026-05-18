@@ -5,7 +5,7 @@
 // and `rescale_positions` helpers are also exercised directly, and
 // `SimulationBox::rescale_isotropic` is unit-tested host-side.
 
-use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField};
+use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, compute_total_virial, init_device, rescale_positions,
 };
@@ -31,6 +31,7 @@ fn box_small() -> SimulationBox {
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
     ForceField::new(
+        &PotentialRegistry::with_builtins(),
         gpu,
         n,
         &box_small(),

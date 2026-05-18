@@ -309,13 +309,13 @@ fn ou_variance_scales_with_predicted_factor() {
 // rq-e1dd0625
 #[test]
 fn step_launches_all_six_expected_kernel_calls() {
-    use dynamics::forces::{BondList, ExclusionList, ForceField};
+    use dynamics::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
     use dynamics::io::config::NeighborListConfig;
     let gpu = init_device().unwrap();
     let state = n_particle_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = SimulationBox::new(1.0e9, 1.0e9, 1.0e9, 0.0, 0.0, 0.0).unwrap();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &sim_box,
         &[],
@@ -362,7 +362,7 @@ fn step_launches_all_six_expected_kernel_calls() {
 // rq-6e98222c
 #[test]
 fn langevin_step_on_empty_is_noop() {
-    use dynamics::forces::{BondList, ExclusionList, ForceField};
+    use dynamics::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
     use dynamics::io::config::NeighborListConfig;
     let gpu = init_device().unwrap();
     let state = ParticleState::new(
@@ -374,7 +374,7 @@ fn langevin_step_on_empty_is_noop() {
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = SimulationBox::new(1.0e9, 1.0e9, 1.0e9, 0.0, 0.0, 0.0).unwrap();
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         0,
         &sim_box,
         &[],

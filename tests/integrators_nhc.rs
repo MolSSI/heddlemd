@@ -5,7 +5,7 @@
 // shared kinetic_energy_reduce / rescale_velocities helpers documented
 // in `nose-hoover-chain.md` are also exercised directly.
 
-use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField};
+use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, compute_kinetic_energy, init_device, rescale_velocities,
 };
@@ -46,6 +46,7 @@ fn box_large() -> SimulationBox {
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
     ForceField::new(
+        &PotentialRegistry::with_builtins(),
         gpu,
         n,
         &box_large(),

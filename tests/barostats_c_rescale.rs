@@ -6,7 +6,7 @@
 // `SimulationBox::rescale_isotropic` convenience are covered in
 // `tests/barostats_berendsen.rs` and not re-tested here.
 
-use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField};
+use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use dynamics::gpu::{GpuContext, ParticleBuffers, init_device};
 use dynamics::integrator::IntegratorStepExt;
 use dynamics::integrator::{
@@ -27,6 +27,7 @@ fn box_small() -> SimulationBox {
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
     ForceField::new(
+        &PotentialRegistry::with_builtins(),
         gpu,
         n,
         &box_small(),

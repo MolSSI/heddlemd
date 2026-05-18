@@ -10,7 +10,9 @@ use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::topology::BondList;
-use super::{ForceFieldError, Potential, SlotOutputView};
+use super::{
+    ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder, SlotOutputView,
+};
 
 // rq-2361f2b8 rq-ec18d174
 #[derive(Debug)]
@@ -195,5 +197,22 @@ fn htod_or_empty_f32(
         device.alloc_zeros::<f32>(0).map_err(GpuError::from)
     } else {
         device.htod_sync_copy(data).map_err(GpuError::from)
+    }
+}
+
+// rq-e8550f96
+#[derive(Debug)]
+pub struct MorseBondedBuilder;
+
+impl PotentialBuilder for MorseBondedBuilder {
+    fn build(
+        &self,
+        cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        if cx.bond_list.is_empty() {
+            return Ok(None);
+        }
+        let state = MorseBondedState::new(cx.gpu, cx.bond_list, cx.bond_types)?;
+        Ok(Some(Box::new(state)))
     }
 }

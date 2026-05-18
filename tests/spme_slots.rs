@@ -7,10 +7,7 @@
 use std::f64::consts::PI;
 
 use dynamics::forces::neighbor_list::NeighborListState;
-use dynamics::forces::{
-    ExclusionList, ForceField, ForceFieldContext, Potential, SpmeParameters,
-    SpmeRealSpaceState, SpmeReciprocalState,
-};
+use dynamics::forces::{ExclusionList, ForceField, ForceFieldContext, Potential, PotentialRegistry, SpmeParameters, SpmeRealSpaceState, SpmeReciprocalState};
 use dynamics::gpu::cufft::cufft_determinism_smoke_test;
 use dynamics::gpu::{GpuContext, K_COULOMB_F32, ParticleBuffers, init_device};
 use dynamics::io::config::{NeighborListConfig, ParticleTypeConfig, SpmeConfig};
@@ -71,6 +68,7 @@ fn force_field_registers_spme_slots_when_configured() {
     let spme = default_spme_config();
     let charges = vec![1.0_f32];
     let ff = ForceField::new(
+        &PotentialRegistry::with_builtins(),
         &gpu,
         1,
         &nm_box(),

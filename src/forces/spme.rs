@@ -23,7 +23,10 @@ use crate::timings::{KernelStage, Timings};
 
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::{NeighborListError, NeighborListState};
-use super::{ForceFieldContext, ForceFieldError, Potential, SlotOutputView};
+use super::{
+    ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder,
+    SlotOutputView,
+};
 
 // rq-7bd2d9ca
 #[derive(Debug, Clone, Copy)]
@@ -686,5 +689,56 @@ fn map_spme_err(e: SpmeError) -> ForceFieldError {
         SpmeError::InvalidGrid { axis, n, required } => panic!(
             "SPME step encountered invalid grid (axis {axis}, n {n}, required {required})"
         ),
+    }
+}
+
+// rq-e8550f96
+#[derive(Debug)]
+pub struct SpmeRealBuilder;
+
+impl PotentialBuilder for SpmeRealBuilder {
+    fn build(
+        &self,
+        cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        let Some(spme_cfg) = cx.spme_config else {
+            return Ok(None);
+        };
+        let params = SpmeParameters::from(spme_cfg);
+        let max_neighbors = super::max_neighbors_from(cx.neighbor_list_config, cx.particle_count);
+        let state = SpmeRealSpaceState::new(
+            cx.gpu,
+            cx.particle_count,
+            params.alpha,
+            params.r_cut_real,
+            max_neighbors,
+            cx.exclusion_list,
+        )?;
+        Ok(Some(Box::new(state)))
+    }
+}
+
+// rq-e8550f96
+#[derive(Debug)]
+pub struct SpmeReciprocalBuilder;
+
+impl PotentialBuilder for SpmeReciprocalBuilder {
+    fn build(
+        &self,
+        cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        let Some(spme_cfg) = cx.spme_config else {
+            return Ok(None);
+        };
+        let params = SpmeParameters::from(spme_cfg);
+        let state = SpmeReciprocalState::new(
+            cx.gpu,
+            cx.sim_box,
+            cx.particle_count,
+            cx.charges,
+            params,
+        )
+        .map_err(map_spme_err)?;
+        Ok(Some(Box::new(state)))
     }
 }

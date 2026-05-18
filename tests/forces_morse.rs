@@ -1,4 +1,4 @@
-use dynamics::forces::{BondList, ExclusionList, ForceField, MorseBondedState};
+use dynamics::forces::{BondList, ExclusionList, ForceField, MorseBondedState, PotentialRegistry};
 use dynamics::gpu::{
     ParticleBuffers, init_device, morse_bond_force, reduce_bond_forces,
 };
@@ -454,7 +454,7 @@ fn diatomic_equilibrium_produces_zero_net_force() {
         r_switch: 0.5,
         potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     };
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
@@ -491,7 +491,7 @@ fn newtons_third_law_holds_for_combined_force() {
         r_switch: 5.0,
         potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
     };
-    let mut ff = ForceField::new(&gpu,
+    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         2,
         &box_10(),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],

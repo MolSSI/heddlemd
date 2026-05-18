@@ -12,7 +12,10 @@ use crate::timings::{KernelStage, Timings};
 
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::NeighborListError;
-use super::{ForceFieldContext, ForceFieldError, Potential, SlotOutputView};
+use super::{
+    ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder,
+    SlotOutputView,
+};
 
 // rq-af2d1628
 #[derive(Debug)]
@@ -118,3 +121,39 @@ impl Potential for LennardJonesState {
         Ok(())
     }
 }
+
+// rq-e8550f96
+#[derive(Debug)]
+pub struct LennardJonesBuilder;
+
+impl PotentialBuilder for LennardJonesBuilder {
+    fn build(
+        &self,
+        cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        if cx.pair_interactions.is_empty() {
+            return Ok(None);
+        }
+        let params = LennardJonesParameterTable::from_config(
+            &cx.gpu.device,
+            cx.particle_types,
+            cx.pair_interactions,
+        )?;
+        let max_cutoff = cx
+            .pair_interactions
+            .iter()
+            .map(|p| p.cutoff as f32)
+            .fold(0.0_f32, f32::max);
+        let max_neighbors = super::max_neighbors_from(cx.neighbor_list_config, cx.particle_count);
+        let state = LennardJonesState::new(
+            cx.gpu,
+            cx.particle_count,
+            params,
+            max_cutoff,
+            max_neighbors,
+            cx.exclusion_list,
+        )?;
+        Ok(Some(Box::new(state)))
+    }
+}
+

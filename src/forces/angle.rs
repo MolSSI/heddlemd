@@ -10,7 +10,9 @@ use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::topology::AngleList;
-use super::{ForceFieldError, Potential, SlotOutputView};
+use super::{
+    ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder, SlotOutputView,
+};
 
 // rq-21a8063c
 #[derive(Debug)]
@@ -191,5 +193,22 @@ fn htod_or_empty_f32(
         device.alloc_zeros::<f32>(0).map_err(GpuError::from)
     } else {
         device.htod_sync_copy(data).map_err(GpuError::from)
+    }
+}
+
+// rq-e8550f96
+#[derive(Debug)]
+pub struct HarmonicAngleBuilder;
+
+impl PotentialBuilder for HarmonicAngleBuilder {
+    fn build(
+        &self,
+        cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+        if cx.angle_list.is_empty() {
+            return Ok(None);
+        }
+        let state = HarmonicAngleState::new(cx.gpu, cx.angle_list, cx.angle_types)?;
+        Ok(Some(Box::new(state)))
     }
 }

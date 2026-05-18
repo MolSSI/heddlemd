@@ -10,52 +10,46 @@ via a deterministic combiner kernel. The runner's force-evaluation step
 calls `force_field.step(...)` once; it has no visibility into which
 potentials participated.
 
-A new potential is added by writing a type that implements `Potential` and
-extending `ForceField::new` to construct it from the parsed config. The
-combiner kernel and the slot collection are generic in the number of slots;
-neither needs editing when a potential is added.
+A `PotentialRegistry` of `PotentialBuilder`s drives slot construction.
+Each builder is an open-extensible factory that decides, from a parsed-config
++ topology context, whether it contributes a slot and (if so) constructs
+one. `ForceField::new` is a fixed loop over the registry: it iterates the
+builders in registration order, calls each builder's `build(cx)`, and
+appends the returned slot when `Some(_)`. Adding a new built-in potential
+is a one-line edit to `PotentialRegistry::with_builtins()`. Implementing
+a new `Potential` requires no edits to `ForceField::new`, to the combiner
+kernel, or to any other potential's code.
 
 ## Slots <!-- rq-cc73f184 -->
 
-The framework constructs the following `Potential` implementations from
-config:
+`PotentialRegistry::with_builtins()` registers six built-in `PotentialBuilder`s,
+each of which contributes one slot to the `ForceField` when its activation
+condition is met. The registry's registration order is the slot evaluation
+order; the registry is the single canonical source of slot ordering, and
+`ForceField::new` reads from it without making its own decisions.
 
-| `kind` | Implementation | File |
-| --- | --- | --- |
-| `lennard-jones` | non-bonded pairwise via `[[pair_interactions]]` | `lj-pair-force.md` |
-| `coulomb` | non-bonded truncated electrostatics via `[coulomb]` | `coulomb-pair-force.md` |
-| `spme_real` | non-bonded `erfc`-screened pair force via `[spme]` | `spme.md` |
-| `spme_reciprocal` | reciprocal-space FFT pipeline via `[spme]` | `spme.md` |
-| `morse-bonded` | bonded pairwise via `[[bond_types]]` + `.topology` file | `morse-bonded.md` |
-| `harmonic-angle` | three-body angle force via `[[angle_types]]` + `.topology` file | `harmonic-angle.md` |
+| Builder | `label()` of the slot it builds | Activation condition (`build(cx)` returns `Some(_)` iff …) | Implementation file |
+| --- | --- | --- | --- |
+| `LennardJonesBuilder` | `"lennard_jones"` | `cx.pair_interactions` is non-empty | `lj-pair-force.md` |
+| `CoulombBuilder` | `"coulomb"` | `cx.coulomb_config.is_some()` | `coulomb-pair-force.md` |
+| `SpmeRealBuilder` | `"spme_real"` | `cx.spme_config.is_some()` | `spme.md` |
+| `SpmeReciprocalBuilder` | `"spme_reciprocal"` | `cx.spme_config.is_some()` | `spme.md` |
+| `MorseBondedBuilder` | `"morse_bonded"` | `!cx.bond_list.is_empty()` | `morse-bonded.md` |
+| `HarmonicAngleBuilder` | `"harmonic_angle"` | `!cx.angle_list.is_empty()` | `harmonic-angle.md` |
 
-Slots are present in the `ForceField` according to the config:
-
-- The `LennardJones` slot is present when `[[pair_interactions]]` contains
-  at least one entry.
-- The `Coulomb` slot is present when the config supplies a `[coulomb]`
-  table.
-- The `SpmeRealSpace` and `SpmeReciprocal` slots are both present when
-  the config supplies a `[spme]` table.
-- The `MorseBonded` slot is present when the config supplies a
-  `topology = "..."` path, the topology file's `[bonds]` section is
-  non-empty, and at least one `[[bond_types]]` entry uses
-  `potential = "morse"`.
-- The `HarmonicAngle` slot is present when the config supplies a
-  `topology = "..."` path, the topology file's `[angles]` section is
-  non-empty, and at least one `[[angle_types]]` entry uses
-  `potential = "harmonic"`.
-
-The `[coulomb]` and `[spme]` tables are mutually exclusive at config
-load (see `io/config-schema.md`); a `ForceField` therefore contains at
-most one electrostatics path.
+The two SPME builders share the same activation condition; they always
+appear together because the Ewald split is exact only when both halves
+are evaluated. The `[coulomb]` and `[spme]` tables are mutually exclusive
+at config load (see `io/config-schema.md`); a `ForceField` therefore
+contains at most one electrostatics path.
 
 A `ForceField` with zero slots is a valid configuration. `step()` writes
 zeros into `particle_buffers.forces_*` and returns without launching any
 contribution or reduction kernels.
 
 When multiple slots are present, they appear in the `ForceField`'s slot
-list in a fixed order determined at construction:
+list in the order their builders are registered. The canonical built-in
+order is the order of the six rows above:
 
 1. `LennardJones`
 2. `Coulomb`
@@ -64,8 +58,9 @@ list in a fixed order determined at construction:
 5. `MorseBonded`
 6. `HarmonicAngle`
 
-Future potentials are inserted into this order at fixed positions defined
-in `ForceField::new`.
+A built-in potential is added by writing a `PotentialBuilder` and inserting
+it at the appropriate position in `PotentialRegistry::with_builtins()`.
+The `ForceField::new` body does not change.
 
 ## Force Evaluation Pipeline <!-- rq-7bab5c1e -->
 
@@ -285,25 +280,93 @@ slots must carry valid zeros in their rows.)
   - `DuplicateLabel(&'static str)` — two slots constructed with the
     same `label()`. Reported from `ForceField::new`.
 
+- `PotentialBuildContext<'a>` — bundle of borrowed references to every <!-- rq-d116af5f -->
+  parsed-config and topology input a built-in `PotentialBuilder` might
+  read. Built once by `ForceField::new` and passed by reference to each
+  builder's `build(cx)` call. Fields:
+
+  ```rust
+  pub struct PotentialBuildContext<'a> {
+      pub gpu: &'a GpuContext,
+      pub particle_count: usize,
+      pub sim_box: &'a SimulationBox,
+      pub particle_types: &'a [ParticleTypeConfig],
+      pub pair_interactions: &'a [PairInteractionConfig],
+      pub bond_types: &'a [BondTypeConfig],
+      pub angle_types: &'a [AngleTypeConfig],
+      pub coulomb_config: Option<&'a CoulombConfig>,
+      pub spme_config: Option<&'a SpmeConfig>,
+      pub charges: &'a [f32],
+      pub bond_list: &'a BondList,
+      pub angle_list: &'a AngleList,
+      pub exclusion_list: &'a ExclusionList,
+      pub neighbor_list_config: &'a NeighborListConfig,
+  }
+  ```
+
+  Each builder reads only the fields it needs. The context is distinct
+  from `ForceFieldContext`, which is the per-step context handed to
+  `Potential::contribute`.
+
+- `PotentialBuilder` — object-safe trait implemented by every potential's <!-- rq-e8550f96 -->
+  factory. Each builder is responsible for one slot.
+
+  ```rust
+  pub trait PotentialBuilder: std::fmt::Debug + Send + Sync {
+      fn build(
+          &self,
+          cx: &PotentialBuildContext<'_>,
+      ) -> Result<Option<Box<dyn Potential>>, ForceFieldError>;
+  }
+  ```
+
+  - `build` inspects `cx` and returns `Ok(Some(slot))` if this builder's
+    activation condition (see *Slots*) is satisfied, or `Ok(None)` if
+    not. `Err` is reserved for genuine construction failures (GPU
+    allocation, malformed inputs that survived config validation, etc.).
+  - Two distinct builders may not produce slots with the same
+    `Potential::label()`. The framework enforces this in
+    `ForceField::new`; builders themselves do not need to check.
+
+- `PotentialRegistry` — open-extensible registry of `PotentialBuilder`s. <!-- rq-50f0a96a -->
+  The registry's iteration order is the slot evaluation order. Fields:
+
+  ```rust
+  pub struct PotentialRegistry {
+      pub builders: Vec<Box<dyn PotentialBuilder>>,
+  }
+  ```
+
+  Methods:
+  - `PotentialRegistry::new() -> Self` — constructs an empty registry.
+  - `PotentialRegistry::with_builtins() -> Self` — constructs a registry
+    pre-populated with the six built-in `PotentialBuilder`s in the
+    canonical evaluation order: `LennardJonesBuilder`, `CoulombBuilder`,
+    `SpmeRealBuilder`, `SpmeReciprocalBuilder`, `MorseBondedBuilder`,
+    `HarmonicAngleBuilder`.
+  - `register(&mut self, builder: Box<dyn PotentialBuilder>)` — appends
+    a builder to the end of the registry. Today `ForceField::new`'s
+    caller uses `PotentialRegistry::with_builtins()` exclusively; the
+    `register` entry point exists so future runner-level surfaces can
+    expose user-supplied builders without changing the trait or
+    `ForceField::new`.
+
 ### Functions and methods <!-- rq-17abcb76 -->
 
-- `ForceField::new(device: Arc<CudaDevice>, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], coulomb_config: Option<&CoulombConfig>, spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>` <!-- rq-79938dbf -->
-  - Constructs the slot collection in fixed evaluation order:
-    - Appends a `LennardJonesState` slot when `pair_interactions` is
-      non-empty.
-    - Appends a `CoulombState` slot when `coulomb_config.is_some()`.
-    - Appends `SpmeRealSpaceState` and `SpmeReciprocalState` slots
-      when `spme_config.is_some()`.
-    - Appends a `MorseBondedState` slot when `bond_list.is_empty()`
-      is false.
-    - Appends a `HarmonicAngleState` slot when
-      `angle_list.is_empty()` is false.
-  - When every slot-bearing input is absent, returns a `ForceField`
-    with `slots.len() == 0`.
+- `ForceField::new(registry: &PotentialRegistry, gpu: &GpuContext, particle_count: usize, sim_box: &SimulationBox, particle_types: &[ParticleTypeConfig], pair_interactions: &[PairInteractionConfig], bond_types: &[BondTypeConfig], angle_types: &[AngleTypeConfig], coulomb_config: Option<&CoulombConfig>, spme_config: Option<&SpmeConfig>, charges: &[f32], bond_list: &BondList, angle_list: &AngleList, exclusion_list: &ExclusionList, neighbor_list_config: &NeighborListConfig) -> Result<ForceField, ForceFieldError>` <!-- rq-79938dbf -->
+  - Builds a `PotentialBuildContext` populated from every parameter
+    listed above (apart from `registry`).
+  - Iterates `registry.builders` in registration order. For each builder,
+    calls `builder.build(&cx)`. When the call returns `Ok(Some(slot))`,
+    appends the slot to the `ForceField`'s slot list. `Ok(None)` is the
+    no-op skip path (this builder's activation condition was not met).
+    Any `Err(_)` short-circuits and is returned unchanged.
+  - When no builder produces a slot, returns a `ForceField` with
+    `slots.len() == 0`.
   - Allocates the five flat slot-output buffers (`slot_forces_x/y/z`,
     `slot_energies`, `slot_virials`) of length
-    `slots.len() * particle_count` on `device`. When either factor is
-    zero, the allocations are length-zero.
+    `slots.len() * particle_count` on `gpu.device`. When either factor
+    is zero, the allocations are length-zero.
   - Builds the shared `NeighborListState`:
     - Computes `r_cut = max(slot.max_cutoff() for slot in slots if
       slot.max_cutoff().is_some())`. If no slot reports a cutoff,
@@ -311,11 +374,11 @@ slots must carry valid zeros in their rows.)
       neighbor-list kernels for the lifetime of the run.
     - Otherwise consults `neighbor_list_config`:
       - `CellList { max_neighbors, r_skin }`: calls
-        `NeighborListState::new_cell_list(device, sim_box,
+        `NeighborListState::new_cell_list(gpu, sim_box,
         particle_count, r_cut, max_neighbors, r_skin as f32)`. May
         return `ForceFieldError::NeighborList(_)` (e.g.
         `BoxTooSmallForCells`).
-      - `AllPairs`: calls `NeighborListState::new_trivial(device,
+      - `AllPairs`: calls `NeighborListState::new_trivial(gpu,
         sim_box, particle_count)`.
   - Returns `ForceFieldError::DuplicateLabel(_)` if two slots end up
     with the same `label()`.
@@ -553,12 +616,88 @@ Feature: Pluggable potential slot framework
 
   @rq-a9642241
   Scenario: Adding a new Potential implementation requires no edits to ForceField or accumulate_forces
-    Given a hypothetical third Potential implementation `Buckingham` with label() == "buckingham"
-    And ForceField::new is extended to construct it after MorseBonded when the config provides Buckingham parameters
+    Given a third Potential implementation `Buckingham` with label() == "buckingham"
+    And a `BuckinghamBuilder` registered after `MorseBondedBuilder` in `PotentialRegistry::with_builtins()`
     When ForceField::new(...) is called with a config that activates all three slots
     Then force_field.slots has length 3
     And the accumulate_forces kernel binary is unchanged
     And the SlotOutputView passed to Buckingham's reduce points at row 2 of the slot-output buffers
+
+  # --- PotentialRegistry-driven construction ---
+
+  @rq-053a026c
+  Scenario: PotentialRegistry::with_builtins exposes the six built-in builders in evaluation order
+    Given a PotentialRegistry constructed via PotentialRegistry::with_builtins()
+    Then registry.builders has length 6
+    And the builders' debug type names (or kind tags) are, in order,
+      LennardJonesBuilder, CoulombBuilder, SpmeRealBuilder,
+      SpmeReciprocalBuilder, MorseBondedBuilder, HarmonicAngleBuilder
+
+  @rq-78ad9477
+  Scenario: PotentialRegistry::new starts empty
+    Given a registry constructed via PotentialRegistry::new()
+    Then registry.builders.is_empty() returns true
+
+  @rq-51af5f97
+  Scenario: register(...) appends a builder at the end
+    Given a PotentialRegistry::with_builtins()
+    And a custom PotentialBuilder whose build(cx) always returns Ok(None)
+    When registry.register(Box::new(custom_builder)) is called
+    Then registry.builders has length 7
+    And registry.builders[6] is the custom builder
+
+  @rq-b1a132b5
+  Scenario: ForceField::new iterates the registry in registration order
+    Given a PotentialRegistry::with_builtins()
+    And a context that satisfies both the LennardJones activation condition
+      and the MorseBonded activation condition
+    When ForceField::new(&registry, ...) is called
+    Then force_field.slots[0].label() == "lennard_jones"
+    And force_field.slots[1].label() == "morse_bonded"
+
+  @rq-ccf4dc3f
+  Scenario: Builder returning Ok(None) is skipped without erroring
+    Given a PotentialRegistry containing exactly one custom builder whose
+      build(cx) returns Ok(None)
+    When ForceField::new(&registry, ...) is called
+    Then it returns Ok(force_field)
+    And force_field.slots is empty
+
+  @rq-6ed7e318
+  Scenario: Builder Err short-circuits ForceField::new
+    Given a PotentialRegistry containing a custom builder whose build(cx)
+      returns Err(ForceFieldError::Gpu(_))
+    And a second custom builder whose build(cx), if reached, would record a call
+    When ForceField::new(&registry, ...) is called
+    Then it returns Err(ForceFieldError::Gpu(_))
+    And the second builder's build is not invoked
+
+  @rq-24c36f8d
+  Scenario: Two builders producing slots with the same label fail construction
+    Given a PotentialRegistry containing two custom builders that both build
+      a Potential whose label() == "duplicate"
+    And a context that satisfies both builders' activation conditions
+    When ForceField::new(&registry, ...) is called
+    Then it returns Err(ForceFieldError::DuplicateLabel("duplicate"))
+
+  @rq-028f5f8e
+  Scenario: Empty registry produces a zero-slot ForceField
+    Given a registry constructed via PotentialRegistry::new()
+    When ForceField::new(&registry, ...) is called
+    Then it returns Ok(force_field)
+    And force_field.slots is empty
+    And force_field.neighbor_list is None
+
+  @rq-b75ce71a
+  Scenario: PotentialBuildContext exposes every parsed-config input by reference
+    Given a custom builder whose build(cx) records pointer identity for
+      cx.particle_types, cx.pair_interactions, cx.bond_types, cx.angle_types,
+      cx.coulomb_config, cx.spme_config, cx.charges, cx.bond_list,
+      cx.angle_list, cx.exclusion_list, cx.neighbor_list_config
+    When ForceField::new(&registry, gpu, n, sim_box, pts, pairs, bts, ats,
+      coul, spme, charges, bonds, angles, excl, nl_config) is called
+    Then the recorded pointers match the addresses of the function arguments
+      passed in by the caller
 
   # --- Reproducibility ---
 

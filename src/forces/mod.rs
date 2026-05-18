@@ -11,7 +11,7 @@ use std::sync::Arc;
 use cudarc::driver::{CudaDevice, CudaSlice, CudaViewMut};
 
 use crate::gpu::{
-    GpuContext, GpuError, Kernels, LennardJonesParameterTable, ParticleBuffers, accumulate_forces,
+    GpuContext, GpuError, Kernels, ParticleBuffers, accumulate_forces,
 };
 use crate::io::config::{
     AngleTypeConfig, BondTypeConfig, CoulombConfig, NeighborListConfig, PairInteractionConfig,
@@ -20,13 +20,14 @@ use crate::io::config::{
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
 
-pub use angle::HarmonicAngleState;
-pub use coulomb::{CoulombParameters, CoulombState};
+pub use angle::{HarmonicAngleBuilder, HarmonicAngleState};
+pub use coulomb::{CoulombBuilder, CoulombParameters, CoulombState};
 pub use spme::{
     SpmeError, SpmeParameters, SpmeReciprocalGrid, SpmeReciprocalState, SpmeRealSpaceState,
+    SpmeRealBuilder, SpmeReciprocalBuilder,
 };
-pub use lj::LennardJonesState;
-pub use morse::MorseBondedState;
+pub use lj::{LennardJonesBuilder, LennardJonesState};
+pub use morse::{MorseBondedBuilder, MorseBondedState};
 pub use topology::{
     Angle, AngleList, Bond, BondList, ConstraintGroup, ConstraintList,
     DeviceExclusionList, Exclusion, ExclusionList, GroupConstraint, TopologyFileError,
@@ -87,6 +88,74 @@ pub enum ForceFieldError {
     DuplicateLabel(&'static str),
 }
 
+// rq-d116af5f
+pub struct PotentialBuildContext<'a> {
+    pub gpu: &'a GpuContext,
+    pub particle_count: usize,
+    pub sim_box: &'a SimulationBox,
+    pub particle_types: &'a [ParticleTypeConfig],
+    pub pair_interactions: &'a [PairInteractionConfig],
+    pub bond_types: &'a [BondTypeConfig],
+    pub angle_types: &'a [AngleTypeConfig],
+    pub coulomb_config: Option<&'a CoulombConfig>,
+    pub spme_config: Option<&'a SpmeConfig>,
+    pub charges: &'a [f32],
+    pub bond_list: &'a BondList,
+    pub angle_list: &'a AngleList,
+    pub exclusion_list: &'a ExclusionList,
+    pub neighbor_list_config: &'a NeighborListConfig,
+}
+
+// rq-e8550f96
+pub trait PotentialBuilder: std::fmt::Debug + Send + Sync {
+    fn build(
+        &self,
+        cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<Box<dyn Potential>>, ForceFieldError>;
+}
+
+// rq-50f0a96a
+#[derive(Debug)]
+pub struct PotentialRegistry {
+    pub builders: Vec<Box<dyn PotentialBuilder>>,
+}
+
+impl PotentialRegistry {
+    pub fn new() -> Self {
+        PotentialRegistry { builders: Vec::new() }
+    }
+
+    pub fn with_builtins() -> Self {
+        PotentialRegistry {
+            builders: vec![
+                Box::new(LennardJonesBuilder),
+                Box::new(CoulombBuilder),
+                Box::new(SpmeRealBuilder),
+                Box::new(SpmeReciprocalBuilder),
+                Box::new(MorseBondedBuilder),
+                Box::new(HarmonicAngleBuilder),
+            ],
+        }
+    }
+
+    pub fn register(&mut self, builder: Box<dyn PotentialBuilder>) {
+        self.builders.push(builder);
+    }
+}
+
+impl Default for PotentialRegistry {
+    fn default() -> Self {
+        PotentialRegistry::with_builtins()
+    }
+}
+
+pub(crate) fn max_neighbors_from(cfg: &NeighborListConfig, particle_count: usize) -> u32 {
+    match cfg {
+        NeighborListConfig::AllPairs => particle_count as u32,
+        NeighborListConfig::CellList { max_neighbors, .. } => *max_neighbors,
+    }
+}
+
 // rq-684a29f1
 #[derive(Debug)]
 pub struct ForceField {
@@ -106,6 +175,7 @@ impl ForceField {
     // rq-79938dbf
     #[allow(clippy::too_many_arguments)]
     pub fn new(
+        registry: &PotentialRegistry,
         gpu: &GpuContext,
         particle_count: usize,
         sim_box: &SimulationBox,
@@ -123,91 +193,29 @@ impl ForceField {
     ) -> Result<Self, ForceFieldError> {
         let device = gpu.device.clone();
         let kernels = gpu.kernels.clone();
-        let mut slots: Vec<Box<dyn Potential>> = Vec::new();
 
-        let max_neighbors = match neighbor_list_config {
-            NeighborListConfig::AllPairs => particle_count as u32,
-            NeighborListConfig::CellList { max_neighbors, .. } => *max_neighbors,
+        let cx = PotentialBuildContext {
+            gpu,
+            particle_count,
+            sim_box,
+            particle_types,
+            pair_interactions,
+            bond_types,
+            angle_types,
+            coulomb_config,
+            spme_config,
+            charges,
+            bond_list,
+            angle_list,
+            exclusion_list,
+            neighbor_list_config,
         };
 
-        // Slot 0: Lennard-Jones when at least one pair interaction is configured.
-        if !pair_interactions.is_empty() {
-            let params = LennardJonesParameterTable::from_config(
-                &device,
-                particle_types,
-                pair_interactions,
-            )?;
-            let max_cutoff = pair_interactions
-                .iter()
-                .map(|p| p.cutoff as f32)
-                .fold(0.0_f32, f32::max);
-            let lj_state = LennardJonesState::new(
-                gpu,
-                particle_count,
-                params,
-                max_cutoff,
-                max_neighbors,
-                exclusion_list,
-            )?;
-            slots.push(Box::new(lj_state));
-        }
-
-        // Slot 1: Coulomb when the [coulomb] table is present in the config.
-        if let Some(coul) = coulomb_config {
-            let params = CoulombParameters::from(coul);
-            let coul_state = CoulombState::new(
-                gpu,
-                particle_count,
-                params,
-                max_neighbors,
-                exclusion_list,
-            )?;
-            slots.push(Box::new(coul_state));
-        }
-
-        // Slots 2 + 3: SPME real-space and reciprocal-space pieces when the
-        // [spme] table is present. The two slots always appear together;
-        // their pairing is what makes the Ewald split exact. Mutual
-        // exclusion with [coulomb] is enforced at config parse time.
-        if let Some(spme_cfg) = spme_config {
-            let params = SpmeParameters::from(spme_cfg);
-            let real_state = SpmeRealSpaceState::new(
-                gpu,
-                particle_count,
-                params.alpha,
-                params.r_cut_real,
-                max_neighbors,
-                exclusion_list,
-            )?;
-            slots.push(Box::new(real_state));
-            let recip_state = SpmeReciprocalState::new(
-                gpu,
-                sim_box,
-                particle_count,
-                charges,
-                params,
-            )
-            .map_err(|e| match e {
-                SpmeError::Gpu(g) => ForceFieldError::Gpu(g),
-                SpmeError::NeighborList(n) => ForceFieldError::NeighborList(n),
-                // Construction-time errors that should not occur after
-                // config-layer validation. Surface as Gpu errors so we
-                // never silently swallow them.
-                other => panic!("SPME slot construction failed unexpectedly: {other:?}"),
-            })?;
-            slots.push(Box::new(recip_state));
-        }
-
-        // Slot 4: Morse bonded when at least one bond is present.
-        if !bond_list.is_empty() {
-            let morse_state = MorseBondedState::new(gpu, bond_list, bond_types)?;
-            slots.push(Box::new(morse_state));
-        }
-
-        // Slot 5: harmonic angle when at least one angle is present.
-        if !angle_list.is_empty() {
-            let angle_state = HarmonicAngleState::new(gpu, angle_list, angle_types)?;
-            slots.push(Box::new(angle_state));
+        let mut slots: Vec<Box<dyn Potential>> = Vec::new();
+        for builder in &registry.builders {
+            if let Some(slot) = builder.build(&cx)? {
+                slots.push(slot);
+            }
         }
 
         for i in 0..slots.len() {

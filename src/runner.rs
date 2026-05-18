@@ -9,7 +9,7 @@ use rand_chacha::ChaCha8Rng;
 
 use crate::forces::{
     AngleList, BondList, ConstraintList, ExclusionList, ForceField, ForceFieldError,
-    TopologyFileError,
+    PotentialRegistry, TopologyFileError,
     load_topology_file,
 };
 use crate::gpu::{ParticleBuffers, compute_total_potential_energy, init_device};
@@ -368,7 +368,9 @@ fn run_simulation_with_phase(
         )
         .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
 
+    let potential_registry = PotentialRegistry::with_builtins();
     let mut force_field = ForceField::new(
+        &potential_registry,
         &gpu,
         n,
         &sim_box,

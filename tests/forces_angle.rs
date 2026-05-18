@@ -1,8 +1,6 @@
 use std::f64::consts::PI;
 
-use dynamics::forces::{
-    AngleList, BondList, ExclusionList, ForceField, HarmonicAngleState,
-};
+use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, HarmonicAngleState, PotentialRegistry};
 use dynamics::forces::topology::Angle;
 use dynamics::gpu::{ParticleBuffers, harmonic_angle_force, init_device};
 use dynamics::io::config::{
@@ -453,6 +451,7 @@ fn spc_single_step_satisfies_newtons_third_law() {
     let charges = vec![0.41 * e_charge, -0.82 * e_charge, 0.41 * e_charge];
 
     let mut ff = ForceField::new(
+        &PotentialRegistry::with_builtins(),
         &gpu,
         3,
         &sim_box,
