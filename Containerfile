@@ -64,6 +64,9 @@ ENV RUST_VERSION=1.93.0
 RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --default-toolchain ${RUST_VERSION}
 ENV PATH="/root/.cargo/bin:${PATH}"
 
+# Install mdBook for building user-facing documentation
+RUN cargo install mdbook --locked
+
 
 
 COPY .podman/interface.sh /interface.sh

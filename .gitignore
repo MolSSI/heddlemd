@@ -27,3 +27,6 @@ target/
 *traj.xyz
 *.timings
 *.log
+
+# mdBook build output
+book/book/
