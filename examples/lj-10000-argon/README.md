@@ -9,6 +9,8 @@ for 100 timesteps.
   100 K)
 - `argon.in.xyz` — 10,000 argon atoms on a 20 × 20 × 25 simple-cubic lattice
   with 4.0 Å spacing, centred at the origin in an 8 × 8 × 10 nm box.
+- `argon.in.analysis` — example post-processing input declaring an Ar-Ar
+  radial distribution function (200 bins, `r_max = 3.5 nm`).
 - `generate_init.py` — regenerates `argon.in.xyz` deterministically.
 
 ## Run
@@ -30,6 +32,20 @@ A run produces three files in this directory:
 - `argon.out.xyz` — 11 trajectory frames (steps 0, 10, …, 100), extended-XYZ
 - `argon.out.log` — 21 CSV rows of step, time, kinetic energy, temperature
 - `argon.out.timings` — per-stage timing summary (kernels and host I/O)
+
+## Analyze
+
+After `dynamics run` has written `argon.out.xyz`, post-process the
+trajectory with:
+
+```
+cargo run --release -- analyze argon.in.analysis
+```
+
+The analyze run writes one CSV per declared analysis. For the bundled
+`argon.in.analysis` that is `argon.out.ar-ar.csv` (200 rows of
+`r, g_r, count`). See the [Analysis chapter](../../book/src/guide/analysis.md)
+for the full file-format reference.
 
 ## Notes
 

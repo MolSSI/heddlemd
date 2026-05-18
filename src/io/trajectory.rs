@@ -1,6 +1,6 @@
 // rq-2cca54cc rq-22e4e198 rq-2196fc45
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::pbc::SimulationBox;
@@ -177,4 +177,545 @@ impl Drop for TrajectoryWriter {
 
 fn io_err(e: std::io::Error) -> TrajectoryWriterError {
     TrajectoryWriterError::Io(format!("{e}"))
+}
+
+// =====================================================================
+// TrajectoryReader — companion to TrajectoryWriter, used by
+// `dynamics analyze` to walk every frame in declaration order.
+// =====================================================================
+
+#[derive(Debug, Clone)]
+pub struct TrajectoryFrameHeader {
+    pub particle_count: usize,
+    pub sim_box: SimulationBox,
+    pub type_indices: Vec<u32>,
+    pub include_velocities: bool,
+    pub include_images: bool,
+}
+
+#[derive(Debug)]
+pub struct TrajectoryFrame {
+    pub step: u64,
+    pub time: f64,
+    pub sim_box: SimulationBox,
+    pub type_indices: Vec<u32>,
+    pub positions_x: Vec<f32>,
+    pub positions_y: Vec<f32>,
+    pub positions_z: Vec<f32>,
+    pub velocities: Option<(Vec<f32>, Vec<f32>, Vec<f32>)>,
+    pub images: Option<(Vec<i32>, Vec<i32>, Vec<i32>)>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum TrajectoryReaderError {
+    #[error("failed to read trajectory file: {0}")]
+    Io(String),
+    #[error("trajectory file is empty")]
+    Empty,
+    #[error("malformed trajectory header on line {line_number}: {reason}")]
+    MalformedHeader { line_number: usize, reason: String },
+    #[error("unknown particle type `{name}` on line {line_number}")]
+    UnknownType { line_number: usize, name: String },
+    #[error("frame {frame_index} disagrees with first-frame header on line {line_number}: {reason}")]
+    FrameMismatch {
+        frame_index: u64,
+        line_number: usize,
+        reason: String,
+    },
+    #[error("malformed trajectory row on line {line_number}: {reason}")]
+    MalformedRow { line_number: usize, reason: String },
+    #[error("trajectory file ended mid-frame (frame {frame_index}: expected {expected} rows, got {got})")]
+    Truncated {
+        expected: usize,
+        got: usize,
+        frame_index: u64,
+    },
+}
+
+pub struct TrajectoryReader {
+    reader: BufReader<File>,
+    pub first_frame_header: TrajectoryFrameHeader,
+    /// 1-based current line number in the file (updated as lines are read).
+    line_number: usize,
+    /// 0-based index of the next frame to return from `next_frame`.
+    next_frame_index: u64,
+    /// Filename, cached for error messages.
+    path: PathBuf,
+    /// Owned type-name list, kept alive for the lifetime of the reader so
+    /// it can be re-used by `next_frame` to map species columns to indices
+    /// without the caller having to thread the slice through every call.
+    type_names: Vec<String>,
+    /// Buffer reused for reading lines.
+    line_buf: String,
+    /// `Some` when `open` peeked the first frame's data rows during
+    /// header construction (they are buffered here so `next_frame` can
+    /// return them on the first call without re-reading).
+    first_frame: Option<TrajectoryFrame>,
+}
+
+impl std::fmt::Debug for TrajectoryReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TrajectoryReader")
+            .field("path", &self.path)
+            .field("first_frame_header", &self.first_frame_header)
+            .field("next_frame_index", &self.next_frame_index)
+            .finish_non_exhaustive()
+    }
+}
+
+impl TrajectoryReader {
+    pub fn open(
+        path: &Path,
+        type_names: &[&str],
+    ) -> Result<TrajectoryReader, TrajectoryReaderError> {
+        let file = File::open(path)
+            .map_err(|e| TrajectoryReaderError::Io(format!("{}: {}", path.display(), e)))?;
+        let mut reader = BufReader::new(file);
+        let owned_type_names: Vec<String> =
+            type_names.iter().map(|s| (*s).to_string()).collect();
+
+        // Read the first frame in full so we can populate
+        // `first_frame_header` and stash the frame for the first
+        // `next_frame` call.
+        let mut line_number: usize = 0;
+        let mut line_buf = String::new();
+        let first_frame = read_one_frame(
+            &mut reader,
+            &owned_type_names,
+            &mut line_number,
+            &mut line_buf,
+            0,
+            None,
+        )?;
+        let first_frame = match first_frame {
+            Some(f) => f,
+            None => return Err(TrajectoryReaderError::Empty),
+        };
+
+        let header = TrajectoryFrameHeader {
+            particle_count: first_frame.type_indices.len(),
+            sim_box: first_frame.sim_box.clone(),
+            type_indices: first_frame.type_indices.clone(),
+            include_velocities: first_frame.velocities.is_some(),
+            include_images: first_frame.images.is_some(),
+        };
+
+        Ok(TrajectoryReader {
+            reader,
+            first_frame_header: header,
+            line_number,
+            next_frame_index: 0,
+            path: path.to_path_buf(),
+            type_names: owned_type_names,
+            line_buf,
+            first_frame: Some(first_frame),
+        })
+    }
+
+    pub fn next_frame(&mut self) -> Result<Option<TrajectoryFrame>, TrajectoryReaderError> {
+        if let Some(frame) = self.first_frame.take() {
+            self.next_frame_index = 1;
+            return Ok(Some(frame));
+        }
+        let frame = read_one_frame(
+            &mut self.reader,
+            &self.type_names,
+            &mut self.line_number,
+            &mut self.line_buf,
+            self.next_frame_index,
+            Some(&self.first_frame_header),
+        )?;
+        if frame.is_some() {
+            self.next_frame_index += 1;
+        }
+        Ok(frame)
+    }
+
+    pub fn frames(&mut self) -> TrajectoryFrameIter<'_> {
+        TrajectoryFrameIter { reader: self }
+    }
+}
+
+pub struct TrajectoryFrameIter<'a> {
+    reader: &'a mut TrajectoryReader,
+}
+
+impl<'a> Iterator for TrajectoryFrameIter<'a> {
+    type Item = Result<TrajectoryFrame, TrajectoryReaderError>;
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.reader.next_frame() {
+            Ok(Some(frame)) => Some(Ok(frame)),
+            Ok(None) => None,
+            Err(e) => Some(Err(e)),
+        }
+    }
+}
+
+/// Read one frame from `reader`. Returns `Ok(None)` on clean EOF (no
+/// further frames). The caller passes `expected_header = None` when
+/// reading the first frame and `Some(&header)` afterward so the reader
+/// can detect mid-trajectory header changes.
+fn read_one_frame<R: BufRead>(
+    reader: &mut R,
+    type_names: &[String],
+    line_number: &mut usize,
+    line_buf: &mut String,
+    frame_index: u64,
+    expected_header: Option<&TrajectoryFrameHeader>,
+) -> Result<Option<TrajectoryFrame>, TrajectoryReaderError> {
+    // Particle-count line.
+    let count_line = match read_nonblank_line(reader, line_number, line_buf)? {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+    let particle_count: usize = count_line.trim().parse::<i64>().ok().and_then(|n| {
+        if n >= 0 { Some(n as usize) } else { None }
+    }).ok_or_else(|| TrajectoryReaderError::MalformedHeader {
+        line_number: *line_number,
+        reason: format!("particle-count line is not a non-negative integer: {count_line:?}"),
+    })?;
+
+    // Comment line.
+    line_buf.clear();
+    let bytes = reader
+        .read_line(line_buf)
+        .map_err(|e| TrajectoryReaderError::Io(format!("{e}")))?;
+    if bytes == 0 {
+        return Err(TrajectoryReaderError::MalformedHeader {
+            line_number: *line_number,
+            reason: "expected comment line after particle-count line, got EOF".to_string(),
+        });
+    }
+    *line_number += 1;
+    let comment_line_number = *line_number;
+    let comment = line_buf.trim_end_matches('\n').trim_end_matches('\r').to_string();
+    let attrs = parse_attribute_line(&comment);
+
+    let lattice_value = attrs
+        .iter()
+        .find(|(k, _)| k == "Lattice")
+        .map(|(_, v)| v.as_str())
+        .ok_or_else(|| TrajectoryReaderError::MalformedHeader {
+            line_number: comment_line_number,
+            reason: "missing `Lattice` attribute".to_string(),
+        })?;
+    let sim_box = parse_lattice(lattice_value).map_err(|e| {
+        TrajectoryReaderError::MalformedHeader {
+            line_number: comment_line_number,
+            reason: e,
+        }
+    })?;
+
+    let properties_value = attrs
+        .iter()
+        .find(|(k, _)| k == "Properties")
+        .map(|(_, v)| v.as_str())
+        .ok_or_else(|| TrajectoryReaderError::MalformedHeader {
+            line_number: comment_line_number,
+            reason: "missing `Properties` attribute".to_string(),
+        })?;
+    let (include_velocities, include_images) =
+        parse_properties(properties_value).map_err(|e| {
+            TrajectoryReaderError::MalformedHeader {
+                line_number: comment_line_number,
+                reason: e,
+            }
+        })?;
+    let step_value: u64 = attrs
+        .iter()
+        .find(|(k, _)| k == "Step")
+        .and_then(|(_, v)| v.parse::<u64>().ok())
+        .unwrap_or(0);
+    let time_value: f64 = attrs
+        .iter()
+        .find(|(k, _)| k == "Time")
+        .and_then(|(_, v)| v.parse::<f64>().ok())
+        .unwrap_or(0.0);
+
+    // Cross-check against expected_header (frames 1..).
+    if let Some(expected) = expected_header {
+        if particle_count != expected.particle_count {
+            return Err(TrajectoryReaderError::FrameMismatch {
+                frame_index,
+                line_number: comment_line_number,
+                reason: format!(
+                    "particle_count={particle_count} differs from first-frame {}",
+                    expected.particle_count
+                ),
+            });
+        }
+        if include_velocities != expected.include_velocities {
+            return Err(TrajectoryReaderError::FrameMismatch {
+                frame_index,
+                line_number: comment_line_number,
+                reason: "`Properties` velocity column presence differs from first-frame header"
+                    .to_string(),
+            });
+        }
+        if include_images != expected.include_images {
+            return Err(TrajectoryReaderError::FrameMismatch {
+                frame_index,
+                line_number: comment_line_number,
+                reason: "`Properties` image column presence differs from first-frame header"
+                    .to_string(),
+            });
+        }
+    }
+
+    let expected_cols: usize = 4
+        + if include_velocities { 3 } else { 0 }
+        + if include_images { 3 } else { 0 };
+    let image_offset = if include_velocities { 7 } else { 4 };
+
+    let mut type_indices: Vec<u32> = Vec::with_capacity(particle_count);
+    let mut positions_x: Vec<f32> = Vec::with_capacity(particle_count);
+    let mut positions_y: Vec<f32> = Vec::with_capacity(particle_count);
+    let mut positions_z: Vec<f32> = Vec::with_capacity(particle_count);
+    let mut velocities_x: Vec<f32> = Vec::with_capacity(particle_count);
+    let mut velocities_y: Vec<f32> = Vec::with_capacity(particle_count);
+    let mut velocities_z: Vec<f32> = Vec::with_capacity(particle_count);
+    let mut images_x: Vec<i32> = Vec::with_capacity(particle_count);
+    let mut images_y: Vec<i32> = Vec::with_capacity(particle_count);
+    let mut images_z: Vec<i32> = Vec::with_capacity(particle_count);
+
+    for row_idx in 0..particle_count {
+        let row = match read_nonblank_line(reader, line_number, line_buf)? {
+            Some(s) => s,
+            None => {
+                return Err(TrajectoryReaderError::Truncated {
+                    expected: particle_count,
+                    got: row_idx,
+                    frame_index,
+                });
+            }
+        };
+        let cols: Vec<&str> = row.split_ascii_whitespace().collect();
+        if cols.len() != expected_cols {
+            return Err(TrajectoryReaderError::MalformedRow {
+                line_number: *line_number,
+                reason: format!(
+                    "expected {expected_cols} columns, got {}",
+                    cols.len()
+                ),
+            });
+        }
+        let species = cols[0];
+        let type_index = match type_names.iter().position(|t| t == species) {
+            Some(idx) => idx as u32,
+            None => {
+                return Err(TrajectoryReaderError::UnknownType {
+                    line_number: *line_number,
+                    name: species.to_string(),
+                });
+            }
+        };
+        if let Some(expected) = expected_header {
+            if expected.type_indices[row_idx] != type_index {
+                return Err(TrajectoryReaderError::FrameMismatch {
+                    frame_index,
+                    line_number: *line_number,
+                    reason: format!(
+                        "row {row_idx} species `{species}` (index {type_index}) differs from first-frame index {}",
+                        expected.type_indices[row_idx]
+                    ),
+                });
+            }
+        }
+        let px = parse_f64_col(cols[1], *line_number, "pos_x")?;
+        let py = parse_f64_col(cols[2], *line_number, "pos_y")?;
+        let pz = parse_f64_col(cols[3], *line_number, "pos_z")?;
+        type_indices.push(type_index);
+        positions_x.push(px as f32);
+        positions_y.push(py as f32);
+        positions_z.push(pz as f32);
+        if include_velocities {
+            let vx = parse_f64_col(cols[4], *line_number, "velo_x")?;
+            let vy = parse_f64_col(cols[5], *line_number, "velo_y")?;
+            let vz = parse_f64_col(cols[6], *line_number, "velo_z")?;
+            velocities_x.push(vx as f32);
+            velocities_y.push(vy as f32);
+            velocities_z.push(vz as f32);
+        }
+        if include_images {
+            let ix = parse_i32_col(cols[image_offset], *line_number, "image_x")?;
+            let iy = parse_i32_col(cols[image_offset + 1], *line_number, "image_y")?;
+            let iz = parse_i32_col(cols[image_offset + 2], *line_number, "image_z")?;
+            images_x.push(ix);
+            images_y.push(iy);
+            images_z.push(iz);
+        }
+    }
+
+    Ok(Some(TrajectoryFrame {
+        step: step_value,
+        time: time_value,
+        sim_box,
+        type_indices,
+        positions_x,
+        positions_y,
+        positions_z,
+        velocities: if include_velocities {
+            Some((velocities_x, velocities_y, velocities_z))
+        } else {
+            None
+        },
+        images: if include_images {
+            Some((images_x, images_y, images_z))
+        } else {
+            None
+        },
+    }))
+}
+
+fn read_nonblank_line<R: BufRead>(
+    reader: &mut R,
+    line_number: &mut usize,
+    buf: &mut String,
+) -> Result<Option<String>, TrajectoryReaderError> {
+    loop {
+        buf.clear();
+        let bytes = reader
+            .read_line(buf)
+            .map_err(|e| TrajectoryReaderError::Io(format!("{e}")))?;
+        if bytes == 0 {
+            return Ok(None);
+        }
+        *line_number += 1;
+        let trimmed = buf.trim_end_matches('\n').trim_end_matches('\r');
+        if trimmed.trim().is_empty() {
+            continue;
+        }
+        return Ok(Some(trimmed.to_string()));
+    }
+}
+
+fn parse_attribute_line(line: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+        let key_start = i;
+        while i < bytes.len() && bytes[i] != b'=' && !bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() || bytes[i] != b'=' {
+            while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            continue;
+        }
+        let key = std::str::from_utf8(&bytes[key_start..i]).unwrap().to_string();
+        i += 1;
+        if i >= bytes.len() {
+            out.push((key, String::new()));
+            break;
+        }
+        let value = if bytes[i] == b'"' {
+            i += 1;
+            let v_start = i;
+            while i < bytes.len() && bytes[i] != b'"' {
+                i += 1;
+            }
+            let v = std::str::from_utf8(&bytes[v_start..i]).unwrap().to_string();
+            if i < bytes.len() {
+                i += 1;
+            }
+            v
+        } else {
+            let v_start = i;
+            while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            std::str::from_utf8(&bytes[v_start..i]).unwrap().to_string()
+        };
+        out.push((key, value));
+    }
+    out
+}
+
+fn parse_lattice(raw: &str) -> Result<SimulationBox, String> {
+    let parts: Vec<&str> = raw.split_ascii_whitespace().collect();
+    if parts.len() != 9 {
+        return Err(format!(
+            "`Lattice` expected 9 components, got {}",
+            parts.len()
+        ));
+    }
+    let mut vals = [0.0_f64; 9];
+    for (i, p) in parts.iter().enumerate() {
+        vals[i] = p
+            .parse::<f64>()
+            .map_err(|_| format!("`Lattice` component {i} is not a number: {p:?}"))?;
+    }
+    for (i, v) in vals.iter().enumerate() {
+        if !v.is_finite() {
+            return Err(format!("`Lattice` component {i} is not finite: {v}"));
+        }
+    }
+    // Lower-triangular form: positions 1, 2, 5 (a_y, a_z, b_z) must be 0.
+    for (i, name) in [(1, "a_y"), (2, "a_z"), (5, "b_z")].iter() {
+        if vals[*i] != 0.0 {
+            return Err(format!(
+                "`Lattice` has non-zero upper-triangular component `{name}` = {}",
+                vals[*i]
+            ));
+        }
+    }
+    let lx = vals[0] as f32;
+    let xy = vals[3] as f32;
+    let ly = vals[4] as f32;
+    let xz = vals[6] as f32;
+    let yz = vals[7] as f32;
+    let lz = vals[8] as f32;
+    SimulationBox::new(lx, ly, lz, xy, xz, yz)
+        .map_err(|e| format!("`Lattice` produced an invalid SimulationBox: {e}"))
+}
+
+fn parse_properties(raw: &str) -> Result<(bool, bool), String> {
+    match raw {
+        "species:S:1:pos:R:3" => Ok((false, false)),
+        "species:S:1:pos:R:3:image:I:3" => Ok((false, true)),
+        "species:S:1:pos:R:3:velo:R:3" => Ok((true, false)),
+        "species:S:1:pos:R:3:velo:R:3:image:I:3" => Ok((true, true)),
+        other => Err(format!(
+            "`Properties` value `{other}` is not one of the four accepted forms"
+        )),
+    }
+}
+
+fn parse_f64_col(
+    raw: &str,
+    line_number: usize,
+    column: &'static str,
+) -> Result<f64, TrajectoryReaderError> {
+    let v: f64 = raw
+        .parse()
+        .map_err(|_| TrajectoryReaderError::MalformedRow {
+            line_number,
+            reason: format!("column `{column}` is not a number: {raw:?}"),
+        })?;
+    if !v.is_finite() {
+        return Err(TrajectoryReaderError::MalformedRow {
+            line_number,
+            reason: format!("column `{column}` is not finite: {v}"),
+        });
+    }
+    Ok(v)
+}
+
+fn parse_i32_col(
+    raw: &str,
+    line_number: usize,
+    column: &'static str,
+) -> Result<i32, TrajectoryReaderError> {
+    raw.parse::<i32>().map_err(|_| TrajectoryReaderError::MalformedRow {
+        line_number,
+        reason: format!("column `{column}` is not an i32: {raw:?}"),
+    })
 }

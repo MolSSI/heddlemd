@@ -28,5 +28,8 @@ target/
 *.out.log
 *.out.timings
 
+# Analysis output (`dynamics analyze` writes `<root>.out.<name>.csv`).
+*.out.*.csv
+
 # mdBook build output
 book/book/

@@ -472,6 +472,14 @@
     "title": "Reject non-positive compressibility",
     "type": "scenario"
   },
+  "rq-06a8b986": {
+    "decl": "### Types",
+    "file": "analysis/rdf",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-06c0e11a": {
     "decl": "Scenario: Exclusion row with non-numeric scale",
     "file": "forces/topology",
@@ -553,6 +561,14 @@
     "level": 3,
     "refs": [],
     "title": "Types",
+    "type": "section"
+  },
+  "rq-0806c514": {
+    "decl": "### Normalisation",
+    "file": "analysis/rdf",
+    "level": 3,
+    "refs": [],
+    "title": "Normalisation",
     "type": "section"
   },
   "rq-08131b48": {
@@ -688,6 +704,13 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-0b5e6b6c": {
+    "decl": "Scenario: `between` order does not matter",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "`between` order does not matter",
+    "type": "scenario"
   },
   "rq-0b5f0881": {
     "decl": "Scenario: Missing seed rejected",
@@ -877,6 +900,14 @@
     "refs": [],
     "title": "apply_post launches the expected kernel set",
     "type": "scenario"
+  },
+  "rq-0ebfcbbc": {
+    "decl": "## Frame selection",
+    "file": "analysis/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Frame selection",
+    "type": "section"
   },
   "rq-0ec0f65d": {
     "decl": "## Gherkin Scenarios",
@@ -1496,6 +1527,14 @@
     "title": "`kinetic_energy_reduce`",
     "type": "section"
   },
+  "rq-175e5b45": {
+    "decl": "## Reproducibility contract",
+    "file": "analysis/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Reproducibility contract",
+    "type": "section"
+  },
   "rq-17666e4f": {
     "decl": "Scenario: Open fails when the parent directory does not exist",
     "file": "io/trajectory-output",
@@ -1564,6 +1603,13 @@
     "file": "integration/mtk-npt",
     "refs": [],
     "title": "At equilibrium, time-averaged pressure tracks P_ext",
+    "type": "scenario"
+  },
+  "rq-17fd53d9": {
+    "decl": "Scenario: Histogram accumulates across multiple frames in order",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Histogram accumulates across multiple frames in order",
     "type": "scenario"
   },
   "rq-18165336": {
@@ -2406,6 +2452,14 @@
     "title": "Config angle_type with potential != \"harmonic\" is rejected",
     "type": "scenario"
   },
+  "rq-22755b52": {
+    "decl": "### Schema",
+    "file": "analysis/framework",
+    "level": 3,
+    "refs": [],
+    "title": "Schema",
+    "type": "section"
+  },
   "rq-22d0ce50": {
     "decl": "### Types",
     "file": "forces/topology",
@@ -2472,6 +2526,13 @@
     "title": "MorseBondedState",
     "type": "api-item"
   },
+  "rq-23678707": {
+    "decl": "Scenario: Refuse to overwrite an existing CSV at the resolved output path",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Refuse to overwrite an existing CSV at the resolved output path",
+    "type": "scenario"
+  },
   "rq-23806456": {
     "decl": "Scenario: MtkNpt integrator with all required fields is accepted",
     "file": "io/config-schema",
@@ -2530,6 +2591,13 @@
     "refs": [],
     "title": "Per-pair-type cutoff zeroes only the pair whose cutoff it exceeds",
     "type": "scenario"
+  },
+  "rq-2456a906": {
+    "decl": "- `TrajectoryReader::first_frame_header: TrajectoryFrameHeader`",
+    "file": "io/trajectory-output",
+    "refs": [],
+    "title": "TrajectoryReader",
+    "type": "api-item"
   },
   "rq-247e3799": {
     "decl": "Scenario: dt = 0 leaves positions unchanged",
@@ -2739,6 +2807,13 @@
     "title": "Doubling epsilon doubles the force at the same separation",
     "type": "scenario"
   },
+  "rq-270637dd": {
+    "decl": "Scenario: Pre-flight refuses to overwrite an existing output file",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Pre-flight refuses to overwrite an existing output file",
+    "type": "scenario"
+  },
   "rq-278cb574": {
     "decl": "- `SettleBuilder` — implements `ConstraintBuilder` with",
     "file": "integration/settle",
@@ -2830,6 +2905,13 @@
     "refs": [],
     "title": "`[coulomb]` (optional table)",
     "type": "section"
+  },
+  "rq-28fd5e34": {
+    "decl": "Scenario: Reject a name containing non-ASCII characters",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Reject a name containing non-ASCII characters",
+    "type": "scenario"
   },
   "rq-2941eebb": {
     "decl": "## Feature API",
@@ -3090,6 +3172,14 @@
     "title": "Velocity generation",
     "type": "section"
   },
+  "rq-2be9d8e3": {
+    "decl": "### Functions",
+    "file": "analysis/framework",
+    "level": 3,
+    "refs": [],
+    "title": "Functions",
+    "type": "section"
+  },
   "rq-2c1bb918": {
     "decl": "Scenario: log_column_names returns [\"csvr_conserved\"]",
     "file": "integration/csvr",
@@ -3110,6 +3200,14 @@
     "level": 3,
     "refs": [],
     "title": "CUDA kernels",
+    "type": "section"
+  },
+  "rq-2caa4efb": {
+    "decl": "## Feature API",
+    "file": "analysis/rdf",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
     "type": "section"
   },
   "rq-2cb82d44": {
@@ -3164,6 +3262,13 @@
     "title": "Reduction with all zero neighbor counts produces zero net forces",
     "type": "scenario"
   },
+  "rq-2d107b4d": {
+    "decl": "Scenario: Reject an empty `[[analyses]]` array",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Reject an empty `[[analyses]]` array",
+    "type": "scenario"
+  },
   "rq-2d109b3a": {
     "decl": "Scenario: C-rescale composes with langevin-baoab",
     "file": "integration/c-rescale-barostat",
@@ -3205,6 +3310,13 @@
     "refs": [],
     "title": "Built-in potentials report their canonical class",
     "type": "scenario"
+  },
+  "rq-2dc76b67": {
+    "decl": "- `RdfBuilder` — implements `AnalysisBuilder` (see",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "RdfBuilder",
+    "type": "api-item"
   },
   "rq-2e15fed7": {
     "decl": "## Launch Configuration",
@@ -3347,7 +3459,12 @@
   "rq-30c21c70": {
     "decl": "- `LintOverall` — `enum { Ok, Fail }`. `LintReport::overall` is `Ok`",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LintOverall",
     "type": "api-item"
   },
@@ -3491,7 +3608,12 @@
   "rq-334f5685": {
     "decl": "- `LintStage` — one row of the report. Fields:",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LintStage",
     "type": "api-item"
   },
@@ -3698,6 +3820,28 @@
     "title": "Data Model",
     "type": "section"
   },
+  "rq-362c9774": {
+    "decl": "## Feature API",
+    "file": "analysis/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
+  "rq-36665dda": {
+    "decl": "Scenario: g_r normalisation matches the ideal-gas reference",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "g_r normalisation matches the ideal-gas reference",
+    "type": "scenario"
+  },
+  "rq-36ec88d9": {
+    "decl": "Scenario: Missing trajectory file is reported before any analysis builds",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Missing trajectory file is reported before any analysis builds",
+    "type": "scenario"
+  },
   "rq-36f771d7": {
     "decl": "Scenario: File with image:I:3 parses three integer columns per row",
     "file": "io/init-state-file",
@@ -3783,6 +3927,13 @@
     "title": "Group Ordering",
     "type": "section"
   },
+  "rq-3825d7c4": {
+    "decl": "- `AnalysisRuntimeError` — per-analysis error type returned by the",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "AnalysisRuntimeError",
+    "type": "api-item"
+  },
   "rq-38285db7": {
     "decl": "# Comments start with '#' and run to end of line. Blank lines are",
     "file": "forces/topology",
@@ -3853,6 +4004,14 @@
     "refs": [],
     "title": "Reject when explicit IDs have the wrong length",
     "type": "scenario"
+  },
+  "rq-3933f0c3": {
+    "decl": "## Out of Scope",
+    "file": "analysis/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-393a7932": {
     "decl": "Scenario: rescale_velocities with factor=1.0 is the identity",
@@ -4289,6 +4448,13 @@
     "title": "TrajectoryWriter",
     "type": "api-item"
   },
+  "rq-40dd09ae": {
+    "decl": "Scenario: Reject `between` referencing a type with zero particles",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Reject `between` referencing a type with zero particles",
+    "type": "scenario"
+  },
   "rq-40ed9975": {
     "decl": "Scenario: Langevin BAOAB missing friction is rejected",
     "file": "io/config-schema",
@@ -4400,6 +4566,13 @@
     "file": "forces/framework",
     "refs": [],
     "title": "ForceField with only a bonded potential owns no neighbor list",
+    "type": "scenario"
+  },
+  "rq-43567b30": {
+    "decl": "Scenario: First bin's `r` column equals 0.5 · Δr",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "First bin's `r` column equals 0.5 · Δr",
     "type": "scenario"
   },
   "rq-43819abc": {
@@ -4745,6 +4918,22 @@
     "title": "Number formatting",
     "type": "section"
   },
+  "rq-4a6d949d": {
+    "decl": "## Gherkin Scenarios",
+    "file": "analysis/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-4a6ec476": {
+    "decl": "### Field reference",
+    "file": "analysis/rdf",
+    "level": 3,
+    "refs": [],
+    "title": "Field reference",
+    "type": "section"
+  },
   "rq-4a8de06c": {
     "decl": "- `ParticleBuffers` — device-side mirror. Holds a `CudaSlice<f32>` for each",
     "file": "particle-state",
@@ -4929,6 +5118,13 @@
     "title": "Overwrite policy",
     "type": "section"
   },
+  "rq-4d1082c4": {
+    "decl": "# Feature: Radial Distribution Function Analysis (`rdf`)",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Feature: Radial Distribution Function Analysis (`rdf`)",
+    "type": "file"
+  },
   "rq-4d226dff": {
     "decl": "Scenario: Re-upload after host-side mutation",
     "file": "particle-state",
@@ -4957,6 +5153,13 @@
     "refs": [],
     "title": "CUDA Kernels",
     "type": "section"
+  },
+  "rq-4e095363": {
+    "decl": "Scenario: Unknown analysis kind is reported with UnknownKind",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Unknown analysis kind is reported with UnknownKind",
+    "type": "scenario"
   },
   "rq-4e9e09f0": {
     "decl": "Scenario: apply_post launches the expected kernel set",
@@ -5060,7 +5263,12 @@
   "rq-4ff84310": {
     "decl": "- `lint_simulation(config_path: &Path, with_gpu: bool) -> LintReport`",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "lint_simulation",
     "type": "api-item"
   },
@@ -5387,6 +5595,13 @@
     "title": "vv_kick_lossless on an empty state is a no-op",
     "type": "scenario"
   },
+  "rq-56306e1f": {
+    "decl": "Scenario: Frames at distances >= r_max do not contribute",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Frames at distances >= r_max do not contribute",
+    "type": "scenario"
+  },
   "rq-56364532": {
     "decl": "## Output File Format",
     "file": "performance-analysis",
@@ -5644,6 +5859,14 @@
     "title": "vv_kick_drift_lossless handles a block-non-aligned particle count",
     "type": "scenario"
   },
+  "rq-5a6f582d": {
+    "decl": "## Analyze lint flow",
+    "file": "analysis/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Analyze lint flow",
+    "type": "section"
+  },
   "rq-5aae9633": {
     "decl": "### `Thermostat` trait overrides",
     "file": "integration/csvr",
@@ -5689,6 +5912,14 @@
     "refs": [],
     "title": "Comments and blank lines are tolerated",
     "type": "scenario"
+  },
+  "rq-5bad4341": {
+    "decl": "### Validation order",
+    "file": "analysis/framework",
+    "level": 3,
+    "refs": [],
+    "title": "Validation order",
+    "type": "section"
   },
   "rq-5bfa5b37": {
     "decl": "Scenario: LosslessBuffers::new allocates six zero-initialised residual buffers",
@@ -5814,6 +6045,13 @@
     "title": "Missing tau rejected",
     "type": "scenario"
   },
+  "rq-5de7798b": {
+    "decl": "Scenario: Reproducibility across two analyze runs",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Reproducibility across two analyze runs",
+    "type": "scenario"
+  },
   "rq-5ded1806": {
     "decl": "Scenario: Absolute paths are honored unchanged",
     "file": "io/config-schema",
@@ -5886,6 +6124,13 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-5f1d5034": {
+    "decl": "Scenario: Reject `n_bins = 0`",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Reject `n_bins = 0`",
+    "type": "scenario"
+  },
   "rq-5f29f928": {
     "decl": "### Constraint entries",
     "file": "forces/topology",
@@ -5943,6 +6188,13 @@
     "title": "SimulationBox",
     "type": "api-item"
   },
+  "rq-5fe9c9e2": {
+    "decl": "Scenario: Frame selection: stride > 1 reduces frames consumed",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Frame selection: stride > 1 reduces frames consumed",
+    "type": "scenario"
+  },
   "rq-5ffa0551": {
     "decl": "Scenario: check_min_perpendicular_width flags direction \"c\" when only w_c fails",
     "file": "simulation-box",
@@ -5971,6 +6223,21 @@
     "refs": [],
     "title": "Config",
     "type": "api-item"
+  },
+  "rq-60c1e792": {
+    "decl": "## Out of Scope",
+    "file": "analysis/rdf",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
+  "rq-60c534f2": {
+    "decl": "Scenario: Last bin's `r` column equals (n_bins - 0.5) · Δr",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Last bin's `r` column equals (n_bins - 0.5) · Δr",
+    "type": "scenario"
   },
   "rq-60f445b2": {
     "decl": "Scenario: Construct a ForceField with zero slots",
@@ -6001,6 +6268,14 @@
     "level": 2,
     "refs": [],
     "title": "Gherkin Scenarios",
+    "type": "section"
+  },
+  "rq-618864ce": {
+    "decl": "## Analyze flow",
+    "file": "analysis/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Analyze flow",
     "type": "section"
   },
   "rq-61889ff1": {
@@ -6215,6 +6490,14 @@
     "title": "Always-on stages (CPU only)",
     "type": "section"
   },
+  "rq-65ad92d0": {
+    "decl": "### `[[analyses]]` array",
+    "file": "analysis/framework",
+    "level": 3,
+    "refs": [],
+    "title": "`[[analyses]]` array",
+    "type": "section"
+  },
   "rq-6606584b": {
     "decl": "Scenario: Config rejected by load_config",
     "file": "simulation-runner",
@@ -6301,6 +6584,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Velocity-Verlet lossless defaults to false when omitted",
+    "type": "scenario"
+  },
+  "rq-66f2679e": {
+    "decl": "Scenario: Output CSV has exactly `n_bins` data rows",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Output CSV has exactly `n_bins` data rows",
     "type": "scenario"
   },
   "rq-6745e7c5": {
@@ -6605,6 +6895,14 @@
     "title": "Unwrap invariant holds across wrap_position_with_image_count",
     "type": "scenario"
   },
+  "rq-6c5a7246": {
+    "decl": "### Types",
+    "file": "analysis/framework",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-6c5b4246": {
     "decl": "### Types",
     "file": "integration/framework",
@@ -6812,6 +7110,13 @@
     "refs": [],
     "title": "Plan walk on empty Langevin state is a no-op",
     "type": "scenario"
+  },
+  "rq-6eb18608": {
+    "decl": "- `lint_analyses_with_registries(config_path: &Path, registries: &Registries) -> LintReport`",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "lint_analyses_with_registries",
+    "type": "api-item"
   },
   "rq-6ec75323": {
     "decl": "### `Time`",
@@ -7144,6 +7449,14 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-7479022f": {
+    "decl": "### Reproducibility",
+    "file": "analysis/rdf",
+    "level": 3,
+    "refs": [],
+    "title": "Reproducibility",
+    "type": "section"
+  },
   "rq-74aa3a99": {
     "decl": "Scenario: Reject zero lz",
     "file": "simulation-box",
@@ -7250,6 +7563,14 @@
     "title": "neighbor_displacement_squared count equals one warm-up plus per-step launches",
     "type": "scenario"
   },
+  "rq-759d2445": {
+    "decl": "### Top-level fields",
+    "file": "analysis/framework",
+    "level": 3,
+    "refs": [],
+    "title": "Top-level fields",
+    "type": "section"
+  },
   "rq-75a9815d": {
     "decl": "Scenario: Constraint groups are sorted by minimum particle index",
     "file": "forces/topology",
@@ -7306,6 +7627,14 @@
     "level": 2,
     "refs": [],
     "title": "Determinism Guarantees",
+    "type": "section"
+  },
+  "rq-76d8bba2": {
+    "decl": "## `<root>.in.analysis` file",
+    "file": "analysis/framework",
+    "level": 2,
+    "refs": [],
+    "title": "`<root>.in.analysis` file",
     "type": "section"
   },
   "rq-77292dee": {
@@ -7833,6 +8162,14 @@
     "title": "Rescale is skipped when K_old = 0",
     "type": "scenario"
   },
+  "rq-7da27d04": {
+    "decl": "### Registration",
+    "file": "analysis/rdf",
+    "level": 3,
+    "refs": [],
+    "title": "Registration",
+    "type": "section"
+  },
   "rq-7db97132": {
     "decl": "- `NeighborListState::rebuild(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`",
     "file": "forces/neighbor-list",
@@ -8065,6 +8402,14 @@
     "title": "Reject zero lx",
     "type": "scenario"
   },
+  "rq-828c169c": {
+    "decl": "### `analyze` subcommand",
+    "file": "simulation-runner",
+    "level": 3,
+    "refs": [],
+    "title": "`analyze` subcommand",
+    "type": "section"
+  },
   "rq-82acb52f": {
     "decl": "Scenario: Combiner is a single-threaded write per output element",
     "file": "forces/framework",
@@ -8153,6 +8498,13 @@
     "file": "integration/framework",
     "refs": [],
     "title": "Integrator",
+    "type": "api-item"
+  },
+  "rq-8464775b": {
+    "decl": "- `Analysis` — per-run handle returned by an `AnalysisBuilder`.",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Analysis",
     "type": "api-item"
   },
   "rq-846bdb8b": {
@@ -8248,6 +8600,13 @@
     "refs": [],
     "title": "Langevin BAOAB kind with valid parameters is accepted",
     "type": "scenario"
+  },
+  "rq-86f01d20": {
+    "decl": "- `AnalysisBuilder` — open-shaped builder trait. Mirrors",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "AnalysisBuilder",
+    "type": "api-item"
   },
   "rq-870ed681": {
     "decl": "Scenario: wrap_position_with_image_count returns the image triple together with the wrapped position",
@@ -8356,6 +8715,13 @@
     "title": "Feature: CSVR Stochastic Velocity Rescaling Thermostat",
     "type": "file"
   },
+  "rq-8914e9ff": {
+    "decl": "- `AnalyzeSummary` — public struct returned by `run_analyses` on",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "AnalyzeSummary",
+    "type": "api-item"
+  },
   "rq-894c16c4": {
     "decl": "Scenario: Defaults populate the output section when [output] is omitted",
     "file": "io/config-schema",
@@ -8390,6 +8756,14 @@
     "level": 3,
     "refs": [],
     "title": "Edge case: non-block-aligned buffer size",
+    "type": "section"
+  },
+  "rq-8a063042": {
+    "decl": "## Output file format",
+    "file": "analysis/rdf",
+    "level": 2,
+    "refs": [],
+    "title": "Output file format",
     "type": "section"
   },
   "rq-8a16e6d6": {
@@ -8437,6 +8811,13 @@
     "title": "Timings",
     "type": "api-item"
   },
+  "rq-8aae6b06": {
+    "decl": "Scenario: Frame selection: last_frame past end is rejected at trajectory-open time",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Frame selection: last_frame past end is rejected at trajectory-open time",
+    "type": "scenario"
+  },
   "rq-8abcd634": {
     "decl": "Scenario: The DriverError-to-TimingsError conversion is retained",
     "file": "error-handling",
@@ -8466,6 +8847,13 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-8b41bc4d": {
+    "decl": "Scenario: Two `dynamics analyze` runs on the same inputs produce byte-identical CSVs",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Two `dynamics analyze` runs on the same inputs produce byte-identical CSVs",
+    "type": "scenario"
+  },
   "rq-8b4243e0": {
     "decl": "### Functions and methods",
     "file": "io/log-output",
@@ -8485,6 +8873,13 @@
     "refs": [],
     "title": "minimum_image of the zero displacement is zero",
     "type": "scenario"
+  },
+  "rq-8c1de56e": {
+    "decl": "- `run_analyses(config_path: &Path) -> Result<AnalyzeSummary, AnalyzeError>`",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "run_analyses",
+    "type": "api-item"
   },
   "rq-8c220501": {
     "decl": "## Gherkin Scenarios",
@@ -8514,6 +8909,13 @@
     "refs": [],
     "title": "plan",
     "type": "api-item"
+  },
+  "rq-8cec425d": {
+    "decl": "Scenario: Cross-type RDF on a two-particle frame",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Cross-type RDF on a two-particle frame",
+    "type": "scenario"
   },
   "rq-8d18d6ee": {
     "decl": "## Gherkin Scenarios",
@@ -9083,6 +9485,14 @@
     "title": "Reduction with zero count writes zero to energy and virial targets",
     "type": "scenario"
   },
+  "rq-964b59fd": {
+    "decl": "### Columns",
+    "file": "analysis/rdf",
+    "level": 3,
+    "refs": [],
+    "title": "Columns",
+    "type": "section"
+  },
   "rq-965c3b59": {
     "decl": "Scenario: Implicit IDs equal data-row order",
     "file": "io/init-state-file",
@@ -9130,6 +9540,13 @@
     "refs": [],
     "title": "Step Plan",
     "type": "section"
+  },
+  "rq-972e319b": {
+    "decl": "- `TrajectoryFrameHeader` — `Clone`, `Debug` struct exposing:",
+    "file": "io/trajectory-output",
+    "refs": [],
+    "title": "TrajectoryFrameHeader",
+    "type": "api-item"
   },
   "rq-975b5ae0": {
     "decl": "Scenario: Newton's third law is bit-exact for non-boundary displacements",
@@ -9325,6 +9742,20 @@
     "refs": [],
     "title": "minimum_image at the +L/2 boundary maps to -L/2",
     "type": "scenario"
+  },
+  "rq-9aacb1f9": {
+    "decl": "Scenario: Same-type RDF on a two-particle frame at exactly r_max - epsilon",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Same-type RDF on a two-particle frame at exactly r_max - epsilon",
+    "type": "scenario"
+  },
+  "rq-9adb9a5b": {
+    "decl": "- `TrajectoryReaderError` — error type. Variants:",
+    "file": "io/trajectory-output",
+    "refs": [],
+    "title": "TrajectoryReaderError",
+    "type": "api-item"
   },
   "rq-9af1f9dc": {
     "decl": "Scenario: Minimum-image works for a triclinic box",
@@ -9566,6 +9997,14 @@
     "title": "Sections may appear in any order",
     "type": "scenario"
   },
+  "rq-9dd82f60": {
+    "decl": "## Gherkin Scenarios",
+    "file": "analysis/rdf",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-9df1eedb": {
     "decl": "Scenario: Bond row with wrong column count",
     "file": "forces/topology",
@@ -9646,7 +10085,12 @@
   "rq-9ed993de": {
     "decl": "- `lint_simulation_with_registries(config_path: &Path, registries: &Registries, with_gpu: bool) -> LintReport`",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "lint_simulation_with_registries",
     "type": "api-item"
   },
@@ -9701,6 +10145,13 @@
     "refs": [],
     "title": "Algorithm",
     "type": "section"
+  },
+  "rq-9fa942b1": {
+    "decl": "- `load_analysis_config(path: &Path) -> Result<AnalysisConfig, AnalyzeError>`",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "load_analysis_config",
+    "type": "api-item"
   },
   "rq-9fbba3be": {
     "decl": "- `StepPlan` — ordered list of `SubStep`s describing one full",
@@ -9826,6 +10277,13 @@
     "file": "integration/nose-hoover-chain",
     "refs": [],
     "title": "Log file header includes nhc_conserved when NHC is the thermostat",
+    "type": "scenario"
+  },
+  "rq-a1735ae4": {
+    "decl": "Scenario: Reject an analysis filename that does not end in `.in.analysis`",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Reject an analysis filename that does not end in `.in.analysis`",
     "type": "scenario"
   },
   "rq-a199e0aa": {
@@ -10120,6 +10578,13 @@
     "title": "run_simulation_with_registries",
     "type": "api-item"
   },
+  "rq-a7211dfd": {
+    "decl": "- `Registries` (the bundle defined in `rqm/simulation-runner.md`)",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Registries",
+    "type": "api-item"
+  },
   "rq-a722f7ce": {
     "decl": "Scenario: log_column_values returns the cached pressure, post-step volume,",
     "file": "integration/mtk-npt",
@@ -10144,7 +10609,12 @@
   "rq-a831fb00": {
     "decl": "- `LintReport` — structured result of `lint_simulation`. All fields",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LintReport",
     "type": "api-item"
   },
@@ -10331,6 +10801,13 @@
       }
     ],
     "title": "Integrator",
+    "type": "api-item"
+  },
+  "rq-aa91623d": {
+    "decl": "- `AnalysisConfig` — parsed `<root>.in.analysis`. All fields are",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "AnalysisConfig",
     "type": "api-item"
   },
   "rq-aad6ca63": {
@@ -10621,6 +11098,13 @@
     "title": "NeighborListError::TooManyCells renders as prose",
     "type": "scenario"
   },
+  "rq-af1c88ae": {
+    "decl": "- `TrajectoryReader::open(path: &Path, type_names: &[&str]) -> Result<TrajectoryReader, TrajectoryReaderError>`",
+    "file": "io/trajectory-output",
+    "refs": [],
+    "title": "TrajectoryReader",
+    "type": "api-item"
+  },
   "rq-af2461ae": {
     "decl": "## Launch Configuration",
     "file": "integration/andersen",
@@ -10872,6 +11356,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "Lossless run includes lossless kick rows and excludes lossy rows",
+    "type": "scenario"
+  },
+  "rq-b306b357": {
+    "decl": "Scenario: Lint reports a trajectory open failure under the trajectory stage",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Lint reports a trajectory open failure under the trajectory stage",
     "type": "scenario"
   },
   "rq-b3086891": {
@@ -11201,6 +11692,13 @@
     "title": "μ clamped to safety floor when the formula yields a non-positive μ³",
     "type": "scenario"
   },
+  "rq-ba2f07bd": {
+    "decl": "Scenario: Reject `between` referencing an undeclared type",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Reject `between` referencing an undeclared type",
+    "type": "scenario"
+  },
   "rq-ba37ec6b": {
     "decl": "Scenario: Angles are sorted by (atom_j, atom_i, atom_k)",
     "file": "forces/topology",
@@ -11284,6 +11782,13 @@
     "title": "Load a file with velocities",
     "type": "scenario"
   },
+  "rq-bb96fc2f": {
+    "decl": "Scenario: Reject two analyses sharing the same explicit output_path",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Reject two analyses sharing the same explicit output_path",
+    "type": "scenario"
+  },
   "rq-bbb25583": {
     "decl": "Scenario: register_potential appends to the bundle's PotentialRegistry",
     "file": "simulation-runner",
@@ -11348,6 +11853,13 @@
     "refs": [],
     "title": "Write_row with mismatched extras length panics in debug builds",
     "type": "scenario"
+  },
+  "rq-bcf7e0eb": {
+    "decl": "- `lint_analyses(config_path: &Path) -> LintReport`",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "lint_analyses",
+    "type": "api-item"
   },
   "rq-bd149f52": {
     "decl": "Scenario: Acceleration scales inversely with mass",
@@ -11493,6 +12005,13 @@
     "title": "ParticleStateError",
     "type": "api-item"
   },
+  "rq-bedbd6d9": {
+    "decl": "Scenario: Reject an output_path equal to the simulation's log file",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Reject an output_path equal to the simulation's log file",
+    "type": "scenario"
+  },
   "rq-bee8e566": {
     "decl": "## Out of Scope",
     "file": "forces/coulomb-pair-force",
@@ -11537,6 +12056,13 @@
     "file": "forces/coulomb-pair-force",
     "refs": [],
     "title": "Self slot in trivial-mode neighbor list yields zero",
+    "type": "scenario"
+  },
+  "rq-bf98584a": {
+    "decl": "Scenario: Reject an analysis filename whose derived root is empty",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Reject an analysis filename whose derived root is empty",
     "type": "scenario"
   },
   "rq-bfa0cc5a": {
@@ -11864,6 +12390,13 @@
     "title": "Pair with Coulomb exclusion scale 0.0 contributes nothing",
     "type": "scenario"
   },
+  "rq-c505f34b": {
+    "decl": "Scenario: Same-type RDF on a one-particle frame yields zero counts",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Same-type RDF on a one-particle frame yields zero counts",
+    "type": "scenario"
+  },
   "rq-c50c6f84": {
     "decl": "Scenario: Log file header includes andersen_conserved when Andersen is the thermostat",
     "file": "integration/andersen",
@@ -11964,6 +12497,13 @@
     "title": "Smoke Test",
     "type": "section"
   },
+  "rq-c67ad79e": {
+    "decl": "Scenario: Lint reports a builder geometric failure under the analyses stage",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Lint reports a builder geometric failure under the analyses stage",
+    "type": "scenario"
+  },
   "rq-c6adba60": {
     "decl": "Scenario: λ > 1 when K_old < K_target (system needs heating)",
     "file": "integration/berendsen",
@@ -11977,6 +12517,13 @@
     "refs": [],
     "title": "spme_force_gather",
     "type": "api-item"
+  },
+  "rq-c70f6309": {
+    "decl": "Scenario: Empty-bin g_r is exactly 0.0",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Empty-bin g_r is exactly 0.0",
+    "type": "scenario"
   },
   "rq-c7420b98": {
     "decl": "## Feature API",
@@ -12111,6 +12658,21 @@
     "title": "collision_rate · dt > 1 is clamped to p = 1 (massive Andersen)",
     "type": "scenario"
   },
+  "rq-c9a3109a": {
+    "decl": "- `run_analyses_with_registries(config_path: &Path, registries: &Registries) -> Result<AnalyzeSummary, AnalyzeError>`",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "run_analyses_with_registries",
+    "type": "api-item"
+  },
+  "rq-c9b62a3c": {
+    "decl": "## Algorithm",
+    "file": "analysis/rdf",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
+  },
   "rq-c9da25a7": {
     "decl": "Scenario: Reduction does not modify positions, velocities, or masses",
     "file": "pair-reduction",
@@ -12146,12 +12708,26 @@
     "title": "log_column_values returns ke + pe − cumulative_injection",
     "type": "scenario"
   },
+  "rq-ca13c67e": {
+    "decl": "Scenario: A custom analysis builder composes with the built-ins",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "A custom analysis builder composes with the built-ins",
+    "type": "scenario"
+  },
   "rq-ca356c08": {
     "decl": "Scenario: [thermostat] section absent yields config.thermostat = None",
     "file": "io/config-schema",
     "refs": [],
     "title": "[thermostat] section absent yields config.thermostat = None",
     "type": "scenario"
+  },
+  "rq-ca3ec865": {
+    "decl": "- `AnalysisEntry` — one row of the `[[analyses]]` array.",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "AnalysisEntry",
+    "type": "api-item"
   },
   "rq-ca49d49a": {
     "decl": "Scenario: A stretched bond's virial equals r * F_mag",
@@ -12291,6 +12867,13 @@
     "title": "cell_offsets contains the prefix sum of cell occupancies",
     "type": "scenario"
   },
+  "rq-cd7d7ee5": {
+    "decl": "- `AnalyzeError` — error type returned by `load_analysis_config`",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "AnalyzeError",
+    "type": "api-item"
+  },
   "rq-cdd5dc6d": {
     "decl": "## File Format",
     "file": "io/init-state-file",
@@ -12401,6 +12984,14 @@
     "title": "Fractional coordinates of every particle are invariant under apply",
     "type": "scenario"
   },
+  "rq-cf285ed5": {
+    "decl": "### Pair enumeration",
+    "file": "analysis/rdf",
+    "level": 3,
+    "refs": [],
+    "title": "Pair enumeration",
+    "type": "section"
+  },
   "rq-cf456bb4": {
     "decl": "# Column format: atom_i  atom_j  bond_type_name",
     "file": "forces/topology",
@@ -12472,6 +13063,13 @@
     "file": "integration/berendsen",
     "refs": [],
     "title": "cumulative_injection equals K_old · (λ² − 1) per invocation",
+    "type": "scenario"
+  },
+  "rq-cfd1d536": {
+    "decl": "Scenario: Reject an entry missing `between`",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Reject an entry missing `between`",
     "type": "scenario"
   },
   "rq-d01b6fb0": {
@@ -12551,6 +13149,14 @@
     "refs": [],
     "title": "Explicit [output] values override defaults",
     "type": "scenario"
+  },
+  "rq-d1814271": {
+    "decl": "### `TrajectoryReader`",
+    "file": "io/trajectory-output",
+    "level": 3,
+    "refs": [],
+    "title": "`TrajectoryReader`",
+    "type": "section"
   },
   "rq-d189e9be": {
     "decl": "Scenario: Missing tau is rejected",
@@ -12670,6 +13276,20 @@
     "title": "HostStage",
     "type": "api-item"
   },
+  "rq-d2b16164": {
+    "decl": "Scenario: Reject output_path equal to the trajectory",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Reject output_path equal to the trajectory",
+    "type": "scenario"
+  },
+  "rq-d2b595a3": {
+    "decl": "- `TrajectoryReader::frames(&mut self)` — convenience iterator",
+    "file": "io/trajectory-output",
+    "refs": [],
+    "title": "TrajectoryReader",
+    "type": "api-item"
+  },
   "rq-d2d0fb5f": {
     "decl": "### `Integrator` trait overrides",
     "file": "integration/mtk-npt",
@@ -12755,6 +13375,13 @@
     "refs": [],
     "title": "Box-Muller transform",
     "type": "section"
+  },
+  "rq-d4c17bd3": {
+    "decl": "Scenario: Reject `r_max` larger than half the box's minimum perpendicular width",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Reject `r_max` larger than half the box's minimum perpendicular width",
+    "type": "scenario"
   },
   "rq-d4d435c8": {
     "decl": "Scenario: integrator.execute receiving ForceEval surfaces UnexpectedSubStep",
@@ -12846,6 +13473,14 @@
     "title": "Counter packing",
     "type": "section"
   },
+  "rq-d6b9b019": {
+    "decl": "## Empty / degenerate cases",
+    "file": "analysis/rdf",
+    "level": 2,
+    "refs": [],
+    "title": "Empty / degenerate cases",
+    "type": "section"
+  },
   "rq-d6bd915a": {
     "decl": "Scenario: Pair exactly at cutoff yields the hard-cutoff value when switch == cutoff",
     "file": "forces/lj-pair-force",
@@ -12913,6 +13548,13 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-d79986d0": {
+    "decl": "- `AnalysisConfig::validate_against(&self, registries: &Registries) -> Result<(), AnalyzeError>`",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "AnalysisConfig",
+    "type": "api-item"
   },
   "rq-d801f67c": {
     "decl": "Scenario: compute_total_virial is deterministic",
@@ -13553,6 +14195,13 @@
     "title": "Feature: Pluggable Integration Framework",
     "type": "file"
   },
+  "rq-e0b5377f": {
+    "decl": "- `RdfAnalysis` — per-run handle. Fields are private; the type",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "RdfAnalysis",
+    "type": "api-item"
+  },
   "rq-e0ef1221": {
     "decl": "- `LogWriter::open(path: &Path, extra_columns: &[&str]) -> Result<LogWriter, LogWriterError>`",
     "file": "io/log-output",
@@ -13686,6 +14335,20 @@
     "title": "Box-generation refresh handles tilt mutation",
     "type": "scenario"
   },
+  "rq-e2cbe4fd": {
+    "decl": "Scenario: Lint reports `r_max` greater than half-box under the analyses stage",
+    "file": "analysis/rdf",
+    "refs": [],
+    "title": "Lint reports `r_max` greater than half-box under the analyses stage",
+    "type": "scenario"
+  },
+  "rq-e2e25bba": {
+    "decl": "- `TrajectoryReader::next_frame(&mut self) -> Result<Option<TrajectoryFrame>, TrajectoryReaderError>`",
+    "file": "io/trajectory-output",
+    "refs": [],
+    "title": "TrajectoryReader",
+    "type": "api-item"
+  },
   "rq-e2f03a25": {
     "decl": "## Launch Configuration",
     "file": "integration/berendsen",
@@ -13751,6 +14414,13 @@
     "refs": [],
     "title": "max_cutoff aggregation determines the neighbor-list radius",
     "type": "scenario"
+  },
+  "rq-e3ba8c3b": {
+    "decl": "- `AnalysisRegistry` — open-builder registry, mirrors",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "AnalysisRegistry",
+    "type": "api-item"
   },
   "rq-e3c3898a": {
     "decl": "Scenario: Forward FFT of a zero grid produces zero",
@@ -13875,6 +14545,14 @@
     "refs": [],
     "title": "Kernel does not write slots with k >= n",
     "type": "scenario"
+  },
+  "rq-e591b51f": {
+    "decl": "### Header and rows",
+    "file": "analysis/rdf",
+    "level": 3,
+    "refs": [],
+    "title": "Header and rows",
+    "type": "section"
   },
   "rq-e5b63a73": {
     "decl": "Scenario: Reject non-positive temperature",
@@ -14399,6 +15077,13 @@
     "title": "Units",
     "type": "section"
   },
+  "rq-ede9a68f": {
+    "decl": "Scenario: Reject stride = 0",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Reject stride = 0",
+    "type": "scenario"
+  },
   "rq-ee43e3d6": {
     "decl": "Scenario: Reject yoshida_order outside {1, 3, 5, 7}",
     "file": "integration/mtk-npt",
@@ -14427,6 +15112,13 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-ee7c4af4": {
+    "decl": "Scenario: Explicit `simulation` and `trajectory` override the implicit defaults",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Explicit `simulation` and `trajectory` override the implicit defaults",
+    "type": "scenario"
   },
   "rq-eea2f5f8": {
     "decl": "Scenario: Duplicate exclusion rejected",
@@ -14643,6 +15335,13 @@
     "title": "[integrator] rejects an unknown field for the chosen kind",
     "type": "scenario"
   },
+  "rq-f067cfe1": {
+    "decl": "Scenario: Reject duplicate analysis names",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Reject duplicate analysis names",
+    "type": "scenario"
+  },
   "rq-f08d7a33": {
     "decl": "## Per-Step Interface",
     "file": "integration/constraint-framework",
@@ -14661,6 +15360,13 @@
     "file": "forces/topology",
     "refs": [],
     "title": "Exclusion scale less than 0 rejected",
+    "type": "scenario"
+  },
+  "rq-f0c97cb7": {
+    "decl": "Scenario: Reject last_frame less than first_frame",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Reject last_frame less than first_frame",
     "type": "scenario"
   },
   "rq-f0d44c8f": {
@@ -14822,6 +15528,22 @@
     "title": "Cell-list scratch is reallocated alongside cell_offsets on box generation refresh",
     "type": "scenario"
   },
+  "rq-f2f2519f": {
+    "decl": "## CLI",
+    "file": "analysis/framework",
+    "level": 2,
+    "refs": [],
+    "title": "CLI",
+    "type": "section"
+  },
+  "rq-f32a2004": {
+    "decl": "## Output convention",
+    "file": "analysis/framework",
+    "level": 2,
+    "refs": [],
+    "title": "Output convention",
+    "type": "section"
+  },
   "rq-f33ca120": {
     "decl": "Scenario: Angle wings are canonicalised so atom_i < atom_k",
     "file": "forces/topology",
@@ -14850,6 +15572,20 @@
     "refs": [],
     "title": "nvcc invocation",
     "type": "section"
+  },
+  "rq-f388ae12": {
+    "decl": "Scenario: Successful run over the full trajectory",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Successful run over the full trajectory",
+    "type": "scenario"
+  },
+  "rq-f3e82236": {
+    "decl": "- `TrajectoryFrame` — borrowed view into the reader's internal",
+    "file": "io/trajectory-output",
+    "refs": [],
+    "title": "TrajectoryFrame",
+    "type": "api-item"
   },
   "rq-f45cdfb6": {
     "decl": "## Per-Step Kernel Sequence",
@@ -14893,6 +15629,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "[thermostat] rejects an unknown field for the chosen kind",
+    "type": "scenario"
+  },
+  "rq-f5166314": {
+    "decl": "Scenario: Load a valid minimal analysis file with implicit pairing",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Load a valid minimal analysis file with implicit pairing",
     "type": "scenario"
   },
   "rq-f5299d6e": {
@@ -15023,6 +15766,13 @@
     "file": "io/trajectory-output",
     "refs": [],
     "title": "Render multiple type names from indices",
+    "type": "scenario"
+  },
+  "rq-f76d0576": {
+    "decl": "Scenario: Missing sibling .in.toml under implicit pairing",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Missing sibling .in.toml under implicit pairing",
     "type": "scenario"
   },
   "rq-f7856bcc": {
@@ -15192,6 +15942,13 @@
     "title": "timings_path can be overridden in [output]",
     "type": "scenario"
   },
+  "rq-fa2fc3a9": {
+    "decl": "Scenario: `dynamics lint` on an .in.analysis path runs the analyze lint",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "`dynamics lint` on an .in.analysis path runs the analyze lint",
+    "type": "scenario"
+  },
   "rq-fa6f7414": {
     "decl": "Scenario: KE of empty input is zero",
     "file": "io/log-output",
@@ -15226,6 +15983,14 @@
     "refs": [],
     "title": "Bonds are canonicalised to (min, max)",
     "type": "scenario"
+  },
+  "rq-fb62c422": {
+    "decl": "## Schema",
+    "file": "analysis/rdf",
+    "level": 2,
+    "refs": [],
+    "title": "Schema",
+    "type": "section"
   },
   "rq-fb632dfc": {
     "decl": "### Periodic-boundary operations",
@@ -15369,6 +16134,13 @@
     "refs": [],
     "title": "Append frames in order",
     "type": "scenario"
+  },
+  "rq-fd8bb824": {
+    "decl": "# Feature: Analysis Framework and `dynamics analyze`",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Feature: Analysis Framework and `dynamics analyze`",
+    "type": "file"
   },
   "rq-fd90fab3": {
     "decl": "## Empty State and degenerate cases",
@@ -15533,7 +16305,12 @@
   "rq-ff560c3b": {
     "decl": "- `LintStatus` — per-stage outcome. Variants:",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LintStatus",
     "type": "api-item"
   },

@@ -15,6 +15,7 @@
 - [Init Files (Extended XYZ)](./guide/init-files.md)
 - [Output Files](./guide/output.md)
 - [Reproducibility](./guide/reproducibility.md)
+- [Analysis (`dynamics analyze`)](./guide/analysis.md)
 
 # Reference
 

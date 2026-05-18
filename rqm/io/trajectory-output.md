@@ -164,6 +164,96 @@ Total frame count when `trajectory_every > 0`:
 without panicking; programs that need crash-safe trajectories call
 `flush` explicitly and check the result.
 
+### `TrajectoryReader` <!-- rq-d1814271 -->
+
+`TrajectoryReader` opens a trajectory file written by
+`TrajectoryWriter` and exposes a frame-at-a-time iterator. It is
+used by `dynamics analyze` (see `rqm/analysis/framework.md`) and
+by any other consumer that needs to walk every frame in
+declaration order without holding the whole file in memory.
+
+Fields are private; the type encapsulates the buffered reader and
+the metadata extracted from the first frame's comment line.
+
+- `TrajectoryReader::open(path: &Path, type_names: &[&str]) -> Result<TrajectoryReader, TrajectoryReaderError>` <!-- rq-af1c88ae -->
+  - Opens the file at `path` read-only and wraps it in a buffered
+    reader. Reads the first frame's header to populate the public
+    `first_frame_header` field (see below) without consuming the
+    frame's data rows. Returns the reader on success.
+  - `type_names` is the same caller-supplied slice that
+    `load_init_state` accepts (`rqm/io/init-state-file.md`); each
+    data row's species name is looked up against this list to
+    populate `type_indices`.
+  - Failure modes:
+    - `Io(String)` — the underlying filesystem error.
+    - `Empty` — the file is empty.
+    - `MalformedHeader { line_number, reason }` — the first
+      frame's particle-count or comment-line attributes failed to
+      parse.
+    - `UnknownType { line_number, name }` — a species name on a
+      data row is not in `type_names`.
+
+- `TrajectoryReader::first_frame_header: TrajectoryFrameHeader` <!-- rq-2456a906 -->
+  — public, populated at `open` time. Carries the particle count,
+  the simulation box (parsed from the `Lattice` attribute), the
+  per-particle `type_indices` (length = particle count), and the
+  comment-line `Properties` decisions (`include_velocities`,
+  `include_images`). The framework guarantees these are constant
+  across the trajectory (the writer fixes them at construction);
+  the reader asserts them on every subsequent frame and surfaces
+  `FrameMismatch` if the assertion fails.
+
+- `TrajectoryReader::next_frame(&mut self) -> Result<Option<TrajectoryFrame>, TrajectoryReaderError>` <!-- rq-e2e25bba -->
+  - Returns `Ok(Some(frame))` for each successive frame in the
+    file, `Ok(None)` once end-of-file is reached cleanly, and
+    `Err(_)` on any parse failure.
+  - The returned `TrajectoryFrame` carries the parsed
+    `step: u64`, `time: f64`, position slices (and velocity /
+    image slices when `include_velocities` / `include_images`
+    are set on the first-frame header), and the per-frame
+    `sim_box: SimulationBox` re-parsed from the frame's `Lattice`
+    attribute.
+
+- `TrajectoryReader::frames(&mut self)` — convenience iterator <!-- rq-d2b595a3 -->
+  that calls `next_frame` until it returns `Ok(None)`. Yields
+  `Result<TrajectoryFrame, TrajectoryReaderError>` items so
+  callers can use `for frame in reader.frames() { ... }` patterns.
+
+- `TrajectoryFrameHeader` — `Clone`, `Debug` struct exposing: <!-- rq-972e319b -->
+  - `particle_count: usize`
+  - `sim_box: SimulationBox`
+  - `type_indices: Vec<u32>`
+  - `include_velocities: bool`
+  - `include_images: bool`
+
+- `TrajectoryFrame` — borrowed view into the reader's internal <!-- rq-f3e82236 -->
+  scratch buffers. Fields:
+  - `step: u64`
+  - `time: f64`
+  - `sim_box: SimulationBox` — per-frame parse of the `Lattice`
+    attribute (constant across frames in the v1 writer, but
+    re-parsed defensively so future barostat-driven box changes
+    work without a reader-side change).
+  - `type_indices: &[u32]`
+  - `positions_x: &[f32]`, `positions_y: &[f32]`, `positions_z: &[f32]`
+  - `velocities: Option<(&[f32], &[f32], &[f32])>`
+  - `images: Option<(&[i32], &[i32], &[i32])>`
+
+- `TrajectoryReaderError` — error type. Variants: <!-- rq-9adb9a5b -->
+  - `Io(String)`
+  - `Empty`
+  - `MalformedHeader { line_number: usize, reason: String }`
+  - `UnknownType { line_number: usize, name: String }`
+  - `FrameMismatch { line_number: usize, reason: String }` — a
+    subsequent frame's `particle_count`, `Properties`, or
+    `Lattice` lower-triangular shape disagrees with the first
+    frame's header in a way the reader cannot reconcile.
+  - `MalformedRow { line_number: usize, reason: String }` — a
+    data row failed to parse (wrong column count, non-finite
+    numeric value, etc.).
+  - `Truncated { expected: usize, got: usize, frame_index: u64 }`
+    — the file ended mid-frame.
+
 ### Number formatting <!-- rq-88ec92fc -->
 
 - Real numbers use Rust's `{:.9e}` (e.g. `3.400000095e-10` for the

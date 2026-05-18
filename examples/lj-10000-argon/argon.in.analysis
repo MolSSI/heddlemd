@@ -1,0 +1,8 @@
+schema_version = 1
+
+[[analyses]]
+name = "ar-ar"
+kind = "rdf"
+between = ["Ar", "Ar"]
+r_max = 3.5e-9
+n_bins = 200

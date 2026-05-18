@@ -12,4 +12,7 @@ pub use init_state::{InitImages, InitState, InitStateError, InitVelocities, load
 pub use log_output::{
     BOLTZMANN_J_PER_K, LogWriter, LogWriterError, compute_kinetic_energy, compute_temperature,
 };
-pub use trajectory::{TrajectoryWriter, TrajectoryWriterError};
+pub use trajectory::{
+    TrajectoryFrame, TrajectoryFrameHeader, TrajectoryFrameIter, TrajectoryReader,
+    TrajectoryReaderError, TrajectoryWriter, TrajectoryWriterError,
+};

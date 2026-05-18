@@ -1,21 +1,24 @@
 # Command-Line Interface
 
-The `dynamics` binary has two subcommands: `run` (executes the
-simulation) and `lint` (validates inputs without running).
+The `dynamics` binary has three subcommands: `run` (executes the
+simulation), `lint` (validates inputs without running), and `analyze`
+(post-processes a trajectory written by `run`).
 
 ## Usage
 
 ```
-dynamics run  <config-path>
-dynamics lint <config-path> [--with-gpu]
+dynamics run     <config-path>
+dynamics lint    <config-path> [--with-gpu]
+dynamics analyze <analysis-path>
 ```
 
 Invoking `dynamics` with no arguments, an unknown subcommand, or a
-subcommand without its required `<config-path>` argument prints
+subcommand without its required path argument prints
 
 ```
-usage: dynamics run  <config-path>
-       dynamics lint <config-path> [--with-gpu]
+usage: dynamics run     <config-path>
+       dynamics lint    <config-path> [--with-gpu]
+       dynamics analyze <analysis-path>
 ```
 
 to stderr and exits with code `1`.
@@ -85,11 +88,20 @@ long submission queue makes trial-and-error iteration expensive: run
 reported issues up front instead of after the queue eventually grants
 GPU time.
 
-- `--with-gpu` (optional) extends the lint to include device
-  initialisation, the cuFFT determinism smoke test (when SPME is
-  configured), the host-to-device upload, slot construction, and the
-  force-field allocation. Omit the flag to keep the lint CPU-only
-  (the default, suitable for login nodes without a CUDA device).
+The subcommand dispatches on the file extension:
+
+- `<path>.in.toml` runs the *simulation lint pipeline* (described
+  in *What it checks* below).
+- `<path>.in.analysis` runs the *analyze lint pipeline* (described
+  under [Analysis](../guide/analysis.md) and
+  `rqm/analysis/framework.md`).
+
+- `--with-gpu` (optional) is accepted only for the simulation lint
+  pipeline; it extends the lint to include device initialisation,
+  the cuFFT determinism smoke test (when SPME is configured), the
+  host-to-device upload, slot construction, and the force-field
+  allocation. Passing `--with-gpu` together with a
+  `.in.analysis` path is rejected (analysis is CPU-only in v1).
 - Lint writes no files at any time. Pre-existing output files are
   detected with `Path::exists()`; the filesystem is otherwise
   unchanged.
@@ -160,6 +172,49 @@ error: simulation box perpendicular width along lattice direction `a` is 2e-9, b
 |------|---------|
 | `0`  | Every check passed. |
 | `1`  | At least one check failed, or the CLI was invoked with bad arguments. |
+
+## `dynamics analyze <analysis-path>`
+
+Runs every analysis declared in `<analysis-path>` (a
+`<root>.in.analysis` file) against the trajectory it points at, and
+writes one CSV per analysis. See [Analysis](../guide/analysis.md) for
+the input-file schema, the implicit pairing rule, the trajectory
+selection knobs, and the built-in `rdf` kind.
+
+- `<analysis-path>` is the path to a `<root>.in.analysis` file. The
+  filename must end in `.in.analysis`. Relative paths are resolved
+  against the current working directory.
+- Implicit pairing: when the analysis file does not set `simulation`
+  or `trajectory` explicitly, the runner pairs with the sibling
+  `<root>.in.toml` (the same `<root>` as the analysis filename) and
+  reads the trajectory from that config's resolved
+  `output.trajectory_path`.
+- v1 is CPU-only; no `--with-gpu` flag.
+- Output files default to `<root>.out.<name>.csv` (where `<name>`
+  comes from each `[[analyses]]` entry's `name` field). Each
+  per-analysis `output_path` field overrides.
+- Pre-existing output files cause a hard error (`OutputExists`) at
+  pre-flight, before any frame is read.
+
+### On success
+
+Prints one line on stdout:
+
+```
+[dynamics] analyze complete: <K> analyses over <F> frames in <T> ms
+```
+
+where `<K>` is the number of analyses and `<F>` is the number of
+frames consumed after `first_frame`, `last_frame`, and `stride` are
+applied.
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| `0`  | Every analysis ran to completion and every CSV flushed. |
+| `1`  | Error before the trajectory pass: filename-convention violation, parse error, sibling-config load failure, trajectory open failure, output-path collision, pre-existing output. |
+| `2`  | Error during the trajectory pass or output write. |
 
 ## What is not provided
 

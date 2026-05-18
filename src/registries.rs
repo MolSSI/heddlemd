@@ -13,6 +13,7 @@
 // `new()` and register every builder explicitly) and pass it to
 // `run_simulation_with_registries`.
 
+use crate::analysis::{AnalysisBuilder, AnalysisRegistry};
 use crate::forces::{PotentialBuilder, PotentialRegistry};
 use crate::integrator::{
     BarostatBuilder, BarostatRegistry, ConstraintBuilder, ConstraintRegistry, IntegratorBuilder,
@@ -26,6 +27,7 @@ pub struct Registries {
     pub barostats: BarostatRegistry,
     pub constraint_types: ConstraintRegistry,
     pub potentials: PotentialRegistry,
+    pub analyses: AnalysisRegistry,
 }
 
 impl Registries {
@@ -36,6 +38,7 @@ impl Registries {
             barostats: BarostatRegistry::with_builtins(),
             constraint_types: ConstraintRegistry::with_builtins(),
             potentials: PotentialRegistry::with_builtins(),
+            analyses: AnalysisRegistry::with_builtins(),
         }
     }
 
@@ -46,6 +49,7 @@ impl Registries {
             barostats: BarostatRegistry::new(),
             constraint_types: ConstraintRegistry::new(),
             potentials: PotentialRegistry::new(),
+            analyses: AnalysisRegistry::new(),
         }
     }
 
@@ -67,6 +71,10 @@ impl Registries {
 
     pub fn register_potential(&mut self, builder: Box<dyn PotentialBuilder>) {
         self.potentials.register(builder);
+    }
+
+    pub fn register_analysis(&mut self, builder: Box<dyn AnalysisBuilder>) {
+        self.analyses.register(builder);
     }
 }
 

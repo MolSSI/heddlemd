@@ -145,11 +145,12 @@ this book or in `rqm/` where the feature is documented in full.
 - **Tagged-enum selection** for integrator / thermostat / barostat /
   constraint kinds; per-kind parameter validation via builder traits.
 - **Open registries.** Custom integrator, thermostat, barostat,
-  constraint, and potential builders can be registered alongside the
-  built-ins via `Registries::register_*`.
-- **Two CLI subcommands**: `dynamics run <config>` to execute and
+  constraint, potential, and **analysis** builders can be registered
+  alongside the built-ins via `Registries::register_*`.
+- **Three CLI subcommands**: `dynamics run <config>` to execute,
   `dynamics lint <config> [--with-gpu]` to validate inputs without
-  running. See [CLI Reference](reference/cli.md). No environment
+  running, and `dynamics analyze <analysis-path>` to post-process a
+  trajectory. See [CLI Reference](reference/cli.md). No environment
   variables — every parameter affecting the trajectory lives in the
   config.
 - **Input linter** for HPC contexts. `dynamics lint` runs the
@@ -158,7 +159,16 @@ this book or in `rqm/` where the feature is documented in full.
   geometry) without touching the GPU; an optional `--with-gpu` flag
   extends the lint through `init_device`, slot construction, and
   force-field allocation. Catches input errors on a login node before
-  a long submission queue runs the job.
+  a long submission queue runs the job. Dispatches on file extension:
+  `.in.toml` runs the simulation lint, `.in.analysis` runs the
+  analyze lint.
+- **In-tree post-processing**: `dynamics analyze` reads a
+  `<root>.in.analysis` file, walks the trajectory frame-by-frame
+  with `first_frame`/`last_frame`/`stride` selection, and writes one
+  CSV per declared analysis. CPU-only in v1; outputs are byte-
+  identical across runs. Ships the radial distribution function
+  (`rdf`) as the first built-in kind; see
+  [Analysis](guide/analysis.md).
 
 ## Diagnostics
 

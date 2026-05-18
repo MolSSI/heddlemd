@@ -1,3 +1,4 @@
+pub mod analysis;
 pub mod forces;
 pub mod gpu;
 pub mod integrator;

@@ -14,18 +14,22 @@ subsystem; it is the integration point.
 
 ## CLI <!-- rq-82d0c34a -->
 
-The `dynamics` binary carries two subcommands:
+The `dynamics` binary carries three subcommands:
 
 ```
-dynamics run  <config-path>
-dynamics lint <config-path> [--with-gpu]
+dynamics run     <config-path>
+dynamics lint    <config-path> [--with-gpu]
+dynamics analyze <analysis-path>
 ```
 
 `<config-path>` is the path to a TOML simulation config (see
-`config-schema.md`). Relative paths are resolved against the current
-working directory. No environment variables or configuration sources
-beyond the config file are accepted in schema v1; every parameter
-affecting the trajectory lives in the file the path points at.
+`config-schema.md`). `<analysis-path>` is the path to a TOML
+analysis config (see `rqm/analysis/framework.md`). Relative paths
+are resolved against the current working directory. No environment
+variables or configuration sources beyond the input file are
+accepted in schema v1; every parameter affecting the trajectory
+lives in the simulation config, every parameter affecting an
+analysis lives in the analysis config.
 
 Errors are reported as a single line on stderr beginning with
 `error: ` followed by a human-readable description that includes the
@@ -48,36 +52,68 @@ The full setup-and-loop pipeline is described under *Runner flow*.
 
 ### `lint` subcommand <!-- rq-c1d5b25d -->
 
-Validates the config and its referenced inputs against every error
-the runner can detect without executing the integration loop, then
-exits. The lint pipeline is described under *Lint flow*. Designed
-for HPC contexts where a long submission queue makes trial-and-error
-iteration expensive: `dynamics lint` runs cheaply on a login node and
-reports every issue that would cause a `run` to fail at setup time.
+Validates an input file and its referenced inputs against every
+error the runner can detect without executing the integration loop
+or trajectory pass, then exits. Dispatches on the input file's
+extension:
 
-- `--with-gpu` (optional flag) extends the lint to include device
+- `<path>.in.toml` runs the *simulation lint pipeline* described
+  under *Lint flow* in this file.
+- `<path>.in.analysis` runs the *analyze lint pipeline* described
+  under `rqm/analysis/framework.md`'s *Analyze lint flow*.
+- Any other extension is rejected with the existing filename-
+  convention error variant for the inferred kind.
+
+Designed for HPC contexts where a long submission queue makes
+trial-and-error iteration expensive: `dynamics lint` runs cheaply
+on a login node and reports every issue that would cause a `run`
+or `analyze` to fail at setup time.
+
+- `--with-gpu` (optional flag) is accepted only for the simulation
+  lint pipeline; it extends the lint to include device
   initialisation and full GPU-side setup (see *Lint flow*'s
-  *`--with-gpu` stages*). Omit the flag to keep the lint CPU-only
-  (the default, suitable for login nodes without a CUDA device).
+  *`--with-gpu` stages*). Passing `--with-gpu` to an
+  `.in.analysis` path is rejected at CLI-parse time (analysis is
+  CPU-only in v1).
 - Exit codes:
   - `0` — every check passed.
   - `1` — at least one check failed.
-- Lint writes no files. Pre-existing output files are detected with
-  `Path::exists()`; the filesystem is otherwise unchanged.
-- Stops at the first failed check (short-circuit). Subsequent stages
-  are reported as **skipped (earlier check failed)** in the
-  per-stage report (see *Lint flow*'s *Output format*).
+- Lint writes no files for either pipeline. Pre-existing output
+  files are detected with `Path::exists()`; the filesystem is
+  otherwise unchanged.
+- Stops at the first failed check (short-circuit). Subsequent
+  stages are reported as **skipped (earlier check failed)** in the
+  per-stage report.
+
+### `analyze` subcommand <!-- rq-828c169c -->
+
+Runs every analysis declared in an `<root>.in.analysis` file
+against the matching trajectory and writes one CSV per analysis.
+The pipeline, input-file schema, registry, and CSV output
+conventions are documented in `rqm/analysis/framework.md`; the
+first built-in analysis kind is documented in
+`rqm/analysis/rdf.md`.
+
+- Exit codes:
+  - `0` — every declared analysis ran to completion and every CSV
+    flushed.
+  - `1` — error before the trajectory pass (filename-convention
+    violation, analysis-file parse failure, sibling config load
+    failure, trajectory open failure, output-collision failure).
+  - `2` — error during the trajectory pass or output write.
 
 ### Usage error messages <!-- rq-7e5cb9f8 -->
 
 `dynamics` with no arguments, an unrecognised subcommand, a
-recognised subcommand without its required `<config-path>` argument,
-or `lint` with an unrecognised flag prints the following usage block
-to stderr and exits with code `1`:
+recognised subcommand without its required path argument,
+`lint --with-gpu` against an `.in.analysis` path, or `lint` with
+any other unrecognised flag prints the following usage block to
+stderr and exits with code `1`:
 
 ```
-usage: dynamics run  <config-path>
-       dynamics lint <config-path> [--with-gpu]
+usage: dynamics run     <config-path>
+       dynamics lint    <config-path> [--with-gpu]
+       dynamics analyze <analysis-path>
 ```
 
 ## Runner flow <!-- rq-ef902cf6 -->
@@ -752,11 +788,14 @@ wrapper that dispatches between the two on the first CLI argument.
   - `barostats: BarostatRegistry`
   - `constraint_types: ConstraintRegistry`
   - `potentials: PotentialRegistry`
+  - `analyses: AnalysisRegistry` — registry consulted by
+    `dynamics analyze`; see `rqm/analysis/framework.md`.
 
   Constructors:
   - `Registries::with_builtins() -> Registries` — every inner
     registry is `XRegistry::with_builtins()`. Used by
-    `run_simulation` (the default-built-ins convenience wrapper).
+    `run_simulation` (the default-built-ins convenience wrapper)
+    and by `run_analyses` (the analyze equivalent).
   - `Registries::new() -> Registries` — every inner registry is
     `XRegistry::new()` (empty). Callers that want full control
     over registration order start from `new()` and register every
@@ -769,6 +808,7 @@ wrapper that dispatches between the two on the first CLI argument.
   - `Registries::register_barostat(&mut self, builder: Box<dyn BarostatBuilder>)`
   - `Registries::register_constraint_type(&mut self, builder: Box<dyn ConstraintBuilder>)`
   - `Registries::register_potential(&mut self, builder: Box<dyn PotentialBuilder>)`
+  - `Registries::register_analysis(&mut self, builder: Box<dyn AnalysisBuilder>)`
 
   Custom builders compose with the built-ins via the standard pattern:
 

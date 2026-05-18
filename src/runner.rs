@@ -79,6 +79,10 @@ pub enum RunnerError {
         "cuFFT returned non-deterministic R2C output between two identical runs ({differences} differing floats); SPME requires bit-exact reciprocal-space behaviour"
     )]
     CuFftNonDeterministic { differences: usize },
+    // rq-fd8bb824 — wraps an analyze-pipeline error for surfacing in
+    // the lint / CLI paths.
+    #[error("{0}")]
+    Analyze(#[source] crate::analysis::AnalyzeError),
 }
 
 // rq-5c1cfc93
@@ -97,8 +101,9 @@ enum ExitPhase {
 }
 
 const USAGE_LINE: &str = "\
-usage: dynamics run  <config-path>
-       dynamics lint <config-path> [--with-gpu]";
+usage: dynamics run     <config-path>
+       dynamics lint    <config-path> [--with-gpu]
+       dynamics analyze <analysis-path>";
 
 // rq-30c21c70
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1355,6 +1360,7 @@ pub fn cli_main_u8(args: Vec<String>) -> u8 {
     match sub.as_str() {
         "run" => cli_main_run(iter.collect()),
         "lint" => cli_main_lint(iter.collect()),
+        "analyze" => cli_main_analyze(iter.collect()),
         _ => {
             eprintln!("{USAGE_LINE}");
             1
@@ -1429,13 +1435,74 @@ fn cli_main_lint(rest: Vec<String>) -> u8 {
         }
     };
 
+    // Dispatch on extension: `.in.analysis` runs the analyze lint
+    // pipeline; everything else falls through to the simulation lint
+    // pipeline (whose filename-convention check rejects non-`.in.toml`
+    // paths internally with `InvalidConfigFilename`).
+    let is_analysis = config_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.ends_with(".in.analysis"))
+        .unwrap_or(false);
+
+    if is_analysis {
+        if with_gpu {
+            eprintln!("{USAGE_LINE}");
+            return 1;
+        }
+        let report = crate::analysis::lint_analyses(&config_path);
+        let _ = report.write_to(&mut std::io::stdout());
+        if let Some(err) = report.first_failure() {
+            eprintln!("error: {err}");
+        }
+        return if report.ok() { 0 } else { 1 };
+    }
+
     let report = lint_simulation(&config_path, with_gpu);
-    // Write the per-stage report to stdout. Errors from stdout writes
-    // are ignored — the report is informational and an unwritable
-    // stdout is not a lint failure.
     let _ = report.write_to(&mut std::io::stdout());
     if let Some(err) = report.first_failure() {
         eprintln!("error: {err}");
     }
     if report.ok() { 0 } else { 1 }
+}
+
+fn cli_main_analyze(rest: Vec<String>) -> u8 {
+    let mut iter = rest.into_iter();
+    let config_path = match iter.next() {
+        Some(p) => PathBuf::from(p),
+        None => {
+            eprintln!("{USAGE_LINE}");
+            return 1;
+        }
+    };
+    if iter.next().is_some() {
+        eprintln!("{USAGE_LINE}");
+        return 1;
+    }
+    match crate::analysis::run_analyses(&config_path) {
+        Ok(summary) => {
+            let elapsed = summary.elapsed_micros;
+            let elapsed_disp = if elapsed >= 10_000 {
+                format!("{} ms", elapsed / 1000)
+            } else {
+                format!("{elapsed} \u{00b5}s")
+            };
+            println!(
+                "[dynamics] analyze complete: {} analyses over {} frames in {}",
+                summary.analyses_written, summary.frames_consumed, elapsed_disp
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("error: {e}");
+            // Distinguish setup vs loop-time errors. The trajectory
+            // pass and per-analysis writes correspond to the loop
+            // phase; everything else is setup.
+            match &e {
+                crate::analysis::AnalyzeError::Trajectory(_)
+                | crate::analysis::AnalyzeError::Analysis { .. } => 2,
+                _ => 1,
+            }
+        }
+    }
 }
