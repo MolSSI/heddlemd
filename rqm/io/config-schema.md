@@ -685,10 +685,18 @@ Config validation is split between two methods. `Config::validate(&self)`
 runs the structural and topology-independent checks; the open registries
 do not need to be available for it. `Config::validate_against(&self,
 registries: &Registries)` runs the per-kind and cross-cutting checks
-that consult the registered builders. `load_config` invokes
-`Config::validate` automatically; the runner invokes
-`Config::validate_against` after constructing the registries it
-intends to use.
+that consult the registered builders. `Registries` lives at
+`dynamics::Registries` (see `simulation-runner.md`) and bundles the
+five open registries the runner consults (integrators, thermostats,
+barostats, constraint_types, potentials).
+
+`load_config` invokes both methods in order, against
+`Registries::with_builtins()`, so the common path surfaces every
+per-kind validation error at parse time without callers having to
+remember the second step. `load_config_raw` is the parse-only entry
+point: it runs `Config::validate` and stops. Callers that compose
+custom builders use `load_config_raw` followed by
+`config.validate_against(&registries)` with their own bundle.
 
 `Config::validate(&self)` checks:
 
@@ -1032,6 +1040,21 @@ lossless variant.
 ### Functions <!-- rq-39891001 -->
 
 - `load_config(path: &Path) -> Result<Config, ConfigError>` <!-- rq-45bb8194 -->
+  - The default loader for callers that use only the built-in slot
+    kinds. Equivalent to:
+    ```rust
+    let config = load_config_raw(path)?;
+    config.validate_against(&Registries::with_builtins())?;
+    Ok(config)
+    ```
+  - Any error from `load_config_raw` or from `validate_against`
+    propagates unchanged.
+  - Callers that register custom builders use `load_config_raw`
+    plus `Config::validate_against(&their_registries)` directly,
+    so the registry-dispatched validation runs against the right
+    builder set.
+
+- `load_config_raw(path: &Path) -> Result<Config, ConfigError>` <!-- rq-deaf8b59 -->
   - Reads the file at `path`, runs the typed TOML deserialiser, fills
     in field-derived defaults (`r_switch = 0.9 * cutoff` for
     `[[pair_interactions]]` and `[coulomb]`, `r_skin = 0.3 * max_cutoff`
@@ -1039,9 +1062,8 @@ lossless variant.
     derived from the config-file stem), resolves every supplied path
     against `path.parent()` (or `"."` if `path` has no parent), calls
     `Config::validate(&config)` on the resulting `Config`, and returns
-    it. The registry-dispatched per-kind parameter validation
-    (`Config::validate_against`) is the caller's responsibility — the
-    runner runs it after constructing the registries it intends to use.
+    it. Does not run `Config::validate_against` — that is the
+    caller's responsibility.
   - File-read failure yields `Io(String)`. Deserialiser failures yield
     either `MissingField`, `UnsupportedSchemaVersion`, or `Parse`
     depending on the failure kind (see the `ConfigError` description

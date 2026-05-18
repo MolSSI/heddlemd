@@ -623,6 +623,14 @@ successfully.
     returns `Ok(None)` without consulting the builders; otherwise
     dispatches the same way as `build` and wraps the result in
     `Some(..)`.
+  - The three integrator-side registries (plus `ConstraintRegistry`
+    from `constraint-framework.md` and `PotentialRegistry` from
+    `forces/framework.md`) are also reachable as fields of the
+    runner-level `dynamics::Registries` bundle. See
+    `simulation-runner.md` for the bundle's constructors and
+    convenience `register_*` methods. The inner registries can be
+    constructed and composed independently of the bundle when
+    callers want one-at-a-time control.
 
 - `IntegratorError`, `ThermostatError`, `BarostatError` — error types <!-- rq-2ccf40de -->
   returned by the corresponding trait methods. Variants for each:

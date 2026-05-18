@@ -116,15 +116,17 @@ message.
 10. **Allocate `ParticleBuffers`.** Construct `ParticleBuffers` from
     the host state.
 11. **Construct the integrator, thermostat, barostat, and constraint.**
-    Build the four slot handles (see `integration/framework.md` and
+    Build the four slot handles by dispatching through the
+    caller-supplied `Registries` bundle (see
+    `integration/framework.md` and
     `integration/constraint-framework.md`):
-    - `IntegratorRegistry::with_builtins().build(&config.integrator,
+    - `registries.integrators.build(&config.integrator,
       device.clone(), N)` → `Box<dyn Integrator>`.
-    - `ThermostatRegistry::with_builtins().build_optional(config.thermostat.as_ref(),
+    - `registries.thermostats.build_optional(config.thermostat.as_ref(),
       device.clone(), N)` → `Option<Box<dyn Thermostat>>`.
-    - `BarostatRegistry::with_builtins().build_optional(config.barostat.as_ref(),
+    - `registries.barostats.build_optional(config.barostat.as_ref(),
       device.clone(), N)` → `Option<Box<dyn Barostat>>`.
-    - `ConstraintRegistry::with_builtins().build_optional(&constraint_list,
+    - `registries.constraint_types.build_optional(&constraint_list,
       device.clone(), N)` → `Option<Box<dyn Constraint>>`. Returns
       `None` when the topology file's `[constraints]` section is
       empty or absent.
@@ -145,12 +147,17 @@ message.
     The constraint slot is threaded through the runner's plan walk
     (via the `run_step` helper in `integration/framework.md`); see
     that file for the dispatch sequence.
-12. **Construct the force field.** Call `ForceField::new(device.clone(),
+12. **Construct the force field.** Call
+    `ForceField::new(&registries.potentials, device.clone(),
     N, &sim_box, &config.pair_interactions, &config.bond_types,
     &bond_list, &exclusion_list, &config.neighbor_list)` (see
-    `forces/framework.md`). The resulting `ForceField` owns the LJ
-    slot (always) and the `MorseBonded` slot (when the bond list is
-    non-empty); when `config.neighbor_list` selects `CellList`, the
+    `forces/framework.md`). The slot list is the one produced by
+    iterating `registries.potentials.builders` and keeping every
+    `Some(slot)` they return. For the built-in `PotentialRegistry`
+    on a typical config that yields the LJ slot (always) and the
+    `MorseBonded` slot (when the bond list is non-empty);
+    user-registered builders extend the slot list per the registry's
+    iteration order. When `config.neighbor_list` selects `CellList`, the
     LJ slot's sub-state owns the cell-list and neighbor-list buffers
     described in `forces/neighbor-list.md`. The runner no longer
     manipulates the `PairBuffer`, neighbor-counts, or Lennard-Jones
@@ -459,7 +466,25 @@ wrapper that calls into the library.
 ### Functions <!-- rq-e5e4b048 -->
 
 - `run_simulation(config_path: &Path) -> Result<RunSummary, RunnerError>` <!-- rq-1fc57c00 -->
-  - Executes the entire runner flow described above.
+  - Convenience wrapper. Equivalent to
+    `run_simulation_with_registries(config_path, &Registries::with_builtins())`.
+  - Used by `main.rs` and by every caller that wants the default
+    built-in registries.
+
+- `run_simulation_with_registries(config_path: &Path, registries: &Registries) -> Result<RunSummary, RunnerError>` <!-- rq-a71cef31 -->
+  - Executes the entire runner flow described above, dispatching
+    every `[integrator]`, `[thermostat]`, `[barostat]`,
+    `[[constraint_types]]`, and force-slot `kind` through
+    `registries`. Used by callers that have registered custom
+    builders.
+  - Reads and parses the config file via `load_config_raw` (the
+    structural-validation-only entry point), then runs
+    `Config::validate_against(&registries)` and
+    `Config::validate_constraint_compatibility(&registries, has_constraints)`
+    with the caller-supplied registries. Any `ConfigError` returned
+    by either method is wrapped in `RunnerError::Config`.
+  - Uses `registries.potentials` instead of constructing
+    `PotentialRegistry::with_builtins()` internally.
   - Returns a `RunSummary` carrying the step count, frame count, log
     row count, and elapsed time on success.
 
@@ -469,10 +494,64 @@ wrapper that calls into the library.
   - `log_rows_written: u64`
   - `elapsed_micros: u128`
 
+- `Registries` — bundled handle to every open builder registry the <!-- rq-74bb02cc -->
+  runner consults. Lives at `dynamics::Registries` (the crate root,
+  so it does not appear to belong to any single subsystem). Fields:
+  - `integrators: IntegratorRegistry`
+  - `thermostats: ThermostatRegistry`
+  - `barostats: BarostatRegistry`
+  - `constraint_types: ConstraintRegistry`
+  - `potentials: PotentialRegistry`
+
+  Constructors:
+  - `Registries::with_builtins() -> Registries` — every inner
+    registry is `XRegistry::with_builtins()`. Used by
+    `run_simulation` (the default-built-ins convenience wrapper).
+  - `Registries::new() -> Registries` — every inner registry is
+    `XRegistry::new()` (empty). Callers that want full control
+    over registration order start from `new()` and register every
+    builder they need explicitly.
+
+  Convenience registration methods, each forwarding to the matching
+  inner registry's `register`:
+  - `Registries::register_integrator(&mut self, builder: Box<dyn IntegratorBuilder>)`
+  - `Registries::register_thermostat(&mut self, builder: Box<dyn ThermostatBuilder>)`
+  - `Registries::register_barostat(&mut self, builder: Box<dyn BarostatBuilder>)`
+  - `Registries::register_constraint_type(&mut self, builder: Box<dyn ConstraintBuilder>)`
+  - `Registries::register_potential(&mut self, builder: Box<dyn PotentialBuilder>)`
+
+  Custom builders compose with the built-ins via the standard pattern:
+
+  ```rust
+  let mut registries = Registries::with_builtins();
+  registries.register_integrator(Box::new(MyCustomIntegratorBuilder));
+  registries.register_potential(Box::new(MyCustomPotentialBuilder));
+  let summary = run_simulation_with_registries(&config_path, &registries)?;
+  ```
+
+  Or from an empty bundle when the caller wants no built-ins:
+
+  ```rust
+  let mut registries = Registries::new();
+  registries.register_integrator(Box::new(VelocityVerletBuilder));
+  registries.register_potential(Box::new(LennardJonesBuilder));
+  // ... etc.
+  ```
+
+  The inner registry types remain accessible by their own paths
+  (`dynamics::integrator::IntegratorRegistry`,
+  `dynamics::forces::PotentialRegistry`, etc.) for callers that want
+  to construct or compose a single registry without going through
+  the bundle.
+
 - `main(args: Vec<String>) -> ExitCode` (in `src/main.rs`) <!-- rq-f7e279ee -->
-  - Parses the CLI, calls `run_simulation`, prints any error to stderr
-    and the final-summary line to stdout, returns the exit code described
-    in *CLI*.
+  - Parses the CLI, calls `run_simulation` (the built-ins
+    convenience wrapper), prints any error to stderr and the
+    final-summary line to stdout, returns the exit code described in
+    *CLI*. The bundled CLI does not expose any mechanism for
+    registering custom builders; a binary that wants custom builders
+    is a Rust program depending on `dynamics` that constructs its
+    own `Registries` and calls `run_simulation_with_registries`.
 
 ## Determinism guarantees <!-- rq-0485e79f -->
 
@@ -814,4 +893,77 @@ Feature: dynamics run simulation runner
     When dynamics is invoked
     Then it exits with code 2
     And the partial trajectory and log files exist with frames/rows up to the last successful write
+
+  # --- User-registered builders ---
+
+  @rq-b5e263e1
+  Scenario: run_simulation defers to run_simulation_with_registries with built-ins
+    Given a valid config that uses only built-in slot kinds
+    When run_simulation(&config_path) is called
+    Then it returns the same RunSummary as
+      run_simulation_with_registries(&config_path, &Registries::with_builtins())
+
+  @rq-923fc84f
+  Scenario: run_simulation_with_registries dispatches an integrator from a user-registered builder
+    Given a valid config whose [integrator] section sets kind = "my-stub"
+    And a Registries bundle constructed via Registries::with_builtins()
+      then `register_integrator(Box::new(MyStubBuilder))` where
+      MyStubBuilder::kind_name() returns "my-stub"
+    When run_simulation_with_registries(&config_path, &registries) is called
+    Then it returns Ok(summary)
+    And the dispatched integrator is the one constructed by MyStubBuilder
+      (verified e.g. by a side-channel counter the builder closes over)
+
+  @rq-fb917fd5
+  Scenario: run_simulation_with_registries dispatches a potential from a user-registered builder
+    Given a valid config that activates the conditions for a user-defined Potential
+    And a Registries bundle whose `register_potential(Box::new(MyPotentialBuilder))`
+      has been called after with_builtins()
+    When run_simulation_with_registries(&config_path, &registries) is called
+    Then it returns Ok(summary)
+    And the constructed ForceField's slot list contains the MyPotentialBuilder slot
+      at the position determined by the registry's iteration order
+
+  @rq-0069339b
+  Scenario: A custom-kind integrator with an empty Registries fails with UnknownKind
+    Given a valid config whose [integrator] section sets kind = "my-stub"
+    And Registries::new() with no integrator builders registered
+    When run_simulation_with_registries(&config_path, &registries) is called
+    Then it returns Err(RunnerError::Config(ConfigError::UnknownKind {
+      slot: "integrator", kind: "my-stub" }))
+
+  @rq-eb9e43e7
+  Scenario: run_simulation rejects a custom-kind config because its built-in registries do not match
+    Given a valid config whose [integrator] section sets kind = "my-stub"
+    When run_simulation(&config_path) is called (which uses Registries::with_builtins())
+    Then it returns Err(RunnerError::Config(ConfigError::UnknownKind {
+      slot: "integrator", kind: "my-stub" }))
+    (the caller's recourse is to use run_simulation_with_registries with a bundle
+     that has the custom builder registered)
+
+  @rq-d9726854
+  Scenario: Registries::new() starts every inner registry empty
+    Given let registries = Registries::new()
+    Then registries.integrators.builders is empty
+    And registries.thermostats.builders is empty
+    And registries.barostats.builders is empty
+    And registries.constraint_types.builders is empty
+    And registries.potentials.builders is empty
+
+  @rq-5f8f7d00
+  Scenario: Registries::with_builtins() pre-populates every inner registry
+    Given let registries = Registries::with_builtins()
+    Then registries.integrators.builders is non-empty
+    And registries.thermostats.builders is non-empty
+    And registries.barostats.builders is non-empty
+    And registries.constraint_types.builders is non-empty
+    And registries.potentials.builders is non-empty
+
+  @rq-bbb25583
+  Scenario: register_potential appends to the bundle's PotentialRegistry
+    Given let mut registries = Registries::with_builtins()
+    And the initial length of registries.potentials.builders is N
+    When registries.register_potential(Box::new(MyPotentialBuilder)) is called
+    Then registries.potentials.builders has length N + 1
+    And registries.potentials.builders[N] is the registered MyPotentialBuilder
 ```

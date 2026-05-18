@@ -529,10 +529,23 @@ struct RawOutputConfig {
 }
 
 // =====================================================================
-// load_config
+// load_config / load_config_raw
 // =====================================================================
 
+// rq-45bb8194 — default loader for callers that use only the built-in
+// slot kinds. Custom-builder callers use `load_config_raw` plus
+// `validate_against(&their_registries)` instead.
 pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
+    let config = load_config_raw(path)?;
+    config.validate_against(&crate::Registries::with_builtins())?;
+    Ok(config)
+}
+
+// rq-45bb8194 — parse-only entry point: read the file, run the typed
+// TOML deserialiser, fill defaults, resolve paths, run `Config::validate`,
+// and return. Skips `Config::validate_against` so callers can register
+// custom builders and supply their own registries.
+pub fn load_config_raw(path: &Path) -> Result<Config, ConfigError> {
     let raw_text = std::fs::read_to_string(path)
         .map_err(|e| ConfigError::Io(format!("{}: {}", path.display(), e)))?;
 
@@ -550,16 +563,6 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
     let base_dir = path.parent().unwrap_or(Path::new("."));
     let config = build_config(raw_config, path, base_dir);
     config.validate()?;
-    // Run the registry-dispatched per-kind validation with the
-    // default registries so the loader surfaces per-builder
-    // ConfigError variants (Parse, MissingField, InvalidValue,
-    // SettleGeometryInfeasible, IncompatibleThermostat,
-    // IncompatibleBarostat, UnknownKind) without callers having to
-    // remember to invoke `validate_against`. Callers that
-    // register custom builders must call `validate_against` themselves
-    // against their custom registries.
-    let registries = crate::integrator::Registries::with_builtins();
-    config.validate_against(&registries)?;
     Ok(config)
 }
 
@@ -811,7 +814,7 @@ impl Config {
     /// `owns_barostat` predicates.
     pub fn validate_against(
         &self,
-        registries: &crate::integrator::Registries,
+        registries: &crate::Registries,
     ) -> Result<(), ConfigError> {
         // Integrator.
         let integ_builder = registries
@@ -897,7 +900,7 @@ impl Config {
     /// can see the parsed `[constraints]` section.
     pub fn validate_constraint_compatibility(
         &self,
-        registries: &crate::integrator::Registries,
+        registries: &crate::Registries,
         has_constraints: bool,
     ) -> Result<(), ConfigError> {
         if !has_constraints {

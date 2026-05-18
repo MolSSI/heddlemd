@@ -1,8 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use dynamics::integrator::{
-    IntegratorRegistry, Registries,
-};
+use dynamics::Registries;
+use dynamics::integrator::IntegratorRegistry;
 use dynamics::io::config::NamedSlotConfig;
 use dynamics::io::{ConfigError, NeighborListConfig, PathRole, SlotConfig, load_config};
 

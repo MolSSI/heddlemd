@@ -724,3 +724,230 @@ fn kernel_failure_exit_code_mapping_smoke() {
     let code = cli_main_u8(vec!["dynamics".to_string()]);
     assert_eq!(code, 1);
 }
+
+// =====================================================================
+// User-registered builders. See the "User-registered builders" block
+// in rqm/simulation-runner.md.
+// =====================================================================
+
+use dynamics::Registries;
+use dynamics::runner::run_simulation_with_registries;
+
+#[test]
+fn registries_new_starts_every_inner_registry_empty() {
+    let registries = Registries::new();
+    assert!(registries.integrators.builders.is_empty());
+    assert!(registries.thermostats.builders.is_empty());
+    assert!(registries.barostats.builders.is_empty());
+    assert!(registries.constraint_types.builders.is_empty());
+    assert!(registries.potentials.builders.is_empty());
+}
+
+#[test]
+fn registries_with_builtins_populates_every_inner_registry() {
+    let registries = Registries::with_builtins();
+    assert!(!registries.integrators.builders.is_empty());
+    assert!(!registries.thermostats.builders.is_empty());
+    assert!(!registries.barostats.builders.is_empty());
+    assert!(!registries.constraint_types.builders.is_empty());
+    assert!(!registries.potentials.builders.is_empty());
+}
+
+#[test]
+fn register_potential_appends_to_potentials() {
+    use dynamics::forces::{
+        ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder,
+    };
+    #[derive(Debug)]
+    struct NoopBuilder;
+    impl PotentialBuilder for NoopBuilder {
+        fn build(
+            &self,
+            _cx: &PotentialBuildContext<'_>,
+        ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+            Ok(None)
+        }
+    }
+    let mut registries = Registries::with_builtins();
+    let before = registries.potentials.builders.len();
+    registries.register_potential(Box::new(NoopBuilder));
+    assert_eq!(registries.potentials.builders.len(), before + 1);
+    let last = &registries.potentials.builders[before];
+    assert_eq!(format!("{last:?}"), "NoopBuilder");
+}
+
+#[test]
+fn run_simulation_matches_with_registries_builtins() {
+    let dir = tmp_path("run_sim_vs_with_registries");
+    let cfg_path = write_pair(&dir, 5, 0, 0, 300.0, true, false, 7, 4);
+    // run_simulation uses Registries::with_builtins() internally.
+    let s1 = run_simulation(&cfg_path).unwrap();
+
+    let dir2 = tmp_path("run_sim_vs_with_registries_b");
+    let cfg_path2 = write_pair(&dir2, 5, 0, 0, 300.0, true, false, 7, 4);
+    let registries = Registries::with_builtins();
+    let s2 = run_simulation_with_registries(&cfg_path2, &registries).unwrap();
+
+    assert_eq!(s1.n_steps, s2.n_steps);
+    assert_eq!(s1.frames_written, s2.frames_written);
+    assert_eq!(s1.log_rows_written, s2.log_rows_written);
+}
+
+#[test]
+fn custom_kind_with_run_simulation_fails_with_unknown_kind() {
+    // A config that references a custom integrator kind, run through
+    // run_simulation (which uses with_builtins). Since the custom
+    // kind isn't in the built-in registry, validate_against rejects it.
+    let dir = tmp_path("custom_kind_builtins_only");
+    let cfg = r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 1
+dt = 1.0e-15
+temperature = 300.0
+
+[integrator]
+kind = "custom-stub"
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#;
+    let cfg_path = dir.join("sim.toml");
+    std::fs::write(&cfg_path, cfg).unwrap();
+    write_init(&dir, 4, true);
+    let err = run_simulation(&cfg_path).unwrap_err();
+    match err {
+        RunnerError::Config(dynamics::io::ConfigError::UnknownKind { slot, kind }) => {
+            assert_eq!(slot, "integrator");
+            assert_eq!(kind, "custom-stub");
+        }
+        other => panic!("expected UnknownKind, got {other:?}"),
+    }
+}
+
+#[test]
+fn custom_kind_with_registered_builder_dispatches_through_bundle() {
+    // Register a stub integrator under the kind "custom-stub" and
+    // verify the runner dispatches the integrator slot to it.
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+    use dynamics::gpu::{GpuContext, ParticleBuffers};
+    use dynamics::integrator::{
+        Integrator, IntegratorBuilder, IntegratorError, StepPlan, SubStep,
+    };
+    use dynamics::pbc::SimulationBox;
+    use dynamics::timings::Timings;
+
+    #[derive(Debug)]
+    struct CountingStubIntegrator {
+        plan_calls: Arc<AtomicU64>,
+    }
+    impl Integrator for CountingStubIntegrator {
+        fn plan(&self, _dt: f32) -> StepPlan {
+            self.plan_calls.fetch_add(1, Ordering::SeqCst);
+            StepPlan::empty()
+        }
+        fn execute(
+            &mut self,
+            _substep: &SubStep,
+            _buffers: &mut ParticleBuffers,
+            _sim_box: &mut SimulationBox,
+            _timings: &mut Timings,
+        ) -> Result<(), IntegratorError> {
+            Ok(())
+        }
+    }
+    #[derive(Debug)]
+    struct CountingStubBuilder {
+        plan_calls: Arc<AtomicU64>,
+    }
+    impl IntegratorBuilder for CountingStubBuilder {
+        fn kind_name(&self) -> &'static str {
+            "custom-stub"
+        }
+        fn validate_params(
+            &self,
+            _params: &toml::Value,
+        ) -> Result<(), dynamics::io::ConfigError> {
+            Ok(())
+        }
+        fn build(
+            &self,
+            _gpu: &GpuContext,
+            _particle_count: usize,
+            _params: &toml::Value,
+        ) -> Result<Box<dyn Integrator>, IntegratorError> {
+            Ok(Box::new(CountingStubIntegrator {
+                plan_calls: self.plan_calls.clone(),
+            }))
+        }
+    }
+
+    let dir = tmp_path("custom_kind_user_registered");
+    let cfg = r#"schema_version = 1
+init = "init.xyz"
+
+[simulation]
+seed = 1
+n_steps = 3
+dt = 1.0e-15
+temperature = 300.0
+
+[integrator]
+kind = "custom-stub"
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#;
+    let cfg_path = dir.join("sim.toml");
+    std::fs::write(&cfg_path, cfg).unwrap();
+    write_init(&dir, 4, true);
+
+    let plan_calls = Arc::new(AtomicU64::new(0));
+    let mut registries = Registries::with_builtins();
+    registries.register_integrator(Box::new(CountingStubBuilder {
+        plan_calls: plan_calls.clone(),
+    }));
+
+    let summary = run_simulation_with_registries(&cfg_path, &registries).unwrap();
+    assert_eq!(summary.n_steps, 3);
+    // The stub's plan() runs once per timestep (3 calls). If the runner
+    // had silently used the built-in velocity-verlet builder instead,
+    // this counter would have stayed at zero.
+    assert_eq!(plan_calls.load(Ordering::SeqCst), 3);
+}
+
+#[test]
+fn custom_kind_with_empty_registries_fails_with_unknown_kind() {
+    // Empty Registries → even the built-in "velocity-verlet" config
+    // fails because nothing's registered.
+    let dir = tmp_path("custom_kind_empty_registries");
+    let cfg_path = write_pair(&dir, 1, 0, 0, 300.0, true, false, 1, 4);
+    let registries = Registries::new();
+    let err = run_simulation_with_registries(&cfg_path, &registries).unwrap_err();
+    match err {
+        RunnerError::Config(dynamics::io::ConfigError::UnknownKind { slot, kind }) => {
+            assert_eq!(slot, "integrator");
+            assert_eq!(kind, "velocity-verlet");
+        }
+        other => panic!("expected UnknownKind, got {other:?}"),
+    }
+}

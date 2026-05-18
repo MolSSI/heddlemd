@@ -20,6 +20,13 @@
     "title": "check_min_perpendicular_width returns Ok at exact equality",
     "type": "scenario"
   },
+  "rq-0069339b": {
+    "decl": "Scenario: A custom-kind integrator with an empty Registries fails with UnknownKind",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "A custom-kind integrator with an empty Registries fails with UnknownKind",
+    "type": "scenario"
+  },
   "rq-0076e6b4": {
     "decl": "## Out of Scope",
     "file": "integration/berendsen",
@@ -2044,10 +2051,6 @@
       },
       {
         "file": "src/integrator/langevin_baoab.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/integrator/mod.rs",
         "kind": "code"
       },
       {
@@ -4446,7 +4449,12 @@
   "rq-45bb8194": {
     "decl": "- `load_config(path: &Path) -> Result<Config, ConfigError>`",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "load_config",
     "type": "api-item"
   },
@@ -5817,6 +5825,13 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-5f8f7d00": {
+    "decl": "Scenario: Registries::with_builtins() pre-populates every inner registry",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Registries::with_builtins() pre-populates every inner registry",
+    "type": "scenario"
+  },
   "rq-5fcdc437": {
     "decl": "Scenario: Atom with no angles gets zero accumulator",
     "file": "forces/harmonic-angle",
@@ -7021,6 +7036,22 @@
     "refs": [],
     "title": "Cadence",
     "type": "section"
+  },
+  "rq-74bb02cc": {
+    "decl": "- `Registries` — bundled handle to every open builder registry the",
+    "file": "simulation-runner",
+    "refs": [
+      {
+        "file": "src/lib.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/registries.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Registries",
+    "type": "api-item"
   },
   "rq-74e42489": {
     "decl": "Scenario: kinetic_energy_reduce matches the host-side formula on small N",
@@ -8684,6 +8715,13 @@
     "title": "Force magnitude matches closed-form expression for an",
     "type": "scenario"
   },
+  "rq-923fc84f": {
+    "decl": "Scenario: run_simulation_with_registries dispatches an integrator from a user-registered builder",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "run_simulation_with_registries dispatches an integrator from a user-registered builder",
+    "type": "scenario"
+  },
   "rq-9244aae4": {
     "decl": "#### `[[pair_interactions]]` (array of tables)",
     "file": "io/config-schema",
@@ -9906,6 +9944,18 @@
     "title": "ParticleTypeConfig",
     "type": "api-item"
   },
+  "rq-a71cef31": {
+    "decl": "- `run_simulation_with_registries(config_path: &Path, registries: &Registries) -> Result<RunSummary, RunnerError>`",
+    "file": "simulation-runner",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "run_simulation_with_registries",
+    "type": "api-item"
+  },
   "rq-a722f7ce": {
     "decl": "Scenario: log_column_values returns the cached pressure, post-step volume,",
     "file": "integration/mtk-npt",
@@ -10762,6 +10812,13 @@
     "title": "Two independent runs produce byte-identical net forces",
     "type": "scenario"
   },
+  "rq-b5e263e1": {
+    "decl": "Scenario: run_simulation defers to run_simulation_with_registries with built-ins",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "run_simulation defers to run_simulation_with_registries with built-ins",
+    "type": "scenario"
+  },
   "rq-b6324878": {
     "decl": "## Gherkin Scenarios",
     "file": "integration/berendsen-barostat",
@@ -11047,6 +11104,13 @@
     "file": "io/init-state-file",
     "refs": [],
     "title": "Load a file with velocities",
+    "type": "scenario"
+  },
+  "rq-bbb25583": {
+    "decl": "Scenario: register_potential appends to the bundle's PotentialRegistry",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "register_potential appends to the bundle's PotentialRegistry",
     "type": "scenario"
   },
   "rq-bbb62e9c": {
@@ -12746,6 +12810,13 @@
     "title": "Empty State",
     "type": "section"
   },
+  "rq-d9726854": {
+    "decl": "Scenario: Registries::new() starts every inner registry empty",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "Registries::new() starts every inner registry empty",
+    "type": "scenario"
+  },
   "rq-d998b5c0": {
     "decl": "Scenario: Bonds are sorted by (atom_i, atom_j)",
     "file": "forces/topology",
@@ -13107,6 +13178,13 @@
     "refs": [],
     "title": "build.rs compiles a .cu file to PTX",
     "type": "scenario"
+  },
+  "rq-deaf8b59": {
+    "decl": "- `load_config_raw(path: &Path) -> Result<Config, ConfigError>`",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "load_config_raw",
+    "type": "api-item"
   },
   "rq-ded81a4a": {
     "decl": "Scenario: Log file header omits nhc_conserved when no thermostat is configured",
@@ -13942,6 +14020,13 @@
     "file": "pair-reduction",
     "refs": [],
     "title": "Reduction does not modify neighbor_counts",
+    "type": "scenario"
+  },
+  "rq-eb9e43e7": {
+    "decl": "Scenario: run_simulation rejects a custom-kind config because its built-in registries do not match",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "run_simulation rejects a custom-kind config because its built-in registries do not match",
     "type": "scenario"
   },
   "rq-eb9e5cc3": {
@@ -14925,6 +15010,13 @@
     "file": "integration/c-rescale-barostat",
     "refs": [],
     "title": "log_column_values returns the cached pressure, post-rescale volume,",
+    "type": "scenario"
+  },
+  "rq-fb917fd5": {
+    "decl": "Scenario: run_simulation_with_registries dispatches a potential from a user-registered builder",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "run_simulation_with_registries dispatches a potential from a user-registered builder",
     "type": "scenario"
   },
   "rq-fbb836fb": {

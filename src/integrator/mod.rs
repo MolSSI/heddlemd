@@ -656,32 +656,3 @@ impl Default for BarostatRegistry {
     }
 }
 
-// rq-1f87880c — bundled handle to the four open registries the
-// config-validation API consults. The runner constructs this once via
-// `Registries::with_builtins()` and threads it through
-// `Config::validate_against` and
-// `Config::validate_constraint_compatibility`.
-#[derive(Debug)]
-pub struct Registries {
-    pub integrators: IntegratorRegistry,
-    pub thermostats: ThermostatRegistry,
-    pub barostats: BarostatRegistry,
-    pub constraint_types: ConstraintRegistry,
-}
-
-impl Registries {
-    pub fn with_builtins() -> Self {
-        Registries {
-            integrators: IntegratorRegistry::with_builtins(),
-            thermostats: ThermostatRegistry::with_builtins(),
-            barostats: BarostatRegistry::with_builtins(),
-            constraint_types: ConstraintRegistry::with_builtins(),
-        }
-    }
-}
-
-impl Default for Registries {
-    fn default() -> Self {
-        Registries::with_builtins()
-    }
-}

@@ -475,11 +475,19 @@ rows.)
     `SpmeRealBuilder`, `SpmeReciprocalBuilder`, `MorseBondedBuilder`,
     `HarmonicAngleBuilder`.
   - `register(&mut self, builder: Box<dyn PotentialBuilder>)` — appends
-    a builder to the end of the registry. Today `ForceField::new`'s
-    caller uses `PotentialRegistry::with_builtins()` exclusively; the
-    `register` entry point exists so future runner-level surfaces can
-    expose user-supplied builders without changing the trait or
-    `ForceField::new`.
+    a builder to the end of the registry. `ForceField::new` calls this
+    indirectly via `dynamics::Registries::register_potential` when the
+    caller assembles a custom bundle, or directly via
+    `PotentialRegistry::register` for one-registry-at-a-time
+    composition.
+
+  `PotentialRegistry` is also reachable as the `potentials` field of
+  the runner-level `dynamics::Registries` bundle (see
+  `simulation-runner.md`). The runner's
+  `run_simulation_with_registries` entry point reads the bundle's
+  `potentials` field instead of constructing
+  `PotentialRegistry::with_builtins()` internally, so custom
+  potential builders flow through the same path as built-ins.
 
 ### Functions and methods <!-- rq-17abcb76 -->
 

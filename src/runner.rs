@@ -9,7 +9,7 @@ use rand_chacha::ChaCha8Rng;
 
 use crate::forces::{
     AngleList, BondList, ConstraintList, ExclusionList, ForceField, ForceFieldError,
-    PotentialRegistry, TopologyFileError,
+    TopologyFileError,
     load_topology_file,
 };
 use crate::gpu::{ParticleBuffers, compute_total_potential_energy, init_device};
@@ -19,7 +19,7 @@ use crate::integrator::{
 use crate::io::config::NeighborListConfig;
 use crate::io::{
     ConfigError, InitStateError, InitVelocities, LogWriter, LogWriterError, TrajectoryWriter,
-    TrajectoryWriterError, load_config, load_init_state,
+    TrajectoryWriterError, load_config_raw, load_init_state,
 };
 use crate::io::log_output::{BOLTZMANN_J_PER_K, compute_kinetic_energy, compute_temperature};
 use crate::state::{ParticleState, ParticleStateError};
@@ -98,9 +98,23 @@ enum ExitPhase {
 
 const USAGE_LINE: &str = "usage: dynamics run <config-path>";
 
-// rq-1fc57c00 rq-e5e4b048
+// rq-1fc57c00 rq-e5e4b048 — convenience wrapper for the built-in case.
+// Equivalent to `run_simulation_with_registries(config_path,
+// &Registries::with_builtins())`. Used by `main.rs` and by every
+// caller that does not register custom builders.
 pub fn run_simulation(config_path: &Path) -> Result<RunSummary, RunnerError> {
-    run_simulation_with_phase(config_path).map_err(|(e, _)| e)
+    let registries = crate::Registries::with_builtins();
+    run_simulation_with_registries(config_path, &registries)
+}
+
+// rq-a71cef31 — entry point for callers that supply their own
+// `Registries`. Dispatches every integrator / thermostat / barostat /
+// constraint / potential builder lookup through `registries`.
+pub fn run_simulation_with_registries(
+    config_path: &Path,
+    registries: &crate::Registries,
+) -> Result<RunSummary, RunnerError> {
+    run_simulation_with_phase(config_path, registries).map_err(|(e, _)| e)
 }
 
 fn timed<T>(target: &mut Duration, f: impl FnOnce() -> T) -> T {
@@ -113,12 +127,21 @@ fn timed<T>(target: &mut Duration, f: impl FnOnce() -> T) -> T {
 // rq-ef902cf6 rq-dcfdb7c9
 fn run_simulation_with_phase(
     config_path: &Path,
+    registries: &crate::Registries,
 ) -> Result<RunSummary, (RunnerError, ExitPhase)> {
     let total_started = Instant::now();
 
     // Time config_load before any other instrumentation exists.
+    // Parse the config without running the registry-dispatched
+    // validation, then run that validation against the
+    // caller-supplied `registries`. This is what lets a custom-kind
+    // config validate cleanly when a matching custom builder is
+    // registered.
     let mut config_load_duration = Duration::ZERO;
-    let config = timed(&mut config_load_duration, || load_config(config_path))
+    let config = timed(&mut config_load_duration, || load_config_raw(config_path))
+        .map_err(|e| (RunnerError::Config(e), ExitPhase::Setup))?;
+    config
+        .validate_against(registries)
         .map_err(|e| (RunnerError::Config(e), ExitPhase::Setup))?;
 
     // Pre-flight output existence checks. Trajectory and log are gated by
@@ -298,15 +321,8 @@ fn run_simulation_with_phase(
         })?;
     timings.record_host(HostStage::HOST_TO_DEVICE_UPLOAD, upload);
 
-    // Construct the four open registries once and run the
-    // registry-dispatched validation (per-kind validate_params plus
-    // integrator-thermostat / integrator-barostat compatibility).
-    let registries = crate::integrator::Registries::with_builtins();
-    config
-        .validate_against(&registries)
-        .map_err(|e| (RunnerError::Config(e), ExitPhase::Setup))?;
-
-    // Build the three slot handles in the framework's dispatch order.
+    // Build the three slot handles in the framework's dispatch order
+    // through the caller-supplied `Registries` bundle.
     let mut integrator = registries
         .integrators
         .build(&config.integrator, &gpu, n)
@@ -353,7 +369,7 @@ fn run_simulation_with_phase(
     // registry. Cannot run during `Config::validate_against` because
     // the topology file is loaded separately.
     config
-        .validate_constraint_compatibility(&registries, !constraint_list.is_empty())
+        .validate_constraint_compatibility(registries, !constraint_list.is_empty())
         .map_err(|e| (RunnerError::Config(e), ExitPhase::Setup))?;
     // rq-3d5f2e98 — construct the constraint slot. `build_optional`
     // returns `None` for an empty list.
@@ -368,9 +384,8 @@ fn run_simulation_with_phase(
         )
         .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
 
-    let potential_registry = PotentialRegistry::with_builtins();
     let mut force_field = ForceField::new(
-        &potential_registry,
+        &registries.potentials,
         &gpu,
         n,
         &sim_box,
@@ -846,7 +861,8 @@ pub fn cli_main_u8(args: Vec<String>) -> u8 {
         }
     };
 
-    match run_simulation_with_phase(&config_path) {
+    let registries = crate::Registries::with_builtins();
+    match run_simulation_with_phase(&config_path, &registries) {
         Ok(summary) => {
             // rq-d29872e4
             let elapsed_micros = summary.elapsed_micros;
