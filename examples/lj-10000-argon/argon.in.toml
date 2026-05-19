@@ -3,13 +3,24 @@ init = "argon.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 100
-dt = 1.0e-15        # 1 fs
 temperature = 100.0 # K (sampled if init lacks velocities; ignored otherwise)
 
-[integrator]
+# Single-phase NVE run. The bundle keeps its original 100-step trajectory
+# so its outputs remain byte-identical reference data for the
+# reproducibility tests.
+[[phase]]
+name = "run"
+n_steps = 100
+dt = 1.0e-15        # 1 fs
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
+
+[phase.output]
+trajectory_every = 10
+include_velocities = true
+log_every = 5
 
 [[particle_types]]
 name = "Ar"
@@ -23,8 +34,3 @@ epsilon = 1.65e-21  # J  (~120 K * k_B)
 cutoff = 8.5e-10    # m  (2.5 sigma)
 r_switch = 8.5e-10  # m  (== cutoff: hard-cutoff degenerate case; preserves
                      #     bit-exact reference trajectory)
-
-[output]
-trajectory_every = 10
-include_velocities = true
-log_every = 5

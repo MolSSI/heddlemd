@@ -33,11 +33,15 @@ init = "sim.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 0
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 0
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -95,7 +99,7 @@ fn write_trajectory(
             body.push_str(&format!("{sp} {x:.9e} {y:.9e} {z:.9e}\n"));
         }
     }
-    std::fs::write(dir.join("sim.out.xyz"), body).unwrap();
+    std::fs::write(dir.join("sim.out.run.xyz"), body).unwrap();
 }
 
 fn write_analysis(dir: &Path, body: &str) -> PathBuf {

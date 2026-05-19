@@ -48,11 +48,15 @@ init = "sim.in.xyz"
 
 [simulation]
 seed = {seed}
-n_steps = {n_steps}
-dt = 1.0e-15
 temperature = {temperature}
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = {n_steps}
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = {lossless_str}
 
@@ -70,7 +74,7 @@ cutoff = 1.0e-9
 [neighbor_list]
 mode = "all-pairs"
 
-[output]
+[phase.output]
 trajectory_every = {traj_every}
 log_every = {log_every}
 "#
@@ -109,7 +113,7 @@ fn write_init(dir: &Path, n: usize, include_velocities: bool) {
 
 fn read_timings(dir: &Path) -> String {
     let canon = std::fs::canonicalize(dir).unwrap();
-    std::fs::read_to_string(canon.join("sim.out.timings")).unwrap()
+    std::fs::read_to_string(canon.join("sim.out.run.timings")).unwrap()
 }
 
 fn stage_row<'a>(body: &'a str, name: &str) -> Option<&'a str> {
@@ -135,7 +139,7 @@ fn successful_run_writes_timings_file() {
     let path = write_pair(&dir, 5, 5, 5, 0.0, true, false, 1, 2);
     run_simulation(&path).unwrap();
     let canon = std::fs::canonicalize(&dir).unwrap();
-    let timings = canon.join("sim.out.timings");
+    let timings = canon.join("sim.out.run.timings");
     assert!(timings.exists());
     let body = std::fs::read_to_string(&timings).unwrap();
     let header = body.lines().next().unwrap();
@@ -159,7 +163,7 @@ fn timings_absent_on_setup_failure() {
     .unwrap();
     let _ = run_simulation(&path);
     let canon = std::fs::canonicalize(&dir).unwrap();
-    assert!(!canon.join("sim.out.timings").exists());
+    assert!(!canon.join("sim.out.run.timings").exists());
 }
 
 // rq-afb80e25
@@ -169,7 +173,7 @@ fn timings_file_uses_default_path() {
     let path = write_pair(&dir, 1, 0, 0, 0.0, true, false, 1, 1);
     run_simulation(&path).unwrap();
     let canon = std::fs::canonicalize(&dir).unwrap();
-    assert!(canon.join("sim.out.timings").exists());
+    assert!(canon.join("sim.out.run.timings").exists());
 }
 
 // rq-a2ebdaaf
@@ -180,14 +184,14 @@ fn timings_file_can_be_overridden() {
     // Rewrite config with a timings_path override.
     let body = std::fs::read_to_string(&path).unwrap();
     let body = body.replace(
-        "[output]",
-        "[output]\ntimings_path = \"custom.timings\"",
+        "[phase.output]",
+        "[phase.output]\ntimings_path = \"custom.timings\"",
     );
     std::fs::write(&path, body).unwrap();
     run_simulation(&path).unwrap();
     let canon = std::fs::canonicalize(&dir).unwrap();
     assert!(canon.join("custom.timings").exists());
-    assert!(!canon.join("sim.out.timings").exists());
+    assert!(!canon.join("sim.out.run.timings").exists());
 }
 
 // rq-11132169
@@ -196,7 +200,7 @@ fn timings_pre_flight_refuses_overwrite() {
     let dir = tmp_path("timings_overwrite");
     let path = write_pair(&dir, 1, 0, 0, 0.0, true, false, 1, 1);
     let canon = std::fs::canonicalize(&dir).unwrap();
-    let timings = canon.join("sim.out.timings");
+    let timings = canon.join("sim.out.run.timings");
     std::fs::write(&timings, "existing").unwrap();
     let err = run_simulation(&path).unwrap_err();
     match err {
@@ -239,11 +243,15 @@ init = "sim.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = {n_steps}
-dt = 1.0e-15
 temperature = 300.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = {n_steps}
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "langevin-baoab"
 friction = 1.0e12
 temperature = 300.0
@@ -260,7 +268,7 @@ sigma = 3.40e-10
 epsilon = 1.65e-21
 cutoff = 1.0e-9
 
-[output]
+[phase.output]
 trajectory_every = 0
 log_every = 0
 "#
@@ -574,12 +582,12 @@ fn trajectory_and_log_remain_bit_identical_with_timings_on() {
     let canon_a = std::fs::canonicalize(&dir_a).unwrap();
     let canon_b = std::fs::canonicalize(&dir_b).unwrap();
     assert_eq!(
-        std::fs::read(canon_a.join("sim.out.xyz")).unwrap(),
-        std::fs::read(canon_b.join("sim.out.xyz")).unwrap()
+        std::fs::read(canon_a.join("sim.out.run.xyz")).unwrap(),
+        std::fs::read(canon_b.join("sim.out.run.xyz")).unwrap()
     );
     assert_eq!(
-        std::fs::read(canon_a.join("sim.out.log")).unwrap(),
-        std::fs::read(canon_b.join("sim.out.log")).unwrap()
+        std::fs::read(canon_a.join("sim.out.run.log")).unwrap(),
+        std::fs::read(canon_b.join("sim.out.run.log")).unwrap()
     );
 }
 
@@ -627,11 +635,15 @@ init = "sim.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 1
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -646,7 +658,7 @@ sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 
-[output]
+[phase.output]
 trajectory_path = "out.dat"
 timings_path = "out.dat"
 "#
@@ -671,11 +683,15 @@ init = "sim.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 1
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -690,7 +706,7 @@ sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 
-[output]
+[phase.output]
 log_path = "out.dat"
 timings_path = "out.dat"
 "#
@@ -715,11 +731,15 @@ init = "particles.dat"
 
 [simulation]
 seed = 1
-n_steps = 1
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -734,7 +754,7 @@ sigma = 1.0
 epsilon = 1.0
 cutoff = 1.0
 
-[output]
+[phase.output]
 timings_path = "particles.dat"
 "#
     );

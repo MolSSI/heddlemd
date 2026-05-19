@@ -88,13 +88,21 @@ init = "argon.in.xyz"
 
 [simulation]
 seed = 1            # RNG seed for the initial Maxwell-Boltzmann sampling
-n_steps = 500
-dt = 1.0e-15        # 1 fs
 temperature = 100.0 # K — used because argon.in.xyz has no `velo:R:3`
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 500
+dt = 1.0e-15        # 1 fs
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
+
+[phase.output]
+trajectory_every = 50
+log_every = 10
+include_velocities = true
 
 [[particle_types]]
 name = "Ar"
@@ -106,11 +114,6 @@ potential = "lennard-jones"
 sigma = 3.40e-10    # m
 epsilon = 1.65e-21  # J  (≈ 120 K · k_B)
 cutoff = 8.5e-10    # m  (2.5 σ)
-
-[output]
-trajectory_every = 50
-log_every = 10
-include_velocities = true
 ```
 
 Why these particular values:
@@ -125,9 +128,10 @@ Why these particular values:
   always sanity-check `cutoff + r_skin < L/2` along the *shortest* box
   vector. The default cell-list configuration adds a `0.3·cutoff`
   skin, which keeps you comfortably under the limit here.
-- We let `output.trajectory_path`, `output.log_path`, and
-  `output.timings_path` default to `argon.out.xyz`, `argon.out.log`,
-  `argon.out.timings` — derived from the config's root by the
+- We let `phase.output.trajectory_path`, `phase.output.log_path`, and
+  `phase.output.timings_path` default to `argon.out.run.xyz`,
+  `argon.out.run.log`, `argon.out.run.timings` — derived from the
+  config's root and the phase's `name` by the
   [filename convention](configuration.md#config-filename-convention).
 
 ### Step 4: run it
@@ -137,22 +141,24 @@ cd my-run
 dynamics run argon.in.toml
 ```
 
-On success the runner prints one line:
+On success the runner prints one line per phase plus a final
+aggregate:
 
 ```
-[dynamics] complete: 500 steps in <T> ms (frames: 11, log rows: 51)
+[dynamics] phase `run`: 500 steps in <T> ms (frames: 11, log rows: 51)
+[dynamics] complete: 500 steps in <T> ms
 ```
 
-and writes `argon.out.xyz`, `argon.out.log`, and `argon.out.timings`
-next to the config. Format details for each file live in
-[Output Files](output.md).
+and writes `argon.out.run.xyz`, `argon.out.run.log`, and
+`argon.out.run.timings` next to the config. Format details for each
+file live in [Output Files](output.md).
 
 ### Step 5: re-run reproducibility check
 
-Move the outputs aside, re-run, and `diff` — `argon.out.xyz` and
-`argon.out.log` should match byte-for-byte. `argon.out.timings` will
-differ; that file is intentionally non-deterministic. See
-[Reproducibility](reproducibility.md).
+Move the outputs aside, re-run, and `diff` — `argon.out.run.xyz` and
+`argon.out.run.log` should match byte-for-byte.
+`argon.out.run.timings` will differ; that file is intentionally
+non-deterministic. See [Reproducibility](reproducibility.md).
 
 ## Common variations
 
@@ -166,11 +172,11 @@ velocities.
 
 ### Switch to NVT (thermostat composition)
 
-Add a `[thermostat]` section to the config. For a deterministic
+Add a `[phase.thermostat]` section to the phase. For a deterministic
 canonical ensemble:
 
 ```toml
-[thermostat]
+[phase.thermostat]
 kind = "nose-hoover-chain"
 temperature = 100.0
 tau = 1.0e-13       # 100 fs coupling time
@@ -179,7 +185,7 @@ tau = 1.0e-13       # 100 fs coupling time
 For a stochastic alternative:
 
 ```toml
-[thermostat]
+[phase.thermostat]
 kind = "csvr"
 temperature = 100.0
 tau = 1.0e-13
@@ -187,15 +193,25 @@ seed = 7            # independent of simulation.seed
 ```
 
 For an integrator that owns its own thermostat use
-`kind = "langevin-baoab"` under `[integrator]` instead, and **omit**
-`[thermostat]` — combining the two is rejected at load time.
+`kind = "langevin-baoab"` under `[phase.integrator]` instead, and
+**omit** `[phase.thermostat]` — combining the two is rejected at load
+time.
 
 ### Reach NPT (barostat composition)
 
-Add a `[barostat]` section, or switch the integrator to
+Add a `[phase.barostat]` section, or switch the integrator to
 `kind = "mtk-npt"` (which owns both thermostat and barostat). See
-[Configuration Reference](configuration.md#barostat-optional) for the
-field reference.
+[Configuration Reference](configuration.md#phasebarostat-optional)
+for the field reference.
+
+### Equilibrate, then sample (multi-phase)
+
+Append a second `[[phase]]` to the config. Particle state (positions,
+velocities, box) carries across the boundary; the integrator,
+thermostat, and barostat slots reset. Common pattern: a short NVT
+equilibration that suppresses trajectory output, followed by a longer
+NPT production phase that writes a frame per picosecond. See
+`examples/spc-water-8192/water.in.toml` for a fully worked version.
 
 ### Bonded forces, exclusions, rigid constraints
 

@@ -1603,11 +1603,15 @@ init = "sim.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 0
-dt = 1.0e-15
 temperature = 300.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 0
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 
 [[particle_types]]

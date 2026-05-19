@@ -4,13 +4,22 @@ topology = "spc.in.topology"
 
 [simulation]
 seed = 1
-n_steps = 100
-dt = 0.5e-15        # 0.5 fs (short enough to integrate the stiff OH bond)
 temperature = 300.0
 
-[integrator]
+# Single-phase NVE run with flexible SPC bonds.
+[[phase]]
+name = "run"
+n_steps = 100
+dt = 0.5e-15        # 0.5 fs (short enough to integrate the stiff OH bond)
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
+
+[phase.output]
+trajectory_every = 10
+include_velocities = false
+log_every = 5
 
 [[particle_types]]
 name = "O"
@@ -78,8 +87,3 @@ theta_0 = 1.910611931  # rad  (109.47°)
 mode = "cell-list"
 max_neighbors = 64
 r_skin = 5.0e-11
-
-[output]
-trajectory_every = 10
-include_velocities = false
-log_every = 5

@@ -61,14 +61,34 @@ schema v1.
 
 ## Path resolution
 
-All file paths in the config (`init`, `topology`, `output.*`) are
-interpreted relative to the **directory containing the config file**,
+All file paths in the config (`init`, `topology`, `phase.<name>.output.*`)
+are interpreted relative to the **directory containing the config file**,
 not the current working directory. Absolute paths are honored as-is.
 After resolution, every supplied path must be pairwise distinct.
 
+## Phases
+
+A simulation is composed of one or more **phases**, each declared as a
+`[[phase]]` array element. A phase carries its own `n_steps`, `dt`, and
+slot blocks (`[phase.integrator]`, optional `[phase.thermostat]`,
+optional `[phase.barostat]`, optional `[phase.output]`). Particle state
+(positions, velocities, box) carries from one phase into the next;
+integrator, thermostat, and barostat slot state resets at every phase
+boundary.
+
+Each phase produces its own output files: `<root>.out.<phase>.xyz`,
+`<root>.out.<phase>.log`, `<root>.out.<phase>.timings`, where `<root>`
+is the config file stem with one trailing `.in` stripped, and
+`<phase>` is the phase's `name`. Per-phase paths can be overridden by
+setting `[phase.output]` fields.
+
+Phases must have distinct names. Stochastic slots of the same kind
+across phases (e.g. two CSVR thermostats in two phases) must use
+distinct seeds.
+
 ## Worked example
 
-A complete config for 10,000 argon atoms in NVE:
+A complete single-phase config for 10,000 argon atoms in NVE:
 
 Saved as `argon.in.toml`:
 
@@ -78,13 +98,21 @@ init = "argon.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 100
-dt = 1.0e-15        # 1 fs
 temperature = 100.0 # K
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 100
+dt = 1.0e-15        # 1 fs
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
+
+[phase.output]
+trajectory_every = 10
+include_velocities = true
+log_every = 5
 
 [[particle_types]]
 name = "Ar"
@@ -96,16 +124,14 @@ potential = "lennard-jones"
 sigma = 3.40e-10    # m
 epsilon = 1.65e-21  # J  (~120 K · k_B)
 cutoff = 8.5e-10    # m  (2.5σ)
-
-[output]
-trajectory_every = 10
-include_velocities = true
-log_every = 5
 ```
 
 This is the bundled `examples/lj-10000-argon/argon.in.toml` file. The
 [Configuration sections](#configuration-sections) below walk through
 every field.
+
+A multi-phase NPT example (equilibration then production) is shown in
+the bundled `examples/spc-water-8192/water.in.toml`.
 
 ## Configuration sections
 
@@ -125,20 +151,33 @@ LJ/Coulomb kernels see no exclusion list.
 | Field         | Type | Required | Default | Notes |
 |---------------|------|----------|---------|-------|
 | `seed`        | u64  | yes      | —       | RNG seed for Maxwell-Boltzmann velocity generation. Required even when the init file supplies velocities. |
-| `n_steps`     | u64  | yes      | —       | Number of integration steps. `0` is permitted (the runner writes the initial state and exits). |
-| `dt`          | f64  | yes      | —       | Integration timestep in seconds. Finite, strictly positive. |
 | `temperature` | f64  | yes      | —       | Initial-velocity temperature in K. Finite, `>= 0`. Used only when the init file omits velocities. The thermostat's bath temperature is a separate field. |
 
-### `[integrator]`
+### `[[phase]]`
+
+At least one `[[phase]]` array element is required. Each phase carries:
+
+| Field         | Type | Required | Default | Notes |
+|---------------|------|----------|---------|-------|
+| `name`        | string | yes    | —       | Identifier used in output filenames and error messages. Must be unique across phases and use only ASCII letters, digits, `-`, or `_`. |
+| `n_steps`     | u64  | yes      | —       | Number of integration steps in this phase. `0` is permitted (the runner writes the initial state and moves on). |
+| `dt`          | f64  | yes      | —       | Integration timestep in seconds. Finite, strictly positive. |
+
+A phase is then specified by its `[phase.integrator]` (required),
+`[phase.thermostat]` (optional), `[phase.barostat]` (optional), and
+`[phase.output]` (optional) sub-tables. The schema of each of those
+slot blocks is described in the sections that follow.
+
+### `[phase.integrator]`
 
 A required `kind` field selects the integrator; all other fields are
 kind-specific. Configs that pair an integrator that owns its own
-thermostat (`langevin-baoab`, `mtk-npt`) with a `[thermostat]` section
-are rejected at load time.
+thermostat (`langevin-baoab`, `mtk-npt`) with a `[phase.thermostat]`
+section are rejected at load time.
 
 #### `kind = "velocity-verlet"`
 
-Symplectic NVE time-stepping. Compose with `[thermostat]` for NVT.
+Symplectic NVE time-stepping. Compose with `[phase.thermostat]` for NVT.
 
 | Field      | Type | Required | Default | Notes |
 |------------|------|----------|---------|-------|
@@ -147,7 +186,7 @@ Symplectic NVE time-stepping. Compose with `[thermostat]` for NVT.
 #### `kind = "langevin-baoab"`
 
 Stochastic NVT via the BAOAB splitting (Leimkuhler–Matthews). Owns its
-own thermostat; incompatible with `[thermostat]`.
+own thermostat; incompatible with `[phase.thermostat]`.
 
 | Field         | Type | Required | Notes |
 |---------------|------|----------|-------|
@@ -159,7 +198,7 @@ own thermostat; incompatible with `[thermostat]`.
 
 Deterministic extended-system NPT (Martyna-Tobias-Klein, isotropic).
 Owns both its thermostat and its barostat; incompatible with both
-`[thermostat]` and `[barostat]`.
+`[phase.thermostat]` and `[phase.barostat]`.
 
 | Field           | Type | Required | Default | Notes |
 |-----------------|------|----------|---------|-------|
@@ -171,12 +210,12 @@ Owns both its thermostat and its barostat; incompatible with both
 | `yoshida_order` | u32  | no       | `3`     | Suzuki-Yoshida sub-steps; one of `1, 3, 5, 7`. |
 | `n_resp`        | u32  | no       | `1`     | Chain RESP sub-cycle count. |
 
-### `[thermostat]` (optional)
+### `[phase.thermostat]` (optional)
 
 Omit for NVE composition with the integrator. A required `kind` field
 selects the thermostat; per-kind fields are listed below. Configs that
-combine `[thermostat]` with an integrator that owns its own thermostat
-are rejected.
+combine `[phase.thermostat]` with an integrator that owns its own
+thermostat are rejected.
 
 #### `kind = "nose-hoover-chain"`
 
@@ -220,11 +259,11 @@ not sample the canonical ensemble.
 | `temperature` | f64  | yes      | Bath temperature in K. |
 | `tau`         | f64  | yes      | Coupling time (s). |
 
-### `[barostat]` (optional)
+### `[phase.barostat]` (optional)
 
 Omit for constant-volume composition. A required `kind` selects the
-barostat. Configs that combine `[barostat]` with an integrator that
-owns its own barostat (currently `mtk-npt`) are rejected.
+barostat. Configs that combine `[phase.barostat]` with an integrator
+that owns its own barostat (currently `mtk-npt`) are rejected.
 
 #### `kind = "berendsen"`
 
@@ -328,21 +367,22 @@ unknown fields. The simulation box's minimum perpendicular width must
 satisfy `>= 3 · (cutoff_max + r_skin)`; the runner validates this once
 the box is known.
 
-### `[output]` (optional; all fields have defaults)
+### `[phase.output]` (optional; all fields have defaults)
 
-| Field                | Type   | Default                  | Notes |
-|----------------------|--------|--------------------------|-------|
-| `trajectory_path`    | string | `<root>.out.xyz`         | Path to the trajectory file. Relative to the config's directory. |
-| `trajectory_every`   | u64    | `100`                    | Steps between frames. `0` disables trajectory output. |
-| `include_velocities` | bool   | `true`                   | Include `velo:R:3` columns. |
-| `include_images`     | bool   | `true`                   | Include `image:I:3` columns. |
-| `log_path`           | string | `<root>.out.log`         | Path to the CSV log. |
-| `log_every`          | u64    | `100`                    | Steps between log rows. `0` disables the log. |
-| `timings_path`       | string | `<root>.out.timings`     | Path to the per-stage performance summary. Always written; there is no `timings_every`. |
+| Field                | Type   | Default                       | Notes |
+|----------------------|--------|-------------------------------|-------|
+| `trajectory_path`    | string | `<root>.out.<phase>.xyz`      | Path to the trajectory file. Relative to the config's directory. |
+| `trajectory_every`   | u64    | `100`                         | Steps between frames. `0` disables trajectory output. |
+| `include_velocities` | bool   | `true`                        | Include `velo:R:3` columns. |
+| `include_images`     | bool   | `true`                        | Include `image:I:3` columns. |
+| `log_path`           | string | `<root>.out.<phase>.log`      | Path to the CSV log. |
+| `log_every`          | u64    | `100`                         | Steps between log rows. `0` disables the log. |
+| `timings_path`       | string | `<root>.out.<phase>.timings`  | Path to the per-stage performance summary. Always written; there is no `timings_every`. |
 
 `<root>` is the config root derived from the filename per the
-[Config filename convention](#config-filename-convention). See
-[Output Files](output.md) for the full format spec.
+[Config filename convention](#config-filename-convention), and
+`<phase>` is the phase's `name`. See [Output Files](output.md) for the
+full format spec.
 
 ## Validation
 
@@ -361,8 +401,10 @@ The loader rejects configs that:
   type, omit a required pair, or duplicate a pair;
 - resolve two supplied file paths to the same location;
 - combine `[coulomb]` with `[spme]`;
-- combine `[thermostat]`/`[barostat]` with an integrator that owns its
-  own;
+- combine `[phase.thermostat]`/`[phase.barostat]` with an integrator
+  that owns its own;
+- omit `[[phase]]`, duplicate a phase name, or share a seed between
+  two stochastic slots of the same kind across phases;
 - pair the constraint framework with an integrator that does not
   support constraints (Langevin BAOAB, MTK NPT, and lossless
   velocity-Verlet currently do not).

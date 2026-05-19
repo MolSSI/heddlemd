@@ -45,16 +45,19 @@ describes to completion.
 4. Loads the init file and, when supplied, the topology file.
 5. Initialises CUDA and uploads the particle state to the GPU.
 6. Generates initial velocities (only when the init file omits them).
-7. Runs the timestep loop for `simulation.n_steps` iterations, writing
-   trajectory frames and log rows at the configured cadences.
-8. Writes the `.timings` file.
+7. For each `[[phase]]` in order: opens the phase's trajectory and
+   log files, runs the timestep loop for `phase.n_steps` iterations
+   writing frames and rows at the configured cadences, flushes the
+   files, then writes the phase's `.timings` file before moving on.
 
 ### On success
 
-Prints one line on stdout:
+Prints one line per phase plus a final aggregate on stdout:
 
 ```
-[dynamics] complete: <N> steps in <T> ms (frames: <F>, log rows: <R>)
+[dynamics] phase `<name>`: <N> steps in <T> ms (frames: <F>, log rows: <R>)
+...
+[dynamics] complete: <total_N> steps in <total_T> ms
 ```
 
 and exits with code `0`. For very short runs (`< 10 ms`) the elapsed
@@ -227,7 +230,7 @@ The following do **not** exist:
 
 - A `--seed` flag (set `simulation.seed` and any thermostat/barostat
   `seed` field in the config).
-- A `--steps` or `--dt` flag (set `simulation.n_steps` and
-  `simulation.dt`).
-- A `--output-dir` flag (set the paths under `[output]`).
+- A `--steps` or `--dt` flag (set `phase.n_steps` and `phase.dt` in
+  the relevant `[[phase]]`).
+- A `--output-dir` flag (set the paths under `[phase.output]`).
 - A `--help` flag. The only help is this book and the usage line above.

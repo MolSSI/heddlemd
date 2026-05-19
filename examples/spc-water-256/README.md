@@ -33,10 +33,10 @@ Or with the debug binary already built:
 
 A run produces three files in this directory:
 
-- `spc.out.xyz` — 11 trajectory frames (steps 0, 10, …, 100),
+- `spc.out.run.xyz` — 11 trajectory frames (steps 0, 10, …, 100),
   extended-XYZ
-- `spc.out.log` — 21 CSV rows of step, time, kinetic energy, temperature
-- `spc.out.timings` — per-stage timing summary (kernels and host I/O)
+- `spc.out.run.log` — 21 CSV rows of step, time, kinetic energy, temperature
+- `spc.out.run.timings` — per-stage timing summary (kernels and host I/O)
 
 ## Parameters
 

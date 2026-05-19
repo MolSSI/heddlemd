@@ -52,11 +52,14 @@ per row (see `integration/nose-hoover-chain.md`).
 
 ### Field semantics <!-- rq-f4750851 -->
 
-- `step: u64` — integration-step index at which the diagnostic was
-  captured. The initial state has `step=0`; subsequent rows carry
-  `log_every`, `2*log_every`, ..., up to the last multiple of `log_every`
-  that is `<= n_steps`.
-- `time: f64` — simulation time in seconds, computed as `step * dt`.
+- `step: u64` — integration-step index **within the owning phase**
+  at which the diagnostic was captured. The phase's initial state has
+  `step=0`; subsequent rows carry `log_every`, `2*log_every`, ...,
+  up to the last multiple of `log_every` that is `<= n_steps` for
+  that phase. Step numbering does **not** accumulate across phases —
+  each per-phase log file starts again at `step=0`.
+- `time: f64` — phase-local simulation time in seconds, computed as
+  `step * dt_phase` using the owning phase's `dt`.
 - `kinetic_energy: f64` — total kinetic energy in joules, computed as
   `0.5 * sum_i(m_i * (v_xi^2 + v_yi^2 + v_zi^2))`. The sum runs over all
   particles in source-array order (i.e. by particle ID). Masses are taken
@@ -84,19 +87,29 @@ per row (see `integration/nose-hoover-chain.md`).
 
 ### Cadence <!-- rq-606197d5 -->
 
-The runner writes one row for the initial state (`step=0`) plus one row
-at every step `s` such that `s % log_every == 0` and
-`1 <= s <= n_steps`. When `log_every == 0`, no rows are written (not even
-the step-0 row, and the header row is not written either; the file is not
-created — see *Disabled-output behaviour* in `simulation-runner.md`).
+Per phase: the runner writes one row for the phase's initial state
+(`step=0`) plus one row at every step `s` such that
+`s % log_every == 0` and `1 <= s <= n_steps` for that phase. Both
+`log_every` and `n_steps` are the phase's per-phase values from
+`config.phases[i].output.log_every` and
+`config.phases[i].n_steps` (see `rqm/io/config-schema.md`). When
+`log_every == 0` for the phase, no rows are written, the header row
+is not written either, and no log file is created for that phase.
 
-Total row count when `log_every > 0`:
+Total row count for a phase, when `log_every > 0`:
 `floor(n_steps / log_every) + 1`, plus the one header line.
 
-### Empty simulation <!-- rq-72c57874 -->
+One log file is produced per phase that opts in (i.e. whose
+`log_every > 0`). Each per-phase log file is structurally identical
+to a single-phase log of the same `n_steps` / `dt` / slot
+composition — the `step` column starts at 0 and the column set is
+derived from the active slots in that phase (which may differ from
+adjacent phases).
 
-When the runner exits without ever stepping (`n_steps == 0`), the log
-contains the header line plus the one step-0 row, provided `log_every > 0`.
+### Empty phase <!-- rq-72c57874 -->
+
+When a phase declares `n_steps == 0`, its log file (if enabled by
+`log_every > 0`) contains the header line plus the one step-0 row.
 
 ## Feature API <!-- rq-7a26eeae -->
 

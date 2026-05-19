@@ -32,8 +32,8 @@ this book or in `rqm/` where the feature is documented in full.
 
 ## Integrators
 
-- `velocity-verlet` — symplectic NVE core. Compose with `[thermostat]`
-  and/or `[barostat]` for NVT / NpT.
+- `velocity-verlet` — symplectic NVE core. Compose with
+  `[phase.thermostat]` and/or `[phase.barostat]` for NVT / NpT.
   - `lossless = true` — opt-in compensated-summation variant; enables
     bit-exact time reversal. Incompatible with constraint groups.
 - `langevin-baoab` — stochastic NVT via the Leimkuhler-Matthews BAOAB
@@ -127,15 +127,16 @@ this book or in `rqm/` where the feature is documented in full.
   convention enforced at load time; defaults for output paths derive
   from the config root (see
   [Configuration Reference](guide/configuration.md#config-filename-convention)).
-- **Outputs**:
-  - `*.out.xyz` — extended-XYZ trajectory, self-describing per frame,
-    re-loadable as an init file.
-  - `*.out.log` — CSV with `step,time,kinetic_energy,temperature`,
-    plus any integrator-supplied extras (e.g. `nhc_conserved`).
-  - `*.out.timings` — fixed-width per-stage performance summary
-    (kernel + host).
+- **Outputs** (one set per `[[phase]]`):
+  - `*.out.<phase>.xyz` — extended-XYZ trajectory, self-describing
+    per frame, re-loadable as an init file.
+  - `*.out.<phase>.log` — CSV with
+    `step,time,kinetic_energy,temperature`, plus any
+    integrator-supplied extras (e.g. `nhc_conserved`).
+  - `*.out.<phase>.timings` — fixed-width per-stage performance
+    summary (kernel + host).
 - **Pre-flight overwrite refusal.** The runner refuses to start when
-  any of the three output files already exists.
+  any output file (across all phases) already exists.
 - **Restart from any trajectory frame.** Trajectory frames are valid
   init files; lift one out and point a fresh config at it.
 

@@ -4,23 +4,23 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Deserializer};
 
 // rq-f0084057
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathRole {
     Init,
-    Trajectory,
-    Log,
-    Timings,
     Topology,
+    PhaseTrajectory { phase: String },
+    PhaseLog { phase: String },
+    PhaseTimings { phase: String },
 }
 
 impl std::fmt::Display for PathRole {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             PathRole::Init => write!(f, "init"),
-            PathRole::Trajectory => write!(f, "trajectory"),
-            PathRole::Log => write!(f, "log"),
-            PathRole::Timings => write!(f, "timings"),
             PathRole::Topology => write!(f, "topology"),
+            PathRole::PhaseTrajectory { phase } => write!(f, "phase `{phase}` trajectory"),
+            PathRole::PhaseLog { phase } => write!(f, "phase `{phase}` log"),
+            PathRole::PhaseTimings { phase } => write!(f, "phase `{phase}` timings"),
         }
     }
 }
@@ -65,18 +65,24 @@ pub enum ConfigError {
     },
     #[error("config declares both [coulomb] and [spme]; only one electrostatics method may be active per run")]
     ConflictingElectrostatics,
-    #[error("integrator `{integrator}` owns its own thermostat and is incompatible with `[thermostat]`")]
-    IncompatibleThermostat { integrator: String },
-    #[error("integrator `{integrator}` owns its own barostat and is incompatible with `[barostat]`")]
-    IncompatibleBarostat { integrator: String },
+    #[error("config declares no [[phase]] entries; a simulation requires at least one phase")]
+    EmptyPhases,
+    #[error("duplicate phase name `{name}`")]
+    DuplicatePhaseName { name: String },
+    #[error("two stochastic slots of kind `{kind}` across the [[phase]] array declare the same seed = {seed}; pick distinct seeds to avoid correlated noise")]
+    DuplicatePhaseSeed { kind: String, seed: u64 },
+    #[error("integrator `{integrator}` in phase `{phase}` owns its own thermostat and is incompatible with `[phase.thermostat]`")]
+    IncompatibleThermostat { integrator: String, phase: String },
+    #[error("integrator `{integrator}` in phase `{phase}` owns its own barostat and is incompatible with `[phase.barostat]`")]
+    IncompatibleBarostat { integrator: String, phase: String },
     #[error("duplicate bond type name `{name}`")]
     DuplicateBondTypeName { name: String },
     #[error("duplicate angle type name `{name}`")]
     DuplicateAngleTypeName { name: String },
     #[error("duplicate constraint type name `{name}`")]
     DuplicateConstraintTypeName { name: String },
-    #[error("integrator `{integrator}` does not support holonomic constraints; remove the topology file's [constraints] section or choose a different integrator")]
-    IncompatibleConstraint { integrator: String },
+    #[error("integrator `{integrator}` in phase `{phase}` does not support holonomic constraints; remove the topology file's [constraints] section or choose a different integrator")]
+    IncompatibleConstraint { integrator: String, phase: String },
     #[error("constraint type `{name}` has infeasible SETTLE geometry: r_hh = {r_hh} must be < 2 * r_oh ({r_oh})")]
     SettleGeometryInfeasible { name: String, r_oh: f64, r_hh: f64 },
     #[error("[{slot}] section's `kind = \"{kind}\"` does not match any registered builder")]
@@ -87,14 +93,29 @@ pub enum ConfigError {
 // Public config types
 // =====================================================================
 
-// rq-53055a5b
+// rq-53055a5b — `[simulation]` carries only the inputs for the
+// initial Maxwell-Boltzmann velocity sampling (fired once at phase-0
+// entry). Per-step settings (`dt`, `n_steps`) live on each
+// `[[phase]]` entry.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SimulationConfig {
     pub seed: u64,
+    pub temperature: f64,
+}
+
+// rq-18441e33 — parsed `[[phase]]` entry. The runner walks
+// `Config::phases` in declaration order; particle state carries
+// across phase boundaries while slot state is rebuilt at each one.
+#[derive(Debug, Clone)]
+pub struct PhaseConfig {
+    pub name: String,
     pub n_steps: u64,
     pub dt: f64,
-    pub temperature: f64,
+    pub integrator: SlotConfig,
+    pub thermostat: Option<SlotConfig>,
+    pub barostat: Option<SlotConfig>,
+    pub output: OutputConfig,
 }
 
 // rq-661bf664 rq-686b0d37
@@ -348,9 +369,7 @@ pub struct Config {
     pub init: PathBuf,
     pub topology: Option<PathBuf>,
     pub simulation: SimulationConfig,
-    pub integrator: SlotConfig,
-    pub thermostat: Option<SlotConfig>,
-    pub barostat: Option<SlotConfig>,
+    pub phases: Vec<PhaseConfig>,
     pub particle_types: Vec<ParticleTypeConfig>,
     pub pair_interactions: Vec<PairInteractionConfig>,
     pub bond_types: Vec<BondTypeConfig>,
@@ -359,7 +378,6 @@ pub struct Config {
     pub coulomb: Option<CoulombConfig>,
     pub spme: Option<SpmeConfig>,
     pub neighbor_list: NeighborListConfig,
-    pub output: OutputConfig,
     pub config_path: PathBuf,
 }
 
@@ -399,11 +417,8 @@ struct RawConfig {
     #[serde(default)]
     topology: Option<String>,
     simulation: SimulationConfig,
-    integrator: SlotConfig,
-    #[serde(default)]
-    thermostat: Option<SlotConfig>,
-    #[serde(default)]
-    barostat: Option<SlotConfig>,
+    #[serde(default, rename = "phase")]
+    phases: Vec<RawPhaseConfig>,
     particle_types: Vec<ParticleTypeConfig>,
     #[serde(default)]
     pair_interactions: Vec<RawPairInteraction>,
@@ -419,6 +434,19 @@ struct RawConfig {
     spme: Option<SpmeConfig>,
     #[serde(default)]
     neighbor_list: Option<RawNeighborList>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPhaseConfig {
+    name: String,
+    n_steps: u64,
+    dt: f64,
+    integrator: SlotConfig,
+    #[serde(default)]
+    thermostat: Option<SlotConfig>,
+    #[serde(default)]
+    barostat: Option<SlotConfig>,
     #[serde(default)]
     output: Option<RawOutputConfig>,
 }
@@ -586,6 +614,10 @@ fn serde_error_to_config_error(
     // marker). Strip it so callers see "init" rather than ".init".
     let trimmed = raw_path.trim_matches('.');
     let path = normalise_path(trimmed);
+    // Strip the `phase[N].` prefix so per-slot error paths look the same
+    // whether the error came from the raw deserialisation step or from a
+    // builder's `validate_params` call.
+    let path = strip_phase_prefix(&path);
     let inner = err.into_inner();
     let message = inner.to_string();
 
@@ -599,6 +631,18 @@ fn serde_error_to_config_error(
     } else {
         ConfigError::Parse { path, message }
     }
+}
+
+fn strip_phase_prefix(path: &str) -> String {
+    // Match `phase[N]` or `phase[N].`; strip both the bracket section
+    // and any trailing `.`.
+    if let Some(rest) = path.strip_prefix("phase[") {
+        if let Some(end) = rest.find(']') {
+            let after = &rest[end + 1..];
+            return after.strip_prefix('.').unwrap_or(after).to_string();
+        }
+    }
+    path.to_string()
 }
 
 // serde_path_to_error renders array indices as `.0`, `.1`, ...; convert
@@ -754,47 +798,73 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
                 .unwrap_or_else(|| "sim".to_string())
         });
 
-    let output = match raw.output {
-        None => OutputConfig {
-            trajectory_path: base_dir.join(format!("{config_root}.out.xyz")),
-            trajectory_every: default_trajectory_every(),
-            include_velocities: true,
-            include_images: true,
-            log_path: base_dir.join(format!("{config_root}.out.log")),
-            log_every: default_log_every(),
-            timings_path: base_dir.join(format!("{config_root}.out.timings")),
-        },
-        Some(o) => OutputConfig {
-            trajectory_path: o
-                .trajectory_path
-                .as_deref()
-                .map(|s| resolve_path(base_dir, s))
-                .unwrap_or_else(|| base_dir.join(format!("{config_root}.out.xyz"))),
-            trajectory_every: o.trajectory_every,
-            include_velocities: o.include_velocities,
-            include_images: o.include_images,
-            log_path: o
-                .log_path
-                .as_deref()
-                .map(|s| resolve_path(base_dir, s))
-                .unwrap_or_else(|| base_dir.join(format!("{config_root}.out.log"))),
-            log_every: o.log_every,
-            timings_path: o
-                .timings_path
-                .as_deref()
-                .map(|s| resolve_path(base_dir, s))
-                .unwrap_or_else(|| base_dir.join(format!("{config_root}.out.timings"))),
-        },
-    };
+    // Per-phase output paths default to
+    // `<root>.out.<phase-name>.{xyz,log,timings}` when the per-phase
+    // `[phase.output]` block is absent or its individual fields are
+    // omitted.
+    let phases: Vec<PhaseConfig> = raw
+        .phases
+        .into_iter()
+        .map(|p| {
+            let name = p.name;
+            let output = match p.output {
+                None => OutputConfig {
+                    trajectory_path: base_dir
+                        .join(format!("{config_root}.out.{name}.xyz")),
+                    trajectory_every: default_trajectory_every(),
+                    include_velocities: true,
+                    include_images: true,
+                    log_path: base_dir.join(format!("{config_root}.out.{name}.log")),
+                    log_every: default_log_every(),
+                    timings_path: base_dir
+                        .join(format!("{config_root}.out.{name}.timings")),
+                },
+                Some(o) => OutputConfig {
+                    trajectory_path: o
+                        .trajectory_path
+                        .as_deref()
+                        .map(|s| resolve_path(base_dir, s))
+                        .unwrap_or_else(|| {
+                            base_dir.join(format!("{config_root}.out.{name}.xyz"))
+                        }),
+                    trajectory_every: o.trajectory_every,
+                    include_velocities: o.include_velocities,
+                    include_images: o.include_images,
+                    log_path: o
+                        .log_path
+                        .as_deref()
+                        .map(|s| resolve_path(base_dir, s))
+                        .unwrap_or_else(|| {
+                            base_dir.join(format!("{config_root}.out.{name}.log"))
+                        }),
+                    log_every: o.log_every,
+                    timings_path: o
+                        .timings_path
+                        .as_deref()
+                        .map(|s| resolve_path(base_dir, s))
+                        .unwrap_or_else(|| {
+                            base_dir.join(format!("{config_root}.out.{name}.timings"))
+                        }),
+                },
+            };
+            PhaseConfig {
+                name,
+                n_steps: p.n_steps,
+                dt: p.dt,
+                integrator: p.integrator,
+                thermostat: p.thermostat,
+                barostat: p.barostat,
+                output,
+            }
+        })
+        .collect();
 
     Config {
         schema_version: raw.schema_version,
         init,
         topology,
         simulation: raw.simulation,
-        integrator: raw.integrator,
-        thermostat: raw.thermostat,
-        barostat: raw.barostat,
+        phases,
         particle_types: raw.particle_types,
         pair_interactions,
         bond_types,
@@ -803,7 +873,6 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
         coulomb,
         spme,
         neighbor_list,
-        output,
         config_path: config_path.to_path_buf(),
     }
 }
@@ -822,6 +891,7 @@ impl Config {
     pub fn validate(&self) -> Result<(), ConfigError> {
         // Per-field domain checks in declaration order.
         validate_simulation(&self.simulation)?;
+        validate_phases(&self.phases)?;
         validate_particle_types(&self.particle_types)?;
         validate_pair_interactions(&self.pair_interactions, &self.particle_types)?;
         validate_bond_types(&self.bond_types)?;
@@ -857,41 +927,8 @@ impl Config {
         &self,
         registries: &crate::Registries,
     ) -> Result<(), ConfigError> {
-        // Integrator.
-        let integ_builder = registries
-            .integrators
-            .lookup(&self.integrator.kind)
-            .ok_or_else(|| ConfigError::UnknownKind {
-                slot: "integrator",
-                kind: self.integrator.kind.clone(),
-            })?;
-        integ_builder.validate_params(&self.integrator.params)?;
-
-        // Thermostat.
-        if let Some(t) = &self.thermostat {
-            let b = registries
-                .thermostats
-                .lookup(&t.kind)
-                .ok_or_else(|| ConfigError::UnknownKind {
-                    slot: "thermostat",
-                    kind: t.kind.clone(),
-                })?;
-            b.validate_params(&t.params)?;
-        }
-
-        // Barostat.
-        if let Some(b) = &self.barostat {
-            let bb = registries
-                .barostats
-                .lookup(&b.kind)
-                .ok_or_else(|| ConfigError::UnknownKind {
-                    slot: "barostat",
-                    kind: b.kind.clone(),
-                })?;
-            bb.validate_params(&b.params)?;
-        }
-
-        // Constraint types.
+        // Constraint types are global (one declaration across the
+        // whole run); validate them once.
         for ct in &self.constraint_types {
             let cb = registries
                 .constraint_types
@@ -917,19 +954,56 @@ impl Config {
             })?;
         }
 
-        // Integrator-thermostat / integrator-barostat compatibility,
-        // driven by the integrator builder's predicate methods.
-        if self.thermostat.is_some()
-            && integ_builder.owns_thermostat(&self.integrator.params)
-        {
-            return Err(ConfigError::IncompatibleThermostat {
-                integrator: self.integrator.kind.clone(),
-            });
-        }
-        if self.barostat.is_some() && integ_builder.owns_barostat(&self.integrator.params) {
-            return Err(ConfigError::IncompatibleBarostat {
-                integrator: self.integrator.kind.clone(),
-            });
+        // Per-phase integrator / thermostat / barostat validation and
+        // compatibility checks.
+        for phase in &self.phases {
+            let integ_builder = registries
+                .integrators
+                .lookup(&phase.integrator.kind)
+                .ok_or_else(|| ConfigError::UnknownKind {
+                    slot: "integrator",
+                    kind: phase.integrator.kind.clone(),
+                })?;
+            integ_builder.validate_params(&phase.integrator.params)?;
+
+            if let Some(t) = &phase.thermostat {
+                let b = registries.thermostats.lookup(&t.kind).ok_or_else(|| {
+                    ConfigError::UnknownKind {
+                        slot: "thermostat",
+                        kind: t.kind.clone(),
+                    }
+                })?;
+                b.validate_params(&t.params)?;
+            }
+
+            if let Some(b) = &phase.barostat {
+                let bb = registries.barostats.lookup(&b.kind).ok_or_else(|| {
+                    ConfigError::UnknownKind {
+                        slot: "barostat",
+                        kind: b.kind.clone(),
+                    }
+                })?;
+                bb.validate_params(&b.params)?;
+            }
+
+            // Integrator-owns-thermostat / integrator-owns-barostat
+            // compatibility, per phase.
+            if phase.thermostat.is_some()
+                && integ_builder.owns_thermostat(&phase.integrator.params)
+            {
+                return Err(ConfigError::IncompatibleThermostat {
+                    integrator: phase.integrator.kind.clone(),
+                    phase: phase.name.clone(),
+                });
+            }
+            if phase.barostat.is_some()
+                && integ_builder.owns_barostat(&phase.integrator.params)
+            {
+                return Err(ConfigError::IncompatibleBarostat {
+                    integrator: phase.integrator.kind.clone(),
+                    phase: phase.name.clone(),
+                });
+            }
         }
         Ok(())
     }
@@ -947,17 +1021,20 @@ impl Config {
         if !has_constraints {
             return Ok(());
         }
-        let integ_builder = registries
-            .integrators
-            .lookup(&self.integrator.kind)
-            .ok_or_else(|| ConfigError::UnknownKind {
-                slot: "integrator",
-                kind: self.integrator.kind.clone(),
-            })?;
-        if !integ_builder.supports_constraints(&self.integrator.params) {
-            return Err(ConfigError::IncompatibleConstraint {
-                integrator: self.integrator.kind.clone(),
-            });
+        for phase in &self.phases {
+            let integ_builder = registries
+                .integrators
+                .lookup(&phase.integrator.kind)
+                .ok_or_else(|| ConfigError::UnknownKind {
+                    slot: "integrator",
+                    kind: phase.integrator.kind.clone(),
+                })?;
+            if !integ_builder.supports_constraints(&phase.integrator.params) {
+                return Err(ConfigError::IncompatibleConstraint {
+                    integrator: phase.integrator.kind.clone(),
+                    phase: phase.name.clone(),
+                });
+            }
         }
         Ok(())
     }
@@ -1005,9 +1082,90 @@ fn require_finite(field: &str, value: f64) -> Result<(), ConfigError> {
 }
 
 fn validate_simulation(s: &SimulationConfig) -> Result<(), ConfigError> {
-    require_finite_positive("simulation.dt", s.dt)?;
     require_finite_non_negative("simulation.temperature", s.temperature)?;
     Ok(())
+}
+
+// rq-18441e33 — per-phase structural validation: non-empty array,
+// non-empty/ASCII-only/unique names, finite positive dt, plus the
+// cross-phase seed-uniqueness rule (no two stochastic slots of the
+// same kind across all phases may share a seed).
+fn validate_phases(phases: &[PhaseConfig]) -> Result<(), ConfigError> {
+    if phases.is_empty() {
+        return Err(ConfigError::EmptyPhases);
+    }
+    let mut seen: std::collections::HashSet<&str> =
+        std::collections::HashSet::with_capacity(phases.len());
+    for (i, p) in phases.iter().enumerate() {
+        if p.name.is_empty() {
+            return Err(invalid(
+                format!("phase[{i}].name"),
+                "must be non-empty",
+            ));
+        }
+        if !p.name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(invalid(
+                format!("phase[{i}].name"),
+                "must contain only ASCII letters, digits, `-`, and `_`",
+            ));
+        }
+        if !seen.insert(p.name.as_str()) {
+            return Err(ConfigError::DuplicatePhaseName {
+                name: p.name.clone(),
+            });
+        }
+        require_finite_positive(&format!("phase[{i}].dt"), p.dt)?;
+    }
+
+    // Cross-phase seed uniqueness: collect (kind, seed) for every
+    // stochastic slot across every phase and reject duplicates.
+    let mut seed_seen: std::collections::HashMap<(String, u64), ()> =
+        std::collections::HashMap::new();
+    for p in phases {
+        if let Some(seed) = extract_slot_seed(&p.integrator) {
+            let key = (p.integrator.kind.clone(), seed);
+            if seed_seen.insert(key.clone(), ()).is_some() {
+                return Err(ConfigError::DuplicatePhaseSeed {
+                    kind: key.0,
+                    seed: key.1,
+                });
+            }
+        }
+        if let Some(t) = &p.thermostat {
+            if let Some(seed) = extract_slot_seed(t) {
+                let key = (t.kind.clone(), seed);
+                if seed_seen.insert(key.clone(), ()).is_some() {
+                    return Err(ConfigError::DuplicatePhaseSeed {
+                        kind: key.0,
+                        seed: key.1,
+                    });
+                }
+            }
+        }
+        if let Some(b) = &p.barostat {
+            if let Some(seed) = extract_slot_seed(b) {
+                let key = (b.kind.clone(), seed);
+                if seed_seen.insert(key.clone(), ()).is_some() {
+                    return Err(ConfigError::DuplicatePhaseSeed {
+                        kind: key.0,
+                        seed: key.1,
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// Pull the optional `seed` field out of a SlotConfig's `params`
+// table. Returns `None` for slots that don't carry one (NVE
+// integrators, deterministic thermostats like NHC, deterministic
+// barostats like Berendsen).
+fn extract_slot_seed(slot: &SlotConfig) -> Option<u64> {
+    slot.params.as_table()?.get("seed")?.as_integer().map(|n| n as u64)
 }
 
 // rq-1f87880c — per-kind validation lives in each builder's
@@ -1244,24 +1402,40 @@ fn check_pair_coverage(
 }
 
 fn check_path_collisions(config: &Config) -> Result<(), ConfigError> {
-    let mut entries: Vec<(PathRole, &Path)> = Vec::with_capacity(5);
-    entries.push((PathRole::Init, &config.init));
+    let mut entries: Vec<(PathRole, PathBuf)> =
+        Vec::with_capacity(2 + 3 * config.phases.len());
+    entries.push((PathRole::Init, config.init.clone()));
     if let Some(p) = config.topology.as_deref() {
-        entries.push((PathRole::Topology, p));
+        entries.push((PathRole::Topology, p.to_path_buf()));
     }
-    entries.push((PathRole::Trajectory, &config.output.trajectory_path));
-    entries.push((PathRole::Log, &config.output.log_path));
-    entries.push((PathRole::Timings, &config.output.timings_path));
+    for p in &config.phases {
+        entries.push((
+            PathRole::PhaseTrajectory {
+                phase: p.name.clone(),
+            },
+            p.output.trajectory_path.clone(),
+        ));
+        entries.push((
+            PathRole::PhaseLog {
+                phase: p.name.clone(),
+            },
+            p.output.log_path.clone(),
+        ));
+        entries.push((
+            PathRole::PhaseTimings {
+                phase: p.name.clone(),
+            },
+            p.output.timings_path.clone(),
+        ));
+    }
 
     for i in 0..entries.len() {
         for j in (i + 1)..entries.len() {
             if entries[i].1 == entries[j].1 {
-                let (kind_a, path) = (entries[i].0, entries[i].1.to_path_buf());
-                let kind_b = entries[j].0;
                 return Err(ConfigError::PathCollision {
-                    kind_a,
-                    kind_b,
-                    path,
+                    kind_a: entries[i].0.clone(),
+                    kind_b: entries[j].0.clone(),
+                    path: entries[i].1.clone(),
                 });
             }
         }

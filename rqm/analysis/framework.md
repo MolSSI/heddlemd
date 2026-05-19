@@ -64,10 +64,16 @@ schema_version = 1
 # Optional. Defaults to "<root>.in.toml" in the same directory.
 # simulation = "argon.in.toml"
 
+# Optional. Selects which simulation phase's trajectory the
+# analyses consume. Must match the `name` of an entry in the loaded
+# simulation config's [[phase]] array. Defaults to the *last* phase
+# in the config (typically the production phase).
+# phase = "production"
+
 # Optional. Defaults to the resolved `output.trajectory_path` from
-# the loaded simulation config (which itself defaults to
-# "<root>.out.xyz").
-# trajectory = "argon.out.xyz"
+# the selected phase of the loaded simulation config (which itself
+# defaults to "<root>.out.<phase-name>.xyz").
+# trajectory = "argon.out.production.xyz"
 
 # Optional frame-selection bounds, applied in order before any
 # analysis is dispatched. Defaults shown.
@@ -91,12 +97,21 @@ kind = "rdf"
   that produced the trajectory. Resolved relative to the
   `.in.analysis` file's directory. Defaults to
   `<root>.in.toml` in the same directory.
+- `phase: String` — optional. Selects which phase of the loaded
+  simulation config to analyze. Must match the `name` field of an
+  entry in the simulation config's `[[phase]]` array. Defaults to
+  the **last** phase in the config (which is conventionally the
+  production phase in equilibration-then-production protocols).
+  Unknown phase names produce
+  `AnalyzeError::UnknownPhase { phase: String, available: Vec<String> }`
+  at load time, with `available` listing the phase names declared
+  by the simulation config.
 - `trajectory: String` — optional. Path to the trajectory file
-  (`.out.xyz` produced by `dynamics run`). Resolved relative to the
-  `.in.analysis` file's directory. Defaults to the resolved
-  `output.trajectory_path` of the loaded simulation config (which
-  in turn defaults to `<root>.out.xyz` per
-  `rqm/io/config-schema.md`).
+  (`.out.<phase-name>.xyz` produced by `dynamics run`). Resolved
+  relative to the `.in.analysis` file's directory. Defaults to the
+  resolved `output.trajectory_path` of the **selected phase** in
+  the loaded simulation config (which itself defaults to
+  `<root>.out.<phase-name>.xyz` per `rqm/io/config-schema.md`).
 - `first_frame: u64` — optional, default `0`. Position of the first
   trajectory frame to use, counted from the start of the file
   (`first_frame = 0` means "use the step-0 frame").
@@ -304,7 +319,12 @@ Degenerate cases:
   `pub`.
   - `schema_version: u64`
   - `simulation: PathBuf` — resolved.
-  - `trajectory: PathBuf` — resolved.
+  - `phase: String` — the selected phase's name. Populated from the
+    optional `phase` field; defaults to the last phase in the loaded
+    simulation config.
+  - `trajectory: PathBuf` — resolved. Defaults to the selected
+    phase's `output.trajectory_path` from the loaded simulation
+    config.
   - `first_frame: u64`
   - `last_frame: Option<u64>` — `None` means "the last frame in
     the file at trajectory-open time".
@@ -334,6 +354,10 @@ Degenerate cases:
   - `EmptyAnalyses` — the `[[analyses]]` array is empty or absent.
   - `UnknownKind { kind: String }` — the chosen `kind` is not
     registered.
+  - `UnknownPhase { phase: String, available: Vec<String> }` — the
+    `phase` field names a phase that does not appear in the loaded
+    simulation config's `[[phase]]` array. `available` lists the
+    actual phase names declared by the config.
   - `AnalyzePathCollision { kind_a: PathRole, kind_b: PathRole,
     path: PathBuf }` — two supplied / defaulted paths resolve to
     the same location. `PathRole` is the same enum used by
@@ -691,4 +715,38 @@ Feature: Analysis framework and `dynamics analyze`
     Then it exits with code 1
     And stdout has an "analyses" stage line beginning with "FAIL —"
     And stderr contains "r_max"
+
+  # --- Phase selection ---
+
+  @rq-963604a4
+  Scenario: Implicit pairing defaults to the last phase of the simulation config
+    Given tmp/argon.in.toml declares two phases named "equil" and "prod"
+    And tmp/argon.in.analysis omits the `phase` field
+    When load_analysis_config followed by run_analyses is called
+    Then config.phase equals "prod"
+    And config.trajectory equals canonical "tmp/argon.out.prod.xyz"
+
+  @rq-38117e33
+  Scenario: Explicit `phase` selects the matching phase's trajectory
+    Given tmp/argon.in.toml declares two phases named "equil" and "prod"
+    And tmp/argon.in.analysis sets phase = "equil"
+    When load_analysis_config is called
+    Then config.phase equals "equil"
+    And config.trajectory equals canonical "tmp/argon.out.equil.xyz"
+
+  @rq-b6d22242
+  Scenario: Unknown phase name is rejected at load time
+    Given tmp/argon.in.toml declares phases named "equil" and "prod"
+    And tmp/argon.in.analysis sets phase = "warmup"
+    When load_analysis_config is called
+    Then it returns Err(AnalyzeError::UnknownPhase {
+      phase: "warmup", available: ["equil", "prod"] })
+
+  @rq-2674f18a
+  Scenario: Explicit `trajectory` overrides phase-derived default
+    Given tmp/argon.in.analysis sets trajectory = "alt.xyz"
+    When load_analysis_config is called
+    Then config.trajectory equals canonical "tmp/alt.xyz"
+    And the `phase` field is still resolved (defaults to last phase if omitted)
+      so that builders that read phase-dependent metadata see the right value
 ```

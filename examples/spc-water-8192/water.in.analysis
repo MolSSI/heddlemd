@@ -1,0 +1,35 @@
+schema_version = 1
+
+# Analyse the `prod` phase (the production-NPT trajectory). The
+# equilibration phase's trajectory is suppressed in water.in.toml
+# (trajectory_every = 0), so there is nothing to analyse there.
+# Defaulting to the last phase would resolve to the same `prod`
+# selection, but we name it explicitly for clarity.
+phase = "prod"
+
+# Three RDFs for liquid water: O-O (peaks ~2.8, ~4.5, ~6.8 Å),
+# O-H (covalent peak ~1.0, hydrogen-bond peak ~1.9, then ~3.3 Å), and
+# H-H (~2.4 Å). r_max = 7 Å covers the first three coordination shells
+# and is well below half the box's minimum perpendicular width
+# (4.973 nm / 2 = 24.86 Å).
+
+[[analyses]]
+name = "o-o"
+kind = "rdf"
+between = ["O", "O"]
+r_max = 7.0e-10
+n_bins = 200
+
+[[analyses]]
+name = "o-h"
+kind = "rdf"
+between = ["O", "H"]
+r_max = 7.0e-10
+n_bins = 200
+
+[[analyses]]
+name = "h-h"
+kind = "rdf"
+between = ["H", "H"]
+r_max = 7.0e-10
+n_bins = 200

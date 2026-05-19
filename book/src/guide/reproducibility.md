@@ -83,7 +83,7 @@ The velocity-Verlet integrator has an opt-in `lossless` mode, enabled
 per run via:
 
 ```toml
-[integrator]
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = true
 ```

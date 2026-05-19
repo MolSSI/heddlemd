@@ -29,13 +29,13 @@ Or with the debug binary already built:
 
 A run produces three files in this directory:
 
-- `argon.out.xyz` — 11 trajectory frames (steps 0, 10, …, 100), extended-XYZ
-- `argon.out.log` — 21 CSV rows of step, time, kinetic energy, temperature
-- `argon.out.timings` — per-stage timing summary (kernels and host I/O)
+- `argon.out.run.xyz` — 11 trajectory frames (steps 0, 10, …, 100), extended-XYZ
+- `argon.out.run.log` — 21 CSV rows of step, time, kinetic energy, temperature
+- `argon.out.run.timings` — per-stage timing summary (kernels and host I/O)
 
 ## Analyze
 
-After `dynamics run` has written `argon.out.xyz`, post-process the
+After `dynamics run` has written `argon.out.run.xyz`, post-process the
 trajectory with:
 
 ```

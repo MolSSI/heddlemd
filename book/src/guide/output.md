@@ -1,18 +1,23 @@
 # Output Files
 
-Every successful run writes three files alongside the config:
-`<root>.out.xyz`, `<root>.out.log`, and `<root>.out.timings`, where
-`<root>` is the config's root derived per the
+Every successful run writes three files **per phase** alongside the
+config: `<root>.out.<phase>.xyz`, `<root>.out.<phase>.log`, and
+`<root>.out.<phase>.timings`, where `<root>` is the config's root
+derived per the
 [Config filename convention](configuration.md#config-filename-convention)
-(e.g. `argon.in.toml` → `argon.out.xyz`, `argon.out.log`,
-`argon.out.timings`). Paths and cadences are controlled by the
-[`[output]` section](configuration.md) of the TOML config.
+and `<phase>` is the phase's `name`. So a single-phase config
+`argon.in.toml` with `name = "run"` writes `argon.out.run.xyz`,
+`argon.out.run.log`, and `argon.out.run.timings`. A two-phase
+config with phases `equil` and `prod` writes six files. Paths and
+cadences are controlled by the
+[`[phase.output]` section](configuration.md) of the TOML config and
+can be overridden per phase.
 
 The runner refuses to start when any of these files already exists at the
 resolved path. Delete or move them before re-running. The check is done
 up front, before the init file is read, so the runner fails fast.
 
-## Trajectory file (`*.out.xyz`)
+## Trajectory file (`*.out.<phase>.xyz`)
 
 Extended-XYZ frames concatenated into a single file. Each frame is fully
 self-describing — particle count, box, column layout, step, and time —
@@ -31,11 +36,12 @@ Lattice="lx 0 0 xy ly 0 xz yz lz" Properties=species:S:1:pos:R:3[:velo:R:3][:ima
 
 - `Lattice` repeats verbatim in every frame even though the box does not
   change (it makes single-frame extraction easy).
-- `Properties` is fixed at writer construction by
+- `Properties` is fixed at writer construction by the phase's
   `output.include_velocities` and `output.include_images`, and never
   varies within a file.
-- `Step` is the integration-step index (`0` for the initial frame).
-- `Time` is `step * dt` in seconds.
+- `Step` is the integration-step index, phase-local (`0` for each
+  phase's initial frame).
+- `Time` is `step * dt` in seconds, where `dt` is the phase's `dt`.
 
 Positions are always written **wrapped** into the primary image. When
 `include_images = true`, the per-particle integer image triple
@@ -62,7 +68,7 @@ written, and no file is created).
 Floats use Rust's `{:.9e}` formatter — nine fractional digits and a
 lower-case `e` exponent, which round-trips every `f32` value exactly.
 
-## Log file (`*.out.log`)
+## Log file (`*.out.<phase>.log`)
 
 A plain CSV with a fixed four-column header followed by one row per log
 interval. No comment characters, no quoting, no trailing summary — easy
@@ -111,7 +117,7 @@ rows when `log_every > 0` is `floor(n_steps / log_every) + 1` plus the
 one header line. Setting `log_every = 0` disables the log entirely (no
 header, no file).
 
-## Timings file (`*.out.timings`)
+## Timings file (`*.out.<phase>.timings`)
 
 A fixed-width text table with one row per instrumented stage that
 collected at least one sample. The runner times every kernel launch
@@ -153,16 +159,19 @@ Wall-clock measurements vary run-to-run for reasons that have nothing
 to do with the simulation: GPU clocks, OS scheduling, driver state.
 Mixing them into the deterministic outputs would silently break
 reproducibility checks. They live in their own file precisely so a
-`diff` of `*.out.xyz` and `*.out.log` against a reference run is a clean
-yes/no answer. See [Reproducibility](reproducibility.md) for the full
-guarantee.
+`diff` of `*.out.<phase>.xyz` and `*.out.<phase>.log` against a
+reference run is a clean yes/no answer. See
+[Reproducibility](reproducibility.md) for the full guarantee.
 
 ## stdout
 
-On success the runner prints one line:
+On success the runner prints one line per phase plus a final
+aggregate:
 
 ```
-[dynamics] complete: <N> steps in <T> ms (frames: <F>, log rows: <R>)
+[dynamics] phase `<name>`: <N> steps in <T> ms (frames: <F>, log rows: <R>)
+...
+[dynamics] complete: <total_N> steps in <total_T> ms
 ```
 
 On failure it prints `error: <message>` on stderr and exits non-zero;

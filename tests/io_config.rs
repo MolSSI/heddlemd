@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 
 use dynamics::Registries;
 use dynamics::integrator::IntegratorRegistry;
-use dynamics::io::config::NamedSlotConfig;
 use dynamics::io::{ConfigError, NeighborListConfig, PathRole, SlotConfig, load_config};
 
 fn param_f64(slot: &SlotConfig, key: &str) -> f64 {
@@ -53,11 +52,15 @@ init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
-n_steps = 10
-dt = 1.0e-15
 temperature = 300.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -125,11 +128,11 @@ fn load_valid_minimal_config() {
     let cfg = load_config(&path).unwrap();
     assert_eq!(cfg.schema_version, 1);
     assert_eq!(cfg.simulation.seed, 12345);
-    assert_eq!(cfg.simulation.n_steps, 10);
-    assert_eq!(cfg.simulation.dt, 1.0e-15);
+    assert_eq!(cfg.phases[0].n_steps, 10);
+    assert_eq!(cfg.phases[0].dt, 1.0e-15);
     assert_eq!(cfg.simulation.temperature, 300.0);
-    assert_eq!(cfg.integrator.kind, "velocity-verlet");
-    assert!(!param_bool(&cfg.integrator, "lossless"));
+    assert_eq!(cfg.phases[0].integrator.kind, "velocity-verlet");
+    assert!(!param_bool(&cfg.phases[0].integrator, "lossless"));
     assert_eq!(cfg.particle_types.len(), 1);
     assert_eq!(cfg.particle_types[0].name, "Ar");
     assert_eq!(cfg.particle_types[0].mass, 6.6335e-26);
@@ -153,12 +156,12 @@ fn defaults_populate_output_section() {
     let path = write_config(&dir, &minimal_config());
     let cfg = load_config(&path).unwrap();
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.output.trajectory_path, canonical_dir.join("sim.out.xyz"));
-    assert_eq!(cfg.output.trajectory_every, 100);
-    assert!(cfg.output.include_velocities);
-    assert_eq!(cfg.output.log_path, canonical_dir.join("sim.out.log"));
-    assert_eq!(cfg.output.log_every, 100);
-    assert_eq!(cfg.output.timings_path, canonical_dir.join("sim.out.timings"));
+    assert_eq!(cfg.phases[0].output.trajectory_path, canonical_dir.join("sim.out.run.xyz"));
+    assert_eq!(cfg.phases[0].output.trajectory_every, 100);
+    assert!(cfg.phases[0].output.include_velocities);
+    assert_eq!(cfg.phases[0].output.log_path, canonical_dir.join("sim.out.run.log"));
+    assert_eq!(cfg.phases[0].output.log_every, 100);
+    assert_eq!(cfg.phases[0].output.timings_path, canonical_dir.join("sim.out.run.timings"));
 }
 
 // rq-0622d4b0 — default output paths strip exactly one trailing `.in`.
@@ -168,9 +171,9 @@ fn defaults_strip_only_one_trailing_in() {
     let path = write_config_named(&dir, "foo.in.in.toml", &minimal_config());
     let cfg = load_config(&path).unwrap();
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.output.trajectory_path, canonical_dir.join("foo.in.out.xyz"));
-    assert_eq!(cfg.output.log_path, canonical_dir.join("foo.in.out.log"));
-    assert_eq!(cfg.output.timings_path, canonical_dir.join("foo.in.out.timings"));
+    assert_eq!(cfg.phases[0].output.trajectory_path, canonical_dir.join("foo.in.out.run.xyz"));
+    assert_eq!(cfg.phases[0].output.log_path, canonical_dir.join("foo.in.out.run.log"));
+    assert_eq!(cfg.phases[0].output.timings_path, canonical_dir.join("foo.in.out.run.timings"));
 }
 
 // rq-d148149f
@@ -178,17 +181,17 @@ fn defaults_strip_only_one_trailing_in() {
 fn explicit_output_overrides_defaults() {
     let dir = tmp_path("explicit_output");
     let body = format!(
-        "{}\n[output]\ntrajectory_path = \"custom-traj.xyz\"\ntrajectory_every = 50\nlog_path = \"custom.log\"\nlog_every = 25\ninclude_velocities = false\n",
+        "{}\n[phase.output]\ntrajectory_path = \"custom-traj.xyz\"\ntrajectory_every = 50\nlog_path = \"custom.log\"\nlog_every = 25\ninclude_velocities = false\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.output.trajectory_path, canonical_dir.join("custom-traj.xyz"));
-    assert_eq!(cfg.output.trajectory_every, 50);
-    assert!(!cfg.output.include_velocities);
-    assert_eq!(cfg.output.log_path, canonical_dir.join("custom.log"));
-    assert_eq!(cfg.output.log_every, 25);
+    assert_eq!(cfg.phases[0].output.trajectory_path, canonical_dir.join("custom-traj.xyz"));
+    assert_eq!(cfg.phases[0].output.trajectory_every, 50);
+    assert!(!cfg.phases[0].output.include_velocities);
+    assert_eq!(cfg.phases[0].output.log_path, canonical_dir.join("custom.log"));
+    assert_eq!(cfg.phases[0].output.log_every, 25);
 }
 
 // rq-5ded1806
@@ -199,7 +202,7 @@ fn absolute_paths_honored() {
     let abs_traj = dir.join("abs-traj.xyz");
     let abs_log = dir.join("abs.log");
     let body = format!(
-        "schema_version = 1\ninit = \"{}\"\n[simulation]\nseed=1\nn_steps=1\ndt=1.0e-15\ntemperature=0.0\n[integrator]\nkind=\"velocity-verlet\"\nlossless=false\n[[particle_types]]\nname=\"Ar\"\nmass=1.0\n[[pair_interactions]]\nbetween=[\"Ar\",\"Ar\"]\npotential=\"lennard-jones\"\nsigma=1.0\nepsilon=1.0\ncutoff=1.0\n[output]\ntrajectory_path=\"{}\"\nlog_path=\"{}\"\n",
+        "schema_version = 1\ninit = \"{}\"\n[simulation]\nseed=1\ntemperature=0.0\n[[phase]]\nname=\"run\"\nn_steps=1\ndt=1.0e-15\n[phase.integrator]\nkind=\"velocity-verlet\"\nlossless=false\n[phase.output]\ntrajectory_path=\"{}\"\nlog_path=\"{}\"\n[[particle_types]]\nname=\"Ar\"\nmass=1.0\n[[pair_interactions]]\nbetween=[\"Ar\",\"Ar\"]\npotential=\"lennard-jones\"\nsigma=1.0\nepsilon=1.0\ncutoff=1.0\n",
         abs_init.display(),
         abs_traj.display(),
         abs_log.display(),
@@ -207,8 +210,8 @@ fn absolute_paths_honored() {
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
     assert_eq!(cfg.init, abs_init);
-    assert_eq!(cfg.output.trajectory_path, abs_traj);
-    assert_eq!(cfg.output.log_path, abs_log);
+    assert_eq!(cfg.phases[0].output.trajectory_path, abs_traj);
+    assert_eq!(cfg.phases[0].output.log_path, abs_log);
 }
 
 // rq-d5085350
@@ -241,11 +244,14 @@ init = "init.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 1
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -298,7 +304,7 @@ fn n_steps_zero_is_accepted() {
     let body = minimal_config().replace("n_steps = 10", "n_steps = 0");
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.simulation.n_steps, 0);
+    assert_eq!(cfg.phases[0].n_steps, 0);
 }
 
 // rq-69a31102
@@ -412,7 +418,7 @@ fn missing_dt() {
     let body = minimal_config().replace("dt = 1.0e-15\n", "");
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::MissingField { field } => assert_eq!(field, "simulation.dt"),
+        ConfigError::MissingField { field } => assert_eq!(field, "dt"),
         other => panic!("unexpected: {other:?}"),
     }
 }
@@ -434,7 +440,7 @@ fn missing_temperature() {
 fn missing_integrator_section() {
     let dir = tmp_path("missing_integrator");
     let body = minimal_config()
-        .replace("[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n", "");
+        .replace("[phase.integrator]\nkind = \"velocity-verlet\"\nlossless = false\n", "");
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
         ConfigError::MissingField { field } => assert_eq!(field, "integrator"),
@@ -451,11 +457,15 @@ init = "init.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 1
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -482,11 +492,15 @@ init = "init.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 1
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -510,7 +524,7 @@ fn reject_zero_dt() {
     let body = minimal_config().replace("dt = 1.0e-15", "dt = 0.0");
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "simulation.dt"),
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "phase[0].dt"),
         other => panic!("unexpected: {other:?}"),
     }
 }
@@ -522,7 +536,7 @@ fn reject_negative_dt() {
     let body = minimal_config().replace("dt = 1.0e-15", "dt = -1.0e-15");
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "simulation.dt"),
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "phase[0].dt"),
         other => panic!("unexpected: {other:?}"),
     }
 }
@@ -534,7 +548,7 @@ fn reject_nan_dt() {
     let body = minimal_config().replace("dt = 1.0e-15", "dt = nan");
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "simulation.dt"),
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "phase[0].dt"),
         other => panic!("unexpected: {other:?}"),
     }
 }
@@ -763,11 +777,15 @@ init = "init.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 1
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -820,11 +838,15 @@ init = "init.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 1
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -885,11 +907,15 @@ init = "init.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 1
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -943,14 +969,14 @@ cutoff = 1.0
 fn reject_init_equals_trajectory() {
     let dir = tmp_path("init_eq_traj");
     let body = format!(
-        "{}\n[output]\ntrajectory_path = \"argon.in.xyz\"\n",
+        "{}\n[phase.output]\ntrajectory_path = \"argon.in.xyz\"\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
         ConfigError::PathCollision { kind_a, kind_b, .. } => {
             assert_eq!(kind_a, PathRole::Init);
-            assert_eq!(kind_b, PathRole::Trajectory);
+            assert_eq!(kind_b, PathRole::PhaseTrajectory { phase: "run".into() });
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -961,14 +987,14 @@ fn reject_init_equals_trajectory() {
 fn reject_trajectory_equals_log() {
     let dir = tmp_path("traj_eq_log");
     let body = format!(
-        "{}\n[output]\ntrajectory_path = \"run.dat\"\nlog_path = \"run.dat\"\n",
+        "{}\n[phase.output]\ntrajectory_path = \"run.dat\"\nlog_path = \"run.dat\"\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
         ConfigError::PathCollision { kind_a, kind_b, .. } => {
-            assert_eq!(kind_a, PathRole::Trajectory);
-            assert_eq!(kind_b, PathRole::Log);
+            assert_eq!(kind_a, PathRole::PhaseTrajectory { phase: "run".into() });
+            assert_eq!(kind_b, PathRole::PhaseLog { phase: "run".into() });
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -979,14 +1005,14 @@ fn reject_trajectory_equals_log() {
 fn reject_init_equals_log() {
     let dir = tmp_path("init_eq_log");
     let body = format!(
-        "{}\n[output]\nlog_path = \"argon.in.xyz\"\n",
+        "{}\n[phase.output]\nlog_path = \"argon.in.xyz\"\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
         ConfigError::PathCollision { kind_a, kind_b, .. } => {
             assert_eq!(kind_a, PathRole::Init);
-            assert_eq!(kind_b, PathRole::Log);
+            assert_eq!(kind_b, PathRole::PhaseLog { phase: "run".into() });
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -1001,11 +1027,15 @@ init = "init.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 1
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -1052,11 +1082,15 @@ init = "init.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 1
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -1098,7 +1132,7 @@ fn timings_path_defaults_to_stem_timings() {
     let path = write_config(&dir, &minimal_config());
     let cfg = load_config(&path).unwrap();
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.output.timings_path, canonical_dir.join("sim.out.timings"));
+    assert_eq!(cfg.phases[0].output.timings_path, canonical_dir.join("sim.out.run.timings"));
 }
 
 // rq-fa24a8d1
@@ -1106,13 +1140,13 @@ fn timings_path_defaults_to_stem_timings() {
 fn timings_path_override() {
     let dir = tmp_path("timings_override");
     let body = format!(
-        "{}\n[output]\ntimings_path = \"custom.timings\"\n",
+        "{}\n[phase.output]\ntimings_path = \"custom.timings\"\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.output.timings_path, canonical_dir.join("custom.timings"));
+    assert_eq!(cfg.phases[0].output.timings_path, canonical_dir.join("custom.timings"));
 }
 
 // rq-7d5915bb
@@ -1120,14 +1154,14 @@ fn timings_path_override() {
 fn reject_init_equals_timings() {
     let dir = tmp_path("init_eq_timings");
     let body = format!(
-        "{}\n[output]\ntimings_path = \"argon.in.xyz\"\n",
+        "{}\n[phase.output]\ntimings_path = \"argon.in.xyz\"\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
         ConfigError::PathCollision { kind_a, kind_b, .. } => {
             assert_eq!(kind_a, PathRole::Init);
-            assert_eq!(kind_b, PathRole::Timings);
+            assert_eq!(kind_b, PathRole::PhaseTimings { phase: "run".into() });
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -1138,14 +1172,14 @@ fn reject_init_equals_timings() {
 fn reject_trajectory_equals_timings() {
     let dir = tmp_path("traj_eq_timings");
     let body = format!(
-        "{}\n[output]\ntrajectory_path = \"run.dat\"\ntimings_path = \"run.dat\"\n",
+        "{}\n[phase.output]\ntrajectory_path = \"run.dat\"\ntimings_path = \"run.dat\"\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
         ConfigError::PathCollision { kind_a, kind_b, .. } => {
-            assert_eq!(kind_a, PathRole::Trajectory);
-            assert_eq!(kind_b, PathRole::Timings);
+            assert_eq!(kind_a, PathRole::PhaseTrajectory { phase: "run".into() });
+            assert_eq!(kind_b, PathRole::PhaseTimings { phase: "run".into() });
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -1156,14 +1190,14 @@ fn reject_trajectory_equals_timings() {
 fn reject_log_equals_timings() {
     let dir = tmp_path("log_eq_timings");
     let body = format!(
-        "{}\n[output]\nlog_path = \"run.dat\"\ntimings_path = \"run.dat\"\n",
+        "{}\n[phase.output]\nlog_path = \"run.dat\"\ntimings_path = \"run.dat\"\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
         ConfigError::PathCollision { kind_a, kind_b, .. } => {
-            assert_eq!(kind_a, PathRole::Log);
-            assert_eq!(kind_b, PathRole::Timings);
+            assert_eq!(kind_a, PathRole::PhaseLog { phase: "run".into() });
+            assert_eq!(kind_b, PathRole::PhaseTimings { phase: "run".into() });
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -1174,8 +1208,8 @@ fn reject_log_equals_timings() {
 fn missing_integrator_kind() {
     let dir = tmp_path("missing_integrator_kind");
     let body = minimal_config().replace(
-        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
-        "[integrator]\nlossless = false\n",
+        "[phase.integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[phase.integrator]\nlossless = false\n",
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
@@ -1204,15 +1238,15 @@ fn unknown_integrator_kind() {
 fn langevin_with_valid_parameters_accepted() {
     let dir = tmp_path("langevin_valid");
     let body = minimal_config().replace(
-        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
-        "[integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 300.0\nseed = 42\n",
+        "[phase.integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[phase.integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 300.0\nseed = 42\n",
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.integrator.kind, "langevin-baoab");
-    assert_eq!(param_f64(&cfg.integrator, "friction"), 1.0e12);
-    assert_eq!(param_f64(&cfg.integrator, "temperature"), 300.0);
-    assert_eq!(param_u64(&cfg.integrator, "seed"), 42);
+    assert_eq!(cfg.phases[0].integrator.kind, "langevin-baoab");
+    assert_eq!(param_f64(&cfg.phases[0].integrator, "friction"), 1.0e12);
+    assert_eq!(param_f64(&cfg.phases[0].integrator, "temperature"), 300.0);
+    assert_eq!(param_u64(&cfg.phases[0].integrator, "seed"), 42);
 }
 
 // rq-40ed9975
@@ -1220,8 +1254,8 @@ fn langevin_with_valid_parameters_accepted() {
 fn langevin_missing_friction() {
     let dir = tmp_path("langevin_missing_friction");
     let body = minimal_config().replace(
-        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
-        "[integrator]\nkind = \"langevin-baoab\"\ntemperature = 300.0\nseed = 42\n",
+        "[phase.integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[phase.integrator]\nkind = \"langevin-baoab\"\ntemperature = 300.0\nseed = 42\n",
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
@@ -1235,8 +1269,8 @@ fn langevin_missing_friction() {
 fn langevin_missing_temperature() {
     let dir = tmp_path("langevin_missing_temperature");
     let body = minimal_config().replace(
-        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
-        "[integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\nseed = 42\n",
+        "[phase.integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[phase.integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\nseed = 42\n",
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
@@ -1250,8 +1284,8 @@ fn langevin_missing_temperature() {
 fn langevin_missing_seed() {
     let dir = tmp_path("langevin_missing_seed");
     let body = minimal_config().replace(
-        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
-        "[integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 300.0\n",
+        "[phase.integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[phase.integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 300.0\n",
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
@@ -1265,8 +1299,8 @@ fn langevin_missing_seed() {
 fn langevin_friction_zero_rejected() {
     let dir = tmp_path("langevin_friction_zero");
     let body = minimal_config().replace(
-        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
-        "[integrator]\nkind = \"langevin-baoab\"\nfriction = 0.0\ntemperature = 300.0\nseed = 42\n",
+        "[phase.integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[phase.integrator]\nkind = \"langevin-baoab\"\nfriction = 0.0\ntemperature = 300.0\nseed = 42\n",
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
@@ -1280,8 +1314,8 @@ fn langevin_friction_zero_rejected() {
 fn langevin_friction_negative_rejected() {
     let dir = tmp_path("langevin_friction_negative");
     let body = minimal_config().replace(
-        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
-        "[integrator]\nkind = \"langevin-baoab\"\nfriction = -1.0\ntemperature = 300.0\nseed = 42\n",
+        "[phase.integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[phase.integrator]\nkind = \"langevin-baoab\"\nfriction = -1.0\ntemperature = 300.0\nseed = 42\n",
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
@@ -1295,8 +1329,8 @@ fn langevin_friction_negative_rejected() {
 fn langevin_temperature_zero_rejected() {
     let dir = tmp_path("langevin_temperature_zero");
     let body = minimal_config().replace(
-        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
-        "[integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 0.0\nseed = 42\n",
+        "[phase.integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[phase.integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 0.0\nseed = 42\n",
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
@@ -1319,24 +1353,24 @@ fn integrator_rejects_unknown_field_for_chosen_kind() {
     let cases: &[(&str, &str, &str)] = &[
         (
             "velocity-verlet",
-            "[integrator]\nkind = \"velocity-verlet\"\nfriction = 1.0e12\n",
+            "[phase.integrator]\nkind = \"velocity-verlet\"\nfriction = 1.0e12\n",
             "friction",
         ),
         (
             "langevin-baoab",
-            "[integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 300.0\nseed = 42\nlossless = false\n",
+            "[phase.integrator]\nkind = \"langevin-baoab\"\nfriction = 1.0e12\ntemperature = 300.0\nseed = 42\nlossless = false\n",
             "lossless",
         ),
         (
             "mtk-npt",
-            "[integrator]\nkind = \"mtk-npt\"\ntemperature = 85.0\npressure = 1.0e5\ntau_t = 1.0e-13\ntau_p = 1.0e-12\nseed = 42\n",
+            "[phase.integrator]\nkind = \"mtk-npt\"\ntemperature = 85.0\npressure = 1.0e5\ntau_t = 1.0e-13\ntau_p = 1.0e-12\nseed = 42\n",
             "seed",
         ),
     ];
     for (label, integrator_block, unknown_field) in cases {
         let dir = tmp_path(&format!("integrator_unknown_field_{label}"));
         let body = minimal_config().replace(
-            "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+            "[phase.integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
             integrator_block,
         );
         let path = write_config(&dir, &body);
@@ -1350,13 +1384,13 @@ fn integrator_rejects_unknown_field_for_chosen_kind() {
 fn vv_lossless_defaults_to_false() {
     let dir = tmp_path("vv_lossless_default");
     let body = minimal_config().replace(
-        "[integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
-        "[integrator]\nkind = \"velocity-verlet\"\n",
+        "[phase.integrator]\nkind = \"velocity-verlet\"\nlossless = false\n",
+        "[phase.integrator]\nkind = \"velocity-verlet\"\n",
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.integrator.kind, "velocity-verlet");
-    assert!(!param_bool_or(&cfg.integrator, "lossless", false));
+    assert_eq!(cfg.phases[0].integrator.kind, "velocity-verlet");
+    assert!(!param_bool_or(&cfg.phases[0].integrator, "lossless", false));
 }
 
 // rq-6cb9ab62
@@ -1418,7 +1452,7 @@ fn reject_bonds_eq_init() {
 fn reject_bonds_eq_trajectory() {
     let dir = tmp_path("bonds_eq_traj");
     let body = format!(
-        "{}\n[output]\ntrajectory_path = \"run.dat\"\n",
+        "{}\n[phase.output]\ntrajectory_path = \"run.dat\"\n",
         minimal_config().replace(
             "init = \"argon.in.xyz\"\n",
             "init = \"argon.in.xyz\"\ntopology = \"run.dat\"\n",
@@ -1427,8 +1461,8 @@ fn reject_bonds_eq_trajectory() {
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
         ConfigError::PathCollision { kind_a, kind_b, .. } => {
-            assert!(matches!(kind_a, PathRole::Trajectory | PathRole::Topology));
-            assert!(matches!(kind_b, PathRole::Trajectory | PathRole::Topology));
+            assert!(matches!(kind_a, PathRole::PhaseTrajectory { .. } | PathRole::Topology));
+            assert!(matches!(kind_b, PathRole::PhaseTrajectory { .. } | PathRole::Topology));
         }
         other => panic!("unexpected: {other:?}"),
     }
@@ -1605,22 +1639,22 @@ fn empty_bond_type_name_rejected() {
 fn trajectory_every_zero_accepted() {
     let dir = tmp_path("traj_every_zero");
     let body = format!(
-        "{}\n[output]\ntrajectory_every = 0\n",
+        "{}\n[phase.output]\ntrajectory_every = 0\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.output.trajectory_every, 0);
+    assert_eq!(cfg.phases[0].output.trajectory_every, 0);
 }
 
 // rq-318cd47d
 #[test]
 fn log_every_zero_accepted() {
     let dir = tmp_path("log_every_zero");
-    let body = format!("{}\n[output]\nlog_every = 0\n", minimal_config());
+    let body = format!("{}\n[phase.output]\nlog_every = 0\n", minimal_config());
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.output.log_every, 0);
+    assert_eq!(cfg.phases[0].output.log_every, 0);
 }
 
 // --- Neighbor list ---
@@ -1919,21 +1953,28 @@ fn empty_angle_type_name_rejected() {
 // `[thermostat]` header so they can omit individual fields to test
 // MissingField paths.
 fn config_with_thermostat(thermostat_block: &str) -> String {
+    let phased = thermostat_block
+        .replace("[thermostat]", "[phase.thermostat]")
+        .replace("[integrator]", "[phase.integrator]");
     format!(
         r#"schema_version = 1
 init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
-n_steps = 10
-dt = 1.0e-15
 temperature = 300.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
-{thermostat_block}
+{phased}
 
 [[particle_types]]
 name = "Ar"
@@ -1956,7 +1997,7 @@ fn thermostat_section_absent_yields_none() {
     let dir = tmp_path("therm_absent");
     let path = write_config(&dir, &minimal_config());
     let cfg = load_config(&path).unwrap();
-    assert!(cfg.thermostat.is_none());
+    assert!(cfg.phases[0].thermostat.is_none());
 }
 
 #[test]
@@ -2003,7 +2044,7 @@ tau = 1.0e-13"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let t = cfg.thermostat.as_ref().unwrap();
+    let t = cfg.phases[0].thermostat.as_ref().unwrap();
     assert_eq!(t.kind, "nose-hoover-chain");
     assert_eq!(param_f64(t, "temperature"), 300.0);
     assert_eq!(param_f64(t, "tau"), 1.0e-13);
@@ -2029,7 +2070,7 @@ n_resp = 2"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let t = cfg.thermostat.as_ref().unwrap();
+    let t = cfg.phases[0].thermostat.as_ref().unwrap();
     assert_eq!(t.kind, "nose-hoover-chain");
     assert_eq!(param_u64(t, "chain_length"), 5);
     assert_eq!(param_u64(t, "yoshida_order"), 5);
@@ -2221,7 +2262,7 @@ seed = 42"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let t = cfg.thermostat.as_ref().unwrap();
+    let t = cfg.phases[0].thermostat.as_ref().unwrap();
     assert_eq!(t.kind, "csvr");
     assert_eq!(param_f64(t, "temperature"), 300.0);
     assert_eq!(param_f64(t, "tau"), 1.0e-13);
@@ -2261,7 +2302,7 @@ seed = 42"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let t = cfg.thermostat.as_ref().unwrap();
+    let t = cfg.phases[0].thermostat.as_ref().unwrap();
     assert_eq!(t.kind, "andersen");
     assert_eq!(param_f64(t, "temperature"), 300.0);
     assert_eq!(param_f64(t, "collision_rate"), 1.0e12);
@@ -2280,7 +2321,7 @@ seed = 42"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let t = cfg.thermostat.as_ref().unwrap();
+    let t = cfg.phases[0].thermostat.as_ref().unwrap();
     assert_eq!(t.kind, "andersen");
     assert_eq!(param_f64(t, "collision_rate"), 0.0);
 }
@@ -2318,7 +2359,7 @@ tau = 1.0e-13"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let t = cfg.thermostat.as_ref().unwrap();
+    let t = cfg.phases[0].thermostat.as_ref().unwrap();
     assert_eq!(t.kind, "berendsen");
     assert_eq!(param_f64(t, "temperature"), 300.0);
     assert_eq!(param_f64(t, "tau"), 1.0e-13);
@@ -2338,17 +2379,21 @@ init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
-n_steps = 10
-dt = 1.0e-15
 temperature = 300.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "langevin-baoab"
 friction = 1.0e12
 temperature = 300.0
 seed = 1
 
-[thermostat]
+[phase.thermostat]
 kind = "csvr"
 temperature = 300.0
 tau = 1.0e-13
@@ -2368,7 +2413,7 @@ cutoff = 1.0e-9
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::IncompatibleThermostat { integrator } => {
+        ConfigError::IncompatibleThermostat { integrator, phase: _ } => {
             assert_eq!(integrator, "langevin-baoab");
         }
         other => panic!("unexpected: {other:?}"),
@@ -2387,8 +2432,8 @@ seed = 1"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.integrator.kind, "velocity-verlet");
-    assert_eq!(cfg.thermostat.as_ref().unwrap().kind, "csvr");
+    assert_eq!(cfg.phases[0].integrator.kind, "velocity-verlet");
+    assert_eq!(cfg.phases[0].thermostat.as_ref().unwrap().kind, "csvr");
 }
 
 #[test]
@@ -2446,11 +2491,15 @@ init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
-n_steps = 10
-dt = 1.0e-15
 temperature = 85.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "mtk-npt"
 temperature = 85.0
 pressure = 1.0e5
@@ -2478,7 +2527,7 @@ fn mtk_npt_with_defaults_accepted() {
     let body = mtk_minimal_body("");
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let i = &cfg.integrator;
+    let i = &cfg.phases[0].integrator;
     assert_eq!(i.kind, "mtk-npt");
     assert_eq!(param_f64(i, "temperature"), 85.0);
     assert_eq!(param_f64(i, "pressure"), 1.0e5);
@@ -2526,18 +2575,22 @@ init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
-n_steps = 10
-dt = 1.0e-15
 temperature = 85.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "mtk-npt"
 temperature = 85.0
 pressure = 1.0e5
 tau_t = 1.0e-13
 tau_p = 1.0e-12
 
-[thermostat]
+[phase.thermostat]
 kind = "csvr"
 temperature = 85.0
 tau = 1.0e-13
@@ -2557,7 +2610,7 @@ cutoff = 1.0e-9
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::IncompatibleThermostat { integrator } => {
+        ConfigError::IncompatibleThermostat { integrator, phase: _ } => {
             assert_eq!(integrator, "mtk-npt");
         }
         other => panic!("unexpected: {other:?}"),
@@ -2573,18 +2626,22 @@ init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
-n_steps = 10
-dt = 1.0e-15
 temperature = 85.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "mtk-npt"
 temperature = 85.0
 pressure = 1.0e5
 tau_t = 1.0e-13
 tau_p = 1.0e-12
 
-[barostat]
+[phase.barostat]
 kind = "berendsen"
 pressure = 1.0e5
 tau = 1.0e-12
@@ -2604,7 +2661,7 @@ cutoff = 1.0e-9
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::IncompatibleBarostat { integrator } => {
+        ConfigError::IncompatibleBarostat { integrator, phase: _ } => {
             assert_eq!(integrator, "mtk-npt");
         }
         other => panic!("unexpected: {other:?}"),
@@ -2618,7 +2675,7 @@ fn barostat_section_absent_yields_none() {
     let dir = tmp_path("baro_absent");
     let path = write_config(&dir, &minimal_config());
     let cfg = load_config(&path).unwrap();
-    assert!(cfg.barostat.is_none());
+    assert!(cfg.phases[0].barostat.is_none());
 }
 
 #[test]
@@ -2630,15 +2687,19 @@ init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
-n_steps = 10
-dt = 1.0e-15
 temperature = 300.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
-[barostat]
+[phase.barostat]
 kind = "not-a-real-barostat"
 
 [[particle_types]]
@@ -2667,21 +2728,29 @@ cutoff = 1.0e-9
 // returned config body has `[integrator] kind="velocity-verlet"` plus
 // the supplied `[barostat]` fragment.
 fn config_with_barostat(barostat_block: &str) -> String {
+    let phased = barostat_block
+        .replace("[barostat]", "[phase.barostat]")
+        .replace("[thermostat]", "[phase.thermostat]")
+        .replace("[integrator]", "[phase.integrator]");
     format!(
         r#"schema_version = 1
 init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
-n_steps = 10
-dt = 1.0e-15
 temperature = 300.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
-{barostat_block}
+{phased}
 
 [[particle_types]]
 name = "Ar"
@@ -2709,7 +2778,7 @@ compressibility = 4.5e-10"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let b = cfg.barostat.as_ref().unwrap();
+    let b = cfg.phases[0].barostat.as_ref().unwrap();
     assert_eq!(b.kind, "berendsen");
     assert_eq!(param_f64(b, "pressure"), 1.0e5);
     assert_eq!(param_f64(b, "tau"), 1.0e-12);
@@ -2728,7 +2797,7 @@ compressibility = 4.5e-10"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert!(cfg.barostat.is_some());
+    assert!(cfg.phases[0].barostat.is_some());
 }
 
 #[test]
@@ -2870,7 +2939,7 @@ seed = 42"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let b = cfg.barostat.as_ref().unwrap();
+    let b = cfg.phases[0].barostat.as_ref().unwrap();
     assert_eq!(b.kind, "c-rescale");
     assert_eq!(param_f64(b, "pressure"), 1.0e5);
     assert_eq!(param_f64(b, "temperature"), 85.0);
@@ -2893,7 +2962,7 @@ seed = 1"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert!(cfg.barostat.is_some());
+    assert!(cfg.phases[0].barostat.is_some());
 }
 
 #[test]
@@ -3007,15 +3076,19 @@ init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
-n_steps = 10
-dt = 1.0e-15
 temperature = 300.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
-[barostat]
+[phase.barostat]
 placeholder = true
 
 [[particle_types]]
@@ -3137,11 +3210,15 @@ init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
-n_steps = 10
-dt = 1.0e-15
 temperature = 300.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "langevin-baoab"
 friction = 1.0e12
 temperature = 300.0
@@ -3163,7 +3240,7 @@ cutoff = 1.0e-9
     let cfg = load_config(&path).unwrap();
     let registries = Registries::with_builtins();
     match cfg.validate_constraint_compatibility(&registries, true).unwrap_err() {
-        ConfigError::IncompatibleConstraint { integrator } => {
+        ConfigError::IncompatibleConstraint { integrator, phase: _ } => {
             assert_eq!(integrator, "langevin-baoab");
         }
         other => panic!("expected IncompatibleConstraint, got {other:?}"),
@@ -3189,11 +3266,15 @@ init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
-n_steps = 10
-dt = 1.0e-15
 temperature = 300.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = true
 
@@ -3213,7 +3294,7 @@ cutoff = 1.0e-9
     let cfg = load_config(&path).unwrap();
     let registries = Registries::with_builtins();
     match cfg.validate_constraint_compatibility(&registries, true).unwrap_err() {
-        ConfigError::IncompatibleConstraint { integrator } => {
+        ConfigError::IncompatibleConstraint { integrator, phase: _ } => {
             assert_eq!(integrator, "velocity-verlet");
         }
         other => panic!("expected IncompatibleConstraint, got {other:?}"),

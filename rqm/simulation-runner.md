@@ -118,20 +118,34 @@ usage: dynamics run     <config-path>
 
 ## Runner flow <!-- rq-ef902cf6 -->
 
-A single invocation proceeds through these stages in order. Any stage that
-fails terminates the process with the appropriate exit code and stderr
-message.
+A single invocation runs the sequence of phases declared in
+`config.phases` (see `config-schema.md`). Setup happens once at
+startup; the per-phase loop builds and tears down slot state at every
+phase boundary; particle state (positions, velocities, simulation
+box, charges) and the global `ForceField` carry over unchanged
+between phases. Any stage that fails terminates the process with the
+appropriate exit code and stderr message.
 
-1. **Parse CLI.** Confirm the form `run <config-path>`. Capture `<config-path>`.
+The fields below in italics indicate where per-phase versus global
+config fields are consulted.
+
+### Once-only setup <!-- rq-d734328e -->
+
+1. **Parse CLI.** Confirm the form `run <config-path>`. Capture
+   `<config-path>`.
 2. **Load config.** Call `load_config(&config_path)`
    (`config-schema.md`). Failure → exit 1.
-3. **Pre-flight output checks.** Verify each enabled output path does not
-   already exist. Trajectory and log are gated by their respective
-   `_every > 0` predicates; the timings file (see
-   `performance-analysis.md`) is always written and always checked.
-   Failure → exit 1 with `OutputExists` reporting the offending path.
-   This check is performed before the init file is read so the runner
-   refuses long, expensive runs early.
+3. **Pre-flight output checks.** For every phase `P` in
+   `config.phases`, verify each enabled output path
+   (`P.output.trajectory_path` when `P.output.trajectory_every > 0`,
+   `P.output.log_path` when `P.output.log_every > 0`, and
+   `P.output.timings_path` always) does not already exist. The check
+   runs across every phase up-front so the runner never starts a
+   long, multi-phase job that would fail to write some later phase's
+   output. Failure → exit 1 with
+   `RunnerError::OutputExists { path }` reporting the first
+   pre-existing path encountered (phases checked in declaration
+   order).
 4. **Build type-name slice.** Construct `type_names: Vec<&str>` from
    `config.particle_types[i].name`, indexed left-to-right.
 5. **Load init state.** Call
@@ -186,31 +200,57 @@ message.
    - `forces_*` zero-initialised by the constructor.
 10. **Allocate `ParticleBuffers`.** Construct `ParticleBuffers` from
     the host state.
-11. **Construct the integrator, thermostat, barostat, and constraint.**
-    Build the four slot handles by dispatching through the
-    caller-supplied `Registries` bundle (see
+11. **Construct the force field.** Call
+    `ForceField::new(&registries.potentials, device.clone(),
+    N, &sim_box, &config.pair_interactions, &config.bond_types,
+    &bond_list, &exclusion_list, &config.neighbor_list)` (see
+    `forces/framework.md`). The force field is shared across every
+    phase: `pair_interactions`, `bond_types`, `angle_types`,
+    `coulomb`, `spme`, `neighbor_list`, and the topology-derived
+    `BondList` / `AngleList` / `ExclusionList` are all global config
+    fields, so a single `ForceField` instance is valid for the whole
+    run.
+
+### Per-phase loop <!-- rq-581dbfb8 -->
+
+For each phase `P` in `config.phases`, in declaration order, the
+runner performs the steps below. Particle state (`ParticleBuffers`,
+`SimulationBox`), the global `ForceField`, and the global
+`Registries` carry over between phases; the slot handles
+(`Integrator`, `Thermostat`, `Barostat`, `Constraint`), the
+output writers (`TrajectoryWriter`, `LogWriter`), and the per-phase
+`Timings` instance are built fresh at every phase boundary and
+dropped at every phase end. Slot internal state (chain variables,
+conserved-quantity counters, RNG counters) starts from each phase's
+declared seeds and initial values.
+
+12. **Construct the integrator, thermostat, barostat, and constraint.**
+    Build the four slot handles for phase `P` by dispatching through
+    the caller-supplied `Registries` bundle (see
     `integration/framework.md` and
     `integration/constraint-framework.md`):
-    - `registries.integrators.build(&config.integrator,
-      device.clone(), N)` → `Box<dyn Integrator>`.
-    - `registries.thermostats.build_optional(config.thermostat.as_ref(),
+    - `registries.integrators.build(&P.integrator, device.clone(), N)`
+      → `Box<dyn Integrator>`.
+    - `registries.thermostats.build_optional(P.thermostat.as_ref(),
       device.clone(), N)` → `Option<Box<dyn Thermostat>>`.
-    - `registries.barostats.build_optional(config.barostat.as_ref(),
+    - `registries.barostats.build_optional(P.barostat.as_ref(),
       device.clone(), N)` → `Option<Box<dyn Barostat>>`.
     - `registries.constraint_types.build_optional(&constraint_list,
-      device.clone(), N)` → `Option<Box<dyn Constraint>>`. Returns
-      `None` when the topology file's `[constraints]` section is
-      empty or absent.
+      device.clone(), N)` → `Option<Box<dyn Constraint>>`. Reuses
+      the global `ConstraintList`; returns `None` when the topology
+      file's `[constraints]` section is empty or absent.
 
     Each slot owns any per-run state it needs (e.g. `LosslessBuffers`
-    for `velocity-verlet` when `lossless == true`; the chain state and
-    `ke_scratch` buffer for `nose-hoover-chain`; the per-group
+    for `velocity-verlet` when `lossless == true`; the chain state
+    and `ke_scratch` buffer for `nose-hoover-chain`; the per-group
     snapshot, atom-index, and per-type parameter buffers for
-    `settle`). The integrator-owns-its-own-thermostat and
+    `settle`). The integrator-owns-its-own-thermostat,
+    integrator-owns-its-own-barostat, and
     integrator-supports-constraints compatibility checks (builder
     predicates `IntegratorBuilder::owns_thermostat(&params)`,
     `owns_barostat(&params)`, and `supports_constraints(&params)`
-    queried via `Config::validate_against(&registries)` and
+    queried per phase via `Config::validate_against(&registries)`
+    and
     `Config::validate_constraint_compatibility(&registries, has_constraints)`)
     have already been enforced at this point; no runtime guard is
     required here.
@@ -218,104 +258,112 @@ message.
     The constraint slot is threaded through the runner's plan walk
     (via the `run_step` helper in `integration/framework.md`); see
     that file for the dispatch sequence.
-12. **Construct the force field.** Call
-    `ForceField::new(&registries.potentials, device.clone(),
-    N, &sim_box, &config.pair_interactions, &config.bond_types,
-    &bond_list, &exclusion_list, &config.neighbor_list)` (see
-    `forces/framework.md`). The slot list is the one produced by
-    iterating `registries.potentials.builders` and keeping every
-    `Some(slot)` they return. For the built-in `PotentialRegistry`
-    on a typical config that yields the LJ slot (always) and the
-    `MorseBonded` slot (when the bond list is non-empty);
-    user-registered builders extend the slot list per the registry's
-    iteration order. When `config.neighbor_list` selects `CellList`, the
-    LJ slot's sub-state owns the cell-list and neighbor-list buffers
-    described in `forces/neighbor-list.md`. The runner no longer
-    manipulates the `PairBuffer`, neighbor-counts, or Lennard-Jones
-    parameter struct directly.
-13. **Open output writers.** Open `TrajectoryWriter` and/or `LogWriter`
-    depending on the `_every` settings. The `LogWriter` is opened with
-    the concatenation of every slot's extra-column names, in dispatch
-    order:
+
+13. **Open per-phase output writers.** Open `TrajectoryWriter`
+    and/or `LogWriter` for phase `P` using
+    `P.output.trajectory_path`, `P.output.log_path`, and the
+    `include_velocities` / `include_images` flags from `P.output`.
+    The `LogWriter` is opened with the concatenation of every active
+    slot's extra-column names, in dispatch order:
     `integrator.log_column_names() ++ thermostat.map(|t|
     t.log_column_names()).unwrap_or_default() ++ barostat.map(|b|
     b.log_column_names()).unwrap_or_default()`. The runner caches the
-    concatenated slice for the duration of the run. When that cached
-    slice is non-empty, the runner additionally allocates a length-1
-    `CudaSlice<f32>` named `pe_scratch` (the per-log-row scratch buffer
-    passed to `compute_total_potential_energy` in steps 15 and 16.f).
-    Failure → exit 1.
-14. **Warm up forces.** Call `force_field.step(&mut buffers, &sim_box,
-    &mut timings)` once to populate `forces_*` with `F(x_0)`. This is
-    the same warm-up pattern used in `pipeline-reproducibility.md`.
-15. **Write step-0 outputs.** When trajectory output is enabled, download
-    the relevant buffers and call `write_frame(step=0, ...)`. When log
-    output is enabled, download `velocities_*` and `masses` (the
-    `masses` download is cached for the remainder of the run), compute
-    KE and T via `compute_kinetic_energy` and `compute_temperature`
-    (`log-output.md`); if the cached extra-column slice is non-empty,
-    additionally call
-    `compute_total_potential_energy(&buffers, &mut pe_scratch)` (see
-    `integration/nose-hoover-chain.md`) to obtain the total PE in
-    joules via a single-block deterministic GPU reduction of
-    `buffers.potential_energies` followed by a one-scalar download.
-    Assemble the extras vector as the concatenation of each slot's
-    `log_column_values(ke, pe)` in the same dispatch order used at
-    log-open time (integrator, thermostat, barostat). Call
-    `write_row(0, 0.0, ke, t, &extras)`.
-16. **Timestep loop.** For each step `s` in `1 ..= n_steps`:
-    a. If `thermostat.is_some()`,
-       `thermostat.apply_pre(&mut buffers, dt, &mut timings)` — runs
-       the thermostat's pre-step modification (a Trotter half-step for
-       NHC; a no-op for thermostats whose `apply_pre` is left at the
-       trait default).
-    b. `integrator.step(&mut buffers, &mut sim_box, &mut force_field, dt, &mut timings)`
-       — runs the integrator's time-stepping body and calls
-       `force_field.step(...)` internally at the integrator's chosen
-       point(s). On return, `particle_buffers.forces_*`,
-       `potential_energies`, and `virials` hold the values for the
-       post-step positions.
-    c. If `thermostat.is_some()`,
-       `thermostat.apply_post(&mut buffers, dt, &mut timings)` — runs
-       the thermostat's post-step modification (the right half-step
-       for NHC; the full single rescale for CSVR / Berendsen; the
-       Bernoulli resample for Andersen).
-    d. If `barostat.is_some()`,
-       `barostat.apply(&mut buffers, &mut sim_box, dt, &mut timings)`
-       — runs the barostat's box and position rescale. The default
-       registry has no implementations; this branch is dead code at
-       runtime until a concrete barostat lands.
+    concatenated slice for the duration of phase `P`. When that
+    cached slice is non-empty, the runner additionally allocates a
+    length-1 `CudaSlice<f32>` named `pe_scratch` (the per-log-row
+    scratch buffer passed to `compute_total_potential_energy` in
+    steps 15 and 16.f). The PE scratch is freed at end of phase along
+    with the slot handles. Failure → exit 1.
 
-    The loop variable `s` is local to the runner and gates trajectory
+14. **Initialise per-phase `Timings`.** Construct a fresh `Timings`
+    instance for phase `P` (`Timings::new(&gpu)`). For phase 0 only,
+    the runner replays the three pre-instrumented host stages
+    (`config_load`, `init_load`, `gpu_init`) into this Timings as
+    static one-shot samples; subsequent phases' Timings start empty.
+
+15. **Warm up forces.** Call
+    `force_field.step(&mut buffers, &sim_box, &mut timings)` once to
+    populate `forces_*` with the force vector at the phase's initial
+    positions. For phase 0 this is `F(x_0)`. For later phases this
+    re-computes the force at the carried-over positions; the result
+    is bit-identical to what the previous phase's last
+    `integrator.step` left in the buffer (the carry-over of
+    `forces_*` is guaranteed by the per-phase invariant
+    `forces ↔ positions` documented in `pipeline-reproducibility.md`),
+    so the redundant compute is a determinism safety net rather than
+    a correctness requirement.
+
+16. **Write phase step-0 outputs.** When `P.output.trajectory_every >
+    0`, download the relevant buffers and call
+    `write_frame(step=0, ...)` on the phase trajectory writer. When
+    `P.output.log_every > 0`, download `velocities_*` and `masses`
+    (the `masses` download is cached for the remainder of phase `P`),
+    compute KE and T via `compute_kinetic_energy` and
+    `compute_temperature` (`log-output.md`); if the cached
+    extra-column slice is non-empty, additionally call
+    `compute_total_potential_energy(&buffers, &mut pe_scratch)` to
+    obtain the total PE via a single-block deterministic GPU
+    reduction (one f32 scalar downloaded; no per-particle download),
+    and assemble the extras vector as the concatenation of each
+    slot's `log_column_values(ke, pe)` in dispatch order
+    (integrator, thermostat, barostat). Call
+    `write_row(0, 0.0, ke, t, &extras)`. The `step` and `time`
+    columns are **phase-local** (the phase always starts at step 0,
+    time 0.0).
+
+17. **Phase timestep loop.** For each step `s` in `1 ..= P.n_steps`:
+    a. If `thermostat.is_some()`,
+       `thermostat.apply_pre(&mut buffers, P.dt, &mut timings)`.
+    b. `integrator.step(&mut buffers, &mut sim_box, &mut force_field,
+       P.dt, &mut timings)`.
+    c. If `thermostat.is_some()`,
+       `thermostat.apply_post(&mut buffers, P.dt, &mut timings)`.
+    d. If `barostat.is_some()`,
+       `barostat.apply(&mut buffers, &mut sim_box, P.dt, &mut timings)`.
+
+    The loop variable `s` is local to the phase and gates trajectory
     and log writes below; it is not passed to any slot.
 
-    e. If trajectory output is enabled and `s % trajectory_every == 0`,
-       download positions (and velocities when configured) and call
-       `write_frame(step=s, ...)`.
-    f. If log output is enabled and `s % log_every == 0`, download
-       velocities, compute KE and T; when the cached extra-column
-       slice is non-empty, additionally call
-       `compute_total_potential_energy(&buffers, &mut pe_scratch)` to
-       obtain the total PE via a single-block deterministic GPU
-       reduction (one f32 scalar downloaded; no per-particle download),
-       and assemble the extras vector as the concatenation of each
-       slot's `log_column_values(ke, pe)` in dispatch order. Call
-       `write_row(s, s as f64 * dt, ke, t, &extras)`.
+    e. If `P.output.trajectory_every > 0` and
+       `s % P.output.trajectory_every == 0`, download positions (and
+       velocities when configured) and call
+       `write_frame(step=s, ...)`. The `Time=` attribute is computed
+       as `s as f64 * P.dt` — phase-local time.
+    f. If `P.output.log_every > 0` and
+       `s % P.output.log_every == 0`, download velocities, compute KE
+       and T, optionally compute total PE (when extras are non-empty),
+       and call `write_row(s, s as f64 * P.dt, ke, t, &extras)`.
     g. Possibly emit a progress line (see *Progress reporting*).
-17. **Flush and close.** Call `flush()` on each open writer. The writers'
-    `Drop` impls are best-effort but the runner calls `flush` explicitly
+
+    The `dt` value passed to integrator launches is `P.dt as f32`.
+
+18. **Flush and close per-phase writers.** Call `flush()` on the
+    open trajectory and log writers and drop them. Writers' `Drop`
+    impls are best-effort but the runner calls `flush` explicitly
     so flush errors propagate.
-18. **Write timings file.** Capture the total-runtime measurement, drain
-    outstanding CUDA event pairs via `Timings::finalize`, and serialise
-    the resulting report to `config.output.timings_path` via
-    `write_timings_file`. See `performance-analysis.md` for the
-    instrumentation contract and file format.
-19. **Final summary.** Emit one summary line to stdout (see
+
+19. **Write per-phase timings file.** Capture the
+    phase-elapsed-runtime measurement (a per-phase `total_runtime`
+    sample), drain outstanding CUDA event pairs via
+    `Timings::finalize`, and serialise the resulting report to
+    `P.output.timings_path` via `write_timings_file`. See
+    `performance-analysis.md` for the file format. The Timings
+    instance is dropped at end of phase.
+
+20. **Drop slot handles.** The phase's `Integrator`, `Thermostat`,
+    `Barostat`, and `Constraint` boxes are dropped, releasing their
+    GPU-side buffers. The persistent state owned by `ParticleBuffers`
+    (positions, velocities, masses, charges) and by the `ForceField`
+    (neighbor list, pair buffer, slot parameter buffers) is
+    unaffected.
+
+### After the loop <!-- rq-0864e90f -->
+
+21. **Final summary.** Emit one summary line to stdout (see
     *Final summary*). Exit 0.
 
-The `dt` value passed to integrator launches is `config.simulation.dt as
-f32`. KE/temperature computation uses `f64` arithmetic on `f32`-downloaded
-values.
+KE/temperature computation uses `f64` arithmetic on `f32`-downloaded
+values throughout, in every phase.
 
 ## Lint flow <!-- rq-c02c6b45 -->
 
@@ -598,21 +646,33 @@ startup. (Implementations may use `std::io::IsTerminal` from std.)
 
 ## Final summary <!-- rq-d29872e4 -->
 
-After flushing all writers, the runner emits a single line to stdout:
+After every phase has completed and its writers have been flushed,
+the runner emits one line per phase plus a final aggregate line to
+stdout. Example for a two-phase config:
 
 ```
-[dynamics] complete: 10000 steps in 312 ms (frames: 101, log rows: 101)
+[dynamics] phase `equil`: 5000 steps in 96 ms (frames: 0, log rows: 51)
+[dynamics] phase `prod`: 10000 steps in 312 ms (frames: 101, log rows: 101)
+[dynamics] complete: 2 phases, 15000 steps in 410 ms
 ```
 
-Where:
+Per-phase lines carry:
 
-- "frames" is the number of trajectory frames written (zero when
-  `trajectory_every == 0`).
-- "log rows" is the number of CSV rows written, excluding the header
-  (zero when `log_every == 0`).
-- The elapsed time is the wall-clock interval between the start of the
-  warm-up step and the end of the final `flush`, formatted in `ms` with no
-  fractional digits when `>= 10 ms` and in `µs` when shorter.
+- "phase `<name>`" — the phase's `name` from `config.phases[i].name`.
+- "<n> steps" — the phase's `n_steps`.
+- The wall-clock elapsed time for that phase (start of warm-up to end
+  of writer flushes), formatted in `ms` with no fractional digits
+  when `>= 10 ms` and in `µs` when shorter.
+- "frames" — the number of trajectory frames written for that phase
+  (zero when the phase's `trajectory_every == 0`).
+- "log rows" — the number of CSV rows written for that phase,
+  excluding the header (zero when the phase's `log_every == 0`).
+
+The final aggregate line carries the phase count, the sum of every
+phase's `n_steps`, and the total wall-clock from the start of phase 0
+to the end of the last phase's writer flushes (including any
+inter-phase setup and teardown). Per-phase and aggregate times
+together account for the full run cost.
 
 ## Feature API <!-- rq-02edd314 -->
 
@@ -745,10 +805,25 @@ wrapper that dispatches between the two on the first CLI argument.
     row count, and elapsed time on success.
 
 - `RunSummary` fields: <!-- rq-5c1cfc93 -->
-  - `n_steps: u64`
-  - `frames_written: u64`
-  - `log_rows_written: u64`
-  - `elapsed_micros: u128`
+  - `phases: Vec<PhaseSummary>` — one entry per phase in declaration
+    order. Length equals `config.phases.len()` on a successful run.
+  - `total_n_steps: u64` — sum of every phase's `n_steps`.
+  - `total_elapsed_micros: u128` — wall-clock interval from the start
+    of phase 0's warm-up through the end of the final phase's writer
+    flushes. Includes per-phase setup, teardown, and per-phase
+    timings-file writes.
+
+- `PhaseSummary` — per-phase outcome record carried in <!-- rq-b00170c6 -->
+  `RunSummary.phases`.
+  - `name: String` — copied from the phase's `name` field.
+  - `n_steps: u64` — the phase's configured `n_steps`.
+  - `frames_written: u64` — number of trajectory frames written
+    during the phase (zero when the phase's `trajectory_every == 0`).
+  - `log_rows_written: u64` — number of CSV log rows written during
+    the phase, excluding the header (zero when the phase's
+    `log_every == 0`).
+  - `elapsed_micros: u128` — wall-clock interval from the start of
+    the phase's warm-up to the end of the phase's writer flushes.
 
 - `lint_simulation(config_path: &Path, with_gpu: bool) -> LintReport` <!-- rq-4ff84310 -->
   - Convenience wrapper. Equivalent to

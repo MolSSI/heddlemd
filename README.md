@@ -70,8 +70,9 @@ A run produces three files alongside the config:
   `total_ms`, `mean_us`, `min_us`, `max_us`.
 
 By convention, config filenames end in `.in.toml` and the loader
-derives the default output paths from the filename root (`argon.in.toml`
-→ `argon.out.{xyz,log,timings}`). The runner rejects a config path
+derives the default output paths from the filename root and each
+phase's `name` (`argon.in.toml` with phase `name = "run"` →
+`argon.out.run.{xyz,log,timings}`). The runner rejects a config path
 that does not match the suffix. The example's
 [`README.md`](examples/lj-10000-argon/README.md) describes the lattice
 layout and how to regenerate `argon.in.xyz`.
@@ -81,12 +82,14 @@ layout and how to regenerate `argon.in.xyz`.
 A simulation is fully specified by two files:
 
 - A **TOML config** that pins everything affecting the trajectory:
-  RNG seed, `n_steps`, `dt`, target temperature, integrator mode
-  (lossy or lossless), particle-type masses, and per-pair Lennard-Jones
-  coefficients. SI units throughout (metres, kilograms, seconds, joules,
-  kelvin). Output paths and cadences live in the optional `[output]`
-  section; see [`rqm/io/config-schema.md`](rqm/io/config-schema.md) for
-  the full field reference.
+  RNG seed, target temperature, particle-type masses, per-pair
+  Lennard-Jones coefficients, and one or more `[[phase]]` blocks —
+  each carrying its own `n_steps`, `dt`, integrator mode, and optional
+  thermostat/barostat/output. SI units throughout (metres, kilograms,
+  seconds, joules, kelvin). Per-phase output paths and cadences live
+  in the optional `[phase.output]` sub-table; see
+  [`rqm/io/config-schema.md`](rqm/io/config-schema.md) for the full
+  field reference.
 - An **extended-XYZ init file** carrying the particle count, simulation
   box (orthorhombic `Lattice="lx 0 0 0 ly 0 0 0 lz"`), per-particle
   type names, positions, and optionally velocities. Positions must lie

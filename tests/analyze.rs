@@ -30,11 +30,15 @@ init = "sim.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 0
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 0
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -52,7 +56,7 @@ cutoff = 1.0e-9
 [neighbor_list]
 mode = "all-pairs"
 
-[output]
+[phase.output]
 trajectory_every = 1
 log_every = 0
 "#
@@ -78,7 +82,7 @@ fn write_one_frame_trajectory(dir: &Path, x_sep: f64) {
         -x_sep / 2.0,
         x_sep / 2.0,
     );
-    std::fs::write(dir.join("sim.out.xyz"), body).unwrap();
+    std::fs::write(dir.join("sim.out.run.xyz"), body).unwrap();
 }
 
 fn write_three_frame_trajectory(dir: &Path, seps: [f64; 3]) {
@@ -92,7 +96,7 @@ fn write_three_frame_trajectory(dir: &Path, seps: [f64; 3]) {
             t = i as f64,
         ));
     }
-    std::fs::write(dir.join("sim.out.xyz"), body).unwrap();
+    std::fs::write(dir.join("sim.out.run.xyz"), body).unwrap();
 }
 
 fn rdf_analysis_body(name: &str, r_max: f64, n_bins: u64) -> String {
@@ -258,7 +262,7 @@ fn reject_output_path_equals_trajectory() {
 [[analyses]]
 name = "x"
 kind = "rdf"
-output_path = "sim.out.xyz"
+output_path = "sim.out.run.xyz"
 between = ["Ar", "Ar"]
 r_max = 1.0e-9
 n_bins = 8
@@ -351,7 +355,7 @@ fn missing_trajectory_is_reported_before_analyses_build() {
     write_two_atom_init(&dir, 1.0e-9);
     let path = dir.join("sim.in.analysis");
     std::fs::write(&path, rdf_analysis_body("ar-ar", 8.0e-10, 8)).unwrap();
-    // No sim.out.xyz exists.
+    // No sim.out.run.xyz exists.
     match run_analyses(&path).unwrap_err() {
         AnalyzeError::Trajectory(_) => {}
         other => panic!("expected Trajectory error, got {other:?}"),
@@ -387,7 +391,7 @@ fn stride_greater_than_one_reduces_frames() {
             t = i as f64,
         ));
     }
-    std::fs::write(dir.join("sim.out.xyz"), body).unwrap();
+    std::fs::write(dir.join("sim.out.run.xyz"), body).unwrap();
     let analysis = format!(
         "schema_version = 1\nstride = 2\n{}",
         rdf_analysis_body("ar-ar", 8.0e-10, 8)

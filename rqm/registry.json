@@ -593,6 +593,14 @@
     "title": "Builder validate_params accepts a well-formed params object",
     "type": "scenario"
   },
+  "rq-0864e90f": {
+    "decl": "### After the loop",
+    "file": "simulation-runner",
+    "level": 3,
+    "refs": [],
+    "title": "After the loop",
+    "type": "section"
+  },
   "rq-086a1bd9": {
     "decl": "Scenario: Unknown angle type name rejected",
     "file": "forces/topology",
@@ -884,6 +892,13 @@
     "file": "integration/csvr",
     "refs": [],
     "title": "Log file header omits csvr_conserved when CSVR is not the thermostat",
+    "type": "scenario"
+  },
+  "rq-0dc50ce0": {
+    "decl": "Scenario: Reject a phase name containing non-ASCII characters",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject a phase name containing non-ASCII characters",
     "type": "scenario"
   },
   "rq-0e5ac409": {
@@ -1631,6 +1646,14 @@
     "title": "ParticleBuffers",
     "type": "api-item"
   },
+  "rq-18441e33": {
+    "decl": "#### `[[phase]]` (array of tables, >= 1 entry)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[[phase]]` (array of tables, >= 1 entry)",
+    "type": "section"
+  },
   "rq-18f5ef7a": {
     "decl": "Scenario: Constraint group adds implicit exclusions for every intra-group pair",
     "file": "integration/constraint-framework",
@@ -1913,14 +1936,6 @@
     "level": 3,
     "refs": [],
     "title": "Types",
-    "type": "section"
-  },
-  "rq-1c2d8eba": {
-    "decl": "#### `[thermostat]` (optional)",
-    "file": "io/config-schema",
-    "level": 4,
-    "refs": [],
-    "title": "`[thermostat]` (optional)",
     "type": "section"
   },
   "rq-1c729f15": {
@@ -2756,6 +2771,13 @@
     "title": "scatter places each atom inside its cell's slice",
     "type": "scenario"
   },
+  "rq-2674f18a": {
+    "decl": "Scenario: Explicit `trajectory` overrides phase-derived default",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Explicit `trajectory` overrides phase-derived default",
+    "type": "scenario"
+  },
   "rq-267941a2": {
     "decl": "## Configuration",
     "file": "forces/neighbor-list",
@@ -2829,11 +2851,11 @@
     "type": "scenario"
   },
   "rq-27f9fae8": {
-    "decl": "#### `[integrator]`",
+    "decl": "#### `[phase.integrator]`",
     "file": "io/config-schema",
     "level": 4,
     "refs": [],
-    "title": "`[integrator]`",
+    "title": "`[phase.integrator]`",
     "type": "section"
   },
   "rq-27ffd3f4": {
@@ -3919,6 +3941,13 @@
     "title": "Per-pair-type r_switch dispatches correctly",
     "type": "scenario"
   },
+  "rq-38117e33": {
+    "decl": "Scenario: Explicit `phase` selects the matching phase's trajectory",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Explicit `phase` selects the matching phase's trajectory",
+    "type": "scenario"
+  },
   "rq-38199bd4": {
     "decl": "### Group Ordering",
     "file": "integration/constraint-framework",
@@ -4374,6 +4403,14 @@
     "title": "Combiner with num_slots == 0 writes zeros",
     "type": "scenario"
   },
+  "rq-3ea7fedd": {
+    "decl": "#### `[phase.output]` (optional table; all fields have defaults)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[phase.output]` (optional table; all fields have defaults)",
+    "type": "section"
+  },
   "rq-3eaf65b6": {
     "decl": "Scenario: check_min_perpendicular_width is deterministic",
     "file": "simulation-box",
@@ -4743,6 +4780,13 @@
     "title": "Per-Step Kernel Sequence",
     "type": "section"
   },
+  "rq-46b1a697": {
+    "decl": "Scenario: Reject two phases of the same stochastic kind sharing a seed",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject two phases of the same stochastic kind sharing a seed",
+    "type": "scenario"
+  },
   "rq-46c317ef": {
     "decl": "Scenario: trajectory_write count equals frames written",
     "file": "performance-analysis",
@@ -5035,10 +5079,10 @@
     "type": "scenario"
   },
   "rq-4bbbada4": {
-    "decl": "Scenario: [barostat] section absent yields config.barostat = None",
+    "decl": "Scenario: [barostat] section absent yields config.phases[0].barostat = None",
     "file": "io/config-schema",
     "refs": [],
-    "title": "[barostat] section absent yields config.barostat = None",
+    "title": "[barostat] section absent yields config.phases[0].barostat = None",
     "type": "scenario"
   },
   "rq-4bc8028f": {
@@ -5121,7 +5165,12 @@
   "rq-4d1082c4": {
     "decl": "# Feature: Radial Distribution Function Analysis (`rdf`)",
     "file": "analysis/rdf",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/rdf.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: Radial Distribution Function Analysis (`rdf`)",
     "type": "file"
   },
@@ -5709,6 +5758,13 @@
     "title": "topology absolute path is preserved",
     "type": "scenario"
   },
+  "rq-57bcb870": {
+    "decl": "Scenario: Reject two phases whose default trajectory paths collide",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject two phases whose default trajectory paths collide",
+    "type": "scenario"
+  },
   "rq-57c1b6a3": {
     "decl": "Scenario: No GPU available",
     "file": "simulation-runner",
@@ -5736,6 +5792,14 @@
     "level": 3,
     "refs": [],
     "title": "Lossless mode: compensated summation",
+    "type": "section"
+  },
+  "rq-581dbfb8": {
+    "decl": "### Per-phase loop",
+    "file": "simulation-runner",
+    "level": 3,
+    "refs": [],
+    "title": "Per-phase loop",
     "type": "section"
   },
   "rq-581ec3ff": {
@@ -6101,6 +6165,13 @@
     "title": "At equilibrium, time-averaged temperature tracks T_target",
     "type": "scenario"
   },
+  "rq-5e69125b": {
+    "decl": "Scenario: Reject an empty [[phase]] array",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject an empty [[phase]] array",
+    "type": "scenario"
+  },
   "rq-5e802037": {
     "decl": "## Determinism",
     "file": "integration/berendsen",
@@ -6223,6 +6294,13 @@
     "refs": [],
     "title": "Config",
     "type": "api-item"
+  },
+  "rq-60b19852": {
+    "decl": "Scenario: Two phases of different kinds may share a numerical seed",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Two phases of different kinds may share a numerical seed",
+    "type": "scenario"
   },
   "rq-60c1e792": {
     "decl": "## Out of Scope",
@@ -6368,14 +6446,6 @@
     "title": "NoseHooverChainThermostat",
     "type": "api-item"
   },
-  "rq-6340fae2": {
-    "decl": "#### `[output]` (optional table; all fields have defaults)",
-    "file": "io/config-schema",
-    "level": 4,
-    "refs": [],
-    "title": "`[output]` (optional table; all fields have defaults)",
-    "type": "section"
-  },
   "rq-637c4fdd": {
     "decl": "### Rust Launch Helpers",
     "file": "forces/morse-bonded",
@@ -6514,7 +6584,7 @@
     "type": "section"
   },
   "rq-661bf664": {
-    "decl": "- `SlotConfig` — open-shaped parsed selection for the singleton",
+    "decl": "- `SlotConfig` — open-shaped parsed selection for a per-phase",
     "file": "io/config-schema",
     "refs": [
       {
@@ -7253,6 +7323,13 @@
     "title": "Construct Langevin BAOAB via the integrator registry",
     "type": "scenario"
   },
+  "rq-707b5520": {
+    "decl": "Scenario: Per-phase [phase.output] defaults derive from <root> and phase name",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Per-phase [phase.output] defaults derive from <root> and phase name",
+    "type": "scenario"
+  },
   "rq-70e9fd38": {
     "decl": "Scenario: A trajectory frame can be re-parsed by load_init_state",
     "file": "io/trajectory-output",
@@ -7341,11 +7418,11 @@
     "type": "scenario"
   },
   "rq-72c57874": {
-    "decl": "### Empty simulation",
+    "decl": "### Empty phase",
     "file": "io/log-output",
     "level": 3,
     "refs": [],
-    "title": "Empty simulation",
+    "title": "Empty phase",
     "type": "section"
   },
   "rq-73054857": {
@@ -9139,6 +9216,13 @@
     "title": "BarostatRegistry::with_builtins() exposes berendsen",
     "type": "scenario"
   },
+  "rq-90e307b2": {
+    "decl": "Scenario: Two-phase config loads with distinct per-phase parameters",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Two-phase config loads with distinct per-phase parameters",
+    "type": "scenario"
+  },
   "rq-90eab90b": {
     "decl": "Scenario: Reject extra fields",
     "file": "integration/berendsen-barostat",
@@ -9485,6 +9569,13 @@
     "title": "Reduction with zero count writes zero to energy and virial targets",
     "type": "scenario"
   },
+  "rq-963604a4": {
+    "decl": "Scenario: Implicit pairing defaults to the last phase of the simulation config",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Implicit pairing defaults to the last phase of the simulation config",
+    "type": "scenario"
+  },
   "rq-964b59fd": {
     "decl": "### Columns",
     "file": "analysis/rdf",
@@ -9517,6 +9608,13 @@
     "file": "forces/morse-bonded",
     "refs": [],
     "title": "reduce_bond_forces on zero particles is a no-op",
+    "type": "scenario"
+  },
+  "rq-96d9c9df": {
+    "decl": "Scenario: Reject phase dt <= 0",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject phase dt <= 0",
     "type": "scenario"
   },
   "rq-96f71d13": {
@@ -9590,6 +9688,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "total_ms equals mean_us * count / 1000 within reporting precision",
+    "type": "scenario"
+  },
+  "rq-982ddb8d": {
+    "decl": "Scenario: Reject [phase.thermostat] alongside an integrator that owns its own",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject [phase.thermostat] alongside an integrator that owns its own",
     "type": "scenario"
   },
   "rq-98473586": {
@@ -11154,6 +11259,13 @@
     "title": "Launch Configuration",
     "type": "section"
   },
+  "rq-b00170c6": {
+    "decl": "- `PhaseSummary` — per-phase outcome record carried in",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "PhaseSummary",
+    "type": "api-item"
+  },
   "rq-b004196f": {
     "decl": "- `ConstraintRegistry::build_optional(&self, list: &ConstraintList, gpu: &GpuContext, particle_count: usize, masses: &[f32], constraint_types: &[NamedSlotConfig]) -> Result<Option<Box<dyn Constraint>>, ConstraintError>`",
     "file": "integration/constraint-framework",
@@ -11515,6 +11627,13 @@
     "file": "integration/berendsen",
     "refs": [],
     "title": "λ < 1 when K_old > K_target (system needs cooling)",
+    "type": "scenario"
+  },
+  "rq-b6d22242": {
+    "decl": "Scenario: Unknown phase name is rejected at load time",
+    "file": "analysis/framework",
+    "refs": [],
+    "title": "Unknown phase name is rejected at load time",
     "type": "scenario"
   },
   "rq-b6f167a4": {
@@ -11916,6 +12035,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "Empty (N=0) run omits all kernel rows but retains host rows",
+    "type": "scenario"
+  },
+  "rq-bdfb11e3": {
+    "decl": "Scenario: Per-phase [phase.output] overrides default paths",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Per-phase [phase.output] overrides default paths",
     "type": "scenario"
   },
   "rq-be1eb548": {
@@ -12716,10 +12842,10 @@
     "type": "scenario"
   },
   "rq-ca356c08": {
-    "decl": "Scenario: [thermostat] section absent yields config.thermostat = None",
+    "decl": "Scenario: [thermostat] section absent yields config.phases[0].thermostat = None",
     "file": "io/config-schema",
     "refs": [],
-    "title": "[thermostat] section absent yields config.thermostat = None",
+    "title": "[thermostat] section absent yields config.phases[0].thermostat = None",
     "type": "scenario"
   },
   "rq-ca3ec865": {
@@ -12822,6 +12948,14 @@
     "refs": [],
     "title": "Accept a lattice with negative tilts",
     "type": "scenario"
+  },
+  "rq-cc557e8c": {
+    "decl": "#### `[phase.barostat]` (optional)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[phase.barostat]` (optional)",
+    "type": "section"
   },
   "rq-cc66d208": {
     "decl": "Scenario: step_class(Slow) on a ForceField with no Slow slots is a no-op",
@@ -13243,14 +13377,6 @@
     "title": "CUDA Kernels",
     "type": "section"
   },
-  "rq-d28e9105": {
-    "decl": "#### `[barostat]` (optional)",
-    "file": "io/config-schema",
-    "level": 4,
-    "refs": [],
-    "title": "`[barostat]` (optional)",
-    "type": "section"
-  },
   "rq-d29872e4": {
     "decl": "## Final summary",
     "file": "simulation-runner",
@@ -13444,6 +13570,13 @@
     "title": "Feature: Langevin BAOAB Integrator",
     "type": "file"
   },
+  "rq-d617bf4a": {
+    "decl": "Scenario: Reject [phase.barostat] alongside mtk-npt in any single phase",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject [phase.barostat] alongside mtk-npt in any single phase",
+    "type": "scenario"
+  },
   "rq-d61fa682": {
     "decl": "Scenario: Force magnitude matches closed-form Morse expression",
     "file": "forces/morse-bonded",
@@ -13525,6 +13658,21 @@
     "refs": [],
     "title": "lan_drift_half does not modify image flags when no wrap occurs",
     "type": "scenario"
+  },
+  "rq-d70c3517": {
+    "decl": "Scenario: A topology with constraint groups paired with mtk-npt in a phase is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "A topology with constraint groups paired with mtk-npt in a phase is rejected",
+    "type": "scenario"
+  },
+  "rq-d734328e": {
+    "decl": "### Once-only setup",
+    "file": "simulation-runner",
+    "level": 3,
+    "refs": [],
+    "title": "Once-only setup",
+    "type": "section"
   },
   "rq-d764ea16": {
     "decl": "### CUDA Kernels",
@@ -15084,6 +15232,14 @@
     "title": "Reject stride = 0",
     "type": "scenario"
   },
+  "rq-ee10237d": {
+    "decl": "#### `[phase.thermostat]` (optional)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[phase.thermostat]` (optional)",
+    "type": "section"
+  },
   "rq-ee43e3d6": {
     "decl": "Scenario: Reject yoshida_order outside {1, 3, 5, 7}",
     "file": "integration/mtk-npt",
@@ -15451,6 +15607,13 @@
     "title": "vv_kick_drift",
     "type": "api-item"
   },
+  "rq-f1c04d3b": {
+    "decl": "- `PhaseConfig` — parsed `[[phase]]` entry.",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "PhaseConfig",
+    "type": "api-item"
+  },
   "rq-f1c96a3f": {
     "decl": "- `mtk_position_drift(buffers: &mut ParticleBuffers, exp_b_dt: f32, phi_x_dt: f32) -> Result<(), GpuError>`",
     "file": "integration/mtk-npt",
@@ -15587,6 +15750,14 @@
     "title": "TrajectoryFrame",
     "type": "api-item"
   },
+  "rq-f45b8166": {
+    "decl": "### Per-phase output paths",
+    "file": "io/config-schema",
+    "level": 3,
+    "refs": [],
+    "title": "Per-phase output paths",
+    "type": "section"
+  },
   "rq-f45cdfb6": {
     "decl": "## Per-Step Kernel Sequence",
     "file": "integration/nose-hoover-chain",
@@ -15682,6 +15853,13 @@
     ],
     "title": "Feature: Nosé-Hoover Chain (NHC) Thermostat",
     "type": "file"
+  },
+  "rq-f6107e43": {
+    "decl": "Scenario: Reject duplicate phase names",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Reject duplicate phase names",
+    "type": "scenario"
   },
   "rq-f652bf7c": {
     "decl": "Scenario: Forces on the two members of a non-boundary pair are equal and opposite",
@@ -16138,7 +16316,16 @@
   "rq-fd8bb824": {
     "decl": "# Feature: Analysis Framework and `dynamics analyze`",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: Analysis Framework and `dynamics analyze`",
     "type": "file"
   },

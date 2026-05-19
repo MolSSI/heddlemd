@@ -66,16 +66,26 @@ file.
 
 ### `Step` <!-- rq-df244549 -->
 
-A non-negative integer, the integration-step index at which the frame was
-captured. The initial-conditions frame has `Step=0`. Subsequent frames
-carry `Step=trajectory_every`, `Step=2*trajectory_every`, ..., up to the
-last multiple of `trajectory_every` that is `<= n_steps`.
+A non-negative integer, the integration-step index within the owning
+phase at which the frame was captured. Step numbering is
+**phase-local**: each per-phase trajectory file starts with `Step=0`
+(the phase's initial-state snapshot) and runs through `Step=n_steps`
+for that phase, regardless of how many phases came before. Subsequent
+frames inside a phase carry `Step=trajectory_every`,
+`Step=2*trajectory_every`, ..., up to the last multiple of
+`trajectory_every` that is `<= n_steps` for that phase.
 
 ### `Time` <!-- rq-6ec75323 -->
 
-A real number, the simulation time in seconds: `Time = step * dt`. Written
-using `{:.9e}`. The initial frame carries `Time=0.0e0`. Identical to
-`Step * dt` evaluated in `f64`.
+A real number, the **phase-local** simulation time in seconds:
+`Time = step * dt_phase`, where `dt_phase` is the owning phase's
+`dt` from the config. Written using `{:.9e}`. The phase's
+initial-state frame carries `Time=0.0e0`. Identical to
+`Step * dt_phase` evaluated in `f64`. Phase-local timing means each
+per-phase trajectory file is structurally identical to a single-phase
+trajectory of the same `n_steps`/`dt`; tooling that wants the
+elapsed time across phases must consult the config's per-phase `dt`
+values and sum them.
 
 ### Data rows <!-- rq-00c68095 -->
 
@@ -104,14 +114,24 @@ Velocities, when included, are written in m/s.
 
 ## Cadence <!-- rq-74b5c137 -->
 
-The runner writes one frame for the initial state (`Step=0`) plus one
-frame at every step `s` such that `s % trajectory_every == 0` and
-`1 <= s <= n_steps`. When `trajectory_every == 0`, no frames are written
-(not even the step-0 frame). When `trajectory_every > n_steps`, only the
+Per phase: the runner writes one frame for the phase's initial state
+(`Step=0`) plus one frame at every step `s` such that
+`s % trajectory_every == 0` and `1 <= s <= n_steps` for that phase.
+Both `trajectory_every` and `n_steps` are the phase's per-phase
+values from `config.phases[i].output.trajectory_every` and
+`config.phases[i].n_steps` (see `rqm/io/config-schema.md`). When
+`trajectory_every == 0` for the phase, no frames are written and no
+trajectory file is created for that phase. When
+`trajectory_every > n_steps` for the phase, only the phase's
 step-0 frame is written.
 
-Total frame count when `trajectory_every > 0`:
+Total frame count for a phase, when `trajectory_every > 0`:
 `floor(n_steps / trajectory_every) + 1`.
+
+One trajectory file is produced per phase that opts in (i.e. whose
+`trajectory_every > 0`). Phases with `trajectory_every == 0` produce
+no file at all — the absence of `<root>.out.<phase-name>.xyz` is
+itself the signal that the phase suppressed trajectory output.
 
 ## Feature API <!-- rq-22e4e198 -->
 

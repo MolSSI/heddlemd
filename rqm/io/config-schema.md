@@ -15,6 +15,15 @@ The top-level table carries one mandatory field, `schema_version`. The schema
 described here is version `1`. Loading a config whose `schema_version` is any
 other value is an error.
 
+A simulation is a sequence of one or more **phases** declared as a
+`[[phase]]` array of tables. Each phase carries its own timestep, step
+count, integrator, optional thermostat, optional barostat, and
+optional output cadences. Particle state (positions, velocities,
+simulation box, particle types, charges) carries over between phases;
+slot state (integrator buffers, thermostat chains, barostat state)
+is reset at every phase boundary. See `simulation-runner.md` for the
+runtime model.
+
 Sections:
 
 | Section | Required | Purpose |
@@ -22,21 +31,22 @@ Sections:
 | top-level `schema_version` | yes | format version |
 | top-level `init` | yes | path to initial-state file |
 | top-level `topology` | no | path to .topology file |
-| `[simulation]` | yes | timestep, step count, RNG seed, initial-velocity temperature |
-| `[integrator]` | yes | integrator slot + per-kind parameters |
-| `[thermostat]` | no | thermostat slot + per-kind parameters |
-| `[barostat]` | no | barostat slot + per-kind parameters |
+| `[simulation]` | yes | RNG seed and target temperature for initial-velocity sampling |
+| `[[phase]]` | yes (>= 1) | per-phase integrator / thermostat / barostat / outputs |
 | `[[particle_types]]` | yes (>= 1) | per-type properties |
 | `[[pair_interactions]]` | yes (covers every pair) | per-pair potential + parameters |
 | `[[bond_types]]` | no | per-bond-type parameters |
 | `[[angle_types]]` | no | per-angle-type parameters |
 | `[[constraint_types]]` | no | per-constraint-type parameters |
+| `[coulomb]` | no | truncated short-range Coulomb |
+| `[spme]` | no | smooth particle-mesh Ewald |
 | `[neighbor_list]` | no | non-bonded pair-evaluation algorithm |
-| `[output]` | no | trajectory & log paths and cadences |
 
 ### Example <!-- rq-ecc664ff -->
 
-Saved as `argon.in.toml`:
+Saved as `argon.in.toml`. A two-phase protocol: an NVT equilibration
+phase followed by an NPT production phase. Each phase writes its own
+trajectory/log/timings file (see *Per-phase output paths* below).
 
 ```toml
 schema_version = 1
@@ -44,30 +54,63 @@ init = "argon.in.xyz"
 
 [simulation]
 seed = 12345
-n_steps = 10000
-dt = 1.0e-15        # s
-temperature = 300.0 # K (used only if init file lacks a `velo` column)
+temperature = 300.0 # K (used only if init file lacks a `velo` column;
+                    #     applied at phase-0 entry)
 
-[integrator]
+# --- Phase 1: NVT equilibration ---
+
+[[phase]]
+name = "equil"
+n_steps = 5000
+dt = 1.0e-15        # s
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
-# Optional. Omit to run NVE. Cannot be combined with an integrator
-# that owns its own thermostat (e.g. langevin-baoab).
-#
-# [thermostat]
-# kind = "csvr"
-# temperature = 300.0
-# tau = 1.0e-13
-# seed = 7
+[phase.thermostat]
+kind = "csvr"
+temperature = 300.0
+tau = 1.0e-13
+seed = 11           # any per-phase stochastic-slot seed is required
 
-# Optional. Omit to run constant-volume.
-#
-# [barostat]
-# kind = "berendsen"
-# pressure = 1.0e5
-# tau = 1.0e-12
-# compressibility = 4.5e-10
+[phase.output]
+# trajectory_every = 0 skips trajectory output during equilibration.
+trajectory_every = 0
+log_every = 100
+
+# --- Phase 2: NPT production ---
+
+[[phase]]
+name = "production"
+n_steps = 10000
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[phase.thermostat]
+kind = "csvr"
+temperature = 300.0
+tau = 1.0e-13
+seed = 12           # distinct from the equilibration phase's seed
+
+[phase.barostat]
+kind = "c-rescale"
+pressure = 1.0e5
+temperature = 300.0
+tau = 1.0e-12
+compressibility = 4.5e-10
+seed = 13
+
+[phase.output]
+trajectory_every = 100
+include_velocities = true
+include_images = true
+log_every = 100
+
+# --- Global fields below apply to every phase ---
 
 [[particle_types]]
 name = "Ar"
@@ -112,16 +155,32 @@ r_hh = 1.633e-10      # m (H-H constraint distance)
 mode = "cell-list"
 max_neighbors = 256
 r_skin = 1.0e-10    # m  (defaults to 0.3 * cutoff when omitted)
-
-[output]
-trajectory_path = "argon.out.xyz"
-trajectory_every = 100
-include_velocities = true
-include_images = true
-log_path = "argon.out.log"
-log_every = 100
-timings_path = "argon.out.timings"
 ```
+
+### Per-phase output paths <!-- rq-f45b8166 -->
+
+Each `[[phase]]` produces three output files in the directory
+containing the config:
+
+- `<root>.out.<phase-name>.xyz` — trajectory frames written during
+  that phase (omitted entirely when the phase's
+  `output.trajectory_every == 0`).
+- `<root>.out.<phase-name>.log` — CSV log written during that phase
+  (omitted when `output.log_every == 0`).
+- `<root>.out.<phase-name>.timings` — per-stage performance summary
+  for that phase (always written when the phase runs to completion).
+
+`<root>` is the config-file root (the `<root>.in.toml` filename with
+`.in.toml` stripped; see *Config filename convention* below).
+`<phase-name>` is the per-phase `name` field. Phase names must be
+unique within the config; the loader rejects duplicates with
+`ConfigError::DuplicatePhaseName { name }`.
+
+A phase's `[phase.output]` block accepts explicit
+`trajectory_path`, `log_path`, and `timings_path` overrides; when
+omitted, the three paths default to the form above. The path-
+collision rules in *Validation* enforce that no two paths anywhere in
+the config resolve to the same location.
 
 ### Units <!-- rq-ed997636 -->
 
@@ -146,20 +205,79 @@ or unit suffixes are supported in schema v1.
 
 #### `[simulation]` <!-- rq-a84e1c76 -->
 
-- `seed: u64` — RNG seed used for Maxwell-Boltzmann velocity generation.
-  Required even when the init file supplies explicit velocities. No default.
-- `n_steps: u64` — number of integration steps to execute. `0` is permitted
-  (the runner writes the initial state and exits).
-- `dt: f64` — integration timestep in seconds. Must be finite and strictly
-  positive.
-- `temperature: f64` — initial-velocity temperature in kelvin. Required.
-  Used to initialise velocities at the Maxwell-Boltzmann distribution
-  when the init file's `Properties` lacks a `velo:R:3` field; ignored
-  (but still required and validated) when the init file supplies
-  velocities. Must be finite and `>= 0.0`. The thermostat's bath
-  temperature is a separate field under `[thermostat]`.
+The `[simulation]` table carries the two settings that apply to the
+**initial-velocity sampling** performed once at phase-0 entry, before
+any integration starts. Per-step settings (timestep, step count,
+integrator/thermostat/barostat composition, output cadences) live in
+the `[[phase]]` array.
 
-#### `[integrator]` <!-- rq-27f9fae8 -->
+- `seed: u64` — RNG seed used for Maxwell-Boltzmann velocity
+  generation. Required even when the init file supplies explicit
+  velocities (still validated, even though unused). No default.
+- `temperature: f64` — initial-velocity temperature in kelvin.
+  Required. Used to initialise velocities at the Maxwell-Boltzmann
+  distribution when the init file's `Properties` lacks a `velo:R:3`
+  field; ignored (but still required and validated) when the init
+  file supplies velocities. Must be finite and `>= 0.0`. The
+  thermostat's bath temperature is a separate per-phase field under
+  `[phase.thermostat]`.
+
+#### `[[phase]]` (array of tables, >= 1 entry) <!-- rq-18441e33 -->
+
+A simulation is a sequence of one or more phases, declared as a TOML
+array of tables. Particle state (positions, velocities, simulation
+box, particle types, charges) carries over between phases; slot
+state (integrator buffers, thermostat chain variables, barostat
+piston, c-rescale conserved quantity) is reset at every phase
+boundary. See `simulation-runner.md` for the runtime model.
+
+Each `[[phase]]` entry carries:
+
+- `name: String` — required. Identifier used to derive output
+  filenames (`<root>.out.<name>.{xyz,log,timings}`). Non-empty,
+  case-sensitive, must contain only ASCII letters, digits, `-`, and
+  `_`. Phase names must be unique within the config; duplicates
+  surface as `ConfigError::DuplicatePhaseName { name }`.
+- `n_steps: u64` — required. Number of integration steps the phase
+  executes. `0` is permitted (the phase writes its initial-state
+  snapshot to its trajectory/log, then immediately advances to the
+  next phase or exits).
+- `dt: f64` — required. Integration timestep in seconds for this
+  phase. Must be finite and strictly positive.
+- `[phase.integrator]` — required. Selects the per-phase integrator
+  slot and its kind-specific parameters; see *`[phase.integrator]`*
+  below for the field reference (the schema is identical to the
+  former top-level `[integrator]`).
+- `[phase.thermostat]` — optional. Per-phase thermostat slot; see
+  *`[phase.thermostat]`* below.
+- `[phase.barostat]` — optional. Per-phase barostat slot; see
+  *`[phase.barostat]`* below.
+- `[phase.output]` — optional. Per-phase output cadences and paths;
+  see *`[phase.output]`* below. When omitted, the phase uses the
+  default cadences (`trajectory_every = 100`, `log_every = 100`,
+  `include_velocities = true`, `include_images = true`) and the
+  default file paths (`<root>.out.<name>.{xyz,log,timings}`).
+
+Seed uniqueness: every stochastic slot (`csvr`, `andersen`,
+`c-rescale`, `langevin-baoab` integrator, etc.) carries its own
+required `seed: u64`. Across the whole config, no two slots of the
+**same `kind`** may declare the same `seed`; duplicates surface as
+`ConfigError::DuplicatePhaseSeed { kind, seed }`. The check is
+across all phases, since a duplicate seed in two phases of the same
+kind would produce correlated noise sequences at the same dynamical
+times. Two slots of *different* kinds may safely share a numerical
+seed value (their RNG streams are independent).
+
+The integrator–thermostat compatibility, integrator–barostat
+compatibility, and integrator–constraint compatibility rules
+documented under *Validation* are checked **per phase**: every phase
+must individually satisfy the rules. A single
+`[[constraint_types]]`/topology block applies to every phase (the
+constraint algorithm cannot be enabled or disabled mid-protocol);
+each phase's integrator must therefore be able to drive the
+configured constraints.
+
+#### `[phase.integrator]` <!-- rq-27f9fae8 -->
 
 The integrator section carries a required `kind` field that selects
 one of the registered integrator slots (see `integration/framework.md`
@@ -174,17 +292,18 @@ and missing required fields are rejected the same way.
 
 - `kind: String` — required. One of:
   - `"velocity-verlet"` — symplectic NVE time-stepping core. Does not
-    own a thermostat; compose with `[thermostat]` for NVT. See
+    own a thermostat; compose with `[phase.thermostat]` for NVT. See
     `integration/velocity-verlet.md`.
   - `"langevin-baoab"` — stochastic NVT via the Leimkuhler-Matthews
     BAOAB splitting. Owns its own thermostat (the OU step);
-    incompatible with `[thermostat]`. See
+    incompatible with `[phase.thermostat]`. See
     `integration/langevin-baoab.md`.
   - `"mtk-npt"` — deterministic extended-system NPT via the
     Martyna-Tobias-Klein integrator (isotropic). Owns both its
     thermostat (Nosé-Hoover chains on particles and cell) and its
     barostat (extended-system cell); incompatible with both
-    `[thermostat]` and `[barostat]`. See `integration/mtk-npt.md`.
+    `[phase.thermostat]` and `[phase.barostat]`. See
+    `integration/mtk-npt.md`.
 
 Fields accepted for `kind = "velocity-verlet"`:
 
@@ -226,11 +345,11 @@ Fields accepted for `kind = "mtk-npt"`:
 - `n_resp: u32` — chain RESP sub-cycle count (shared by both
   chains). Optional; defaults to `1`. Must be `≥ 1`.
 
-#### `[thermostat]` (optional) <!-- rq-1c2d8eba -->
+#### `[phase.thermostat]` (optional) <!-- rq-ee10237d -->
 
-The thermostat section is optional. When omitted, the runner runs no
-thermostat (NVE composition with the integrator, or whatever fused
-thermostat the integrator owns). When present, a required `kind`
+The per-phase thermostat section is optional. When omitted, the phase
+runs no thermostat (NVE composition with the integrator, or whatever
+fused thermostat the integrator owns). When present, a required `kind`
 field selects one of the registered thermostat slots (see
 `integration/framework.md`) and the kind-specific parameter fields
 sit at the same level. The Rust-side deserialiser captures `kind`
@@ -238,11 +357,11 @@ into a `SlotConfig` and flattens the rest of the section into a
 `toml::Value`; the chosen builder's `validate_params(&toml::Value)`
 enforces required fields, domains, and rejects unknown fields.
 
-Configuring `[thermostat]` alongside an integrator whose builder's
-`owns_thermostat(&params)` returns `true` (currently the
+Configuring `[phase.thermostat]` alongside an integrator whose
+builder's `owns_thermostat(&params)` returns `true` (currently the
 `langevin-baoab` and `mtk-npt` builders) is rejected at config-load
 time with
-`ConfigError::IncompatibleThermostat { integrator: <kind name> }`.
+`ConfigError::IncompatibleThermostat { integrator: <kind name>, phase: <phase name> }`.
 
 - `kind: String` — required when the section is present. One of:
   - `"nose-hoover-chain"` — deterministic NVT via the Nosé-Hoover
@@ -308,21 +427,21 @@ Fields accepted for `kind = "berendsen"`:
   and strictly positive. Typical values for liquid water are 100 fs
   to 1 ps; larger `τ` leaves the dynamics closer to NVE.
 
-#### `[barostat]` (optional) <!-- rq-d28e9105 -->
+#### `[phase.barostat]` (optional) <!-- rq-cc557e8c -->
 
-The barostat section is optional. When omitted, the runner runs no
-barostat (constant-volume composition). When present, a required
-`kind` field selects one of the registered barostat slots (see
-`integration/framework.md`) and the kind-specific parameter fields
-sit at the same level. The Rust-side deserialiser captures `kind`
-into a `SlotConfig` and flattens the rest of the section into a
-`toml::Value`; the chosen builder's `validate_params(&toml::Value)`
+The per-phase barostat section is optional. When omitted, the phase
+runs no barostat (constant-volume composition). When present, a
+required `kind` field selects one of the registered barostat slots
+(see `integration/framework.md`) and the kind-specific parameter
+fields sit at the same level. The Rust-side deserialiser captures
+`kind` into a `SlotConfig` and flattens the rest of the section into
+a `toml::Value`; the chosen builder's `validate_params(&toml::Value)`
 enforces required fields, domains, and rejects unknown fields.
 
-Configuring `[barostat]` alongside an integrator whose builder's
+Configuring `[phase.barostat]` alongside an integrator whose builder's
 `owns_barostat(&params)` returns `true` (currently the `mtk-npt`
 builder) is rejected at config-load time with
-`ConfigError::IncompatibleBarostat { integrator: <kind name> }`.
+`ConfigError::IncompatibleBarostat { integrator: <kind name>, phase: <phase name> }`.
 
 - `kind: String` — required when the section is present. One of:
   - `"berendsen"` — deterministic isotropic weak-coupling barostat
@@ -353,11 +472,11 @@ Fields accepted for `kind = "c-rescale"`:
   Required. Finite. May be any sign or zero.
 - `temperature: f64` — target temperature `T` in kelvin used in the
   noise term. Required. Finite and strictly positive. Independent
-  of `simulation.temperature` and of any `[thermostat].temperature`;
-  the framework performs no cross-slot validation. For canonical
-  NPT sampling the user must keep this value consistent with the
-  thermostat (or, for `langevin-baoab`, with the integrator's bath
-  temperature).
+  of `simulation.temperature` and of any
+  `[phase.thermostat].temperature`; the framework performs no
+  cross-slot validation. For canonical NPT sampling the user must
+  keep this value consistent with the thermostat (or, for
+  `langevin-baoab`, with the integrator's bath temperature).
 - `tau: f64` — pressure-coupling time constant in seconds. Required.
   Finite and strictly positive. Typical values for liquid water are
   1–5 ps.
@@ -525,10 +644,11 @@ the chosen `kind` are rejected by the matching builder's
 The presence of at least one constraint group in the topology file
 triggers construction of the `Constraint` slot (see
 `integration/constraint-framework.md`) and is incompatible with any
-integrator whose builder's
+integrator (in any phase) whose builder's
 `IntegratorBuilder::supports_constraints(&params)` returns `false`.
-`Config::validate_against(&registries)` enforces this and returns
-`ConfigError::IncompatibleConstraint { integrator: <kind name> }`.
+The runner enforces this **per phase** (see *Validation*) and surfaces
+failures as
+`ConfigError::IncompatibleConstraint { integrator: <kind name>, phase: <phase name> }`.
 
 #### `[coulomb]` (optional table) <!-- rq-28d519b5 -->
 
@@ -627,40 +747,60 @@ Cross-validation:
   not by `load_config`. See `simulation-runner.md` for the
   runner-side validation and the corresponding `RunnerError` variant.
 
-#### `[output]` (optional table; all fields have defaults) <!-- rq-6340fae2 -->
+#### `[phase.output]` (optional table; all fields have defaults) <!-- rq-3ea7fedd -->
 
-- `trajectory_path: String` — output trajectory path. Default:
-  `<config-root>.out.xyz` in the same directory as the config file
-  (e.g. `argon.in.toml` → `argon.out.xyz`). `<config-root>` is the
-  config-filename derivation defined under *Config filename
-  convention*. Resolved relative to the config file's directory;
-  absolute paths are honored as-is.
+Every `[[phase]]` entry accepts an optional `[phase.output]` sub-table
+controlling that phase's trajectory, log, and timings outputs. Each
+field defaults independently when omitted; the table itself is
+optional. Output paths default to
+`<config-root>.out.<phase-name>.{xyz,log,timings}` (one file per
+phase per output kind).
+
+- `trajectory_path: String` — output trajectory path for this phase.
+  Default: `<config-root>.out.<phase-name>.xyz` in the same directory
+  as the config file (e.g. config root `argon`, phase name `equil` →
+  `argon.out.equil.xyz`). `<config-root>` is the config-filename
+  derivation defined under *Config filename convention*. Resolved
+  relative to the config file's directory; absolute paths are
+  honored as-is.
 - `trajectory_every: u64` — write one trajectory frame every this many
-  integration steps. Default `100`. `0` disables trajectory output entirely
-  (not even the step-0 frame is written). TOML parses `u64` fields, so
-  negative integers fail at TOML parse time.
-- `include_velocities: bool` — include `velo:R:3` columns in every
-  trajectory frame. Default `true`.
-- `include_images: bool` — include `image:I:3` columns in every
-  trajectory frame. Default `true`. When `true`, each frame's data rows
-  carry three integer columns after the position (and velocity, if
-  present) columns; consumers reconstruct unwrapped positions as
-  `pos + images_x · a + images_y · b + images_z · c`, which reduces to
-  `pos + image · (lx, ly, lz)` for an orthorhombic box. When `false`,
-  image columns are omitted from the file; positions in the trajectory
-  are still wrapped into the primary image.
-- `log_path: String` — output log path. Default:
-  `<config-root>.out.log` in the same directory as the config file
-  (e.g. `argon.in.toml` → `argon.out.log`). Resolved like
-  `trajectory_path`.
-- `log_every: u64` — write one log row every this many integration steps.
-  Default `100`. `0` disables the log entirely.
-- `timings_path: String` — output path for the per-stage performance
-  summary file. Default: `<config-root>.out.timings` in the same
-  directory as the config file (e.g. `argon.in.toml` →
-  `argon.out.timings`). Resolved like `trajectory_path`. See
+  integration steps **within this phase**. Default `100`. `0` disables
+  trajectory output for this phase entirely (not even the phase's
+  step-0 frame is written; no `<phase-name>.xyz` file is created).
+  TOML parses `u64` fields, so negative integers fail at TOML parse
+  time.
+- `include_velocities: bool` — include `velo:R:3` columns in this
+  phase's trajectory frames. Default `true`.
+- `include_images: bool` — include `image:I:3` columns in this
+  phase's trajectory frames. Default `true`. When `true`, each
+  frame's data rows carry three integer columns after the position
+  (and velocity, if present) columns; consumers reconstruct unwrapped
+  positions as `pos + images_x · a + images_y · b + images_z · c`,
+  which reduces to `pos + image · (lx, ly, lz)` for an orthorhombic
+  box. When `false`, image columns are omitted from the file;
+  positions in the trajectory are still wrapped into the primary
+  image.
+- `log_path: String` — output log path for this phase. Default:
+  `<config-root>.out.<phase-name>.log` in the same directory as the
+  config file. Resolved like `trajectory_path`.
+- `log_every: u64` — write one log row every this many integration
+  steps within this phase. Default `100`. `0` disables the log
+  entirely for this phase (no header is written, no file is created).
+- `timings_path: String` — output path for this phase's per-stage
+  performance summary file. Default:
+  `<config-root>.out.<phase-name>.timings` in the same directory as
+  the config file. Resolved like `trajectory_path`. See
   `performance-analysis.md` for the file format. There is no
-  `timings_every` field; the file is written once at end of run.
+  `timings_every` field; one timings file is written per phase at
+  end of phase.
+
+Phase-local step numbering: within a single phase's output files,
+the trajectory `Step=` attribute and the log `step` column start at
+`0` (the phase's initial-state snapshot) and run through `n_steps`.
+Step numbering does **not** accumulate across phases — each phase's
+output file is structurally identical to a single-phase trajectory
+or log of the same `n_steps`. Phase-local `time` is computed as
+`step * dt_phase` using that phase's `dt`.
 
 ### Config filename convention <!-- rq-5a0f5c00 -->
 
@@ -768,52 +908,70 @@ path:
    produces `DuplicatePairInteraction { types: (String, String) }`. The
    reported tuple is normalised so the lexicographically smaller name
    comes first.
-3. After path resolution, every supplied path is pairwise distinct from
+3. The `[[phase]]` array is non-empty (`EmptyPhases` otherwise).
+4. Every `[[phase]]` entry has a non-empty ASCII-only `name`
+   (letters/digits/`-`/`_`); names are unique across the array
+   (`DuplicatePhaseName { name }` otherwise).
+5. Every per-phase `n_steps` is a `u64` (TOML-enforced) and every
+   per-phase `dt` is finite and strictly positive
+   (`InvalidValue { field: "phase[<i>].dt", reason }` otherwise).
+6. After path resolution, every supplied path is pairwise distinct from
    every other supplied path (`PathCollision { kind_a, kind_b, path }`).
-   The set of paths under check is `init`, `output.trajectory_path`,
-   `output.log_path`, `output.timings_path`, and (when supplied) `topology`.
-4. Every `[[constraint_types]]` entry has a unique `name`; duplicates
+   The set of paths under check is `init`, every phase's
+   `output.trajectory_path`, every phase's `output.log_path`, every
+   phase's `output.timings_path`, and (when supplied) `topology`.
+7. Across every stochastic slot in every phase, no two slots of the
+   same `kind` declare the same numerical `seed`
+   (`DuplicatePhaseSeed { kind: String, seed: u64 }` otherwise). Two
+   slots of different `kind`s may share a numerical seed.
+8. Every `[[constraint_types]]` entry has a unique `name`; duplicates
    surface as `DuplicateConstraintTypeName { name }`.
-5. The electrostatics tables are mutually exclusive: declaring both
+9. The electrostatics tables are mutually exclusive: declaring both
    `[coulomb]` and `[spme]` surfaces as `ConflictingElectrostatics`.
 
-`Config::validate_against(&self, registries: &Registries)` checks:
+`Config::validate_against(&self, registries: &Registries)` checks,
+per phase, in declaration order:
 
-6. The `[integrator]` section's `kind` is a registered key of
-   `registries.integrators`. Unknown kinds surface as
-   `ConfigError::UnknownKind { slot: "integrator", kind }`.
-7. The chosen integrator builder's `validate_params(&integrator.params)`
-   succeeds; otherwise the builder-produced `ConfigError` propagates.
-8. Same as (6) and (7) for `[thermostat]` (when present) against
-   `registries.thermostats`, and for `[barostat]` (when present)
-   against `registries.barostats`.
-9. Same as (6) and (7) for every `[[constraint_types]]` entry against
-   `registries.constraint_types`.
-10. If `[thermostat]` is present and
-    `registries.integrators.lookup(&integrator.kind).unwrap()
-    .owns_thermostat(&integrator.params)` returns `true`, validation
-    returns
-    `IncompatibleThermostat { integrator: <integrator kind name> }`.
-11. If `[barostat]` is present and
-    `registries.integrators.lookup(&integrator.kind).unwrap()
-    .owns_barostat(&integrator.params)` returns `true`, validation
-    returns
-    `IncompatibleBarostat { integrator: <integrator kind name> }`.
-12. Every constraint type name referenced from the topology file's
+10. The `[phase.integrator]` section's `kind` is a registered key of
+    `registries.integrators`. Unknown kinds surface as
+    `ConfigError::UnknownKind { slot: "integrator", kind }`.
+11. The chosen integrator builder's
+    `validate_params(&phase.integrator.params)` succeeds; otherwise
+    the builder-produced `ConfigError` propagates.
+12. Same as (10) and (11) for `[phase.thermostat]` (when present)
+    against `registries.thermostats`, and for `[phase.barostat]`
+    (when present) against `registries.barostats`.
+13. Same as (10) and (11) for every `[[constraint_types]]` entry
+    against `registries.constraint_types` (checked once, not per
+    phase — constraint types are global).
+14. If `[phase.thermostat]` is present and
+    `registries.integrators.lookup(&phase.integrator.kind).unwrap()
+    .owns_thermostat(&phase.integrator.params)` returns `true`,
+    validation returns `IncompatibleThermostat { integrator: <kind name>,
+    phase: <phase name> }`.
+15. If `[phase.barostat]` is present and
+    `registries.integrators.lookup(&phase.integrator.kind).unwrap()
+    .owns_barostat(&phase.integrator.params)` returns `true`,
+    validation returns `IncompatibleBarostat { integrator: <kind name>,
+    phase: <phase name> }`.
+16. Every constraint type name referenced from the topology file's
     `[constraints]` section appears in `[[constraint_types]]`.
     Unknown names surface through `load_topology_file` as
     `TopologyFileError::UnknownConstraintType { .. }`. This check is
     performed by `load_topology_file`, not by `Config::validate_against`,
     because the topology file is loaded separately.
 
-The runner additionally calls `Config::validate_constraint_compatibility(&self, registries: &Registries, has_constraints: bool)`
+The runner additionally calls
+`Config::validate_constraint_compatibility(&self, registries: &Registries, has_constraints: bool)`
 after `load_topology_file` returns. This method runs the
-`IncompatibleConstraint` check (the topology-coupled one) using the
-chosen integrator builder's
-`supports_constraints(&integrator.params)` predicate. In the default
-registry it rejects every combination of a non-empty `[constraints]`
+`IncompatibleConstraint` check **per phase**: every phase's chosen
+integrator builder must satisfy `supports_constraints(&params)` when
+the topology declares any constraint group. In the default registry
+this rejects every combination of a non-empty `[constraints]`
 section with `langevin-baoab`, `mtk-npt`, or `velocity-verlet`'s
-lossless variant.
+lossless variant, for any phase that uses such an integrator.
+Failures surface as `IncompatibleConstraint { integrator: <kind name>,
+phase: <phase name> }`.
 
 ## Feature API <!-- rq-110285ae -->
 
@@ -829,12 +987,8 @@ lossless variant.
     `topology` field is present; resolved against the config file's
     directory.
   - `simulation: SimulationConfig`
-  - `integrator: SlotConfig` — the chosen integrator kind plus its
-    raw `toml::Value` parameters.
-  - `thermostat: Option<SlotConfig>` — `Some` when the `[thermostat]`
-    table is present in the config, `None` otherwise.
-  - `barostat: Option<SlotConfig>` — `Some` when the `[barostat]`
-    table is present in the config, `None` otherwise.
+  - `phases: Vec<PhaseConfig>` — one entry per `[[phase]]` table in
+    declaration order. Non-empty (enforced by `Config::validate`).
   - `particle_types: Vec<ParticleTypeConfig>`
   - `pair_interactions: Vec<PairInteractionConfig>`
   - `bond_types: Vec<BondTypeConfig>` — empty when the `[[bond_types]]`
@@ -855,18 +1009,30 @@ lossless variant.
     config, where `max_cutoff` is the largest cutoff across
     `[[pair_interactions]]`, the `[coulomb]` table, and the `[spme]`
     table's `r_cut_real` (whichever are present).
-  - `output: OutputConfig`
   - `config_path: PathBuf` — the absolute path of the source config file,
     retained for error messages and default output-path derivation.
 
 - `SimulationConfig` <!-- rq-53055a5b -->
   - `seed: u64`
-  - `n_steps: u64`
-  - `dt: f64`
   - `temperature: f64`
 
-- `SlotConfig` — open-shaped parsed selection for the singleton <!-- rq-661bf664 -->
-  `[integrator]`, `[thermostat]`, and `[barostat]` sections.
+- `PhaseConfig` — parsed `[[phase]]` entry. <!-- rq-f1c04d3b -->
+  - `name: String`
+  - `n_steps: u64`
+  - `dt: f64`
+  - `integrator: SlotConfig` — the chosen integrator kind plus its
+    raw `toml::Value` parameters.
+  - `thermostat: Option<SlotConfig>` — `Some` when the phase declares
+    `[phase.thermostat]`, `None` otherwise.
+  - `barostat: Option<SlotConfig>` — `Some` when the phase declares
+    `[phase.barostat]`, `None` otherwise.
+  - `output: OutputConfig` — resolved per-phase trajectory/log/timings
+    paths and cadences, with defaults derived from
+    `<config-root>.out.<phase-name>.{xyz,log,timings}` when omitted.
+
+- `SlotConfig` — open-shaped parsed selection for a per-phase <!-- rq-661bf664 -->
+  `[phase.integrator]`, `[phase.thermostat]`, or `[phase.barostat]`
+  section.
 
   ```rust
   pub struct SlotConfig {
@@ -1052,27 +1218,43 @@ lossless variant.
     `[[pair_interactions]]` entries cover the same unordered pair.
     Tuple normalised as above.
   - `PathCollision { kind_a: PathRole, kind_b: PathRole, path: PathBuf }`
-    — two supplied file paths resolve to the same location.
+    — two supplied file paths resolve to the same location. `PathRole`
+    carries variants `Init`, `Topology`, and
+    `PhaseTrajectory { phase: String }` /
+    `PhaseLog { phase: String }` /
+    `PhaseTimings { phase: String }` for per-phase outputs.
   - `ConflictingElectrostatics` — the config declares both `[coulomb]`
     and `[spme]`. Only one electrostatics method may be active per run.
-  - `IncompatibleThermostat { integrator: String }` — the config
-    pairs an integrator that owns its own thermostat
-    (`langevin-baoab` or `mtk-npt`) with a `[thermostat]` table.
-  - `IncompatibleBarostat { integrator: String }` — the config
-    pairs an integrator that owns its own barostat (currently only
-    `mtk-npt`) with a `[barostat]` table.
+  - `EmptyPhases` — the `[[phase]]` array is empty or absent. A
+    simulation requires at least one phase.
+  - `DuplicatePhaseName { name: String }` — two `[[phase]]` entries
+    share a `name`. Phase names must be unique because they derive
+    per-phase output filenames.
+  - `DuplicatePhaseSeed { kind: String, seed: u64 }` — two stochastic
+    slots of the same `kind` across the `[[phase]]` array share the
+    same numerical `seed`. The check applies across every phase's
+    `[phase.thermostat]`, `[phase.barostat]`, and any seeded
+    `[phase.integrator]` (e.g. `langevin-baoab`).
+  - `IncompatibleThermostat { integrator: String, phase: String }` —
+    a phase pairs an integrator that owns its own thermostat
+    (`langevin-baoab` or `mtk-npt`) with a `[phase.thermostat]`
+    table. `phase` is the offending phase's `name`.
+  - `IncompatibleBarostat { integrator: String, phase: String }` —
+    a phase pairs an integrator that owns its own barostat
+    (currently only `mtk-npt`) with a `[phase.barostat]` table.
   - `DuplicateBondTypeName { name: String }` — two `[[bond_types]]`
     entries share a `name`.
   - `DuplicateAngleTypeName { name: String }` — two `[[angle_types]]`
     entries share a `name`.
   - `DuplicateConstraintTypeName { name: String }` — two
     `[[constraint_types]]` entries share a `name`.
-  - `IncompatibleConstraint { integrator: String }` — the topology
-    file's `[constraints]` section is non-empty and the chosen
-    integrator builder's
+  - `IncompatibleConstraint { integrator: String, phase: String }` —
+    the topology file's `[constraints]` section is non-empty and the
+    chosen integrator builder's
     `IntegratorBuilder::supports_constraints(&params)` returns
-    `false` (in the default registry: `langevin-baoab`, `mtk-npt`,
-    or `velocity-verlet` with `lossless = true`).
+    `false` for the named phase (in the default registry:
+    `langevin-baoab`, `mtk-npt`, or `velocity-verlet` with
+    `lossless = true`).
   - `UnknownKind { slot: &'static str, kind: String }` — a
     `[integrator]`, `[thermostat]`, `[barostat]`, or
     `[[constraint_types]]` entry's `kind` field does not match any
@@ -1252,8 +1434,9 @@ Feature: TOML simulation config schema
 
   Background:
     Given a valid minimal config containing schema_version = 1, init = "argon.in.xyz",
-      one [simulation] section with seed=12345, n_steps=10, dt=1.0e-15, temperature=300.0,
-      one [integrator] section with kind="velocity-verlet" and lossless=false,
+      one [simulation] section with seed=12345, temperature=300.0,
+      one [[phase]] entry with name="run", n_steps=10, dt=1.0e-15,
+        [phase.integrator] kind="velocity-verlet" and lossless=false,
       one [[particle_types]] entry with name="Ar" and mass=6.6335e-26,
       one [[pair_interactions]] entry between=["Ar","Ar"], potential="lennard-jones",
         sigma=3.40e-10, epsilon=1.65e-21, cutoff=1.0e-9
@@ -1267,10 +1450,10 @@ Feature: TOML simulation config schema
     Then it returns Ok(config)
     And config.schema_version equals 1
     And config.simulation.seed equals 12345
-    And config.simulation.n_steps equals 10
-    And config.simulation.dt equals 1.0e-15
+    And config.phases[0].n_steps equals 10
+    And config.phases[0].dt equals 1.0e-15
     And config.simulation.temperature equals 300.0
-    And config.integrator matches IntegratorKind::VelocityVerlet { lossless: false }
+    And config.phases[0].integrator matches IntegratorKind::VelocityVerlet { lossless: false }
     And config.particle_types has length 1
     And config.particle_types[0].name equals "Ar"
     And config.particle_types[0].mass equals 6.6335e-26
@@ -1285,22 +1468,22 @@ Feature: TOML simulation config schema
   Scenario: Defaults populate the output section when [output] is omitted
     Given the Background config with no [output] section, written to "/tmp/sim/argon.in.toml"
     When load_config("/tmp/sim/argon.in.toml") is called
-    Then config.output.trajectory_path equals "/tmp/sim/argon.out.xyz"
-    And config.output.trajectory_every equals 100
-    And config.output.include_velocities equals true
-    And config.output.include_images equals true
-    And config.output.log_path equals "/tmp/sim/argon.out.log"
-    And config.output.log_every equals 100
-    And config.output.timings_path equals "/tmp/sim/argon.out.timings"
+    Then config.phases[0].output.trajectory_path equals "/tmp/sim/argon.out.xyz"
+    And config.phases[0].output.trajectory_every equals 100
+    And config.phases[0].output.include_velocities equals true
+    And config.phases[0].output.include_images equals true
+    And config.phases[0].output.log_path equals "/tmp/sim/argon.out.log"
+    And config.phases[0].output.log_every equals 100
+    And config.phases[0].output.timings_path equals "/tmp/sim/argon.out.timings"
 
   @rq-0622d4b0
   Scenario: Default output paths drop a single trailing `.in` from the config-file root
     Given the Background config with no [output] section,
       written to "/tmp/sim/foo.in.in.toml"
     When load_config("/tmp/sim/foo.in.in.toml") is called
-    Then config.output.trajectory_path equals "/tmp/sim/foo.in.out.xyz"
-    And config.output.log_path equals "/tmp/sim/foo.in.out.log"
-    And config.output.timings_path equals "/tmp/sim/foo.in.out.timings"
+    Then config.phases[0].output.trajectory_path equals "/tmp/sim/foo.in.out.xyz"
+    And config.phases[0].output.log_path equals "/tmp/sim/foo.in.out.log"
+    And config.phases[0].output.timings_path equals "/tmp/sim/foo.in.out.timings"
 
   @rq-d148149f
   Scenario: Explicit [output] values override defaults
@@ -1308,11 +1491,11 @@ Feature: TOML simulation config schema
       trajectory_path="custom-traj.xyz", log_path="custom.log", include_velocities=false,
       written to "/tmp/sim/argon.in.toml"
     When load_config("/tmp/sim/argon.in.toml") is called
-    Then config.output.trajectory_path equals "/tmp/sim/custom-traj.xyz"
-    And config.output.trajectory_every equals 50
-    And config.output.include_velocities equals false
-    And config.output.log_path equals "/tmp/sim/custom.log"
-    And config.output.log_every equals 25
+    Then config.phases[0].output.trajectory_path equals "/tmp/sim/custom-traj.xyz"
+    And config.phases[0].output.trajectory_every equals 50
+    And config.phases[0].output.include_velocities equals false
+    And config.phases[0].output.log_path equals "/tmp/sim/custom.log"
+    And config.phases[0].output.log_every equals 25
 
   @rq-5ded1806
   Scenario: Absolute paths are honored unchanged
@@ -1321,8 +1504,8 @@ Feature: TOML simulation config schema
       [output].log_path="/data/out/run.log"
     When load_config is called
     Then config.init equals "/data/argon.in.xyz"
-    And config.output.trajectory_path equals "/data/out/traj.xyz"
-    And config.output.log_path equals "/data/out/run.log"
+    And config.phases[0].output.trajectory_path equals "/data/out/traj.xyz"
+    And config.phases[0].output.log_path equals "/data/out/run.log"
 
   @rq-d5085350
   Scenario: Pair `between` is normalised to lexicographic order
@@ -1343,7 +1526,7 @@ Feature: TOML simulation config schema
     Given the Background config with n_steps=0
     When load_config is called
     Then it returns Ok(config)
-    And config.simulation.n_steps equals 0
+    And config.phases[0].n_steps equals 0
 
   # --- Schema version ---
 
@@ -1478,7 +1661,7 @@ Feature: TOML simulation config schema
       friction=1.0e12, temperature=300.0, seed=42
     When load_config is called
     Then it returns Ok(config)
-    And config.integrator matches IntegratorKind::LangevinBaoab { friction: 1.0e12, temperature: 300.0, seed: 42 }
+    And config.phases[0].integrator matches IntegratorKind::LangevinBaoab { friction: 1.0e12, temperature: 300.0, seed: 42 }
 
   @rq-40ed9975
   Scenario: Langevin BAOAB missing friction is rejected
@@ -1527,7 +1710,7 @@ Feature: TOML simulation config schema
     Given the Background config with [integrator] containing only kind="velocity-verlet"
     When load_config is called
     Then it returns Ok(config)
-    And config.integrator matches IntegratorKind::VelocityVerlet { lossless: false }
+    And config.phases[0].integrator matches IntegratorKind::VelocityVerlet { lossless: false }
 
   # --- Per-thermostat-kind parameter validation ---
   # Scenarios validating temperature / tau / seed / extra-field handling
@@ -1743,14 +1926,14 @@ Feature: TOML simulation config schema
   Scenario: timings_path defaults to <config-root>.out.timings
     Given the Background config at "/tmp/sim/argon.in.toml" with no [output].timings_path
     When load_config is called
-    Then config.output.timings_path equals "/tmp/sim/argon.out.timings"
+    Then config.phases[0].output.timings_path equals "/tmp/sim/argon.out.timings"
 
   @rq-fa24a8d1
   Scenario: timings_path can be overridden in [output]
     Given the Background config at "/tmp/sim/argon.in.toml" with
       [output].timings_path = "custom.timings"
     When load_config is called
-    Then config.output.timings_path equals "/tmp/sim/custom.timings"
+    Then config.phases[0].output.timings_path equals "/tmp/sim/custom.timings"
 
   @rq-7d5915bb
   Scenario: Reject init = timings_path
@@ -2053,23 +2236,23 @@ Feature: TOML simulation config schema
     Given the Background config with [output].trajectory_every=0
     When load_config is called
     Then it returns Ok(config)
-    And config.output.trajectory_every equals 0
+    And config.phases[0].output.trajectory_every equals 0
 
   @rq-318cd47d
   Scenario: log_every = 0 is accepted (disables log output)
     Given the Background config with [output].log_every=0
     When load_config is called
     Then it returns Ok(config)
-    And config.output.log_every equals 0
+    And config.phases[0].output.log_every equals 0
 
   # --- [thermostat] presence and absence ---
 
   @rq-ca356c08
-  Scenario: [thermostat] section absent yields config.thermostat = None
+  Scenario: [thermostat] section absent yields config.phases[0].thermostat = None
     Given the Background config with no [thermostat] section
     When load_config is called
     Then it returns Ok(config)
-    And config.thermostat is None
+    And config.phases[0].thermostat is None
 
   @rq-b7cd6d16
   Scenario: [thermostat] kind = "berendsen" is accepted
@@ -2077,7 +2260,7 @@ Feature: TOML simulation config schema
     And a [thermostat] section with kind="berendsen", temperature=300.0, tau=1.0e-13
     When load_config is called
     Then it returns Ok(config)
-    And config.thermostat matches Some(ThermostatKind::Berendsen { temperature: 300.0, tau: 1.0e-13 })
+    And config.phases[0].thermostat matches Some(ThermostatKind::Berendsen { temperature: 300.0, tau: 1.0e-13 })
 
   @rq-5c28eee0
   Scenario: [thermostat] kind = "csvr" requires a seed
@@ -2137,8 +2320,8 @@ Feature: TOML simulation config schema
       tau=1.0e-13, seed=1
     When load_config is called
     Then it returns Ok(config)
-    And config.integrator matches IntegratorKind::VelocityVerlet { .. }
-    And config.thermostat matches Some(ThermostatKind::Csvr { .. })
+    And config.phases[0].integrator matches IntegratorKind::VelocityVerlet { .. }
+    And config.phases[0].thermostat matches Some(ThermostatKind::Csvr { .. })
 
   @rq-4cd2ec5b
   Scenario: IntegratorBuilder::owns_thermostat agrees with the validation rule
@@ -2153,7 +2336,7 @@ Feature: TOML simulation config schema
       temperature=85.0, pressure=1.0e5, tau_t=1.0e-13, tau_p=1.0e-12
     When load_config is called
     Then it returns Ok(config)
-    And config.integrator matches IntegratorKind::MtkNpt {
+    And config.phases[0].integrator matches IntegratorKind::MtkNpt {
       temperature: 85.0, pressure: 1.0e5, tau_t: 1.0e-13, tau_p: 1.0e-12,
       chain_length: 3, yoshida_order: 3, n_resp: 1 }
 
@@ -2198,11 +2381,11 @@ Feature: TOML simulation config schema
   # --- [barostat] section ---
 
   @rq-4bbbada4
-  Scenario: [barostat] section absent yields config.barostat = None
+  Scenario: [barostat] section absent yields config.phases[0].barostat = None
     Given the Background config with no [barostat] section
     When load_config is called
     Then it returns Ok(config)
-    And config.barostat is None
+    And config.phases[0].barostat is None
 
   @rq-f03e2af2
   Scenario: Unknown [barostat] kind is rejected
@@ -2241,7 +2424,7 @@ Feature: TOML simulation config schema
       tau=1.0e-12, compressibility=4.5e-10
     When load_config is called
     Then it returns Ok(config)
-    And config.barostat matches
+    And config.phases[0].barostat matches
       Some(BarostatKind::Berendsen { pressure: 1.0e5, tau: 1.0e-12, compressibility: 4.5e-10 })
 
   @rq-c1d79d33
@@ -2251,7 +2434,7 @@ Feature: TOML simulation config schema
       temperature=85.0, tau=1.0e-12, compressibility=4.5e-10, seed=42
     When load_config is called
     Then it returns Ok(config)
-    And config.barostat matches Some(BarostatKind::CRescale {
+    And config.phases[0].barostat matches Some(BarostatKind::CRescale {
       pressure: 1.0e5, temperature: 85.0, tau: 1.0e-12,
       compressibility: 4.5e-10, seed: 42 })
 
@@ -2333,4 +2516,120 @@ Feature: TOML simulation config schema
     And the default Registries::with_builtins()
     When config.validate_constraint_compatibility(&registries, true) is called
     Then it returns Ok(())
+
+  # --- [[phase]] array ---
+
+  @rq-5e69125b
+  Scenario: Reject an empty [[phase]] array
+    Given the Background config with the [[phase]] array removed
+    When load_config is called
+    Then it returns Err(ConfigError::EmptyPhases)
+
+  @rq-f6107e43
+  Scenario: Reject duplicate phase names
+    Given the Background config plus a second [[phase]] entry also named "run"
+    When load_config is called
+    Then it returns Err(ConfigError::DuplicatePhaseName { name: "run" })
+
+  @rq-0dc50ce0
+  Scenario: Reject a phase name containing non-ASCII characters
+    Given the Background config with [[phase]] name="αβ"
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "phase[0].name", .. })
+
+  @rq-96d9c9df
+  Scenario: Reject phase dt <= 0
+    Given the Background config with [[phase]] dt = 0.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "phase[0].dt", .. })
+
+  @rq-90e307b2
+  Scenario: Two-phase config loads with distinct per-phase parameters
+    Given a config with two [[phase]] entries: phase 0 name="equil"
+      n_steps=5000 dt=1.0e-15 with [phase.integrator] kind="velocity-verlet";
+      phase 1 name="prod" n_steps=10000 dt=2.0e-15 with [phase.integrator]
+      kind="velocity-verlet"
+    When load_config is called
+    Then config.phases has length 2
+    And config.phases[0].name equals "equil"
+    And config.phases[0].n_steps equals 5000
+    And config.phases[0].dt equals 1.0e-15
+    And config.phases[1].name equals "prod"
+    And config.phases[1].n_steps equals 10000
+    And config.phases[1].dt equals 2.0e-15
+
+  @rq-707b5520
+  Scenario: Per-phase [phase.output] defaults derive from <root> and phase name
+    Given a two-phase config at "/tmp/sim/argon.in.toml" with phase names "equil"
+      and "prod" and no [phase.output] blocks
+    When load_config is called
+    Then config.phases[0].output.trajectory_path equals "/tmp/sim/argon.out.equil.xyz"
+    And config.phases[0].output.log_path equals "/tmp/sim/argon.out.equil.log"
+    And config.phases[0].output.timings_path equals "/tmp/sim/argon.out.equil.timings"
+    And config.phases[1].output.trajectory_path equals "/tmp/sim/argon.out.prod.xyz"
+    And config.phases[1].output.log_path equals "/tmp/sim/argon.out.prod.log"
+    And config.phases[1].output.timings_path equals "/tmp/sim/argon.out.prod.timings"
+
+  @rq-bdfb11e3
+  Scenario: Per-phase [phase.output] overrides default paths
+    Given a [[phase]] entry with [phase.output].trajectory_path = "custom.xyz"
+    When load_config is called
+    Then config.phases[0].output.trajectory_path equals "/tmp/sim/custom.xyz"
+
+  # --- Seed uniqueness across phases ---
+
+  @rq-46b1a697
+  Scenario: Reject two phases of the same stochastic kind sharing a seed
+    Given a two-phase config where both [phase.thermostat] entries declare
+      kind="csvr" and seed=7
+    When load_config is called
+    Then it returns Err(ConfigError::DuplicatePhaseSeed { kind: "csvr", seed: 7 })
+
+  @rq-60b19852
+  Scenario: Two phases of different kinds may share a numerical seed
+    Given a two-phase config where phase 0's [phase.thermostat] is csvr
+      with seed=7 and phase 1's [phase.barostat] is c-rescale with seed=7
+    When load_config is called
+    Then it returns Ok(config)
+
+  # --- Per-phase compatibility checks ---
+
+  @rq-982ddb8d
+  Scenario: Reject [phase.thermostat] alongside an integrator that owns its own
+    Given a [[phase]] named "x" with [phase.integrator] kind="langevin-baoab"
+      and [phase.thermostat] kind="csvr"
+    When load_config is called
+    Then it returns Err(ConfigError::IncompatibleThermostat {
+      integrator: "langevin-baoab", phase: "x" })
+
+  @rq-d617bf4a
+  Scenario: Reject [phase.barostat] alongside mtk-npt in any single phase
+    Given a [[phase]] named "prod" with [phase.integrator] kind="mtk-npt"
+      and [phase.barostat] kind="c-rescale"
+    When load_config is called
+    Then it returns Err(ConfigError::IncompatibleBarostat {
+      integrator: "mtk-npt", phase: "prod" })
+
+  @rq-d70c3517
+  Scenario: A topology with constraint groups paired with mtk-npt in a phase is rejected
+    Given a topology declaring at least one [constraints] entry of type "SPCE"
+    And a [[phase]] named "p" using [phase.integrator] kind="mtk-npt"
+    When config.validate_constraint_compatibility(&registries, true) is called
+    Then it returns Err(ConfigError::IncompatibleConstraint {
+      integrator: "mtk-npt", phase: "p" })
+
+  # --- Per-phase output collisions ---
+
+  @rq-57bcb870
+  Scenario: Reject two phases whose default trajectory paths collide
+    Given two [[phase]] entries with name="x" each (duplicate names also trigger
+      DuplicatePhaseName, but the collision check applies when explicit
+      output_path settings collide too)
+    And phase 0 sets [phase.output].trajectory_path = "shared.xyz"
+    And phase 1 sets [phase.output].trajectory_path = "shared.xyz"
+    When load_config is called
+    Then it returns Err(ConfigError::PathCollision {
+      kind_a: PathRole::PhaseTrajectory { phase: _ },
+      kind_b: PathRole::PhaseTrajectory { phase: _ },
+      path: _ })
 ```

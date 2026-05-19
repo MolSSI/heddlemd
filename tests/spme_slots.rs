@@ -408,11 +408,15 @@ init = "sim.in.xyz"
 
 [simulation]
 seed = 0
-n_steps = 1
-dt = 1.0e-15
 temperature = 300.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -438,7 +442,7 @@ r_cut_real = 0.3e-9
 grid = [16, 16, 16]
 spline_order = 4
 
-[output]
+[phase.output]
 trajectory_every = 0
 log_every = 0
 "#;

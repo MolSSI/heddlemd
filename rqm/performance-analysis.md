@@ -1,19 +1,27 @@
 # Feature: Performance Analysis and Timings Output <!-- rq-bbb62e9c -->
 
-The simulation runner collects per-stage timing data throughout every run and
-writes a summary table to a `.timings` file alongside the trajectory and log.
-Kernel launches are timed with CUDA events (submitted to the default stream so
-they do not disturb GPU/host pipelining beyond the inherent kernel cost); host
+The simulation runner collects per-stage timing data throughout every
+phase and writes one summary table per phase to a separate `.timings`
+file alongside the per-phase trajectory and log. Kernel launches are
+timed with CUDA events (submitted to the default stream so they do not
+disturb GPU/host pipelining beyond the inherent kernel cost); host
 operations are timed with `std::time::Instant` wall-clock measurements.
 
-Timings are always collected — there is no opt-out in schema v1. The cost is
-~1 µs of overhead per CUDA event, which is negligible compared to typical
-kernel runtimes.
+Timings are always collected — there is no opt-out in schema v1. The
+cost is ~1 µs of overhead per CUDA event, which is negligible compared
+to typical kernel runtimes.
 
-Timing data never enters the trajectory or log files; those remain bit-wise
-reproducible across runs on the same GPU. The `.timings` file contents are
-expected to vary run-to-run because wall-clock measurements are inherently
-non-deterministic.
+One timings file is produced per phase that runs to completion, at the
+path `config.phases[i].output.timings_path` (defaulting to
+`<root>.out.<phase-name>.timings`). Each per-phase file contains the
+samples accumulated during that phase only; counts and totals do not
+aggregate across phases. A phase that fails mid-loop leaves no
+timings file for that phase, exactly as a single-phase failure would.
+
+Timing data never enters the trajectory or log files; those remain
+bit-wise reproducible across runs on the same GPU. The `.timings`
+file contents are expected to vary run-to-run because wall-clock
+measurements are inherently non-deterministic.
 
 ## Instrumented Stages <!-- rq-1bd297f4 -->
 
@@ -85,32 +93,43 @@ exist in the runner's `Timings` instance with zero accumulated samples.
 One host timer per stage. Each is recorded as a single elapsed `Duration`
 per occurrence. Stages:
 
-- `config_load` — duration of `load_config`.
-- `init_load` — duration of `load_init_state`.
-- `gpu_init` — duration of `init_device`.
-- `velocity_generation` — duration of Maxwell-Boltzmann sampling and
-  momentum subtraction (zero samples when the init file supplies
-  velocities).
-- `host_to_device_upload` — duration of `ParticleBuffers::new` (which
-  performs the initial bulk upload). One sample per run.
-- `device_to_host_download` — duration of `ParticleState::download_from`
-  inside the loop's snapshot/log download steps. One sample per call.
-- `trajectory_write` — duration of one `TrajectoryWriter::write_frame`
-  call. One sample per written frame.
-- `log_write` — duration of one `LogWriter::write_row` call. One sample
-  per written row.
+- `config_load` — duration of `load_config`. Appears in **phase 0's
+  timings only** (the loader runs once, before any phase begins).
+- `init_load` — duration of `load_init_state`. Phase-0-only, same
+  rationale.
+- `gpu_init` — duration of `init_device`. Phase-0-only.
+- `velocity_generation` — duration of Maxwell-Boltzmann sampling
+  and momentum subtraction (zero samples when the init file supplies
+  velocities; phase-0-only since velocity sampling happens once at
+  startup).
+- `host_to_device_upload` — duration of `ParticleBuffers::new`
+  (which performs the initial bulk upload). Phase-0-only.
+- `device_to_host_download` — duration of
+  `ParticleState::download_from` inside the loop's snapshot/log
+  download steps. One sample per call, recorded into the
+  currently-running phase's Timings.
+- `trajectory_write` — duration of one
+  `TrajectoryWriter::write_frame` call. One sample per written
+  frame, recorded into the currently-running phase's Timings.
+- `log_write` — duration of one `LogWriter::write_row` call. One
+  sample per written row, recorded into the currently-running
+  phase's Timings.
 - `neighbor_list_rebuild` — wall-clock duration of one full neighbor
   list rebuild, covering the device-to-host download of cell indices,
   the host-side stable sort, the upload of the sorted ordering, and
   the kernel launches that run inside the rebuild (sample is recorded
   by the runner around the entire rebuild block). Present only when
-  `NeighborListConfig::CellList` is selected. One sample per rebuild.
+  `NeighborListConfig::CellList` is selected. One sample per rebuild,
+  recorded into the currently-running phase's Timings.
 
 ### Synthetic stages <!-- rq-7eb22aad -->
 
-- `total_runtime` — single-sample wall-clock measurement from the start of
-  `run_simulation` to the moment just before the `.timings` file is
-  serialised. Count is exactly `1` on a successful run.
+- `total_runtime` — single-sample wall-clock measurement from the
+  start of each phase's warm-up to the moment just before that
+  phase's `.timings` file is serialised. One sample per phase
+  (recorded into the per-phase Timings). The aggregate per-run
+  wall-clock is reported on stdout by the final-summary line; no
+  cross-phase aggregate appears in any timings file.
 
 ## Timing Methodology <!-- rq-fdbb902d -->
 

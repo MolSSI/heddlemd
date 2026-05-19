@@ -1,0 +1,124 @@
+schema_version = 1
+init = "water.in.xyz"
+topology = "water.in.topology"
+
+[simulation]
+seed = 1
+temperature = 298.15        # K, initial Maxwell-Boltzmann sampling target
+
+# --- Phase 1: NVT equilibration ---
+# Stochastic NVT (CSVR thermostat) at constant box. Lets orientations
+# randomise and local structure relax from the lattice initial
+# conditions before the barostat is turned on. No trajectory written
+# during equilibration; only a log row every 200 fs to monitor T.
+[[phase]]
+name = "equil"
+n_steps = 5000              # 5,000 × 2 fs = 10 ps
+dt = 2.0e-15                # 2 fs (allowed because SETTLE removes the OH stretching mode)
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[phase.thermostat]
+kind = "csvr"
+temperature = 298.15
+tau = 1.0e-13               # 100 fs coupling time
+seed = 11                   # independent of every other stochastic-slot seed
+
+[phase.output]
+trajectory_every = 0        # skip trajectory during equilibration
+log_every = 100             # 1 log row per 200 fs
+
+# --- Phase 2: NPT production ---
+# CSVR thermostat + c-rescale barostat. Samples the canonical NPT
+# distribution exactly. Trajectory written every 1 ps for RDF analysis.
+[[phase]]
+name = "prod"
+n_steps = 15000             # 15,000 × 2 fs = 30 ps
+dt = 2.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[phase.thermostat]
+kind = "csvr"
+temperature = 298.15
+tau = 1.0e-13
+seed = 12                   # distinct from the equilibration phase's seed
+
+[phase.barostat]
+kind = "c-rescale"
+pressure = 1.01325e5        # 1 atm (Pa)
+temperature = 298.15        # K (noise-term temperature; matches thermostat)
+tau = 1.0e-12               # 1 ps coupling time (~10× the thermostat's)
+compressibility = 4.5e-10   # 1/Pa, liquid water
+seed = 13
+
+[phase.output]
+trajectory_every = 500      # 1 frame per ps (31 frames over 30 ps)
+include_velocities = false  # RDFs do not need velocities; keeps the file small
+include_images = false
+log_every = 100             # 1 log row per 200 fs (150 rows over 30 ps)
+
+# --- Global fields below apply to every phase ---
+
+[[particle_types]]
+name = "O"
+mass = 2.6566e-26           # kg (oxygen-16)
+charge = -1.3585e-19        # C (SPC/E: −0.8476 e)
+
+[[particle_types]]
+name = "H"
+mass = 1.6735e-27           # kg (hydrogen-1)
+charge = 6.7925e-20         # C (SPC/E: +0.4238 e)
+
+# LJ on the O–O pair only; H–H and O–H carry a negligible epsilon to
+# satisfy the loader's "every unordered pair declared" rule without
+# contributing meaningfully to the forces.
+[[pair_interactions]]
+between = ["O", "O"]
+potential = "lennard-jones"
+sigma = 3.166e-10           # m (SPC/E)
+epsilon = 1.080e-21         # J ≈ 78.2 K · k_B (SPC/E)
+cutoff = 1.0e-9             # m (10 Å, standard for SPME real-space cutoff)
+r_switch = 1.0e-9           # m (== cutoff: hard cutoff degenerate case)
+
+[[pair_interactions]]
+between = ["H", "H"]
+potential = "lennard-jones"
+sigma = 1.0e-10
+epsilon = 1.0e-30
+cutoff = 1.0e-9
+r_switch = 1.0e-9
+
+[[pair_interactions]]
+between = ["H", "O"]
+potential = "lennard-jones"
+sigma = 1.0e-10
+epsilon = 1.0e-30
+cutoff = 1.0e-9
+r_switch = 1.0e-9
+
+# SPME electrostatics: real-space cutoff matches the LJ cutoff so the
+# same neighbor list serves both, plus reciprocal-space pipeline with a
+# ~1 Å FFT grid spacing.
+[spme]
+alpha = 3.5e9               # 1/m  (≈ 3.5 / r_cut_real)
+r_cut_real = 1.0e-9         # m
+grid = [48, 48, 96]         # one grid point per ~1.04 Å (small-prime-factored for cuFFT)
+spline_order = 4            # default
+
+# Rigid SPC/E geometry via SETTLE.
+[[constraint_types]]
+name = "SPCE"
+kind = "settle-water"
+r_oh = 1.0e-10              # m
+r_hh = 1.633e-10            # m  (= 2 · r_oh · sin(θ_HOH / 2), θ_HOH = 109.47°)
+
+[neighbor_list]
+mode = "cell-list"
+max_neighbors = 1024        # liquid water at ~100 atoms/nm³ + r_cut+r_skin = 1.1 nm
+                            # shell volume gives ~560 neighbours per atom
+r_skin = 1.0e-10            # 1 Å

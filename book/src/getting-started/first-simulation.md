@@ -51,13 +51,13 @@ output flushed. Non-zero exit codes are documented in
 
 Three files appear in `examples/lj-10000-argon/` alongside the config:
 
-- **`argon.out.xyz`** — 11 extended-XYZ frames: the initial state plus
+- **`argon.out.run.xyz`** — 11 extended-XYZ frames: the initial state plus
   one frame every 10 steps. Each frame is self-describing (lattice
   vectors, column layout, step index, simulation time) and is itself a
   valid init file. Format details in
   [Output Files](../guide/output.md) and
   [Init Files](../guide/init-files.md).
-- **`argon.out.log`** — 22 lines of CSV: one header plus 21 rows logged
+- **`argon.out.run.log`** — 22 lines of CSV: one header plus 21 rows logged
   every 5 steps. Columns are `step,time,kinetic_energy,temperature`:
   ```
   step,time,kinetic_energy,temperature
@@ -68,7 +68,7 @@ Three files appear in `examples/lj-10000-argon/` alongside the config:
   The realised step-0 temperature is exactly 100 K (within `f32`
   storage round-off) because the initial velocities were sampled from a
   Maxwell-Boltzmann distribution and rescaled to the configured target.
-- **`argon.out.timings`** — fixed-width text table with one row per
+- **`argon.out.run.timings`** — fixed-width text table with one row per
   instrumented kernel and host stage. Wall-clock measurements vary
   every run by design; the trajectory and log do not.
 
@@ -76,25 +76,25 @@ Three files appear in `examples/lj-10000-argon/` alongside the config:
 
 Two cheap sanity checks:
 
-1. `argon.out.log`'s `kinetic_energy` column should hold steady to about
+1. `argon.out.run.log`'s `kinetic_energy` column should hold steady to about
    four significant figures across all 21 rows (energy drift is small
    over 100 steps of NVE).
 2. Re-run the command after deleting the three output files. The
-   regenerated `argon.out.xyz` and `argon.out.log` must be
+   regenerated `argon.out.run.xyz` and `argon.out.run.log` must be
    byte-identical to the previous run:
    ```
-   diff argon.out.xyz <prior copy>
-   diff argon.out.log <prior copy>
+   diff argon.out.run.xyz <prior copy>
+   diff argon.out.run.log <prior copy>
    ```
    That is the load-bearing
    [reproducibility guarantee](../guide/reproducibility.md).
-   `argon.out.timings` will differ — that file is intentionally
+   `argon.out.run.timings` will differ — that file is intentionally
    non-deterministic.
 
 ## Re-running
 
 The runner refuses to overwrite existing outputs. Delete (or move)
-`argon.out.xyz`, `argon.out.log`, and `argon.out.timings` between runs,
+`argon.out.run.xyz`, `argon.out.run.log`, and `argon.out.run.timings` between runs,
 or set explicit `output.*_path` fields in `argon.in.toml`.
 
 ## Validating without running (`dynamics lint`)

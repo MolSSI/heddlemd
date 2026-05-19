@@ -14,8 +14,8 @@ outputs are byte-identical across runs on identical inputs.
 ## Quick start
 
 In a directory containing the simulation outputs from a previous
-`dynamics run` (`argon.in.toml`, `argon.in.xyz`, `argon.out.xyz`),
-write a minimal `argon.in.analysis`:
+`dynamics run` (`argon.in.toml`, `argon.in.xyz`,
+`argon.out.run.xyz`), write a minimal `argon.in.analysis`:
 
 ```toml
 schema_version = 1
@@ -64,18 +64,25 @@ is rejected.
 
 When the analysis file does not set `simulation` or `trajectory`
 explicitly, the runner pairs with the sibling `<root>.in.toml` (must
-exist) and reads the trajectory from that config's resolved
-`output.trajectory_path` (which itself defaults to `<root>.out.xyz`
-per the [Configuration Reference](configuration.md)).
+exist) and selects a phase from that config. The `phase` field on the
+analysis file picks the phase by name; when omitted, the **last**
+phase in the config is used. The chosen phase's resolved
+`output.trajectory_path` (which itself defaults to
+`<root>.out.<phase>.xyz` per the
+[Configuration Reference](configuration.md)) is then used as the
+trajectory.
 
 You can override either default explicitly:
 
 ```toml
 schema_version = 1
 
-# Analyse a trajectory from a different simulation directory.
+# Analyse the equilibration phase rather than the default last phase.
+phase = "equil"
+
+# Or, analyse a trajectory from a different simulation directory.
 simulation = "../other-run/other.in.toml"
-trajectory = "../other-run/other.out.xyz"
+trajectory = "../other-run/other.out.prod.xyz"
 
 [[analyses]]
 name = "ar-ar"

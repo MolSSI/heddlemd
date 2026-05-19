@@ -30,6 +30,13 @@ pub use rdf::RdfBuilder;
 pub struct AnalysisConfig {
     pub schema_version: u64,
     pub simulation: PathBuf,
+    /// Name of the simulation phase whose trajectory the analyses
+    /// consume. Populated from the optional `phase` field; defaults
+    /// to the *last* phase in the loaded simulation config (the
+    /// production phase in equilibration-then-production protocols).
+    /// Empty string until `run_analyses` resolves the simulation
+    /// config; see `validate_phase_against`.
+    pub phase: String,
     pub trajectory: PathBuf,
     pub first_frame: u64,
     pub last_frame: Option<u64>,
@@ -52,9 +59,9 @@ pub enum AnalysisPathRole {
     Analysis,
     Simulation,
     Trajectory,
-    SimulationTrajectory,
-    SimulationLog,
-    SimulationTimings,
+    SimulationPhaseTrajectory { phase: String },
+    SimulationPhaseLog { phase: String },
+    SimulationPhaseTimings { phase: String },
     AnalysisOutput { name: String },
 }
 
@@ -104,6 +111,8 @@ pub enum AnalyzeError {
     OutputExists { path: PathBuf },
     #[error("requested last_frame={requested} exceeds available frame count {available}")]
     FrameOutOfRange { requested: u64, available: u64 },
+    #[error("phase `{phase}` is not declared in the loaded simulation config; available phases: {available:?}")]
+    UnknownPhase { phase: String, available: Vec<String> },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -198,6 +207,8 @@ struct RawAnalysisConfig {
     schema_version: u64,
     #[serde(default)]
     simulation: Option<String>,
+    #[serde(default)]
+    phase: Option<String>,
     #[serde(default)]
     trajectory: Option<String>,
     #[serde(default)]
@@ -362,9 +373,16 @@ pub fn load_analysis_config(path: &Path) -> Result<AnalysisConfig, AnalyzeError>
     let config_path = std::fs::canonicalize(path)
         .unwrap_or_else(|_| path.to_path_buf());
 
+    // `phase` is resolved against the loaded simulation config in
+    // `run_analyses` / `lint_analyses` (we don't load the sim config
+    // here). The explicit value is captured verbatim; the default
+    // (last phase) is filled in when the sim config is available.
+    let phase = raw.phase.unwrap_or_default();
+
     Ok(AnalysisConfig {
         schema_version: raw.schema_version,
         simulation: simulation_path,
+        phase,
         trajectory: trajectory_path,
         first_frame,
         last_frame,
@@ -422,6 +440,50 @@ impl AnalysisConfig {
 // Path-collision check against the loaded simulation config's resolved
 // output paths plus self/trajectory/analysis-file. Run after the
 // simulation config has been loaded so its OutputConfig is available.
+/// Resolve `AnalysisConfig::phase` and `AnalysisConfig::trajectory`
+/// against the loaded simulation config. Called once the sim config
+/// is available; mutates `analysis` to fill in the resolved values.
+///
+/// - When `analysis.phase` is empty, default to the **last** phase
+///   in the sim config.
+/// - When non-empty, verify the name matches a declared phase;
+///   otherwise return `UnknownPhase`.
+/// - When `analysis.trajectory` is empty (the sentinel set by
+///   `load_analysis_config` when no explicit `trajectory` was given),
+///   fill it from the selected phase's
+///   `output.trajectory_path`.
+fn resolve_phase_and_trajectory(
+    analysis: &mut AnalysisConfig,
+    sim_config: &Config,
+) -> Result<(), AnalyzeError> {
+    let chosen_index: usize = if analysis.phase.is_empty() {
+        // Default to the last phase.
+        sim_config.phases.len().saturating_sub(1)
+    } else {
+        match sim_config
+            .phases
+            .iter()
+            .position(|p| p.name == analysis.phase)
+        {
+            Some(i) => i,
+            None => {
+                let available =
+                    sim_config.phases.iter().map(|p| p.name.clone()).collect();
+                return Err(AnalyzeError::UnknownPhase {
+                    phase: analysis.phase.clone(),
+                    available,
+                });
+            }
+        }
+    };
+    let chosen_phase = &sim_config.phases[chosen_index];
+    analysis.phase = chosen_phase.name.clone();
+    if analysis.trajectory.as_os_str().is_empty() {
+        analysis.trajectory = chosen_phase.output.trajectory_path.clone();
+    }
+    Ok(())
+}
+
 fn check_path_collisions(
     analysis: &AnalysisConfig,
     sim_config: &Config,
@@ -430,19 +492,27 @@ fn check_path_collisions(
         (AnalysisPathRole::Analysis, analysis.config_path.clone()),
         (AnalysisPathRole::Simulation, analysis.simulation.clone()),
         (AnalysisPathRole::Trajectory, analysis.trajectory.clone()),
-        (
-            AnalysisPathRole::SimulationTrajectory,
-            sim_config.output.trajectory_path.clone(),
-        ),
-        (
-            AnalysisPathRole::SimulationLog,
-            sim_config.output.log_path.clone(),
-        ),
-        (
-            AnalysisPathRole::SimulationTimings,
-            sim_config.output.timings_path.clone(),
-        ),
     ];
+    for phase in &sim_config.phases {
+        entries.push((
+            AnalysisPathRole::SimulationPhaseTrajectory {
+                phase: phase.name.clone(),
+            },
+            phase.output.trajectory_path.clone(),
+        ));
+        entries.push((
+            AnalysisPathRole::SimulationPhaseLog {
+                phase: phase.name.clone(),
+            },
+            phase.output.log_path.clone(),
+        ));
+        entries.push((
+            AnalysisPathRole::SimulationPhaseTimings {
+                phase: phase.name.clone(),
+            },
+            phase.output.timings_path.clone(),
+        ));
+    }
     for entry in &analysis.analyses {
         entries.push((
             AnalysisPathRole::AnalysisOutput {
@@ -453,8 +523,9 @@ fn check_path_collisions(
     }
     for i in 0..entries.len() {
         for j in (i + 1)..entries.len() {
-            // SimulationTrajectory == Trajectory is the normal case under
-            // implicit pairing — skip that specific collision.
+            // The Trajectory entry pointing at the selected phase's
+            // own trajectory is the expected case under implicit
+            // pairing — skip that specific collision.
             let (a_role, a_path) = &entries[i];
             let (b_role, b_path) = &entries[j];
             let analysis_outputs = matches!(
@@ -464,10 +535,10 @@ fn check_path_collisions(
                 b_role,
                 AnalysisPathRole::AnalysisOutput { .. }
             );
-            let benign_trajectory_pair = matches!(a_role, AnalysisPathRole::Trajectory)
-                && matches!(b_role, AnalysisPathRole::SimulationTrajectory)
-                || matches!(a_role, AnalysisPathRole::SimulationTrajectory)
-                    && matches!(b_role, AnalysisPathRole::Trajectory);
+            let benign_trajectory_pair = (matches!(a_role, AnalysisPathRole::Trajectory)
+                && matches!(b_role, AnalysisPathRole::SimulationPhaseTrajectory { .. }))
+                || (matches!(a_role, AnalysisPathRole::SimulationPhaseTrajectory { .. })
+                    && matches!(b_role, AnalysisPathRole::Trajectory));
             if a_path == b_path {
                 if benign_trajectory_pair {
                     continue;
@@ -513,9 +584,7 @@ pub fn run_analyses_with_registries(
 
     // Stage 1b: simulation-config load.
     let sim_config = load_config(&analysis.simulation).map_err(AnalyzeError::Config)?;
-    if analysis.trajectory.as_os_str().is_empty() {
-        analysis.trajectory = sim_config.output.trajectory_path.clone();
-    }
+    resolve_phase_and_trajectory(&mut analysis, &sim_config)?;
 
     // Stage 1c: per-kind parameter validation.
     analysis.validate_against(registries)?;
@@ -677,8 +746,17 @@ pub fn lint_analyses_with_registries(
             return finalise_lint_skips(stages, &["output paths", "trajectory", "analyses"]);
         }
     };
-    if analysis.trajectory.as_os_str().is_empty() {
-        analysis.trajectory = sim_config.output.trajectory_path.clone();
+    if let Err(e) = resolve_phase_and_trajectory(&mut analysis, &sim_config) {
+        let display = format!("{e}");
+        stages.pop();
+        stages.push(LintStage {
+            label: "config",
+            status: LintStatus::Fail {
+                detail: display,
+                error: wrap_analyze(e),
+            },
+        });
+        return finalise_lint_skips(stages, &["output paths", "trajectory", "analyses"]);
     }
     if let Err(e) = check_path_collisions(&analysis, &sim_config) {
         let display = format!("{e}");

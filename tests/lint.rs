@@ -32,11 +32,15 @@ init = "{init_name}"
 
 [simulation]
 seed = 1
-n_steps = 1
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -54,7 +58,7 @@ cutoff = 1.0e-9
 [neighbor_list]
 mode = "all-pairs"
 
-[output]
+[phase.output]
 trajectory_every = 5
 log_every = 5
 "#
@@ -164,14 +168,14 @@ fn lint_reports_filename_convention_violation() {
 fn lint_reports_pre_existing_output_file() {
     let dir = tmp_path("pre_existing_output");
     let config = write_valid_pair(&dir);
-    let traj = dir.join("sim.out.xyz");
+    let traj = dir.join("sim.out.run.xyz");
     std::fs::write(&traj, "existing").unwrap();
 
     let report = lint_simulation(&config, false);
     assert!(!report.ok());
     match stage_status(&report, "output paths") {
         LintStatus::Fail { detail, error } => {
-            assert!(detail.contains("sim.out.xyz"), "got `{detail}`");
+            assert!(detail.contains("sim.out.run.xyz"), "got `{detail}`");
             match error {
                 RunnerError::OutputExists { path } => assert_eq!(path, &traj),
                 other => panic!("expected OutputExists, got {other:?}"),
@@ -201,11 +205,15 @@ init = "sim.in.xyz"
 
 [simulation]
 seed = 1
-n_steps = 1
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -224,7 +232,7 @@ cutoff = 1.0e-9
 mode = "cell-list"
 r_skin = 1.0e-10
 
-[output]
+[phase.output]
 trajectory_every = 0
 log_every = 0
 "#;
@@ -277,11 +285,15 @@ topology = "bad.in.topology"
 
 [simulation]
 seed = 1
-n_steps = 1
-dt = 1.0e-15
 temperature = 0.0
 
-[integrator]
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+
+[phase.integrator]
 kind = "velocity-verlet"
 lossless = false
 
@@ -306,7 +318,7 @@ de = 1.0e-19
 a = 1.0e10
 re = 3.40e-10
 
-[output]
+[phase.output]
 trajectory_every = 5
 log_every = 5
 "#;
@@ -439,7 +451,7 @@ fn cli_lint_returns_zero_on_success() {
 fn cli_lint_returns_one_on_failure() {
     let dir = tmp_path("cli_fail");
     let config = write_valid_pair(&dir);
-    let traj = dir.join("sim.out.xyz");
+    let traj = dir.join("sim.out.run.xyz");
     std::fs::write(&traj, "existing").unwrap();
     let exit = cli_main_u8(vec![
         "dynamics".to_string(),
