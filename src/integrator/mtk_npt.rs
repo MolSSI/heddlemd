@@ -128,6 +128,7 @@ impl MtkNptIntegrator {
     fn new(
         gpu: &GpuContext,
         particle_count: usize,
+        n_constraints: usize,
         temperature: f64,
         pressure: f64,
         tau_t: f64,
@@ -137,7 +138,8 @@ impl MtkNptIntegrator {
         n_resp: u32,
     ) -> Result<Self, GpuError> {
         let m = chain_length as usize;
-        let g_dof = ((3 * particle_count) as i64 - 3).max(1) as u32;
+        let g_dof =
+            ((3 * particle_count) as i64 - n_constraints as i64 - 3).max(1) as u32;
         let kt = BOLTZMANN_J_PER_K * temperature;
         let tau_t2 = tau_t * tau_t;
         let tau_p2 = tau_p * tau_p;
@@ -489,6 +491,7 @@ impl IntegratorBuilder for MtkNptBuilder {
         &self,
         gpu: &GpuContext,
         particle_count: usize,
+        n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
         let p = deserialize_params(params)
@@ -496,6 +499,7 @@ impl IntegratorBuilder for MtkNptBuilder {
         let state = MtkNptIntegrator::new(
             gpu,
             particle_count,
+            n_constraints,
             p.temperature,
             p.pressure,
             p.tau_t,

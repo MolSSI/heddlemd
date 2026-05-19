@@ -86,7 +86,7 @@ fn construct_langevin_state_stores_parameters() {
         "friction = 1.0e12\ntemperature = 300.0\nseed = 42\n",
     );
     let builder = LangevinBaoabBuilder;
-    let boxed = builder.build(&gpu, 4, &slot.params).unwrap();
+    let boxed = builder.build(&gpu, 4, 0, &slot.params).unwrap();
     // The integrator is a `Box<dyn Integrator>`; we can't downcast without
     // `Any`. Instead verify behaviour: a single step with seed=42 yields
     // post-call velocities specific to that seed.
@@ -102,7 +102,7 @@ fn construct_langevin_with_zero_particles() {
         "langevin-baoab",
         "friction = 1.0e12\ntemperature = 300.0\nseed = 42\n",
     );
-    let _ = IntegratorRegistry::with_builtins().build(&slot, &gpu, 0).unwrap();
+    let _ = IntegratorRegistry::with_builtins().build(&slot, &gpu, 0, 0).unwrap();
 }
 
 // rq-358de3e6
@@ -339,8 +339,7 @@ fn step_launches_all_six_expected_kernel_calls() {
                 "friction = 1.0e12\ntemperature = 300.0\nseed = 1\n",
             ),
             &gpu,
-            4,
-        )
+            4, 0)
         .unwrap();
     integrator
         .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
@@ -398,8 +397,7 @@ fn langevin_step_on_empty_is_noop() {
                 "friction = 1.0e12\ntemperature = 300.0\nseed = 1\n",
             ),
             &gpu,
-            0,
-        )
+            0, 0)
         .unwrap();
     integrator
         .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)

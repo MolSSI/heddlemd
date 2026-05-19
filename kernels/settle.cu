@@ -91,6 +91,7 @@ extern "C" __global__ void settle_positions(
     const float *type_mass_h,
     float lx, float ly, float lz, float xy, float xz, float yz,
     float dt,
+    float *constraint_virial,
     unsigned int n_groups)
 {
   unsigned int g = blockIdx.x * blockDim.x + threadIdx.x;
@@ -98,6 +99,14 @@ extern "C" __global__ void settle_positions(
     return;
   }
   unsigned int base = 3u * g;
+  // Zero this group's slot in `constraint_virial` up front. On the
+  // success path each slot is overwritten with the computed
+  // per-atom virial contribution before kernel exit; on a degenerate
+  // early-return path the slot remains zero, which matches the
+  // no-op correction those paths perform.
+  constraint_virial[base + 0] = 0.0f;
+  constraint_virial[base + 1] = 0.0f;
+  constraint_virial[base + 2] = 0.0f;
   unsigned int t = group_type_index[g];
 
   unsigned int a_o = group_atoms[base + 0];
@@ -346,6 +355,63 @@ extern "C" __global__ void settle_positions(
   positions_x[a_h2] = positions_x[a_h2] + (h2x_c - h2x_u);
   positions_y[a_h2] = positions_y[a_h2] + (h2y_c - h2y_u);
   positions_z[a_h2] = positions_z[a_h2] + (h2z_c - h2z_u);
+
+  // Constraint-virial contribution from this group's position
+  // correction. The total scalar constraint virial for one group is
+  //   W_g = Σ_i m_i · (Δr_i · r_constrained_i) / dt²
+  // (equivalent to Σ_atoms F_constraint_i · r_i; the per-atom F·r
+  // sum is translation-invariant within the group because the
+  // analytic SETTLE solve preserves the mass-weighted COM, so
+  // Σ_i m_i Δr_i = 0.) We compute the sum using
+  // COM-relative positions to avoid f32 catastrophic cancellation:
+  // when the molecule sits several nm from the origin, the absolute
+  // positions are O(10⁻⁹ m) while Δr is O(10⁻¹² m), and a direct
+  // m·Δr·r_lab sum loses precision long before the inter-atomic
+  // cancellation reduces it to the physical O(kT) virial. The
+  // group's mass-weighted COM (cx, cy, cz) is already computed
+  // above, so the per-atom contribution can be written in
+  // body-relative coordinates with no extra arithmetic.
+  float inv_dt2 = (dt != 0.0f) ? (1.0f / (dt * dt)) : 0.0f;
+  float dox = ox_c - ox_u;
+  float doy = oy_c - oy_u;
+  float doz = oz_c - oz_u;
+  float dh1x = h1x_c - h1x_u;
+  float dh1y = h1y_c - h1y_u;
+  float dh1z = h1z_c - h1z_u;
+  float dh2x = h2x_c - h2x_u;
+  float dh2y = h2y_c - h2y_u;
+  float dh2z = h2z_c - h2z_u;
+  // COM-relative constrained positions: subtract the unconstrained
+  // COM (cx, cy, cz) which equals the constrained COM by SETTLE's
+  // COM-preservation invariant.
+  float rox = ox_c - cx, roy = oy_c - cy, roz = oz_c - cz;
+  float rh1x = h1x_c - cx, rh1y = h1y_c - cy, rh1z = h1z_c - cz;
+  float rh2x = h2x_c - cx, rh2y = h2y_c - cy, rh2z = h2z_c - cz;
+  constraint_virial[base + 0] =
+      m_o * (dox * rox + doy * roy + doz * roz) * inv_dt2;
+  constraint_virial[base + 1] =
+      m_h * (dh1x * rh1x + dh1y * rh1y + dh1z * rh1z) * inv_dt2;
+  constraint_virial[base + 2] =
+      m_h * (dh2x * rh2x + dh2y * rh2y + dh2z * rh2z) * inv_dt2;
+}
+
+// Scatter the slot-cached constraint virials computed by
+// `settle_positions` into `particle_virials` so the barostat's
+// scalar-virial reduction picks them up. One thread per atom slot
+// (`n_atom_slots = 3 * n_groups`); each constraint group has a
+// disjoint atom set so no atomics are needed.
+extern "C" __global__ void settle_virial_scatter(
+    const float *constraint_virial,
+    const unsigned int *group_atoms,
+    float *particle_virials,
+    unsigned int n_atom_slots)
+{
+  unsigned int s = blockIdx.x * blockDim.x + threadIdx.x;
+  if (s >= n_atom_slots) {
+    return;
+  }
+  unsigned int atom_index = group_atoms[s];
+  particle_virials[atom_index] = particle_virials[atom_index] + constraint_virial[s];
 }
 
 // Project the post-kick velocities onto the constraint manifold by

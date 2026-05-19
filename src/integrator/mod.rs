@@ -389,6 +389,7 @@ pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
         &self,
         gpu: &GpuContext,
         particle_count: usize,
+        n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError>;
 }
@@ -437,11 +438,12 @@ impl IntegratorRegistry {
         slot: &SlotConfig,
         gpu: &GpuContext,
         particle_count: usize,
+        n_constraints: usize,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
         let b = self
             .lookup(&slot.kind)
             .ok_or_else(|| IntegratorError::UnknownKind(slot.kind.clone()))?;
-        b.build(gpu, particle_count, &slot.params)
+        b.build(gpu, particle_count, n_constraints, &slot.params)
     }
 }
 
@@ -498,6 +500,7 @@ pub trait ThermostatBuilder: std::fmt::Debug + Send + Sync {
         &self,
         gpu: &GpuContext,
         particle_count: usize,
+        n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Thermostat>, ThermostatError>;
 }
@@ -544,12 +547,13 @@ impl ThermostatRegistry {
         slot: Option<&SlotConfig>,
         gpu: &GpuContext,
         particle_count: usize,
+        n_constraints: usize,
     ) -> Result<Option<Box<dyn Thermostat>>, ThermostatError> {
         let Some(slot) = slot else { return Ok(None) };
         let b = self
             .lookup(&slot.kind)
             .ok_or_else(|| ThermostatError::UnknownKind(slot.kind.clone()))?;
-        Ok(Some(b.build(gpu, particle_count, &slot.params)?))
+        Ok(Some(b.build(gpu, particle_count, n_constraints, &slot.params)?))
     }
 }
 
@@ -597,6 +601,7 @@ pub trait BarostatBuilder: std::fmt::Debug + Send + Sync {
         &self,
         gpu: &GpuContext,
         particle_count: usize,
+        n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Barostat>, BarostatError>;
 }
@@ -641,12 +646,13 @@ impl BarostatRegistry {
         slot: Option<&SlotConfig>,
         gpu: &GpuContext,
         particle_count: usize,
+        n_constraints: usize,
     ) -> Result<Option<Box<dyn Barostat>>, BarostatError> {
         let Some(slot) = slot else { return Ok(None) };
         let b = self
             .lookup(&slot.kind)
             .ok_or_else(|| BarostatError::UnknownKind(slot.kind.clone()))?;
-        Ok(Some(b.build(gpu, particle_count, &slot.params)?))
+        Ok(Some(b.build(gpu, particle_count, n_constraints, &slot.params)?))
     }
 }
 

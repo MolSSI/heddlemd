@@ -26,9 +26,14 @@ the post-step velocities. For each invocation with timestep `dt`, let
    `K = (1/2) Σ_i m_i |v_i|²` using the deterministic GPU reduction
    documented in `nose-hoover-chain.md`.
 2. Draw `N_f` independent standard-normal samples on the host, where
-   `N_f = max(1, 3·N − 3)` is the number of thermostatted degrees of
-   freedom. Designate the first sample as `R` and the remaining
-   `N_f − 1` samples' squared sum as `S`:
+   `N_f = max(1, 3·N − n_constraints − 3)` is the number of
+   thermostatted degrees of freedom. The `n_constraints` term subtracts
+   the holonomic constraints carried by the run (zero when no
+   `[constraints]` section is configured; `3 · n_settle_groups` for a
+   SETTLE'd water system). The `−3` term subtracts the three COM
+   translational degrees of freedom that CSVR's uniform velocity
+   rescale preserves. Designate the first sample as `R` and the
+   remaining `N_f − 1` samples' squared sum as `S`:
 
    ```text
    R = ξ_0
@@ -197,10 +202,15 @@ log-write time.
 
 - `particle_count == 0`: `apply_pre` and `apply_post` return
   `Ok(())` without launching any kernel.
-- `particle_count == 1`: `N_f = max(1, 3 − 3) = 1`. The chi-squared
-  sum is empty (`S = 0`); the lone `R` term still appears. The
-  thermostat propagates a degenerate one-degree-of-freedom system as
-  documented in the original paper.
+- `particle_count == 1` with `n_constraints == 0`:
+  `N_f = max(1, 3 − 0 − 3) = 1`. The chi-squared sum is empty
+  (`S = 0`); the lone `R` term still appears. The thermostat
+  propagates a degenerate one-degree-of-freedom system as documented
+  in the original paper.
+- Heavily-constrained systems where `3·N − n_constraints − 3 <= 0`:
+  the `max(1, …)` floor keeps `N_f = 1` so the thermostat still
+  runs. Users should not pair CSVR with such systems; the convention
+  is documented for completeness.
 - `K == 0` on entry: every velocity is exactly zero. The rescale
   formula contains `K` in a square-root term that would divide by
   zero; the kernel skips the rescale this invocation. The next
@@ -221,7 +231,9 @@ log-write time.
   - `draw_counter: u64` — Philox counter advance for the CSVR draws.
     Initialised to `0` by the builder; pre-incremented on every
     `apply_post` call.
-  - `g_dof: u32` — `max(1, 3 · particle_count − 3)`.
+  - `g_dof: u32` — `max(1, 3 · particle_count − n_constraints − 3)`,
+    computed at construction from the `n_constraints` parameter passed
+    by the runner.
   - `kt_target: f64` — `BOLTZMANN_J_PER_K · temperature`.
   - `cumulative_injection: f64` — running sum of `K_new − K_old` over
     every completed `apply_post` call. Initialised to `0.0`. Used by
@@ -240,9 +252,10 @@ log-write time.
   restart-from-checkpoint flow can restore them explicitly.
 
 - `CsvrBuilder` — implements `ThermostatBuilder` with <!-- rq-750b828f -->
-  `kind_name() == "csvr"`. `build(device, particle_count, kind)`
-  deserialises `CsvrParams` from `params`, allocates the
-  length-1 `ke_scratch` device buffer, and returns the boxed
+  `kind_name() == "csvr"`. `build(gpu, particle_count, n_constraints,
+  params)` deserialises `CsvrParams` from `params`, computes
+  `g_dof = max(1, 3 · particle_count − n_constraints − 3)`, allocates
+  the length-1 `ke_scratch` device buffer, and returns the boxed
   `CsvrThermostat`.
 
 ### `Thermostat` trait overrides <!-- rq-5aae9633 -->
@@ -314,9 +327,9 @@ All launches go through the default stream of
 - Massive thermostatting (per-atom independent CSVR). Single global
   thermostat only.
 - User-overrideable `N_f` (degrees of freedom). The thermostat
-  hard-codes `N_f = max(1, 3N − 3)` to match the COM-removed
-  initial-velocity convention; constraint-aware `N_f` follows the
-  constraint feature.
+  hard-codes `N_f = max(1, 3N − n_constraints − 3)`, the
+  COM-removed and constraint-aware convention shared with
+  `compute_temperature` (see `io/log-output.md`).
 - Pressure coupling (Bussi-Parrinello stochastic-cell NPT extension).
   A future stochastic barostat would slot in alongside CSVR via the
   `[barostat]` slot.
@@ -348,28 +361,43 @@ Feature: CSVR stochastic velocity-rescaling thermostat
 
   # --- Construction ---
 
-  @rq-9e1142aa
-  Scenario: Construct CsvrThermostat via the registry
+  @rq-a6cd03aa
+  Scenario: Construct CsvrThermostat via the registry (unconstrained system)
     Given a ThermostatKind::Csvr { temperature: 300.0, tau: 1.0e-13, seed: 42 }
-    When registry.build_optional(Some(&kind), device, particle_count=4) is called
+    When registry.build_optional(Some(&kind), device, particle_count=4, n_constraints=0) is called
     Then it returns Ok(Some(thermostat))
     And the underlying CsvrThermostat has draw_counter == 0
     And state.cumulative_injection == 0.0
-    And state.g_dof == max(1, 3*4 − 3) == 9
+    And state.g_dof == max(1, 3*4 − 0 − 3) == 9
     And state.kt_target == k_B * 300.0
 
-  @rq-cf008c68
+  @rq-70a46202
+  Scenario: Construct CsvrThermostat for a SETTLE'd water system
+    Given a ThermostatKind::Csvr { temperature: 300.0, tau: 1.0e-13, seed: 42 }
+    When registry.build_optional(Some(&kind), device, particle_count=24, n_constraints=24) is called
+      (8 SETTLE waters: 24 atoms, 3 constraints per molecule)
+    Then it returns Ok(Some(thermostat))
+    And state.g_dof == max(1, 3*24 − 24 − 3) == 45
+
+  @rq-b5089af4
   Scenario: Construct with particle_count = 0
     Given a ThermostatKind::Csvr { temperature: 300.0, tau: 1.0e-13, seed: 1 }
-    When registry.build_optional(Some(&kind), device, particle_count=0) is called
+    When registry.build_optional(Some(&kind), device, particle_count=0, n_constraints=0) is called
     Then it returns Ok(Some(thermostat))
 
-  @rq-c4872e7e
+  @rq-7326a2d5
   Scenario: Construct with particle_count = 1 (N_f = 1)
     Given a ThermostatKind::Csvr { temperature: 300.0, tau: 1.0e-13, seed: 1 }
-    When registry.build_optional(Some(&kind), device, particle_count=1) is called
+    When registry.build_optional(Some(&kind), device, particle_count=1, n_constraints=0) is called
     Then it returns Ok(Some(thermostat))
     And state.g_dof == 1
+
+  @rq-d16be675
+  Scenario: Heavily-constrained system clamps g_dof to 1
+    Given a ThermostatKind::Csvr { temperature: 300.0, tau: 1.0e-13, seed: 1 }
+    When registry.build_optional(Some(&kind), device, particle_count=2, n_constraints=4) is called
+    Then it returns Ok(Some(thermostat))
+    And state.g_dof == max(1, 3*2 − 4 − 3) == max(1, -1) == 1
 
   # --- Config validation (paired with config-schema scenarios) ---
 

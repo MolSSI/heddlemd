@@ -503,10 +503,12 @@ When the init file does not supply velocities, the runner samples them from
 a Maxwell-Boltzmann distribution at `config.simulation.temperature` using a
 deterministic RNG seeded by `config.simulation.seed`. Sampling is followed
 by a centre-of-mass momentum subtraction and a single-scalar rescale, so the
-generated array's flat-3N temperature equals the configured target (within
-f32 storage round-off) for any system with thermal degrees of freedom
-(`N >= 2`). The procedure is fully specified so that two runs with identical
-config and identical init files produce byte-identical velocity arrays.
+generated array's thermodynamic temperature equals the configured target
+(within f32 storage round-off) for any system with at least one thermal
+degree of freedom (`N_thermal_dof >= 1`, where `N_thermal_dof =
+max(0, 3 * N - n_constraints - 3)`). The procedure is fully specified so
+that two runs with identical config and identical init files (including
+identical constraint topology) produce byte-identical velocity arrays.
 
 ### RNG <!-- rq-1b7680ad -->
 
@@ -567,17 +569,21 @@ zero).
 
 ### Temperature rescaling <!-- inline --> <!-- rq-be568071 -->
 
-After the momentum subtraction, when the centre-of-mass-removed velocity
-field has thermal degrees of freedom (`N >= 2`), the runner rescales every
-velocity by a single scalar so the realised kinetic energy matches the
-flat-3N target `(3 * N / 2) * k_B * T`. This is the degrees-of-freedom
-convention used by `compute_temperature` (see `io/log-output.md`), so the
-generated array's reported temperature equals
-`config.simulation.temperature`.
+After the momentum subtraction, when the system has at least one thermal
+degree of freedom (`N_thermal_dof = max(0, 3 * N - n_constraints - 3) >= 1`),
+the runner rescales every velocity by a single scalar so the realised
+kinetic energy matches the equipartition target
+`(N_thermal_dof / 2) * k_B * T`. The runner reads `n_constraints` from the
+parsed `ConstraintList` (the sum of every group's `constraint_count`; zero
+when no `[constraints]` section is present). This matches the
+degrees-of-freedom convention used by `compute_temperature`
+(see `io/log-output.md`), so the generated array's reported temperature
+equals `config.simulation.temperature`.
 
 ```
-if N < 2:
-    # no thermal degrees of freedom after centring
+n_thermal_dof = max(0, 3 * N - n_constraints - 3)
+if n_thermal_dof == 0:
+    # no thermal degrees of freedom remain after centring and constraints
     for i in 0..N:
         for axis in (x, y, z):
             v[axis][i] = 0.0
@@ -586,7 +592,7 @@ else:
              ((v_x[i] as f64)^2 + (v_y[i] as f64)^2 + (v_z[i] as f64)^2)
              for i in 0..N)
     if ke > 0.0:
-        target_ke = 1.5 * (N as f64) * k_B * T
+        target_ke = 0.5 * (n_thermal_dof as f64) * k_B * T
         scale = sqrt(target_ke / ke)
         for i in 0..N:
             for axis in (x, y, z):
@@ -598,24 +604,22 @@ rescaled component is stored back as `f32`. Reading the result back through
 `compute_temperature` therefore recovers `T` to within f32
 velocity-storage round-off.
 
-The rescale targets the thermal degrees of freedom of the
-centre-of-mass-removed velocity field, which exist only for `N >= 2`. The
-edge cases:
+The rescale targets the thermodynamic kinetic energy of the
+constraint- and COM-removed velocity field. Edge cases:
 
 - `temperature == 0.0` — velocity generation returns zero velocities
   before sampling, the momentum subtraction, or the rescale ever run.
 - `N == 0` — there are no particles; the velocity arrays are empty.
-- `N == 1` — a single centred particle is its own centre of mass and has
-  no internal motion, so its velocity components are set to exactly zero.
-  The `N == 1` momentum subtraction cancels the sampled velocity only up
-  to a floating-point rounding residual; the rescale would otherwise
-  amplify that residual into a full thermal velocity, so the velocities
-  are zeroed explicitly rather than scaled.
-- `N >= 2` with a positive post-subtraction kinetic energy — every
-  component is multiplied by `scale`. The `ke > 0.0` guard also covers the
-  measure-zero degenerate case in which every sampled velocity is
-  identical, in which case the velocities are left as the momentum
-  subtraction produced them.
+- `n_thermal_dof == 0` — no thermal degrees of freedom remain. Covers
+  `N <= 1` (a single centred particle is its own centre of mass) and
+  pathologically over-constrained systems. Every velocity component is
+  set to exactly zero; the rescale is skipped to avoid amplifying
+  floating-point residuals into spurious thermal motion.
+- `n_thermal_dof >= 1` with a positive post-subtraction kinetic energy
+  — every component is multiplied by `scale`. The `ke > 0.0` guard
+  also covers the measure-zero degenerate case in which every sampled
+  velocity is identical, in which case the velocities are left as the
+  momentum subtraction produced them.
 
 The rescale is a single deterministic scalar multiply, so it preserves both
 the determinism of velocity generation and the zero-total-momentum property
@@ -626,8 +630,9 @@ established by the momentum subtraction.
 When `init_state.velocities = Some(_)`, the velocities are used directly:
 the RNG is not consulted, and neither the momentum subtraction nor the
 rescale is applied. The caller is presumed to have set velocities
-deliberately; `compute_temperature` reports their flat-3N temperature as-is
-(see `io/log-output.md`).
+deliberately; `compute_temperature` reports their thermodynamic
+temperature as-is, dividing by the same `N_thermal_dof` used everywhere
+else in the runner (see `io/log-output.md`).
 
 ## Progress reporting <!-- rq-73fbb111 -->
 

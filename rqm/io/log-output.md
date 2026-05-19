@@ -65,18 +65,22 @@ per row (see `integration/nose-hoover-chain.md`).
   particles in source-array order (i.e. by particle ID). Masses are taken
   from the device-side `masses` buffer (downloaded once into host memory
   by the runner; subsequent log writes reuse the cached host copy).
-- `temperature: f64` — instantaneous temperature in kelvin, computed as
-  `T = 2 * kinetic_energy / (3 * N * k_B)` using the CODATA-2019 value
-  `k_B = 1.380649e-23 J/K`. When `N == 0`, temperature is written as
-  `0.0e0` (zero by definition rather than NaN). This is a flat-3N
-  degrees-of-freedom convention: it does not subtract the three
-  constrained degrees of freedom of a centre-of-mass-removed ensemble.
-  The convention is exact for a Langevin-thermostatted run (the stochastic
-  thermostat couples every degree of freedom and conserves no momentum)
-  and for sampled velocities, which are rescaled to this convention (see
-  *Velocity generation* in `simulation-runner.md`). For a
-  centre-of-mass-removed microcanonical run the equipartition temperature
-  per thermal degree of freedom is `N / (N - 1)` times this value.
+- `temperature: f64` — instantaneous thermodynamic temperature in
+  kelvin, computed as `T = 2 * kinetic_energy / (N_thermal_dof * k_B)`
+  using the CODATA-2019 value `k_B = 1.380649e-23 J/K`, where
+  `N_thermal_dof = max(0, 3 * N - n_constraints - 3)` is the
+  centre-of-mass-removed thermal degrees of freedom of the system. The
+  `n_constraints` term is the total number of holonomic constraints
+  carried by the run's `ConstraintList` (zero when the topology has no
+  `[constraints]` section; `3 * n_settle_groups` for a SETTLE'd water
+  system). The `-3` term removes the three centre-of-mass translational
+  degrees of freedom, which are frozen by the velocity-generation
+  procedure (see *Velocity generation* in `simulation-runner.md`).
+  When `N_thermal_dof == 0` (e.g. `N <= 1`, or so heavily constrained
+  that no thermal DOFs remain) `temperature` is written as `0.0e0`
+  rather than NaN. Under this convention an equilibrated thermostat at
+  setpoint `T_set` produces a long-run mean of `temperature` equal to
+  `T_set` to within sampling fluctuations.
 
 ### Number formatting <!-- rq-4a6969aa -->
 
@@ -159,12 +163,13 @@ When a phase declares `n_steps == 0`, its log file (if enabled by
   - Debug-asserts that all four slices have the same length.
   - Returns `0.0_f64` when the slices are empty.
 
-- `compute_temperature(kinetic_energy: f64, particle_count: usize) -> f64` <!-- rq-46a39249 -->
-  - Free helper. Returns `0.0_f64` when `particle_count == 0`. Otherwise
-    returns `2.0 * kinetic_energy / (3.0 * particle_count as f64 * 1.380649e-23_f64)`.
-  - Uses a flat-3N degrees-of-freedom convention regardless of how the
-    velocities were produced; see the `temperature` field description above
-    for when that convention is exact.
+- `compute_temperature(kinetic_energy: f64, n_thermal_dof: u32) -> f64` <!-- rq-46a39249 -->
+  - Free helper. Returns `0.0_f64` when `n_thermal_dof == 0`. Otherwise
+    returns `2.0 * kinetic_energy / (n_thermal_dof as f64 * 1.380649e-23_f64)`.
+  - `n_thermal_dof` is supplied by the runner as
+    `max(0, 3 * particle_count - n_constraints - 3)`; see the
+    `temperature` field description above for the formula and its
+    rationale.
 
 `LogWriter` implements `Drop` which best-effort flushes on drop without
 panicking.
@@ -301,15 +306,29 @@ Feature: CSV diagnostic log
 
   # --- Temperature helper ---
 
-  @rq-2a9acb69
-  Scenario: Temperature of an empty system is zero
+  @rq-8f554438
+  Scenario: Temperature of a zero-DOF system is zero
     When compute_temperature(0.0, 0) is called
     Then it returns 0.0
 
-  @rq-4518fa47
-  Scenario: Temperature uses k_B = 1.380649e-23
-    Given KE = 1.5 * N * k_B * T_target for T_target=300 K and N=10
-    When compute_temperature(KE, 10) is called
+  @rq-7d831804
+  Scenario: Temperature uses k_B = 1.380649e-23 and N_thermal_dof as divisor
+    Given N_thermal_dof = 27 and KE = (N_thermal_dof / 2) * k_B * T_target for T_target = 300 K
+    When compute_temperature(KE, 27) is called
+    Then it returns 300.0 within an absolute tolerance of 1.0e-12
+
+  @rq-9d8f0c97
+  Scenario: Temperature for an unconstrained 10-particle COM-removed system
+    Given a 10-particle unconstrained run (n_constraints = 0), so N_thermal_dof = 3 * 10 - 0 - 3 = 27
+    And KE = (27 / 2) * k_B * 300
+    When compute_temperature(KE, 27) is called
+    Then it returns 300.0 within an absolute tolerance of 1.0e-12
+
+  @rq-5939f04a
+  Scenario: Temperature for a 3-atom SETTLE'd water (one rigid molecule, COM removed)
+    Given a system with N = 3, n_constraints = 3, so N_thermal_dof = 3 * 3 - 3 - 3 = 3
+    And KE = (3 / 2) * k_B * 300
+    When compute_temperature(KE, 3) is called
     Then it returns 300.0 within an absolute tolerance of 1.0e-12
 
   # --- Empty-simulation edge case ---

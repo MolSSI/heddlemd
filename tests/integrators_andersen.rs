@@ -56,7 +56,7 @@ fn andersen_kind(temperature: f64, collision_rate: f64, seed: u64) -> SlotConfig
 
 fn build_andersen(gpu: &GpuContext, n: usize, slot: &SlotConfig) -> Box<dyn Thermostat> {
     ThermostatRegistry::with_builtins()
-        .build_optional(Some(slot), gpu, n)
+        .build_optional(Some(slot), gpu, n, 0)
         .unwrap()
         .unwrap()
 }
@@ -500,8 +500,7 @@ fn andersen_time_averaged_ke_tracks_target() {
         .build(
             &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
             &gpu,
-            n,
-        )
+            n, 0)
         .unwrap();
     let mut therm = build_andersen(&gpu, n, &andersen_kind(temperature, 5.0e14, 11));
     ff.step(&mut buffers, &sim_box, &mut timings).unwrap();

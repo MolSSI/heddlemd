@@ -119,18 +119,16 @@ pub fn compute_kinetic_energy(
 
 // rq-46a39249
 //
-// Uses a flat-3N degrees-of-freedom convention: it does not subtract the
-// three constrained degrees of freedom of a centre-of-mass-removed
-// ensemble. The convention is exact for a Langevin-thermostatted run (the
-// stochastic thermostat couples every degree of freedom and conserves no
-// momentum) and for sampled velocities, which the runner rescales to this
-// convention. For a centre-of-mass-removed microcanonical run the
-// equipartition temperature per thermal degree of freedom is `N / (N - 1)`
-// times this value.
-pub fn compute_temperature(kinetic_energy: f64, particle_count: usize) -> f64 {
-    if particle_count == 0 {
+// Instantaneous thermodynamic temperature `T = 2K / (N_thermal_dof · k_B)`.
+// `n_thermal_dof` is supplied by the runner as
+// `max(0, 3 * particle_count - n_constraints - 3)`: the constraint- and
+// COM-removed thermal degrees of freedom. With this convention an
+// equilibrated thermostat at setpoint `T_set` produces a long-run mean of
+// `temperature` equal to `T_set` to within sampling fluctuations.
+pub fn compute_temperature(kinetic_energy: f64, n_thermal_dof: u32) -> f64 {
+    if n_thermal_dof == 0 {
         0.0
     } else {
-        2.0 * kinetic_energy / (3.0 * particle_count as f64 * BOLTZMANN_J_PER_K)
+        2.0 * kinetic_energy / (n_thermal_dof as f64 * BOLTZMANN_J_PER_K)
     }
 }

@@ -15,15 +15,19 @@ be equal (parameter `r_oh`) and the H–H distance is the parameter
 `r_hh`. The atom listed first in each `[constraints]` row is the
 oxygen; the next two are the hydrogens, in either order.
 
-The implementation provides two CUDA kernels — `settle_positions` and
-`settle_velocities` — and a single host-side slot
-(`SettleConstraintsState`) that owns the device-side per-group buffers
-and implements the `Constraint` trait. The slot's `apply_before_drift`
-hook snapshots pre-drift positions; `apply_after_drift` runs
-`settle_positions` to project the post-drift positions back onto the
-manifold and to correct the half-step velocities; `apply_after_kick`
-runs `settle_velocities` to project the final velocities onto the
-manifold.
+The implementation provides three CUDA kernels — `settle_positions`,
+`settle_velocities`, and `settle_virial_scatter` — and a single
+host-side slot (`SettleConstraintsState`) that owns the device-side
+per-group buffers and implements the `Constraint` trait. The slot's
+`apply_before_drift` hook snapshots pre-drift positions;
+`apply_after_drift` runs `settle_positions` to project the post-drift
+positions back onto the manifold, to correct the half-step velocities,
+and to compute each constraint atom's contribution to the constraint
+virial into a slot-owned buffer; `apply_after_kick` runs
+`settle_velocities` to project the final velocities onto the manifold,
+followed by `settle_virial_scatter` to fold the cached constraint
+virial into `buffers.virials` so the barostat sees it on the same
+timestep.
 
 ## Algorithm <!-- rq-ce77d9fb -->
 
@@ -110,16 +114,73 @@ in a fixed number of arithmetic operations.
 
 ## Per-Step Kernel Sequence <!-- rq-de7601cd -->
 
-| Order | Hook                 | Kernel              | Operation                                                                          | Stage label              |
-| ----- | -------------------- | ------------------- | ---------------------------------------------------------------------------------- | ------------------------ |
-| 1     | `apply_before_drift` | `settle_snapshot`   | copy pre-drift positions of every group's atoms into the slot's snapshot buffer    | `SettleSnapshot`         |
-| 2     | `apply_after_drift`  | `settle_positions`  | per-group analytic projection of positions; per-group half-step velocity correction | `SettlePositions`        |
-| 3     | `apply_after_kick`   | `settle_velocities` | per-group analytic projection of final velocities                                  | `SettleVelocities`       |
+| Order | Hook                 | Kernel                    | Operation                                                                                                                                              | Stage label             |
+| ----- | -------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------- |
+| 1     | `apply_before_drift` | `settle_snapshot`         | copy pre-drift positions of every group's atoms into the slot's snapshot buffer                                                                        | `SettleSnapshot`        |
+| 2     | `apply_after_drift`  | `settle_positions`        | per-group analytic projection of positions; per-group half-step velocity correction; per-atom constraint-virial contribution written to a slot buffer  | `SettlePositions`       |
+| 3     | `apply_after_kick`   | `settle_velocities`       | per-group analytic projection of final velocities                                                                                                      | `SettleVelocities`      |
+| 4     | `apply_after_kick`   | `settle_virial_scatter`   | per-atom-of-group scatter of the cached constraint-virial values into `buffers.virials` for the barostat                                               | `SettleVirialScatter`   |
 
-All three kernels run with one thread per constraint group. Block
-size is 256; grid size is `ceil(group_count / 256)`. Shared memory is
-zero bytes. The stream is the default stream carried by
-`ParticleBuffers::device`.
+All four kernels run with one thread per constraint group (or per
+constraint-group-atom for the scatter, with one thread per atom slot
+`3 * group_count`). Block size is 256; grid size is
+`ceil(work_items / 256)`. Shared memory is zero bytes. The stream is
+the default stream carried by `ParticleBuffers::device`.
+
+## Constraint Virial <!-- rq-b5baee1d -->
+
+The SETTLE position projection in `apply_after_drift` does work on
+the system that the barostat (`c-rescale-barostat.md`,
+`berendsen-barostat.md`) must see in its instantaneous pressure
+estimate `P = (2K + W) / (3V)`. Each timestep the slot computes a
+scalar per-atom contribution
+
+```text
+w_i = m_i · ((r_constrained_i − r_unconstrained_i) · r_constrained_i) / dt²
+```
+
+for every atom `i` in every constraint group. The sum
+`W_settle = Σ_i w_i` is the constraint contribution to the total
+scalar virial.
+
+Computation and scatter are split across two hook points so the
+contribution survives the in-step force evaluation:
+
+1. **Compute** — inside `settle_positions` during `apply_after_drift`.
+   Each thread, after solving for `r_constrained_i`, writes
+   `w_i` into a slot-owned device buffer
+   `constraint_virial: CudaSlice<f32>` of length `3 * group_count`,
+   indexed by the same `(group, local atom)` layout as `group_atoms`.
+2. **Scatter** — `settle_virial_scatter` runs at the end of
+   `apply_after_kick`, after the force evaluation has populated
+   `buffers.virials` with its force-field contributions and after
+   `settle_velocities` has finished. For each
+   `(group g, local atom k)` slot it adds
+   `constraint_virial[3*g+k]` to
+   `buffers.virials[group_atoms[3*g+k]]`.
+
+The split is required by the per-step order in
+`constraint-framework.md`:
+`apply_before_drift → KickDrift → apply_after_drift →
+ForceEval → KickHalf → apply_after_kick → barostat`. The force
+evaluation between `apply_after_drift` and `apply_after_kick`
+overwrites `buffers.virials`, so the scatter happens *after* it.
+Writing the contribution in `apply_after_drift` (when
+`r_constrained_i − r_unconstrained_i` is freshly available) keeps
+the algorithm a single closed-form expression; the cached buffer
+defers the visible write to the correct hook.
+
+The scatter writes only to the `3 * group_count` atom slots actually
+owned by SETTLE; every other entry of `buffers.virials` is left
+unchanged. No atomics are used: each constraint group is exclusive
+to one thread in `settle_positions`, and the scatter is a per-slot
+write to a unique atom index because constraint groups have disjoint
+atom sets (the topology parser rejects overlap).
+
+The empty-state and reproducibility properties documented for
+`settle_positions` and `settle_velocities` apply unchanged to the
+scatter: a zero-group slot performs no launches; identical inputs on
+the same GPU produce byte-identical virial buffers across runs.
 
 ## Reproducibility <!-- rq-52412463 -->
 
@@ -188,6 +249,11 @@ consistent per constraint type; mismatch is rejected with
     by `settle_snapshot`).
   - `snapshot_y: CudaSlice<f32>` — length `3 * group_count`.
   - `snapshot_z: CudaSlice<f32>` — length `3 * group_count`.
+  - `constraint_virial: CudaSlice<f32>` — length `3 * group_count`,
+    per-atom-of-group scalar contribution `m_i · ((r_constrained_i −
+    r_unconstrained_i) · r_constrained_i) / dt²` written by
+    `settle_positions` and consumed by `settle_virial_scatter`. See
+    *Constraint Virial* above. Refreshed each step.
 
   All fields are private; the slot's public surface is the
   `Constraint` trait methods.
@@ -231,7 +297,7 @@ consistent per constraint type; mismatch is rejected with
 
 ### CUDA Kernels <!-- rq-744ae79d -->
 
-`kernels/settle.cu` declares three `extern "C"` kernels:
+`kernels/settle.cu` declares four `extern "C"` kernels:
 
 ```c
 extern "C" __global__ void settle_snapshot(
@@ -250,6 +316,7 @@ extern "C" __global__ void settle_positions(
     const float *type_mass_o, const float *type_mass_h,
     float lx, float ly, float lz, float xy, float xz, float yz,
     float dt,
+    float *constraint_virial,
     unsigned int n_groups);
 
 extern "C" __global__ void settle_velocities(
@@ -260,6 +327,12 @@ extern "C" __global__ void settle_velocities(
     const float *type_mass_o, const float *type_mass_h,
     float lx, float ly, float lz, float xy, float xz, float yz,
     unsigned int n_groups);
+
+extern "C" __global__ void settle_virial_scatter(
+    const float *constraint_virial,
+    const unsigned int *group_atoms,
+    float *particle_virials,
+    unsigned int n_atom_slots);
 ```
 
 Each thread computes its global group index as
@@ -302,11 +375,17 @@ For group `g`:
 8. Writes constrained positions back to `positions_{x,y,z}[a_*]`.
 9. Writes corrected half-step velocities back to
    `velocities_{x,y,z}[a_*]` using `v_i ← v_i + (r_constrained - r_unconstrained) / dt`.
+10. For each of the three atoms `i ∈ {O, H1, H2}`, writes the per-atom
+    constraint-virial contribution
+    `w_i = m_i · ((r_constrained_i − r_unconstrained_i) · r_constrained_i) / dt²`
+    into `constraint_virial[3*g .. 3*g+3]`. See *Constraint Virial*.
 
 The kernel writes only the nine `f32` slots `positions_{x,y,z}[a_O]`,
-`positions_{x,y,z}[a_H1]`, `positions_{x,y,z}[a_H2]` and the nine
+`positions_{x,y,z}[a_H1]`, `positions_{x,y,z}[a_H2]`, the nine
 `f32` slots `velocities_{x,y,z}[a_O]`, `velocities_{x,y,z}[a_H1]`,
-`velocities_{x,y,z}[a_H2]`. Every other particle's state is untouched.
+`velocities_{x,y,z}[a_H2]`, and the three slot-owned virial slots
+`constraint_virial[3*g .. 3*g+3]`. Every other particle's state and
+every other entry of `constraint_virial` is untouched.
 
 The kernel does not advance `images_{x,y,z}` for the corrected
 atoms. SETTLE's position projection produces displacements at most
@@ -340,12 +419,30 @@ For group `g`:
 The kernel writes only the nine `f32` velocity slots of the group.
 Positions are not modified.
 
+#### `settle_virial_scatter` <!-- rq-a3f15f82 -->
+
+One thread per atom slot in `group_atoms` (`n_atom_slots = 3 *
+group_count`). For each thread index `s`:
+
+1. Reads `w = constraint_virial[s]` and `atom_index =
+   group_atoms[s]`.
+2. Executes
+   `particle_virials[atom_index] = particle_virials[atom_index] + w`.
+
+The write is a plain addition with no atomics: the topology parser
+guarantees every constraint group has a disjoint atom set, so each
+`atom_index` appears in exactly one slot of `group_atoms`.
+
+The kernel writes only the `group_count` distinct atom slots covered
+by SETTLE groups. Every other entry of `particle_virials` is left
+unchanged.
+
 ### PTX Module Loading <!-- rq-ba4d55e6 -->
 
 `init_device()` loads the compiled `kernels/settle.cu` PTX as module
-`"settle"` and captures its `settle_snapshot`, `settle_positions`, and
-`settle_velocities` functions into the `Kernels` handle (see
-`build-pipeline.md`).
+`"settle"` and captures its `settle_snapshot`, `settle_positions`,
+`settle_velocities`, and `settle_virial_scatter` functions into the
+`Kernels` handle (see `build-pipeline.md`).
 
 ### Builder <!-- rq-a0f7c746 -->
 
@@ -413,10 +510,6 @@ constructed with `particle_count == 0` and a non-empty group list.
   compensated summation for SETTLE corrections is a follow-up
   feature.
 - Composition with `langevin-baoab` or `mtk-npt`. Same reason.
-- Constraint virial contributions to the system pressure. SETTLE's
-  position corrections do work on the system; that work is not added
-  to `buffers.virials` in v1. Barostats compose with the SETTLE slot
-  but do not see the constraint pressure contribution.
 - Per-step diagnostics (max residual, per-group iteration count).
   SETTLE is non-iterative and the residual is zero by construction
   (up to floating-point rounding); a diagnostic is unnecessary in
@@ -548,11 +641,42 @@ Feature: SETTLE analytic three-atom rigid-water constraint
     When apply_before_drift, apply_after_drift, and apply_after_kick are all invoked
     Then positions and velocities for every atom not in {4, 5, 6} are byte-identical to the snapshot
 
-  @rq-87330eaa
-  Scenario: SETTLE kernels do not modify forces, masses, particle_ids, type_indices, potential_energies, or virials
-    Given a ParticleBuffers with one SETTLE water and snapshots of all six arrays before any hook
+  @rq-fd498605
+  Scenario: SETTLE kernels do not modify forces, masses, particle_ids, type_indices, or potential_energies
+    Given a ParticleBuffers with one SETTLE water and snapshots of forces_*, masses, particle_ids, type_indices, and potential_energies before any hook
     When all three hooks are invoked
-    Then forces_x, forces_y, forces_z, masses, particle_ids, type_indices, potential_energies, and virials are byte-identical to the snapshot
+    Then forces_x, forces_y, forces_z, masses, particle_ids, type_indices, and potential_energies are byte-identical to the snapshot
+
+  @rq-28bba228
+  Scenario: SETTLE adds constraint virial to buffers.virials in apply_after_kick
+    Given a ParticleBuffers with one SETTLE water at atoms [a_O, a_H1, a_H2]
+      and an initial buffers.virials[a_O] = 7.0, buffers.virials[a_H1] = 11.0, buffers.virials[a_H2] = 13.0
+    And a non-trivial pre-drift → post-drift displacement
+    When apply_before_drift, apply_after_drift, and apply_after_kick are all invoked
+    Then buffers.virials[a_O] equals 7.0 + w_O within absolute tolerance 1e-12
+    And buffers.virials[a_H1] equals 11.0 + w_H1 within absolute tolerance 1e-12
+    And buffers.virials[a_H2] equals 13.0 + w_H2 within absolute tolerance 1e-12
+    And buffers.virials at every other index is unchanged
+    Where w_i = m_i · ((r_constrained_i − r_unconstrained_i) · r_constrained_i) / dt²
+      computed from the same inputs
+
+  @rq-72dceb28
+  Scenario: settle_virial_scatter is a no-op for a zero-group slot
+    Given a SETTLE slot with group_count() == 0 and a snapshot of buffers.virials
+    When apply_after_kick is called
+    Then buffers.virials is byte-identical to the snapshot
+    And no kernel launches are recorded for the scatter step
+
+  @rq-9cf9ece2
+  Scenario: Adding constraint virial completes the pressure cancellation for an equilibrated rigid water gas
+    Given a composed runner of velocity-Verlet + CSVR + c-rescale-barostat with
+      N_mol SPCE waters (well-equilibrated rigid water at 1 g/cm³, T = 298.15 K)
+    When the run completes
+    Then the time-averaged pressure reported on the c-rescale-barostat's log column
+      is within 200 bar of the configured target P (1.013e5 Pa)
+    (Without the SETTLE constraint virial the time-averaged pressure
+    differs from P_target by O(N_mol · k_B · T / V), which for SPC/E
+    liquid at standard conditions is several kbar.)
 
   @rq-17c0a358
   Scenario: SETTLE kernels do not modify image flags

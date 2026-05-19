@@ -157,6 +157,7 @@ impl ThermostatBuilder for AndersenBuilder {
         &self,
         gpu: &GpuContext,
         particle_count: usize,
+        _n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Thermostat>, ThermostatError> {
         let p = deserialize_params(params)

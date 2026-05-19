@@ -537,11 +537,17 @@ successfully.
       /// `validate_params(&params)`, so the builder may unwrap
       /// trusted fields; any failure inside `build` surfaces as
       /// `IntegratorError::Gpu` (the typical case is a failed GPU
-      /// allocation).
+      /// allocation). `n_constraints` is the total holonomic
+      /// constraint count of the run (sum of every constraint group's
+      /// `constraint_count`, zero when the topology has no
+      /// `[constraints]` section). Integrators that compute internal
+      /// degrees-of-freedom counts (e.g. `mtk-npt`) consume it; others
+      /// ignore it.
       fn build(
           &self,
           gpu: &GpuContext,
           particle_count: usize,
+          n_constraints: usize,
           params: &toml::Value,
       ) -> Result<Box<dyn Integrator>, IntegratorError>;
   }
@@ -550,10 +556,18 @@ successfully.
       fn kind_name(&self) -> &'static str;
       fn validate_params(&self, params: &toml::Value)
           -> Result<(), ConfigError>;
+
+      /// `n_constraints` is the total holonomic constraint count of
+      /// the run (sum of every constraint group's `constraint_count`,
+      /// zero when the topology has no `[constraints]` section).
+      /// Implementations use it to compute their thermostatted
+      /// degrees-of-freedom count; see each thermostat's requirements
+      /// file for the exact formula.
       fn build(
           &self,
           gpu: &GpuContext,
           particle_count: usize,
+          n_constraints: usize,
           params: &toml::Value,
       ) -> Result<Box<dyn Thermostat>, ThermostatError>;
   }
@@ -562,10 +576,17 @@ successfully.
       fn kind_name(&self) -> &'static str;
       fn validate_params(&self, params: &toml::Value)
           -> Result<(), ConfigError>;
+
+      /// `n_constraints` is the total holonomic constraint count of
+      /// the run (sum of every constraint group's `constraint_count`,
+      /// zero when the topology has no `[constraints]` section).
+      /// Barostats that compute kinetic-pressure or internal
+      /// degrees-of-freedom counts consume it; others ignore it.
       fn build(
           &self,
           gpu: &GpuContext,
           particle_count: usize,
+          n_constraints: usize,
           params: &toml::Value,
       ) -> Result<Box<dyn Barostat>, BarostatError>;
   }
@@ -612,13 +633,13 @@ successfully.
     (`owns_thermostat`, `supports_constraints`) and to drive
     `validate_params` against the parsed config before any GPU
     work runs.
-  - `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize) -> Result<Box<dyn Integrator>, IntegratorError>`
+  - `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Integrator>, IntegratorError>`
     — looks up the builder whose `kind_name()` equals `slot.kind`
-    and delegates `build(gpu, particle_count, &slot.params)` to it.
+    and delegates `build(gpu, particle_count, n_constraints, &slot.params)` to it.
     Returns `IntegratorError::UnknownKind(slot.kind.clone())` when
     no builder matches.
   - The thermostat and barostat registries expose
-    `build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>`
+    `build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>`
     (and the corresponding barostat variant): if `slot` is `None`,
     returns `Ok(None)` without consulting the builders; otherwise
     dispatches the same way as `build` and wraps the result in
@@ -666,9 +687,9 @@ successfully.
     `owns_barostat`, `supports_constraints`) and to drive
     `validate_params` before any GPU work.
 
-- `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize) -> Result<Box<dyn Integrator>, IntegratorError>` <!-- rq-1e30bbf4 -->
+- `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Integrator>, IntegratorError>` <!-- rq-1e30bbf4 -->
   - Looks up the builder whose `kind_name()` equals `slot.kind` and
-    delegates `build(gpu, particle_count, &slot.params)`.
+    delegates `build(gpu, particle_count, n_constraints, &slot.params)`.
   - Returns `IntegratorError::UnknownKind(slot.kind.clone())` when
     no builder matches.
   - The builder is responsible for kind-specific allocations:
@@ -691,7 +712,7 @@ successfully.
     builders.
   - When `slot` is `Some`, looks up the builder whose `kind_name()`
     equals `slot.kind` and delegates
-    `build(gpu, particle_count, &slot.params)`. Returns
+    `build(gpu, particle_count, n_constraints, &slot.params)`. Returns
     `ThermostatError::UnknownKind(slot.kind.clone())` when no builder
     matches.
   - Per-thermostat builder responsibilities are documented in each
@@ -704,12 +725,12 @@ successfully.
 - `BarostatRegistry::lookup(&self, kind: &str) -> Option<&dyn BarostatBuilder>` <!-- rq-acbb6d0e -->
   - Parallel to `IntegratorRegistry::lookup`.
 
-- `BarostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize) -> Result<Option<Box<dyn Barostat>>, BarostatError>` <!-- rq-9548bc1a -->
+- `BarostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Option<Box<dyn Barostat>>, BarostatError>` <!-- rq-9548bc1a -->
   - When `slot` is `None`, returns `Ok(None)` without consulting the
     builders.
   - When `slot` is `Some`, looks up the builder whose `kind_name()`
     equals `slot.kind` and delegates
-    `build(gpu, particle_count, &slot.params)`. Returns
+    `build(gpu, particle_count, n_constraints, &slot.params)`. Returns
     `BarostatError::UnknownKind(slot.kind.clone())` when no builder
     matches.
   - Per-barostat builder responsibilities are documented in each
@@ -821,7 +842,7 @@ Feature: Pluggable integration framework
   Scenario: Construct velocity-Verlet (lossy) via the integrator registry
     Given an IntegratorRegistry::with_builtins()
     And a SlotConfig { kind: "velocity-verlet", params: { lossless: false } }
-    When registry.build(&slot, &gpu, particle_count=4) is called
+    When registry.build(&slot, &gpu, particle_count=4, n_constraints=0) is called
     Then it returns Ok(integrator)
     And integrator's underlying type implements `Integrator`
 
@@ -829,7 +850,7 @@ Feature: Pluggable integration framework
   Scenario: Construct velocity-Verlet (lossless) via the integrator registry
     Given an IntegratorRegistry::with_builtins()
     And a SlotConfig { kind: "velocity-verlet", params: { lossless: true } }
-    When registry.build(&slot, &gpu, particle_count=4) is called
+    When registry.build(&slot, &gpu, particle_count=4, n_constraints=0) is called
     Then it returns Ok(integrator)
     And the underlying integrator allocates LosslessBuffers with particle_count == 4
 
@@ -838,14 +859,14 @@ Feature: Pluggable integration framework
     Given an IntegratorRegistry::with_builtins()
     And a SlotConfig { kind: "langevin-baoab",
       params: { friction: 1.0e12, temperature: 300.0, seed: 42 } }
-    When registry.build(&slot, &gpu, particle_count=4) is called
+    When registry.build(&slot, &gpu, particle_count=4, n_constraints=0) is called
     Then it returns Ok(integrator)
 
   @rq-b44769f1
   Scenario: Construct an integrator with particle_count = 0
     Given an IntegratorRegistry::with_builtins()
     And a SlotConfig { kind: "velocity-verlet", params: { lossless: true } }
-    When registry.build(&slot, &gpu, particle_count=0) is called
+    When registry.build(&slot, &gpu, particle_count=0, n_constraints=0) is called
     Then it returns Ok(integrator)
     And every per-particle device allocation has length 0
 
@@ -853,14 +874,14 @@ Feature: Pluggable integration framework
   Scenario: Empty integrator registry reports UnknownKind
     Given an empty IntegratorRegistry (no builders registered)
     And a SlotConfig { kind: "velocity-verlet", params: { lossless: false } }
-    When registry.build(&slot, &gpu, particle_count=4) is called
+    When registry.build(&slot, &gpu, particle_count=4, n_constraints=0) is called
     Then it returns Err(IntegratorError::UnknownKind("velocity-verlet"))
 
   @rq-79c53582
   Scenario: Unknown kind in a populated registry reports UnknownKind
     Given an IntegratorRegistry::with_builtins()
     And a SlotConfig { kind: "no-such-integrator", params: { } }
-    When registry.build(&slot, &gpu, particle_count=4) is called
+    When registry.build(&slot, &gpu, particle_count=4, n_constraints=0) is called
     Then it returns Err(IntegratorError::UnknownKind("no-such-integrator"))
 
   @rq-8fbdbc0c

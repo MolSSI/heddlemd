@@ -54,10 +54,12 @@ impl BerendsenThermostat {
     fn new(
         gpu: &GpuContext,
         particle_count: usize,
+        n_constraints: usize,
         temperature: f64,
         tau: f64,
     ) -> Result<Self, GpuError> {
-        let g_dof = ((3 * particle_count) as i64 - 3).max(1) as u32;
+        let g_dof =
+            ((3 * particle_count) as i64 - n_constraints as i64 - 3).max(1) as u32;
         let kt_target = BOLTZMANN_J_PER_K * temperature;
         let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
         Ok(BerendsenThermostat {
@@ -144,11 +146,18 @@ impl ThermostatBuilder for BerendsenBuilder {
         &self,
         gpu: &GpuContext,
         particle_count: usize,
+        n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Thermostat>, ThermostatError> {
         let p = deserialize_params(params)
             .map_err(|_| ThermostatError::UnknownKind("berendsen (malformed params)".into()))?;
-        let state = BerendsenThermostat::new(gpu, particle_count, p.temperature, p.tau)?;
+        let state = BerendsenThermostat::new(
+            gpu,
+            particle_count,
+            n_constraints,
+            p.temperature,
+            p.tau,
+        )?;
         Ok(Box::new(state))
     }
 }

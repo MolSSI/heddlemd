@@ -806,7 +806,7 @@ fn integrator_step_dispatches_all_three_constraint_hooks() {
     .unwrap();
     let registry = IntegratorRegistry::with_builtins();
     let vv = SlotConfig::from_params_str("velocity-verlet", "lossless = false\n");
-    let mut integrator = registry.build(&vv, &gpu, 3).unwrap();
+    let mut integrator = registry.build(&vv, &gpu, 3, 0).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     let log = StdArc::new(Mutex::new(Vec::new()));
     let mut rec = RecordingConstraint { log: log.clone() };
@@ -852,7 +852,7 @@ fn integrator_step_with_none_constraint_skips_all_hooks() {
     .unwrap();
     let registry = IntegratorRegistry::with_builtins();
     let vv = SlotConfig::from_params_str("velocity-verlet", "lossless = false\n");
-    let mut integrator = registry.build(&vv, &gpu, 3).unwrap();
+    let mut integrator = registry.build(&vv, &gpu, 3, 0).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     integrator
         .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)

@@ -24,9 +24,9 @@ target/
 /target
 
 # Simulation output
-*.out.xyz
-*.out.log
-*.out.timings
+*.out.*.xyz
+*.out.*.log
+*.out.*.timings
 
 # Analysis output (`dynamics analyze` writes `<root>.out.<name>.csv`).
 *.out.*.csv

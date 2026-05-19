@@ -1768,6 +1768,7 @@ pub fn settle_positions(
     type_mass_h: &CudaSlice<f32>,
     sim_box: &SimulationBox,
     dt: f32,
+    constraint_virial: &mut CudaSlice<f32>,
     n_groups: usize,
 ) -> Result<(), GpuError> {
     if n_groups == 0 {
@@ -1804,7 +1805,40 @@ pub fn settle_positions(
                 lat[4],
                 lat[5],
                 dt,
+                &mut *constraint_virial,
                 n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn settle_virial_scatter(
+    particle_buffers: &mut ParticleBuffers,
+    constraint_virial: &CudaSlice<f32>,
+    group_atoms: &CudaSlice<u32>,
+    n_groups: usize,
+) -> Result<(), GpuError> {
+    if n_groups == 0 {
+        return Ok(());
+    }
+    let n_atom_slots = (3 * n_groups) as u32;
+    let func = particle_buffers
+        .kernels
+        .settle
+        .settle_virial_scatter
+        .clone();
+    let cfg = launch_config(n_atom_slots);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                constraint_virial,
+                group_atoms,
+                &mut particle_buffers.virials,
+                n_atom_slots,
             ),
         )
         .map_err(GpuError::from)?;

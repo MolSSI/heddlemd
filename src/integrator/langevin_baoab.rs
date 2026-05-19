@@ -132,6 +132,7 @@ impl IntegratorBuilder for LangevinBaoabBuilder {
         &self,
         gpu: &GpuContext,
         particle_count: usize,
+        _n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
         let _ = gpu;

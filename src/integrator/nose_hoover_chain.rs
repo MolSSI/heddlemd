@@ -197,6 +197,7 @@ impl NoseHooverChainThermostat {
     fn new(
         gpu: &GpuContext,
         particle_count: usize,
+        n_constraints: usize,
         temperature: f64,
         tau: f64,
         chain_length: u32,
@@ -204,7 +205,8 @@ impl NoseHooverChainThermostat {
         n_resp: u32,
     ) -> Result<Self, GpuError> {
         let m = chain_length as usize;
-        let g_dof = ((3 * particle_count) as i64 - 3).max(0) as u32;
+        let g_dof =
+            ((3 * particle_count) as i64 - n_constraints as i64 - 3).max(0) as u32;
         let kt = BOLTZMANN_J_PER_K * temperature;
         let tau2 = tau * tau;
         let mut q_mass = vec![0.0_f64; m];
@@ -366,6 +368,7 @@ impl ThermostatBuilder for NoseHooverChainBuilder {
         &self,
         gpu: &GpuContext,
         particle_count: usize,
+        n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Thermostat>, ThermostatError> {
         let p = deserialize_params(params).map_err(|_| {
@@ -374,6 +377,7 @@ impl ThermostatBuilder for NoseHooverChainBuilder {
         let state = NoseHooverChainThermostat::new(
             gpu,
             particle_count,
+            n_constraints,
             p.temperature,
             p.tau,
             p.chain_length,

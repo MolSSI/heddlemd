@@ -264,11 +264,20 @@ where `kind` is the algorithm's kind string.
   - Every hook returns `Ok(())` immediately when the slot owns zero
     constraint groups.
   - Hooks never modify `force_field` or `sim_box` and never read or
-    write `buffers.forces_*`, `buffers.potential_energies`, or
-    `buffers.virials`.
+    write `buffers.forces_*` or `buffers.potential_energies`.
   - `apply_before_drift` is permitted to mutate slot-private buffers
     only; `buffers` is borrowed mutably for symmetry with the other
     hooks and to allow future hooks that need to mutate state.
+  - `apply_after_kick` is permitted to mutate `buffers.virials` to
+    add the constraint slot's contribution to the total scalar
+    virial used by the barostat's pressure estimate. The
+    contribution is *added* (not assigned): each constraint slot
+    adds in-place, so the force evaluation that runs between
+    `apply_after_drift` and `apply_after_kick` populates virials
+    first and the constraint contribution is folded in afterward.
+    Concrete algorithms document the exact form of their
+    contribution (see `settle.md` for SETTLE's `m · Δr · r / dt²`
+    per-atom contribution).
 
 - `ConstraintGroup` — `Debug, Clone, Copy`. Fields: `atom_offset: u32`, <!-- rq-0faddd62 -->
   `atom_count: u32`, `constraint_offset: u32`, `constraint_count: u32`,
@@ -492,11 +501,6 @@ algorithm individually guarantees:
   row in `[constraints]` is its own group in v1; the parser rejects
   overlap. The connected-components algorithm needed to merge shared
   atoms across rows arrives with M-SHAKE.
-- Constraint virial contributions. The constraint corrector does work
-  on the system, and that work is in principle part of the pressure
-  computation. v1 reports zero constraint virial; barostats compose
-  with constraints but do not see the constraint contribution to the
-  pressure. This is a documented limitation.
 - Constraint diagnostics beyond config-load validation (per-step
   residual reporting, per-group iteration counts). SETTLE is
   non-iterative; M-SHAKE will introduce its own diagnostics.

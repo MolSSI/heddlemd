@@ -72,7 +72,7 @@ fn mtk_kind(
 
 fn build_mtk(gpu: &GpuContext, n: usize, slot: &SlotConfig) -> Box<dyn Integrator> {
     IntegratorRegistry::with_builtins()
-        .build(slot, gpu, n)
+        .build(slot, gpu, n, 0)
         .unwrap()
 }
 

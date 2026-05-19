@@ -22,6 +22,7 @@ pub use kernels::{
     prefix_scan_cell_counts, reduce_angle_forces, reduce_bond_forces, reduce_pair_forces,
     rescale_positions, rescale_velocities,
     scatter_atoms_into_cells, settle_positions, settle_snapshot, settle_velocities,
+    settle_virial_scatter,
     sort_cells_by_particle_id, spme_charge_spread,
     spme_force_gather, spme_influence_multiply, spme_real_pair_force, vv_kick,
     vv_kick_drift, vv_kick_drift_lossless, vv_kick_lossless,

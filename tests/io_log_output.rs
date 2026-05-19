@@ -170,10 +170,11 @@ fn temperature_of_empty_is_zero() {
 // rq-4518fa47
 #[test]
 fn temperature_uses_codata_kb() {
-    let n = 10;
+    // 10 unconstrained particles, COM-removed: N_thermal_dof = 3*10 - 0 - 3 = 27.
+    let n_thermal_dof: u32 = 27;
     let t_target = 300.0_f64;
-    let ke = 1.5 * n as f64 * BOLTZMANN_J_PER_K * t_target;
-    let t = compute_temperature(ke, n);
+    let ke = 0.5 * (n_thermal_dof as f64) * BOLTZMANN_J_PER_K * t_target;
+    let t = compute_temperature(ke, n_thermal_dof);
     assert!((t - t_target).abs() < 1.0e-12);
 }
 

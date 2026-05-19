@@ -82,7 +82,7 @@ fn nhc_kind(
 
 fn build_nhc(gpu: &GpuContext, n: usize, slot: &SlotConfig) -> Box<dyn Thermostat> {
     ThermostatRegistry::with_builtins()
-        .build_optional(Some(slot), gpu, n)
+        .build_optional(Some(slot), gpu, n, 0)
         .unwrap()
         .unwrap()
 }
@@ -368,8 +368,7 @@ fn vv_and_langevin_log_column_names_are_empty() {
         .build(
             &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
             &gpu,
-            4,
-        )
+            4, 0)
         .unwrap();
     assert!(vv.log_column_names().is_empty());
     let lan = IntegratorRegistry::with_builtins()
@@ -379,8 +378,7 @@ fn vv_and_langevin_log_column_names_are_empty() {
                 "friction = 1.0e12\ntemperature = 300.0\nseed = 1\n",
             ),
             &gpu,
-            4,
-        )
+            4, 0)
         .unwrap();
     assert!(lan.log_column_names().is_empty());
 }
@@ -485,8 +483,7 @@ fn nhc_preserves_com_momentum_to_round_off() {
         .build(
             &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
             &gpu,
-            n,
-        )
+            n, 0)
         .unwrap();
     let mut therm = build_nhc(&gpu, n, &nhc_kind(300.0, 1.0e-13, 3, 3, 1));
     ff.step(&mut buffers, &sim_box, &mut timings).unwrap();

@@ -154,6 +154,14 @@ impl ConstraintList {
     pub fn is_empty(&self) -> bool {
         self.groups.is_empty()
     }
+
+    /// Total number of holonomic constraints carried by the list:
+    /// the sum of every group's `constraint_count`. Equals
+    /// `group_constraints.len()` since constraints are laid out
+    /// contiguously per group.
+    pub fn total_constraint_count(&self) -> usize {
+        self.group_constraints.len()
+    }
 }
 
 /// Host-side handle around the exclusion list's four device buffers.

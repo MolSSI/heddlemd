@@ -2,12 +2,12 @@
 # Generates `water.in.xyz` for the spc-water-8192 example.
 #
 # Layout: 16 x 16 x 32 simple-cubic lattice = 8192 water molecules
-# (24,576 atoms total) at sub-liquid initial density. Lattice spacing
-# a = 4.0e-10 m gives a 6.4 x 6.4 x 12.8 nm box, centred at the origin
-# (initial density ~0.47 of SPC/E liquid). The c-rescale barostat
-# contracts the box toward equilibrium during the simulation; the
-# rationale for starting under-dense rather than at exact liquid
-# density is documented in README.md.
+# (24,576 atoms total) at near-liquid initial density. Lattice spacing
+# a = 3.345e-10 m gives a 5.352 x 5.352 x 10.704 nm box, centred at
+# the origin (initial density ~0.80 g/cm^3, ~80% of SPC/E liquid).
+# Starting close to the liquid-equilibrium density lets the c-rescale
+# barostat make small corrections rather than a large monotonic
+# expansion or contraction from the lattice initial conditions.
 #
 # Each molecule is placed with its oxygen at the lattice site and a
 # random rigid-body orientation (uniform on SO(3) via Shoemake's
@@ -22,7 +22,7 @@ import math
 import random
 
 NX, NY, NZ = 16, 16, 32        # 16*16*32 = 8192 waters -> 24,576 atoms
-A = 4.0e-10                    # lattice spacing (m); ~0.47 of liquid density
+A = 3.345e-10                  # lattice spacing (m); ~0.80 g/cm^3
 LX, LY, LZ = NX * A, NY * A, NZ * A
 R_OH = 1.0e-10                 # SPC/E O-H bond length (m)
 THETA_HOH = 1.910611931        # SPC/E H-O-H angle (rad; 109.47 deg)

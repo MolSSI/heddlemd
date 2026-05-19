@@ -546,6 +546,10 @@ fn lint_gpu_full_setup(
         charges_f32.push(pt.charge as f32);
     }
 
+    let n_constraints_lint = topology
+        .as_ref()
+        .map(|(_, _, _, c)| c.total_constraint_count())
+        .unwrap_or(0);
     let (vx, vy, vz) = match &init.velocities {
         Some(v) => (
             v.velocities_x.clone(),
@@ -554,6 +558,7 @@ fn lint_gpu_full_setup(
         ),
         None => generate_velocities(
             n,
+            n_constraints_lint,
             config.simulation.temperature,
             config.simulation.seed,
             &masses_f64,
@@ -597,18 +602,19 @@ fn lint_gpu_full_setup(
         )
     });
 
+    let n_constraints = constraint_list.total_constraint_count();
     for phase in &config.phases {
         let _integrator = registries
             .integrators
-            .build(&phase.integrator, &gpu, n)
+            .build(&phase.integrator, &gpu, n, n_constraints)
             .map_err(|e| (format!("{e}"), RunnerError::Integrator(e)))?;
         let _thermostat = registries
             .thermostats
-            .build_optional(phase.thermostat.as_ref(), &gpu, n)
+            .build_optional(phase.thermostat.as_ref(), &gpu, n, n_constraints)
             .map_err(|e| (format!("{e}"), RunnerError::Thermostat(e)))?;
         let _barostat = registries
             .barostats
-            .build_optional(phase.barostat.as_ref(), &gpu, n)
+            .build_optional(phase.barostat.as_ref(), &gpu, n, n_constraints)
             .map_err(|e| (format!("{e}"), RunnerError::Barostat(e)))?;
         let _constraint = registries
             .constraint_types
@@ -794,6 +800,44 @@ fn run_simulation_with_phase(
         charges_f32.push(pt.charge as f32);
     }
 
+    // Load the .topology file when supplied, otherwise build empty bond /
+    // angle / exclusion lists keyed to `n`. Topology is global (one
+    // load per run, applies to every phase). Loaded before velocity
+    // generation so the constraint count can shape the equipartition
+    // target.
+    let bond_type_names: Vec<&str> =
+        config.bond_types.iter().map(|bt| bt.name()).collect();
+    let angle_type_names: Vec<&str> =
+        config.angle_types.iter().map(|at| at.name()).collect();
+    let (bond_list, angle_list, exclusion_list, constraint_list): (
+        BondList,
+        AngleList,
+        ExclusionList,
+        ConstraintList,
+    ) = match config.topology.as_ref() {
+        Some(path) => load_topology_file(
+            path,
+            n,
+            &bond_type_names,
+            &angle_type_names,
+            &config.constraint_types,
+            &registries.constraint_types,
+        )
+        .map_err(|e| (RunnerError::TopologyFile(e), ExitPhase::Setup))?,
+        None => (
+            BondList::empty(n),
+            AngleList::empty(n),
+            ExclusionList::empty(n),
+            ConstraintList::empty(n),
+        ),
+    };
+    let n_constraints = constraint_list.total_constraint_count();
+    // Thermal degrees of freedom used by `compute_temperature` and by
+    // the initial-velocity equipartition rescale: constraint- and
+    // COM-removed.
+    let n_thermal_dof: u32 =
+        ((3 * n as i64) - n_constraints as i64 - 3).max(0) as u32;
+
     // Build velocities: either from the init state or sampled.
     // Velocity generation runs once at phase-0 entry; the duration is
     // recorded into phase 0's Timings inside the per-phase loop.
@@ -807,6 +851,7 @@ fn run_simulation_with_phase(
         None => timed(&mut velocity_generation_duration, || {
             generate_velocities(
                 n,
+                n_constraints,
                 config.simulation.temperature,
                 config.simulation.seed,
                 &masses_f64,
@@ -840,36 +885,6 @@ fn run_simulation_with_phase(
             ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Setup),
             other => (RunnerError::ParticleState(other), ExitPhase::Setup),
         })?;
-
-    // Load the .topology file when supplied, otherwise build empty bond /
-    // angle / exclusion lists keyed to `n`. Topology is global (one
-    // load per run, applies to every phase).
-    let bond_type_names: Vec<&str> =
-        config.bond_types.iter().map(|bt| bt.name()).collect();
-    let angle_type_names: Vec<&str> =
-        config.angle_types.iter().map(|at| at.name()).collect();
-    let (bond_list, angle_list, exclusion_list, constraint_list): (
-        BondList,
-        AngleList,
-        ExclusionList,
-        ConstraintList,
-    ) = match config.topology.as_ref() {
-        Some(path) => load_topology_file(
-            path,
-            n,
-            &bond_type_names,
-            &angle_type_names,
-            &config.constraint_types,
-            &registries.constraint_types,
-        )
-        .map_err(|e| (RunnerError::TopologyFile(e), ExitPhase::Setup))?,
-        None => (
-            BondList::empty(n),
-            AngleList::empty(n),
-            ExclusionList::empty(n),
-            ConstraintList::empty(n),
-        ),
-    };
     // rq-acfda5d4 — runner-side enforcement of the integrator/constraint
     // compatibility rule, applied to every phase. Cannot run during
     // `Config::validate_against` because the topology file is loaded
@@ -930,15 +945,15 @@ fn run_simulation_with_phase(
         // Build the four slot handles for this phase.
         let mut integrator = registries
             .integrators
-            .build(&phase.integrator, &gpu, n)
+            .build(&phase.integrator, &gpu, n, n_constraints)
             .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Setup))?;
         let mut thermostat = registries
             .thermostats
-            .build_optional(phase.thermostat.as_ref(), &gpu, n)
+            .build_optional(phase.thermostat.as_ref(), &gpu, n, n_constraints)
             .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Setup))?;
         let mut barostat = registries
             .barostats
-            .build_optional(phase.barostat.as_ref(), &gpu, n)
+            .build_optional(phase.barostat.as_ref(), &gpu, n, n_constraints)
             .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
         let mut constraint = registries
             .constraint_types
@@ -1032,7 +1047,7 @@ fn run_simulation_with_phase(
                 &frame.velocities_y,
                 &frame.velocities_z,
             );
-            let t = compute_temperature(ke, n);
+            let t = compute_temperature(ke, n_thermal_dof);
             let extras = if log_extra_columns.is_empty() {
                 Vec::new()
             } else {
@@ -1149,7 +1164,7 @@ fn run_simulation_with_phase(
                     &frame.velocities_y,
                     &frame.velocities_z,
                 );
-                let t = compute_temperature(ke, n);
+                let t = compute_temperature(ke, n_thermal_dof);
                 let time = (step as f64) * phase.dt;
                 let extras = if log_extra_columns.is_empty() {
                     Vec::new()
@@ -1291,6 +1306,7 @@ fn write_traj_frame(
 // rq-2be8ef35 rq-1b7680ad rq-2249f685 rq-8e239d36 rq-e6552df6
 fn generate_velocities(
     n: usize,
+    n_constraints: usize,
     temperature: f64,
     seed: u64,
     masses: &[f64],
@@ -1338,23 +1354,17 @@ fn generate_velocities(
         }
     }
 
-    // rq-be568071
     // Rescale every velocity by a single scalar so the realised kinetic
-    // energy matches the flat-3N target `(3N/2) * k_B * T`, the
-    // degrees-of-freedom convention used by `compute_temperature`.
-    //
-    // The rescale targets the thermal degrees of freedom of the
-    // centre-of-mass-removed velocity field, which exist only for N >= 2.
-    // A single centred particle is its own centre of mass and has no
-    // internal motion, so its velocity is set to exactly zero: the N == 1
-    // momentum subtraction cancels the sampled velocity only up to a
-    // floating-point rounding residual, and the rescale would otherwise
-    // amplify that residual into a full thermal velocity. (N == 0 has
-    // already returned above.)
-    //
-    // For N >= 2 a single deterministic scalar multiply preserves both
-    // determinism and the zero-total-momentum property established above.
-    if n < 2 {
+    // energy matches the equipartition target
+    // `(N_thermal_dof / 2) * k_B * T`, where
+    // `N_thermal_dof = max(0, 3N − n_constraints − 3)` is the
+    // constraint- and COM-removed thermal degrees of freedom — the
+    // same convention used by `compute_temperature` and by the
+    // momentum-conserving thermostats. When the system has no
+    // thermal DOFs remaining (N == 0 or 1, or pathologically
+    // over-constrained), every velocity is set to exactly zero.
+    let n_thermal_dof: i64 = (3 * n as i64) - n_constraints as i64 - 3;
+    if n_thermal_dof <= 0 {
         for i in 0..n {
             vx[i] = 0.0;
             vy[i] = 0.0;
@@ -1370,7 +1380,8 @@ fn generate_velocities(
             })
             .sum();
         if ke > 0.0 {
-            let target_ke = 1.5 * (n as f64) * BOLTZMANN_J_PER_K * temperature;
+            let target_ke =
+                0.5 * (n_thermal_dof as f64) * BOLTZMANN_J_PER_K * temperature;
             let scale = (target_ke / ke).sqrt();
             for i in 0..n {
                 vx[i] = ((vx[i] as f64) * scale) as f32;

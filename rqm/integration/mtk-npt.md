@@ -39,9 +39,12 @@ carries an extended set of host-side scalar DOFs:
   to `0.0`.
 - `W: f64` — cell mass. Precomputed at construction as
   `W = (N_f + 3) · k_B · T · τ_P²` (Martyna-Tobias-Klein 1994,
-  Eq. 4.8) where `N_f = max(1, 3·N − 3)` is the number of
-  thermostatted DOFs and `τ_P` is the user-supplied barostat
-  coupling time. Never updated during the run.
+  Eq. 4.8) where `N_f = max(1, 3·N − n_constraints − 3)` is the
+  number of thermostatted DOFs (the same constraint- and
+  COM-removed convention used by CSVR — see `csvr.md` — and by
+  `compute_temperature` in `io/log-output.md`) and `τ_P` is the
+  user-supplied barostat coupling time. Never updated during the
+  run.
 - Particle thermostat chain `{ξ_j, p_ξ_j, Q_j}` for `j = 1..M` — a
   standard NHC chain identical in shape to `nose-hoover-chain.md`,
   with `Q_1 = N_f · k_B · T · τ_T²` and `Q_j = k_B · T · τ_T²` for
@@ -271,10 +274,13 @@ post-step `V`.
   advancing any chain state. `K`, `W_virial`, and `P` are not
   computed; the diagnostic columns report `0.0`, `sim_box.volume()`,
   and the chain-only contribution to `H_MTK`.
-- `particle_count == 1`: `N_f = max(1, 3·1 − 3) = 1`. The chain
-  masses use `N_f = 1`. The integrator is mathematically well-defined
-  but produces a one-thermostatted-DOF system with little physical
-  relevance.
+- `particle_count == 1` with `n_constraints == 0`:
+  `N_f = max(1, 3 − 0 − 3) = 1`. The chain masses use `N_f = 1`.
+  The integrator is mathematically well-defined but produces a
+  one-thermostatted-DOF system with little physical relevance.
+- Heavily-constrained systems where `3·N − n_constraints − 3 <= 0`:
+  the `max(1, …)` floor keeps `N_f = 1`. Users should not pair MTK
+  with such systems.
 - `M == 1`: vanilla single-DOF Nosé-Hoover (no chain). The
   outermost chain-momentum kicks documented in the
   `nose-hoover-chain.md` *Chain sub-step* are skipped on both
@@ -308,7 +314,9 @@ post-step `V`.
   - `n_resp: u32`
   - `yoshida_weights: &'static [f64]` — pre-resolved Suzuki-Yoshida
     weights.
-  - `g_dof: u32` — `max(1, 3·particle_count − 3)`.
+  - `g_dof: u32` — `max(1, 3 · particle_count − n_constraints − 3)`,
+    computed at construction from the `n_constraints` parameter
+    passed by the runner.
   - `kt: f64` — `BOLTZMANN_J_PER_K · temperature`.
   - `w_cell: f64` — `(g_dof + 3) · kt · τ_p²`.
   - `p_eps: f64` — cell momentum. Initialised to `0.0`.
@@ -557,13 +565,13 @@ Feature: MTK NPT integrator (isotropic)
 
   # --- Construction ---
 
-  @rq-e266de94
-  Scenario: Construct MtkNptIntegrator with defaults
+  @rq-21e17441
+  Scenario: Construct MtkNptIntegrator with defaults (unconstrained system)
     Given an IntegratorKind::MtkNpt {
       temperature: 85.0, pressure: 1.0e5,
       tau_t: 1.0e-13, tau_p: 1.0e-12,
       chain_length: 3, yoshida_order: 3, n_resp: 1 }
-    When registry.build(&kind, device, particle_count=4) is called
+    When registry.build(&kind, device, particle_count=4, n_constraints=0) is called
     Then it returns Ok(integrator)
     And the underlying MtkNptIntegrator has chain_length == 3
     And xi_part equals [0.0, 0.0, 0.0]
@@ -572,23 +580,36 @@ Feature: MTK NPT integrator (isotropic)
     And p_xi_cell equals [0.0, 0.0, 0.0]
     And p_eps == 0.0
     And eps == 0.0
+    And g_dof equals 9 (max(1, 3*4 − 0 − 3))
     And w_cell equals (g_dof + 3) · k_B · 85.0 · (1.0e-12)²
     And q_mass_part[0] equals g_dof · k_B · 85.0 · (1.0e-13)²
 
-  @rq-2db435ba
+  @rq-0abaa85d
+  Scenario: Construct MtkNptIntegrator for a SETTLE'd water system
+    Given an IntegratorKind::MtkNpt { temperature: 300.0, pressure: 1.0e5,
+      tau_t: 1.0e-13, tau_p: 1.0e-12,
+      chain_length: 3, yoshida_order: 3, n_resp: 1 }
+    When registry.build(&kind, device, particle_count=24, n_constraints=24) is called
+      (8 SETTLE waters: 24 atoms, 3 constraints per molecule)
+    Then it returns Ok(integrator)
+    And g_dof equals 45 (max(1, 3*24 − 24 − 3))
+    And w_cell equals (g_dof + 3) · k_B · 300 · (1.0e-12)²
+    And q_mass_part[0] equals g_dof · k_B · 300 · (1.0e-13)²
+
+  @rq-100e0cc8
   Scenario: Construct with chain_length = 1
     Given an IntegratorKind::MtkNpt { ..., chain_length: 1 }
-    When registry.build(&kind, device, particle_count=4) is called
+    When registry.build(&kind, device, particle_count=4, n_constraints=0) is called
     Then it returns Ok(integrator)
     And xi_part has length 1
     And xi_cell has length 1
 
-  @rq-bafb9cf3
+  @rq-7fcfceac
   Scenario: Construct with particle_count = 0
     Given any MtkNpt kind
-    When registry.build(..., particle_count=0) is called
+    When registry.build(..., particle_count=0, n_constraints=0) is called
     Then it returns Ok(integrator)
-    And g_dof equals 1 (max(1, 3·0 − 3))
+    And g_dof equals 1 (max(1, 3·0 − 0 − 3))
 
   # --- Ownership flags ---
 

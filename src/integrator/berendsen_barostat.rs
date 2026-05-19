@@ -176,6 +176,7 @@ impl BarostatBuilder for BerendsenBarostatBuilder {
         &self,
         gpu: &GpuContext,
         particle_count: usize,
+        _n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Barostat>, BarostatError> {
         let p = deserialize_params(params).map_err(|_| {

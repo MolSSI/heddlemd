@@ -75,7 +75,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
 fn construct_vv_lossy_via_registry() {
     let gpu = init_device().unwrap();
     let registry = IntegratorRegistry::with_builtins();
-    let _integrator = registry.build(&vv_kind(false), &gpu, 4).unwrap();
+    let _integrator = registry.build(&vv_kind(false), &gpu, 4, 0).unwrap();
 }
 
 // rq-db78448e
@@ -88,7 +88,7 @@ fn construct_vv_lossless_via_registry() {
     let mut sim_box = box_10();
     let mut ff = empty_force_field(&gpu, 4);
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut integrator = registry.build(&vv_kind(true), &gpu, 4).unwrap();
+    let mut integrator = registry.build(&vv_kind(true), &gpu, 4, 0).unwrap();
     integrator
         .step(&mut buffers, &mut sim_box, &mut ff, None, 0.1, &mut timings)
         .unwrap();
@@ -104,7 +104,7 @@ fn construct_vv_lossless_via_registry() {
 fn construct_langevin_via_registry() {
     let gpu = init_device().unwrap();
     let registry = IntegratorRegistry::with_builtins();
-    let _integrator = registry.build(&langevin_kind(42), &gpu, 4).unwrap();
+    let _integrator = registry.build(&langevin_kind(42), &gpu, 4, 0).unwrap();
 }
 
 // rq-48fd88ed
@@ -112,14 +112,14 @@ fn construct_langevin_via_registry() {
 fn construct_with_particle_count_zero() {
     let gpu = init_device().unwrap();
     let registry = IntegratorRegistry::with_builtins();
-    let _integrator = registry.build(&vv_kind(true), &gpu, 0).unwrap();
+    let _integrator = registry.build(&vv_kind(true), &gpu, 0, 0).unwrap();
 }
 
 #[test]
 fn registry_without_matching_builder_reports_unknown_kind() {
     let gpu = init_device().unwrap();
     let registry = IntegratorRegistry::new();
-    let err = registry.build(&vv_kind(false), &gpu, 4).unwrap_err();
+    let err = registry.build(&vv_kind(false), &gpu, 4, 0).unwrap_err();
     match err {
         IntegratorError::UnknownKind(name) => assert_eq!(name, "velocity-verlet"),
         other => panic!("expected UnknownKind, got {other:?}"),
@@ -146,6 +146,7 @@ impl IntegratorBuilder for StubBuilder {
         &self,
         _gpu: &GpuContext,
         _particle_count: usize,
+        _n_constraints: usize,
         _params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
         Ok(Box::new(StubIntegrator))
@@ -181,7 +182,7 @@ fn custom_builder_registered_takes_priority_over_builtin() {
     let mut sim_box = box_10();
     let mut ff = empty_force_field(&gpu, 4);
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut integrator = registry.build(&vv_kind(false), &gpu, 4).unwrap();
+    let mut integrator = registry.build(&vv_kind(false), &gpu, 4, 0).unwrap();
     integrator
         .step(&mut buffers, &mut sim_box, &mut ff, None, 0.1, &mut timings)
         .unwrap();
@@ -209,7 +210,7 @@ fn step_on_empty_state_is_noop() {
     let mut ff = empty_force_field(&gpu, 0);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
-        .build(&vv_kind(false), &gpu, 0)
+        .build(&vv_kind(false), &gpu, 0, 0)
         .unwrap();
     integrator
         .step(&mut buffers, &mut sim_box, &mut ff, None, 0.1, &mut timings)
@@ -232,7 +233,7 @@ fn vv_step_launches_kick_drift_force_and_kick() {
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
-        .build(&vv_kind(false), &gpu, n)
+        .build(&vv_kind(false), &gpu, n, 0)
         .unwrap();
     let snap_positions = state.positions_x.clone();
     integrator
@@ -266,7 +267,7 @@ fn lossless_vv_step_uses_lossless_kernels() {
     let mut ff = empty_force_field(&gpu, 4);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
-        .build(&vv_kind(true), &gpu, 4)
+        .build(&vv_kind(true), &gpu, 4, 0)
         .unwrap();
     integrator
         .step(&mut buffers, &mut sim_box, &mut ff, None, 0.1, &mut timings)
@@ -311,7 +312,7 @@ fn integrator_owns_force_evaluation_inside_step() {
     .unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
-        .build(&vv_kind(false), &gpu, 4)
+        .build(&vv_kind(false), &gpu, 4, 0)
         .unwrap();
     integrator
         .step(&mut buffers, &mut sim_box, &mut ff, None, 0.001, &mut timings)
@@ -340,7 +341,7 @@ fn two_consecutive_langevin_steps_produce_different_velocities() {
     let mut ff = empty_force_field(&gpu, 2);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
-        .build(&langevin_kind(1), &gpu, 2)
+        .build(&langevin_kind(1), &gpu, 2, 0)
         .unwrap();
     integrator
         .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
@@ -370,10 +371,10 @@ fn two_independent_runs_byte_identical() {
     let mut timings_a = Timings::new(&gpu).unwrap();
     let mut timings_b = Timings::new(&gpu).unwrap();
     let mut integrator_a = IntegratorRegistry::with_builtins()
-        .build(&vv_kind(false), &gpu, 4)
+        .build(&vv_kind(false), &gpu, 4, 0)
         .unwrap();
     let mut integrator_b = IntegratorRegistry::with_builtins()
-        .build(&vv_kind(false), &gpu, 4)
+        .build(&vv_kind(false), &gpu, 4, 0)
         .unwrap();
 
     for _ in 1..=10 {
@@ -477,7 +478,7 @@ use dynamics::integrator::{
 fn empty_integrator_registry_reports_unknown_kind() {
     let gpu = init_device().unwrap();
     let registry = IntegratorRegistry::new();
-    let err = registry.build(&vv_kind(false), &gpu, 4).unwrap_err();
+    let err = registry.build(&vv_kind(false), &gpu, 4, 0).unwrap_err();
     matches!(err, IntegratorError::UnknownKind(ref s) if s == "velocity-verlet");
 }
 
@@ -498,7 +499,7 @@ fn empty_thermostat_registry_reports_unknown_kind() {
         "temperature = 300.0\ntau = 1.0e-13\n",
     );
     let err = registry
-        .build_optional(Some(&kind), &gpu, 4)
+        .build_optional(Some(&kind), &gpu, 4, 0)
         .unwrap_err();
     matches!(err, ThermostatError::UnknownKind(ref s) if s == "berendsen");
 }
@@ -508,7 +509,7 @@ fn empty_thermostat_registry_reports_unknown_kind() {
 fn thermostat_build_optional_none_returns_none() {
     let gpu = init_device().unwrap();
     let registry = ThermostatRegistry::with_builtins();
-    let result = registry.build_optional(None, &gpu, 4).unwrap();
+    let result = registry.build_optional(None, &gpu, 4, 0).unwrap();
     assert!(result.is_none());
 }
 
@@ -529,7 +530,7 @@ fn barostat_with_builtins_contains_berendsen() {
 fn barostat_build_optional_none_returns_none() {
     let gpu = init_device().unwrap();
     let registry = BarostatRegistry::with_builtins();
-    let result = registry.build_optional(None, &gpu, 4).unwrap();
+    let result = registry.build_optional(None, &gpu, 4, 0).unwrap();
     assert!(result.is_none());
 }
 
@@ -756,7 +757,7 @@ fn fixture() -> (
 fn plan_returns_same_shape_across_repeated_calls() {
     let registry = IntegratorRegistry::with_builtins();
     let gpu = init_device().unwrap();
-    let integ = registry.build(&vv_kind(false), &gpu, 4).unwrap();
+    let integ = registry.build(&vv_kind(false), &gpu, 4, 0).unwrap();
     let p1 = integ.plan(0.1);
     let p2 = integ.plan(0.1);
     assert_eq!(p1.steps.len(), p2.steps.len());
@@ -770,7 +771,7 @@ fn plan_is_pure_does_not_launch_kernels_or_touch_buffers() {
     let registry = IntegratorRegistry::with_builtins();
     let (gpu, buffers, _sim_box, _ff, _timings) = fixture();
     let pre_x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
-    let integ = registry.build(&vv_kind(false), &gpu, 4).unwrap();
+    let integ = registry.build(&vv_kind(false), &gpu, 4, 0).unwrap();
     let _plan = integ.plan(0.1);
     let post_x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     assert_eq!(pre_x, post_x);
@@ -1053,7 +1054,7 @@ fn populated_registry_unknown_kind_reports_unknown_kind() {
     let gpu = init_device().unwrap();
     let registry = IntegratorRegistry::with_builtins();
     let slot = SlotConfig::from_params_str("no-such-integrator", "");
-    let err = registry.build(&slot, &gpu, 4).unwrap_err();
+    let err = registry.build(&slot, &gpu, 4, 0).unwrap_err();
     match err {
         IntegratorError::UnknownKind(name) => assert_eq!(name, "no-such-integrator"),
         other => panic!("expected UnknownKind, got {other:?}"),

@@ -903,6 +903,7 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
             &self,
             _gpu: &GpuContext,
             _particle_count: usize,
+            _n_constraints: usize,
             _params: &toml::Value,
         ) -> Result<Box<dyn Integrator>, IntegratorError> {
             Ok(Box::new(CountingStubIntegrator {

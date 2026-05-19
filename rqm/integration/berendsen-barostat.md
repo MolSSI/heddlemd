@@ -47,7 +47,13 @@ For each invocation with timestep `dt`:
 
 2. Compute the instantaneous total scalar virial
    `W = Σ_i buffers.virials[i]` via the shared
-   `compute_total_virial` helper introduced by this slot.
+   `compute_total_virial` helper introduced by this slot. The
+   per-particle virials buffer carries every contribution that
+   enters the pressure estimator: force-field pair / bonded / angle
+   / SPME (real + reciprocal) terms populated by `force_field.step`,
+   plus any constraint contribution added by the `Constraint`
+   slot's `apply_after_kick` hook (see `constraint-framework.md`;
+   for SETTLE the contribution is documented in `settle.md`).
 
 3. Read the current box volume `V = sim_box.volume()`.
 

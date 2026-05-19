@@ -53,7 +53,7 @@ fn csvr_kind(temperature: f64, tau: f64, seed: u64) -> SlotConfig {
 
 fn build_csvr(gpu: &GpuContext, n: usize, slot: &SlotConfig) -> Box<dyn Thermostat> {
     ThermostatRegistry::with_builtins()
-        .build_optional(Some(slot), gpu, n)
+        .build_optional(Some(slot), gpu, n, 0)
         .unwrap()
         .unwrap()
 }
@@ -445,8 +445,7 @@ fn csvr_time_averaged_ke_tracks_k_target() {
         .build(
             &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
             &gpu,
-            n,
-        )
+            n, 0)
         .unwrap();
     let mut therm = build_csvr(&gpu, n, &csvr_kind(temperature, 1.0e-14, 11));
     ff.step(&mut buffers, &sim_box, &mut timings).unwrap();

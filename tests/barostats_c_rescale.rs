@@ -67,7 +67,7 @@ fn build_c_rescale(
     slot: &SlotConfig,
 ) -> Box<dyn Barostat> {
     BarostatRegistry::with_builtins()
-        .build_optional(Some(slot), gpu, n)
+        .build_optional(Some(slot), gpu, n, 0)
         .unwrap()
         .unwrap()
 }
@@ -468,8 +468,7 @@ fn composes_with_velocity_verlet_and_csvr_thermostat() {
         .build(
             &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
             &gpu,
-            n,
-        )
+            n, 0)
         .unwrap();
     let mut therm = ThermostatRegistry::with_builtins()
         .build_optional(
@@ -479,6 +478,7 @@ fn composes_with_velocity_verlet_and_csvr_thermostat() {
             )),
             &gpu,
             n,
+            0,
         )
         .unwrap()
         .unwrap();

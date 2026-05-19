@@ -44,8 +44,11 @@ the post-step velocities. For each invocation with timestep `dt`:
    λ  = sqrt(max(λ², 0))
    ```
 
-   where `N_f = max(1, 3·N − 3)` is the number of thermostatted
-   degrees of freedom. The `max(λ², 0)` floor handles the rare case
+   where `N_f = max(1, 3·N − n_constraints − 3)` is the number of
+   thermostatted degrees of freedom (constraint- and COM-removed; the
+   same convention used by CSVR — see `csvr.md` — and by
+   `compute_temperature` in `io/log-output.md`). The `max(λ², 0)`
+   floor handles the rare case
    where `dt / τ > 1` and `K_target ≪ K_old` would produce a
    negative `λ²`; clamping to zero quenches the velocities rather
    than producing imaginary numbers. Sensible parameters
@@ -132,9 +135,11 @@ systematic non-`O(dt²)` drift indicates an implementation bug.
 
 - `particle_count == 0`: `apply_pre` and `apply_post` return
   `Ok(())` without launching any kernel.
-- `particle_count == 1`: `N_f = max(1, 3·1 − 3) = 1`. The rescale
-  works as documented; the system has one thermostatted degree of
-  freedom.
+- `particle_count == 1` with `n_constraints == 0`:
+  `N_f = max(1, 3 − 0 − 3) = 1`. The rescale works as documented; the
+  system has one thermostatted degree of freedom.
+- Heavily-constrained systems where `3·N − n_constraints − 3 <= 0`:
+  the `max(1, …)` floor keeps `N_f = 1` so the thermostat still runs.
 - `K_old == 0` on entry: rescale and accumulation are skipped this
   invocation.
 - `dt / τ > 1` combined with `K_target ≪ K_old`: `λ²` is clamped to
@@ -151,7 +156,9 @@ systematic non-`O(dt²)` drift indicates an implementation bug.
   - `device: Arc<CudaDevice>`
   - `temperature: f64`
   - `tau: f64`
-  - `g_dof: u32` — `max(1, 3·particle_count − 3)`.
+  - `g_dof: u32` — `max(1, 3 · particle_count − n_constraints − 3)`,
+    computed at construction from the `n_constraints` parameter
+    passed by the runner.
   - `kt_target: f64` — `BOLTZMANN_J_PER_K · temperature`.
   - `cumulative_injection: f64` — running sum of `K_new − K_old`
     across every completed `apply_post` invocation. Initialised to
@@ -251,24 +258,30 @@ Feature: Berendsen weak-coupling thermostat
   # --- Construction ---
 
   @rq-e8252f10
-  Scenario: Construct BerendsenThermostat via the registry
+  Scenario: Construct BerendsenThermostat via the registry (unconstrained system)
     Given a ThermostatKind::Berendsen { temperature: 300.0, tau: 1.0e-13 }
-    When registry.build_optional(Some(&kind), device, particle_count=4) is called
+    When registry.build_optional(Some(&kind), device, particle_count=4, n_constraints=0) is called
     Then it returns Ok(Some(thermostat))
     And the underlying BerendsenThermostat has cumulative_injection == 0.0
-    And state.g_dof == max(1, 3·4 − 3) == 9
+    And state.g_dof == max(1, 3·4 − 0 − 3) == 9
     And state.kt_target == k_B * 300.0
 
-  @rq-73384fea
+  @rq-6136714b
+  Scenario: Construct for a SETTLE'd water system
+    Given a ThermostatKind::Berendsen { temperature: 300.0, tau: 1.0e-13 }
+    When registry.build_optional(Some(&kind), device, particle_count=24, n_constraints=24) is called
+    Then state.g_dof == max(1, 3*24 − 24 − 3) == 45
+
+  @rq-e3a8d87c
   Scenario: Construct with particle_count = 0
     Given a ThermostatKind::Berendsen { temperature: 300.0, tau: 1.0e-13 }
-    When registry.build_optional(Some(&kind), device, particle_count=0) is called
+    When registry.build_optional(Some(&kind), device, particle_count=0, n_constraints=0) is called
     Then it returns Ok(Some(thermostat))
 
-  @rq-079b4f9e
+  @rq-470019c7
   Scenario: Construct with particle_count = 1 (N_f = 1)
     Given a ThermostatKind::Berendsen { temperature: 300.0, tau: 1.0e-13 }
-    When registry.build_optional(Some(&kind), device, particle_count=1) is called
+    When registry.build_optional(Some(&kind), device, particle_count=1, n_constraints=0) is called
     Then state.g_dof == 1
 
   # --- Config validation ---

@@ -573,12 +573,17 @@ Feature: Andersen stochastic thermostat
   # --- Physical correctness ---
 
   @rq-536457be
-  Scenario: Time-averaged kinetic energy tracks (3 N / 2) k_B T
+  Scenario: Time-averaged kinetic energy tracks (3 N − n_constraints) / 2 · k_B · T
     Given a composed runner of velocity-Verlet + Andersen with N=128 LJ particles,
-      temperature=300, collision_rate=1.0e13, dt=1.0e-15, n_steps=2000, seed=1
+      temperature=300, collision_rate=1.0e13, dt=1.0e-15, n_steps=2000, seed=1, n_constraints=0
     When the run completes
     Then the time-averaged kinetic energy over the last 1000 log rows
-      is within 5% of (3 * N / 2) · k_B · 300
+      is within 5% of ((3 * N − n_constraints) / 2) · k_B · 300
+    (Andersen resamples every velocity component independently and does
+    not conserve total momentum, so the equilibrium kinetic energy
+    corresponds to 3N − n_constraints thermal DOFs rather than the
+    momentum-conserving (3N − n_constraints − 3) target used by CSVR,
+    Berendsen, NHC, and MTK.)
 
   @rq-299112e9
   Scenario: Variance of resampled velocity components matches MB

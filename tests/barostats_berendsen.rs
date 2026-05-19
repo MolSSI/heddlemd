@@ -65,7 +65,7 @@ fn build_berendsen_barostat(
     slot: &SlotConfig,
 ) -> Box<dyn Barostat> {
     BarostatRegistry::with_builtins()
-        .build_optional(Some(slot), gpu, n)
+        .build_optional(Some(slot), gpu, n, 0)
         .unwrap()
         .unwrap()
 }
@@ -127,7 +127,7 @@ fn registry_builds_berendsen_barostat_particle_count_zero() {
 fn barostat_build_optional_none_returns_none() {
     let gpu = init_device().unwrap();
     let registry = BarostatRegistry::with_builtins();
-    let result = registry.build_optional(None, &gpu, 4).unwrap();
+    let result = registry.build_optional(None, &gpu, 4, 0).unwrap();
     assert!(result.is_none());
 }
 
@@ -647,8 +647,7 @@ fn composes_with_velocity_verlet_and_berendsen_thermostat() {
         .build(
             &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
             &gpu,
-            n,
-        )
+            n, 0)
         .unwrap();
     let mut therm = ThermostatRegistry::with_builtins()
         .build_optional(
@@ -658,6 +657,7 @@ fn composes_with_velocity_verlet_and_berendsen_thermostat() {
             )),
             &gpu,
             n,
+            0,
         )
         .unwrap()
         .unwrap();

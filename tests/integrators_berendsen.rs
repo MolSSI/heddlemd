@@ -56,7 +56,7 @@ fn berendsen_kind(temperature: f64, tau: f64) -> SlotConfig {
 
 fn build_berendsen(gpu: &GpuContext, n: usize, slot: &SlotConfig) -> Box<dyn Thermostat> {
     ThermostatRegistry::with_builtins()
-        .build_optional(Some(slot), gpu, n)
+        .build_optional(Some(slot), gpu, n, 0)
         .unwrap()
         .unwrap()
 }
@@ -435,8 +435,7 @@ fn berendsen_temperature_relaxes_toward_target() {
         .build(
             &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
             &gpu,
-            n,
-        )
+            n, 0)
         .unwrap();
     let mut therm = build_berendsen(&gpu, n, &berendsen_kind(temperature, tau));
 

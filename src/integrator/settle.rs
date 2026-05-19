@@ -11,6 +11,7 @@ use crate::forces::{ConstraintList, GroupConstraint};
 use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, settle_positions, settle_snapshot, settle_velocities,
+    settle_virial_scatter,
 };
 use crate::kernels;
 use crate::io::config::{ConfigError, NamedSlotConfig};
@@ -124,6 +125,7 @@ pub struct SettleConstraintsState {
     pub snapshot_x: CudaSlice<f32>,
     pub snapshot_y: CudaSlice<f32>,
     pub snapshot_z: CudaSlice<f32>,
+    pub constraint_virial: CudaSlice<f32>,
 }
 
 impl SettleConstraintsState {
@@ -362,6 +364,9 @@ impl SettleConstraintsState {
         let snapshot_z = device
             .alloc_zeros::<f32>(3 * n_groups)
             .map_err(GpuError::from)?;
+        let constraint_virial = device
+            .alloc_zeros::<f32>(3 * n_groups)
+            .map_err(GpuError::from)?;
 
         Ok(SettleConstraintsState {
             device,
@@ -377,6 +382,7 @@ impl SettleConstraintsState {
             snapshot_x,
             snapshot_y,
             snapshot_z,
+            constraint_virial,
         })
     }
 }
@@ -430,6 +436,7 @@ impl Constraint for SettleConstraintsState {
             &self.type_mass_h,
             sim_box,
             dt,
+            &mut self.constraint_virial,
             self.group_count,
         )?;
         timings.kernel_stop(KernelStage::SETTLE_POSITIONS)?;
@@ -457,6 +464,19 @@ impl Constraint for SettleConstraintsState {
             self.group_count,
         )?;
         timings.kernel_stop(KernelStage::SETTLE_VELOCITIES)?;
+        // Scatter the per-atom-of-group constraint virials cached by
+        // settle_positions into buffers.virials so the barostat's
+        // scalar-virial reduction picks them up. Runs after the force
+        // evaluation (which populated buffers.virials with the force
+        // contributions) and after settle_velocities.
+        timings.kernel_start(KernelStage::SETTLE_VIRIAL_SCATTER)?;
+        settle_virial_scatter(
+            buffers,
+            &self.constraint_virial,
+            &self.group_atoms,
+            self.group_count,
+        )?;
+        timings.kernel_stop(KernelStage::SETTLE_VIRIAL_SCATTER)?;
         Ok(())
     }
 
@@ -573,6 +593,7 @@ pub struct SettleKernels {
     pub settle_snapshot: CudaFunction,
     pub settle_positions: CudaFunction,
     pub settle_velocities: CudaFunction,
+    pub settle_virial_scatter: CudaFunction,
 }
 
 impl SettleKernels {
@@ -580,12 +601,18 @@ impl SettleKernels {
         device.load_ptx(
             Ptx::from_src(kernels::SETTLE),
             "settle",
-            &["settle_snapshot", "settle_positions", "settle_velocities"],
+            &[
+                "settle_snapshot",
+                "settle_positions",
+                "settle_velocities",
+                "settle_virial_scatter",
+            ],
         )?;
         Ok(SettleKernels {
             settle_snapshot: get_func(device, "settle", "settle_snapshot")?,
             settle_positions: get_func(device, "settle", "settle_positions")?,
             settle_velocities: get_func(device, "settle", "settle_velocities")?,
+            settle_virial_scatter: get_func(device, "settle", "settle_virial_scatter")?,
         })
     }
 }

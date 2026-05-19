@@ -510,11 +510,19 @@ Feature: Langevin BAOAB integrator
   # --- Temperature target ---
 
   @rq-adc3a32f
-  Scenario: Equilibrium kinetic energy approaches 1.5 * N * k_B * T after many steps
+  Scenario: Equilibrium kinetic energy approaches ((3N − n_constraints) / 2) · k_B · T
     Given a Langevin run with N=512, friction=1.0e13, temperature=300, seed=42,
-      initial v = 0, dt = 1.0e-15, n_steps=1000
+      initial v = 0, dt = 1.0e-15, n_steps=1000, n_constraints=0
     When the run completes
-    Then the kinetic energy reported by the final log row is within 15% of 1.5 * N * k_B * 300
+    Then the kinetic energy reported by the final log row is within 15% of
+      ((3 * N − n_constraints) / 2) · k_B · 300
+    (Langevin couples each Cartesian velocity component to an independent
+    Ornstein-Uhlenbeck noise and does not conserve total momentum, so the
+    equilibrium kinetic energy corresponds to 3N − n_constraints thermal
+    DOFs. The reported `temperature` log column uses the COM-removed
+    convention 3N − n_constraints − 3, which differs from this DOF count
+    by a factor (3N − n_constraints − 3) / (3N − n_constraints) — close
+    to 1 for any N of practical interest.)
 
   # --- Empty system ---
 

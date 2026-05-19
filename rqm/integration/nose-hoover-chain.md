@@ -36,8 +36,11 @@ v̇_i      = F_i/m_i − (p_ξ_1 / Q_1) v_i
 ```
 
 where `K = (1/2) Σ_i m_i |v_i|²` is the instantaneous kinetic energy,
-`g = 3N − 3` is the number of thermal degrees of freedom (the three
-centre-of-mass modes are removed at initial-velocity generation), and
+`g = max(0, 3N − n_constraints − 3)` is the number of thermal
+degrees of freedom (the three centre-of-mass modes are removed at
+initial-velocity generation, and any holonomic constraints carried by
+the run are also subtracted; the same convention used by CSVR and by
+`compute_temperature` in `io/log-output.md`), and
 `k_B = 1.380649 × 10⁻²³ J/K` is the same CODATA-2019 value used by
 `io/log-output.md`.
 
@@ -195,12 +198,15 @@ Host-side state on `NoseHooverChainThermostat`:
 - `q_mass: Vec<f64>` — length `M`, precomputed chain masses. Element
   `0` is `g · k_B · T · τ²`; elements `1..M` are `k_B · T · τ²`.
 - `g_dof: u32` — degrees of freedom thermostatted by the chain,
-  computed at construction as `max(0, 3 · particle_count − 3)`. The
+  computed at construction as
+  `max(0, 3 · particle_count − n_constraints − 3)` from the
+  `n_constraints` parameter passed by the runner. The
   centre-of-mass-removed initial-velocity convention (see
   `simulation-runner.md`) keeps the COM momentum exactly zero under
-  NHC's uniform velocity rescaling, so the chain target
-  `g · k_B · T` matches the equilibrium kinetic energy when COM is
-  zero. Stored once at construction and never updated.
+  NHC's uniform velocity rescaling, and `n_constraints` accounts for
+  the holonomic constraints (e.g. SETTLE) that project out
+  intramolecular velocity components. Stored once at construction
+  and never updated.
 
 All chain arithmetic runs in `f64` on the host. The chain state is
 read and written exclusively inside `NoseHooverChainThermostat`'s
@@ -265,7 +271,9 @@ by the runner at log-write time.
   - `n_resp: u32` — `n_resp`.
   - `yoshida_weights: &'static [f64]` — pre-resolved Suzuki-Yoshida
     weights for the chosen `yoshida_order`.
-  - `g_dof: u32` — `max(0, 3 · particle_count − 3)`.
+  - `g_dof: u32` — `max(0, 3 · particle_count − n_constraints − 3)`,
+    computed at construction from the `n_constraints` parameter
+    passed by the runner.
   - `q_mass: Vec<f64>` — chain masses, length `M`.
   - `xi: Vec<f64>` — chain positions, length `M`.
   - `p_xi: Vec<f64>` — chain momenta, length `M`.
@@ -506,8 +514,9 @@ pub fn nhc_chain_sub_step(
 - Constraints (SHAKE/RATTLE). The trait shape supports them; no
   constrained-NHC thermostat ships.
 - User-overrideable `g` (degrees of freedom). The thermostat
-  hard-codes `g = max(0, 3N − 3)`. Constraint-aware `g` follows the
-  constraint feature.
+  hard-codes `g = max(0, 3N − n_constraints − 3)`, the
+  COM-removed and constraint-aware convention shared with CSVR
+  (`csvr.md`) and `compute_temperature` (`io/log-output.md`).
 - Multi-step velocity-rescale buffering. Each Yoshida sub-step's
   velocity rescale launches its own `rescale_velocities` kernel; no
   attempt is made to fold consecutive rescales into a single launch
@@ -549,7 +558,7 @@ Feature: Nosé-Hoover chain (NHC) thermostat
     Given a ThermostatKind::NoseHooverChain {
       temperature: 300.0, tau: 1.0e-13,
       chain_length: 3, yoshida_order: 3, n_resp: 1 }
-    When registry.build_optional(Some(&kind), device, particle_count=4) is called
+    When registry.build_optional(Some(&kind), device, particle_count=4, n_constraints=0) is called
     Then it returns Ok(Some(thermostat))
     And the underlying NoseHooverChainThermostat has chain_length=3
     And xi equals [0.0, 0.0, 0.0]
@@ -557,22 +566,30 @@ Feature: Nosé-Hoover chain (NHC) thermostat
     And q_mass[0] equals g_dof * k_B * 300 * tau²
     And q_mass[1] equals k_B * 300 * tau²
     And q_mass[2] equals k_B * 300 * tau²
-    And g_dof equals 9 (3 * 4 − 3)
+    And g_dof equals 9 (3 * 4 − 0 − 3)
 
-  @rq-93570a07
+  @rq-1aa67999
+  Scenario: Construct for a SETTLE'd water system
+    Given an NHC kind with chain_length=3, temperature=300, tau=1e-13
+    When registry.build_optional(Some(&kind), device, particle_count=24, n_constraints=24) is called
+    Then it returns Ok(Some(thermostat))
+    And g_dof equals 45 (3 * 24 − 24 − 3)
+    And q_mass[0] equals 45 * k_B * 300 * tau²
+
+  @rq-12d7c3fe
   Scenario: Construct with chain_length = 1 reduces to vanilla Nosé-Hoover
     Given a ThermostatKind::NoseHooverChain { temperature: 300, tau: 1e-13,
       chain_length: 1, yoshida_order: 3, n_resp: 1 }
-    When registry.build_optional(Some(&kind), device, particle_count=4) is called
+    When registry.build_optional(Some(&kind), device, particle_count=4, n_constraints=0) is called
     Then it returns Ok(Some(thermostat))
     And xi has length 1
     And p_xi has length 1
     And q_mass has length 1
 
-  @rq-8afd1b7d
+  @rq-5f21bfd8
   Scenario: Construct with particle_count = 0
     Given an NHC kind with chain_length=3
-    When registry.build_optional(Some(&kind), device, particle_count=0) is called
+    When registry.build_optional(Some(&kind), device, particle_count=0, n_constraints=0) is called
     Then it returns Ok(Some(thermostat))
     And g_dof equals 0
     And the ke_scratch device buffer has length 1

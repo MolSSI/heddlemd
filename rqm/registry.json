@@ -527,13 +527,6 @@
     "title": "Barostat",
     "type": "api-item"
   },
-  "rq-079b4f9e": {
-    "decl": "Scenario: Construct with particle_count = 1 (N_f = 1)",
-    "file": "integration/berendsen",
-    "refs": [],
-    "title": "Construct with particle_count = 1 (N_f = 1)",
-    "type": "scenario"
-  },
   "rq-07a18814": {
     "decl": "Scenario: log_column_values returns the conserved Hamiltonian",
     "file": "integration/nose-hoover-chain",
@@ -696,6 +689,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Unknown neighbor_list mode is rejected",
+    "type": "scenario"
+  },
+  "rq-0abaa85d": {
+    "decl": "Scenario: Construct MtkNptIntegrator for a SETTLE'd water system",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Construct MtkNptIntegrator for a SETTLE'd water system",
     "type": "scenario"
   },
   "rq-0ae304bc": {
@@ -1019,6 +1019,13 @@
     "title": "Missing integrator.kind is rejected",
     "type": "scenario"
   },
+  "rq-100e0cc8": {
+    "decl": "Scenario: Construct with chain_length = 1",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Construct with chain_length = 1",
+    "type": "scenario"
+  },
   "rq-100f8b5f": {
     "decl": "## Per-Step Kernel Sequence",
     "file": "forces/morse-bonded",
@@ -1308,6 +1315,13 @@
     ],
     "title": "load_topology_file",
     "type": "api-item"
+  },
+  "rq-12d7c3fe": {
+    "decl": "Scenario: Construct with chain_length = 1 reduces to vanilla Nosé-Hoover",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "Construct with chain_length = 1 reduces to vanilla Nosé-Hoover",
+    "type": "scenario"
   },
   "rq-136f7d15": {
     "decl": "Scenario: sim_box.generation() advances after apply",
@@ -1650,7 +1664,12 @@
     "decl": "#### `[[phase]]` (array of tables, >= 1 entry)",
     "file": "io/config-schema",
     "level": 4,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`[[phase]]` (array of tables, >= 1 entry)",
     "type": "section"
   },
@@ -1770,6 +1789,13 @@
     "file": "forces/framework",
     "refs": [],
     "title": "step_class(Fast) refreshes only Fast slots' contributions",
+    "type": "scenario"
+  },
+  "rq-1aa67999": {
+    "decl": "Scenario: Construct for a SETTLE'd water system",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "Construct for a SETTLE'd water system",
     "type": "scenario"
   },
   "rq-1ad7e751": {
@@ -2035,7 +2061,7 @@
     "type": "scenario"
   },
   "rq-1e30bbf4": {
-    "decl": "- `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize) -> Result<Box<dyn Integrator>, IntegratorError>`",
+    "decl": "- `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Integrator>, IntegratorError>`",
     "file": "integration/framework",
     "refs": [],
     "title": "IntegratorRegistry",
@@ -2409,6 +2435,13 @@
     "file": "simulation-runner",
     "refs": [],
     "title": "All-pairs mode skips the box-too-small check",
+    "type": "scenario"
+  },
+  "rq-21e17441": {
+    "decl": "Scenario: Construct MtkNptIntegrator with defaults (unconstrained system)",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Construct MtkNptIntegrator with defaults (unconstrained system)",
     "type": "scenario"
   },
   "rq-220f3f10": {
@@ -2920,6 +2953,13 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-28bba228": {
+    "decl": "Scenario: SETTLE adds constraint virial to buffers.virials in apply_after_kick",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SETTLE adds constraint virial to buffers.virials in apply_after_kick",
+    "type": "scenario"
+  },
   "rq-28d519b5": {
     "decl": "#### `[coulomb]` (optional table)",
     "file": "io/config-schema",
@@ -3058,13 +3098,6 @@
     "refs": [],
     "title": "Empty State and degenerate cases",
     "type": "section"
-  },
-  "rq-2a9acb69": {
-    "decl": "Scenario: Temperature of an empty system is zero",
-    "file": "io/log-output",
-    "refs": [],
-    "title": "Temperature of an empty system is zero",
-    "type": "scenario"
   },
   "rq-2aadbec9": {
     "decl": "### CUDA Kernels",
@@ -3317,13 +3350,6 @@
     "file": "integration/berendsen-barostat",
     "refs": [],
     "title": "Berendsen barostat composes with langevin-baoab integrator",
-    "type": "scenario"
-  },
-  "rq-2db435ba": {
-    "decl": "Scenario: Construct with chain_length = 1",
-    "file": "integration/mtk-npt",
-    "refs": [],
-    "title": "Construct with chain_length = 1",
     "type": "scenario"
   },
   "rq-2dbda7ec": {
@@ -4315,10 +4341,6 @@
       {
         "file": "src/integrator/constraint.rs",
         "kind": "code"
-      },
-      {
-        "file": "src/runner.rs",
-        "kind": "code"
       }
     ],
     "title": "Feature: Constraint Slot Framework",
@@ -4685,13 +4707,6 @@
     "title": "Constraint row with atom index out of range is rejected",
     "type": "scenario"
   },
-  "rq-4518fa47": {
-    "decl": "Scenario: Temperature uses k_B = 1.380649e-23",
-    "file": "io/log-output",
-    "refs": [],
-    "title": "Temperature uses k_B = 1.380649e-23",
-    "type": "scenario"
-  },
   "rq-454ad2cf": {
     "decl": "- `HarmonicAngleState` — implements `Potential` with `label() == \"harmonic_angle\"` and `frequency_class() == ForceClass::Fast` (the trait default).",
     "file": "forces/framework",
@@ -4761,7 +4776,7 @@
     "type": "section"
   },
   "rq-46a39249": {
-    "decl": "- `compute_temperature(kinetic_energy: f64, particle_count: usize) -> f64`",
+    "decl": "- `compute_temperature(kinetic_energy: f64, n_thermal_dof: u32) -> f64`",
     "file": "io/log-output",
     "refs": [
       {
@@ -4801,6 +4816,13 @@
     "refs": [],
     "title": "`Thermostat` trait overrides",
     "type": "section"
+  },
+  "rq-470019c7": {
+    "decl": "Scenario: Construct with particle_count = 1 (N_f = 1)",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Construct with particle_count = 1 (N_f = 1)",
+    "type": "scenario"
   },
   "rq-47129004": {
     "decl": "Scenario: COM momentum is preserved under the MTK integrator",
@@ -5523,10 +5545,10 @@
     "type": "scenario"
   },
   "rq-536457be": {
-    "decl": "Scenario: Time-averaged kinetic energy tracks (3 N / 2) k_B T",
+    "decl": "Scenario: Time-averaged kinetic energy tracks (3 N − n_constraints) / 2 · k_B · T",
     "file": "integration/andersen",
     "refs": [],
-    "title": "Time-averaged kinetic energy tracks (3 N / 2) k_B T",
+    "title": "Time-averaged kinetic energy tracks (3 N − n_constraints) / 2 · k_B · T",
     "type": "scenario"
   },
   "rq-5395785a": {
@@ -5887,6 +5909,13 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-5939f04a": {
+    "decl": "Scenario: Temperature for a 3-atom SETTLE'd water (one rigid molecule, COM removed)",
+    "file": "io/log-output",
+    "refs": [],
+    "title": "Temperature for a 3-atom SETTLE'd water (one rigid molecule, COM removed)",
+    "type": "scenario"
+  },
   "rq-599b2eb4": {
     "decl": "## Fill Kernel",
     "file": "build-pipeline",
@@ -6202,6 +6231,13 @@
     "title": "Reject `n_bins = 0`",
     "type": "scenario"
   },
+  "rq-5f21bfd8": {
+    "decl": "Scenario: Construct with particle_count = 0",
+    "file": "integration/nose-hoover-chain",
+    "refs": [],
+    "title": "Construct with particle_count = 0",
+    "type": "scenario"
+  },
   "rq-5f29f928": {
     "decl": "### Constraint entries",
     "file": "forces/topology",
@@ -6331,6 +6367,13 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-6136714b": {
+    "decl": "Scenario: Construct for a SETTLE'd water system",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Construct for a SETTLE'd water system",
+    "type": "scenario"
   },
   "rq-61528c78": {
     "decl": "## Out of Scope",
@@ -7330,6 +7373,13 @@
     "title": "Per-phase [phase.output] defaults derive from <root> and phase name",
     "type": "scenario"
   },
+  "rq-70a46202": {
+    "decl": "Scenario: Construct CsvrThermostat for a SETTLE'd water system",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Construct CsvrThermostat for a SETTLE'd water system",
+    "type": "scenario"
+  },
   "rq-70e9fd38": {
     "decl": "Scenario: A trajectory frame can be re-parsed by load_init_state",
     "file": "io/trajectory-output",
@@ -7425,6 +7475,13 @@
     "title": "Empty phase",
     "type": "section"
   },
+  "rq-72dceb28": {
+    "decl": "Scenario: settle_virial_scatter is a no-op for a zero-group slot",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "settle_virial_scatter is a no-op for a zero-group slot",
+    "type": "scenario"
+  },
   "rq-73054857": {
     "decl": "### Angle entries",
     "file": "forces/topology",
@@ -7440,11 +7497,11 @@
     "title": "Reject negative particle count",
     "type": "scenario"
   },
-  "rq-73384fea": {
-    "decl": "Scenario: Construct with particle_count = 0",
-    "file": "integration/berendsen",
+  "rq-7326a2d5": {
+    "decl": "Scenario: Construct with particle_count = 1 (N_f = 1)",
+    "file": "integration/csvr",
     "refs": [],
-    "title": "Construct with particle_count = 0",
+    "title": "Construct with particle_count = 1 (N_f = 1)",
     "type": "scenario"
   },
   "rq-73a3b802": {
@@ -8217,6 +8274,13 @@
     "title": "vv_kick_drift_lossless",
     "type": "api-item"
   },
+  "rq-7d831804": {
+    "decl": "Scenario: Temperature uses k_B = 1.380649e-23 and N_thermal_dof as divisor",
+    "file": "io/log-output",
+    "refs": [],
+    "title": "Temperature uses k_B = 1.380649e-23 and N_thermal_dof as divisor",
+    "type": "scenario"
+  },
   "rq-7d8485b3": {
     "decl": "Scenario: Each slot writes into its own row of the slot-output buffers",
     "file": "forces/framework",
@@ -8386,6 +8450,13 @@
     "refs": [],
     "title": "Angle list",
     "type": "section"
+  },
+  "rq-7fcfceac": {
+    "decl": "Scenario: Construct with particle_count = 0",
+    "file": "integration/mtk-npt",
+    "refs": [],
+    "title": "Construct with particle_count = 0",
+    "type": "scenario"
   },
   "rq-7fd19f00": {
     "decl": "Scenario: Reject when charges has the wrong length",
@@ -8699,13 +8770,6 @@
     "title": "Reject non-finite r_switch",
     "type": "scenario"
   },
-  "rq-87330eaa": {
-    "decl": "Scenario: SETTLE kernels do not modify forces, masses, particle_ids, type_indices, potential_energies, or virials",
-    "file": "integration/settle",
-    "refs": [],
-    "title": "SETTLE kernels do not modify forces, masses, particle_ids, type_indices, potential_energies, or virials",
-    "type": "scenario"
-  },
   "rq-874dbfec": {
     "decl": "Scenario: Two end-to-end Langevin runs with identical configs produce byte-identical outputs",
     "file": "integration/langevin-baoab",
@@ -8907,13 +8971,6 @@
     "file": "simulation-box",
     "refs": [],
     "title": "check_min_perpendicular_width on a triclinic box uses perpendicular widths, not edge lengths",
-    "type": "scenario"
-  },
-  "rq-8afd1b7d": {
-    "decl": "Scenario: Construct with particle_count = 0",
-    "file": "integration/nose-hoover-chain",
-    "refs": [],
-    "title": "Construct with particle_count = 0",
     "type": "scenario"
   },
   "rq-8b1827a9": {
@@ -9136,6 +9193,13 @@
     "file": "io/trajectory-output",
     "refs": [],
     "title": "Open refuses to overwrite an existing file",
+    "type": "scenario"
+  },
+  "rq-8f554438": {
+    "decl": "Scenario: Temperature of a zero-DOF system is zero",
+    "file": "io/log-output",
+    "refs": [],
+    "title": "Temperature of a zero-DOF system is zero",
     "type": "scenario"
   },
   "rq-8f665dd0": {
@@ -9436,13 +9500,6 @@
     "title": "Constraint row with repeated atom is rejected",
     "type": "scenario"
   },
-  "rq-93570a07": {
-    "decl": "Scenario: Construct with chain_length = 1 reduces to vanilla Nosé-Hoover",
-    "file": "integration/nose-hoover-chain",
-    "refs": [],
-    "title": "Construct with chain_length = 1 reduces to vanilla Nosé-Hoover",
-    "type": "scenario"
-  },
   "rq-93be622c": {
     "decl": "Scenario: Unknown attributes in the comment line are ignored",
     "file": "io/init-state-file",
@@ -9515,7 +9572,7 @@
     "type": "section"
   },
   "rq-9548bc1a": {
-    "decl": "- `BarostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize) -> Result<Option<Box<dyn Barostat>>, BarostatError>`",
+    "decl": "- `BarostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Option<Box<dyn Barostat>>, BarostatError>`",
     "file": "integration/framework",
     "refs": [
       {
@@ -10038,6 +10095,13 @@
     "title": "fill kernel writes 1.0 to every element of a block-aligned buffer",
     "type": "scenario"
   },
+  "rq-9cf9ece2": {
+    "decl": "Scenario: Adding constraint virial completes the pressure cancellation for an equilibrated rigid water gas",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "Adding constraint virial completes the pressure cancellation for an equilibrated rigid water gas",
+    "type": "scenario"
+  },
   "rq-9d0cb192": {
     "decl": "- `scatter_atoms_into_cells(cell_indices, cell_offsets, write_cursors, sorted_particle_ids, particle_count) -> Result<(), GpuError>` —",
     "file": "forces/neighbor-list",
@@ -10087,6 +10151,13 @@
     "title": "Perpendicular Widths",
     "type": "section"
   },
+  "rq-9d8f0c97": {
+    "decl": "Scenario: Temperature for an unconstrained 10-particle COM-removed system",
+    "file": "io/log-output",
+    "refs": [],
+    "title": "Temperature for an unconstrained 10-particle COM-removed system",
+    "type": "scenario"
+  },
   "rq-9d9ca545": {
     "decl": "#### `reduce_angle_forces`",
     "file": "forces/harmonic-angle",
@@ -10122,13 +10193,6 @@
     "file": "simulation-box",
     "refs": [],
     "title": "Successive successful set_lattice calls increment generation monotonically",
-    "type": "scenario"
-  },
-  "rq-9e1142aa": {
-    "decl": "Scenario: Construct CsvrThermostat via the registry",
-    "file": "integration/csvr",
-    "refs": [],
-    "title": "Construct CsvrThermostat via the registry",
     "type": "scenario"
   },
   "rq-9e1eee68": {
@@ -10519,6 +10583,14 @@
     "title": "Reject non-positive tau",
     "type": "scenario"
   },
+  "rq-a3f15f82": {
+    "decl": "#### `settle_virial_scatter`",
+    "file": "integration/settle",
+    "level": 4,
+    "refs": [],
+    "title": "`settle_virial_scatter`",
+    "type": "section"
+  },
   "rq-a3fdbd7c": {
     "decl": "### Types",
     "file": "forces/coulomb-pair-force",
@@ -10670,6 +10742,13 @@
     ],
     "title": "ParticleTypeConfig",
     "type": "api-item"
+  },
+  "rq-a6cd03aa": {
+    "decl": "Scenario: Construct CsvrThermostat via the registry (unconstrained system)",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Construct CsvrThermostat via the registry (unconstrained system)",
+    "type": "scenario"
   },
   "rq-a71cef31": {
     "decl": "- `run_simulation_with_registries(config_path: &Path, registries: &Registries) -> Result<RunSummary, RunnerError>`",
@@ -11098,10 +11177,10 @@
     "type": "section"
   },
   "rq-adc3a32f": {
-    "decl": "Scenario: Equilibrium kinetic energy approaches 1.5 * N * k_B * T after many steps",
+    "decl": "Scenario: Equilibrium kinetic energy approaches ((3N − n_constraints) / 2) · k_B · T",
     "file": "integration/langevin-baoab",
     "refs": [],
-    "title": "Equilibrium kinetic energy approaches 1.5 * N * k_B * T after many steps",
+    "title": "Equilibrium kinetic energy approaches ((3N − n_constraints) / 2) · k_B · T",
     "type": "scenario"
   },
   "rq-add8ab9e": {
@@ -11586,12 +11665,27 @@
     "title": "Two independent runs produce byte-identical net forces",
     "type": "scenario"
   },
+  "rq-b5089af4": {
+    "decl": "Scenario: Construct with particle_count = 0",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Construct with particle_count = 0",
+    "type": "scenario"
+  },
   "rq-b54d8111": {
     "decl": "Scenario: Lint reports filename-convention violations under the config stage",
     "file": "simulation-runner",
     "refs": [],
     "title": "Lint reports filename-convention violations under the config stage",
     "type": "scenario"
+  },
+  "rq-b5baee1d": {
+    "decl": "## Constraint Virial",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Constraint Virial",
+    "type": "section"
   },
   "rq-b5e263e1": {
     "decl": "Scenario: run_simulation defers to run_simulation_with_registries with built-ins",
@@ -11865,13 +11959,6 @@
     ],
     "title": "Timings",
     "type": "api-item"
-  },
-  "rq-bafb9cf3": {
-    "decl": "Scenario: Construct with particle_count = 0",
-    "file": "integration/mtk-npt",
-    "refs": [],
-    "title": "Construct with particle_count = 0",
-    "type": "scenario"
   },
   "rq-bafc5900": {
     "decl": "Scenario: Reject a row missing a velocity column",
@@ -12459,13 +12546,6 @@
     "refs": [],
     "title": "ForceClass",
     "type": "api-item"
-  },
-  "rq-c4872e7e": {
-    "decl": "Scenario: Construct with particle_count = 1 (N_f = 1)",
-    "file": "integration/csvr",
-    "refs": [],
-    "title": "Construct with particle_count = 1 (N_f = 1)",
-    "type": "scenario"
   },
   "rq-c491802b": {
     "decl": "## Empty State",
@@ -13104,13 +13184,6 @@
     "title": "apply_post launches all expected kernels",
     "type": "scenario"
   },
-  "rq-cf008c68": {
-    "decl": "Scenario: Construct with particle_count = 0",
-    "file": "integration/csvr",
-    "refs": [],
-    "title": "Construct with particle_count = 0",
-    "type": "scenario"
-  },
   "rq-cf183b79": {
     "decl": "Scenario: Fractional coordinates of every particle are invariant under apply",
     "file": "integration/berendsen-barostat",
@@ -13282,6 +13355,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Explicit [output] values override defaults",
+    "type": "scenario"
+  },
+  "rq-d16be675": {
+    "decl": "Scenario: Heavily-constrained system clamps g_dof to 1",
+    "file": "integration/csvr",
+    "refs": [],
+    "title": "Heavily-constrained system clamps g_dof to 1",
     "type": "scenario"
   },
   "rq-d1814271": {
@@ -14469,13 +14549,6 @@
     "title": "PTX Module Loading",
     "type": "section"
   },
-  "rq-e266de94": {
-    "decl": "Scenario: Construct MtkNptIntegrator with defaults",
-    "file": "integration/mtk-npt",
-    "refs": [],
-    "title": "Construct MtkNptIntegrator with defaults",
-    "type": "scenario"
-  },
   "rq-e2a31585": {
     "decl": "Scenario: Box-generation refresh handles tilt mutation",
     "file": "forces/neighbor-list",
@@ -14561,6 +14634,13 @@
     "file": "forces/framework",
     "refs": [],
     "title": "max_cutoff aggregation determines the neighbor-list radius",
+    "type": "scenario"
+  },
+  "rq-e3a8d87c": {
+    "decl": "Scenario: Construct with particle_count = 0",
+    "file": "integration/berendsen",
+    "refs": [],
+    "title": "Construct with particle_count = 0",
     "type": "scenario"
   },
   "rq-e3ba8c3b": {
@@ -14851,10 +14931,10 @@
     "type": "scenario"
   },
   "rq-e8252f10": {
-    "decl": "Scenario: Construct BerendsenThermostat via the registry",
+    "decl": "Scenario: Construct BerendsenThermostat via the registry (unconstrained system)",
     "file": "integration/berendsen",
     "refs": [],
-    "title": "Construct BerendsenThermostat via the registry",
+    "title": "Construct BerendsenThermostat via the registry (unconstrained system)",
     "type": "scenario"
   },
   "rq-e84d3bac": {
@@ -16257,10 +16337,6 @@
       {
         "file": "src/gpu/kernels.rs",
         "kind": "code"
-      },
-      {
-        "file": "src/runner.rs",
-        "kind": "code"
       }
     ],
     "title": "compute_total_potential_energy",
@@ -16305,6 +16381,13 @@
     ],
     "title": "AndersenBuilder",
     "type": "api-item"
+  },
+  "rq-fd498605": {
+    "decl": "Scenario: SETTLE kernels do not modify forces, masses, particle_ids, type_indices, or potential_energies",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SETTLE kernels do not modify forces, masses, particle_ids, type_indices, or potential_energies",
+    "type": "scenario"
   },
   "rq-fd593357": {
     "decl": "Scenario: Append frames in order",
