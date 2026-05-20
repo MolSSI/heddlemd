@@ -299,7 +299,20 @@ extern "C" __global__ void settle_positions(
   // group's mass-weighted COM (cx, cy, cz) is already computed
   // above, so the per-atom contribution can be written in
   // body-relative coordinates with no extra arithmetic.
+  //
+  // Critical ordering: the per-atom expression `m · (Δr · r) / dt²`
+  // has m ≈ 10⁻²⁷ kg, (Δr · r) ≈ 10⁻²³ m², and 1/dt² ≈ 10³⁰. The
+  // associative grouping `(m · (Δr · r)) / dt²` produces the
+  // intermediate `m · (Δr · r) ≈ 10⁻⁵⁰`, which underflows to zero
+  // in f32 (smallest denormal ≈ 1.4·10⁻⁴⁵). The associativity-
+  // preserving grouping `(m / dt²) · (Δr · r)` keeps every
+  // intermediate well inside f32 normal range: `m / dt² ≈ 10³`,
+  // `(Δr · r) ≈ 10⁻²³`, product ≈ 10⁻²⁰ J. We therefore precompute
+  // the per-mass `m · inv_dt²` scale once and multiply the dot
+  // product by it.
   float inv_dt2 = (dt != 0.0f) ? (1.0f / (dt * dt)) : 0.0f;
+  float scale_o = m_o * inv_dt2;
+  float scale_h = m_h * inv_dt2;
   float dox = ox_c - ox_u;
   float doy = oy_c - oy_u;
   float doz = oz_c - oz_u;
@@ -316,11 +329,11 @@ extern "C" __global__ void settle_positions(
   float rh1x = h1x_c - cx, rh1y = h1y_c - cy, rh1z = h1z_c - cz;
   float rh2x = h2x_c - cx, rh2y = h2y_c - cy, rh2z = h2z_c - cz;
   constraint_virial[base + 0] =
-      m_o * (dox * rox + doy * roy + doz * roz) * inv_dt2;
+      scale_o * (dox * rox + doy * roy + doz * roz);
   constraint_virial[base + 1] =
-      m_h * (dh1x * rh1x + dh1y * rh1y + dh1z * rh1z) * inv_dt2;
+      scale_h * (dh1x * rh1x + dh1y * rh1y + dh1z * rh1z);
   constraint_virial[base + 2] =
-      m_h * (dh2x * rh2x + dh2y * rh2y + dh2z * rh2z) * inv_dt2;
+      scale_h * (dh2x * rh2x + dh2y * rh2y + dh2z * rh2z);
 }
 
 // Scatter the slot-cached constraint virials computed by
