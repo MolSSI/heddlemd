@@ -1906,6 +1906,8 @@ pub fn settle_velocities(
     type_mass_o: &CudaSlice<f32>,
     type_mass_h: &CudaSlice<f32>,
     sim_box: &SimulationBox,
+    dt: f32,
+    constraint_virial: &mut CudaSlice<f32>,
     n_groups: usize,
 ) -> Result<(), GpuError> {
     if n_groups == 0 {
@@ -1935,6 +1937,8 @@ pub fn settle_velocities(
                 lat[3],
                 lat[4],
                 lat[5],
+                dt,
+                &mut *constraint_virial,
                 n_u32,
             ),
         )

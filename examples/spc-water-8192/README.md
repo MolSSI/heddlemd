@@ -1,17 +1,18 @@
 # 8192-molecule rigid SPC/E water, NPT, with RDF post-processing
 
 A larger, more realistic example that exercises rigid water (SETTLE),
-SPME electrostatics, multi-phase NVT-then-NPT scheduling (CSVR
-thermostat + c-rescale barostat), and the `dynamics analyze`
-post-processing pipeline. 8192 SPC/E water molecules (24,576 atoms)
-integrated for 10 ps of NVT equilibration followed by 30 ps of NPT
-production at 298.15 K, 1 atm, then analyzed for the O-O, O-H, and
-H-H radial distribution functions of the production trajectory.
+SPME electrostatics, multi-phase scheduling, energy minimization,
+NVT-then-NPT dynamics (CSVR thermostat + c-rescale barostat), and
+the `dynamics analyze` post-processing pipeline. 8192 SPC/E water
+molecules (24,576 atoms) relaxed by a steepest-descent minimization,
+then integrated for 5 ps of NVT equilibration followed by 2 ps of
+NPT production at 298.15 K, 1 atm, then analyzed for the O-O, O-H,
+and H-H radial distribution functions of the production trajectory.
 
 ## Layout
 
 - `water.in.toml` — simulation config (rigid SPC/E + SETTLE + SPME,
-  two phases: `equil` and `prod`).
+  three phases: `min`, `equil`, and `prod`).
 - `water.in.xyz` — initial state: 16 × 16 × 32 simple-cubic lattice
   of water molecules at sub-liquid density (~0.47 g/cm³), each with a
   randomized SO(3) orientation seeded for determinism.
@@ -33,22 +34,34 @@ From this directory:
 cargo run --release -- run water.in.toml
 ```
 
-This is **not** a quick example. On a recent NVIDIA GPU the combined
-20,000-step run (10 ps NVT + 30 ps NPT at `dt = 2 fs`) takes roughly
-20 minutes; the dominant cost is the cell-list rebuild as the box
-volume changes under the barostat.
+The combined run is roughly:
 
-The run produces six output files in this directory — three per
-phase. The equilibration phase suppresses trajectory output, so its
-`.xyz` file is not created:
+| Phase   | Steps / iters | Wall-clock cost          |
+|---------|---------------|--------------------------|
+| `min`   | up to 500     | ~3 s — converges in ~80  |
+| `equil` | 2,500         | ~2 min — 5 ps at dt=2 fs |
+| `prod`  | 1,000         | ~1 min — 2 ps NPT        |
 
-- `water.out.equil.log` — 51 rows of `step, time, kinetic_energy,
-  temperature, csvr_conserved` (NVT diagnostics).
+Total runtime is a few minutes on a recent NVIDIA GPU; the dominant
+cost during NPT is the cell-list rebuild as the box volume changes
+under the barostat.
+
+The run produces several output files in this directory — one
+`.timings` per phase, plus a `.log` for the MD phases and a `.minlog`
+for the minimization phase. No phase writes a trajectory in the
+default config (the example focuses on the `prod` log + analysis;
+turn on `[phase.output].trajectory_every` to write frames):
+
+- `water.out.min.minlog` — per-iteration `iter, energy, max_force,
+  step, accepted` rows from the SD minimization phase. ~10 rows
+  given the configured `minlog_every = 10`.
+- `water.out.min.timings` — minimization performance summary.
+- `water.out.equil.log` — `step, time, kinetic_energy, temperature,
+  csvr_conserved` (NVT diagnostics), one row per 250 steps.
 - `water.out.equil.timings` — equilibration performance summary.
-- `water.out.prod.xyz` — 31 production frames (1 per ps), ~38 MB.
-- `water.out.prod.log` — 151 rows of `step, time, kinetic_energy,
-  temperature, csvr_conserved, pressure, box_volume,
-  c_rescale_conserved` (NPT diagnostics).
+- `water.out.prod.log` — `step, time, kinetic_energy, temperature,
+  csvr_conserved, pressure, box_volume, c_rescale_conserved` (NPT
+  diagnostics), one row per 50 steps.
 - `water.out.prod.timings` — production performance summary.
 
 ## Analyze
@@ -77,6 +90,38 @@ cargo run --release -- lint water.in.analysis
 ```
 
 reports `[dynamics lint] OK` (after the trajectory exists).
+
+## Minimization phase
+
+The lattice-on-a-grid initial state has occasional H–H close contacts
+(two waters whose hydrogens happen to point at each other can sit
+~1 Å apart, well inside the repulsive Coulomb core). Starting NVT
+directly from this state requires a tiny timestep — even a 2 fs
+leapfrog kick generates supersonic velocities for the closest
+contacts.
+
+The `min` phase relaxes positions along the negative energy gradient
+until either the per-atom force or the relative energy change drops
+below a loose tolerance. SETTLE projects every trial position back
+onto the rigid SPC/E manifold before the trial energy is evaluated,
+so the minimization respects the constraint geometry exactly.
+Velocities (Maxwell-Boltzmann sampled at setup, see
+`[simulation].temperature`) and the simulation box pass through this
+phase unchanged; only positions move.
+
+Tolerances are chosen to reach a *non-pathological* starting
+geometry, not a true energy minimum:
+
+- `force_tolerance = 1.0e-9 N` — a few × thermal force per atom; the
+  long tail of the gradient is left for the thermostat to handle.
+- `energy_tolerance = 1.0e-5` (relative) — stops once consecutive
+  accepted iterations move the total potential energy by less than
+  `~10⁻²⁰ J`.
+- `max_iterations = 500` — non-convergence is a hard error (exit code
+  `2`). Lattice → relaxed typically completes in `~80` iterations.
+
+The `.minlog` records every iteration's `(energy, F_max, step,
+accepted)` so the descent is easy to inspect post hoc.
 
 ## Parameters
 
@@ -133,18 +178,18 @@ correct liquid-water peak structure. It is **not** a fully converged
 production-quality calculation — two limitations are worth knowing
 about before treating the `g(r)` heights as quantitative:
 
-- **Equilibration from a lattice initial state is hard.** A
-  rigid-body lattice of charges has a large virial pressure even when
-  the molecule orientations are randomized, and the c-rescale
-  barostat in the production phase responds by expanding the box. In
-  this 30 ps NPT phase (following 10 ps of NVT equilibration) the box
-  does not converge to the SPC/E equilibrium liquid density — the
-  system instead settles into a metastable two-phase configuration
-  (liquid cluster + low-density surroundings). The asymptotic value
-  of every `g(r)` in this bundle plateaus around 1.30–1.35 rather
-  than the canonical 1.0; the offset is the ratio of the actual
-  in-cluster density to the box-averaged density. For a strictly
-  converged liquid-water density users should either:
+- **Equilibration from a lattice initial state is hard.** Even after
+  the SD minimization knocks down the worst close contacts, a
+  rigid-body lattice of charges carries a large residual virial
+  pressure and the c-rescale barostat in the production phase
+  responds by expanding the box. The 5 ps NVT + 2 ps NPT schedule
+  in this bundle does not converge to the SPC/E equilibrium liquid
+  density — the system instead settles into a metastable two-phase
+  configuration (liquid cluster + low-density surroundings). The
+  asymptotic value of every `g(r)` in this bundle plateaus around
+  1.30–1.35 rather than the canonical 1.0; the offset is the ratio
+  of the actual in-cluster density to the box-averaged density. For
+  a strictly converged liquid-water density users should either:
   1. Start from a pre-equilibrated structure provided by another
      code (the init-file parser accepts any extended-XYZ file
      satisfying the engine's lower-triangular `Lattice` constraint),

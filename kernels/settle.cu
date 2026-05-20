@@ -360,6 +360,22 @@ extern "C" __global__ void settle_virial_scatter(
 // associated with the three rigid-water constraints. The system is
 // linear because the constraints are bilinear in the velocity
 // corrections and the constraint gradients (r_i - r_j) are known.
+//
+// When `dt > 0.0f` (i.e., called as part of an integration step's
+// `apply_after_kick`), the kernel also accumulates the velocity-
+// level constraint-virial contribution `m_i · Δv_i · r_i_COM / dt`
+// into `constraint_virial` (additive: settle_positions has already
+// written the position-level contribution). The position-level and
+// velocity-level pieces each contribute half of the analytic
+// `-2 K_rot` virial of a rigid rotor; the sum equals the
+// continuous-time constraint virial as required by the velocity-
+// Verlet + SHAKE + RATTLE virial decomposition.
+//
+// When `dt <= 0.0f` (initial-velocity projection at runner setup,
+// where there is no associated timestep), the velocity-level
+// virial accumulation is skipped. The `constraint_virial` argument
+// may then be a stale buffer; settle_positions on the first
+// integration step overwrites it before any consumer reads.
 // rq-de7601cd
 extern "C" __global__ void settle_velocities(
     const float *positions_x,
@@ -373,6 +389,8 @@ extern "C" __global__ void settle_velocities(
     const float *type_mass_o,
     const float *type_mass_h,
     float lx, float ly, float lz, float xy, float xz, float yz,
+    float dt,
+    float *constraint_virial,
     unsigned int n_groups)
 {
   unsigned int g = blockIdx.x * blockDim.x + threadIdx.x;
@@ -471,6 +489,59 @@ extern "C" __global__ void settle_velocities(
   velocities_x[a_h2] = v_h2_x + (l2 * d2x + l3 * d3x) * inv_m_h;
   velocities_y[a_h2] = v_h2_y + (l2 * d2y + l3 * d3y) * inv_m_h;
   velocities_z[a_h2] = v_h2_z + (l2 * d2z + l3 * d3z) * inv_m_h;
+
+  // Velocity-level constraint-virial accumulation.
+  //
+  // Each atom's RATTLE velocity correction Δv_i applied above is an
+  // impulsive constraint force F = m_i · Δv_i / dt acting at this
+  // instant. Its contribution to the system virial Σ F·r is
+  //   W_i_velocity = m_i · Δv_i · r_i / dt.
+  // Using `Δv_O = -(l1·d1 + l2·d2)/m_O` and the symmetric expressions
+  // for the hydrogens, the masses cancel and the per-atom velocity-
+  // level virial reduces to
+  //   W_O  = -(l1·d1 + l2·d2) · r_O_COM / dt
+  //   W_H1 =  (l1·d1 - l3·d3) · r_H1_COM / dt
+  //   W_H2 =  (l2·d2 + l3·d3) · r_H2_COM / dt
+  // We use COM-relative positions for the same f32 stability reason
+  // as in settle_positions, and group the scalar `1/dt` factor with
+  // the Lagrange multipliers so every intermediate stays in f32
+  // range (l_k/dt ≈ O(0.1)–O(1) kg/s²; d_k · r ≈ 10⁻²⁰ m²; product
+  // ≈ 10⁻²¹ J per atom).
+  //
+  // The position-level contribution from settle_positions already
+  // sits in constraint_virial[base+k] when this kernel runs, so we
+  // ADD here (rather than assign). The sum is then scattered into
+  // particle_virials by settle_virial_scatter; together the two
+  // halves recover the analytic -2·K_rot per-molecule constraint
+  // virial that satisfies the rigid-rotor virial identity.
+  if (dt > 0.0f) {
+    float inv_dt = 1.0f / dt;
+    // Mass-weighted COM of the constrained positions. SETTLE
+    // preserves the COM through the position projection, so this
+    // matches the COM used by settle_positions.
+    float total_mass = m_o + 2.0f * m_h;
+    float cx = (m_o * ox + m_h * h1x + m_h * h2x) / total_mass;
+    float cy = (m_o * oy + m_h * h1y + m_h * h2y) / total_mass;
+    float cz = (m_o * oz + m_h * h1z + m_h * h2z) / total_mass;
+    float rox = ox - cx,  roy  = oy - cy,  roz  = oz - cz;
+    float rh1x = h1x - cx, rh1y = h1y - cy, rh1z = h1z - cz;
+    float rh2x = h2x - cx, rh2y = h2y - cy, rh2z = h2z - cz;
+    float l1_dt = l1 * inv_dt;
+    float l2_dt = l2 * inv_dt;
+    float l3_dt = l3 * inv_dt;
+    float w_o =
+        -(l1_dt * (d1x * rox + d1y * roy + d1z * roz)
+        + l2_dt * (d2x * rox + d2y * roy + d2z * roz));
+    float w_h1 =
+        l1_dt * (d1x * rh1x + d1y * rh1y + d1z * rh1z)
+      - l3_dt * (d3x * rh1x + d3y * rh1y + d3z * rh1z);
+    float w_h2 =
+        l2_dt * (d2x * rh2x + d2y * rh2y + d2z * rh2z)
+      + l3_dt * (d3x * rh2x + d3y * rh2y + d3z * rh2z);
+    constraint_virial[base + 0] += w_o;
+    constraint_virial[base + 1] += w_h1;
+    constraint_virial[base + 2] += w_h2;
+  }
 }
 
 // Position-only SHAKE projection. Used by the minimization runner

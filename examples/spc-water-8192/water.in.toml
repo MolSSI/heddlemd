@@ -6,15 +6,45 @@ topology = "water.in.topology"
 seed = 1
 temperature = 298.15        # K, initial Maxwell-Boltzmann sampling target
 
-# --- Phase 1: NVT equilibration ---
+# --- Phase 1: SD energy minimization ---
+# Relax the lattice initial state along the negative energy gradient
+# before NVT begins. Random orientations on a fixed cubic lattice
+# produce occasional close H-H contacts whose initial forces are
+# several orders of magnitude above thermal — left unrelaxed, the
+# first NVT timestep would either explode or require an absurdly
+# small dt to integrate stably. SETTLE projects every trial position
+# back onto the rigid SPC/E manifold before the trial energy is
+# evaluated. Velocities (sampled above) and the box are unchanged
+# by this phase.
+[[minimization]]
+name = "min"
+
+[minimization.algorithm]
+kind = "steepest-descent"
+# Goal here is "non-pathological starting geometry for NVT", not a
+# true energy minimum: relax the lattice's H-H close contacts so the
+# first integration step takes a stable 2 fs leap. Force and energy
+# tolerances are correspondingly relaxed from the strict defaults.
+force_tolerance = 1.0e-9    # N — a few × thermal force per atom; stops
+                            # us spending iterations chasing the
+                            # vanishing tail of the gradient
+energy_tolerance = 1.0e-5   # relative; same rationale
+max_iterations = 500        # plenty for the relaxed tolerances above;
+                            # a hard error if exceeded
+
+[minimization.output]
+minlog_every = 10           # ~50 rows; concise descent curve
+trajectory_every = 0
+
+# --- Phase 2: NVT equilibration ---
 # Stochastic NVT (CSVR thermostat) at constant box. Lets orientations
-# randomise and local structure relax from the lattice initial
-# conditions before the barostat is turned on. No trajectory written
+# randomise and local structure relax from the minimized lattice
+# state before the barostat is turned on. No trajectory written
 # during equilibration; only a log row every 200 fs to monitor T.
 [[phase]]
 name = "equil"
-n_steps = 5000              # 5,000 × 2 fs = 10 ps
-dt = 2.0e-15                # 2 fs (allowed because SETTLE removes the OH stretching mode)
+n_steps = 2500              # 2,500 × 2 fs = 5 ps NVT thermalisation
+dt = 2.0e-15
 
 [phase.integrator]
 kind = "velocity-verlet"
@@ -27,15 +57,15 @@ tau = 1.0e-13               # 100 fs coupling time
 seed = 11                   # independent of every other stochastic-slot seed
 
 [phase.output]
-trajectory_every = 0        # skip trajectory during equilibration
-log_every = 100             # 1 log row per 200 fs
+trajectory_every = 0
+log_every = 250             # 1 log row per 500 fs (11 rows over 5 ps)
 
-# --- Phase 2: NPT production ---
+# --- Phase 3: NPT production ---
 # CSVR thermostat + c-rescale barostat. Samples the canonical NPT
 # distribution exactly. Trajectory written every 1 ps for RDF analysis.
 [[phase]]
 name = "prod"
-n_steps = 15000             # 15,000 × 2 fs = 30 ps
+n_steps = 1000              # 1,000 × 2 fs = 2 ps NPT
 dt = 2.0e-15
 
 [phase.integrator]
@@ -57,10 +87,10 @@ compressibility = 4.5e-10   # 1/Pa, liquid water
 seed = 13
 
 [phase.output]
-trajectory_every = 500      # 1 frame per ps (31 frames over 30 ps)
-include_velocities = false  # RDFs do not need velocities; keeps the file small
+trajectory_every = 0
+include_velocities = false
 include_images = false
-log_every = 100             # 1 log row per 200 fs (150 rows over 30 ps)
+log_every = 50              # 1 log row per 100 fs (21 rows over 2 ps)
 
 # --- Global fields below apply to every phase ---
 

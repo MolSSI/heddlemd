@@ -447,7 +447,7 @@ impl Constraint for SettleConstraintsState {
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,
-        _dt: f32,
+        dt: f32,
         timings: &mut Timings,
     ) -> Result<(), ConstraintError> {
         if self.group_count == 0 {
@@ -461,6 +461,8 @@ impl Constraint for SettleConstraintsState {
             &self.type_mass_o,
             &self.type_mass_h,
             sim_box,
+            dt,
+            &mut self.constraint_virial,
             self.group_count,
         )?;
         timings.kernel_stop(KernelStage::SETTLE_VELOCITIES)?;
@@ -491,10 +493,12 @@ impl Constraint for SettleConstraintsState {
         }
         // Project the Maxwell-Boltzmann-sampled initial velocities
         // onto the constraint velocity manifold so the first
-        // integrator step starts already on-manifold. No virial
-        // scatter at init time: no force evaluation has happened and
-        // the per-atom virial contribution is irrelevant before the
-        // first barostat invocation.
+        // integrator step starts already on-manifold. Pass dt = 0.0
+        // to suppress the velocity-level virial accumulation: the
+        // initial projection is a static projection with no
+        // associated timestep, and the runner does not consume
+        // `constraint_virial` until the first force evaluation
+        // overwrites it via settle_positions in the next step.
         timings.kernel_start(KernelStage::SETTLE_VELOCITIES)?;
         settle_velocities(
             buffers,
@@ -503,6 +507,8 @@ impl Constraint for SettleConstraintsState {
             &self.type_mass_o,
             &self.type_mass_h,
             sim_box,
+            0.0,
+            &mut self.constraint_virial,
             self.group_count,
         )?;
         timings.kernel_stop(KernelStage::SETTLE_VELOCITIES)?;
