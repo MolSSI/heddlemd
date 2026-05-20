@@ -1,19 +1,18 @@
-# Feature: SETTLE Analytic Three-Atom Rigid-Water Constraint <!-- rq-67e62f4b -->
+# Feature: Rigid Three-Atom Water Constraint (`settle-water`) <!-- rq-67e62f4b -->
 
-SETTLE is the constraint algorithm of Miyamoto & Kollman (*J. Comput.
-Chem.* **13**, 952 (1992)) for projecting a three-atom rigid water
+The `settle-water` constraint kind projects a three-atom rigid water
 molecule's positions and velocities back onto its constraint manifold
-in closed form, with no iteration. It is the v1 implementation of the
-pluggable `Constraint` slot defined in `constraint-framework.md`,
-selected by `kind = "settle-water"` on a `[[constraint_types]]` entry
-in the TOML config.
+at fixed sub-step boundaries inside the integrator. It is the v1
+implementation of the pluggable `Constraint` slot defined in
+`constraint-framework.md`, selected by `kind = "settle-water"` on a
+`[[constraint_types]]` entry in the TOML config.
 
-SETTLE consumes constraint groups whose `constraint_type_kind` is
-`SettleWater`: exactly three atoms with exactly three constraints
-forming the rigid triangle `(O, H1, H2)`. The two O–H distances must
-be equal (parameter `r_oh`) and the H–H distance is the parameter
-`r_hh`. The atom listed first in each `[constraints]` row is the
-oxygen; the next two are the hydrogens, in either order.
+A `settle-water` constraint group has exactly three atoms with
+exactly three constraints forming the rigid triangle `(O, H1, H2)`.
+The two O–H distances must be equal (parameter `r_oh`) and the H–H
+distance is the parameter `r_hh`. The atom listed first in each
+`[constraints]` row is the oxygen; the next two are the hydrogens,
+in either order.
 
 The implementation provides four CUDA kernels — `settle_positions`,
 `settle_velocities`, `settle_virial_scatter`, and
@@ -22,16 +21,69 @@ The implementation provides four CUDA kernels — `settle_positions`,
 and implements the `Constraint` trait. The slot's `apply_before_drift`
 hook snapshots pre-drift positions; `apply_after_drift` runs
 `settle_positions` to project the post-drift positions back onto the
-manifold, to correct the half-step velocities, and to compute each
-constraint atom's contribution to the constraint virial into a
-slot-owned buffer; `apply_after_kick` runs `settle_velocities` to
-project the final velocities onto the manifold, followed by
-`settle_virial_scatter` to fold the cached constraint virial into
-`buffers.virials` so the barostat sees it on the same timestep. The
-slot's `apply_position_projection_only` hook runs
+manifold, to correct the half-step velocities, and to write the
+position-level half of each atom's constraint-virial contribution
+into a slot-owned buffer; `apply_after_kick` runs `settle_velocities`
+to project the final velocities onto the manifold and accumulate the
+velocity-level half of the constraint virial into the same buffer,
+followed by `settle_virial_scatter` to fold the combined contribution
+into `buffers.virials` so the barostat sees both halves on the same
+timestep. The slot's `apply_position_projection_only` hook runs
 `settle_positions_no_velocity` to perform the same position projection
 as `settle_positions` but without the half-step velocity correction
 and without writing the constraint-virial scratch.
+
+## Status: non-standard hybrid implementation, pending migration <!-- rq-176bca9c -->
+
+**The kernels are named `settle_*` for historical reasons, but the
+implementation is *not* the analytical SETTLE algorithm of Miyamoto
+& Kollman (*J. Comput. Chem.* **13**, 952 (1992)).** It is a
+non-standard hybrid:
+
+- `settle_positions` and `settle_positions_no_velocity` are
+  **iterative SHAKE** on the three pair-distance constraints
+  (O–H1, O–H2, H1–H2), up to 32 sweeps per group with absolute
+  tolerance `|σ| < 10⁻²⁶ m²` on each constraint.
+- `settle_velocities` is **closed-form RATTLE**: a single
+  Cramer's-rule solve of the 3×3 Lagrange-multiplier linear
+  system that the rigid-water topology produces for the
+  velocity-level projection.
+
+Only the velocity-level kernel retains anything specifically
+SETTLE-like, and even that's because the constraint matrix
+happens to be 3×3 — there is no use of the body-frame /
+closed-form rotation that the Miyamoto-Kollman algorithm is
+named for. The position-level kernel is generic SHAKE applied
+to a fixed three-constraint cluster.
+
+This hybrid is the result of a correctness-preserving substitution:
+an earlier implementation followed the Miyamoto-Kollman analytical
+derivation but parameterised the body-frame rotation by only the
+oxygen's in-plane angle and out-of-plane tilt, capturing 2 of 3
+rotational DOFs and silently zeroing the dipole-axis rotation.
+Replacing the analytical rotation with iterative SHAKE — whose `Δr`
+is guaranteed to lie in the constraint-gradient subspace required
+for RATTLE-consistent velocity coupling — was easier to verify
+correct than fixing the parameterisation.
+
+**Migration plan.** This `settle-water` kind is expected to be
+deprecated by two follow-on features:
+
+1. A faithful **analytical SETTLE** (`kind = "settle-water-analytic"`
+   or similar) implementing the closed-form Miyamoto-Kollman 1992
+   projection — non-iterative, deterministic per-group cost, and the
+   algorithm that production MD codes mean when they say "SETTLE".
+2. A general **M-SHAKE / SHAKE+RATTLE** (`kind = "m-shake"` or
+   similar) for arbitrary rigid constraint clusters — of which
+   three-atom rigid water is the simplest special case, and which
+   would obsolete the present hardcoded 3-atom kernel.
+
+When both arrive, `settle-water` as documented here will be removed.
+Until then this file documents the current implementation honestly:
+its kernels, its iteration counts, its tolerances, and the
+constraint-virial decomposition it uses. References to "SETTLE" in
+this file refer to the *kind string* `"settle-water"`, not to the
+Miyamoto-Kollman algorithm.
 
 ## Algorithm <!-- rq-ce77d9fb -->
 
@@ -40,91 +92,133 @@ For one water group `g` with atoms `(O, H1, H2)`, masses
 unconstrained post-drift positions `(r_O', r_H1', r_H2')`, the
 `settle_positions` step computes constrained post-drift positions
 `(r_O, r_H1, r_H2)` and updates the half-step velocities `(v_O, v_H1,
-v_H2)` to reflect the position correction.
+v_H2)` to reflect the position correction. `settle_velocities`
+subsequently projects the post-kick velocities onto the velocity
+manifold of the constrained positions. The two kernels together
+implement a SHAKE position projection followed by a closed-form
+RATTLE velocity projection on the three pair-distance constraints
+of rigid water; see *Status* above for the algorithm-naming
+disclaimer.
 
-The algorithm is the closed-form projection from Miyamoto & Kollman
-1992; the present description is a per-thread restatement of it for
-the per-group dispatch this slot uses.
+### Position projection: iterative SHAKE <!-- rq-c1f9a5b3 -->
 
-1. **Centre-of-mass invariance.** Compute the centre of mass of the
-   unconstrained post-drift positions:
-   `r_C = (m_O r_O' + m_H r_H1' + m_H r_H2') / M`
-   where `M = m_O + 2 m_H`. The COM motion is unaffected by the
-   constraint (constraint forces are internal); the constrained
-   positions share this COM exactly.
-2. **Build the body frame on the pre-drift positions.** Translate the
-   pre-drift positions to their own COM
-   `r_C0 = (m_O r_O0 + m_H r_H10 + m_H r_H20) / M`, giving
-   `a0 = r_O0 - r_C0`, `b0 = r_H10 - r_C0`, `c0 = r_H20 - r_C0`. Build
-   an orthonormal frame `(X0, Y0, Z0)` from these three vectors: `Z0`
-   is normal to the molecular plane (proportional to
-   `(b0 - a0) × (c0 - a0)`); `X0` lies along the symmetry axis of the
-   canonical molecule, in the molecular plane and pointing from the
-   H–H midpoint toward O; `Y0` completes the right-handed frame.
-3. **Build the trial frame on the unconstrained post-drift COM-relative
-   positions.** Translate to the new COM:
-   `a1 = r_O' - r_C`, `b1 = r_H1' - r_C`, `c1 = r_H2' - r_C`. Express
-   them in the body frame `(X0, Y0, Z0)`:
-   `a1' = (a1 · X0, a1 · Y0, a1 · Z0)`, and similarly for `b1'`,
-   `c1'`.
-4. **Solve for the rotation.** SETTLE solves three quadratic equations
-   (two for the rotation about `Z0` aligning the H–H midpoint to the
-   new H–H midpoint, plus the constraint-distance condition) in
-   closed form, giving two trigonometric quantities
-   `(sin φ, cos φ)` and `(sin ψ, cos ψ)` plus a third small rotation
-   `(sin θ, cos θ)` for the out-of-plane tilt. The full derivation
-   appears in Miyamoto & Kollman 1992 §III.A; the implementation
-   follows that derivation step by step using single-precision
-   arithmetic throughout. No square root of a negative number is
-   reachable from physical inputs; should one occur (a degenerate
-   drift configuration), the kernel clamps the radicand to zero,
-   which yields the constrained positions on the boundary of the
-   feasible manifold.
-5. **Reconstruct constrained positions.** Apply the rotation to the
-   canonical body-frame positions of the rigid triangle and translate
-   back to `r_C`. The canonical body-frame positions are computed
-   once per constraint type at slot construction from `r_oh` and
-   `r_hh`:
-   - `O_body = (+r_oh cos(θ/2 - π/2), 0, 0)` along the symmetry axis,
-     with `θ = H–O–H angle = 2 asin((r_hh / 2) / r_oh)` (a derived
-     quantity).
-   - `H1_body = (-r_oh sin(θ/2 - π/2) - r_oh cos(α), -r_hh/2, 0)`.
-   - `H2_body = (-r_oh sin(θ/2 - π/2) - r_oh cos(α), +r_hh/2, 0)`.
-   - The expressions above are illustrative; the implementation uses
-     the equivalent COM-anchored form so the canonical body-frame
-     positions sum (mass-weighted) to zero exactly.
-6. **Update half-step velocities for position consistency.** For each
-   atom `i ∈ {O, H1, H2}` in the group:
-   `v_i ← v_i + (r_i_constrained - r_i_unconstrained) / dt`. This is
-   the classical SHAKE velocity correction. It preserves the
-   integrator's leapfrog half-step semantics: the corrected
-   `v(t + dt/2)` is consistent with the constrained
-   `x(t + dt)` having been reached from `x(t)` by free streaming.
+`settle_positions` solves the three pair-distance constraints
+iteratively. Index the constraints `k = 1, 2, 3` as `(O–H1)`,
+`(O–H2)`, `(H1–H2)` with target distances `d_1 = d_2 = r_oh`,
+`d_3 = r_hh`. Denote the pre-drift relative-position vectors as
+`g_k = r_i^{(0)} − r_j^{(0)}` (where `(i, j)` is the atom pair of
+constraint `k`); these are the constraint-gradient directions used
+by SHAKE.
 
-The `settle_velocities` step projects post-second-kick velocities
-`(v_O', v_H1', v_H2')` onto the constraint manifold of the
-constrained positions `(r_O, r_H1, r_H2)`. For three constraints on a
-rigid triangle, the projection is the solution of a 3×3 linear system
-in three Lagrange multipliers `(λ_OH1, λ_OH2, λ_HH)`. The system is
-constructed from the constraint Jacobian rows
-`∇_i C_k = (r_i - r_j) for constraint k coupling atoms (i, j)`, and
-solved in closed form because the 3×3 matrix has a known structure
-for a rigid water (every off-diagonal entry is half the dot product
-of two intra-group displacement vectors). The corrected velocities
-satisfy `(v_i - v_j) · (r_i - r_j) = 0` for every constraint `(i, j)`.
+Per group, starting from `r_i = r_i'` (the unconstrained post-drift
+positions, after minimum-image fix-up so all three atoms of the
+group lie in the same lattice image):
 
-The algorithm has no iteration. Every per-group computation completes
-in a fixed number of arithmetic operations.
+```text
+for iter in 0..MAX_ITER (= 32):
+    converged = true
+    for each constraint k = (i, j) with target d_k:
+        σ_k = |r_i − r_j|² − d_k²
+        if |σ_k| > tol²:                     # tol² = 1.0e-26 m²
+            converged = false
+            ddot   = (r_i − r_j) · g_k
+            inv_m  = 1/m_i + 1/m_j
+            λ_k    = σ_k / (2 · ddot · inv_m)
+            r_i   -= λ_k · g_k / m_i
+            r_j   += λ_k · g_k / m_j
+    if converged: break
+```
+
+The constraint-gradient direction `g_k` is fixed at the pre-drift
+geometry and reused across iterations; the linearised Newton step
+above brings each `|σ_k|` below `tol²` in O(1) sweeps for thermal
+MD step sizes (typically 1–2 sweeps per group at `dt = 2 fs`,
+ramping with the magnitude of the per-step unconstrained
+displacement). The cumulative position correction
+`Δr_i = r_i_constrained − r_i_unconstrained` lies in the
+constraint-gradient subspace by construction (it is a linear
+combination of the `g_k`), which is what makes the corresponding
+velocity correction `v_i ← v_i + Δr_i / dt` RATTLE-consistent at
+the leapfrog half-step.
+
+After the SHAKE loop, `settle_positions` writes the constrained
+positions back to global memory and applies the half-step
+velocity correction `v_i ← v_i + Δr_i / dt` for every atom in the
+group. It then writes the **position-level** half of the per-atom
+constraint-virial contribution; see *Constraint Virial → Decomposition*
+for the formula and the velocity-level half added later by
+`settle_velocities`.
+
+### Velocity projection: closed-form RATTLE <!-- rq-77f3ae21 -->
+
+`settle_velocities` projects the post-second-kick velocities
+`(v_O', v_H1', v_H2')` onto the velocity manifold of the
+constrained positions `(r_O, r_H1, r_H2)`. For the three pair
+constraints `k ∈ {OH1, OH2, HH}`, the velocity manifold is the
+joint kernel of the constraint Jacobian rows
+`∇_i C_k = r_i − r_j` (for atom `i` ∈ constraint `k` coupling
+atoms `(i, j)`):
+
+```text
+(v_i_corrected − v_j_corrected) · (r_i − r_j) = 0    for each k
+```
+
+Writing `v_i_corrected = v_i' − Σ_k s_k_i · λ_k · (r_i − r_j) / m_i`
+(where `s_k_i = ±1` is the sign of atom `i` in constraint `k`),
+the manifold conditions reduce to a 3×3 symmetric linear system
+`M λ = b`, with
+
+```text
+M_{kl} = Σ_atoms s_k_atom · s_l_atom · (d_k · d_l) / m_atom
+b_k    = (v_i' − v_j') · (r_i − r_j)            for constraint k = (i,j)
+```
+
+where `d_k = r_i − r_j` is the constraint-direction vector
+(post-SHAKE). The 3×3 matrix is symmetric positive-definite under
+the rigid-water geometry; `settle_velocities` solves it in
+**closed form via Cramer's rule** (a fixed number of arithmetic
+operations per group, no iteration). The Lagrange multipliers
+`λ = (λ_OH1, λ_OH2, λ_HH)` then drive a single per-atom velocity
+update:
+
+```text
+v_O   ← v_O   − (λ_OH1 · d_OH1 + λ_OH2 · d_OH2) / m_O
+v_H1  ← v_H1  + (λ_OH1 · d_OH1 − λ_HH  · d_HH ) / m_H
+v_H2  ← v_H2  + (λ_OH2 · d_OH2 + λ_HH  · d_HH ) / m_H
+```
+
+after which `(v_i − v_j) · (r_i − r_j) = 0` holds for every
+constraint to within f32 rounding.
+
+The same kernel additionally accumulates the **velocity-level**
+half of the per-atom constraint-virial contribution; see
+*Constraint Virial → Decomposition*.
+
+### Iteration count and convergence <!-- rq-7e63e0f4 -->
+
+The position-level SHAKE loop's iteration count is bounded by
+`SHAKE_MAX_ITER = 32` per group. The `tol² = 1.0e-26 m²` absolute
+tolerance corresponds to a relative tolerance of ~10⁻⁶ on a
+(10⁻¹⁰ m)² distance — well below thermal noise at MD step sizes.
+At `dt = 2 fs` and 300 K rigid water, σ_k for the H–H constraint
+is of order `(v_thermal · dt)² ≈ 10⁻²³ m²`, three orders of
+magnitude above tolerance, and the loop converges in 1–2 sweeps.
+Larger step sizes or near-pathological initial conditions raise
+the iteration count toward the 32-sweep cap; reaching the cap
+without converging is unexpected and is not currently treated as
+a hard error (the kernel exits with whatever residual remains and
+the caller observes a small constraint violation in
+`buffers.positions_*`).
 
 ## Per-Step Kernel Sequence <!-- rq-de7601cd -->
 
-| Order | Hook                                | Kernel                            | Operation                                                                                                                                              | Stage label                   |
-| ----- | ----------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- |
-| 1     | `apply_before_drift`                | `settle_snapshot`                 | copy pre-drift positions of every group's atoms into the slot's snapshot buffer                                                                        | `SettleSnapshot`              |
-| 2     | `apply_after_drift`                 | `settle_positions`                | per-group analytic projection of positions; per-group half-step velocity correction; per-atom constraint-virial contribution written to a slot buffer  | `SettlePositions`             |
-| 3     | `apply_after_kick`                  | `settle_velocities`               | per-group analytic projection of final velocities                                                                                                      | `SettleVelocities`            |
-| 4     | `apply_after_kick`                  | `settle_virial_scatter`           | per-atom-of-group scatter of the cached constraint-virial values into `buffers.virials` for the barostat                                               | `SettleVirialScatter`         |
-| 5     | `apply_position_projection_only`    | `settle_positions_no_velocity`    | per-group analytic projection of positions only (no velocity correction, no virial scratch write); used by minimization phases                         | `SettlePositionsNoVelocity`   |
+| Order | Hook                                | Kernel                            | Operation                                                                                                                                                                                       | Stage label                   |
+| ----- | ----------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
+| 1     | `apply_before_drift`                | `settle_snapshot`                 | copy pre-drift positions of every group's atoms into the slot's snapshot buffer                                                                                                                 | `SettleSnapshot`              |
+| 2     | `apply_after_drift`                 | `settle_positions`                | per-group analytic projection of positions; per-group half-step velocity correction; per-atom position-level constraint-virial contribution **written** to the slot buffer                      | `SettlePositions`             |
+| 3     | `apply_after_kick`                  | `settle_velocities`               | per-group analytic projection of final velocities; per-atom velocity-level constraint-virial contribution **added** to the same slot buffer (or skipped when `dt == 0`)                         | `SettleVelocities`            |
+| 4     | `apply_after_kick`                  | `settle_virial_scatter`           | per-atom-of-group scatter of the cached constraint-virial values (position + velocity halves summed) into `buffers.virials` for the barostat                                                    | `SettleVirialScatter`         |
+| 5     | `apply_position_projection_only`    | `settle_positions_no_velocity`    | per-group analytic projection of positions only (no velocity correction, no virial scratch write); used by minimization phases                                                                  | `SettlePositionsNoVelocity`   |
 
 All five kernels run with one thread per constraint group (or per
 constraint-group-atom for the scatter, with one thread per atom slot
@@ -140,29 +234,67 @@ not depend on a pre-drift reference frame.
 
 ## Constraint Virial <!-- rq-b5baee1d -->
 
-The SETTLE position projection in `apply_after_drift` does work on
-the system that the barostat (`c-rescale-barostat.md`,
-`berendsen-barostat.md`) must see in its instantaneous pressure
-estimate `P = (2K + W) / (3V)`. Each timestep the slot computes a
-scalar per-atom contribution
+The SETTLE constraint forces do work on the system that the
+barostat (`c-rescale-barostat.md`, `berendsen-barostat.md`) must
+see in its instantaneous pressure estimate `P = (2K + W) / (3V)`.
+The per-atom contribution has two pieces — one delivered with the
+SHAKE position projection and one delivered with the RATTLE
+velocity projection — and the slot accumulates both into a single
+per-atom scalar before scattering into `buffers.virials`.
+
+### Decomposition <!-- rq-89b7da40 -->
+
+In velocity-Verlet + SHAKE + RATTLE, the per-step constraint
+impulse is split across two half-steps:
+
+- The position projection in `apply_after_drift` (SHAKE) snaps
+  positions onto the constraint manifold and, by the standard
+  RATTLE-consistent half-step velocity update, also delivers an
+  impulse. The corresponding time-averaged constraint force is
+  `m_i · Δr_i / dt²`, where
+  `Δr_i = r_constrained_i − r_unconstrained_i`.
+- The velocity projection in `apply_after_kick` (RATTLE) snaps the
+  freshly-kicked velocities back onto the velocity manifold,
+  delivering an additional impulse. The corresponding
+  time-averaged constraint force is `m_i · Δv_i / dt`, where
+  `Δv_i` is the change applied by the RATTLE Lagrange-multiplier
+  solve.
+
+The per-atom virial entries written into the slot-owned
+`constraint_virial: CudaSlice<f32>` buffer therefore have two
+additive parts:
 
 ```text
-w_i = m_i · ((r_constrained_i − r_unconstrained_i) · r_constrained_i) / dt²
+position-level: w_i_pos = m_i · (Δr_i · r_i_COM) / dt²
+velocity-level: w_i_vel = m_i · (Δv_i · r_i_COM) / dt
 ```
 
-for every atom `i` in every constraint group. The sum
-`W_settle = Σ_i w_i` is the constraint contribution to the total
-scalar virial.
+where `r_i_COM = r_i − r_COM_mol` is the atom's COM-relative
+constrained position (used both for f32 numerical stability — see
+*Numerical stability* below — and because the within-molecule sum
+of constraint forces vanishes, so lab-frame and COM-relative forms
+of `Σ F · r` agree).
 
-Computation and scatter are split across two hook points so the
-contribution survives the in-step force evaluation:
+Recovering both halves is required for the engine to compute the
+physically correct pressure when constraint forces balance
+intermolecular forces along bond directions (the dominant case for
+SPC/E water under electrostatic cohesion). Either half alone is
+incomplete and biases the reported pressure.
 
-1. **Compute** — inside `settle_positions` during `apply_after_drift`.
-   Each thread, after solving for `r_constrained_i`, writes
-   `w_i` into a slot-owned device buffer
-   `constraint_virial: CudaSlice<f32>` of length `3 * group_count`,
-   indexed by the same `(group, local atom)` layout as `group_atoms`.
-2. **Scatter** — `settle_virial_scatter` runs at the end of
+### Computation pipeline <!-- rq-1ceb334f -->
+
+1. **Position-level compute** — inside `settle_positions` during
+   `apply_after_drift`. After solving for `r_constrained_i`, the
+   kernel writes
+   `constraint_virial[3*g+k] = m_i · (Δr_i · r_i_COM) / dt²` for
+   every atom in the group (assignment, not addition).
+2. **Velocity-level accumulate** — inside `settle_velocities` during
+   `apply_after_kick`. After applying the RATTLE velocity
+   correction, the kernel adds
+   `m_i · (Δv_i · r_i_COM) / dt` to the same
+   `constraint_virial[3*g+k]` slot (addition, not assignment, so
+   the position-level value written in step 1 is preserved).
+3. **Scatter** — `settle_virial_scatter` runs at the end of
    `apply_after_kick`, after the force evaluation has populated
    `buffers.virials` with its force-field contributions and after
    `settle_velocities` has finished. For each
@@ -170,23 +302,40 @@ contribution survives the in-step force evaluation:
    `constraint_virial[3*g+k]` to
    `buffers.virials[group_atoms[3*g+k]]`.
 
-The split is required by the per-step order in
-`constraint-framework.md`:
+The split between steps 1 and 3 is required by the per-step order
+in `constraint-framework.md`:
 `apply_before_drift → KickDrift → apply_after_drift →
 ForceEval → KickHalf → apply_after_kick → barostat`. The force
 evaluation between `apply_after_drift` and `apply_after_kick`
 overwrites `buffers.virials`, so the scatter happens *after* it.
-Writing the contribution in `apply_after_drift` (when
-`r_constrained_i − r_unconstrained_i` is freshly available) keeps
-the algorithm a single closed-form expression; the cached buffer
-defers the visible write to the correct hook.
 
 The scatter writes only to the `3 * group_count` atom slots actually
 owned by SETTLE; every other entry of `buffers.virials` is left
 unchanged. No atomics are used: each constraint group is exclusive
-to one thread in `settle_positions`, and the scatter is a per-slot
-write to a unique atom index because constraint groups have disjoint
-atom sets (the topology parser rejects overlap).
+to one thread in `settle_positions` / `settle_velocities`, and the
+scatter is a per-slot write to a unique atom index because
+constraint groups have disjoint atom sets (the topology parser
+rejects overlap).
+
+### Numerical stability <!-- rq-6c3a4f88 -->
+
+The per-atom expression `m · (Δ · r) / dt^k` (k = 2 for the
+position-level half, k = 1 for the velocity-level half) is
+implemented with the scale factor evaluated first:
+
+```c
+float scale = m / dt^k;          // ≈ O(10³)
+contribution = scale * (Δ · r);  // (Δ · r) ≈ O(10⁻²³ m²)
+```
+
+The left-associative grouping `(m · (Δ · r)) / dt^k` would form an
+intermediate `m · (Δ · r) ≈ O(10⁻⁵⁰)` that **underflows in f32**
+(smallest denormal ≈ 1.4·10⁻⁴⁵) and silently rounds to zero,
+collapsing the per-atom contribution to zero regardless of how
+much SHAKE / RATTLE actually does. The scale-first grouping keeps
+every intermediate in f32 normal range and is the only
+associativity-preserving order that does so for typical MD
+magnitudes.
 
 The empty-state and reproducibility properties documented for
 `settle_positions` and `settle_velocities` apply unchanged to the
@@ -226,9 +375,10 @@ launch the slot passes pointers to these per-type tables; each thread
 reads the row indexed by its group's `constraint_type_index`.
 
 Mass values for the three atoms of every group must be identical
-across groups that share a constraint type: the SETTLE algorithm
-assumes a single oxygen mass `m_O` and a single hydrogen mass `m_H`
-per constraint type. The slot constructor reads
+across groups that share a constraint type: the SHAKE + RATTLE
+kernels assume a single oxygen mass `m_O` and a single hydrogen
+mass `m_H` per constraint type (the inverse masses are hard-coded
+into the constraint-pair Jacobian structure). The slot constructor reads
 `config.particle_types[t].mass` for every distinct `t` that appears
 among any group's atoms and verifies the (O, H, H) mass pattern is
 consistent per constraint type; mismatch is rejected with
@@ -337,6 +487,8 @@ extern "C" __global__ void settle_velocities(
     const unsigned int *group_type_index,
     const float *type_mass_o, const float *type_mass_h,
     float lx, float ly, float lz, float xy, float xz, float yz,
+    float dt,
+    float *constraint_virial,
     unsigned int n_groups);
 
 extern "C" __global__ void settle_virial_scatter(
@@ -389,9 +541,13 @@ For group `g`:
    relative to `a_O` before forming the body frame, then unwraps the
    final constrained positions back to the primary image after the
    projection.
-7. Executes the closed-form algorithm in §III.A of Miyamoto & Kollman
-   1992 to produce constrained positions in the same frame as the
-   unconstrained positions.
+7. Executes the iterative SHAKE loop documented in
+   *Algorithm → Position projection: iterative SHAKE* — up to
+   `SHAKE_MAX_ITER = 32` sweeps over the three pair constraints,
+   each sweep applying the linearised Lagrange-multiplier update
+   `r_i -= λ_k · g_k / m_i` for any constraint whose residual
+   `|σ_k| > 10⁻²⁶ m²`. The pre-drift snapshot supplies the
+   constraint-gradient directions `g_k` reused across iterations.
 8. Writes constrained positions back to `positions_{x,y,z}[a_*]`.
 9. Writes corrected half-step velocities back to
    `velocities_{x,y,z}[a_*]` using `v_i ← v_i + (r_constrained - r_unconstrained) / dt`.
@@ -408,7 +564,7 @@ The kernel writes only the nine `f32` slots `positions_{x,y,z}[a_O]`,
 every other entry of `constraint_virial` is untouched.
 
 The kernel does not advance `images_{x,y,z}` for the corrected
-atoms. SETTLE's position projection produces displacements at most
+atoms. The SHAKE position correction produces displacements at most
 `O(dt · v_thermal)` in magnitude — well below a half-image of any
 non-pathological simulation box — so the corrected position remains
 in the same image as the unconstrained position. The next
@@ -435,9 +591,26 @@ For group `g`:
    `v_O ← v_O - (λ_OH1 · r_OH1 + λ_OH2 · r_OH2) / m_O`,
    `v_H1 ← v_H1 + (λ_OH1 · r_OH1 - λ_HH · r_H1H2) / m_H`,
    `v_H2 ← v_H2 + (λ_OH2 · r_OH2 + λ_HH · r_H1H2) / m_H`.
+9. When `dt > 0.0f`, accumulates the per-atom velocity-level
+   constraint-virial contribution `m_i · (Δv_i · r_i_COM) / dt`
+   into `constraint_virial[3*g + k]` (additive; the position-level
+   contribution from `settle_positions` is already in this buffer
+   and must be preserved). Because the velocity correction
+   `Δv_i = ±λ_k · r_k / m_i` carries `1 / m_i`, the per-atom mass
+   cancels and the contributions reduce to
+   `(λ_OH1 / dt) · r_OH1 · r_i_COM ± …`, using the per-mass
+   COM-relative constrained position `r_i_COM = r_i − r_COM_mol`.
+   See *Constraint Virial → Decomposition* for the full formula
+   and *Numerical stability* for the operation ordering. When
+   `dt == 0.0f` (initial-velocity projection at runner setup, where
+   no associated timestep exists), this step is skipped — the
+   `constraint_virial` argument is treated as scratch and may carry
+   stale values; the next `settle_positions` overwrites it before
+   any consumer reads.
 
-The kernel writes only the nine `f32` velocity slots of the group.
-Positions are not modified.
+The kernel writes only the nine `f32` velocity slots of the group
+and (when `dt > 0`) the three slot-owned `constraint_virial` slots
+of the group. Positions are not modified.
 
 #### `settle_virial_scatter` <!-- rq-a3f15f82 -->
 
@@ -555,22 +728,34 @@ constructed with `particle_count == 0` and a non-empty group list.
 
 ## Out of Scope <!-- rq-5adb53ee -->
 
-- M-SHAKE, P-LINCS, LINCS, and every other constraint algorithm.
-  Each is the target of its own future feature; this file describes
-  only SETTLE.
+- The analytical Miyamoto-Kollman 1992 SETTLE algorithm and a
+  general M-SHAKE / P-LINCS / LINCS solver. These are the two
+  follow-on features the current `settle-water` kind is expected
+  to be deprecated by (see *Status*); they will arrive in their
+  own feature files. This file describes the current SHAKE +
+  closed-form RATTLE hybrid only.
 - Composition with `velocity-verlet { lossless = true }`. The slot's
   builder rejects the combination via the framework-level
-  `IntegratorBuilder::supports_constraints(&params)` check; lossless
-  compensated summation for SETTLE corrections is a follow-up
-  feature.
+  `IntegratorBuilder::supports_constraints(&params)` check;
+  lossless compensated summation for constraint corrections is a
+  follow-up feature.
 - Composition with `langevin-baoab` or `mtk-npt`. Same reason.
-- Per-step diagnostics (max residual, per-group iteration count).
-  SETTLE is non-iterative and the residual is zero by construction
-  (up to floating-point rounding); a diagnostic is unnecessary in
-  v1.
+- Per-step diagnostics (max constraint residual after the SHAKE
+  loop, per-group iteration count). The kernel does not currently
+  surface the per-group `iter` value or the final `σ_k` residual
+  to host. At thermal MD step sizes the loop converges in 1–2
+  sweeps and the residual is at the SHAKE tolerance
+  (~10⁻²⁶ m²), well below physical relevance; a diagnostic
+  surface for unusual step sizes or pathological initial
+  conditions is a follow-up feature.
+- Hitting the iteration cap. `SHAKE_MAX_ITER = 32` is sized
+  generously for thermal MD; reaching the cap without converging
+  is not currently treated as a hard error (the kernel exits with
+  whatever residual remains). A strict failure mode for
+  non-convergence is a follow-up feature.
 - Flexible water models (SPC/Flex, etc.). Those use the harmonic
-  bond and angle slots already in the registry; SETTLE is for rigid
-  water only.
+  bond and angle slots already in the registry; `settle-water` is
+  for rigid water only.
 - Mixed rigid/flexible bonds inside the same molecule. v1 rejects
   any pair that appears in both `[bonds]` and `[constraints]`.
 - Cross-cluster constraints (atoms appearing in more than one

@@ -1666,6 +1666,14 @@
     "title": "Open fails when the parent directory does not exist",
     "type": "scenario"
   },
+  "rq-176bca9c": {
+    "decl": "## Status: non-standard hybrid implementation, pending migration",
+    "file": "integration/settle",
+    "level": 2,
+    "refs": [],
+    "title": "Status: non-standard hybrid implementation, pending migration",
+    "type": "section"
+  },
   "rq-1775255c": {
     "decl": "## Gherkin Scenarios",
     "file": "integration/csvr",
@@ -2117,6 +2125,14 @@
     "refs": [],
     "title": "Atom with two bonds receives sum of contributions",
     "type": "scenario"
+  },
+  "rq-1ceb334f": {
+    "decl": "### Computation pipeline",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "Computation pipeline",
+    "type": "section"
   },
   "rq-1d25a0db": {
     "decl": "Scenario: Log file header includes csvr_conserved when CSVR is the thermostat",
@@ -7092,7 +7108,7 @@
     "type": "scenario"
   },
   "rq-67e62f4b": {
-    "decl": "# Feature: SETTLE Analytic Three-Atom Rigid-Water Constraint",
+    "decl": "# Feature: Rigid Three-Atom Water Constraint (`settle-water`)",
     "file": "integration/settle",
     "refs": [
       {
@@ -7104,7 +7120,7 @@
         "kind": "code"
       }
     ],
-    "title": "Feature: SETTLE Analytic Three-Atom Rigid-Water Constraint",
+    "title": "Feature: Rigid Three-Atom Water Constraint (`settle-water`)",
     "type": "file"
   },
   "rq-67ebf3b1": {
@@ -7345,6 +7361,14 @@
     "refs": [],
     "title": "Two independent rebuilds with identical positions produce identical lists",
     "type": "scenario"
+  },
+  "rq-6c3a4f88": {
+    "decl": "### Numerical stability",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "Numerical stability",
+    "type": "section"
   },
   "rq-6c52e57d": {
     "decl": "Scenario: Unwrap invariant holds across wrap_position_with_image_count",
@@ -8215,6 +8239,14 @@
     "title": "Block-non-aligned particle counts are handled by the bounds check",
     "type": "scenario"
   },
+  "rq-77f3ae21": {
+    "decl": "### Velocity projection: closed-form RATTLE",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "Velocity projection: closed-form RATTLE",
+    "type": "section"
+  },
   "rq-77f42047": {
     "decl": "Scenario: Missing compressibility rejected",
     "file": "integration/c-rescale-barostat",
@@ -8775,6 +8807,14 @@
     "title": "Usage error messages",
     "type": "section"
   },
+  "rq-7e63e0f4": {
+    "decl": "### Iteration count and convergence",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "Iteration count and convergence",
+    "type": "section"
+  },
   "rq-7e6a503c": {
     "decl": "Scenario: Round-trip through load_init_state preserves image flags",
     "file": "io/trajectory-output",
@@ -9301,6 +9341,14 @@
     "refs": [],
     "title": "Defaults populate the output section when [output] is omitted",
     "type": "scenario"
+  },
+  "rq-89b7da40": {
+    "decl": "### Decomposition",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "Decomposition",
+    "type": "section"
   },
   "rq-89b8e85c": {
     "decl": "Scenario: step() launches the expected kernel set",
@@ -12938,6 +12986,14 @@
     "refs": [],
     "title": "Feature: Pluggable Potential Slot Framework",
     "type": "file"
+  },
+  "rq-c1f9a5b3": {
+    "decl": "### Position projection: iterative SHAKE",
+    "file": "integration/settle",
+    "level": 3,
+    "refs": [],
+    "title": "Position projection: iterative SHAKE",
+    "type": "section"
   },
   "rq-c2211c85": {
     "decl": "## Parameters",

@@ -11,9 +11,9 @@ interfaces beyond the integrator's `step()` signature.
 
 The default registry exposes one constraint algorithm:
 
-| `kind` value | Implementation | File |
-| ------------ | -------------- | ---- |
-| `settle`     | analytic three-atom rigid-water projection (Miyamoto & Kollman 1992) | `settle.md` |
+| `kind` value     | Implementation                                                                            | File         |
+| ---------------- | ----------------------------------------------------------------------------------------- | ------------ |
+| `settle-water`   | non-standard hybrid: iterative SHAKE + closed-form RATTLE on three-atom rigid water (see `settle.md` *Status*; expected to be deprecated by separate analytical SETTLE and general M-SHAKE features) | `settle.md`  |
 
 The slot is selectable in any simulation whose declared integrator
 returns `IntegratorBuilder::supports_constraints(&params) == true`. In the default
@@ -294,8 +294,10 @@ where `kind` is the algorithm's kind string.
     `apply_after_drift` and `apply_after_kick` populates virials
     first and the constraint contribution is folded in afterward.
     Concrete algorithms document the exact form of their
-    contribution (see `settle.md` for SETTLE's `m · Δr · r / dt²`
-    per-atom contribution).
+    contribution (see `settle.md` for the `settle-water` two-half
+    decomposition: a position-level `m · Δr · r / dt²` part from
+    the SHAKE projection plus a velocity-level `m · Δv · r / dt`
+    part from the RATTLE projection).
   - `apply_position_projection_only` mutates only
     `buffers.positions_*`. It does not touch `buffers.velocities_*`,
     `buffers.virials`, `buffers.forces_*`, or `sim_box`, and it does

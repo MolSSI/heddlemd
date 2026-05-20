@@ -110,8 +110,17 @@ this book or in `rqm/` where the feature is documented in full.
 
 ## Rigid constraints
 
-- `settle-water` — SETTLE algorithm for rigid three-site water
-  (Miyamoto-Kollman 1992). Configurable `r_OH` and `r_HH`.
+- `settle-water` — non-standard hybrid for rigid three-site water:
+  iterative SHAKE for the position projection and closed-form RATTLE
+  (3×3 Lagrange-multiplier solve via Cramer's rule) for the velocity
+  projection. **Not** the analytical SETTLE algorithm of Miyamoto &
+  Kollman 1992 despite the name; the `settle-water` kind string and
+  kernel names are kept for source-compatibility while the
+  underlying algorithm is replaced. Expected to be deprecated by
+  two follow-on features: a faithful analytical SETTLE and a
+  general M-SHAKE / SHAKE+RATTLE for arbitrary rigid clusters. See
+  `rqm/integration/settle.md` for the current implementation.
+  Configurable `r_OH` and `r_HH`.
 - Compatible with the lossy `velocity-verlet` integrator and with the
   `steepest-descent` minimizer (position-only projection in the
   latter). Langevin BAOAB, MTK NpT, and the lossless velocity-Verlet
