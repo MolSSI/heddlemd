@@ -463,12 +463,15 @@ fn resolve_phase_and_trajectory(
         match sim_config
             .phases
             .iter()
-            .position(|p| p.name == analysis.phase)
+            .position(|p| p.name() == analysis.phase)
         {
             Some(i) => i,
             None => {
-                let available =
-                    sim_config.phases.iter().map(|p| p.name.clone()).collect();
+                let available = sim_config
+                    .phases
+                    .iter()
+                    .map(|p| p.name().to_string())
+                    .collect();
                 return Err(AnalyzeError::UnknownPhase {
                     phase: analysis.phase.clone(),
                     available,
@@ -477,9 +480,16 @@ fn resolve_phase_and_trajectory(
         }
     };
     let chosen_phase = &sim_config.phases[chosen_index];
-    analysis.phase = chosen_phase.name.clone();
+    analysis.phase = chosen_phase.name().to_string();
     if analysis.trajectory.as_os_str().is_empty() {
-        analysis.trajectory = chosen_phase.output.trajectory_path.clone();
+        match chosen_phase {
+            crate::io::PhaseKind::Md(p) => {
+                analysis.trajectory = p.output.trajectory_path.clone();
+            }
+            crate::io::PhaseKind::Minimization(m) => {
+                analysis.trajectory = m.output.trajectory_path.clone();
+            }
+        }
     }
     Ok(())
 }
@@ -494,24 +504,42 @@ fn check_path_collisions(
         (AnalysisPathRole::Trajectory, analysis.trajectory.clone()),
     ];
     for phase in &sim_config.phases {
-        entries.push((
-            AnalysisPathRole::SimulationPhaseTrajectory {
-                phase: phase.name.clone(),
-            },
-            phase.output.trajectory_path.clone(),
-        ));
-        entries.push((
-            AnalysisPathRole::SimulationPhaseLog {
-                phase: phase.name.clone(),
-            },
-            phase.output.log_path.clone(),
-        ));
-        entries.push((
-            AnalysisPathRole::SimulationPhaseTimings {
-                phase: phase.name.clone(),
-            },
-            phase.output.timings_path.clone(),
-        ));
+        match phase {
+            crate::io::PhaseKind::Md(p) => {
+                entries.push((
+                    AnalysisPathRole::SimulationPhaseTrajectory {
+                        phase: p.name.clone(),
+                    },
+                    p.output.trajectory_path.clone(),
+                ));
+                entries.push((
+                    AnalysisPathRole::SimulationPhaseLog {
+                        phase: p.name.clone(),
+                    },
+                    p.output.log_path.clone(),
+                ));
+                entries.push((
+                    AnalysisPathRole::SimulationPhaseTimings {
+                        phase: p.name.clone(),
+                    },
+                    p.output.timings_path.clone(),
+                ));
+            }
+            crate::io::PhaseKind::Minimization(m) => {
+                entries.push((
+                    AnalysisPathRole::SimulationPhaseTrajectory {
+                        phase: m.name.clone(),
+                    },
+                    m.output.trajectory_path.clone(),
+                ));
+                entries.push((
+                    AnalysisPathRole::SimulationPhaseTimings {
+                        phase: m.name.clone(),
+                    },
+                    m.output.timings_path.clone(),
+                ));
+            }
+        }
     }
     for entry in &analysis.analyses {
         entries.push((

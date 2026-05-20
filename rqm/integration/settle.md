@@ -15,19 +15,23 @@ be equal (parameter `r_oh`) and the H–H distance is the parameter
 `r_hh`. The atom listed first in each `[constraints]` row is the
 oxygen; the next two are the hydrogens, in either order.
 
-The implementation provides three CUDA kernels — `settle_positions`,
-`settle_velocities`, and `settle_virial_scatter` — and a single
-host-side slot (`SettleConstraintsState`) that owns the device-side
-per-group buffers and implements the `Constraint` trait. The slot's
-`apply_before_drift` hook snapshots pre-drift positions;
-`apply_after_drift` runs `settle_positions` to project the post-drift
-positions back onto the manifold, to correct the half-step velocities,
-and to compute each constraint atom's contribution to the constraint
-virial into a slot-owned buffer; `apply_after_kick` runs
-`settle_velocities` to project the final velocities onto the manifold,
-followed by `settle_virial_scatter` to fold the cached constraint
-virial into `buffers.virials` so the barostat sees it on the same
-timestep.
+The implementation provides four CUDA kernels — `settle_positions`,
+`settle_velocities`, `settle_virial_scatter`, and
+`settle_positions_no_velocity` — and a single host-side slot
+(`SettleConstraintsState`) that owns the device-side per-group buffers
+and implements the `Constraint` trait. The slot's `apply_before_drift`
+hook snapshots pre-drift positions; `apply_after_drift` runs
+`settle_positions` to project the post-drift positions back onto the
+manifold, to correct the half-step velocities, and to compute each
+constraint atom's contribution to the constraint virial into a
+slot-owned buffer; `apply_after_kick` runs `settle_velocities` to
+project the final velocities onto the manifold, followed by
+`settle_virial_scatter` to fold the cached constraint virial into
+`buffers.virials` so the barostat sees it on the same timestep. The
+slot's `apply_position_projection_only` hook runs
+`settle_positions_no_velocity` to perform the same position projection
+as `settle_positions` but without the half-step velocity correction
+and without writing the constraint-virial scratch.
 
 ## Algorithm <!-- rq-ce77d9fb -->
 
@@ -114,18 +118,25 @@ in a fixed number of arithmetic operations.
 
 ## Per-Step Kernel Sequence <!-- rq-de7601cd -->
 
-| Order | Hook                 | Kernel                    | Operation                                                                                                                                              | Stage label             |
-| ----- | -------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------- |
-| 1     | `apply_before_drift` | `settle_snapshot`         | copy pre-drift positions of every group's atoms into the slot's snapshot buffer                                                                        | `SettleSnapshot`        |
-| 2     | `apply_after_drift`  | `settle_positions`        | per-group analytic projection of positions; per-group half-step velocity correction; per-atom constraint-virial contribution written to a slot buffer  | `SettlePositions`       |
-| 3     | `apply_after_kick`   | `settle_velocities`       | per-group analytic projection of final velocities                                                                                                      | `SettleVelocities`      |
-| 4     | `apply_after_kick`   | `settle_virial_scatter`   | per-atom-of-group scatter of the cached constraint-virial values into `buffers.virials` for the barostat                                               | `SettleVirialScatter`   |
+| Order | Hook                                | Kernel                            | Operation                                                                                                                                              | Stage label                   |
+| ----- | ----------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------- |
+| 1     | `apply_before_drift`                | `settle_snapshot`                 | copy pre-drift positions of every group's atoms into the slot's snapshot buffer                                                                        | `SettleSnapshot`              |
+| 2     | `apply_after_drift`                 | `settle_positions`                | per-group analytic projection of positions; per-group half-step velocity correction; per-atom constraint-virial contribution written to a slot buffer  | `SettlePositions`             |
+| 3     | `apply_after_kick`                  | `settle_velocities`               | per-group analytic projection of final velocities                                                                                                      | `SettleVelocities`            |
+| 4     | `apply_after_kick`                  | `settle_virial_scatter`           | per-atom-of-group scatter of the cached constraint-virial values into `buffers.virials` for the barostat                                               | `SettleVirialScatter`         |
+| 5     | `apply_position_projection_only`    | `settle_positions_no_velocity`    | per-group analytic projection of positions only (no velocity correction, no virial scratch write); used by minimization phases                         | `SettlePositionsNoVelocity`   |
 
-All four kernels run with one thread per constraint group (or per
+All five kernels run with one thread per constraint group (or per
 constraint-group-atom for the scatter, with one thread per atom slot
 `3 * group_count`). Block size is 256; grid size is
 `ceil(work_items / 256)`. Shared memory is zero bytes. The stream is
 the default stream carried by `ParticleBuffers::device`.
+
+Hooks 1–4 fire during the MD plan walk only. Hook 5 fires during
+minimization phases only (see
+`rqm/minimization/steepest-descent.md`); the snapshot buffer is not
+consulted because the minimization projection is per-trial and does
+not depend on a pre-drift reference frame.
 
 ## Constraint Virial <!-- rq-b5baee1d -->
 
@@ -297,7 +308,7 @@ consistent per constraint type; mismatch is rejected with
 
 ### CUDA Kernels <!-- rq-744ae79d -->
 
-`kernels/settle.cu` declares four `extern "C"` kernels:
+`kernels/settle.cu` declares five `extern "C"` kernels:
 
 ```c
 extern "C" __global__ void settle_snapshot(
@@ -333,6 +344,15 @@ extern "C" __global__ void settle_virial_scatter(
     const unsigned int *group_atoms,
     float *particle_virials,
     unsigned int n_atom_slots);
+
+extern "C" __global__ void settle_positions_no_velocity(
+    float *positions_x, float *positions_y, float *positions_z,
+    const unsigned int *group_atoms,
+    const unsigned int *group_type_index,
+    const float *type_canonical_x, const float *type_canonical_y, const float *type_canonical_z,
+    const float *type_mass_o, const float *type_mass_h,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    unsigned int n_groups);
 ```
 
 Each thread computes its global group index as
@@ -437,12 +457,46 @@ The kernel writes only the `group_count` distinct atom slots covered
 by SETTLE groups. Every other entry of `particle_virials` is left
 unchanged.
 
+#### `settle_positions_no_velocity` <!-- rq-fb83923b -->
+
+For group `g`:
+
+1. Reads atom indices `(a_O, a_H1, a_H2)` from
+   `group_atoms[3*g .. 3*g+3]` and type index `t = group_type_index[g]`.
+2. Reads unconstrained positions from `positions_{x,y,z}[a_*]`.
+3. Reads canonical body-frame positions from
+   `type_canonical_{x,y,z}[3*t .. 3*t+3]`.
+4. Reads masses `m_O = type_mass_o[t]`, `m_H = type_mass_h[t]`.
+5. Computes the centre of mass of the unconstrained positions and
+   minimum-image displacements between every pair of atoms using the
+   triclinic tilt-subtraction algorithm in `simulation-box.md`.
+6. Builds the body frame directly from the unconstrained positions
+   (rather than from a separate pre-drift snapshot). Because
+   minimization has no pre-drift / post-drift distinction — there is
+   only one position state per trial — the projection target is
+   the closest point on the manifold to the unconstrained
+   positions, with the body frame oriented to minimise the rigid-
+   body rotation required to satisfy the constraint distances. This
+   is the same projection logic as `settle_positions` with the
+   "pre-drift" frame replaced by the "unconstrained" frame; the
+   closed-form solution of Miyamoto & Kollman 1992 applies
+   unchanged.
+7. Writes constrained positions back to `positions_{x,y,z}[a_*]`.
+
+The kernel writes only the nine `f32` slots
+`positions_{x,y,z}[a_O]`, `positions_{x,y,z}[a_H1]`,
+`positions_{x,y,z}[a_H2]`. It does **not** read or write
+`velocities_*`, `constraint_virial`, `forces_*`, or any other buffer.
+It does not consume `dt` (no parameter for it; minimization has no
+time scale).
+
 ### PTX Module Loading <!-- rq-ba4d55e6 -->
 
 `init_device()` loads the compiled `kernels/settle.cu` PTX as module
 `"settle"` and captures its `settle_snapshot`, `settle_positions`,
-`settle_velocities`, and `settle_virial_scatter` functions into the
-`Kernels` handle (see `build-pipeline.md`).
+`settle_velocities`, `settle_virial_scatter`, and
+`settle_positions_no_velocity` functions into the `Kernels` handle
+(see `build-pipeline.md`).
 
 ### Builder <!-- rq-a0f7c746 -->
 
@@ -718,6 +772,36 @@ Feature: SETTLE analytic three-atom rigid-water constraint
     When apply_before_drift, a vv_kick_drift, apply_after_drift, a vv_kick, then apply_after_kick are run on each
     And both buffers are downloaded
     Then every f32 and u32 array of run A is byte-identical to run B
+
+  # --- apply_position_projection_only (minimization hook) ---
+
+  @rq-57d0aebf
+  Scenario: settle_positions_no_velocity restores constraint distances from off-manifold positions
+    Given one SPCE water at the equilibrium geometry stretched by +5% on the O-H1 bond
+    When apply_position_projection_only is called
+    Then |r_O - r_H1| equals r_oh within relative tolerance 1.0e-6
+    And |r_O - r_H2| equals r_oh within relative tolerance 1.0e-6
+    And |r_H1 - r_H2| equals r_hh within relative tolerance 1.0e-6
+
+  @rq-5a3bb763
+  Scenario: settle_positions_no_velocity does not modify velocities or virials
+    Given one SPCE water with arbitrary off-manifold positions, non-zero velocities, and a snapshot of buffers.virials
+    When apply_position_projection_only is called
+    Then velocities_x, velocities_y, velocities_z are byte-identical to their pre-call values
+    And buffers.virials is byte-identical to the snapshot
+    And forces_x, forces_y, forces_z are byte-identical to their pre-call values
+
+  @rq-bc7a8950
+  Scenario: settle_positions_no_velocity preserves the centre of mass of the unconstrained positions
+    Given one SPCE water with arbitrary off-manifold positions
+    When apply_position_projection_only is called
+    Then the constrained centre of mass equals the unconstrained centre of mass to within absolute tolerance 1e-14 m
+
+  @rq-173bfc40
+  Scenario: SettleBuilder reports supports_position_projection_only as true
+    Given the SettleBuilder from ConstraintRegistry::with_builtins()
+    And any well-formed settle-water params
+    Then builder.supports_position_projection_only(&params) returns true
 
   # --- End-to-end constrained dynamics on one water ---
 

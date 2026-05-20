@@ -19,6 +19,7 @@ use crate::integrator::{
     BarostatBuilder, BarostatRegistry, ConstraintBuilder, ConstraintRegistry, IntegratorBuilder,
     IntegratorRegistry, ThermostatBuilder, ThermostatRegistry,
 };
+use crate::minimizer::{MinimizerBuilder, MinimizerRegistry};
 
 #[derive(Debug)]
 pub struct Registries {
@@ -27,6 +28,7 @@ pub struct Registries {
     pub barostats: BarostatRegistry,
     pub constraint_types: ConstraintRegistry,
     pub potentials: PotentialRegistry,
+    pub minimizers: MinimizerRegistry,
     pub analyses: AnalysisRegistry,
 }
 
@@ -38,6 +40,7 @@ impl Registries {
             barostats: BarostatRegistry::with_builtins(),
             constraint_types: ConstraintRegistry::with_builtins(),
             potentials: PotentialRegistry::with_builtins(),
+            minimizers: MinimizerRegistry::with_builtins(),
             analyses: AnalysisRegistry::with_builtins(),
         }
     }
@@ -49,6 +52,7 @@ impl Registries {
             barostats: BarostatRegistry::new(),
             constraint_types: ConstraintRegistry::new(),
             potentials: PotentialRegistry::new(),
+            minimizers: MinimizerRegistry::new(),
             analyses: AnalysisRegistry::new(),
         }
     }
@@ -71,6 +75,10 @@ impl Registries {
 
     pub fn register_potential(&mut self, builder: Box<dyn PotentialBuilder>) {
         self.potentials.register(builder);
+    }
+
+    pub fn register_minimizer(&mut self, builder: Box<dyn MinimizerBuilder>) {
+        self.minimizers.register(builder);
     }
 
     pub fn register_analysis(&mut self, builder: Box<dyn AnalysisBuilder>) {

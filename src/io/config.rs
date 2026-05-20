@@ -11,6 +11,9 @@ pub enum PathRole {
     PhaseTrajectory { phase: String },
     PhaseLog { phase: String },
     PhaseTimings { phase: String },
+    MinimizationMinlog { phase: String },
+    MinimizationTrajectory { phase: String },
+    MinimizationTimings { phase: String },
 }
 
 impl std::fmt::Display for PathRole {
@@ -21,6 +24,15 @@ impl std::fmt::Display for PathRole {
             PathRole::PhaseTrajectory { phase } => write!(f, "phase `{phase}` trajectory"),
             PathRole::PhaseLog { phase } => write!(f, "phase `{phase}` log"),
             PathRole::PhaseTimings { phase } => write!(f, "phase `{phase}` timings"),
+            PathRole::MinimizationMinlog { phase } => {
+                write!(f, "minimization `{phase}` minlog")
+            }
+            PathRole::MinimizationTrajectory { phase } => {
+                write!(f, "minimization `{phase}` trajectory")
+            }
+            PathRole::MinimizationTimings { phase } => {
+                write!(f, "minimization `{phase}` timings")
+            }
         }
     }
 }
@@ -116,6 +128,66 @@ pub struct PhaseConfig {
     pub thermostat: Option<SlotConfig>,
     pub barostat: Option<SlotConfig>,
     pub output: OutputConfig,
+}
+
+/// Parsed `[[minimization]]` entry. Energy-minimization phases run
+/// the SD outer loop documented in
+/// `rqm/minimization/steepest-descent.md`.
+#[derive(Debug, Clone)]
+pub struct MinimizationConfig {
+    pub name: String,
+    pub algorithm: SlotConfig,
+    pub output: MinimizationOutputConfig,
+}
+
+/// Resolved per-phase outputs for a `[[minimization]]` entry.
+#[derive(Debug, Clone)]
+pub struct MinimizationOutputConfig {
+    pub minlog_path: PathBuf,
+    pub minlog_every: u64,
+    pub trajectory_path: PathBuf,
+    pub trajectory_every: u64,
+    pub include_images: bool,
+    pub timings_path: PathBuf,
+}
+
+/// Discriminated union over the unified phase sequence. The runner
+/// walks `Config::phases: Vec<PhaseKind>` in source-document order
+/// (see `Phase kinds` in `rqm/io/config-schema.md`).
+#[derive(Debug, Clone)]
+pub enum PhaseKind {
+    Md(PhaseConfig),
+    Minimization(MinimizationConfig),
+}
+
+impl PhaseKind {
+    pub fn name(&self) -> &str {
+        match self {
+            PhaseKind::Md(p) => &p.name,
+            PhaseKind::Minimization(m) => &m.name,
+        }
+    }
+
+    pub fn timings_path(&self) -> &Path {
+        match self {
+            PhaseKind::Md(p) => &p.output.timings_path,
+            PhaseKind::Minimization(m) => &m.output.timings_path,
+        }
+    }
+
+    pub fn as_md(&self) -> Option<&PhaseConfig> {
+        match self {
+            PhaseKind::Md(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    pub fn as_minimization(&self) -> Option<&MinimizationConfig> {
+        match self {
+            PhaseKind::Minimization(m) => Some(m),
+            _ => None,
+        }
+    }
 }
 
 // rq-661bf664 rq-686b0d37
@@ -369,7 +441,11 @@ pub struct Config {
     pub init: PathBuf,
     pub topology: Option<PathBuf>,
     pub simulation: SimulationConfig,
-    pub phases: Vec<PhaseConfig>,
+    /// Unified phase sequence in source-document order: each entry is
+    /// either a `PhaseKind::Md(PhaseConfig)` from a `[[phase]]` table
+    /// or a `PhaseKind::Minimization(MinimizationConfig)` from a
+    /// `[[minimization]]` table.
+    pub phases: Vec<PhaseKind>,
     pub particle_types: Vec<ParticleTypeConfig>,
     pub pair_interactions: Vec<PairInteractionConfig>,
     pub bond_types: Vec<BondTypeConfig>,
@@ -418,7 +494,9 @@ struct RawConfig {
     topology: Option<String>,
     simulation: SimulationConfig,
     #[serde(default, rename = "phase")]
-    phases: Vec<RawPhaseConfig>,
+    phases: Vec<toml::Spanned<RawPhaseConfig>>,
+    #[serde(default, rename = "minimization")]
+    minimizations: Vec<toml::Spanned<RawMinimizationConfig>>,
     particle_types: Vec<ParticleTypeConfig>,
     #[serde(default)]
     pair_interactions: Vec<RawPairInteraction>,
@@ -434,6 +512,36 @@ struct RawConfig {
     spme: Option<SpmeConfig>,
     #[serde(default)]
     neighbor_list: Option<RawNeighborList>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMinimizationConfig {
+    name: String,
+    algorithm: SlotConfig,
+    #[serde(default)]
+    output: Option<RawMinimizationOutputConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMinimizationOutputConfig {
+    #[serde(default)]
+    minlog_path: Option<String>,
+    #[serde(default = "default_minlog_every")]
+    minlog_every: u64,
+    #[serde(default)]
+    trajectory_path: Option<String>,
+    #[serde(default)]
+    trajectory_every: u64,
+    #[serde(default = "default_true")]
+    include_images: bool,
+    #[serde(default)]
+    timings_path: Option<String>,
+}
+
+fn default_minlog_every() -> u64 {
+    1
 }
 
 #[derive(Debug, Deserialize)]
@@ -634,12 +742,49 @@ fn serde_error_to_config_error(
 }
 
 fn strip_phase_prefix(path: &str) -> String {
+    // `[[phase]]` and `[[minimization]]` deserialise through
+    // `toml::Spanned<T>`, which inserts an internal
+    // `$__serde_spanned_private_value` segment in the serde_path_to_error
+    // path. Strip it so error paths look the same whether the entry was
+    // wrapped or not.
+    let path = strip_spanned_prefix(path, "phase");
+    let path = strip_spanned_prefix(&path, "minimization");
     // Match `phase[N]` or `phase[N].`; strip both the bracket section
     // and any trailing `.`.
     if let Some(rest) = path.strip_prefix("phase[") {
         if let Some(end) = rest.find(']') {
             let after = &rest[end + 1..];
             return after.strip_prefix('.').unwrap_or(after).to_string();
+        }
+    }
+    if let Some(rest) = path.strip_prefix("minimization[") {
+        if let Some(end) = rest.find(']') {
+            let after = &rest[end + 1..];
+            return after.strip_prefix('.').unwrap_or(after).to_string();
+        }
+    }
+    path.to_string()
+}
+
+// Collapse a `toml::Spanned<T>` path segment by removing the internal
+// `$__serde_spanned_private_value` marker. After the Spanned wrap the
+// path of a `[[phase]]` (or `[[minimization]]`) entry's field looks
+// like `phase[N].$__serde_spanned_private_value.integrator` (or
+// `minimization[N].$__serde_spanned_private_value.algorithm`); we
+// strip the marker so the remaining path looks the same as before
+// wrapping.
+fn strip_spanned_prefix(path: &str, field: &str) -> String {
+    let needle_with_idx = format!("{field}[");
+    if let Some(idx) = path.find(&needle_with_idx) {
+        // Skip past `field[N]`.
+        let after_bracket = &path[idx + needle_with_idx.len()..];
+        if let Some(close) = after_bracket.find(']') {
+            let prefix = &path[..idx + needle_with_idx.len() + close + 1];
+            let rest = &after_bracket[close + 1..];
+            let stripped = rest
+                .strip_prefix(".$__serde_spanned_private_value")
+                .unwrap_or(rest);
+            return format!("{prefix}{stripped}");
         }
     }
     path.to_string()
@@ -801,60 +946,135 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
     // Per-phase output paths default to
     // `<root>.out.<phase-name>.{xyz,log,timings}` when the per-phase
     // `[phase.output]` block is absent or its individual fields are
-    // omitted.
-    let phases: Vec<PhaseConfig> = raw
-        .phases
+    // omitted. The merged sequence preserves source-document order
+    // by sorting both `[[phase]]` and `[[minimization]]` entries by
+    // their byte-span start (via `toml::Spanned<T>`).
+    enum SpannedEntry {
+        Md(toml::Spanned<RawPhaseConfig>),
+        Min(toml::Spanned<RawMinimizationConfig>),
+    }
+    impl SpannedEntry {
+        fn span_start(&self) -> usize {
+            match self {
+                SpannedEntry::Md(s) => s.span().start,
+                SpannedEntry::Min(s) => s.span().start,
+            }
+        }
+    }
+    let mut entries: Vec<SpannedEntry> = Vec::with_capacity(
+        raw.phases.len() + raw.minimizations.len(),
+    );
+    for p in raw.phases {
+        entries.push(SpannedEntry::Md(p));
+    }
+    for m in raw.minimizations {
+        entries.push(SpannedEntry::Min(m));
+    }
+    entries.sort_by_key(|e| e.span_start());
+
+    let phases: Vec<PhaseKind> = entries
         .into_iter()
-        .map(|p| {
-            let name = p.name;
-            let output = match p.output {
-                None => OutputConfig {
-                    trajectory_path: base_dir
-                        .join(format!("{config_root}.out.{name}.xyz")),
-                    trajectory_every: default_trajectory_every(),
-                    include_velocities: true,
-                    include_images: true,
-                    log_path: base_dir.join(format!("{config_root}.out.{name}.log")),
-                    log_every: default_log_every(),
-                    timings_path: base_dir
-                        .join(format!("{config_root}.out.{name}.timings")),
-                },
-                Some(o) => OutputConfig {
-                    trajectory_path: o
-                        .trajectory_path
-                        .as_deref()
-                        .map(|s| resolve_path(base_dir, s))
-                        .unwrap_or_else(|| {
-                            base_dir.join(format!("{config_root}.out.{name}.xyz"))
-                        }),
-                    trajectory_every: o.trajectory_every,
-                    include_velocities: o.include_velocities,
-                    include_images: o.include_images,
-                    log_path: o
-                        .log_path
-                        .as_deref()
-                        .map(|s| resolve_path(base_dir, s))
-                        .unwrap_or_else(|| {
-                            base_dir.join(format!("{config_root}.out.{name}.log"))
-                        }),
-                    log_every: o.log_every,
-                    timings_path: o
-                        .timings_path
-                        .as_deref()
-                        .map(|s| resolve_path(base_dir, s))
-                        .unwrap_or_else(|| {
-                            base_dir.join(format!("{config_root}.out.{name}.timings"))
-                        }),
-                },
-            };
-            PhaseConfig {
-                name,
-                n_steps: p.n_steps,
-                dt: p.dt,
-                integrator: p.integrator,
-                thermostat: p.thermostat,
-                barostat: p.barostat,
-                output,
+        .map(|entry| match entry {
+            SpannedEntry::Md(spanned) => {
+                let p = spanned.into_inner();
+                let name = p.name;
+                let output = match p.output {
+                    None => OutputConfig {
+                        trajectory_path: base_dir
+                            .join(format!("{config_root}.out.{name}.xyz")),
+                        trajectory_every: default_trajectory_every(),
+                        include_velocities: true,
+                        include_images: true,
+                        log_path: base_dir.join(format!("{config_root}.out.{name}.log")),
+                        log_every: default_log_every(),
+                        timings_path: base_dir
+                            .join(format!("{config_root}.out.{name}.timings")),
+                    },
+                    Some(o) => OutputConfig {
+                        trajectory_path: o
+                            .trajectory_path
+                            .as_deref()
+                            .map(|s| resolve_path(base_dir, s))
+                            .unwrap_or_else(|| {
+                                base_dir.join(format!("{config_root}.out.{name}.xyz"))
+                            }),
+                        trajectory_every: o.trajectory_every,
+                        include_velocities: o.include_velocities,
+                        include_images: o.include_images,
+                        log_path: o
+                            .log_path
+                            .as_deref()
+                            .map(|s| resolve_path(base_dir, s))
+                            .unwrap_or_else(|| {
+                                base_dir.join(format!("{config_root}.out.{name}.log"))
+                            }),
+                        log_every: o.log_every,
+                        timings_path: o
+                            .timings_path
+                            .as_deref()
+                            .map(|s| resolve_path(base_dir, s))
+                            .unwrap_or_else(|| {
+                                base_dir.join(format!("{config_root}.out.{name}.timings"))
+                            }),
+                    },
+                };
+                PhaseKind::Md(PhaseConfig {
+                    name,
+                    n_steps: p.n_steps,
+                    dt: p.dt,
+                    integrator: p.integrator,
+                    thermostat: p.thermostat,
+                    barostat: p.barostat,
+                    output,
+                })
+            }
+            SpannedEntry::Min(spanned) => {
+                let m = spanned.into_inner();
+                let name = m.name;
+                let output = match m.output {
+                    None => MinimizationOutputConfig {
+                        minlog_path: base_dir
+                            .join(format!("{config_root}.out.{name}.minlog")),
+                        minlog_every: default_minlog_every(),
+                        trajectory_path: base_dir
+                            .join(format!("{config_root}.out.{name}.xyz")),
+                        trajectory_every: 0,
+                        include_images: true,
+                        timings_path: base_dir
+                            .join(format!("{config_root}.out.{name}.timings")),
+                    },
+                    Some(o) => MinimizationOutputConfig {
+                        minlog_path: o
+                            .minlog_path
+                            .as_deref()
+                            .map(|s| resolve_path(base_dir, s))
+                            .unwrap_or_else(|| {
+                                base_dir.join(format!("{config_root}.out.{name}.minlog"))
+                            }),
+                        minlog_every: o.minlog_every,
+                        trajectory_path: o
+                            .trajectory_path
+                            .as_deref()
+                            .map(|s| resolve_path(base_dir, s))
+                            .unwrap_or_else(|| {
+                                base_dir.join(format!("{config_root}.out.{name}.xyz"))
+                            }),
+                        trajectory_every: o.trajectory_every,
+                        include_images: o.include_images,
+                        timings_path: o
+                            .timings_path
+                            .as_deref()
+                            .map(|s| resolve_path(base_dir, s))
+                            .unwrap_or_else(|| {
+                                base_dir.join(format!("{config_root}.out.{name}.timings"))
+                            }),
+                    },
+                };
+                PhaseKind::Minimization(MinimizationConfig {
+                    name,
+                    algorithm: m.algorithm,
+                    output,
+                })
             }
         })
         .collect();
@@ -954,65 +1174,80 @@ impl Config {
             })?;
         }
 
-        // Per-phase integrator / thermostat / barostat validation and
-        // compatibility checks.
+        // Per-phase validation. MD and minimization phases follow
+        // distinct dispatch paths.
         for phase in &self.phases {
-            let integ_builder = registries
-                .integrators
-                .lookup(&phase.integrator.kind)
-                .ok_or_else(|| ConfigError::UnknownKind {
-                    slot: "integrator",
-                    kind: phase.integrator.kind.clone(),
-                })?;
-            integ_builder.validate_params(&phase.integrator.params)?;
+            match phase {
+                PhaseKind::Md(md) => {
+                    let integ_builder = registries
+                        .integrators
+                        .lookup(&md.integrator.kind)
+                        .ok_or_else(|| ConfigError::UnknownKind {
+                            slot: "integrator",
+                            kind: md.integrator.kind.clone(),
+                        })?;
+                    integ_builder.validate_params(&md.integrator.params)?;
 
-            if let Some(t) = &phase.thermostat {
-                let b = registries.thermostats.lookup(&t.kind).ok_or_else(|| {
-                    ConfigError::UnknownKind {
-                        slot: "thermostat",
-                        kind: t.kind.clone(),
+                    if let Some(t) = &md.thermostat {
+                        let b = registries.thermostats.lookup(&t.kind).ok_or_else(
+                            || ConfigError::UnknownKind {
+                                slot: "thermostat",
+                                kind: t.kind.clone(),
+                            },
+                        )?;
+                        b.validate_params(&t.params)?;
                     }
-                })?;
-                b.validate_params(&t.params)?;
-            }
 
-            if let Some(b) = &phase.barostat {
-                let bb = registries.barostats.lookup(&b.kind).ok_or_else(|| {
-                    ConfigError::UnknownKind {
-                        slot: "barostat",
-                        kind: b.kind.clone(),
+                    if let Some(b) = &md.barostat {
+                        let bb = registries.barostats.lookup(&b.kind).ok_or_else(
+                            || ConfigError::UnknownKind {
+                                slot: "barostat",
+                                kind: b.kind.clone(),
+                            },
+                        )?;
+                        bb.validate_params(&b.params)?;
                     }
-                })?;
-                bb.validate_params(&b.params)?;
-            }
 
-            // Integrator-owns-thermostat / integrator-owns-barostat
-            // compatibility, per phase.
-            if phase.thermostat.is_some()
-                && integ_builder.owns_thermostat(&phase.integrator.params)
-            {
-                return Err(ConfigError::IncompatibleThermostat {
-                    integrator: phase.integrator.kind.clone(),
-                    phase: phase.name.clone(),
-                });
-            }
-            if phase.barostat.is_some()
-                && integ_builder.owns_barostat(&phase.integrator.params)
-            {
-                return Err(ConfigError::IncompatibleBarostat {
-                    integrator: phase.integrator.kind.clone(),
-                    phase: phase.name.clone(),
-                });
+                    // Integrator-owns-thermostat / integrator-owns-
+                    // barostat compatibility, per phase.
+                    if md.thermostat.is_some()
+                        && integ_builder.owns_thermostat(&md.integrator.params)
+                    {
+                        return Err(ConfigError::IncompatibleThermostat {
+                            integrator: md.integrator.kind.clone(),
+                            phase: md.name.clone(),
+                        });
+                    }
+                    if md.barostat.is_some()
+                        && integ_builder.owns_barostat(&md.integrator.params)
+                    {
+                        return Err(ConfigError::IncompatibleBarostat {
+                            integrator: md.integrator.kind.clone(),
+                            phase: md.name.clone(),
+                        });
+                    }
+                }
+                PhaseKind::Minimization(min) => {
+                    let mb = registries.minimizers.lookup(&min.algorithm.kind).ok_or_else(
+                        || ConfigError::UnknownKind {
+                            slot: "minimization",
+                            kind: min.algorithm.kind.clone(),
+                        },
+                    )?;
+                    mb.validate_params(&min.algorithm.params)?;
+                }
             }
         }
         Ok(())
     }
 
-    /// Topology-coupled cross-validation: rejects a non-empty constraint
-    /// list when the chosen integrator's builder
-    /// `IntegratorBuilder::supports_constraints(&params)` returns `false`.
-    /// The runner calls this after `load_topology_file` so the check
-    /// can see the parsed `[constraints]` section.
+    /// Topology-coupled cross-validation. For every MD phase: rejects
+    /// a non-empty constraint list when the chosen integrator's
+    /// builder `IntegratorBuilder::supports_constraints(&params)`
+    /// returns `false`. For every minimization phase: rejects a
+    /// non-empty constraint list when any registered constraint-type
+    /// builder reports
+    /// `ConstraintBuilder::supports_position_projection_only(&params) == false`.
     pub fn validate_constraint_compatibility(
         &self,
         registries: &crate::Registries,
@@ -1022,18 +1257,45 @@ impl Config {
             return Ok(());
         }
         for phase in &self.phases {
-            let integ_builder = registries
-                .integrators
-                .lookup(&phase.integrator.kind)
-                .ok_or_else(|| ConfigError::UnknownKind {
-                    slot: "integrator",
-                    kind: phase.integrator.kind.clone(),
-                })?;
-            if !integ_builder.supports_constraints(&phase.integrator.params) {
-                return Err(ConfigError::IncompatibleConstraint {
-                    integrator: phase.integrator.kind.clone(),
-                    phase: phase.name.clone(),
-                });
+            match phase {
+                PhaseKind::Md(md) => {
+                    let integ_builder = registries
+                        .integrators
+                        .lookup(&md.integrator.kind)
+                        .ok_or_else(|| ConfigError::UnknownKind {
+                            slot: "integrator",
+                            kind: md.integrator.kind.clone(),
+                        })?;
+                    if !integ_builder.supports_constraints(&md.integrator.params) {
+                        return Err(ConfigError::IncompatibleConstraint {
+                            integrator: md.integrator.kind.clone(),
+                            phase: md.name.clone(),
+                        });
+                    }
+                }
+                PhaseKind::Minimization(min) => {
+                    // Cross-check every registered constraint type: if
+                    // any reports `supports_position_projection_only =
+                    // false`, the combination with this minimization
+                    // phase is rejected. In the default registry
+                    // SETTLE returns `true`, so this branch is
+                    // reachable only with custom builders.
+                    for ct in &self.constraint_types {
+                        let cb = registries
+                            .constraint_types
+                            .lookup(&ct.kind)
+                            .ok_or_else(|| ConfigError::UnknownKind {
+                                slot: "constraint_types",
+                                kind: ct.kind.clone(),
+                            })?;
+                        if !cb.supports_position_projection_only(&ct.params) {
+                            return Err(ConfigError::IncompatibleConstraint {
+                                integrator: min.algorithm.kind.clone(),
+                                phase: min.name.clone(),
+                            });
+                        }
+                    }
+                }
             }
         }
         Ok(())
@@ -1086,47 +1348,59 @@ fn validate_simulation(s: &SimulationConfig) -> Result<(), ConfigError> {
     Ok(())
 }
 
-// rq-18441e33 — per-phase structural validation: non-empty array,
-// non-empty/ASCII-only/unique names, finite positive dt, plus the
-// cross-phase seed-uniqueness rule (no two stochastic slots of the
-// same kind across all phases may share a seed).
-fn validate_phases(phases: &[PhaseConfig]) -> Result<(), ConfigError> {
+// rq-18441e33 — per-phase structural validation: non-empty merged
+// phase sequence, non-empty/ASCII-only/unique names, finite positive
+// dt (MD only), plus the cross-phase seed-uniqueness rule (no two
+// stochastic slots of the same kind across all phases may share a
+// seed).
+fn validate_phases(phases: &[PhaseKind]) -> Result<(), ConfigError> {
     if phases.is_empty() {
         return Err(ConfigError::EmptyPhases);
     }
     let mut seen: std::collections::HashSet<&str> =
         std::collections::HashSet::with_capacity(phases.len());
     for (i, p) in phases.iter().enumerate() {
-        if p.name.is_empty() {
+        let (name, is_min) = match p {
+            PhaseKind::Md(md) => (md.name.as_str(), false),
+            PhaseKind::Minimization(min) => (min.name.as_str(), true),
+        };
+        let label = if is_min { "minimization" } else { "phase" };
+        if name.is_empty() {
             return Err(invalid(
-                format!("phase[{i}].name"),
+                format!("{label}[{i}].name"),
                 "must be non-empty",
             ));
         }
-        if !p.name
+        if !name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
             return Err(invalid(
-                format!("phase[{i}].name"),
+                format!("{label}[{i}].name"),
                 "must contain only ASCII letters, digits, `-`, and `_`",
             ));
         }
-        if !seen.insert(p.name.as_str()) {
+        if !seen.insert(name) {
             return Err(ConfigError::DuplicatePhaseName {
-                name: p.name.clone(),
+                name: name.to_string(),
             });
         }
-        require_finite_positive(&format!("phase[{i}].dt"), p.dt)?;
+        if let PhaseKind::Md(md) = p {
+            require_finite_positive(&format!("phase[{i}].dt"), md.dt)?;
+        }
     }
 
     // Cross-phase seed uniqueness: collect (kind, seed) for every
-    // stochastic slot across every phase and reject duplicates.
+    // stochastic slot across every MD phase and reject duplicates.
     let mut seed_seen: std::collections::HashMap<(String, u64), ()> =
         std::collections::HashMap::new();
     for p in phases {
-        if let Some(seed) = extract_slot_seed(&p.integrator) {
-            let key = (p.integrator.kind.clone(), seed);
+        let md = match p {
+            PhaseKind::Md(md) => md,
+            _ => continue,
+        };
+        if let Some(seed) = extract_slot_seed(&md.integrator) {
+            let key = (md.integrator.kind.clone(), seed);
             if seed_seen.insert(key.clone(), ()).is_some() {
                 return Err(ConfigError::DuplicatePhaseSeed {
                     kind: key.0,
@@ -1134,7 +1408,7 @@ fn validate_phases(phases: &[PhaseConfig]) -> Result<(), ConfigError> {
                 });
             }
         }
-        if let Some(t) = &p.thermostat {
+        if let Some(t) = &md.thermostat {
             if let Some(seed) = extract_slot_seed(t) {
                 let key = (t.kind.clone(), seed);
                 if seed_seen.insert(key.clone(), ()).is_some() {
@@ -1145,7 +1419,7 @@ fn validate_phases(phases: &[PhaseConfig]) -> Result<(), ConfigError> {
                 }
             }
         }
-        if let Some(b) = &p.barostat {
+        if let Some(b) = &md.barostat {
             if let Some(seed) = extract_slot_seed(b) {
                 let key = (b.kind.clone(), seed);
                 if seed_seen.insert(key.clone(), ()).is_some() {
@@ -1408,25 +1682,49 @@ fn check_path_collisions(config: &Config) -> Result<(), ConfigError> {
     if let Some(p) = config.topology.as_deref() {
         entries.push((PathRole::Topology, p.to_path_buf()));
     }
-    for p in &config.phases {
-        entries.push((
-            PathRole::PhaseTrajectory {
-                phase: p.name.clone(),
-            },
-            p.output.trajectory_path.clone(),
-        ));
-        entries.push((
-            PathRole::PhaseLog {
-                phase: p.name.clone(),
-            },
-            p.output.log_path.clone(),
-        ));
-        entries.push((
-            PathRole::PhaseTimings {
-                phase: p.name.clone(),
-            },
-            p.output.timings_path.clone(),
-        ));
+    for phase in &config.phases {
+        match phase {
+            PhaseKind::Md(p) => {
+                entries.push((
+                    PathRole::PhaseTrajectory {
+                        phase: p.name.clone(),
+                    },
+                    p.output.trajectory_path.clone(),
+                ));
+                entries.push((
+                    PathRole::PhaseLog {
+                        phase: p.name.clone(),
+                    },
+                    p.output.log_path.clone(),
+                ));
+                entries.push((
+                    PathRole::PhaseTimings {
+                        phase: p.name.clone(),
+                    },
+                    p.output.timings_path.clone(),
+                ));
+            }
+            PhaseKind::Minimization(m) => {
+                entries.push((
+                    PathRole::MinimizationMinlog {
+                        phase: m.name.clone(),
+                    },
+                    m.output.minlog_path.clone(),
+                ));
+                entries.push((
+                    PathRole::MinimizationTrajectory {
+                        phase: m.name.clone(),
+                    },
+                    m.output.trajectory_path.clone(),
+                ));
+                entries.push((
+                    PathRole::MinimizationTimings {
+                        phase: m.name.clone(),
+                    },
+                    m.output.timings_path.clone(),
+                ));
+            }
+        }
     }
 
     for i in 0..entries.len() {

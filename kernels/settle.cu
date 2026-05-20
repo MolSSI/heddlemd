@@ -99,11 +99,6 @@ extern "C" __global__ void settle_positions(
     return;
   }
   unsigned int base = 3u * g;
-  // Zero this group's slot in `constraint_virial` up front. On the
-  // success path each slot is overwritten with the computed
-  // per-atom virial contribution before kernel exit; on a degenerate
-  // early-return path the slot remains zero, which matches the
-  // no-op correction those paths perform.
   constraint_virial[base + 0] = 0.0f;
   constraint_virial[base + 1] = 0.0f;
   constraint_virial[base + 2] = 0.0f;
@@ -113,23 +108,33 @@ extern "C" __global__ void settle_positions(
   unsigned int a_h1 = group_atoms[base + 1];
   unsigned int a_h2 = group_atoms[base + 2];
 
-  // Canonical body-frame positions (mass-weighted COM at origin).
-  // Stored layout: indices 3t+0 = O, 3t+1 = H1, 3t+2 = H2.
+  // Canonical body-frame positions are used only to derive the
+  // target pair distances r_OH and r_HH. They are no longer used
+  // to place atoms directly: the position projection is the
+  // iterative SHAKE solver below, which finds the constrained
+  // positions as r_uncon + Σ_k λ_k · ∇_k C_k(r_old). That form is
+  // the unique projection in the constraint-gradient subspace, and
+  // the corresponding velocity correction `v ← v + Δr/dt`
+  // therefore implements RATTLE-consistent leapfrog. Replacing the
+  // Miyamoto-Kollman analytical rotation with SHAKE removes the
+  // tangential-Δr component that breaks the energy conservation
+  // of the constrained velocity-Verlet integrator.
   float ox_b = type_canonical_x[3u * t + 0];
-  float oy_b = type_canonical_y[3u * t + 0];
-  float oz_b = type_canonical_z[3u * t + 0];
   float h1x_b = type_canonical_x[3u * t + 1];
   float h1y_b = type_canonical_y[3u * t + 1];
-  float h1z_b = type_canonical_z[3u * t + 1];
-  float h2x_b = type_canonical_x[3u * t + 2];
   float h2y_b = type_canonical_y[3u * t + 2];
-  float h2z_b = type_canonical_z[3u * t + 2];
+  float r_OH2 =
+      (ox_b - h1x_b) * (ox_b - h1x_b) + h1y_b * h1y_b;
+  // Canonical H1 and H2 have the same x and z (z = 0), so
+  // r_HH² = (h1y_b - h2y_b)² = 4 · h2y_b² (since h1y_b = -h2y_b).
+  float r_HH2 = 4.0f * h2y_b * h2y_b;
 
   float m_o = type_mass_o[t];
   float m_h = type_mass_h[t];
-  float total_mass = m_o + 2.0f * m_h;
+  float inv_m_o = 1.0f / m_o;
+  float inv_m_h = 1.0f / m_h;
 
-  // Pre-drift positions in the same image as the snapshot.
+  // Pre-drift positions (gradients of C are evaluated here).
   float ox0 = snapshot_x[base + 0];
   float oy0 = snapshot_y[base + 0];
   float oz0 = snapshot_z[base + 0];
@@ -139,11 +144,16 @@ extern "C" __global__ void settle_positions(
   float h2x0 = snapshot_x[base + 2];
   float h2y0 = snapshot_y[base + 2];
   float h2z0 = snapshot_z[base + 2];
-  // Bring snapshot hydrogens into the oxygen's image.
   min_image_to(ox0, oy0, oz0, h1x0, h1y0, h1z0, lx, ly, lz, xy, xz, yz);
   min_image_to(ox0, oy0, oz0, h2x0, h2y0, h2z0, lx, ly, lz, xy, xz, yz);
 
-  // Unconstrained post-drift positions; same image fix-up.
+  // Pre-drift constraint-gradient directions (per-constraint, paired
+  // atoms; sign convention: r_i_old − r_j_old for the (i, j) pair).
+  float g_oh1_x = ox0 - h1x0, g_oh1_y = oy0 - h1y0, g_oh1_z = oz0 - h1z0;
+  float g_oh2_x = ox0 - h2x0, g_oh2_y = oy0 - h2y0, g_oh2_z = oz0 - h2z0;
+  float g_hh_x  = h1x0 - h2x0, g_hh_y  = h1y0 - h2y0, g_hh_z  = h1z0 - h2z0;
+
+  // Unconstrained post-drift positions.
   float ox_u = positions_x[a_o];
   float oy_u = positions_y[a_o];
   float oz_u = positions_z[a_o];
@@ -156,175 +166,93 @@ extern "C" __global__ void settle_positions(
   min_image_to(ox_u, oy_u, oz_u, h1x_u, h1y_u, h1z_u, lx, ly, lz, xy, xz, yz);
   min_image_to(ox_u, oy_u, oz_u, h2x_u, h2y_u, h2z_u, lx, ly, lz, xy, xz, yz);
 
-  // COMs of pre-drift and unconstrained post-drift.
-  float cx0, cy0, cz0;
-  weighted_com(ox0, oy0, oz0, h1x0, h1y0, h1z0, h2x0, h2y0, h2z0,
-               m_o, m_h, total_mass, cx0, cy0, cz0);
+  // SHAKE iterates. Start at the unconstrained positions; each
+  // iteration walks the three constraints in fixed order and
+  // applies the Lagrange-multiplier-style correction
+  //   r_i ← r_i − λ · (r_i_old − r_j_old) / m_i
+  //   r_j ← r_j + λ · (r_i_old − r_j_old) / m_j
+  // where λ = σ / (2 · (r_i − r_j) · (r_i_old − r_j_old) · (1/m_i + 1/m_j))
+  // and σ = |r_i − r_j|² − r_target². Convergence is quadratic for
+  // small displacements and typically completes in well under 10
+  // sweeps for rigid water at thermal MD step sizes.
+  float ox_c = ox_u, oy_c = oy_u, oz_c = oz_u;
+  float h1x_c = h1x_u, h1y_c = h1y_u, h1z_c = h1z_u;
+  float h2x_c = h2x_u, h2y_c = h2y_u, h2z_c = h2z_u;
+  // Absolute tolerance: ~10⁻⁶ relative on a (10⁻¹⁰ m)² distance.
+  const float SHAKE_TOL2 = 1.0e-26f;
+  const int SHAKE_MAX_ITER = 32;
+  float inv_oh = inv_m_o + inv_m_h;
+  float inv_hh = inv_m_h + inv_m_h;
+  for (int iter = 0; iter < SHAKE_MAX_ITER; ++iter) {
+    bool converged = true;
+
+    // O–H1.
+    float dx = ox_c - h1x_c;
+    float dy = oy_c - h1y_c;
+    float dz = oz_c - h1z_c;
+    float dist2 = dx * dx + dy * dy + dz * dz;
+    float sigma = dist2 - r_OH2;
+    if (fabsf(sigma) > SHAKE_TOL2) {
+      converged = false;
+      float ddot = dx * g_oh1_x + dy * g_oh1_y + dz * g_oh1_z;
+      float lambda = sigma / (2.0f * ddot * inv_oh);
+      ox_c  -= lambda * g_oh1_x * inv_m_o;
+      oy_c  -= lambda * g_oh1_y * inv_m_o;
+      oz_c  -= lambda * g_oh1_z * inv_m_o;
+      h1x_c += lambda * g_oh1_x * inv_m_h;
+      h1y_c += lambda * g_oh1_y * inv_m_h;
+      h1z_c += lambda * g_oh1_z * inv_m_h;
+    }
+
+    // O–H2.
+    dx = ox_c - h2x_c;
+    dy = oy_c - h2y_c;
+    dz = oz_c - h2z_c;
+    dist2 = dx * dx + dy * dy + dz * dz;
+    sigma = dist2 - r_OH2;
+    if (fabsf(sigma) > SHAKE_TOL2) {
+      converged = false;
+      float ddot = dx * g_oh2_x + dy * g_oh2_y + dz * g_oh2_z;
+      float lambda = sigma / (2.0f * ddot * inv_oh);
+      ox_c  -= lambda * g_oh2_x * inv_m_o;
+      oy_c  -= lambda * g_oh2_y * inv_m_o;
+      oz_c  -= lambda * g_oh2_z * inv_m_o;
+      h2x_c += lambda * g_oh2_x * inv_m_h;
+      h2y_c += lambda * g_oh2_y * inv_m_h;
+      h2z_c += lambda * g_oh2_z * inv_m_h;
+    }
+
+    // H1–H2.
+    dx = h1x_c - h2x_c;
+    dy = h1y_c - h2y_c;
+    dz = h1z_c - h2z_c;
+    dist2 = dx * dx + dy * dy + dz * dz;
+    sigma = dist2 - r_HH2;
+    if (fabsf(sigma) > SHAKE_TOL2) {
+      converged = false;
+      float ddot = dx * g_hh_x + dy * g_hh_y + dz * g_hh_z;
+      float lambda = sigma / (2.0f * ddot * inv_hh);
+      h1x_c -= lambda * g_hh_x * inv_m_h;
+      h1y_c -= lambda * g_hh_y * inv_m_h;
+      h1z_c -= lambda * g_hh_z * inv_m_h;
+      h2x_c += lambda * g_hh_x * inv_m_h;
+      h2y_c += lambda * g_hh_y * inv_m_h;
+      h2z_c += lambda * g_hh_z * inv_m_h;
+    }
+
+    if (converged) {
+      break;
+    }
+  }
+
+  // COM, for the constraint-virial computation below. By
+  // construction SHAKE preserves the mass-weighted centre of mass
+  // (every λ·g term contributes equal-and-opposite displacements
+  // to the two atoms of its constraint, weighted by 1/m).
+  float total_mass = m_o + 2.0f * m_h;
   float cx, cy, cz;
-  weighted_com(ox_u, oy_u, oz_u, h1x_u, h1y_u, h1z_u, h2x_u, h2y_u, h2z_u,
+  weighted_com(ox_c, oy_c, oz_c, h1x_c, h1y_c, h1z_c, h2x_c, h2y_c, h2z_c,
                m_o, m_h, total_mass, cx, cy, cz);
-
-  // Pre-drift positions relative to their COM (body-frame reference).
-  float a0x = ox0 - cx0, a0y = oy0 - cy0, a0z = oz0 - cz0;
-  float b0x = h1x0 - cx0, b0y = h1y0 - cy0, b0z = h1z0 - cz0;
-  float c0x = h2x0 - cx0, c0y = h2y0 - cy0, c0z = h2z0 - cz0;
-
-  // Build the orthonormal frame attached to the pre-drift molecule:
-  // Z0 normal to the plane defined by (a0, b0, c0); X0 along the
-  // canonical symmetry axis projected into the plane; Y0 = Z0 x X0.
-  float e1x = b0x - a0x, e1y = b0y - a0y, e1z = b0z - a0z;
-  float e2x = c0x - a0x, e2y = c0y - a0y, e2z = c0z - a0z;
-  float z0x = e1y * e2z - e1z * e2y;
-  float z0y = e1z * e2x - e1x * e2z;
-  float z0z = e1x * e2y - e1y * e2x;
-  float z0_norm = sqrtf(z0x * z0x + z0y * z0y + z0z * z0z);
-  if (z0_norm < 1.0e-30f) {
-    // Degenerate (collinear) pre-drift configuration; bail out by
-    // copying the unconstrained positions and treating the constraint
-    // correction as a no-op. The integrator's next step will
-    // re-establish a non-degenerate geometry.
-    return;
-  }
-  z0x /= z0_norm;
-  z0y /= z0_norm;
-  z0z /= z0_norm;
-  // X0: from H-H midpoint toward O, projected into the molecular plane.
-  float mx = 0.5f * (b0x + c0x);
-  float my = 0.5f * (b0y + c0y);
-  float mz = 0.5f * (b0z + c0z);
-  float x0x = a0x - mx;
-  float x0y = a0y - my;
-  float x0z = a0z - mz;
-  float x0_norm = sqrtf(x0x * x0x + x0y * x0y + x0z * x0z);
-  if (x0_norm < 1.0e-30f) {
-    return;
-  }
-  x0x /= x0_norm;
-  x0y /= x0_norm;
-  x0z /= x0_norm;
-  float y0x = z0y * x0z - z0z * x0y;
-  float y0y = z0z * x0x - z0x * x0z;
-  float y0z = z0x * x0y - z0y * x0x;
-
-  // Unconstrained positions relative to new COM, projected into the
-  // body frame (X0, Y0, Z0).
-  float a1x = ox_u - cx, a1y = oy_u - cy, a1z = oz_u - cz;
-  float b1x = h1x_u - cx, b1y = h1y_u - cy, b1z = h1z_u - cz;
-  float c1x = h2x_u - cx, c1y = h2y_u - cy, c1z = h2z_u - cz;
-
-  // Express each in body-frame coordinates.
-  float a1_X = a1x * x0x + a1y * x0y + a1z * x0z;
-  float a1_Y = a1x * y0x + a1y * y0y + a1z * y0z;
-  float a1_Z = a1x * z0x + a1y * z0y + a1z * z0z;
-  float b1_X = b1x * x0x + b1y * x0y + b1z * x0z;
-  float b1_Y = b1x * y0x + b1y * y0y + b1z * y0z;
-  float b1_Z = b1x * z0x + b1y * z0y + b1z * z0z;
-  float c1_X = c1x * x0x + c1y * x0y + c1z * x0z;
-  float c1_Y = c1x * y0x + c1y * y0y + c1z * y0z;
-  float c1_Z = c1x * z0x + c1y * z0y + c1z * z0z;
-
-  // Canonical body-frame positions for this constraint type.
-  // The body-frame convention matches the host computation:
-  // O on +x, H1/H2 symmetric about the x-axis with H-H along y.
-  float aO_X = ox_b;  // O is on the X axis in canonical form.
-  float aO_Y = oy_b;
-  float bH1_X = h1x_b;
-  float bH1_Y = h1y_b;
-  float cH2_X = h2x_b;
-  float cH2_Y = h2y_b;
-
-  // Step 1: in-plane rotation that aligns the H-H midpoint of the
-  // unconstrained configuration with the +X axis. The constrained
-  // positions in body-frame coordinates have:
-  //   O   = ( aO_X cos φ, aO_X sin φ, 0 )      (canonical aO_Y = 0)
-  //   H1  = ( bH1_X cos φ - bH1_Y sin φ,
-  //           bH1_X sin φ + bH1_Y cos φ, 0 )
-  //   H2  = ( cH2_X cos φ - cH2_Y sin φ,
-  //           cH2_X sin φ + cH2_Y cos φ, 0 )
-  // and the SETTLE rotation is chosen so that the projection of these
-  // points onto the molecular plane matches the projection of the
-  // unconstrained points.
-  //
-  // For the rigid water with masses (m_O, m_H, m_H), the body-frame
-  // canonical configuration has weighted centroid at the origin and
-  // O on the +x axis. The rotation angle that best fits the
-  // unconstrained projection is determined by demanding that the
-  // body-frame O-vector's in-plane projection (a1_X, a1_Y) is
-  // proportional to (cos φ, sin φ):
-  float r0 = sqrtf(a1_X * a1_X + a1_Y * a1_Y);
-  float cos_phi, sin_phi;
-  if (r0 > 1.0e-30f) {
-    cos_phi = a1_X / r0;
-    sin_phi = a1_Y / r0;
-  } else {
-    cos_phi = 1.0f;
-    sin_phi = 0.0f;
-  }
-
-  // Step 2: out-of-plane rotation. With the molecular plane fixed by
-  // the pre-drift body frame, the unconstrained out-of-plane component
-  // of O is a1_Z. After the in-plane rotation, the body-frame O lies
-  // at (aO_X cos φ, aO_X sin φ, 0). To match the unconstrained
-  // out-of-plane displacement we rotate about the in-plane axis
-  // perpendicular to the body-frame O-vector by an angle θ such that
-  // sin θ = a1_Z / |O_body|, cos θ = sqrt(1 - sin² θ). aO_X is the
-  // distance from O to the COM in the canonical frame.
-  float r_o_body = fabsf(aO_X);
-  float sin_theta = 0.0f, cos_theta = 1.0f;
-  if (r_o_body > 1.0e-30f) {
-    float s = a1_Z / r_o_body;
-    if (s > 1.0f) s = 1.0f;
-    if (s < -1.0f) s = -1.0f;
-    sin_theta = s;
-    cos_theta = sqrtf(fmaxf(0.0f, 1.0f - s * s));
-  }
-
-  // Reconstruct the constrained body-frame coordinates. The combined
-  // rotation R = R_oop(θ) · R_inplane(φ) maps body-frame canonical
-  // positions to the projected frame. Applied to a generic body-frame
-  // point (X, Y, 0):
-  //   R · (X, Y, 0) = ( X cos φ - Y sin φ,
-  //                      (X sin φ + Y cos φ) · cos θ ... )
-  // For a rigid water all three body-frame points have Z = 0, so the
-  // out-of-plane rotation introduces a Z component proportional to
-  // sin θ in their in-plane displacement perpendicular to the rotation
-  // axis (the body-frame x' axis after the in-plane rotation).
-  //
-  // To keep the implementation tractable and bit-reproducible, we
-  // apply R as a composition of three rotations in the body frame:
-  // (i) rotate (X, Y) by φ about Z, (ii) rotate the result by θ about
-  // the new Y' axis, (iii) leave Z = 0 + lift.
-  auto apply_rot = [&](float X, float Y, float &px, float &py, float &pz) {
-    // In-plane rotation about Z by φ.
-    float x1 = X * cos_phi - Y * sin_phi;
-    float y1 = X * sin_phi + Y * cos_phi;
-    // Out-of-plane rotation about Y' (the rotated +Y axis) by θ.
-    float x2 = x1 * cos_theta;
-    float z2 = x1 * sin_theta;
-    px = x2;
-    py = y1;
-    pz = z2;
-  };
-  float oX, oY, oZ;
-  apply_rot(aO_X, aO_Y, oX, oY, oZ);
-  float h1X, h1Y, h1Z;
-  apply_rot(bH1_X, bH1_Y, h1X, h1Y, h1Z);
-  float h2X, h2Y, h2Z;
-  apply_rot(cH2_X, cH2_Y, h2X, h2Y, h2Z);
-
-  // Transform back to Cartesian via the pre-drift frame (X0, Y0, Z0).
-  auto from_body = [&](float X, float Y, float Z,
-                       float &cx_o, float &cy_o, float &cz_o) {
-    cx_o = X * x0x + Y * y0x + Z * z0x + cx;
-    cy_o = X * x0y + Y * y0y + Z * z0y + cy;
-    cz_o = X * x0z + Y * y0z + Z * z0z + cz;
-  };
-  float ox_c, oy_c, oz_c;
-  from_body(oX, oY, oZ, ox_c, oy_c, oz_c);
-  float h1x_c, h1y_c, h1z_c;
-  from_body(h1X, h1Y, h1Z, h1x_c, h1y_c, h1z_c);
-  float h2x_c, h2y_c, h2z_c;
-  from_body(h2X, h2Y, h2Z, h2x_c, h2y_c, h2z_c);
 
   // Update half-step velocities: v ← v + (r_constrained - r_unconstrained)/dt.
   // (Use the un-image-fixed positions buffer for the post-drift values
@@ -530,4 +458,161 @@ extern "C" __global__ void settle_velocities(
   velocities_x[a_h2] = v_h2_x + (l2 * d2x + l3 * d3x) * inv_m_h;
   velocities_y[a_h2] = v_h2_y + (l2 * d2y + l3 * d3y) * inv_m_h;
   velocities_z[a_h2] = v_h2_z + (l2 * d2z + l3 * d3z) * inv_m_h;
+}
+
+// Position-only SHAKE projection. Used by the minimization runner
+// after each trial position update. Differs from `settle_positions`
+// in two ways: (1) no pre-drift snapshot — the constraint-gradient
+// directions are evaluated at the *current* (off-manifold) positions
+// rather than at a snapshot, since minimization has no notion of a
+// pre-drift configuration; (2) no velocity correction, no virial
+// contribution. Velocities and virials are untouched.
+extern "C" __global__ void settle_positions_no_velocity(
+    float *positions_x,
+    float *positions_y,
+    float *positions_z,
+    const unsigned int *group_atoms,
+    const unsigned int *group_type_index,
+    const float *type_canonical_x,
+    const float *type_canonical_y,
+    const float *type_canonical_z,
+    const float *type_mass_o,
+    const float *type_mass_h,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    unsigned int n_groups)
+{
+  unsigned int g = blockIdx.x * blockDim.x + threadIdx.x;
+  if (g >= n_groups) {
+    return;
+  }
+  unsigned int base = 3u * g;
+  unsigned int t = group_type_index[g];
+
+  unsigned int a_o = group_atoms[base + 0];
+  unsigned int a_h1 = group_atoms[base + 1];
+  unsigned int a_h2 = group_atoms[base + 2];
+
+  // Derive target pair distances from the canonical body-frame
+  // positions (same convention as `settle_positions`).
+  float ox_b = type_canonical_x[3u * t + 0];
+  float h1x_b = type_canonical_x[3u * t + 1];
+  float h1y_b = type_canonical_y[3u * t + 1];
+  float h2y_b = type_canonical_y[3u * t + 2];
+  float r_OH2 =
+      (ox_b - h1x_b) * (ox_b - h1x_b) + h1y_b * h1y_b;
+  float r_HH2 = 4.0f * h2y_b * h2y_b;
+
+  float m_o = type_mass_o[t];
+  float m_h = type_mass_h[t];
+  float inv_m_o = 1.0f / m_o;
+  float inv_m_h = 1.0f / m_h;
+  float inv_oh = inv_m_o + inv_m_h;
+  float inv_hh = inv_m_h + inv_m_h;
+
+  // Read current (off-manifold) positions and bring all three atoms
+  // into the same image relative to O.
+  float ox_u = positions_x[a_o];
+  float oy_u = positions_y[a_o];
+  float oz_u = positions_z[a_o];
+  float h1x_u = positions_x[a_h1];
+  float h1y_u = positions_y[a_h1];
+  float h1z_u = positions_z[a_h1];
+  float h2x_u = positions_x[a_h2];
+  float h2y_u = positions_y[a_h2];
+  float h2z_u = positions_z[a_h2];
+  min_image_to(ox_u, oy_u, oz_u, h1x_u, h1y_u, h1z_u, lx, ly, lz, xy, xz, yz);
+  min_image_to(ox_u, oy_u, oz_u, h2x_u, h2y_u, h2z_u, lx, ly, lz, xy, xz, yz);
+
+  // Use the current positions themselves as the reference frame for
+  // the constraint-gradient directions. This is the standard SHAKE
+  // formulation when no pre-drift snapshot is available: the
+  // Lagrange-multiplier solve uses ∇C evaluated at the off-manifold
+  // configuration. Quadratic convergence is preserved for small
+  // displacements, which is the regime minimization produces under
+  // a well-chosen `step` size.
+  float g_oh1_x = ox_u - h1x_u, g_oh1_y = oy_u - h1y_u, g_oh1_z = oz_u - h1z_u;
+  float g_oh2_x = ox_u - h2x_u, g_oh2_y = oy_u - h2y_u, g_oh2_z = oz_u - h2z_u;
+  float g_hh_x  = h1x_u - h2x_u, g_hh_y  = h1y_u - h2y_u, g_hh_z  = h1z_u - h2z_u;
+
+  float ox_c = ox_u, oy_c = oy_u, oz_c = oz_u;
+  float h1x_c = h1x_u, h1y_c = h1y_u, h1z_c = h1z_u;
+  float h2x_c = h2x_u, h2y_c = h2y_u, h2z_c = h2z_u;
+  const float SHAKE_TOL2 = 1.0e-26f;
+  const int SHAKE_MAX_ITER = 32;
+  for (int iter = 0; iter < SHAKE_MAX_ITER; ++iter) {
+    bool converged = true;
+
+    // O–H1.
+    float dx = ox_c - h1x_c;
+    float dy = oy_c - h1y_c;
+    float dz = oz_c - h1z_c;
+    float dist2 = dx * dx + dy * dy + dz * dz;
+    float sigma = dist2 - r_OH2;
+    if (fabsf(sigma) > SHAKE_TOL2) {
+      converged = false;
+      float ddot = dx * g_oh1_x + dy * g_oh1_y + dz * g_oh1_z;
+      float lambda = sigma / (2.0f * ddot * inv_oh);
+      ox_c  -= lambda * g_oh1_x * inv_m_o;
+      oy_c  -= lambda * g_oh1_y * inv_m_o;
+      oz_c  -= lambda * g_oh1_z * inv_m_o;
+      h1x_c += lambda * g_oh1_x * inv_m_h;
+      h1y_c += lambda * g_oh1_y * inv_m_h;
+      h1z_c += lambda * g_oh1_z * inv_m_h;
+    }
+
+    // O–H2.
+    dx = ox_c - h2x_c;
+    dy = oy_c - h2y_c;
+    dz = oz_c - h2z_c;
+    dist2 = dx * dx + dy * dy + dz * dz;
+    sigma = dist2 - r_OH2;
+    if (fabsf(sigma) > SHAKE_TOL2) {
+      converged = false;
+      float ddot = dx * g_oh2_x + dy * g_oh2_y + dz * g_oh2_z;
+      float lambda = sigma / (2.0f * ddot * inv_oh);
+      ox_c  -= lambda * g_oh2_x * inv_m_o;
+      oy_c  -= lambda * g_oh2_y * inv_m_o;
+      oz_c  -= lambda * g_oh2_z * inv_m_o;
+      h2x_c += lambda * g_oh2_x * inv_m_h;
+      h2y_c += lambda * g_oh2_y * inv_m_h;
+      h2z_c += lambda * g_oh2_z * inv_m_h;
+    }
+
+    // H1–H2.
+    dx = h1x_c - h2x_c;
+    dy = h1y_c - h2y_c;
+    dz = h1z_c - h2z_c;
+    dist2 = dx * dx + dy * dy + dz * dz;
+    sigma = dist2 - r_HH2;
+    if (fabsf(sigma) > SHAKE_TOL2) {
+      converged = false;
+      float ddot = dx * g_hh_x + dy * g_hh_y + dz * g_hh_z;
+      float lambda = sigma / (2.0f * ddot * inv_hh);
+      h1x_c -= lambda * g_hh_x * inv_m_h;
+      h1y_c -= lambda * g_hh_y * inv_m_h;
+      h1z_c -= lambda * g_hh_z * inv_m_h;
+      h2x_c += lambda * g_hh_x * inv_m_h;
+      h2y_c += lambda * g_hh_y * inv_m_h;
+      h2z_c += lambda * g_hh_z * inv_m_h;
+    }
+
+    if (converged) {
+      break;
+    }
+  }
+
+  // Write constrained positions back. The hydrogens may have been
+  // image-shifted relative to O for the SHAKE solve; the shift below
+  // re-applies the same offset to the original position values so the
+  // final positions remain in the same image as the unconstrained
+  // ones.
+  positions_x[a_o] = ox_c;
+  positions_y[a_o] = oy_c;
+  positions_z[a_o] = oz_c;
+  positions_x[a_h1] = positions_x[a_h1] + (h1x_c - h1x_u);
+  positions_y[a_h1] = positions_y[a_h1] + (h1y_c - h1y_u);
+  positions_z[a_h1] = positions_z[a_h1] + (h1z_c - h1z_u);
+  positions_x[a_h2] = positions_x[a_h2] + (h2x_c - h2x_u);
+  positions_y[a_h2] = positions_y[a_h2] + (h2y_c - h2y_u);
+  positions_z[a_h2] = positions_z[a_h2] + (h2z_c - h2z_u);
 }

@@ -15,14 +15,31 @@ The top-level table carries one mandatory field, `schema_version`. The schema
 described here is version `1`. Loading a config whose `schema_version` is any
 other value is an error.
 
-A simulation is a sequence of one or more **phases** declared as a
-`[[phase]]` array of tables. Each phase carries its own timestep, step
-count, integrator, optional thermostat, optional barostat, and
-optional output cadences. Particle state (positions, velocities,
-simulation box, particle types, charges) carries over between phases;
-slot state (integrator buffers, thermostat chains, barostat state)
-is reset at every phase boundary. See `simulation-runner.md` for the
-runtime model.
+A simulation is a sequence of one or more **phases**. Phases come in
+two kinds:
+
+- **MD phases** declared as `[[phase]]` array entries. Each carries
+  its own timestep, step count, integrator, optional thermostat,
+  optional barostat, and optional output cadences.
+- **Minimization phases** declared as `[[minimization]]` array
+  entries. Each carries an algorithm selector
+  (`steepest-descent` in v1), algorithm-specific parameters,
+  convergence criteria, and output cadences. See
+  `rqm/minimization/steepest-descent.md` for the algorithm.
+
+A config carries at least one phase across the two arrays combined
+(neither array is individually required, but the union must be
+non-empty). Phases execute in **source-document order** across both
+arrays: the deserialiser captures the byte span of each `[[phase]]`
+and `[[minimization]]` entry via `toml::Spanned<T>` and the loader
+merges them into a single `Vec<PhaseKind>` sorted by span start.
+MD phases and minimization phases may be freely interleaved.
+
+Particle state (positions, velocities, simulation box, particle
+types, charges) carries over between phases regardless of kind; slot
+state (integrator buffers, thermostat chains, barostat state, the
+minimizer's adaptive step size) is reset at every phase boundary. See
+`simulation-runner.md` for the runtime model.
 
 Sections:
 
@@ -32,7 +49,8 @@ Sections:
 | top-level `init` | yes | path to initial-state file |
 | top-level `topology` | no | path to .topology file |
 | `[simulation]` | yes | RNG seed and target temperature for initial-velocity sampling |
-| `[[phase]]` | yes (>= 1) | per-phase integrator / thermostat / barostat / outputs |
+| `[[phase]]` | conditional | per-phase integrator / thermostat / barostat / outputs (at least one of `[[phase]]` or `[[minimization]]` must be present) |
+| `[[minimization]]` | conditional | per-phase minimization algorithm / parameters / outputs |
 | `[[particle_types]]` | yes (>= 1) | per-type properties |
 | `[[pair_interactions]]` | yes (covers every pair) | per-pair potential + parameters |
 | `[[bond_types]]` | no | per-bond-type parameters |
@@ -489,6 +507,32 @@ Fields accepted for `kind = "c-rescale"`:
   slot's seed. Two runs with identical configs on the same GPU
   produce byte-identical trajectories.
 
+#### `[[minimization]]` (array of tables) <!-- rq-0132d7a5 -->
+
+Each `[[minimization]]` table declares a minimization phase. The full
+schema, parameter defaults, convergence criteria, and the
+`[minimization.output]` sub-table are documented in
+`rqm/minimization/steepest-descent.md`'s *Schema* section. Summary:
+
+- `name: String` — required. Identifier used to derive output
+  filenames (`<root>.out.<name>.{minlog,xyz,timings}`). Same
+  character set and uniqueness rules as `[[phase]]`'s `name`.
+  Uniqueness is enforced across the union of `[[phase]]` and
+  `[[minimization]]` names; collisions surface as
+  `ConfigError::DuplicatePhaseName { name }`.
+- `[minimization.algorithm]` — required. Carries a `kind` field
+  (`"steepest-descent"` in v1) plus algorithm-specific parameters.
+  Dispatched through the `MinimizerRegistry`. Unknown kinds surface
+  as `ConfigError::UnknownKind { slot: "minimization", kind }`.
+- `[minimization.output]` — optional. Controls `.minlog`, optional
+  `.xyz`, and `.timings` cadences and paths. Defaults: `minlog_every
+  = 1`, `trajectory_every = 0`, `include_images = true`.
+
+A `[[minimization]]` entry rejects any of the following keys at
+deserialisation time: `n_steps`, `dt`, `[minimization.integrator]`,
+`[minimization.thermostat]`, `[minimization.barostat]`. Those
+concepts belong to MD phases only.
+
 #### `[[particle_types]]` (array of tables) <!-- rq-78487f38 -->
 
 One entry per particle species. At least one entry required.
@@ -908,18 +952,21 @@ path:
    produces `DuplicatePairInteraction { types: (String, String) }`. The
    reported tuple is normalised so the lexicographically smaller name
    comes first.
-3. The `[[phase]]` array is non-empty (`EmptyPhases` otherwise).
-4. Every `[[phase]]` entry has a non-empty ASCII-only `name`
-   (letters/digits/`-`/`_`); names are unique across the array
-   (`DuplicatePhaseName { name }` otherwise).
-5. Every per-phase `n_steps` is a `u64` (TOML-enforced) and every
-   per-phase `dt` is finite and strictly positive
+3. The merged phase sequence (`[[phase]]` ∪ `[[minimization]]`) is
+   non-empty (`EmptyPhases` otherwise).
+4. Every phase (MD or minimization) has a non-empty ASCII-only `name`
+   (letters/digits/`-`/`_`); names are unique across the merged
+   sequence (`DuplicatePhaseName { name }` otherwise).
+5. Every MD phase's `n_steps` is a `u64` (TOML-enforced) and every
+   MD phase's `dt` is finite and strictly positive
    (`InvalidValue { field: "phase[<i>].dt", reason }` otherwise).
 6. After path resolution, every supplied path is pairwise distinct from
    every other supplied path (`PathCollision { kind_a, kind_b, path }`).
-   The set of paths under check is `init`, every phase's
-   `output.trajectory_path`, every phase's `output.log_path`, every
-   phase's `output.timings_path`, and (when supplied) `topology`.
+   The set of paths under check is `init`, every MD phase's
+   `output.trajectory_path` / `output.log_path` /
+   `output.timings_path`, every minimization phase's
+   `output.minlog_path` / `output.trajectory_path` /
+   `output.timings_path`, and (when supplied) `topology`.
 7. Across every stochastic slot in every phase, no two slots of the
    same `kind` declare the same numerical `seed`
    (`DuplicatePhaseSeed { kind: String, seed: u64 }` otherwise). Two
@@ -941,6 +988,13 @@ per phase, in declaration order:
 12. Same as (10) and (11) for `[phase.thermostat]` (when present)
     against `registries.thermostats`, and for `[phase.barostat]`
     (when present) against `registries.barostats`.
+12a. For every `PhaseKind::Minimization` entry: the
+    `[minimization.algorithm]` section's `kind` is a registered key
+    of `registries.minimizers`. Unknown kinds surface as
+    `ConfigError::UnknownKind { slot: "minimization", kind }`. The
+    chosen builder's
+    `validate_params(&minimization.algorithm.params)` runs and any
+    failure propagates.
 13. Same as (10) and (11) for every `[[constraint_types]]` entry
     against `registries.constraint_types` (checked once, not per
     phase — constraint types are global).
@@ -964,14 +1018,28 @@ per phase, in declaration order:
 The runner additionally calls
 `Config::validate_constraint_compatibility(&self, registries: &Registries, has_constraints: bool)`
 after `load_topology_file` returns. This method runs the
-`IncompatibleConstraint` check **per phase**: every phase's chosen
-integrator builder must satisfy `supports_constraints(&params)` when
-the topology declares any constraint group. In the default registry
-this rejects every combination of a non-empty `[constraints]`
-section with `langevin-baoab`, `mtk-npt`, or `velocity-verlet`'s
-lossless variant, for any phase that uses such an integrator.
-Failures surface as `IncompatibleConstraint { integrator: <kind name>,
-phase: <phase name> }`.
+`IncompatibleConstraint` check **per phase**:
+
+- Every MD phase's chosen integrator builder must satisfy
+  `IntegratorBuilder::supports_constraints(&params)` when the
+  topology declares any constraint group. In the default registry
+  this rejects every combination of a non-empty `[constraints]`
+  section with `langevin-baoab`, `mtk-npt`, or `velocity-verlet`'s
+  lossless variant.
+- Every minimization phase requires that every registered
+  `[[constraint_types]]` entry's builder satisfies
+  `ConstraintBuilder::supports_position_projection_only(&params)`.
+  In the default registry the `settle-water` builder returns
+  `true`, so the v1 registry never rejects on this path; future
+  constraint algorithms that cannot project positions in isolation
+  flip the predicate to `false` and surface here.
+
+Failures of either form surface as
+`IncompatibleConstraint { integrator: <kind-or-algorithm name>,
+phase: <phase name> }`. The `integrator` field carries the
+integrator's `kind` for MD-phase failures and the minimization
+algorithm's `kind` (e.g. `"steepest-descent"`) for minimization-
+phase failures.
 
 ## Feature API <!-- rq-110285ae -->
 
@@ -987,8 +1055,14 @@ phase: <phase name> }`.
     `topology` field is present; resolved against the config file's
     directory.
   - `simulation: SimulationConfig`
-  - `phases: Vec<PhaseConfig>` — one entry per `[[phase]]` table in
-    declaration order. Non-empty (enforced by `Config::validate`).
+  - `phases: Vec<PhaseKind>` — one entry per `[[phase]]` or
+    `[[minimization]]` table in **source-document order** across
+    both arrays (merged by byte-span comparison; see *Schema*
+    above). Non-empty (enforced by `Config::validate`).
+    `PhaseKind::Md(PhaseConfig)` for `[[phase]]` entries;
+    `PhaseKind::Minimization(MinimizationConfig)` for
+    `[[minimization]]` entries. The `MinimizationConfig` type is
+    documented in `rqm/minimization/steepest-descent.md`.
   - `particle_types: Vec<ParticleTypeConfig>`
   - `pair_interactions: Vec<PairInteractionConfig>`
   - `bond_types: Vec<BondTypeConfig>` — empty when the `[[bond_types]]`
@@ -1016,7 +1090,7 @@ phase: <phase name> }`.
   - `seed: u64`
   - `temperature: f64`
 
-- `PhaseConfig` — parsed `[[phase]]` entry. <!-- rq-f1c04d3b -->
+- `PhaseConfig` — parsed `[[phase]]` (MD) entry. <!-- rq-f1c04d3b -->
   - `name: String`
   - `n_steps: u64`
   - `dt: f64`
@@ -1029,6 +1103,17 @@ phase: <phase name> }`.
   - `output: OutputConfig` — resolved per-phase trajectory/log/timings
     paths and cadences, with defaults derived from
     `<config-root>.out.<phase-name>.{xyz,log,timings}` when omitted.
+
+- `PhaseKind` — discriminated union over the unified phase sequence. <!-- rq-19226daf -->
+  ```rust
+  pub enum PhaseKind {
+      Md(PhaseConfig),
+      Minimization(MinimizationConfig),
+  }
+  ```
+  `MinimizationConfig` is documented in
+  `rqm/minimization/steepest-descent.md`. `Config.phases` is a
+  `Vec<PhaseKind>` in source-document order across the two arrays.
 
 - `SlotConfig` — open-shaped parsed selection for a per-phase <!-- rq-661bf664 -->
   `[phase.integrator]`, `[phase.thermostat]`, or `[phase.barostat]`
@@ -1159,7 +1244,15 @@ phase: <phase name> }`.
   - `log_every: u64`
   - `timings_path: PathBuf` — resolved.
 
-- `PathRole` — `enum { Init, Trajectory, Log, Timings, Topology }`. Used in `PathCollision`. <!-- rq-f0084057 -->
+- `PathRole` — `enum`. Used in `PathCollision`. Variants: <!-- rq-f0084057 -->
+  - `Init`
+  - `Topology`
+  - `PhaseTrajectory { phase: String }`
+  - `PhaseLog { phase: String }`
+  - `PhaseTimings { phase: String }`
+  - `MinimizationMinlog { phase: String }`
+  - `MinimizationTrajectory { phase: String }`
+  - `MinimizationTimings { phase: String }`
 
 - `ConfigError` — error type returned by `load_config` and by <!-- rq-3108381e -->
   `Config::validate`. Variants:
@@ -1225,11 +1318,13 @@ phase: <phase name> }`.
     `PhaseTimings { phase: String }` for per-phase outputs.
   - `ConflictingElectrostatics` — the config declares both `[coulomb]`
     and `[spme]`. Only one electrostatics method may be active per run.
-  - `EmptyPhases` — the `[[phase]]` array is empty or absent. A
-    simulation requires at least one phase.
-  - `DuplicatePhaseName { name: String }` — two `[[phase]]` entries
-    share a `name`. Phase names must be unique because they derive
-    per-phase output filenames.
+  - `EmptyPhases` — the merged phase sequence
+    (`[[phase]]` ∪ `[[minimization]]`) is empty. A simulation
+    requires at least one phase of either kind.
+  - `DuplicatePhaseName { name: String }` — two phases across the
+    merged `[[phase]]` ∪ `[[minimization]]` sequence share a
+    `name`. Phase names must be unique because they derive per-phase
+    output filenames.
   - `DuplicatePhaseSeed { kind: String, seed: u64 }` — two stochastic
     slots of the same `kind` across the `[[phase]]` array share the
     same numerical `seed`. The check applies across every phase's
@@ -1256,11 +1351,12 @@ phase: <phase name> }`.
     `langevin-baoab`, `mtk-npt`, or `velocity-verlet` with
     `lossless = true`).
   - `UnknownKind { slot: &'static str, kind: String }` — a
-    `[integrator]`, `[thermostat]`, `[barostat]`, or
-    `[[constraint_types]]` entry's `kind` field does not match any
-    registered builder in the corresponding registry. `slot` carries
-    `"integrator"`, `"thermostat"`, `"barostat"`, or
-    `"constraint_types"`.
+    `[integrator]`, `[thermostat]`, `[barostat]`,
+    `[[constraint_types]]`, or `[minimization.algorithm]` entry's
+    `kind` field does not match any registered builder in the
+    corresponding registry. `slot` carries `"integrator"`,
+    `"thermostat"`, `"barostat"`, `"constraint_types"`, or
+    `"minimization"`.
   - `SettleGeometryInfeasible { name: String, r_oh: f64, r_hh: f64 }`
     — a `[[constraint_types]]` entry with `kind = "settle-water"`
     declares `r_hh ≥ 2 · r_oh`.

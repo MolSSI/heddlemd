@@ -50,6 +50,7 @@ pub struct Kernels {
     pub settle: crate::integrator::settle::SettleKernels,
     pub forces: crate::forces::ForcesKernels,
     pub neighbor: crate::forces::neighbor_list::NeighborKernels,
+    pub minimize: crate::minimizer::MinimizeKernels,
 }
 
 impl Kernels {
@@ -75,6 +76,7 @@ impl Kernels {
             settle: crate::integrator::settle::SettleKernels::load(device)?,
             forces: crate::forces::ForcesKernels::load(device)?,
             neighbor: crate::forces::neighbor_list::NeighborKernels::load(device)?,
+            minimize: crate::minimizer::MinimizeKernels::load(device)?,
         })
     }
 }

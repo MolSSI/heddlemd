@@ -68,6 +68,47 @@ pub trait Constraint: std::fmt::Debug + Send {
         timings: &mut Timings,
     ) -> Result<(), ConstraintError>;
 
+    /// Project the runner's freshly-sampled initial velocities onto
+    /// the constraint velocity manifold. Called once by the runner
+    /// after the initial Maxwell-Boltzmann sample and before the
+    /// first integrator step, so the system starts the run already
+    /// on the manifold (rather than relying on the first step's
+    /// `apply_after_kick` to do it, which would drop ~`n_constraints /
+    /// 3N` of the sampled kinetic energy and leave the integrator
+    /// starting at the wrong displayed temperature).
+    ///
+    /// The default does nothing (no projection needed for an empty
+    /// constraint list); algorithms that own a velocity projection
+    /// override this. Implementations must not touch
+    /// `buffers.forces_*`, `buffers.potential_energies`, or
+    /// `buffers.virials`.
+    fn apply_initial_velocity_projection(
+        &mut self,
+        _buffers: &mut ParticleBuffers,
+        _sim_box: &SimulationBox,
+        _timings: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        Ok(())
+    }
+
+    /// Project per-particle positions back onto the constraint
+    /// manifold without modifying velocities, virials, or any other
+    /// buffer. Driven by the minimization runner (see
+    /// `rqm/minimization/steepest-descent.md`); never called from the
+    /// integration plan walk.
+    ///
+    /// Implementations must mutate only `buffers.positions_*`; they
+    /// must not consume `dt` (minimization has no time scale). The
+    /// default returns `Ok(())` for slots that own no groups.
+    fn apply_position_projection_only(
+        &mut self,
+        _buffers: &mut ParticleBuffers,
+        _sim_box: &SimulationBox,
+        _timings: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        Ok(())
+    }
+
     /// Number of constraint groups the slot owns. Tests use this to
     /// assert empty-state behaviour.
     fn group_count(&self) -> usize {
@@ -84,6 +125,18 @@ pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
     /// `[[constraint_types]]` entry at config-load time. Called by
     /// `Config::validate_against(&registries)` before any GPU work.
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError>;
+
+    /// `true` iff the algorithm implements
+    /// `Constraint::apply_position_projection_only` non-trivially
+    /// (i.e., can participate in minimization phases). The default
+    /// returns `true`. Algorithms that cannot project positions
+    /// without a paired velocity / virial update override this to
+    /// return `false`; configs that pair such an algorithm with a
+    /// `[[minimization]]` phase are rejected at config load via
+    /// `Config::validate_constraint_compatibility`.
+    fn supports_position_projection_only(&self, _params: &toml::Value) -> bool {
+        true
+    }
 
     /// Number of atoms a single `[constraints]` topology row of this
     /// kind must declare. The topology parser uses this value to

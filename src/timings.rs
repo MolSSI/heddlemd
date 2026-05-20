@@ -82,6 +82,12 @@ impl KernelStage {
     pub const SETTLE_VELOCITIES: KernelStage = KernelStage::new("settle_velocities");
     pub const SETTLE_VIRIAL_SCATTER: KernelStage =
         KernelStage::new("settle_virial_scatter");
+    pub const SETTLE_POSITIONS_NO_VELOCITY: KernelStage =
+        KernelStage::new("settle_positions_no_velocity");
+    pub const SD_F_MAX_REDUCTION: KernelStage = KernelStage::new("sd_f_max_reduction");
+    pub const SD_COMPUTE_STEP: KernelStage = KernelStage::new("sd_compute_step");
+    pub const SD_SNAPSHOT: KernelStage = KernelStage::new("sd_snapshot");
+    pub const SD_RESTORE: KernelStage = KernelStage::new("sd_restore");
     pub const ACCUMULATE_FORCES: KernelStage = KernelStage::new("accumulate_forces");
     pub const NEIGHBOR_DISPLACEMENT_SQUARED: KernelStage =
         KernelStage::new("neighbor_displacement_squared");
@@ -124,6 +130,11 @@ impl KernelStage {
         Self::SETTLE_POSITIONS,
         Self::SETTLE_VELOCITIES,
         Self::SETTLE_VIRIAL_SCATTER,
+        Self::SETTLE_POSITIONS_NO_VELOCITY,
+        Self::SD_F_MAX_REDUCTION,
+        Self::SD_COMPUTE_STEP,
+        Self::SD_SNAPSHOT,
+        Self::SD_RESTORE,
         Self::ACCUMULATE_FORCES,
         Self::VV_KICK,
         Self::VV_KICK_LOSSLESS,

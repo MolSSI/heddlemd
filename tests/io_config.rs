@@ -128,11 +128,11 @@ fn load_valid_minimal_config() {
     let cfg = load_config(&path).unwrap();
     assert_eq!(cfg.schema_version, 1);
     assert_eq!(cfg.simulation.seed, 12345);
-    assert_eq!(cfg.phases[0].n_steps, 10);
-    assert_eq!(cfg.phases[0].dt, 1.0e-15);
+    assert_eq!(cfg.phases[0].as_md().unwrap().n_steps, 10);
+    assert_eq!(cfg.phases[0].as_md().unwrap().dt, 1.0e-15);
     assert_eq!(cfg.simulation.temperature, 300.0);
-    assert_eq!(cfg.phases[0].integrator.kind, "velocity-verlet");
-    assert!(!param_bool(&cfg.phases[0].integrator, "lossless"));
+    assert_eq!(cfg.phases[0].as_md().unwrap().integrator.kind, "velocity-verlet");
+    assert!(!param_bool(&cfg.phases[0].as_md().unwrap().integrator, "lossless"));
     assert_eq!(cfg.particle_types.len(), 1);
     assert_eq!(cfg.particle_types[0].name, "Ar");
     assert_eq!(cfg.particle_types[0].mass, 6.6335e-26);
@@ -156,12 +156,12 @@ fn defaults_populate_output_section() {
     let path = write_config(&dir, &minimal_config());
     let cfg = load_config(&path).unwrap();
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.phases[0].output.trajectory_path, canonical_dir.join("sim.out.run.xyz"));
-    assert_eq!(cfg.phases[0].output.trajectory_every, 100);
-    assert!(cfg.phases[0].output.include_velocities);
-    assert_eq!(cfg.phases[0].output.log_path, canonical_dir.join("sim.out.run.log"));
-    assert_eq!(cfg.phases[0].output.log_every, 100);
-    assert_eq!(cfg.phases[0].output.timings_path, canonical_dir.join("sim.out.run.timings"));
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.trajectory_path, canonical_dir.join("sim.out.run.xyz"));
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.trajectory_every, 100);
+    assert!(cfg.phases[0].as_md().unwrap().output.include_velocities);
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.log_path, canonical_dir.join("sim.out.run.log"));
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.log_every, 100);
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.timings_path, canonical_dir.join("sim.out.run.timings"));
 }
 
 // rq-0622d4b0 — default output paths strip exactly one trailing `.in`.
@@ -171,9 +171,9 @@ fn defaults_strip_only_one_trailing_in() {
     let path = write_config_named(&dir, "foo.in.in.toml", &minimal_config());
     let cfg = load_config(&path).unwrap();
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.phases[0].output.trajectory_path, canonical_dir.join("foo.in.out.run.xyz"));
-    assert_eq!(cfg.phases[0].output.log_path, canonical_dir.join("foo.in.out.run.log"));
-    assert_eq!(cfg.phases[0].output.timings_path, canonical_dir.join("foo.in.out.run.timings"));
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.trajectory_path, canonical_dir.join("foo.in.out.run.xyz"));
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.log_path, canonical_dir.join("foo.in.out.run.log"));
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.timings_path, canonical_dir.join("foo.in.out.run.timings"));
 }
 
 // rq-d148149f
@@ -187,11 +187,11 @@ fn explicit_output_overrides_defaults() {
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.phases[0].output.trajectory_path, canonical_dir.join("custom-traj.xyz"));
-    assert_eq!(cfg.phases[0].output.trajectory_every, 50);
-    assert!(!cfg.phases[0].output.include_velocities);
-    assert_eq!(cfg.phases[0].output.log_path, canonical_dir.join("custom.log"));
-    assert_eq!(cfg.phases[0].output.log_every, 25);
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.trajectory_path, canonical_dir.join("custom-traj.xyz"));
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.trajectory_every, 50);
+    assert!(!cfg.phases[0].as_md().unwrap().output.include_velocities);
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.log_path, canonical_dir.join("custom.log"));
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.log_every, 25);
 }
 
 // rq-5ded1806
@@ -210,8 +210,8 @@ fn absolute_paths_honored() {
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
     assert_eq!(cfg.init, abs_init);
-    assert_eq!(cfg.phases[0].output.trajectory_path, abs_traj);
-    assert_eq!(cfg.phases[0].output.log_path, abs_log);
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.trajectory_path, abs_traj);
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.log_path, abs_log);
 }
 
 // rq-d5085350
@@ -304,7 +304,7 @@ fn n_steps_zero_is_accepted() {
     let body = minimal_config().replace("n_steps = 10", "n_steps = 0");
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.phases[0].n_steps, 0);
+    assert_eq!(cfg.phases[0].as_md().unwrap().n_steps, 0);
 }
 
 // rq-69a31102
@@ -1132,7 +1132,7 @@ fn timings_path_defaults_to_stem_timings() {
     let path = write_config(&dir, &minimal_config());
     let cfg = load_config(&path).unwrap();
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.phases[0].output.timings_path, canonical_dir.join("sim.out.run.timings"));
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.timings_path, canonical_dir.join("sim.out.run.timings"));
 }
 
 // rq-fa24a8d1
@@ -1146,7 +1146,7 @@ fn timings_path_override() {
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
-    assert_eq!(cfg.phases[0].output.timings_path, canonical_dir.join("custom.timings"));
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.timings_path, canonical_dir.join("custom.timings"));
 }
 
 // rq-7d5915bb
@@ -1243,10 +1243,10 @@ fn langevin_with_valid_parameters_accepted() {
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.phases[0].integrator.kind, "langevin-baoab");
-    assert_eq!(param_f64(&cfg.phases[0].integrator, "friction"), 1.0e12);
-    assert_eq!(param_f64(&cfg.phases[0].integrator, "temperature"), 300.0);
-    assert_eq!(param_u64(&cfg.phases[0].integrator, "seed"), 42);
+    assert_eq!(cfg.phases[0].as_md().unwrap().integrator.kind, "langevin-baoab");
+    assert_eq!(param_f64(&cfg.phases[0].as_md().unwrap().integrator, "friction"), 1.0e12);
+    assert_eq!(param_f64(&cfg.phases[0].as_md().unwrap().integrator, "temperature"), 300.0);
+    assert_eq!(param_u64(&cfg.phases[0].as_md().unwrap().integrator, "seed"), 42);
 }
 
 // rq-40ed9975
@@ -1389,8 +1389,8 @@ fn vv_lossless_defaults_to_false() {
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.phases[0].integrator.kind, "velocity-verlet");
-    assert!(!param_bool_or(&cfg.phases[0].integrator, "lossless", false));
+    assert_eq!(cfg.phases[0].as_md().unwrap().integrator.kind, "velocity-verlet");
+    assert!(!param_bool_or(&cfg.phases[0].as_md().unwrap().integrator, "lossless", false));
 }
 
 // rq-6cb9ab62
@@ -1644,7 +1644,7 @@ fn trajectory_every_zero_accepted() {
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.phases[0].output.trajectory_every, 0);
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.trajectory_every, 0);
 }
 
 // rq-318cd47d
@@ -1654,7 +1654,7 @@ fn log_every_zero_accepted() {
     let body = format!("{}\n[phase.output]\nlog_every = 0\n", minimal_config());
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.phases[0].output.log_every, 0);
+    assert_eq!(cfg.phases[0].as_md().unwrap().output.log_every, 0);
 }
 
 // --- Neighbor list ---
@@ -1997,7 +1997,7 @@ fn thermostat_section_absent_yields_none() {
     let dir = tmp_path("therm_absent");
     let path = write_config(&dir, &minimal_config());
     let cfg = load_config(&path).unwrap();
-    assert!(cfg.phases[0].thermostat.is_none());
+    assert!(cfg.phases[0].as_md().unwrap().thermostat.is_none());
 }
 
 #[test]
@@ -2044,7 +2044,7 @@ tau = 1.0e-13"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let t = cfg.phases[0].thermostat.as_ref().unwrap();
+    let t = cfg.phases[0].as_md().unwrap().thermostat.as_ref().unwrap();
     assert_eq!(t.kind, "nose-hoover-chain");
     assert_eq!(param_f64(t, "temperature"), 300.0);
     assert_eq!(param_f64(t, "tau"), 1.0e-13);
@@ -2070,7 +2070,7 @@ n_resp = 2"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let t = cfg.phases[0].thermostat.as_ref().unwrap();
+    let t = cfg.phases[0].as_md().unwrap().thermostat.as_ref().unwrap();
     assert_eq!(t.kind, "nose-hoover-chain");
     assert_eq!(param_u64(t, "chain_length"), 5);
     assert_eq!(param_u64(t, "yoshida_order"), 5);
@@ -2262,7 +2262,7 @@ seed = 42"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let t = cfg.phases[0].thermostat.as_ref().unwrap();
+    let t = cfg.phases[0].as_md().unwrap().thermostat.as_ref().unwrap();
     assert_eq!(t.kind, "csvr");
     assert_eq!(param_f64(t, "temperature"), 300.0);
     assert_eq!(param_f64(t, "tau"), 1.0e-13);
@@ -2302,7 +2302,7 @@ seed = 42"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let t = cfg.phases[0].thermostat.as_ref().unwrap();
+    let t = cfg.phases[0].as_md().unwrap().thermostat.as_ref().unwrap();
     assert_eq!(t.kind, "andersen");
     assert_eq!(param_f64(t, "temperature"), 300.0);
     assert_eq!(param_f64(t, "collision_rate"), 1.0e12);
@@ -2321,7 +2321,7 @@ seed = 42"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let t = cfg.phases[0].thermostat.as_ref().unwrap();
+    let t = cfg.phases[0].as_md().unwrap().thermostat.as_ref().unwrap();
     assert_eq!(t.kind, "andersen");
     assert_eq!(param_f64(t, "collision_rate"), 0.0);
 }
@@ -2359,7 +2359,7 @@ tau = 1.0e-13"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let t = cfg.phases[0].thermostat.as_ref().unwrap();
+    let t = cfg.phases[0].as_md().unwrap().thermostat.as_ref().unwrap();
     assert_eq!(t.kind, "berendsen");
     assert_eq!(param_f64(t, "temperature"), 300.0);
     assert_eq!(param_f64(t, "tau"), 1.0e-13);
@@ -2432,8 +2432,8 @@ seed = 1"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.phases[0].integrator.kind, "velocity-verlet");
-    assert_eq!(cfg.phases[0].thermostat.as_ref().unwrap().kind, "csvr");
+    assert_eq!(cfg.phases[0].as_md().unwrap().integrator.kind, "velocity-verlet");
+    assert_eq!(cfg.phases[0].as_md().unwrap().thermostat.as_ref().unwrap().kind, "csvr");
 }
 
 #[test]
@@ -2527,7 +2527,7 @@ fn mtk_npt_with_defaults_accepted() {
     let body = mtk_minimal_body("");
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let i = &cfg.phases[0].integrator;
+    let i = &cfg.phases[0].as_md().unwrap().integrator;
     assert_eq!(i.kind, "mtk-npt");
     assert_eq!(param_f64(i, "temperature"), 85.0);
     assert_eq!(param_f64(i, "pressure"), 1.0e5);
@@ -2675,7 +2675,7 @@ fn barostat_section_absent_yields_none() {
     let dir = tmp_path("baro_absent");
     let path = write_config(&dir, &minimal_config());
     let cfg = load_config(&path).unwrap();
-    assert!(cfg.phases[0].barostat.is_none());
+    assert!(cfg.phases[0].as_md().unwrap().barostat.is_none());
 }
 
 #[test]
@@ -2778,7 +2778,7 @@ compressibility = 4.5e-10"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let b = cfg.phases[0].barostat.as_ref().unwrap();
+    let b = cfg.phases[0].as_md().unwrap().barostat.as_ref().unwrap();
     assert_eq!(b.kind, "berendsen");
     assert_eq!(param_f64(b, "pressure"), 1.0e5);
     assert_eq!(param_f64(b, "tau"), 1.0e-12);
@@ -2797,7 +2797,7 @@ compressibility = 4.5e-10"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert!(cfg.phases[0].barostat.is_some());
+    assert!(cfg.phases[0].as_md().unwrap().barostat.is_some());
 }
 
 #[test]
@@ -2939,7 +2939,7 @@ seed = 42"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    let b = cfg.phases[0].barostat.as_ref().unwrap();
+    let b = cfg.phases[0].as_md().unwrap().barostat.as_ref().unwrap();
     assert_eq!(b.kind, "c-rescale");
     assert_eq!(param_f64(b, "pressure"), 1.0e5);
     assert_eq!(param_f64(b, "temperature"), 85.0);
@@ -2962,7 +2962,7 @@ seed = 1"#,
     );
     let path = write_config(&dir, &body);
     let cfg = load_config(&path).unwrap();
-    assert!(cfg.phases[0].barostat.is_some());
+    assert!(cfg.phases[0].as_md().unwrap().barostat.is_some());
 }
 
 #[test]

@@ -119,12 +119,19 @@ usage: dynamics run     <config-path>
 ## Runner flow <!-- rq-ef902cf6 -->
 
 A single invocation runs the sequence of phases declared in
-`config.phases` (see `config-schema.md`). Setup happens once at
-startup; the per-phase loop builds and tears down slot state at every
-phase boundary; particle state (positions, velocities, simulation
-box, charges) and the global `ForceField` carry over unchanged
-between phases. Any stage that fails terminates the process with the
-appropriate exit code and stderr message.
+`config.phases` (see `config-schema.md`). The unified phase sequence
+contains entries of two kinds: MD phases (declared as `[[phase]]`
+tables, carried as `PhaseKind::Md(PhaseConfig)`) and minimization
+phases (declared as `[[minimization]]` tables, carried as
+`PhaseKind::Minimization(MinimizationConfig)`). The order is the
+literal source-document order across both arrays (see
+`config-schema.md`'s *Phase kinds* section). Setup happens once at
+startup; the per-phase loop builds and tears down slot state at
+every phase boundary; particle state (positions, velocities,
+simulation box, charges) and the global `ForceField` carry over
+unchanged between phases regardless of phase kind. Any stage that
+fails terminates the process with the appropriate exit code and
+stderr message.
 
 The fields below in italics indicate where per-phase versus global
 config fields are consulted.
@@ -215,14 +222,42 @@ config fields are consulted.
 
 For each phase `P` in `config.phases`, in declaration order, the
 runner performs the steps below. Particle state (`ParticleBuffers`,
-`SimulationBox`), the global `ForceField`, and the global
-`Registries` carry over between phases; the slot handles
-(`Integrator`, `Thermostat`, `Barostat`, `Constraint`), the
-output writers (`TrajectoryWriter`, `LogWriter`), and the per-phase
+`SimulationBox`), the global `ForceField`, the global `Registries`,
+and the global `Constraint` slot (constructed once at runner
+startup) carry over between phases regardless of phase kind. The
+per-phase slot handles (`Integrator`, `Thermostat`, `Barostat` for
+MD phases; `Minimizer` for minimization phases), the output writers
+(`TrajectoryWriter`, `LogWriter`, `MinlogWriter`), and the per-phase
 `Timings` instance are built fresh at every phase boundary and
 dropped at every phase end. Slot internal state (chain variables,
-conserved-quantity counters, RNG counters) starts from each phase's
-declared seeds and initial values.
+conserved-quantity counters, RNG counters, adaptive step sizes)
+starts from each phase's declared seeds and initial values.
+
+The runner dispatches on the phase kind:
+
+```text
+for phase in config.phases:
+    match phase:
+        PhaseKind::Md(P) =>
+            run_md_phase(P, &mut buffers, &mut sim_box, &mut force_field,
+                         &constraint_list, &registries, &gpu, ...)
+        PhaseKind::Minimization(P) =>
+            run_minimization_phase(P, &mut buffers, &mut sim_box, &mut force_field,
+                                   &constraint_list, &registries, &gpu, ...)
+```
+
+Each phase function constructs its own slots (including a fresh
+`Constraint` slot from the global `ConstraintList`) at phase entry
+and drops them at phase exit, matching the per-phase slot lifecycle
+documented in the rest of this section.
+
+The MD branch executes steps 12–20 below. The minimization branch
+follows the corresponding workflow documented in
+`rqm/minimization/steepest-descent.md` (slot construction → writer
+opening → SD loop → writer flush → timings drain → slot drop); the
+minimization phase honours the same particle-state and ForceField
+carry-over invariants as the MD branch, never mutating velocities or
+the simulation box.
 
 12. **Construct the integrator, thermostat, barostat, and constraint.**
     Build the four slot handles for phase `P` by dispatching through
@@ -732,6 +767,19 @@ wrapper that dispatches between the two on the first CLI argument.
     input. Raised only when `config.spme.is_some()`. Indicates the
     host's cuFFT installation does not meet SPME's reproducibility
     contract.
+  - `Minimizer(MinimizerError)` — from `Minimizer::step` or from
+    minimizer-slot construction (see
+    `rqm/minimization/steepest-descent.md`). Wraps the underlying
+    `MinimizerError` variants (`Gpu`, `Timings`, `ForceField`,
+    `Constraint`, `UnknownKind`).
+  - `MinimizerNonConvergence { phase: String, iterations: u64, final_force: f64, final_step: f64 }`
+    — a `[[minimization]]` phase reached `max_iterations` without
+    meeting any physical convergence criterion. Surfaces as exit
+    code `2` (failure during the loop). `final_force` is the
+    `F_max` at the last accepted state in newtons; `final_step` is
+    the adaptive step size at the time of giving up.
+  - `MinlogWriter(MinlogWriterError)` — from minlog-writer
+    construction or `write_row`/`flush`.
 
 - `LintReport` — structured result of `lint_simulation`. All fields <!-- rq-a831fb00 -->
   are `pub`. Carries one `LintStage` per stage of the lint pipeline
@@ -868,6 +916,9 @@ wrapper that dispatches between the two on the first CLI argument.
   - `barostats: BarostatRegistry`
   - `constraint_types: ConstraintRegistry`
   - `potentials: PotentialRegistry`
+  - `minimizers: MinimizerRegistry` — registry consulted by the
+    minimization branch of the per-phase loop; see
+    `rqm/minimization/steepest-descent.md`.
   - `analyses: AnalysisRegistry` — registry consulted by
     `dynamics analyze`; see `rqm/analysis/framework.md`.
 
@@ -888,6 +939,7 @@ wrapper that dispatches between the two on the first CLI argument.
   - `Registries::register_barostat(&mut self, builder: Box<dyn BarostatBuilder>)`
   - `Registries::register_constraint_type(&mut self, builder: Box<dyn ConstraintBuilder>)`
   - `Registries::register_potential(&mut self, builder: Box<dyn PotentialBuilder>)`
+  - `Registries::register_minimizer(&mut self, builder: Box<dyn MinimizerBuilder>)`
   - `Registries::register_analysis(&mut self, builder: Box<dyn AnalysisBuilder>)`
 
   Custom builders compose with the built-ins via the standard pattern:

@@ -3,6 +3,7 @@ pub mod forces;
 pub mod gpu;
 pub mod integrator;
 pub mod io;
+pub mod minimizer;
 pub mod pbc;
 pub mod registries;
 pub mod runner;

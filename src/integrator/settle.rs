@@ -10,8 +10,8 @@ use serde::Deserialize;
 use crate::forces::{ConstraintList, GroupConstraint};
 use crate::gpu::device::get_func;
 use crate::gpu::{
-    GpuContext, GpuError, ParticleBuffers, settle_positions, settle_snapshot, settle_velocities,
-    settle_virial_scatter,
+    GpuContext, GpuError, ParticleBuffers, settle_positions, settle_positions_no_velocity,
+    settle_snapshot, settle_velocities, settle_virial_scatter,
 };
 use crate::kernels;
 use crate::io::config::{ConfigError, NamedSlotConfig};
@@ -480,6 +480,61 @@ impl Constraint for SettleConstraintsState {
         Ok(())
     }
 
+    fn apply_initial_velocity_projection(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        timings: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        if self.group_count == 0 {
+            return Ok(());
+        }
+        // Project the Maxwell-Boltzmann-sampled initial velocities
+        // onto the constraint velocity manifold so the first
+        // integrator step starts already on-manifold. No virial
+        // scatter at init time: no force evaluation has happened and
+        // the per-atom virial contribution is irrelevant before the
+        // first barostat invocation.
+        timings.kernel_start(KernelStage::SETTLE_VELOCITIES)?;
+        settle_velocities(
+            buffers,
+            &self.group_atoms,
+            &self.group_type_index,
+            &self.type_mass_o,
+            &self.type_mass_h,
+            sim_box,
+            self.group_count,
+        )?;
+        timings.kernel_stop(KernelStage::SETTLE_VELOCITIES)?;
+        Ok(())
+    }
+
+    fn apply_position_projection_only(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        timings: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        if self.group_count == 0 {
+            return Ok(());
+        }
+        timings.kernel_start(KernelStage::SETTLE_POSITIONS_NO_VELOCITY)?;
+        settle_positions_no_velocity(
+            buffers,
+            &self.group_atoms,
+            &self.group_type_index,
+            &self.type_canonical_x,
+            &self.type_canonical_y,
+            &self.type_canonical_z,
+            &self.type_mass_o,
+            &self.type_mass_h,
+            sim_box,
+            self.group_count,
+        )?;
+        timings.kernel_stop(KernelStage::SETTLE_POSITIONS_NO_VELOCITY)?;
+        Ok(())
+    }
+
     fn group_count(&self) -> usize {
         self.group_count
     }
@@ -594,6 +649,7 @@ pub struct SettleKernels {
     pub settle_positions: CudaFunction,
     pub settle_velocities: CudaFunction,
     pub settle_virial_scatter: CudaFunction,
+    pub settle_positions_no_velocity: CudaFunction,
 }
 
 impl SettleKernels {
@@ -606,6 +662,7 @@ impl SettleKernels {
                 "settle_positions",
                 "settle_velocities",
                 "settle_virial_scatter",
+                "settle_positions_no_velocity",
             ],
         )?;
         Ok(SettleKernels {
@@ -613,6 +670,11 @@ impl SettleKernels {
             settle_positions: get_func(device, "settle", "settle_positions")?,
             settle_velocities: get_func(device, "settle", "settle_velocities")?,
             settle_virial_scatter: get_func(device, "settle", "settle_virial_scatter")?,
+            settle_positions_no_velocity: get_func(
+                device,
+                "settle",
+                "settle_positions_no_velocity",
+            )?,
         })
     }
 }

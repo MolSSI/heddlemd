@@ -491,8 +491,10 @@ cutoff = 1.0
     let path = dir.join("sim.in.toml");
     std::fs::write(&path, body).unwrap();
     let cfg = load_config(&path).unwrap();
-    assert_eq!(cfg.phases[0].integrator.kind, "velocity-verlet");
+    assert_eq!(cfg.phases[0].as_md().unwrap().integrator.kind, "velocity-verlet");
     let lossless = cfg.phases[0]
+        .as_md()
+        .unwrap()
         .integrator
         .params
         .get("lossless")

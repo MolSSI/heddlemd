@@ -50,13 +50,19 @@ identifies the canonical hook positions by inspecting the variant of
 each sub-step and inserts the corresponding hook call. Integrators
 never reference the constraint slot.
 
-The three hook positions are inferred from sub-step variants:
+The four hook positions are:
 
-| Hook                   | When the runner fires it                                                                | What the slot does                                                                                                                            |
-| ---------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apply_before_drift`   | Immediately before every `SubStep::Drift` or `SubStep::KickDrift` the integrator executes | Snapshots the pre-drift positions of every atom the slot owns into the slot's internal buffer.                                                |
-| `apply_after_drift`    | Immediately after every `SubStep::Drift` or `SubStep::KickDrift` the integrator executes | Projects positions back onto the constraint manifold; updates the corresponding half-step velocities so they remain consistent with the projected displacement. |
-| `apply_after_kick`     | Once per timestep, after the final sub-step in the plan, iff that sub-step is a `SubStep::KickHalf` or `SubStep::KickDrift` | Projects velocities onto the constraint manifold so the time-derivative of every constraint is zero at the new positions.                     |
+| Hook                              | When the runner fires it                                                                | What the slot does                                                                                                                            |
+| --------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apply_before_drift`              | Immediately before every `SubStep::Drift` or `SubStep::KickDrift` the integrator executes | Snapshots the pre-drift positions of every atom the slot owns into the slot's internal buffer.                                                |
+| `apply_after_drift`               | Immediately after every `SubStep::Drift` or `SubStep::KickDrift` the integrator executes | Projects positions back onto the constraint manifold; updates the corresponding half-step velocities so they remain consistent with the projected displacement. |
+| `apply_after_kick`                | Once per timestep, after the final sub-step in the plan, iff that sub-step is a `SubStep::KickHalf` or `SubStep::KickDrift` | Projects velocities onto the constraint manifold so the time-derivative of every constraint is zero at the new positions.                     |
+| `apply_position_projection_only`  | After each trial position update inside an energy-minimization phase (see `rqm/minimization/steepest-descent.md`) | Projects positions back onto the constraint manifold without modifying velocities or virials. Does not consume `dt`. |
+
+The first three hooks fire only during the integrator's plan walk in
+MD phases. The fourth hook fires only during minimization phases and
+is driven by the runner's minimization loop (see
+`rqm/minimization/steepest-descent.md`).
 
 For the registered `velocity-verlet` (lossy) integrator, whose plan is
 `[KickDrift, ForceEval, KickHalf]` (see `velocity-verlet.md`), the
@@ -258,6 +264,18 @@ where `kind` is the algorithm's kind string.
           dt: f32,
           timings: &mut Timings,
       ) -> Result<(), ConstraintError>;
+
+      /// Project positions back onto the constraint manifold without
+      /// modifying velocities, virials, or any other buffer.
+      /// Driven by the minimization runner (see
+      /// `rqm/minimization/steepest-descent.md`); never called from the
+      /// integration plan walk.
+      fn apply_position_projection_only(
+          &mut self,
+          buffers: &mut ParticleBuffers,
+          sim_box: &SimulationBox,
+          timings: &mut Timings,
+      ) -> Result<(), ConstraintError>;
   }
   ```
 
@@ -278,6 +296,14 @@ where `kind` is the algorithm's kind string.
     Concrete algorithms document the exact form of their
     contribution (see `settle.md` for SETTLE's `m · Δr · r / dt²`
     per-atom contribution).
+  - `apply_position_projection_only` mutates only
+    `buffers.positions_*`. It does not touch `buffers.velocities_*`,
+    `buffers.virials`, `buffers.forces_*`, or `sim_box`, and it does
+    not consume `dt` (minimization has no physical time scale). It
+    is permitted to read and write slot-private scratch buffers. The
+    runner invokes it after each trial position update inside the
+    SD loop (see `rqm/minimization/steepest-descent.md`'s *Algorithm*
+    step 2); the integrator plan walk never calls it.
 
 - `ConstraintGroup` — `Debug, Clone, Copy`. Fields: `atom_offset: u32`, <!-- rq-0faddd62 -->
   `atom_count: u32`, `constraint_offset: u32`, `constraint_count: u32`,
@@ -343,6 +369,19 @@ where `kind` is the algorithm's kind string.
       /// `Config::validate_against(&registries)` before any GPU work.
       fn validate_params(&self, params: &toml::Value)
           -> Result<(), ConfigError>;
+
+      /// `true` iff the algorithm implements
+      /// `Constraint::apply_position_projection_only` non-trivially
+      /// (i.e., can participate in minimization phases). The default
+      /// returns `true`. Algorithms that cannot project positions
+      /// without a paired velocity / virial update override this to
+      /// return `false`; configs that pair such an algorithm with a
+      /// `[[minimization]]` phase are rejected at config load via
+      /// `Config::validate_constraint_compatibility`.
+      fn supports_position_projection_only(
+          &self,
+          _params: &toml::Value,
+      ) -> bool { true }
 
       /// Number of atoms a single `[constraints]` topology row of
       /// this kind must declare. The topology parser uses this value
@@ -660,6 +699,37 @@ Feature: Constraint slot framework
     And a recording Constraint slot
     When the runner executes one timestep
     Then no constraint hooks are recorded
+
+  @rq-77f959b2
+  Scenario: apply_position_projection_only is not fired during the MD plan walk
+    Given a velocity-Verlet integrator (lossless=false) with a SETTLE constraint slot
+    And a recording wrapper that timestamps every Constraint hook call
+    When the runner executes one MD timestep
+    Then apply_position_projection_only is not recorded
+    And the recorded hooks are exactly [apply_before_drift, apply_after_drift, apply_after_kick]
+
+  @rq-178eb1ae
+  Scenario: apply_position_projection_only mutates positions but not velocities or virials
+    Given a Constraint slot constructed from a non-empty list
+    And a ParticleBuffers with off-manifold positions and snapshots of velocities_*, virials, and forces_*
+    When constraint.apply_position_projection_only(&mut buffers, &sim_box, &mut timings) is called
+    Then positions_x, positions_y, positions_z lie on the constraint manifold (every constraint distance equals its r0 within relative tolerance 1e-6)
+    And velocities_x, velocities_y, velocities_z are byte-identical to the snapshot
+    And virials and forces_x, forces_y, forces_z are byte-identical to their snapshots
+
+  @rq-833d83a9
+  Scenario: apply_position_projection_only on empty state is a no-op
+    Given a ParticleBuffers with particle_count() == 0
+    And a Constraint slot constructed with an empty ConstraintList
+    When constraint.apply_position_projection_only(&mut buffers, &sim_box, &mut timings) is called
+    Then it returns Ok(())
+    And no kernel launches are recorded for that call
+
+  @rq-fd51fccb
+  Scenario: ConstraintBuilder default supports_position_projection_only returns true
+    Given the registered SETTLE builder
+    And any well-formed settle-water params
+    Then builder.supports_position_projection_only(&params) returns true
 
   @rq-309d8d50
   Scenario: supports_constraints == false suppresses all hook insertion

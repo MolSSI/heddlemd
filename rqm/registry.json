@@ -98,6 +98,14 @@
     "title": "rescale_positions does not modify velocities, forces, masses, or images",
     "type": "scenario"
   },
+  "rq-0132d7a5": {
+    "decl": "#### `[[minimization]]` (array of tables)",
+    "file": "io/config-schema",
+    "level": 4,
+    "refs": [],
+    "title": "`[[minimization]]` (array of tables)",
+    "type": "section"
+  },
   "rq-014a82ef": {
     "decl": "Scenario: IntegratorBuilder::owns_barostat matrix",
     "file": "io/config-schema",
@@ -110,6 +118,13 @@
     "file": "io/init-state-file",
     "refs": [],
     "title": "Reject image:I:3 ordered before velo:R:3",
+    "type": "scenario"
+  },
+  "rq-0165303c": {
+    "decl": "Scenario: SD on empty buffers converges immediately",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD on empty buffers converges immediately",
     "type": "scenario"
   },
   "rq-01784049": {
@@ -146,6 +161,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Build kernel signals overflow when an atom exceeds max_neighbors",
+    "type": "scenario"
+  },
+  "rq-020ff80e": {
+    "decl": "Scenario: SD does not modify velocities",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD does not modify velocities",
     "type": "scenario"
   },
   "rq-021e6d82": {
@@ -458,6 +480,14 @@
     "title": "Algorithm",
     "type": "section"
   },
+  "rq-063beff1": {
+    "decl": "### Per-iteration kernel sequence (one accepted iteration)",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "Per-iteration kernel sequence (one accepted iteration)",
+    "type": "section"
+  },
   "rq-064c9df1": {
     "decl": "Scenario: Reject [constraints] with an integrator that does not support them",
     "file": "integration/constraint-framework",
@@ -608,6 +638,13 @@
     "title": "Pair beyond cutoff contributes zero",
     "type": "scenario"
   },
+  "rq-08aba7ee": {
+    "decl": "# Feature: Steepest-Descent Energy Minimizer",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Feature: Steepest-Descent Energy Minimizer",
+    "type": "file"
+  },
   "rq-08e113ca": {
     "decl": "Scenario: Missing tau_p rejected",
     "file": "integration/mtk-npt",
@@ -649,6 +686,13 @@
     "title": "Feature: Velocity Verlet Time Integration",
     "type": "file"
   },
+  "rq-09c8a503": {
+    "decl": "Scenario: Custom minimizer builder is selectable",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Custom minimizer builder is selectable",
+    "type": "scenario"
+  },
   "rq-09d4e13f": {
     "decl": "Scenario: Two independent SPME runs on identical inputs produce byte-identical outputs",
     "file": "forces/spme",
@@ -663,12 +707,27 @@
     "title": "rescale_velocities",
     "type": "api-item"
   },
+  "rq-09ed630b": {
+    "decl": "Scenario: Interleaved [[phase]] and [[minimization]] preserve document order",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Interleaved [[phase]] and [[minimization]] preserve document order",
+    "type": "scenario"
+  },
   "rq-0a18c7c2": {
     "decl": "Scenario: Missing temperature rejected",
     "file": "integration/c-rescale-barostat",
     "refs": [],
     "title": "Missing temperature rejected",
     "type": "scenario"
+  },
+  "rq-0a2ca9ac": {
+    "decl": "### `[minimization.algorithm]`",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "`[minimization.algorithm]`",
+    "type": "section"
   },
   "rq-0a6a97f6": {
     "decl": "Scenario: Dispatch loop calls thermostat.apply_pre, plan walk, thermostat.apply_post in that order",
@@ -732,6 +791,13 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Two-particle pair virial matches r_ij · F_ij",
+    "type": "scenario"
+  },
+  "rq-0b7acd88": {
+    "decl": "Scenario: MinimizerRegistry::with_builtins exposes the registered minimizer",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "MinimizerRegistry::with_builtins exposes the registered minimizer",
     "type": "scenario"
   },
   "rq-0b7f7023": {
@@ -1181,6 +1247,14 @@
     "title": "Barostat",
     "type": "api-item"
   },
+  "rq-119cbe46": {
+    "decl": "### `.minlog` format",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "`.minlog` format",
+    "type": "section"
+  },
   "rq-11a953dc": {
     "decl": "Scenario: philox_4x32_10 produces the same outputs as the device-side helper",
     "file": "integration/csvr",
@@ -1372,6 +1446,13 @@
     "title": "Bond row with atom index out of range",
     "type": "scenario"
   },
+  "rq-13e42f65": {
+    "decl": "Scenario: SD with SETTLE projects every trial onto the rigid-water manifold",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD with SETTLE projects every trial onto the rigid-water manifold",
+    "type": "scenario"
+  },
   "rq-14033af1": {
     "decl": "- `NeighborListState::new_cell_list(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>`",
     "file": "forces/neighbor-list",
@@ -1399,6 +1480,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-1440b6e6": {
+    "decl": "- `Minimizer::check_convergence(&self, report)`",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Minimizer",
+    "type": "api-item"
   },
   "rq-147f5ea6": {
     "decl": "# Atom indices are 0-based and refer to entries in the init file.",
@@ -1556,6 +1644,13 @@
     "title": "`kinetic_energy_reduce`",
     "type": "section"
   },
+  "rq-173bfc40": {
+    "decl": "Scenario: SettleBuilder reports supports_position_projection_only as true",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "SettleBuilder reports supports_position_projection_only as true",
+    "type": "scenario"
+  },
   "rq-175e5b45": {
     "decl": "## Reproducibility contract",
     "file": "analysis/framework",
@@ -1578,6 +1673,13 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-178eb1ae": {
+    "decl": "Scenario: apply_position_projection_only mutates positions but not velocities or virials",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "apply_position_projection_only mutates positions but not velocities or virials",
+    "type": "scenario"
   },
   "rq-179ed985": {
     "decl": "- `ParticleBuffers::upload(&mut self, state: &ParticleState) -> Result<(), ParticleStateError>`",
@@ -1673,6 +1775,14 @@
     "title": "`[[phase]]` (array of tables, >= 1 entry)",
     "type": "section"
   },
+  "rq-187a5252": {
+    "decl": "### Types",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-18f5ef7a": {
     "decl": "Scenario: Constraint group adds implicit exclusions for every intra-group pair",
     "file": "integration/constraint-framework",
@@ -1686,6 +1796,13 @@
     "refs": [],
     "title": "trajectory_every > n_steps writes only the step-0 frame",
     "type": "scenario"
+  },
+  "rq-19226daf": {
+    "decl": "- `PhaseKind` — discriminated union over the unified phase sequence.",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "PhaseKind",
+    "type": "api-item"
   },
   "rq-19496703": {
     "decl": "### Shared `nhc_chain_sub_step` host-side helper",
@@ -2262,6 +2379,14 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-2032660c": {
+    "decl": "### `.xyz` trajectory",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "`.xyz` trajectory",
+    "type": "section"
+  },
   "rq-203ecf81": {
     "decl": "Scenario: Reject a config that declares both [spme] and [coulomb]",
     "file": "forces/spme",
@@ -2284,6 +2409,13 @@
     "refs": [],
     "title": "Reproducibility",
     "type": "section"
+  },
+  "rq-208aaa72": {
+    "decl": "- `MinimizerStepReport` — outcome of one `step` call.",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "MinimizerStepReport",
+    "type": "api-item"
   },
   "rq-2093594f": {
     "decl": "### Types",
@@ -2581,6 +2713,13 @@
     "title": "Refuse to overwrite an existing CSV at the resolved output path",
     "type": "scenario"
   },
+  "rq-237b5543": {
+    "decl": "- `MinimizerRegistry::with_builtins() -> MinimizerRegistry`",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "MinimizerRegistry",
+    "type": "api-item"
+  },
   "rq-23806456": {
     "decl": "Scenario: MtkNpt integrator with all required fields is accepted",
     "file": "io/config-schema",
@@ -2625,6 +2764,14 @@
     "refs": [],
     "title": "log_column_values returns the cached most-recent pressure and post-rescale volume",
     "type": "scenario"
+  },
+  "rq-2443920b": {
+    "decl": "### `[minimization.output]`",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "`[minimization.output]`",
+    "type": "section"
   },
   "rq-244fceb1": {
     "decl": "Scenario: A wrapping variant's Display delegates to the inner error",
@@ -2795,6 +2942,13 @@
     "file": "performance-analysis",
     "refs": [],
     "title": "record_host with a HostStage not in ORDER panics",
+    "type": "scenario"
+  },
+  "rq-265de297": {
+    "decl": "Scenario: SD doubles the step on accepted iteration",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD doubles the step on accepted iteration",
     "type": "scenario"
   },
   "rq-265f4da4": {
@@ -3374,6 +3528,13 @@
     "title": "Launch Configuration",
     "type": "section"
   },
+  "rq-2e27a5fc": {
+    "decl": "Scenario: Energy tolerance does not fire on a rejected step",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Energy tolerance does not fire on a rejected step",
+    "type": "scenario"
+  },
   "rq-2e284f4b": {
     "decl": "## MTK conserved Hamiltonian",
     "file": "integration/mtk-npt",
@@ -3515,6 +3676,13 @@
     ],
     "title": "LintOverall",
     "type": "api-item"
+  },
+  "rq-30d3f1fa": {
+    "decl": "Scenario: Reject step_decrease >= 1.0",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Reject step_decrease >= 1.0",
+    "type": "scenario"
   },
   "rq-30f85829": {
     "decl": "Scenario: Trivial-mode state has no cell-list fields",
@@ -3687,6 +3855,13 @@
     "refs": [],
     "title": "Neighbor List Construction",
     "type": "section"
+  },
+  "rq-33b1f2d2": {
+    "decl": "Scenario: Phase-name collision between [[phase]] and [[minimization]]",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Phase-name collision between [[phase]] and [[minimization]]",
+    "type": "scenario"
   },
   "rq-33c0521d": {
     "decl": "### Types",
@@ -4046,6 +4221,14 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-38d5e7a8": {
+    "decl": "## Schema",
+    "file": "minimization/steepest-descent",
+    "level": 2,
+    "refs": [],
+    "title": "Schema",
+    "type": "section"
+  },
   "rq-38ebe278": {
     "decl": "Scenario: Load a two-particle file with no velocities",
     "file": "io/init-state-file",
@@ -4067,6 +4250,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-393a57e4": {
+    "decl": "- `run_minimization_phase(phase: &MinimizationConfig, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, registries: &Registries, gpu: &GpuContext) -> Result<MinimizationPhaseSummary, RunnerError>`",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "run_minimization_phase",
+    "type": "api-item"
   },
   "rq-393a7932": {
     "decl": "Scenario: rescale_velocities with factor=1.0 is the identity",
@@ -4103,6 +4293,14 @@
     "refs": [],
     "title": "Download into the source state preserves values",
     "type": "scenario"
+  },
+  "rq-39ab27d9": {
+    "decl": "### Initial iteration",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "Initial iteration",
+    "type": "section"
   },
   "rq-39ab439e": {
     "decl": "## Slot Integration",
@@ -4388,6 +4586,13 @@
     "title": "Pair at exactly the cutoff contributes the smoothed (zero) value",
     "type": "scenario"
   },
+  "rq-3e0a3040": {
+    "decl": "Scenario: Unknown minimizer kind in a populated registry reports UnknownKind",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Unknown minimizer kind in a populated registry reports UnknownKind",
+    "type": "scenario"
+  },
   "rq-3e2bcb37": {
     "decl": "## Slot structure",
     "file": "forces/spme",
@@ -4460,6 +4665,14 @@
     "refs": [],
     "title": "bond_type unknown potential is rejected",
     "type": "scenario"
+  },
+  "rq-3f080cf2": {
+    "decl": "### Per-iteration sequence",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "Per-iteration sequence",
+    "type": "section"
   },
   "rq-3f46fb2e": {
     "decl": "Scenario: All output values are finite after the 100-step run",
@@ -4604,6 +4817,21 @@
     "level": 4,
     "refs": [],
     "title": "Other attributes",
+    "type": "section"
+  },
+  "rq-420d2eb3": {
+    "decl": "Scenario: SD reduces energy of a 1D harmonic well in one step",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD reduces energy of a 1D harmonic well in one step",
+    "type": "scenario"
+  },
+  "rq-4241d94b": {
+    "decl": "## Constraint Handling",
+    "file": "minimization/steepest-descent",
+    "level": 2,
+    "refs": [],
+    "title": "Constraint Handling",
     "type": "section"
   },
   "rq-4254b707": {
@@ -4755,6 +4983,13 @@
     "title": "load_config",
     "type": "api-item"
   },
+  "rq-45e6b20a": {
+    "decl": "Scenario: Convergence on energy tolerance ends the phase",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Convergence on energy tolerance ends the phase",
+    "type": "scenario"
+  },
   "rq-45eb243b": {
     "decl": "- `LogWriterError` — error type. Variants:",
     "file": "io/log-output",
@@ -4845,6 +5080,14 @@
     "title": "Reject non-positive mass",
     "type": "scenario"
   },
+  "rq-47a5fe0e": {
+    "decl": "## CUDA Kernels",
+    "file": "minimization/steepest-descent",
+    "level": 2,
+    "refs": [],
+    "title": "CUDA Kernels",
+    "type": "section"
+  },
   "rq-47a9ef14": {
     "decl": "## Feature API",
     "file": "forces/spme",
@@ -4901,6 +5144,13 @@
     "title": "Positions written by the writer are inside the primary cell",
     "type": "scenario"
   },
+  "rq-48e36163": {
+    "decl": "Scenario: SD step formula moves the largest-force atom by exactly `step`",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD step formula moves the largest-force atom by exactly `step`",
+    "type": "scenario"
+  },
   "rq-4901507f": {
     "decl": "- `IntegratorRegistry`, `ThermostatRegistry`, `BarostatRegistry` —",
     "file": "integration/framework",
@@ -4948,6 +5198,20 @@
     "refs": [],
     "title": "Reject missing comment line",
     "type": "scenario"
+  },
+  "rq-49e26627": {
+    "decl": "Scenario: trajectory frames do not include velocity columns even when velocities are present",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "trajectory frames do not include velocity columns even when velocities are present",
+    "type": "scenario"
+  },
+  "rq-4a0c5f2e": {
+    "decl": "- `PhaseKind` — runtime-level discriminated union over the unified",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "PhaseKind",
+    "type": "api-item"
   },
   "rq-4a14aec3": {
     "decl": "Scenario: Same-type pair uses the diagonal parameter slot",
@@ -5390,6 +5654,14 @@
     "title": "PotentialRegistry",
     "type": "api-item"
   },
+  "rq-50f2cc42": {
+    "decl": "### Top-level fields",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "Top-level fields",
+    "type": "section"
+  },
   "rq-50fa922c": {
     "decl": "Scenario: set_lattice rejects a non-finite tilt without mutating the box",
     "file": "simulation-box",
@@ -5565,6 +5837,13 @@
     "title": "Displacement check on reference positions equal to current returns 0",
     "type": "scenario"
   },
+  "rq-53d48fb8": {
+    "decl": "- `Minimizer::step(&mut self, buffers, sim_box, force_field, constraint, timings)`",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Minimizer",
+    "type": "api-item"
+  },
   "rq-5444c7ae": {
     "decl": "Scenario: pair_energies carries half the pair's potential energy",
     "file": "forces/coulomb-pair-force",
@@ -5578,6 +5857,14 @@
     "refs": [],
     "title": "fractional_coords inverts cartesian_coords",
     "type": "scenario"
+  },
+  "rq-54810de5": {
+    "decl": "## Phase-Kind Dispatch",
+    "file": "minimization/steepest-descent",
+    "level": 2,
+    "refs": [],
+    "title": "Phase-Kind Dispatch",
+    "type": "section"
   },
   "rq-54a28837": {
     "decl": "## Performance Notes",
@@ -5780,6 +6067,13 @@
     "title": "topology absolute path is preserved",
     "type": "scenario"
   },
+  "rq-57a0f297": {
+    "decl": "Scenario: Parse a [[minimization]] section with defaults",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Parse a [[minimization]] section with defaults",
+    "type": "scenario"
+  },
   "rq-57bcb870": {
     "decl": "Scenario: Reject two phases whose default trajectory paths collide",
     "file": "io/config-schema",
@@ -5792,6 +6086,13 @@
     "file": "simulation-runner",
     "refs": [],
     "title": "No GPU available",
+    "type": "scenario"
+  },
+  "rq-57d0aebf": {
+    "decl": "Scenario: settle_positions_no_velocity restores constraint distances from off-manifold positions",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "settle_positions_no_velocity restores constraint distances from off-manifold positions",
     "type": "scenario"
   },
   "rq-57f8de41": {
@@ -5945,6 +6246,13 @@
     "title": "Construction and Lifetime",
     "type": "section"
   },
+  "rq-5a3bb763": {
+    "decl": "Scenario: settle_positions_no_velocity does not modify velocities or virials",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "settle_positions_no_velocity does not modify velocities or virials",
+    "type": "scenario"
+  },
   "rq-5a6d5e9e": {
     "decl": "Scenario: vv_kick_drift_lossless handles a block-non-aligned particle count",
     "file": "integration/velocity-verlet",
@@ -6083,6 +6391,13 @@
     "title": "Empty State",
     "type": "section"
   },
+  "rq-5cbcbabe": {
+    "decl": "Scenario: Reject a thermostat under [[minimization]]",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Reject a thermostat under [[minimization]]",
+    "type": "scenario"
+  },
   "rq-5d1f8e8e": {
     "decl": "### Host wall-clock",
     "file": "performance-analysis",
@@ -6186,6 +6501,13 @@
     ],
     "title": "Feature: Andersen Stochastic Thermostat",
     "type": "file"
+  },
+  "rq-5e075019": {
+    "decl": "Scenario: SD with no constraint slot does not call any projection hook",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD with no constraint slot does not call any projection hook",
+    "type": "scenario"
   },
   "rq-5e238a79": {
     "decl": "Scenario: At equilibrium, time-averaged temperature tracks T_target",
@@ -6360,6 +6682,14 @@
     "title": "Construct a ForceField with zero slots",
     "type": "scenario"
   },
+  "rq-6112a43b": {
+    "decl": "## Determinism",
+    "file": "minimization/steepest-descent",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
+  },
   "rq-61207d82": {
     "decl": "## Feature API",
     "file": "forces/lj-pair-force",
@@ -6420,6 +6750,14 @@
     "refs": [],
     "title": "Missing temperature is rejected",
     "type": "scenario"
+  },
+  "rq-61b646d2": {
+    "decl": "## Construction and Lifetime",
+    "file": "minimization/steepest-descent",
+    "level": 2,
+    "refs": [],
+    "title": "Construction and Lifetime",
+    "type": "section"
   },
   "rq-6211a82f": {
     "decl": "Scenario: Kernels is composed of per-subsystem sub-structs",
@@ -6852,6 +7190,13 @@
     "title": "Bond-force reduction sums energy and virial alongside forces",
     "type": "scenario"
   },
+  "rq-69109415": {
+    "decl": "Scenario: Reject an unknown minimization algorithm kind",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Reject an unknown minimization algorithm kind",
+    "type": "scenario"
+  },
   "rq-693ce6fa": {
     "decl": "# Feature: Shared Neighbor List Service",
     "file": "forces/neighbor-list",
@@ -7231,6 +7576,14 @@
     "title": "lint_analyses_with_registries",
     "type": "api-item"
   },
+  "rq-6eb845c5": {
+    "decl": "### Final summary",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "Final summary",
+    "type": "section"
+  },
   "rq-6ec75323": {
     "decl": "### `Time`",
     "file": "io/trajectory-output",
@@ -7408,6 +7761,14 @@
     "level": 2,
     "refs": [],
     "title": "Chain state",
+    "type": "section"
+  },
+  "rq-71fa84f4": {
+    "decl": "## Output",
+    "file": "minimization/steepest-descent",
+    "level": 2,
+    "refs": [],
+    "title": "Output",
     "type": "section"
   },
   "rq-71fbbafb": {
@@ -7690,12 +8051,27 @@
     "title": "log_column_names returns [\"pressure\", \"box_volume\"]",
     "type": "scenario"
   },
+  "rq-7573ac91": {
+    "decl": "## Out of Scope",
+    "file": "minimization/steepest-descent",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-75746f64": {
     "decl": "Scenario: neighbor_displacement_squared count equals one warm-up plus per-step launches",
     "file": "performance-analysis",
     "refs": [],
     "title": "neighbor_displacement_squared count equals one warm-up plus per-step launches",
     "type": "scenario"
+  },
+  "rq-758b03ef": {
+    "decl": "- `MinimizationOutputConfig` — parsed `[minimization.output]` table",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "MinimizationOutputConfig",
+    "type": "api-item"
   },
   "rq-759d2445": {
     "decl": "### Top-level fields",
@@ -7825,6 +8201,13 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-77d98b9c": {
+    "decl": "Scenario: Convergence on force tolerance ends the phase",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Convergence on force tolerance ends the phase",
+    "type": "scenario"
+  },
   "rq-77e88745": {
     "decl": "Scenario: Block-non-aligned particle counts are handled by the bounds check",
     "file": "pair-reduction",
@@ -7845,6 +8228,27 @@
     "refs": [],
     "title": "atom_excl_offsets reflects sorted exclusion list",
     "type": "scenario"
+  },
+  "rq-77f64e46": {
+    "decl": "- `MinimizerConvergence` — enum reporting why the loop ended.",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "MinimizerConvergence",
+    "type": "api-item"
+  },
+  "rq-77f959b2": {
+    "decl": "Scenario: apply_position_projection_only is not fired during the MD plan walk",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "apply_position_projection_only is not fired during the MD plan walk",
+    "type": "scenario"
+  },
+  "rq-78041a25": {
+    "decl": "- `MinimizerError` — error type returned by every trait method.",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "MinimizerError",
+    "type": "api-item"
   },
   "rq-780d68ea": {
     "decl": "Scenario: Reject ParticleBuffers::new when a host array length is inconsistent",
@@ -8550,6 +8954,13 @@
     "title": "Reject zero lx",
     "type": "scenario"
   },
+  "rq-82621837": {
+    "decl": "- `MinlogWriterError` — error type. Variants `OutputExists { path:",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "MinlogWriterError",
+    "type": "api-item"
+  },
   "rq-828c169c": {
     "decl": "### `analyze` subcommand",
     "file": "simulation-runner",
@@ -8625,6 +9036,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Bonded-only ForceField builds no neighbor list",
+    "type": "scenario"
+  },
+  "rq-833d83a9": {
+    "decl": "Scenario: apply_position_projection_only on empty state is a no-op",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "apply_position_projection_only on empty state is a no-op",
     "type": "scenario"
   },
   "rq-8373db52": {
@@ -8728,6 +9146,13 @@
     "title": "build.rs reruns when a kernel source file changes",
     "type": "scenario"
   },
+  "rq-85e9b9da": {
+    "decl": "Scenario: .minlog rows include the final convergence iteration",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": ".minlog rows include the final convergence iteration",
+    "type": "scenario"
+  },
   "rq-8626ec3c": {
     "decl": "Scenario: Two particles across the box boundary interact via the minimum image",
     "file": "forces/lj-pair-force",
@@ -8789,6 +9214,13 @@
     "file": "forces/spme",
     "refs": [],
     "title": "Spread produces zero charge density at a grid point with no particle support",
+    "type": "scenario"
+  },
+  "rq-881bb997": {
+    "decl": "Scenario: SD with a constraint slot but no projection support is rejected at config load",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD with a constraint slot but no projection support is rejected at config load",
     "type": "scenario"
   },
   "rq-882c9e86": {
@@ -8897,6 +9329,14 @@
     "level": 3,
     "refs": [],
     "title": "Edge case: non-block-aligned buffer size",
+    "type": "section"
+  },
+  "rq-89e8f3d7": {
+    "decl": "## Gherkin Scenarios",
+    "file": "minimization/steepest-descent",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
     "type": "section"
   },
   "rq-8a063042": {
@@ -9237,6 +9677,13 @@
     "title": "LennardJonesState reports its max cutoff to the framework",
     "type": "scenario"
   },
+  "rq-901c006f": {
+    "decl": "Scenario: Zero force at initial positions triggers ForceZero convergence",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Zero force at initial positions triggers ForceZero convergence",
+    "type": "scenario"
+  },
   "rq-9021ec4b": {
     "decl": "Scenario: Write a single frame without velocities and without images",
     "file": "io/trajectory-output",
@@ -9278,6 +9725,13 @@
     "file": "integration/berendsen-barostat",
     "refs": [],
     "title": "BarostatRegistry::with_builtins() exposes berendsen",
+    "type": "scenario"
+  },
+  "rq-90a67daf": {
+    "decl": "Scenario: Non-convergence at max_iterations is a hard error",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Non-convergence at max_iterations is a hard error",
     "type": "scenario"
   },
   "rq-90e307b2": {
@@ -10116,6 +10570,13 @@
     "title": "Flush is idempotent",
     "type": "scenario"
   },
+  "rq-9d165c7f": {
+    "decl": "Scenario: minlog_every=0 disables the file",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "minlog_every=0 disables the file",
+    "type": "scenario"
+  },
   "rq-9d2d90b3": {
     "decl": "Scenario: sim_box.generation() advances after apply",
     "file": "integration/c-rescale-barostat",
@@ -10790,6 +11251,13 @@
     "title": "Lossy run includes lossy kick rows and excludes lossless rows",
     "type": "scenario"
   },
+  "rq-a82a275a": {
+    "decl": "Scenario: Reject max_step < initial_step",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Reject max_step < initial_step",
+    "type": "scenario"
+  },
   "rq-a831fb00": {
     "decl": "- `LintReport` — structured result of `lint_simulation`. All fields",
     "file": "simulation-runner",
@@ -11416,6 +11884,13 @@
     "title": "Empty topology file is valid",
     "type": "scenario"
   },
+  "rq-b10ed5ec": {
+    "decl": "Scenario: SD halves the step on rejected iteration and restores positions",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD halves the step on rejected iteration and restores positions",
+    "type": "scenario"
+  },
   "rq-b1148667": {
     "decl": "- `SpmeReciprocalState` — implements `Potential` with",
     "file": "forces/spme",
@@ -11891,6 +12366,13 @@
     "title": "LosslessBuffers::new with particle_count = 0",
     "type": "scenario"
   },
+  "rq-b977777a": {
+    "decl": "Scenario: .minlog header line",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": ".minlog header line",
+    "type": "scenario"
+  },
   "rq-b9a4e3de": {
     "decl": "Scenario: Non-finite check precedes non-positive check on a diagonal",
     "file": "simulation-box",
@@ -11940,6 +12422,13 @@
     "refs": [],
     "title": "PTX Module Loading",
     "type": "section"
+  },
+  "rq-ba6d3eaa": {
+    "decl": "Scenario: SD caps step at max_step",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD caps step at max_step",
+    "type": "scenario"
   },
   "rq-bacbf7d2": {
     "decl": "Scenario: andersen_resample is deterministic across two runs",
@@ -12027,6 +12516,13 @@
     "title": "Particle IDs",
     "type": "section"
   },
+  "rq-bc7a8950": {
+    "decl": "Scenario: settle_positions_no_velocity preserves the centre of mass of the unconstrained positions",
+    "file": "integration/settle",
+    "refs": [],
+    "title": "settle_positions_no_velocity preserves the centre of mass of the unconstrained positions",
+    "type": "scenario"
+  },
   "rq-bc8375ce": {
     "decl": "Scenario: init_device exposes the velocity-Verlet kernels on the Kernels handle",
     "file": "integration/velocity-verlet",
@@ -12058,6 +12554,13 @@
     "file": "io/log-output",
     "refs": [],
     "title": "Write_row with mismatched extras length panics in debug builds",
+    "type": "scenario"
+  },
+  "rq-bcc16e10": {
+    "decl": "Scenario: Reject an unknown field under [minimization.algorithm]",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Reject an unknown field under [minimization.algorithm]",
     "type": "scenario"
   },
   "rq-bcf7e0eb": {
@@ -12150,12 +12653,7 @@
     "decl": "### Temperature rescaling <!-- inline -->",
     "file": "simulation-runner",
     "level": 3,
-    "refs": [
-      {
-        "file": "src/runner.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Temperature rescaling <!-- inline -->",
     "type": "section"
   },
@@ -12587,6 +13085,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "velocity-verlet + [thermostat] is accepted",
+    "type": "scenario"
+  },
+  "rq-c4aea411": {
+    "decl": "Scenario: .minlog reports accepted=0 for rejected iterations",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": ".minlog reports accepted=0 for rejected iterations",
     "type": "scenario"
   },
   "rq-c4d4608f": {
@@ -13059,11 +13564,26 @@
     "title": "Self-interaction slots are zero",
     "type": "scenario"
   },
+  "rq-cc9f4623": {
+    "decl": "### Empty state",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "Empty state",
+    "type": "section"
+  },
   "rq-ccf4dc3f": {
     "decl": "Scenario: Builder returning Ok(None) is skipped without erroring",
     "file": "forces/framework",
     "refs": [],
     "title": "Builder returning Ok(None) is skipped without erroring",
+    "type": "scenario"
+  },
+  "rq-cd12ce51": {
+    "decl": "Scenario: SD does not modify simulation box",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SD does not modify simulation box",
     "type": "scenario"
   },
   "rq-cd28340e": {
@@ -13589,6 +14109,14 @@
     "title": "Reject `r_max` larger than half the box's minimum perpendicular width",
     "type": "scenario"
   },
+  "rq-d4c2b6cd": {
+    "decl": "## Algorithm",
+    "file": "minimization/steepest-descent",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
+    "type": "section"
+  },
   "rq-d4d435c8": {
     "decl": "Scenario: integrator.execute receiving ForceEval surfaces UnexpectedSubStep",
     "file": "integration/framework",
@@ -13649,6 +14177,13 @@
     ],
     "title": "Feature: Langevin BAOAB Integrator",
     "type": "file"
+  },
+  "rq-d5b07d2a": {
+    "decl": "- `MinimizerRegistry` — host-side registry of minimizer builders.",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "MinimizerRegistry",
+    "type": "api-item"
   },
   "rq-d617bf4a": {
     "decl": "Scenario: Reject [phase.barostat] alongside mtk-npt in any single phase",
@@ -13804,6 +14339,13 @@
     "refs": [],
     "title": "Feature: End-to-End Pipeline Reversibility Test",
     "type": "file"
+  },
+  "rq-d87be0ca": {
+    "decl": "Scenario: trajectory frames are written at the configured cadence and at convergence",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "trajectory frames are written at the configured cadence and at convergence",
+    "type": "scenario"
   },
   "rq-d87f15bd": {
     "decl": "Scenario: Lint without --with-gpu does not open a GPU device",
@@ -14093,6 +14635,13 @@
     "title": "Construct HarmonicAngleState",
     "type": "scenario"
   },
+  "rq-dc140510": {
+    "decl": "- `MinlogWriter` — handle to an open `.minlog` file. Fields are",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "MinlogWriter",
+    "type": "api-item"
+  },
   "rq-dc17132d": {
     "decl": "- `SimulationBox::generation(&self) -> u64`",
     "file": "simulation-box",
@@ -14111,6 +14660,13 @@
     "refs": [],
     "title": "Empty angle_type name rejected",
     "type": "scenario"
+  },
+  "rq-dc3b1bb5": {
+    "decl": "- `SteepestDescentMinimizer` — concrete implementor of `Minimizer`",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "SteepestDescentMinimizer",
+    "type": "api-item"
   },
   "rq-dc3c616a": {
     "decl": "Scenario: Construct AndersenThermostat via the registry",
@@ -14215,6 +14771,13 @@
     "refs": [],
     "title": "Per-Step Kernel Sequence",
     "type": "section"
+  },
+  "rq-dddb8e7a": {
+    "decl": "- `MinimizerBuilder` — trait describing a registered minimizer",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "MinimizerBuilder",
+    "type": "api-item"
   },
   "rq-dddcbf07": {
     "decl": "### Exclusion scaling <!-- inline-edit -->",
@@ -14556,6 +15119,14 @@
     "title": "Box-generation refresh handles tilt mutation",
     "type": "scenario"
   },
+  "rq-e2bb500b": {
+    "decl": "### Cross-validation",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "Cross-validation",
+    "type": "section"
+  },
   "rq-e2cbe4fd": {
     "decl": "Scenario: Lint reports `r_max` greater than half-box under the analyses stage",
     "file": "analysis/rdf",
@@ -14621,6 +15192,14 @@
     "refs": [],
     "title": "Reject unknown pair potential",
     "type": "scenario"
+  },
+  "rq-e38eed0c": {
+    "decl": "### Functions and methods",
+    "file": "minimization/steepest-descent",
+    "level": 3,
+    "refs": [],
+    "title": "Functions and methods",
+    "type": "section"
   },
   "rq-e399422c": {
     "decl": "Scenario: Harmonic angle_type rejects theta_0 outside [0, π]",
@@ -15024,6 +15603,13 @@
     "title": "Trivial-mode and cell-list-mode forces agree within tolerance",
     "type": "scenario"
   },
+  "rq-e92c18c6": {
+    "decl": "Scenario: Two SD runs on the same GPU with identical inputs are byte-identical",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Two SD runs on the same GPU with identical inputs are byte-identical",
+    "type": "scenario"
+  },
   "rq-e93e7ad1": {
     "decl": "Scenario: write_timings_file fails when the parent directory does not exist",
     "file": "performance-analysis",
@@ -15044,6 +15630,13 @@
     "refs": [],
     "title": "Reduction sums entries 0..count in left-to-right order",
     "type": "scenario"
+  },
+  "rq-e963f27a": {
+    "decl": "- `MinlogWriter::open`, `MinlogWriter::write_row`,",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "MinlogWriter",
+    "type": "api-item"
   },
   "rq-e9994f86": {
     "decl": "Scenario: Construct with particle_count = 0",
@@ -15297,6 +15890,13 @@
     "title": "μ > 1 when instantaneous pressure above target (system expands)",
     "type": "scenario"
   },
+  "rq-ed61cf26": {
+    "decl": "- `MinimizationConfig` — parsed `[[minimization]]` entry. Lives in",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "MinimizationConfig",
+    "type": "api-item"
+  },
   "rq-ed997636": {
     "decl": "### Units",
     "file": "io/config-schema",
@@ -15506,7 +16106,7 @@
     "type": "section"
   },
   "rq-f0084057": {
-    "decl": "- `PathRole` — `enum { Init, Trajectory, Log, Timings, Topology }`. Used in `PathCollision`.",
+    "decl": "- `PathRole` — `enum`. Used in `PathCollision`. Variants:",
     "file": "io/config-schema",
     "refs": [
       {
@@ -15687,8 +16287,16 @@
     "title": "vv_kick_drift",
     "type": "api-item"
   },
+  "rq-f1befa71": {
+    "decl": "## Feature API",
+    "file": "minimization/steepest-descent",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-f1c04d3b": {
-    "decl": "- `PhaseConfig` — parsed `[[phase]]` entry.",
+    "decl": "- `PhaseConfig` — parsed `[[phase]]` (MD) entry.",
     "file": "io/config-schema",
     "refs": [],
     "title": "PhaseConfig",
@@ -15896,6 +16504,13 @@
     "title": "Reduction overwrites prior net force values",
     "type": "scenario"
   },
+  "rq-f5a4623c": {
+    "decl": "Scenario: A run with one [[minimization]] phase executes the SD loop and proceeds to the next phase",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "A run with one [[minimization]] phase executes the SD loop and proceeds to the next phase",
+    "type": "scenario"
+  },
   "rq-f5d16700": {
     "decl": "### Extended-system state",
     "file": "integration/mtk-npt",
@@ -15954,6 +16569,13 @@
     "refs": [],
     "title": "Init file rejected by load_init_state",
     "type": "scenario"
+  },
+  "rq-f69350df": {
+    "decl": "- `Minimizer` — object-safe trait implemented by every concrete",
+    "file": "minimization/steepest-descent",
+    "refs": [],
+    "title": "Minimizer",
+    "type": "api-item"
   },
   "rq-f69698b8": {
     "decl": "- `spme_charge_spread(particle_buffers, spme_state) -> Result<(), GpuError>`",
@@ -16265,6 +16887,14 @@
     "title": "log_column_values returns the cached pressure, post-rescale volume,",
     "type": "scenario"
   },
+  "rq-fb83923b": {
+    "decl": "#### `settle_positions_no_velocity`",
+    "file": "integration/settle",
+    "level": 4,
+    "refs": [],
+    "title": "`settle_positions_no_velocity`",
+    "type": "section"
+  },
   "rq-fb917fd5": {
     "decl": "Scenario: run_simulation_with_registries dispatches a potential from a user-registered builder",
     "file": "simulation-runner",
@@ -16387,6 +17017,13 @@
     "file": "integration/settle",
     "refs": [],
     "title": "SETTLE kernels do not modify forces, masses, particle_ids, type_indices, or potential_energies",
+    "type": "scenario"
+  },
+  "rq-fd51fccb": {
+    "decl": "Scenario: ConstraintBuilder default supports_position_projection_only returns true",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "ConstraintBuilder default supports_position_projection_only returns true",
     "type": "scenario"
   },
   "rq-fd593357": {
