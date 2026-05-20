@@ -45,19 +45,28 @@ describes to completion.
 4. Loads the init file and, when supplied, the topology file.
 5. Initialises CUDA and uploads the particle state to the GPU.
 6. Generates initial velocities (only when the init file omits them).
-7. For each `[[phase]]` in order: opens the phase's trajectory and
-   log files, runs the timestep loop for `phase.n_steps` iterations
-   writing frames and rows at the configured cadences, flushes the
-   files, then writes the phase's `.timings` file before moving on.
+7. For each phase in **source-document order** across `[[phase]]`
+   and `[[minimization]]`: opens the phase's output files, runs
+   either the timestep loop (`[[phase]]`) for `phase.n_steps`
+   iterations writing frames and log rows at the configured
+   cadences, or the steepest-descent outer loop (`[[minimization]]`)
+   writing per-iteration `.minlog` rows until a convergence criterion
+   fires (see [Configuration → `[[minimization]]`](../guide/configuration.md#minimization)).
+   Flushes the files, then writes the phase's `.timings` file before
+   moving on.
 
 ### On success
 
-Prints one line per phase plus a final aggregate on stdout:
+Prints one line per phase plus a final aggregate on stdout. MD phases
+report a step count; minimization phases report an iteration count
+and the convergence reason (`force_tolerance`, `energy_tolerance`,
+`force_zero`):
 
 ```
 [dynamics] phase `<name>`: <N> steps in <T> ms (frames: <F>, log rows: <R>)
+[dynamics] phase `<name>`: <N> iters in <T> ms (converged: <reason>, frames: <F>, log rows: <R>)
 ...
-[dynamics] complete: <total_N> steps in <total_T> ms
+[dynamics] complete: <total_phases> phases, <total_N> steps in <total_T> ms
 ```
 
 and exits with code `0`. For very short runs (`< 10 ms`) the elapsed
@@ -75,11 +84,12 @@ applicable, and exits with the appropriate non-zero code.
 |------|---------|
 | `0`  | Simulation completed; every requested step ran and every output flushed. |
 | `1`  | Any error *before* the integration loop started: malformed CLI args, config-load failure, init-state load failure, output-file overwrite check failure, GPU initialisation failure, box-vs-cutoff compatibility failure, cuFFT determinism smoke-test failure. |
-| `2`  | Any error *during* the integration loop: a kernel launch failed, a write to the trajectory or log failed, or a device-to-host download failed. |
+| `2`  | Any error *during* the integration loop or minimization loop: a kernel launch failed, a write to the trajectory / log / `.minlog` failed, a device-to-host download failed, or a `[[minimization]]` phase reached `max_iterations` without satisfying any physical convergence criterion. |
 
 The split between exit code `1` and `2` makes it cheap for a wrapper
 script to distinguish input mistakes (re-edit the config) from
-mid-flight failures (likely transient: re-run, check GPU health).
+mid-flight failures (likely transient: re-run, check GPU health, or
+relax minimization tolerances).
 
 ## `dynamics lint <config-path> [--with-gpu]`
 

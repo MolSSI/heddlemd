@@ -204,6 +204,47 @@ Add a `[phase.barostat]` section, or switch the integrator to
 [Configuration Reference](configuration.md#phasebarostat-optional)
 for the field reference.
 
+### Minimize before sampling
+
+Add a `[[minimization]]` phase before the `[[phase]]` block. The
+minimizer relaxes positions along the negative energy gradient until
+the maximum per-atom force or the relative energy change drops below
+a tolerance; velocities and the box pass through untouched, so any
+subsequent MD phase starts from a clean low-strain configuration.
+
+```toml
+[[minimization]]
+name = "min"
+
+[minimization.algorithm]
+kind = "steepest-descent"
+# Optional — all of these have sensible defaults:
+#   initial_step = 1.0e-12     # m
+#   max_step = 1.0e-10         # m
+#   step_increase = 1.2        # multiplier on accept
+#   step_decrease = 0.2        # multiplier on reject
+#   force_tolerance = 1.0e-10  # N
+#   energy_tolerance = 1.0e-7  # relative
+#   max_iterations = 1000
+
+[[phase]]
+name = "run"
+n_steps = 500
+dt = 1.0e-15
+...
+```
+
+Phases run in source-document order, so the minimization above
+executes before the MD `[[phase]]`. The minimization writes
+`<root>.out.min.minlog` (per-iteration energy, max-force, step size,
+accept/reject flag); see [Output Files](output.md#minlog-file-outphaseminlog).
+
+Non-convergence at `max_iterations` is a hard error (exit code `2`);
+subsequent phases do not run. If you are tuning a new system,
+inspect the `.minlog` to see whether energy is still decreasing at
+the cap and either raise `max_iterations` or relax one of the
+tolerances.
+
 ### Equilibrate, then sample (multi-phase)
 
 Append a second `[[phase]]` to the config. Particle state (positions,

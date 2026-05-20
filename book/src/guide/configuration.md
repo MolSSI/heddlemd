@@ -68,23 +68,64 @@ After resolution, every supplied path must be pairwise distinct.
 
 ## Phases
 
-A simulation is composed of one or more **phases**, each declared as a
-`[[phase]]` array element. A phase carries its own `n_steps`, `dt`, and
-slot blocks (`[phase.integrator]`, optional `[phase.thermostat]`,
-optional `[phase.barostat]`, optional `[phase.output]`). Particle state
-(positions, velocities, box) carries from one phase into the next;
-integrator, thermostat, and barostat slot state resets at every phase
-boundary.
+A simulation is composed of one or more **phases**. Phases come in
+two kinds:
 
-Each phase produces its own output files: `<root>.out.<phase>.xyz`,
-`<root>.out.<phase>.log`, `<root>.out.<phase>.timings`, where `<root>`
-is the config file stem with one trailing `.in` stripped, and
-`<phase>` is the phase's `name`. Per-phase paths can be overridden by
-setting `[phase.output]` fields.
+- **MD phases** declared as `[[phase]]` array elements. Each MD phase
+  carries its own `n_steps`, `dt`, and slot blocks
+  (`[phase.integrator]`, optional `[phase.thermostat]`, optional
+  `[phase.barostat]`, optional `[phase.output]`).
+- **Minimization phases** declared as `[[minimization]]` array
+  elements. Each minimization phase carries an algorithm selector
+  (`steepest-descent` in v1), algorithm parameters, convergence
+  criteria, and an optional `[minimization.output]` block.
 
-Phases must have distinct names. Stochastic slots of the same kind
-across phases (e.g. two CSVR thermostats in two phases) must use
-distinct seeds.
+Particle state (positions, velocities, box) carries from one phase
+into the next regardless of phase kind; per-phase slot state resets
+at every boundary. Velocities and the simulation box are **unchanged**
+by a minimization phase — only positions move.
+
+The two arrays may be freely interleaved: phases execute in
+**source-document order** across `[[phase]]` and `[[minimization]]`
+combined. Typical pattern is one minimization phase followed by one
+or more MD phases:
+
+```toml
+[[minimization]]
+name = "min"
+
+[minimization.algorithm]
+kind = "steepest-descent"
+
+[[phase]]
+name = "equil"
+n_steps = 5000
+dt = 1.0e-15
+...
+
+[[phase]]
+name = "prod"
+n_steps = 10000
+dt = 1.0e-15
+...
+```
+
+Each phase produces its own output files derived from `<root>` (the
+config file stem with one trailing `.in` stripped) and the phase's
+`name`:
+
+- MD phases write `<root>.out.<phase>.xyz`, `<root>.out.<phase>.log`,
+  `<root>.out.<phase>.timings`.
+- Minimization phases write `<root>.out.<phase>.minlog` and
+  `<root>.out.<phase>.timings` (always), plus
+  `<root>.out.<phase>.xyz` when `trajectory_every > 0`.
+
+Per-phase paths can be overridden via the phase's output block
+(`[phase.output]` for MD, `[minimization.output]` for minimization).
+
+Phases must have distinct names **across the union of both arrays**.
+Stochastic MD slots of the same kind across phases (e.g. two CSVR
+thermostats) must use distinct seeds.
 
 ## Worked example
 
@@ -288,6 +329,64 @@ the canonical NPT distribution exactly.
 | `compressibility` | f64  | yes      | Isothermal compressibility (1/Pa). |
 | `seed`            | u64  | yes      | RNG seed. |
 
+### `[[minimization]]`
+
+A minimization phase advances positions along the negative gradient
+of the potential energy. Each entry carries:
+
+| Field   | Type   | Required | Default | Notes |
+|---------|--------|----------|---------|-------|
+| `name`  | string | yes      | —       | Identifier used in output filenames. Same character set and uniqueness rules as `[[phase]]`'s `name` (the uniqueness check spans **both** arrays). |
+
+A minimization entry has a required `[minimization.algorithm]` block
+and an optional `[minimization.output]` block. Unlike MD phases,
+minimization rejects `n_steps`, `dt`, `[minimization.integrator]`,
+`[minimization.thermostat]`, and `[minimization.barostat]` — those
+concepts do not apply.
+
+#### `[minimization.algorithm]`
+
+A required `kind` field selects the algorithm; all other fields are
+optional with documented defaults.
+
+##### `kind = "steepest-descent"`
+
+Adaptive-step steepest descent (GROMACS-style). Each iteration
+proposes a trial position `x_trial = x + step · F / F_max`, where
+`F_max = max_i ||F_i||`; if the trial energy is lower, the step is
+accepted and `step` is multiplied by `step_increase` (capped at
+`max_step`); otherwise positions are restored and `step` is
+multiplied by `step_decrease`.
+
+| Field              | Type | Required | Default   | Notes |
+|--------------------|------|----------|-----------|-------|
+| `initial_step`     | f64  | no       | `1.0e-12` | Initial scalar step in m. Finite, strictly positive. |
+| `max_step`         | f64  | no       | `1.0e-10` | Upper bound on `step` in m. Must be `>= initial_step`. |
+| `step_increase`    | f64  | no       | `1.2`     | Multiplier applied to `step` on accept. Must be `>= 1.0`. |
+| `step_decrease`    | f64  | no       | `0.2`     | Multiplier applied to `step` on reject. Must be in `(0.0, 1.0)`. |
+| `force_tolerance`  | f64  | no       | `1.0e-10` | Convergence threshold on `F_max` in N. `0.0` disables this criterion. |
+| `energy_tolerance` | f64  | no       | `1.0e-7`  | Relative convergence threshold on `|ΔE| / max(|E_prev|, |E_curr|, ε)` between two consecutive accepted iterations. `0.0` disables. |
+| `max_iterations`   | u64  | no       | `1000`    | Iteration cap. Reaching it without satisfying any physical criterion is a hard error and exits with code `2`. |
+
+The phase terminates with **success** when either `F_max <= force_tolerance`
+or the energy-tolerance criterion fires on an accepted iteration.
+
+#### `[minimization.output]` (optional; all fields have defaults)
+
+| Field              | Type   | Default                          | Notes |
+|--------------------|--------|----------------------------------|-------|
+| `minlog_path`      | string | `<root>.out.<phase>.minlog`      | Path to the per-iteration CSV. |
+| `minlog_every`     | u64    | `1`                              | Iterations between `.minlog` rows. `0` disables the file. The final convergence iteration is always logged. |
+| `trajectory_path`  | string | `<root>.out.<phase>.xyz`         | Path to the optional `.xyz` trajectory. |
+| `trajectory_every` | u64    | `0`                              | Iterations between trajectory frames. `0` (the default) disables intermediate frames; only the step-0 and convergence frames are written when this is `> 0`. |
+| `include_images`   | bool   | `true`                           | Include `image:I:3` columns in trajectory frames. |
+| `timings_path`     | string | `<root>.out.<phase>.timings`     | Path to the per-stage performance summary. Always written. |
+
+Velocities never appear in minimization trajectory frames; setting
+`include_velocities` under `[minimization.output]` is rejected as an
+unknown field. See [Output Files](output.md#minlog-file-outphaseminlog)
+for the `.minlog` format.
+
 ### `[[particle_types]]` (array, ≥ 1 entry)
 
 One entry per species. Names must be unique.
@@ -403,8 +502,13 @@ The loader rejects configs that:
 - combine `[coulomb]` with `[spme]`;
 - combine `[phase.thermostat]`/`[phase.barostat]` with an integrator
   that owns its own;
-- omit `[[phase]]`, duplicate a phase name, or share a seed between
-  two stochastic slots of the same kind across phases;
+- declare zero phases (the union of `[[phase]]` and
+  `[[minimization]]` must be non-empty), duplicate a phase name
+  across either array, or share a seed between two stochastic slots
+  of the same kind across phases;
+- choose an unknown minimization `kind`, or supply out-of-domain
+  values for the SD parameters (e.g. `step_decrease >= 1.0`,
+  `max_step < initial_step`, `max_iterations = 0`);
 - pair the constraint framework with an integrator that does not
   support constraints (Langevin BAOAB, MTK NPT, and lossless
   velocity-Verlet currently do not).

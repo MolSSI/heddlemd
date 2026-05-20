@@ -62,6 +62,23 @@ this book or in `rqm/` where the feature is documented in full.
 - `berendsen` — deterministic isotropic weak-coupling barostat.
   **Equilibration only.**
 
+## Energy minimization
+
+- `steepest-descent` — adaptive-step steepest descent (GROMACS-style):
+  per-iteration trial `x_new = x + step · F / F_max`, then accept and
+  grow `step` on energy decrease or reject and shrink `step` on
+  increase. Convergence criteria are configurable (max-force-per-atom,
+  relative energy-change tolerance, max-iterations); non-convergence
+  is a hard error (exit code `2`). Configured via a `[[minimization]]`
+  phase, freely interleavable with `[[phase]]` blocks. Particle
+  velocities and the simulation box pass through the phase
+  untouched. Writes a per-iteration `.minlog` CSV with `iter, energy,
+  max_force, step, accepted` columns.
+- **Constraint-aware.** When the topology declares constraint groups,
+  the minimizer projects every trial position back onto the constraint
+  manifold before evaluating the trial energy (SETTLE rigid water in
+  v1).
+
 ## Pair potentials (short-range, non-bonded)
 
 - **Lennard-Jones** — per type-pair `(σ, ε)`, cutoff with CHARMM-style
@@ -95,9 +112,10 @@ this book or in `rqm/` where the feature is documented in full.
 
 - `settle-water` — SETTLE algorithm for rigid three-site water
   (Miyamoto-Kollman 1992). Configurable `r_OH` and `r_HH`.
-- Compatible only with the lossy `velocity-verlet` integrator; Langevin
-  BAOAB, MTK NpT, and the lossless velocity-Verlet variant reject
-  topologies that declare any constraint group.
+- Compatible with the lossy `velocity-verlet` integrator and with the
+  `steepest-descent` minimizer (position-only projection in the
+  latter). Langevin BAOAB, MTK NpT, and the lossless velocity-Verlet
+  variant reject topologies that declare any constraint group.
 
 ## Neighbor lists
 

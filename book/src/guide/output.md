@@ -1,17 +1,26 @@
 # Output Files
 
-Every successful run writes three files **per phase** alongside the
-config: `<root>.out.<phase>.xyz`, `<root>.out.<phase>.log`, and
-`<root>.out.<phase>.timings`, where `<root>` is the config's root
-derived per the
-[Config filename convention](configuration.md#config-filename-convention)
+Every successful run writes files **per phase** alongside the config.
+The exact file set depends on the phase kind:
+
+- **MD phases (`[[phase]]`)** write `<root>.out.<phase>.xyz`,
+  `<root>.out.<phase>.log`, and `<root>.out.<phase>.timings`.
+- **Minimization phases (`[[minimization]]`)** write
+  `<root>.out.<phase>.minlog` and `<root>.out.<phase>.timings`
+  (always), plus `<root>.out.<phase>.xyz` when
+  `trajectory_every > 0`. No `.log` file (the `.minlog` replaces
+  it).
+
+`<root>` is the config's root derived per the
+[Config filename convention](configuration.md#config-filename-convention),
 and `<phase>` is the phase's `name`. So a single-phase config
 `argon.in.toml` with `name = "run"` writes `argon.out.run.xyz`,
 `argon.out.run.log`, and `argon.out.run.timings`. A two-phase
 config with phases `equil` and `prod` writes six files. Paths and
 cadences are controlled by the
-[`[phase.output]` section](configuration.md) of the TOML config and
-can be overridden per phase.
+[`[phase.output]` section](configuration.md) (or
+[`[minimization.output]`](configuration.md#minimizationoutput-optional-all-fields-have-defaults))
+of the TOML config and can be overridden per phase.
 
 The runner refuses to start when any of these files already exists at the
 resolved path. Delete or move them before re-running. The check is done
@@ -117,6 +126,53 @@ rows when `log_every > 0` is `floor(n_steps / log_every) + 1` plus the
 one header line. Setting `log_every = 0` disables the log entirely (no
 header, no file).
 
+## Minlog file (`*.out.<phase>.minlog`)
+
+Minimization phases write a per-iteration diagnostic CSV in place of
+the per-step `.log` file. Each row records the post-iteration accepted
+state plus whether the trial step was accepted.
+
+```
+iter,energy,max_force,step,accepted
+0,4.123456789e-18,2.345678901e-10,0.000000000e0,1
+1,4.012345678e-18,2.234567890e-10,1.000000000e-12,1
+2,4.012345678e-18,2.234567890e-10,1.200000000e-12,0
+3,3.998765432e-18,2.198765432e-10,2.400000000e-13,1
+...
+```
+
+| Column      | Type | Units | Notes |
+|-------------|------|-------|-------|
+| `iter`      | u64  | —     | phase-local iteration counter; base-10 integer. Row `0` is the pre-loop initial state. |
+| `energy`    | f64  | J     | total potential energy at the iteration's **accepted** positions. For a rejected iteration this equals the previous accepted row's energy (positions are rolled back). |
+| `max_force` | f64  | N     | `F_max = max_i ||F_i||` at the iteration's accepted positions. |
+| `step`      | f64  | m     | adaptive step size used for **this** iteration's trial. Row `0` is `0.0` (no trial taken). |
+| `accepted`  | u32  | —     | `1` if the trial was accepted, `0` if rejected. Row `0` is always `1`. |
+
+Number formatting is identical to the `.log`: floats use `{:.9e}`, the
+integer columns use unpadded base-10.
+
+### Cadence
+
+A row is written for the pre-loop initial state (`iter=0`) plus one
+every `minlog_every` accepted-or-rejected iterations. The final
+convergence iteration always appears as the last row, even when its
+index is not a multiple of `minlog_every`. Setting `minlog_every = 0`
+disables the file (no header, no file). See
+[`[minimization.output]`](configuration.md#minimizationoutput-optional-all-fields-have-defaults)
+for the configurable fields.
+
+### Trajectory frames during minimization
+
+When `[minimization.output].trajectory_every > 0`, the runner writes
+a `<root>.out.<phase>.xyz` file alongside the `.minlog`. Frames are
+written for the initial state, every `trajectory_every` accepted
+iterations, and the final convergence iteration. Velocities never
+appear in minimization frames (they do not change during
+minimization); the file's `Properties` string omits `velo:R:3`. The
+`Time=` attribute is fixed at `0.0` (minimization has no physical
+time).
+
 ## Timings file (`*.out.<phase>.timings`)
 
 A fixed-width text table with one row per instrumented stage that
@@ -166,13 +222,20 @@ reference run is a clean yes/no answer. See
 ## stdout
 
 On success the runner prints one line per phase plus a final
-aggregate:
+aggregate. MD phases report a step count and frame/log totals;
+minimization phases report an iteration count and the convergence
+reason:
 
 ```
-[dynamics] phase `<name>`: <N> steps in <T> ms (frames: <F>, log rows: <R>)
-...
-[dynamics] complete: <total_N> steps in <total_T> ms
+[dynamics] phase `min`: 87 iters in 412 ms (converged: force_tolerance, frames: 0, log rows: 88)
+[dynamics] phase `prod`: 10000 steps in 5234 ms (frames: 101, log rows: 101)
+[dynamics] complete: 2 phases, 10087 steps in 5646 ms
 ```
 
-On failure it prints `error: <message>` on stderr and exits non-zero;
-see [the CLI reference](../reference/cli.md) for exit codes.
+Convergence reasons are `force_tolerance`, `energy_tolerance`,
+`force_zero`, or `max_iterations`. The last of these is a hard error
+and exits with code `2`; see [the CLI reference](../reference/cli.md)
+for exit codes.
+
+On failure the runner prints `error: <message>` on stderr and exits
+non-zero.
