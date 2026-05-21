@@ -541,6 +541,7 @@ fn file_does_not_exist() {
 
 // --- Image flags ---
 
+// rq-8eb0050f
 #[test]
 fn file_without_image_property_has_images_none() {
     let dir = tmp_path("img_none");
@@ -554,6 +555,7 @@ fn file_without_image_property_has_images_none() {
     assert!(state.images.is_none());
 }
 
+// rq-36f771d7
 #[test]
 fn file_with_image_property_parses_three_integer_columns() {
     let dir = tmp_path("img_only");
@@ -571,6 +573,7 @@ fn file_with_image_property_parses_three_integer_columns() {
     assert_eq!(imgs.images_z, vec![0, 0, -7]);
 }
 
+// rq-e794b794
 #[test]
 fn file_with_velo_and_image_parses_both_blocks() {
     let dir = tmp_path("velo_img");
@@ -587,6 +590,7 @@ fn file_with_velo_and_image_parses_both_blocks() {
     assert_eq!(imgs.images_x, vec![4, -4]);
 }
 
+// rq-d65bcc90
 #[test]
 fn reject_image_column_with_non_integer_value() {
     let dir = tmp_path("img_bad");
@@ -603,6 +607,7 @@ fn reject_image_column_with_non_integer_value() {
     }
 }
 
+// rq-febdd0b3
 #[test]
 fn reject_image_property_with_wrong_count() {
     let dir = tmp_path("img_wrong");
@@ -619,6 +624,7 @@ fn reject_image_property_with_wrong_count() {
     }
 }
 
+// rq-01607062
 #[test]
 fn reject_image_before_velo_in_properties() {
     let dir = tmp_path("img_order");

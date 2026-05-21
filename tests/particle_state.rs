@@ -581,7 +581,7 @@ fn download_from_empty_buffers_into_empty_state() {
     assert_eq!(sink.particle_count(), 0);
 }
 
-#[test]
+#[test] // rq-790c1f86
 fn reject_when_type_indices_has_wrong_length() {
     let err = ParticleState::new(
         vec![0.0; 4],
@@ -700,7 +700,7 @@ fn potential_energies_and_virials_round_trip_through_buffers() {
 
 // --- Image flags ---
 
-#[test]
+#[test] // rq-6f897168
 fn images_default_to_zero_when_none_passed() {
     let n = 4;
     let state = ParticleState::new(
@@ -722,7 +722,7 @@ fn images_default_to_zero_when_none_passed() {
     assert_eq!(state.images_z, vec![0_i32; n]);
 }
 
-#[test]
+#[test] // rq-2315b501
 fn explicit_nonzero_images_stored_as_supplied() {
     let n = 3;
     let state = ParticleState::new(
@@ -744,7 +744,7 @@ fn explicit_nonzero_images_stored_as_supplied() {
     assert_eq!(state.images_z, vec![-4, 0, 5]);
 }
 
-#[test]
+#[test] // rq-0705e380
 fn reject_explicit_images_y_wrong_length() {
     let n = 4;
     let err = ParticleState::new(
@@ -775,7 +775,7 @@ fn reject_explicit_images_y_wrong_length() {
     }
 }
 
-#[test]
+#[test] // rq-2c31aa6e
 fn particle_buffers_carry_image_buffers() {
     let gpu = init_device().expect("init_device");
     let device = gpu.device.clone();
@@ -809,7 +809,7 @@ fn particle_buffers_carry_image_buffers() {
     assert_eq!(dz, images_z);
 }
 
-#[test]
+#[test] // rq-cef2288f
 fn reject_upload_when_images_x_has_wrong_length() {
     let gpu = init_device().expect("init_device");
     let n = 4;
@@ -845,7 +845,7 @@ fn reject_upload_when_images_x_has_wrong_length() {
     }
 }
 
-#[test]
+#[test] // rq-7fd19f00
 fn reject_when_charges_has_wrong_length() {
     let n = 4;
     let positions_x = vec![0.0_f32; n];
@@ -877,7 +877,7 @@ fn reject_when_charges_has_wrong_length() {
     }
 }
 
-#[test]
+#[test] // rq-fdc02bdb
 fn charges_round_trip_through_particle_buffers() {
     let gpu = init_device().unwrap();
     let n = 4;

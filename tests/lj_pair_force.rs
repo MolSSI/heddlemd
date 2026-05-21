@@ -683,7 +683,7 @@ fn build_state_with_types(positions: &[[f32; 3]], type_indices: Vec<u32>) -> Par
     .expect("ParticleState::new")
 }
 
-#[test]
+#[test] // rq-4a14aec3
 fn multi_type_same_type_pair_uses_diagonal_slot() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
@@ -711,7 +711,7 @@ fn multi_type_same_type_pair_uses_diagonal_slot() {
     assert!((px[0 * 2 + 1] - expected[0]).abs() < 1e-5);
 }
 
-#[test]
+#[test] // rq-23fc870b
 fn multi_type_mixed_pair_uses_off_diagonal_slot() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
@@ -737,7 +737,7 @@ fn multi_type_mixed_pair_uses_off_diagonal_slot() {
     assert!((px[0 * 2 + 1] - expected[0]).abs() < 1e-5);
 }
 
-#[test]
+#[test] // rq-55640f03
 fn multi_type_newtons_third_law_symmetric_table() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
@@ -762,7 +762,7 @@ fn multi_type_newtons_third_law_symmetric_table() {
     assert_eq!(pz[0 * 2 + 1], -pz[1 * 2 + 0]);
 }
 
-#[test]
+#[test] // rq-244fe033
 fn multi_type_per_pair_cutoff_zeros_only_the_exceeded_pair() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
@@ -790,7 +790,7 @@ fn multi_type_per_pair_cutoff_zeros_only_the_exceeded_pair() {
     assert!(px[1 * 3 + 2] != 0.0, "(0,1)-type pair at r=0.5 should be non-zero");
 }
 
-#[test]
+#[test] // rq-1e7e6aa4
 fn multi_type_three_type_dispatch() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
@@ -834,7 +834,7 @@ fn multi_type_three_type_dispatch() {
     }
 }
 
-#[test]
+#[test] // rq-75446ddd
 fn lj_param_table_from_config_builds_symmetric_table() {
     use dynamics::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
     let gpu = init_device().unwrap();

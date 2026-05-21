@@ -136,6 +136,7 @@ fn spme_pipeline_matches_explicit_ewald_two_charge_pair() {
     );
 }
 
+// rq-2996a545
 #[test]
 fn spme_pipeline_matches_explicit_ewald_four_charges() {
     let gpu = init_device().unwrap();
@@ -181,6 +182,7 @@ fn spme_pipeline_matches_explicit_ewald_four_charges() {
     );
 }
 
+// rq-79291441
 #[test]
 fn spread_conserves_total_charge() {
     let gpu = init_device().unwrap();
@@ -239,6 +241,7 @@ fn k_zero_entry_of_influence_function_is_zero() {
     assert_eq!(g[0], 0.0, "influence_G[0] must be zero (tinfoil BC)");
 }
 
+// rq-09d4e13f
 #[test]
 fn identical_inputs_produce_byte_identical_grids() {
     let gpu = init_device().unwrap();

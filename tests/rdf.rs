@@ -1,5 +1,7 @@
 // Integration tests for the RDF analysis kind.
 //
+// Feature: Radial Distribution Function Analysis (`rdf`) <!-- rq-4d1082c4 -->
+//
 // These tests construct trajectories by hand and run `dynamics analyze`
 // (or the library API directly), then inspect the resulting CSV to
 // verify pair-enumeration correctness, bin placement, normalisation,
@@ -145,6 +147,7 @@ n_bins = {n_bins}
 
 // --- Parameter validation ---
 
+// rq-cfd1d536
 #[test]
 fn reject_missing_between() {
     let dir = tmp_path("missing_between");
@@ -171,6 +174,7 @@ n_bins = 8
     }
 }
 
+// rq-d4c17bd3
 #[test]
 fn reject_r_max_above_half_box() {
     let dir = tmp_path("r_max_too_large");
@@ -191,6 +195,7 @@ fn reject_r_max_above_half_box() {
     }
 }
 
+// rq-5f1d5034
 #[test]
 fn reject_n_bins_zero() {
     let dir = tmp_path("n_bins_zero");
@@ -207,6 +212,7 @@ fn reject_n_bins_zero() {
     }
 }
 
+// rq-ba2f07bd
 #[test]
 fn reject_between_undeclared_type() {
     let dir = tmp_path("undeclared_type");
@@ -226,6 +232,7 @@ fn reject_between_undeclared_type() {
     }
 }
 
+// rq-c505f34b
 #[test]
 fn reject_same_type_single_particle() {
     let dir = tmp_path("single_particle");
@@ -244,6 +251,7 @@ fn reject_same_type_single_particle() {
 
 // --- Algorithm and output ---
 
+// rq-66f2679e
 #[test]
 fn output_has_expected_row_count() {
     let dir = tmp_path("row_count");
@@ -259,6 +267,7 @@ fn output_has_expected_row_count() {
     assert_eq!(rows.len(), 64);
 }
 
+// rq-43567b30 rq-60c534f2
 #[test]
 fn bin_centers_match_formula() {
     let dir = tmp_path("bin_centres");
@@ -277,6 +286,7 @@ fn bin_centers_match_formula() {
     assert!((rows[9].0 - 9.5e-10).abs() < 1e-20);
 }
 
+// rq-9aacb1f9
 #[test]
 fn same_type_two_particles_at_known_distance() {
     let dir = tmp_path("two_ar");
@@ -296,6 +306,7 @@ fn same_type_two_particles_at_known_distance() {
     assert_eq!(total, 1, "expected exactly one pair counted, got {total}");
 }
 
+// rq-8cec425d
 #[test]
 fn cross_type_two_particles() {
     let dir = tmp_path("ar_kr");
@@ -317,6 +328,7 @@ fn cross_type_two_particles() {
     assert_eq!(nonzero[0].1.2, 1);
 }
 
+// rq-56306e1f
 #[test]
 fn distances_beyond_r_max_contribute_nothing() {
     let dir = tmp_path("beyond_rmax");
@@ -334,6 +346,7 @@ fn distances_beyond_r_max_contribute_nothing() {
     assert_eq!(total, 0);
 }
 
+// rq-17fd53d9
 #[test]
 fn histogram_accumulates_across_frames() {
     let dir = tmp_path("multi_frame");
@@ -361,6 +374,7 @@ fn histogram_accumulates_across_frames() {
 
 // --- Normalisation ---
 
+// rq-c70f6309
 #[test]
 fn empty_bin_g_r_is_zero() {
     let dir = tmp_path("empty_bin");
@@ -380,6 +394,7 @@ fn empty_bin_g_r_is_zero() {
     }
 }
 
+// rq-36665dda
 #[test]
 fn normalisation_formula_matches_analytical_value() {
     let dir = tmp_path("normalisation");
@@ -419,6 +434,7 @@ fn normalisation_formula_matches_analytical_value() {
 
 // --- Reproducibility ---
 
+// rq-8b41bc4d
 #[test]
 fn two_analyze_runs_produce_byte_identical_csv() {
     let dir = tmp_path("repro");

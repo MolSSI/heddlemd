@@ -127,6 +127,7 @@ fn symmetric_state(n: usize, mass: f32, v_mag: f32) -> ParticleState {
 
 // --- Construction ---
 
+// rq-21e17441
 #[test]
 fn registry_builds_mtk_npt_with_defaults() {
     let gpu = init_device().unwrap();
@@ -146,6 +147,7 @@ fn registry_builds_mtk_npt_with_defaults() {
     assert!((state.q_mass_part[0] - expected_q1).abs() / expected_q1 < 1.0e-10);
 }
 
+// rq-100e0cc8
 #[test]
 fn registry_builds_mtk_npt_with_chain_length_1() {
     let gpu = init_device().unwrap();
@@ -155,6 +157,7 @@ fn registry_builds_mtk_npt_with_chain_length_1() {
     assert_eq!(state.xi_cell.len(), 1);
 }
 
+// rq-7fcfceac
 #[test]
 fn registry_builds_mtk_npt_with_particle_count_zero() {
     let gpu = init_device().unwrap();
@@ -165,6 +168,7 @@ fn registry_builds_mtk_npt_with_particle_count_zero() {
 
 // --- Ownership flags ---
 
+// rq-fecc63ef rq-2d46cad5
 #[test]
 fn mtk_npt_owns_thermostat_and_barostat() {
     use dynamics::integrator::IntegratorRegistry;
@@ -177,6 +181,7 @@ fn mtk_npt_owns_thermostat_and_barostat() {
 
 // --- Per-step kernel sequence ---
 
+// rq-89b8e85c
 #[test]
 fn step_launches_expected_kernel_set() {
     let gpu = init_device().unwrap();
@@ -218,6 +223,7 @@ fn step_launches_expected_kernel_set() {
     assert_eq!(count_for(KernelStage::VV_KICK), 0);
 }
 
+// rq-07375d3f
 #[test]
 fn step_on_empty_state_is_noop() {
     let gpu = init_device().unwrap();
@@ -239,6 +245,7 @@ fn step_on_empty_state_is_noop() {
 
 // --- Cell-coupled kernels (identity-mode checks) ---
 
+// rq-0d413b82
 #[test]
 fn mtk_velocity_half_kick_identity_mode_matches_half_vv_kick() {
     let gpu = init_device().unwrap();
@@ -281,6 +288,7 @@ fn mtk_velocity_half_kick_identity_mode_matches_half_vv_kick() {
     }
 }
 
+// rq-db6e7977
 #[test]
 fn mtk_position_drift_identity_mode_matches_plain_drift() {
     let gpu = init_device().unwrap();
@@ -311,6 +319,7 @@ fn mtk_position_drift_identity_mode_matches_plain_drift() {
     }
 }
 
+// rq-b3b19b01
 #[test]
 fn mtk_kernels_empty_state_are_noops() {
     let gpu = init_device().unwrap();
@@ -322,6 +331,7 @@ fn mtk_kernels_empty_state_are_noops() {
 
 // --- Shared chain helper ---
 
+// rq-e4f97cc2
 #[test]
 fn nhc_chain_sub_step_m_eq_1_runs_without_panicking() {
     let mut xi = vec![0.0_f64; 1];
@@ -369,6 +379,7 @@ fn nhc_chain_sub_step_is_pure_function() {
 
 // --- Box-generation propagation ---
 
+// rq-ba4087d7
 #[test]
 fn generation_advances_every_step() {
     let gpu = init_device().unwrap();
@@ -392,6 +403,7 @@ fn generation_advances_every_step() {
 
 // --- Log columns ---
 
+// rq-aae13334
 #[test]
 fn log_column_names_returns_pressure_volume_and_conserved() {
     let gpu = init_device().unwrap();
@@ -403,6 +415,7 @@ fn log_column_names_returns_pressure_volume_and_conserved() {
     );
 }
 
+// rq-a722f7ce
 #[test]
 fn log_column_values_includes_chain_terms_in_conserved_hamiltonian() {
     let gpu = init_device().unwrap();
@@ -448,6 +461,7 @@ fn log_column_values_includes_chain_terms_in_conserved_hamiltonian() {
 
 // --- Determinism ---
 
+// rq-c5f04195
 #[test]
 fn two_runs_with_identical_configs_are_byte_identical() {
     let gpu = init_device().unwrap();

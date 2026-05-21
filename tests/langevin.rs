@@ -615,6 +615,7 @@ mode = "all-pairs"
 
 // --- Image-flag wrap (lan_drift_half) ---
 
+// rq-7cd5fae2
 #[test]
 fn lan_drift_half_wraps_across_plus_l_half() {
     let gpu = init_device().expect("init_device");
@@ -641,6 +642,7 @@ fn lan_drift_half_wraps_across_plus_l_half() {
     assert_eq!(snap.images_x[0], 1);
 }
 
+// rq-d6e89324
 #[test]
 fn lan_drift_half_preserves_image_flags_when_no_wrap() {
     let gpu = init_device().expect("init_device");

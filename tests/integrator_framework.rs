@@ -115,6 +115,7 @@ fn construct_with_particle_count_zero() {
     let _integrator = registry.build(&vv_kind(true), &gpu, 0, 0).unwrap();
 }
 
+// rq-5711d6ce
 #[test]
 fn registry_without_matching_builder_reports_unknown_kind() {
     let gpu = init_device().unwrap();
@@ -169,6 +170,7 @@ impl Integrator for StubIntegrator {
     }
 }
 
+// rq-0d7ebeb6
 #[test]
 fn custom_builder_registered_takes_priority_over_builtin() {
     let gpu = init_device().unwrap();
@@ -280,6 +282,7 @@ fn lossless_vv_step_uses_lossless_kernels() {
     assert!(!names.contains(&"vv_kick"));
 }
 
+// rq-812e88d5
 #[test]
 fn integrator_owns_force_evaluation_inside_step() {
     // Wire up a real LJ slot so the force pipeline runs and we can confirm
@@ -490,6 +493,7 @@ fn empty_integrator_registry_reports_unknown_kind() {
 // rq-e8252f10 — placeholder: Berendsen construction is covered in tests/integrators_berendsen.rs
 
 // Empty thermostat registry reports UnknownKind.
+// rq-6dffb17f
 #[test]
 fn empty_thermostat_registry_reports_unknown_kind() {
     let gpu = init_device().unwrap();
@@ -505,6 +509,7 @@ fn empty_thermostat_registry_reports_unknown_kind() {
 }
 
 // build_optional with None returns Ok(None) without consulting builders.
+// rq-fb3f2189
 #[test]
 fn thermostat_build_optional_none_returns_none() {
     let gpu = init_device().unwrap();
@@ -514,6 +519,7 @@ fn thermostat_build_optional_none_returns_none() {
 }
 
 // BarostatRegistry::with_builtins() exposes the registered barostats.
+// rq-386e3288
 #[test]
 fn barostat_with_builtins_contains_berendsen() {
     let registry = BarostatRegistry::with_builtins();
@@ -526,6 +532,7 @@ fn barostat_with_builtins_contains_berendsen() {
 }
 
 // build_optional with None returns Ok(None) on the empty barostat registry.
+// rq-82cdabba
 #[test]
 fn barostat_build_optional_none_returns_none() {
     let gpu = init_device().unwrap();
@@ -621,6 +628,7 @@ impl dynamics::integrator::Thermostat for RecordingThermostat {
     }
 }
 
+// rq-0a6a97f6
 #[test]
 fn dispatch_loop_orders_apply_pre_step_apply_post() {
     let gpu = init_device().unwrap();
@@ -753,6 +761,7 @@ fn fixture() -> (
     (gpu, buffers, sim_box, ff, timings)
 }
 
+// rq-94a67d95
 #[test]
 fn plan_returns_same_shape_across_repeated_calls() {
     let registry = IntegratorRegistry::with_builtins();
@@ -766,6 +775,7 @@ fn plan_returns_same_shape_across_repeated_calls() {
     }
 }
 
+// rq-4300cafc
 #[test]
 fn plan_is_pure_does_not_launch_kernels_or_touch_buffers() {
     let registry = IntegratorRegistry::with_builtins();
@@ -777,6 +787,7 @@ fn plan_is_pure_does_not_launch_kernels_or_touch_buffers() {
     assert_eq!(pre_x, post_x);
 }
 
+// rq-384ed838
 #[test]
 fn empty_plan_walks_as_a_noop() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
@@ -799,6 +810,7 @@ fn empty_plan_walks_as_a_noop() {
     assert!(events.is_empty(), "expected no events, got {:?}", events);
 }
 
+// rq-07ead62b
 #[test]
 fn plan_with_multiple_force_evals_dispatches_each() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
@@ -845,6 +857,7 @@ fn plan_with_multiple_force_evals_dispatches_each() {
     );
 }
 
+// rq-d4d435c8
 #[test]
 fn execute_with_force_eval_directly_returns_unexpected_substep() {
     let (gpu, mut buffers, mut sim_box, _ff, mut timings) = fixture();
@@ -865,6 +878,7 @@ fn execute_with_force_eval_directly_returns_unexpected_substep() {
     }
 }
 
+// rq-99034e90
 #[test]
 fn plan_with_one_drift_fires_before_after_drift() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
@@ -899,6 +913,7 @@ fn plan_with_one_drift_fires_before_after_drift() {
     assert_eq!(events, vec!["before_drift", "after_drift", "after_kick"]);
 }
 
+// rq-3b42c2ff
 #[test]
 fn plan_with_two_drifts_fires_before_after_drift_twice() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
@@ -945,6 +960,7 @@ fn plan_with_two_drifts_fires_before_after_drift_twice() {
     );
 }
 
+// rq-a90e4189
 #[test]
 fn plan_whose_final_substep_is_not_a_kick_does_not_fire_after_kick() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
@@ -979,6 +995,7 @@ fn plan_whose_final_substep_is_not_a_kick_does_not_fire_after_kick() {
     assert!(!events.contains(&"after_kick"));
 }
 
+// rq-c3b3ec99
 #[test]
 fn custom_substep_alone_fires_no_constraint_hooks() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
@@ -1009,6 +1026,7 @@ fn custom_substep_alone_fires_no_constraint_hooks() {
     assert!(events.is_empty(), "expected no constraint events, got {events:?}");
 }
 
+// rq-309d8d50
 #[test]
 fn install_constraint_hooks_false_suppresses_all_hooks() {
     let (gpu, mut buffers, mut sim_box, mut ff, mut timings) = fixture();
@@ -1170,7 +1188,7 @@ fn validate_params_rejects_unknown_field() {
 
 use dynamics::forces::ForceClass;
 
-// rq-d4d435c8
+// rq-751bbb3c
 #[test]
 fn execute_with_force_eval_some_class_also_returns_unexpected_substep() {
     let (gpu, mut buffers, mut sim_box, _ff, mut timings) = fixture();

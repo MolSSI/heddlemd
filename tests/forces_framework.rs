@@ -1991,6 +1991,7 @@ impl dynamics::forces::PotentialBuilder for CountingSlowStubBuilder {
     }
 }
 
+// rq-db2253db
 #[test]
 fn potential_frequency_class_default_is_fast() {
     // ConstStub doesn't override frequency_class, so it inherits Fast.
@@ -2004,6 +2005,7 @@ fn potential_frequency_class_default_is_fast() {
     assert_eq!(stub.frequency_class(), ForceClass::Fast);
 }
 
+// rq-2dbda7ec
 #[test]
 fn builtin_potentials_report_canonical_class() {
     let gpu = init_device().unwrap();
@@ -2048,6 +2050,7 @@ fn builtin_potentials_report_canonical_class() {
     }
 }
 
+// rq-79068d4d
 #[test]
 fn per_class_slot_output_buffers_have_length_num_class_slots_times_n() {
     // Custom registry with one Fast slot (LJ-equivalent stub) and one
@@ -2087,6 +2090,7 @@ fn per_class_slot_output_buffers_have_length_num_class_slots_times_n() {
     assert_eq!(ff.slow_slot_virials.len(), 1 * 8);
 }
 
+// rq-52d4b245
 #[test]
 fn per_class_slot_output_buffers_are_zero_initialised() {
     // Slow buffers should be all-zero immediately after construction,
@@ -2127,6 +2131,7 @@ fn per_class_slot_output_buffers_are_zero_initialised() {
     assert!(slow.iter().all(|v| *v == 0.0));
 }
 
+// rq-cc66d208
 #[test]
 fn step_class_slow_with_no_slow_slots_is_noop() {
     // ForceField with only Fast slots: step_class(Slow) must launch
@@ -2188,6 +2193,7 @@ fn step_class_slow_with_no_slow_slots_is_noop() {
     );
 }
 
+// rq-b80f2ddb
 #[test]
 fn step_class_fast_with_no_fast_slots_is_noop() {
     // ForceField with only one Slow stub: step_class(Fast) must launch
@@ -2238,6 +2244,7 @@ fn step_class_fast_with_no_fast_slots_is_noop() {
     );
 }
 
+// rq-8eb7a546
 #[test]
 fn step_class_n0_launches_no_kernels() {
     let gpu = init_device().unwrap();
@@ -2284,6 +2291,7 @@ fn step_class_n0_launches_no_kernels() {
     );
 }
 
+// rq-57fd217e
 #[test]
 fn step_evaluates_every_class_and_produces_total_in_particle_buffers() {
     // One Fast slot writing value 1.0 and one Slow stub whose counter
@@ -2328,6 +2336,7 @@ fn step_evaluates_every_class_and_produces_total_in_particle_buffers() {
     assert_eq!(fx, vec![2.0_f32, 2.0]);
 }
 
+// rq-1a996f5d
 #[test]
 fn step_class_fast_refreshes_only_fast_slots_contributions() {
     // After step(), forces_x = ConstStub(value_x=1.0) + Slow(counter=1.0) = 2.0.
@@ -2377,6 +2386,7 @@ fn step_class_fast_refreshes_only_fast_slots_contributions() {
     assert_eq!(fx, vec![2.0_f32, 2.0]); // stale Slow=1.0 + fresh Fast=1.0
 }
 
+// rq-33cfb9fc
 #[test]
 fn step_class_slow_refreshes_only_slow_slots_contributions() {
     // After step(): counter=1, forces_x=2.0.
@@ -2425,6 +2435,7 @@ fn step_class_slow_refreshes_only_slow_slots_contributions() {
     assert_eq!(fx, vec![3.0_f32, 3.0]); // stale Fast=1.0 + fresh Slow=2.0
 }
 
+// rq-40f9d35a
 #[test]
 fn respa_style_call_sequence_is_deterministic_across_two_runs() {
     // Two independent ForceFields each issue

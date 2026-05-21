@@ -1,3 +1,4 @@
+// rq-9e1eee68
 use std::path::{Path, PathBuf};
 
 use dynamics::forces::{TopologyFileError, load_topology_file};
@@ -168,6 +169,7 @@ fn atom_bond_offsets_reflect_sorted_list() {
     assert_eq!(bl.atom_bond_indices.len(), 6);
 }
 
+// rq-ef5aa4b7
 #[test]
 fn file_does_not_exist() {
     let dir = tmp_path("missing");
@@ -178,6 +180,7 @@ fn file_does_not_exist() {
     }
 }
 
+// rq-4c245ce7
 #[test]
 fn unknown_section_header() {
     let dir = tmp_path("unknown_section");
@@ -189,6 +192,7 @@ fn unknown_section_header() {
     }
 }
 
+// rq-583d3df1
 #[test]
 fn duplicate_section_header() {
     let dir = tmp_path("duplicate_section");
@@ -200,6 +204,7 @@ fn duplicate_section_header() {
     }
 }
 
+// rq-1ed32e10
 #[test]
 fn content_before_section_rejected() {
     let dir = tmp_path("orphan_content");
@@ -211,6 +216,7 @@ fn content_before_section_rejected() {
     }
 }
 
+// rq-9df1eedb
 #[test]
 fn bond_row_wrong_column_count() {
     let dir = tmp_path("bond_cols");
@@ -222,6 +228,7 @@ fn bond_row_wrong_column_count() {
     }
 }
 
+// rq-13e15b90
 #[test]
 fn bond_row_atom_out_of_range() {
     let dir = tmp_path("bond_oob");
@@ -236,6 +243,7 @@ fn bond_row_atom_out_of_range() {
     }
 }
 
+// rq-10d1da56
 #[test]
 fn self_bond_rejected() {
     let dir = tmp_path("self_bond");
@@ -247,6 +255,7 @@ fn self_bond_rejected() {
     }
 }
 
+// rq-4f78f4a2
 #[test]
 fn duplicate_bond_rejected() {
     let dir = tmp_path("dup_bond");
@@ -260,6 +269,7 @@ fn duplicate_bond_rejected() {
     }
 }
 
+// rq-e4563eec
 #[test]
 fn unknown_bond_type() {
     let dir = tmp_path("unknown_type");
@@ -271,6 +281,7 @@ fn unknown_bond_type() {
     }
 }
 
+// rq-f371677d
 #[test]
 fn exclusion_row_wrong_cols() {
     let dir = tmp_path("excl_cols");
@@ -282,6 +293,7 @@ fn exclusion_row_wrong_cols() {
     }
 }
 
+// rq-df10e81f
 #[test]
 fn self_exclusion_rejected() {
     let dir = tmp_path("self_excl");
@@ -293,6 +305,7 @@ fn self_exclusion_rejected() {
     }
 }
 
+// rq-eea2f5f8
 #[test]
 fn duplicate_exclusion_rejected() {
     let dir = tmp_path("dup_excl");
@@ -304,6 +317,7 @@ fn duplicate_exclusion_rejected() {
     }
 }
 
+// rq-f0b9b0f5
 #[test]
 fn exclusion_scale_out_of_range_negative() {
     let dir = tmp_path("scale_neg");
@@ -315,6 +329,7 @@ fn exclusion_scale_out_of_range_negative() {
     }
 }
 
+// rq-9f658edf
 #[test]
 fn exclusion_scale_out_of_range_above_one() {
     let dir = tmp_path("scale_high");
@@ -326,6 +341,7 @@ fn exclusion_scale_out_of_range_above_one() {
     }
 }
 
+// rq-2b4a324a
 #[test]
 fn exclusion_scale_nan_rejected() {
     let dir = tmp_path("scale_nan");
@@ -337,6 +353,7 @@ fn exclusion_scale_nan_rejected() {
     }
 }
 
+// rq-1221d020
 #[test]
 fn single_scale_form_sets_both_lj_and_coul_scales_equally() {
     let dir = tmp_path("single_scale");
@@ -348,6 +365,7 @@ fn single_scale_form_sets_both_lj_and_coul_scales_equally() {
     assert_eq!(el.entries[0].scale_coul, 0.5);
 }
 
+// rq-1fde7f32
 #[test]
 fn four_column_form_sets_lj_and_coul_scales_independently() {
     let dir = tmp_path("four_col");
@@ -359,6 +377,7 @@ fn four_column_form_sets_lj_and_coul_scales_independently() {
     assert_eq!(el.entries[0].scale_coul, 0.833);
 }
 
+// rq-6a9f0a18
 #[test]
 fn out_of_range_coul_scale_in_four_column_form_rejected() {
     let dir = tmp_path("coul_oor");
@@ -370,6 +389,7 @@ fn out_of_range_coul_scale_in_four_column_form_rejected() {
     }
 }
 
+// rq-6cd92c14
 #[test]
 fn too_few_exclusion_columns_rejected() {
     let dir = tmp_path("too_few");
@@ -381,6 +401,7 @@ fn too_few_exclusion_columns_rejected() {
     }
 }
 
+// rq-f371677d
 #[test]
 fn too_many_exclusion_columns_rejected() {
     let dir = tmp_path("too_many");
@@ -394,6 +415,7 @@ fn too_many_exclusion_columns_rejected() {
 
 // --- Angle parsing tests ---
 
+// rq-e768a2b1
 #[test]
 fn load_topology_with_an_angle() {
     let dir = tmp_path("angle_basic");
@@ -411,6 +433,7 @@ fn load_topology_with_an_angle() {
     assert_eq!(el.entries.len(), 3);
 }
 
+// rq-f33ca120
 #[test]
 fn angle_wings_canonicalised_so_atom_i_lt_atom_k() {
     let dir = tmp_path("angle_canon");
@@ -423,6 +446,7 @@ fn angle_wings_canonicalised_so_atom_i_lt_atom_k() {
     assert_eq!(a.atom_k, 2);
 }
 
+// rq-ba37ec6b
 #[test]
 fn angles_sorted_by_centre_then_wings() {
     let dir = tmp_path("angle_sort");
@@ -437,6 +461,7 @@ fn angles_sorted_by_centre_then_wings() {
     assert_eq!((al.angles[1].atom_i, al.angles[1].atom_j, al.angles[1].atom_k), (1, 2, 3));
 }
 
+// rq-021e6d82
 #[test]
 fn angle_row_wrong_column_count_rejected() {
     let dir = tmp_path("angle_short");
@@ -448,6 +473,7 @@ fn angle_row_wrong_column_count_rejected() {
     }
 }
 
+// rq-b05f8682
 #[test]
 fn angle_row_atom_out_of_range() {
     let dir = tmp_path("angle_oor");
@@ -462,6 +488,7 @@ fn angle_row_atom_out_of_range() {
     }
 }
 
+// rq-cfc7a794
 #[test]
 fn angle_repeated_atom_i_eq_j_rejected() {
     let dir = tmp_path("angle_ij");
@@ -473,6 +500,7 @@ fn angle_repeated_atom_i_eq_j_rejected() {
     }
 }
 
+// rq-9d68f8fb
 #[test]
 fn angle_repeated_atom_j_eq_k_rejected() {
     let dir = tmp_path("angle_jk");
@@ -484,6 +512,7 @@ fn angle_repeated_atom_j_eq_k_rejected() {
     }
 }
 
+// rq-220f3f10
 #[test]
 fn angle_repeated_atom_i_eq_k_rejected() {
     let dir = tmp_path("angle_ik");
@@ -495,6 +524,7 @@ fn angle_repeated_atom_i_eq_k_rejected() {
     }
 }
 
+// rq-c7c3f66a
 #[test]
 fn duplicate_angle_after_canonicalisation_rejected() {
     let dir = tmp_path("angle_dup");
@@ -512,6 +542,7 @@ fn duplicate_angle_after_canonicalisation_rejected() {
     }
 }
 
+// rq-086a1bd9
 #[test]
 fn unknown_angle_type_rejected() {
     let dir = tmp_path("angle_unk");
@@ -523,6 +554,7 @@ fn unknown_angle_type_rejected() {
     }
 }
 
+// rq-ea8ebebd
 #[test]
 fn explicit_exclusion_overrides_angle_implicit_default() {
     let dir = tmp_path("angle_excl_override");
@@ -534,6 +566,7 @@ fn explicit_exclusion_overrides_angle_implicit_default() {
     assert_eq!(entry_1_2.scale_coul, 0.833);
 }
 
+// rq-9a386c23
 #[test]
 fn atom_angle_offsets_reflect_sorted_list() {
     let dir = tmp_path("angle_offsets");
@@ -558,6 +591,7 @@ fn spce() -> NamedSlotConfig {
     )
 }
 
+// rq-fe3b32cf
 #[test]
 fn load_topology_with_a_settle_constraint() {
     let dir = tmp_path("constraint_settle");
@@ -582,6 +616,7 @@ fn load_topology_with_a_settle_constraint() {
     assert!(el.entries.iter().any(|e| e.atom_i == 1 && e.atom_j == 2));
 }
 
+// rq-5dfc02a9
 #[test]
 fn constraint_row_wrong_atom_count_rejected() {
     let dir = tmp_path("constraint_wrong_count");
@@ -597,6 +632,7 @@ fn constraint_row_wrong_atom_count_rejected() {
     }
 }
 
+// rq-93506647
 #[test]
 fn constraint_row_repeated_atom_rejected() {
     let dir = tmp_path("constraint_repeated");
@@ -609,6 +645,7 @@ fn constraint_row_repeated_atom_rejected() {
     }
 }
 
+// rq-44feffc6
 #[test]
 fn constraint_row_atom_out_of_range_rejected() {
     let dir = tmp_path("constraint_oob");
@@ -624,6 +661,7 @@ fn constraint_row_atom_out_of_range_rejected() {
     }
 }
 
+// rq-6381db33
 #[test]
 fn unknown_constraint_type_rejected() {
     let dir = tmp_path("constraint_unknown_type");
@@ -638,6 +676,7 @@ fn unknown_constraint_type_rejected() {
     }
 }
 
+// rq-15b6d3a4
 #[test]
 fn duplicate_constraint_atom_across_rows_rejected() {
     let dir = tmp_path("constraint_dup_atom");
@@ -650,6 +689,7 @@ fn duplicate_constraint_atom_across_rows_rejected() {
     }
 }
 
+// rq-8ea6cf9c
 #[test]
 fn bond_and_constraint_pair_overlap_rejected() {
     let dir = tmp_path("constraint_bond_overlap");
@@ -665,6 +705,7 @@ fn bond_and_constraint_pair_overlap_rejected() {
     }
 }
 
+// rq-be8dfaa5
 #[test]
 fn explicit_exclusion_overrides_constraint_derived_default() {
     let dir = tmp_path("constraint_excl_override");
@@ -678,6 +719,7 @@ fn explicit_exclusion_overrides_constraint_derived_default() {
     assert_eq!(entry.scale_coul, 0.25);
 }
 
+// rq-75a9815d
 #[test]
 fn constraint_groups_sorted_by_minimum_atom_index() {
     let dir = tmp_path("constraint_sort");

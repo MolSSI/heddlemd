@@ -656,7 +656,7 @@ fn check_min_perpendicular_width_flags_direction_b_when_only_w_b_fails() {
     }
 }
 
-#[test]
+#[test] // rq-5ffa0551
 fn check_min_perpendicular_width_flags_direction_c_when_only_w_c_fails() {
     let b = SimulationBox::new(10.0, 10.0, 4.0, 0.0, 0.0, 0.0).unwrap();
     let err = b.check_min_perpendicular_width(5.0).unwrap_err();
@@ -674,7 +674,7 @@ fn check_min_perpendicular_width_flags_direction_c_when_only_w_c_fails() {
     }
 }
 
-#[test]
+#[test] // rq-743ae35c
 fn check_min_perpendicular_width_reports_first_failing_direction_when_multiple_fail() {
     // All three widths fail; only direction "a" should be reported.
     let b = SimulationBox::new(4.0, 4.0, 4.0, 0.0, 0.0, 0.0).unwrap();
@@ -690,7 +690,7 @@ fn check_min_perpendicular_width_reports_first_failing_direction_when_multiple_f
     }
 }
 
-#[test]
+#[test] // rq-8ac1a52f
 fn check_min_perpendicular_width_on_triclinic_uses_perpendicular_width_not_edge() {
     // A box with yz tilt: w_b = (ly * lz) / sqrt(lz^2 + yz^2) =
     // 100 / sqrt(200) ≈ 7.071. Edge length ly = 10.0 would pass an 8.0
@@ -712,14 +712,14 @@ fn check_min_perpendicular_width_on_triclinic_uses_perpendicular_width_not_edge(
     }
 }
 
-#[test]
+#[test] // rq-98ac1915
 fn check_min_perpendicular_width_with_non_positive_threshold_always_ok() {
     let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).unwrap();
     assert!(b.check_min_perpendicular_width(-1.0).is_ok());
     assert!(b.check_min_perpendicular_width(0.0).is_ok());
 }
 
-#[test]
+#[test] // rq-3eaf65b6
 fn check_min_perpendicular_width_is_deterministic() {
     let b1 = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).unwrap();
     let b2 = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).unwrap();

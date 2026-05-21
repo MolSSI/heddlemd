@@ -439,6 +439,7 @@ fn reduce_bond_forces_zero_particles_noop() {
 }
 
 // End-to-end: through the framework.
+// rq-c7af1f28
 #[test]
 fn diatomic_equilibrium_produces_zero_net_force() {
     let gpu = init_device().unwrap();
@@ -476,6 +477,7 @@ fn diatomic_equilibrium_produces_zero_net_force() {
     assert!(downloaded.forces_x[1].abs() < 1.0e-6);
 }
 
+// rq-6d06e36e
 #[test]
 fn newtons_third_law_holds_for_combined_force() {
     let gpu = init_device().unwrap();

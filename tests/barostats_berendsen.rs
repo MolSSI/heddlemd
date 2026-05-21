@@ -104,6 +104,7 @@ fn make_state(
 
 // --- Construction ---
 
+// rq-52b7d30e
 #[test]
 fn registry_builds_berendsen_barostat() {
     let gpu = init_device().unwrap();
@@ -116,6 +117,7 @@ fn registry_builds_berendsen_barostat() {
     assert_eq!(baro.compressibility, 4.5e-10);
 }
 
+// rq-abf09acf
 #[test]
 fn registry_builds_berendsen_barostat_particle_count_zero() {
     let gpu = init_device().unwrap();
@@ -123,6 +125,7 @@ fn registry_builds_berendsen_barostat_particle_count_zero() {
     let _baro = build_berendsen_barostat(&gpu, 0, &kind);
 }
 
+// rq-05e8f300
 #[test]
 fn barostat_build_optional_none_returns_none() {
     let gpu = init_device().unwrap();
@@ -131,6 +134,7 @@ fn barostat_build_optional_none_returns_none() {
     assert!(result.is_none());
 }
 
+// rq-909e5bb4
 #[test]
 fn barostat_with_builtins_exposes_berendsen() {
     let registry = BarostatRegistry::with_builtins();
@@ -144,6 +148,7 @@ fn barostat_with_builtins_exposes_berendsen() {
 
 // --- compute_total_virial helper ---
 
+// rq-cf4d6ab4
 #[test]
 fn compute_total_virial_zero_virial_returns_zero() {
     let gpu = init_device().unwrap();
@@ -154,6 +159,7 @@ fn compute_total_virial_zero_virial_returns_zero() {
     assert_eq!(w, 0.0);
 }
 
+// rq-098fabd1
 #[test]
 fn compute_total_virial_matches_host_sum() {
     let gpu = init_device().unwrap();
@@ -171,6 +177,7 @@ fn compute_total_virial_matches_host_sum() {
     assert!((w - expected).abs() < 1.0e-5);
 }
 
+// rq-d801f67c
 #[test]
 fn compute_total_virial_is_deterministic() {
     let gpu = init_device().unwrap();
@@ -187,6 +194,7 @@ fn compute_total_virial_is_deterministic() {
     assert_eq!(wa.to_bits(), wb.to_bits());
 }
 
+// rq-4a328491
 #[test]
 fn compute_total_virial_empty_state_returns_zero() {
     let gpu = init_device().unwrap();
@@ -199,6 +207,7 @@ fn compute_total_virial_empty_state_returns_zero() {
 
 // --- rescale_positions helper ---
 
+// rq-77292dee
 #[test]
 fn rescale_positions_multiplies_components() {
     let gpu = init_device().unwrap();
@@ -226,6 +235,7 @@ fn rescale_positions_multiplies_components() {
     assert_eq!(z, vec![1.5_f32, -3.0]);
 }
 
+// rq-2fc35d61
 #[test]
 fn rescale_positions_factor_one_is_identity() {
     let gpu = init_device().unwrap();
@@ -253,6 +263,7 @@ fn rescale_positions_factor_one_is_identity() {
     assert_eq!(rx, px);
 }
 
+// rq-00e98375
 #[test]
 fn rescale_positions_does_not_touch_velocities_forces_masses_or_images() {
     let gpu = init_device().unwrap();
@@ -284,6 +295,7 @@ fn rescale_positions_does_not_touch_velocities_forces_masses_or_images() {
     assert_eq!(ix, snap_images_x);
 }
 
+// rq-64c051d4
 #[test]
 fn rescale_positions_empty_state_is_noop() {
     let gpu = init_device().unwrap();
@@ -294,6 +306,7 @@ fn rescale_positions_empty_state_is_noop() {
 
 // --- SimulationBox::rescale_isotropic ---
 
+// rq-af9257bb
 #[test]
 fn rescale_isotropic_multiplies_all_six_lattice_parameters() {
     let mut sim_box = SimulationBox::new(1.0, 2.0, 3.0, 0.1, 0.2, 0.3).unwrap();
@@ -307,6 +320,7 @@ fn rescale_isotropic_multiplies_all_six_lattice_parameters() {
     assert!((yz - 0.15).abs() < 1.0e-6);
 }
 
+// rq-911d9120
 #[test]
 fn rescale_isotropic_bumps_generation() {
     let mut sim_box = SimulationBox::new(1.0, 1.0, 1.0, 0.0, 0.0, 0.0).unwrap();
@@ -315,6 +329,7 @@ fn rescale_isotropic_bumps_generation() {
     assert_eq!(sim_box.generation(), g + 1);
 }
 
+// rq-b0b4c220
 #[test]
 fn rescale_isotropic_rejects_zero_factor() {
     let mut sim_box = SimulationBox::new(1.0, 1.0, 1.0, 0.0, 0.0, 0.0).unwrap();
@@ -322,6 +337,7 @@ fn rescale_isotropic_rejects_zero_factor() {
     assert!(matches!(result, Err(SimulationBoxError::NonPositiveDiagonal { .. })));
 }
 
+// rq-9ba11e1e
 #[test]
 fn rescale_isotropic_rejects_nan_factor() {
     let mut sim_box = SimulationBox::new(1.0, 1.0, 1.0, 0.0, 0.0, 0.0).unwrap();
@@ -331,6 +347,7 @@ fn rescale_isotropic_rejects_nan_factor() {
 
 // --- Per-step kernel sequence ---
 
+// rq-92cecd28
 #[test]
 fn apply_launches_expected_kernel_set() {
     let gpu = init_device().unwrap();
@@ -367,6 +384,7 @@ fn apply_launches_expected_kernel_set() {
     assert_eq!(count_for(KernelStage::VV_KICK), 0);
 }
 
+// rq-69600add
 #[test]
 fn apply_on_empty_state_is_noop() {
     let gpu = init_device().unwrap();
@@ -409,6 +427,7 @@ fn system_with_pressure(target_pressure_pa: f64) -> (Vec<f32>, Vec<f32>, Vec<f32
     (px, vx, masses, virials, target_pressure_pa)
 }
 
+// rq-a2bb55c6
 #[test]
 fn mu_equals_one_when_pressure_equals_target() {
     let gpu = init_device().unwrap();
@@ -435,6 +454,7 @@ fn mu_equals_one_when_pressure_equals_target() {
     }
 }
 
+// rq-c9f9d550
 #[test]
 fn mu_less_than_one_when_pressure_below_target() {
     // P = P_target / 2 → P_target − P > 0 → μ³ < 1 → contraction.
@@ -461,6 +481,7 @@ fn mu_less_than_one_when_pressure_below_target() {
     assert!(rel < 1.0e-3, "μ³ actual = {mu_cubed_actual}, expected ≈ {expected_mu_cubed}");
 }
 
+// rq-ed3ed814
 #[test]
 fn mu_greater_than_one_when_pressure_above_target() {
     // P = 2 · P_target → μ³ > 1 → expansion.
@@ -487,6 +508,7 @@ fn mu_greater_than_one_when_pressure_above_target() {
     assert!(rel < 1.0e-3, "μ³ actual = {mu_cubed_actual}, expected ≈ {expected_mu_cubed}");
 }
 
+// rq-4dbe4a07
 #[test]
 fn mu_clamped_to_safety_floor() {
     // Set up so that β · (dt/τ) · (P_target − P) >> 1; μ³ would be
@@ -522,6 +544,7 @@ fn mu_clamped_to_safety_floor() {
 
 // --- Fractional-coord and shape invariants ---
 
+// rq-cf183b79
 #[test]
 fn fractional_coordinates_invariant_under_apply() {
     let gpu = init_device().unwrap();
@@ -547,6 +570,7 @@ fn fractional_coordinates_invariant_under_apply() {
     }
 }
 
+// rq-16252a37
 #[test]
 fn triclinic_shape_preserved_under_apply() {
     let gpu = init_device().unwrap();
@@ -580,6 +604,7 @@ fn triclinic_shape_preserved_under_apply() {
 
 // --- Box-generation propagation ---
 
+// rq-136f7d15
 #[test]
 fn generation_advances_after_apply() {
     let gpu = init_device().unwrap();
@@ -599,6 +624,7 @@ fn generation_advances_after_apply() {
 
 // --- Log columns ---
 
+// rq-7564b1e7
 #[test]
 fn log_column_names_returns_pressure_and_box_volume() {
     let gpu = init_device().unwrap();
@@ -606,6 +632,7 @@ fn log_column_names_returns_pressure_and_box_volume() {
     assert_eq!(baro.log_column_names(), &["pressure", "box_volume"]);
 }
 
+// rq-24073418
 #[test]
 fn log_column_values_returns_cached_pressure_and_volume() {
     let gpu = init_device().unwrap();
@@ -682,6 +709,7 @@ fn composes_with_velocity_verlet_and_berendsen_thermostat() {
 
 // --- Determinism ---
 
+// rq-3460c38a
 #[test]
 fn two_runs_byte_identical() {
     let gpu = init_device().unwrap();

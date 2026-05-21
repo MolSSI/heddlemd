@@ -579,6 +579,7 @@ fn forward_then_negated_kick_drift_returns_free_particle_to_origin() {
 
 // --- Image-flag wrap ---
 
+// rq-e6b6f2d8
 #[test]
 fn vv_kick_drift_wraps_positions_back_into_primary_image() {
     let gpu = init_device().expect("init_device");
@@ -606,6 +607,7 @@ fn vv_kick_drift_wraps_positions_back_into_primary_image() {
     assert_eq!(r.images_z[0], 0);
 }
 
+// rq-aaf3d06f
 #[test]
 fn vv_kick_drift_wraps_in_negative_x() {
     let gpu = init_device().expect("init_device");
@@ -631,6 +633,7 @@ fn vv_kick_drift_wraps_in_negative_x() {
     assert_eq!(r.images_x[0], -1);
 }
 
+// rq-dae60da6
 #[test]
 fn vv_kick_drift_handles_multi_period_crossings() {
     let gpu = init_device().expect("init_device");
@@ -661,6 +664,7 @@ fn vv_kick_drift_handles_multi_period_crossings() {
     assert!((unwrapped - 95.0_f32).abs() < 1e-4);
 }
 
+// rq-9cd01384
 #[test]
 fn vv_kick_does_not_modify_image_flags() {
     let gpu = init_device().expect("init_device");

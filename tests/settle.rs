@@ -108,6 +108,7 @@ fn big_box() -> SimulationBox {
 
 // --- Construction tests --------------------------------------------------
 
+// rq-3abb71cd
 #[test]
 fn construct_settle_slot_for_one_water() {
     let gpu = init_device().unwrap();
@@ -124,6 +125,7 @@ fn construct_settle_slot_for_one_water() {
     assert_eq!(slot.particle_count, 3);
 }
 
+// rq-3abb71cd
 #[test]
 fn settle_registry_with_builtins_returns_some_for_non_empty_list() {
     let gpu = init_device().unwrap();
@@ -137,6 +139,7 @@ fn settle_registry_with_builtins_returns_some_for_non_empty_list() {
     assert_eq!(slot.unwrap().group_count(), 1);
 }
 
+// rq-fd0add61
 #[test]
 fn settle_registry_with_builtins_returns_none_for_empty_list() {
     let gpu = init_device().unwrap();
@@ -146,6 +149,7 @@ fn settle_registry_with_builtins_returns_none_for_empty_list() {
     assert!(slot.is_none());
 }
 
+// rq-7e0437ab
 #[test]
 fn settle_rejects_inconsistent_h_masses() {
     let gpu = init_device().unwrap();
@@ -186,6 +190,7 @@ fn empty_constraint_registry_reports_unsupported_kind() {
 
 // --- Empty-state tests ---------------------------------------------------
 
+// rq-5d972f15
 #[test]
 fn settle_hooks_on_zero_group_slot_are_noops() {
     let gpu = init_device().unwrap();
@@ -212,6 +217,7 @@ fn settle_hooks_on_zero_group_slot_are_noops() {
 
 // --- Snapshot kernel -----------------------------------------------------
 
+// rq-4ec4d1d6
 #[test]
 fn settle_snapshot_copies_pre_drift_positions() {
     let gpu = init_device().unwrap();
@@ -246,6 +252,7 @@ fn dist(ax: f32, ay: f32, az: f32, bx: f32, by: f32, bz: f32) -> f32 {
     ((ax - bx).powi(2) + (ay - by).powi(2) + (az - bz).powi(2)).sqrt()
 }
 
+// rq-a8b68f59
 #[test]
 fn settle_positions_restores_constraint_distances_after_bond_stretch() {
     let gpu = init_device().unwrap();
@@ -306,6 +313,7 @@ fn settle_positions_restores_constraint_distances_after_bond_stretch() {
     );
 }
 
+// rq-f26ae0cc
 #[test]
 fn settle_positions_preserves_centre_of_mass() {
     let gpu = init_device().unwrap();
@@ -368,6 +376,7 @@ fn settle_positions_preserves_centre_of_mass() {
     assert!((com_c.2 - com_u.2).abs() < tol, "COM z drifted");
 }
 
+// rq-25acc667
 #[test]
 fn settle_positions_updates_half_step_velocities_consistently() {
     let gpu = init_device().unwrap();
@@ -413,6 +422,7 @@ fn settle_positions_updates_half_step_velocities_consistently() {
 
 // --- Velocity projection -------------------------------------------------
 
+// rq-66e657bf
 #[test]
 fn settle_velocities_zeroes_constraint_derivatives() {
     let gpu = init_device().unwrap();
@@ -462,6 +472,7 @@ fn settle_velocities_zeroes_constraint_derivatives() {
     assert!(dot(1, 2).abs() < tol, "(v_H1 - v_H2) · r_HH = {}", dot(1, 2));
 }
 
+// rq-13af93b9
 #[test]
 fn settle_velocities_preserves_centre_of_mass_velocity() {
     let gpu = init_device().unwrap();
@@ -512,6 +523,7 @@ fn settle_velocities_preserves_centre_of_mass_velocity() {
 
 // --- Side effects --------------------------------------------------------
 
+// rq-fc6ec19e
 #[test]
 fn settle_does_not_modify_atoms_outside_groups() {
     let gpu = init_device().unwrap();
@@ -566,6 +578,7 @@ fn settle_does_not_modify_atoms_outside_groups() {
     }
 }
 
+// rq-fd498605
 #[test]
 fn settle_does_not_modify_forces_masses_or_ids() {
     let gpu = init_device().unwrap();
@@ -607,6 +620,7 @@ fn settle_does_not_modify_forces_masses_or_ids() {
 
 // --- Multi-water independence --------------------------------------------
 
+// rq-d5790d66
 #[test]
 fn multiple_water_groups_evolve_independently() {
     let gpu = init_device().unwrap();
@@ -653,6 +667,7 @@ fn multiple_water_groups_evolve_independently() {
 
 // --- Reproducibility -----------------------------------------------------
 
+// rq-99ee814d
 #[test]
 fn two_independent_settle_runs_produce_byte_identical_outputs() {
     let gpu = init_device().unwrap();
@@ -699,6 +714,7 @@ fn two_independent_settle_runs_produce_byte_identical_outputs() {
 
 // --- Module loading + builder construction -------------------------------
 
+// rq-bdb4af60
 #[test]
 fn init_device_exposes_settle_kernels() {
     let gpu = init_device().unwrap();
@@ -709,6 +725,7 @@ fn init_device_exposes_settle_kernels() {
     let _ = &gpu.kernels.settle.settle_velocities;
 }
 
+// rq-278cb574
 #[test]
 fn settle_builder_kind_name_is_settle_water() {
     let b = SettleBuilder;

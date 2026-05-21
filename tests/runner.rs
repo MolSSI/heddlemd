@@ -750,6 +750,7 @@ fn kernel_failure_exit_code_mapping_smoke() {
 use dynamics::Registries;
 use dynamics::runner::run_simulation_with_registries;
 
+// rq-d9726854
 #[test]
 fn registries_new_starts_every_inner_registry_empty() {
     let registries = Registries::new();
@@ -760,6 +761,7 @@ fn registries_new_starts_every_inner_registry_empty() {
     assert!(registries.potentials.builders.is_empty());
 }
 
+// rq-5f8f7d00
 #[test]
 fn registries_with_builtins_populates_every_inner_registry() {
     let registries = Registries::with_builtins();
@@ -770,6 +772,7 @@ fn registries_with_builtins_populates_every_inner_registry() {
     assert!(!registries.potentials.builders.is_empty());
 }
 
+// rq-bbb25583
 #[test]
 fn register_potential_appends_to_potentials() {
     use dynamics::forces::{
@@ -793,6 +796,7 @@ fn register_potential_appends_to_potentials() {
     assert_eq!(format!("{last:?}"), "NoopBuilder");
 }
 
+// rq-b5e263e1
 #[test]
 fn run_simulation_matches_with_registries_builtins() {
     let dir = tmp_path("run_sim_vs_with_registries");
@@ -810,6 +814,7 @@ fn run_simulation_matches_with_registries_builtins() {
     assert_eq!(s1.phases[0].log_rows_written, s2.phases[0].log_rows_written);
 }
 
+// rq-eb9e43e7
 #[test]
 fn custom_kind_with_run_simulation_fails_with_unknown_kind() {
     // A config that references a custom integrator kind, run through
@@ -855,6 +860,7 @@ cutoff = 1.0e-9
     }
 }
 
+// rq-923fc84f
 #[test]
 fn custom_kind_with_registered_builder_dispatches_through_bundle() {
     // Register a stub integrator under the kind "custom-stub" and
@@ -959,6 +965,7 @@ cutoff = 1.0e-9
     assert_eq!(plan_calls.load(Ordering::SeqCst), 3);
 }
 
+// rq-0069339b
 #[test]
 fn custom_kind_with_empty_registries_fails_with_unknown_kind() {
     // Empty Registries → even the built-in "velocity-verlet" config

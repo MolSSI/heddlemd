@@ -1074,6 +1074,7 @@ cutoff = 1.0
     assert_eq!(config.pair_interactions.len(), 3);
 }
 
+// rq-66dfc50f
 #[test]
 fn reject_multi_type_with_missing_pair() {
     let dir = tmp_path("multi_type_missing_pair");
@@ -1659,6 +1660,7 @@ fn log_every_zero_accepted() {
 
 // --- Neighbor list ---
 
+// rq-e2f32af0
 #[test]
 fn neighbor_list_defaults_to_cell_list_when_section_omitted() {
     let dir = tmp_path("nl_default");
@@ -1674,6 +1676,7 @@ fn neighbor_list_defaults_to_cell_list_when_section_omitted() {
     }
 }
 
+// rq-b1f33ea4
 #[test]
 fn neighbor_list_cell_list_explicit_parameters() {
     let dir = tmp_path("nl_explicit");
@@ -1689,6 +1692,7 @@ fn neighbor_list_cell_list_explicit_parameters() {
     );
 }
 
+// rq-e643b070
 #[test]
 fn neighbor_list_cell_list_default_max_neighbors() {
     let dir = tmp_path("nl_default_max");
@@ -1704,6 +1708,7 @@ fn neighbor_list_cell_list_default_max_neighbors() {
     );
 }
 
+// rq-cde6e114
 #[test]
 fn neighbor_list_cell_list_default_r_skin() {
     let dir = tmp_path("nl_default_rskin");
@@ -1722,6 +1727,7 @@ fn neighbor_list_cell_list_default_r_skin() {
     }
 }
 
+// rq-931f1ab8
 #[test]
 fn neighbor_list_all_pairs_mode() {
     let dir = tmp_path("nl_all_pairs");
@@ -1734,6 +1740,7 @@ fn neighbor_list_all_pairs_mode() {
     assert_eq!(cfg.neighbor_list, NeighborListConfig::AllPairs);
 }
 
+// rq-0a92d90b
 #[test]
 fn neighbor_list_unknown_mode_rejected() {
     let dir = tmp_path("nl_unknown_mode");
@@ -1777,6 +1784,7 @@ fn neighbor_list_rejects_unknown_field_for_chosen_mode() {
     }
 }
 
+// rq-fedef74d
 #[test]
 fn neighbor_list_rejects_zero_max_neighbors() {
     let dir = tmp_path("nl_zero_max");
@@ -1792,6 +1800,7 @@ fn neighbor_list_rejects_zero_max_neighbors() {
     ), "got {err:?}");
 }
 
+// rq-f7856bcc
 #[test]
 fn neighbor_list_rejects_non_positive_r_skin() {
     let dir = tmp_path("nl_zero_rskin");
@@ -1809,6 +1818,7 @@ fn neighbor_list_rejects_non_positive_r_skin() {
 
 // --- Angle types ---
 
+// rq-24dc9578
 #[test]
 fn angle_types_optional_empty() {
     let dir = tmp_path("angle_types_optional");
@@ -1817,6 +1827,7 @@ fn angle_types_optional_empty() {
     assert!(cfg.angle_types.is_empty());
 }
 
+// rq-91bf10ec
 #[test]
 fn valid_harmonic_angle_type_accepted() {
     let dir = tmp_path("angle_types_harmonic");
@@ -1836,6 +1847,7 @@ fn valid_harmonic_angle_type_accepted() {
     }
 }
 
+// rq-57518e01
 #[test]
 fn angle_type_missing_potential_rejected() {
     let dir = tmp_path("angle_no_pot");
@@ -1852,6 +1864,7 @@ fn angle_type_missing_potential_rejected() {
     }
 }
 
+// rq-ffa771bd
 #[test]
 fn angle_type_unknown_potential_rejected() {
     let dir = tmp_path("angle_unk_pot");
@@ -1866,6 +1879,7 @@ fn angle_type_unknown_potential_rejected() {
     );
 }
 
+// rq-aad6ca63
 #[test]
 fn harmonic_angle_rejects_non_positive_k_theta() {
     let dir = tmp_path("angle_k_neg");
@@ -1882,6 +1896,7 @@ fn harmonic_angle_rejects_non_positive_k_theta() {
     }
 }
 
+// rq-e399422c
 #[test]
 fn harmonic_angle_rejects_theta_0_outside_zero_pi() {
     let dir = tmp_path("angle_t0_oor");
@@ -1898,6 +1913,7 @@ fn harmonic_angle_rejects_theta_0_outside_zero_pi() {
     }
 }
 
+// rq-c5fa34f5
 #[test]
 fn harmonic_angle_rejects_extra_fields() {
     let dir = tmp_path("angle_extra");
@@ -1913,6 +1929,7 @@ fn harmonic_angle_rejects_extra_fields() {
     );
 }
 
+// rq-9255c192
 #[test]
 fn reject_duplicate_angle_type_name() {
     let dir = tmp_path("angle_dup_name");
@@ -1927,6 +1944,7 @@ fn reject_duplicate_angle_type_name() {
     }
 }
 
+// rq-dc35ae30
 #[test]
 fn empty_angle_type_name_rejected() {
     let dir = tmp_path("angle_empty_name");
@@ -1992,6 +2010,7 @@ cutoff = 1.0e-9
 
 // --- [thermostat] presence / absence ---
 
+// rq-ca356c08
 #[test]
 fn thermostat_section_absent_yields_none() {
     let dir = tmp_path("therm_absent");
@@ -2000,6 +2019,7 @@ fn thermostat_section_absent_yields_none() {
     assert!(cfg.phases[0].as_md().unwrap().thermostat.is_none());
 }
 
+// rq-19ccc047
 #[test]
 fn thermostat_unknown_kind_rejected() {
     let dir = tmp_path("therm_unknown");
@@ -2017,6 +2037,7 @@ kind = "not-a-real-thermostat""#,
     }
 }
 
+// rq-c4a74903
 #[test]
 fn thermostat_missing_kind_rejected() {
     let dir = tmp_path("therm_no_kind");
@@ -2107,6 +2128,7 @@ temperature = 300.0"#,
     }
 }
 
+// rq-e5b63a73
 #[test]
 fn thermostat_nhc_rejects_non_positive_temperature() {
     let dir = tmp_path("nhc_T_zero");
@@ -2123,6 +2145,7 @@ tau = 1.0e-13"#,
     }
 }
 
+// rq-d532de58
 #[test]
 fn thermostat_nhc_rejects_non_positive_tau() {
     let dir = tmp_path("nhc_tau_neg");
@@ -2139,6 +2162,7 @@ tau = -1.0e-13"#,
     }
 }
 
+// rq-811c598f
 #[test]
 fn thermostat_nhc_rejects_chain_length_zero() {
     let dir = tmp_path("nhc_chain0");
@@ -2156,6 +2180,7 @@ chain_length = 0"#,
     }
 }
 
+// rq-6dc8454d
 #[test]
 fn thermostat_nhc_rejects_yoshida_order_outside_allowed_set() {
     let dir = tmp_path("nhc_yoshida2");
@@ -2173,6 +2198,7 @@ yoshida_order = 2"#,
     }
 }
 
+// rq-dd6fe266
 #[test]
 fn thermostat_nhc_rejects_n_resp_zero() {
     let dir = tmp_path("nhc_nresp0");
@@ -2269,6 +2295,7 @@ seed = 42"#,
     assert_eq!(param_u64(t, "seed"), 42);
 }
 
+// rq-5c28eee0 rq-84927a79
 #[test]
 fn thermostat_csvr_missing_seed_rejected() {
     let dir = tmp_path("csvr_no_seed");
@@ -2309,6 +2336,7 @@ seed = 42"#,
     assert_eq!(param_u64(t, "seed"), 42);
 }
 
+// rq-c4581536
 #[test]
 fn thermostat_andersen_accepts_collision_rate_zero() {
     let dir = tmp_path("andersen_rate_zero");
@@ -2326,6 +2354,7 @@ seed = 42"#,
     assert_eq!(param_f64(t, "collision_rate"), 0.0);
 }
 
+// rq-0f3b352b
 #[test]
 fn thermostat_andersen_rejects_negative_collision_rate() {
     let dir = tmp_path("andersen_rate_neg");
@@ -2348,6 +2377,7 @@ seed = 42"#,
 
 // --- Berendsen ---
 
+// rq-b7cd6d16
 #[test]
 fn thermostat_berendsen_accepted() {
     let dir = tmp_path("berendsen_accepted");
@@ -2370,6 +2400,7 @@ tau = 1.0e-13"#,
 
 // --- Integrator-owns-thermostat compatibility ---
 
+// rq-bdd03f85
 #[test]
 fn langevin_with_thermostat_is_rejected() {
     let dir = tmp_path("incompat_langevin_therm");
@@ -2420,6 +2451,7 @@ cutoff = 1.0e-9
     }
 }
 
+// rq-c4ae19e0
 #[test]
 fn velocity_verlet_with_thermostat_is_accepted() {
     let dir = tmp_path("vv_plus_csvr");
@@ -2436,6 +2468,7 @@ seed = 1"#,
     assert_eq!(cfg.phases[0].as_md().unwrap().thermostat.as_ref().unwrap().kind, "csvr");
 }
 
+// rq-4cd2ec5b
 #[test]
 fn integrator_kind_owns_thermostat_matrix_config_layer() {
     let registry = IntegratorRegistry::with_builtins();
@@ -2459,6 +2492,7 @@ fn integrator_kind_owns_thermostat_matrix_config_layer() {
     assert!(owns(&mtk));
 }
 
+// rq-014a82ef
 #[test]
 fn integrator_kind_owns_barostat_matrix_config_layer() {
     let registry = IntegratorRegistry::with_builtins();
@@ -2521,6 +2555,7 @@ cutoff = 1.0e-9
     )
 }
 
+// rq-23806456
 #[test]
 fn mtk_npt_with_defaults_accepted() {
     let dir = tmp_path("mtk_defaults");
@@ -2541,6 +2576,7 @@ fn mtk_npt_with_defaults_accepted() {
     assert!(i.params.get("n_resp").is_none());
 }
 
+// rq-d572a90a rq-08e113ca
 #[test]
 fn mtk_npt_missing_tau_p_rejected() {
     let dir = tmp_path("mtk_no_tau_p");
@@ -2552,6 +2588,7 @@ fn mtk_npt_missing_tau_p_rejected() {
     }
 }
 
+// rq-775b0833
 #[test]
 fn mtk_npt_rejects_non_positive_tau_p() {
     let dir = tmp_path("mtk_tau_p_zero");
@@ -2566,6 +2603,7 @@ fn mtk_npt_rejects_non_positive_tau_p() {
 // `mtk-npt` extra-fields coverage lives in the parameterised
 // `integrator_rejects_unknown_field_for_chosen_kind` test above.
 
+// rq-129edb76 rq-6478b9c9
 #[test]
 fn mtk_npt_with_thermostat_is_rejected() {
     let dir = tmp_path("mtk_plus_therm");
@@ -2617,6 +2655,7 @@ cutoff = 1.0e-9
     }
 }
 
+// rq-fbb836fb rq-1b467c03
 #[test]
 fn mtk_npt_with_barostat_is_rejected() {
     let dir = tmp_path("mtk_plus_baro");
@@ -2670,6 +2709,7 @@ cutoff = 1.0e-9
 
 // --- [barostat] section (always rejected with the empty registry) ---
 
+// rq-4bbbada4
 #[test]
 fn barostat_section_absent_yields_none() {
     let dir = tmp_path("baro_absent");
@@ -2678,6 +2718,7 @@ fn barostat_section_absent_yields_none() {
     assert!(cfg.phases[0].as_md().unwrap().barostat.is_none());
 }
 
+// rq-f03e2af2
 #[test]
 fn barostat_unknown_kind_rejected() {
     let dir = tmp_path("baro_unknown");
@@ -2766,6 +2807,7 @@ cutoff = 1.0e-9
     )
 }
 
+// rq-0fcb5a1e
 #[test]
 fn barostat_berendsen_accepted() {
     let dir = tmp_path("baro_berendsen");
@@ -2785,6 +2827,7 @@ compressibility = 4.5e-10"#,
     assert_eq!(param_f64(b, "compressibility"), 4.5e-10);
 }
 
+// rq-2adf8b58
 #[test]
 fn barostat_berendsen_accepts_negative_pressure() {
     let dir = tmp_path("baro_berendsen_neg");
@@ -2800,6 +2843,7 @@ compressibility = 4.5e-10"#,
     assert!(cfg.phases[0].as_md().unwrap().barostat.is_some());
 }
 
+// rq-7ac01c02
 #[test]
 fn barostat_berendsen_missing_pressure_rejected() {
     let dir = tmp_path("baro_berendsen_no_p");
@@ -2816,6 +2860,7 @@ compressibility = 4.5e-10"#,
     }
 }
 
+// rq-5dce727f
 #[test]
 fn barostat_berendsen_missing_tau_rejected() {
     let dir = tmp_path("baro_berendsen_no_tau");
@@ -2832,6 +2877,7 @@ compressibility = 4.5e-10"#,
     }
 }
 
+// rq-414ed5ef
 #[test]
 fn barostat_berendsen_missing_compressibility_rejected() {
     let dir = tmp_path("baro_berendsen_no_beta");
@@ -2850,6 +2896,7 @@ tau = 1.0e-12"#,
     }
 }
 
+// rq-125677a3
 #[test]
 fn barostat_berendsen_rejects_non_positive_tau() {
     let dir = tmp_path("baro_berendsen_tau_neg");
@@ -2867,6 +2914,7 @@ compressibility = 4.5e-10"#,
     }
 }
 
+// rq-06772617
 #[test]
 fn barostat_berendsen_rejects_non_positive_compressibility() {
     let dir = tmp_path("baro_berendsen_beta_zero");
@@ -2925,6 +2973,7 @@ friction = 1.0e12"#,
     }
 }
 
+// rq-c1d79d33
 #[test]
 fn barostat_c_rescale_accepted() {
     let dir = tmp_path("baro_c_rescale_ok");
@@ -2948,6 +2997,7 @@ seed = 42"#,
     assert_eq!(param_u64(b, "seed"), 42);
 }
 
+// rq-8904d7cb
 #[test]
 fn barostat_c_rescale_accepts_negative_pressure() {
     let dir = tmp_path("baro_c_rescale_neg_p");
@@ -2965,6 +3015,7 @@ seed = 1"#,
     assert!(cfg.phases[0].as_md().unwrap().barostat.is_some());
 }
 
+// rq-d406cdc2
 #[test]
 fn barostat_c_rescale_rejects_non_positive_temperature() {
     let dir = tmp_path("baro_c_rescale_T_zero");
@@ -2986,6 +3037,7 @@ seed = 1"#,
     }
 }
 
+// rq-a3b6838f
 #[test]
 fn barostat_c_rescale_rejects_non_positive_tau() {
     let dir = tmp_path("baro_c_rescale_tau_neg");
@@ -3005,6 +3057,7 @@ seed = 1"#,
     }
 }
 
+// rq-de8b9cd5
 #[test]
 fn barostat_c_rescale_rejects_non_positive_compressibility() {
     let dir = tmp_path("baro_c_rescale_beta_zero");
@@ -3026,6 +3079,7 @@ seed = 1"#,
     }
 }
 
+// rq-d623f23d rq-0a18c7c2
 #[test]
 fn barostat_c_rescale_missing_temperature_rejected() {
     let dir = tmp_path("baro_c_rescale_no_T");
@@ -3046,6 +3100,7 @@ seed = 1"#,
     }
 }
 
+// rq-b33d1ff0 rq-0b5f0881
 #[test]
 fn barostat_c_rescale_missing_seed_rejected() {
     let dir = tmp_path("baro_c_rescale_no_seed");
@@ -3067,6 +3122,7 @@ compressibility = 4.5e-10"#,
 // c-rescale extra-fields coverage lives in the parameterised
 // `barostat_rejects_unknown_field_for_chosen_kind` test above.
 
+// rq-bda9c0a2
 #[test]
 fn barostat_missing_kind_rejected() {
     let dir = tmp_path("baro_no_kind");
@@ -3133,6 +3189,7 @@ fn load_constraint_types_settle_water() {
     assert_eq!(builder.expected_atom_count(&ct.params), 3);
 }
 
+// rq-535abb5b
 #[test]
 fn reject_settle_geometry_infeasible() {
     let dir = tmp_path("constraint_infeasible");
@@ -3171,18 +3228,21 @@ fn supports_constraints_for(kind: &SlotConfig) -> bool {
         .supports_constraints(&kind.params)
 }
 
+// rq-fd07b4dc
 #[test]
 fn supports_constraints_velocity_verlet_lossy_true() {
     let k = SlotConfig::from_params_str("velocity-verlet", "lossless = false\n");
     assert!(supports_constraints_for(&k));
 }
 
+// rq-53237ec4
 #[test]
 fn supports_constraints_velocity_verlet_lossless_false() {
     let k = SlotConfig::from_params_str("velocity-verlet", "lossless = true\n");
     assert!(!supports_constraints_for(&k));
 }
 
+// rq-047c1f4d
 #[test]
 fn supports_constraints_langevin_baoab_false() {
     let k = SlotConfig::from_params_str(
@@ -3192,6 +3252,7 @@ fn supports_constraints_langevin_baoab_false() {
     assert!(!supports_constraints_for(&k));
 }
 
+// rq-09a19014
 #[test]
 fn supports_constraints_mtk_npt_false() {
     let k = SlotConfig::from_params_str(
@@ -3201,6 +3262,7 @@ fn supports_constraints_mtk_npt_false() {
     assert!(!supports_constraints_for(&k));
 }
 
+// rq-064c9df1
 #[test]
 fn validate_constraint_compatibility_rejects_langevin_with_constraints() {
     let dir = tmp_path("compat_langevin");
@@ -3247,6 +3309,7 @@ cutoff = 1.0e-9
     }
 }
 
+// rq-8a3c0426
 #[test]
 fn validate_constraint_compatibility_accepts_velocity_verlet_lossy() {
     let dir = tmp_path("compat_vv_lossy");
@@ -3257,6 +3320,7 @@ fn validate_constraint_compatibility_accepts_velocity_verlet_lossy() {
     assert!(cfg.validate_constraint_compatibility(&registries, true).is_ok());
 }
 
+// rq-d370907d rq-58476106
 #[test]
 fn validate_constraint_compatibility_rejects_lossless_with_constraints() {
     let dir = tmp_path("compat_vv_lossless");

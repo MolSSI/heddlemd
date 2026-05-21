@@ -98,6 +98,7 @@ fn fill_does_not_write_beyond_n() {
 
 // `Kernels` exposes one field per subsystem; the chain to every kernel
 // has the shape `gpu.kernels.<subsystem>.<kernel>`.
+// rq-6211a82f
 #[test]
 fn kernels_is_composed_of_per_subsystem_sub_structs() {
     let gpu = init_device().expect("init_device failed");
@@ -127,6 +128,7 @@ fn kernels_is_composed_of_per_subsystem_sub_structs() {
 
 // Each subsystem's `XKernels::load(&device)` returns a populated
 // handle whose kernel fields are launchable.
+// rq-6745e7c5
 #[test]
 fn xkernels_load_returns_populated_handle() {
     use dynamics::forces::lj::LjKernels;
@@ -143,6 +145,7 @@ fn xkernels_load_returns_populated_handle() {
 // `reduce_pair_forces` lives in `kernels.reduce.*` and is used by the
 // LJ, Coulomb, and SPME-real launch wrappers — none of those
 // subsystems carries its own copy of the kernel handle.
+// rq-7b651edb
 #[test]
 fn cross_subsystem_reads_pull_from_home_sub_struct() {
     let gpu = init_device().expect("init_device failed");

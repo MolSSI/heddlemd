@@ -127,6 +127,7 @@ fn system_with_pressure(
 
 // --- Construction ---
 
+// rq-26b98781
 #[test]
 fn registry_builds_c_rescale() {
     let gpu = init_device().unwrap();
@@ -141,6 +142,7 @@ fn registry_builds_c_rescale() {
     assert_eq!(baro.seed, 42);
 }
 
+// rq-f1b57184
 #[test]
 fn registry_builds_c_rescale_particle_count_zero() {
     let gpu = init_device().unwrap();
@@ -148,6 +150,7 @@ fn registry_builds_c_rescale_particle_count_zero() {
     let _baro = build_c_rescale(&gpu, 0, &kind);
 }
 
+// rq-1e27ee47
 #[test]
 fn barostat_registry_exposes_berendsen_and_c_rescale() {
     let registry = BarostatRegistry::with_builtins();
@@ -167,6 +170,7 @@ fn barostat_registry_exposes_berendsen_and_c_rescale() {
 
 // --- Per-step kernel sequence ---
 
+// rq-3e57f675
 #[test]
 fn apply_launches_expected_kernel_set() {
     let gpu = init_device().unwrap();
@@ -203,6 +207,7 @@ fn apply_launches_expected_kernel_set() {
     assert_eq!(count_for(KernelStage::VV_KICK), 0);
 }
 
+// rq-4894ae09
 #[test]
 fn apply_on_empty_state_is_noop() {
     let gpu = init_device().unwrap();
@@ -223,6 +228,7 @@ fn apply_on_empty_state_is_noop() {
 
 // --- draw_counter advances ---
 
+// rq-1f2b5320
 #[test]
 fn draw_counter_starts_at_zero_and_increments_per_apply() {
     let gpu = init_device().unwrap();
@@ -243,6 +249,7 @@ fn draw_counter_starts_at_zero_and_increments_per_apply() {
     assert_eq!(baro.draw_counter, 2);
 }
 
+// rq-cedda168
 #[test]
 fn two_barostats_at_same_seed_and_counter_produce_identical_outputs() {
     let gpu = init_device().unwrap();
@@ -271,6 +278,7 @@ fn two_barostats_at_same_seed_and_counter_produce_identical_outputs() {
 
 // --- μ correctness with a known Philox draw ---
 
+// rq-9e5579bb
 #[test]
 fn mu_cubed_matches_analytical_formula_with_known_philox_draw() {
     // P = P_target / 2, so the deterministic drift is negative
@@ -310,6 +318,7 @@ fn mu_cubed_matches_analytical_formula_with_known_philox_draw() {
     );
 }
 
+// rq-ac873434
 #[test]
 fn temperature_zero_limit_matches_berendsen_barostat() {
     // With temperature → 0 the noise amplitude → 0; the C-rescale
@@ -342,6 +351,7 @@ fn temperature_zero_limit_matches_berendsen_barostat() {
 
 // --- Fractional-coord and shape invariants ---
 
+// rq-3b9e9550
 #[test]
 fn fractional_coordinates_invariant_under_apply() {
     let gpu = init_device().unwrap();
@@ -366,6 +376,7 @@ fn fractional_coordinates_invariant_under_apply() {
     }
 }
 
+// rq-94d30346
 #[test]
 fn triclinic_shape_preserved_under_apply() {
     let gpu = init_device().unwrap();
@@ -395,6 +406,7 @@ fn triclinic_shape_preserved_under_apply() {
 
 // --- Box-generation propagation ---
 
+// rq-9d2d90b3
 #[test]
 fn generation_advances_after_apply() {
     let gpu = init_device().unwrap();
@@ -413,6 +425,7 @@ fn generation_advances_after_apply() {
 
 // --- Log columns ---
 
+// rq-e5cb5505
 #[test]
 fn log_column_names_returns_pressure_volume_and_conserved() {
     let gpu = init_device().unwrap();
@@ -423,6 +436,7 @@ fn log_column_names_returns_pressure_volume_and_conserved() {
     );
 }
 
+// rq-fb78338b
 #[test]
 fn log_column_values_combines_pressure_volume_and_cumulative_injection() {
     let gpu = init_device().unwrap();
@@ -443,6 +457,7 @@ fn log_column_values_combines_pressure_volume_and_cumulative_injection() {
 
 // --- Composition with the orthogonal framework ---
 
+// rq-0f3f63c8
 #[test]
 fn composes_with_velocity_verlet_and_csvr_thermostat() {
     let gpu = init_device().unwrap();
@@ -502,6 +517,7 @@ fn composes_with_velocity_verlet_and_csvr_thermostat() {
 
 // --- Determinism ---
 
+// rq-6e0d6cb4
 #[test]
 fn two_runs_with_same_seed_are_byte_identical() {
     let gpu = init_device().unwrap();
@@ -543,6 +559,7 @@ fn two_runs_with_same_seed_are_byte_identical() {
     }
 }
 
+// rq-efc07f81
 #[test]
 fn different_seeds_produce_different_trajectories() {
     let gpu = init_device().unwrap();

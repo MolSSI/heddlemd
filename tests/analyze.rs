@@ -1,4 +1,4 @@
-// Integration tests for `dynamics analyze` and the analysis framework.
+// rq-fd8bb824 — Integration tests for `dynamics analyze` and the analysis framework.
 
 use std::path::{Path, PathBuf};
 
@@ -124,6 +124,7 @@ fn write_bundle(dir: &Path) -> PathBuf {
 
 // --- Filename convention ---
 
+// rq-a1735ae4
 #[test]
 fn reject_filename_not_ending_in_in_analysis() {
     let dir = tmp_path("bad_filename");
@@ -135,6 +136,7 @@ fn reject_filename_not_ending_in_in_analysis() {
     }
 }
 
+// rq-bf98584a
 #[test]
 fn reject_empty_root_filename() {
     let dir = tmp_path("empty_root");
@@ -148,6 +150,7 @@ fn reject_empty_root_filename() {
 
 // --- Loader behavior ---
 
+// rq-f5166314
 #[test]
 fn load_valid_minimal_analysis_with_implicit_pairing() {
     let dir = tmp_path("implicit_pairing");
@@ -165,6 +168,7 @@ fn load_valid_minimal_analysis_with_implicit_pairing() {
     assert_eq!(cfg.simulation, dir.join("sim.in.toml"));
 }
 
+// rq-2d107b4d
 #[test]
 fn reject_empty_analyses_array() {
     let dir = tmp_path("empty_analyses");
@@ -176,6 +180,7 @@ fn reject_empty_analyses_array() {
     }
 }
 
+// rq-f067cfe1
 #[test]
 fn reject_duplicate_analysis_names() {
     let dir = tmp_path("dup_names");
@@ -203,6 +208,7 @@ n_bins = 8
     }
 }
 
+// rq-28fd5e34
 #[test]
 fn reject_non_ascii_name() {
     let dir = tmp_path("non_ascii_name");
@@ -223,6 +229,7 @@ n_bins = 8
     }
 }
 
+// rq-ede9a68f
 #[test]
 fn reject_stride_zero() {
     let dir = tmp_path("stride_zero");
@@ -236,6 +243,7 @@ fn reject_stride_zero() {
     }
 }
 
+// rq-f0c97cb7
 #[test]
 fn reject_last_frame_before_first_frame() {
     let dir = tmp_path("last_before_first");
@@ -251,6 +259,7 @@ fn reject_last_frame_before_first_frame() {
 
 // --- Path collisions ---
 
+// rq-d2b16164
 #[test]
 fn reject_output_path_equals_trajectory() {
     let dir = tmp_path("collision_output_traj");
@@ -275,6 +284,7 @@ n_bins = 8
     }
 }
 
+// rq-bb96fc2f
 #[test]
 fn reject_two_analyses_sharing_output() {
     let dir = tmp_path("collision_two_outputs");
@@ -317,6 +327,7 @@ fn run_and_read_csv(path: &Path) -> AnalyzeSummary {
     summary
 }
 
+// rq-f388ae12
 #[test]
 fn end_to_end_one_frame_run_succeeds() {
     let dir = tmp_path("e2e_one_frame");
@@ -332,6 +343,7 @@ fn end_to_end_one_frame_run_succeeds() {
     assert_eq!(lines[0], "r,g_r,count");
 }
 
+// rq-270637dd
 #[test]
 fn refuses_to_overwrite_existing_output() {
     let dir = tmp_path("no_overwrite");
@@ -348,6 +360,7 @@ fn refuses_to_overwrite_existing_output() {
     );
 }
 
+// rq-36ec88d9
 #[test]
 fn missing_trajectory_is_reported_before_analyses_build() {
     let dir = tmp_path("missing_traj");
@@ -362,6 +375,7 @@ fn missing_trajectory_is_reported_before_analyses_build() {
     }
 }
 
+// rq-f76d0576
 #[test]
 fn missing_sibling_sim_toml_under_implicit_pairing() {
     let dir = tmp_path("missing_sibling");
@@ -375,6 +389,7 @@ fn missing_sibling_sim_toml_under_implicit_pairing() {
     }
 }
 
+// rq-5fe9c9e2
 #[test]
 fn stride_greater_than_one_reduces_frames() {
     let dir = tmp_path("stride_3");
@@ -404,6 +419,7 @@ fn stride_greater_than_one_reduces_frames() {
     assert_eq!(summary.frames_consumed, 3);
 }
 
+// rq-8aae6b06
 #[test]
 fn last_frame_past_end_is_rejected() {
     let dir = tmp_path("last_past_end");
@@ -427,6 +443,7 @@ fn last_frame_past_end_is_rejected() {
     }
 }
 
+// rq-5de7798b
 #[test]
 fn reproducibility_across_two_runs() {
     let dir_a = tmp_path("repro_a");
@@ -442,6 +459,7 @@ fn reproducibility_across_two_runs() {
 
 // --- Registry / unknown kind ---
 
+// rq-4e095363
 #[test]
 fn unknown_kind_is_reported() {
     let dir = tmp_path("unknown_kind");
@@ -473,6 +491,7 @@ fn lint_stage<'a>(report: &'a dynamics::runner::LintReport, label: &str) -> &'a 
         .status
 }
 
+// rq-fa2fc3a9
 #[test]
 fn dynamics_lint_on_in_analysis_passes_for_valid_inputs() {
     let dir = tmp_path("lint_ok");
@@ -484,6 +503,7 @@ fn dynamics_lint_on_in_analysis_passes_for_valid_inputs() {
     assert_eq!(labels, vec!["config", "output paths", "trajectory", "analyses"]);
 }
 
+// rq-b306b357
 #[test]
 fn dynamics_lint_reports_missing_trajectory() {
     let dir = tmp_path("lint_missing_traj");
@@ -496,6 +516,7 @@ fn dynamics_lint_reports_missing_trajectory() {
     assert!(matches!(lint_stage(&report, "trajectory"), LintStatus::Fail { .. }));
 }
 
+// rq-c67ad79e
 #[test]
 fn dynamics_lint_reports_geometric_failure_under_analyses_stage() {
     let dir = tmp_path("lint_geom_fail");
@@ -510,6 +531,7 @@ fn dynamics_lint_reports_geometric_failure_under_analyses_stage() {
     assert!(matches!(lint_stage(&report, "analyses"), LintStatus::Fail { .. }));
 }
 
+// rq-fa2fc3a9
 #[test]
 fn cli_lint_dispatches_in_analysis_to_analyze_lint() {
     let dir = tmp_path("cli_lint_dispatch");
@@ -522,6 +544,7 @@ fn cli_lint_dispatches_in_analysis_to_analyze_lint() {
     assert_eq!(exit, 0);
 }
 
+// rq-f2f2519f — CLI section: v1 is CPU-only; no `--with-gpu` mode is offered.
 #[test]
 fn cli_lint_with_gpu_on_in_analysis_is_rejected() {
     let dir = tmp_path("cli_lint_with_gpu_analysis");
@@ -535,6 +558,7 @@ fn cli_lint_with_gpu_on_in_analysis_is_rejected() {
     assert_eq!(exit, 1);
 }
 
+// rq-f2f2519f — CLI section: exit code 0 on success.
 #[test]
 fn cli_analyze_returns_zero_on_success() {
     let dir = tmp_path("cli_analyze_ok");
@@ -547,6 +571,7 @@ fn cli_analyze_returns_zero_on_success() {
     assert_eq!(exit, 0);
 }
 
+// rq-f2f2519f — CLI section: exit code 1 before first frame is processed.
 #[test]
 fn cli_analyze_returns_nonzero_on_failure() {
     let dir = tmp_path("cli_analyze_fail");

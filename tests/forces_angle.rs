@@ -1,3 +1,4 @@
+// rq-d9adc4cb Feature: Harmonic Angle Bonded Potential
 use std::f64::consts::PI;
 
 use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, HarmonicAngleState, PotentialRegistry};
@@ -90,6 +91,7 @@ fn single_angle_list(n: usize, i: u32, j: u32, k: u32) -> AngleList {
     }
 }
 
+// rq-f7a71238
 #[test]
 fn init_device_loads_angle_module() {
     // Loading the device exposes the angle kernels on the Kernels handle.
@@ -97,6 +99,7 @@ fn init_device_loads_angle_module() {
     // No assertion: a missing kernel would have panicked inside `init_device`.
 }
 
+// rq-dbee9f45
 #[test]
 fn construct_harmonic_angle_state() {
     let gpu = init_device().unwrap();
@@ -146,6 +149,7 @@ fn launch_angle_force(
     let _ = gpu;
 }
 
+// rq-a57bcebe
 #[test]
 fn equilibrium_angle_produces_zero_force() {
     let gpu = init_device().unwrap();
@@ -173,6 +177,7 @@ fn equilibrium_angle_produces_zero_force() {
     }
 }
 
+// rq-e60a2781
 #[test]
 fn compressed_angle_pushes_wings_apart() {
     let gpu = init_device().unwrap();
@@ -203,6 +208,7 @@ fn compressed_angle_pushes_wings_apart() {
     assert!(sz.abs() < 1.0e-4, "Σfz = {sz}");
 }
 
+// rq-98fd2e40
 #[test]
 fn stretched_angle_pulls_wings_together() {
     let gpu = init_device().unwrap();
@@ -223,6 +229,7 @@ fn stretched_angle_pulls_wings_together() {
     assert!(fx[2] < 0.0, "stretched: fx on right wing should be negative, got {}", fx[2]);
 }
 
+// rq-ee7566b4
 #[test]
 fn energy_matches_closed_form() {
     let gpu = init_device().unwrap();
@@ -244,6 +251,7 @@ fn energy_matches_closed_form() {
     assert!(rel < 1.0e-4, "energy {} vs expected {} (rel {})", total, expected, rel);
 }
 
+// rq-4ffdad62 rq-a587753e
 #[test]
 fn degenerate_geometry_produces_zero() {
     let gpu = init_device().unwrap();
@@ -266,6 +274,7 @@ fn degenerate_geometry_produces_zero() {
     }
 }
 
+// rq-bd367201
 #[test]
 fn near_collinear_geometry_safety_guard_zeros() {
     let gpu = init_device().unwrap();
@@ -292,6 +301,7 @@ fn near_collinear_geometry_safety_guard_zeros() {
     }
 }
 
+// rq-cf50db39
 #[test]
 fn harmonic_angle_force_zero_angles_is_noop() {
     let gpu = init_device().unwrap();
@@ -303,6 +313,7 @@ fn harmonic_angle_force_zero_angles_is_noop() {
     launch_angle_force(&gpu, &mut s, &buffers, &box_10());
 }
 
+// rq-9120ab3c
 #[test]
 fn two_independent_constructs_produce_byte_identical_outputs() {
     let gpu = init_device().unwrap();
@@ -346,6 +357,7 @@ fn spc_morse_tuned() -> BondTypeConfig {
     }
 }
 
+// rq-501bce66 rq-b19189c2
 #[test]
 fn spc_single_step_satisfies_newtons_third_law() {
     let gpu = init_device().unwrap();

@@ -1,4 +1,4 @@
-// End-to-end tests for the steepest-descent energy minimizer.
+// rq-08aba7ee — End-to-end tests for the steepest-descent energy minimizer.
 //
 // These tests exercise the full runner pipeline against a small
 // argon system with an off-equilibrium initial geometry. Each test
@@ -79,6 +79,7 @@ mode = "all-pairs"
     .to_string()
 }
 
+// rq-f5a4623c rq-b977777a
 #[test]
 fn steepest_descent_reduces_lj_energy() {
     let dir = tmp_dir("descent_reduces");
@@ -122,6 +123,7 @@ fn steepest_descent_reduces_lj_energy() {
     );
 }
 
+// rq-57a0f297
 #[test]
 fn config_loader_parses_minimization_block() {
     let dir = tmp_dir("min_config_load");
@@ -141,6 +143,7 @@ fn config_loader_parses_minimization_block() {
     assert_eq!(min.output.trajectory_every, 0);
 }
 
+// rq-09ed630b
 #[test]
 fn interleaved_phase_and_minimization_preserve_document_order() {
     let dir = tmp_dir("interleaved_order");
@@ -200,6 +203,7 @@ mode = "all-pairs"
     assert!(matches!(&cfg.phases[2], PhaseKind::Md(p) if p.name == "prod"));
 }
 
+// rq-33b1f2d2
 #[test]
 fn duplicate_phase_name_across_arrays_is_rejected() {
     let dir = tmp_dir("dup_phase_name");
@@ -253,6 +257,7 @@ mode = "all-pairs"
     );
 }
 
+// rq-69109415
 #[test]
 fn unknown_minimization_kind_rejected() {
     let dir = tmp_dir("unknown_min_kind");
@@ -298,6 +303,7 @@ mode = "all-pairs"
     );
 }
 
+// rq-30d3f1fa
 #[test]
 fn invalid_step_decrease_rejected_at_load() {
     let dir = tmp_dir("invalid_step_decrease");
@@ -344,6 +350,7 @@ mode = "all-pairs"
     );
 }
 
+// rq-90a67daf
 #[test]
 fn non_convergence_returns_hard_error() {
     let dir = tmp_dir("non_convergence");

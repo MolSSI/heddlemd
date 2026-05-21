@@ -324,6 +324,7 @@ fn drop_flushes_best_effort() {
 
 // --- Image columns ---
 
+// rq-b8463a3b
 #[test]
 fn frame_with_images_only_carries_image_property() {
     let dir = tmp_path("images_only");
@@ -348,6 +349,7 @@ fn frame_with_images_only_carries_image_property() {
     assert!(lines[1].contains("Properties=species:S:1:pos:R:3:image:I:3"));
 }
 
+// rq-3df3a993
 #[test]
 fn frame_with_velocities_and_images_carries_both_properties() {
     let dir = tmp_path("velo_images");
@@ -378,6 +380,7 @@ fn frame_with_velocities_and_images_carries_both_properties() {
     assert_eq!(cols[9], "6");
 }
 
+// rq-7e6a503c
 #[test]
 fn image_round_trip_via_init_parser() {
     let dir = tmp_path("images_round_trip");
