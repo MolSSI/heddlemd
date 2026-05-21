@@ -184,6 +184,7 @@ fn io_err(e: std::io::Error) -> TrajectoryWriterError {
 // `dynamics analyze` to walk every frame in declaration order.
 // =====================================================================
 
+// rq-972e319b
 #[derive(Debug, Clone)]
 pub struct TrajectoryFrameHeader {
     pub particle_count: usize,
@@ -193,6 +194,7 @@ pub struct TrajectoryFrameHeader {
     pub include_images: bool,
 }
 
+// rq-f3e82236
 #[derive(Debug)]
 pub struct TrajectoryFrame {
     pub step: u64,
@@ -206,6 +208,7 @@ pub struct TrajectoryFrame {
     pub images: Option<(Vec<i32>, Vec<i32>, Vec<i32>)>,
 }
 
+// rq-9adb9a5b
 #[derive(Debug, thiserror::Error)]
 pub enum TrajectoryReaderError {
     #[error("failed to read trajectory file: {0}")]
@@ -232,8 +235,10 @@ pub enum TrajectoryReaderError {
     },
 }
 
+// rq-d1814271
 pub struct TrajectoryReader {
     reader: BufReader<File>,
+    // rq-2456a906
     pub first_frame_header: TrajectoryFrameHeader,
     /// 1-based current line number in the file (updated as lines are read).
     line_number: usize,
@@ -264,6 +269,7 @@ impl std::fmt::Debug for TrajectoryReader {
 }
 
 impl TrajectoryReader {
+    // rq-af1c88ae
     pub fn open(
         path: &Path,
         type_names: &[&str],
@@ -312,6 +318,7 @@ impl TrajectoryReader {
         })
     }
 
+    // rq-e2e25bba
     pub fn next_frame(&mut self) -> Result<Option<TrajectoryFrame>, TrajectoryReaderError> {
         if let Some(frame) = self.first_frame.take() {
             self.next_frame_index = 1;
@@ -331,6 +338,7 @@ impl TrajectoryReader {
         Ok(frame)
     }
 
+    // rq-d2b595a3
     pub fn frames(&mut self) -> TrajectoryFrameIter<'_> {
         TrajectoryFrameIter { reader: self }
     }

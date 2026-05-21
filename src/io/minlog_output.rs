@@ -1,10 +1,11 @@
-// Per-iteration diagnostic CSV log for energy minimization phases.
+// rq-119cbe46 — Per-iteration diagnostic CSV log for energy minimization phases.
 // See `rqm/minimization/steepest-descent.md`.
 
 use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+// rq-dc140510
 pub struct MinlogWriter {
     writer: BufWriter<File>,
 }
@@ -15,6 +16,7 @@ impl std::fmt::Debug for MinlogWriter {
     }
 }
 
+// rq-82621837
 #[derive(Debug, thiserror::Error)]
 pub enum MinlogWriterError {
     #[error("output file already exists: `{}`", .path.display())]
@@ -24,6 +26,7 @@ pub enum MinlogWriterError {
 }
 
 impl MinlogWriter {
+    // rq-e963f27a
     pub fn open(path: &Path) -> Result<Self, MinlogWriterError> {
         match OpenOptions::new().write(true).create_new(true).open(path) {
             Ok(file) => {

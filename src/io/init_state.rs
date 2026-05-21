@@ -24,6 +24,7 @@ pub struct InitVelocities {
     pub velocities_z: Vec<f32>,
 }
 
+// rq-af0518f8
 #[derive(Debug, Clone)]
 pub struct InitImages {
     pub images_x: Vec<i32>,

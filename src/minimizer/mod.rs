@@ -1,4 +1,4 @@
-// Minimizer slot framework. See `rqm/minimization/steepest-descent.md`.
+// rq-08aba7ee — Minimizer slot framework. See `rqm/minimization/steepest-descent.md`.
 
 use std::sync::Arc;
 
@@ -20,6 +20,7 @@ pub use steepest_descent::{
     SteepestDescentBuilder, SteepestDescentMinimizer, SteepestDescentParams,
 };
 
+// rq-78041a25
 #[derive(Debug, thiserror::Error)]
 pub enum MinimizerError {
     #[error("{0}")]
@@ -34,6 +35,7 @@ pub enum MinimizerError {
     UnknownKind(String),
 }
 
+// rq-77f64e46
 /// Why a minimizer's outer loop stopped.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MinimizerConvergence {
@@ -61,6 +63,7 @@ impl MinimizerConvergence {
     }
 }
 
+// rq-208aaa72
 /// Outcome of one `Minimizer::step` call.
 #[derive(Debug, Clone, Copy)]
 pub struct MinimizerStepReport {
@@ -79,10 +82,12 @@ pub struct MinimizerStepReport {
     pub prev_energy: f64,
 }
 
+// rq-f69350df
 /// One concrete minimizer slot. Implementations own per-phase device
 /// allocations (snapshot buffers, reductions scratches) and the
 /// per-phase adaptive state (current step size).
 pub trait Minimizer: std::fmt::Debug + Send {
+    // rq-53d48fb8
     /// Execute one outer iteration. The runner supplies the global
     /// force field (already populated with `forces_*` and
     /// `potential_energies` at the current accepted positions) and
@@ -105,6 +110,7 @@ pub trait Minimizer: std::fmt::Debug + Send {
         timings: &mut Timings,
     ) -> Result<(f64, f64), MinimizerError>;
 
+    // rq-1440b6e6
     /// Test the most-recent accepted state against the configured
     /// physical convergence criteria. Returns `Some(reason)` on
     /// convergence, `None` to continue. Pure: no kernel launches, no
@@ -125,6 +131,7 @@ pub trait Minimizer: std::fmt::Debug + Send {
     fn max_iterations(&self) -> u64;
 }
 
+// rq-dddb8e7a
 pub trait MinimizerBuilder: std::fmt::Debug + Send + Sync {
     fn kind_name(&self) -> &'static str;
 
@@ -146,6 +153,7 @@ pub trait MinimizerBuilder: std::fmt::Debug + Send + Sync {
     ) -> Result<Box<dyn Minimizer>, MinimizerError>;
 }
 
+// rq-d5b07d2a
 #[derive(Debug)]
 pub struct MinimizerRegistry {
     pub builders: Vec<Box<dyn MinimizerBuilder>>,
@@ -158,6 +166,7 @@ impl MinimizerRegistry {
         }
     }
 
+    // rq-237b5543
     pub fn with_builtins() -> Self {
         MinimizerRegistry {
             builders: vec![Box::new(SteepestDescentBuilder)],
@@ -197,6 +206,7 @@ impl Default for MinimizerRegistry {
     }
 }
 
+// rq-47a5fe0e
 // CUDA kernel handle for the minimizer's per-step kernels. Loaded
 // alongside the other kernel modules at `init_device`.
 #[derive(Debug, Clone)]

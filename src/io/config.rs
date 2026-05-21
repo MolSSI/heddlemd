@@ -37,7 +37,7 @@ impl std::fmt::Display for PathRole {
     }
 }
 
-// rq-0b9372e8 rq-e1ceb5c0 rq-1bbcf3b7
+// rq-3108381e rq-e1ceb5c0 rq-1bbcf3b7
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     // rq-5a0f5c00
@@ -133,6 +133,7 @@ pub struct PhaseConfig {
 /// Parsed `[[minimization]]` entry. Energy-minimization phases run
 /// the SD outer loop documented in
 /// `rqm/minimization/steepest-descent.md`.
+// rq-ed61cf26
 #[derive(Debug, Clone)]
 pub struct MinimizationConfig {
     pub name: String,
@@ -140,6 +141,7 @@ pub struct MinimizationConfig {
     pub output: MinimizationOutputConfig,
 }
 
+// rq-758b03ef
 /// Resolved per-phase outputs for a `[[minimization]]` entry.
 #[derive(Debug, Clone)]
 pub struct MinimizationOutputConfig {
@@ -151,6 +153,7 @@ pub struct MinimizationOutputConfig {
     pub timings_path: PathBuf,
 }
 
+// rq-19226daf
 /// Discriminated union over the unified phase sequence. The runner
 /// walks `Config::phases: Vec<PhaseKind>` in source-document order
 /// (see `Phase kinds` in `rqm/io/config-schema.md`).
@@ -190,7 +193,7 @@ impl PhaseKind {
     }
 }
 
-// rq-661bf664 rq-686b0d37
+// rq-661bf664
 /// Open-shaped parsed selection for a singleton `[integrator]`,
 /// `[thermostat]`, or `[barostat]` config section. The Rust-side
 /// deserialiser captures the user's `kind = "..."` field into `kind`
@@ -362,6 +365,7 @@ pub enum PairPotentialParams {
     LennardJones { sigma: f64, epsilon: f64 },
 }
 
+// rq-2f230ccb
 #[derive(Debug, Clone)]
 pub enum BondTypeConfig {
     Morse {
@@ -380,6 +384,7 @@ impl BondTypeConfig {
     }
 }
 
+// rq-a47beb76
 #[derive(Debug, Clone)]
 pub enum AngleTypeConfig {
     Harmonic {
@@ -683,7 +688,7 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
     Ok(config)
 }
 
-// rq-45bb8194 — parse-only entry point: read the file, run the typed
+// rq-deaf8b59 — parse-only entry point: read the file, run the typed
 // TOML deserialiser, fill defaults, resolve paths, run `Config::validate`,
 // and return. Skips `Config::validate_against` so callers can register
 // custom builders and supply their own registries.
@@ -1102,6 +1107,7 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
 // =====================================================================
 
 impl Config {
+    // rq-a54cc657
     /// Structural validation that does not require registry access.
     /// Per-field domain checks for the per-slot `params` and the
     /// integrator-thermostat / integrator-barostat / lossless-with-
@@ -1140,6 +1146,7 @@ impl Config {
     /// Registry-dispatched validation: looks up each slot's `kind` in
     /// the corresponding registry, calls
     /// `builder.validate_params(&params)`, and enforces the
+    // rq-6082cd2d
     /// integrator-thermostat and integrator-barostat compatibility
     /// rules using the integrator builder's `owns_thermostat` /
     /// `owns_barostat` predicates.
@@ -1242,6 +1249,7 @@ impl Config {
     }
 
     /// Topology-coupled cross-validation. For every MD phase: rejects
+    // rq-723d202b
     /// a non-empty constraint list when the chosen integrator's
     /// builder `IntegratorBuilder::supports_constraints(&params)`
     /// returns `false`. For every minimization phase: rejects a

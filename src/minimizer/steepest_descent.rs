@@ -1,4 +1,4 @@
-// Steepest-descent minimizer with adaptive step size.
+// rq-d4c2b6cd — Steepest-descent minimizer with adaptive step size.
 // See `rqm/minimization/steepest-descent.md`.
 
 use cudarc::driver::CudaSlice;
@@ -16,6 +16,7 @@ use super::{
     sd_compute_step, sd_f_max_reduction, sd_restore, sd_snapshot,
 };
 
+// rq-0a2ca9ac — `[minimization.algorithm]` schema fields
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SteepestDescentParams {
@@ -64,6 +65,7 @@ fn deserialize_params(params: &toml::Value) -> Result<SteepestDescentParams, Con
         .map_err(|e| crate::io::config::translate_params_error("minimization.algorithm", e))
 }
 
+// rq-dc3b1bb5
 #[derive(Debug)]
 pub struct SteepestDescentMinimizer {
     initial_step: f32,
@@ -116,6 +118,7 @@ impl SteepestDescentMinimizer {
 }
 
 impl Minimizer for SteepestDescentMinimizer {
+    // rq-39ab27d9 — Initial iteration: warm-up F_max and energy at accepted positions.
     fn initial_state(
         &mut self,
         buffers: &mut ParticleBuffers,
@@ -137,6 +140,7 @@ impl Minimizer for SteepestDescentMinimizer {
         Ok((energy, max_force))
     }
 
+    // rq-3f080cf2 rq-cc9f4623 — Per-iteration sequence; empty-state branch.
     fn step(
         &mut self,
         buffers: &mut ParticleBuffers,
@@ -254,6 +258,7 @@ impl Minimizer for SteepestDescentMinimizer {
         }
     }
 
+    // rq-1440b6e6
     fn check_convergence(
         &self,
         report: &MinimizerStepReport,
@@ -289,6 +294,7 @@ impl Minimizer for SteepestDescentMinimizer {
     }
 }
 
+// rq-dddb8e7a — concrete MinimizerBuilder implementation for kind = "steepest-descent".
 #[derive(Debug)]
 pub struct SteepestDescentBuilder;
 
@@ -297,6 +303,7 @@ impl MinimizerBuilder for SteepestDescentBuilder {
         "steepest-descent"
     }
 
+    // rq-e2bb500b — schema cross-validation: domain checks on every algorithm field.
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
         require_finite_positive(
