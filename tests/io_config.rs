@@ -714,7 +714,7 @@ fn reject_nonfinite_r_switch() {
     }
 }
 
-// rq-a3a5905d
+// rq-e38aac7b
 #[test]
 fn reject_unknown_potential() {
     let dir = tmp_path("unknown_potential");
@@ -740,7 +740,7 @@ fn reject_lennard_jones_missing_sigma() {
     }
 }
 
-// rq-d10e8c7f
+// rq-053613b6
 #[test]
 fn reject_unknown_pair_interaction_field() {
     let dir = tmp_path("pair_unknown_field");
@@ -1218,7 +1218,7 @@ fn missing_integrator_kind() {
     }
 }
 
-// rq-9d882742
+// rq-657bbbd6
 #[test]
 fn unknown_integrator_kind() {
     let dir = tmp_path("unknown_integrator_kind");
@@ -1513,7 +1513,7 @@ fn bond_type_missing_potential() {
     }
 }
 
-// rq-e34d764e
+// rq-3f01c746
 #[test]
 fn bond_type_unknown_potential() {
     let dir = tmp_path("bond_type_unknown");
@@ -1588,7 +1588,7 @@ fn morse_bond_type_rejects_zero_re() {
     }
 }
 
-// rq-e40d2722
+// rq-a208c9ba
 #[test]
 fn morse_bond_type_rejects_extra_field() {
     let dir = tmp_path("morse_extra_field");

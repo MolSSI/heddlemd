@@ -103,7 +103,7 @@ fn registry_builds_berendsen() {
     let _therm = build_berendsen(&gpu, 4, &kind);
 }
 
-// rq-73384fea
+// rq-e3a8d87c
 #[test]
 fn registry_builds_berendsen_particle_count_zero() {
     let gpu = init_device().unwrap();
@@ -111,7 +111,7 @@ fn registry_builds_berendsen_particle_count_zero() {
     let _therm = build_berendsen(&gpu, 0, &kind);
 }
 
-// rq-079b4f9e
+// rq-470019c7
 #[test]
 fn berendsen_state_precomputes_g_dof_one_for_single_particle() {
     let gpu = init_device().unwrap();

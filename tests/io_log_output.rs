@@ -161,13 +161,13 @@ fn ke_of_empty_is_zero() {
     assert_eq!(ke, 0.0);
 }
 
-// rq-2a9acb69
+// rq-8f554438
 #[test]
 fn temperature_of_empty_is_zero() {
     assert_eq!(compute_temperature(0.0, 0), 0.0);
 }
 
-// rq-4518fa47
+// rq-7d831804
 #[test]
 fn temperature_uses_codata_kb() {
     // 10 unconstrained particles, COM-removed: N_thermal_dof = 3*10 - 0 - 3 = 27.

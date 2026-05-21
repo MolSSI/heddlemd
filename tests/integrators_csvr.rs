@@ -92,7 +92,7 @@ fn atomic_state(n: usize) -> ParticleState {
 
 // --- Construction ---
 
-// rq-9e1142aa
+// rq-a6cd03aa
 #[test]
 fn registry_builds_csvr() {
     let gpu = init_device().unwrap();
@@ -104,7 +104,7 @@ fn registry_builds_csvr() {
     assert!((therm.kt_target - KB * 300.0).abs() < 1.0e-30);
 }
 
-// rq-cf008c68
+// rq-b5089af4
 #[test]
 fn registry_builds_csvr_particle_count_zero() {
     let gpu = init_device().unwrap();
@@ -112,7 +112,7 @@ fn registry_builds_csvr_particle_count_zero() {
     let _therm = build_csvr(&gpu, 0, &kind);
 }
 
-// rq-c4872e7e
+// rq-7326a2d5
 #[test]
 fn registry_builds_csvr_particle_count_one() {
     let gpu = init_device().unwrap();

@@ -152,7 +152,7 @@ fn comments_and_blanks_tolerated() {
     assert_eq!(bl.bonds.len(), 1);
 }
 
-// rq-cab7b9f3 (atom_bond_offsets matches sorted bond list)
+// rq-3eb8fe40 (atom_bond_offsets matches sorted bond list)
 #[test]
 fn atom_bond_offsets_reflect_sorted_list() {
     let dir = tmp_path("offsets");

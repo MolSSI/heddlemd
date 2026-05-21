@@ -110,7 +110,7 @@ fn registry_builds_nhc_with_defaults() {
     assert_eq!(state.g_dof, 9);
 }
 
-// rq-93570a07
+// rq-12d7c3fe
 #[test]
 fn registry_builds_nhc_with_chain_length_1() {
     let gpu = init_device().unwrap();
@@ -121,7 +121,7 @@ fn registry_builds_nhc_with_chain_length_1() {
     assert_eq!(state.q_mass.len(), 1);
 }
 
-// rq-8afd1b7d
+// rq-5f21bfd8
 #[test]
 fn registry_builds_nhc_with_particle_count_zero() {
     let gpu = init_device().unwrap();

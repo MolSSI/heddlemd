@@ -70,7 +70,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
     .unwrap()
 }
 
-// rq-e02917c3
+// rq-444903e2
 #[test]
 fn construct_vv_lossy_via_registry() {
     let gpu = init_device().unwrap();
@@ -78,7 +78,7 @@ fn construct_vv_lossy_via_registry() {
     let _integrator = registry.build(&vv_kind(false), &gpu, 4, 0).unwrap();
 }
 
-// rq-db78448e
+// rq-7d4c470a
 #[test]
 fn construct_vv_lossless_via_registry() {
     let gpu = init_device().unwrap();
@@ -99,7 +99,7 @@ fn construct_vv_lossless_via_registry() {
     assert!(names.contains(&"vv_kick_lossless"));
 }
 
-// rq-47877631
+// rq-706c4b80
 #[test]
 fn construct_langevin_via_registry() {
     let gpu = init_device().unwrap();
@@ -107,7 +107,7 @@ fn construct_langevin_via_registry() {
     let _integrator = registry.build(&langevin_kind(42), &gpu, 4, 0).unwrap();
 }
 
-// rq-48fd88ed
+// rq-b44769f1
 #[test]
 fn construct_with_particle_count_zero() {
     let gpu = init_device().unwrap();
@@ -194,7 +194,7 @@ fn custom_builder_registered_takes_priority_over_builtin() {
     assert!(!names.contains(&"vv_kick"));
 }
 
-// rq-171b99f5
+// rq-8fd4e3bf
 #[test]
 fn step_on_empty_state_is_noop() {
     let gpu = init_device().unwrap();
@@ -219,7 +219,7 @@ fn step_on_empty_state_is_noop() {
     assert!(report.stages.is_empty());
 }
 
-// rq-2980a672
+// rq-d3bd619e
 #[test]
 fn vv_step_launches_kick_drift_force_and_kick() {
     let gpu = init_device().unwrap();
@@ -257,7 +257,7 @@ fn vv_step_launches_kick_drift_force_and_kick() {
     assert_eq!(k.count, 1);
 }
 
-// rq-7b9aada4
+// rq-17def001
 #[test]
 fn lossless_vv_step_uses_lossless_kernels() {
     let gpu = init_device().unwrap();
@@ -331,7 +331,7 @@ fn integrator_owns_force_evaluation_inside_step() {
     assert_eq!(count("accumulate_forces"), 1);
 }
 
-// rq-d12c24f0
+// rq-009bbbdc
 #[test]
 fn two_consecutive_langevin_steps_produce_different_velocities() {
     let gpu = init_device().unwrap();
@@ -356,7 +356,7 @@ fn two_consecutive_langevin_steps_produce_different_velocities() {
     assert_ne!(state_after_first.velocities_x, state_after_second.velocities_x);
 }
 
-// rq-706001ec
+// rq-1b0504e7
 #[test]
 fn two_independent_runs_byte_identical() {
     let gpu = init_device().unwrap();
@@ -473,7 +473,7 @@ fn _imports_used() {
 use dynamics::integrator::{
     BarostatError, BarostatRegistry, ThermostatError, ThermostatRegistry,
 };
-// rq-78da0ce9
+// rq-5711d6ce
 #[test]
 fn empty_integrator_registry_reports_unknown_kind() {
     let gpu = init_device().unwrap();
@@ -482,10 +482,10 @@ fn empty_integrator_registry_reports_unknown_kind() {
     matches!(err, IntegratorError::UnknownKind(ref s) if s == "velocity-verlet");
 }
 
-// rq-89b4b926: also covered by `custom_builder_registered_takes_priority_over_builtin` above.
+// rq-0d7ebeb6: also covered by `custom_builder_registered_takes_priority_over_builtin` above.
 
-// rq-7e6b3ade — placeholder: NHC construction is covered in tests/integrators_nhc.rs
-// rq-9e1142aa — placeholder: CSVR construction is covered in tests/integrators_csvr.rs
+// rq-353da04c — placeholder: NHC construction is covered in tests/integrators_nhc.rs
+// rq-69d2c5f5 — placeholder: CSVR construction is covered in tests/integrators_csvr.rs
 // rq-dc3c616a — placeholder: Andersen construction is covered in tests/integrators_andersen.rs
 // rq-e8252f10 — placeholder: Berendsen construction is covered in tests/integrators_berendsen.rs
 
