@@ -23,5 +23,5 @@ fi
 
 echo "Entering an interactive terminal session"
 echo ""
-podman run --rm --device nvidia.com/gpu=all -it -v $(pwd):/work ${X11_ARGS} -v ~/.claude:/root/.claude:cached -v ~/.claude.json:/root/.claude.json ${image} bash -c "${XVFB_PREFIX}exec bash"
+podman run --rm --device nvidia.com/gpu=all -it -v "$(pwd):/work" ${X11_ARGS} -v ~/.claude:/root/.claude:cached -v ~/.claude.json:/root/.claude.json ${image} bash -c "${XVFB_PREFIX}exec bash"
 
