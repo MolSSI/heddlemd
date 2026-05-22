@@ -1,0 +1,16 @@
+## Determinism <!-- rq-72a606e3 -->
+
+- `rescale_velocities` is deterministic by construction (see
+  `nose-hoover-chain.md`).
+- `kinetic_energy_reduce` uses a single-block deterministic reduction
+  tree (see `nose-hoover-chain.md`).
+- The host-side Philox stream is pure functional; the chi-squared sum
+  proceeds in fixed left-to-right sample-index order in `f64`.
+- The `draw_counter` advances by exactly `+1` per `apply_post`, so
+  two runs that take the same number of steps with the same seed
+  consume the same set of Philox counters.
+- Two end-to-end runs composing the same integrator with CSVR on the
+  same GPU with identical configs and identical initial particle
+  state produce byte-identical trajectory and log files, including
+  the `csvr_conserved` column.
+

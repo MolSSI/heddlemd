@@ -1,0 +1,6 @@
+  @rq-7d37c707
+  Scenario: VelocityVerlet builder's supports_constraints depends on the lossless flag
+    Given the "velocity-verlet" builder from IntegratorRegistry::with_builtins()
+    Then builder.supports_constraints(&{ lossless: false }) returns true
+    And builder.supports_constraints(&{ lossless: true }) returns false
+

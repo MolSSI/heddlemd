@@ -1,0 +1,5 @@
+    // rq-8ee58ec1
+    fn log_column_names(&self) -> &'static [&'static str] {
+        &["csvr_conserved"]
+    }
+

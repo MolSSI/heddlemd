@@ -1,0 +1,9 @@
+  @rq-1e5dcdc9
+  Scenario: draw_counter starts at 0 and increments by 1 per apply_post
+    Given a freshly built CsvrThermostat
+    Then state.draw_counter == 0
+    When thermostat.apply_post(...) is called once
+    Then state.draw_counter == 1
+    When thermostat.apply_post(...) is called again
+    Then state.draw_counter == 2
+

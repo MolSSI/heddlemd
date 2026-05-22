@@ -1,0 +1,31 @@
+    // rq-4ca9b179
+    //
+    // Fractional-coordinate wrap. Compute the fractional coordinates of
+    // `v` via back-substitution (z-then-y-then-x), pick the integer
+    // image triple that brings each component into `[-1/2, 1/2)`, and
+    // apply the image-vector correction directly in Cartesian
+    // coordinates. The output has fractional coordinates in
+    // `[-1/2, 1/2)³` and therefore lies inside the primary
+    // parallelepiped.
+    //
+    // For an orthorhombic box (xy = xz = yz = 0), s_d reduces to
+    // v_d / L_d, and `floor(s_d + 0.5) = floor((v_d + L_d * 0.5) / L_d)`
+    // — the algorithm collapses to three independent per-axis wraps
+    // that match the v0 orthorhombic implementation bit-for-bit.
+    #[inline]
+    fn wrap_with_image_count(&self, v: [f32; 3]) -> ([f32; 3], [i32; 3]) {
+        let s_c = v[2] / self.lz;
+        let s_b = (v[1] - s_c * self.yz) / self.ly;
+        let s_a = (v[0] - s_b * self.xy - s_c * self.xz) / self.lx;
+
+        let k_a_f = (s_a + 0.5).floor();
+        let k_b_f = (s_b + 0.5).floor();
+        let k_c_f = (s_c + 0.5).floor();
+
+        let vx = v[0] - k_a_f * self.lx - k_b_f * self.xy - k_c_f * self.xz;
+        let vy = v[1] - k_b_f * self.ly - k_c_f * self.yz;
+        let vz = v[2] - k_c_f * self.lz;
+
+        ([vx, vy, vz], [k_a_f as i32, k_b_f as i32, k_c_f as i32])
+    }
+

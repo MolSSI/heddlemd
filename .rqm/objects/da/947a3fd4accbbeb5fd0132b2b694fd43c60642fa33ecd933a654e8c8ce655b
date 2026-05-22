@@ -1,0 +1,23 @@
+## Perpendicular Widths <!-- rq-9d8d96f1 -->
+
+The perpendicular width along lattice direction `a` is the perpendicular
+distance between the two faces of the parallelepiped that are parallel to
+the plane spanned by `b` and `c`. In closed form for the lower-triangular
+lattice:
+
+```
+w_a = (lx · ly · lz) / sqrt((ly · lz)² + (xy · lz)² + (xy · yz - ly · xz)²)
+w_b = (ly · lz) / sqrt(lz² + yz²)
+w_c = lz
+```
+
+`min_perpendicular_width()` returns `min(w_a, w_b, w_c)`. All intermediate
+operations are `f32`. For an orthorhombic box the formula reduces to
+`min(lx, ly, lz)`.
+
+Consumers (the neighbor list, a future barostat) gate cutoff-vs-box
+validity against `min_perpendicular_width / 2` rather than
+`min(lx, ly, lz) / 2`: the minimum image is well-defined precisely when
+every interaction radius is less than half the shortest perpendicular
+width.
+

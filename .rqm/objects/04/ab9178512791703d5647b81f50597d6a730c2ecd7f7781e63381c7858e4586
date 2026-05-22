@@ -1,0 +1,15 @@
+### Header and rows <!-- rq-e591b51f -->
+
+```
+r,g_r,count
+0.000000000e0,0.000000000e0,0
+8.500000000e-12,1.230000000e-1,4
+...
+8.415000000e-10,9.876543210e-1,42
+```
+
+- First line: the literal header `r,g_r,count` (no leading
+  whitespace, no quoting, no trailing comma).
+- Subsequent lines: one row per bin in ascending-`i` order, with
+  exactly `n_bins` data rows.
+

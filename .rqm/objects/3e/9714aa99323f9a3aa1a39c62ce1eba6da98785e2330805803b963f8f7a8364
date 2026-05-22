@@ -1,0 +1,8 @@
+  @rq-a3563587
+  Scenario: Successful set_lattice increments generation by 1
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    When box.set_lattice(12.0, 9.0, 7.0, 1.0, 2.0, 3.0) is called
+    Then it returns Ok(())
+    And box.lattice() equals [12.0, 9.0, 7.0, 1.0, 2.0, 3.0]
+    And box.generation() equals 1
+

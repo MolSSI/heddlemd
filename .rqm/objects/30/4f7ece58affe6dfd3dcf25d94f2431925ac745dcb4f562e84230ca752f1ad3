@@ -1,0 +1,15 @@
+## Empty / degenerate cases <!-- rq-d6b9b019 -->
+
+- `frames_consumed == 0` — the trajectory pass produced zero
+  frames (selection emptied the file). The RDF writes its rows
+  with `g_r = 0.0e0` for every bin and `count = 0` for every bin.
+  The header row is still written.
+- `N_A == 0` (or, for cross-type, `N_B == 0`) — the ideal-pair
+  count is zero for every bin. The builder rejects this at
+  `build` time with
+  `AnalysisRuntimeError::InvalidValue { field: "between", reason:
+  "type `X` has zero particles in the trajectory" }`; it does not
+  silently produce an all-NaN CSV.
+- `N_A == 1` for a same-type RDF — `N_A · (N_A - 1) / 2 == 0`, no
+  pairs to enumerate. Rejected the same way.
+

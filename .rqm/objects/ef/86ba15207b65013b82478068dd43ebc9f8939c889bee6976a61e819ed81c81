@@ -1,0 +1,5 @@
+  @rq-2c1bb918
+  Scenario: log_column_names returns ["csvr_conserved"]
+    Given a constructed CsvrThermostat
+    Then state.log_column_names() equals ["csvr_conserved"]
+

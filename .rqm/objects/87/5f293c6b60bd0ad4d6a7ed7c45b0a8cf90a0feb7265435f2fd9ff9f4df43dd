@@ -1,0 +1,6 @@
+  @rq-3e8324c2
+  Scenario: wrap_position leaves a position inside the primary cell unchanged
+    Given position = [4.0, 3.0, 2.0]
+    When box.wrap_position(position) is called
+    Then the result equals [4.0, 3.0, 2.0]
+

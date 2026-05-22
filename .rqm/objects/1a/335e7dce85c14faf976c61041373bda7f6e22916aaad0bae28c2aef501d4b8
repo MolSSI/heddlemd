@@ -1,0 +1,20 @@
+// rq-9aacb1f9
+#[test]
+fn same_type_two_particles_at_known_distance() {
+    let dir = tmp_path("two_ar");
+    std::fs::write(dir.join("sim.in.toml"), sim_toml_with_types(&["Ar"], 4.0e-9)).unwrap();
+    write_init(&dir, &["Ar", "Ar"]);
+    // Separation 5e-10 m along x.
+    write_trajectory(
+        &dir,
+        &[vec![("Ar", -2.5e-10, 0.0, 0.0), ("Ar", 2.5e-10, 0.0, 0.0)]],
+    );
+    // r_max = 1e-9, n_bins = 10 → 5e-10 lands in bin 4 (covers [4e-10, 5e-10)).
+    // Actually 5e-10 is on the boundary; floor(5e-10 / 1e-10) = 5, so bin 5.
+    let path = write_analysis(&dir, &rdf_body("x", ["Ar", "Ar"], 1.0e-9, 10));
+    run_analyses(&path).unwrap();
+    let rows = read_csv(&dir.join("sim.out.x.csv"));
+    let total: u64 = rows.iter().map(|(_, _, c)| c).sum();
+    assert_eq!(total, 1, "expected exactly one pair counted, got {total}");
+}
+

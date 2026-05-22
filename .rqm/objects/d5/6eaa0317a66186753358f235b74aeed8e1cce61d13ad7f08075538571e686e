@@ -1,0 +1,8 @@
+  @rq-e60481e9
+  Scenario: apply_post on empty state is a no-op
+    Given a ParticleBuffers with particle_count() == 0
+    And any constructed Thermostat
+    When thermostat.apply_post(&mut buffers, dt=0.1, &mut timings) is called
+    Then it returns Ok(())
+    And no kernel launches are recorded for that call
+

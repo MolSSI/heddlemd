@@ -1,0 +1,8 @@
+  @rq-98ac1915
+  Scenario: check_min_perpendicular_width with non-positive threshold always returns Ok
+    Given an orthorhombic SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    When box.check_min_perpendicular_width(-1.0) is called
+    Then it returns Ok(())
+    When box.check_min_perpendicular_width(0.0) is called
+    Then it returns Ok(())
+

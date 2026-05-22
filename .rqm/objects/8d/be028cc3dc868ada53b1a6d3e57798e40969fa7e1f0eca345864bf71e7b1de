@@ -1,0 +1,9 @@
+#[test] // rq-4b63564b
+fn nan_displacement_propagates_to_nan_output() {
+    let b = default_box();
+    let result = b.minimum_image([f32::NAN, 0.0, 0.0]);
+    assert!(result[0].is_nan());
+    assert_eq!(result[1], 0.0);
+    assert_eq!(result[2], 0.0);
+}
+

@@ -1,0 +1,6 @@
+#[test] // rq-d19fc020
+fn minimum_image_at_minus_half_l_stays_at_minus_half_l() {
+    let b = default_box();
+    assert_eq!(b.minimum_image([-5.0, 0.0, 0.0]), [-5.0_f32, 0.0, 0.0]);
+}
+

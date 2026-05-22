@@ -1,0 +1,8 @@
+  @rq-9aacb1f9
+  Scenario: Same-type RDF on a two-particle frame at exactly r_max - epsilon
+    Given a one-frame trajectory with two Ar particles separated by 5.0e-10 m along x
+    And an RDF with r_max=1.0e-9 and n_bins=10
+    When dynamics analyze runs to completion
+    Then the bin containing 5.0e-10 has count = 1
+    And every other bin has count = 0
+

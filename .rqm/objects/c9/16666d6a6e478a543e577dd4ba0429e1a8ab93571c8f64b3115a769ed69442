@@ -1,0 +1,94 @@
+// rq-891232bf
+//
+// CSVR (Bussi-Donadio-Parrinello) thermostat tests. The thermostat is
+// exercised in isolation through its `apply_post` hook.
+
+use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use dynamics::gpu::{
+    GpuContext, ParticleBuffers, compute_kinetic_energy, init_device, lan_ou_step,
+};
+use dynamics::integrator::IntegratorStepExt;
+use dynamics::integrator::{
+    CsvrThermostat, Thermostat, ThermostatRegistry, philox_4x32_10, philox_normal,
+};
+use dynamics::io::SlotConfig;
+use dynamics::io::config::NeighborListConfig;
+use dynamics::pbc::SimulationBox;
+use dynamics::state::ParticleState;
+use dynamics::timings::{KernelStage, Timings};
+
+const KB: f64 = 1.380649e-23;
+
+fn box_large() -> SimulationBox {
+    SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap()
+}
+
+fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
+    ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        gpu,
+        n,
+        &box_large(),
+        &[],
+        &[],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(n),
+        &AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap()
+}
+
+fn csvr_kind(temperature: f64, tau: f64, seed: u64) -> SlotConfig {
+    SlotConfig::from_params_str(
+        "csvr",
+        &format!("temperature = {temperature:e}\ntau = {tau:e}\nseed = {seed}\n"),
+    )
+}
+
+fn build_csvr(gpu: &GpuContext, n: usize, slot: &SlotConfig) -> Box<dyn Thermostat> {
+    ThermostatRegistry::with_builtins()
+        .build_optional(Some(slot), gpu, n, 0)
+        .unwrap()
+        .unwrap()
+}
+
+fn unbox_csvr(boxed: Box<dyn Thermostat>) -> CsvrThermostat {
+    unsafe { *Box::from_raw(Box::into_raw(boxed) as *mut CsvrThermostat) }
+}
+
+fn atomic_state(n: usize) -> ParticleState {
+    let mass: f32 = 1.66e-27;
+    let mut vx: Vec<f32> = Vec::with_capacity(n);
+    for i in 0..n / 2 {
+        let v = 500.0 * ((i as f32) + 1.0);
+        vx.push(v);
+        vx.push(-v);
+    }
+    if vx.len() < n {
+        vx.push(0.0);
+    }
+    let zero = vec![0.0_f32; n];
+    ParticleState::new(
+        (0..n).map(|i| (i as f32) * 1.0e-10).collect(),
+        zero.clone(),
+        zero.clone(),
+        vx,
+        zero.clone(),
+        zero,
+        vec![mass; n],
+        vec![0.0_f32; n],
+        vec![0u32; n],
+        None,
+        None,
+    )
+    .unwrap()
+}
+
+// --- Construction ---
+

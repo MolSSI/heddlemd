@@ -1,0 +1,9 @@
+  @rq-d16be675
+  Scenario: Heavily-constrained system clamps g_dof to 1
+    Given a ThermostatKind::Csvr { temperature: 300.0, tau: 1.0e-13, seed: 1 }
+    When registry.build_optional(Some(&kind), device, particle_count=2, n_constraints=4) is called
+    Then it returns Ok(Some(thermostat))
+    And state.g_dof == max(1, 3*2 − 4 − 3) == max(1, -1) == 1
+
+  # --- Config validation (paired with config-schema scenarios) ---
+

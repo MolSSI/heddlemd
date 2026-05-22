@@ -1,0 +1,23 @@
+#[test] // rq-6c52e57d
+fn wrap_position_with_image_count_unwrap_invariant() {
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
+    let p = [37.5_f32, -41.0, 22.5];
+    let (wrapped, image) = b.wrap_position_with_image_count(p);
+    // wrapped + image[0] * a + image[1] * b + image[2] * c == p
+    let lat = b.lattice();
+    let (lx, ly, lz) = (lat[0], lat[1], lat[2]);
+    let (xy, xz, yz) = (lat[3], lat[4], lat[5]);
+    let recovered_x = wrapped[0]
+        + image[0] as f32 * lx
+        + image[1] as f32 * xy
+        + image[2] as f32 * xz;
+    let recovered_y =
+        wrapped[1] + image[1] as f32 * ly + image[2] as f32 * yz;
+    let recovered_z = wrapped[2] + image[2] as f32 * lz;
+    assert!((recovered_x - p[0]).abs() < 1.0e-3);
+    assert!((recovered_y - p[1]).abs() < 1.0e-3);
+    assert!((recovered_z - p[2]).abs() < 1.0e-3);
+}
+
+// --- Fractional coordinates ---
+

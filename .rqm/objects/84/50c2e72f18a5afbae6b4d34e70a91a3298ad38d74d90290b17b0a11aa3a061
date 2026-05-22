@@ -1,0 +1,10 @@
+  @rq-23678707
+  Scenario: Refuse to overwrite an existing CSV at the resolved output path
+    Given the resolved output_path already exists
+    When dynamics analyze runs
+    Then it exits with code 1
+    And stderr contains "OutputExists"
+    And the existing file is unchanged
+
+  # --- Lint coverage ---
+

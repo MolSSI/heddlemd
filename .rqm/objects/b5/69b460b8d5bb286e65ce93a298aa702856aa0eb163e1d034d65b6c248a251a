@@ -1,0 +1,11 @@
+#[test] // rq-4b9d059e
+fn wrap_position_wraps_outside_primary_image_orthorhombic() {
+    let b = default_box();
+    let position = [12.0_f32, -5.0, 7.0];
+    let result = b.wrap_position(position);
+    assert!(result[0] >= -b.lx() * 0.5 && result[0] < b.lx() * 0.5);
+    assert!(result[1] >= -b.ly() * 0.5 && result[1] < b.ly() * 0.5);
+    assert!(result[2] >= -b.lz() * 0.5 && result[2] < b.lz() * 0.5);
+    assert_eq!(result, b.minimum_image(position));
+}
+

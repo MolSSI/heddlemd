@@ -1,0 +1,24 @@
+## Construction and Lifetime <!-- rq-5a1771b2 -->
+
+The runner constructs all three slots after `init_device` returns and
+immediately after the `Timings` instance is created. Construction
+draws from one parsed `SlotConfig` for the integrator and optional
+`SlotConfig`s for the thermostat and barostat (see
+`io/config-schema.md`). Each `SlotConfig` carries a `kind: String`
+naming one of the registered builders plus a `params: toml::Value`
+holding the kind-specific parameters in raw form. The runner consults
+the corresponding `IntegratorRegistry`, `ThermostatRegistry`, or
+`BarostatRegistry`, looks up the builder by name, and calls its
+`build` method to obtain a `Box<dyn Integrator>`,
+`Option<Box<dyn Thermostat>>`, or `Option<Box<dyn Barostat>>`.
+Per-particle device buffers (when an implementation needs them — for
+example, `LosslessBuffers` for the lossless velocity-Verlet mode, or
+`ke_scratch` for the kinetic-energy reduction used by every
+thermostat) are allocated on the runner's `Arc<CudaDevice>` inside
+each builder.
+
+Every slot's allocations persist for the lifetime of the run and are
+dropped together with the rest of the runner's GPU resources at end
+of run. The runner never re-creates a slot mid-run, and no slot's
+state ever crosses to another `Arc<CudaDevice>`.
+

@@ -1,0 +1,7 @@
+#[test] // rq-98ac1915
+fn check_min_perpendicular_width_with_non_positive_threshold_always_ok() {
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).unwrap();
+    assert!(b.check_min_perpendicular_width(-1.0).is_ok());
+    assert!(b.check_min_perpendicular_width(0.0).is_ok());
+}
+

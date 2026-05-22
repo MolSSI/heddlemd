@@ -1,0 +1,12 @@
+#[test] // rq-b4e4bdc7
+fn minimum_image_of_c_aligned_displacement_subtracts_c_vector() {
+    // box with xz=2.0, yz=3.0; the wrap of v_z = 4.0 picks k_c = 1
+    // and propagates k_c * (xz, yz) = (2, 3) into x and y.
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 2.0, 3.0).expect("ok");
+    let result = b.minimum_image([2.0, 3.0, 4.0]);
+    // v_z: 4.0 - 6.0 = -2.0
+    // v_y: 3.0 - 3.0 = 0.0; k_b wrap leaves it at 0.0
+    // v_x: 2.0 - 2.0 = 0.0; k_a wrap leaves it at 0.0
+    assert_eq!(result, [0.0_f32, 0.0, -2.0]);
+}
+

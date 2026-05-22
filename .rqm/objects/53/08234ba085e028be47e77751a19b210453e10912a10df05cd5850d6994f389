@@ -1,0 +1,10 @@
+#[test] // rq-9e09673b
+fn successive_set_lattice_calls_increment_generation_monotonically() {
+    let mut b = default_box();
+    b.set_lattice(11.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect("ok");
+    b.set_lattice(11.0, 9.0, 6.0, 0.0, 0.0, 0.0).expect("ok");
+    b.set_lattice(11.0, 9.0, 7.0, 1.0, 2.0, 3.0).expect("ok");
+    assert_eq!(b.lattice(), [11.0_f32, 9.0, 7.0, 1.0, 2.0, 3.0]);
+    assert_eq!(b.generation(), 3);
+}
+

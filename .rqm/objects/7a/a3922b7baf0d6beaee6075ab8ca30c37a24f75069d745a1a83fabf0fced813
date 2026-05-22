@@ -1,0 +1,9 @@
+  @rq-74f48855
+  Scenario: NaN z-displacement propagates through tilt coupling for a triclinic box
+    Given a SimulationBox::new(10.0, 8.0, 6.0, 0.0, 2.0, 3.0)
+    When box.minimum_image([0.0, 0.0, f32::NAN]) is called
+    Then every result component is NaN
+      (k_c is NaN, propagated into the y channel via yz and the x channel via xz)
+
+  # --- Generation counter ---
+

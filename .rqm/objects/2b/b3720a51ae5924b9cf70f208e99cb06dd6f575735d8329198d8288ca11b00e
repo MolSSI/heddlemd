@@ -1,0 +1,8 @@
+  @rq-8ac1a52f
+  Scenario: check_min_perpendicular_width on a triclinic box uses perpendicular widths, not edge lengths
+    Given a SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 10.0)
+    And w_b equals 100.0 / sqrt(200.0) ≈ 7.071
+    When box.check_min_perpendicular_width(8.0) is called
+    Then it returns Err(SimulationBoxError::PerpendicularWidthTooSmall {
+      direction: "b", width: ≈ 7.071, required: 8.0 })
+

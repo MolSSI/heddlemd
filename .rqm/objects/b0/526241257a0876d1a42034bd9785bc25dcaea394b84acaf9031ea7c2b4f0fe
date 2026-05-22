@@ -1,0 +1,11 @@
+// rq-7326a2d5
+#[test]
+fn registry_builds_csvr_particle_count_one() {
+    let gpu = init_device().unwrap();
+    let kind = csvr_kind(300.0, 1.0e-13, 1);
+    let therm = unbox_csvr(build_csvr(&gpu, 1, &kind));
+    assert_eq!(therm.g_dof, 1);
+}
+
+// --- Host-side Philox parity with the device-side kernel ---
+

@@ -1,0 +1,13 @@
+#[test] // rq-22fb3b0e
+fn mutating_a_copy_does_not_affect_the_original() {
+    let b = default_box();
+    let mut copy = b;
+    copy.set_lattice(20.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect("ok");
+    assert_eq!(copy.lattice(), [20.0_f32, 8.0, 6.0, 0.0, 0.0, 0.0]);
+    assert_eq!(copy.generation(), 1);
+    assert_eq!(b.lattice(), [10.0_f32, 8.0, 6.0, 0.0, 0.0, 0.0]);
+    assert_eq!(b.generation(), 0);
+}
+
+// --- check_min_perpendicular_width ---
+

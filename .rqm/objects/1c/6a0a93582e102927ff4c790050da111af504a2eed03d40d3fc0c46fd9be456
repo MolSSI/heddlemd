@@ -1,0 +1,6 @@
+#[test] // rq-2cb82d44
+fn newly_constructed_box_reports_generation_zero() {
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
+    assert_eq!(b.generation(), 0);
+}
+

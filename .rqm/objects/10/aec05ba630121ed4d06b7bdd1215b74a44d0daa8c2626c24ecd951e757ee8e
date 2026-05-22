@@ -1,0 +1,6 @@
+  @rq-7a1c24be
+  Scenario: Construct a triclinic box with non-zero tilts
+    When SimulationBox::new(10.0, 8.0, 6.0, 1.5, -2.0, 0.5) is called
+    Then it returns Ok(box)
+    And box.lattice() equals [10.0, 8.0, 6.0, 1.5, -2.0, 0.5]
+

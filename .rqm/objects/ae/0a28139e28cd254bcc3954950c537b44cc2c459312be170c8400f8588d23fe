@@ -1,0 +1,18 @@
+// rq-56306e1f
+#[test]
+fn distances_beyond_r_max_contribute_nothing() {
+    let dir = tmp_path("beyond_rmax");
+    std::fs::write(dir.join("sim.in.toml"), sim_toml_with_types(&["Ar"], 4.0e-9)).unwrap();
+    write_init(&dir, &["Ar", "Ar"]);
+    // Separation 1.5 nm along x — outside r_max = 1 nm.
+    write_trajectory(
+        &dir,
+        &[vec![("Ar", -7.5e-10, 0.0, 0.0), ("Ar", 7.5e-10, 0.0, 0.0)]],
+    );
+    let path = write_analysis(&dir, &rdf_body("x", ["Ar", "Ar"], 1.0e-9, 10));
+    run_analyses(&path).unwrap();
+    let rows = read_csv(&dir.join("sim.out.x.csv"));
+    let total: u64 = rows.iter().map(|(_, _, c)| c).sum();
+    assert_eq!(total, 0);
+}
+

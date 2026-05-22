@@ -1,0 +1,6 @@
+  @rq-66f2679e
+  Scenario: Output CSV has exactly `n_bins` data rows
+    Given an RDF with n_bins=64
+    When dynamics analyze runs to completion
+    Then the output CSV has 65 lines total (header + 64 data rows)
+

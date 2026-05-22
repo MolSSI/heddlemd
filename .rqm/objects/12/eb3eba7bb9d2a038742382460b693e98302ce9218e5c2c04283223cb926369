@@ -1,0 +1,13 @@
+#[test] // rq-74f48855
+fn nan_z_displacement_propagates_through_tilt_coupling() {
+    // For a triclinic box with non-zero xz and yz, a NaN z-displacement
+    // propagates into the x and y channels via the tilt-subtraction.
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 2.0, 3.0).expect("ok");
+    let result = b.minimum_image([0.0, 0.0, f32::NAN]);
+    assert!(result[0].is_nan());
+    assert!(result[1].is_nan());
+    assert!(result[2].is_nan());
+}
+
+// --- Generation counter ---
+

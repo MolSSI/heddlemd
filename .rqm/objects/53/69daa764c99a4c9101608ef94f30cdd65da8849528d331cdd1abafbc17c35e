@@ -1,0 +1,8 @@
+  @rq-11b0deff
+  Scenario: cumulative_injection accumulates K_new − K_old across calls
+    Given a CsvrThermostat with cumulative_injection = 0.0
+    And K_old = 1.0e-20 from a synthetic buffer setup before apply_post
+    When thermostat.apply_post(...) is called once
+    Then state.cumulative_injection equals the (K_new − K_old) of that invocation
+      to f64 round-off
+

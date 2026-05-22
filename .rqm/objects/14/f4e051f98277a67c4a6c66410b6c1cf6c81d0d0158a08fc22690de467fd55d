@@ -1,0 +1,23 @@
+// rq-d1f1b53e
+#[test]
+fn csvr_apply_pre_is_trait_default_noop() {
+    let gpu = init_device().unwrap();
+    let n = 4usize;
+    let state = atomic_state(n);
+    let snap_vx = state.velocities_x.clone();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut therm = build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 1));
+    therm
+        .apply_pre(&mut buffers, 1.0e-15, &mut timings)
+        .unwrap();
+    let vx_after = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    assert_eq!(vx_after, snap_vx);
+    let report = timings.finalize().unwrap();
+    for s in &report.stages {
+        assert_eq!(s.count, 0, "apply_pre launched kernel {:?}", s.name);
+    }
+}
+
+// --- draw_counter advances ---
+

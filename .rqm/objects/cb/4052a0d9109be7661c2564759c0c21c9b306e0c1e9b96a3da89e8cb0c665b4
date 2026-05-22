@@ -1,0 +1,8 @@
+#[test] // rq-a3563587
+fn successful_set_lattice_increments_generation_by_one() {
+    let mut b = default_box();
+    b.set_lattice(12.0, 9.0, 7.0, 1.0, 2.0, 3.0).expect("ok");
+    assert_eq!(b.lattice(), [12.0_f32, 9.0, 7.0, 1.0, 2.0, 3.0]);
+    assert_eq!(b.generation(), 1);
+}
+

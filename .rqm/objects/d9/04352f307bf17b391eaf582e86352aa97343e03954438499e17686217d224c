@@ -1,0 +1,12 @@
+## Gherkin Scenarios <!-- rq-1775255c -->
+
+```gherkin
+Feature: CSVR stochastic velocity-rescaling thermostat
+
+  Background:
+    Given a CUDA-capable GPU available as device 0
+    And a SimulationBox with lx=ly=lz=1.0e6 unless otherwise specified
+    And init_device() has been called
+
+  # --- Construction ---
+

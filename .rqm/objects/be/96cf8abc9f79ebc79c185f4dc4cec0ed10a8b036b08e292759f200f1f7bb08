@@ -1,0 +1,9 @@
+### Barostat slot <!-- rq-d898f1cd -->
+
+The default registry exposes two barostats:
+
+| `kind` value | Implementation                                                       | File                      |
+| ------------ | -------------------------------------------------------------------- | ------------------------- |
+| `berendsen`  | weak-coupling isotropic pressure coupling (equilibration only — not canonical) | `berendsen-barostat.md`   |
+| `c-rescale`  | stochastic isotropic cell-rescaling (canonical NPT)                  | `c-rescale-barostat.md`   |
+

@@ -1,0 +1,7 @@
+## Empty State <!-- rq-0bb735c9 -->
+
+When the runner has `particle_count == 0`, every slot's hooks return
+`Ok(())` without launching any kernel. Each slot's allocations (if
+any) may have zero-length device slices but must construct
+successfully.
+

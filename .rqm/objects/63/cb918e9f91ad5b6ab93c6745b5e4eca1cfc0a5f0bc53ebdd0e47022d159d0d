@@ -1,0 +1,8 @@
+  @rq-4300cafc
+  Scenario: plan(dt) is pure; it does not launch kernels or touch buffers
+    Given a velocity-Verlet integrator
+    And a snapshot of buffers before the call
+    When integrator.plan(0.1) is called
+    Then buffers are byte-identical to the snapshot
+    And no kernel launches are recorded
+

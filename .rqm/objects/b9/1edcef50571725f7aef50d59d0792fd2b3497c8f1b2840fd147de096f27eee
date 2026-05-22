@@ -1,0 +1,11 @@
+  @rq-d3bd619e
+  Scenario: Velocity-Verlet plan walk launches vv_kick_drift, force pipeline, and vv_kick
+    Given a velocity-Verlet integrator (lossless=false) with particle_count=4
+    And a snapshot of buffers.positions_x and buffers.velocities_x before the call
+    When the runner walks integrator.plan(0.1)
+    Then every dispatch returns Ok(())
+    And positions_x differs from the snapshot
+    And velocities_x differs from the snapshot
+    And timings.finalize() reports count==1 for KernelStage::VV_KICK_DRIFT
+    And timings.finalize() reports count==1 for KernelStage::VV_KICK
+

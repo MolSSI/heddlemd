@@ -1,0 +1,7 @@
+  @rq-7326a2d5
+  Scenario: Construct with particle_count = 1 (N_f = 1)
+    Given a ThermostatKind::Csvr { temperature: 300.0, tau: 1.0e-13, seed: 1 }
+    When registry.build_optional(Some(&kind), device, particle_count=1, n_constraints=0) is called
+    Then it returns Ok(Some(thermostat))
+    And state.g_dof == 1
+

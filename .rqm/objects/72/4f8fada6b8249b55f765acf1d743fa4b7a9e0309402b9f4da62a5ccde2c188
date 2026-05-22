@@ -1,0 +1,8 @@
+  @rq-8fd4e3bf
+  Scenario: plan walk on empty state is a no-op
+    Given a ParticleBuffers with particle_count() == 0
+    And any constructed Integrator
+    When the runner walks integrator.plan(0.1) and dispatches each sub-step
+    Then every execute(...) call returns Ok(())
+    And no kernel launches are recorded for any call
+

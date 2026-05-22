@@ -1,0 +1,9 @@
+  @rq-95b66af0
+  Scenario: MtkNpt builder owns both its thermostat and its barostat
+    Given the "mtk-npt" builder from IntegratorRegistry::with_builtins()
+    And params = { temperature: 85.0, pressure: 1.0e5,
+      tau_t: 1.0e-13, tau_p: 1.0e-12,
+      chain_length: 3, yoshida_order: 3, n_resp: 1 }
+    Then builder.owns_thermostat(&params) returns true
+    And builder.owns_barostat(&params) returns true
+

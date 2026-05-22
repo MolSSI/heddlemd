@@ -1,0 +1,66 @@
+## Algorithm <!-- rq-062ea284 -->
+
+The thermostat is invoked through `apply_post(buffers, dt, timings)`
+after the integrator's `step()` returns. The integrator has already
+completed its velocity-Verlet substeps; the thermostat operates on
+the post-step velocities. For each invocation with timestep `dt`, let
+`c = exp(−dt/τ)`:
+
+1. Compute the instantaneous kinetic energy
+   `K = (1/2) Σ_i m_i |v_i|²` using the deterministic GPU reduction
+   documented in `nose-hoover-chain.md`.
+2. Draw `N_f` independent standard-normal samples on the host, where
+   `N_f = max(1, 3·N − n_constraints − 3)` is the number of
+   thermostatted degrees of freedom. The `n_constraints` term subtracts
+   the holonomic constraints carried by the run (zero when no
+   `[constraints]` section is configured; `3 · n_settle_groups` for a
+   SETTLE'd water system). The `−3` term subtracts the three COM
+   translational degrees of freedom that CSVR's uniform velocity
+   rescale preserves. Designate the first sample as `R` and the
+   remaining `N_f − 1` samples' squared sum as `S`:
+
+   ```text
+   R = ξ_0
+   S = ξ_1² + ξ_2² + … + ξ_{N_f−1}²
+   ```
+
+3. Compute the new target kinetic energy (Bussi-Donadio-Parrinello
+   2007 / PLUMED `csvr.cc`):
+
+   ```text
+   K_target = (N_f / 2) · k_B · T
+   K_new    = c · K
+              + (K_target / N_f) · (1 − c) · (S + R²)
+              + 2 · R · sqrt(c · (1 − c) · K · K_target / N_f)
+   ```
+
+   The `(S + R²)` term is `chi²(N_f)` since adding `R²` to
+   `S ∼ chi²(N_f − 1)` makes a chi-squared with `N_f` degrees of
+   freedom. At equilibrium (`K = K_target`), `E[S + R²] = N_f` gives
+   `E[K_new] = K_target` exactly.
+
+4. The velocity-rescale factor is `α = sqrt(K_new / K)` when `K > 0`;
+   when `K = 0` (every velocity is exactly zero) the formula
+   degenerates and the rescale is skipped. The CSVR step also produces
+   a sign convention: the rescale factor is positive only when the
+   discriminant `K_new` is non-negative. When `K_new` ends up
+   negative (extremely unlikely for `N_f` of physical size; possible
+   only for `N_f < 5` with adversarial draws) the kernel takes
+   `K_new = K` (no rescale this invocation). This guard keeps the
+   thermostat robust for tiny systems.
+
+5. Apply the rescale with the shared `rescale_velocities` helper
+   (documented in `nose-hoover-chain.md`):
+   `v_i ← α · v_i` for every particle `i` and axis.
+
+The CSVR Markov kernel is exact in the sense that repeated
+application from any non-zero initial `K` converges to the canonical
+distribution `P(K) ∝ K^{(N_f/2)−1} · exp(−K / (k_B · T))`.
+
+The instantaneous kinetic energy is the only piece of particle state
+the thermostat reads; it has no auxiliary degrees of freedom.
+
+`apply_pre` is the trait default (no-op): CSVR is a post-only
+single-rescale formula and never modifies velocities before the
+integrator runs.
+

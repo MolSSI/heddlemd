@@ -1,3 +1,6 @@
+[workspace]
+members = ["crates/rqm"]
+
 [package]
 name = "dynamics"
 version = "0.1.0"

@@ -1,0 +1,6 @@
+#[test] // rq-8c045718
+fn minimum_image_of_zero_displacement_is_zero() {
+    let b = default_box();
+    assert_eq!(b.minimum_image([0.0, 0.0, 0.0]), [0.0_f32, 0.0, 0.0]);
+}
+

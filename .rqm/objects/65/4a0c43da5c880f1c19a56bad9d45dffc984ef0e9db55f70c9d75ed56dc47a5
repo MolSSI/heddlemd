@@ -1,0 +1,9 @@
+  @rq-0dc48f6b
+  Scenario: Log file header omits csvr_conserved when CSVR is not the thermostat
+    Given a config with [thermostat].kind != "csvr" or [thermostat] omitted entirely
+    And log_every > 0
+    When the runner produces the log file
+    Then the header line does not include "csvr_conserved"
+
+  # --- Rescale correctness ---
+

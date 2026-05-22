@@ -1,0 +1,8 @@
+### Reproducibility <!-- rq-99a68e09 -->
+
+Two runs with identical `(seed, temperature, tau)` and identical
+initial particle state on the same GPU produce byte-identical
+trajectory and log files. The Philox stream is stateless (no
+algorithmic state to drift), and the host-side chi-squared sum
+proceeds left-to-right in fixed sample-index order.
+

@@ -1,0 +1,21 @@
+    // rq-f0da71ea
+    pub fn new(
+        lx: f32,
+        ly: f32,
+        lz: f32,
+        xy: f32,
+        xz: f32,
+        yz: f32,
+    ) -> Result<Self, SimulationBoxError> {
+        validate_lattice(lx, ly, lz, xy, xz, yz)?;
+        Ok(SimulationBox {
+            lx,
+            ly,
+            lz,
+            xy,
+            xz,
+            yz,
+            generation: 0,
+        })
+    }
+

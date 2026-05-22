@@ -1,0 +1,13 @@
+#[test] // rq-5355f3f0
+fn wrap_position_with_image_count_for_triclinic() {
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
+    // pos_z = 20.0 wraps via k_c = floor((20 + 3)/6) = 3
+    let (wrapped, image) = b.wrap_position_with_image_count([0.0, 0.0, 20.0]);
+    assert_eq!(image[2], 3);
+    // After the wrap result must lie in the primary parallelepiped:
+    let s = b.fractional_coords(wrapped);
+    for d in 0..3 {
+        assert!(s[d] >= -0.5 && s[d] < 0.5);
+    }
+}
+

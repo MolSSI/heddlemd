@@ -1,0 +1,45 @@
+## Wrap Algorithm <!-- rq-4ca9b179 -->
+
+Wrapping a displacement or position `(v_x, v_y, v_z)` into the primary
+image is a fractional-coordinate wrap. The algorithm computes the
+fractional coordinates of the input via back-substitution
+(z-then-y-then-x), picks the integer image triple that brings each
+fractional component into `[-1/2, 1/2)`, and applies the image-vector
+correction directly in Cartesian coordinates:
+
+```
+s_c = v_z / lz
+s_b = (v_y - s_c · yz) / ly
+s_a = (v_x - s_b · xy - s_c · xz) / lx
+
+k_a = floor(s_a + 0.5)
+k_b = floor(s_b + 0.5)
+k_c = floor(s_c + 0.5)
+
+v_x := v_x - k_a · lx - k_b · xy - k_c · xz
+v_y := v_y - k_b · ly - k_c · yz
+v_z := v_z - k_c · lz
+```
+
+After these three steps the result `(v_x, v_y, v_z)` has fractional
+coordinates in `[-1/2, 1/2)³` and therefore lies inside the primary
+parallelepiped. The integer triple `(k_a, k_b, k_c)` records the number
+of image shifts along the `a`, `b`, `c` lattice directions;
+`minimum_image` and `wrap_position` discard it while
+`wrap_position_with_image_count` returns it so integrator drift kernels
+can advance per-particle image flags.
+
+The algorithm uses `f32::floor` and a fixed sequence of `f32`
+adds/subtracts/multiplies/divides in the order shown. The bit pattern of
+the result is identical across runs given identical inputs on the same
+hardware. For an orthorhombic box (`xy = xz = yz = 0`), `s_d` reduces to
+`v_d / L_d`, the image counts reduce to `floor(v_d / L_d + 0.5)` which
+equals `floor((v_d + L_d · 0.5) / L_d)`, and the Cartesian correction
+reduces to three independent per-axis subtractions `v_d -= k_d · L_d` —
+the v0 orthorhombic implementation, bit-for-bit.
+
+`minimum_image` and `wrap_position` apply this algorithm to a displacement
+and an absolute position respectively. They return identical output for
+identical input; the two methods exist as separate names so call sites
+communicate intent.
+

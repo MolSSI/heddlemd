@@ -1,0 +1,39 @@
+### Pair enumeration <!-- rq-cf285ed5 -->
+
+For each consumed trajectory frame:
+
+1. Read `type_indices`, `positions_x`, `positions_y`, `positions_z`
+   from the frame.
+2. Resolve `between` to a pair of type indices
+   `(t_a, t_b)` looked up in the simulation config's
+   `[[particle_types]]` array (left-to-right declaration order, so
+   the index of `"Ar"` matches the index `dynamics run` assigns).
+3. Build two index lists: `idx_a` containing every particle index
+   `i` with `type_indices[i] == t_a`, and `idx_b` containing every
+   index with `type_indices[i] == t_b`. Both lists are in
+   ascending particle-index order (the natural iteration order
+   over `0..particle_count`).
+4. Enumerate unordered pairs:
+   - **Same-type (`t_a == t_b`)**: iterate `for i in idx_a` and
+     `for j in idx_a where j > i`. This is the canonical
+     `i < j` upper-triangular enumeration.
+   - **Cross-type (`t_a != t_b`)**: iterate `for i in idx_a` and
+     `for j in idx_b`. Each `(i, j)` pair is visited exactly once
+     because the two index lists are disjoint.
+5. For each pair, compute the minimum-image displacement
+   `Δ = sim_box.minimum_image(pos_j - pos_i)` and its squared
+   distance `d2 = Δ.x² + Δ.y² + Δ.z²` in `f64` (positions are
+   cast from `f32` to `f64` before subtraction).
+6. If `d2 < r_max²`, compute `d = sqrt(d2)` in `f64`, find the bin
+   index `bin = floor(d / Δr)`, clamp to `n_bins - 1` for the
+   rare `d == r_max` case (a numeric edge that arises when
+   `r_max² = d2` exactly under `f64`), and increment
+   `histogram[bin]` by `1`.
+7. Increment `frames_consumed` by `1` after the pair loop.
+
+Pair enumeration is fully deterministic: the index lists are in
+ascending particle-index order, the pair loop is the canonical
+nested form, every numeric step uses standard IEEE `f64`
+operations with no fused-multiply-add reliance, and the
+histogram counts are integer increments.
+

@@ -1,0 +1,5 @@
+  @rq-f7b922df
+  Scenario: minimum_image just past +L/2 wraps by one period
+    When box.minimum_image([6.0, 0.0, 0.0]) is called
+    Then the result equals [-4.0, 0.0, 0.0]
+

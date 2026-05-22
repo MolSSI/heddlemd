@@ -1,0 +1,24 @@
+// rq-94a43204
+#[test]
+fn csvr_different_seeds_produce_different_trajectories() {
+    let gpu = init_device().unwrap();
+    let state = atomic_state(8);
+
+    fn run_once(gpu: &GpuContext, state: &ParticleState, seed: u64) -> Vec<f32> {
+        let n = state.particle_count();
+        let mut buffers = ParticleBuffers::new(gpu, state).unwrap();
+        let mut timings = Timings::new(gpu).unwrap();
+        let mut therm = build_csvr(gpu, n, &csvr_kind(300.0, 1.0e-13, seed));
+        for _ in 0..3 {
+            therm
+                .apply_post(&mut buffers, 1.0e-15, &mut timings)
+                .unwrap();
+        }
+        gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap()
+    }
+
+    let a = run_once(&gpu, &state, 1);
+    let b = run_once(&gpu, &state, 2);
+    assert_ne!(a, b);
+}
+

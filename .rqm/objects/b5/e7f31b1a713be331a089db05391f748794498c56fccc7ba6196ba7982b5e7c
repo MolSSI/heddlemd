@@ -1,0 +1,7 @@
+  @rq-56306e1f
+  Scenario: Frames at distances >= r_max do not contribute
+    Given a one-frame trajectory with two Ar particles separated by 1.5e-9 m
+    And an RDF with r_max=1.0e-9
+    When dynamics analyze runs to completion
+    Then every bin has count = 0
+

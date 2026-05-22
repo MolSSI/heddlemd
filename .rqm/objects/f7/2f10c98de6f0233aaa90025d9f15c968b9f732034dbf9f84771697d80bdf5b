@@ -1,0 +1,7 @@
+  @rq-7edab504
+  Scenario: set_lattice non-finite check precedes non-positive check on a diagonal
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    When box.set_lattice(f32::NAN, 9.0, 7.0, 0.0, 0.0, 0.0) is called
+    Then it returns Err(SimulationBoxError::NonFiniteLatticeValue { name: "lx", value: v }) where v is NaN
+    And box.generation() equals 0
+

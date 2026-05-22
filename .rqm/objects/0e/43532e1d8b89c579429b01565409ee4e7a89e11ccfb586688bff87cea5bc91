@@ -1,0 +1,12 @@
+## Gherkin Scenarios <!-- rq-9dd82f60 -->
+
+```gherkin
+Feature: Radial distribution function analysis
+
+  Background:
+    Given a temporary directory tmp
+    And tmp/argon.in.toml is a valid one-type config declaring [[particle_types]] with name="Ar"
+    And tmp/argon.out.xyz is a valid trajectory written by `dynamics run` of that config
+
+  # --- Parameter validation ---
+

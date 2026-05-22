@@ -1,0 +1,7 @@
+  @rq-8fbdbc0c
+  Scenario: lookup returns the builder for a registered kind
+    Given an IntegratorRegistry::with_builtins()
+    When registry.lookup("velocity-verlet") is called
+    Then it returns Some(builder)
+    And builder.kind_name() equals "velocity-verlet"
+

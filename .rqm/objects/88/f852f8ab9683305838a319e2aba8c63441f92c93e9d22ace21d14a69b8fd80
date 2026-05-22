@@ -1,0 +1,12 @@
+// rq-db1298bd
+#[test]
+fn philox_is_pure_function() {
+    let a = philox_4x32_10(1, 2, 3, 4, 5, 6);
+    let b = philox_4x32_10(1, 2, 3, 4, 5, 6);
+    assert_eq!(a, b);
+    let c = philox_4x32_10(1, 2, 3, 4, 5, 7);
+    assert_ne!(a, c);
+}
+
+// --- Per-step kernel sequence ---
+

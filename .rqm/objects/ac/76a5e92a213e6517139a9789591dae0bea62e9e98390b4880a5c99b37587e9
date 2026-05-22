@@ -1,0 +1,9 @@
+  @rq-efea1b70
+  Scenario: Rescale skipped when K == 0
+    Given a CSVR thermostat composed with velocity-Verlet
+    And a ParticleBuffers whose velocities are all 0
+    When the runner executes one timestep and no force is applied
+      (force_field has zero slots)
+    Then no rescale_velocities launch occurs that step
+    And state.cumulative_injection equals 0.0
+

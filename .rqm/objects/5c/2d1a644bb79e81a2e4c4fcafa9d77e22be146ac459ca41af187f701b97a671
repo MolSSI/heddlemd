@@ -1,0 +1,14 @@
+# Feature: Radial Distribution Function Analysis (`rdf`) <!-- rq-4d1082c4 -->
+
+The `rdf` analysis kind computes the radial distribution function
+`g_AB(r)` for an ordered or unordered pair of particle types `A`, `B`
+declared in the simulation config. The histogram is accumulated over
+every trajectory frame the framework dispatches to it (see
+`rqm/analysis/framework.md` for frame selection and the
+`Analysis` trait), then normalised against an ideal-gas reference
+and written as a CSV file at end of pass.
+
+This file describes the `rdf`-kind `[[analyses]]` entry in
+`<root>.in.analysis`, the pair-enumeration and binning algorithm,
+the normalisation convention, and the CSV output format.
+

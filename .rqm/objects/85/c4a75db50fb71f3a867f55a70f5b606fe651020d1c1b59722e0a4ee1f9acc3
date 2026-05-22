@@ -1,0 +1,12 @@
+#[test] // rq-9b1f8a7c
+fn reject_negative_diagonal() {
+    let err = SimulationBox::new(-1.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect_err("err");
+    match err {
+        SimulationBoxError::NonPositiveDiagonal { name, value } => {
+            assert_eq!(name, "lx");
+            assert_eq!(value, -1.0);
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+

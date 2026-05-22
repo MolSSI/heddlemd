@@ -1,0 +1,16 @@
+# Feature: CSVR Stochastic Velocity Rescaling Thermostat <!-- rq-891232bf -->
+
+Canonical Sampling through Velocity Rescaling (CSVR;
+Bussi-Donadio-Parrinello, *J. Chem. Phys.* **126**, 014101 (2007)) is
+a stochastic NVT thermostat. One of the pluggable thermostat slots
+(see `framework.md`); selected by `kind = "csvr"` in the config's
+`[thermostat]` section.
+
+The thermostat applies a single global velocity rescale per timestep,
+as a post-only hook (`apply_post`); its `apply_pre` is the trait
+default no-op. The rescale factor is drawn from a Markov kernel that,
+after equilibration, samples the canonical distribution at the
+user-specified temperature exactly. CSVR has no ergodicity caveat for
+stiff systems (unlike vanilla Nosé-Hoover) and perturbs the underlying
+dynamics less than Langevin (no per-particle friction term).
+

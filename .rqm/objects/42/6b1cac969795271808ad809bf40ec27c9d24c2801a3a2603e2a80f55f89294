@@ -1,0 +1,22 @@
+#[test] // rq-8ac1a52f
+fn check_min_perpendicular_width_on_triclinic_uses_perpendicular_width_not_edge() {
+    // A box with yz tilt: w_b = (ly * lz) / sqrt(lz^2 + yz^2) =
+    // 100 / sqrt(200) ≈ 7.071. Edge length ly = 10.0 would pass an 8.0
+    // threshold; the perpendicular width fails.
+    let b = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 10.0).unwrap();
+    let err = b.check_min_perpendicular_width(8.0).unwrap_err();
+    match err {
+        SimulationBoxError::PerpendicularWidthTooSmall {
+            direction,
+            width,
+            required,
+        } => {
+            assert_eq!(direction, "b");
+            let expected = 100.0_f32 / 200.0_f32.sqrt();
+            assert!((width - expected).abs() < 1.0e-6_f32);
+            assert_eq!(required, 8.0_f32);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+

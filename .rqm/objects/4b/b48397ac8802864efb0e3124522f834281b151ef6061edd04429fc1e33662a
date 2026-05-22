@@ -1,0 +1,14 @@
+// rq-ca0b98cb
+#[test]
+fn csvr_log_column_values_subtracts_cumulative_injection() {
+    let gpu = init_device().unwrap();
+    let mut therm = unbox_csvr(build_csvr(&gpu, 4, &csvr_kind(300.0, 1.0e-13, 1)));
+    therm.cumulative_injection = 1.0e-20;
+    let extras = therm.log_column_values(2.5e-20, 3.0e-20);
+    assert_eq!(extras.len(), 1);
+    let expected: f64 = 2.5e-20 + 3.0e-20 - 1.0e-20;
+    assert!((extras[0] - expected).abs() < 1.0e-30);
+}
+
+// --- Cumulative injection updates during apply_post ---
+

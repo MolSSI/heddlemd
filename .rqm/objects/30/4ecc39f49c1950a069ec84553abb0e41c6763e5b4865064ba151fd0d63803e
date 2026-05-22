@@ -1,0 +1,12 @@
+#[test] // rq-0c9dc32b
+fn reject_nan_tilt() {
+    let err = SimulationBox::new(10.0, 8.0, 6.0, f32::NAN, 0.0, 0.0).expect_err("err");
+    match err {
+        SimulationBoxError::NonFiniteLatticeValue { name, value } => {
+            assert_eq!(name, "xy");
+            assert!(value.is_nan());
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+

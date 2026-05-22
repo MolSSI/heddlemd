@@ -1,0 +1,8 @@
+  @rq-8b41bc4d
+  Scenario: Two `dynamics analyze` runs on the same inputs produce byte-identical CSVs
+    Given a valid .in.analysis and trajectory
+    When dynamics analyze is invoked twice
+    Then the two output CSVs are byte-identical for every analysis
+
+  # --- Output overwrite ---
+

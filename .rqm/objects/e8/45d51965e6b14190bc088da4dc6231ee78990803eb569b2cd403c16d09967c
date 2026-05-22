@@ -1,0 +1,6 @@
+#[test] // rq-f7b922df
+fn minimum_image_just_past_plus_half_l_wraps_one_period() {
+    let b = default_box();
+    assert_eq!(b.minimum_image([6.0, 0.0, 0.0]), [-4.0_f32, 0.0, 0.0]);
+}
+

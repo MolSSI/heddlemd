@@ -1,0 +1,8 @@
+  @rq-67c5a863
+  Scenario: Tilts may be negative
+    When SimulationBox::new(10.0, 8.0, 6.0, -3.0, -5.0, -1.5) is called
+    Then it returns Ok(box)
+    And box.xy() equals -3.0
+    And box.xz() equals -5.0
+    And box.yz() equals -1.5
+

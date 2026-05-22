@@ -1,0 +1,10 @@
+  @rq-db1298bd
+  Scenario: philox_normal returns the standard-normal Box-Muller cos branch
+    Given key=(0, 0), counter=(0, 0, 0, 0)
+    When philox_normal(0, 0, 0, 0, 0, 0) is called
+    Then the returned f64 is the standard-normal Box-Muller cos
+      computed from the same Philox output, matching the device-side draw
+      formula in `langevin-baoab.md`
+
+  # --- Per-step kernel sequence ---
+

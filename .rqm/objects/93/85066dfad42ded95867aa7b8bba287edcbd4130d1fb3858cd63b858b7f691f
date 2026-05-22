@@ -1,0 +1,8 @@
+  @rq-17def001
+  Scenario: Lossless velocity-Verlet uses the lossless kernels
+    Given a velocity-Verlet integrator (lossless=true) with particle_count=4
+    When the runner walks integrator.plan(0.1)
+    Then timings.finalize() reports count==1 for KernelStage::VV_KICK_DRIFT_LOSSLESS
+    And timings.finalize() reports count==1 for KernelStage::VV_KICK_LOSSLESS
+    And KernelStage::VV_KICK_DRIFT and KernelStage::VV_KICK have count==0
+

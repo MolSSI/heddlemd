@@ -1,0 +1,11 @@
+## Gherkin Scenarios <!-- rq-1012fb8a -->
+
+```gherkin
+Feature: Simulation box and periodic boundary conditions
+
+  Background:
+    Given an orthorhombic SimulationBox constructed via
+      SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+
+  # --- Construction: orthorhombic ---
+

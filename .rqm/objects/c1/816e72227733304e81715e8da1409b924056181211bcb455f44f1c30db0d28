@@ -1,0 +1,8 @@
+  @rq-89c71321
+  Scenario: set_lattice rejects a non-positive diagonal without mutating the box
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    When box.set_lattice(0.0, 9.0, 7.0, 0.0, 0.0, 0.0) is called
+    Then it returns Err(SimulationBoxError::NonPositiveDiagonal { name: "lx", value: 0.0 })
+    And box.lattice() equals [10.0, 8.0, 6.0, 0.0, 0.0, 0.0]
+    And box.generation() equals 0
+

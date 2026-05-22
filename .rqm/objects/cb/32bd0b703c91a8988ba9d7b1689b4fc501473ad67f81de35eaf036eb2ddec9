@@ -1,0 +1,6 @@
+  @rq-43567b30
+  Scenario: First bin's `r` column equals 0.5 · Δr
+    Given an RDF with r_max=1.0e-9 and n_bins=10
+    When dynamics analyze runs to completion
+    Then the first data row's `r` column equals 5.0e-11 within f64 round-off
+

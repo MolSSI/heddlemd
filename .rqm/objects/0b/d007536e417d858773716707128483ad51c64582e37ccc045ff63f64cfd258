@@ -1,0 +1,13 @@
+  @rq-0a6a97f6
+  Scenario: Dispatch loop calls thermostat.apply_pre, plan walk, thermostat.apply_post in that order
+    Given a velocity-Verlet integrator
+    And a Nosé-Hoover-chain thermostat
+    And a recording wrapper that timestamps every trait call (apply_pre,
+      apply_post, plan, every execute, force_field.step)
+    When the runner executes one timestep
+    Then the first recorded event is apply_pre
+    And the last recorded event is apply_post
+    And between apply_pre and apply_post the recorded sub-calls are exactly
+      [plan, execute(KickDrift), force_field.step, execute(KickHalf)]
+    And no barostat hook is recorded
+

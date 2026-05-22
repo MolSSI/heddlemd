@@ -1,0 +1,13 @@
+### Integrator slot <!-- rq-d8c0e5b0 -->
+
+The default registry exposes three integrators:
+
+| `kind` value      | Owns thermostat? | Owns barostat? | Implementation                                                   | File                  |
+| ----------------- | ---------------- | -------------- | ---------------------------------------------------------------- | --------------------- |
+| `velocity-verlet` | no               | no             | symplectic NVE (lossy or lossless)                               | `velocity-verlet.md`  |
+| `langevin-baoab`  | yes              | no             | stochastic NVT via BAOAB splitting                               | `langevin-baoab.md`   |
+| `mtk-npt`         | yes              | yes            | deterministic NPT via MTK extended-system (isotropic, fused)     | `mtk-npt.md`          |
+
+Each implementation's per-step kernels, parameter set, and timings
+stages are documented in its own requirements file.
+

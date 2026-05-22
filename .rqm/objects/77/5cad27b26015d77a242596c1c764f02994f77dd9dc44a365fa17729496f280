@@ -1,0 +1,11 @@
+#[test] // rq-491235c1
+fn minimum_image_after_set_lattice_reflects_new_tilts() {
+    let mut b = default_box();
+    b.set_lattice(10.0, 8.0, 6.0, 0.0, 4.0, 0.0).expect("ok");
+    let result = b.minimum_image([0.0, 0.0, 4.0]);
+    // k_c = floor((4 + 3)/6) = 1
+    // v_z = 4 - 6 = -2
+    // v_x -= 1 * xz = 4 -> v_x = -4
+    assert_eq!(result, [-4.0_f32, 0.0, -2.0]);
+}
+

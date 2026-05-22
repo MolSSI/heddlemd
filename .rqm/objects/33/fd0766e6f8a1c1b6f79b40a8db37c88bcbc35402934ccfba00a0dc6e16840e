@@ -1,0 +1,7 @@
+  @rq-394a4bb1
+  Scenario: check_min_perpendicular_width flags direction "a" when w_a fails
+    Given an orthorhombic SimulationBox::new(4.0, 10.0, 10.0, 0.0, 0.0, 0.0)
+    When box.check_min_perpendicular_width(5.0) is called
+    Then it returns Err(SimulationBoxError::PerpendicularWidthTooSmall {
+      direction: "a", width: 4.0, required: 5.0 })
+

@@ -1,0 +1,10 @@
+  @rq-5355f3f0
+  Scenario: wrap_position_with_image_count tracks per-direction image counts for a triclinic box
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0)
+    And position = [0.0, 0.0, 20.0] (k_c = 3 to wrap into fractional [-0.5, 0.5))
+    When (wrapped, image) = box.wrap_position_with_image_count(position)
+    Then image[2] equals 3
+    And box.fractional_coords(wrapped) has every component in [-0.5, 0.5)
+    And wrapped[0] equals 0.0 - 3 * 2.0 (the xz tilt subtraction propagates)
+    And wrapped[1] equals 0.0 - 3 * 3.0 - k_b * 8.0 (the yz tilt subtraction then a possible y wrap)
+

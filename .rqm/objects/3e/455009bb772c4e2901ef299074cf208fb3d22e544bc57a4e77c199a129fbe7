@@ -1,0 +1,12 @@
+#[test] // rq-05eb9fbb
+fn reject_zero_ly() {
+    let err = SimulationBox::new(10.0, 0.0, 6.0, 0.0, 0.0, 0.0).expect_err("err");
+    match err {
+        SimulationBoxError::NonPositiveDiagonal { name, value } => {
+            assert_eq!(name, "ly");
+            assert_eq!(value, 0.0);
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+

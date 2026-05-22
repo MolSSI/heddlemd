@@ -1,0 +1,7 @@
+  @rq-47e800e0
+  Scenario: min_perpendicular_width of a c-tilted box reflects the yz contribution
+    Given a SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 10.0)
+    Then box.min_perpendicular_width() equals (ly * lz) / sqrt(lz² + yz²)
+      = 100.0 / sqrt(200.0)
+    And this value is less than 10.0
+

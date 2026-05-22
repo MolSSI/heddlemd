@@ -1,0 +1,12 @@
+  @rq-22fb3b0e
+  Scenario: Mutating a copy does not affect the original
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    And let copy = box (a value copy)
+    When copy.set_lattice(20.0, 8.0, 6.0, 0.0, 0.0, 0.0) is called
+    Then copy.lattice() equals [20.0, 8.0, 6.0, 0.0, 0.0, 0.0]
+    And copy.generation() equals 1
+    And box.lattice() equals [10.0, 8.0, 6.0, 0.0, 0.0, 0.0]
+    And box.generation() equals 0
+
+  # --- check_min_perpendicular_width ---
+

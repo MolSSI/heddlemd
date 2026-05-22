@@ -1,0 +1,12 @@
+#[test] // rq-5318db55
+fn reject_infinite_tilt() {
+    let err = SimulationBox::new(10.0, 8.0, 6.0, 0.0, f32::INFINITY, 0.0).expect_err("err");
+    match err {
+        SimulationBoxError::NonFiniteLatticeValue { name, value } => {
+            assert_eq!(name, "xz");
+            assert_eq!(value, f32::INFINITY);
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+

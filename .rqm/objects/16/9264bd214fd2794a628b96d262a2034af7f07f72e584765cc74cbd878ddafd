@@ -1,0 +1,9 @@
+  @rq-b2d5886a
+  Scenario: Two consecutive apply_post calls on a CSVR thermostat produce different post-call velocities
+    Given a CSVR thermostat with seed=1, temperature=300, tau=1e-13, particle_count=4
+    When apply_post is called twice on identical buffers
+    Then the two calls produce different post-call velocities
+    (because the thermostat's internal draw_counter advances between calls)
+
+  # --- Determinism across two runs ---
+

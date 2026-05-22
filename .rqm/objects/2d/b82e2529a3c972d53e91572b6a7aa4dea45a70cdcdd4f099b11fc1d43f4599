@@ -1,0 +1,6 @@
+  @rq-5f1d5034
+  Scenario: Reject `n_bins = 0`
+    Given an RDF entry with n_bins = 0
+    When validate_params is called
+    Then it returns Err(AnalyzeError::InvalidValue { field: "n_bins", .. })
+

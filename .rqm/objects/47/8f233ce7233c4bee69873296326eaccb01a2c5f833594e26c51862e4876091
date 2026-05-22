@@ -1,0 +1,10 @@
+  @rq-9e09673b
+  Scenario: Successive successful set_lattice calls increment generation monotonically
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    When box.set_lattice(11.0, 8.0, 6.0, 0.0, 0.0, 0.0),
+      then box.set_lattice(11.0, 9.0, 6.0, 0.0, 0.0, 0.0),
+      then box.set_lattice(11.0, 9.0, 7.0, 1.0, 2.0, 3.0) are called in sequence
+    Then every call returns Ok(())
+    And box.lattice() equals [11.0, 9.0, 7.0, 1.0, 2.0, 3.0] after the third call
+    And box.generation() equals 3 after the third call
+

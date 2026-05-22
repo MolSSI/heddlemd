@@ -1,0 +1,46 @@
+# Feature: Pluggable Integration Framework <!-- rq-e0a0553d -->
+
+The runner drives time integration through four orthogonal slots that
+compose at every timestep:
+
+1. An `Integrator` — the core time-stepping algorithm. Owns the velocity
+   kicks, position drifts, and the in-step call into `force_field.step`.
+2. An optional `Thermostat` — temperature coupling. Fires twice per
+   step, once before the integrator (`apply_pre`) and once after
+   (`apply_post`), so symmetric Trotter splittings such as
+   Nosé-Hoover-chain can place a half-step on each side of the
+   integrator's velocity-Verlet body.
+3. An optional `Barostat` — pressure coupling. Fires once per step,
+   after the thermostat's post-step, so it consumes the freshest
+   virial / kinetic-energy data and mutates the box for the next
+   step's force evaluation.
+4. An optional `Constraint` — holonomic constraint projection (rigid
+   bonds, rigid groups). Driven by the runner during its walk of the
+   integrator's `StepPlan` (see *Per-Step Interface*): the runner
+   inserts the constraint's hooks at the canonical sub-step
+   boundaries (before / after every `Drift` or `KickDrift`, and after
+   the final velocity update). Integrators never reference the
+   constraint slot. The slot, its trait, its data layout, and its
+   compatibility rules are defined in `constraint-framework.md`; the
+   v1 implementation (SETTLE for three-atom rigid water) lives in
+   `settle.md`.
+
+Each slot is independently registered and independently selectable
+from TOML. Omitting `[thermostat]` selects NVE; omitting `[barostat]`
+selects constant-volume; an empty (or absent) `[constraints]` section
+of the topology file selects no constraints.
+
+Some integrators own their own thermostat (the O step in Langevin
+BAOAB *is* the Ornstein-Uhlenbeck thermostat); some additionally own
+their own barostat (the MTK NPT integrator carries an extended-system
+cell DOF and its own thermostat chains on both the particles and the
+cell). Those integrators declare ownership through their builder's
+`IntegratorBuilder::owns_thermostat(&params)` and
+`IntegratorBuilder::owns_barostat(&params)` predicate methods, and
+the config loader rejects co-configured `[thermostat]` /
+`[barostat]` tables at load time. An analogous predicate
+`IntegratorBuilder::supports_constraints(&params)` gates the
+constraint slot: integrators that do not drive the constraint hooks
+are incompatible with a non-empty `[constraints]` topology section.
+See `constraint-framework.md` for the full rule.
+

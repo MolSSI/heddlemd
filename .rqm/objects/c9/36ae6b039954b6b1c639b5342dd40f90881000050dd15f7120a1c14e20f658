@@ -1,0 +1,5 @@
+    // rq-3b9ed390
+    pub fn volume(&self) -> f32 {
+        self.lx * self.ly * self.lz
+    }
+

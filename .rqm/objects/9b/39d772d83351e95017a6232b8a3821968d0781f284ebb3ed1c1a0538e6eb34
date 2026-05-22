@@ -1,0 +1,43 @@
+## Lattice Convention <!-- rq-c1308495 -->
+
+The three lattice vectors are arranged so that `a` lies along the x-axis,
+`b` lies in the xy-plane, and `c` is general. In matrix form, the lattice
+matrix `H` with rows = lattice vectors is lower-triangular:
+
+```
+H = [lx   0    0 ]
+    [xy   ly   0 ]
+    [xz   yz   lz]
+```
+
+The matrix with columns = lattice vectors is the transpose `H^T` and is
+upper-triangular. The two forms describe the same physical cell; this file
+uses the rows-are-vectors convention throughout.
+
+For a position or displacement `v = (v_x, v_y, v_z)` treated as a column
+vector, the Cartesian-to-fractional transform is `s = H^(-T) · v` and the
+fractional-to-Cartesian transform is `v = H^T · s`. Both have closed-form
+back-substitution implementations:
+
+```
+s_c = v_z / lz
+s_b = (v_y - s_c · yz) / ly
+s_a = (v_x - s_b · xy - s_c · xz) / lx
+```
+
+```
+v_x = s_a · lx + s_b · xy + s_c · xz
+v_y = s_b · ly + s_c · yz
+v_z = s_c · lz
+```
+
+The primary cell is the set `{ H^T · s : s ∈ [-1/2, 1/2)³ }`. A position is
+inside the primary cell iff its fractional coordinates satisfy
+`s_a, s_b, s_c ∈ [-1/2, 1/2)`. The interval is half-open: the lower bound
+is included, the upper bound is excluded, matching the convention used by
+the integrator's drift kernels.
+
+For an orthorhombic box (`xy = xz = yz = 0`), every formula above reduces
+to the per-axis equivalents `s_a = v_x / lx`, `v_x = s_a · lx`, and the
+primary cell becomes `[-lx/2, lx/2) × [-ly/2, ly/2) × [-lz/2, lz/2)`.
+

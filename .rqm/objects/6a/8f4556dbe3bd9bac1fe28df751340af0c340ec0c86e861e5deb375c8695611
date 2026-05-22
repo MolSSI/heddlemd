@@ -1,0 +1,21 @@
+// rq-d4c17bd3
+#[test]
+fn reject_r_max_above_half_box() {
+    let dir = tmp_path("r_max_too_large");
+    std::fs::write(dir.join("sim.in.toml"), sim_toml_with_types(&["Ar"], 4.0e-9)).unwrap();
+    write_init(&dir, &["Ar", "Ar"]);
+    write_trajectory(
+        &dir,
+        &[vec![("Ar", -2.5e-10, 0.0, 0.0), ("Ar", 2.5e-10, 0.0, 0.0)]],
+    );
+    // 4 nm box, half = 2 nm. r_max = 3 nm fails.
+    let path = write_analysis(&dir, &rdf_body("x", ["Ar", "Ar"], 3.0e-9, 8));
+    match run_analyses(&path).unwrap_err() {
+        AnalyzeError::Analysis { error: e, .. } => {
+            let s = format!("{e}");
+            assert!(s.contains("r_max"), "got {s}");
+        }
+        other => panic!("expected Analysis, got {other:?}"),
+    }
+}
+

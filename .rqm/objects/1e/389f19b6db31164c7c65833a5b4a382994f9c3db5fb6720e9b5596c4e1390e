@@ -1,0 +1,5 @@
+  @rq-8259c9ca
+  Scenario: Reject zero lx
+    When SimulationBox::new(0.0, 8.0, 6.0, 0.0, 0.0, 0.0) is called
+    Then it returns Err(SimulationBoxError::NonPositiveDiagonal { name: "lx", value: 0.0 })
+

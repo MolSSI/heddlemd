@@ -1,0 +1,9 @@
+  @rq-a1fc0841
+  Scenario: wrap_position and minimum_image agree on the same input
+    Given v = [17.0, -13.0, 9.5]
+    When mi = box.minimum_image(v)
+    And wp = box.wrap_position(v)
+    Then mi equals wp
+
+  # --- wrap_position_with_image_count ---
+

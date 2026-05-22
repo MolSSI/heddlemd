@@ -1,0 +1,7 @@
+  @rq-153dd875
+  Scenario: set_lattice validation order is lx, ly, lz, xy, xz, yz
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    When box.set_lattice(0.0, -1.0, 0.0, f32::NAN, 0.0, 0.0) is called
+    Then it returns Err(SimulationBoxError::NonPositiveDiagonal { name: "lx", value: 0.0 })
+    And box.generation() equals 0
+

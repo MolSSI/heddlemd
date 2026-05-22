@@ -1,0 +1,20 @@
+// rq-1e5dcdc9
+#[test]
+fn csvr_draw_counter_increments_per_apply_post() {
+    let gpu = init_device().unwrap();
+    let n = 4usize;
+    let state = atomic_state(n);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut therm = unbox_csvr(build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 1)));
+    assert_eq!(therm.draw_counter, 0);
+    therm
+        .apply_post(&mut buffers, 1.0e-15, &mut timings)
+        .unwrap();
+    assert_eq!(therm.draw_counter, 1);
+    therm
+        .apply_post(&mut buffers, 1.0e-15, &mut timings)
+        .unwrap();
+    assert_eq!(therm.draw_counter, 2);
+}
+

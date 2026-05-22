@@ -1,0 +1,14 @@
+## Out of Scope <!-- rq-60c1e792 -->
+
+- Three-particle correlation functions (`g_3`, angular RDFs).
+- Time-dependent RDFs (van Hove function).
+- Density-weighted or charge-weighted RDFs.
+- Cumulative coordination number columns. Users compute these
+  from the CSV.
+- Box rescaling within a single trajectory. The first frame's
+  box is the canonical box.
+- `r_min > 0` lower cutoffs. The histogram always starts at `r =
+  0`; users mask low-`r` bins in post-processing if desired.
+- Logarithmic or otherwise non-uniform bin spacings. Bins are
+  uniform on `[0, r_max]`.
+

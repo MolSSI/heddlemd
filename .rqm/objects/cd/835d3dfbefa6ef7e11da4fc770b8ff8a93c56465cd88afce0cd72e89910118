@@ -1,0 +1,8 @@
+  @rq-743ae35c
+  Scenario: check_min_perpendicular_width reports the first failing direction when multiple fail
+    Given an orthorhombic SimulationBox::new(4.0, 4.0, 4.0, 0.0, 0.0, 0.0)
+    When box.check_min_perpendicular_width(5.0) is called
+    Then it returns Err(SimulationBoxError::PerpendicularWidthTooSmall {
+      direction: "a", width: 4.0, required: 5.0 })
+    And the "b" and "c" directions are not reported
+

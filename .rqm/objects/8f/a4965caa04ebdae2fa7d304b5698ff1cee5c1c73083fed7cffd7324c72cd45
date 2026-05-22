@@ -1,0 +1,7 @@
+  @rq-4b63564b
+  Scenario: NaN displacement propagates to NaN output
+    When box.minimum_image([f32::NAN, 0.0, 0.0]) is called
+    Then result_x is NaN
+    And result_y equals 0.0
+    And result_z equals 0.0
+

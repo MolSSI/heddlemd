@@ -1,0 +1,11 @@
+  @rq-17fd53d9
+  Scenario: Histogram accumulates across multiple frames in order
+    Given a three-frame trajectory with the same two Ar particles per frame
+      and per-frame separations 3.0e-10, 4.0e-10, 5.0e-10
+    And an RDF with r_max=1.0e-9 and n_bins=10
+    When dynamics analyze runs to completion
+    Then exactly three bins have count = 1 each (one per distance)
+    And every other bin has count = 0
+
+  # --- Normalisation ---
+

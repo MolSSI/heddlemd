@@ -1,0 +1,15 @@
+## Numerical Behaviour <!-- rq-70ff0369 -->
+
+- Non-finite inputs to `minimum_image`, `wrap_position`,
+  `wrap_position_with_image_count`, `fractional_coords`, or
+  `cartesian_coords` propagate to non-finite outputs (no validation;
+  matches the trust-the-caller posture used elsewhere in the project for
+  kernel inputs).
+- The wrap algorithm uses `f32::floor`, which is IEEE-754 deterministic.
+- Repeated application of `wrap_position` is idempotent: for any finite
+  input `p`, `wrap_position(wrap_position(p)) == wrap_position(p)`.
+- All intermediate `f32` operations in the wrap algorithm and the
+  Cartesian↔fractional helpers run in the fixed order shown in the
+  algorithm pseudocode. The bit pattern of the result is identical across
+  runs given identical inputs on the same hardware.
+

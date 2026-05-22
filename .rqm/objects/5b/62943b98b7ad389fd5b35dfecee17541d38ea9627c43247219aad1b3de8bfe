@@ -1,0 +1,15 @@
+### Constructor <!-- rq-b8070abb -->
+
+- `SimulationBox::new(lx: f32, ly: f32, lz: f32, xy: f32, xz: f32, yz: f32) -> Result<SimulationBox, SimulationBoxError>` <!-- rq-f0da71ea -->
+  - Validates each parameter in declaration order (`lx`, `ly`, `lz`, `xy`,
+    `xz`, `yz`).
+  - For each parameter, checks finiteness first (returns
+    `NonFiniteLatticeValue` on NaN or infinity).
+  - For each diagonal (`lx`, `ly`, `lz`), additionally checks positivity
+    after finiteness (returns `NonPositiveDiagonal` if the finite value
+    is `<= 0.0`).
+  - Tilts (`xy`, `xz`, `yz`) need only be finite; any sign and magnitude
+    are accepted.
+  - On success, stores the six parameters and returns the constructed
+    box with `generation = 0`.
+

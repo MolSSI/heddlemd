@@ -1,0 +1,22 @@
+### Counter packing <!-- rq-7c49aae5 -->
+
+Each per-step draw of `N_f` normals consumes `N_f` Philox invocations
+with:
+
+- **Key (2 × u32)**: `(seed_lo, seed_hi)` — low and high halves of
+  the thermostat's `seed`.
+- **Counter (4 × u32)**:
+  - `counter[0] = draw_counter_lo` — low 32 bits of the thermostat's
+    `draw_counter`.
+  - `counter[1] = draw_counter_hi` — high 32 bits.
+  - `counter[2] = sample_index` — `0` for the lone `R` draw,
+    `1..N_f−1` for the chi-squared components.
+  - `counter[3] = 0` — reserved (matches Langevin's axis slot).
+
+The `draw_counter` lives on `CsvrThermostat`. It starts at `0` at
+construction. Each `apply_post` performs `self.draw_counter += 1`
+before the draws and the in-call loop uses the post-increment value
+across all `N_f` Philox calls of that invocation. The first
+invocation in a run therefore uses `draw_counter == 1`; the `N`-th
+invocation uses `draw_counter == N`.
+

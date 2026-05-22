@@ -1,0 +1,5 @@
+    // rq-dc17132d
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+

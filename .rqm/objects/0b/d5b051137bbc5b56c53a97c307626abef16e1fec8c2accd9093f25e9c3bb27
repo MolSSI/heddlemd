@@ -1,0 +1,6 @@
+  @rq-386e3288
+  Scenario: BarostatRegistry::with_builtins() exposes the registered barostats
+    Given a BarostatRegistry::with_builtins()
+    Then the registry contains a builder whose kind_name() is "berendsen"
+    And the registry contains a builder whose kind_name() is "c-rescale"
+

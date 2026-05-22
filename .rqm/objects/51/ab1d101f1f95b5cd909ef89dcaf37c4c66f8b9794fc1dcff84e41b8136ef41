@@ -1,0 +1,13 @@
+#[test] // rq-47e800e0
+fn min_perpendicular_width_of_c_tilted_box() {
+    // yz=10, so w_b = ly*lz / sqrt(lz² + yz²) = 100 / sqrt(200) ≈ 7.07
+    let b = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 10.0).expect("ok");
+    let w = b.min_perpendicular_width();
+    let expected = 100.0_f32 / 200.0_f32.sqrt();
+    assert!(
+        (w - expected).abs() < 1.0e-5,
+        "expected {expected}, got {w}"
+    );
+    assert!(w < 10.0);
+}
+

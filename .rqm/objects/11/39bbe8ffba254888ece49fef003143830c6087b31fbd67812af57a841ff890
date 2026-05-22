@@ -1,0 +1,8 @@
+// rq-b5089af4
+#[test]
+fn registry_builds_csvr_particle_count_zero() {
+    let gpu = init_device().unwrap();
+    let kind = csvr_kind(300.0, 1.0e-13, 1);
+    let _therm = build_csvr(&gpu, 0, &kind);
+}
+

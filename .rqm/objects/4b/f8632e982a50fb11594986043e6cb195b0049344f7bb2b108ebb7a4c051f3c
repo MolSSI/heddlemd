@@ -1,0 +1,12 @@
+  @rq-7f018040
+  Scenario: cartesian_coords of unit fractional triples yields the lattice vectors
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0)
+    When box.cartesian_coords([1.0, 0.0, 0.0]) is called
+    Then the result equals [10.0, 0.0, 0.0] (the a vector)
+    When box.cartesian_coords([0.0, 1.0, 0.0]) is called
+    Then the result equals [1.0, 8.0, 0.0] (the b vector)
+    When box.cartesian_coords([0.0, 0.0, 1.0]) is called
+    Then the result equals [2.0, 3.0, 6.0] (the c vector)
+
+  # --- min_perpendicular_width ---
+

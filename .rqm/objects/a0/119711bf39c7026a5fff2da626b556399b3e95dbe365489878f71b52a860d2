@@ -1,0 +1,28 @@
+## Determinism Guarantees <!-- rq-a93a8dc4 -->
+
+The composed framework preserves the project's bit-wise reproducibility
+invariant under the same conditions each slot individually guarantees:
+
+- All slot kernels and the force pipeline run on the default stream
+  of the same `Arc<CudaDevice>` carried by `ParticleBuffers`. No
+  additional streams are introduced.
+- The outer dispatch order (`apply_pre`, then the plan walk, then
+  `apply_post`, then `apply`) is fixed and identical across runs.
+- The plan walk visits sub-steps in `StepPlan::steps` order; the plan
+  is a pure function of `dt` and the integrator's static
+  configuration, so identical inputs across runs produce identical
+  plans and identical sub-step orderings.
+- The trait surfaces carry no loop-position parameter; the runner's
+  loop counter stays local to the runner. Slots that need a monotone,
+  reproducible counter (such as `LangevinBaoab` for its RNG draws, or
+  `Csvr` / `Andersen` for theirs) own it on their own state and
+  increment it deterministically per invocation.
+- Implementations that draw random numbers document the exact RNG
+  scheme so two runs on the same GPU with the same seed produce
+  byte-identical trajectories.
+- Composing a deterministic integrator with a deterministic
+  thermostat (NHC, Berendsen) and no barostat produces a deterministic
+  combination. Composing with a stochastic thermostat (CSVR,
+  Andersen) preserves the stochastic thermostat's bit-exact
+  reproducibility under the same RNG seed.
+

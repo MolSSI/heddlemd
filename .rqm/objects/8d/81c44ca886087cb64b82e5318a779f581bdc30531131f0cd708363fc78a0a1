@@ -1,0 +1,5 @@
+  @rq-7f867e37
+  Scenario: Reject infinite diagonal
+    When SimulationBox::new(10.0, f32::INFINITY, 6.0, 0.0, 0.0, 0.0) is called
+    Then it returns Err(SimulationBoxError::NonFiniteLatticeValue { name: "ly", value: f32::INFINITY })
+

@@ -1,0 +1,10 @@
+### Columns <!-- rq-964b59fd -->
+
+- `r: f64` — bin centre `(i + 0.5) · Δr`, in metres. Formatted with
+  Rust's `{:.9e}` (nine fractional digits, lower-case `e` exponent).
+- `g_r: f64` — `g_AB(r_i)`, dimensionless. Formatted with `{:.9e}`.
+- `count: u64` — raw histogram count for the bin. Base-10
+  integer, no padding.
+
+Row count is exactly `n_bins`; header is exactly one line.
+

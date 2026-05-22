@@ -1,0 +1,10 @@
+#[test] // rq-d6e10419
+fn minimum_image_after_set_lattice_uses_new_parameters() {
+    let mut b = default_box();
+    b.set_lattice(20.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect("ok");
+    let result = b.minimum_image([12.0, 0.0, 0.0]);
+    assert_eq!(result[0], -8.0_f32);
+    assert_eq!(result[1], 0.0);
+    assert_eq!(result[2], 0.0);
+}
+

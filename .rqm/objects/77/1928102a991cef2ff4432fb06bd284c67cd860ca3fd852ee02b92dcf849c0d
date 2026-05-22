@@ -1,0 +1,8 @@
+  @rq-69d2c5f5
+  Scenario: Construct CSVR via the thermostat registry
+    Given a ThermostatRegistry::with_builtins()
+    And a SlotConfig { kind: "csvr", params:
+      { temperature: 300.0, tau: 1.0e-13, seed: 42 } }
+    When registry.build_optional(Some(&slot), &gpu, particle_count=4) is called
+    Then it returns Ok(Some(thermostat))
+

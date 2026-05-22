@@ -1,0 +1,6 @@
+  @rq-94a43204
+  Scenario: Different seeds produce different trajectories
+    Given two composed runs identical except thermostat.seed = 1 and = 2
+    When dynamics run is invoked on each
+    Then the trajectory files differ
+```

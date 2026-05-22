@@ -1,0 +1,12 @@
+#[test] // rq-261fde88
+fn minimum_image_requires_both_c_and_b_wrapping() {
+    // box with xy=1.0 only.
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 0.0, 0.0).expect("ok");
+    let result = b.minimum_image([0.0, 5.0, 0.0]);
+    // v_z = 0 stays; k_c = 0
+    // v_y = 5.0; k_b = floor((5.0 + 4.0) / 8.0) = 1; v_y -= 8.0 -> -3.0
+    // x channel: subtract k_b * xy = 1.0; v_x: 0.0 - 1.0 = -1.0
+    // k_a = floor((-1.0 + 5.0) / 10.0) = 0; v_x stays -1.0
+    assert_eq!(result, [-1.0_f32, -3.0, 0.0]);
+}
+

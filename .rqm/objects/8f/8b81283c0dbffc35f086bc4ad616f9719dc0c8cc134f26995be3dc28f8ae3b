@@ -1,0 +1,6 @@
+  @rq-84927a79
+  Scenario: Missing seed rejected
+    Given a config with [thermostat] kind="csvr", temperature=300.0, tau=1.0e-13
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "thermostat.seed" })
+

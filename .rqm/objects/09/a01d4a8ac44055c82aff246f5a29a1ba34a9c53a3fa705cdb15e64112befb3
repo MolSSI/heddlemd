@@ -1,0 +1,8 @@
+  @rq-82cdabba
+  Scenario: build_optional with None returns Ok(None) on the barostat registry
+    Given a BarostatRegistry::with_builtins()
+    When registry.build_optional(None, device, particle_count=4) is called
+    Then it returns Ok(None)
+
+  # --- Per-step dispatch ---
+

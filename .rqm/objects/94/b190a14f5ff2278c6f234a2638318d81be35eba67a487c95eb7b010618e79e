@@ -1,0 +1,12 @@
+#[test] // rq-19fe4806
+fn reject_nan_diagonal() {
+    let err = SimulationBox::new(f32::NAN, 8.0, 6.0, 0.0, 0.0, 0.0).expect_err("err");
+    match err {
+        SimulationBoxError::NonFiniteLatticeValue { name, value } => {
+            assert_eq!(name, "lx");
+            assert!(value.is_nan());
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+

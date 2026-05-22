@@ -1,0 +1,6 @@
+#[test] // rq-3e8324c2
+fn wrap_position_inside_primary_image_unchanged() {
+    let b = default_box();
+    assert_eq!(b.wrap_position([4.0, 3.0, 2.0]), [4.0_f32, 3.0, 2.0]);
+}
+

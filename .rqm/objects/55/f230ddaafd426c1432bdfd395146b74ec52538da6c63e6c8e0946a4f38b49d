@@ -1,0 +1,8 @@
+  @rq-5269221c
+  Scenario: wrap_position is idempotent for a triclinic box
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 1.5, -2.0, 0.5)
+    And position = [200.0, -150.0, 75.5]
+    When wrapped_once = box.wrap_position(position)
+    And wrapped_twice = box.wrap_position(wrapped_once)
+    Then wrapped_twice equals wrapped_once
+

@@ -1,0 +1,18 @@
+#[test] // rq-394a4bb1
+fn check_min_perpendicular_width_flags_direction_a_when_only_w_a_fails() {
+    let b = SimulationBox::new(4.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
+    let err = b.check_min_perpendicular_width(5.0).unwrap_err();
+    match err {
+        SimulationBoxError::PerpendicularWidthTooSmall {
+            direction,
+            width,
+            required,
+        } => {
+            assert_eq!(direction, "a");
+            assert_eq!(width, 4.0_f32);
+            assert_eq!(required, 5.0_f32);
+        }
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+

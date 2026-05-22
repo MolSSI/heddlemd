@@ -1,0 +1,6 @@
+  @rq-e8adaa9c
+  Scenario: lookup returns None for an unregistered kind
+    Given an IntegratorRegistry::with_builtins()
+    When registry.lookup("no-such-integrator") is called
+    Then it returns None
+

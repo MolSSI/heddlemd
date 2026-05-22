@@ -1,0 +1,8 @@
+  @rq-4e9e09f0
+  Scenario: apply_post launches the expected kernel set
+    Given a CSVR thermostat with seed=1, temperature=300, tau=1e-13, particle_count=4
+    And buffers prepared with non-zero velocities
+    When thermostat.apply_post(&mut buffers, dt=1e-15, &mut timings) is called
+    Then KernelStage::KINETIC_ENERGY_REDUCE has count == 1
+    And KernelStage::CSVR_RESCALE_VELOCITIES has count == 1
+

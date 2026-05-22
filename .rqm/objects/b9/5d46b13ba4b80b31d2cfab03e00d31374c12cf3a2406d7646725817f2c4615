@@ -1,0 +1,5 @@
+  @rq-ef6ae25a
+  Scenario: min_perpendicular_width equals min(lx, ly, lz) for an orthorhombic box
+    Given an orthorhombic SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    Then box.min_perpendicular_width() equals 6.0
+

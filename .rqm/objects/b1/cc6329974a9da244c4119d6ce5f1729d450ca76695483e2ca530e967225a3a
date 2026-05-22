@@ -1,0 +1,19 @@
+// rq-43567b30 rq-60c534f2
+#[test]
+fn bin_centers_match_formula() {
+    let dir = tmp_path("bin_centres");
+    std::fs::write(dir.join("sim.in.toml"), sim_toml_with_types(&["Ar"], 4.0e-9)).unwrap();
+    write_init(&dir, &["Ar", "Ar"]);
+    write_trajectory(
+        &dir,
+        &[vec![("Ar", -2.5e-10, 0.0, 0.0), ("Ar", 2.5e-10, 0.0, 0.0)]],
+    );
+    // r_max = 1e-9, n_bins = 10 → Δr = 1e-10, first centre = 5e-11,
+    // last centre = 9.5e-10.
+    let path = write_analysis(&dir, &rdf_body("x", ["Ar", "Ar"], 1.0e-9, 10));
+    run_analyses(&path).unwrap();
+    let rows = read_csv(&dir.join("sim.out.x.csv"));
+    assert!((rows[0].0 - 5.0e-11).abs() < 1e-20);
+    assert!((rows[9].0 - 9.5e-10).abs() < 1e-20);
+}
+

@@ -1,0 +1,9 @@
+  @rq-07ead62b
+  Scenario: Plan with multiple ForceEval { class: None } sub-steps invokes force_field.step that many times
+    Given a stub integrator whose plan(dt) returns
+      [KickHalf, Drift, ForceEval { class: None }, KickHalf, Drift,
+       ForceEval { class: None }, KickHalf]
+    When the runner executes one timestep with this integrator
+    Then force_field.step(...) is invoked exactly twice
+    And force_field.step_class(...) is invoked exactly zero times
+

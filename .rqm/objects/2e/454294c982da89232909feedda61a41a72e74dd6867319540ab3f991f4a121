@@ -1,0 +1,27 @@
+#[test] // rq-3eaf65b6
+fn check_min_perpendicular_width_is_deterministic() {
+    let b1 = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).unwrap();
+    let b2 = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).unwrap();
+    let r1 = b1.check_min_perpendicular_width(7.0);
+    let r2 = b2.check_min_perpendicular_width(7.0);
+    match (r1, r2) {
+        (Ok(()), Ok(())) => {}
+        (
+            Err(SimulationBoxError::PerpendicularWidthTooSmall {
+                direction: d1,
+                width: w1,
+                required: r1,
+            }),
+            Err(SimulationBoxError::PerpendicularWidthTooSmall {
+                direction: d2,
+                width: w2,
+                required: r2,
+            }),
+        ) => {
+            assert_eq!(d1, d2);
+            assert_eq!(w1.to_bits(), w2.to_bits());
+            assert_eq!(r1.to_bits(), r2.to_bits());
+        }
+        other => panic!("non-deterministic outcomes: {other:?}"),
+    }
+}

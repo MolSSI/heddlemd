@@ -1,0 +1,27 @@
+### Normalisation <!-- rq-0806c514 -->
+
+After the trajectory pass, the builder converts the integer
+histogram into `g_AB(r)` using the simulation box's volume `V` from
+the first frame (the framework assumes a constant box, see
+`rqm/analysis/framework.md`).
+
+For each bin `i` with centre `r_i = (i + 0.5) · Δr`:
+
+- Compute the exact shell volume
+  `V_shell[i] = (4π / 3) · ((r_{i+1})³ - (r_i')³)`
+  where `r_{i+1} = (i + 1) · Δr` is the bin's outer radius and
+  `r_i' = i · Δr` is the bin's inner radius. The exact form
+  (rather than the small-Δr `4π r² Δr` approximation) is used so
+  the first bin's normalisation is well defined.
+- Compute the ideal-pair count for the bin:
+  - **Same-type**: `ideal[i] = frames_consumed · (N_A · (N_A - 1) / 2) · V_shell[i] / V`.
+  - **Cross-type**: `ideal[i] = frames_consumed · (N_A · N_B) · V_shell[i] / V`.
+- `g_AB(r_i) = histogram[i] as f64 / ideal[i]` (`0.0` when
+  `histogram[i] == 0`; the divisor is non-zero for every bin
+  because `n_bins >= 1` and `V > 0`).
+
+`N_A` and `N_B` are taken from the first frame and assumed
+constant (the framework rejects analyses on trajectories whose
+particle counts vary; see `rqm/analysis/framework.md`'s *Out of
+Scope*).
+

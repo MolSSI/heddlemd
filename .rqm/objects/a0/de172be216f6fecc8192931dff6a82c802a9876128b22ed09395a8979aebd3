@@ -1,0 +1,5 @@
+  @rq-9a9523d9
+  Scenario: minimum_image at the +L/2 boundary maps to -L/2
+    When box.minimum_image([5.0, 0.0, 0.0]) is called
+    Then the result equals [-5.0, 0.0, 0.0]
+

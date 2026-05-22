@@ -1,0 +1,8 @@
+  @rq-751bbb3c
+  Scenario: integrator.execute receiving ForceEval with a class also surfaces UnexpectedSubStep
+    Given any concrete integrator
+    When execute(&SubStep::ForceEval { class: Some(ForceClass::Fast) }, ...) is called directly
+    Then it returns Err(IntegratorError::UnexpectedSubStep { variant: "ForceEval" })
+
+  # --- Compatibility ---
+

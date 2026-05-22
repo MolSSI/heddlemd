@@ -1,0 +1,9 @@
+  @rq-a9ab33a8
+  Scenario: A wrap result lies inside the primary parallelepiped
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 4.0, -3.0, 1.5)
+    And an arbitrary displacement v
+    When result = box.minimum_image(v) is called
+    Then box.fractional_coords(result) has every component in [-0.5, 0.5)
+
+  # --- wrap_position ---
+

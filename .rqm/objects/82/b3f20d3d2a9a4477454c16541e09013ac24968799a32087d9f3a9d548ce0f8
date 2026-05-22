@@ -1,0 +1,9 @@
+  @rq-353da04c
+  Scenario: Construct Nosé-Hoover chain via the thermostat registry
+    Given a ThermostatRegistry::with_builtins()
+    And a SlotConfig { kind: "nose-hoover-chain", params:
+      { temperature: 300.0, tau: 1.0e-13,
+        chain_length: 3, yoshida_order: 3, n_resp: 1 } }
+    When registry.build_optional(Some(&slot), &gpu, particle_count=4) is called
+    Then it returns Ok(Some(thermostat))
+

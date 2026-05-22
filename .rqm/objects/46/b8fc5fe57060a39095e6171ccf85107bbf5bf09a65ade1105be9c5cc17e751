@@ -1,0 +1,6 @@
+  @rq-c70f6309
+  Scenario: Empty-bin g_r is exactly 0.0
+    Given an RDF whose histogram has count = 0 in some bin
+    When dynamics analyze runs to completion
+    Then the corresponding `g_r` column value is exactly 0.0e0
+

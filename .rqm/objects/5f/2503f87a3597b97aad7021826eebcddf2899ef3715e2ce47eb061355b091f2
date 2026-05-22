@@ -1,0 +1,10 @@
+  @rq-c9618bdd
+  Scenario: minimum_image is per-axis independent for an orthorhombic box
+    Given displacement = [6.0, -5.0, 4.0]
+    When box.minimum_image(displacement) is called
+    Then the x-component is wrapped against lx=10.0
+    And the y-component is wrapped against ly=8.0
+    And the z-component is wrapped against lz=6.0
+
+  # --- minimum_image: triclinic ---
+

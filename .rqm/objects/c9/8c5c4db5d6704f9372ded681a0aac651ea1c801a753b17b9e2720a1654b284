@@ -1,0 +1,12 @@
+#[test] // rq-c9618bdd
+fn minimum_image_is_per_axis_independent_for_orthorhombic() {
+    let b = default_box();
+    // x=6, lx=10  -> -4
+    // y=-5, ly=8  -> 3
+    // z=4, lz=6   -> -2
+    let result = b.minimum_image([6.0, -5.0, 4.0]);
+    assert_eq!(result, [-4.0_f32, 3.0, -2.0]);
+}
+
+// --- minimum_image: triclinic ---
+

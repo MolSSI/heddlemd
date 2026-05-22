@@ -1,0 +1,13 @@
+  @rq-27ffd3f4
+  Scenario: Construct an orthorhombic box (all tilts zero)
+    When SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0) is called
+    Then it returns Ok(box)
+    And box.lattice() equals [10.0, 8.0, 6.0, 0.0, 0.0, 0.0]
+    And box.lx() equals 10.0
+    And box.ly() equals 8.0
+    And box.lz() equals 6.0
+    And box.xy() equals 0.0
+    And box.xz() equals 0.0
+    And box.yz() equals 0.0
+    And box.generation() equals 0
+

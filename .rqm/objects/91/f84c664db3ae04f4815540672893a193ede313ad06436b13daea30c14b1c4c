@@ -1,0 +1,6 @@
+  @rq-0fa3b49f
+  Scenario: check_min_perpendicular_width returns Ok when every width meets the threshold
+    Given an orthorhombic SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    When box.check_min_perpendicular_width(5.0) is called
+    Then it returns Ok(())
+

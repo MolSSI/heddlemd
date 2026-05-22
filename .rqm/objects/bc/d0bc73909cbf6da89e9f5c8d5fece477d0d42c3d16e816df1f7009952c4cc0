@@ -1,0 +1,12 @@
+#[test] // rq-8259c9ca
+fn reject_zero_lx() {
+    let err = SimulationBox::new(0.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect_err("err");
+    match err {
+        SimulationBoxError::NonPositiveDiagonal { name, value } => {
+            assert_eq!(name, "lx");
+            assert_eq!(value, 0.0);
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+

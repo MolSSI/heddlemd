@@ -1,0 +1,7 @@
+#[test] // rq-0061906c
+fn check_min_perpendicular_width_ok_at_exact_equality() {
+    // Smallest width is lz = 6.0; threshold of 6.0 must still pass.
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).unwrap();
+    assert!(b.check_min_perpendicular_width(6.0).is_ok());
+}
+

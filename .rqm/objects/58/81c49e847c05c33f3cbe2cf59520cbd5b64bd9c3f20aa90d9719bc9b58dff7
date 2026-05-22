@@ -1,0 +1,6 @@
+#[test] // rq-bfb3b9d8
+fn minimum_image_leaves_displacement_strictly_inside_unchanged() {
+    let b = default_box();
+    assert_eq!(b.minimum_image([4.0, 3.0, 2.0]), [4.0_f32, 3.0, 2.0]);
+}
+

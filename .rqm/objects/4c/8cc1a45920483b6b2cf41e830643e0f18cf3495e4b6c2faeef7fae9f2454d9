@@ -1,0 +1,15 @@
+## Schema <!-- rq-fb62c422 -->
+
+A `[[analyses]]` entry of `kind = "rdf"` accepts the fields below
+in addition to the framework-level `name`, `kind`, and
+optional `output_path`.
+
+```toml
+[[analyses]]
+name = "ar-ar"
+kind = "rdf"
+between = ["Ar", "Ar"]    # required, [String; 2]
+r_max = 8.5e-10           # required, f64 (m)
+n_bins = 100              # required, u64
+```
+

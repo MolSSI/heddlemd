@@ -1,0 +1,29 @@
+## Out of Scope <!-- rq-8d904561 -->
+
+- A user-supplied integrator / thermostat / barostat DSL (à la
+  OpenMM's `CustomIntegrator`). New slot implementations are Rust
+  source code that implement the corresponding trait and register a
+  builder.
+- Concrete multi-time-step / RESPA integrators. The integrator and
+  force-field trait shapes support RESPA-style plans: an integrator
+  can emit `SubStep::ForceEval { class: Some(Fast) }` many times per
+  outer step and `SubStep::ForceEval { class: Some(Slow) }` once, and
+  the runner dispatches each via `ForceField::step` / `step_class`
+  (see `rqm/forces/framework.md`). No RESPA implementation ships in
+  the default `IntegratorRegistry`.
+- Constraint algorithms other than SETTLE. M-SHAKE, P-LINCS, and
+  every other constraint algorithm are out of scope for this
+  framework file; they share the `Constraint` slot defined in
+  `constraint-framework.md` and arrive in their own feature files.
+- Concrete barostat implementations. The trait, registry, and config
+  schema slot exist; the default registry has no builders.
+- Multiple simultaneous thermostats per run. The runner holds at most
+  one `Box<dyn Thermostat>`.
+- Multiple simultaneous barostats per run. The runner holds at most
+  one `Box<dyn Barostat>`.
+- Mid-run replacement of any slot. Each slot is fixed at construction
+  and never replaced for the duration of a run.
+- Dynamic loading of slot implementations from shared libraries.
+
+---
+

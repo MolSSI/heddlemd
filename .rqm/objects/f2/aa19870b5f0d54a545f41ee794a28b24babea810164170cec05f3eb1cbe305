@@ -1,0 +1,13 @@
+#[test] // rq-7f018040
+fn cartesian_coords_of_unit_fractional_triples_yields_lattice_vectors() {
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
+    let a = b.cartesian_coords([1.0, 0.0, 0.0]);
+    assert_eq!(a, [10.0_f32, 0.0, 0.0]);
+    let bv = b.cartesian_coords([0.0, 1.0, 0.0]);
+    assert_eq!(bv, [1.0_f32, 8.0, 0.0]);
+    let c = b.cartesian_coords([0.0, 0.0, 1.0]);
+    assert_eq!(c, [2.0_f32, 3.0, 6.0]);
+}
+
+// --- min_perpendicular_width ---
+

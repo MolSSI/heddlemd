@@ -1,0 +1,27 @@
+// rq-cfd1d536
+#[test]
+fn reject_missing_between() {
+    let dir = tmp_path("missing_between");
+    std::fs::write(dir.join("sim.in.toml"), sim_toml_with_types(&["Ar"], 4.0e-9)).unwrap();
+    write_init(&dir, &["Ar", "Ar"]);
+    write_trajectory(
+        &dir,
+        &[vec![("Ar", -2.5e-10, 0.0, 0.0), ("Ar", 2.5e-10, 0.0, 0.0)]],
+    );
+    let path = write_analysis(
+        &dir,
+        r#"schema_version = 1
+
+[[analyses]]
+name = "x"
+kind = "rdf"
+r_max = 1.0e-9
+n_bins = 8
+"#,
+    );
+    match run_analyses(&path).unwrap_err() {
+        AnalyzeError::MissingField { field } => assert!(field.ends_with("between")),
+        other => panic!("expected MissingField, got {other:?}"),
+    }
+}
+

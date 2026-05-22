@@ -1,0 +1,33 @@
+## Out of Scope <!-- rq-1178e005 -->
+
+- A lossless `(f32, f64)` compensated mode. CSVR is stochastic;
+  bit-exact time-reversibility is not a property the algorithm
+  promises.
+- Pre/post symmetric splitting of the thermostat. The single
+  post-VV variant is the canonical Bussi 2007 algorithm and is
+  sufficient for correct canonical sampling.
+- Massive thermostatting (per-atom independent CSVR). Single global
+  thermostat only.
+- User-overrideable `N_f` (degrees of freedom). The thermostat
+  hard-codes `N_f = max(1, 3N − n_constraints − 3)`, the
+  COM-removed and constraint-aware convention shared with
+  `compute_temperature` (see `io/log-output.md`).
+- Pressure coupling (Bussi-Parrinello stochastic-cell NPT extension).
+  A future stochastic barostat would slot in alongside CSVR via the
+  `[barostat]` slot.
+- Constraint algorithms (SHAKE/RATTLE).
+- Wilson-Hilferty or Gamma-rejection approximations of the
+  chi-squared distribution. The exact sum-of-squared-normals
+  implementation is the only supported sampler; future opt-in
+  approximations could land if `N_f` is large enough to make the
+  exact sum dominate the step cost.
+- A device-side RNG path for CSVR. The host-side path is fast enough
+  for typical system sizes and simpler to reason about; a future
+  GPU-side variant could be added if profiling demands it.
+- Restart-from-checkpoint of the `draw_counter` and
+  `cumulative_injection` via the config layer. The fields are public
+  for direct assignment by future checkpoint code; the config layer
+  carries no syntax for them today.
+
+---
+

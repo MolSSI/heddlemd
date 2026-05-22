@@ -1,0 +1,8 @@
+  @rq-545c961a
+  Scenario: fractional_coords inverts cartesian_coords
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0)
+    And an arbitrary fractional triple s = [0.1, -0.2, 0.3]
+    When v = box.cartesian_coords(s)
+    And s_round = box.fractional_coords(v)
+    Then s_round agrees with s within f32 round-off
+

@@ -1,0 +1,6 @@
+  @rq-ca0b98cb
+  Scenario: log_column_values returns ke + pe − cumulative_injection
+    Given a CsvrThermostat with cumulative_injection = 1.0e-20
+    When state.log_column_values(ke=2.5e-20, pe=3.0e-20) is called
+    Then it returns [2.5e-20 + 3.0e-20 − 1.0e-20] = [4.5e-20]
+

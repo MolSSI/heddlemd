@@ -1,0 +1,6 @@
+  @rq-d4c17bd3
+  Scenario: Reject `r_max` larger than half the box's minimum perpendicular width
+    Given a 4 nm cubic box and an RDF entry with r_max = 3.0e-9
+    When RdfBuilder::build is called against that header
+    Then it returns Err(AnalysisRuntimeError::InvalidValue { field: "r_max", .. })
+

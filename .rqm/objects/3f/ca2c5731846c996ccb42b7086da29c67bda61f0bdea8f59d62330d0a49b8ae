@@ -1,0 +1,9 @@
+  @rq-491235c1
+  Scenario: minimum_image after set_lattice reflects new tilts
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    When box.set_lattice(10.0, 8.0, 6.0, 0.0, 4.0, 0.0) is called
+    And box.minimum_image([0.0, 0.0, 4.0]) is called
+    Then k_c = floor((4.0 + 3.0) / 6.0) = 1
+    And the result equals [-4.0, 0.0, -2.0]
+    (the new xz=4.0 propagates into the x channel even though the displacement has v_x=0)
+

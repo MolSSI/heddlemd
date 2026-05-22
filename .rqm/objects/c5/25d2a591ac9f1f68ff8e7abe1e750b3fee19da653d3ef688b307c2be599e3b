@@ -1,0 +1,10 @@
+  @rq-36665dda
+  Scenario: g_r normalisation matches the ideal-gas reference
+    Given a two-particle Ar/Ar trajectory whose distances sum to ideal-gas expectations
+    When dynamics analyze runs to completion
+    Then the resulting g_r values agree with the analytical normalisation
+      g_r = (V * count) / (frames * N_A * (N_A - 1) / 2 * shell_volume)
+      to within f64 round-off
+
+  # --- Reproducibility ---
+

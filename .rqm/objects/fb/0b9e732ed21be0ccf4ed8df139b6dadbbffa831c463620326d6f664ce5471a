@@ -1,0 +1,6 @@
+#[test] // rq-ef6ae25a
+fn min_perpendicular_width_equals_min_lx_ly_lz_for_orthorhombic() {
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect("ok");
+    assert_eq!(b.min_perpendicular_width(), 6.0_f32);
+}
+

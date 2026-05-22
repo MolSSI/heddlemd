@@ -1,0 +1,17 @@
+#[test] // rq-89c71321
+fn set_lattice_rejects_non_positive_diagonal_without_mutating() {
+    let mut b = default_box();
+    let err = b
+        .set_lattice(0.0, 9.0, 7.0, 0.0, 0.0, 0.0)
+        .expect_err("err");
+    match err {
+        SimulationBoxError::NonPositiveDiagonal { name, value } => {
+            assert_eq!(name, "lx");
+            assert_eq!(value, 0.0);
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+    assert_eq!(b.lattice(), [10.0_f32, 8.0, 6.0, 0.0, 0.0, 0.0]);
+    assert_eq!(b.generation(), 0);
+}
+

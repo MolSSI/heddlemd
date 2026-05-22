@@ -1,0 +1,8 @@
+  @rq-d6e10419
+  Scenario: minimum_image after set_lattice reflects the new lattice parameters
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    When box.set_lattice(20.0, 8.0, 6.0, 0.0, 0.0, 0.0) is called
+    And box.minimum_image([12.0, 0.0, 0.0]) is called
+    Then result_x equals -8.0
+    (12.0 - 20.0; the wrap uses the post-mutation lx = 20.0, not 10.0)
+

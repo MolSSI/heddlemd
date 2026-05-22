@@ -1,0 +1,5 @@
+  @rq-8c045718
+  Scenario: minimum_image of the zero displacement is zero
+    When box.minimum_image([0.0, 0.0, 0.0]) is called
+    Then the result equals [0.0, 0.0, 0.0]
+

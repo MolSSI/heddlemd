@@ -1,0 +1,8 @@
+  @rq-706c4b80
+  Scenario: Construct Langevin BAOAB via the integrator registry
+    Given an IntegratorRegistry::with_builtins()
+    And a SlotConfig { kind: "langevin-baoab",
+      params: { friction: 1.0e12, temperature: 300.0, seed: 42 } }
+    When registry.build(&slot, &gpu, particle_count=4, n_constraints=0) is called
+    Then it returns Ok(integrator)
+

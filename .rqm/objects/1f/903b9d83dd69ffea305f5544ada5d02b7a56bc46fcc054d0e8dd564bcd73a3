@@ -1,0 +1,6 @@
+  @rq-0ae304bc
+  Scenario: minimum_image handles many-period displacements (orthorhombic)
+    When box.minimum_image([24.0, 0.0, 0.0]) is called
+    Then result_x lies in [-5.0, 5.0)
+    And result_x equals 24.0 - 10.0 * floor((24.0 + 5.0) / 10.0)
+

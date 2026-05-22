@@ -1,0 +1,8 @@
+    // rq-1a3ec0c8
+    pub fn fractional_coords(&self, position: [f32; 3]) -> [f32; 3] {
+        let s_c = position[2] / self.lz;
+        let s_b = (position[1] - s_c * self.yz) / self.ly;
+        let s_a = (position[0] - s_b * self.xy - s_c * self.xz) / self.lx;
+        [s_a, s_b, s_c]
+    }
+

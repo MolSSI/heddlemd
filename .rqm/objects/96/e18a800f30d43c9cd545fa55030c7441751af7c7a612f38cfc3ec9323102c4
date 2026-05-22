@@ -1,0 +1,5 @@
+  @rq-19fe4806
+  Scenario: Reject NaN diagonal
+    When SimulationBox::new(f32::NAN, 8.0, 6.0, 0.0, 0.0, 0.0) is called
+    Then it returns Err(SimulationBoxError::NonFiniteLatticeValue { name: "lx", value: v }) where v is NaN
+

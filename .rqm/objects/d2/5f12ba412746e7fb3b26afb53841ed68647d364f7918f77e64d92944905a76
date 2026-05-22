@@ -1,0 +1,8 @@
+#[test] // rq-870ed681
+fn wrap_position_with_image_count_returns_image_triple() {
+    let b = default_box(); // orthorhombic, lx=10
+    let (wrapped, image) = b.wrap_position_with_image_count([12.0, 0.0, 0.0]);
+    assert_eq!(wrapped, [2.0_f32, 0.0, 0.0]);
+    assert_eq!(image, [1, 0, 0]);
+}
+

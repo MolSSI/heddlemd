@@ -1,0 +1,8 @@
+#[test] // rq-67c5a863
+fn tilts_may_be_negative() {
+    let b = SimulationBox::new(10.0, 8.0, 6.0, -3.0, -5.0, -1.5).expect("ok");
+    assert_eq!(b.xy(), -3.0);
+    assert_eq!(b.xz(), -5.0);
+    assert_eq!(b.yz(), -1.5);
+}
+

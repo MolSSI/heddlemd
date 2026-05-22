@@ -1,0 +1,22 @@
+## CSVR conserved quantity <!-- rq-be551127 -->
+
+The conserved diagnostic for CSVR is
+
+```text
+H_csvr = K + U − Σ_{invocations} (K_new − K_old)
+```
+
+i.e., the physical Hamiltonian plus a running subtraction of the
+cumulative kinetic energy injected (or removed) by the thermostat
+over all completed invocations. With a correct CSVR implementation
+the sequence `{H_csvr(t)}` drifts as a martingale (zero-mean
+increment per step) and is bounded in expectation; an implementation
+bug produces a systematic drift instead.
+
+`H_csvr` is exposed as a per-log-row diagnostic column named
+`csvr_conserved` when CSVR is the configured thermostat (see
+`io/log-output.md`). The thermostat accumulates `Σ (K_new − K_old)`
+on its host-side state across every `apply_post` call and combines
+it with the kinetic and potential energies supplied by the runner at
+log-write time.
+

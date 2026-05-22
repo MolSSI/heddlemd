@@ -1,0 +1,6 @@
+  @rq-e1a6bde9
+  Scenario: Reject non-positive tau
+    Given a config with [thermostat] kind="csvr", temperature=300.0, tau=-1.0e-13, seed=1
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "thermostat.tau", reason: _ })
+

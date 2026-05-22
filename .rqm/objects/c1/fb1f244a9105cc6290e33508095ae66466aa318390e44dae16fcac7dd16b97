@@ -1,0 +1,5 @@
+  @rq-5318db55
+  Scenario: Reject infinite tilt
+    When SimulationBox::new(10.0, 8.0, 6.0, 0.0, f32::INFINITY, 0.0) is called
+    Then it returns Err(SimulationBoxError::NonFiniteLatticeValue { name: "xz", value: f32::INFINITY })
+

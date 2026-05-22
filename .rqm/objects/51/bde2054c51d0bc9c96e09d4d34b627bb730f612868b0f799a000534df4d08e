@@ -1,0 +1,9 @@
+  @rq-7a076bc9
+  Scenario: Builder validate_params rejects an unknown field
+    Given the "velocity-verlet" builder
+    And params = { lossless: false, junk: true }
+    When builder.validate_params(&params) is called
+    Then it returns Err(ConfigError::Parse { .. })
+
+  # --- RNG-using slot state ---
+

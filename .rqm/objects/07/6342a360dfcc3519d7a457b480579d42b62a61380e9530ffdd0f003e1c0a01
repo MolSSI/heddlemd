@@ -1,0 +1,6 @@
+    // rq-9b1c84c3
+    pub fn wrap_position(&self, position: [f32; 3]) -> [f32; 3] {
+        let (wrapped, _image) = self.wrap_with_image_count(position);
+        wrapped
+    }
+

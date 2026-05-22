@@ -1,0 +1,6 @@
+  @rq-d4d435c8
+  Scenario: integrator.execute receiving ForceEval surfaces UnexpectedSubStep
+    Given any concrete integrator
+    When execute(&SubStep::ForceEval { class: None }, ...) is called directly (bypassing the runner)
+    Then it returns Err(IntegratorError::UnexpectedSubStep { variant: "ForceEval" })
+

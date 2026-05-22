@@ -1,0 +1,30 @@
+// rq-750b828f
+#[derive(Debug)]
+pub struct CsvrBuilder;
+
+impl ThermostatBuilder for CsvrBuilder {
+    fn kind_name(&self) -> &'static str {
+        "csvr"
+    }
+
+    fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
+        let p = deserialize_params(params)?;
+        require_finite_positive("thermostat.temperature", p.temperature)?;
+        require_finite_positive("thermostat.tau", p.tau)?;
+        Ok(())
+    }
+
+    fn build(
+        &self,
+        gpu: &GpuContext,
+        particle_count: usize,
+        n_constraints: usize,
+        params: &toml::Value,
+    ) -> Result<Box<dyn Thermostat>, ThermostatError> {
+        let p = deserialize_params(params)
+            .map_err(|_| ThermostatError::UnknownKind("csvr (malformed params)".into()))?;
+        let state =
+            CsvrThermostat::new(gpu, particle_count, n_constraints, p.temperature, p.tau, p.seed)?;
+        Ok(Box::new(state))
+    }
+}

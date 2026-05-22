@@ -1,0 +1,7 @@
+  @rq-b9a4e3de
+  Scenario: Non-finite check precedes non-positive check on a diagonal
+    When SimulationBox::new(f32::NAN, 8.0, 6.0, 0.0, 0.0, 0.0) is called
+    Then it returns Err(SimulationBoxError::NonFiniteLatticeValue { name: "lx", value: v }) where v is NaN
+
+  # --- minimum_image: orthorhombic special case ---
+

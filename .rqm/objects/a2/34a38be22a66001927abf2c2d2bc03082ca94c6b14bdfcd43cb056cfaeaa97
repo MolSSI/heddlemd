@@ -1,0 +1,7 @@
+### Registration <!-- rq-7da27d04 -->
+
+`AnalysisRegistry::with_builtins()` registers exactly one builder
+in v1: `RdfBuilder`. Custom builders compose via
+`Registries::register_analysis` as described in
+`rqm/analysis/framework.md`'s *Feature API*.
+

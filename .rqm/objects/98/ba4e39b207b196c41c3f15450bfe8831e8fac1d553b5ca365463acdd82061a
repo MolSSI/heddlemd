@@ -1,0 +1,22 @@
+// rq-11b0deff
+#[test]
+fn csvr_cumulative_injection_tracks_kinetic_energy_changes() {
+    let gpu = init_device().unwrap();
+    let n = 8usize;
+    let state = atomic_state(n);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut therm = unbox_csvr(build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 1)));
+    let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
+    let k_before = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
+    therm
+        .apply_post(&mut buffers, 1.0e-15, &mut timings)
+        .unwrap();
+    let k_after = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
+    let expected = k_after - k_before;
+    let rel = (therm.cumulative_injection - expected).abs() / expected.abs().max(1.0e-30);
+    assert!(rel < 1.0e-4);
+}
+
+// --- End-to-end determinism + COM preservation ---
+

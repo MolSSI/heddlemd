@@ -1,0 +1,11 @@
+  @rq-5257ec08
+  Scenario: Plan with mixed-class ForceEval sub-steps dispatches step and step_class
+    Given a stub integrator whose plan(dt) returns
+      [ForceEval { class: None },
+       ForceEval { class: Some(ForceClass::Fast) },
+       ForceEval { class: Some(ForceClass::Slow) }]
+    When the runner executes one timestep with this integrator
+    Then force_field.step(...) is invoked exactly once
+    And force_field.step_class(ForceClass::Fast, ...) is invoked exactly once
+    And force_field.step_class(ForceClass::Slow, ...) is invoked exactly once
+

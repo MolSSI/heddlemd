@@ -1,0 +1,25 @@
+// rq-dc95802b
+#[test]
+fn csvr_two_thermostats_at_same_counter_produce_identical_velocities() {
+    let gpu = init_device().unwrap();
+    let n = 4usize;
+    let state = atomic_state(n);
+    let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings_a = Timings::new(&gpu).unwrap();
+    let mut timings_b = Timings::new(&gpu).unwrap();
+    let mut therm_a = build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 7));
+    let mut therm_b = build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 7));
+    therm_a
+        .apply_post(&mut buffers_a, 1.0e-15, &mut timings_a)
+        .unwrap();
+    therm_b
+        .apply_post(&mut buffers_b, 1.0e-15, &mut timings_b)
+        .unwrap();
+    let va = gpu.device.dtoh_sync_copy(&buffers_a.velocities_x).unwrap();
+    let vb = gpu.device.dtoh_sync_copy(&buffers_b.velocities_x).unwrap();
+    assert_eq!(va, vb);
+}
+
+// --- Log columns ---
+

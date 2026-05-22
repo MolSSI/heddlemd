@@ -1,0 +1,19 @@
+// rq-c505f34b
+#[test]
+fn reject_same_type_single_particle() {
+    let dir = tmp_path("single_particle");
+    std::fs::write(dir.join("sim.in.toml"), sim_toml_with_types(&["Ar"], 4.0e-9)).unwrap();
+    write_init(&dir, &["Ar"]);
+    write_trajectory(&dir, &[vec![("Ar", 0.0, 0.0, 0.0)]]);
+    let path = write_analysis(&dir, &rdf_body("x", ["Ar", "Ar"], 1.0e-9, 8));
+    match run_analyses(&path).unwrap_err() {
+        AnalyzeError::Analysis { error, .. } => {
+            let s = format!("{error}");
+            assert!(s.contains("N_A"), "got {s}");
+        }
+        other => panic!("expected Analysis error, got {other:?}"),
+    }
+}
+
+// --- Algorithm and output ---
+

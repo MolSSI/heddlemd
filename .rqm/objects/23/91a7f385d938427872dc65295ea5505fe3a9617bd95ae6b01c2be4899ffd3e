@@ -1,0 +1,7 @@
+  @rq-4dd5d2d0
+  Scenario: LangevinBaoab builder owns its thermostat but not its barostat
+    Given the "langevin-baoab" builder from IntegratorRegistry::with_builtins()
+    And params = { friction: 1.0e12, temperature: 300.0, seed: 0 }
+    Then builder.owns_thermostat(&params) returns true
+    And builder.owns_barostat(&params) returns false
+

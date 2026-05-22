@@ -1,0 +1,8 @@
+  @rq-1b0504e7
+  Scenario: Two independent runs of the same composed configuration are byte-identical
+    Given two runners constructed from identical
+      (SlotConfig integrator, Option<SlotConfig> thermostat, Option<SlotConfig> barostat) tuples
+    And two ParticleBuffers built from byte-identical ParticleStates
+    When each runs N=10 timesteps with the same dt
+    Then the two final ParticleStates agree byte-for-byte
+```

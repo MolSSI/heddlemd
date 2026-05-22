@@ -1,0 +1,21 @@
+use dynamics::pbc::{SimulationBox, SimulationBoxError};
+
+fn default_box() -> SimulationBox {
+    SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect("default box")
+}
+
+// --- Construction: orthorhombic ---
+
+#[test] // rq-27ffd3f4
+fn construct_orthorhombic_box() {
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect("ok");
+    assert_eq!(b.lattice(), [10.0_f32, 8.0, 6.0, 0.0, 0.0, 0.0]);
+    assert_eq!(b.lx(), 10.0);
+    assert_eq!(b.ly(), 8.0);
+    assert_eq!(b.lz(), 6.0);
+    assert_eq!(b.xy(), 0.0);
+    assert_eq!(b.xz(), 0.0);
+    assert_eq!(b.yz(), 0.0);
+    assert_eq!(b.generation(), 0);
+}
+

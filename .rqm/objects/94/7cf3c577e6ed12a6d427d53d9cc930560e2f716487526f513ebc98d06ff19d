@@ -1,0 +1,17 @@
+// rq-5f1d5034
+#[test]
+fn reject_n_bins_zero() {
+    let dir = tmp_path("n_bins_zero");
+    std::fs::write(dir.join("sim.in.toml"), sim_toml_with_types(&["Ar"], 4.0e-9)).unwrap();
+    write_init(&dir, &["Ar", "Ar"]);
+    write_trajectory(
+        &dir,
+        &[vec![("Ar", -2.5e-10, 0.0, 0.0), ("Ar", 2.5e-10, 0.0, 0.0)]],
+    );
+    let path = write_analysis(&dir, &rdf_body("x", ["Ar", "Ar"], 1.0e-9, 0));
+    match run_analyses(&path).unwrap_err() {
+        AnalyzeError::InvalidValue { field, .. } => assert!(field.ends_with("n_bins")),
+        other => panic!("expected InvalidValue, got {other:?}"),
+    }
+}
+

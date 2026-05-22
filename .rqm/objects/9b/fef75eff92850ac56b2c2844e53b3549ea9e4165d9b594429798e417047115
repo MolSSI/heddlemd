@@ -1,0 +1,92 @@
+## Per-Step Interface <!-- rq-daadfc1a -->
+
+An integrator describes its work as an ordered sequence of typed
+*sub-steps* (a `StepPlan`) and exposes a method that executes one
+sub-step at a time. The runner walks the plan, dispatching each
+sub-step to either `integrator.execute(...)` or `force_field.step(...)`
+depending on the sub-step's variant, and inserts the constraint slot's
+hooks at the canonical sub-step boundaries (see `constraint-framework.md`
+for the hook contract). Integrators never reference the constraint
+slot directly.
+
+The runner drives the timestep loop in a fixed pattern:
+
+```text
+loop step in 1..=n_steps:
+    if let Some(t) = thermostat { t.apply_pre(buffers, dt, timings) }
+    let plan = integrator.plan(dt)
+    let install_hooks = constraint.is_some()
+        && integrator_builder.supports_constraints(&integrator_slot.params)
+    for (i, sub) in plan.steps.iter().enumerate():
+        let is_drift = matches!(sub, SubStep::Drift{..} | SubStep::KickDrift{..})
+        if install_hooks && is_drift {
+            constraint.apply_before_drift(buffers, sim_box, dt, timings)
+        }
+        match sub:
+            SubStep::ForceEval { class: None } =>
+                force_field.step(buffers, sim_box, timings)
+            SubStep::ForceEval { class: Some(c) } =>
+                force_field.step_class(c, buffers, sim_box, timings)
+            other =>
+                integrator.execute(other, buffers, sim_box, timings)
+        if install_hooks && is_drift {
+            constraint.apply_after_drift(buffers, sim_box, dt, timings)
+        }
+    let last_is_kick = matches!(
+        plan.steps.last(),
+        Some(SubStep::KickHalf{..} | SubStep::KickDrift{..}))
+    if install_hooks && last_is_kick {
+        constraint.apply_after_kick(buffers, sim_box, dt, timings)
+    }
+    if let Some(t) = thermostat { t.apply_post(buffers, dt, timings) }
+    if let Some(b) = barostat   { b.apply(buffers, sim_box, dt, timings) }
+    ...trajectory / log output...
+```
+
+The runner calls `integrator.plan(dt)` once per timestep. `plan(dt)` is
+a pure function of `dt` and the integrator's static configuration; it
+returns the same `StepPlan` shape every call with the same `dt` (no
+per-step branching on simulation state). Plans may contain zero or
+more sub-steps; an empty plan is a no-op for that timestep.
+
+`integrator.execute(sub, buffers, sim_box, timings)` runs one sub-step.
+It receives no `&mut ForceField` because force evaluation is dispatched
+by the runner, not the integrator. The integrator's per-sub-step
+kernel launches bracket their own timings stages.
+
+When `constraint` is `None`, when the integrator's builder's
+`supports_constraints(&params)` returns `false`, or when the plan
+has no Drift / KickDrift sub-steps, no constraint hooks fire and the
+loop reduces to a straight plan walk. The integrator code never
+mentions the constraint slot.
+
+The runner's `step` value is local to the timestep loop; it gates
+trajectory and log writes via `step % trajectory_every == 0` and
+`step % log_every == 0`, and is not visible to any slot. Slots that
+need a monotone counter (for example a stochastic thermostat that
+needs reproducible RNG draws) maintain their own counter on their
+state and increment it on every invocation.
+
+`thermostat.apply_pre()` and `thermostat.apply_post()` mutate
+velocities (and read kinetic energy). They never touch positions, box,
+or forces. Thermostats that only need post-step coupling leave
+`apply_pre` at its default empty implementation.
+
+`barostat.apply()` mutates positions and the simulation box, reading
+virial / kinetic data from `buffers`. The integrator has already
+populated `buffers.virials` and `buffers.forces_*` during its
+in-step force evaluation; the barostat consumes those without
+re-launching the force pipeline. The mutated box is observed by the
+next iteration's plan walk through the existing
+`SimulationBox::generation()` change-detection path
+(`forces/neighbor-list.md`, `forces/spme.md`).
+
+The runner performs one warm-up `force_field.step(...)` call before
+entering the timestep loop so the first iteration's plan walk reads
+valid `forces_*` and `virials`. Integrators that follow the
+symplectic-with-cached-F contract place a `KickHalf` or `KickDrift`
+sub-step before the `ForceEval` so they consume `F(t)`, and place
+their final velocity update (a `KickHalf` or `KickDrift`) after the
+`ForceEval` so it consumes `F(t+dt)`. Every integrator in the
+default registry follows this contract.
+

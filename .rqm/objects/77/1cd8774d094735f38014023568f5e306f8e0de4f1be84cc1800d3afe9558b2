@@ -1,0 +1,9 @@
+  @rq-f70f7c1e
+  Scenario: Equilibrium kinetic energy approaches (N_f / 2) k_B T
+    Given a composed runner of velocity-Verlet + CSVR with N=512 LJ particles,
+      temperature=300, tau=1e-13, dt=1e-15, n_steps=5000, seed=1
+    When the run completes
+    Then the time-averaged kinetic energy over the last 1000 log rows is
+      within 5% of (N_f / 2) · k_B · 300
+    And the time-averaged temperature is within 5% of 300 K
+

@@ -1,0 +1,6 @@
+  @rq-94a67d95
+  Scenario: plan(dt) returns the same StepPlan shape across repeated calls
+    Given a velocity-Verlet integrator
+    When integrator.plan(dt=0.1) is called twice
+    Then both calls return StepPlans with identical variant + label sequences
+

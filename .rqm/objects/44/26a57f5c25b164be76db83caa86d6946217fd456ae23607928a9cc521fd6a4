@@ -1,0 +1,5 @@
+  @rq-9b1f8a7c
+  Scenario: Reject negative diagonal
+    When SimulationBox::new(-1.0, 8.0, 6.0, 0.0, 0.0, 0.0) is called
+    Then it returns Err(SimulationBoxError::NonPositiveDiagonal { name: "lx", value: -1.0 })
+

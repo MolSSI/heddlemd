@@ -1,0 +1,9 @@
+#[test] // rq-a1fc0841
+fn wrap_position_and_minimum_image_agree() {
+    let b = default_box();
+    let v = [17.0_f32, -13.0, 9.5];
+    assert_eq!(b.minimum_image(v), b.wrap_position(v));
+}
+
+// --- wrap_position_with_image_count ---
+

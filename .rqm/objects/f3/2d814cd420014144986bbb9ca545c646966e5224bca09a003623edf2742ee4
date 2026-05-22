@@ -1,0 +1,45 @@
+// rq-11a953dc
+#[test]
+fn host_philox_matches_device_philox() {
+    let gpu = init_device().unwrap();
+    let n = 1usize;
+    let mass: f32 = 1.0;
+    let kt: f32 = 1.0;
+    let seed: u64 = 0x1234_5678_9ABC_DEF0;
+    let draw: u64 = 7;
+    let state = ParticleState::new(
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![mass; n],
+        vec![0.0_f32; n],
+        vec![0u32; n],
+        None,
+        None,
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    lan_ou_step(&mut buffers, seed, draw, 0.0_f32, kt).unwrap();
+    let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    let vy = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
+    let vz = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
+
+    let seed_lo = seed as u32;
+    let seed_hi = (seed >> 32) as u32;
+    let draw_lo = draw as u32;
+    let draw_hi = (draw >> 32) as u32;
+    let host_xi = |axis: u32| -> f32 {
+        philox_normal(seed_lo, seed_hi, draw_lo, draw_hi, 0, axis) as f32
+    };
+    let sigma = (kt / mass).sqrt();
+    let expected_vx = sigma * host_xi(0);
+    let expected_vy = sigma * host_xi(1);
+    let expected_vz = sigma * host_xi(2);
+    assert_eq!(vx[0].to_bits(), expected_vx.to_bits());
+    assert_eq!(vy[0].to_bits(), expected_vy.to_bits());
+    assert_eq!(vz[0].to_bits(), expected_vz.to_bits());
+}
+

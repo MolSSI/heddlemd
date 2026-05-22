@@ -1,0 +1,26 @@
+// rq-1f87880c
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CsvrParams {
+    pub temperature: f64,
+    pub tau: f64,
+    pub seed: u64,
+}
+
+fn deserialize_params(params: &toml::Value) -> Result<CsvrParams, ConfigError> {
+    params
+        .clone()
+        .try_into::<CsvrParams>()
+        .map_err(|e| crate::io::config::translate_params_error("thermostat", e))
+}
+
+fn require_finite_positive(field: &str, value: f64) -> Result<(), ConfigError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(ConfigError::InvalidValue {
+            field: field.to_string(),
+            reason: format!("value must be finite and strictly positive, got {value}"),
+        });
+    }
+    Ok(())
+}
+

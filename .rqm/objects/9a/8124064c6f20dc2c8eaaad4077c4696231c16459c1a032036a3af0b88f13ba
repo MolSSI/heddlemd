@@ -1,0 +1,6 @@
+  @rq-084ba25b
+  Scenario: Builder validate_params accepts a well-formed params object
+    Given the "velocity-verlet" builder
+    When builder.validate_params(&{ lossless: false }) is called
+    Then it returns Ok(())
+

@@ -1,0 +1,17 @@
+### Box-Muller transform <!-- rq-d4b9d831 -->
+
+Each Philox call returns four `u32` values; CSVR uses the first two
+to produce one standard normal via Box-Muller, matching Langevin's
+convention exactly:
+
+```text
+u1 = (output[0] as f64 + 0.5) * 2^-32       # uniform in (0, 1)
+u2 = (output[1] as f64 + 0.5) * 2^-32       # uniform in (0, 1)
+ξ  = sqrt(-2 ln u1) * cos(2 π u2)            # standard normal (f64)
+```
+
+The second Box-Muller output (`sin` half) is discarded; `output[2]`
+and `output[3]` are unused. The draw is computed in `f64` and used in
+`f64` chain math, then converted to `f32` only for the final
+`α` argument passed to `rescale_velocities`.
+

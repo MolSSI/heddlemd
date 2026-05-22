@@ -1,0 +1,20 @@
+// rq-ba2f07bd
+#[test]
+fn reject_between_undeclared_type() {
+    let dir = tmp_path("undeclared_type");
+    std::fs::write(dir.join("sim.in.toml"), sim_toml_with_types(&["Ar"], 4.0e-9)).unwrap();
+    write_init(&dir, &["Ar", "Ar"]);
+    write_trajectory(
+        &dir,
+        &[vec![("Ar", -2.5e-10, 0.0, 0.0), ("Ar", 2.5e-10, 0.0, 0.0)]],
+    );
+    let path = write_analysis(&dir, &rdf_body("x", ["Ar", "Kr"], 1.0e-9, 8));
+    match run_analyses(&path).unwrap_err() {
+        AnalyzeError::Analysis { error, .. } => {
+            let s = format!("{error}");
+            assert!(s.contains("Kr"));
+        }
+        other => panic!("expected Analysis error, got {other:?}"),
+    }
+}
+

@@ -1,0 +1,6 @@
+  @rq-ba2f07bd
+  Scenario: Reject `between` referencing an undeclared type
+    Given a one-type config declaring only "Ar" and an RDF with between=["Ar","Kr"]
+    When RdfBuilder::build is called
+    Then it returns Err(AnalysisRuntimeError::InvalidValue { field: "between", .. })
+

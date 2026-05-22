@@ -1,0 +1,10 @@
+  @rq-6dffb17f
+  Scenario: Empty thermostat registry reports UnknownKind
+    Given an empty ThermostatRegistry (no builders registered)
+    And a SlotConfig { kind: "berendsen", params:
+      { temperature: 300.0, tau: 1.0e-13 } }
+    When registry.build_optional(Some(&slot), &gpu, particle_count=4) is called
+    Then it returns Err(ThermostatError::UnknownKind("berendsen"))
+
+  # --- Barostat construction ---
+

@@ -1,0 +1,13 @@
+// rq-a2454a72
+#[test]
+fn csvr_apply_post_empty_state_is_noop() {
+    let gpu = init_device().unwrap();
+    let state = atomic_state(0);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut therm = build_csvr(&gpu, 0, &csvr_kind(300.0, 1.0e-13, 1));
+    therm
+        .apply_post(&mut buffers, 1.0e-15, &mut timings)
+        .unwrap();
+}
+

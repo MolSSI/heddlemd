@@ -1,0 +1,22 @@
+// rq-8cec425d
+#[test]
+fn cross_type_two_particles() {
+    let dir = tmp_path("ar_kr");
+    std::fs::write(
+        dir.join("sim.in.toml"),
+        sim_toml_with_types(&["Ar", "Kr"], 4.0e-9),
+    )
+    .unwrap();
+    write_init(&dir, &["Ar", "Kr"]);
+    write_trajectory(
+        &dir,
+        &[vec![("Ar", -1.5e-10, 0.0, 0.0), ("Kr", 1.5e-10, 0.0, 0.0)]],
+    );
+    let path = write_analysis(&dir, &rdf_body("x", ["Ar", "Kr"], 1.0e-9, 10));
+    run_analyses(&path).unwrap();
+    let rows = read_csv(&dir.join("sim.out.x.csv"));
+    let nonzero: Vec<_> = rows.iter().enumerate().filter(|(_, (_, _, c))| *c > 0).collect();
+    assert_eq!(nonzero.len(), 1, "expected exactly one non-zero bin");
+    assert_eq!(nonzero[0].1.2, 1);
+}
+

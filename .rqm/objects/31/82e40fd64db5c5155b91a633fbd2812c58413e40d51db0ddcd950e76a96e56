@@ -1,0 +1,9 @@
+// rq-2c1bb918
+#[test]
+fn csvr_log_column_names_returns_csvr_conserved() {
+    let gpu = init_device().unwrap();
+    let kind = csvr_kind(300.0, 1.0e-13, 1);
+    let therm = build_csvr(&gpu, 4, &kind);
+    assert_eq!(therm.log_column_names(), &["csvr_conserved"]);
+}
+

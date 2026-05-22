@@ -1,0 +1,39 @@
+### Types <!-- rq-1c26a108 -->
+
+- `CsvrThermostat` — implements the `Thermostat` trait declared in <!-- rq-47d91c7d -->
+  `framework.md`. Registered in `ThermostatRegistry::with_builtins`
+  under `kind_name() == "csvr"`. Fields:
+
+  - `temperature: f64`
+  - `tau: f64`
+  - `seed: u64`
+  - `draw_counter: u64` — Philox counter advance for the CSVR draws.
+    Initialised to `0` by the builder; pre-incremented on every
+    `apply_post` call.
+  - `g_dof: u32` — `max(1, 3 · particle_count − n_constraints − 3)`,
+    computed at construction from the `n_constraints` parameter passed
+    by the runner.
+  - `kt_target: f64` — `BOLTZMANN_J_PER_K · temperature`.
+  - `cumulative_injection: f64` — running sum of `K_new − K_old` over
+    every completed `apply_post` call. Initialised to `0.0`. Used by
+    `log_column_values`.
+  - `ke_scratch: CudaSlice<f32>` — length-1 device buffer for the
+    kinetic-energy reduction; reused across calls.
+  - `most_recent_ke: f64` — last kinetic energy computed during the
+    current `apply_post`. Available to `log_column_values` to avoid a
+    redundant download.
+  - `particle_count: usize`
+
+  All fields private; the slot's public surface is the `Thermostat`
+  trait methods (see `framework.md`) and the construction via
+  `CsvrBuilder`. The `draw_counter` and `cumulative_injection`
+  fields are public for parity with other slots' state so a future
+  restart-from-checkpoint flow can restore them explicitly.
+
+- `CsvrBuilder` — implements `ThermostatBuilder` with <!-- rq-750b828f -->
+  `kind_name() == "csvr"`. `build(gpu, particle_count, n_constraints,
+  params)` deserialises `CsvrParams` from `params`, computes
+  `g_dof = max(1, 3 · particle_count − n_constraints − 3)`, allocates
+  the length-1 `ke_scratch` device buffer, and returns the boxed
+  `CsvrThermostat`.
+

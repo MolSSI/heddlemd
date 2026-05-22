@@ -1,0 +1,23 @@
+// rq-8b41bc4d
+#[test]
+fn two_analyze_runs_produce_byte_identical_csv() {
+    let dir = tmp_path("repro");
+    std::fs::write(dir.join("sim.in.toml"), sim_toml_with_types(&["Ar"], 4.0e-9)).unwrap();
+    write_init(&dir, &["Ar", "Ar", "Ar", "Ar"]);
+    write_trajectory(
+        &dir,
+        &[vec![
+            ("Ar", -1.5e-10, 0.0, 0.0),
+            ("Ar", 0.0, 0.0, 0.0),
+            ("Ar", 1.5e-10, 0.0, 0.0),
+            ("Ar", 0.0, 1.5e-10, 0.0),
+        ]],
+    );
+    let path = write_analysis(&dir, &rdf_body("x", ["Ar", "Ar"], 1.0e-9, 32));
+    run_analyses(&path).unwrap();
+    let a = std::fs::read(dir.join("sim.out.x.csv")).unwrap();
+    std::fs::remove_file(dir.join("sim.out.x.csv")).unwrap();
+    run_analyses(&path).unwrap();
+    let b = std::fs::read(dir.join("sim.out.x.csv")).unwrap();
+    assert_eq!(a, b);
+}

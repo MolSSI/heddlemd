@@ -1,0 +1,8 @@
+  @rq-7d4c470a
+  Scenario: Construct velocity-Verlet (lossless) via the integrator registry
+    Given an IntegratorRegistry::with_builtins()
+    And a SlotConfig { kind: "velocity-verlet", params: { lossless: true } }
+    When registry.build(&slot, &gpu, particle_count=4, n_constraints=0) is called
+    Then it returns Ok(integrator)
+    And the underlying integrator allocates LosslessBuffers with particle_count == 4
+

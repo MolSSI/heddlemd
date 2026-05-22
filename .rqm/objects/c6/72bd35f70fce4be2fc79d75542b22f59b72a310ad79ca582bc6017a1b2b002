@@ -1,0 +1,149 @@
+// Integration tests for the RDF analysis kind.
+//
+// Feature: Radial Distribution Function Analysis (`rdf`) <!-- rq-4d1082c4 -->
+//
+// These tests construct trajectories by hand and run `dynamics analyze`
+// (or the library API directly), then inspect the resulting CSV to
+// verify pair-enumeration correctness, bin placement, normalisation,
+// reproducibility, and the empty/degenerate-case behaviour spelled out
+// in rqm/analysis/rdf.md.
+
+use std::path::{Path, PathBuf};
+
+use dynamics::analysis::{AnalyzeError, run_analyses};
+
+fn tmp_path(name: &str) -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let mut p = std::env::temp_dir();
+    p.push(format!(
+        "dynamics-rdf-{}-{}-{}",
+        std::process::id(),
+        name,
+        nanos
+    ));
+    std::fs::create_dir_all(&p).unwrap();
+    p
+}
+
+fn sim_toml_with_types(types: &[&str], box_edge_m: f64) -> String {
+    let mut s = String::from(
+        r#"schema_version = 1
+init = "sim.in.xyz"
+
+[simulation]
+seed = 1
+temperature = 0.0
+
+[[phase]]
+name = "run"
+n_steps = 0
+dt = 1.0e-15
+
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+"#,
+    );
+    for t in types {
+        s.push_str(&format!(
+            "[[particle_types]]\nname = \"{t}\"\nmass = 6.6335e-26\n\n"
+        ));
+    }
+    // Cover every unordered type pair with a tiny LJ entry.
+    for i in 0..types.len() {
+        for j in i..types.len() {
+            s.push_str(&format!(
+                "[[pair_interactions]]\nbetween = [\"{}\", \"{}\"]\npotential = \"lennard-jones\"\nsigma = 1.0e-10\nepsilon = 1.0e-25\ncutoff = 1.0e-10\nr_switch = 1.0e-10\n\n",
+                types[i], types[j],
+            ));
+        }
+    }
+    s.push_str(&format!(
+        "[neighbor_list]\nmode = \"all-pairs\"\n\n[output]\ntrajectory_every = 1\nlog_every = 0\n"
+    ));
+    // We don't actually run the simulation, so the box-vs-cutoff check
+    // doesn't matter here; the box is determined by the trajectory.
+    let _ = box_edge_m;
+    s
+}
+
+fn write_init(dir: &Path, types_per_atom: &[&str]) {
+    let mut body = format!(
+        "{n}\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3\n",
+        n = types_per_atom.len()
+    );
+    for t in types_per_atom {
+        body.push_str(&format!("{t} 0.0 0.0 0.0\n"));
+    }
+    std::fs::write(dir.join("sim.in.xyz"), body).unwrap();
+}
+
+/// Write a trajectory with one or more frames. Each frame lists the
+/// particles in declaration order; `positions` is per-frame
+/// `(species, x, y, z)`.
+fn write_trajectory(
+    dir: &Path,
+    frames: &[Vec<(&str, f64, f64, f64)>],
+) {
+    let mut body = String::new();
+    for (i, frame) in frames.iter().enumerate() {
+        body.push_str(&format!(
+            "{n}\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3 Step={i} Time={t:.9e}\n",
+            n = frame.len(),
+            t = i as f64,
+        ));
+        for (sp, x, y, z) in frame {
+            body.push_str(&format!("{sp} {x:.9e} {y:.9e} {z:.9e}\n"));
+        }
+    }
+    std::fs::write(dir.join("sim.out.run.xyz"), body).unwrap();
+}
+
+fn write_analysis(dir: &Path, body: &str) -> PathBuf {
+    let p = dir.join("sim.in.analysis");
+    std::fs::write(&p, body).unwrap();
+    p
+}
+
+fn read_csv(path: &Path) -> Vec<(f64, f64, u64)> {
+    let s = std::fs::read_to_string(path).unwrap();
+    let mut out = Vec::new();
+    for (i, line) in s.lines().enumerate() {
+        if i == 0 {
+            assert_eq!(line, "r,g_r,count", "csv header malformed");
+            continue;
+        }
+        let parts: Vec<&str> = line.split(',').collect();
+        assert_eq!(parts.len(), 3, "row {i} has {} cols", parts.len());
+        out.push((
+            parts[0].parse().unwrap(),
+            parts[1].parse().unwrap(),
+            parts[2].parse().unwrap(),
+        ));
+    }
+    out
+}
+
+fn rdf_body(name: &str, between: [&str; 2], r_max: f64, n_bins: u64) -> String {
+    format!(
+        r#"schema_version = 1
+
+[[analyses]]
+name = "{name}"
+kind = "rdf"
+between = ["{a}", "{b}"]
+r_max = {r_max:e}
+n_bins = {n_bins}
+"#,
+        a = between[0],
+        b = between[1],
+    )
+}
+
+// --- Parameter validation ---
+

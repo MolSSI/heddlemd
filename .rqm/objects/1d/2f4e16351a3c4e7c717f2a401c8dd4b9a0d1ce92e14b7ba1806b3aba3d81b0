@@ -1,0 +1,7 @@
+  @rq-941c4000
+  Scenario: wrap_position is idempotent
+    Given position = [123.45, -67.89, 42.0]
+    When wrapped_once = box.wrap_position(position)
+    And wrapped_twice = box.wrap_position(wrapped_once)
+    Then wrapped_twice equals wrapped_once
+

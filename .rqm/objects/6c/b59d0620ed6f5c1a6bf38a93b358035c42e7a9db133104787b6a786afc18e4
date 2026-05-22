@@ -1,0 +1,7 @@
+  @rq-cb52dec0
+  Scenario: Builder validate_params rejects an out-of-domain field
+    Given the "langevin-baoab" builder
+    And params = { friction: -1.0, temperature: 300.0, seed: 1 }
+    When builder.validate_params(&params) is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.friction", .. })
+

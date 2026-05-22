@@ -1,0 +1,6 @@
+  @rq-cfd1d536
+  Scenario: Reject an entry missing `between`
+    Given an RDF [[analyses]] entry omitting `between`
+    When validate_params is called
+    Then it returns Err(AnalyzeError::MissingField { field: "between" })
+

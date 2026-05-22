@@ -1,0 +1,8 @@
+  @rq-e2cbe4fd
+  Scenario: Lint reports `r_max` greater than half-box under the analyses stage
+    Given an RDF entry with r_max greater than half the trajectory box's min perpendicular width
+    When dynamics is invoked with arguments ["lint", "tmp/argon.in.analysis"]
+    Then it exits with code 1
+    And stdout has an "analyses" stage line beginning with "FAIL —"
+    And stderr contains "r_max"
+```

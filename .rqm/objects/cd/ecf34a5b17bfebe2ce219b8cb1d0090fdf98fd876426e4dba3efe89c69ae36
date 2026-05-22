@@ -1,0 +1,6 @@
+#[test] // rq-7a1c24be
+fn construct_triclinic_box_with_non_zero_tilts() {
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.5, -2.0, 0.5).expect("ok");
+    assert_eq!(b.lattice(), [10.0_f32, 8.0, 6.0, 1.5, -2.0, 0.5]);
+}
+

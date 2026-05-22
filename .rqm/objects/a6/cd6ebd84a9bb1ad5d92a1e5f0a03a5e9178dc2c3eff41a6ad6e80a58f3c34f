@@ -1,0 +1,7 @@
+  @rq-5711d6ce
+  Scenario: Empty integrator registry reports UnknownKind
+    Given an empty IntegratorRegistry (no builders registered)
+    And a SlotConfig { kind: "velocity-verlet", params: { lossless: false } }
+    When registry.build(&slot, &gpu, particle_count=4, n_constraints=0) is called
+    Then it returns Err(IntegratorError::UnknownKind("velocity-verlet"))
+

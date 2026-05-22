@@ -1,0 +1,10 @@
+#[test] // rq-650875cc
+fn tilts_may_exceed_the_corresponding_diagonals() {
+    // No reduced-tilt enforcement; geometric infeasibility is the
+    // neighbor list's problem (caught via min_perpendicular_width).
+    let b = SimulationBox::new(2.0, 3.0, 4.0, 50.0, 50.0, 50.0).expect("ok");
+    assert_eq!(b.xy(), 50.0);
+}
+
+// --- Construction: rejection ---
+

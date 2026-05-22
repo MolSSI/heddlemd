@@ -1,0 +1,8 @@
+  @rq-0b5e6b6c
+  Scenario: `between` order does not matter
+    Given two RDF entries with between=["Ar","Kr"] and between=["Kr","Ar"] respectively
+    When both analyses run against the same trajectory
+    Then the two output CSVs are byte-identical (modulo the differing `name`-derived filename)
+
+  # --- Algorithm and output ---
+

@@ -1,0 +1,44 @@
+## Compatibility Rules <!-- rq-9913daee -->
+
+The compatibility predicates an integrator answers — `owns_thermostat`,
+`owns_barostat`, `supports_constraints` — live on the
+`IntegratorBuilder` trait and take the integrator's parsed
+`toml::Value` parameters as input. The runner consults the registered
+builder (looked up by `kind` name) and asks the predicate after
+parsing the config and before constructing any GPU state.
+
+- An integrator whose
+  `IntegratorBuilder::owns_thermostat(&params)` returns `true` is
+  incompatible with any configured `[thermostat]`. `load_config` (with
+  registry access via `Config::validate_against`, see
+  `io/config-schema.md`) returns
+  `ConfigError::IncompatibleThermostat { integrator: <kind name> }`
+  when the user configures both. `langevin-baoab` and `mtk-npt` are
+  the integrators in the default registry that own their thermostat.
+- An integrator whose
+  `IntegratorBuilder::owns_barostat(&params)` returns `true` is
+  incompatible with any configured `[barostat]`.
+  `ConfigError::IncompatibleBarostat { integrator: <kind name> }`
+  fires for the same reason. `mtk-npt` is the only integrator in the
+  default registry that owns its barostat.
+- An integrator whose
+  `IntegratorBuilder::supports_constraints(&params)` returns `false`
+  is incompatible with a non-empty topology `[constraints]` section
+  (see `constraint-framework.md`).
+- The thermostat slot is optional. When `[thermostat]` is omitted,
+  the runner holds `None` and skips both `apply_pre` and `apply_post`
+  hooks. This is how the user expresses NVE composition (or a
+  self-thermostatted integrator standing alone).
+- The barostat slot is optional. When `[barostat]` is omitted, the
+  runner holds `None` and skips the `apply` hook. This is how the
+  user expresses constant-volume composition.
+- The `[thermostat]` and `[barostat]` slots accept at most one entry
+  each per run. Composing multiple simultaneous thermostats or
+  multiple simultaneous barostats is out of scope.
+
+The predicates may depend on the slot's parsed `params`. For example,
+`velocity-verlet`'s `supports_constraints` returns `true` when
+`params.lossless == false` and `false` when `params.lossless == true`.
+The builder is the single authority on these predicates because it is
+the only component that understands its own parameter shape.
+

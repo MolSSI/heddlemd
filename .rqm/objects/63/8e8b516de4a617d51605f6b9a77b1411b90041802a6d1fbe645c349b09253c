@@ -1,0 +1,7 @@
+  @rq-40dd09ae
+  Scenario: Reject `between` referencing a type with zero particles
+    Given a config declaring "Ar" and "Kr" but a trajectory containing only Ar atoms
+    And an RDF entry with between=["Kr","Kr"]
+    When RdfBuilder::build is called
+    Then it returns Err(AnalysisRuntimeError::InvalidValue { field: "between", .. })
+

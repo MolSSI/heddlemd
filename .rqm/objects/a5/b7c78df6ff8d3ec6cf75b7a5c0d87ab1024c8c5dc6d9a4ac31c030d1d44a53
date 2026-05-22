@@ -1,0 +1,7 @@
+  @rq-e9be025b
+  Scenario: VelocityVerlet builder does not own its thermostat or its barostat
+    Given the "velocity-verlet" builder from IntegratorRegistry::with_builtins()
+    And params = { lossless: false }
+    Then builder.owns_thermostat(&params) returns false
+    And builder.owns_barostat(&params) returns false
+

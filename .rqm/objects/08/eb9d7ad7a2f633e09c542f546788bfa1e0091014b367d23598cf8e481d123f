@@ -1,0 +1,8 @@
+  @rq-384ed838
+  Scenario: Empty plan walks as a no-op
+    Given a stub integrator whose plan(dt) returns StepPlan { steps: vec![] }
+    When the runner executes one timestep with this integrator
+    Then no execute(...) call is made
+    And no force_field.step(...) call is made
+    And no kernel launches are recorded
+

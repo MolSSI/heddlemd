@@ -1,0 +1,11 @@
+  @rq-d1f1b53e
+  Scenario: apply_pre is the trait default (no-op)
+    Given a CSVR thermostat with particle_count=4
+    And a snapshot of buffers.velocities before the call
+    When thermostat.apply_pre(&mut buffers, dt=1e-15, &mut timings) is called
+    Then it returns Ok(())
+    And velocities are bit-identical to the snapshot
+    And no kernel launches are recorded for that call
+
+  # --- draw_counter advances per invocation ---
+

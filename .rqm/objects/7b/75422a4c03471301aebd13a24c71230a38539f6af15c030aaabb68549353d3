@@ -1,0 +1,6 @@
+    // rq-d49c9093
+    pub fn minimum_image(&self, displacement: [f32; 3]) -> [f32; 3] {
+        let (wrapped, _image) = self.wrap_with_image_count(displacement);
+        wrapped
+    }
+

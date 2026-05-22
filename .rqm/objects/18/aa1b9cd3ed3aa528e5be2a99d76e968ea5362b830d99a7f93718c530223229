@@ -1,0 +1,6 @@
+## Output file format <!-- rq-8a063042 -->
+
+One CSV file per RDF analysis, written to the resolved
+`output_path` (see `rqm/analysis/framework.md`'s *Output
+convention*). UTF-8, `\n` line endings, ASCII-compatible.
+

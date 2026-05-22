@@ -1,0 +1,16 @@
+#[test] // rq-545c961a
+fn fractional_coords_inverts_cartesian_coords() {
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
+    let s = [0.1_f32, -0.2, 0.3];
+    let v = b.cartesian_coords(s);
+    let s_back = b.fractional_coords(v);
+    for d in 0..3 {
+        assert!(
+            (s_back[d] - s[d]).abs() < 1.0e-6,
+            "round-trip mismatch on axis {d}: {} vs {}",
+            s_back[d],
+            s[d]
+        );
+    }
+}
+

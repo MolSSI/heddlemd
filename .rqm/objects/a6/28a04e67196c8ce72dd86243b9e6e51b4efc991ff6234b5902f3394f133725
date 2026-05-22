@@ -1,0 +1,8 @@
+  @rq-b4e4bdc7
+  Scenario: minimum_image of a c-aligned displacement subtracts the c lattice vector
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 0.0, 2.0, 3.0)
+    When box.minimum_image([2.0, 3.0, 4.0]) is called
+    Then the result equals [0.0, 0.0, -2.0]
+      (fractional coords are (s_a, s_b, s_c) ≈ (0.067, 0.125, 0.667);
+       k = (0, 0, 1); v − c = (2 − xz, 3 − yz, 4 − lz) = (0, 0, −2))
+

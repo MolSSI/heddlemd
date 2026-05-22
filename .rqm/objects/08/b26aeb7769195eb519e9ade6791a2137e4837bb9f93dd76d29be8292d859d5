@@ -1,0 +1,8 @@
+  @rq-70a46202
+  Scenario: Construct CsvrThermostat for a SETTLE'd water system
+    Given a ThermostatKind::Csvr { temperature: 300.0, tau: 1.0e-13, seed: 42 }
+    When registry.build_optional(Some(&kind), device, particle_count=24, n_constraints=24) is called
+      (8 SETTLE waters: 24 atoms, 3 constraints per molecule)
+    Then it returns Ok(Some(thermostat))
+    And state.g_dof == max(1, 3*24 − 24 − 3) == 45
+

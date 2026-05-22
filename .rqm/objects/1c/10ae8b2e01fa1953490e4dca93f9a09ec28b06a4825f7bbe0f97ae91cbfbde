@@ -1,0 +1,22 @@
+// rq-287e8d41
+#[test]
+fn csvr_preserves_com_momentum() {
+    let gpu = init_device().unwrap();
+    let n = 16usize;
+    let state = atomic_state(n);
+    let mass = 1.66e-27_f32;
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut therm = build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 7));
+    for _ in 0..20 {
+        therm
+            .apply_post(&mut buffers, 1.0e-15, &mut timings)
+            .unwrap();
+    }
+    let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    let p_com: f64 = vx.iter().map(|&v| (mass as f64) * (v as f64)).sum();
+    let scale: f32 = vx.iter().map(|v| v.abs()).fold(0.0, f32::max);
+    let tol = (mass as f64) * (scale as f64) * 1.0e-3;
+    assert!(p_com.abs() < tol, "p_com = {p_com} (tol {tol})");
+}
+

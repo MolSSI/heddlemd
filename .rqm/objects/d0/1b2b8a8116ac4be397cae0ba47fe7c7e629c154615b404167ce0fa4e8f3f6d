@@ -1,0 +1,9 @@
+  @rq-650875cc
+  Scenario: Tilts may exceed the corresponding diagonals
+    When SimulationBox::new(2.0, 3.0, 4.0, 50.0, 50.0, 50.0) is called
+    Then it returns Ok(box)
+    (no reduced-tilt enforcement; geometric infeasibility is caught by
+     the neighbor list via min_perpendicular_width)
+
+  # --- Construction: rejection ---
+

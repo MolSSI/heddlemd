@@ -1,0 +1,7 @@
+  @rq-c505f34b
+  Scenario: Same-type RDF on a one-particle frame yields zero counts
+    Given a one-frame trajectory with a single Ar particle
+    And an RDF with between=["Ar","Ar"]
+    When RdfBuilder::build is called
+    Then it returns Err(AnalysisRuntimeError::InvalidValue { field: "between", .. })
+

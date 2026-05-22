@@ -1,0 +1,10 @@
+  @rq-4ae77a72
+  Scenario: csvr_conserved drifts as a zero-mean martingale (no systematic bias)
+    Given a composed runner of velocity-Verlet + CSVR with N=128 LJ particles,
+      dt=1e-15, n_steps=2000, seed=1
+    When the run completes
+    Then |mean(csvr_conserved increments)| < 3 · stddev(increments) / sqrt(n_rows)
+      (i.e., consistent with zero mean to within 3σ)
+
+  # --- Determinism ---
+

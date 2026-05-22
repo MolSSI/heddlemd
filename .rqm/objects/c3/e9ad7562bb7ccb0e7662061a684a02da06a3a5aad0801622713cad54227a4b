@@ -1,0 +1,6 @@
+  @rq-3eaf65b6
+  Scenario: check_min_perpendicular_width is deterministic
+    Given two SimulationBox instances constructed from identical six-parameter tuples
+    When check_min_perpendicular_width(required) is called on each with the same required value
+    Then both calls return byte-identical outcomes
+```

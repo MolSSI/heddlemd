@@ -1,0 +1,8 @@
+  @rq-b44769f1
+  Scenario: Construct an integrator with particle_count = 0
+    Given an IntegratorRegistry::with_builtins()
+    And a SlotConfig { kind: "velocity-verlet", params: { lossless: true } }
+    When registry.build(&slot, &gpu, particle_count=0, n_constraints=0) is called
+    Then it returns Ok(integrator)
+    And every per-particle device allocation has length 0
+

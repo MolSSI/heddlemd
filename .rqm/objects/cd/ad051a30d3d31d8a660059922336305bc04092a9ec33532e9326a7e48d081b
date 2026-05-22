@@ -1,0 +1,9 @@
+#[test] // rq-941c4000
+fn wrap_position_is_idempotent_orthorhombic() {
+    let b = default_box();
+    let position = [123.45_f32, -67.89, 42.0];
+    let once = b.wrap_position(position);
+    let twice = b.wrap_position(once);
+    assert_eq!(twice, once);
+}
+

@@ -1,0 +1,47 @@
+# Feature: Simulation Box and Periodic Boundary Conditions <!-- rq-03830444 -->
+
+The simulation runs in a periodic, parallelepiped cell described in
+lower-triangular form. The primary image of the cell is the parallelepiped
+centered at the origin spanned by three lattice vectors:
+
+```
+a = (lx,  0,   0)
+b = (xy,  ly,  0)
+c = (xz,  yz,  lz)
+```
+
+`(lx, ly, lz)` are strictly positive diagonal edge lengths; `(xy, xz, yz)`
+are tilt parameters that place `b` in the xy-plane and `c` in general
+position. An orthorhombic cell corresponds to `xy = xz = yz = 0`.
+
+`SimulationBox` is a host-side `Copy` type carrying the six lattice
+parameters and a monotonic `generation` counter. It exposes pure operations
+used by neighbor search and pair-force computation:
+
+- `minimum_image` — given a displacement vector between two particles, returns
+  the shortest equivalent displacement under periodicity (the "minimum image").
+- `wrap_position` — given an absolute position, returns the equivalent position
+  inside the primary image of the cell.
+- `wrap_position_with_image_count` — same as `wrap_position` but also returns
+  the integer image triple `(k_a, k_b, k_c)` recording how many lattice
+  vectors were subtracted along each fractional direction. Integrator drift
+  kernels use this to update the per-particle image flags.
+- `min_perpendicular_width` — the minimum perpendicular distance between
+  opposite faces of the parallelepiped. Consumers gate cutoff-vs-box
+  validity against this value rather than `min(lx, ly, lz)`.
+- `fractional_coords` and `cartesian_coords` — map between Cartesian
+  coordinates and fractional coordinates along the lattice vectors. Used
+  by the spatial-hash kernel (which indexes cells in fractional space) and
+  by the init-state parser's position-bounds check.
+
+All operations are pure functions of the box and the input vector. They are
+defined on the host in Rust; consuming kernels inline equivalent math in
+CUDA, taking the six lattice parameters as kernel arguments.
+
+The six lattice parameters are mutable in place through `set_lattice`. Every
+successful mutation increments the box's `generation` counter by one.
+Downstream consumers that cache values derived from the box's lattice (the
+neighbor list's cached cell layout; future barostat bookkeeping) record the
+generation alongside their cache and refresh whenever the live box's
+generation differs from the recorded one.
+

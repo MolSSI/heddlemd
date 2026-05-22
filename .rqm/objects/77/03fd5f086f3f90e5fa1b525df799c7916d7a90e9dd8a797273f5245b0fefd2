@@ -1,0 +1,11 @@
+  @rq-dc95802b
+  Scenario: Two CsvrThermostats at the same draw_counter and seed produce identical
+    velocity outputs after apply_post
+    Given two CsvrThermostats A and B built from identical ThermostatKinds
+    And both A.draw_counter and B.draw_counter == 5
+    And identical buffer state
+    When thermostat.apply_post(...) is called once on each
+    Then post-call velocities of A and B are byte-identical
+
+  # --- Log columns ---
+

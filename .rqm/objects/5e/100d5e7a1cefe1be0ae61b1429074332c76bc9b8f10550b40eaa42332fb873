@@ -1,0 +1,6 @@
+  @rq-a2454a72
+  Scenario: apply_post on empty CSVR state is a no-op
+    Given a CSVR thermostat with particle_count=0
+    When thermostat.apply_post(...) is called
+    Then it returns Ok(())
+

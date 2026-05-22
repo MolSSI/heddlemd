@@ -1,0 +1,11 @@
+  @rq-812e88d5
+  Scenario: Force evaluation is dispatched by the runner, not the integrator
+    Given a velocity-Verlet integrator and a ForceField with one LennardJones slot
+    When the runner walks integrator.plan(0.1) once
+    Then timings.finalize() reports count==1 for KernelStage::LJ_PAIR_FORCE
+    And KernelStage::REDUCE_PAIR_FORCES has count==1
+    And KernelStage::ACCUMULATE_FORCES has count==1
+    And integrator.execute(...) is never called with SubStep::ForceEval { .. } regardless of the `class` payload
+
+  # --- Plan structure ---
+

@@ -1,0 +1,10 @@
+  @rq-287e8d41
+  Scenario: Rescale preserves COM momentum
+    Given a CSVR thermostat composed with velocity-Verlet on N=16 particles
+      with initial COM-x = 0
+    When the runner executes 20 timesteps with dt=1e-15
+    Then Σ_i m_i v_x[i] evaluated on the final velocities is zero
+      to f32 round-off
+
+  # --- Physical correctness ---
+

@@ -1,0 +1,7 @@
+  @rq-1d25a0db
+  Scenario: Log file header includes csvr_conserved when CSVR is the thermostat
+    Given a config with [thermostat].kind = "csvr"
+    And log_every > 0
+    When the runner produces the log file
+    Then its header line is "step,time,kinetic_energy,temperature,csvr_conserved"
+

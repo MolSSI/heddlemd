@@ -1,0 +1,5 @@
+  @rq-2cb82d44
+  Scenario: Newly-constructed box reports generation 0
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0)
+    Then box.generation() equals 0
+

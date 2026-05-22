@@ -1,0 +1,11 @@
+## Gherkin Scenarios <!-- rq-ee777124 -->
+
+```gherkin
+Feature: Pluggable integration framework
+
+  Background:
+    Given a CUDA-capable GPU available as device 0
+    And init_device() has been called
+
+  # --- Integrator construction ---
+

@@ -1,0 +1,28 @@
+// rq-17fd53d9
+#[test]
+fn histogram_accumulates_across_frames() {
+    let dir = tmp_path("multi_frame");
+    std::fs::write(dir.join("sim.in.toml"), sim_toml_with_types(&["Ar"], 4.0e-9)).unwrap();
+    write_init(&dir, &["Ar", "Ar"]);
+    // Separations 3.5e-10, 5.5e-10, 7.5e-10 chosen so each lands
+    // cleanly in the middle of its bin (no boundary collision under
+    // f32 round-off).
+    write_trajectory(
+        &dir,
+        &[
+            vec![("Ar", -1.75e-10, 0.0, 0.0), ("Ar", 1.75e-10, 0.0, 0.0)],
+            vec![("Ar", -2.75e-10, 0.0, 0.0), ("Ar", 2.75e-10, 0.0, 0.0)],
+            vec![("Ar", -3.75e-10, 0.0, 0.0), ("Ar", 3.75e-10, 0.0, 0.0)],
+        ],
+    );
+    let path = write_analysis(&dir, &rdf_body("x", ["Ar", "Ar"], 1.0e-9, 10));
+    run_analyses(&path).unwrap();
+    let rows = read_csv(&dir.join("sim.out.x.csv"));
+    let total: u64 = rows.iter().map(|(_, _, c)| c).sum();
+    assert_eq!(total, 3, "expected 3 total pair counts, got {total}");
+    let nonzero_bins = rows.iter().filter(|(_, _, c)| *c > 0).count();
+    assert_eq!(nonzero_bins, 3);
+}
+
+// --- Normalisation ---
+

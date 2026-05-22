@@ -1,0 +1,8 @@
+  @rq-fa98ca13
+  Scenario: Copy of a SimulationBox carries the original's generation
+    Given a SimulationBox constructed via SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0)
+    And box.set_lattice(11.0, 8.0, 6.0, 1.0, 0.0, 0.0) has been called once
+    When let copy = box (a value copy via the Copy derive)
+    Then copy.generation() equals 1
+    And copy.lattice() equals [11.0, 8.0, 6.0, 1.0, 0.0, 0.0]
+

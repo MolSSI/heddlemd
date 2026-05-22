@@ -1,0 +1,9 @@
+#[test] // rq-5269221c
+fn wrap_position_is_idempotent_for_triclinic_box() {
+    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.5, -2.0, 0.5).expect("ok");
+    let position = [200.0_f32, -150.0, 75.5];
+    let once = b.wrap_position(position);
+    let twice = b.wrap_position(once);
+    assert_eq!(twice, once);
+}
+

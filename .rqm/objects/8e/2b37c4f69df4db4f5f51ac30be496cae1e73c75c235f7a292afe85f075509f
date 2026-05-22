@@ -1,0 +1,7 @@
+  @rq-8cec425d
+  Scenario: Cross-type RDF on a two-particle frame
+    Given a one-frame trajectory with one Ar and one Kr separated by 3.0e-10 m
+    And an RDF with between=["Ar","Kr"], r_max=1.0e-9, n_bins=10
+    When dynamics analyze runs to completion
+    Then exactly one bin has count = 1 and every other bin has count = 0
+

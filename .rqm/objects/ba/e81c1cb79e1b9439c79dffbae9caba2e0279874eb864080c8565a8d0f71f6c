@@ -1,0 +1,6 @@
+  @rq-60c534f2
+  Scenario: Last bin's `r` column equals (n_bins - 0.5) · Δr
+    Given an RDF with r_max=1.0e-9 and n_bins=10
+    When dynamics analyze runs to completion
+    Then the last data row's `r` column equals 9.5e-10 within f64 round-off
+

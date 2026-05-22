@@ -1,0 +1,7 @@
+  @rq-870ed681
+  Scenario: wrap_position_with_image_count returns the image triple together with the wrapped position
+    Given position = [12.0, 0.0, 0.0] and an orthorhombic SimulationBox with lx=10.0
+    When (wrapped, image) = box.wrap_position_with_image_count(position)
+    Then wrapped equals [2.0, 0.0, 0.0]
+    And image equals [1, 0, 0]
+

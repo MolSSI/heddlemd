@@ -1,0 +1,6 @@
+  @rq-bfb3b9d8
+  Scenario: minimum_image leaves a displacement strictly inside the primary image unchanged
+    Given displacement = [4.0, 3.0, 2.0]
+    When box.minimum_image(displacement) is called
+    Then the result equals [4.0, 3.0, 2.0]
+

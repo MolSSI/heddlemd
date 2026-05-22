@@ -1,0 +1,14 @@
+### Host-side RNG utility <!-- rq-3d7c8e53 -->
+
+`src/integrator/philox.rs::philox_4x32_10(key_lo: u32, key_hi: u32,
+ctr0: u32, ctr1: u32, ctr2: u32, ctr3: u32) -> [u32; 4]` — host-side
+Philox-4×32-10 implementation matching the device-side helper used
+by `lan_ou_step` (see `langevin-baoab.md`). Pure function,
+deterministic output for any fixed key/counter pair. Available to
+any other host-side stochastic slot (e.g. Andersen thermostat).
+
+The accompanying helper `philox_normal(key_lo, key_hi, ctr0, ctr1,
+ctr2, ctr3) -> f64` wraps `philox_4x32_10` with the Box-Muller
+transform documented under *RNG* above and returns one f64 standard
+normal per call (discarding the `sin` half).
+

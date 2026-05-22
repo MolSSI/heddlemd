@@ -1,0 +1,7 @@
+  @rq-009bbbdc
+  Scenario: Two consecutive step() calls on a Langevin integrator produce different post-call velocities
+    Given a Langevin-BAOAB integrator with seed=1, friction=1e12, temperature=300, particle_count=2
+    When step() is called twice on the same buffers with identical inputs
+    Then the two calls produce different post-call velocities
+    (because the integrator's internal draw_counter advances between calls)
+

@@ -1,0 +1,43 @@
+### Types <!-- rq-06a8b986 -->
+
+- `RdfBuilder` — implements `AnalysisBuilder` (see <!-- rq-2dc76b67 -->
+  `rqm/analysis/framework.md`).
+  - `kind_name(&self) -> "rdf"`.
+  - `validate_params(&self, params: &toml::Value) -> Result<(),
+    AnalyzeError>` — checks that `between`, `r_max`, and `n_bins`
+    are present, of the right type, and individually in range;
+    rejects unknown fields. Does not consult the simulation
+    config (so it can be called during `load_analysis_config`).
+  - `build(&self, params: &toml::Value, header:
+    &TrajectoryFrameHeader, sim_config: &Config) -> Result<Box<dyn
+    Analysis>, AnalysisRuntimeError>` — resolves `between` against
+    `sim_config.particle_types`, counts `N_A` and `N_B` against
+    `header.type_indices`, computes the bin width, caches the
+    box's volume, and verifies `r_max <=
+    header.sim_box.min_perpendicular_width() / 2`. On success,
+    returns a `RdfAnalysis` boxed as `dyn Analysis`.
+
+- `RdfAnalysis` — per-run handle. Fields are private; the type <!-- rq-e0b5377f -->
+  owns:
+  - the two type indices `(t_a, t_b)` and a flag for the
+    same-type case,
+  - the cached `(N_A, N_B)` counts and box volume `V`,
+  - the histogram (length `n_bins`, `Vec<u64>`),
+  - the bin width `Δr` and `r_max` for re-use in
+    `finalize_and_write`,
+  - the running `frames_consumed: u64`.
+
+  Methods:
+  - `consume_frame(&mut self, frame: &TrajectoryFrame, sim_box:
+    &SimulationBox) -> Result<(), AnalysisRuntimeError>` — runs
+    the pair-enumeration loop documented under *Pair enumeration*.
+    Returns `Other(_)` if a frame's `type_indices` does not
+    contain the cached `(N_A, N_B)` counts (i.e. the trajectory's
+    composition changed mid-run, which v1 does not support).
+  - `finalize_and_write(&mut self, output_path: &Path,
+    _sim_config: &Config) -> Result<(), AnalysisRuntimeError>` —
+    computes the per-bin `g_AB`, opens the output path with
+    `OpenOptions::new().write(true).create_new(true)`, writes
+    the header + `n_bins` rows, and flushes the file. Returns
+    `Io(String)` on filesystem failure.
+

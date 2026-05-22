@@ -1,0 +1,7 @@
+  @rq-fb3f2189
+  Scenario: build_optional with None returns Ok(None)
+    Given a ThermostatRegistry::with_builtins()
+    When registry.build_optional(None, &gpu, particle_count=4) is called
+    Then it returns Ok(None)
+    And no builder is consulted
+

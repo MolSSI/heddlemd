@@ -1,0 +1,27 @@
+// rq-4e9e09f0
+#[test]
+fn csvr_apply_post_launches_expected_kernels() {
+    let gpu = init_device().unwrap();
+    let n = 4usize;
+    let state = atomic_state(n);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut therm = build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 1));
+    therm
+        .apply_post(&mut buffers, 1.0e-15, &mut timings)
+        .unwrap();
+    let report = timings.finalize().unwrap();
+    let count_for = |stage: KernelStage| -> u64 {
+        report
+            .stages
+            .iter()
+            .find(|r| r.name == stage.name())
+            .map(|r| r.count)
+            .unwrap_or(0)
+    };
+    assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 1);
+    assert_eq!(count_for(KernelStage::CSVR_RESCALE_VELOCITIES), 1);
+    assert_eq!(count_for(KernelStage::VV_KICK_DRIFT), 0);
+    assert_eq!(count_for(KernelStage::VV_KICK), 0);
+}
+

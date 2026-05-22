@@ -1,0 +1,21 @@
+## Out of Scope <!-- rq-987dc616 -->
+
+- NPT ensembles, barostats, and deformable cell tensors. `set_lattice` is
+  the underlying primitive that future ensemble code drives;
+  ensemble-level orchestration (when to mutate, how the box couples to a
+  piston, etc.) is its own feature.
+- Anisotropic or strain-tensor mutators (e.g. `scale_isotropic`,
+  `scale_per_axis`, shear). Callers compose them out of `set_lattice`
+  until a barostat-specific API is needed.
+- Reduced-tilt enforcement (LAMMPS-style `|xy| <= lx/2`, etc.) and the
+  associated "box flip" remapping. Tilts are unbounded in magnitude; the
+  only operational constraint is `min_perpendicular_width / 2 > max
+  interaction cutoff`, enforced by the neighbor list rather than the box.
+- Non-periodic boundaries (open or reflecting).
+- Device-side (CUDA) PBC helpers; consuming kernels inline the math.
+- Per-particle bulk wrap helpers operating on `Vec<f32>` SoA arrays
+  (callers loop over `wrap_position` until a bulk helper is needed).
+- The `f64` precision feature flag.
+
+---
+

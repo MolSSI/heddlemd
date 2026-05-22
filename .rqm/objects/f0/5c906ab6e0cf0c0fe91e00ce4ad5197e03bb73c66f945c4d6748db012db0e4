@@ -1,0 +1,9 @@
+  @rq-0d7ebeb6
+  Scenario: Custom integrator builder is selectable
+    Given an IntegratorRegistry::with_builtins()
+    And a custom IntegratorBuilder whose kind_name() is "test-stub"
+    When registry.register(custom_builder) is called
+    Then registry.build(...) routes "test-stub" kind requests to the custom builder
+
+  # --- Thermostat construction ---
+

@@ -1,0 +1,19 @@
+### Reproducibility <!-- rq-7479022f -->
+
+Two `dynamics analyze` runs on the same `.in.analysis`,
+`.in.toml`, and trajectory produce byte-identical RDF CSVs. The
+guarantee follows from:
+
+- Deterministic pair enumeration order (particle-index ascending,
+  upper-triangular).
+- Pure integer histogram accumulation.
+- `f64` `sqrt`, multiplications, and division (no FMA contraction
+  on the CPU side; the implementation must avoid `fma` /
+  `f64::mul_add` in the histogram-to-`g_r` reduction).
+- Fixed numeric formatting (see *Output file format* below).
+- Constant box convention (the first frame's `lengths()` are
+  cached at builder-`build` time and used throughout).
+
+The guarantee is unconditional on hardware in v1 because the
+pipeline is CPU-only.
+

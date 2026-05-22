@@ -1,0 +1,20 @@
+// rq-c70f6309
+#[test]
+fn empty_bin_g_r_is_zero() {
+    let dir = tmp_path("empty_bin");
+    std::fs::write(dir.join("sim.in.toml"), sim_toml_with_types(&["Ar"], 4.0e-9)).unwrap();
+    write_init(&dir, &["Ar", "Ar"]);
+    write_trajectory(
+        &dir,
+        &[vec![("Ar", -2.5e-10, 0.0, 0.0), ("Ar", 2.5e-10, 0.0, 0.0)]],
+    );
+    let path = write_analysis(&dir, &rdf_body("x", ["Ar", "Ar"], 1.0e-9, 10));
+    run_analyses(&path).unwrap();
+    let rows = read_csv(&dir.join("sim.out.x.csv"));
+    for (_, g, c) in &rows {
+        if *c == 0 {
+            assert_eq!(*g, 0.0);
+        }
+    }
+}
+

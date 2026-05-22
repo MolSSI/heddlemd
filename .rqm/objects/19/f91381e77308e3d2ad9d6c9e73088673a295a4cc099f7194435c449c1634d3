@@ -1,0 +1,9 @@
+  @rq-167867a2
+  Scenario: Default apply_pre is a no-op for thermostats that don't override it
+    Given a CSVR thermostat
+    And a ParticleBuffers with particle_count == 4 and a snapshot of velocities
+    When thermostat.apply_pre(&mut buffers, dt=0.1, &mut timings) is called
+    Then it returns Ok(())
+    And velocities are bit-identical to the snapshot
+    And no kernel launches are recorded for that call
+

@@ -1,0 +1,17 @@
+## Parameters <!-- rq-a8da85cf -->
+
+The matching builder deserialises a typed `CsvrParams` from the `[thermostat]` section's `SlotConfig::params` (see `framework.md`); the per-field reference below documents that parameter struct:
+
+- `temperature: f64` — bath temperature `T` in kelvin. Required.
+  Finite and strictly positive. Independent of `simulation.temperature`,
+  which governs the initial-velocity sampler.
+- `tau: f64` — thermostat coupling time in seconds. Required. Finite
+  and strictly positive. Larger `τ` leaves the dynamics closer to NVE
+  (slow thermostat coupling); smaller `τ` enforces the target
+  temperature more aggressively. Typical values for liquid water are
+  100 fs – 1 ps.
+- `seed: u64` — counter-based RNG seed. Required, independent of
+  `simulation.seed` and any other slot's seed. Two runs with
+  identical configs on the same GPU produce byte-identical
+  trajectories.
+

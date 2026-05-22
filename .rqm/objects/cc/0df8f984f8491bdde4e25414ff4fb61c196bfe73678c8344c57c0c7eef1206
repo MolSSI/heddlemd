@@ -1,0 +1,12 @@
+#[test] // rq-7541fd8a
+fn validation_order_is_lx_ly_lz_xy_xz_yz() {
+    let err = SimulationBox::new(0.0, -1.0, 0.0, f32::NAN, 0.0, 0.0).expect_err("err");
+    match err {
+        SimulationBoxError::NonPositiveDiagonal { name, value } => {
+            assert_eq!(name, "lx");
+            assert_eq!(value, 0.0);
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+}
+

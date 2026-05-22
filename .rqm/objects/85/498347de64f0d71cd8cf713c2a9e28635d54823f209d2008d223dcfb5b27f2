@@ -1,0 +1,8 @@
+### CUDA kernels <!-- rq-2c834256 -->
+
+CSVR introduces no new CUDA kernels. It reuses
+`kinetic_energy_reduce` and `rescale_velocities` from
+`nose-hoover-chain.md` through their public launch helpers
+`compute_kinetic_energy` and `rescale_velocities` re-exported from
+`crate::gpu`.
+

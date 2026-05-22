@@ -1,0 +1,12 @@
+// rq-a6cd03aa
+#[test]
+fn registry_builds_csvr() {
+    let gpu = init_device().unwrap();
+    let kind = csvr_kind(300.0, 1.0e-13, 42);
+    let therm = unbox_csvr(build_csvr(&gpu, 4, &kind));
+    assert_eq!(therm.draw_counter, 0);
+    assert_eq!(therm.cumulative_injection, 0.0);
+    assert_eq!(therm.g_dof, 9);
+    assert!((therm.kt_target - KB * 300.0).abs() < 1.0e-30);
+}
+

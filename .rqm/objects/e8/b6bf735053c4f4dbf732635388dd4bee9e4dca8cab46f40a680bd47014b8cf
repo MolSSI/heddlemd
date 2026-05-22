@@ -1,0 +1,40 @@
+// rq-36665dda
+#[test]
+fn normalisation_formula_matches_analytical_value() {
+    let dir = tmp_path("normalisation");
+    std::fs::write(dir.join("sim.in.toml"), sim_toml_with_types(&["Ar"], 4.0e-9)).unwrap();
+    write_init(&dir, &["Ar", "Ar"]);
+    // Two-particle system separated by 5e-10 m along x. Box 4 nm cubic.
+    write_trajectory(
+        &dir,
+        &[vec![("Ar", -2.5e-10, 0.0, 0.0), ("Ar", 2.5e-10, 0.0, 0.0)]],
+    );
+    let r_max = 1.0e-9;
+    let n_bins = 10u64;
+    let path = write_analysis(&dir, &rdf_body("x", ["Ar", "Ar"], r_max, n_bins));
+    run_analyses(&path).unwrap();
+    let rows = read_csv(&dir.join("sim.out.x.csv"));
+    // Locate the bin with count == 1.
+    let (i, _) = rows.iter().enumerate().find(|(_, (_, _, c))| *c == 1).unwrap();
+    let dr = r_max / (n_bins as f64);
+    let r_inner = (i as f64) * dr;
+    let r_outer = ((i + 1) as f64) * dr;
+    let shell_volume = 4.0 * std::f64::consts::PI / 3.0
+        * (r_outer.powi(3) - r_inner.powi(3));
+    // 4 nm cubic box (f32 -> f64 round-off in `volume()` shows up; use
+    // the same `f64` path the implementation does by constructing the
+    // box via SimulationBox::volume() ourselves).
+    let box_edge = 4.0e-9_f32 as f64;
+    let v = box_edge * box_edge * box_edge;
+    let n_a: f64 = 2.0;
+    let n_pairs = n_a * (n_a - 1.0) / 2.0;
+    let expected = v / (1.0 * n_pairs * shell_volume);
+    let got = rows[i].1;
+    assert!(
+        (got / expected - 1.0).abs() < 1e-6,
+        "expected g_r ≈ {expected:e}, got {got:e}"
+    );
+}
+
+// --- Reproducibility ---
+
