@@ -448,7 +448,7 @@ fn find_entry_at_line(
 
 /// Find the file-tree entry index covering `line`, and the byte offset
 /// of the start of `line` within that entry's blob.
-fn find_entry_at_line_with_offset(
+pub(crate) fn find_entry_at_line_with_offset(
     store: &Store,
     tree: &FileTree,
     line: usize,

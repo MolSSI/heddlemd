@@ -11,5 +11,6 @@
   - [`rqm edit`](./commands/edit.md)
   - [`rqm log`](./commands/log.md)
   - [`rqm mv`](./commands/mv.md)
+  - [`rqm insert`](./commands/insert.md)
 - [Workflows](./workflows.md)
 - [Limitations](./limitations.md)

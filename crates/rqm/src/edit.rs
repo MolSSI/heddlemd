@@ -125,6 +125,33 @@ pub fn target_to_canonical_id(store: &Store, target: &EditTarget) -> Result<Stab
     }
 }
 
+/// Like [`target_to_canonical_id`], but refuses alias `Id` targets.
+/// `FileLine` targets always resolve through a file-tree entry, which
+/// already carries canonical stable_ids, so they never need alias
+/// rejection.
+pub fn target_to_canonical_id_strict(
+    store: &Store,
+    target: &EditTarget,
+) -> Result<StableId> {
+    match target {
+        EditTarget::Id(id) => {
+            let canonical = store
+                .resolve(id)?
+                .ok_or_else(|| anyhow::anyhow!("unknown stable_id: {id}"))?;
+            if &canonical != id {
+                bail!(
+                    "{id} is an alias for {canonical}; aliases are not accepted here. \
+                     Use the canonical id or a file:line cursor."
+                );
+            }
+            Ok(canonical)
+        }
+        EditTarget::FileLine { path, line } => {
+            Ok(find_entry_at(store, path, *line)?.0)
+        }
+    }
+}
+
 /// Find the file-tree entry whose blob covers `line` in `path`.
 /// Returns `(entry.stable_id, entry.blob)`.
 pub fn find_entry_at(

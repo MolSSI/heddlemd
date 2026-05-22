@@ -54,6 +54,53 @@ enum Cmd {
         /// Either `rq-XXXXXXXX` or `<path>:<line>`.
         target: String,
     },
+    /// Insert a new blob at a specified position in a managed file.
+    /// Auto-creates the file if it is not yet managed (use `:start` or
+    /// `:end` in that case).
+    ///
+    /// Operates in one of two modes — exactly one must be selected:
+    ///
+    ///  * Attribute mode: `--owner <id|file:line>` (repeatable) —
+    ///    attaches the new blob to one or more existing requirements.
+    ///
+    ///  * Create-new mode: `--parent <id|file:line>` or `--no-parent`
+    ///    — generates a fresh stable_id, creates a new requirement
+    ///    of the given `--kind` (default `behavior`) that owns the new
+    ///    blob as its text_blob.
+    ///
+    /// Content is read from `$EDITOR` (default), `--from-file`, or
+    /// `--from-stdin`.
+    Insert {
+        /// Position: `<path>:<line>`, `<path>:start`, or `<path>:end`.
+        target: String,
+        /// Attribute mode: existing requirement(s) that own the new
+        /// blob. May repeat for joint ownership. Each is
+        /// `rq-XXXXXXXX` or `<path>:<line>`. Aliases are rejected.
+        #[arg(long, conflicts_with_all = ["parent", "no_parent"])]
+        owner: Vec<String>,
+        /// Create-new mode: parent stable_id (or file:line cursor) for
+        /// the new requirement. Mutually exclusive with `--no-parent`
+        /// and `--owner`.
+        #[arg(long, conflicts_with_all = ["owner", "no_parent"])]
+        parent: Option<String>,
+        /// Create-new mode: create as a DAG root (no parent).
+        /// Mutually exclusive with `--parent` and `--owner`.
+        #[arg(long = "no-parent", conflicts_with_all = ["owner", "parent"])]
+        no_parent: bool,
+        /// Kind of the new requirement (only used with `--parent` or
+        /// `--no-parent`). One of `behavior`, `design`, `pending`.
+        #[arg(long, default_value = "behavior")]
+        kind: String,
+        /// Anchor before the destination blob instead of after.
+        #[arg(long)]
+        before: bool,
+        /// Read content from this file instead of `$EDITOR`.
+        #[arg(long, conflicts_with = "from_stdin")]
+        from_file: Option<PathBuf>,
+        /// Read content from stdin instead of `$EDITOR`.
+        #[arg(long, conflicts_with = "from_file")]
+        from_stdin: bool,
+    },
     /// Move a blob to a different position, either within its current
     /// file or in another managed file.
     ///
@@ -146,6 +193,79 @@ fn run(cli: Cli) -> Result<ExitCode> {
             let store = rqm::store::Store::open(&cli.rqm_dir)?;
             let target = rqm::edit::EditTarget::parse(&target)?;
             rqm::log::run(&store, &target)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Cmd::Insert {
+            target,
+            owner,
+            parent,
+            no_parent,
+            kind,
+            before,
+            from_file,
+            from_stdin,
+        } => {
+            let store = rqm::store::Store::open(&cli.rqm_dir)?;
+            // Pick the mode based on which group of options was used.
+            let mode = if !owner.is_empty() {
+                let mut owners = Vec::with_capacity(owner.len());
+                for spec in &owner {
+                    let t = rqm::edit::EditTarget::parse(spec)?;
+                    owners.push(rqm::edit::target_to_canonical_id_strict(&store, &t)?);
+                }
+                rqm::insert::InsertMode::AttributeTo { owners }
+            } else if parent.is_some() || no_parent {
+                let parent_id = if let Some(p) = parent {
+                    let t = rqm::edit::EditTarget::parse(&p)?;
+                    Some(rqm::edit::target_to_canonical_id_strict(&store, &t)?)
+                } else {
+                    None
+                };
+                let kind = match kind.as_str() {
+                    "behavior" => rqm::object::Kind::Behavior,
+                    "design" => rqm::object::Kind::Design,
+                    "pending" => rqm::object::Kind::Pending,
+                    other => anyhow::bail!(
+                        "unknown --kind {other:?}; expected behavior, design, or pending"
+                    ),
+                };
+                rqm::insert::InsertMode::CreateNew {
+                    parent: parent_id,
+                    kind,
+                }
+            } else {
+                anyhow::bail!(
+                    "must specify one of --owner (attribute), --parent (new child), \
+                     or --no-parent (new DAG root)"
+                );
+            };
+            let content = if let Some(p) = from_file {
+                rqm::insert::read_content(rqm::insert::ContentSource::File(&p))?
+            } else if from_stdin {
+                rqm::insert::read_content(rqm::insert::ContentSource::Stdin)?
+            } else {
+                rqm::insert::read_via_editor()?
+            };
+            let spec = rqm::insert::InsertSpec::parse(&target, before)?;
+            let outcome = rqm::insert::do_insert(&store, spec, mode, content)?;
+            if outcome.created_file {
+                println!("created managed path: {}", outcome.path.display());
+            }
+            println!("new blob: {}", outcome.new_blob);
+            match &outcome.change {
+                rqm::insert::InsertChange::Attributed(ids) => {
+                    for id in ids {
+                        println!("  updated meta: {id}");
+                    }
+                }
+                rqm::insert::InsertChange::Created(id) => {
+                    println!("  created requirement: {id}");
+                }
+            }
+            let report = rqm::materialize::build(&store, &root)?;
+            for p in &report.written {
+                println!("  wrote {}", p.display());
+            }
             Ok(ExitCode::SUCCESS)
         }
         Cmd::Mv {

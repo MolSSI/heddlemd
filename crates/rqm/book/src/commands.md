@@ -25,6 +25,7 @@ Both options can be passed before any subcommand.
 | [`edit`](./commands/edit.md) | Open a blob in `$EDITOR`; apply on save |
 | [`log`](./commands/log.md) | Show a requirement's current state |
 | [`mv`](./commands/mv.md) | Relocate a blob within or across files |
+| [`insert`](./commands/insert.md) | Add a new blob at a specified position |
 
 ## Exit codes
 
