@@ -1,0 +1,6 @@
+### Real-space reproducibility <!-- rq-cf6116b8 -->
+
+Same as the truncated Coulomb pair force: each pair-buffer slot is written
+by exactly one thread; no atomics; reduction is the existing
+`reduce_pair_forces` kernel in deterministic slot order.
+

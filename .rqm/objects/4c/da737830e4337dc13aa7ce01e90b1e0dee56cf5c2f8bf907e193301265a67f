@@ -1,0 +1,7 @@
+  @rq-7d5915bb
+  Scenario: Reject init = timings_path
+    Given the Background config with init="argon.dat" and
+      [output].timings_path="argon.dat"
+    When load_config is called
+    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Init, kind_b: PathRole::Timings, path: _ })
+

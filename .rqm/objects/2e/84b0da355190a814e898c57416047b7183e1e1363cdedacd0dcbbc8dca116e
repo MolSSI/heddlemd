@@ -1,0 +1,20 @@
+  @rq-66ec7ee4
+  Scenario: Velocity-Verlet lossless defaults to false when omitted
+    Given the Background config with [integrator] containing only kind="velocity-verlet"
+    When load_config is called
+    Then it returns Ok(config)
+    And config.phases[0].integrator matches IntegratorKind::VelocityVerlet { lossless: false }
+
+  # --- Per-thermostat-kind parameter validation ---
+  # Scenarios validating temperature / tau / seed / extra-field handling
+  # for individual `[thermostat]` kinds live alongside each thermostat's
+  # algorithmic scenarios:
+  #   - nose-hoover-chain.md
+  #   - csvr.md
+  #   - andersen.md
+  #   - berendsen.md
+  # They reference `ConfigError::MissingField { field: "thermostat.*" }`,
+  # `ConfigError::InvalidValue { field: "thermostat.*", .. }`, and
+  # `ConfigError::Parse { path: "thermostat.*", .. }` to exercise the
+  # same loader path documented in this section.
+

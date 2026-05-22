@@ -1,0 +1,8 @@
+  @rq-86aa2be7
+  Scenario: Langevin BAOAB kind with valid parameters is accepted
+    Given the Background config with [integrator] kind="langevin-baoab",
+      friction=1.0e12, temperature=300.0, seed=42
+    When load_config is called
+    Then it returns Ok(config)
+    And config.phases[0].integrator matches IntegratorKind::LangevinBaoab { friction: 1.0e12, temperature: 300.0, seed: 42 }
+

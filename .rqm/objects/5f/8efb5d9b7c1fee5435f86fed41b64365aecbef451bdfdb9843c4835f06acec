@@ -1,0 +1,6 @@
+  @rq-330d6b42
+  Scenario: Reject init = log_path
+    Given the Background config with init="run.log" and [output].log_path="run.log"
+    When load_config is called
+    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Init, kind_b: PathRole::Log, path: _ })
+

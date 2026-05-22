@@ -1,0 +1,17 @@
+  @rq-f4eeb849
+  Scenario: [thermostat] rejects an unknown field for the chosen kind
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [thermostat] section with kind="berendsen", temperature=300.0,
+      tau=1.0e-13, plus the unknown field seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "thermostat"
+    And message mentions "seed"
+    # The same rejection applies to every (kind, unknown-field) pair the
+    # parameterised unit test enumerates. At minimum the test exercises
+    #   (berendsen, seed), (csvr, chain_length), (andersen, tau),
+    #   (nose-hoover-chain, collision_rate). Adding a kind extends the
+    #   matrix.
+
+  # --- Integrator-owns-thermostat compatibility ---
+

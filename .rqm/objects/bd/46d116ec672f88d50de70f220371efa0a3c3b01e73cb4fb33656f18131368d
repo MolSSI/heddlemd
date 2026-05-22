@@ -1,0 +1,5 @@
+## Gherkin Scenarios <!-- rq-fc0de81b -->
+
+```gherkin
+Feature: Error handling convention
+

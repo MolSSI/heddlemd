@@ -1,0 +1,7 @@
+  @rq-789fcec9
+  Scenario: Trivial-mode contents
+    Given a NeighborListState built via new_trivial with particle_count = 3
+    When neighbor_list and neighbor_counts are downloaded
+    Then neighbor_counts equals [3, 3, 3]
+    And neighbor_list equals [0, 1, 2, 0, 1, 2, 0, 1, 2]
+

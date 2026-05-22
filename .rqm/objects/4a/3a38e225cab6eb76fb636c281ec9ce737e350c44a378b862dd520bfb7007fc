@@ -1,0 +1,8 @@
+  @rq-bda9c0a2
+  Scenario: [barostat] missing kind is rejected
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [barostat] section containing only an arbitrary field
+      (no kind field)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "barostat.kind" })
+

@@ -1,0 +1,7 @@
+  @rq-92f643cb
+  Scenario: Langevin BAOAB missing seed is rejected
+    Given the Background config with [integrator] kind="langevin-baoab",
+      friction=1.0e12, temperature=300.0 (no seed field)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.seed" })
+

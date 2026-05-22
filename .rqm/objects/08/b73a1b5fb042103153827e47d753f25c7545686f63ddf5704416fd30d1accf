@@ -1,0 +1,103 @@
+### CUDA Kernels <!-- rq-0469400b -->
+
+`kernels/neighbor.cu` declares the following `extern "C"` kernels.
+
+Neighbor-list-build pipeline:
+
+```c
+extern "C" __global__ void neighbor_displacement_squared(
+    const float *positions_x, const float *positions_y, const float *positions_z,
+    const float *reference_x, const float *reference_y, const float *reference_z,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    float *disp_sq,
+    unsigned int n);
+
+extern "C" __global__ void neighbor_list_build(
+    const float *positions_x, const float *positions_y, const float *positions_z,
+    const unsigned int *sorted_particle_ids,
+    const unsigned int *cell_offsets,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
+    float r_search_sq,
+    unsigned int max_neighbors,
+    unsigned int *neighbor_list,
+    unsigned int *neighbor_counts,
+    unsigned int *overflow_flag,
+    unsigned int n);
+
+extern "C" __global__ void copy_positions_into_reference(
+    const float *positions_x, const float *positions_y, const float *positions_z,
+    float *reference_x, float *reference_y, float *reference_z,
+    unsigned int n);
+```
+
+The six lattice parameters `(lx, ly, lz, xy, xz, yz)` carry the box's
+lower-triangular form (see `simulation-box.md`). Both
+`neighbor_displacement_squared` and `neighbor_list_build` compute their
+minimum-image displacements via the triclinic *Wrap Algorithm* defined in
+`simulation-box.md`. The neighbor-list-build kernel also computes its
+own and its neighbor-cell indices in fractional coordinates from these
+six values (no separate `cell_size_x/y/z` argument; `1.0f / n_cells_d` is
+computed on the fly).
+
+Spatial-hash pipeline (cell-list construction):
+
+```c
+extern "C" __global__ void compute_cell_indices_and_histogram(
+    const float *positions_x, const float *positions_y, const float *positions_z,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
+    unsigned int *cell_indices,
+    unsigned int *cell_counts,
+    unsigned int n);
+
+extern "C" __global__ void prefix_scan_local_blocks(
+    const unsigned int *input,
+    unsigned int *output,
+    unsigned int *block_totals,
+    unsigned int len);
+
+extern "C" __global__ void prefix_scan_apply_block_totals(
+    const unsigned int *block_offsets,
+    unsigned int *output,
+    unsigned int len);
+
+extern "C" __global__ void prefix_scan_finalize_offsets(
+    unsigned int *cell_offsets,
+    unsigned int n_cells_total,
+    unsigned int particle_count);
+
+extern "C" __global__ void scatter_atoms_into_cells(
+    const unsigned int *cell_indices,
+    const unsigned int *cell_offsets,
+    unsigned int *write_cursors,
+    unsigned int *sorted_particle_ids,
+    unsigned int n);
+
+extern "C" __global__ void sort_cells_by_particle_id(
+    const unsigned int *cell_offsets,
+    unsigned int *sorted_particle_ids,
+    unsigned int n_cells_total);
+```
+
+`compute_cell_indices_and_histogram` writes each atom's cell index to
+`cell_indices` and increments `cell_counts[cell_idx]` via `atomicAdd`.
+
+`prefix_scan_local_blocks` performs a per-block exclusive scan over
+`input[0 .. len]`, writing the local scan to `output[0 .. len]` and each
+block's inclusive total to `block_totals[blockIdx]`. Each thread reads
+its input element before any write and blocks write disjoint output
+ranges, so `input` and `output` may alias the same buffer — the
+recursive driver scans each block-totals level of the stack in place.
+`prefix_scan_apply_block_totals` adds `block_offsets[gid / scan_block_size]`
+into `output[gid]` for every `gid < len`. `prefix_scan_finalize_offsets`
+writes the trailing `cell_offsets[n_cells_total] = particle_count`
+sentinel with a single thread.
+
+`scatter_atoms_into_cells` writes
+`sorted_particle_ids[cell_offsets[cell_indices[i]] + atomicAdd(&write_cursors[cell_indices[i]], 1)] = i`.
+
+`sort_cells_by_particle_id` runs one thread per cell; each thread
+insertion-sorts the slice `[cell_offsets[c], cell_offsets[c+1])` of
+`sorted_particle_ids` ascending by particle index.
+

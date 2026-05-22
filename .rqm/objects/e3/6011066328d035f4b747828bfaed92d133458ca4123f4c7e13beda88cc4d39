@@ -1,0 +1,7 @@
+  @rq-9ecf5a3a
+  Scenario: Filename-convention check runs before schema_version check
+    Given a file at "/tmp/sim/sim.toml" containing only "schema_version = 2"
+    When load_config("/tmp/sim/sim.toml") is called
+    Then it returns Err(ConfigError::InvalidConfigFilename { path: "/tmp/sim/sim.toml" })
+      (the schema_version mismatch is never reached)
+

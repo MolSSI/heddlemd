@@ -1,0 +1,7 @@
+  @rq-31a9e3bb
+  Scenario: r_search_sq is preserved across a generation refresh
+    Given a NeighborListState in CellList mode with r_cut = 1.0 and r_skin = 0.3
+    When box.set_lattice is called bumping the generation
+    And pre_step is called with the updated box
+    Then state.r_search_sq still equals 1.69 (i.e. (1.0 + 0.3)²)
+

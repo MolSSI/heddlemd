@@ -1,0 +1,112 @@
+// rq-5a0f5c00 — derive `<config-root>` from a config path:
+//   1. Take the final filename component.
+//   2. Require it to end in `.in.toml` (case-sensitive, exact suffix).
+//   3. Strip the `.toml` and one trailing `.in`.
+//   4. Reject an empty result (e.g. the filename is `.in.toml`).
+// The check is purely syntactic; the file is not opened.
+fn derive_config_root(path: &Path) -> Result<String, ConfigError> {
+    let invalid = || ConfigError::InvalidConfigFilename {
+        path: path.to_path_buf(),
+    };
+    let filename = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(invalid)?;
+    let without_toml = filename.strip_suffix(".in.toml").ok_or_else(invalid)?;
+    if without_toml.is_empty() {
+        return Err(invalid());
+    }
+    Ok(without_toml.to_string())
+}
+
+// Extract `dt` from messages like ``missing field `dt` `` or
+// ``missing field "dt"``. Returns None for anything else.
+fn extract_missing_field(msg: &str) -> Option<String> {
+    let needle = "missing field";
+    let idx = msg.find(needle)?;
+    let rest = &msg[idx + needle.len()..];
+    // Skip whitespace, then expect a quote (backtick or double-quote).
+    let rest = rest.trim_start();
+    let open = rest.chars().next()?;
+    let close = match open {
+        '`' => '`',
+        '"' => '"',
+        _ => return None,
+    };
+    let after_open = &rest[open.len_utf8()..];
+    let end = after_open.find(close)?;
+    Some(after_open[..end].to_string())
+}
+
+// Populate `Config` from `RawConfig` by resolving paths, filling
+// derived defaults, and converting the Raw sub-types. Does not validate
+// (that's `Config::validate`).
+fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
+    let init = resolve_path(base_dir, &raw.init);
+    let topology = raw.topology.as_deref().map(|s| resolve_path(base_dir, s));
+
+    // Translate the pair_interactions raw form into the public form,
+    // normalising the type-name pair and filling r_switch defaults.
+    let pair_interactions: Vec<PairInteractionConfig> = raw
+        .pair_interactions
+        .into_iter()
+        .map(|r| match r {
+            RawPairInteraction::LennardJones {
+                between,
+                cutoff,
+                r_switch,
+                sigma,
+                epsilon,
+            } => PairInteractionConfig {
+                between: normalise_pair(&between[0], &between[1]),
+                cutoff,
+                r_switch: r_switch.unwrap_or(0.9 * cutoff),
+                potential: PairPotentialParams::LennardJones { sigma, epsilon },
+            },
+        })
+        .collect();
+
+    let bond_types: Vec<BondTypeConfig> = raw.bond_types.into_iter().map(Into::into).collect();
+    let angle_types: Vec<AngleTypeConfig> = raw.angle_types.into_iter().map(Into::into).collect();
+    let constraint_types: Vec<NamedSlotConfig> = raw.constraint_types;
+    let coulomb: Option<CoulombConfig> = raw.coulomb.map(Into::into);
+    let spme = raw.spme;
+
+    // Compute the maximum cutoff across pair_interactions, coulomb,
+    // and spme.r_cut_real; used to derive r_skin's default when
+    // [neighbor_list] is absent or its r_skin field is omitted.
+    let max_cutoff = {
+        let mut m: f64 = 0.0;
+        for p in &pair_interactions {
+            if p.cutoff > m {
+                m = p.cutoff;
+            }
+        }
+        if let Some(c) = coulomb.as_ref() {
+            if c.cutoff > m {
+                m = c.cutoff;
+            }
+        }
+        if let Some(s) = spme.as_ref() {
+            if (s.r_cut_real as f64) > m {
+                m = s.r_cut_real;
+            }
+        }
+        m
+    };
+
+    let neighbor_list = match raw.neighbor_list {
+        None => NeighborListConfig::CellList {
+            max_neighbors: default_max_neighbors(),
+            r_skin: 0.3 * max_cutoff,
+        },
+        Some(RawNeighborList::AllPairs {}) => NeighborListConfig::AllPairs,
+        Some(RawNeighborList::CellList {
+            max_neighbors,
+            r_skin,
+        }) => NeighborListConfig::CellList {
+            max_neighbors,
+            r_skin: r_skin.unwrap_or(0.3 * max_cutoff),
+        },
+    };
+

@@ -1,0 +1,10 @@
+  @rq-b10ed5ec
+  Scenario: SD halves the step on rejected iteration and restores positions
+    Given a SD slot with initial_step=1.0e-12, step_decrease=0.5
+    And a snapshot of positions before the call
+    And a trial that increases the energy (e.g. via an artificially large initial_step over a Morse well)
+    When one minimizer.step is invoked
+    Then the report has accepted == false
+    And the next iteration's step size is 5.0e-13 m within absolute tolerance 1.0e-20
+    And positions_x, positions_y, positions_z are byte-identical to the snapshot
+

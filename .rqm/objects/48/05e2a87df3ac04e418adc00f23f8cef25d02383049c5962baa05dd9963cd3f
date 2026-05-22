@@ -1,0 +1,11 @@
+  @rq-dacb071c
+  Scenario: Generation mismatch with new box too small returns BoxTooSmallForCells
+    Given a NeighborListState in CellList mode with r_cut + r_skin = 1.3
+    When box.set_lattice(3.0, 10.0, 10.0, 0.0, 0.0, 0.0) is called
+      (so w_a = 3.0, giving floor(3.0 / 1.3) = 2 < 3)
+    And pre_step is called with the updated box
+    Then pre_step returns Err(NeighborListError::BoxTooSmallForCells { direction: "a", width: 3.0, required: 3.9 })
+    And state.cached_generation is left unchanged
+    And state.n_cells and state.n_cells_total are left unchanged
+    And cell_offsets is not reallocated
+

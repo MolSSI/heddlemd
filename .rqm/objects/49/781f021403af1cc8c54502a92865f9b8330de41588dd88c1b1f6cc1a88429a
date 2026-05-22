@@ -1,0 +1,31 @@
+## Construction and Lifetime <!-- rq-61b646d2 -->
+
+The runner constructs each minimization phase's `Minimizer` slot
+between *Runner flow* steps 11 (force-field construction) and 13
+(output writer opening) of `simulation-runner.md`, in the same place
+the integrator / thermostat / barostat slots are constructed for an
+MD phase. The unified per-phase loop dispatches on the phase kind:
+
+```text
+for phase in phases:
+    match phase.kind:
+        PhaseKind::Md(P) =>
+            run_md_phase(P, &mut buffers, &mut sim_box, &mut force_field,
+                         constraint.as_mut(), &registries, ...)
+        PhaseKind::Minimization(P) =>
+            run_minimization_phase(P, &mut buffers, &mut sim_box, &mut force_field,
+                                   constraint.as_mut(), &registries, ...)
+```
+
+`run_minimization_phase` builds the `Minimizer` slot via
+`registries.minimizers.build(&P.algorithm, &gpu, particle_count,
+n_constraints)`, opens the per-phase `.minlog` and optional `.xyz`
+writers, runs the SD loop documented under *Algorithm*, flushes and
+closes the writers, drains `Timings`, drops the slot.
+
+The minimizer slot's per-phase allocations (a length-1
+`CudaSlice<f32>` for `F_max` reduction, a length-1 `CudaSlice<f32>`
+for the total potential energy reduction, and per-particle scratch
+buffers for the position snapshot on rejection rollback) persist for
+the lifetime of the phase and are dropped at end of phase.
+

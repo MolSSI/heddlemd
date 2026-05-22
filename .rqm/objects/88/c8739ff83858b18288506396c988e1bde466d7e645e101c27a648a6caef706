@@ -1,0 +1,7 @@
+  @rq-2bc559ec
+  Scenario: Each atom's neighbor list is sorted by partner index after build
+    Given any non-empty system
+    When NeighborListState::rebuild is called
+    Then for every atom i, neighbor_list[i * max_neighbors .. i * max_neighbors + neighbor_counts[i]]
+      is a strictly ascending sequence of u32 partner indices
+

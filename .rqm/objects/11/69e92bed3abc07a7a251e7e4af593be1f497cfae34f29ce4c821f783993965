@@ -1,0 +1,6 @@
+  @rq-1e1c5f3b
+  Scenario: Missing [[particle_types]] is rejected
+    Given the Background config with no [[particle_types]] entries
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "particle_types" })
+

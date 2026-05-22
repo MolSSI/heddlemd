@@ -1,0 +1,6 @@
+  @rq-221b1bb4
+  Scenario: Missing [simulation].dt
+    Given the Background config with the simulation.dt field removed
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "simulation.dt" })
+

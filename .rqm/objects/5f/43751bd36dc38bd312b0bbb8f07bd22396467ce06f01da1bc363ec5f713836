@@ -1,0 +1,9 @@
+  @rq-8f665dd0
+  Scenario: Reject log_path = timings_path
+    Given the Background config with [output].log_path="run.dat"
+      and [output].timings_path="run.dat"
+    When load_config is called
+    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Log, kind_b: PathRole::Timings, path: _ })
+
+  # --- Bonds field ---
+

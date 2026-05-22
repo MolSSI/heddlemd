@@ -1,0 +1,7 @@
+  @rq-40ed9975
+  Scenario: Langevin BAOAB missing friction is rejected
+    Given the Background config with [integrator] kind="langevin-baoab",
+      temperature=300.0, seed=42 (no friction field)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.friction" })
+

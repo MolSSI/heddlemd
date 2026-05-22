@@ -1,0 +1,5 @@
+  @rq-ae7f8045
+  Scenario: File does not exist
+    When load_config("/tmp/does-not-exist.in.toml") is called
+    Then it returns Err(ConfigError::Io(_))
+

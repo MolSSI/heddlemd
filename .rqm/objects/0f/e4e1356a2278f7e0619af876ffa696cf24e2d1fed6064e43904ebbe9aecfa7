@@ -1,0 +1,15 @@
+## Gherkin Scenarios <!-- rq-5f7aa9ac -->
+
+```gherkin
+Feature: Truncated Coulomb pair force kernel
+
+  Background:
+    Given a CUDA-capable GPU available as device 0
+    And init_device() has been called
+    And an orthorhombic SimulationBox with lx=ly=lz=10.0e-9
+    And the Coulomb constant k_C = 8.987551787e9 (rounded to f32)
+    And a CoulombParameters with cutoff=5.0e-9 and r_switch=5.0e-9
+      (hard cutoff, no smoothing) unless otherwise specified
+
+  # --- Basic two-particle force ---
+

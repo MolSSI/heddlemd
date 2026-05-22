@@ -1,0 +1,93 @@
+// rq-3fdb7e01
+/// Open-shaped parsed entry for an array-of-named-slots config
+/// section (currently only `[[constraint_types]]`). Adds a `name`
+/// field that other parts of the config reference by string.
+#[derive(Debug, Clone)]
+pub struct NamedSlotConfig {
+    pub name: String,
+    pub kind: String,
+    pub params: toml::Value,
+}
+
+impl NamedSlotConfig {
+    pub fn new(
+        name: impl Into<String>,
+        kind: impl Into<String>,
+        params: toml::Value,
+    ) -> Self {
+        NamedSlotConfig {
+            name: name.into(),
+            kind: kind.into(),
+            params,
+        }
+    }
+
+    /// Convenience for tests: parse a TOML fragment into the
+    /// `params` field. Panics on malformed input.
+    pub fn from_params_str(name: &str, kind: &str, params_toml: &str) -> Self {
+        let value: toml::Value = toml::from_str(params_toml)
+            .unwrap_or_else(|e| panic!("malformed params TOML: {e}"));
+        NamedSlotConfig {
+            name: name.to_string(),
+            kind: kind.to_string(),
+            params: value,
+        }
+    }
+}
+
+/// Translate a `toml::de::Error` (typically from
+/// `toml::Value::try_into::<Params>()`) into a `ConfigError` for use
+/// from per-builder `validate_params` impls. Routes the
+/// "missing field `x`" case to `MissingField { field: "<slot>.x" }`
+/// to preserve the user-visible error shape, and otherwise wraps the
+/// message in `Parse { path: <slot>, message }`.
+pub fn translate_params_error(slot: &str, e: toml::de::Error) -> ConfigError {
+    let msg = e.to_string();
+    // serde's missing-field message starts with "missing field `<name>`".
+    if let Some(rest) = msg.strip_prefix("missing field `") {
+        if let Some(end) = rest.find('`') {
+            let field = &rest[..end];
+            return ConfigError::MissingField {
+                field: format!("{slot}.{field}"),
+            };
+        }
+    }
+    ConfigError::Parse {
+        path: slot.to_string(),
+        message: msg,
+    }
+}
+
+impl<'de> Deserialize<'de> for NamedSlotConfig {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut table = <toml::Table as Deserialize>::deserialize(d)?;
+        let name = table
+            .remove("name")
+            .ok_or_else(|| serde::de::Error::missing_field("name"))?;
+        let name = match name {
+            toml::Value::String(s) => s,
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "field `name` must be a string",
+                ));
+            }
+        };
+        let kind = table
+            .remove("kind")
+            .ok_or_else(|| serde::de::Error::missing_field("kind"))?;
+        let kind = match kind {
+            toml::Value::String(s) => s,
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "field `kind` must be a string",
+                ));
+            }
+        };
+        Ok(NamedSlotConfig {
+            name,
+            kind,
+            params: toml::Value::Table(table),
+        })
+    }
+}
+

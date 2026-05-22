@@ -1,0 +1,19 @@
+### Per-iteration kernel sequence (one accepted iteration) <!-- rq-063beff1 -->
+
+| Order | Kernel                                | Notes                                                                                  |
+| ----- | ------------------------------------- | -------------------------------------------------------------------------------------- |
+| 1     | `compute_f_max_reduction`             | reduces `forces_*` to a single `f32` `F_max` on the device                             |
+| 2     | `sd_snapshot`                         | captures current accepted positions                                                    |
+| 3     | `sd_compute_step`                     | writes trial positions                                                                 |
+| 4     | (constraint slot, when present)       | `apply_position_projection_only` — projects trial positions onto the manifold          |
+| 5     | `force_field.step` (full pipeline)    | populates `forces_*` and `potential_energies_*` at the trial positions                 |
+| 6     | `compute_total_potential_energy`      | reduces `potential_energies_*` to a single `f32` `E_trial` on the device                |
+
+Rejected iteration: as above, but after step 6 the runner calls
+`sd_restore` to roll positions back to the snapshot, then calls
+`force_field.step` and `compute_total_potential_energy` one more time
+to re-populate forces and the accepted energy at the restored
+positions. (The next iteration's `sd_compute_step` reads the
+re-evaluated forces.) The cost of a rejection is one extra
+`force_field.step` per rejected iteration.
+

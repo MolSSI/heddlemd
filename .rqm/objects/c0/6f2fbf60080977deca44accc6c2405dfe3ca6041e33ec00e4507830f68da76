@@ -1,0 +1,10 @@
+  @rq-4f23c656
+  Scenario: Opposite-sign charges attract
+    Given two particles with charges (+1e, -1e) at positions
+      (0, 0, 0) and (3e-10, 0, 0)
+    When coulomb_pair_force is called
+    Then pair_forces_x[0*2 + 1] equals the closed-form Coulomb force
+      F_x = k_C · (+1e) · (-1e) · (-3e-10) / (3e-10)³
+        = -k_C · e² · 3e-10 / (3e-10)³
+      which is negative (atom 0 is pulled toward atom 1 along +x)
+

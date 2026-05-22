@@ -1,0 +1,34 @@
+## Rebuild Policy <!-- rq-6e11554f -->
+
+The runner holds one host-side `bool` flag `needs_rebuild`. Its initial
+value is `true` so the warm-up force evaluation triggers the first
+rebuild.
+
+Per timestep, after the integrator's pre-force step:
+
+1. If `sim_box.generation() != cached_generation`, refresh the cell-layout
+   cache (see *Box Generation Tracking*). This sets `needs_rebuild = true`
+   and skips the displacement-check kernel for this step. The refresh may
+   return `BoxTooSmallForCells`, in which case `pre_step` aborts and the
+   error propagates.
+2. Otherwise, run the displacement-check kernel, download the per-atom
+   buffer, compute `max_disp`, and set `needs_rebuild = true` if
+   `max_disp > r_skin / 2`. The displacement check is skipped when
+   `needs_rebuild` is already true.
+3. If `needs_rebuild`:
+   a. Run the on-device cell-list pipeline (see *Cell List Construction*)
+      to repopulate `cell_indices`, `cell_counts`, `cell_offsets`, and
+      `sorted_particle_ids` from the current positions.
+   b. Run the neighbor-list-build kernel.
+   c. Check the overflow flag; fail-loud if set.
+   d. Copy current positions into the reference-positions buffers.
+   e. Set `needs_rebuild = false`.
+4. Run downstream contribution kernels (see `framework.md`), which read
+   the neighbor list.
+
+In `CellListOnly` mode, `pre_step` skips the displacement check
+entirely and runs the cell-list pipeline (cell indexing, prefix scan,
+scatter, in-cell sort) on every call, regardless of how far particles
+have moved. The neighbor-list-build kernel does not run in
+`CellListOnly` mode.
+

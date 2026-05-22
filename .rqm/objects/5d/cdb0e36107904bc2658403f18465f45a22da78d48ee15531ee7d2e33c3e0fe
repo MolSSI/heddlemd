@@ -1,0 +1,6 @@
+  @rq-af191d10
+  Scenario: NeighborListError::TooManyCells renders as prose
+    Given NeighborListError::TooManyCells { n_cells_total: 4298942376, max_supported: 4294967295 }
+    When it is formatted with Display
+    Then the output equals "cell grid has 4298942376 cells, exceeding the device limit of 4294967295"
+

@@ -1,0 +1,54 @@
+// rq-661bf664
+/// Open-shaped parsed selection for a singleton `[integrator]`,
+/// `[thermostat]`, or `[barostat]` config section. The Rust-side
+/// deserialiser captures the user's `kind = "..."` field into `kind`
+/// and flattens every other field of the section into a `toml::Value`
+/// (a `toml::Table`) that the chosen builder consumes via
+/// `validate_params(&toml::Value)` and `build(...)`.
+#[derive(Debug, Clone)]
+pub struct SlotConfig {
+    pub kind: String,
+    pub params: toml::Value,
+}
+
+impl SlotConfig {
+    pub fn new(kind: impl Into<String>, params: toml::Value) -> Self {
+        SlotConfig {
+            kind: kind.into(),
+            params,
+        }
+    }
+
+    /// Convenience for tests: parse a TOML fragment into the
+    /// `params` field. Panics on malformed input.
+    pub fn from_params_str(kind: &str, params_toml: &str) -> Self {
+        let value: toml::Value = toml::from_str(params_toml)
+            .unwrap_or_else(|e| panic!("malformed params TOML: {e}"));
+        SlotConfig {
+            kind: kind.to_string(),
+            params: value,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SlotConfig {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut table = <toml::Table as Deserialize>::deserialize(d)?;
+        let kind = table
+            .remove("kind")
+            .ok_or_else(|| serde::de::Error::missing_field("kind"))?;
+        let kind = match kind {
+            toml::Value::String(s) => s,
+            _ => {
+                return Err(serde::de::Error::custom(
+                    "field `kind` must be a string",
+                ));
+            }
+        };
+        Ok(SlotConfig {
+            kind,
+            params: toml::Value::Table(table),
+        })
+    }
+}
+

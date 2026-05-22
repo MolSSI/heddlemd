@@ -1,0 +1,8 @@
+  @rq-cd50d861
+  Scenario: cell_offsets contains the prefix sum of cell occupancies
+    Given the same particles as above
+    Then cell_offsets[0] = 0, cell_offsets[1] = 2, cell_offsets[2] = 3, cell_offsets[3] = 5
+    And cell_offsets has length n_cells_total + 1
+
+  # --- Neighbor list construction ---
+

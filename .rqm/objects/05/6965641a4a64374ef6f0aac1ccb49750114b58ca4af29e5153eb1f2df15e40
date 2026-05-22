@@ -1,0 +1,8 @@
+### Top-level fields <!-- rq-50f2cc42 -->
+
+- `name: String` — required. Identifier used to derive output filenames
+  (`<root>.out.<name>.{minlog,xyz,timings}`). Same character set and
+  uniqueness rules as `[[phase]]`'s `name` (non-empty, ASCII
+  letters/digits/`-`/`_`, unique across both `[[phase]]` and
+  `[[minimization]]` arrays).
+

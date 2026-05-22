@@ -1,0 +1,7 @@
+  @rq-7cd9471a
+  Scenario: Reject r_switch greater than cutoff
+    Given the Background config with pair_interactions[0].cutoff=1.0e-9
+      and pair_interactions[0].r_switch=1.1e-9
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].r_switch", reason: _ })
+

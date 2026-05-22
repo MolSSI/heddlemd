@@ -1,0 +1,6 @@
+  @rq-e75b24e7
+  Scenario: Neighbor list excludes the self atom
+    Given any non-empty system
+    When NeighborListState::rebuild is called
+    Then atom i's neighbor list does not contain i
+

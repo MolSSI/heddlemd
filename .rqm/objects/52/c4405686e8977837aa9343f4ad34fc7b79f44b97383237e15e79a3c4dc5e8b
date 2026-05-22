@@ -1,0 +1,7 @@
+  @rq-24dc9578
+  Scenario: angle_types is optional and defaults to empty
+    Given the Background config without an [[angle_types]] array
+    When load_config is called
+    Then it returns Ok(config)
+    And config.angle_types is empty
+

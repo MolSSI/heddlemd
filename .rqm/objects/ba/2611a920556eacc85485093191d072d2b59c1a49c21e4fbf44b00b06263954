@@ -1,0 +1,127 @@
+    // rq-5a0f5c00 — filename-convention check runs before any I/O.
+    let _root = derive_config_root(path)?;
+
+    let raw_text = std::fs::read_to_string(path)
+        .map_err(|e| ConfigError::Io(format!("{}: {}", path.display(), e)))?;
+
+    let de = toml::Deserializer::new(&raw_text);
+    let raw_config: RawConfig =
+        serde_path_to_error::deserialize(de).map_err(serde_error_to_config_error)?;
+
+    if raw_config.schema_version != SUPPORTED_SCHEMA_VERSION {
+        return Err(ConfigError::UnsupportedSchemaVersion {
+            actual: raw_config.schema_version,
+            supported: SUPPORTED_SCHEMA_VERSION,
+        });
+    }
+
+    let base_dir = path.parent().unwrap_or(Path::new("."));
+    let config = build_config(raw_config, path, base_dir);
+    config.validate()?;
+    Ok(config)
+}
+
+// Translate a `serde_path_to_error::Error<toml::de::Error>` into the
+// `ConfigError` shape: detect "missing field `X`" patterns and route
+// those to `MissingField`; everything else becomes `Parse`.
+fn serde_error_to_config_error(
+    err: serde_path_to_error::Error<toml::de::Error>,
+) -> ConfigError {
+    let raw_path = err.path().to_string();
+    // serde_path_to_error renders the empty path as "." (the root
+    // marker). Strip it so callers see "init" rather than ".init".
+    let trimmed = raw_path.trim_matches('.');
+    let path = normalise_path(trimmed);
+    // Strip the `phase[N].` prefix so per-slot error paths look the same
+    // whether the error came from the raw deserialisation step or from a
+    // builder's `validate_params` call.
+    let path = strip_phase_prefix(&path);
+    let inner = err.into_inner();
+    let message = inner.to_string();
+
+    if let Some(field) = extract_missing_field(&message) {
+        let full = if path.is_empty() {
+            field
+        } else {
+            format!("{path}.{field}")
+        };
+        ConfigError::MissingField { field: full }
+    } else {
+        ConfigError::Parse { path, message }
+    }
+}
+
+fn strip_phase_prefix(path: &str) -> String {
+    // `[[phase]]` and `[[minimization]]` deserialise through
+    // `toml::Spanned<T>`, which inserts an internal
+    // `$__serde_spanned_private_value` segment in the serde_path_to_error
+    // path. Strip it so error paths look the same whether the entry was
+    // wrapped or not.
+    let path = strip_spanned_prefix(path, "phase");
+    let path = strip_spanned_prefix(&path, "minimization");
+    // Match `phase[N]` or `phase[N].`; strip both the bracket section
+    // and any trailing `.`.
+    if let Some(rest) = path.strip_prefix("phase[") {
+        if let Some(end) = rest.find(']') {
+            let after = &rest[end + 1..];
+            return after.strip_prefix('.').unwrap_or(after).to_string();
+        }
+    }
+    if let Some(rest) = path.strip_prefix("minimization[") {
+        if let Some(end) = rest.find(']') {
+            let after = &rest[end + 1..];
+            return after.strip_prefix('.').unwrap_or(after).to_string();
+        }
+    }
+    path.to_string()
+}
+
+// Collapse a `toml::Spanned<T>` path segment by removing the internal
+// `$__serde_spanned_private_value` marker. After the Spanned wrap the
+// path of a `[[phase]]` (or `[[minimization]]`) entry's field looks
+// like `phase[N].$__serde_spanned_private_value.integrator` (or
+// `minimization[N].$__serde_spanned_private_value.algorithm`); we
+// strip the marker so the remaining path looks the same as before
+// wrapping.
+fn strip_spanned_prefix(path: &str, field: &str) -> String {
+    let needle_with_idx = format!("{field}[");
+    if let Some(idx) = path.find(&needle_with_idx) {
+        // Skip past `field[N]`.
+        let after_bracket = &path[idx + needle_with_idx.len()..];
+        if let Some(close) = after_bracket.find(']') {
+            let prefix = &path[..idx + needle_with_idx.len() + close + 1];
+            let rest = &after_bracket[close + 1..];
+            let stripped = rest
+                .strip_prefix(".$__serde_spanned_private_value")
+                .unwrap_or(rest);
+            return format!("{prefix}{stripped}");
+        }
+    }
+    path.to_string()
+}
+
+// serde_path_to_error renders array indices as `.0`, `.1`, ...; convert
+// them to the `[i]` form used in error-message contracts.
+fn normalise_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut chars = path.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '.' && chars.peek().map_or(false, |n| n.is_ascii_digit()) {
+            // ".N" -> "[N]"
+            out.push('[');
+            while let Some(&n) = chars.peek() {
+                if n.is_ascii_digit() {
+                    out.push(n);
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+            out.push(']');
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+

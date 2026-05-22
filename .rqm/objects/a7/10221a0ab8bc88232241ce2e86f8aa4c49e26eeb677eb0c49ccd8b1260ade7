@@ -1,0 +1,18 @@
+## Algorithm <!-- rq-d4c2b6cd -->
+
+Steepest descent advances positions along the negative gradient of the
+potential energy `U(x)`, with a single global scalar step size that is
+adapted between iterations based on whether the previous trial reduced
+the energy. The step formula is GROMACS-style:
+
+```
+x_trial = x + step · (F / F_max)
+```
+
+where `F = -∇U(x)` is the per-atom force at the current accepted
+positions, `F_max = max_i ||F_i||` is the maximum per-atom force
+magnitude, and `step` is the current scalar step size (metres). The
+atom with the largest force magnitude moves by exactly `step`; every
+other atom moves proportionally less. The division by `F_max` keeps
+the maximum per-atom displacement bounded regardless of force scale.
+

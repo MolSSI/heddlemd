@@ -1,0 +1,6 @@
+  @rq-0dc50ce0
+  Scenario: Reject a phase name containing non-ASCII characters
+    Given the Background config with [[phase]] name="αβ"
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "phase[0].name", .. })
+

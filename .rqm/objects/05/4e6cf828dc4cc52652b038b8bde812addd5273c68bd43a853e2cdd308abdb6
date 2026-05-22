@@ -1,0 +1,33 @@
+### `[minimization.output]` <!-- rq-2443920b -->
+
+The `[minimization.output]` table is optional. When omitted, the
+phase uses the default cadences and the default file paths.
+
+- `minlog_path: String` — output `.minlog` path for this phase.
+  Default: `<config-root>.out.<phase-name>.minlog` in the same
+  directory as the config file. Resolved relative to the config
+  file's directory; absolute paths are honoured as-is.
+- `minlog_every: u64` — write one `.minlog` row every this many
+  iterations within this phase. Default `1`. `0` disables the
+  `.minlog` entirely (no header is written, no file is created).
+- `trajectory_path: String` — output `.xyz` path for this phase.
+  Default: `<config-root>.out.<phase-name>.xyz`. Same resolution
+  rules as `[phase.output].trajectory_path`.
+- `trajectory_every: u64` — write one trajectory frame every this
+  many iterations. Default `0` (disabled). When `> 0`, the frame at
+  iteration `0` is always written, plus one at every multiple of
+  `trajectory_every`, plus one final frame at the convergence
+  iteration.
+- `include_images: bool` — include `image:I:3` columns in
+  trajectory frames. Default `true`. Same semantics as the MD-phase
+  field.
+- `timings_path: String` — output `.timings` path for this phase.
+  Default: `<config-root>.out.<phase-name>.timings`.
+
+The minimization phase does not emit a `.log` (MD CSV log); the
+`.minlog` replaces it. The `include_velocities` field is not
+accepted (velocities do not change during minimization; including
+them in trajectory frames would duplicate the phase-entry velocities
+without adding information). Setting `include_velocities` under
+`[minimization.output]` surfaces as `ConfigError::Parse`.
+

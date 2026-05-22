@@ -1,0 +1,7 @@
+  @rq-6ad9a0f8
+  Scenario: bond_types is optional and defaults to empty
+    Given the Background config without a [[bond_types]] array
+    When load_config is called
+    Then it returns Ok(config)
+    And config.bond_types is empty
+

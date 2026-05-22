@@ -1,0 +1,8 @@
+  @rq-203ecf81
+  Scenario: Reject a config that declares both [spme] and [coulomb]
+    Given a Config TOML with both [spme] and [coulomb] tables
+    When load_config is called
+    Then it returns Err(ConfigError::ConflictingElectrostatics { .. })
+
+  # --- Box-compat check ---
+

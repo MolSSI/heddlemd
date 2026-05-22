@@ -1,0 +1,11 @@
+  @rq-f5a4623c
+  Scenario: A run with one [[minimization]] phase executes the SD loop and proceeds to the next phase
+    Given a config with one [[minimization]] phase followed by one [[phase]] of n_steps=10
+    And a 4-particle initial state with non-zero forces
+    When dynamics run <config> is invoked
+    Then the .minlog for the minimization phase exists and has at least the step-0 row
+    And the subsequent MD phase's log exists and has the expected number of rows
+    And the exit code is 0
+
+  # --- Algorithm semantics ---
+

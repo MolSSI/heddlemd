@@ -1,0 +1,6 @@
+  @rq-e399422c
+  Scenario: Harmonic angle_type rejects theta_0 outside [0, π]
+    Given an [[angle_types]] entry with potential="harmonic", k_theta=5.27e-19, theta_0=4.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "angle_types[0].theta_0", reason: _ })
+

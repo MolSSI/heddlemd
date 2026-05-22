@@ -1,0 +1,9 @@
+  @rq-5e075019
+  Scenario: SD with no constraint slot does not call any projection hook
+    Given a config with no [[constraint_types]] / no topology [constraints] section
+    And a recording wrapper that timestamps every Constraint hook call
+    When the minimization phase runs
+    Then no constraint hooks are recorded
+
+  # --- Empty state ---
+

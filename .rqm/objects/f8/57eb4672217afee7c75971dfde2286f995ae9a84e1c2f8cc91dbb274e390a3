@@ -1,0 +1,8 @@
+  @rq-b1f33ea4
+  Scenario: neighbor_list cell-list with explicit parameters is accepted
+    Given the Background config plus
+      [neighbor_list] mode="cell-list" max_neighbors=128 r_skin=2.0e-10
+    When load_config is called
+    Then it returns Ok(config)
+    And config.neighbor_list matches NeighborListConfig::CellList { max_neighbors: 128, r_skin: 2.0e-10 }
+

@@ -1,0 +1,13 @@
+  @rq-014a82ef
+  Scenario: IntegratorBuilder::owns_barostat matrix
+    Given the "velocity-verlet" builder from IntegratorRegistry::with_builtins()
+    Then builder.owns_barostat(&{ lossless: false }) returns false
+    Given the "langevin-baoab" builder
+    Then builder.owns_barostat(&{ friction: 1.0, temperature: 300.0, seed: 0 }) returns false
+    Given the "mtk-npt" builder
+    Then builder.owns_barostat(&{ temperature: 85.0, pressure: 1.0e5,
+      tau_t: 1.0e-13, tau_p: 1.0e-12,
+      chain_length: 3, yoshida_order: 3, n_resp: 1 }) returns true
+
+  # --- [barostat] section ---
+

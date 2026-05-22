@@ -1,0 +1,40 @@
+# Feature: Truncated Coulomb Pair Force Kernel <!-- rq-846bdb8b -->
+
+Truncated Coulomb is the non-bonded electrostatic pairwise potential slot
+in the pluggable potential framework (`framework.md`). The slot is present
+when the config declares a `[coulomb]` table. Its parameters are a single
+real-space cutoff and a single inner-switching radius; pair magnitudes are
+constructed at kernel time from the per-particle charges carried by
+`ParticleBuffers` (see `particle-state.md`).
+
+The slot evaluates pair forces with a single kernel that reads the shared
+`NeighborListState` owned by `ForceField` (see `neighbor-list.md`). Each
+`(i, k)` thread reads `neighbor_list[i * max_neighbors + k]` to find its
+partner `j`, applies the cutoff and switching function, applies the
+Coulomb-specific per-pair exclusion scale, and writes the pair force into
+the `PairBuffer` at slot `i * max_neighbors + k`. Work is O(N · average
+neighbour count) when the shared list is in cell-list mode and O(N²) when
+it is in trivial mode (every particle's list contains every particle).
+The kernel is the same in both cases; only the contents and size of the
+shared list differ.
+
+This slot is the smallest viable charge-carrying milestone in the project's
+electrostatics roadmap. It is intentionally short-range only: real-space
+truncation of `1/r` is known to introduce artefacts for charged systems
+larger than a few nanometres. A future smooth particle-mesh Ewald slot
+will replace the long-range contribution; the real-space and exclusion
+machinery exercised here carries over.
+
+This file specifies `CoulombParameters` (the host-side parameter
+container), the `coulomb_pair_force` CUDA kernel in `kernels/coulomb.cu`,
+and the Rust launch helper that drives it.
+
+Each pair contribution is multiplied by a CHARMM-style C¹ switching
+function `S(r²)` over the interval `[r_switch, cutoff]` so that both
+energy and force go smoothly to zero at the cutoff. Below `r_switch`
+the switching factor is exactly `1` and the kernel evaluates the
+unmodified Coulomb force and energy. `r_switch = cutoff` selects the
+hard-cutoff degenerate case in which no smoothing is applied; below
+the cutoff the unmodified Coulomb force and energy apply and at the
+cutoff a discontinuity remains.
+

@@ -1,0 +1,31 @@
+### Force gather <!-- rq-df8766ae -->
+
+The reciprocal-space force on particle `i` is
+
+```text
+F_i_recip = −q_i · ∇_r ( Σ_g V[g] · M_p(s_a · n_a − g_a)
+                                  · M_p(s_b · n_b − g_b)
+                                  · M_p(s_c · n_c − g_c) )
+```
+
+Operationally: one thread per particle. Each thread:
+
+1. Reads particle `i`'s wrapped position and computes the fractional
+   coordinates `(s_a, s_b, s_c)`.
+2. Determines its primary bin and iterates the `p × p × p` neighbouring
+   bins of grid points (wrapping modulo `n_d`).
+3. For each grid point `g` in the support, computes the 1D B-spline
+   weights `w_a, w_b, w_c` and the corresponding 1D derivatives
+   `dw_a, dw_b, dw_c`.
+4. Accumulates per-particle force components from the gradient
+   contribution `V[g] · (dw_a · w_b · w_c, w_a · dw_b · w_c, w_a · w_b · dw_c)`
+   scaled by `−q_i · n_d` (the chain-rule factor for the fractional-to-
+   grid map).
+5. Accumulates the per-particle reciprocal energy
+   `0.5 · q_i · Σ_g V[g] · w_a · w_b · w_c`.
+
+Each particle is written by exactly one thread; no atomics, no race
+conditions. Summation order over the `p³` grid points within a particle
+is fixed in `(d_a, d_b, d_c)` lexicographic order, so the contribution
+ordering is deterministic.
+

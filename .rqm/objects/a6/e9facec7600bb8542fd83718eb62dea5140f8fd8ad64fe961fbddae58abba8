@@ -1,0 +1,9 @@
+  @rq-d22f105f
+  Scenario: cell_offsets is reallocated when n_cells_total changes
+    Given a NeighborListState in CellList mode with n_cells = [10, 10, 10]
+      (n_cells_total = 1000, cell_offsets length 1001)
+    When box.set_lattice is called producing n_cells = [11, 11, 11]
+      (n_cells_total = 1331)
+    And pre_step is called with the updated box
+    Then cell_offsets is reallocated to length 1332
+

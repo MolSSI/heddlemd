@@ -1,0 +1,31 @@
+## Out of Scope <!-- rq-58acf788 -->
+
+- Device-side parallel displacement-max reduction. Future work when the
+  N-length per-step download becomes a bottleneck.
+- Auto-growing `max_neighbors` on overflow. The current v1 contract is
+  fail-loud and require the user to raise the value.
+- Coulomb-style long-range force, which would require a non-cell-list
+  decomposition (Ewald / PME). The neighbor-list framework here is
+  short-range only.
+- Half-neighbor-list (Newton's-third-law optimisation that lists each
+  pair once instead of twice). Doubles the build complexity and would
+  also force a different reduction strategy.
+- Constant or adaptive `r_skin`. v1 is constant.
+- Sort 2 (per-atom neighbor-list sort) being optional in v1 — the v1
+  implementation always sorts. A future feature may make it
+  conditional, but doing so is its own decision-point and is not
+  included here.
+- Per-pair-of-consumers cutoff filtering inside the neighbor-list build
+  itself. The shared list is built once at the maximum cutoff across
+  consumers; each consumer applies its own per-pair cutoff at force
+  evaluation time, reading the list but discarding entries beyond its
+  own cutoff.
+- Detecting a box mutation that bypasses `SimulationBox::set_lattice`
+  (e.g. two `SimulationBox` values constructed independently that happen
+  to share a `generation`, or a future API that mutates the lattice
+  without bumping the counter). The generation counter is the contract;
+  consumers trust the runner to own one canonical box and to use only
+  the documented mutator.
+
+---
+

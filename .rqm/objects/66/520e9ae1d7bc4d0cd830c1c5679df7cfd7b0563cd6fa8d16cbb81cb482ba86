@@ -1,0 +1,25 @@
+## Constraint Handling <!-- rq-4241d94b -->
+
+Constraints participate in minimization through a new trait method on
+the `Constraint` slot, `apply_position_projection_only`, that performs
+the SHAKE-style position projection without the per-step velocity
+correction that the integration hooks apply. The trait method, its
+contract, and the registered SETTLE implementation are documented in
+`integration/constraint-framework.md` and `integration/settle.md`.
+
+A minimization phase consults the same global `ConstraintList` as the
+MD phases. The runner constructs the constraint slot at runner
+startup (once, before any phase begins) and reuses it across both
+phase kinds. The `Minimizer` does not own the constraint slot; the
+runner holds it and threads it into the per-iteration step.
+
+The SD minimizer is compatible with every registered constraint
+algorithm. The compatibility predicate
+`MinimizerBuilder::supports_constraints(&params)` returns `true` for
+the `steepest-descent` builder regardless of its params, parallel to
+the `velocity-verlet { lossless = false }` integrator's behaviour.
+
+When the run has no constraints, the projection step is skipped (the
+runner holds `None` for the constraint slot and the loop body does
+not call the projection hook).
+

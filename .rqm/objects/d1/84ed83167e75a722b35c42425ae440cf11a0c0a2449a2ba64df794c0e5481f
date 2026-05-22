@@ -1,0 +1,6 @@
+  @rq-52c9b17a
+  Scenario: Missing [simulation].temperature
+    Given the Background config with the simulation.temperature field removed
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "simulation.temperature" })
+

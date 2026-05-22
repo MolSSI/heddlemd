@@ -1,0 +1,9 @@
+// rq-45bb8194 — default loader for callers that use only the built-in
+// slot kinds. Custom-builder callers use `load_config_raw` plus
+// `validate_against(&their_registries)` instead.
+pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
+    let config = load_config_raw(path)?;
+    config.validate_against(&crate::Registries::with_builtins())?;
+    Ok(config)
+}
+

@@ -1,0 +1,19 @@
+#### `[simulation]` <!-- rq-a84e1c76 -->
+
+The `[simulation]` table carries the two settings that apply to the
+**initial-velocity sampling** performed once at phase-0 entry, before
+any integration starts. Per-step settings (timestep, step count,
+integrator/thermostat/barostat composition, output cadences) live in
+the `[[phase]]` array.
+
+- `seed: u64` — RNG seed used for Maxwell-Boltzmann velocity
+  generation. Required even when the init file supplies explicit
+  velocities (still validated, even though unused). No default.
+- `temperature: f64` — initial-velocity temperature in kelvin.
+  Required. Used to initialise velocities at the Maxwell-Boltzmann
+  distribution when the init file's `Properties` lacks a `velo:R:3`
+  field; ignored (but still required and validated) when the init
+  file supplies velocities. Must be finite and `>= 0.0`. The
+  thermostat's bath temperature is a separate per-phase field under
+  `[phase.thermostat]`.
+

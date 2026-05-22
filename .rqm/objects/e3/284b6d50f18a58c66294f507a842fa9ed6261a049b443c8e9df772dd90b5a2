@@ -1,0 +1,9 @@
+### Empty state <!-- rq-cc9f4623 -->
+
+When `particle_count == 0`, the phase emits a single step-0 `.minlog`
+row with `energy = 0.0`, `max_force = 0.0`, `step = initial_step`,
+and `accepted = true`, declares convergence with
+`MinimizerConvergence::ForceZero`, and proceeds to the next phase
+without launching any kernel beyond the warm-up `force_field.step`
+(which itself is a no-op on empty buffers).
+

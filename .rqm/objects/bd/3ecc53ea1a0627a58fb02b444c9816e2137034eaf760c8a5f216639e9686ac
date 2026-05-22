@@ -1,0 +1,6 @@
+  @rq-fedef74d
+  Scenario: neighbor_list rejects zero max_neighbors
+    Given the Background config plus [neighbor_list] mode="cell-list" max_neighbors=0 r_skin=1.0e-10
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "neighbor_list.max_neighbors", reason: _ })
+

@@ -1,0 +1,22 @@
+## Parameters <!-- rq-f9a9c569 -->
+
+The slot owns a single `CoulombParameters` record (host-side) carrying
+the cutoff and the inner switching radius, both in metres:
+
+- `cutoff: f32` — finite, strictly positive.
+- `r_switch: f32` — finite, strictly positive, and `r_switch <= cutoff`.
+  When `r_switch == cutoff` the switching interval is degenerate and no
+  smoothing is applied (the kernel writes the bare Coulomb force and
+  energy for `r ≤ cutoff` and zero for `r > cutoff`).
+
+Per-particle charges live on `ParticleBuffers` (see `particle-state.md`)
+and are not duplicated here. The slot does not own a per-pair-type
+parameter table; `q_i · q_j` is computed on the fly from the per-particle
+charges.
+
+`k_C` (the Coulomb constant) is a compile-time `f32` constant equal to
+the rounded f32 representation of `1 / (4 π ε₀) ≈ 8.987 551 787 × 10⁹`
+N·m²/C². The kernel reads it as an argument to keep the parameter
+surface explicit at the launch site; the constant is supplied by the
+launch helper, never overridden from config.
+

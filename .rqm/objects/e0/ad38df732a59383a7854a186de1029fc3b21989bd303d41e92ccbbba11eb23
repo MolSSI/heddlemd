@@ -1,0 +1,9 @@
+  @rq-e5bf6fea
+  Scenario: The k=0 entry is zeroed by the influence-function multiply
+    Given any non-zero rho_hat
+    When spme_influence_multiply is called
+    Then rho_hat[k=0] equals 0.0 + 0.0i after the multiply
+      (tinfoil boundary condition)
+
+  # --- Force gather ---
+

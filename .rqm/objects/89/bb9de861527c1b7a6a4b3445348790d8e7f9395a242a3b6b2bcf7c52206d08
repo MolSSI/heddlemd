@@ -1,0 +1,26 @@
+### Cross-validation <!-- rq-e2bb500b -->
+
+- Phase names are unique across the unified `[[phase]]` and
+  `[[minimization]]` arrays. A collision surfaces as
+  `ConfigError::DuplicatePhaseName { name }`.
+- Output paths are pairwise distinct across the whole config
+  (extending the existing `PathRole` enum with
+  `MinimizationMinlog { phase: String }`,
+  `MinimizationTrajectory { phase: String }`, and
+  `MinimizationTimings { phase: String }` variants).
+- A minimization phase's algorithm kind is dispatched against
+  `registries.minimizers` (a new field on the `Registries` bundle).
+  An unknown kind surfaces as
+  `ConfigError::UnknownKind { slot: "minimization", kind }`.
+- A minimization phase is **incompatible** with any constraint
+  algorithm whose builder's
+  `ConstraintBuilder::supports_position_projection_only(&params)`
+  returns `false` (a new predicate; see
+  `integration/constraint-framework.md`). The check runs per phase via
+  `Config::validate_constraint_compatibility`. The default-registry
+  `settle` builder returns `true`, so this rejection path is
+  reachable only by future constraint algorithms.
+- A `[[minimization]]` phase carries no integrator, thermostat, or
+  barostat section. The TOML deserialiser rejects those keys under
+  `[[minimization]]` as unknown fields.
+

@@ -1,0 +1,9 @@
+  @rq-f114c560
+  Scenario: Accept a two-type config with a complete pair_interactions table
+    Given a config with two declared types "Ar" and "Kr"
+      and pair_interactions for all three unordered pairs ("Ar","Ar"), ("Ar","Kr"), ("Kr","Kr")
+    When load_config is called
+    Then it returns Ok(config)
+    And config.particle_types has length 2
+    And config.pair_interactions has length 3
+

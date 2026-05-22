@@ -1,0 +1,8 @@
+  @rq-57f8de41
+  Scenario: Malformed TOML
+    Given a file at "/tmp/sim.in.toml" containing the bytes "schema_version = ["
+    When load_config("/tmp/sim.in.toml") is called
+    Then it returns Err(ConfigError::Parse { .. })
+
+  # --- Filename convention ---
+

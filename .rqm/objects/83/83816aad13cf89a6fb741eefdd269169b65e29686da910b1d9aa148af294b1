@@ -1,0 +1,8 @@
+  @rq-52f547fd
+  Scenario: NeighborListState with particle_count = 1 produces an empty neighbor list
+    When a single particle is in the system
+    And NeighborListState::rebuild is called
+    Then neighbor_counts[0] equals 0
+
+  # --- Determinism ---
+

@@ -1,0 +1,8 @@
+  @rq-4169d3af
+  Scenario: Reject schema_version = 0
+    Given the Background config with schema_version=0
+    When load_config is called
+    Then it returns Err(ConfigError::UnsupportedSchemaVersion { actual: 0, supported: 1 })
+
+  # --- TOML and IO failures ---
+

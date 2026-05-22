@@ -1,0 +1,11 @@
+// rq-53055a5b — `[simulation]` carries only the inputs for the
+// initial Maxwell-Boltzmann velocity sampling (fired once at phase-0
+// entry). Per-step settings (`dt`, `n_steps`) live on each
+// `[[phase]]` entry.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SimulationConfig {
+    pub seed: u64,
+    pub temperature: f64,
+}
+

@@ -1,0 +1,40 @@
+### Config filename convention <!-- rq-5a0f5c00 -->
+
+The config-file path passed to `load_config` (and `load_config_raw`)
+must end in `.in.toml` (the suffix match is case-sensitive on the
+whole `.in.toml` string). The runner inspects the path's final
+filename component and rejects any name that does not have this
+suffix with `ConfigError::InvalidConfigFilename { path }`. The rule is
+a load-time check on the path string itself; the file is not opened
+when it fails. This makes the in/out file-naming pairing visible at
+every `ls` of a simulation directory and lets the loader derive every
+output default from the config filename without an extra config field.
+
+The `<config-root>` referenced by the `[output]` defaults is derived
+as:
+
+```
+1. Take the path's final filename component.
+2. Strip the trailing `.toml` suffix.
+3. Strip one trailing `.in` suffix (and only one).
+```
+
+Examples:
+
+| Config filename       | `<config-root>` | Default trajectory path |
+| --------------------- | --------------- | ----------------------- |
+| `argon.in.toml`       | `argon`         | `argon.out.xyz`         |
+| `spc.in.toml`         | `spc`           | `spc.out.xyz`           |
+| `run-01.in.toml`      | `run-01`        | `run-01.out.xyz`        |
+| `foo.in.in.toml`      | `foo.in`        | `foo.in.out.xyz`        |
+
+The strip is case-sensitive on the `.in` segment: a filename ending in
+`.IN.toml` does not satisfy the suffix rule and is rejected at the
+filename-convention check. Filenames whose `<config-root>` derivation
+would yield the empty string (e.g. `.in.toml` itself) are likewise
+rejected with `ConfigError::InvalidConfigFilename { path }`.
+
+The init-file path, the topology-file path, and any explicit
+`output.*_path` field are not subject to the filename convention; they
+are arbitrary user-supplied paths.
+

@@ -1,0 +1,7 @@
+  @rq-02f4d342
+  Scenario: cuFFT smoke test fails-loud when consecutive transforms produce different output
+    Given a config that selects SPME
+    And cuFFT (simulated) produces byte-different output on consecutive R2C calls of the same input
+    When init_device() is called
+    Then it returns Err(RunnerError::CuFftNonDeterministic { differences: d }) with d > 0
+

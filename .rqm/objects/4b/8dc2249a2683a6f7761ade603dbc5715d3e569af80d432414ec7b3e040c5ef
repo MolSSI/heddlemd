@@ -1,0 +1,6 @@
+  @rq-96d9c9df
+  Scenario: Reject phase dt <= 0
+    Given the Background config with [[phase]] dt = 0.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "phase[0].dt", .. })
+

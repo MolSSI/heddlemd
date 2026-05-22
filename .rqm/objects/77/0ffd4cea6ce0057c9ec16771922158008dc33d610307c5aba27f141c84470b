@@ -1,0 +1,7 @@
+  @rq-83312d09
+  Scenario: Bonded-only ForceField builds no neighbor list
+    Given a ForceField whose only slot returns max_cutoff() = None
+    When ForceField::new completes
+    Then ForceField::neighbor_list is None
+    And ForceField::step launches no displacement-check kernel and no neighbor-list-build kernel
+

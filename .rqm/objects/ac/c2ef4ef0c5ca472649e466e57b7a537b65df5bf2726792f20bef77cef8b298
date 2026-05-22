@@ -1,0 +1,9 @@
+  @rq-bd684a0d
+  Scenario: Force gather on one isolated particle returns the gradient of its own spread
+    Given a single particle with charge q and the spread + FFT + multiply + IFFT pipeline run
+    When spme_force_gather is called
+    Then the per-particle force F equals -q · ∇V evaluated at the particle position
+      to within 1e-4 relative
+    And after subtracting the self-energy gradient (zero for an isolated particle in v1),
+      the result matches the closed-form short-distance limit
+

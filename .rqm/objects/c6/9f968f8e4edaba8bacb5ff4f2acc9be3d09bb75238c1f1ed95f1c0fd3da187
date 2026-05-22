@@ -1,0 +1,16 @@
+## Gherkin Scenarios <!-- rq-6aeb039a -->
+
+```gherkin
+Feature: TOML simulation config schema
+
+  Background:
+    Given a valid minimal config containing schema_version = 1, init = "argon.in.xyz",
+      one [simulation] section with seed=12345, temperature=300.0,
+      one [[phase]] entry with name="run", n_steps=10, dt=1.0e-15,
+        [phase.integrator] kind="velocity-verlet" and lossless=false,
+      one [[particle_types]] entry with name="Ar" and mass=6.6335e-26,
+      one [[pair_interactions]] entry between=["Ar","Ar"], potential="lennard-jones",
+        sigma=3.40e-10, epsilon=1.65e-21, cutoff=1.0e-9
+
+  # --- Happy path ---
+

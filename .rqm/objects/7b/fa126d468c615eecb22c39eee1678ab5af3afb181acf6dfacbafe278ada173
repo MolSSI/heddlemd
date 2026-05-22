@@ -1,0 +1,35 @@
+## Neighbor List Construction <!-- rq-33aa3e1d -->
+
+Once the cell list is populated (see *Cell List Construction*), one
+device kernel builds the per-atom neighbor list. The kernel maps one
+thread to each atom `i`:
+
+1. Compute atom `i`'s cell `(cx, cy, cz)` from its current position.
+2. Iterate the 27 adjacent cells `(cx + dx, cy + dy, cz + dz)` for
+   `dx, dy, dz` in `{-1, 0, +1}`, wrapping each per-axis cell index modulo
+   `n_cells_a`.
+3. For each visited cell `c'`, walk `sorted_particle_ids[cell_offsets[c']
+   .. cell_offsets[c' + 1]]` in order. For each candidate partner `j`,
+   skip if `j == i`, otherwise compute the minimum-image displacement
+   between `i` and `j`. If `r² <= (r_cut + r_skin)²`, append `j` to
+   atom `i`'s neighbor list.
+4. After all 27 cells are walked, sort atom `i`'s neighbor list in place
+   by partner index (an insertion sort over `<= max_neighbors` entries).
+
+The cell iteration order, the in-cell particle order, and the per-atom
+insertion sort are all deterministic given the inputs. No atomics are
+used.
+
+The neighbor list is stored as:
+
+- `neighbor_list: CudaSlice<u32>` of length `N * max_neighbors`. Slot
+  `i * max_neighbors + k` is the `k`-th partner of atom `i`.
+- `neighbor_counts: CudaSlice<u32>` of length `N`. Entry `i` is atom
+  `i`'s neighbor count (`<= max_neighbors`).
+
+When an atom's neighbor count would exceed `max_neighbors`, the kernel
+sets an overflow flag in a device-side scalar and ceases appending for
+that atom. The host detects the flag after the kernel returns and
+returns `NeighborListOverflow { max: max_neighbors }` from
+`NeighborListState::rebuild` (see *Feature API* below).
+

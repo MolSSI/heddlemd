@@ -1,0 +1,8 @@
+  @rq-d623f23d
+  Scenario: C-rescale barostat missing temperature is rejected
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [barostat] section with kind="c-rescale", pressure=1.0e5,
+      tau=1.0e-12, compressibility=4.5e-10, seed=1
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "barostat.temperature" })
+

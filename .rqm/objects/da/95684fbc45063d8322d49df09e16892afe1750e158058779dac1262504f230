@@ -1,0 +1,66 @@
+## Cell List Construction <!-- rq-a060036e -->
+
+A cell-list rebuild is performed entirely on the device. The pipeline
+operates on five device buffers — three persistent outputs and two
+persistent scratch buffers — without round-tripping through the host:
+
+- **`cell_indices: CudaSlice<u32>` of length `N`** (scratch). Populated
+  by the cell-indexing stage; entry `i` is atom `i`'s cell index.
+- **`cell_counts: CudaSlice<u32>` of length `n_cells_total`** (scratch).
+  Populated by the histogram stage; entry `c` is the number of atoms in
+  cell `c`.
+- **`cell_offsets: CudaSlice<u32>` of length `n_cells_total + 1`**
+  (output). Populated by the exclusive-scan stage from `cell_counts`.
+  `cell_offsets[c]` is the index in `sorted_particle_ids` where cell
+  `c`'s atoms begin; `cell_offsets[c+1] - cell_offsets[c]` is the cell's
+  occupancy; `cell_offsets[n_cells_total]` is `particle_count`.
+- **`write_cursors: CudaSlice<u32>` of length `n_cells_total`** (scratch).
+  Reset to zero at the start of each rebuild; the scatter stage
+  `atomicAdd`s into it to claim per-cell write positions.
+- **`sorted_particle_ids: CudaSlice<u32>` of length `N`** (output). The
+  particle IDs sorted lexicographically by `(cell_index, particle_id)`;
+  the secondary sort key gives a deterministic in-cell ordering.
+
+The pipeline runs as a sequence of device kernels:
+
+1. **Cell-index + histogram.** Each thread handles one atom: computes
+   the atom's cell index (using the wrap formula in *Cell Layout*),
+   writes it to `cell_indices[i]`, and performs an `atomicAdd` on
+   `cell_counts[cell_indices[i]]`. Integer `atomicAdd` is deterministic
+   in value because addition is associative; the final `cell_counts`
+   array is identical across runs even though the order of atomic
+   updates is not.
+2. **Exclusive prefix scan.** A recursive multi-level device scan writes
+   the exclusive prefix sum of `cell_counts` into `cell_offsets`. Each
+   level performs a per-block local exclusive scan and emits one
+   inclusive total per block; the array of per-block totals is scanned
+   by the same procedure applied recursively, and the scanned totals are
+   added back into the level below. The recursion bottoms out at a level
+   whose input fits in a single block. The output invariant is
+   `cell_offsets[c] = sum_{c' < c} cell_counts[c']` for `c` in
+   `[0, n_cells_total]`, with `cell_offsets[n_cells_total] =
+   particle_count`. The scan imposes no cap on `n_cells_total`; the only
+   ceiling is the device's `u32` cell addressing (see
+   `NeighborListError::TooManyCells`). Integer addition is associative,
+   so the scan result is bit-exact run-to-run regardless of block
+   scheduling.
+3. **Scatter.** `write_cursors` is reset to zero. Each thread handles
+   one atom and computes
+   `slot = atomicAdd(&write_cursors[cell_indices[i]], 1)`, then writes
+   `sorted_particle_ids[cell_offsets[cell_indices[i]] + slot] = i`. The
+   within-cell ordering at this stage is non-deterministic (depends on
+   the order in which threads execute their atomic).
+4. **Per-cell sort.** Each thread handles one cell and insertion-sorts
+   the `sorted_particle_ids` slice
+   `[cell_offsets[c] .. cell_offsets[c+1]]` ascending by particle index.
+   This canonicalises the non-deterministic scatter order: after this
+   stage `sorted_particle_ids` is identical across runs given identical
+   inputs on the same GPU, and matches the canonical
+   `(cell_index, particle_id)` lex order.
+
+No host download or upload of particle data occurs in the rebuild. The
+host work per rebuild is the three per-atom / per-cell kernel launches
+(cell-index + histogram, scatter, per-cell sort), the prefix scan's
+`O(log(n_cells_total))` launches, and one device memset (zeroing
+`write_cursors`).
+

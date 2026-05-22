@@ -1,0 +1,9 @@
+  @rq-3c0beda9
+  Scenario: Spread reduces to a single B-spline weight for one isolated particle
+    Given exactly one particle with charge q at fractional position s
+    When spme_charge_spread is called
+    Then rho[g] equals q · M_p(s_a·n_a - g_a) · M_p(s_b·n_b - g_b) · M_p(s_c·n_c - g_c)
+      for every grid point g
+
+  # --- Reciprocal-space pipeline: FFT ---
+

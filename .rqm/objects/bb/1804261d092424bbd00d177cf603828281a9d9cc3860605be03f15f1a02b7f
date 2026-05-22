@@ -1,0 +1,28 @@
+## Schema <!-- rq-38d5e7a8 -->
+
+A minimization phase is declared as a `[[minimization]]` table:
+
+```toml
+[[minimization]]
+name = "min"
+
+[minimization.algorithm]
+kind = "steepest-descent"
+
+# Optional adaptive-step parameters; defaults shown:
+initial_step = 1.0e-12         # m
+max_step = 1.0e-10             # m
+step_increase = 1.2            # multiplicative factor on accept
+step_decrease = 0.2            # multiplicative factor on reject
+
+# Optional convergence parameters; defaults shown:
+force_tolerance = 1.0e-10      # N
+energy_tolerance = 1.0e-7      # relative
+max_iterations = 1000
+
+[minimization.output]
+minlog_every = 1               # 0 disables the .minlog
+trajectory_every = 0           # 0 disables intermediate frames
+include_images = true
+```
+

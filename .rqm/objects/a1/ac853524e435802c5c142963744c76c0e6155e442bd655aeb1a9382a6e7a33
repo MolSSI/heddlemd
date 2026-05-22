@@ -1,0 +1,7 @@
+  @rq-657bbbd6
+  Scenario: Unknown integrator kind is rejected
+    Given the Background config with [integrator] kind="custom"
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, .. })
+    And path equals "integrator.kind"
+

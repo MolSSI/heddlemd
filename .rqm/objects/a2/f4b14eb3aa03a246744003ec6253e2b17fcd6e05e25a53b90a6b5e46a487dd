@@ -1,0 +1,9 @@
+  @rq-0622d4b0
+  Scenario: Default output paths drop a single trailing `.in` from the config-file root
+    Given the Background config with no [output] section,
+      written to "/tmp/sim/foo.in.in.toml"
+    When load_config("/tmp/sim/foo.in.in.toml") is called
+    Then config.phases[0].output.trajectory_path equals "/tmp/sim/foo.in.out.xyz"
+    And config.phases[0].output.log_path equals "/tmp/sim/foo.in.out.log"
+    And config.phases[0].output.timings_path equals "/tmp/sim/foo.in.out.timings"
+

@@ -1,0 +1,6 @@
+  @rq-30d3f1fa
+  Scenario: Reject step_decrease >= 1.0
+    Given a config with [minimization.algorithm] kind="steepest-descent" and step_decrease=1.0
+    When load_config(path) is called
+    Then it returns Err(ConfigError::InvalidValue { field: "minimization[0].algorithm.step_decrease", .. })
+

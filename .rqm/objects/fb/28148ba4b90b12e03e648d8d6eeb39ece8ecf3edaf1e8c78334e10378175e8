@@ -1,0 +1,125 @@
+### Functions <!-- rq-39891001 -->
+
+- `load_config(path: &Path) -> Result<Config, ConfigError>` <!-- rq-45bb8194 -->
+  - The default loader for callers that use only the built-in slot
+    kinds. Equivalent to:
+    ```rust
+    let config = load_config_raw(path)?;
+    config.validate_against(&Registries::with_builtins())?;
+    Ok(config)
+    ```
+  - Any error from `load_config_raw` or from `validate_against`
+    propagates unchanged.
+  - Callers that register custom builders use `load_config_raw`
+    plus `Config::validate_against(&their_registries)` directly,
+    so the registry-dispatched validation runs against the right
+    builder set.
+
+- `load_config_raw(path: &Path) -> Result<Config, ConfigError>` <!-- rq-deaf8b59 -->
+  - Validates the config-filename convention (see *Config filename
+    convention*) on `path` before opening the file; failures return
+    `ConfigError::InvalidConfigFilename { path }` without any I/O.
+  - Reads the file at `path`, runs the typed TOML deserialiser, fills
+    in field-derived defaults (`r_switch = 0.9 * cutoff` for
+    `[[pair_interactions]]` and `[coulomb]`, `r_skin = 0.3 * max_cutoff`
+    for the `cell-list` `[neighbor_list]` mode, `[output]` defaults
+    derived from `<config-root>` per *Config filename convention*),
+    resolves every supplied path against `path.parent()` (or `"."` if
+    `path` has no parent), calls `Config::validate(&config)` on the
+    resulting `Config`, and returns it. Does not run
+    `Config::validate_against` — that is the caller's responsibility.
+  - File-read failure yields `Io(String)`. Filename-convention failure
+    yields `InvalidConfigFilename { path }`. Deserialiser failures
+    yield either `MissingField`, `UnsupportedSchemaVersion`, or
+    `Parse` depending on the failure kind (see the `ConfigError`
+    description above). Range, finiteness, domain, and structural
+    cross-validation failures yield the variant emitted by
+    `Config::validate`.
+  - On any validation failure, returns the first error encountered in
+    declaration order: deserialiser errors first (top-level fields,
+    then `[simulation]`, then `[integrator]`, then
+    `[[particle_types]]`, then `[[pair_interactions]]`, then
+    `[bond_types]` / `[angle_types]` / `[coulomb]` / `[spme]` /
+    `[neighbor_list]` / `[output]`); then `Config::validate`'s
+    field-domain checks in the same declaration order; then
+    `Config::validate`'s structural cross-validation rules in the
+    order listed under *Validation*.
+
+- `Config::validate(&self) -> Result<(), ConfigError>` <!-- rq-a54cc657 -->
+  - Pure host-side function. Takes a `Config` (typically obtained from
+    `load_config` after deserialisation, but also constructable in
+    memory by callers) and applies every structural check documented
+    under *Field reference* that is not already enforceable by the
+    typed deserialiser and that does not require registry knowledge:
+    range/finiteness/domain constraints on numeric fields (positivity,
+    NaN-rejection, `theta_0 in [0, π]`, `r_switch <= cutoff`, non-empty
+    string identifiers), plus the structural cross-validation rules
+    listed under *Validation*.
+  - Per-kind parameter validation for the open-builder slots
+    (`[integrator]`, `[thermostat]`, `[barostat]`,
+    `[[constraint_types]]`) lives in `Config::validate_against`
+    because it requires registry access.
+  - On the first failure, returns the structured error variant
+    documented for that check (`InvalidValue` for per-field domain
+    failures; `DuplicateTypeName`, `UnknownTypeInPair`,
+    `MissingPairInteraction`, `DuplicatePairInteraction`,
+    `PathCollision`, `ConflictingElectrostatics`,
+    `IncompatibleThermostat`, `IncompatibleBarostat`,
+    `DuplicateBondTypeName`, or `DuplicateAngleTypeName` for the
+    cross-validation rules).
+  - Order of checks: per-field domain checks in the section order
+    above, then the structural cross-validation rules listed under
+    *Validation* in that order.
+  - Calling `Config::validate` on a `Config` returned by
+    `load_config` is a no-op (returns `Ok(())`): `load_config` already
+    invoked it.
+
+- `Config::validate_against(&self, registries: &Registries) -> Result<(), ConfigError>` <!-- rq-6082cd2d -->
+  - Runs the registry-dispatched per-kind validation: looks up each
+    open-builder slot's `kind` in the corresponding registry, calls
+    the builder's `validate_params(&toml::Value)`, and then queries
+    `owns_thermostat(&params)` / `owns_barostat(&params)` to enforce
+    the integrator-thermostat and integrator-barostat compatibility
+    rules.
+  - Returns `ConfigError::UnknownKind { slot, kind }` for any
+    `kind` that does not match a registered builder.
+  - Surfaces every builder-produced `ConfigError` (typically
+    `InvalidValue`, `SettleGeometryInfeasible`, or `Parse`).
+  - Runs the `[thermostat]` integrator-ownership check and the
+    `[barostat]` integrator-ownership check as documented in
+    *Validation*; these produce `IncompatibleThermostat` and
+    `IncompatibleBarostat` respectively.
+  - The runner invokes this method after `load_config` returns and
+    after constructing its registries; the constraint compatibility
+    check (which also requires the topology file's
+    `[constraints]` count) lives in
+    `Config::validate_constraint_compatibility`.
+
+- `Config::validate_constraint_compatibility(&self, registries: &Registries, has_constraints: bool) -> Result<(), ConfigError>` <!-- rq-723d202b -->
+  - When `has_constraints` is `true` and the chosen integrator
+    builder's `supports_constraints(&integrator.params)` returns
+    `false`, returns
+    `ConfigError::IncompatibleConstraint { integrator: <kind name> }`.
+  - When `has_constraints` is `false`, always returns `Ok(())`.
+  - The runner calls this method after `load_topology_file` returns
+    so the topology's `[constraints]` count is known.
+
+- `Registries` — host-side bundle of the four open registries the <!-- rq-32308250 -->
+  config-validation API consults.
+
+  ```rust
+  pub struct Registries {
+      pub integrators: IntegratorRegistry,
+      pub thermostats: ThermostatRegistry,
+      pub barostats: BarostatRegistry,
+      pub constraint_types: ConstraintRegistry,
+  }
+  ```
+
+  Each field is the open registry documented in its own requirements
+  file (`integration/framework.md` for the first three;
+  `integration/constraint-framework.md` for the constraint registry).
+  `Registries::with_builtins()` constructs a `Registries` whose four
+  sub-registries are each `*Registry::with_builtins()` — the default
+  set the runner uses.
+

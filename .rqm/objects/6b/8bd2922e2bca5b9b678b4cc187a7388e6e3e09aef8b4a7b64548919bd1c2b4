@@ -1,0 +1,9 @@
+  @rq-2996a545
+  Scenario: Force gather and forward FFT of force agree with explicit Ewald for small N
+    Given 4 particles with random fractional positions and random charges summing to 0
+    And explicit-Ewald reference forces computed on the host with the same parameters
+    When the full SPME pipeline runs
+    Then per-particle forces agree with the reference within 1e-3 relative tolerance
+
+  # --- Self-energy ---
+

@@ -1,0 +1,6 @@
+  @rq-576561a2
+  Scenario: topology absolute path is preserved
+    Given the Background config with topology="/data/argon.in.topology"
+    When load_config is called
+    Then config.topology equals Some("/data/argon.in.topology")
+

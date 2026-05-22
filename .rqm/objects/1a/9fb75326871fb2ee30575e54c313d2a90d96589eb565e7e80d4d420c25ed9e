@@ -1,0 +1,34 @@
+// rq-f0084057
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PathRole {
+    Init,
+    Topology,
+    PhaseTrajectory { phase: String },
+    PhaseLog { phase: String },
+    PhaseTimings { phase: String },
+    MinimizationMinlog { phase: String },
+    MinimizationTrajectory { phase: String },
+    MinimizationTimings { phase: String },
+}
+
+impl std::fmt::Display for PathRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PathRole::Init => write!(f, "init"),
+            PathRole::Topology => write!(f, "topology"),
+            PathRole::PhaseTrajectory { phase } => write!(f, "phase `{phase}` trajectory"),
+            PathRole::PhaseLog { phase } => write!(f, "phase `{phase}` log"),
+            PathRole::PhaseTimings { phase } => write!(f, "phase `{phase}` timings"),
+            PathRole::MinimizationMinlog { phase } => {
+                write!(f, "minimization `{phase}` minlog")
+            }
+            PathRole::MinimizationTrajectory { phase } => {
+                write!(f, "minimization `{phase}` trajectory")
+            }
+            PathRole::MinimizationTimings { phase } => {
+                write!(f, "minimization `{phase}` timings")
+            }
+        }
+    }
+}
+

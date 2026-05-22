@@ -1,0 +1,28 @@
+# Feature: Smooth Particle-Mesh Ewald (SPME) <!-- rq-202493a5 -->
+
+Smooth particle-mesh Ewald is the long-range electrostatics method
+configured by the `[spme]` table in the simulation config. The SPME
+algorithm partitions the Coulomb energy `U_total = k_C · Σ_{i<j} q_i q_j / r_ij`
+into three contributions:
+
+```
+U_total = U_real + U_reciprocal − U_self
+```
+
+where
+- `U_real` is a short-range pairwise sum with screening `erfc(α · r)`,
+  evaluated on the shared neighbor list,
+- `U_reciprocal` is a long-range smooth sum evaluated on a 3D FFT grid,
+- `U_self = k_C · (α/√π) · Σ_i q_i²` corrects for each particle's
+  self-interaction introduced by the charge spreading step.
+
+`α` is the Ewald splitting parameter; it controls the partitioning of
+work between real and reciprocal space. `k_C = 1/(4π ε₀) ≈ 8.987 551 787 × 10⁹
+N·m²/C²` is the Coulomb constant (rounded to `f32`).
+
+See `docs/long-range-electrostatics.md` for the architectural overview.
+This file specifies the configuration interface, the two `Potential` slots
+that implement SPME (the real-space `erfc` slot and the reciprocal-space
+spread → FFT → multiply → IFFT → gather pipeline), the CUDA kernels they
+own, and the cuFFT-determinism precondition validated at device-init time.
+

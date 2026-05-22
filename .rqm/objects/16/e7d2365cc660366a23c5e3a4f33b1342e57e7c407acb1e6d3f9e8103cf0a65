@@ -1,0 +1,10 @@
+  @rq-b07abbd4
+  Scenario: Pair inside the inner plateau is unsmoothed
+    Given a CoulombParameters with cutoff=5e-10 and r_switch=4e-10
+    And two particles with charges (+1e, +1e) at separation 3.5e-10 (< r_switch)
+    When coulomb_pair_force is called
+    Then pair_energies[0*2 + 1] equals the unswitched Coulomb energy
+      0.5 · k_C · (1e)² / 3.5e-10
+    And pair_forces_x[0*2 + 1] equals the unswitched Coulomb force component
+      along +x: k_C · (1e)² · 3.5e-10 / (3.5e-10)³
+

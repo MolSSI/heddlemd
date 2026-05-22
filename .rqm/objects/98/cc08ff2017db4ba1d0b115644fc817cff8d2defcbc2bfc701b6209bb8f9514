@@ -1,0 +1,9 @@
+  @rq-66dfc50f
+  Scenario: Reject a two-type config that omits a pair
+    Given a config with two declared types "Ar" and "Kr"
+      and pair_interactions for ("Ar","Ar") and ("Kr","Kr") only
+    When load_config is called
+    Then it returns Err(ConfigError::MissingPairInteraction { types: ("Ar", "Kr") })
+
+  # --- Output cadence semantics ---
+

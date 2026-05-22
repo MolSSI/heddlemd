@@ -1,0 +1,7 @@
+  @rq-789b7a33
+  Scenario: Langevin BAOAB rejects non-positive temperature
+    Given the Background config with [integrator] kind="langevin-baoab",
+      friction=1.0e12, temperature=0.0, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.temperature", reason: _ })
+

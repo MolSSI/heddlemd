@@ -1,0 +1,65 @@
+    // rq-5a0f5c00
+    #[error(
+        "config filename `{}` does not end in `.in.toml` (or its derived root is empty)",
+        path.display()
+    )]
+    InvalidConfigFilename { path: PathBuf },
+    #[error("failed to read config file: {0}")]
+    Io(String),
+    // Structural error from the typed deserialiser: TOML syntax error,
+    // type mismatch, unknown field for the enclosing table, or unknown
+    // tagged-enum variant. `path` is a dotted JSON-pointer-like location
+    // within the document; `message` is the underlying parser/deserialiser
+    // message.
+    #[error("config parse error at `{path}`: {message}")]
+    Parse { path: String, message: String },
+    #[error("unsupported schema version {actual}: only version {supported} is supported")]
+    UnsupportedSchemaVersion { actual: u64, supported: u64 },
+    #[error("missing required field `{field}`")]
+    MissingField { field: String },
+    #[error("invalid value for `{field}`: {reason}")]
+    InvalidValue { field: String, reason: String },
+    #[error("duplicate particle type name `{name}`")]
+    DuplicateTypeName { name: String },
+    #[error("pair_interactions[{pair_index}] references unknown particle type `{name}`")]
+    UnknownTypeInPair { name: String, pair_index: usize },
+    #[error("missing pair interaction for type pair (`{}`, `{}`)", types.0, types.1)]
+    MissingPairInteraction { types: (String, String) },
+    #[error("duplicate pair interaction for type pair (`{}`, `{}`)", types.0, types.1)]
+    DuplicatePairInteraction { types: (String, String) },
+    #[error("output paths collide: `{kind_a}` and `{kind_b}` both resolve to `{}`", path.display())]
+    PathCollision {
+        kind_a: PathRole,
+        kind_b: PathRole,
+        path: PathBuf,
+    },
+    #[error("config declares both [coulomb] and [spme]; only one electrostatics method may be active per run")]
+    ConflictingElectrostatics,
+    #[error("config declares no [[phase]] entries; a simulation requires at least one phase")]
+    EmptyPhases,
+    #[error("duplicate phase name `{name}`")]
+    DuplicatePhaseName { name: String },
+    #[error("two stochastic slots of kind `{kind}` across the [[phase]] array declare the same seed = {seed}; pick distinct seeds to avoid correlated noise")]
+    DuplicatePhaseSeed { kind: String, seed: u64 },
+    #[error("integrator `{integrator}` in phase `{phase}` owns its own thermostat and is incompatible with `[phase.thermostat]`")]
+    IncompatibleThermostat { integrator: String, phase: String },
+    #[error("integrator `{integrator}` in phase `{phase}` owns its own barostat and is incompatible with `[phase.barostat]`")]
+    IncompatibleBarostat { integrator: String, phase: String },
+    #[error("duplicate bond type name `{name}`")]
+    DuplicateBondTypeName { name: String },
+    #[error("duplicate angle type name `{name}`")]
+    DuplicateAngleTypeName { name: String },
+    #[error("duplicate constraint type name `{name}`")]
+    DuplicateConstraintTypeName { name: String },
+    #[error("integrator `{integrator}` in phase `{phase}` does not support holonomic constraints; remove the topology file's [constraints] section or choose a different integrator")]
+    IncompatibleConstraint { integrator: String, phase: String },
+    #[error("constraint type `{name}` has infeasible SETTLE geometry: r_hh = {r_hh} must be < 2 * r_oh ({r_oh})")]
+    SettleGeometryInfeasible { name: String, r_oh: f64, r_hh: f64 },
+    #[error("[{slot}] section's `kind = \"{kind}\"` does not match any registered builder")]
+    UnknownKind { slot: &'static str, kind: String },
+}
+
+// =====================================================================
+// Public config types
+// =====================================================================
+

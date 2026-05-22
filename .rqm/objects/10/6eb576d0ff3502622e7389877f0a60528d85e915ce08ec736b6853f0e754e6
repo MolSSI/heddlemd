@@ -1,0 +1,7 @@
+  @rq-265de297
+  Scenario: SD doubles the step on accepted iteration
+    Given a SD slot with initial_step=1.0e-12 and step_increase=2.0
+    And the first trial reduces the energy
+    When one minimizer.step is invoked
+    Then the next iteration's step size is 2.0e-12 m within absolute tolerance 1.0e-20
+

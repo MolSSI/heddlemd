@@ -1,0 +1,6 @@
+  @rq-b4d2f559
+  Scenario: Reject non-positive r_switch
+    Given the Background config with pair_interactions[0].r_switch=0.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].r_switch", reason: _ })
+

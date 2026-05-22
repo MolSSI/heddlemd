@@ -1,0 +1,21 @@
+# Feature: Steepest-Descent Energy Minimizer <!-- rq-08aba7ee -->
+
+Energy minimization is a phase-kind of the simulation runner alongside
+time-integration MD. A minimization phase advances particle positions
+along the negative gradient of the potential energy until either a
+force-per-atom threshold or an energy-change threshold is met, or a
+maximum iteration count is reached. Velocities and the simulation box
+pass through the phase unchanged; only positions move.
+
+The runner exposes minimization through a `Minimizer` slot trait that
+parallels the `Integrator` slot trait. The `MinimizerRegistry` carries
+one registered algorithm in v1, `kind = "steepest-descent"`, and is
+structured so that future conjugate-gradient or L-BFGS variants register
+alongside without changing the runner's dispatch surface.
+
+The default registry exposes one minimizer:
+
+| `kind` value         | Implementation                                                | File                       |
+| -------------------- | ------------------------------------------------------------- | -------------------------- |
+| `steepest-descent`   | adaptive-step steepest descent (GROMACS-style)                | this file                  |
+

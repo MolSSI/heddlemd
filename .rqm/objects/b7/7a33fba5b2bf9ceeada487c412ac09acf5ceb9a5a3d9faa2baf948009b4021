@@ -1,0 +1,175 @@
+    // rq-5a0f5c00 — `<config-root>` is the filename with `.toml` stripped
+    // and one trailing `.in` stripped. `derive_config_root` is the single
+    // source of truth; `load_config_raw` has already validated the suffix
+    // before reaching this point, but `build_config` is also reachable from
+    // `Config::from_raw_for_tests`-style paths that bypass the loader, so
+    // fall back to the bare file stem if derivation fails rather than
+    // panicking — `Config::validate` will not catch this, but only the
+    // loader entry point should ever be calling `build_config` in practice.
+    let config_root = derive_config_root(config_path)
+        .unwrap_or_else(|_| {
+            config_path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "sim".to_string())
+        });
+
+    // Per-phase output paths default to
+    // `<root>.out.<phase-name>.{xyz,log,timings}` when the per-phase
+    // `[phase.output]` block is absent or its individual fields are
+    // omitted. The merged sequence preserves source-document order
+    // by sorting both `[[phase]]` and `[[minimization]]` entries by
+    // their byte-span start (via `toml::Spanned<T>`).
+    enum SpannedEntry {
+        Md(toml::Spanned<RawPhaseConfig>),
+        Min(toml::Spanned<RawMinimizationConfig>),
+    }
+    impl SpannedEntry {
+        fn span_start(&self) -> usize {
+            match self {
+                SpannedEntry::Md(s) => s.span().start,
+                SpannedEntry::Min(s) => s.span().start,
+            }
+        }
+    }
+    let mut entries: Vec<SpannedEntry> = Vec::with_capacity(
+        raw.phases.len() + raw.minimizations.len(),
+    );
+    for p in raw.phases {
+        entries.push(SpannedEntry::Md(p));
+    }
+    for m in raw.minimizations {
+        entries.push(SpannedEntry::Min(m));
+    }
+    entries.sort_by_key(|e| e.span_start());
+
+    let phases: Vec<PhaseKind> = entries
+        .into_iter()
+        .map(|entry| match entry {
+            SpannedEntry::Md(spanned) => {
+                let p = spanned.into_inner();
+                let name = p.name;
+                let output = match p.output {
+                    None => OutputConfig {
+                        trajectory_path: base_dir
+                            .join(format!("{config_root}.out.{name}.xyz")),
+                        trajectory_every: default_trajectory_every(),
+                        include_velocities: true,
+                        include_images: true,
+                        log_path: base_dir.join(format!("{config_root}.out.{name}.log")),
+                        log_every: default_log_every(),
+                        timings_path: base_dir
+                            .join(format!("{config_root}.out.{name}.timings")),
+                    },
+                    Some(o) => OutputConfig {
+                        trajectory_path: o
+                            .trajectory_path
+                            .as_deref()
+                            .map(|s| resolve_path(base_dir, s))
+                            .unwrap_or_else(|| {
+                                base_dir.join(format!("{config_root}.out.{name}.xyz"))
+                            }),
+                        trajectory_every: o.trajectory_every,
+                        include_velocities: o.include_velocities,
+                        include_images: o.include_images,
+                        log_path: o
+                            .log_path
+                            .as_deref()
+                            .map(|s| resolve_path(base_dir, s))
+                            .unwrap_or_else(|| {
+                                base_dir.join(format!("{config_root}.out.{name}.log"))
+                            }),
+                        log_every: o.log_every,
+                        timings_path: o
+                            .timings_path
+                            .as_deref()
+                            .map(|s| resolve_path(base_dir, s))
+                            .unwrap_or_else(|| {
+                                base_dir.join(format!("{config_root}.out.{name}.timings"))
+                            }),
+                    },
+                };
+                PhaseKind::Md(PhaseConfig {
+                    name,
+                    n_steps: p.n_steps,
+                    dt: p.dt,
+                    integrator: p.integrator,
+                    thermostat: p.thermostat,
+                    barostat: p.barostat,
+                    output,
+                })
+            }
+            SpannedEntry::Min(spanned) => {
+                let m = spanned.into_inner();
+                let name = m.name;
+                let output = match m.output {
+                    None => MinimizationOutputConfig {
+                        minlog_path: base_dir
+                            .join(format!("{config_root}.out.{name}.minlog")),
+                        minlog_every: default_minlog_every(),
+                        trajectory_path: base_dir
+                            .join(format!("{config_root}.out.{name}.xyz")),
+                        trajectory_every: 0,
+                        include_images: true,
+                        timings_path: base_dir
+                            .join(format!("{config_root}.out.{name}.timings")),
+                    },
+                    Some(o) => MinimizationOutputConfig {
+                        minlog_path: o
+                            .minlog_path
+                            .as_deref()
+                            .map(|s| resolve_path(base_dir, s))
+                            .unwrap_or_else(|| {
+                                base_dir.join(format!("{config_root}.out.{name}.minlog"))
+                            }),
+                        minlog_every: o.minlog_every,
+                        trajectory_path: o
+                            .trajectory_path
+                            .as_deref()
+                            .map(|s| resolve_path(base_dir, s))
+                            .unwrap_or_else(|| {
+                                base_dir.join(format!("{config_root}.out.{name}.xyz"))
+                            }),
+                        trajectory_every: o.trajectory_every,
+                        include_images: o.include_images,
+                        timings_path: o
+                            .timings_path
+                            .as_deref()
+                            .map(|s| resolve_path(base_dir, s))
+                            .unwrap_or_else(|| {
+                                base_dir.join(format!("{config_root}.out.{name}.timings"))
+                            }),
+                    },
+                };
+                PhaseKind::Minimization(MinimizationConfig {
+                    name,
+                    algorithm: m.algorithm,
+                    output,
+                })
+            }
+        })
+        .collect();
+
+    Config {
+        schema_version: raw.schema_version,
+        init,
+        topology,
+        simulation: raw.simulation,
+        phases,
+        particle_types: raw.particle_types,
+        pair_interactions,
+        bond_types,
+        angle_types,
+        constraint_types,
+        coulomb,
+        spme,
+        neighbor_list,
+        config_path: config_path.to_path_buf(),
+    }
+}
+
+// =====================================================================
+// Config::validate
+// =====================================================================
+
+impl Config {

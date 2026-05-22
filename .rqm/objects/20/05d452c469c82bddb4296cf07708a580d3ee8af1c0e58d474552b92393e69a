@@ -1,0 +1,9 @@
+  @rq-901c006f
+  Scenario: Zero force at initial positions triggers ForceZero convergence
+    Given a system at the exact minimum of the potential (F_max == 0 at x_0)
+    When the minimization phase is invoked
+    Then the phase terminates after iteration 0 with reason ForceZero
+    And no SD step is taken
+
+  # --- Output ---
+

@@ -1,0 +1,82 @@
+#### `[phase.thermostat]` (optional) <!-- rq-ee10237d -->
+
+The per-phase thermostat section is optional. When omitted, the phase
+runs no thermostat (NVE composition with the integrator, or whatever
+fused thermostat the integrator owns). When present, a required `kind`
+field selects one of the registered thermostat slots (see
+`integration/framework.md`) and the kind-specific parameter fields
+sit at the same level. The Rust-side deserialiser captures `kind`
+into a `SlotConfig` and flattens the rest of the section into a
+`toml::Value`; the chosen builder's `validate_params(&toml::Value)`
+enforces required fields, domains, and rejects unknown fields.
+
+Configuring `[phase.thermostat]` alongside an integrator whose
+builder's `owns_thermostat(&params)` returns `true` (currently the
+`langevin-baoab` and `mtk-npt` builders) is rejected at config-load
+time with
+`ConfigError::IncompatibleThermostat { integrator: <kind name>, phase: <phase name> }`.
+
+- `kind: String` — required when the section is present. One of:
+  - `"nose-hoover-chain"` — deterministic NVT via the Nosé-Hoover
+    chain (Martyna-Klein-Tuckerman, 1992). See
+    `integration/nose-hoover-chain.md`.
+  - `"csvr"` — stochastic NVT via canonical sampling velocity
+    rescaling (Bussi-Donadio-Parrinello, 2007). See
+    `integration/csvr.md`.
+  - `"andersen"` — stochastic NVT via per-particle Maxwell-Boltzmann
+    resampling (Andersen, 1980). See `integration/andersen.md`.
+  - `"berendsen"` — deterministic weak-coupling thermostat (Berendsen
+    et al., 1984). Suitable for **equilibration only**; does not
+    sample the canonical ensemble. See `integration/berendsen.md`
+    for the full caveat and parameter description.
+
+Fields accepted for `kind = "nose-hoover-chain"`:
+
+- `temperature: f64` — bath temperature in kelvin. Required. Finite
+  and strictly positive. Independent of `simulation.temperature`.
+- `tau: f64` — thermostat coupling time in seconds. Required. Finite
+  and strictly positive. Typical values for liquid water are 50–100
+  fs.
+- `chain_length: u32` — number of chain elements `M`. Optional;
+  defaults to `3`. Must be `≥ 1`. `M = 1` reduces to vanilla
+  Nosé-Hoover.
+- `yoshida_order: u32` — Suzuki-Yoshida sub-step count per chain
+  half-step. Optional; defaults to `3`. Accepted values: `1`, `3`,
+  `5`, `7`.
+- `n_resp: u32` — chain RESP sub-cycle count. Optional; defaults to
+  `1`. Must be `≥ 1`.
+
+Fields accepted for `kind = "csvr"`:
+
+- `temperature: f64` — bath temperature in kelvin. Required. Finite
+  and strictly positive. Independent of `simulation.temperature`.
+- `tau: f64` — thermostat coupling time in seconds. Required. Finite
+  and strictly positive. Typical values for liquid water are 100 fs
+  to 1 ps; larger `τ` leaves the dynamics closer to NVE.
+- `seed: u64` — counter-based RNG seed for the chi-squared and
+  standard-normal draws consumed by the rescale formula. Required,
+  independent of `simulation.seed` and any other slot's seed.
+
+Fields accepted for `kind = "andersen"`:
+
+- `temperature: f64` — bath temperature in kelvin. Required. Finite
+  and strictly positive. Independent of `simulation.temperature`.
+- `collision_rate: f64` — per-particle stochastic collision frequency
+  `ν` in inverse seconds. Required. Finite and `≥ 0` (`0`
+  degenerates to NVE — no resampling — and is permitted as a
+  diagnostic mode). Typical values for liquid water are
+  `10¹¹–10¹² s⁻¹`. The per-step collision probability `p` is
+  computed as `clamp(collision_rate · dt, 0.0, 1.0)`.
+- `seed: u64` — counter-based RNG seed for the Bernoulli decisions
+  and Maxwell-Boltzmann draws consumed by the resample kernel.
+  Required, independent of `simulation.seed` and any other slot's
+  seed.
+
+Fields accepted for `kind = "berendsen"`:
+
+- `temperature: f64` — bath temperature in kelvin. Required. Finite
+  and strictly positive. Independent of `simulation.temperature`.
+- `tau: f64` — thermostat coupling time in seconds. Required. Finite
+  and strictly positive. Typical values for liquid water are 100 fs
+  to 1 ps; larger `τ` leaves the dynamics closer to NVE.
+

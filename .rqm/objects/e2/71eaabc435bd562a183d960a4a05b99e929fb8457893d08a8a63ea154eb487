@@ -1,0 +1,6 @@
+  @rq-a82a275a
+  Scenario: Reject max_step < initial_step
+    Given a config with initial_step=1.0e-10 and max_step=1.0e-12
+    When load_config(path) is called
+    Then it returns Err(ConfigError::InvalidValue { field: "minimization[0].algorithm.max_step", .. })
+

@@ -1,0 +1,15 @@
+### Final summary <!-- rq-6eb845c5 -->
+
+After the phase completes (successfully or with non-convergence), the
+runner emits one line of phase summary to stdout, parallel to the
+per-phase line MD phases emit:
+
+```
+[dynamics] phase `min`: 87 iters in 412 ms (converged: force_tolerance, frames: 0, log rows: 88)
+```
+
+Carries: phase name, accepted-iteration count (or `max_iterations`
+on non-convergence), wall-clock elapsed time, convergence reason
+(`force_tolerance`, `energy_tolerance`, `force_zero`, or
+`max_iterations`), trajectory frame count, and minlog row count.
+

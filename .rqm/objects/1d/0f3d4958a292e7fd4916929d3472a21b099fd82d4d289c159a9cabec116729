@@ -1,0 +1,10 @@
+## Dependencies <!-- rq-6e136da6 -->
+
+`Cargo.toml` declares `thiserror`. It is a compile-time-only proc-macro crate:
+the `Display`, `Error`, and `From` impls are expanded during compilation, and
+it links no runtime code or transitive runtime dependency. It is the one
+dependency the engine takes purely for ergonomics; it is justified because
+error reporting is cross-cutting — every module defines an error type — and
+the convention would otherwise require repeating the same trait-impl
+boilerplate in each.
+

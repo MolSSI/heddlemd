@@ -1,0 +1,7 @@
+  @rq-45a14d49
+  Scenario: Lennard-Jones pair interaction missing sigma is rejected
+    Given the Background config with pair_interactions[0] having potential="lennard-jones",
+      epsilon=1.65e-21, cutoff=1.0e-9, and no sigma field
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "pair_interactions[0].sigma" })
+

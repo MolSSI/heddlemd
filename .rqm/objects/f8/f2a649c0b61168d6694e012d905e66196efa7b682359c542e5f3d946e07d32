@@ -1,0 +1,10 @@
+  @rq-e2a31585
+  Scenario: Box-generation refresh handles tilt mutation
+    Given a NeighborListState in CellList mode with an orthorhombic box
+      lx=ly=lz=10.0 and r_cut + r_skin = 1.3
+    When box.set_lattice(10.0, 10.0, 10.0, 0.0, 0.0, 5.0) is called
+      (introducing yz=5.0; w_b drops to (10*10)/sqrt(100 + 25) = 100/sqrt(125) ≈ 8.94)
+    And pre_step is called with the updated box
+    Then state.n_cells[1] equals floor(8.94 / 1.3) = 6
+    And state.n_cells[0] and state.n_cells[2] equal floor(10.0 / 1.3) = 7
+

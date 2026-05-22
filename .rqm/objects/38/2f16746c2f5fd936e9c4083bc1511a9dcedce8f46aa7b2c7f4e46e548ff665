@@ -1,0 +1,11 @@
+  @rq-c1d79d33
+  Scenario: [barostat] kind = "c-rescale" with all required fields accepted
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [barostat] section with kind="c-rescale", pressure=1.0e5,
+      temperature=85.0, tau=1.0e-12, compressibility=4.5e-10, seed=42
+    When load_config is called
+    Then it returns Ok(config)
+    And config.phases[0].barostat matches Some(BarostatKind::CRescale {
+      pressure: 1.0e5, temperature: 85.0, tau: 1.0e-12,
+      compressibility: 4.5e-10, seed: 42 })
+

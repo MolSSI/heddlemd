@@ -1,0 +1,9 @@
+  @rq-ecad9802
+  Scenario: write_cursors is reset to zero before each rebuild
+    Given a NeighborListState in CellList mode just past a rebuild whose
+      write_cursors are populated (one count per cell that received atoms)
+    When NeighborListState::rebuild is called a second time on identical
+      positions
+    Then sorted_particle_ids matches the first rebuild's output exactly
+      (write_cursors did not accumulate across rebuilds)
+

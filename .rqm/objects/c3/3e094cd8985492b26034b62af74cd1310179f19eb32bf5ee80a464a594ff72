@@ -1,0 +1,7 @@
+  @rq-ffa771bd
+  Scenario: angle_type unknown potential is rejected
+    Given an [[angle_types]] entry with potential="cosine-harmonic"
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, .. })
+    And path equals "angle_types[0].potential"
+

@@ -1,0 +1,21 @@
+## Slot structure <!-- rq-3e2bcb37 -->
+
+SPME contributes two `Potential` slots to the `ForceField`:
+
+- `SpmeRealSpaceState` — a pair-force slot using `erfc(α · r) / r`
+  screening over the shared neighbor list. Structurally similar to the
+  truncated Coulomb slot (`coulomb-pair-force.md`); differs only in the
+  functional form of the pair force.
+- `SpmeReciprocalState` — owns the FFT grid buffers, the cuFFT plan, the
+  precomputed influence function, and a dedicated bin-only cell-list
+  used by the spread and gather kernels.
+
+Both slots share the per-particle `charges` buffer on `ParticleBuffers`
+(see `particle-state.md`) and the shared `DeviceExclusionList` (see
+`topology.md`). The two slots are constructed together when `[spme]` is
+present in the config; they share the parsed `alpha` and per-particle
+charges but are otherwise independent.
+
+The `[spme]` and `[coulomb]` tables are mutually exclusive in the config
+(see `io/config-schema.md`).
+

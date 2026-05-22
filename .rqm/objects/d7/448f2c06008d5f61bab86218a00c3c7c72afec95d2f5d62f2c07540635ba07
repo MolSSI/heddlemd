@@ -1,0 +1,6 @@
+  @rq-66bf31c6
+  Scenario: Missing [integrator] section is rejected
+    Given the Background config with the [integrator] section removed
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator" })
+

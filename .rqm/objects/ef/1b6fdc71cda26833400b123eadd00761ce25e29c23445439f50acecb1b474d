@@ -1,0 +1,55 @@
+#### `[[phase]]` (array of tables, >= 1 entry) <!-- rq-18441e33 -->
+
+A simulation is a sequence of one or more phases, declared as a TOML
+array of tables. Particle state (positions, velocities, simulation
+box, particle types, charges) carries over between phases; slot
+state (integrator buffers, thermostat chain variables, barostat
+piston, c-rescale conserved quantity) is reset at every phase
+boundary. See `simulation-runner.md` for the runtime model.
+
+Each `[[phase]]` entry carries:
+
+- `name: String` — required. Identifier used to derive output
+  filenames (`<root>.out.<name>.{xyz,log,timings}`). Non-empty,
+  case-sensitive, must contain only ASCII letters, digits, `-`, and
+  `_`. Phase names must be unique within the config; duplicates
+  surface as `ConfigError::DuplicatePhaseName { name }`.
+- `n_steps: u64` — required. Number of integration steps the phase
+  executes. `0` is permitted (the phase writes its initial-state
+  snapshot to its trajectory/log, then immediately advances to the
+  next phase or exits).
+- `dt: f64` — required. Integration timestep in seconds for this
+  phase. Must be finite and strictly positive.
+- `[phase.integrator]` — required. Selects the per-phase integrator
+  slot and its kind-specific parameters; see *`[phase.integrator]`*
+  below for the field reference (the schema is identical to the
+  former top-level `[integrator]`).
+- `[phase.thermostat]` — optional. Per-phase thermostat slot; see
+  *`[phase.thermostat]`* below.
+- `[phase.barostat]` — optional. Per-phase barostat slot; see
+  *`[phase.barostat]`* below.
+- `[phase.output]` — optional. Per-phase output cadences and paths;
+  see *`[phase.output]`* below. When omitted, the phase uses the
+  default cadences (`trajectory_every = 100`, `log_every = 100`,
+  `include_velocities = true`, `include_images = true`) and the
+  default file paths (`<root>.out.<name>.{xyz,log,timings}`).
+
+Seed uniqueness: every stochastic slot (`csvr`, `andersen`,
+`c-rescale`, `langevin-baoab` integrator, etc.) carries its own
+required `seed: u64`. Across the whole config, no two slots of the
+**same `kind`** may declare the same `seed`; duplicates surface as
+`ConfigError::DuplicatePhaseSeed { kind, seed }`. The check is
+across all phases, since a duplicate seed in two phases of the same
+kind would produce correlated noise sequences at the same dynamical
+times. Two slots of *different* kinds may safely share a numerical
+seed value (their RNG streams are independent).
+
+The integrator–thermostat compatibility, integrator–barostat
+compatibility, and integrator–constraint compatibility rules
+documented under *Validation* are checked **per phase**: every phase
+must individually satisfy the rules. A single
+`[[constraint_types]]`/topology block applies to every phase (the
+constraint algorithm cannot be enabled or disabled mid-protocol);
+each phase's integrator must therefore be able to drive the
+configured constraints.
+

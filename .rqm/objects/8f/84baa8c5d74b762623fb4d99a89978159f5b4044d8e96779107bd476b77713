@@ -1,0 +1,6 @@
+  @rq-f6107e43
+  Scenario: Reject duplicate phase names
+    Given the Background config plus a second [[phase]] entry also named "run"
+    When load_config is called
+    Then it returns Err(ConfigError::DuplicatePhaseName { name: "run" })
+

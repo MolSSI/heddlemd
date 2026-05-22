@@ -1,0 +1,8 @@
+  @rq-d1d84e31
+  Scenario: Accept user-supplied r_switch in pair_interactions
+    Given the Background config with pair_interactions[0].cutoff=1.0e-9
+      and pair_interactions[0].r_switch=9.0e-10
+    When load_config is called
+    Then it returns Ok
+    And config.pair_interactions[0].r_switch equals 9.0e-10
+

@@ -1,0 +1,6 @@
+  @rq-76a6be2f
+  Scenario: Zero particles is a no-op
+    Given particle_count == 0
+    When coulomb_pair_force is called
+    Then it returns Ok(()) without launching the kernel
+

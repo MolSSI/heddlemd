@@ -1,0 +1,30 @@
+## Configuration <!-- rq-267941a2 -->
+
+Selected from the config's optional `[neighbor_list]` table; see
+`io/config-schema.md` for the schema. Summary:
+
+- `mode: String` — `"cell-list"` (default) or `"all-pairs"`.
+- For `mode = "cell-list"`:
+  - `max_neighbors: u64` — required. Strictly positive.
+  - `r_skin: f64` — optional, defaults to `0.3 * max_cutoff` where
+    `max_cutoff` is the largest cutoff reported by any
+    neighbor-list-consuming potential. Strictly positive.
+
+Validation at config load:
+
+- `r_skin > 0` and finite.
+- `max_neighbors > 0`.
+- For every cutoff `c` reported by a consuming potential, the box's
+  minimum perpendicular width satisfies `min_perpendicular_width >= 3 *
+  (c + r_skin)` (see `simulation-box.md`). For an orthorhombic box this
+  reduces to `min(lx, ly, lz) >= 3 * (c + r_skin)`. The init file holds
+  the box; validation therefore happens after the init file is loaded
+  and the effective `r_skin` and `max_cutoff` are known.
+- In `mode = "all-pairs"`, `max_neighbors` and `r_skin` are rejected.
+
+The maximum cutoff used to size the neighbor list is the largest
+`max_cutoff` reported by any consuming potential in the `ForceField`
+slot list (see `framework.md`). With one or more consumers, the
+neighbor search radius is `max_cutoff + r_skin` in cell-list mode. The
+trivial mode does not use a search radius.
+

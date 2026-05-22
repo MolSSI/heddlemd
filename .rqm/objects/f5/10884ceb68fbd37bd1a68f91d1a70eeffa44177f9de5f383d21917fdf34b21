@@ -1,0 +1,10 @@
+  @rq-f8ad62d4
+  Scenario: cell_offsets is the exclusive prefix sum and ends at particle_count
+    Given a NeighborListState in CellList mode with N particles and
+      arbitrary positions
+    When NeighborListState::rebuild is called
+    Then downloading cell_offsets yields a strictly non-decreasing sequence
+    And cell_offsets[0] equals 0
+    And cell_offsets[c+1] equals cell_offsets[c] + cell_counts[c] for every c
+    And cell_offsets[n_cells_total] equals N
+

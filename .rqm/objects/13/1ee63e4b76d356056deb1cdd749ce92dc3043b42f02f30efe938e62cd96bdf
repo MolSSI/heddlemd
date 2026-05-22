@@ -1,0 +1,6 @@
+  @rq-2e27a5fc
+  Scenario: Energy tolerance does not fire on a rejected step
+    Given a SD slot whose first trial is rejected
+    When two iterations have run
+    Then check_convergence does not return EnergyTolerance based on the rejected iteration alone
+

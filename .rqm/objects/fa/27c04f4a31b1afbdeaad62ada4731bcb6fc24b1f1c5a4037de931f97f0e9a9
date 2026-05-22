@@ -1,0 +1,8 @@
+## Real-space slot <!-- rq-f6d45062 -->
+
+The real-space slot is structurally analogous to `coulomb-pair-force.md`
+but evaluates `erfc(α · r) / r` instead of `1/r`. The slot uses the
+shared `NeighborListState` owned by `ForceField`, the per-particle
+`charges` buffer, and the shared `DeviceExclusionList`'s
+`atom_excl_coul_scales` array.
+

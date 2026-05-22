@@ -1,0 +1,6 @@
+  @rq-4186d4f4
+  Scenario: Reject topology = init
+    Given the Background config with init="argon.in.xyz" and topology="argon.in.xyz"
+    When load_config is called
+    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Init, kind_b: PathRole::Topology, path: _ })
+

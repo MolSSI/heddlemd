@@ -1,0 +1,7 @@
+  @rq-ec8d715d
+  Scenario: Reject trajectory_path = timings_path
+    Given the Background config with [output].trajectory_path="run.dat"
+      and [output].timings_path="run.dat"
+    When load_config is called
+    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Trajectory, kind_b: PathRole::Timings, path: _ })
+

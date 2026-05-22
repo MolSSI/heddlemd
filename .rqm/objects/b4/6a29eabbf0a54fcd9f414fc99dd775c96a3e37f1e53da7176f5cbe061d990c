@@ -1,0 +1,8 @@
+  @rq-265f4da4
+  Scenario: scatter places each atom inside its cell's slice
+    Given particles at positions producing cells [2, 0, 1, 0, 2]
+    When NeighborListState::rebuild is called
+    Then for every atom i, sorted_particle_ids contains i exactly once
+    And the slot at which i appears falls in
+      [cell_offsets[cell_indices[i]], cell_offsets[cell_indices[i]+1])
+

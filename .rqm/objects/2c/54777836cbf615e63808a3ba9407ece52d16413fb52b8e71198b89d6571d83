@@ -1,0 +1,7 @@
+  @rq-3726c0f1
+  Scenario: Real-space slot produces zero force on an excluded pair (scale_coul=0)
+    Given two oppositely charged particles within r_cut_real
+    And an ExclusionList listing the pair with scale_coul=0.0
+    When the real-space slot's contribute() is called
+    Then the pair-buffer slot for (0, 1) has zero force, zero energy, zero virial
+

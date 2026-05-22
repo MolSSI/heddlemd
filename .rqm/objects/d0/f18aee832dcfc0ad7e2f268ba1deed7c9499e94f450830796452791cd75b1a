@@ -1,0 +1,10 @@
+  @rq-0165303c
+  Scenario: SD on empty buffers converges immediately
+    Given a ParticleBuffers with particle_count == 0
+    When the minimization phase runs
+    Then the phase terminates after iteration 0 with reason ForceZero
+    And the .minlog contains exactly the step-0 row
+    And no SD kernel launches are recorded
+
+  # --- Determinism ---
+

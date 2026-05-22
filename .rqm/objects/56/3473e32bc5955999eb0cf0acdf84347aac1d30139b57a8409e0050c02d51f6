@@ -1,0 +1,10 @@
+  @rq-8c96d3c7
+  Scenario: Coulomb and LJ exclusions are independent
+    Given two particles whose ExclusionList entry is scale_lj=0.5, scale_coul=0.833
+    When coulomb_pair_force is called
+    Then the Coulomb contribution is scaled by 0.833
+    When lj_pair_force is called on the same pair
+    Then the LJ contribution is scaled by 0.5
+
+  # --- Energy and virial conventions ---
+

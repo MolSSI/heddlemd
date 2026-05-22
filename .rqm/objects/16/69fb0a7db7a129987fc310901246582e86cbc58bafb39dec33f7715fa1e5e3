@@ -1,0 +1,25 @@
+### Per-phase output paths <!-- rq-f45b8166 -->
+
+Each `[[phase]]` produces three output files in the directory
+containing the config:
+
+- `<root>.out.<phase-name>.xyz` — trajectory frames written during
+  that phase (omitted entirely when the phase's
+  `output.trajectory_every == 0`).
+- `<root>.out.<phase-name>.log` — CSV log written during that phase
+  (omitted when `output.log_every == 0`).
+- `<root>.out.<phase-name>.timings` — per-stage performance summary
+  for that phase (always written when the phase runs to completion).
+
+`<root>` is the config-file root (the `<root>.in.toml` filename with
+`.in.toml` stripped; see *Config filename convention* below).
+`<phase-name>` is the per-phase `name` field. Phase names must be
+unique within the config; the loader rejects duplicates with
+`ConfigError::DuplicatePhaseName { name }`.
+
+A phase's `[phase.output]` block accepts explicit
+`trajectory_path`, `log_path`, and `timings_path` overrides; when
+omitted, the three paths default to the form above. The path-
+collision rules in *Validation* enforce that no two paths anywhere in
+the config resolve to the same location.
+

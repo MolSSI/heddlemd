@@ -1,0 +1,9 @@
+## Launch Configuration <!-- rq-84af056c -->
+
+- Block size: 16 × 16 × 1 = 256 threads per block.
+- Grid size: `(ceil(max_neighbors / 16), ceil(n / 16), 1)` blocks.
+- Shared memory: zero bytes.
+- Stream: the default stream carried by `pair_buffer.device`.
+
+This matches the LJ kernel's launch configuration (`lj-pair-force.md`).
+

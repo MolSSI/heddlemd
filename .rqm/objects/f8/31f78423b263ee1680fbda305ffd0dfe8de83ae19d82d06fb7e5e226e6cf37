@@ -1,0 +1,9 @@
+  @rq-a99ca751
+  Scenario: Cell index of a position outside the primary cell wraps before binning
+    Given a particle whose Cartesian position is exactly one full lattice vector
+      past the primary cell along direction a
+    When its cell index is computed
+    Then it equals the cell index of the corresponding particle inside the primary cell
+
+  # --- Cell list construction ---
+

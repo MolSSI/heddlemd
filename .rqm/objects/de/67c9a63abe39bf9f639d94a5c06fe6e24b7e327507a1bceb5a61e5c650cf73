@@ -1,0 +1,9 @@
+  @rq-e92c18c6
+  Scenario: Two SD runs on the same GPU with identical inputs are byte-identical
+    Given two minimization phases constructed from byte-identical configs and init states (16 SPC/E waters)
+    When each runs to convergence
+    Then every f32 array of run A is byte-identical to run B
+    And the .minlog files are byte-identical
+
+  # --- Registry ---
+

@@ -1,0 +1,7 @@
+  @rq-5444c7ae
+  Scenario: pair_energies carries half the pair's potential energy
+    Given a single pair (i, j) at finite distance with no exclusion
+    When coulomb_pair_force is called
+    Then pair_energies[i*max_neighbors + slot_for_j]
+        equals 0.5 * (k_C * q_i * q_j / r) * S(r²)
+

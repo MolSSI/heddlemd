@@ -1,0 +1,8 @@
+  @rq-19ccc047
+  Scenario: [thermostat] unknown kind is rejected
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [thermostat] section with kind="not-a-real-thermostat"
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, .. })
+    And path equals "thermostat.kind"
+

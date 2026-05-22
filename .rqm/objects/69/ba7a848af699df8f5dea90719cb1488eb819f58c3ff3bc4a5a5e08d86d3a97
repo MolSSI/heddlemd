@@ -1,0 +1,8 @@
+  @rq-2303ee2e
+  Scenario: Per-cell sort yields ascending partner indices inside every cell
+    Given any non-empty system
+    When NeighborListState::rebuild is called
+    Then for every cell c with occupancy k,
+      sorted_particle_ids[cell_offsets[c] .. cell_offsets[c+1]] is a
+      strictly ascending sequence of u32 particle indices
+```

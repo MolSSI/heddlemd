@@ -1,0 +1,13 @@
+  @rq-5f2c42be
+  Scenario: Prefix scan is correct for cell counts beyond a single block-totals pass
+    Given r_cut + r_skin = 0.05 yielding n_cells_per_axis = 200
+      (n_cells_total = 8000000, well past scan_block_size² and requiring
+      multiple recursion levels in the prefix scan)
+    When NeighborListState::new_cell_list is called
+    Then it returns Ok(state)
+    When NeighborListState::rebuild is called
+    Then downloading cell_offsets yields a non-decreasing sequence
+    And cell_offsets[0] equals 0
+    And cell_offsets[c+1] equals cell_offsets[c] + cell_counts[c] for every c
+    And cell_offsets[n_cells_total] equals the particle count
+

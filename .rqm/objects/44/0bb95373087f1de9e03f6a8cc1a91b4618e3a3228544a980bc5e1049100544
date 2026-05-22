@@ -1,0 +1,10 @@
+  @rq-23806456
+  Scenario: MtkNpt integrator with all required fields is accepted
+    Given the Background config with [integrator] kind="mtk-npt",
+      temperature=85.0, pressure=1.0e5, tau_t=1.0e-13, tau_p=1.0e-12
+    When load_config is called
+    Then it returns Ok(config)
+    And config.phases[0].integrator matches IntegratorKind::MtkNpt {
+      temperature: 85.0, pressure: 1.0e5, tau_t: 1.0e-13, tau_p: 1.0e-12,
+      chain_length: 3, yoshida_order: 3, n_resp: 1 }
+

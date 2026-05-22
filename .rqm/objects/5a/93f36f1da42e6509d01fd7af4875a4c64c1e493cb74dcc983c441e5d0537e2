@@ -1,0 +1,6 @@
+  @rq-871f0292
+  Scenario: Reject non-finite r_switch
+    Given the Background config with pair_interactions[0].r_switch=NaN
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].r_switch", reason: _ })
+

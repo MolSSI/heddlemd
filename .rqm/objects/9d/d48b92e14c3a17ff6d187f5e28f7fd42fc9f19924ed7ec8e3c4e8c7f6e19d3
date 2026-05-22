@@ -1,0 +1,8 @@
+  @rq-2ed643ad
+  Scenario: Two consumers share one neighbor list
+    Given a ForceField containing two short-range Potential implementations
+      with max_cutoff() reporting 5.0 and 3.0 respectively
+    When ForceField::new builds the shared neighbor list in cell-list mode
+    Then the neighbor list is built with r_search = 5.0 + r_skin
+    And both potentials' contribute() receive the same NeighborListState reference
+

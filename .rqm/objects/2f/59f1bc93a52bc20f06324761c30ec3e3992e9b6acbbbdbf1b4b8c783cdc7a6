@@ -1,0 +1,15 @@
+## Gherkin Scenarios <!-- rq-c0668cb7 -->
+
+```gherkin
+Feature: Smooth particle-mesh Ewald (SPME)
+
+  Background:
+    Given a CUDA-capable GPU available as device 0
+    And init_device() has been called with a config that selects SPME
+    And the Coulomb constant k_C = 8.987551787e9 (rounded to f32)
+    And an orthorhombic SimulationBox with lx=ly=lz=2.0e-9
+    And an SpmeConfig with alpha=2.0e10, r_cut_real=8.0e-10,
+        grid=[16, 16, 16], spline_order=4
+
+  # --- Slot presence and parameter validation ---
+

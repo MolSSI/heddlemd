@@ -1,0 +1,12 @@
+### Initial iteration <!-- rq-39ab27d9 -->
+
+Before the loop, the runner performs the same warm-up
+`force_field.step` call as for an MD phase (step 15 of *Runner flow*
+in `simulation-runner.md`) so that `buffers.forces_*` and the initial
+potential energy `E_0` are populated. The first iteration's trial uses
+`step_0 = initial_step`.
+
+If `F_max(x_0) ≤ force_tolerance`, the phase converges immediately
+without any trial step; the runner writes a step-0 `.minlog` row and
+the convergence-reason summary, then proceeds to the next phase.
+

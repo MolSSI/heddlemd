@@ -1,0 +1,7 @@
+  @rq-ea0ee5ef
+  Scenario: Neighbor list contains every particle within r_cut + r_skin
+    Given particles in a regular grid spaced 0.5 apart, r_cut = 1.0, r_skin = 0.3
+    When NeighborListState::rebuild is called
+    Then atom 0's neighbor list contains every particle within 1.3 of atom 0
+    And it excludes every particle farther than 1.3
+

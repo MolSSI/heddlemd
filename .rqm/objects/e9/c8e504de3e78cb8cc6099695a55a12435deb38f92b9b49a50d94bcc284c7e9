@@ -1,0 +1,9 @@
+  @rq-053613b6
+  Scenario: Pair interaction rejects an extra field for the chosen potential
+    Given the Background config with pair_interactions[0] having potential="lennard-jones"
+      and an unknown field stiffness=1.0
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "pair_interactions[0]"
+    And message mentions "stiffness"
+

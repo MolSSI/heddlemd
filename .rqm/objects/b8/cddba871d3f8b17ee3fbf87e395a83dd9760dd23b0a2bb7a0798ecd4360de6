@@ -1,0 +1,8 @@
+  @rq-b7cd6d16
+  Scenario: [thermostat] kind = "berendsen" is accepted
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [thermostat] section with kind="berendsen", temperature=300.0, tau=1.0e-13
+    When load_config is called
+    Then it returns Ok(config)
+    And config.phases[0].thermostat matches Some(ThermostatKind::Berendsen { temperature: 300.0, tau: 1.0e-13 })
+

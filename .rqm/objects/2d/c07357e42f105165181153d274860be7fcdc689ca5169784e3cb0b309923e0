@@ -1,0 +1,8 @@
+  @rq-dd41209b
+  Scenario: SPME slots present in the ForceField when [spme] is configured
+    Given a Config with the Background SpmeConfig
+    When ForceField::new is called
+    Then the slot list contains SpmeRealSpaceState (label "spme_real")
+    And the slot list contains SpmeReciprocalState (label "spme_reciprocal")
+    And the slot list does not contain CoulombState (truncated Coulomb)
+

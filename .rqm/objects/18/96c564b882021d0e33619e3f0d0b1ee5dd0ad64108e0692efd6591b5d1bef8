@@ -1,0 +1,7 @@
+// CoulombConfig — parsed `[coulomb]` table; rq-846bdb8b
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoulombConfig {
+    pub cutoff: f64,
+    pub r_switch: f64,
+}
+

@@ -1,0 +1,7 @@
+  @rq-e553c05b
+  Scenario: Reject init = trajectory_path
+    Given the Background config at "/tmp/sim/argon.in.toml" with init="out.xyz" and
+      [output].trajectory_path="out.xyz"
+    When load_config is called
+    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Init, kind_b: PathRole::Trajectory, path: "/tmp/sim/out.xyz" })
+

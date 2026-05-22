@@ -1,0 +1,6 @@
+  @rq-020ff80e
+  Scenario: SD does not modify velocities
+    Given a SD slot and a snapshot of buffers.velocities_* before the phase
+    When the entire minimization phase runs to convergence
+    Then velocities_x, velocities_y, velocities_z are byte-identical to the snapshot
+

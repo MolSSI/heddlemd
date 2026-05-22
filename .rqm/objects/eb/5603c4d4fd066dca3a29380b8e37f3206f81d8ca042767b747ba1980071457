@@ -1,0 +1,12 @@
+  @rq-d148149f
+  Scenario: Explicit [output] values override defaults
+    Given the Background config plus [output] with trajectory_every=50, log_every=25,
+      trajectory_path="custom-traj.xyz", log_path="custom.log", include_velocities=false,
+      written to "/tmp/sim/argon.in.toml"
+    When load_config("/tmp/sim/argon.in.toml") is called
+    Then config.phases[0].output.trajectory_path equals "/tmp/sim/custom-traj.xyz"
+    And config.phases[0].output.trajectory_every equals 50
+    And config.phases[0].output.include_velocities equals false
+    And config.phases[0].output.log_path equals "/tmp/sim/custom.log"
+    And config.phases[0].output.log_every equals 25
+

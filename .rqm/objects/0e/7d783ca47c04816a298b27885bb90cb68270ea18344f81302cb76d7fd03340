@@ -1,0 +1,9 @@
+  @rq-db8b171d
+  Scenario: pre_step with unchanged box does not refresh the cell-layout cache
+    Given a NeighborListState in CellList mode immediately after its first pre_step
+    And the simulation box has not been mutated since construction
+    When pre_step is called again with the same box
+    Then n_cells and n_cells_total are unchanged
+    And cell_offsets is not reallocated
+    And state.cached_generation is unchanged
+

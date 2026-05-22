@@ -1,0 +1,7 @@
+  @rq-c0cfc5d6
+  Scenario: Cell counts are floor(w / (r_cut + r_skin)) for an orthorhombic box
+    Given r_cut = 1.0, r_skin = 0.3
+    And an orthorhombic SimulationBox with lx=ly=lz=10.0 (so w_a=w_b=w_c=10.0)
+    When NeighborListState::new_cell_list is called
+    Then n_cells equals [7, 7, 7]
+

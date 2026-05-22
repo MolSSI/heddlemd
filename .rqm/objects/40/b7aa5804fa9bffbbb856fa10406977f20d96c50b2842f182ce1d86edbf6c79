@@ -1,0 +1,28 @@
+## Reproducibility <!-- rq-20530653 -->
+
+SPME on Dynamics is bit-exact GPU-vs-GPU when run on the same hardware
+with identical inputs. Five components carry the reproducibility
+invariant:
+
+1. **Bin structure.** Inherits the existing cell-list service's
+   determinism: particles sorted by `(cell_index, particle_id)` with a
+   fixed-topology insertion sort within each bin.
+2. **Charge spread.** One thread per grid point; per-thread accumulation
+   in fixed `(bin_index, particle_id)` order.
+3. **cuFFT.** Deterministic for fixed plan dimensions, single-stream
+   usage, and the same hardware. The `cufft_determinism_smoke_test` run
+   at `init_device` time validates the contract on the host's specific
+   cuFFT version.
+4. **Influence-function multiply and virial-per-cell write.** One
+   thread per complex grid cell; no atomics; no inter-thread reads.
+5. **Force gather.** One thread per particle; each thread reads `p³`
+   grid points in fixed `(d_a, d_b, d_c)` lexicographic order. No
+   atomics. The per-particle virial uses the equal-division attribution
+   `W_recip / N` (the slot's `reduce()` distributes the scalar
+   identically to every particle, so the SoA convention is preserved
+   regardless of summation order).
+
+The reciprocal-virial scalar reduction uses a fixed-topology tree
+reduction (or equivalent deterministic sum); the implementation must
+not use unordered atomic-add for the scalar accumulation.
+

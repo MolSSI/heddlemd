@@ -1,0 +1,16 @@
+### `.xyz` trajectory <!-- rq-2032660c -->
+
+When `output.trajectory_every > 0`, the runner writes one trajectory
+frame at phase entry (step-0 positions), one frame at every
+iteration `k` such that `k % trajectory_every == 0` (only accepted
+iterations advance the position state — a rejected iteration's
+restored positions are byte-identical to the previous accepted state,
+so writing a frame for a rejected iteration is permitted but
+redundant), and one final frame at the convergence iteration.
+
+The trajectory file's `Step=` attribute and `Time=` attribute carry
+the iteration counter as `Step=k` and `Time=0.0` (minimization has
+no physical-time semantics). Consumers parse this the same way they
+parse MD trajectory frames; the missing `Time` progression is the
+only difference.
+

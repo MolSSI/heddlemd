@@ -1,0 +1,7 @@
+  @rq-ca356c08
+  Scenario: [thermostat] section absent yields config.phases[0].thermostat = None
+    Given the Background config with no [thermostat] section
+    When load_config is called
+    Then it returns Ok(config)
+    And config.phases[0].thermostat is None
+

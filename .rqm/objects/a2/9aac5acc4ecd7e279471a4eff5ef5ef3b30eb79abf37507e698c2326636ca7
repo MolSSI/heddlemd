@@ -1,0 +1,7 @@
+  @rq-43819abc
+  Scenario: Reject a config whose filename does not end in `.in.toml`
+    Given a valid Background config written to "/tmp/sim/sim.toml"
+    When load_config("/tmp/sim/sim.toml") is called
+    Then it returns Err(ConfigError::InvalidConfigFilename { path: "/tmp/sim/sim.toml" })
+    And the file was not opened (verified by spy on the IO layer)
+

@@ -1,0 +1,8 @@
+  @rq-331b6e81
+  Scenario: cell_offsets is not reallocated when n_cells_total is unchanged
+    Given a NeighborListState in CellList mode with n_cells = [10, 10, 10]
+    When box.set_lattice is called producing n_cells = [10, 10, 10]
+      (different lattice parameters but same n_cells_total)
+    And pre_step is called with the updated box
+    Then cell_offsets retains its previous device allocation (length 1001)
+

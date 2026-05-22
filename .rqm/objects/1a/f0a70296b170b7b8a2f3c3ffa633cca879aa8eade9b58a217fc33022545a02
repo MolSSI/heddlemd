@@ -1,0 +1,27 @@
+## Empty State <!-- rq-5cbab27f -->
+
+When `particle_count == 0`:
+
+- Cell-list construction produces empty `sorted_particle_ids` and
+  `cell_offsets` of length `n_cells_total + 1` filled with zeros.
+- The neighbor-list build kernel does not launch.
+- The displacement-check kernel does not launch.
+- `needs_rebuild` stays `true` forever but no rebuild work happens.
+- Trivial construction produces empty `neighbor_list` and
+  `neighbor_counts` buffers.
+
+When `particle_count == 1`:
+
+- Cell-list construction works trivially.
+- The neighbor-list build kernel runs for one atom and finds zero
+  partners.
+- Trivial construction produces a single-element `neighbor_counts`
+  buffer with value `1`, and a single-element `neighbor_list` buffer
+  containing the self index `0`. Consumers handle the self slot at
+  evaluation time (the LJ kernel zeroes self slots).
+
+When the `ForceField` has zero neighbor-list-consuming potentials, no
+`NeighborListState` is built; the framework's `Option<NeighborListState>`
+is `None` and no displacement-check or build kernel runs over the
+lifetime of the run.
+

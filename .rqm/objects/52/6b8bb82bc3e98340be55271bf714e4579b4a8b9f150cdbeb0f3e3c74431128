@@ -1,0 +1,12 @@
+  @rq-894c16c4
+  Scenario: Defaults populate the output section when [output] is omitted
+    Given the Background config with no [output] section, written to "/tmp/sim/argon.in.toml"
+    When load_config("/tmp/sim/argon.in.toml") is called
+    Then config.phases[0].output.trajectory_path equals "/tmp/sim/argon.out.xyz"
+    And config.phases[0].output.trajectory_every equals 100
+    And config.phases[0].output.include_velocities equals true
+    And config.phases[0].output.include_images equals true
+    And config.phases[0].output.log_path equals "/tmp/sim/argon.out.log"
+    And config.phases[0].output.log_every equals 100
+    And config.phases[0].output.timings_path equals "/tmp/sim/argon.out.timings"
+

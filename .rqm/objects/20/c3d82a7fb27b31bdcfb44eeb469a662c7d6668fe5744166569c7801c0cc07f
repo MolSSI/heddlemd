@@ -1,0 +1,7 @@
+  @rq-931f1ab8
+  Scenario: neighbor_list all-pairs mode is accepted
+    Given the Background config plus [neighbor_list] mode="all-pairs"
+    When load_config is called
+    Then it returns Ok(config)
+    And config.neighbor_list matches NeighborListConfig::AllPairs
+

@@ -1,5 +1,8 @@
 pub mod codec;
+pub mod edit;
+pub mod log;
 pub mod materialize;
 pub mod migrate;
+pub mod mv;
 pub mod object;
 pub mod store;

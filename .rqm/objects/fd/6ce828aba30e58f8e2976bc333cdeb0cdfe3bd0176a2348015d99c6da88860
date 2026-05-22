@@ -1,0 +1,8 @@
+  @rq-77d98b9c
+  Scenario: Convergence on force tolerance ends the phase
+    Given a SD slot with force_tolerance = 1.0e-10
+    And a system whose F_max already equals 5.0e-11 N at the initial positions
+    When the minimization phase is invoked
+    Then the phase terminates after iteration 0 with reason ForceTolerance
+    And the .minlog contains exactly the step-0 row plus the final convergence row
+

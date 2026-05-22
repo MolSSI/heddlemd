@@ -1,0 +1,9 @@
+  @rq-09ed630b
+  Scenario: Interleaved [[phase]] and [[minimization]] preserve document order
+    Given a config whose TOML body declares, in source order,
+      [[phase]] name="equil", then [[minimization]] name="min", then [[phase]] name="prod"
+    When load_config(path) is called
+    Then config.phases[0] is PhaseKind::Md with name="equil"
+    And config.phases[1] is PhaseKind::Minimization with name="min"
+    And config.phases[2] is PhaseKind::Md with name="prod"
+

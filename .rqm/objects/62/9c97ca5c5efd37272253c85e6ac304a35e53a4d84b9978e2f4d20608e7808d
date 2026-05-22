@@ -1,0 +1,8 @@
+  @rq-07297467
+  Scenario: Spread is independent of particle order in the bin
+    Given two particles at the same primary bin, presented in two different
+      input orderings (e.g. swapped IDs)
+    When spme_charge_spread is called
+    Then the resulting rho is byte-identical between the two runs
+      (the cell-list sort canonicalises particle order within a bin)
+

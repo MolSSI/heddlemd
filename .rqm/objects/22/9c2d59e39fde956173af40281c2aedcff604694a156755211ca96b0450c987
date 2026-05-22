@@ -1,0 +1,13 @@
+  @rq-57bcb870
+  Scenario: Reject two phases whose default trajectory paths collide
+    Given two [[phase]] entries with name="x" each (duplicate names also trigger
+      DuplicatePhaseName, but the collision check applies when explicit
+      output_path settings collide too)
+    And phase 0 sets [phase.output].trajectory_path = "shared.xyz"
+    And phase 1 sets [phase.output].trajectory_path = "shared.xyz"
+    When load_config is called
+    Then it returns Err(ConfigError::PathCollision {
+      kind_a: PathRole::PhaseTrajectory { phase: _ },
+      kind_b: PathRole::PhaseTrajectory { phase: _ },
+      path: _ })
+```

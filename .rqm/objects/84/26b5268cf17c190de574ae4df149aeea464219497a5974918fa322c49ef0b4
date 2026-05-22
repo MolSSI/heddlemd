@@ -1,0 +1,9 @@
+  @rq-a7aac794
+  Scenario: Cell counts reflect perpendicular widths for a tilted box
+    Given r_cut + r_skin = 1.3
+    And a SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 10.0)
+      (so w_c = 10.0 but w_b = (ly*lz)/sqrt(lz² + yz²) = 100/sqrt(200) ≈ 7.07)
+    When NeighborListState::new_cell_list is called
+    Then n_cells[1] equals floor(7.07 / 1.3) = 5
+    And n_cells[2] equals floor(10.0 / 1.3) = 7
+

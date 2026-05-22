@@ -1,0 +1,9 @@
+  @rq-4b40604b
+  Scenario: Cell-list mode and trivial mode produce identical forces (within f32 tolerance)
+    Given two ForceField instances with identical particle positions and parameters,
+      one in mode = "cell-list" with r_skin = 0.3, the other in mode = "all-pairs"
+    When both run a single force evaluation
+    Then the resulting forces_* agree componentwise within 1e-4 relative error
+
+  # --- Trivial mode ---
+

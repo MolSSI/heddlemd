@@ -1,0 +1,8 @@
+// rq-ed61cf26
+#[derive(Debug, Clone)]
+pub struct MinimizationConfig {
+    pub name: String,
+    pub algorithm: SlotConfig,
+    pub output: MinimizationOutputConfig,
+}
+

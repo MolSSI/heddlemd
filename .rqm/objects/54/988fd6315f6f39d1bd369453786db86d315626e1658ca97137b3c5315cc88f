@@ -1,0 +1,9 @@
+  @rq-674cc467
+  Scenario: Box compatibility picks up SPME's real-space cutoff
+    Given a Config with the Background SpmeConfig (r_cut_real = 8.0e-10)
+    And a simulation box with min_perpendicular_width = 2.0e-9
+    And neighbor_list.r_skin = 1.0e-10
+    When the runner runs the cell-list compatibility check
+    Then required = 3 · (8.0e-10 + 1.0e-10) = 2.7e-9 > 2.0e-9 → fails
+    And the runner exits with RunnerError::CellListBoxTooSmall referencing the smallest perpendicular direction
+

@@ -1,0 +1,28 @@
+#### `[coulomb]` (optional table) <!-- rq-28d519b5 -->
+
+Activates the truncated Coulomb pair-force slot (see
+`forces/coulomb-pair-force.md`). The slot is present iff this table is
+present. The kernel computes pair contributions from the per-particle
+charges carried by `ParticleBuffers` (sourced from each particle type's
+`charge` field in `[[particle_types]]`); the table carries only the
+real-space cutoff parameters that apply uniformly to every pair.
+
+- `cutoff: f64` — pair distance in metres beyond which the Coulomb
+  force is treated as zero. Required when the table is present. Finite,
+  strictly positive.
+- `r_switch: f64` — optional. Inner radius of the CHARMM-style C¹
+  switching function applied over `[r_switch, cutoff]` (see
+  `forces/coulomb-pair-force.md`). Finite, strictly positive, and
+  `r_switch <= cutoff`. Defaults to `0.9 * cutoff` when omitted.
+  Setting `r_switch = cutoff` selects the hard-cutoff degenerate case
+  in which no smoothing is applied.
+
+The `[coulomb]` and `[spme]` tables are mutually exclusive: a config
+declaring both is rejected with `ConfigError::ConflictingElectrostatics`.
+
+Cross-validation alongside the other pair potentials feeds into the
+neighbor list's box-compatibility check: the shared neighbor list's
+search radius is `max(pair_interactions.cutoff_max, coulomb.cutoff,
+spme.r_cut_real) + r_skin`, and the simulation box's minimum
+perpendicular width must be at least `3 *` that value.
+

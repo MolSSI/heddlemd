@@ -1,0 +1,6 @@
+  @rq-560dffb8
+  Scenario: Reject duplicate type names
+    Given a config with two [[particle_types]] both named "Ar"
+    When load_config is called
+    Then it returns Err(ConfigError::DuplicateTypeName { name: "Ar" })
+

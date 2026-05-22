@@ -1,0 +1,8 @@
+  @rq-d01b6fb0
+  Scenario: Slots beyond neighbor_counts[i] are explicitly zeroed
+    Given particle i with neighbor_counts[i] = 3 and max_neighbors = 8
+    When coulomb_pair_force is called
+    Then slots i*8 + 3 through i*8 + 7 are all 0.0 in every output buffer
+
+  # --- Reproducibility ---
+

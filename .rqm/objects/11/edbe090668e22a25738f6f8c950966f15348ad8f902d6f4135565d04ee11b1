@@ -1,0 +1,6 @@
+  @rq-032b4b79
+  Scenario: Reject a config whose derived root is empty
+    Given a valid Background config written to "/tmp/sim/.in.toml"
+    When load_config("/tmp/sim/.in.toml") is called
+    Then it returns Err(ConfigError::InvalidConfigFilename { path: "/tmp/sim/.in.toml" })
+

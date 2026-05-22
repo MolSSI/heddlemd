@@ -1,0 +1,45 @@
+## Box Generation Tracking <!-- rq-282af621 -->
+
+In `CellList` mode the cell layout (`n_cells`, `n_cells_total`, and the
+cached lattice parameters used by the spatial-hash and build kernels)
+depends on the simulation box's lattice and is therefore cached. The
+state records the box's `generation()` value at the moment the cache was
+populated; this is stored as the field `cached_generation: u64`. The state
+also stores the `r_cut` value used to derive that cache so the cache can be
+refreshed without re-querying every consumer.
+
+Every call to `NeighborListState::pre_step` receives the runner's current
+`&SimulationBox` and compares `sim_box.generation()` against
+`cached_generation`. On a match no cache work is done. On a mismatch the
+state:
+
+1. Recomputes `n_cells_d = floor(w_d / (r_cut + r_skin))` per lattice
+   direction `d ∈ {a, b, c}` from the current box's perpendicular widths
+   `w_d` (see `simulation-box.md`).
+2. Re-validates that `n_cells_d >= 3` on every direction. If any direction
+   fails, returns `Err(NeighborListError::BoxTooSmallForCells { direction,
+   width, required })` without mutating any cached field; the caller can
+   rerun the previous step's force evaluation with the prior box or abort.
+3. Recomputes the scalar `n_cells_total = n_cells_a * n_cells_b * n_cells_c`.
+4. Reallocates the device buffers sized by `n_cells_total` (`cell_offsets`
+   to `n_cells_total + 1`; `cell_counts` and `write_cursors` to
+   `n_cells_total`) if `n_cells_total` differs from the previous value,
+   and rebuilds the prefix scan's block-totals stack to match the new
+   `n_cells_total`. Other device buffers (`neighbor_list`,
+   `neighbor_counts`, `reference_positions_*`, `disp_sq`,
+   `overflow_flag`, `cell_indices`) are sized by `particle_count` or are
+   scalar and are not reallocated.
+5. Stores the new `n_cells`, `n_cells_total`, and the cached lattice
+   parameters used by the spatial-hash and build kernels, and replaces
+   `cached_generation` with `sim_box.generation()`.
+6. Sets `needs_rebuild = true`. The rebuild that fires after the cache
+   refresh uses the new cell layout, so the displacement check is skipped
+   on a generation-mismatch step (current cell bins are stale by
+   construction).
+
+`r_search_sq` (`(r_cut + r_skin)²`) does not depend on the box and is left
+in place across refreshes.
+
+In `Trivial` mode the cell layout is not used; `pre_step` ignores the box's
+generation and does no per-step work.
+

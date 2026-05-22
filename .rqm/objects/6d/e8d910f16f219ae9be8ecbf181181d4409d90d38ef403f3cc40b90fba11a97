@@ -1,0 +1,8 @@
+  @rq-d3d4b6b3
+  Scenario: Pair `between` normalisation when both types are declared
+    Given a config with two declared types "Ar" and "Kr" and three pair_interactions
+      between=["Kr","Ar"], ["Ar","Ar"], ["Kr","Kr"]
+    When load_config is called
+    Then it returns Ok(config)
+    And every config.pair_interactions[i].between has lexicographically ordered names
+

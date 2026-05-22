@@ -1,0 +1,8 @@
+  @rq-d617bf4a
+  Scenario: Reject [phase.barostat] alongside mtk-npt in any single phase
+    Given a [[phase]] named "prod" with [phase.integrator] kind="mtk-npt"
+      and [phase.barostat] kind="c-rescale"
+    When load_config is called
+    Then it returns Err(ConfigError::IncompatibleBarostat {
+      integrator: "mtk-npt", phase: "prod" })
+

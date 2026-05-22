@@ -1,0 +1,8 @@
+  @rq-c5fa34f5
+  Scenario: Harmonic angle_type rejects extra fields
+    Given an [[angle_types]] entry with potential="harmonic" and an unknown field stiffness=1.0
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "angle_types[0]"
+    And message mentions "stiffness"
+

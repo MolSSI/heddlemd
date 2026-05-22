@@ -1,0 +1,55 @@
+#### `[phase.output]` (optional table; all fields have defaults) <!-- rq-3ea7fedd -->
+
+Every `[[phase]]` entry accepts an optional `[phase.output]` sub-table
+controlling that phase's trajectory, log, and timings outputs. Each
+field defaults independently when omitted; the table itself is
+optional. Output paths default to
+`<config-root>.out.<phase-name>.{xyz,log,timings}` (one file per
+phase per output kind).
+
+- `trajectory_path: String` — output trajectory path for this phase.
+  Default: `<config-root>.out.<phase-name>.xyz` in the same directory
+  as the config file (e.g. config root `argon`, phase name `equil` →
+  `argon.out.equil.xyz`). `<config-root>` is the config-filename
+  derivation defined under *Config filename convention*. Resolved
+  relative to the config file's directory; absolute paths are
+  honored as-is.
+- `trajectory_every: u64` — write one trajectory frame every this many
+  integration steps **within this phase**. Default `100`. `0` disables
+  trajectory output for this phase entirely (not even the phase's
+  step-0 frame is written; no `<phase-name>.xyz` file is created).
+  TOML parses `u64` fields, so negative integers fail at TOML parse
+  time.
+- `include_velocities: bool` — include `velo:R:3` columns in this
+  phase's trajectory frames. Default `true`.
+- `include_images: bool` — include `image:I:3` columns in this
+  phase's trajectory frames. Default `true`. When `true`, each
+  frame's data rows carry three integer columns after the position
+  (and velocity, if present) columns; consumers reconstruct unwrapped
+  positions as `pos + images_x · a + images_y · b + images_z · c`,
+  which reduces to `pos + image · (lx, ly, lz)` for an orthorhombic
+  box. When `false`, image columns are omitted from the file;
+  positions in the trajectory are still wrapped into the primary
+  image.
+- `log_path: String` — output log path for this phase. Default:
+  `<config-root>.out.<phase-name>.log` in the same directory as the
+  config file. Resolved like `trajectory_path`.
+- `log_every: u64` — write one log row every this many integration
+  steps within this phase. Default `100`. `0` disables the log
+  entirely for this phase (no header is written, no file is created).
+- `timings_path: String` — output path for this phase's per-stage
+  performance summary file. Default:
+  `<config-root>.out.<phase-name>.timings` in the same directory as
+  the config file. Resolved like `trajectory_path`. See
+  `performance-analysis.md` for the file format. There is no
+  `timings_every` field; one timings file is written per phase at
+  end of phase.
+
+Phase-local step numbering: within a single phase's output files,
+the trajectory `Step=` attribute and the log `step` column start at
+`0` (the phase's initial-state snapshot) and run through `n_steps`.
+Step numbering does **not** accumulate across phases — each phase's
+output file is structurally identical to a single-phase trajectory
+or log of the same `n_steps`. Phase-local `time` is computed as
+`step * dt_phase` using that phase's `dt`.
+

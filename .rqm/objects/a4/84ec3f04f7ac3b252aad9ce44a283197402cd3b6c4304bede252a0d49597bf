@@ -1,0 +1,8 @@
+  @rq-a94d2c13
+  Scenario: Missing [[pair_interactions]] is rejected
+    Given the Background config with no [[pair_interactions]] entries
+    When load_config is called
+    Then it returns Err(ConfigError::MissingPairInteraction { types: ("Ar", "Ar") })
+
+  # --- Per-field validation ---
+

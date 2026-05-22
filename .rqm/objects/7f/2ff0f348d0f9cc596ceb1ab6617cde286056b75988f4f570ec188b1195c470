@@ -1,0 +1,10 @@
+  @rq-129edb76
+  Scenario: MtkNpt + [thermostat] is rejected (owns its thermostat)
+    Given the Background config with [integrator] kind="mtk-npt",
+      temperature=85.0, pressure=1.0e5, tau_t=1.0e-13, tau_p=1.0e-12
+    And a [thermostat] section with kind="csvr",
+      temperature=85.0, tau=1.0e-13, seed=1
+    When load_config is called
+    Then it returns Err(ConfigError::IncompatibleThermostat {
+      integrator: "mtk-npt" })
+

@@ -1,0 +1,131 @@
+### Validation <!-- rq-bd228ef7 -->
+
+Config validation is split between two methods. `Config::validate(&self)`
+runs the structural and topology-independent checks; the open registries
+do not need to be available for it. `Config::validate_against(&self,
+registries: &Registries)` runs the per-kind and cross-cutting checks
+that consult the registered builders. `Registries` lives at
+`dynamics::Registries` (see `simulation-runner.md`) and bundles the
+five open registries the runner consults (integrators, thermostats,
+barostats, constraint_types, potentials).
+
+`load_config` invokes both methods in order, against
+`Registries::with_builtins()`, so the common path surfaces every
+per-kind validation error at parse time without callers having to
+remember the second step. `load_config_raw` is the parse-only entry
+point: it runs `Config::validate` and stops. Callers that compose
+custom builders use `load_config_raw` followed by
+`config.validate_against(&registries)` with their own bundle.
+
+`load_config_raw` performs one pre-deserialiser check on the input
+path:
+
+0. The path's final filename component, lower-cased, ends in
+   `.in.toml`, and the `<config-root>` derivation (see *Config
+   filename convention*) yields a non-empty string. A failure of
+   either part returns
+   `ConfigError::InvalidConfigFilename { path: PathBuf }` and the
+   file is not opened. This check runs before
+   `schema_version` validation.
+
+`Config::validate(&self)` checks:
+
+1. Every name in `[[pair_interactions]]`'s `between` refers to a declared
+   `[[particle_types]]`. Unknown names produce `UnknownTypeInPair { name,
+   pair_index }` where `pair_index` is the zero-based index in the
+   `pair_interactions` array.
+2. Every unordered pair of declared types appears in
+   `[[pair_interactions]]` exactly once. A missing pair produces
+   `MissingPairInteraction { types: (String, String) }`. A duplicate
+   produces `DuplicatePairInteraction { types: (String, String) }`. The
+   reported tuple is normalised so the lexicographically smaller name
+   comes first.
+3. The merged phase sequence (`[[phase]]` ∪ `[[minimization]]`) is
+   non-empty (`EmptyPhases` otherwise).
+4. Every phase (MD or minimization) has a non-empty ASCII-only `name`
+   (letters/digits/`-`/`_`); names are unique across the merged
+   sequence (`DuplicatePhaseName { name }` otherwise).
+5. Every MD phase's `n_steps` is a `u64` (TOML-enforced) and every
+   MD phase's `dt` is finite and strictly positive
+   (`InvalidValue { field: "phase[<i>].dt", reason }` otherwise).
+6. After path resolution, every supplied path is pairwise distinct from
+   every other supplied path (`PathCollision { kind_a, kind_b, path }`).
+   The set of paths under check is `init`, every MD phase's
+   `output.trajectory_path` / `output.log_path` /
+   `output.timings_path`, every minimization phase's
+   `output.minlog_path` / `output.trajectory_path` /
+   `output.timings_path`, and (when supplied) `topology`.
+7. Across every stochastic slot in every phase, no two slots of the
+   same `kind` declare the same numerical `seed`
+   (`DuplicatePhaseSeed { kind: String, seed: u64 }` otherwise). Two
+   slots of different `kind`s may share a numerical seed.
+8. Every `[[constraint_types]]` entry has a unique `name`; duplicates
+   surface as `DuplicateConstraintTypeName { name }`.
+9. The electrostatics tables are mutually exclusive: declaring both
+   `[coulomb]` and `[spme]` surfaces as `ConflictingElectrostatics`.
+
+`Config::validate_against(&self, registries: &Registries)` checks,
+per phase, in declaration order:
+
+10. The `[phase.integrator]` section's `kind` is a registered key of
+    `registries.integrators`. Unknown kinds surface as
+    `ConfigError::UnknownKind { slot: "integrator", kind }`.
+11. The chosen integrator builder's
+    `validate_params(&phase.integrator.params)` succeeds; otherwise
+    the builder-produced `ConfigError` propagates.
+12. Same as (10) and (11) for `[phase.thermostat]` (when present)
+    against `registries.thermostats`, and for `[phase.barostat]`
+    (when present) against `registries.barostats`.
+12a. For every `PhaseKind::Minimization` entry: the
+    `[minimization.algorithm]` section's `kind` is a registered key
+    of `registries.minimizers`. Unknown kinds surface as
+    `ConfigError::UnknownKind { slot: "minimization", kind }`. The
+    chosen builder's
+    `validate_params(&minimization.algorithm.params)` runs and any
+    failure propagates.
+13. Same as (10) and (11) for every `[[constraint_types]]` entry
+    against `registries.constraint_types` (checked once, not per
+    phase — constraint types are global).
+14. If `[phase.thermostat]` is present and
+    `registries.integrators.lookup(&phase.integrator.kind).unwrap()
+    .owns_thermostat(&phase.integrator.params)` returns `true`,
+    validation returns `IncompatibleThermostat { integrator: <kind name>,
+    phase: <phase name> }`.
+15. If `[phase.barostat]` is present and
+    `registries.integrators.lookup(&phase.integrator.kind).unwrap()
+    .owns_barostat(&phase.integrator.params)` returns `true`,
+    validation returns `IncompatibleBarostat { integrator: <kind name>,
+    phase: <phase name> }`.
+16. Every constraint type name referenced from the topology file's
+    `[constraints]` section appears in `[[constraint_types]]`.
+    Unknown names surface through `load_topology_file` as
+    `TopologyFileError::UnknownConstraintType { .. }`. This check is
+    performed by `load_topology_file`, not by `Config::validate_against`,
+    because the topology file is loaded separately.
+
+The runner additionally calls
+`Config::validate_constraint_compatibility(&self, registries: &Registries, has_constraints: bool)`
+after `load_topology_file` returns. This method runs the
+`IncompatibleConstraint` check **per phase**:
+
+- Every MD phase's chosen integrator builder must satisfy
+  `IntegratorBuilder::supports_constraints(&params)` when the
+  topology declares any constraint group. In the default registry
+  this rejects every combination of a non-empty `[constraints]`
+  section with `langevin-baoab`, `mtk-npt`, or `velocity-verlet`'s
+  lossless variant.
+- Every minimization phase requires that every registered
+  `[[constraint_types]]` entry's builder satisfies
+  `ConstraintBuilder::supports_position_projection_only(&params)`.
+  In the default registry the `settle-water` builder returns
+  `true`, so the v1 registry never rejects on this path; future
+  constraint algorithms that cannot project positions in isolation
+  flip the predicate to `false` and surface here.
+
+Failures of either form surface as
+`IncompatibleConstraint { integrator: <kind-or-algorithm name>,
+phase: <phase name> }`. The `integrator` field carries the
+integrator's `kind` for MD-phase failures and the minimization
+algorithm's `kind` (e.g. `"steepest-descent"`) for minimization-
+phase failures.
+

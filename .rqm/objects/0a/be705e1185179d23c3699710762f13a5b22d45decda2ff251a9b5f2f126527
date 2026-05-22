@@ -1,0 +1,7 @@
+  @rq-0a92d90b
+  Scenario: Unknown neighbor_list mode is rejected
+    Given the Background config plus [neighbor_list] mode="kd-tree"
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, .. })
+    And path equals "neighbor_list.mode"
+

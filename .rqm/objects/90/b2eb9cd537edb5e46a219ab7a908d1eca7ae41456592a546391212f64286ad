@@ -1,0 +1,7 @@
+  @rq-09c8a503
+  Scenario: Custom minimizer builder is selectable
+    Given a MinimizerRegistry::with_builtins()
+    And a custom MinimizerBuilder whose kind_name() is "test-stub"
+    When registry.register(custom_builder) is called
+    Then registry.build(...) routes "test-stub" kind requests to the custom builder
+```

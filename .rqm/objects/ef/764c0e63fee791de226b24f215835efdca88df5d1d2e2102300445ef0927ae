@@ -1,0 +1,6 @@
+  @rq-0cb3c41c
+  Scenario: Reject unknown schema_version
+    Given the Background config with schema_version=2
+    When load_config is called
+    Then it returns Err(ConfigError::UnsupportedSchemaVersion { actual: 2, supported: 1 })
+

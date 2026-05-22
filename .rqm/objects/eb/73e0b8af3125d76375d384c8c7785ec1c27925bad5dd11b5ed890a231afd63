@@ -1,0 +1,16 @@
+## Output <!-- rq-71fa84f4 -->
+
+A minimization phase writes two files (in addition to the per-phase
+`.timings` file that every phase writes):
+
+- **`.minlog`** — per-iteration diagnostics CSV. Always written when
+  `output.minlog_every > 0`. Always opened with a header line; rows
+  appear at the cadence below.
+- **`.xyz`** — periodic positions trajectory, sharing the same writer
+  and format as MD trajectory output (`io/trajectory-output.md`).
+  Optional; controlled by `output.trajectory_every`. Velocities are
+  not written even when `output.include_velocities = true` (the
+  velocity columns carry whatever values were in the buffer at phase
+  entry; they do not change during minimization, so writing them would
+  duplicate the init-state velocities).
+

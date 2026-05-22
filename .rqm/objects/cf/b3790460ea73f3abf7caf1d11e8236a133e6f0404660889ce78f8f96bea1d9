@@ -1,0 +1,6 @@
+  @rq-4f8e37af
+  Scenario: A wrapped error is reachable through source()
+    Given ForceFieldError::NeighborList wrapping a NeighborListError::TooManyCells
+    When source() is called on the ForceFieldError
+    Then it returns the wrapped NeighborListError
+

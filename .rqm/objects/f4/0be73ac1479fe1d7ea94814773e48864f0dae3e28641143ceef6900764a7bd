@@ -1,0 +1,7 @@
+  @rq-637cd1a5
+  Scenario: cuFFT smoke test passes on a determinism-conforming installation
+    Given a config that selects SPME
+    When init_device() is called
+    Then it succeeds without error
+    And cufft_determinism_smoke_test returned Ok(()) internally
+

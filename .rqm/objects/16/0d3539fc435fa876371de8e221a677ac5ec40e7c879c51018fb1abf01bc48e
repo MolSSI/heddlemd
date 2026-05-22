@@ -1,0 +1,11 @@
+  @rq-9af1f9dc
+  Scenario: Minimum-image works for a triclinic box
+    Given a SimulationBox with non-zero tilts (e.g. xy=2e-10, xz=1e-10, yz=-3e-10)
+    And two particles at positions whose minimum-image separation crosses a
+      tilted face of the primary parallelepiped
+    When coulomb_pair_force is called
+    Then the computed displacement matches the triclinic minimum-image
+      result of sim_box.minimum_image(r_i - r_j)
+
+  # --- Self-pair handling ---
+

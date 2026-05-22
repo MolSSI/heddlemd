@@ -1,0 +1,6 @@
+  @rq-f0e3b004
+  Scenario: Missing init field
+    Given the Background config with the `init` field removed
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "init" })
+

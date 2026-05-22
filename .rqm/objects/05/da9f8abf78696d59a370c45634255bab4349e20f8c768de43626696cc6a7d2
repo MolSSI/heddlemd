@@ -1,0 +1,32 @@
+### Real-space CUDA kernel <!-- rq-9a512ed1 -->
+
+`kernels/spme_real.cu` declares one `extern "C"` kernel:
+
+```c
+extern "C" __global__ void spme_real_pair_force(
+    const float *positions_x,
+    const float *positions_y,
+    const float *positions_z,
+    const float *charges,
+    float *pair_forces_x,
+    float *pair_forces_y,
+    float *pair_forces_z,
+    float *pair_energies,
+    float *pair_virials,
+    unsigned int max_neighbors,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    float k_coulomb,
+    float alpha,
+    float r_cut_real,
+    const unsigned int *atom_excl_offsets,
+    const unsigned int *atom_excl_partners,
+    const float *atom_excl_coul_scales,
+    const unsigned int *neighbor_list,
+    const unsigned int *neighbor_counts,
+    unsigned int n);
+```
+
+Launch configuration: `(grid_x, grid_y, 1) = (ceil(max_neighbors/16),
+ceil(n/16), 1)` blocks of `(16, 16, 1) = 256` threads, matching the LJ
+and truncated-Coulomb kernels.
+

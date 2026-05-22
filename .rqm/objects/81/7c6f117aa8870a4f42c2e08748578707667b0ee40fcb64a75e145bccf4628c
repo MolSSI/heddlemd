@@ -1,0 +1,10 @@
+  @rq-5ded1806
+  Scenario: Absolute paths are honored unchanged
+    Given the Background config with init="/data/argon.in.xyz",
+      [output].trajectory_path="/data/out/traj.xyz",
+      [output].log_path="/data/out/run.log"
+    When load_config is called
+    Then config.init equals "/data/argon.in.xyz"
+    And config.phases[0].output.trajectory_path equals "/data/out/traj.xyz"
+    And config.phases[0].output.log_path equals "/data/out/run.log"
+

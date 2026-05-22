@@ -1,0 +1,6 @@
+  @rq-aa19f894
+  Scenario: Reject non-positive sigma
+    Given the Background config with pair_interactions[0].sigma=0.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].sigma", reason: _ })
+

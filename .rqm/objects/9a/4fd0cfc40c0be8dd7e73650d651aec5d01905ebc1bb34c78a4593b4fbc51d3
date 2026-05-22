@@ -1,0 +1,14 @@
+  @rq-5d91f07d
+  Scenario: [barostat] rejects an unknown field for the chosen kind
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [barostat] section with kind="berendsen", pressure=1.0e5,
+      tau=1.0e-12, compressibility=4.5e-10, plus the unknown field seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "barostat"
+    And message mentions "seed"
+    # The same rejection applies to every (kind, unknown-field) pair the
+    # parameterised unit test enumerates. At minimum the test exercises
+    #   (berendsen, seed), (c-rescale, friction). Adding a kind extends
+    #   the matrix.
+

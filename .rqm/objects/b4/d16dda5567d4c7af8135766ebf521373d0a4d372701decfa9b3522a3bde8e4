@@ -1,0 +1,7 @@
+  @rq-ae6d5db8
+  Scenario: Reject missing pair interaction
+    Given a config with two declared types "Ar" and "Kr"
+      and pair_interactions containing only between=["Ar","Ar"] and between=["Kr","Kr"]
+    When load_config is called
+    Then it returns Err(ConfigError::MissingPairInteraction { types: ("Ar", "Kr") })
+

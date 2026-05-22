@@ -1,0 +1,6 @@
+  @rq-8abcd634
+  Scenario: The DriverError-to-TimingsError conversion is retained
+    Given a generic function fn assert_from<T: From<cudarc::driver::DriverError>>()
+    When it is instantiated for TimingsError
+    Then the crate compiles
+

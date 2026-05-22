@@ -1,0 +1,40 @@
+#### `[neighbor_list]` (optional table) <!-- rq-adddaf1a -->
+
+Selects the algorithm used by the Lennard-Jones slot to enumerate
+non-bonded pairs. The table is optional; when omitted the runner uses
+the cell-list defaults documented below. See `forces/neighbor-list.md`
+for the algorithm.
+
+- `mode: String` — `"cell-list"` (default) or `"all-pairs"`. The
+  `cell-list` value selects the cell-list / neighbor-list pipeline; the
+  `all-pairs` value forces the O(N²) kernel.
+
+Fields accepted for `mode = "cell-list"`:
+
+- `max_neighbors: u64` — optional; defaults to `256`. Strictly
+  positive. Upper bound on the number of neighbours retained per
+  particle; a rebuild that finds more than this many neighbours for
+  some atom halts the simulation via
+  `RunnerError::ForceField(NeighborList(NeighborListOverflow))`. The
+  default suits typical liquid-density short-range simulations
+  (≤ ~200 neighbours per atom at cubic-LJ density and 2.5σ cutoff);
+  dense or long-cutoff systems must raise it.
+- `r_skin: f64` — skin distance in metres. Optional; defaults to
+  `0.3 * cutoff` where `cutoff` is the maximum cutoff among
+  `[[pair_interactions]]` entries. Strictly positive and finite.
+
+Fields accepted for `mode = "all-pairs"`: none. `max_neighbors` and
+`r_skin` are rejected as unknown fields in this mode.
+
+Cross-validation:
+
+- `r_skin > 0` and finite.
+- `max_neighbors > 0`.
+- The simulation box's minimum perpendicular width satisfies
+  `min_perpendicular_width >= 3 * (cutoff_max + r_skin)` where
+  `cutoff_max` is the largest cutoff among `[[pair_interactions]]`
+  and the `[coulomb]` table's `cutoff` (when present). The box is
+  read from the init file, so this check is performed by the runner,
+  not by `load_config`. See `simulation-runner.md` for the
+  runner-side validation and the corresponding `RunnerError` variant.
+

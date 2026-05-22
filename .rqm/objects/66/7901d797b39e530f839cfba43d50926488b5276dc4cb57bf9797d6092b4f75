@@ -1,0 +1,8 @@
+  @rq-dc35ae30
+  Scenario: Empty angle_type name rejected
+    Given an [[angle_types]] entry with name=""
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "angle_types[0].name", reason: _ })
+
+  # --- Neighbor list ---
+

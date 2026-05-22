@@ -1,0 +1,8 @@
+  @rq-aa1492a7
+  Scenario: validate_against rejects an unknown integrator kind
+    Given a Config whose integrator.kind equals "no-such-integrator"
+    And the default Registries::with_builtins()
+    When config.validate_against(&registries) is called
+    Then it returns Err(ConfigError::UnknownKind {
+      slot: "integrator", kind: "no-such-integrator" })
+

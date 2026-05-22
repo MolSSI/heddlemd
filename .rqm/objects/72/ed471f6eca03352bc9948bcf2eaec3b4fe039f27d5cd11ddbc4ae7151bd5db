@@ -1,0 +1,8 @@
+  @rq-e643b070
+  Scenario: neighbor_list cell-list mode omitting max_neighbors uses default 256
+    Given the Background config plus
+      [neighbor_list] mode="cell-list" r_skin=2.0e-10
+    When load_config is called
+    Then it returns Ok(config)
+    And config.neighbor_list matches NeighborListConfig::CellList { max_neighbors: 256, r_skin: 2.0e-10 }
+

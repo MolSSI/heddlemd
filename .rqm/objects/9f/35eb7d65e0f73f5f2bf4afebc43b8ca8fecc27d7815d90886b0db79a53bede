@@ -1,0 +1,9 @@
+  @rq-699cccff
+  Scenario: Two pre_steps after a single box mutation refresh only once
+    Given a NeighborListState in CellList mode
+    When box.set_lattice bumps the generation once
+    And pre_step is called, refreshing the cache and rebuilding
+    And pre_step is called again without any further box mutation
+    Then the second pre_step performs no cell-layout recompute
+    And the second pre_step runs the displacement check (no longer skipped)
+

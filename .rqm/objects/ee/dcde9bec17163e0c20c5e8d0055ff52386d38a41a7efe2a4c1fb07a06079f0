@@ -1,0 +1,49 @@
+### Per-iteration sequence <!-- rq-3f080cf2 -->
+
+For iteration `k` with current accepted positions `x_k`, accepted
+energy `E_k`, and current step size `step_k`:
+
+1. **Build trial.** Compute `F_max = max_i ||F_i(x_k)||`. If
+   `F_max == 0.0`, declare convergence with reason
+   `MinimizerConvergence::ForceZero` and stop. Otherwise compute
+   `x_trial = x_k + step_k · (F(x_k) / F_max)`.
+2. **Project constraints (if enabled).** When the run carries a
+   `Constraint` slot, call
+   `constraint.apply_position_projection_only(buffers, sim_box,
+   timings)` on `x_trial` (see `integration/constraint-framework.md`).
+   The projection mutates `x_trial` in place; velocities are not
+   touched.
+3. **Evaluate trial energy.** Run
+   `force_field.step(buffers, sim_box, timings)` to populate
+   `buffers.forces_*` at `x_trial` and to compute the trial potential
+   energy `E_trial` via `compute_total_potential_energy`.
+4. **Accept or reject.**
+   - If `E_trial < E_k`: **accept**. Set `x_{k+1} = x_trial`,
+     `E_{k+1} = E_trial`, `step_{k+1} = min(step_increase · step_k,
+     max_step)`, increment the accepted-step counter.
+   - If `E_trial >= E_k`: **reject**. Discard `x_trial` (restore the
+     accepted positions from the iteration's pre-trial snapshot), set
+     `step_{k+1} = step_decrease · step_k`. Forces are re-evaluated at
+     the restored positions before the next iteration's trial.
+5. **Check convergence.** A successful step ends the phase when either
+   physical criterion is met:
+   - `F_max(x_{k+1}) ≤ force_tolerance` — `MinimizerConvergence::ForceTolerance`.
+   - `|E_k - E_{k+1}| / max(|E_k|, |E_{k+1}|, ε_floor) ≤ energy_tolerance`
+     and at least one prior step was accepted —
+     `MinimizerConvergence::EnergyTolerance`, with
+     `ε_floor = 1.0e-30` to avoid divide-by-zero when both energies
+     are zero.
+   Rejected steps never trigger convergence; the energy-tolerance check
+   compares the last two distinct accepted energies.
+6. **Check iteration cap.** When the iteration counter `k` reaches
+   `max_iterations`, the phase ends with a **non-convergence failure**.
+   The runner surfaces this as
+   `RunnerError::MinimizerNonConvergence { phase: <phase name>,
+   iterations: max_iterations, final_force: F_max(x_k),
+   final_step: step_k }` and exits with code `2`. Subsequent phases
+   do not run.
+
+The iteration counter advances on every loop body iteration (accepted
+**or** rejected), so `max_iterations` caps total force evaluations.
+A rejected step counts as one iteration.
+

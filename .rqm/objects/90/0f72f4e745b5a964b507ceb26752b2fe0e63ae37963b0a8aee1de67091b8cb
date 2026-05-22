@@ -1,0 +1,8 @@
+  @rq-ab74a666
+  Scenario: Reject grid dimension below 2*spline_order along b
+    Given an SpmeConfig with spline_order=6 and grid=[16, 8, 16]
+    When SpmeReciprocalState::new is called
+    Then it returns Err(SpmeError::InvalidGrid { axis: "b", n: 8, spline_order: 6 })
+
+  # --- cuFFT determinism precondition ---
+

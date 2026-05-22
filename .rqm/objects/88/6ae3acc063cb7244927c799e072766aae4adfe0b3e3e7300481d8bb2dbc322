@@ -1,0 +1,8 @@
+  @rq-02a15197
+  Scenario: Mixed charge magnitudes scale linearly
+    Given two particles with charges (q_i, q_j) at distance r
+    When coulomb_pair_force is called
+    Then pair_forces_x[0*2 + 1] is proportional to q_i · q_j
+
+  # --- Cutoff gating ---
+

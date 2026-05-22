@@ -1,0 +1,240 @@
+// rq-2a6a51c8
+#[derive(Debug, Clone)]
+pub struct Config {
+    pub schema_version: u64,
+    pub init: PathBuf,
+    pub topology: Option<PathBuf>,
+    pub simulation: SimulationConfig,
+    /// Unified phase sequence in source-document order: each entry is
+    /// either a `PhaseKind::Md(PhaseConfig)` from a `[[phase]]` table
+    /// or a `PhaseKind::Minimization(MinimizationConfig)` from a
+    /// `[[minimization]]` table.
+    pub phases: Vec<PhaseKind>,
+    pub particle_types: Vec<ParticleTypeConfig>,
+    pub pair_interactions: Vec<PairInteractionConfig>,
+    pub bond_types: Vec<BondTypeConfig>,
+    pub angle_types: Vec<AngleTypeConfig>,
+    pub constraint_types: Vec<NamedSlotConfig>,
+    pub coulomb: Option<CoulombConfig>,
+    pub spme: Option<SpmeConfig>,
+    pub neighbor_list: NeighborListConfig,
+    pub config_path: PathBuf,
+}
+
+// =====================================================================
+// Default-value helpers used by `#[serde(default = "...")]`
+// =====================================================================
+
+fn default_spline_order() -> u32 {
+    4
+}
+fn default_max_neighbors() -> u32 {
+    256
+}
+fn default_trajectory_every() -> u64 {
+    100
+}
+fn default_log_every() -> u64 {
+    100
+}
+fn default_true() -> bool {
+    true
+}
+
+// =====================================================================
+// Raw types: deserialise-side mirrors for entries with field-derived
+// defaults or post-parse normalisation. Convert into the public type via
+// `From` (when the conversion is context-free) or via the helpers in
+// `build_config` (when it needs e.g. the max cutoff).
+// =====================================================================
+
+const SUPPORTED_SCHEMA_VERSION: u64 = 1;
+
+#[derive(Debug, Deserialize)]
+struct RawConfig {
+    schema_version: u64,
+    init: String,
+    #[serde(default)]
+    topology: Option<String>,
+    simulation: SimulationConfig,
+    #[serde(default, rename = "phase")]
+    phases: Vec<toml::Spanned<RawPhaseConfig>>,
+    #[serde(default, rename = "minimization")]
+    minimizations: Vec<toml::Spanned<RawMinimizationConfig>>,
+    particle_types: Vec<ParticleTypeConfig>,
+    #[serde(default)]
+    pair_interactions: Vec<RawPairInteraction>,
+    #[serde(default)]
+    bond_types: Vec<RawBondType>,
+    #[serde(default)]
+    angle_types: Vec<RawAngleType>,
+    #[serde(default)]
+    constraint_types: Vec<NamedSlotConfig>,
+    #[serde(default)]
+    coulomb: Option<RawCoulombConfig>,
+    #[serde(default)]
+    spme: Option<SpmeConfig>,
+    #[serde(default)]
+    neighbor_list: Option<RawNeighborList>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMinimizationConfig {
+    name: String,
+    algorithm: SlotConfig,
+    #[serde(default)]
+    output: Option<RawMinimizationOutputConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMinimizationOutputConfig {
+    #[serde(default)]
+    minlog_path: Option<String>,
+    #[serde(default = "default_minlog_every")]
+    minlog_every: u64,
+    #[serde(default)]
+    trajectory_path: Option<String>,
+    #[serde(default)]
+    trajectory_every: u64,
+    #[serde(default = "default_true")]
+    include_images: bool,
+    #[serde(default)]
+    timings_path: Option<String>,
+}
+
+fn default_minlog_every() -> u64 {
+    1
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawPhaseConfig {
+    name: String,
+    n_steps: u64,
+    dt: f64,
+    integrator: SlotConfig,
+    #[serde(default)]
+    thermostat: Option<SlotConfig>,
+    #[serde(default)]
+    barostat: Option<SlotConfig>,
+    #[serde(default)]
+    output: Option<RawOutputConfig>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "potential", rename_all = "kebab-case", deny_unknown_fields)]
+enum RawPairInteraction {
+    LennardJones {
+        between: [String; 2],
+        cutoff: f64,
+        #[serde(default)]
+        r_switch: Option<f64>,
+        sigma: f64,
+        epsilon: f64,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "potential", rename_all = "kebab-case", deny_unknown_fields)]
+enum RawBondType {
+    Morse {
+        name: String,
+        de: f64,
+        a: f64,
+        re: f64,
+    },
+}
+
+impl From<RawBondType> for BondTypeConfig {
+    fn from(r: RawBondType) -> Self {
+        match r {
+            RawBondType::Morse { name, de, a, re } => BondTypeConfig::Morse { name, de, a, re },
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "potential", rename_all = "kebab-case", deny_unknown_fields)]
+enum RawAngleType {
+    Harmonic {
+        name: String,
+        k_theta: f64,
+        theta_0: f64,
+    },
+}
+
+impl From<RawAngleType> for AngleTypeConfig {
+    fn from(r: RawAngleType) -> Self {
+        match r {
+            RawAngleType::Harmonic {
+                name,
+                k_theta,
+                theta_0,
+            } => AngleTypeConfig::Harmonic {
+                name,
+                k_theta,
+                theta_0,
+            },
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawCoulombConfig {
+    cutoff: f64,
+    #[serde(default)]
+    r_switch: Option<f64>,
+}
+
+impl From<RawCoulombConfig> for CoulombConfig {
+    fn from(r: RawCoulombConfig) -> Self {
+        let r_switch = r.r_switch.unwrap_or(0.9 * r.cutoff);
+        CoulombConfig {
+            cutoff: r.cutoff,
+            r_switch,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "mode", rename_all = "kebab-case", deny_unknown_fields)]
+enum RawNeighborList {
+    // Empty-struct form (`AllPairs {}`) so `deny_unknown_fields` rejects
+    // sibling fields like `max_neighbors` / `r_skin` under
+    // `mode = "all-pairs"`. Unit variants in internally-tagged enums
+    // skip the deny check.
+    AllPairs {},
+    CellList {
+        #[serde(default = "default_max_neighbors")]
+        max_neighbors: u32,
+        #[serde(default)]
+        r_skin: Option<f64>,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawOutputConfig {
+    #[serde(default)]
+    trajectory_path: Option<String>,
+    #[serde(default = "default_trajectory_every")]
+    trajectory_every: u64,
+    #[serde(default = "default_true")]
+    include_velocities: bool,
+    #[serde(default = "default_true")]
+    include_images: bool,
+    #[serde(default)]
+    log_path: Option<String>,
+    #[serde(default = "default_log_every")]
+    log_every: u64,
+    #[serde(default)]
+    timings_path: Option<String>,
+}
+
+// =====================================================================
+// load_config / load_config_raw
+// =====================================================================
+

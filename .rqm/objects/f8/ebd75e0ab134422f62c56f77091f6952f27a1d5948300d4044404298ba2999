@@ -1,0 +1,7 @@
+  @rq-35981c27
+  Scenario: First displacement_check call always rebuilds (needs_rebuild starts true)
+    Given a freshly-constructed NeighborListState
+    When pre_step is called for the first time
+    Then a rebuild occurs unconditionally
+    And needs_rebuild is false afterwards
+

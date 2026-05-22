@@ -1,0 +1,13 @@
+  @rq-13ca0415
+  Scenario: [neighbor_list] rejects unknown fields for the chosen mode
+    Given the Background config plus [neighbor_list] mode="all-pairs"
+      and the unknown field max_neighbors=128
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "neighbor_list"
+    And message mentions "max_neighbors"
+    # The same rejection applies to every (mode, unknown-field) pair the
+    # parameterised unit test enumerates. At minimum the test exercises
+    #   (all-pairs, max_neighbors), (all-pairs, r_skin),
+    #   (cell-list, stencil="huge").
+

@@ -1,0 +1,8 @@
+  @rq-982ddb8d
+  Scenario: Reject [phase.thermostat] alongside an integrator that owns its own
+    Given a [[phase]] named "x" with [phase.integrator] kind="langevin-baoab"
+      and [phase.thermostat] kind="csvr"
+    When load_config is called
+    Then it returns Err(ConfigError::IncompatibleThermostat {
+      integrator: "langevin-baoab", phase: "x" })
+

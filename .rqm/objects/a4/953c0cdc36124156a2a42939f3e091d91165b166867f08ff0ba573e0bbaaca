@@ -1,0 +1,7 @@
+  @rq-46b1a697
+  Scenario: Reject two phases of the same stochastic kind sharing a seed
+    Given a two-phase config where both [phase.thermostat] entries declare
+      kind="csvr" and seed=7
+    When load_config is called
+    Then it returns Err(ConfigError::DuplicatePhaseSeed { kind: "csvr", seed: 7 })
+

@@ -1,0 +1,7 @@
+  @rq-3e0a3040
+  Scenario: Unknown minimizer kind in a populated registry reports UnknownKind
+    Given a MinimizerRegistry::with_builtins()
+    And a SlotConfig { kind: "fancy-gradient", params: { } }
+    When registry.build(&slot, &gpu, particle_count=4, n_constraints=0) is called
+    Then it returns Err(MinimizerError::UnknownKind("fancy-gradient"))
+

@@ -1,0 +1,10 @@
+  @rq-d70c3517
+  Scenario: A topology with constraint groups paired with mtk-npt in a phase is rejected
+    Given a topology declaring at least one [constraints] entry of type "SPCE"
+    And a [[phase]] named "p" using [phase.integrator] kind="mtk-npt"
+    When config.validate_constraint_compatibility(&registries, true) is called
+    Then it returns Err(ConfigError::IncompatibleConstraint {
+      integrator: "mtk-npt", phase: "p" })
+
+  # --- Per-phase output collisions ---
+

@@ -1,0 +1,23 @@
+## Determinism <!-- rq-6112a43b -->
+
+Steepest descent preserves the project's bit-wise reproducibility
+invariant on the same GPU under identical inputs:
+
+- The `F_max` reduction is a deterministic single-block reduction in
+  fixed left-to-right index order, parallel to
+  `compute_total_potential_energy`'s structure.
+- The position update `x_trial = x + step · (F / F_max)` is a
+  per-particle `f32` arithmetic sequence with no atomics and no
+  cross-particle dependencies.
+- The accept/reject decision compares two `f64` energy values
+  computed by the same deterministic reduction; the comparison is
+  bit-exact.
+- The position-snapshot rollback on rejection copies device buffers
+  through `cudaMemcpyAsync` on the default stream; the source and
+  destination are both per-particle SoA arrays of fixed length.
+- The minimizer slot holds no random-number state.
+
+Two runs on the same GPU with identical configs and init files
+produce byte-identical post-minimization positions and byte-identical
+`.minlog` rows.
+

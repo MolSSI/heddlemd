@@ -1,0 +1,15 @@
+### Path resolution and overwrite policy <!-- rq-6d99f9c8 -->
+
+- All file paths (`init`, `topology`, `output.trajectory_path`,
+  `output.log_path`, `output.timings_path`) are interpreted relative
+  to the **config file's containing directory** when not absolute.
+  The loader resolves them before returning. The `topology` field is
+  optional; when absent the resolved topology path is `None` and no
+  topology file is loaded.
+- After resolution, every supplied path must be pairwise distinct
+  from every other supplied path. When `topology` is supplied, that
+  path is included in the distinctness check.
+- The loader does not check whether the resolved output files already
+  exist; that check lives in the runner (`simulation-runner.md`) so that
+  configs can be loaded for validation without filesystem side effects.
+

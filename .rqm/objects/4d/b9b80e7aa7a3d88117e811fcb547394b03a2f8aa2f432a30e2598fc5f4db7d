@@ -1,0 +1,7 @@
+  @rq-0896c33a
+  Scenario: Pair beyond cutoff contributes zero
+    Given a CoulombParameters with cutoff=2.0e-10
+    And two particles with charges (+1e, +1e) at separation 5e-10 (> cutoff)
+    When coulomb_pair_force is called
+    Then pair_forces_x[0*2 + 1], pair_energies[0*2 + 1], and pair_virials[0*2 + 1] equal 0.0
+

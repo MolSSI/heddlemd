@@ -1,0 +1,7 @@
+  @rq-e412e54a
+  Scenario: pair_virials carries half the pair's scalar virial
+    Given a single pair (i, j) at finite distance with no exclusion
+    When coulomb_pair_force is called
+    Then pair_virials[i*max_neighbors + slot_for_j] equals 0.5 * factor * r²
+      where factor is the post-switching radial scalar force prefactor
+

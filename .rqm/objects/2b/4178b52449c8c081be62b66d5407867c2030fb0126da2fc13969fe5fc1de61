@@ -1,0 +1,6 @@
+  @rq-aeb23925
+  Scenario: Reject grid dimension below 2*spline_order
+    Given an SpmeConfig with spline_order=4 and grid=[6, 16, 16]
+    When SpmeReciprocalState::new is called
+    Then it returns Err(SpmeError::InvalidGrid { axis: "a", n: 6, spline_order: 4 })
+

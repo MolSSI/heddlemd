@@ -1,0 +1,15 @@
+## Out of Scope <!-- rq-745fda7c -->
+
+- Redesigning error variants. Variant names, fields, and payloads are
+  unchanged. Variants that hold a pre-formatted `String` (such as
+  `ConfigError::Io(String)`, which carries an already-rendered I/O error
+  message rather than a wrapped `std::io::Error`) keep that shape.
+- The runner's mapping of errors to process exit codes — setup-phase failures
+  to exit code `1`, loop-phase failures to exit code `2`. The convention
+  governs trait impls and message text only; the exit-code mapping is
+  specified in `simulation-runner.md`.
+- A dynamic error type (`anyhow`-style) or a single crate-wide error enum.
+  Each module keeps its own concrete, exhaustively-matchable error type.
+
+---
+

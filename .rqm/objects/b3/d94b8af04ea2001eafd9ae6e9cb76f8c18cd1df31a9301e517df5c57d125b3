@@ -1,0 +1,7 @@
+  @rq-79291441
+  Scenario: Spread sum integrates to total charge
+    Given a system of N particles with total charge Q = Σ q_i
+    When spme_charge_spread is called
+    Then Σ_g rho[g] equals Q to within 1e-5 relative tolerance
+      (B-splines are partition-of-unity normalised)
+

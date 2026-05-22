@@ -1,0 +1,41 @@
+### `[minimization.algorithm]` <!-- rq-0a2ca9ac -->
+
+The `[minimization.algorithm]` table is required and carries a `kind`
+field plus algorithm-specific parameters. The Rust-side deserialiser
+captures `kind` into a `SlotConfig` and flattens the rest of the
+section into `params: toml::Value`. The chosen builder's
+`validate_params(&toml::Value)` enforces required fields, domains, and
+rejects unknown fields.
+
+- `kind: String` — required. One of:
+  - `"steepest-descent"` — adaptive-step steepest descent (see *Algorithm*
+    above).
+
+Fields accepted for `kind = "steepest-descent"` (all optional with
+defaults):
+
+- `initial_step: f64` — initial scalar step `step_0` in metres.
+  Default `1.0e-12`. Finite and strictly positive.
+- `max_step: f64` — upper bound on `step` in metres. Default
+  `1.0e-10` (1 Å). Finite, strictly positive, and `≥ initial_step`.
+- `step_increase: f64` — multiplicative factor applied to `step` on
+  an accepted iteration. Default `1.2`. Finite and `≥ 1.0`. A value
+  of `1.0` disables step growth (a fixed-step variant).
+- `step_decrease: f64` — multiplicative factor applied to `step` on
+  a rejected iteration. Default `0.2`. Finite and in `(0.0, 1.0)`.
+- `force_tolerance: f64` — convergence threshold on `F_max` in
+  newtons. Default `1.0e-10` (≈ 600 kJ/mol/nm in chemistry units).
+  Finite and `≥ 0.0`. A value of `0.0` disables this criterion (only
+  `energy_tolerance` and `max_iterations` end the loop).
+- `energy_tolerance: f64` — relative convergence threshold on
+  `|ΔE| / max(|E_prev|, |E_curr|, 1.0e-30)` between consecutive
+  accepted iterations. Default `1.0e-7`. Finite and `≥ 0.0`. A value
+  of `0.0` disables this criterion.
+- `max_iterations: u64` — iteration cap. Default `1000`. Strictly
+  positive. Non-convergence after `max_iterations` is a hard error
+  (see *Algorithm*'s step 6).
+
+Unknown fields under `[minimization.algorithm]` for the chosen `kind`
+surface as `ConfigError::Parse { path:
+"minimization[<i>].algorithm", message }`.
+

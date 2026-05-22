@@ -1,0 +1,115 @@
+### Example <!-- rq-ecc664ff -->
+
+Saved as `argon.in.toml`. A two-phase protocol: an NVT equilibration
+phase followed by an NPT production phase. Each phase writes its own
+trajectory/log/timings file (see *Per-phase output paths* below).
+
+```toml
+schema_version = 1
+init = "argon.in.xyz"
+
+[simulation]
+seed = 12345
+temperature = 300.0 # K (used only if init file lacks a `velo` column;
+                    #     applied at phase-0 entry)
+
+# --- Phase 1: NVT equilibration ---
+
+[[phase]]
+name = "equil"
+n_steps = 5000
+dt = 1.0e-15        # s
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[phase.thermostat]
+kind = "csvr"
+temperature = 300.0
+tau = 1.0e-13
+seed = 11           # any per-phase stochastic-slot seed is required
+
+[phase.output]
+# trajectory_every = 0 skips trajectory output during equilibration.
+trajectory_every = 0
+log_every = 100
+
+# --- Phase 2: NPT production ---
+
+[[phase]]
+name = "production"
+n_steps = 10000
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[phase.thermostat]
+kind = "csvr"
+temperature = 300.0
+tau = 1.0e-13
+seed = 12           # distinct from the equilibration phase's seed
+
+[phase.barostat]
+kind = "c-rescale"
+pressure = 1.0e5
+temperature = 300.0
+tau = 1.0e-12
+compressibility = 4.5e-10
+seed = 13
+
+[phase.output]
+trajectory_every = 100
+include_velocities = true
+include_images = true
+log_every = 100
+
+# --- Global fields below apply to every phase ---
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26   # kg
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10    # m
+epsilon = 1.65e-21  # J
+cutoff = 1.0e-9     # m
+r_switch = 9.0e-10  # m  (defaults to 0.9 * cutoff when omitted)
+
+# Optional: path to a .topology file declaring bonds, angles, and
+# explicit non-bonded exclusions. When omitted, no bonded forces are
+# computed and the LJ / Coulomb kernels see no exclusions.
+topology = "argon.in.topology"
+
+[[bond_types]]
+name = "ArAr"
+potential = "morse"
+de = 1.65e-21       # J  (well depth)
+a = 1.9e10          # 1/m (width)
+re = 3.40e-10       # m  (equilibrium distance)
+
+[[angle_types]]
+name = "HOH"
+potential = "harmonic"
+k_theta = 5.27e-19  # J/rad²  (75.9 kcal/mol/rad², flexible SPC)
+theta_0 = 1.911     # rad (~109.47°)
+
+# Constraint types are referenced from the `.topology` file's
+# [constraints] section. Each entry's `kind` selects the algorithm
+# that processes any group declared with this type.
+[[constraint_types]]
+name = "SPCE"
+kind = "settle-water"
+r_oh = 1.0e-10        # m (O-H constraint distance)
+r_hh = 1.633e-10      # m (H-H constraint distance)
+
+[neighbor_list]
+mode = "cell-list"
+max_neighbors = 256
+r_skin = 1.0e-10    # m  (defaults to 0.3 * cutoff when omitted)
+```
+

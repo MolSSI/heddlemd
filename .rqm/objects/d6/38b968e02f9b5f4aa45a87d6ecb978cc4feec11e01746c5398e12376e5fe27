@@ -1,0 +1,9 @@
+  @rq-f704561b
+  Scenario: Valid Morse bond_type is accepted
+    Given the Background config plus
+      [[bond_types]] name="ArAr" potential="morse" de=1.65e-21 a=1.9e10 re=3.4e-10
+    When load_config is called
+    Then it returns Ok(config)
+    And config.bond_types has length 1
+    And config.bond_types[0] matches BondTypeConfig::Morse { name: "ArAr", de: 1.65e-21, a: 1.9e10, re: 3.4e-10 }
+

@@ -1,0 +1,38 @@
+### Influence function <!-- rq-e7b74f7a -->
+
+The precomputed influence function for grid index
+`k = (k_a, k_b, k_c)` (with `k_c < n_c/2 + 1`) is
+
+```text
+m_a = (k_a < n_a / 2) ? k_a : k_a − n_a
+m_b = (k_b < n_b / 2) ? k_b : k_b − n_b
+m_c = (k_c < n_c / 2) ? k_c : k_c − n_c    # always k_c since k_c < n_c/2 + 1
+
+K = 2π · (m_a · b_a + m_b · b_b + m_c · b_c)
+K2 = |K|²
+
+G[k] = (4π / K²) · exp(−K² / (4 α²))
+       · b_factors_a[k_a] · b_factors_b[k_b] · b_factors_c[k_c]
+```
+
+where `b_a`, `b_b`, `b_c` are the rows of the reciprocal lattice matrix
+`H^(-T)` (computed once from the simulation box) and the `b_factors_*`
+are the SPME B-spline correction terms:
+
+```text
+b_factors_d[k] = |Σ_{j=0..p-1} M_p(j + 1) · exp(2π i · k · j / n_d)|⁻²
+```
+
+The `k = (0, 0, 0)` slot is set to zero, implementing tinfoil boundary
+conditions and removing the (unphysical) infinite background-charge
+contribution.
+
+`influence_G` is rebuilt whenever the slot observes a different
+`sim_box.generation()` from the value captured at last rebuild (the same
+box-generation tracking pattern as `NeighborListState`). When the box has
+not changed, the precomputed values are reused.
+
+`b_factors_*` are independent of the box and depend only on the grid
+dimensions and spline order; they are computed once at slot construction
+and never rebuilt.
+

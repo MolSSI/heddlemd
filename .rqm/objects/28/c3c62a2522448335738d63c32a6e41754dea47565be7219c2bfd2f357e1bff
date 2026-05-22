@@ -1,0 +1,62 @@
+#### `[phase.barostat]` (optional) <!-- rq-cc557e8c -->
+
+The per-phase barostat section is optional. When omitted, the phase
+runs no barostat (constant-volume composition). When present, a
+required `kind` field selects one of the registered barostat slots
+(see `integration/framework.md`) and the kind-specific parameter
+fields sit at the same level. The Rust-side deserialiser captures
+`kind` into a `SlotConfig` and flattens the rest of the section into
+a `toml::Value`; the chosen builder's `validate_params(&toml::Value)`
+enforces required fields, domains, and rejects unknown fields.
+
+Configuring `[phase.barostat]` alongside an integrator whose builder's
+`owns_barostat(&params)` returns `true` (currently the `mtk-npt`
+builder) is rejected at config-load time with
+`ConfigError::IncompatibleBarostat { integrator: <kind name>, phase: <phase name> }`.
+
+- `kind: String` — required when the section is present. One of:
+  - `"berendsen"` — deterministic isotropic weak-coupling barostat
+    (Berendsen et al., 1984). Suitable for **equilibration only**;
+    does not sample the isobaric ensemble. See
+    `integration/berendsen-barostat.md` for the full caveat and
+    parameter description.
+  - `"c-rescale"` — stochastic isotropic cell-rescaling barostat
+    (Bernetti-Bussi, 2020). Samples the canonical NPT distribution
+    exactly. See `integration/c-rescale-barostat.md`.
+
+Fields accepted for `kind = "berendsen"`:
+
+- `pressure: f64` — target pressure `P_target` in pascals (Pa).
+  Required. Finite. May be any sign or zero.
+- `tau: f64` — pressure-coupling time constant in seconds. Required.
+  Finite and strictly positive. Typical values for liquid water are
+  1–5 ps; should be longer than the thermostat's `τ` to keep the
+  two relaxation processes decoupled.
+- `compressibility: f64` — isothermal compressibility `β` in 1/Pa
+  (= m³/J). Required. Finite and strictly positive. Typical values
+  are around `4.5e-10 1/Pa` for water; an inaccurate value changes
+  the effective relaxation rate but not the long-time mean pressure.
+
+Fields accepted for `kind = "c-rescale"`:
+
+- `pressure: f64` — target pressure `P_target` in pascals (Pa).
+  Required. Finite. May be any sign or zero.
+- `temperature: f64` — target temperature `T` in kelvin used in the
+  noise term. Required. Finite and strictly positive. Independent
+  of `simulation.temperature` and of any
+  `[phase.thermostat].temperature`; the framework performs no
+  cross-slot validation. For canonical NPT sampling the user must
+  keep this value consistent with the thermostat (or, for
+  `langevin-baoab`, with the integrator's bath temperature).
+- `tau: f64` — pressure-coupling time constant in seconds. Required.
+  Finite and strictly positive. Typical values for liquid water are
+  1–5 ps.
+- `compressibility: f64` — isothermal compressibility `β` in 1/Pa
+  (= m³/J). Required. Finite and strictly positive. An inaccurate
+  value changes the effective relaxation rate but not the long-time
+  NPT distribution.
+- `seed: u64` — counter-based RNG seed for the per-step normal
+  draw. Required, independent of `simulation.seed` and any other
+  slot's seed. Two runs with identical configs on the same GPU
+  produce byte-identical trajectories.
+

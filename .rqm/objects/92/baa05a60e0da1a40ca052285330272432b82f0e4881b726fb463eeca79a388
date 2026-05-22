@@ -1,0 +1,26 @@
+## Displacement Check <!-- rq-1f38d78a -->
+
+Every timestep (after the integrator's pre-force step has updated
+positions), the runner runs a *displacement-check* kernel:
+
+1. Per atom `i`, compute `disp² = (x_i - x_i_ref)² + (y_i - y_i_ref)² +
+   (z_i - z_i_ref)²` using the minimum-image-wrapped displacement (so an
+   atom that moved through a PBC boundary still reports a small
+   displacement rather than `L - epsilon`).
+2. Write `disp²` to a per-atom buffer of length `N`.
+
+The host downloads the per-atom buffer (one f32 each), computes
+`max_disp = sqrt(max_i disp²_i)` in f64, and compares against
+`r_skin / 2`. If `max_disp > r_skin / 2`, the host sets a
+`needs_rebuild` flag.
+
+`x_i_ref` / `y_i_ref` / `z_i_ref` are reference positions captured at
+the time of the last rebuild and held in three device buffers of
+length `N`. They are updated immediately after each rebuild to the
+positions used during that rebuild.
+
+Host-side max instead of a device max-reduction keeps the implementation
+small for v1; the per-step download is one f32 per particle (40 KB at
+N = 10000, ~4 µs over PCIe), well below the rebuild interval cost the
+displacement check is amortising.
+

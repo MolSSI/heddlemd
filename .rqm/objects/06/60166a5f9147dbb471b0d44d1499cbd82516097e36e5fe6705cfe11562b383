@@ -1,0 +1,7 @@
+  @rq-90524f5d
+  Scenario: Sub-skin movement does not trigger a rebuild
+    Given a NeighborListState immediately after a rebuild with r_skin = 0.3
+    When every particle has moved less than r_skin/2 = 0.15 from its reference position
+    And pre_step is called
+    Then no rebuild occurs
+

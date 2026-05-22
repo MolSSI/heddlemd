@@ -1,0 +1,7 @@
+  @rq-bb3773aa
+  Scenario: Trivial-mode pre_step does no work
+    Given a NeighborListState in Trivial mode
+    When pre_step is called
+    Then timings report zero samples for KernelStage::NeighborDisplacementSquared
+    And timings report zero samples for KernelStage::NeighborListBuild
+

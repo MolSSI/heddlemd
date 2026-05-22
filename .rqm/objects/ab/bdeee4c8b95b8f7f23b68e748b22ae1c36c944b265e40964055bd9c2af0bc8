@@ -1,0 +1,9 @@
+### Schema version handling <!-- rq-fc58e2c5 -->
+
+- `schema_version` must appear as a top-level field. A missing field
+  produces `MissingField { field: "schema_version" }`.
+- The only accepted value is `1`. Any other value produces
+  `UnsupportedSchemaVersion { actual, supported: 1 }`. The check runs
+  before any other validation so that future formats fail loudly before
+  any other field is read.
+

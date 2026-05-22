@@ -1,0 +1,6 @@
+  @rq-151cb099
+  Scenario: Cell index of a position at the +1/2 fractional-coordinate boundary clamps inside the grid
+    Given a particle whose fractional coordinate along a equals +0.5 (boundary case)
+    When its cell index is computed
+    Then cell_a equals n_cells_a - 1 (no out-of-bounds index)
+

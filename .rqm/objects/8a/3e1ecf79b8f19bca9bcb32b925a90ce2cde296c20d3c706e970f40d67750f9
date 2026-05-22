@@ -1,0 +1,17 @@
+## Out of Scope <!-- rq-bee8e566 -->
+
+- Long-range Ewald or smooth particle-mesh Ewald reciprocal-space
+  contribution.
+- Charge-neutrality checks at config-load time. Truncated Coulomb is
+  documented to misbehave on non-neutral systems; the user is
+  responsible.
+- Reaction-field or other dielectric-medium correction terms beyond
+  the cutoff.
+- Per-particle charges supplied from the init-state file; charges come
+  only from the per-type config field (see `io/config-schema.md`).
+- Tabulated or splined Coulomb forms.
+- Polarisable models (Drude, fluctuating charges).
+- Tinfoil boundary conditions or other implicit-solvent treatments.
+
+---
+

@@ -1,0 +1,7 @@
+  @rq-993ec182
+  Scenario: [integrator] section parses into a SlotConfig
+    Given the Background config with [integrator] kind="velocity-verlet" and lossless=false
+    When load_config is called
+    Then config.integrator.kind equals "velocity-verlet"
+    And config.integrator.params.get("lossless") equals Some(toml::Value::Boolean(false))
+

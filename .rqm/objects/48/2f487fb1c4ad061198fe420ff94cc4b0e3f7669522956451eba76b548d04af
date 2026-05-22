@@ -1,0 +1,23 @@
+## Display Messages <!-- rq-1bbcf3b7 -->
+
+`Display` renders human-readable prose, never a transcription of the variant's
+Rust structure. Every message follows one style:
+
+- it begins with a lower-case letter and carries no trailing period;
+- identifiers, file paths, and literal values are wrapped in backticks;
+- dynamic values are interpolated inline, not appended as a debug-formatted
+  tuple or struct.
+
+Representative messages:
+
+```
+ConfigError::InvalidValue { field: "simulation.dt", reason: "must be finite and positive" }
+  ->  invalid value for `simulation.dt`: must be finite and positive
+
+NeighborListError::TooManyCells { n_cells_total: 4298942376, max_supported: 4294967295 }
+  ->  cell grid has 4298942376 cells, exceeding the device limit of 4294967295
+
+RunnerError::OutputExists { path: "/tmp/sim/argon.out.xyz" }
+  ->  output file already exists: `/tmp/sim/argon.out.xyz`
+```
+

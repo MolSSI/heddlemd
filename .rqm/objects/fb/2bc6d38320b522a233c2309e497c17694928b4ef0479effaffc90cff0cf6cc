@@ -1,0 +1,8 @@
+  @rq-2ae37ac3
+  Scenario: SPME reciprocal state's internal cell list uses one bin per FFT grid cell
+    Given an SpmeConfig with grid=[16, 16, 16]
+    When SpmeReciprocalState::new is called
+    Then the slot's internal NeighborListState has n_cells = [16, 16, 16]
+    And the slot's internal NeighborListState has mode CellListOnly
+    And the slot's internal state does not allocate the neighbor_list or neighbor_counts buffers
+

@@ -1,0 +1,7 @@
+  @rq-9ce1bd52
+  Scenario: validate_against accepts a well-formed config
+    Given a Config returned by load_config from the Background config
+    And the default Registries::with_builtins()
+    When config.validate_against(&registries) is called
+    Then it returns Ok(())
+

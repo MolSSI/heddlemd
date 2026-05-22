@@ -1,0 +1,7 @@
+  @rq-c4aea411
+  Scenario: .minlog reports accepted=0 for rejected iterations
+    Given a phase in which iteration 1 is rejected and iteration 2 is accepted
+    When the .minlog is read
+    Then row iter=1 has accepted=0 and energy equal to row iter=0's energy
+    And row iter=2 has accepted=1
+

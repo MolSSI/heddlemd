@@ -1,0 +1,8 @@
+  @rq-3bc18e1a
+  Scenario: Max cutoff is the largest reported by any consumer
+    Given a ForceField with three short-range slots reporting max_cutoffs 2.0, 4.5, 4.5
+    When the framework computes the neighbor-list search radius
+    Then r_search equals 4.5 + r_skin
+
+  # --- Box generation tracking ---
+

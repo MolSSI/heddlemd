@@ -1,0 +1,8 @@
+  @rq-50521f04
+  Scenario: Empty bond_type name rejected
+    Given a [[bond_types]] entry with name=""
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].name", reason: _ })
+
+  # --- Angle types ---
+

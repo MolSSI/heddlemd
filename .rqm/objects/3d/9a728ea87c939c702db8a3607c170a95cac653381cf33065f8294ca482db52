@@ -1,0 +1,14 @@
+## Empty state <!-- rq-5ad9b8b9 -->
+
+When no particle carries a non-zero charge but a `[coulomb]` table is
+present, the slot is still constructed and the kernel runs over every
+pair within the cutoff; the pair contributions are all zero (since
+`q_i · q_j == 0`). The slot's per-particle reduced outputs are
+all zero. This avoids a host-side scan of the charge array.
+
+When `particle_count == 0`, the kernel does not launch and the slot's
+reduced output buffers are length zero.
+
+When no `[coulomb]` table is supplied in the config, the slot is absent
+from the `ForceField` and contributes nothing.
+

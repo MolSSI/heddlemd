@@ -1,0 +1,12 @@
+  @rq-707b5520
+  Scenario: Per-phase [phase.output] defaults derive from <root> and phase name
+    Given a two-phase config at "/tmp/sim/argon.in.toml" with phase names "equil"
+      and "prod" and no [phase.output] blocks
+    When load_config is called
+    Then config.phases[0].output.trajectory_path equals "/tmp/sim/argon.out.equil.xyz"
+    And config.phases[0].output.log_path equals "/tmp/sim/argon.out.equil.log"
+    And config.phases[0].output.timings_path equals "/tmp/sim/argon.out.equil.timings"
+    And config.phases[1].output.trajectory_path equals "/tmp/sim/argon.out.prod.xyz"
+    And config.phases[1].output.log_path equals "/tmp/sim/argon.out.prod.log"
+    And config.phases[1].output.timings_path equals "/tmp/sim/argon.out.prod.timings"
+

@@ -1,0 +1,8 @@
+  @rq-cd12ce51
+  Scenario: SD does not modify simulation box
+    Given a SD slot and a snapshot of sim_box before the phase
+    When the entire minimization phase runs to convergence
+    Then sim_box equals the snapshot byte-for-byte
+
+  # --- Convergence ---
+

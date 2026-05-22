@@ -1,0 +1,6 @@
+  @rq-d5085350
+  Scenario: Pair `between` is normalised to lexicographic order
+    Given the Background config with between=["Kr","Ar"] (the only declared type is "Ar")
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownTypeInPair { name: "Kr", pair_index: 0 })
+

@@ -1,0 +1,6 @@
+  @rq-ecc8f632
+  Scenario: Morse bond_type rejects non-positive de
+    Given a [[bond_types]] entry with potential="morse", de=0.0, a=1.9e10, re=3.4e-10
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "bond_types[0].de", reason: _ })
+

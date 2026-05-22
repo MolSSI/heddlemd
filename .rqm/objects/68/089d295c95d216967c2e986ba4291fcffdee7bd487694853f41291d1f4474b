@@ -1,0 +1,7 @@
+  @rq-6cb9ab62
+  Scenario: topology field is optional and defaults to None
+    Given the Background config without a top-level `topology` field
+    When load_config is called
+    Then it returns Ok(config)
+    And config.topology equals None
+

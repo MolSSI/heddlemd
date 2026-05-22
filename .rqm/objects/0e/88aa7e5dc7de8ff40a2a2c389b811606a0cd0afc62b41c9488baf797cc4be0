@@ -1,0 +1,8 @@
+  @rq-0040baca
+  Scenario: validate_against enforces IncompatibleThermostat from the builder predicate
+    Given a Config whose integrator is "langevin-baoab" and whose thermostat is "csvr"
+    And the default Registries::with_builtins()
+    When config.validate_against(&registries) is called
+    Then it returns Err(ConfigError::IncompatibleThermostat {
+      integrator: "langevin-baoab" })
+

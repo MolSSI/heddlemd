@@ -1,0 +1,6 @@
+### Units <!-- rq-ed997636 -->
+
+All physical quantities are SI: lengths in metres, mass in kilograms, time in
+seconds, energy in joules, temperature in kelvin. No alternative unit systems
+or unit suffixes are supported in schema v1.
+

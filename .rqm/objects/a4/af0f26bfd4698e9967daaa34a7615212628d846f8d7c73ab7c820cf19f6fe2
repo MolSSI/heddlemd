@@ -1,0 +1,5 @@
+  @rq-0b7acd88
+  Scenario: MinimizerRegistry::with_builtins exposes the registered minimizer
+    Given a MinimizerRegistry::with_builtins()
+    Then the registry contains a builder whose kind_name() is "steepest-descent"
+

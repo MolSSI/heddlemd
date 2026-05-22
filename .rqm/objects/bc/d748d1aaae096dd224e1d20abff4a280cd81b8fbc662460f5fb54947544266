@@ -1,0 +1,9 @@
+  @rq-83088c2f
+  Scenario: Real-space slot matches the closed-form erfc force for an isolated pair
+    Given two unit-charge particles at separation r = 4.0e-10 inside the cutoff
+    And alpha = 2.0e10
+    When the real-space slot's contribute() is called
+    Then pair_forces_x[0*max + 1] equals the closed-form
+      k_C · q_i · q_j · (erfc(α r) · inv_r2 + (2 α / √π) · exp(-α² r²) · inv_r2) · dx · inv_r
+      to within 1e-5 relative
+

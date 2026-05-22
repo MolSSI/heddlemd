@@ -1,0 +1,10 @@
+  @rq-3df3ed61
+  Scenario: Pair at exactly the cutoff contributes the smoothed (zero) value
+    Given a CoulombParameters with cutoff=3.0e-10 and r_switch=2.7e-10
+    And two particles with charges (+1e, +1e) at separation exactly 3.0e-10
+    When coulomb_pair_force is called
+    Then pair_energies[0*2 + 1] equals 0.0 (the switching function S(r_c²) = 0)
+    And pair_forces_*[0*2 + 1] equals 0.0
+
+  # --- Switching function ---
+

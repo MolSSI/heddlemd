@@ -1,0 +1,19 @@
+## Launch Configuration <!-- rq-2e15fed7 -->
+
+- Block size: 256 threads for the per-atom kernels
+  (`neighbor_displacement_squared`, `neighbor_list_build`,
+  `copy_positions_into_reference`,
+  `compute_cell_indices_and_histogram`, `scatter_atoms_into_cells`),
+  with grid `ceil(n / 256)`.
+- Block size: 256 threads for the per-cell kernel
+  (`sort_cells_by_particle_id`), with grid `ceil(n_cells_total / 256)`.
+- Block size: 256 threads for the scan kernels
+  (`prefix_scan_local_blocks`, `prefix_scan_apply_block_totals`). At
+  recursion level `l` both are launched with grid `ceil(len_l / 256)`,
+  where `len_0 = n_cells_total` and `len_{l+1} = ceil(len_l / 256)`; the
+  recursion terminates at the level whose input fits in a single block.
+  `prefix_scan_finalize_offsets` runs a single thread.
+- Shared memory: zero, except for `prefix_scan_local_blocks`, which uses
+  one `unsigned int[2 * block_size]` for the double-buffered local scan.
+- Stream: the default stream carried by `particle_buffers.device`.
+

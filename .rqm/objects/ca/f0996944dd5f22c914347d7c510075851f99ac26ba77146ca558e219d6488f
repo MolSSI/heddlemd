@@ -1,0 +1,9 @@
+  @rq-19fd5b09
+  Scenario: cell_counts is the device-computed per-cell histogram
+    Given particles placed at positions producing cells [2, 0, 1, 0, 2]
+    When NeighborListState::rebuild is called
+    Then downloading cell_counts yields counts that sum to particle_count
+    And cell_counts[0] equals 2 (particles 1 and 3)
+    And cell_counts[1] equals 1 (particle 2)
+    And cell_counts[2] equals 2 (particles 0 and 4)
+

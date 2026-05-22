@@ -1,0 +1,12 @@
+## Gherkin Scenarios <!-- rq-89e8f3d7 -->
+
+```gherkin
+Feature: Steepest-descent energy minimizer
+
+  Background:
+    Given a CUDA-capable GPU available as device 0
+    And init_device() has been called
+    And a MinimizerRegistry::with_builtins() with one builder of kind "steepest-descent"
+
+  # --- Schema parsing ---
+

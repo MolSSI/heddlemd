@@ -1,0 +1,6 @@
+  @rq-85e9b9da
+  Scenario: .minlog rows include the final convergence iteration
+    Given output.minlog_every = 10 and the phase converges at iteration 47
+    When the phase runs
+    Then the .minlog contains rows at iter ∈ {0, 10, 20, 30, 40, 47}
+

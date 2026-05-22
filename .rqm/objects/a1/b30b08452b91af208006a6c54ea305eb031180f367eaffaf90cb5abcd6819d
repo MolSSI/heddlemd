@@ -1,0 +1,7 @@
+  @rq-f164bf76
+  Scenario: cell_indices is populated by the device pipeline
+    Given a NeighborListState in CellList mode with n_cells_x=n_cells_y=n_cells_z=7
+    And particles at positions that map to known cell indices c0, c1, c2, ...
+    When NeighborListState::rebuild is called
+    Then downloading cell_indices yields [c0, c1, c2, ...] for atoms [0, 1, 2, ...]
+

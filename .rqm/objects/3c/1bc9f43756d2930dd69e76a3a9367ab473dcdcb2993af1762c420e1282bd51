@@ -1,0 +1,6 @@
+  @rq-b977777a
+  Scenario: .minlog header line
+    Given a [[minimization]] phase with output.minlog_every = 1
+    When the phase runs to convergence
+    Then the .minlog file's first line is exactly "iter,energy,max_force,step,accepted\n"
+

@@ -1,0 +1,6 @@
+  @rq-c9fa5cda
+  Scenario: Reject pair referencing an unknown type
+    Given the Background config plus an extra [[pair_interactions]] between=["Ar","Xe"]
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownTypeInPair { name: "Xe", pair_index: 1 })
+

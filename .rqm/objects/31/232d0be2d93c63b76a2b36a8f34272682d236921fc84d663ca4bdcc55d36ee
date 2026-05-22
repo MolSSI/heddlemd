@@ -1,0 +1,9 @@
+  @rq-09d4e13f
+  Scenario: Two independent SPME runs on identical inputs produce byte-identical outputs
+    Given two SpmeReciprocalState instances with identical config and identical positions
+    When the full pipeline (spread + FFT + multiply + IFFT + gather) runs on each
+    Then the per-particle force, energy, and virial buffers are byte-identical
+      between the two runs
+
+  # --- Mutual exclusion with truncated Coulomb ---
+

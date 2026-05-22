@@ -1,0 +1,8 @@
+  @rq-ea4205ec
+  Scenario: cuFFT smoke test is skipped when SPME is not configured
+    Given a config that does not declare [spme]
+    When init_device() is called
+    Then cufft_determinism_smoke_test is not invoked
+
+  # --- Real-space slot: physics ---
+

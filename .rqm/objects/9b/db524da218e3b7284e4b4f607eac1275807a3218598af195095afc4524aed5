@@ -1,0 +1,6 @@
+  @rq-494626a0
+  Scenario: Every governed error type implements std::error::Error
+    Given a generic function fn assert_error<E: std::error::Error + 'static>()
+    When it is instantiated once for each of the 14 governed error types
+    Then the crate compiles
+

@@ -1,0 +1,6 @@
+  @rq-dc94d9e3
+  Scenario: Harmonic angle_type missing k_theta is rejected
+    Given an [[angle_types]] entry with potential="harmonic", theta_0=1.911 (no k_theta)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "angle_types[0].k_theta" })
+

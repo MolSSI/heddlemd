@@ -1,0 +1,6 @@
+  @rq-0051b248
+  Scenario: Reject negative dt
+    Given the Background config with simulation.dt=-1.0e-15
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "simulation.dt", reason: _ })
+

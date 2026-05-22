@@ -1,0 +1,7 @@
+  @rq-f652bf7c
+  Scenario: Forces on the two members of a non-boundary pair are equal and opposite
+    Given two particles whose minimum-image displacement is not at the primary-image boundary
+    When coulomb_pair_force is called
+    Then pair_forces_x[i*max + slot_j] == -pair_forces_x[j*max + slot_i] (bit-exact)
+    And similarly for y and z
+```

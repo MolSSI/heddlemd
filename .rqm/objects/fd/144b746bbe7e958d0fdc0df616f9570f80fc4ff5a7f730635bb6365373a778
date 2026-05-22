@@ -1,0 +1,6 @@
+  @rq-dffdd81c
+  Scenario: Reject NaN dt
+    Given the Background config with simulation.dt=nan
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "simulation.dt", reason: _ })
+

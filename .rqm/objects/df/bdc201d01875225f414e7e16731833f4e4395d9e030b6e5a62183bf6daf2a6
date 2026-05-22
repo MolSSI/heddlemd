@@ -1,0 +1,15 @@
+  @rq-f067338a
+  Scenario: [integrator] rejects an unknown field for the chosen kind
+    Given the Background config with [integrator] kind="velocity-verlet"
+      plus the unknown field friction=1.0e12
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, message })
+    And path equals "integrator"
+    And message mentions "friction"
+    # The deserialiser reports the enclosing table's path; the offending
+    # field name appears in the message. The same rejection applies to
+    # every (kind, unknown-field) pair the parameterised unit test
+    # enumerates. At minimum the test exercises
+    #   (velocity-verlet, friction), (langevin-baoab, lossless),
+    #   (mtk-npt, seed). Adding an integrator kind extends the matrix.
+

@@ -1,0 +1,28 @@
+## Governed Error Types <!-- rq-44ce75ec -->
+
+The following error types are returned across the engine's public API and all
+conform to this convention. Each is canonically defined — with its full
+variant list — in the requirements file for the feature that owns it.
+
+- `GpuError` (`src/gpu/device.rs`) — a newtype wrapping
+  `cudarc::driver::DriverError`; returned by every GPU operation.
+- `ConfigError` (`src/io/config.rs`) — TOML config loading and validation.
+- `InitStateError` (`src/io/init_state.rs`) — extended-XYZ init-file parsing.
+- `TopologyFileError` (`src/forces/topology.rs`) — `.topology`-file parsing
+  (bonds, angles, and exclusions).
+- `ParticleStateError` (`src/state.rs`) — particle-state construction and
+  host/device transfer.
+- `SimulationBoxError` (`src/pbc.rs`) — simulation-box construction.
+- `NeighborListError` (`src/forces/neighbor_list.rs`) — neighbor-list
+  construction and rebuild.
+- `ForceFieldError` (`src/forces/mod.rs`) — force-field assembly and the
+  per-step force pipeline.
+- `IntegratorError` (`src/integrator/mod.rs`) — integrator construction and
+  stepping.
+- `TimingsError` (`src/timings.rs`) — CUDA-event timing instrumentation.
+- `TimingsWriterError` (`src/timings.rs`) — timings-file output.
+- `TrajectoryWriterError` (`src/io/trajectory.rs`) — trajectory-file output.
+- `LogWriterError` (`src/io/log_output.rs`) — diagnostic-log output.
+- `RunnerError` (`src/runner.rs`) — the top-level error of `run_simulation`;
+  wraps every error type above.
+

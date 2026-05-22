@@ -1,0 +1,7 @@
+  @rq-0181787c
+  Scenario: Build kernel signals overflow when an atom exceeds max_neighbors
+    Given a dense configuration where atom 0 has 257 partners within r_cut + r_skin
+    And max_neighbors = 256
+    When NeighborListState::rebuild is called
+    Then it returns Err(NeighborListError::NeighborListOverflow { max: 256 })
+

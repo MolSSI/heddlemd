@@ -1,0 +1,12 @@
+## Newton's third law <!-- rq-e858417a -->
+
+Threads `(i, j)` and `(j, i)` independently compute `F_ij` and `F_ji`.
+The displacements differ only in sign, the wrap formula respects sign
+symmetry for displacements not exactly at the primary-image boundary,
+and the Coulomb factor depends only on `r²` and on the product `q_i · q_j`
+(commutative). The exclusion lookup table is constructed so the
+`(i, j)` and `(j, i)` scales are equal (see `topology.md`). The two
+threads' Cartesian forces therefore differ by a sign bit-for-bit for
+all displacements except the measure-zero exact-boundary case
+documented in `lj-pair-force.md`.
+

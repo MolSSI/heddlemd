@@ -1,0 +1,27 @@
+### Rust Launch Helpers <!-- rq-fec7ae1c -->
+
+Free functions in `src/gpu/kernels.rs`, re-exported from `crate::gpu`.
+Each is a no-op when `particle_count == 0`.
+
+Neighbor-list-build pipeline:
+
+- `neighbor_displacement_squared(particle_buffers, reference_x, reference_y, reference_z, sim_box, disp_sq) -> Result<(), GpuError>` <!-- rq-884b5cd6 -->
+- `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>` <!-- rq-a1262872 -->
+- `copy_positions_into_reference(particle_buffers, reference_x, reference_y, reference_z) -> Result<(), GpuError>` <!-- rq-344f7af0 -->
+
+Spatial-hash pipeline:
+
+- `compute_cell_indices_and_histogram(particle_buffers, sim_box, n_cells, cell_indices, cell_counts) -> Result<(), GpuError>` <!-- rq-10f6f831 -->
+- `prefix_scan_cell_counts(cell_counts, cell_offsets, scan_block_totals, n_cells_total, particle_count) -> Result<(), GpuError>` — <!-- rq-2ef5e222 -->
+  drives the recursive multi-level exclusive scan. Scans `cell_counts`
+  into `cell_offsets` with `prefix_scan_local_blocks`, emitting
+  `scan_block_totals[0]`; recursively scans each block-totals level of
+  the stack in place; applies each level's scanned totals back into the
+  level below with `prefix_scan_apply_block_totals`; finishes with
+  `prefix_scan_finalize_offsets` to write the
+  `cell_offsets[n_cells_total] = particle_count` sentinel. Issues
+  `O(log(n_cells_total))` kernel launches.
+- `scatter_atoms_into_cells(cell_indices, cell_offsets, write_cursors, sorted_particle_ids, particle_count) -> Result<(), GpuError>` — <!-- rq-9d0cb192 -->
+  zeroes `write_cursors` before launching the scatter kernel.
+- `sort_cells_by_particle_id(cell_offsets, sorted_particle_ids, n_cells_total) -> Result<(), GpuError>` <!-- rq-165c4422 -->
+

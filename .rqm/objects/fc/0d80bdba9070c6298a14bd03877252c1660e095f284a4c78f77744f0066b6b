@@ -1,0 +1,26 @@
+#### `[[minimization]]` (array of tables) <!-- rq-0132d7a5 -->
+
+Each `[[minimization]]` table declares a minimization phase. The full
+schema, parameter defaults, convergence criteria, and the
+`[minimization.output]` sub-table are documented in
+`rqm/minimization/steepest-descent.md`'s *Schema* section. Summary:
+
+- `name: String` — required. Identifier used to derive output
+  filenames (`<root>.out.<name>.{minlog,xyz,timings}`). Same
+  character set and uniqueness rules as `[[phase]]`'s `name`.
+  Uniqueness is enforced across the union of `[[phase]]` and
+  `[[minimization]]` names; collisions surface as
+  `ConfigError::DuplicatePhaseName { name }`.
+- `[minimization.algorithm]` — required. Carries a `kind` field
+  (`"steepest-descent"` in v1) plus algorithm-specific parameters.
+  Dispatched through the `MinimizerRegistry`. Unknown kinds surface
+  as `ConfigError::UnknownKind { slot: "minimization", kind }`.
+- `[minimization.output]` — optional. Controls `.minlog`, optional
+  `.xyz`, and `.timings` cadences and paths. Defaults: `minlog_every
+  = 1`, `trajectory_every = 0`, `include_images = true`.
+
+A `[[minimization]]` entry rejects any of the following keys at
+deserialisation time: `n_steps`, `dt`, `[minimization.integrator]`,
+`[minimization.thermostat]`, `[minimization.barostat]`. Those
+concepts belong to MD phases only.
+

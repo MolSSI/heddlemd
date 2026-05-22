@@ -1,0 +1,29 @@
+#### `[spme]` (optional table) <!-- rq-08131b48 -->
+
+Activates smooth particle-mesh Ewald (see `forces/spme.md`). The two
+SPME slots — the real-space `erfc`-screened pair-force slot and the
+reciprocal-space spread / FFT / multiply / IFFT / gather pipeline —
+are present iff this table is present. Per-particle charges come from
+each particle type's `charge` field in `[[particle_types]]`; the table
+carries the SPME parameters that apply uniformly to every pair and
+every grid cell.
+
+- `alpha: f64` — Ewald splitting parameter in inverse metres.
+  Required. Finite, strictly positive. Larger values shift work into
+  reciprocal space (shorter real-space cutoff feasible, finer grid
+  needed). A common starting point for typical accuracy targets is
+  `alpha ≈ 3.5 / r_cut_real`.
+- `r_cut_real: f64` — real-space cutoff in metres beyond which the
+  screened Coulomb force is treated as zero. Required. Finite,
+  strictly positive.
+- `grid: [u32; 3]` — FFT grid dimensions in the lattice-direction order
+  `[n_a, n_b, n_c]`. Required. Each component must satisfy
+  `n_d >= 2 · spline_order`. A typical starting point is one grid
+  point per `~1 Å` of perpendicular width.
+- `spline_order: u32` — B-spline interpolation order. Optional;
+  defaults to `4` when omitted. Accepted values are `4`, `5`, `6`,
+  `7`, `8`.
+
+The `[spme]` and `[coulomb]` tables are mutually exclusive (see
+above).
+

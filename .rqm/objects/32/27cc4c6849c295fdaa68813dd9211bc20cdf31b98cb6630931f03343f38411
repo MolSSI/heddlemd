@@ -1,0 +1,33 @@
+## Conversions and Source Chains <!-- rq-6cf916af -->
+
+Error-to-error conversions are declared with thiserror's `#[from]` attribute
+on the wrapped field. A single annotation generates both the `From` impl and
+the `source()` link:
+
+- `GpuError` converts from `cudarc::driver::DriverError`.
+- `ParticleStateError`, `NeighborListError`, `ForceFieldError`, and
+  `IntegratorError` convert from `GpuError`.
+- `ForceFieldError` additionally converts from `TimingsError` and
+  `NeighborListError`.
+- `IntegratorError` additionally converts from `TimingsError` and
+  `ForceFieldError`.
+- `TimingsError` converts from `GpuError`.
+
+One conversion cannot be expressed as a single `#[from]` hop: turning a
+`cudarc::driver::DriverError` into a `TimingsError` routes through `GpuError`.
+That conversion is a hand-written `From` impl that coexists with the derived
+ones.
+
+`RunnerError` carries no `From` impls. The runner tags each error it lifts
+with the execution phase it occurred in (see `simulation-runner.md`), so every
+conversion into `RunnerError` is an explicit `.map_err` at the call site
+rather than an implicit `?`. `RunnerError`'s wrapping variants still expose
+their inner error through `source()`.
+
+Every variant that wraps another error exposes it through
+`std::error::Error::source`, so a caller can walk the whole cause chain — for
+instance `RunnerError` → `ForceFieldError` → `NeighborListError`. A wrapping
+variant that adds no information of its own also delegates its `Display` to
+the inner error, so the inner message surfaces verbatim with no `Variant(...)`
+decoration.
+

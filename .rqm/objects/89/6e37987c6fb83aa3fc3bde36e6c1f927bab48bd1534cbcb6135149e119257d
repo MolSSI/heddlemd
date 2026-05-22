@@ -1,0 +1,25 @@
+### Reciprocal-space virial <!-- rq-ce4590c1 -->
+
+The reciprocal-space slot computes the scalar virial trace from the
+reciprocal grid:
+
+```text
+W_recip = (k_C / 2) · Σ_{k ≠ 0} G[k] · |rho_hat[k]|² · (1 − K² / (2 α²))
+```
+
+The contribution per complex-grid cell is computed by the same kernel
+that does the influence-function multiply (or a separate kernel that
+runs alongside; the implementation is free to fuse or split). The cell
+values are summed deterministically — either by a tree reduction in
+fixed topology or by a sorted-segment reduction — to produce a single
+scalar `W_recip` on the device.
+
+The scalar is distributed per particle by equal division: each particle
+receives `W_recip / N` in its `virials[i]` slot. Summing `virials` over
+all particles yields the system total `W_recip`. The per-particle
+attribution has no individual physical meaning; the convention exists
+only so the SoA `virials: Vec<f32>` layout sums correctly.
+
+The real-space slot writes the per-pair virial contribution in the
+standard pair-buffer pattern (`pair_virials[slot] = 0.5 · scale · factor · r²`).
+

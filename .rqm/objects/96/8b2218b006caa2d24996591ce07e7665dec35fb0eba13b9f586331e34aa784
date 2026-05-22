@@ -1,0 +1,34 @@
+# Feature: Shared Neighbor List Service <!-- rq-693ce6fa -->
+
+The `ForceField` owns a single `NeighborListState` shared by every
+short-range pair potential in the slot list. Each consuming potential
+declares its maximum interaction cutoff through the `Potential` trait
+(see `framework.md`); the framework aggregates these into one search
+radius and builds a single neighbor list once per timestep cluster.
+Per-pair cutoff filtering happens inside each consumer's kernel — the
+shared list is sized to the largest cutoff so it captures every
+candidate for every consumer.
+
+The shared state exists in one of two construction modes determined by
+the parsed `NeighborListConfig`:
+
+- **`CellList`** — the spatial-hash-filtered list described in this
+  file. Built lazily on the first step and rebuilt on demand when an
+  atom's reference displacement exceeds `r_skin / 2`. The cell layout
+  (number of cells per lattice direction, total cell count) is cached at
+  construction from the simulation box's lattice parameters and refreshed
+  whenever the box's `generation` counter changes (see *Box Generation
+  Tracking* below).
+- **`Trivial`** — every particle's neighbor list contains every
+  particle (including itself; consumers handle the self slot). The list
+  is materialised once at construction and never rebuilt. Used when the
+  config selects `[neighbor_list].mode = "all-pairs"`.
+
+When no slot in the `ForceField` reports a `max_cutoff` (a bonded-only
+or zero-slot configuration), no `NeighborListState` is built at all and
+no displacement-check kernel runs.
+
+This file specifies both modes, the per-step displacement check and
+rebuild policy that governs `CellList`, the trivial construction path
+used by `Trivial`, and the `NeighborListState` API the framework drives.
+

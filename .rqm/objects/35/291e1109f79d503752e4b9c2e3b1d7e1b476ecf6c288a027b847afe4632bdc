@@ -1,0 +1,103 @@
+    // rq-6082cd2d
+    /// integrator-thermostat and integrator-barostat compatibility
+    /// rules using the integrator builder's `owns_thermostat` /
+    /// `owns_barostat` predicates.
+    pub fn validate_against(
+        &self,
+        registries: &crate::Registries,
+    ) -> Result<(), ConfigError> {
+        // Constraint types are global (one declaration across the
+        // whole run); validate them once.
+        for ct in &self.constraint_types {
+            let cb = registries
+                .constraint_types
+                .lookup(&ct.kind)
+                .ok_or_else(|| ConfigError::UnknownKind {
+                    slot: "constraint_types",
+                    kind: ct.kind.clone(),
+                })?;
+            cb.validate_params(&ct.params).map_err(|e| match e {
+                // Promote the entry's `name` into name-bearing errors
+                // that the builder couldn't fill in itself (it only
+                // sees the params, not the entry's name).
+                ConfigError::SettleGeometryInfeasible {
+                    name: _,
+                    r_oh,
+                    r_hh,
+                } => ConfigError::SettleGeometryInfeasible {
+                    name: ct.name.clone(),
+                    r_oh,
+                    r_hh,
+                },
+                other => other,
+            })?;
+        }
+
+        // Per-phase validation. MD and minimization phases follow
+        // distinct dispatch paths.
+        for phase in &self.phases {
+            match phase {
+                PhaseKind::Md(md) => {
+                    let integ_builder = registries
+                        .integrators
+                        .lookup(&md.integrator.kind)
+                        .ok_or_else(|| ConfigError::UnknownKind {
+                            slot: "integrator",
+                            kind: md.integrator.kind.clone(),
+                        })?;
+                    integ_builder.validate_params(&md.integrator.params)?;
+
+                    if let Some(t) = &md.thermostat {
+                        let b = registries.thermostats.lookup(&t.kind).ok_or_else(
+                            || ConfigError::UnknownKind {
+                                slot: "thermostat",
+                                kind: t.kind.clone(),
+                            },
+                        )?;
+                        b.validate_params(&t.params)?;
+                    }
+
+                    if let Some(b) = &md.barostat {
+                        let bb = registries.barostats.lookup(&b.kind).ok_or_else(
+                            || ConfigError::UnknownKind {
+                                slot: "barostat",
+                                kind: b.kind.clone(),
+                            },
+                        )?;
+                        bb.validate_params(&b.params)?;
+                    }
+
+                    // Integrator-owns-thermostat / integrator-owns-
+                    // barostat compatibility, per phase.
+                    if md.thermostat.is_some()
+                        && integ_builder.owns_thermostat(&md.integrator.params)
+                    {
+                        return Err(ConfigError::IncompatibleThermostat {
+                            integrator: md.integrator.kind.clone(),
+                            phase: md.name.clone(),
+                        });
+                    }
+                    if md.barostat.is_some()
+                        && integ_builder.owns_barostat(&md.integrator.params)
+                    {
+                        return Err(ConfigError::IncompatibleBarostat {
+                            integrator: md.integrator.kind.clone(),
+                            phase: md.name.clone(),
+                        });
+                    }
+                }
+                PhaseKind::Minimization(min) => {
+                    let mb = registries.minimizers.lookup(&min.algorithm.kind).ok_or_else(
+                        || ConfigError::UnknownKind {
+                            slot: "minimization",
+                            kind: min.algorithm.kind.clone(),
+                        },
+                    )?;
+                    mb.validate_params(&min.algorithm.params)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Topology-coupled cross-validation. For every MD phase: rejects

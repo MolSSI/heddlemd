@@ -1,0 +1,6 @@
+  @rq-017b6769
+  Scenario: Reject non-positive epsilon
+    Given the Background config with pair_interactions[0].epsilon=-1.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "pair_interactions[0].epsilon", reason: _ })
+

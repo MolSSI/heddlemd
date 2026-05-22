@@ -1,0 +1,6 @@
+// rq-70442e07
+#[derive(Debug, Clone)]
+pub enum PairPotentialParams {
+    LennardJones { sigma: f64, epsilon: f64 },
+}
+

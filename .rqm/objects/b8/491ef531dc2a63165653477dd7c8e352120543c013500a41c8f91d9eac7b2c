@@ -1,0 +1,94 @@
+// rq-18441e33 — per-phase structural validation: non-empty merged
+// phase sequence, non-empty/ASCII-only/unique names, finite positive
+// dt (MD only), plus the cross-phase seed-uniqueness rule (no two
+// stochastic slots of the same kind across all phases may share a
+// seed).
+fn validate_phases(phases: &[PhaseKind]) -> Result<(), ConfigError> {
+    if phases.is_empty() {
+        return Err(ConfigError::EmptyPhases);
+    }
+    let mut seen: std::collections::HashSet<&str> =
+        std::collections::HashSet::with_capacity(phases.len());
+    for (i, p) in phases.iter().enumerate() {
+        let (name, is_min) = match p {
+            PhaseKind::Md(md) => (md.name.as_str(), false),
+            PhaseKind::Minimization(min) => (min.name.as_str(), true),
+        };
+        let label = if is_min { "minimization" } else { "phase" };
+        if name.is_empty() {
+            return Err(invalid(
+                format!("{label}[{i}].name"),
+                "must be non-empty",
+            ));
+        }
+        if !name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(invalid(
+                format!("{label}[{i}].name"),
+                "must contain only ASCII letters, digits, `-`, and `_`",
+            ));
+        }
+        if !seen.insert(name) {
+            return Err(ConfigError::DuplicatePhaseName {
+                name: name.to_string(),
+            });
+        }
+        if let PhaseKind::Md(md) = p {
+            require_finite_positive(&format!("phase[{i}].dt"), md.dt)?;
+        }
+    }
+
+    // Cross-phase seed uniqueness: collect (kind, seed) for every
+    // stochastic slot across every MD phase and reject duplicates.
+    let mut seed_seen: std::collections::HashMap<(String, u64), ()> =
+        std::collections::HashMap::new();
+    for p in phases {
+        let md = match p {
+            PhaseKind::Md(md) => md,
+            _ => continue,
+        };
+        if let Some(seed) = extract_slot_seed(&md.integrator) {
+            let key = (md.integrator.kind.clone(), seed);
+            if seed_seen.insert(key.clone(), ()).is_some() {
+                return Err(ConfigError::DuplicatePhaseSeed {
+                    kind: key.0,
+                    seed: key.1,
+                });
+            }
+        }
+        if let Some(t) = &md.thermostat {
+            if let Some(seed) = extract_slot_seed(t) {
+                let key = (t.kind.clone(), seed);
+                if seed_seen.insert(key.clone(), ()).is_some() {
+                    return Err(ConfigError::DuplicatePhaseSeed {
+                        kind: key.0,
+                        seed: key.1,
+                    });
+                }
+            }
+        }
+        if let Some(b) = &md.barostat {
+            if let Some(seed) = extract_slot_seed(b) {
+                let key = (b.kind.clone(), seed);
+                if seed_seen.insert(key.clone(), ()).is_some() {
+                    return Err(ConfigError::DuplicatePhaseSeed {
+                        kind: key.0,
+                        seed: key.1,
+                    });
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+// Pull the optional `seed` field out of a SlotConfig's `params`
+// table. Returns `None` for slots that don't carry one (NVE
+// integrators, deterministic thermostats like NHC, deterministic
+// barostats like Berendsen).
+fn extract_slot_seed(slot: &SlotConfig) -> Option<u64> {
+    slot.params.as_table()?.get("seed")?.as_integer().map(|n| n as u64)
+}
+

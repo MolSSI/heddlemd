@@ -1,0 +1,6 @@
+  @rq-f009e02b
+  Scenario: Reject negative temperature
+    Given the Background config with simulation.temperature=-1.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "simulation.temperature", reason: _ })
+

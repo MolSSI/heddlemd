@@ -1,0 +1,14 @@
+  @rq-57a0f297
+  Scenario: Parse a [[minimization]] section with defaults
+    Given a config file containing exactly one [[minimization]] table with name="min"
+      and [minimization.algorithm] kind="steepest-descent" and no other fields
+    When load_config(path) is called
+    Then it returns Ok(config)
+    And config.phases has length 1
+    And config.phases[0] is PhaseKind::Minimization(M)
+    And M.name == "min"
+    And M.algorithm.kind == "steepest-descent"
+    And the builder-resolved params carry initial_step = 1.0e-12, max_step = 1.0e-10,
+      step_increase = 1.2, step_decrease = 0.2, force_tolerance = 1.0e-10,
+      energy_tolerance = 1.0e-7, max_iterations = 1000
+

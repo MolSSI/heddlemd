@@ -1,0 +1,9 @@
+  @rq-318cd47d
+  Scenario: log_every = 0 is accepted (disables log output)
+    Given the Background config with [output].log_every=0
+    When load_config is called
+    Then it returns Ok(config)
+    And config.phases[0].output.log_every equals 0
+
+  # --- [thermostat] presence and absence ---
+

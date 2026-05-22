@@ -1,0 +1,8 @@
+  @rq-420d2eb3
+  Scenario: SD reduces energy of a 1D harmonic well in one step
+    Given a 2-particle system with a single Morse bond at +5% stretch from r_e
+    And [minimization.algorithm] kind="steepest-descent" with initial_step=1.0e-13
+    When one minimizer.step is invoked
+    Then the reported energy decreases by more than 1.0e-25 J
+    And the reported accepted flag is true
+

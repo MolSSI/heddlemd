@@ -1,0 +1,10 @@
+  @rq-bdd03f85
+  Scenario: langevin-baoab + [thermostat] is rejected
+    Given the Background config with [integrator] kind="langevin-baoab",
+      friction=1.0e12, temperature=300.0, seed=1
+    And a [thermostat] section with kind="csvr", temperature=300.0,
+      tau=1.0e-13, seed=2
+    When load_config is called
+    Then it returns Err(ConfigError::IncompatibleThermostat {
+      integrator: "langevin-baoab" })
+

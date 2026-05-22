@@ -1,0 +1,16 @@
+### Bin structure <!-- rq-618bc65e -->
+
+The spread and gather kernels both walk a bin structure with one bin per
+FFT grid cell. The slot constructs this via
+`NeighborListState::new_cell_list_only` (see `neighbor-list.md`): a
+cell-list-mode state with explicit `n_cells_per_direction = grid` that
+runs only the cell-index, prefix-scan, scatter, and in-cell sort stages
+(no neighbor-list build, no displacement check). The state's
+`sorted_particle_ids` and `cell_offsets` buffers carry the bin structure
+the spread and gather kernels read.
+
+The slot's `pre_step` rebuilds the bin structure every step
+unconditionally (no skin tolerance): particles cross FFT-grid cell
+boundaries on every reasonable timestep and the spread kernel must see
+the latest binning.
+

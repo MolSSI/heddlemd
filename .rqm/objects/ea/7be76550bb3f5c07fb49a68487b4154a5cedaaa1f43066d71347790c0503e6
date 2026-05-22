@@ -1,0 +1,6 @@
+  @rq-69109415
+  Scenario: Reject an unknown minimization algorithm kind
+    Given a config with [minimization.algorithm] kind="quasi-newton"
+    When load_config(path) is called
+    Then it returns Err(ConfigError::UnknownKind { slot: "minimization", kind: "quasi-newton" })
+

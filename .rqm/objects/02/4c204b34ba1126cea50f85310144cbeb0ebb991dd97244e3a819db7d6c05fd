@@ -1,0 +1,9 @@
+  @rq-91bf10ec
+  Scenario: Valid harmonic angle_type is accepted
+    Given the Background config plus
+      [[angle_types]] name="HOH" potential="harmonic" k_theta=5.27e-19 theta_0=1.911
+    When load_config is called
+    Then it returns Ok(config)
+    And config.angle_types has length 1
+    And config.angle_types[0] matches AngleTypeConfig::Harmonic { name: "HOH", k_theta: 5.27e-19, theta_0: 1.911 }
+

@@ -1,0 +1,7 @@
+  @rq-3f01c746
+  Scenario: bond_type unknown potential is rejected
+    Given a [[bond_types]] entry with potential="harmonic"
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, .. })
+    And path equals "bond_types[0].potential"
+

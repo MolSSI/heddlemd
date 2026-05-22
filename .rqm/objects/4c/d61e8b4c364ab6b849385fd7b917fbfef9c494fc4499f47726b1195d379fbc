@@ -1,0 +1,7 @@
+  @rq-244fceb1
+  Scenario: A wrapping variant's Display delegates to the inner error
+    Given RunnerError::ForceField wrapping ForceFieldError::NeighborList wrapping
+      NeighborListError::TooManyCells { n_cells_total: 4298942376, max_supported: 4294967295 }
+    When the RunnerError is formatted with Display
+    Then the output equals "cell grid has 4298942376 cells, exceeding the device limit of 4294967295"
+```

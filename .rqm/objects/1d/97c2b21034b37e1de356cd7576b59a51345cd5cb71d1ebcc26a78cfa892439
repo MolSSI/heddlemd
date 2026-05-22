@@ -1,0 +1,6 @@
+  @rq-bcc16e10
+  Scenario: Reject an unknown field under [minimization.algorithm]
+    Given a config file with [minimization.algorithm] kind="steepest-descent" and a junk field
+    When load_config(path) is called
+    Then it returns Err(ConfigError::Parse { path: "minimization[0].algorithm", .. })
+

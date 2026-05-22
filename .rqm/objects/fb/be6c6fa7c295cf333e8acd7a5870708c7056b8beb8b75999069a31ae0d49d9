@@ -1,0 +1,9 @@
+  @rq-3b9611f2
+  Scenario: SPME runs on a triclinic box with non-zero tilts
+    Given a SimulationBox with non-zero xy, xz, yz tilts
+    And an SpmeConfig with valid grid dimensions
+    When the full SPME pipeline runs
+    Then the influence function uses k-vectors from the reciprocal lattice H^(-T)
+    And the per-particle reciprocal-space force agrees with an explicit-Ewald reference
+      on the same triclinic box to within 1e-3 relative
+```

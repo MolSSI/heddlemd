@@ -1,0 +1,9 @@
+  @rq-49e26627
+  Scenario: trajectory frames do not include velocity columns even when velocities are present
+    Given a [[minimization]] phase with output.trajectory_every = 1
+    And buffers carrying non-zero velocities at phase entry
+    When the phase writes any trajectory frame
+    Then the frame's Properties string does not contain "velo:R:3"
+
+  # --- Constraints ---
+

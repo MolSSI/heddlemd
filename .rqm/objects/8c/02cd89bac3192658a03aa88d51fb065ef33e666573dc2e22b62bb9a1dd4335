@@ -1,0 +1,7 @@
+  @rq-ba6d3eaa
+  Scenario: SD caps step at max_step
+    Given a SD slot with current step=8.0e-11 m, step_increase=2.0, max_step=1.0e-10
+    And the trial reduces the energy
+    When one minimizer.step is invoked
+    Then the next iteration's step size is exactly max_step (1.0e-10 m)
+

@@ -1,0 +1,16 @@
+### Influence-function multiply and inverse FFT <!-- rq-95385a9d -->
+
+A per-cell multiply kernel applies `V_hat[k] = G[k] · rho_hat[k]` for
+every `k`, including writing zero for `k = (0, 0, 0)`. One thread per
+complex grid cell; no atomics.
+
+A cuFFT C2R plan transforms `V_hat` back into `V`:
+
+```text
+cuFFT_C2R_3D(plan, in=V_hat, out=V)
+```
+
+The R2C and C2R plans may be one combined plan handle or two; the
+implementation is free to choose. Both transforms reuse the same
+`(n_a, n_b, n_c)` plan dimensions.
+

@@ -1,0 +1,10 @@
+  @rq-9f63a183
+  Scenario: Over-skin movement triggers a rebuild
+    Given a NeighborListState immediately after a rebuild with r_skin = 0.3
+    When at least one particle has moved more than r_skin/2 = 0.15
+    And pre_step is called
+    Then a rebuild occurs
+    And reference positions equal the current positions afterwards
+
+  # --- Empty and tiny states ---
+

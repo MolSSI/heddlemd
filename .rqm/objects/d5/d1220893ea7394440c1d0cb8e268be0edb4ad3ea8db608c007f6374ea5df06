@@ -1,0 +1,7 @@
+  @rq-4bbbada4
+  Scenario: [barostat] section absent yields config.phases[0].barostat = None
+    Given the Background config with no [barostat] section
+    When load_config is called
+    Then it returns Ok(config)
+    And config.phases[0].barostat is None
+

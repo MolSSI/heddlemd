@@ -1,0 +1,11 @@
+# Feature: TOML Simulation Config Schema <!-- rq-6432ab1f -->
+
+A simulation is specified by a TOML configuration file. The config pins every
+parameter required to predict the trajectory bit-exactly. It carries no
+positions or velocities; those live in a separate extended-XYZ initial-state
+file referenced from the config.
+
+The runner consumes the config via `dynamics run <path>` (see
+`simulation-runner.md`). Trajectory and log outputs are described in
+`trajectory-output.md` and `log-output.md` respectively.
+

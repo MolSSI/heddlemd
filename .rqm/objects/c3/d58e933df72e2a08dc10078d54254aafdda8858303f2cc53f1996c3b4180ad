@@ -1,0 +1,10 @@
+  @rq-dd829afb
+  Scenario: Bin-only cell list rebuilds every step regardless of particle displacement
+    Given an SpmeReciprocalState with N particles immediately after a step
+    And no particle has moved more than f32 epsilon since the last rebuild
+    When the slot's pre_step is called for the next step
+    Then a fresh cell-list rebuild was performed
+    And the displacement-check kernel was not launched (it is absent in bin-only mode)
+
+  # --- Per-particle charge dependence ---
+

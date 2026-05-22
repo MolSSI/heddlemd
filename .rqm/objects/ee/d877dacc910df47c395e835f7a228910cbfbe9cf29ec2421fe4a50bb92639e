@@ -1,0 +1,6 @@
+  @rq-47697f4a
+  Scenario: Reject non-positive mass
+    Given the Background config with particle_types[0].mass=0.0
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "particle_types[0].mass", reason: _ })
+

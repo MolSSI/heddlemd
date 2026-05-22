@@ -1,0 +1,7 @@
+  @rq-e2f32af0
+  Scenario: neighbor_list defaults to cell-list with derived r_skin when [neighbor_list] is omitted
+    Given the Background config with no [neighbor_list] section
+    When load_config is called
+    Then it returns Ok(config)
+    And config.neighbor_list matches NeighborListConfig::CellList { max_neighbors: 256, r_skin: 3.0e-10 }
+

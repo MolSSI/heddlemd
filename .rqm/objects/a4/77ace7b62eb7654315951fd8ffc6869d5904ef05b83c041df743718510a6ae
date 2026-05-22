@@ -1,0 +1,13 @@
+#### Top level <!-- rq-4c42a952 -->
+
+- `schema_version: u64` — must equal `1`. See *Schema version handling* below.
+- `init: String` — path to the extended-XYZ initial-state file. Resolved
+  relative to the config file's directory; absolute paths are honored as-is.
+- `topology: String` — optional path to a `.topology` file (see
+  `forces/topology.md`). Resolved relative to the config file's
+  directory; absolute paths are honored as-is. When omitted, no
+  bonded forces are computed and the LJ and Coulomb kernels see an
+  empty exclusion list. When supplied, the file is loaded after the
+  init file (so atom-index bounds checking has access to the
+  particle count).
+

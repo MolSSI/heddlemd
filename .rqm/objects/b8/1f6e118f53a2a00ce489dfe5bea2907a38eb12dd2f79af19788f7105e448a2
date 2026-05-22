@@ -1,0 +1,5 @@
+  @rq-fdf7a255
+  Scenario: thiserror is a declared dependency
+    When Cargo.toml is parsed
+    Then "thiserror" appears under [dependencies]
+

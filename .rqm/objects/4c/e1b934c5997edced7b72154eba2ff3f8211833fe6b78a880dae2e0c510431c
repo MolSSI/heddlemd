@@ -1,0 +1,44 @@
+### `.minlog` format <!-- rq-119cbe46 -->
+
+The `.minlog` is RFC-4180 CSV with header line and one row per logged
+iteration:
+
+```
+iter,energy,max_force,step,accepted
+0,4.123456789e-18,2.345678901e-10,1.000000000e-12,1
+1,4.012345678e-18,2.234567890e-10,1.200000000e-12,1
+2,4.012345678e-18,2.234567890e-10,2.400000000e-13,0
+...
+```
+
+Columns:
+
+- `iter: u64` — phase-local iteration counter. The pre-loop step-0
+  row carries `iter = 0`. Rejected iterations advance the counter
+  alongside accepted ones.
+- `energy: f64` — total potential energy at the iteration's
+  accepted positions (joules), computed via
+  `compute_total_potential_energy`. For a rejected iteration the
+  reported `energy` is the accepted energy *before* the rejected
+  trial (i.e., the same energy that was reported on the previous
+  accepted row), since the rejected trial's positions and energy are
+  discarded.
+- `max_force: f64` — `F_max` at the iteration's accepted positions
+  in newtons.
+- `step: f64` — the step size *used for the trial that this row
+  represents*. The step-0 row carries `initial_step`.
+- `accepted: u32` — `1` if the trial was accepted, `0` if rejected.
+  The step-0 row carries `1` (the initial state is "accepted" by
+  fiat).
+
+Number formatting: same as the MD log (`{:.9e}` for floats, base-10
+unpadded for integers). Line endings `\n`; encoding UTF-8.
+
+Cadence: when `minlog_every == 0`, no `.minlog` file is created. When
+`minlog_every > 0`, the writer emits the step-0 row at phase entry
+plus one row at every iteration `k` such that
+`k % minlog_every == 0` and `1 ≤ k ≤ max_iterations`, plus one final
+row at the iteration that triggered convergence (if it would not
+otherwise have been written). The final row always appears so the
+user always sees the converged state's energy and `F_max`.
+

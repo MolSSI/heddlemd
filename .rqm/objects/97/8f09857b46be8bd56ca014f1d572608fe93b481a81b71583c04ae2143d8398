@@ -1,0 +1,9 @@
+  @rq-13e42f65
+  Scenario: SD with SETTLE projects every trial onto the rigid-water manifold
+    Given a system with one SPC/E water (atoms [0,1,2]) and a SETTLE constraint group
+    And [minimization.algorithm] kind="steepest-descent"
+    When one minimizer.step is invoked
+    Then |positions[1] - positions[0]| equals r_oh within relative tolerance 1.0e-6
+    And |positions[2] - positions[0]| equals r_oh within relative tolerance 1.0e-6
+    And |positions[2] - positions[1]| equals r_hh within relative tolerance 1.0e-6
+

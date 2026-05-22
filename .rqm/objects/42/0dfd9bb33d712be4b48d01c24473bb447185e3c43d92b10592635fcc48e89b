@@ -1,0 +1,6 @@
+  @rq-c79a1408
+  Scenario: bond_type missing potential field
+    Given the Background config plus a [[bond_types]] entry with name="X" but no potential
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "bond_types[0].potential" })
+

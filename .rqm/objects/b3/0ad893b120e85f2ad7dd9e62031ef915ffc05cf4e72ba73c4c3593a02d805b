@@ -1,0 +1,8 @@
+  @rq-1d8b8efe
+  Scenario: Accept r_switch equal to cutoff (hard-cutoff degenerate case)
+    Given the Background config with pair_interactions[0].cutoff=1.0e-9
+      and pair_interactions[0].r_switch=1.0e-9
+    When load_config is called
+    Then it returns Ok
+    And config.pair_interactions[0].r_switch equals 1.0e-9
+

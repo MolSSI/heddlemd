@@ -1,0 +1,22 @@
+## Parameters <!-- rq-7bd2d9ca -->
+
+The `[spme]` table parses into a `SpmeConfig` carried as
+`Config::spme: Option<SpmeConfig>` (see `io/config-schema.md`). Required
+fields:
+
+- `alpha: f64` — Ewald splitting parameter in inverse metres. Finite,
+  strictly positive.
+- `r_cut_real: f64` — real-space cutoff in metres. Finite, strictly
+  positive.
+- `grid: [u32; 3]` — FFT grid dimensions, in the lattice-direction order
+  `[n_a, n_b, n_c]`. Each component must satisfy
+  `n_d >= 2 · spline_order`.
+- `spline_order: u32` — B-spline interpolation order. Accepted values
+  are `4`, `5`, `6`, `7`, `8`. Defaults to `4` when omitted.
+
+The schema description in `io/config-schema.md` documents the
+recommended parameter relationship (`α · r_cut_real ≈ 3.5` for typical
+accuracy targets; grid spacing `~1 Å` per direction) but the loader
+performs no auto-derivation: every field except `spline_order` is
+required when the table is present.
+

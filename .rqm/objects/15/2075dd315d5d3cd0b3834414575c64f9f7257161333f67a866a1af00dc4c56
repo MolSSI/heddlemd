@@ -1,0 +1,11 @@
+// SpmeConfig — parsed `[spme]` table; rq-7bd2d9ca rq-202493a5
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SpmeConfig {
+    pub alpha: f64,
+    pub r_cut_real: f64,
+    pub grid: [u32; 3],
+    #[serde(default = "default_spline_order")]
+    pub spline_order: u32,
+}
+

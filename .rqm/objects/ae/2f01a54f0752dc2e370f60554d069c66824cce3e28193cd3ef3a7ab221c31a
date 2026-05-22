@@ -1,0 +1,9 @@
+  @rq-25faef11
+  Scenario: Neighbor list applies minimum-image PBC
+    Given particles at x = -lx/2 + 0.1 and x = +lx/2 - 0.1 (separated by 0.2
+      across the periodic boundary)
+    And r_cut + r_skin = 1.0
+    When NeighborListState::rebuild is called
+    Then atom 0's neighbor list contains atom 1
+    And the displacement used was the minimum-image dx = +0.2 (not lx - 0.2)
+

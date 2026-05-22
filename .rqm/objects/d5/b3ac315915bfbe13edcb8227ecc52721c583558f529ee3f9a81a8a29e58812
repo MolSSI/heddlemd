@@ -1,0 +1,10 @@
+  @rq-ef8dee82
+  Scenario: Self-energy is subtracted per particle and totals -k_C·(α/√π)·Σ q²
+    Given a system with N particles and charges (+e, -e)
+    When the reciprocal slot's reduce() runs
+    Then Σ_i u_self_per_particle[i] equals k_C · (α/√π) · (e² + e²)
+    And the slot's per-particle energy output equals
+      (reciprocal-energy share) − u_self_per_particle[i] for each particle
+
+  # --- Reciprocal-space virial ---
+

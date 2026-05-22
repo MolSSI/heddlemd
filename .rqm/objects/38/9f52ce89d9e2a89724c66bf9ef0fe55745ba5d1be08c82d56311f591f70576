@@ -1,0 +1,6 @@
+  @rq-f11e9d4c
+  Scenario: Reject duplicate pair interaction
+    Given a config with two pair_interactions both between=["Ar","Ar"]
+    When load_config is called
+    Then it returns Err(ConfigError::DuplicatePairInteraction { types: ("Ar", "Ar") })
+

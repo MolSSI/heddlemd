@@ -1,0 +1,6 @@
+  @rq-3b7da473
+  Scenario: Zero charges produce zero force
+    Given two neutral particles at positions (0, 0, 0) and (3e-10, 0, 0)
+    When coulomb_pair_force is called
+    Then all pair_forces_*, pair_energies, pair_virials slots equal 0.0
+

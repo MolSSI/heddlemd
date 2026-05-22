@@ -1,0 +1,7 @@
+  @rq-45e6b20a
+  Scenario: Convergence on energy tolerance ends the phase
+    Given a SD slot with energy_tolerance = 1.0e-7 and force_tolerance = 0.0
+    And consecutive accepted energies E_k, E_{k+1} satisfying |E_k - E_{k+1}| / max(|E_k|, |E_{k+1}|, 1e-30) ≤ 1.0e-7
+    When the phase is invoked
+    Then the phase terminates with reason EnergyTolerance
+

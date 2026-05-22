@@ -1,0 +1,47 @@
+#### `[[constraint_types]]` (optional array of tables) <!-- rq-7e9cb164 -->
+
+Declares the parameter sets for rigid constraint groups referenced by
+name from the `.topology` file's `[constraints]` section. The array is
+optional and may be empty. When supplied, every constraint type's
+`name` field appears as the final column of one or more rows in the
+`.topology` file's `[constraints]` section. Constraint types whose
+`name` is never used in the file are permitted (declared-but-unused).
+
+Each array entry deserialises into a `NamedSlotConfig` (see *Feature
+API* below). Two fields are common to every entry; everything else is
+captured into a `toml::Value` `params` field for the chosen
+algorithm's builder to consume:
+
+- `name: String` — unique identifier within the `[[constraint_types]]`
+  array. Empty strings are rejected. Case-sensitive.
+- `kind: String` — selects the algorithm that processes any group
+  declared with this type. The currently registered value is
+  `"settle-water"` (see `integration/settle.md`). Future values
+  (`"m-shake"`, `"lincs"`, ...) are added by registering additional
+  `ConstraintBuilder`s.
+
+Per-kind parameter fields are validated by the matching
+`ConstraintBuilder`'s `validate_params(&toml::Value)` method (see
+`integration/constraint-framework.md`). For `kind = "settle-water"`
+(documented in `integration/settle.md`):
+
+- `r_oh: f64` — O–H constraint distance in metres. Required. Finite,
+  strictly positive.
+- `r_hh: f64` — H–H constraint distance in metres. Required. Finite,
+  strictly positive. Must satisfy `r_hh < 2 · r_oh`; otherwise the
+  builder returns `ConfigError::SettleGeometryInfeasible { name,
+  r_oh, r_hh }`.
+
+Names must be unique within the array. Unknown parameter fields for
+the chosen `kind` are rejected by the matching builder's
+`validate_params`.
+
+The presence of at least one constraint group in the topology file
+triggers construction of the `Constraint` slot (see
+`integration/constraint-framework.md`) and is incompatible with any
+integrator (in any phase) whose builder's
+`IntegratorBuilder::supports_constraints(&params)` returns `false`.
+The runner enforces this **per phase** (see *Validation*) and surfaces
+failures as
+`ConfigError::IncompatibleConstraint { integrator: <kind name>, phase: <phase name> }`.
+

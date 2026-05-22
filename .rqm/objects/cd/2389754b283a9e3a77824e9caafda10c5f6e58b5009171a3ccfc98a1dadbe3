@@ -1,0 +1,29 @@
+#### `[[bond_types]]` (optional array of tables) <!-- rq-e4420955 -->
+
+Declares the parameter sets for bonded potentials referenced by name from
+the `.topology` file. The array is optional and may be empty. When
+supplied, every bond type's `name` field appears as the third column of
+one or more rows in the `.topology` file's `[bonds]` section. Bond
+types whose `name` is never used in the file are permitted
+(declared-but-unused).
+
+Common fields:
+
+- `name: String` — unique identifier within the `[[bond_types]]` array.
+  Empty strings are rejected. Case-sensitive.
+- `potential: String` — selects the bonded potential. In schema v1 the
+  only supported value is `"morse"`. Future values (`"harmonic"`,
+  `"fene"`, ...) are reserved.
+
+Fields accepted for `potential = "morse"` (see `forces/morse-bonded.md`):
+
+- `de: f64` — Morse well depth in joules. Required. Finite, strictly
+  positive.
+- `a: f64` — Morse width parameter in inverse metres. Required. Finite,
+  strictly positive.
+- `re: f64` — Morse equilibrium distance in metres. Required. Finite,
+  strictly positive.
+
+Names must be unique within the array. Unknown fields for the chosen
+`potential` are rejected.
+

@@ -1,0 +1,8 @@
+  @rq-33b1f2d2
+  Scenario: Phase-name collision between [[phase]] and [[minimization]]
+    Given a config with a [[phase]] named "step1" and a [[minimization]] also named "step1"
+    When load_config(path) is called
+    Then it returns Err(ConfigError::DuplicatePhaseName { name: "step1" })
+
+  # --- Phase-kind dispatch and ordering ---
+

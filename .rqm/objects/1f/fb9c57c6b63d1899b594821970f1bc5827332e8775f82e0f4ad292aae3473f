@@ -1,0 +1,8 @@
+  @rq-991b4695
+  Scenario: Box compatibility ignores SPME's reciprocal grid
+    Given a Config with grid=[256, 256, 256] but r_cut_real well within the box
+    When the runner runs the cell-list compatibility check
+    Then it passes (the grid resolution does not enter the check)
+
+  # --- Bin-only cell-list construction ---
+

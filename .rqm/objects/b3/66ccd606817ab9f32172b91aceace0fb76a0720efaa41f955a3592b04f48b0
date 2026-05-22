@@ -1,0 +1,10 @@
+  @rq-881bb997
+  Scenario: SD with a constraint slot but no projection support is rejected at config load
+    Given a hypothetical constraint algorithm "fictional-cluster" whose
+      ConstraintBuilder::supports_position_projection_only returns false
+    And a config combining a [[minimization]] phase with a [[constraint_types]] entry of that kind
+    When load_config(path) is called
+    Then it returns Err(ConfigError::IncompatibleConstraint { integrator: "steepest-descent", phase: "min" })
+    (Reuses the IncompatibleConstraint variant from the integrator-constraint compatibility check;
+     phase carries the minimization phase's name.)
+

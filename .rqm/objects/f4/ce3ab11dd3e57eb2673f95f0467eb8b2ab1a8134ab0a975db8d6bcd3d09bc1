@@ -1,0 +1,8 @@
+  @rq-bdfb11e3
+  Scenario: Per-phase [phase.output] overrides default paths
+    Given a [[phase]] entry with [phase.output].trajectory_path = "custom.xyz"
+    When load_config is called
+    Then config.phases[0].output.trajectory_path equals "/tmp/sim/custom.xyz"
+
+  # --- Seed uniqueness across phases ---
+

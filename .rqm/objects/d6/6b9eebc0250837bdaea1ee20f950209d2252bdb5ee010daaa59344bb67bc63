@@ -1,0 +1,7 @@
+  @rq-7dd509c8
+  Scenario: source() walks the full cause chain
+    Given RunnerError::ForceField wrapping ForceFieldError::NeighborList wrapping a
+      NeighborListError::TooManyCells
+    When source() is walked from the RunnerError
+    Then it yields the ForceFieldError, then the NeighborListError, then None
+

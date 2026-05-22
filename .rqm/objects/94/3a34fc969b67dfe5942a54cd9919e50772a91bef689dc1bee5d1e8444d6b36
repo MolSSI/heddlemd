@@ -1,0 +1,6 @@
+  @rq-1514bec6
+  Scenario: Reject a config with an upper-case `.IN.toml` suffix
+    Given a valid Background config written to "/tmp/sim/argon.IN.toml"
+    When load_config("/tmp/sim/argon.IN.toml") is called
+    Then it returns Err(ConfigError::InvalidConfigFilename { path: "/tmp/sim/argon.IN.toml" })
+

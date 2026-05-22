@@ -1,0 +1,7 @@
+  @rq-2afb76f2
+  Scenario: validate_against surfaces per-builder validate_params errors
+    Given a Config whose integrator is the "langevin-baoab" kind with friction = -1.0
+    And the default Registries::with_builtins()
+    When config.validate_against(&registries) is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.friction", .. })
+

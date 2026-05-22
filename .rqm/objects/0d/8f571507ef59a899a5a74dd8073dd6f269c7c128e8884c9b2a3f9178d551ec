@@ -1,0 +1,39 @@
+## Cell Layout <!-- rq-dfad7218 -->
+
+Cells partition the parallelepiped box into a 3D grid of smaller
+parallelepipeds aligned with the lattice vectors. Per lattice direction
+`d ∈ {a, b, c}`:
+
+```
+n_cells_d            = floor(w_d / (r_cut + r_skin))
+fractional_cell_size = 1 / n_cells_d
+```
+
+where `w_d` is the perpendicular width along lattice direction `d` (see
+`simulation-box.md`). The cell thickness perpendicular to the opposite
+face is `w_d / n_cells_d`, which is always `>= r_cut + r_skin` because
+`n_cells_d` is rounded down. The 27-cell PBC search visits every adjacent
+cell exactly once iff `n_cells_d >= 3` along every direction. Configurations
+that violate this on any direction are rejected at neighbor-list
+construction time and again on every box-generation refresh (see *Box
+Generation Tracking*).
+
+`n_cells_total = n_cells_a * n_cells_b * n_cells_c`. The cell index of a
+particle at Cartesian position `(x, y, z)` is computed in fractional
+coordinates:
+
+```
+s = sim_box.fractional_coords(sim_box.wrap_position((x, y, z)))
+cell_d = floor((s_d + 0.5) * n_cells_d)   for d in {a, b, c}
+```
+
+The total row-major cell index is `cell_a * n_cells_b * n_cells_c +
+cell_b * n_cells_c + cell_c`. Per-direction indices are clamped to
+`[0, n_cells_d - 1]` to handle the `s_d = +0.5` boundary case (mapped to
+`cell_d = n_cells_d - 1` rather than `n_cells_d`).
+
+For an orthorhombic box (`xy = xz = yz = 0`), `w_a = lx`, `w_b = ly`,
+`w_c = lz`, and `s_d` reduces to per-axis `pos_d / L_d` so the cell-index
+formula collapses to the per-axis formula `floor((wrapped + L/2) /
+cell_size)` with `cell_size_d = L_d / n_cells_d`.
+

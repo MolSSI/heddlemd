@@ -1,0 +1,9 @@
+  @rq-8a3c0426
+  Scenario: validate_constraint_compatibility accepts lossy velocity-Verlet with constraints
+    Given a Config whose integrator is "velocity-verlet" with lossless = false
+    And the default Registries::with_builtins()
+    When config.validate_constraint_compatibility(&registries, true) is called
+    Then it returns Ok(())
+
+  # --- [[phase]] array ---
+

@@ -1,0 +1,9 @@
+  @rq-9e4d8944
+  Scenario: Reject duplicate pair under different orderings
+    Given a config with pair_interactions between=["Ar","Kr"] and between=["Kr","Ar"]
+      with two declared types "Ar" and "Kr" and a same-type pair for each
+    When load_config is called
+    Then it returns Err(ConfigError::DuplicatePairInteraction { types: ("Ar", "Kr") })
+
+  # --- Path collision ---
+

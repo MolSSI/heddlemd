@@ -1,0 +1,15 @@
+## Trait Derivation <!-- rq-e1ceb5c0 -->
+
+Every error type derives `thiserror::Error` together with `Debug`:
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError { /* variants */ }
+```
+
+The derive supplies the `std::fmt::Display` and `std::error::Error` impls. No
+error type carries a hand-written `Display` or `Error` impl. The variant
+names, fields, and payloads of each error enum are exactly those documented
+in the owning feature's requirements file — the convention governs how the
+traits are implemented, not the shape of the data.
+

@@ -1,0 +1,9 @@
+// rq-f001eaf8
+#[derive(Debug, Clone)]
+pub struct PairInteractionConfig {
+    pub between: (String, String),
+    pub cutoff: f64,
+    pub r_switch: f64,
+    pub potential: PairPotentialParams,
+}
+

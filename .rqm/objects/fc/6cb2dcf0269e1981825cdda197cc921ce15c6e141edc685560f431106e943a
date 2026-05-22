@@ -1,0 +1,10 @@
+  @rq-0fcb5a1e
+  Scenario: [barostat] kind = "berendsen" with all required fields accepted
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [barostat] section with kind="berendsen", pressure=1.0e5,
+      tau=1.0e-12, compressibility=4.5e-10
+    When load_config is called
+    Then it returns Ok(config)
+    And config.phases[0].barostat matches
+      Some(BarostatKind::Berendsen { pressure: 1.0e5, tau: 1.0e-12, compressibility: 4.5e-10 })
+

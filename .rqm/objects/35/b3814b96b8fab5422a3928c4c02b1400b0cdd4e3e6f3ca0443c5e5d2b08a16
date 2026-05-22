@@ -1,0 +1,41 @@
+#### `[[pair_interactions]]` (array of tables) <!-- rq-9244aae4 -->
+
+One entry per unordered pair of declared types. The collection contains
+exactly one entry for every unordered pair, including same-type self pairs.
+For `N` declared types the array contains exactly `N * (N + 1) / 2` entries.
+
+Each entry is a tagged variant: a required `potential` field selects the
+pair potential, and every other field is either a common field shared by
+all potentials or specific to the chosen `potential`.
+
+Common fields:
+
+- `between: [String; 2]` — unordered pair of declared type names. Order is
+  not significant: `["A", "B"]` and `["B", "A"]` refer to the same pair.
+- `potential: String` — selects the pair potential. The only supported
+  value in `[[pair_interactions]]` is `"lennard-jones"`. Electrostatic
+  pair interactions are configured globally through the top-level
+  `[coulomb]` table (see below) rather than per type pair, since the
+  Coulomb pair magnitude is constructed from per-particle charges and
+  carries no per-pair parameters. Future values
+  (`"buckingham"`, ...) for `[[pair_interactions]]` are reserved.
+- `cutoff: f64` — pair distance in metres beyond which the force is treated
+  as zero. Finite, strictly positive.
+- `r_switch: f64` — optional. Inner radius of the CHARMM-style C¹
+  switching function applied over `[r_switch, cutoff]` (see
+  `forces/lj-pair-force.md`). Finite, strictly positive, and
+  `r_switch <= cutoff`. Defaults to `0.9 * cutoff` when omitted.
+  Setting `r_switch = cutoff` selects the hard-cutoff degenerate case
+  in which no smoothing is applied.
+
+Fields accepted for `potential = "lennard-jones"` (see
+`forces/lj-pair-force.md`):
+
+- `sigma: f64` — LJ zero-crossing distance in metres. Finite, strictly
+  positive.
+- `epsilon: f64` — LJ well depth in joules. Finite, strictly positive.
+
+Same-type pairs are required even when only one type is declared:
+`between = ["Ar", "Ar"]` must appear. Unknown fields for the chosen
+`potential` are rejected.
+

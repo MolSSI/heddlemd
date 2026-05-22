@@ -1,0 +1,8 @@
+  @rq-d370907d
+  Scenario: validate_constraint_compatibility rejects lossless velocity-Verlet with constraints
+    Given a Config whose integrator is "velocity-verlet" with lossless = true
+    And the default Registries::with_builtins()
+    When config.validate_constraint_compatibility(&registries, true) is called
+    Then it returns Err(ConfigError::IncompatibleConstraint {
+      integrator: "velocity-verlet" })
+

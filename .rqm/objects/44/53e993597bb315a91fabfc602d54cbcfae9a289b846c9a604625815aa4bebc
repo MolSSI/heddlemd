@@ -1,0 +1,9 @@
+  @rq-ee4ebbda
+  Scenario: A neutral system with [coulomb] present still launches and produces zeros
+    Given every particle has charge 0.0 and a [coulomb] table is present
+    When coulomb_pair_force is called
+    Then every pair-buffer slot equals 0.0
+    And the slot's reduced per-particle outputs equal 0.0
+
+  # --- Newton's third law (bit-exact for non-boundary displacements) ---
+

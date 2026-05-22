@@ -1,0 +1,6 @@
+  @rq-3b0e8140
+  Scenario: Morse bond_type missing de is rejected
+    Given a [[bond_types]] entry with potential="morse", a=1.9e10, re=3.4e-10 (no de)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "bond_types[0].de" })
+

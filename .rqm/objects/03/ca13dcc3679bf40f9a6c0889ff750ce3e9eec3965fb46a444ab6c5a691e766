@@ -1,0 +1,21 @@
+  @rq-7df1515f
+  Scenario: Load a valid minimal config
+    Given a config file written to "/tmp/sim/argon.in.toml" containing the Background
+    When load_config("/tmp/sim/argon.in.toml") is called
+    Then it returns Ok(config)
+    And config.schema_version equals 1
+    And config.simulation.seed equals 12345
+    And config.phases[0].n_steps equals 10
+    And config.phases[0].dt equals 1.0e-15
+    And config.simulation.temperature equals 300.0
+    And config.phases[0].integrator matches IntegratorKind::VelocityVerlet { lossless: false }
+    And config.particle_types has length 1
+    And config.particle_types[0].name equals "Ar"
+    And config.particle_types[0].mass equals 6.6335e-26
+    And config.pair_interactions has length 1
+    And config.pair_interactions[0].between equals ("Ar", "Ar")
+    And config.pair_interactions[0].cutoff equals 1.0e-9
+    And config.pair_interactions[0].potential matches PairPotentialParams::LennardJones { sigma: 3.40e-10, epsilon: 1.65e-21 }
+    And config.init equals "/tmp/sim/argon.in.xyz"
+    And config.config_path equals "/tmp/sim/argon.in.toml"
+

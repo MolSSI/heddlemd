@@ -1,0 +1,11 @@
+## Reproducibility <!-- rq-03423870 -->
+
+The pair-buffer slot for `(i, k)` is written by exactly one thread; there
+are no atomics and no race conditions. Each contribution is a deterministic
+function of `q_i`, `q_j`, the wrapped displacement, the six lattice
+parameters, the cutoff and switching parameters, and the per-pair
+exclusion scale. The reduction kernel `reduce_pair_forces` sums the
+per-particle contributions in fixed slot order (see `pair-reduction.md`).
+Identical runs on the same GPU with identical inputs produce
+byte-identical `slot_force_*` outputs.
+

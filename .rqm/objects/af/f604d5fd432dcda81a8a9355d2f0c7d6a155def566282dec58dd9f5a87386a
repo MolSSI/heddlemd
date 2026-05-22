@@ -1,0 +1,6 @@
+  @rq-5cbcbabe
+  Scenario: Reject a thermostat under [[minimization]]
+    Given a config file with [[minimization]] name="min" and [minimization.thermostat] kind="csvr"
+    When load_config(path) is called
+    Then it returns Err(ConfigError::Parse { path: "minimization[0]", .. })
+

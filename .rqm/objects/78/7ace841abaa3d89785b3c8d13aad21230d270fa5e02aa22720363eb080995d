@@ -1,0 +1,6 @@
+  @rq-100115a0
+  Scenario: Missing integrator.kind is rejected
+    Given the Background config with [integrator] containing only lossless=false (no kind field)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.kind" })
+

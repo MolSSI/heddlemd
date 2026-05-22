@@ -1,0 +1,19 @@
+## Out of Scope <!-- rq-35722a66 -->
+
+- Non-SI units (LJ-reduced, nm/ps, ...).
+- Non-orthorhombic boxes (the box lives in the init file; see
+  `init-state-file.md`).
+- Potentials other than Lennard-Jones; bonded terms; long-range
+  electrostatics.
+- Mixing rules (Lorentz-Berthelot, geometric); every pair is enumerated
+  explicitly.
+- Restart files and resume semantics (a separate planned feature).
+- CLI flag overrides of config fields. Every parameter lives in the file.
+- Thermostats and barostats; the integrator is microcanonical.
+- Per-particle or per-type initial temperatures (one global field).
+- Compile-time `f64` precision feature flag.
+- Filesystem existence checks for resolved paths; that is the runner's
+  responsibility.
+
+---
+

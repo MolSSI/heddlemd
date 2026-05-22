@@ -1,0 +1,27 @@
+## cuFFT determinism precondition <!-- rq-017a61a4 -->
+
+`init_device` runs a smoke test that confirms cuFFT produces
+byte-identical output on two consecutive R2C transforms of the same
+input. The test runs only when the active simulation config selects
+SPME (i.e. when `config.spme.is_some()`); on configs without SPME the
+test is skipped to avoid startup overhead.
+
+The smoke test:
+
+1. Constructs a 16×16×16 R2C plan on the same device the simulation will
+   use.
+2. Uploads a fixed pseudo-random `f32` grid of 4096 entries seeded with
+   a constant (independent of the simulation's RNG seeds).
+3. Runs the R2C transform twice in succession on the same input buffer
+   into two separate output buffers.
+4. Downloads both output buffers and compares them byte-for-byte.
+
+A byte mismatch surfaces as
+`RunnerError::CuFftNonDeterministic { differences: usize }` and exits
+with code `1`. The test runs once per `init_device` invocation; the
+result is not cached across processes.
+
+When SPME is not configured, `init_device` does not initialise cuFFT and
+does not run the smoke test. The cuFFT plan and any cuFFT bindings exist
+only inside the `SpmeReciprocalState` construction path.
+

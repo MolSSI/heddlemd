@@ -1,0 +1,7 @@
+  @rq-385408d0
+  Scenario: Langevin BAOAB rejects friction=0
+    Given the Background config with [integrator] kind="langevin-baoab",
+      friction=0.0, temperature=300.0, seed=42
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "integrator.friction", reason: _ })
+

@@ -1,0 +1,10 @@
+  @rq-ef3083cd
+  Scenario: Pair across the periodic boundary uses minimum-image displacement
+    Given two particles with charges (+1e, -1e) at positions
+      (-lx/2 + 0.1e-10, 0, 0) and (+lx/2 - 0.1e-10, 0, 0)
+      (which are 0.2e-10 apart across the periodic boundary)
+    And a CoulombParameters with cutoff = 5e-10
+    When coulomb_pair_force is called
+    Then the closed-form force uses minimum-image dx = +0.2e-10, not lx - 0.2e-10
+    And pair_forces_x[0*2 + 1] is negative (attraction across the +x face)
+

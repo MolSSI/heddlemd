@@ -1,0 +1,8 @@
+  @rq-6f4f5ece
+  Scenario: Default r_switch to 0.9 * cutoff when omitted
+    Given the Background config with pair_interactions[0].cutoff=1.0e-9
+      and no r_switch field on pair_interactions[0]
+    When load_config is called
+    Then it returns Ok
+    And config.pair_interactions[0].r_switch equals 9.0e-10 within f64 round-off
+

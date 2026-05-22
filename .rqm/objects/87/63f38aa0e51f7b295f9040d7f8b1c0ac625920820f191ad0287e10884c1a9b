@@ -1,0 +1,8 @@
+  @rq-ec28cbfb
+  Scenario: neighbor_list rejects non-finite r_skin
+    Given the Background config plus [neighbor_list] mode="cell-list" max_neighbors=128 r_skin=inf
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "neighbor_list.r_skin", reason: _ })
+
+  # --- Multi-type configs ---
+

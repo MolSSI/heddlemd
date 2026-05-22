@@ -1,0 +1,6 @@
+  @rq-d87be0ca
+  Scenario: trajectory frames are written at the configured cadence and at convergence
+    Given a [[minimization]] phase with output.trajectory_every = 5 and the phase converges at iteration 12
+    When the phase runs
+    Then the trajectory file contains frames at Step ∈ {0, 5, 10, 12}
+

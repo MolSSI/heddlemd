@@ -1,0 +1,7 @@
+  @rq-1b9c474c
+  Scenario: Reject configurations whose box admits fewer than 3 cells along any direction
+    Given r_cut = 1.0, r_skin = 3.0 (so r_cut + r_skin = 4.0)
+    And an orthorhombic SimulationBox with lx=10.0 (so w_a = 10.0, giving floor(10/4) = 2 < 3)
+    When NeighborListState::new_cell_list is called
+    Then it returns Err(NeighborListError::BoxTooSmallForCells { direction: "a", width: 10.0, required: 12.0 })
+

@@ -1,0 +1,23 @@
+## Out of Scope <!-- rq-7573ac91 -->
+
+- Conjugate-gradient (`kind = "conjugate-gradient"`) and L-BFGS
+  (`kind = "l-bfgs"`) minimizers. Reserved for future features;
+  registered alongside `steepest-descent` in the same
+  `MinimizerRegistry`.
+- Per-atom step size adaptation. SD uses a single global scalar
+  `step` adapted across the whole system; per-atom step controllers
+  (preconditioned SD, FIRE) are out of scope.
+- Minimization of cell parameters / barostatic minimization (variable
+  cell). The simulation box is read-only during minimization.
+- Restart from a `.minlog`. Restart input/output is out of scope for
+  the runner generally (see `simulation-runner.md`).
+- Multi-stream or multi-GPU launches.
+- Reporting per-particle gradient magnitudes in the `.minlog`. The
+  per-iteration row reports the scalar `F_max` only; per-particle
+  inspection is left to trajectory frames.
+- Composing a minimization phase with a thermostat or barostat. The
+  `[[minimization]]` table rejects `[minimization.thermostat]` /
+  `[minimization.barostat]` keys at TOML parse time.
+
+---
+

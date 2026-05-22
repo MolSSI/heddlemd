@@ -1,0 +1,13 @@
+## Gherkin Scenarios <!-- rq-c4645fa6 -->
+
+```gherkin
+Feature: Cell-list neighbor list
+
+  Background:
+    Given a CUDA-capable GPU available as device 0
+    And init_device() has been called
+    And an orthorhombic SimulationBox with lx=ly=lz=10.0
+    And a particle count of 100
+
+  # --- Cell layout ---
+

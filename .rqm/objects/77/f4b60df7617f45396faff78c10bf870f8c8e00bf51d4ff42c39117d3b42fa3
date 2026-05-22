@@ -1,0 +1,6 @@
+  @rq-e3c3898a
+  Scenario: Forward FFT of a zero grid produces zero
+    Given a charge density `rho` of all zeros
+    When spme_forward_fft is called
+    Then rho_hat is all zeros (both real and imag parts)
+

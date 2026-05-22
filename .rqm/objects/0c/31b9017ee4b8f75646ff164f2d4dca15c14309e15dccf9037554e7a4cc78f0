@@ -1,0 +1,30 @@
+## Determinism <!-- rq-c62bb861 -->
+
+Two-sort approach.
+
+1. **Sort 1 — particles within each cell.** The spatial-hash pipeline
+   places atoms into cells with an `atomicAdd`-based scatter whose
+   within-cell order is non-deterministic, then runs a per-cell
+   insertion sort over `sorted_particle_ids` keyed on particle index.
+   Atomic integer addition is associative so the histogram and the
+   write-cursor counts are run-to-run identical even though atomic
+   ordering is not; the per-cell sort canonicalises the scatter output.
+   The end-to-end result is identical to a stable lexicographic sort on
+   `(cell_index, particle_id)`. **Required for run-to-run
+   reproducibility.**
+
+2. **Sort 2 — per-atom neighbor list by partner index.** The build
+   kernel's trailing insertion sort imposes a canonical ascending order
+   on each atom's neighbor list. **Not required** for run-to-run
+   reproducibility (sort 1 already guarantees identical orderings
+   across runs with identical inputs on the same GPU), but provides:
+   - A canonical neighbor-list contents/order independent of cell
+     decomposition, useful for testing.
+   - Stability under future cell-layout changes (different `r_skin`,
+     different cell size).
+   - Insurance against subtle regressions in sort 1.
+
+Future feature work may drop sort 2 if it becomes a measurable cost at
+very large N. Doing so does not weaken the project's bit-exact
+guarantee; it only forfeits the canonical-ordering testability.
+

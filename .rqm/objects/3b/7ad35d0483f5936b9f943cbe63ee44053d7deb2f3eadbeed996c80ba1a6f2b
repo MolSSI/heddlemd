@@ -1,0 +1,9 @@
+  @rq-e84d3bac
+  Scenario: Reject a tilted box whose perpendicular width drops below 3*(r_cut+r_skin)
+    Given r_cut + r_skin = 4.0 (required perpendicular width = 12.0)
+    And a SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 8.0) so that
+      w_b = (10*10)/sqrt(100 + 64) ≈ 7.81 < 12.0
+    When NeighborListState::new_cell_list is called
+    Then it returns Err(NeighborListError::BoxTooSmallForCells { direction: "b", width: w, required: 12.0 })
+      where w is the actual computed perpendicular width
+

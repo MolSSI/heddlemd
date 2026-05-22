@@ -1,0 +1,7 @@
+  @rq-881559bd
+  Scenario: Spread produces zero charge density at a grid point with no particle support
+    Given one particle at position s = (0.5, 0.5, 0.5) in fractional coords
+    And a grid point at fractional position (0.0, 0.0, 0.0) far from the particle's support
+    When spme_charge_spread is called
+    Then rho[grid_index(0, 0, 0)] equals 0.0
+

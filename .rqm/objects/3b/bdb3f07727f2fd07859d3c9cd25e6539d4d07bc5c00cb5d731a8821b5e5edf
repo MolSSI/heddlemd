@@ -1,0 +1,9 @@
+  @rq-6fd5167a
+  Scenario: Configuration exceeding the u32 cell-addressing limit is rejected at construction
+    Given r_cut + r_skin = 0.1 and lx=ly=lz=162.6 yielding
+      n_cells_per_axis = 1626 (n_cells_total = 4298942376, just past u32::MAX)
+    When NeighborListState::new_cell_list is called
+    Then it returns Err(NeighborListError::TooManyCells { n_cells_total: 4298942376, max_supported })
+      where max_supported equals u32::MAX as usize (4294967295)
+    And no device buffer was allocated before the error was returned
+

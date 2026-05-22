@@ -1,0 +1,8 @@
+  @rq-5c28eee0
+  Scenario: [thermostat] kind = "csvr" requires a seed
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [thermostat] section with kind="csvr", temperature=300.0, tau=1.0e-13
+      (no seed)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "thermostat.seed" })
+

@@ -1,0 +1,68 @@
+#### `[phase.integrator]` <!-- rq-27f9fae8 -->
+
+The integrator section carries a required `kind` field that selects
+one of the registered integrator slots (see `integration/framework.md`
+for the slot interface) plus any number of kind-specific parameter
+fields at the same level. The Rust-side deserialiser captures `kind`
+into a `SlotConfig` (see *Feature API* below) and flattens the rest of
+the section into a `toml::Value` for the builder to consume. Each
+registered builder validates its own parameter schema:
+fields not recognised by the chosen `kind`'s builder are rejected at
+config load via the builder's `validate_params(&toml::Value)` method,
+and missing required fields are rejected the same way.
+
+- `kind: String` — required. One of:
+  - `"velocity-verlet"` — symplectic NVE time-stepping core. Does not
+    own a thermostat; compose with `[phase.thermostat]` for NVT. See
+    `integration/velocity-verlet.md`.
+  - `"langevin-baoab"` — stochastic NVT via the Leimkuhler-Matthews
+    BAOAB splitting. Owns its own thermostat (the OU step);
+    incompatible with `[phase.thermostat]`. See
+    `integration/langevin-baoab.md`.
+  - `"mtk-npt"` — deterministic extended-system NPT via the
+    Martyna-Tobias-Klein integrator (isotropic). Owns both its
+    thermostat (Nosé-Hoover chains on particles and cell) and its
+    barostat (extended-system cell); incompatible with both
+    `[phase.thermostat]` and `[phase.barostat]`. See
+    `integration/mtk-npt.md`.
+
+Fields accepted for `kind = "velocity-verlet"`:
+
+- `lossless: bool` — selects the lossless compensated-summation variant.
+  Optional; defaults to `false`. When `true`, the runner allocates
+  `LosslessBuffers` and launches the `*_lossless` kernels. Composing
+  `lossless = true` with a non-empty `[constraints]` topology section
+  is rejected at config load (see
+  `integration/constraint-framework.md`); the lossy variant
+  (`lossless = false`) is the only integrator in the default registry
+  that supports constraints.
+
+Fields accepted for `kind = "langevin-baoab"`:
+
+- `friction: f64` — damping coefficient `γ` in inverse seconds. Required.
+  Finite and strictly positive; `0.0` is rejected.
+- `temperature: f64` — bath temperature in kelvin. Required. Finite and
+  strictly positive. Independent of `simulation.temperature`.
+- `seed: u64` — counter-based RNG seed. Required, independent of
+  `simulation.seed`.
+
+Fields accepted for `kind = "mtk-npt"`:
+
+- `temperature: f64` — bath temperature `T` in kelvin. Required.
+  Finite and strictly positive. Independent of
+  `simulation.temperature`.
+- `pressure: f64` — target pressure `P_ext` in pascals (Pa).
+  Required. Finite. May be any sign or zero.
+- `tau_t: f64` — thermostat coupling time in seconds. Required.
+  Finite and strictly positive. Controls both the particle-chain
+  and cell-chain masses.
+- `tau_p: f64` — barostat coupling time in seconds. Required.
+  Finite and strictly positive. Controls the cell mass `W`.
+- `chain_length: u32` — length `M` of both the particle and cell
+  thermostat chains. Optional; defaults to `3`. Must be `≥ 1`.
+- `yoshida_order: u32` — Suzuki-Yoshida sub-step count per chain
+  half-step (shared by both chains). Optional; defaults to `3`.
+  Accepted values: `1`, `3`, `5`, `7`.
+- `n_resp: u32` — chain RESP sub-cycle count (shared by both
+  chains). Optional; defaults to `1`. Must be `≥ 1`.
+

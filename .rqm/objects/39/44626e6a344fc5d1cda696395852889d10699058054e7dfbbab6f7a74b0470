@@ -1,0 +1,7 @@
+  @rq-e38aac7b
+  Scenario: Reject unknown pair potential
+    Given the Background config with pair_interactions[0].potential="morse"
+    When load_config is called
+    Then it returns Err(ConfigError::Parse { path, .. })
+    And path equals "pair_interactions[0].potential"
+

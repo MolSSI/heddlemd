@@ -1,0 +1,6 @@
+  @rq-1b742a37
+  Scenario: cached_generation initialised from the construction-time box
+    Given a SimulationBox with generation 0
+    When NeighborListState::new_cell_list is called with that box
+    Then state.cached_generation equals 0
+

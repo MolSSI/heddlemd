@@ -1,0 +1,8 @@
+  @rq-6bf3709c
+  Scenario: Two independent rebuilds with identical positions produce identical lists
+    Given two NeighborListStates built from identical configurations and identical positions
+    When each is rebuilt
+    Then their neighbor_list, neighbor_counts, sorted_particle_ids, and cell_offsets agree byte-for-byte
+
+  # --- Displacement check ---
+

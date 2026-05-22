@@ -1,0 +1,6 @@
+  @rq-77c04470
+  Scenario: RunnerError::OutputExists renders as prose
+    Given RunnerError::OutputExists { path: "/tmp/sim/argon.out.xyz" }
+    When it is formatted with Display
+    Then the output equals "output file already exists: `/tmp/sim/argon.out.xyz`"
+

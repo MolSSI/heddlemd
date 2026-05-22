@@ -1,0 +1,7 @@
+  @rq-97e525d8
+  Scenario: trajectory_every = 0 is accepted (disables trajectory output)
+    Given the Background config with [output].trajectory_every=0
+    When load_config is called
+    Then it returns Ok(config)
+    And config.phases[0].output.trajectory_every equals 0
+

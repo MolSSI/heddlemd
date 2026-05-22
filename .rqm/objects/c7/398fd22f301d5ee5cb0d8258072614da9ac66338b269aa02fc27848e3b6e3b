@@ -1,0 +1,8 @@
+  @rq-761f26c6
+  Scenario: Unknown top-level key is permitted
+    Given the Background config plus an extra top-level field unknown_key="x"
+    When load_config is called
+    Then it returns Ok(config)
+
+  # --- Required fields ---
+

@@ -1,0 +1,6 @@
+  @rq-027153d9
+  Scenario: topology field is resolved relative to the config directory
+    Given the Background config at "/tmp/sim/argon.in.toml" with topology="argon.in.topology"
+    When load_config is called
+    Then config.topology equals Some("/tmp/sim/argon.in.topology")
+

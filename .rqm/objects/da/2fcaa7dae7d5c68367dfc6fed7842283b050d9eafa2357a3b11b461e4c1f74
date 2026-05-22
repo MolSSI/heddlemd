@@ -1,0 +1,17 @@
+// rq-18441e33 — parsed `[[phase]]` entry. The runner walks
+// `Config::phases` in declaration order; particle state carries
+// across phase boundaries while slot state is rebuilt at each one.
+#[derive(Debug, Clone)]
+pub struct PhaseConfig {
+    pub name: String,
+    pub n_steps: u64,
+    pub dt: f64,
+    pub integrator: SlotConfig,
+    pub thermostat: Option<SlotConfig>,
+    pub barostat: Option<SlotConfig>,
+    pub output: OutputConfig,
+}
+
+/// Parsed `[[minimization]]` entry. Energy-minimization phases run
+/// the SD outer loop documented in
+/// `rqm/minimization/steepest-descent.md`.

@@ -1,0 +1,9 @@
+  @rq-1a0f3eef
+  Scenario: Identical inputs produce byte-identical pair-buffer outputs
+    Given two coulomb_pair_force launches with identical inputs on the same GPU
+    When both kernels return
+    Then their pair_forces_x/y/z, pair_energies, and pair_virials buffers
+      are byte-identical
+
+  # --- Empty state ---
+

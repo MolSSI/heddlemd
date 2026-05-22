@@ -1,0 +1,7 @@
+  @rq-90a67daf
+  Scenario: Non-convergence at max_iterations is a hard error
+    Given a SD slot with max_iterations = 5 and a system whose forces never fall below force_tolerance
+    When dynamics run <config> is invoked
+    Then the process exits with code 2
+    And stderr contains "MinimizerNonConvergence" with iterations = 5
+

@@ -1,0 +1,39 @@
+### Charge spreading <!-- rq-037dd2f3 -->
+
+The spread kernel computes the charge density `rho[g]` for each grid
+point `g = (g_a, g_b, g_c)`:
+
+```text
+rho[g] = Σ_i q_i · M_p(s_a_i · n_a - g_a) · M_p(s_b_i · n_b - g_b) · M_p(s_c_i · n_c - g_c)
+```
+
+where `s_i = (s_a_i, s_b_i, s_c_i)` are particle `i`'s fractional
+coordinates (computed via `SimulationBox::fractional_coords` on the
+wrapped position) and `M_p` is the 1D cardinal B-spline of order `p`.
+The sum runs over every particle whose support intersects `g`, i.e. every
+particle whose primary bin lies within the box of `p × p × p` bins
+centred on `g`.
+
+**Iteration direction.** The kernel uses **one thread per grid point**.
+Each thread:
+
+1. Computes its own grid coordinate `(g_a, g_b, g_c)` from the
+   thread/block index.
+2. Iterates `(d_a, d_b, d_c) ∈ {−⌈p/2⌉ + 1, …, ⌊p/2⌋}³` (a box of
+   `p³` neighbouring bins, wrapping modulo `n_d` per direction).
+3. For each visited bin, walks the sorted particle IDs in
+   `sorted_particle_ids[cell_offsets[c] .. cell_offsets[c+1]]` in
+   ascending particle-index order.
+4. For each particle `i` in the bin, computes the 1D B-spline weights
+   `w_a = M_p(s_a_i · n_a − g_a)`, similarly for `b` and `c`, multiplies
+   them, multiplies by `q_i`, and accumulates into a per-thread `rho`
+   register.
+5. Writes the final accumulator to `rho[grid_index(g)]`.
+
+Each grid point is written by exactly one thread; no atomics are used.
+The accumulator is summed in (bin-iteration, particle-iteration) order,
+which is fixed across runs given identical positions on the same GPU.
+
+The grid index uses the standard row-major mapping
+`grid_index(g_a, g_b, g_c) = (g_a · n_b + g_b) · n_c + g_c`.
+

@@ -1,0 +1,29 @@
+## Phase-Kind Dispatch <!-- rq-54810de5 -->
+
+A simulation is a sequence of one or more phases declared as a TOML
+array of tables. Phases come in two **kinds**:
+
+- **MD phases** declared as `[[phase]]` tables. Each MD phase carries a
+  timestep, integrator, optional thermostat, optional barostat, and
+  output cadences (see `io/config-schema.md`'s `[[phase]]` section).
+- **Minimization phases** declared as `[[minimization]]` tables. Each
+  minimization phase carries an algorithm selector, algorithm-specific
+  parameters, convergence criteria, and output cadences (see *Schema*
+  below).
+
+The runner unifies the two arrays into a single `Vec<PhaseSlot>` in
+the order they appear in the source TOML document. The
+deserialiser captures the source byte offset of each `[[phase]]` and
+`[[minimization]]` table via `toml::Spanned<T>`, then sorts the merged
+sequence by offset to recover document order. MD phases and
+minimization phases may be freely interleaved.
+
+Particle state (positions, velocities, simulation box, charges) and
+the global `ForceField` carry over between phases regardless of kind.
+Slot handles (integrator, thermostat, barostat, constraint, minimizer)
+are built fresh at every phase boundary and dropped at every phase end.
+Per-phase output writers and the per-phase `Timings` instance are
+likewise per-phase. Phase names are unique across the unified
+sequence; a name collision between an MD phase and a minimization
+phase surfaces as `ConfigError::DuplicatePhaseName { name }`.
+

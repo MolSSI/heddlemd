@@ -1,0 +1,9 @@
+  @rq-0816969e
+  Scenario: Reciprocal-space virial is distributed equally per particle
+    Given a non-zero rho_hat producing a non-zero W_recip
+    When the reciprocal slot's reduce() runs
+    Then every particle's virials[i] entry equals W_recip / N (to within f32 round-off)
+    And summing virials over all particles recovers W_recip
+
+  # --- Reproducibility ---
+

@@ -1,0 +1,6 @@
+  @rq-a5c86770
+  Scenario: timings_path defaults to <config-root>.out.timings
+    Given the Background config at "/tmp/sim/argon.in.toml" with no [output].timings_path
+    When load_config is called
+    Then config.phases[0].output.timings_path equals "/tmp/sim/argon.out.timings"
+

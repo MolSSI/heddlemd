@@ -1,0 +1,13 @@
+  @rq-72aae589
+  Scenario: Generation mismatch is detected even when the box lattice parameters
+    are unchanged
+    Given a NeighborListState in CellList mode with an orthorhombic box
+      lx=ly=lz=10.0 just past its first pre_step
+    When box.set_lattice(10.0, 10.0, 10.0, 0.0, 0.0, 0.0) is called
+      (same lattice but generation bumps from 0 to 1)
+    And pre_step is called with the updated box
+    Then state.cached_generation equals 1 after the call
+    And state.needs_rebuild was set to true and a rebuild was performed
+
+  # --- Device-side spatial hash ---
+

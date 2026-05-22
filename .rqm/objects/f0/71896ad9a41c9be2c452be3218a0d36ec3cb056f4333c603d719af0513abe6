@@ -1,0 +1,8 @@
+  @rq-c4a74903
+  Scenario: [thermostat] missing kind is rejected
+    Given the Background config with [integrator] kind="velocity-verlet"
+    And a [thermostat] section containing only temperature=300.0
+      (no kind field)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "thermostat.kind" })
+

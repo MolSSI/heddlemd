@@ -1,0 +1,6 @@
+  @rq-53ae77a4
+  Scenario: Displacement check on reference positions equal to current returns 0
+    Given a NeighborListState immediately after a rebuild
+    When displacement_check is called
+    Then it returns 0.0 (to within f32 round-off)
+

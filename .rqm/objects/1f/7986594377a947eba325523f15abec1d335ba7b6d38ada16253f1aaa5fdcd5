@@ -1,0 +1,6 @@
+  @rq-af7018c0
+  Scenario: Real-space slot produces zero outside r_cut_real
+    Given two particles at separation greater than r_cut_real
+    When the real-space slot's contribute() is called
+    Then the pair-buffer slot has zero force, zero energy, zero virial
+

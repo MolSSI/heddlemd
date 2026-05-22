@@ -1,0 +1,9 @@
+  @rq-ea67c26b
+  Scenario: Doubling all charges quadruples the reciprocal-space energy and forces scale linearly
+    Given a system where reciprocal energy U_r is recorded for charges {q_i}
+    When the same system is run with charges {2 · q_i}
+    Then the new reciprocal energy equals 4 · U_r to within 1e-4 relative
+    And the per-particle forces double in magnitude
+
+  # --- Triclinic box ---
+

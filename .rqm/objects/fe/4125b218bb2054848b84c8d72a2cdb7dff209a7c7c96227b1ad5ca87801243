@@ -1,0 +1,15 @@
+### Forward FFT <!-- rq-f2673343 -->
+
+A single cuFFT R2C plan transforms `rho` into `rho_hat`:
+
+```text
+cuFFT_R2C_3D(plan, in=rho, out=rho_hat)
+```
+
+The plan is constructed once at slot init and reused every step. The
+plan dimensions are `(n_a, n_b, n_c)` in cuFFT's natural ordering (the
+slowest-varying axis first; consistent with our row-major grid).
+
+cuFFT's R2C output has length `n_a · n_b · (n_c/2 + 1)` complex32
+entries; the kernel reads this directly without rearrangement.
+

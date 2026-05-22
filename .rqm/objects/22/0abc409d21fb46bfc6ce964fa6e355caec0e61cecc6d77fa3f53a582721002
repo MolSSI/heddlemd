@@ -1,0 +1,99 @@
+## Algorithm <!-- rq-bfd7004c -->
+
+The pair potential and force between particles `i` and `j` at separation
+`r = |r_i - r_j|` are
+
+```text
+U_ij(r)  = k_C · q_i · q_j / r
+F_ij(r)  = -dU/dr along r_hat = k_C · q_i · q_j · r_ij / r³
+```
+
+where `r_ij = r_i - r_j`, `q_i` and `q_j` are the per-particle charges in
+coulombs, and `k_C = 1 / (4 π ε₀) ≈ 8.987 551 787 × 10⁹ N·m²/C²` is the
+Coulomb constant. The kernel stores `k_C` as an `f32` constant captured at
+kernel launch.
+
+For each ordered `(i, k)` with `0 <= i < N` and `0 <= k <
+neighbor_counts[i]`:
+
+1. The pair-buffer slot is `slot = i * max_neighbors + k`.
+2. Read `j = neighbor_list[slot]`. If `i == j`, write `0.0_f32` to
+   `pair_forces_x[slot]`, `pair_forces_y[slot]`, `pair_forces_z[slot]`,
+   `pair_energies[slot]`, and `pair_virials[slot]` and stop. (The kernel
+   encounters `i == j` only when the shared neighbor list is in trivial
+   mode, which lists every particle including self.)
+3. Look up `q_i = charges[i]` and `q_j = charges[j]`.
+4. Compute the displacement `dx = positions_x[i] - positions_x[j]` (and
+   similarly `dy`, `dz`).
+5. Apply the triclinic minimum-image convention to `(dx, dy, dz)` using
+   the six lattice parameters `(lx, ly, lz, xy, xz, yz)` and the
+   fractional-coordinate wrap algorithm defined in `simulation-box.md`.
+   For an orthorhombic box (all tilts zero) this reduces to three
+   independent per-axis wraps.
+6. Compute `r2 = dx*dx + dy*dy + dz*dz`.
+7. If `r2 > cutoff * cutoff`, write `0.0_f32` to all five slots
+   (force x/y/z, energy, virial) and stop.
+8. Compute the unswitched Coulomb factor and energy in this order:
+
+   ```text
+   inv_r2  = 1.0f / r2
+   inv_r   = sqrtf(inv_r2)
+   qq      = q_i * q_j
+   energy  = k_C * qq * inv_r
+   factor  = k_C * qq * inv_r * inv_r2          // F = factor · r_ij
+   ```
+
+   `factor * r_ij` is the Coulomb force on particle `i` due to `j`.
+9. Apply the CHARMM-style C¹ switching function `S(r²)` defined over
+   `[r_switch², cutoff²]`. Let `r_s2 = r_switch * r_switch` and
+   `r_c2 = cutoff * cutoff`. The polynomial is evaluated in
+   normalised form so the only place the cutoff-width factor appears
+   explicitly is `1/delta` where `delta = r_c2 - r_s2`.
+
+   - If `r2 <= r_s2`, the inner plateau has `S = 1` and `dS/d(r²) = 0`,
+     so `factor` and `energy` are unchanged.
+   - Otherwise `r_s2 < r2 <= r_c2` (the `r2 > r_c2` case was gated above)
+     and the polynomial branch runs.
+
+     With `tau = (r² − r_s2) / delta` the polynomial reduces to
+     `S = (1 − tau)² (1 + 2 tau)` and
+     `dS/d(r²) = −6 tau (1 − tau) / delta`.
+
+     Apply the switching factor as a multiplication on `energy` and on
+     `factor`. The chain-rule correction adds `2 · energy · dS_dr2` to
+     `factor` (matches the identical correction in `lj-pair-force.md`).
+
+   When `r_switch = cutoff` the switching interval is degenerate and the
+   polynomial branch is never entered; the kernel writes `factor` and
+   `energy` unchanged for any `r2 ≤ r_c2`, producing the hard-cutoff
+   case.
+10. Apply the per-pair Coulomb exclusion scale (see `topology.md`). The
+    kernel walks the per-atom exclusion slice
+    `atom_excl_partners[atom_excl_offsets[i] .. atom_excl_offsets[i+1]]`
+    looking for `j`; if present, the corresponding entry in
+    `atom_excl_coul_scales` multiplies both `factor` and `energy`. A
+    scale of `0.0` fully excludes the pair; a scale in `(0.0, 1.0)`
+    partially attenuates it. Pairs not listed in the exclusion table
+    are evaluated with scale `1.0` (no attenuation).
+11. Compute the scalar virial contribution from this pair as
+    `w = factor * r²` (which equals `r_ij · F_ij`). Apply the exclusion
+    scale to `w` along with `factor` and `energy`.
+12. Write the final values to the pair buffer:
+
+    ```text
+    pair_forces_x[slot] = factor * dx
+    pair_forces_y[slot] = factor * dy
+    pair_forces_z[slot] = factor * dz
+    pair_energies[slot] = 0.5 * energy
+    pair_virials[slot]  = 0.5 * w
+    ```
+
+    The `0.5` factors implement the half-sum convention shared with
+    `lj-pair-force.md` and `morse-bonded.md` (see `pair-reduction.md`):
+    summing over every ordered pair `(i, j)` counts each unordered pair
+    exactly once when totalled.
+
+The kernel writes `0.0_f32` to every slot beyond `neighbor_counts[i]`
+(the kernel grid spans all `max_neighbors` slots per particle; the
+trailing slots are zeroed unconditionally).
+

@@ -1,0 +1,19 @@
+// rq-2f230ccb
+#[derive(Debug, Clone)]
+pub enum BondTypeConfig {
+    Morse {
+        name: String,
+        de: f64,
+        a: f64,
+        re: f64,
+    },
+}
+
+impl BondTypeConfig {
+    pub fn name(&self) -> &str {
+        match self {
+            BondTypeConfig::Morse { name, .. } => name,
+        }
+    }
+}
+

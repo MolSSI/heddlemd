@@ -1,0 +1,8 @@
+  @rq-f94ee5cd
+  Scenario: Displacement check returns the maximum across all particles
+    Given particle 7 has moved 0.5 from its reference and all others have moved less
+    When displacement_check is called
+    Then the result equals 0.5
+
+  # --- Rebuild policy ---
+

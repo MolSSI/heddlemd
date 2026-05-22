@@ -1,0 +1,16 @@
+#### `[[particle_types]]` (array of tables) <!-- rq-78487f38 -->
+
+One entry per particle species. At least one entry required.
+
+- `name: String` — unique identifier, used in the init file and in
+  `pair_interactions.between`. Case-sensitive. Empty strings are rejected.
+- `mass: f64` — particle mass in kilograms. Must be finite and strictly
+  positive.
+- `charge: f64` — optional. Particle charge in coulombs. Must be finite
+  when supplied; any sign is accepted. Defaults to `0.0` when omitted.
+  The charge applies to every particle of this type uniformly. The runner
+  uploads the per-type charges into a per-particle `charges` buffer at
+  init time (see `particle-state.md`).
+
+Names must be unique within the array.
+

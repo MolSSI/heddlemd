@@ -1,0 +1,6 @@
+  @rq-9255c192
+  Scenario: Reject duplicate angle_type names
+    Given two [[angle_types]] entries with the same name "HOH"
+    When load_config is called
+    Then it returns Err(ConfigError::DuplicateAngleTypeName { name: "HOH" })
+

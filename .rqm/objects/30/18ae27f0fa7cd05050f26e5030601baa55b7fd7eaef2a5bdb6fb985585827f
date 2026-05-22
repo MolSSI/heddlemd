@@ -1,0 +1,12 @@
+  @rq-f2e4b0b8
+  Scenario: Cell-list scratch is reallocated alongside cell_offsets on box generation refresh
+    Given a NeighborListState in CellList mode with n_cells_total = 343
+      (cell_counts length 343, write_cursors length 343,
+       a scan_block_totals stack sized for n_cells_total = 343)
+    When box.set_lattice is called producing n_cells_total = 729
+    And pre_step is called with the updated box
+    Then cell_counts is reallocated to length 729
+    And write_cursors is reallocated to length 729
+    And the scan_block_totals stack is rebuilt for n_cells_total = 729
+    And cell_indices is NOT reallocated (its length particle_count is unchanged)
+

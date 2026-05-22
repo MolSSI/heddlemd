@@ -1,0 +1,27 @@
+### Functions <!-- rq-cf82e422 -->
+
+- `spme_real_pair_force(particle_buffers, pair_buffer, sim_box, alpha, r_cut_real, atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales, neighbor_list, neighbor_counts) -> Result<(), GpuError>` <!-- rq-f735ea05 -->
+  Launches the `spme_real_pair_force` kernel.
+
+- `spme_charge_spread(particle_buffers, spme_state) -> Result<(), GpuError>` <!-- rq-f69698b8 -->
+  Launches the charge-spread kernel. Writes `spme_state.rho`.
+
+- `spme_forward_fft(spme_state) -> Result<(), CuFftError>` <!-- rq-24e36eba -->
+  Runs the cuFFT R2C transform `rho → rho_hat`.
+
+- `spme_influence_multiply(spme_state) -> Result<(), GpuError>` <!-- rq-8326d2d1 -->
+  Multiplies `rho_hat[k] *= G[k]` in place, also writing the per-cell
+  virial contribution to a scratch buffer for the subsequent reduction.
+
+- `spme_inverse_fft(spme_state) -> Result<(), CuFftError>` <!-- rq-a98abc35 -->
+  Runs the cuFFT C2R transform `V_hat → V`.
+
+- `spme_force_gather(particle_buffers, spme_state, slot_output) -> Result<(), GpuError>` <!-- rq-c6f6a13c -->
+  Launches the force-gather kernel. Writes per-particle force,
+  reciprocal energy, and (after the deterministic virial reduction)
+  per-particle virial.
+
+- `cufft_determinism_smoke_test(device: &Arc<CudaDevice>) -> Result<(), CuFftError>` <!-- rq-d880c228 -->
+  Used by `init_device` when SPME is enabled. Returns `Err` on a
+  byte-difference between two consecutive R2C transforms.
+

@@ -1,0 +1,7 @@
+  @rq-5d9d7f83
+  Scenario: Display output is distinct from the Debug rendering
+    Given the values ConfigError::InvalidValue { .. }, NeighborListError::TooManyCells { .. },
+      and RunnerError::OutputExists { .. }
+    When each is formatted with Display and with Debug
+    Then the Display output differs from the Debug output for every value
+

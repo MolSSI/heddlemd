@@ -1,0 +1,26 @@
+### Self-energy <!-- rq-29bdf2b2 -->
+
+The self-energy `U_self = k_C · (α / √π) · Σ_i q_i²` is constant for the
+duration of the run (charges do not change). The slot computes the
+per-particle self-energy contribution
+
+```text
+u_self_i = k_C · (α / √π) · q_i²
+```
+
+once at slot construction by reading the host-side charges, and stores
+the resulting per-particle constant in a device buffer
+`u_self_per_particle: CudaSlice<f32>` of length `N`. Every step, the
+slot's `reduce()` writes the reciprocal-space per-particle energy as
+
+```text
+energy_per_particle[i] = (per-particle reciprocal contribution) − u_self_per_particle[i]
+```
+
+Summing `energy_per_particle` over all particles yields
+`U_reciprocal − U_self`, matching the Ewald decomposition.
+
+`u_self_per_particle` is rebuilt only when per-particle charges change.
+Charges are immutable for the lifetime of a run in v1, so the buffer is
+computed once at construction and never updated.
+

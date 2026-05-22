@@ -1,0 +1,10 @@
+  @rq-f02e9e0e
+  Scenario: Inverse FFT round-trips the forward FFT
+    Given a non-trivial rho
+    When spme_forward_fft and spme_inverse_fft are called in succession
+      (without the influence-function multiply in between)
+    Then the round-trip output equals the input scaled by the FFT normalisation factor
+      (cuFFT convention: forward+inverse = N · identity)
+
+  # --- Reciprocal-space pipeline: multiply ---
+

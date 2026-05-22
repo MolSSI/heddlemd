@@ -1,0 +1,21 @@
+## Performance Notes <!-- rq-54a28837 -->
+
+- Cell-list rebuild cost is the per-atom and per-cell kernels plus the
+  prefix scan and one device memset, with no host-device transfers of
+  particle data. The prefix scan issues `O(log(n_cells_total))` kernel
+  launches — a small constant, at most six up to ~16 M cells. Total
+  work is `O(N)` for the per-atom kernels (cell index, histogram,
+  scatter), `O(N · d)` for the per-cell sort at average cell density
+  `d`, and `O(n_cells_total)` for the prefix scan. At N = 10⁴ in liquid
+  density the rebuild completes in roughly tens of microseconds; rebuild
+  interval is typically 10–100 timesteps so amortised per-step cost is
+  well below the contribution kernel cost.
+- Atomic-add contention: each cell sees on the order of `d` serialised
+  `atomicAdd`s in the histogram and `d` in the scatter. Negligible at
+  liquid density (`d` ≈ 5–20).
+- Displacement check: one f32 per atom downloaded each step, a host max
+  reduction. Sub-ms at N = 10⁴.
+- The neighbor-list build kernel walks ~27 × density particles per atom
+  (about 100–200 per atom for liquid-density systems); per-step force
+  evaluation drops from `O(N²)` to `O(N · avg_neighbors)`.
+

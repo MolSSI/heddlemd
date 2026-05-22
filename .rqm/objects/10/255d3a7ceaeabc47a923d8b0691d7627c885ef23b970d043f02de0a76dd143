@@ -1,0 +1,7 @@
+  @rq-d572a90a
+  Scenario: MtkNpt missing tau_p is rejected
+    Given the Background config with [integrator] kind="mtk-npt",
+      temperature=85.0, pressure=1.0e5, tau_t=1.0e-13 (no tau_p)
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "integrator.tau_p" })
+

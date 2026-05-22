@@ -1,0 +1,9 @@
+  @rq-48e36163
+  Scenario: SD step formula moves the largest-force atom by exactly `step`
+    Given a 3-particle system with forces (F_max, F_max/2, 0) along x
+    And initial_step = 1.0e-12 m
+    When one minimizer.step is invoked
+    Then particle 0's x-position changes by 1.0e-12 m within absolute tolerance 1.0e-18
+    And particle 1's x-position changes by 5.0e-13 m within absolute tolerance 1.0e-18
+    And particle 2's x-position is unchanged within absolute tolerance 1.0e-18
+

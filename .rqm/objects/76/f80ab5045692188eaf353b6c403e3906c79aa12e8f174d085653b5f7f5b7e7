@@ -1,0 +1,6 @@
+  @rq-57518e01
+  Scenario: angle_type missing potential field
+    Given the Background config plus an [[angle_types]] entry with name="X" but no potential
+    When load_config is called
+    Then it returns Err(ConfigError::MissingField { field: "angle_types[0].potential" })
+

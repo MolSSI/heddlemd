@@ -1,0 +1,7 @@
+  @rq-cc12f2d8
+  Scenario: Zero temperature is accepted
+    Given the Background config with simulation.temperature=0.0
+    When load_config is called
+    Then it returns Ok(config)
+    And config.simulation.temperature equals 0.0
+

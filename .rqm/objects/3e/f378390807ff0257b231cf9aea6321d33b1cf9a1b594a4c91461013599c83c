@@ -1,0 +1,6 @@
+  @rq-5e69125b
+  Scenario: Reject an empty [[phase]] array
+    Given the Background config with the [[phase]] array removed
+    When load_config is called
+    Then it returns Err(ConfigError::EmptyPhases)
+

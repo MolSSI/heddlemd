@@ -1,0 +1,9 @@
+  @rq-30f85829
+  Scenario: Trivial-mode state has no cell-list fields
+    Given a NeighborListState built via new_trivial
+    Then state.mode equals NeighborListMode::Trivial
+    And the cell-list-specific buffers (sorted_particle_ids, cell_offsets,
+      reference_positions_*, disp_sq, overflow_flag) are absent
+
+  # --- Shared-service ownership ---
+

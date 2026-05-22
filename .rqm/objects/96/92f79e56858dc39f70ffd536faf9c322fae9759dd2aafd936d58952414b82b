@@ -1,0 +1,40 @@
+### CUDA kernel <!-- rq-4a96b705 -->
+
+`kernels/coulomb.cu` declares the following `extern "C"` kernel:
+
+```c
+extern "C" __global__ void coulomb_pair_force(
+    const float *positions_x,
+    const float *positions_y,
+    const float *positions_z,
+    const float *charges,
+    float *pair_forces_x,
+    float *pair_forces_y,
+    float *pair_forces_z,
+    float *pair_energies,
+    float *pair_virials,
+    unsigned int max_neighbors,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    float k_coulomb,
+    float cutoff,
+    float r_switch,
+    const unsigned int *atom_excl_offsets,
+    const unsigned int *atom_excl_partners,
+    const float *atom_excl_coul_scales,
+    const unsigned int *neighbor_list,
+    const unsigned int *neighbor_counts,
+    unsigned int n);
+```
+
+The launcher trusts the caller for shape consistency: in debug builds
+it asserts `pair_buffer.particle_count() == particle_buffers.particle_count()`,
+`neighbor_list.len() == particle_buffers.particle_count() * pair_buffer.max_neighbors() as usize`,
+`neighbor_counts.len() == particle_buffers.particle_count()`,
+`atom_excl_offsets.len() == particle_buffers.particle_count() + 1`,
+`atom_excl_partners.len() == atom_excl_coul_scales.len()`, and
+`charges.len() == particle_buffers.particle_count()`. Release builds
+skip the asserts for parity with the other kernel launchers. The
+launcher does not validate the parameter values themselves and does
+not check `cutoff` against `sim_box.min_perpendicular_width() / 2`
+(that gating happens in the neighbor list; see `forces/neighbor-list.md`).
+

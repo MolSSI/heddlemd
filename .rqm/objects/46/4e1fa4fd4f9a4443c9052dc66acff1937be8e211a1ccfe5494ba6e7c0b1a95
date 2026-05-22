@@ -1,0 +1,20 @@
+## Reciprocal-space pipeline <!-- rq-9ca00d25 -->
+
+The reciprocal-space slot owns:
+
+- A dedicated `NeighborListState` configured in cell-list-only mode with
+  `n_cells_per_direction = grid` (see *Bin Structure* below and
+  `neighbor-list.md` for the construction path). This service produces a
+  sorted particle-ID list with the FFT grid's resolution.
+- Real-valued grid buffers `rho: [f32; M]` (charge density) and
+  `V: [f32; M]` (smoothed potential) where `M = n_a · n_b · n_c`.
+- A complex-valued grid `rho_hat: [c32; M_complex]` where
+  `M_complex = n_a · n_b · (n_c/2 + 1)`. cuFFT stores real-to-complex
+  output in Hermitian symmetry format.
+- A precomputed influence function `influence_G: [f32; M_complex]`
+  rebuilt whenever the simulation box's `generation` counter changes.
+- Per-axis B-spline correction factor arrays
+  `b_factors_a: [f32; n_a]`, `b_factors_b: [f32; n_b]`,
+  `b_factors_c: [f32; n_c]` precomputed once at slot construction.
+- A cuFFT plan handle for the `(n_a, n_b, n_c)` R2C / C2R transforms.
+

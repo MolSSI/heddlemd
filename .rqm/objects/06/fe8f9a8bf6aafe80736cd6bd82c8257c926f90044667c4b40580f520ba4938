@@ -1,0 +1,9 @@
+  @rq-60b19852
+  Scenario: Two phases of different kinds may share a numerical seed
+    Given a two-phase config where phase 0's [phase.thermostat] is csvr
+      with seed=7 and phase 1's [phase.barostat] is c-rescale with seed=7
+    When load_config is called
+    Then it returns Ok(config)
+
+  # --- Per-phase compatibility checks ---
+

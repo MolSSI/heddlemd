@@ -1,0 +1,8 @@
+  @rq-a30ac09f
+  Scenario: Reject empty type name
+    Given the Background config with particle_types[0].name=""
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { field: "particle_types[0].name", reason: _ })
+
+  # --- Cross-validation ---
+

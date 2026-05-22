@@ -1,0 +1,8 @@
+  @rq-82e4f74e
+  Scenario: Same-sign charges repel
+    Given two particles with charges (+1e, +1e) at positions
+      (0, 0, 0) and (3e-10, 0, 0)
+    When coulomb_pair_force is called
+    Then pair_forces_x[0*2 + 1] is positive (atom 0 is pushed away from atom 1)
+    And pair_forces_x[1*2 + 0] equals -pair_forces_x[0*2 + 1] (Newton's third law)
+

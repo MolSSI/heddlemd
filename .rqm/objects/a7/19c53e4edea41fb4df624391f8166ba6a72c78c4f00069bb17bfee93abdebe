@@ -1,0 +1,7 @@
+  @rq-765c96c5
+  Scenario: Reject trajectory_path = log_path
+    Given the Background config with [output].trajectory_path="run.dat" and
+      [output].log_path="run.dat"
+    When load_config is called
+    Then it returns Err(ConfigError::PathCollision { kind_a: PathRole::Trajectory, kind_b: PathRole::Log, path: _ })
+

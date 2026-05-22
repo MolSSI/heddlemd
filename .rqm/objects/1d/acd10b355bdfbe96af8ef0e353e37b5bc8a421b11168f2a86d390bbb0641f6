@@ -1,0 +1,28 @@
+#### `[[angle_types]]` (optional array of tables) <!-- rq-f2946c4a -->
+
+Declares the parameter sets for angle potentials referenced by name from
+the `.topology` file. The array is optional and may be empty. When
+supplied, every angle type's `name` field appears as the fourth column
+of one or more rows in the `.topology` file's `[angles]` section. Angle
+types whose `name` is never used in the file are permitted
+(declared-but-unused).
+
+Common fields:
+
+- `name: String` — unique identifier within the `[[angle_types]]`
+  array. Empty strings are rejected. Case-sensitive.
+- `potential: String` — selects the angle potential. The only
+  supported value is `"harmonic"`. Future values
+  (`"cosine-harmonic"`, `"urey-bradley"`, ...) are reserved.
+
+Fields accepted for `potential = "harmonic"` (see
+`forces/harmonic-angle.md`):
+
+- `k_theta: f64` — angle force constant in joules per radian². Required.
+  Finite, strictly positive.
+- `theta_0: f64` — equilibrium angle in radians. Required. Finite, in
+  `[0, π]`.
+
+Names must be unique within the array. Unknown fields for the chosen
+`potential` are rejected.
+

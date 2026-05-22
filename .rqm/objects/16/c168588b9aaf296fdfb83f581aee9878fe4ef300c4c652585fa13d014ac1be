@@ -1,0 +1,15 @@
+  @rq-90e307b2
+  Scenario: Two-phase config loads with distinct per-phase parameters
+    Given a config with two [[phase]] entries: phase 0 name="equil"
+      n_steps=5000 dt=1.0e-15 with [phase.integrator] kind="velocity-verlet";
+      phase 1 name="prod" n_steps=10000 dt=2.0e-15 with [phase.integrator]
+      kind="velocity-verlet"
+    When load_config is called
+    Then config.phases has length 2
+    And config.phases[0].name equals "equil"
+    And config.phases[0].n_steps equals 5000
+    And config.phases[0].dt equals 1.0e-15
+    And config.phases[1].name equals "prod"
+    And config.phases[1].n_steps equals 10000
+    And config.phases[1].dt equals 2.0e-15
+

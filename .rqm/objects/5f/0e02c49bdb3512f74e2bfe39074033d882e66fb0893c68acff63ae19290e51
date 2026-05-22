@@ -1,0 +1,51 @@
+## Schema <!-- rq-1c7a9cfd -->
+
+The top-level table carries one mandatory field, `schema_version`. The schema
+described here is version `1`. Loading a config whose `schema_version` is any
+other value is an error.
+
+A simulation is a sequence of one or more **phases**. Phases come in
+two kinds:
+
+- **MD phases** declared as `[[phase]]` array entries. Each carries
+  its own timestep, step count, integrator, optional thermostat,
+  optional barostat, and optional output cadences.
+- **Minimization phases** declared as `[[minimization]]` array
+  entries. Each carries an algorithm selector
+  (`steepest-descent` in v1), algorithm-specific parameters,
+  convergence criteria, and output cadences. See
+  `rqm/minimization/steepest-descent.md` for the algorithm.
+
+A config carries at least one phase across the two arrays combined
+(neither array is individually required, but the union must be
+non-empty). Phases execute in **source-document order** across both
+arrays: the deserialiser captures the byte span of each `[[phase]]`
+and `[[minimization]]` entry via `toml::Spanned<T>` and the loader
+merges them into a single `Vec<PhaseKind>` sorted by span start.
+MD phases and minimization phases may be freely interleaved.
+
+Particle state (positions, velocities, simulation box, particle
+types, charges) carries over between phases regardless of kind; slot
+state (integrator buffers, thermostat chains, barostat state, the
+minimizer's adaptive step size) is reset at every phase boundary. See
+`simulation-runner.md` for the runtime model.
+
+Sections:
+
+| Section | Required | Purpose |
+| ------- | -------- | ------- |
+| top-level `schema_version` | yes | format version |
+| top-level `init` | yes | path to initial-state file |
+| top-level `topology` | no | path to .topology file |
+| `[simulation]` | yes | RNG seed and target temperature for initial-velocity sampling |
+| `[[phase]]` | conditional | per-phase integrator / thermostat / barostat / outputs (at least one of `[[phase]]` or `[[minimization]]` must be present) |
+| `[[minimization]]` | conditional | per-phase minimization algorithm / parameters / outputs |
+| `[[particle_types]]` | yes (>= 1) | per-type properties |
+| `[[pair_interactions]]` | yes (covers every pair) | per-pair potential + parameters |
+| `[[bond_types]]` | no | per-bond-type parameters |
+| `[[angle_types]]` | no | per-angle-type parameters |
+| `[[constraint_types]]` | no | per-constraint-type parameters |
+| `[coulomb]` | no | truncated short-range Coulomb |
+| `[spme]` | no | smooth particle-mesh Ewald |
+| `[neighbor_list]` | no | non-bonded pair-evaluation algorithm |
+

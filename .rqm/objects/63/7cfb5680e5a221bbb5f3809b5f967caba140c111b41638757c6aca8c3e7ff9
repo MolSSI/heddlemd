@@ -1,0 +1,7 @@
+  @rq-4cd2ec5b
+  Scenario: IntegratorBuilder::owns_thermostat agrees with the validation rule
+    Given the "velocity-verlet" builder from IntegratorRegistry::with_builtins()
+    Then builder.owns_thermostat(&{ lossless: false }) returns false
+    Given the "langevin-baoab" builder from IntegratorRegistry::with_builtins()
+    Then builder.owns_thermostat(&{ friction: 1.0, temperature: 300.0, seed: 0 }) returns true
+

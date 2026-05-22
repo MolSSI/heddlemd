@@ -1,0 +1,53 @@
+### Algorithm <!-- rq-39b05bc9 -->
+
+For each ordered `(i, k)` with `0 <= i < N` and `0 <= k <
+neighbor_counts[i]`:
+
+1. The pair-buffer slot is `slot = i * max_neighbors + k`.
+2. Read `j = neighbor_list[slot]`. If `i == j` or
+   `k >= neighbor_counts[i]`, write `0.0_f32` to all five pair-buffer
+   slots and stop.
+3. Compute the displacement `(dx, dy, dz) = positions[i] − positions[j]`
+   and apply the triclinic minimum-image algorithm of `simulation-box.md`.
+4. Compute `r² = dx² + dy² + dz²`. If `r² > r_cut_real²`, write zeros to
+   all five slots and stop.
+5. Read `q_i = charges[i]`, `q_j = charges[j]`.
+6. Compute the screened Coulomb factor and energy:
+
+   ```text
+   inv_r2  = 1.0f / r2
+   inv_r   = sqrtf(inv_r2)
+   r       = sqrtf(r2)
+   qq      = q_i * q_j
+   ar      = α * r
+   erfc_ar = erfcf(ar)
+   gauss   = expf(-(ar * ar))
+   energy  = k_C * qq * erfc_ar * inv_r
+   factor  = k_C * qq * inv_r * (erfc_ar * inv_r2
+                                 + (2.0f * α / sqrtf(π)) * gauss * inv_r2)
+   ```
+
+   `factor · r_ij` is the screened-Coulomb force on particle `i` due to
+   `j`. The derivative form combines the `1/r²` decay of `erfc(αr)/r` with
+   the Gaussian term from `d(erfc)/dr = −(2α/√π) · exp(−α²r²)`.
+
+7. Apply the per-pair Coulomb exclusion scale (see `topology.md`):
+   `scale = exclusion_scale(i, j, atom_excl_offsets, atom_excl_partners,
+   atom_excl_coul_scales)`. Multiply `factor`, `energy`, and the scalar
+   virial `w = factor · r²` by `scale`.
+8. Write the final values to the pair buffer using the half-sum
+   convention:
+
+   ```text
+   pair_forces_x[slot] = factor * dx
+   pair_forces_y[slot] = factor * dy
+   pair_forces_z[slot] = factor * dz
+   pair_energies[slot] = 0.5 * energy
+   pair_virials[slot]  = 0.5 * w
+   ```
+
+The real-space slot does not apply a switching function. The `erfc`
+factor decays rapidly enough that a hard cutoff is acceptable when
+`α · r_cut_real >= 3.5` (the loader does not enforce this; it is a
+user-tuning concern documented in `io/config-schema.md`).
+

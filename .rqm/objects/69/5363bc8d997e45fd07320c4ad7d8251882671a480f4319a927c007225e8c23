@@ -1,0 +1,6 @@
+  @rq-9d165c7f
+  Scenario: minlog_every=0 disables the file
+    Given a [[minimization]] phase with output.minlog_every = 0
+    When the phase runs
+    Then no .minlog file is created
+

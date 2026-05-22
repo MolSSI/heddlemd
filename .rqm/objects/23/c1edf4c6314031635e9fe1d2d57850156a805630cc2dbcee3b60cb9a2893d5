@@ -1,0 +1,7 @@
+  @rq-4bc8028f
+  Scenario: NeighborListState with particle_count = 0 builds successfully
+    When NeighborListState::new_cell_list is called with particle_count = 0
+    Then it returns Ok(state)
+    And rebuild is a no-op
+    And displacement_check returns 0.0
+

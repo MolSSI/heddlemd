@@ -1,0 +1,8 @@
+  @rq-0caebe37
+  Scenario: Real-space slot obeys Newton's third law for a non-boundary pair
+    Given two particles at non-boundary separation
+    When the real-space slot's contribute() is called
+    Then pair_forces_x[0*max + slot_j] equals −pair_forces_x[1*max + slot_i] bit-exactly
+
+  # --- Reciprocal-space pipeline: spread ---
+

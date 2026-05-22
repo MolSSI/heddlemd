@@ -1,0 +1,7 @@
+  @rq-b39d3be7
+  Scenario: Displacement check uses minimum-image displacement
+    Given a particle whose reference position is x = lx/2 - 0.05
+    And whose current position is x = -lx/2 + 0.05 (wrapped across the boundary)
+    When displacement_check is called
+    Then the reported max displacement is approximately 0.1, not lx - 0.1
+

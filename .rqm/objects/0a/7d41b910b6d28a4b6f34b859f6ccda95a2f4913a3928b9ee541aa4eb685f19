@@ -1,0 +1,12 @@
+# Error Handling Convention <!-- rq-91ac50d0 -->
+
+Every fallible operation in the engine returns `Result<T, E>`, where `E` is a
+module-specific error type. All of these error types follow one convention so
+that failures surface uniformly regardless of where they originate — config
+parsing, a CUDA kernel launch, neighbor-list construction, or trajectory I/O.
+
+The convention has four parts: every error type derives `thiserror::Error`;
+its `Display` output is human-readable prose; error-to-error conversions are
+declared with `#[from]`; and a variant that wraps another error exposes that
+error through `std::error::Error::source`.
+

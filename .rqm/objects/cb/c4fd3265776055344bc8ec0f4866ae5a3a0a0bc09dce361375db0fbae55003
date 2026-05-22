@@ -1,0 +1,7 @@
+  @rq-6c8415f6
+  Scenario: NeighborListState rebuild performs no host-device particle transfers
+    Given a NeighborListState in CellList mode
+    When NeighborListState::rebuild is called
+    Then no host-side download of positions_x/y/z occurs
+    And no host-side upload of sorted_particle_ids or cell_offsets occurs
+

@@ -1,0 +1,7 @@
+  @rq-fa24a8d1
+  Scenario: timings_path can be overridden in [output]
+    Given the Background config at "/tmp/sim/argon.in.toml" with
+      [output].timings_path = "custom.timings"
+    When load_config is called
+    Then config.phases[0].output.timings_path equals "/tmp/sim/custom.timings"
+

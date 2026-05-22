@@ -1,0 +1,42 @@
+## CUDA Kernels <!-- rq-47a5fe0e -->
+
+The minimizer's per-step work runs on the existing
+`compute_total_potential_energy` reduction plus three small new
+kernels in `kernels/minimize.cu`:
+
+```c
+extern "C" __global__ void sd_compute_step(
+    float *positions_x, float *positions_y, float *positions_z,
+    const float *forces_x, const float *forces_y, const float *forces_z,
+    float step_size,
+    float inv_f_max,
+    unsigned int n);
+
+extern "C" __global__ void sd_snapshot(
+    const float *positions_x, const float *positions_y, const float *positions_z,
+    float *snapshot_x, float *snapshot_y, float *snapshot_z,
+    unsigned int n);
+
+extern "C" __global__ void sd_restore(
+    float *positions_x, float *positions_y, float *positions_z,
+    const float *snapshot_x, const float *snapshot_y, const float *snapshot_z,
+    unsigned int n);
+```
+
+Plus the existing `compute_f_max_reduction` kernel (or, if not yet
+exposed by the existing reduction utilities, a deterministic
+single-block reduction kernel with the same fixed left-to-right
+index order as `compute_total_potential_energy`).
+
+- `sd_compute_step` reads `(positions_*, forces_*)`, computes
+  `positions_d ← positions_d + step_size · forces_d · inv_f_max` per
+  axis, and writes back to `positions_*`. One thread per particle.
+- `sd_snapshot` copies `positions_*` into the slot's snapshot
+  buffers; called before each trial.
+- `sd_restore` copies snapshot buffers back into `positions_*`;
+  called after a rejected trial.
+
+All three kernels run with block size 256, grid size
+`ceil(n / 256)`, zero shared memory, on the default stream of the
+`ParticleBuffers`'s `Arc<CudaDevice>`.
+

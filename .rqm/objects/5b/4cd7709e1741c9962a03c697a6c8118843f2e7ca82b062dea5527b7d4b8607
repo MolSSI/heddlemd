@@ -1,0 +1,6 @@
+  @rq-3298bdc5
+  Scenario: ConfigError::InvalidValue renders as prose
+    Given ConfigError::InvalidValue { field: "simulation.dt", reason: "must be finite and positive" }
+    When it is formatted with Display
+    Then the output equals "invalid value for `simulation.dt`: must be finite and positive"
+

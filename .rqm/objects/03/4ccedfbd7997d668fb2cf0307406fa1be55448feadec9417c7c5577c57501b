@@ -1,0 +1,10 @@
+  @rq-fbb836fb
+  Scenario: MtkNpt + [barostat] is rejected (owns its barostat)
+    Given the Background config with [integrator] kind="mtk-npt",
+      temperature=85.0, pressure=1.0e5, tau_t=1.0e-13, tau_p=1.0e-12
+    And a [barostat] section with kind="berendsen", pressure=1.0e5,
+      tau=1.0e-12, compressibility=4.5e-10
+    When load_config is called
+    Then it returns Err(ConfigError::IncompatibleBarostat {
+      integrator: "mtk-npt" })
+
