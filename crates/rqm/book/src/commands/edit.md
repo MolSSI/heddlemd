@@ -1,11 +1,21 @@
 # `rqm edit`
 
-Open a blob's bytes in `$EDITOR` (or `vi`). On save, `.rqm/` is updated
-and the working tree is rebuilt.
+Replace a blob's bytes. Interactive by default (opens `$EDITOR`);
+non-interactive via `--from-file` or `--from-stdin`. On save / accept,
+`.rqm/` is updated and the working tree is rebuilt.
 
 ```
-rqm edit <target>
+rqm edit <target> [--from-file <path> | --from-stdin]
 ```
+
+- `<target>` — `rq-XXXXXXXX` (text-blob of that requirement) or
+  `<path>:<line>` (whichever blob covers that line in either a
+  markdown or source file).
+- `--from-file <path>` — read replacement bytes from a file.
+- `--from-stdin` — read replacement bytes from stdin.
+
+When neither flag is given, `$EDITOR` opens with the blob's current
+contents; save and exit to apply.
 
 `<target>` follows the standard convention — see
 [Addressing](../addressing.md):

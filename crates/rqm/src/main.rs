@@ -38,14 +38,20 @@ enum Cmd {
         /// file to already be migrated).
         path: PathBuf,
     },
-    /// Open a requirement's text in $EDITOR. On save, .rqm/ is
-    /// updated and the working tree is rebuilt.
+    /// Edit a blob's bytes. Default is interactive ($EDITOR);
+    /// `--from-file` and `--from-stdin` allow non-interactive use.
     ///
     /// The target can be either a canonical stable_id
     /// (`rq-XXXXXXXX`) or a file:line cursor (`rqm/foo.md:42`).
     Edit {
         /// Either `rq-XXXXXXXX` or `<path>:<line>` (1-based line).
         target: String,
+        /// Read replacement bytes from this file instead of `$EDITOR`.
+        #[arg(long, conflicts_with = "from_stdin")]
+        from_file: Option<PathBuf>,
+        /// Read replacement bytes from stdin instead of `$EDITOR`.
+        #[arg(long, conflicts_with = "from_file")]
+        from_stdin: bool,
     },
     /// Show the current state of a requirement: kind, ancestry,
     /// children, text-blob preview, source-blob locations, and any
@@ -474,11 +480,29 @@ fn run(cli: Cli) -> Result<ExitCode> {
             }
             Ok(ExitCode::SUCCESS)
         }
-        Cmd::Edit { target } => {
+        Cmd::Edit {
+            target,
+            from_file,
+            from_stdin,
+        } => {
             let store = rqm::store::Store::open(&cli.rqm_dir)?;
             let target = rqm::edit::EditTarget::parse(&target)?;
             let blob = rqm::edit::target_to_blob(&store, &target)?;
-            match rqm::edit::edit_blob_interactive(&store, &blob)? {
+            let outcome = if let Some(p) = from_file {
+                let bytes = std::fs::read(&p)
+                    .with_context(|| format!("read {}", p.display()))?;
+                rqm::edit::edit_blob_from_bytes(&store, &blob, bytes)?
+            } else if from_stdin {
+                use std::io::Read;
+                let mut bytes = Vec::new();
+                std::io::stdin()
+                    .read_to_end(&mut bytes)
+                    .context("read stdin")?;
+                rqm::edit::edit_blob_from_bytes(&store, &blob, bytes)?
+            } else {
+                rqm::edit::edit_blob_interactive(&store, &blob)?
+            };
+            match outcome {
                 rqm::edit::EditOutcome::Unchanged => {
                     println!("no changes");
                 }

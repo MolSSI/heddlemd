@@ -1,4 +1,16 @@
-# Feature: Requirements Traceability ID System
+# Feature: Requirements Traceability ID System (legacy)
+
+> **Status: legacy / transitional.** This document describes the bash-based
+> traceability tooling used before the `rqm` Rust CLI (under
+> `crates/rqm/`) came online. The Rust tool is now the primary mechanism
+> for any file under `.rqm/` management (see `rqm check` for the current
+> list of managed paths, and `crates/rqm/book/src/` for its reference).
+>
+> The `rqm.sh` workflow described below remains in use only for files
+> that have not yet been migrated to `.rqm/`. Once a file is migrated
+> (via `rqm migrate <path>`), all further edits to that file must go
+> through the `rqm` CLI; running `rqm.sh stamp` on a managed file is no
+> longer the right answer.
 
 This feature defines a scheme for assigning stable, opaque identifiers to requirements entities
 (files, sections, API items, and Gherkin scenarios) and provides a standalone bash script,

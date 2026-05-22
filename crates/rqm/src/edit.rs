@@ -215,6 +215,20 @@ pub fn find_entry_at(
     Ok((last.stable_id.clone(), last.blob))
 }
 
+/// Apply `new_bytes` as the replacement contents for `blob_hash`. The
+/// non-interactive counterpart to [`edit_blob_interactive`]. Refuses
+/// empty content (use `rqm rm` instead).
+pub fn edit_blob_from_bytes(
+    store: &Store,
+    blob_hash: &ObjectHash,
+    new_bytes: Vec<u8>,
+) -> Result<EditOutcome> {
+    if new_bytes.is_empty() {
+        bail!("refusing to replace blob with empty content; use `rqm rm` instead");
+    }
+    edit_blob_with(store, blob_hash, |_old| Ok(EditFn::Apply(new_bytes)))
+}
+
 /// Open `blob_hash` in `$EDITOR` (or `vi` if unset), then apply the
 /// result through [`edit_blob_with`].
 pub fn edit_blob_interactive(store: &Store, blob_hash: &ObjectHash) -> Result<EditOutcome> {
