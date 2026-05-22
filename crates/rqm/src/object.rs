@@ -63,7 +63,7 @@ impl std::fmt::Display for FromHexError {
 
 impl std::error::Error for FromHexError {}
 
-#[derive(Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct StableId(String);
 
@@ -95,13 +95,56 @@ pub enum Kind {
 pub struct Blob(pub Vec<u8>);
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(from = "RequirementRaw")]
 pub struct Requirement {
     pub stable_id: StableId,
     pub kind: Kind,
     pub text_blob: ObjectHash,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent: Option<StableId>,
+    /// Parent requirements in the DAG. Empty for a DAG root.
+    /// Multi-parent semantics: a requirement may have any number of
+    /// parents. Canonical-sorted for hash stability.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parents: Vec<StableId>,
     pub source_blobs: Vec<ObjectHash>,
+}
+
+/// On-disk form used for backward-compatible deserialization. Accepts
+/// the legacy single-parent `parent` field as well as the new `parents`
+/// list. Writing always uses the new `parents` form (via the derived
+/// Serialize impl on `Requirement`).
+#[derive(Deserialize)]
+struct RequirementRaw {
+    stable_id: StableId,
+    kind: Kind,
+    text_blob: ObjectHash,
+    #[serde(default)]
+    parent: Option<StableId>,
+    #[serde(default)]
+    parents: Vec<StableId>,
+    #[serde(default)]
+    source_blobs: Vec<ObjectHash>,
+}
+
+impl From<RequirementRaw> for Requirement {
+    fn from(raw: RequirementRaw) -> Self {
+        let mut parents = raw.parents;
+        // If only the legacy single-parent field is present, migrate
+        // it into the new list.
+        if parents.is_empty() {
+            if let Some(p) = raw.parent {
+                parents.push(p);
+            }
+        }
+        parents.sort();
+        parents.dedup();
+        Requirement {
+            stable_id: raw.stable_id,
+            kind: raw.kind,
+            text_blob: raw.text_blob,
+            parents,
+            source_blobs: raw.source_blobs,
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]

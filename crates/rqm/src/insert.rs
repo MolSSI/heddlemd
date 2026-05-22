@@ -202,7 +202,7 @@ pub fn do_insert(
                 stable_id: new_id.clone(),
                 kind,
                 text_blob: new_blob,
-                parent,
+                parents: parent.into_iter().collect(),
                 source_blobs: Vec::new(),
             };
             let meta_hash = store.write_requirement(&req)?;
@@ -323,7 +323,7 @@ mod tests {
             stable_id: StableId::new(id),
             kind: Kind::Behavior,
             text_blob: text,
-            parent: None,
+            parents: vec![],
             source_blobs: vec![],
         };
         let h = store.write_requirement(&req).unwrap();
@@ -604,7 +604,7 @@ mod tests {
         // The new requirement exists and is a DAG root.
         let h = store.ref_get(&new_id).unwrap().unwrap();
         let req = store.read_requirement(&h).unwrap();
-        assert_eq!(req.parent, None);
+        assert!(req.parents.is_empty());
         assert_eq!(req.kind, Kind::Behavior);
 
         materialize::build(&store, root).unwrap();
@@ -640,7 +640,7 @@ mod tests {
 
         let h = store.ref_get(&new_id).unwrap().unwrap();
         let req = store.read_requirement(&h).unwrap();
-        assert_eq!(req.parent, Some(StableId::new("rq-aaaaaaaa")));
+        assert_eq!(req.parents, vec![StableId::new("rq-aaaaaaaa")]);
 
         materialize::build(&store, root).unwrap();
         let on_disk = fs::read_to_string(root.join("rqm/doc.md")).unwrap();

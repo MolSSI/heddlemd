@@ -338,7 +338,7 @@ mod tests {
             stable_id: StableId::new("rq-4d1082c4"),
             kind: Kind::Behavior,
             text_blob: text_hash,
-            parent: None,
+            parents: vec![],
             source_blobs: vec![],
         };
         let h = store.write_requirement(&req).unwrap();

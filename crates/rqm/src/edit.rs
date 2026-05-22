@@ -492,7 +492,7 @@ Second body.
             stable_id: StableId::new(id),
             kind: Kind::Behavior,
             text_blob: text,
-            parent: None,
+            parents: vec![],
             source_blobs: vec![],
         };
         let h = store.write_requirement(&req).unwrap();

@@ -198,7 +198,7 @@ pub fn do_remove_requirement(
             // Alias ref — skip; the canonical will be visited separately.
             continue;
         }
-        if cmeta.parent.as_ref() == Some(id) {
+        if cmeta.parents.contains(id) {
             children.push(sid);
         }
     }
@@ -279,7 +279,7 @@ mod tests {
             stable_id: StableId::new(id),
             kind: Kind::Behavior,
             text_blob: text,
-            parent: None,
+            parents: vec![],
             source_blobs: vec![],
         };
         let h = store.write_requirement(&req).unwrap();

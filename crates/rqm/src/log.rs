@@ -28,20 +28,20 @@ pub fn render(store: &Store, target: &EditTarget, out: &mut dyn std::fmt::Write)
     writeln!(out, "requirement: {canonical}  ({})", kind_label(meta.kind))?;
     writeln!(out, "  meta: {meta_hash}")?;
 
-    // Ancestry chain (parent → grandparent → ... → root)
-    writeln!(out, "\nancestry:")?;
-    if meta.parent.is_none() {
+    // Direct parents. Under a multi-parent DAG, listing direct parents
+    // rather than walking a single chain keeps the output bounded; the
+    // user can `rqm log` on each parent to walk further.
+    writeln!(out, "\nparents ({}):", meta.parents.len())?;
+    if meta.parents.is_empty() {
         writeln!(out, "  (DAG root)")?;
     } else {
-        let mut current = meta.parent.clone();
-        while let Some(pid) = current {
-            let parent_hash = store.ref_get(&pid)?.with_context(|| {
+        for pid in &meta.parents {
+            let parent_hash = store.ref_get(pid)?.with_context(|| {
                 format!("parent {pid} has no ref")
             })?;
             let parent_meta = store.read_requirement(&parent_hash)?;
             let preview = blob_preview(store, &parent_meta.text_blob)?;
             writeln!(out, "  {pid}  {preview}")?;
-            current = parent_meta.parent.clone();
         }
     }
 
@@ -136,7 +136,7 @@ fn direct_children(store: &Store, parent_id: &StableId) -> Result<Vec<StableId>>
             // Alias ref — skip; the canonical will be visited separately.
             continue;
         }
-        if meta.parent.as_ref() == Some(parent_id) {
+        if meta.parents.contains(parent_id) {
             out.push(sid);
         }
     }
@@ -202,7 +202,7 @@ mod tests {
             stable_id: StableId::new(id),
             kind: Kind::Behavior,
             text_blob: text,
-            parent: None,
+            parents: vec![],
             source_blobs: vec![],
         };
         let h = store.write_requirement(&req).unwrap();
@@ -233,29 +233,28 @@ Second body.
     }
 
     #[test]
-    fn log_root_shows_no_ancestry_and_lists_children() {
+    fn log_root_shows_no_parents_and_lists_children() {
         let (_dir, store) = setup_doc();
         let mut out = String::new();
         let target = EditTarget::Id(StableId::new("rq-aaaaaaaa"));
         render(&store, &target, &mut out).unwrap();
         assert!(out.contains("requirement: rq-aaaaaaaa  (behavior)"));
-        assert!(out.contains("ancestry:\n  (DAG root)"));
+        assert!(out.contains("parents (0):\n  (DAG root)"));
         assert!(out.contains("children (2):"));
         assert!(out.contains("rq-bbbbbbbb"));
         assert!(out.contains("rq-dddddddd"));
     }
 
     #[test]
-    fn log_child_shows_parent_chain() {
+    fn log_child_shows_direct_parents() {
         let (_dir, store) = setup_doc();
         let mut out = String::new();
         let target = EditTarget::Id(StableId::new("rq-bbbbbbbb"));
         render(&store, &target, &mut out).unwrap();
-        // Ancestry section should list rq-aaaaaaaa.
-        let ancestry_idx = out.find("ancestry:").unwrap();
+        let parents_idx = out.find("parents").unwrap();
         let children_idx = out.find("children").unwrap();
-        let ancestry = &out[ancestry_idx..children_idx];
-        assert!(ancestry.contains("rq-aaaaaaaa"));
+        let parents_section = &out[parents_idx..children_idx];
+        assert!(parents_section.contains("rq-aaaaaaaa"));
     }
 
     #[test]

@@ -120,6 +120,24 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// Change a requirement's parents in the DAG.
+    ///
+    /// Replaces the target's `parents` list with the given parents
+    /// (zero for a DAG root, or one or more for a multi-parent DAG).
+    /// Rejects aliases, self-loops, and cycles.
+    Reassign {
+        /// `rq-XXXXXXXX` or `<path>:<line>`. Must resolve to a
+        /// canonical requirement.
+        target: String,
+        /// New parents (canonical stable_ids or file:line cursors).
+        /// May repeat. Mutually exclusive with `--no-parent`.
+        #[arg(long, conflicts_with = "no_parent")]
+        parent: Vec<String>,
+        /// Make the requirement a DAG root (empty parents list).
+        /// Mutually exclusive with `--parent`.
+        #[arg(long = "no-parent", conflicts_with = "parent")]
+        no_parent: bool,
+    },
     /// Move a blob to a different position, either within its current
     /// file or in another managed file.
     ///
@@ -328,6 +346,42 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     for p in &report.written {
                         println!("  wrote {}", p.display());
                     }
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Cmd::Reassign {
+            target,
+            parent,
+            no_parent,
+        } => {
+            let store = rqm::store::Store::open(&cli.rqm_dir)?;
+            let target_t = rqm::edit::EditTarget::parse(&target)?;
+            let target_id = rqm::edit::target_to_canonical_id_strict(&store, &target_t)?;
+            if !no_parent && parent.is_empty() {
+                anyhow::bail!(
+                    "must specify --parent <id>... or --no-parent"
+                );
+            }
+            let mut new_parents = Vec::with_capacity(parent.len());
+            for p in &parent {
+                let pt = rqm::edit::EditTarget::parse(p)?;
+                new_parents.push(rqm::edit::target_to_canonical_id_strict(&store, &pt)?);
+            }
+            let outcome = rqm::reassign::do_reassign(&store, &target_id, new_parents)?;
+            println!("reassigned {}", outcome.target);
+            if outcome.old_parents.is_empty() {
+                println!("  old parents: (DAG root)");
+            } else {
+                for p in &outcome.old_parents {
+                    println!("  old parent: {p}");
+                }
+            }
+            if outcome.new_parents.is_empty() {
+                println!("  new parents: (DAG root)");
+            } else {
+                for p in &outcome.new_parents {
+                    println!("  new parent: {p}");
                 }
             }
             Ok(ExitCode::SUCCESS)

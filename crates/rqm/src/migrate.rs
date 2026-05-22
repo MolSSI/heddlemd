@@ -60,14 +60,15 @@ pub fn migrate_markdown(store: &Store, root: &Path, rel_path: &Path) -> Result<(
         blob_hashes.push(h);
     }
 
-    // Write metas. Order doesn't matter — `parent` is a stable_id, not a
-    // hash, so there's no write-ordering dependency between parent and child.
+    // Write metas. Order doesn't matter — parents are stable_ids, not
+    // hashes, so there's no write-ordering dependency between parent
+    // and child.
     for (bn, blob) in boundaries.iter().zip(blob_hashes.iter()) {
         let req = Requirement {
             stable_id: bn.stable_id.clone(),
             kind: bn.kind,
             text_blob: *blob,
-            parent: bn.parent_id.clone(),
+            parents: bn.parent_id.iter().cloned().collect(),
             source_blobs: vec![],
         };
         let meta_hash = store.write_requirement(&req)?;
@@ -659,8 +660,8 @@ Body of child.
         let h_child = store.ref_get(&StableId::new("rq-bbbbbbbb")).unwrap().unwrap();
         let top = store.read_requirement(&h_top).unwrap();
         let child = store.read_requirement(&h_child).unwrap();
-        assert_eq!(top.parent, None);
-        assert_eq!(child.parent, Some(StableId::new("rq-aaaaaaaa")));
+        assert!(top.parents.is_empty());
+        assert_eq!(child.parents, vec![StableId::new("rq-aaaaaaaa")]);
 
         let tree_hash = store.tree_get(rel).unwrap().expect("tree ref");
         let tree = store.read_file_tree(&tree_hash).unwrap();
@@ -781,7 +782,7 @@ fn last() {}
             stable_id: StableId::new(id),
             kind: Kind::Behavior,
             text_blob: text,
-            parent: None,
+            parents: vec![],
             source_blobs: vec![],
         };
         let h = store.write_requirement(&req).unwrap();

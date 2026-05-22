@@ -13,5 +13,6 @@
   - [`rqm mv`](./commands/mv.md)
   - [`rqm insert`](./commands/insert.md)
   - [`rqm rm`](./commands/rm.md)
+  - [`rqm reassign`](./commands/reassign.md)
 - [Workflows](./workflows.md)
 - [Limitations](./limitations.md)

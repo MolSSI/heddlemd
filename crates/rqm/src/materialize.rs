@@ -199,7 +199,7 @@ fn integrity_checks(store: &Store, report: &mut CheckReport) -> Result<()> {
                     .push(format!("meta {id}: source_blob {b} missing"));
             }
         }
-        if let Some(parent) = &req.parent {
+        for parent in &req.parents {
             if store.ref_get(parent)?.is_none() {
                 report
                     .integrity

@@ -91,7 +91,7 @@ mod tests {
             stable_id: StableId::new("rq-4d1082c4"),
             kind: Kind::Behavior,
             text_blob: h(1),
-            parent: None,
+            parents: vec![],
             source_blobs: vec![h(2), h(3)],
         };
         let bytes = write_requirement(&req).unwrap();
@@ -105,13 +105,13 @@ mod tests {
             stable_id: StableId::new("rq-aaaaaaaa"),
             kind: Kind::Design,
             text_blob: h(1),
-            parent: Some(StableId::new("rq-bbbbbbbb")),
+            parents: vec![StableId::new("rq-bbbbbbbb")],
             source_blobs: vec![],
         };
         let bytes = write_requirement(&req).unwrap();
         let s = std::str::from_utf8(&bytes).unwrap();
         // Keys must appear in lexicographic order.
-        let key_positions: Vec<_> = ["kind", "parent", "source_blobs", "stable_id", "text_blob", "type"]
+        let key_positions: Vec<_> = ["kind", "parents", "source_blobs", "stable_id", "text_blob", "type"]
             .iter()
             .map(|k| s.find(&format!("\"{k}\"")).unwrap_or(usize::MAX))
             .collect();
@@ -121,17 +121,26 @@ mod tests {
     }
 
     #[test]
-    fn requirement_omits_parent_when_none() {
+    fn requirement_omits_parents_when_empty() {
         let req = Requirement {
             stable_id: StableId::new("rq-deadbeef"),
             kind: Kind::Behavior,
             text_blob: h(7),
-            parent: None,
+            parents: vec![],
             source_blobs: vec![h(8)],
         };
         let bytes = write_requirement(&req).unwrap();
         let s = std::str::from_utf8(&bytes).unwrap();
-        assert!(!s.contains("\"parent\""), "parent should be omitted: {s}");
+        assert!(!s.contains("\"parents\""), "parents should be omitted when empty: {s}");
+    }
+
+    #[test]
+    fn requirement_accepts_legacy_parent_field() {
+        // Old format used `parent: Option<StableId>`. New deserialize
+        // should accept and convert.
+        let legacy = br#"{"kind":"behavior","parent":"rq-abcdef12","source_blobs":[],"stable_id":"rq-deadbeef","text_blob":"0101010101010101010101010101010101010101010101010101010101010101","type":"requirement"}"#;
+        let req = read_requirement(legacy).unwrap();
+        assert_eq!(req.parents, vec![StableId::new("rq-abcdef12")]);
     }
 
     #[test]
@@ -154,7 +163,7 @@ mod tests {
             stable_id: StableId::new("rq-12345678"),
             kind: Kind::Behavior,
             text_blob: h(1),
-            parent: None,
+            parents: vec![],
             source_blobs: vec![],
         };
         let bytes = write_requirement(&req).unwrap();
