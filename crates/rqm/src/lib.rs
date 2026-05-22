@@ -7,5 +7,6 @@ pub mod migrate;
 pub mod mv;
 pub mod object;
 pub mod reassign;
+pub mod rename;
 pub mod rm;
 pub mod store;

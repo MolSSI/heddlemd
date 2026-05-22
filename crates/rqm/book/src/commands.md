@@ -28,6 +28,7 @@ Both options can be passed before any subcommand.
 | [`insert`](./commands/insert.md) | Add a new blob at a specified position |
 | [`rm`](./commands/rm.md) | Remove a blob or a requirement |
 | [`reassign`](./commands/reassign.md) | Change a requirement's parents in the DAG |
+| [`rename`](./commands/rename.md) | Change a requirement's stable_id everywhere |
 
 ## Exit codes
 

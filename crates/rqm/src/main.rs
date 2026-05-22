@@ -120,6 +120,18 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// Change a requirement's stable_id everywhere.
+    ///
+    /// Updates the ref, the meta, every child's parents, every
+    /// file-tree entry, every alias's canonical pointer, and rewrites
+    /// every reachable blob containing the old id as a word-bounded
+    /// stamp.
+    Rename {
+        /// `rq-XXXXXXXX` or `<path>:<line>` (canonical only).
+        old: String,
+        /// New stable_id (must be `rq-XXXXXXXX`, not already in use).
+        new: String,
+    },
     /// Change a requirement's parents in the DAG.
     ///
     /// Replaces the target's `parents` list with the given parents
@@ -346,6 +358,33 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     for p in &report.written {
                         println!("  wrote {}", p.display());
                     }
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Cmd::Rename { old, new } => {
+            let store = rqm::store::Store::open(&cli.rqm_dir)?;
+            let old_t = rqm::edit::EditTarget::parse(&old)?;
+            let old_id = rqm::edit::target_to_canonical_id_strict(&store, &old_t)?;
+            let new_id = rqm::object::StableId::new(new);
+            let outcome = rqm::rename::do_rename(&store, &old_id, &new_id)?;
+            println!("renamed {} -> {}", outcome.old, outcome.new);
+            if outcome.blobs_rewritten > 0 {
+                println!("  blobs rewritten: {}", outcome.blobs_rewritten);
+            }
+            for id in &outcome.metas_updated {
+                println!("  updated meta: {id}");
+            }
+            for p in &outcome.paths_updated {
+                println!("  rewrote file-tree: {}", p.display());
+            }
+            for alias in &outcome.aliases_updated {
+                println!("  redirected alias: {alias}");
+            }
+            if !outcome.paths_updated.is_empty() || outcome.blobs_rewritten > 0 {
+                let report = rqm::materialize::build(&store, &root)?;
+                for p in &report.written {
+                    println!("  wrote {}", p.display());
                 }
             }
             Ok(ExitCode::SUCCESS)
