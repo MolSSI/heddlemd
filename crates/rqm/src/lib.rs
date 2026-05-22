@@ -6,4 +6,5 @@ pub mod materialize;
 pub mod migrate;
 pub mod mv;
 pub mod object;
+pub mod rm;
 pub mod store;

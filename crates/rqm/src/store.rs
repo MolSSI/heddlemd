@@ -120,6 +120,16 @@ impl Store {
         Ok(())
     }
 
+    /// Delete a ref. Idempotent — no error if the ref does not exist.
+    pub fn ref_delete(&self, id: &StableId) -> Result<()> {
+        let path = self.ref_path(id);
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(anyhow::Error::from(e).context(format!("delete ref {id}"))),
+        }
+    }
+
     pub fn ref_list(&self) -> Result<Vec<(StableId, ObjectHash)>> {
         let dir = self.root.join(REFS);
         let mut out = Vec::new();
@@ -155,6 +165,16 @@ impl Store {
         fs::write(&p, format!("{}\n", canonical.as_str()))
             .with_context(|| format!("write alias {alias}"))?;
         Ok(())
+    }
+
+    /// Delete an alias. Idempotent — no error if the alias does not exist.
+    pub fn alias_delete(&self, alias: &StableId) -> Result<()> {
+        let p = self.root.join(ALIASES).join(alias.as_str());
+        match fs::remove_file(&p) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(anyhow::Error::from(e).context(format!("delete alias {alias}"))),
+        }
     }
 
     pub fn alias_list(&self) -> Result<Vec<(StableId, StableId)>> {

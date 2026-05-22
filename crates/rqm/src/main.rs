@@ -101,6 +101,25 @@ enum Cmd {
         #[arg(long, conflicts_with = "from_file")]
         from_stdin: bool,
     },
+    /// Remove a blob or a requirement.
+    ///
+    /// If `target` is `<path>:<line>`, removes the blob covering that
+    /// line from its file-tree. Refuses to remove a requirement's
+    /// text_blob unless `--force` is given.
+    ///
+    /// If `target` is `rq-XXXXXXXX`, removes the requirement entirely
+    /// (delete the ref, remove every file-tree entry carrying its
+    /// stable_id, auto-delete any aliases that point at it). Refuses
+    /// if the requirement has source_blobs attached or children in the
+    /// DAG — clear those first.
+    Rm {
+        /// `<path>:<line>` or `rq-XXXXXXXX`.
+        target: String,
+        /// (blob form only) Allow removing a blob that is a
+        /// requirement's text_blob.
+        #[arg(long)]
+        force: bool,
+    },
     /// Move a blob to a different position, either within its current
     /// file or in another managed file.
     ///
@@ -265,6 +284,51 @@ fn run(cli: Cli) -> Result<ExitCode> {
             let report = rqm::materialize::build(&store, &root)?;
             for p in &report.written {
                 println!("  wrote {}", p.display());
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Cmd::Rm { target, force } => {
+            let store = rqm::store::Store::open(&cli.rqm_dir)?;
+            let parsed = rqm::edit::EditTarget::parse(&target)?;
+            match parsed {
+                rqm::edit::EditTarget::Id(id) => {
+                    if force {
+                        anyhow::bail!(
+                            "--force is for blob removal only; requirement \
+                             removal has explicit safety checks that --force \
+                             does not override"
+                        );
+                    }
+                    let outcome = rqm::rm::do_remove_requirement(&store, &id)?;
+                    println!("removed requirement: {}", outcome.removed);
+                    for alias in &outcome.aliases_removed {
+                        println!("  auto-deleted alias: {alias}");
+                    }
+                    for p in &outcome.paths_updated {
+                        println!("  rewrote file-tree: {}", p.display());
+                    }
+                    let report = rqm::materialize::build(&store, &root)?;
+                    for p in &report.written {
+                        println!("  wrote {}", p.display());
+                    }
+                }
+                rqm::edit::EditTarget::FileLine { path, line } => {
+                    let spec = rqm::rm::RemoveSpec { path, line };
+                    let outcome = rqm::rm::do_remove(&store, spec, force)?;
+                    println!("removed blob: {}", outcome.removed_blob);
+                    if let Some(id) = &outcome.ghosted_requirement {
+                        println!(
+                            "  warning: {id} is now ghosted (text_blob no longer materialized)"
+                        );
+                    }
+                    for id in &outcome.metas_updated {
+                        println!("  updated meta: {id}");
+                    }
+                    let report = rqm::materialize::build(&store, &root)?;
+                    for p in &report.written {
+                        println!("  wrote {}", p.display());
+                    }
+                }
             }
             Ok(ExitCode::SUCCESS)
         }

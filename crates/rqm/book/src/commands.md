@@ -26,6 +26,7 @@ Both options can be passed before any subcommand.
 | [`log`](./commands/log.md) | Show a requirement's current state |
 | [`mv`](./commands/mv.md) | Relocate a blob within or across files |
 | [`insert`](./commands/insert.md) | Add a new blob at a specified position |
+| [`rm`](./commands/rm.md) | Remove a blob from a managed file |
 
 ## Exit codes
 
