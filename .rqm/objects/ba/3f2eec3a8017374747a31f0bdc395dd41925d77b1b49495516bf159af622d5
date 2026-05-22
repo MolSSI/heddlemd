@@ -1,0 +1,5 @@
+    // rq-b015ef15
+    pub fn lz(&self) -> f32 {
+        self.lz
+    }
+

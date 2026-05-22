@@ -250,7 +250,7 @@ successfully.
 
 ### Types <!-- rq-6c5b4246 -->
 
-- `SubStep` — closed enum describing one piece of an integrator's <!-- rq-dbbffa7d -->
+- `SubStep` — closed enum describing one piece of an integrator's
   per-timestep work. Variants:
 
   ```rust
@@ -304,7 +304,7 @@ successfully.
   - `ForceClass` is re-exported from `crate::forces` (see
     `rqm/forces/framework.md` for its definition).
 
-- `StepPlan` — ordered list of `SubStep`s describing one full <!-- rq-9fbba3be -->
+- `StepPlan` — ordered list of `SubStep`s describing one full
   timestep. `Debug + Clone`.
 
   ```rust
@@ -322,7 +322,7 @@ successfully.
     pattern. More than one: predictor-corrector or future multi-step
     integrators.
 
-- `Integrator` — object-safe trait implemented by every concrete <!-- rq-78f484d9 -->
+- `Integrator` — object-safe trait implemented by every concrete
   integrator. Owns the core time-stepping algorithm.
 
   ```rust
@@ -389,7 +389,7 @@ successfully.
     to do for that timestep; this is the canonical way to express a
     no-op step.
 
-- `Thermostat` — object-safe trait implemented by every concrete <!-- rq-5d9ed248 -->
+- `Thermostat` — object-safe trait implemented by every concrete
   thermostat.
 
   ```rust
@@ -433,7 +433,7 @@ successfully.
   - `apply_pre` returns immediately when
     `buffers.particle_count() == 0`. So does `apply_post`.
 
-- `Barostat` — object-safe trait implemented by every concrete <!-- rq-076617ab -->
+- `Barostat` — object-safe trait implemented by every concrete
   barostat.
 
   ```rust
@@ -467,7 +467,7 @@ successfully.
     change-detection path (`forces/neighbor-list.md`,
     `forces/spme.md`).
 
-- `SlotConfig` — open-shaped parsed slot selection. Lives alongside <!-- rq-1f87880c -->
+- `SlotConfig` — open-shaped parsed slot selection. Lives alongside
   the rest of the config types in `crate::io::config`. Its TOML
   mapping is defined in `io/config-schema.md`.
 
@@ -494,7 +494,7 @@ successfully.
   shape that adds the type's user-facing name (see
   `io/config-schema.md`).
 
-- `IntegratorBuilder`, `ThermostatBuilder`, `BarostatBuilder` — <!-- rq-29e08cb5 -->
+- `IntegratorBuilder`, `ThermostatBuilder`, `BarostatBuilder` —
   parallel traits describing a registered slot implementation.
   Implementations are stateless and self-register at construction
   time. Each builder owns its parameter shape: it deserialises a
@@ -607,7 +607,7 @@ successfully.
     first; conforming registry helpers (`build_or_validate_first`
     below) chain the two calls.
 
-- `IntegratorRegistry`, `ThermostatRegistry`, `BarostatRegistry` — <!-- rq-4901507f -->
+- `IntegratorRegistry`, `ThermostatRegistry`, `BarostatRegistry` —
   parallel host-side registries of builders. Each holds:
   - `builders: Vec<Box<dyn *Builder>>`
 
@@ -653,7 +653,7 @@ successfully.
     constructed and composed independently of the bundle when
     callers want one-at-a-time control.
 
-- `IntegratorError`, `ThermostatError`, `BarostatError` — error types <!-- rq-2ccf40de -->
+- `IntegratorError`, `ThermostatError`, `BarostatError` — error types
   returned by the corresponding trait methods. Variants for each:
   - `Gpu(GpuError)` — CUDA driver / kernel-launch failure.
   - `Timings(TimingsError)` — CUDA event recording failure.
@@ -680,14 +680,14 @@ successfully.
 
 ### Functions and methods <!-- rq-c8848b7f -->
 
-- `IntegratorRegistry::lookup(&self, kind: &str) -> Option<&dyn IntegratorBuilder>` <!-- rq-24f6b8b9 -->
+- `IntegratorRegistry::lookup(&self, kind: &str) -> Option<&dyn IntegratorBuilder>`
   - Returns the first registered builder whose `kind_name()` equals
     `kind`. The runner uses this to query the integrator's
     compatibility predicates (`owns_thermostat`,
     `owns_barostat`, `supports_constraints`) and to drive
     `validate_params` before any GPU work.
 
-- `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Integrator>, IntegratorError>` <!-- rq-1e30bbf4 -->
+- `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Integrator>, IntegratorError>`
   - Looks up the builder whose `kind_name()` equals `slot.kind` and
     delegates `build(gpu, particle_count, n_constraints, &slot.params)`.
   - Returns `IntegratorError::UnknownKind(slot.kind.clone())` when
@@ -703,11 +703,11 @@ successfully.
   - A `particle_count` of zero is permitted: any per-particle device
     allocations have length zero.
 
-- `ThermostatRegistry::lookup(&self, kind: &str) -> Option<&dyn ThermostatBuilder>` <!-- rq-c44b25af -->
+- `ThermostatRegistry::lookup(&self, kind: &str) -> Option<&dyn ThermostatBuilder>`
   - Parallel to `IntegratorRegistry::lookup`. Returns `None` when no
     registered builder matches.
 
-- `ThermostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>` <!-- rq-678c233d -->
+- `ThermostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>`
   - When `slot` is `None`, returns `Ok(None)` without consulting the
     builders.
   - When `slot` is `Some`, looks up the builder whose `kind_name()`
@@ -722,10 +722,10 @@ successfully.
     allocations (such as `ke_scratch`) still allocate at their fixed
     length (length 1 for the scalar reductions).
 
-- `BarostatRegistry::lookup(&self, kind: &str) -> Option<&dyn BarostatBuilder>` <!-- rq-acbb6d0e -->
+- `BarostatRegistry::lookup(&self, kind: &str) -> Option<&dyn BarostatBuilder>`
   - Parallel to `IntegratorRegistry::lookup`.
 
-- `BarostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Option<Box<dyn Barostat>>, BarostatError>` <!-- rq-9548bc1a -->
+- `BarostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Option<Box<dyn Barostat>>, BarostatError>`
   - When `slot` is `None`, returns `Ok(None)` without consulting the
     builders.
   - When `slot` is `Some`, looks up the builder whose `kind_name()`
@@ -737,14 +737,14 @@ successfully.
     barostat's requirements file (`berendsen-barostat.md`,
     `c-rescale-barostat.md`).
 
-- `Integrator::plan(&self, dt: f32) -> StepPlan` <!-- rq-aa68f468 -->
+- `Integrator::plan(&self, dt: f32) -> StepPlan`
   - Returns the integrator's ordered sub-step sequence for a
     timestep of size `dt`. Pure: same `dt` and same integrator
     state must yield the same plan shape across calls. Allocates a
     short `Vec<SubStep>`; does not touch GPU buffers.
   - May return an empty plan; the runner walks it as a no-op.
 
-- `Integrator::execute(&mut self, substep: &SubStep, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, timings: &mut Timings) -> Result<(), IntegratorError>` <!-- rq-83e752cd -->
+- `Integrator::execute(&mut self, substep: &SubStep, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, timings: &mut Timings) -> Result<(), IntegratorError>`
   - Executes one sub-step from the plan. Dispatches on `substep`'s
     variant and label to launch the appropriate kernel(s).
   - Never receives `SubStep::ForceEval { .. }` from a conforming
@@ -753,19 +753,19 @@ successfully.
   - Returns `Ok(())` without launching any kernel when
     `buffers.particle_count() == 0`.
 
-- `Thermostat::apply_pre(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>` <!-- rq-2fe47a86 -->
+- `Thermostat::apply_pre(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>`
   - Default implementation returns `Ok(())` without launching any
     kernel. Thermostats that do not need pre-step coupling (CSVR,
     Andersen, Berendsen) accept the default.
   - Returns `Ok(())` without launching any kernel when
     `buffers.particle_count() == 0`.
 
-- `Thermostat::apply_post(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>` <!-- rq-7a124d43 -->
+- `Thermostat::apply_post(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>`
   - Every concrete `Thermostat` must implement this method.
   - Returns `Ok(())` without launching any kernel when
     `buffers.particle_count() == 0`.
 
-- `Barostat::apply(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, dt: f32, timings: &mut Timings) -> Result<(), BarostatError>` <!-- rq-1179e42f -->
+- `Barostat::apply(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, dt: f32, timings: &mut Timings) -> Result<(), BarostatError>`
   - Every concrete `Barostat` must implement this method.
   - Returns `Ok(())` without launching any kernel when
     `buffers.particle_count() == 0`.

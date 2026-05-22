@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Deserializer};
 
-// rq-f0084057
+// rq-b719c42c
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PathRole {
     Init,
@@ -37,7 +37,7 @@ impl std::fmt::Display for PathRole {
     }
 }
 
-// rq-3108381e rq-e1ceb5c0 rq-1bbcf3b7
+// rq-b719c42c rq-e1ceb5c0 rq-1bbcf3b7
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     // rq-5a0f5c00
@@ -105,7 +105,7 @@ pub enum ConfigError {
 // Public config types
 // =====================================================================
 
-// rq-53055a5b — `[simulation]` carries only the inputs for the
+// rq-b719c42c — `[simulation]` carries only the inputs for the
 // initial Maxwell-Boltzmann velocity sampling (fired once at phase-0
 // entry). Per-step settings (`dt`, `n_steps`) live on each
 // `[[phase]]` entry.
@@ -133,7 +133,7 @@ pub struct PhaseConfig {
 /// Parsed `[[minimization]]` entry. Energy-minimization phases run
 /// the SD outer loop documented in
 /// `rqm/minimization/steepest-descent.md`.
-// rq-ed61cf26
+// rq-187a5252
 #[derive(Debug, Clone)]
 pub struct MinimizationConfig {
     pub name: String,
@@ -141,7 +141,7 @@ pub struct MinimizationConfig {
     pub output: MinimizationOutputConfig,
 }
 
-// rq-758b03ef
+// rq-187a5252
 /// Resolved per-phase outputs for a `[[minimization]]` entry.
 #[derive(Debug, Clone)]
 pub struct MinimizationOutputConfig {
@@ -153,7 +153,7 @@ pub struct MinimizationOutputConfig {
     pub timings_path: PathBuf,
 }
 
-// rq-19226daf
+// rq-b719c42c
 /// Discriminated union over the unified phase sequence. The runner
 /// walks `Config::phases: Vec<PhaseKind>` in source-document order
 /// (see `Phase kinds` in `rqm/io/config-schema.md`).
@@ -193,7 +193,7 @@ impl PhaseKind {
     }
 }
 
-// rq-661bf664
+// rq-b719c42c
 /// Open-shaped parsed selection for a singleton `[integrator]`,
 /// `[thermostat]`, or `[barostat]` config section. The Rust-side
 /// deserialiser captures the user's `kind = "..."` field into `kind`
@@ -247,7 +247,7 @@ impl<'de> Deserialize<'de> for SlotConfig {
     }
 }
 
-// rq-3fdb7e01
+// rq-b719c42c
 /// Open-shaped parsed entry for an array-of-named-slots config
 /// section (currently only `[[constraint_types]]`). Adds a `name`
 /// field that other parts of the config reference by string.
@@ -340,7 +340,7 @@ impl<'de> Deserialize<'de> for NamedSlotConfig {
     }
 }
 
-// rq-a5ccc1de
+// rq-b719c42c
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ParticleTypeConfig {
@@ -350,7 +350,7 @@ pub struct ParticleTypeConfig {
     pub charge: f64,
 }
 
-// rq-f001eaf8
+// rq-b719c42c
 #[derive(Debug, Clone)]
 pub struct PairInteractionConfig {
     pub between: (String, String),
@@ -359,13 +359,13 @@ pub struct PairInteractionConfig {
     pub potential: PairPotentialParams,
 }
 
-// rq-70442e07
+// rq-b719c42c
 #[derive(Debug, Clone)]
 pub enum PairPotentialParams {
     LennardJones { sigma: f64, epsilon: f64 },
 }
 
-// rq-2f230ccb
+// rq-b719c42c
 #[derive(Debug, Clone)]
 pub enum BondTypeConfig {
     Morse {
@@ -384,7 +384,7 @@ impl BondTypeConfig {
     }
 }
 
-// rq-a47beb76
+// rq-b719c42c
 #[derive(Debug, Clone)]
 pub enum AngleTypeConfig {
     Harmonic {
@@ -402,7 +402,7 @@ impl AngleTypeConfig {
     }
 }
 
-// rq-060b1fab
+// rq-ad7eb40f
 #[derive(Debug, Clone, PartialEq)]
 pub enum NeighborListConfig {
     AllPairs,
@@ -427,7 +427,7 @@ pub struct SpmeConfig {
     pub spline_order: u32,
 }
 
-// rq-1254cd3a
+// rq-b719c42c
 #[derive(Debug, Clone)]
 pub struct OutputConfig {
     pub trajectory_path: PathBuf,
@@ -439,7 +439,7 @@ pub struct OutputConfig {
     pub timings_path: PathBuf,
 }
 
-// rq-2a6a51c8
+// rq-b719c42c
 #[derive(Debug, Clone)]
 pub struct Config {
     pub schema_version: u64,
@@ -679,7 +679,7 @@ struct RawOutputConfig {
 // load_config / load_config_raw
 // =====================================================================
 
-// rq-45bb8194 — default loader for callers that use only the built-in
+// rq-39891001 — default loader for callers that use only the built-in
 // slot kinds. Custom-builder callers use `load_config_raw` plus
 // `validate_against(&their_registries)` instead.
 pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
@@ -688,7 +688,7 @@ pub fn load_config(path: &Path) -> Result<Config, ConfigError> {
     Ok(config)
 }
 
-// rq-deaf8b59 — parse-only entry point: read the file, run the typed
+// rq-39891001 — parse-only entry point: read the file, run the typed
 // TOML deserialiser, fill defaults, resolve paths, run `Config::validate`,
 // and return. Skips `Config::validate_against` so callers can register
 // custom builders and supply their own registries.
@@ -1107,7 +1107,7 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
 // =====================================================================
 
 impl Config {
-    // rq-a54cc657
+    // rq-39891001
     /// Structural validation that does not require registry access.
     /// Per-field domain checks for the per-slot `params` and the
     /// integrator-thermostat / integrator-barostat / lossless-with-
@@ -1146,7 +1146,7 @@ impl Config {
     /// Registry-dispatched validation: looks up each slot's `kind` in
     /// the corresponding registry, calls
     /// `builder.validate_params(&params)`, and enforces the
-    // rq-6082cd2d
+    // rq-39891001
     /// integrator-thermostat and integrator-barostat compatibility
     /// rules using the integrator builder's `owns_thermostat` /
     /// `owns_barostat` predicates.
@@ -1249,7 +1249,7 @@ impl Config {
     }
 
     /// Topology-coupled cross-validation. For every MD phase: rejects
-    // rq-723d202b
+    // rq-39891001
     /// a non-empty constraint list when the chosen integrator's
     /// builder `IntegratorBuilder::supports_constraints(&params)`
     /// returns `false`. For every minimization phase: rejects a
@@ -1450,7 +1450,7 @@ fn extract_slot_seed(slot: &SlotConfig) -> Option<u64> {
     slot.params.as_table()?.get("seed")?.as_integer().map(|n| n as u64)
 }
 
-// rq-1f87880c — per-kind validation lives in each builder's
+// rq-6c5b4246 — per-kind validation lives in each builder's
 // `validate_params(&toml::Value)` method (see `integration/framework.md`).
 // `Config::validate_against` looks up the right builder and dispatches.
 

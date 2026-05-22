@@ -1,0 +1,11 @@
+// rq-fdf2db79
+pub struct SimulationBox {
+    lx: f32,
+    ly: f32,
+    lz: f32,
+    xy: f32,
+    xz: f32,
+    yz: f32,
+    generation: u64,
+}
+

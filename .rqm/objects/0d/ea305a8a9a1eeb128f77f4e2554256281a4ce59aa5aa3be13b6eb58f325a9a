@@ -1,0 +1,11 @@
+    // rq-fb632dfc
+    pub fn cartesian_coords(&self, fractional: [f32; 3]) -> [f32; 3] {
+        let s_a = fractional[0];
+        let s_b = fractional[1];
+        let s_c = fractional[2];
+        let v_z = s_c * self.lz;
+        let v_y = s_b * self.ly + s_c * self.yz;
+        let v_x = s_a * self.lx + s_b * self.xy + s_c * self.xz;
+        [v_x, v_y, v_z]
+    }
+}

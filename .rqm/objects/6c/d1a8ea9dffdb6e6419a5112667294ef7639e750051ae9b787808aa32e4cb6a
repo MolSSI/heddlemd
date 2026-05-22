@@ -1,0 +1,3 @@
+// rq-b719c42c rq-e1ceb5c0 rq-1bbcf3b7
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {

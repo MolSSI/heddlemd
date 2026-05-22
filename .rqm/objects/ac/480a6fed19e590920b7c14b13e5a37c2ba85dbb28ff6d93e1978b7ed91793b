@@ -1,0 +1,27 @@
+### Types <!-- rq-a3fdbd7c -->
+
+- `CoulombParameters` — host-side parameter container. Fields:
+  - `cutoff: f32`
+  - `r_switch: f32`
+
+- `CoulombState` — implements the `Potential` trait with
+  `label() == "coulomb"` (see `framework.md`). Fields:
+  - `device: Arc<CudaDevice>`
+  - `kernels: Arc<Kernels>`
+  - `params: CoulombParameters`
+  - `particle_count: usize`
+  - `pair_buffer: PairBuffer` — owned by the slot.
+
+  All fields private; the slot's public surface is the per-step methods
+  invoked by `ForceField::step` (see `framework.md`).
+
+  Constructor:
+
+  - `CoulombState::new(device: Arc<CudaDevice>, kernels: Arc<Kernels>, params: CoulombParameters, particle_count: usize, max_neighbors: u32) -> Result<CoulombState, GpuError>`
+    - Allocates the slot's `PairBuffer` with `max_neighbors` matching
+      the shared neighbor list's value.
+
+  The `Potential` implementation reports
+  `max_cutoff() = Some(params.cutoff)` so the shared neighbor list
+  sizes its search radius accordingly.
+

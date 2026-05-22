@@ -190,7 +190,7 @@ Row count is exactly `n_bins`; header is exactly one line.
 
 ### Types <!-- rq-06a8b986 -->
 
-- `RdfBuilder` — implements `AnalysisBuilder` (see <!-- rq-2dc76b67 -->
+- `RdfBuilder` — implements `AnalysisBuilder` (see
   `rqm/analysis/framework.md`).
   - `kind_name(&self) -> "rdf"`.
   - `validate_params(&self, params: &toml::Value) -> Result<(),
@@ -207,7 +207,7 @@ Row count is exactly `n_bins`; header is exactly one line.
     header.sim_box.min_perpendicular_width() / 2`. On success,
     returns a `RdfAnalysis` boxed as `dyn Analysis`.
 
-- `RdfAnalysis` — per-run handle. Fields are private; the type <!-- rq-e0b5377f -->
+- `RdfAnalysis` — per-run handle. Fields are private; the type
   owns:
   - the two type indices `(t_a, t_b)` and a flag for the
     same-type case,

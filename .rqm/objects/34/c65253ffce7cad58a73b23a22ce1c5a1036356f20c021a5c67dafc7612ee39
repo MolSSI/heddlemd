@@ -1,0 +1,5 @@
+// rq-39891001 — parse-only entry point: read the file, run the typed
+// TOML deserialiser, fill defaults, resolve paths, run `Config::validate`,
+// and return. Skips `Config::validate_against` so callers can register
+// custom builders and supply their own registries.
+pub fn load_config_raw(path: &Path) -> Result<Config, ConfigError> {

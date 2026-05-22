@@ -1,0 +1,92 @@
+### Functions and methods <!-- rq-c8848b7f -->
+
+- `IntegratorRegistry::lookup(&self, kind: &str) -> Option<&dyn IntegratorBuilder>`
+  - Returns the first registered builder whose `kind_name()` equals
+    `kind`. The runner uses this to query the integrator's
+    compatibility predicates (`owns_thermostat`,
+    `owns_barostat`, `supports_constraints`) and to drive
+    `validate_params` before any GPU work.
+
+- `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Integrator>, IntegratorError>`
+  - Looks up the builder whose `kind_name()` equals `slot.kind` and
+    delegates `build(gpu, particle_count, n_constraints, &slot.params)`.
+  - Returns `IntegratorError::UnknownKind(slot.kind.clone())` when
+    no builder matches.
+  - The builder is responsible for kind-specific allocations:
+    - For `velocity-verlet`, the builder reads the `lossless` bool
+      from `params` and allocates `LosslessBuffers` when
+      `lossless == true`.
+    - For `langevin-baoab`, the builder reads `friction`,
+      `temperature`, `seed` from `params` and captures them (no
+      per-particle state allocations; Philox is counter-based —
+      see `langevin-baoab.md`).
+  - A `particle_count` of zero is permitted: any per-particle device
+    allocations have length zero.
+
+- `ThermostatRegistry::lookup(&self, kind: &str) -> Option<&dyn ThermostatBuilder>`
+  - Parallel to `IntegratorRegistry::lookup`. Returns `None` when no
+    registered builder matches.
+
+- `ThermostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>`
+  - When `slot` is `None`, returns `Ok(None)` without consulting the
+    builders.
+  - When `slot` is `Some`, looks up the builder whose `kind_name()`
+    equals `slot.kind` and delegates
+    `build(gpu, particle_count, n_constraints, &slot.params)`. Returns
+    `ThermostatError::UnknownKind(slot.kind.clone())` when no builder
+    matches.
+  - Per-thermostat builder responsibilities are documented in each
+    thermostat's requirements file (`nose-hoover-chain.md`,
+    `csvr.md`, `andersen.md`, `berendsen.md`).
+  - A `particle_count` of zero is permitted: any per-particle device
+    allocations (such as `ke_scratch`) still allocate at their fixed
+    length (length 1 for the scalar reductions).
+
+- `BarostatRegistry::lookup(&self, kind: &str) -> Option<&dyn BarostatBuilder>`
+  - Parallel to `IntegratorRegistry::lookup`.
+
+- `BarostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Option<Box<dyn Barostat>>, BarostatError>`
+  - When `slot` is `None`, returns `Ok(None)` without consulting the
+    builders.
+  - When `slot` is `Some`, looks up the builder whose `kind_name()`
+    equals `slot.kind` and delegates
+    `build(gpu, particle_count, n_constraints, &slot.params)`. Returns
+    `BarostatError::UnknownKind(slot.kind.clone())` when no builder
+    matches.
+  - Per-barostat builder responsibilities are documented in each
+    barostat's requirements file (`berendsen-barostat.md`,
+    `c-rescale-barostat.md`).
+
+- `Integrator::plan(&self, dt: f32) -> StepPlan`
+  - Returns the integrator's ordered sub-step sequence for a
+    timestep of size `dt`. Pure: same `dt` and same integrator
+    state must yield the same plan shape across calls. Allocates a
+    short `Vec<SubStep>`; does not touch GPU buffers.
+  - May return an empty plan; the runner walks it as a no-op.
+
+- `Integrator::execute(&mut self, substep: &SubStep, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, timings: &mut Timings) -> Result<(), IntegratorError>`
+  - Executes one sub-step from the plan. Dispatches on `substep`'s
+    variant and label to launch the appropriate kernel(s).
+  - Never receives `SubStep::ForceEval { .. }` from a conforming
+    runner regardless of the `class` payload; if it does, returns
+    `IntegratorError::UnexpectedSubStep { variant: "ForceEval" }`.
+  - Returns `Ok(())` without launching any kernel when
+    `buffers.particle_count() == 0`.
+
+- `Thermostat::apply_pre(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>`
+  - Default implementation returns `Ok(())` without launching any
+    kernel. Thermostats that do not need pre-step coupling (CSVR,
+    Andersen, Berendsen) accept the default.
+  - Returns `Ok(())` without launching any kernel when
+    `buffers.particle_count() == 0`.
+
+- `Thermostat::apply_post(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>`
+  - Every concrete `Thermostat` must implement this method.
+  - Returns `Ok(())` without launching any kernel when
+    `buffers.particle_count() == 0`.
+
+- `Barostat::apply(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, dt: f32, timings: &mut Timings) -> Result<(), BarostatError>`
+  - Every concrete `Barostat` must implement this method.
+  - Returns `Ok(())` without launching any kernel when
+    `buffers.particle_count() == 0`.
+

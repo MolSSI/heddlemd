@@ -200,11 +200,11 @@ from the `ForceField` and contributes nothing.
 
 ### Types <!-- rq-a3fdbd7c -->
 
-- `CoulombParameters` — host-side parameter container. Fields: <!-- rq-6bdfdd6d -->
+- `CoulombParameters` — host-side parameter container. Fields:
   - `cutoff: f32`
   - `r_switch: f32`
 
-- `CoulombState` — implements the `Potential` trait with <!-- rq-d340b338 -->
+- `CoulombState` — implements the `Potential` trait with
   `label() == "coulomb"` (see `framework.md`). Fields:
   - `device: Arc<CudaDevice>`
   - `kernels: Arc<Kernels>`
@@ -227,7 +227,7 @@ from the `ForceField` and contributes nothing.
 
 ### Functions <!-- rq-7bae4b69 -->
 
-- `coulomb_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &CoulombParameters, atom_excl_offsets: &CudaSlice<u32>, atom_excl_partners: &CudaSlice<u32>, atom_excl_coul_scales: &CudaSlice<f32>, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>` <!-- rq-38676211 -->
+- `coulomb_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &CoulombParameters, atom_excl_offsets: &CudaSlice<u32>, atom_excl_partners: &CudaSlice<u32>, atom_excl_coul_scales: &CudaSlice<f32>, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>`
   - Launches the `coulomb_pair_force` kernel with the layout described
     in *Launch Configuration*.
   - When `particle_buffers.particle_count() == 0`, returns `Ok(())`

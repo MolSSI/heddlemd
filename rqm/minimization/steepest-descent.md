@@ -446,7 +446,7 @@ produce byte-identical post-minimization positions and byte-identical
 
 ### Types <!-- rq-187a5252 -->
 
-- `Minimizer` — object-safe trait implemented by every concrete <!-- rq-f69350df -->
+- `Minimizer` — object-safe trait implemented by every concrete
   minimizer slot.
 
   ```rust
@@ -493,7 +493,7 @@ produce byte-identical post-minimization positions and byte-identical
   - `check_convergence` is pure (no kernel launches, no buffer
     mutations).
 
-- `MinimizerStepReport` — outcome of one `step` call. <!-- rq-208aaa72 -->
+- `MinimizerStepReport` — outcome of one `step` call.
 
   ```rust
   pub struct MinimizerStepReport {
@@ -514,7 +514,7 @@ produce byte-identical post-minimization positions and byte-identical
     (i.e., before any trial). Used by the runner's energy-tolerance
     check.
 
-- `MinimizerConvergence` — enum reporting why the loop ended. <!-- rq-77f64e46 -->
+- `MinimizerConvergence` — enum reporting why the loop ended.
 
   ```rust
   pub enum MinimizerConvergence {
@@ -535,7 +535,7 @@ produce byte-identical post-minimization positions and byte-identical
     `max_iterations` without any physical criterion firing. Drives
     `RunnerError::MinimizerNonConvergence`.
 
-- `MinimizerError` — error type returned by every trait method. <!-- rq-78041a25 -->
+- `MinimizerError` — error type returned by every trait method.
   Variants:
   - `Gpu(GpuError)` — CUDA driver / kernel-launch failure.
   - `Timings(TimingsError)` — CUDA event recording failure.
@@ -549,7 +549,7 @@ produce byte-identical post-minimization positions and byte-identical
   The runner's `RunnerError` wraps this via
   `RunnerError::Minimizer(MinimizerError)`.
 
-- `MinimizerRegistry` — host-side registry of minimizer builders. <!-- rq-d5b07d2a -->
+- `MinimizerRegistry` — host-side registry of minimizer builders.
   Holds `builders: Vec<Box<dyn MinimizerBuilder>>`.
 
   Methods:
@@ -575,7 +575,7 @@ produce byte-identical post-minimization positions and byte-identical
   `MinimizerRegistry::with_builtins()` in
   `Registries::with_builtins()`.
 
-- `MinimizerBuilder` — trait describing a registered minimizer <!-- rq-dddb8e7a -->
+- `MinimizerBuilder` — trait describing a registered minimizer
   implementation. Implementations are stateless and self-register at
   construction time.
 
@@ -615,7 +615,7 @@ produce byte-identical post-minimization positions and byte-identical
     `particle_count == 0` is permitted; reduction scratches still
     allocate at length 1.
 
-- `SteepestDescentMinimizer` — concrete implementor of `Minimizer` <!-- rq-dc3b1bb5 -->
+- `SteepestDescentMinimizer` — concrete implementor of `Minimizer`
   for `kind = "steepest-descent"`. Fields:
   - `device: Arc<CudaDevice>`
   - `particle_count: usize`
@@ -640,7 +640,7 @@ produce byte-identical post-minimization positions and byte-identical
   - `pe_scratch: CudaSlice<f32>` — length-1 device buffer for the
     deterministic total-potential-energy reduction.
 
-- `MinimizationConfig` — parsed `[[minimization]]` entry. Lives in <!-- rq-ed61cf26 -->
+- `MinimizationConfig` — parsed `[[minimization]]` entry. Lives in
   `crate::io::config` alongside `PhaseConfig`.
 
   ```rust
@@ -651,7 +651,7 @@ produce byte-identical post-minimization positions and byte-identical
   }
   ```
 
-- `MinimizationOutputConfig` — parsed `[minimization.output]` table <!-- rq-758b03ef -->
+- `MinimizationOutputConfig` — parsed `[minimization.output]` table
   with resolved paths and populated defaults.
 
   ```rust
@@ -665,7 +665,7 @@ produce byte-identical post-minimization positions and byte-identical
   }
   ```
 
-- `PhaseKind` — runtime-level discriminated union over the unified <!-- rq-4a0c5f2e -->
+- `PhaseKind` — runtime-level discriminated union over the unified
   phase sequence. Lives in `crate::runner`.
 
   ```rust
@@ -679,7 +679,7 @@ produce byte-identical post-minimization positions and byte-identical
   `phases: Vec<PhaseKind>` (see `io/config-schema.md` for the
   config-schema-level statement of this).
 
-- `MinlogWriter` — handle to an open `.minlog` file. Fields are <!-- rq-dc140510 -->
+- `MinlogWriter` — handle to an open `.minlog` file. Fields are
   private; the type encapsulates the buffered writer. The header
   emitted at open is exactly
   `iter,energy,max_force,step,accepted\n`.
@@ -697,12 +697,12 @@ produce byte-identical post-minimization positions and byte-identical
   - `MinlogWriter::flush(&mut self) -> Result<(), MinlogWriterError>`
     — flushes the internal buffer.
 
-- `MinlogWriterError` — error type. Variants `OutputExists { path: <!-- rq-82621837 -->
+- `MinlogWriterError` — error type. Variants `OutputExists { path:
   PathBuf }` and `Io(String)`, parallel to `LogWriterError`.
 
 ### Functions and methods <!-- rq-e38eed0c -->
 
-- `run_minimization_phase(phase: &MinimizationConfig, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, registries: &Registries, gpu: &GpuContext) -> Result<MinimizationPhaseSummary, RunnerError>` <!-- rq-393a57e4 -->
+- `run_minimization_phase(phase: &MinimizationConfig, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, registries: &Registries, gpu: &GpuContext) -> Result<MinimizationPhaseSummary, RunnerError>`
   - The runner's per-phase entry point for a minimization phase.
     Constructs the minimizer slot via
     `registries.minimizers.build(...)`, opens the `.minlog` and
@@ -716,17 +716,17 @@ produce byte-identical post-minimization positions and byte-identical
     runner propagates the error and exits with code `2`. No further
     phases run.
 
-- `Minimizer::step(&mut self, buffers, sim_box, force_field, constraint, timings)` <!-- rq-53d48fb8 -->
+- `Minimizer::step(&mut self, buffers, sim_box, force_field, constraint, timings)`
   - As described under *Types*.
 
-- `Minimizer::check_convergence(&self, report)` <!-- rq-1440b6e6 -->
+- `Minimizer::check_convergence(&self, report)`
   - As described under *Types*.
 
-- `MinimizerRegistry::with_builtins() -> MinimizerRegistry` <!-- rq-237b5543 -->
+- `MinimizerRegistry::with_builtins() -> MinimizerRegistry`
   - Returns a registry with one registered builder
     (`SteepestDescentBuilder`).
 
-- `MinlogWriter::open`, `MinlogWriter::write_row`, <!-- rq-e963f27a -->
+- `MinlogWriter::open`, `MinlogWriter::write_row`,
   `MinlogWriter::flush` — as described under *Types*.
 
 ## CUDA Kernels <!-- rq-47a5fe0e -->

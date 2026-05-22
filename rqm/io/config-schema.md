@@ -1045,7 +1045,7 @@ phase failures.
 
 ### Types <!-- rq-b719c42c -->
 
-- `Config` — parsed configuration. All fields are `pub`; field names match <!-- rq-2a6a51c8 -->
+- `Config` — parsed configuration. All fields are `pub`; field names match
   TOML keys directly (snake_case).
 
   Fields:
@@ -1086,11 +1086,11 @@ phase failures.
   - `config_path: PathBuf` — the absolute path of the source config file,
     retained for error messages and default output-path derivation.
 
-- `SimulationConfig` <!-- rq-53055a5b -->
+- `SimulationConfig`
   - `seed: u64`
   - `temperature: f64`
 
-- `PhaseConfig` — parsed `[[phase]]` (MD) entry. <!-- rq-f1c04d3b -->
+- `PhaseConfig` — parsed `[[phase]]` (MD) entry.
   - `name: String`
   - `n_steps: u64`
   - `dt: f64`
@@ -1104,7 +1104,7 @@ phase failures.
     paths and cadences, with defaults derived from
     `<config-root>.out.<phase-name>.{xyz,log,timings}` when omitted.
 
-- `PhaseKind` — discriminated union over the unified phase sequence. <!-- rq-19226daf -->
+- `PhaseKind` — discriminated union over the unified phase sequence.
   ```rust
   pub enum PhaseKind {
       Md(PhaseConfig),
@@ -1115,7 +1115,7 @@ phase failures.
   `rqm/minimization/steepest-descent.md`. `Config.phases` is a
   `Vec<PhaseKind>` in source-document order across the two arrays.
 
-- `SlotConfig` — open-shaped parsed selection for a per-phase <!-- rq-661bf664 -->
+- `SlotConfig` — open-shaped parsed selection for a per-phase
   `[phase.integrator]`, `[phase.thermostat]`, or `[phase.barostat]`
   section.
 
@@ -1135,7 +1135,7 @@ phase failures.
     typed parameter struct from it via `validate_params(&toml::Value)`
     and `build(...)`.
 
-- `NamedSlotConfig` — open-shaped parsed entry for the <!-- rq-3fdb7e01 -->
+- `NamedSlotConfig` — open-shaped parsed entry for the
   `[[constraint_types]]` array (and any future similarly-shaped array
   of named, kind-tagged entries).
 
@@ -1161,12 +1161,12 @@ phase failures.
   predicate methods that consume `SlotConfig`'s and
   `NamedSlotConfig`'s `params`.
 
-- `ParticleTypeConfig` <!-- rq-a5ccc1de -->
+- `ParticleTypeConfig`
   - `name: String`
   - `mass: f64`
   - `charge: f64` — defaults to `0.0` when the TOML field is omitted.
 
-- `PairInteractionConfig` <!-- rq-f001eaf8 -->
+- `PairInteractionConfig`
   - `between: (String, String)` — stored normalised so the lexicographically
     smaller string comes first, regardless of source order.
   - `cutoff: f64` — pair distance in metres beyond which the force is
@@ -1177,13 +1177,13 @@ phase failures.
   - `potential: PairPotentialParams` — tagged enum carrying the chosen
     pair potential's functional-form parameters.
 
-- `PairPotentialParams` — tagged enum carrying the functional-form <!-- rq-70442e07 -->
+- `PairPotentialParams` — tagged enum carrying the functional-form
   parameters of a pair potential. Variants:
   - `LennardJones { sigma: f64, epsilon: f64 }` — selected by
     `potential = "lennard-jones"`. `sigma` is the LJ zero-crossing
     distance in metres; `epsilon` is the LJ well depth in joules.
 
-- `BondTypeConfig` — tagged enum carrying the chosen bonded-potential <!-- rq-2f230ccb -->
+- `BondTypeConfig` — tagged enum carrying the chosen bonded-potential
   parameters. Variants:
   - `Morse { name: String, de: f64, a: f64, re: f64 }` — selected by
     `potential = "morse"`.
@@ -1191,7 +1191,7 @@ phase failures.
   The `name` field is the lookup key referenced from the `.topology`
   file's `[bonds]` section.
 
-- `AngleTypeConfig` — tagged enum carrying the chosen angle-potential <!-- rq-a47beb76 -->
+- `AngleTypeConfig` — tagged enum carrying the chosen angle-potential
   parameters. Variants:
   - `Harmonic { name: String, k_theta: f64, theta_0: f64 }` — selected
     by `potential = "harmonic"`.
@@ -1199,7 +1199,7 @@ phase failures.
   The `name` field is the lookup key referenced from the `.topology`
   file's `[angles]` section.
 
-- `[[constraint_types]]` entries deserialise into `NamedSlotConfig` <!-- rq-ac8fc96a -->
+- `[[constraint_types]]` entries deserialise into `NamedSlotConfig`
   values (see `NamedSlotConfig` above). Each entry's `kind` selects
   the algorithm; each registered `ConstraintBuilder` (see
   `integration/constraint-framework.md`) deserialises its own typed
@@ -1209,19 +1209,19 @@ phase failures.
   `kind = "settle-water"`, the builder's typed params are
   `{ r_oh: f64, r_hh: f64 }` (see `integration/settle.md`).
 
-- `CoulombConfig` <!-- rq-793a7cbb -->
+- `CoulombConfig`
   - `cutoff: f64` — real-space cutoff in metres.
   - `r_switch: f64` — populated from the optional `r_switch` field with
     the documented default `0.9 * cutoff`.
 
-- `SpmeConfig` <!-- rq-a03de3d5 -->
+- `SpmeConfig`
   - `alpha: f64` — Ewald splitting parameter (1/m).
   - `r_cut_real: f64` — real-space cutoff in metres.
   - `grid: [u32; 3]` — FFT grid dimensions `[n_a, n_b, n_c]`.
   - `spline_order: u32` — populated from the optional `spline_order`
     field with the documented default `4`.
 
-- `NeighborListConfig` — tagged enum selecting the algorithm used by <!-- rq-a8320030 -->
+- `NeighborListConfig` — tagged enum selecting the algorithm used by
   every short-range pair-force slot (Lennard-Jones, truncated Coulomb,
   SPME real-space) to enumerate non-bonded pairs. Variants:
   - `AllPairs` — selected by `mode = "all-pairs"`. Carries no
@@ -1235,7 +1235,7 @@ phase failures.
   See `forces/neighbor-list.md` for the runtime semantics of each
   variant.
 
-- `OutputConfig` <!-- rq-1254cd3a -->
+- `OutputConfig`
   - `trajectory_path: PathBuf` — resolved.
   - `trajectory_every: u64`
   - `include_velocities: bool`
@@ -1244,7 +1244,7 @@ phase failures.
   - `log_every: u64`
   - `timings_path: PathBuf` — resolved.
 
-- `PathRole` — `enum`. Used in `PathCollision`. Variants: <!-- rq-f0084057 -->
+- `PathRole` — `enum`. Used in `PathCollision`. Variants:
   - `Init`
   - `Topology`
   - `PhaseTrajectory { phase: String }`
@@ -1254,7 +1254,7 @@ phase failures.
   - `MinimizationTrajectory { phase: String }`
   - `MinimizationTimings { phase: String }`
 
-- `ConfigError` — error type returned by `load_config` and by <!-- rq-3108381e -->
+- `ConfigError` — error type returned by `load_config` and by
   `Config::validate`. Variants:
   - `InvalidConfigFilename { path: PathBuf }` — the path passed to
     `load_config` / `load_config_raw` does not satisfy the
@@ -1381,7 +1381,7 @@ phase failures.
 
 ### Functions <!-- rq-39891001 -->
 
-- `load_config(path: &Path) -> Result<Config, ConfigError>` <!-- rq-45bb8194 -->
+- `load_config(path: &Path) -> Result<Config, ConfigError>`
   - The default loader for callers that use only the built-in slot
     kinds. Equivalent to:
     ```rust
@@ -1396,7 +1396,7 @@ phase failures.
     so the registry-dispatched validation runs against the right
     builder set.
 
-- `load_config_raw(path: &Path) -> Result<Config, ConfigError>` <!-- rq-deaf8b59 -->
+- `load_config_raw(path: &Path) -> Result<Config, ConfigError>`
   - Validates the config-filename convention (see *Config filename
     convention*) on `path` before opening the file; failures return
     `ConfigError::InvalidConfigFilename { path }` without any I/O.
@@ -1426,7 +1426,7 @@ phase failures.
     `Config::validate`'s structural cross-validation rules in the
     order listed under *Validation*.
 
-- `Config::validate(&self) -> Result<(), ConfigError>` <!-- rq-a54cc657 -->
+- `Config::validate(&self) -> Result<(), ConfigError>`
   - Pure host-side function. Takes a `Config` (typically obtained from
     `load_config` after deserialisation, but also constructable in
     memory by callers) and applies every structural check documented
@@ -1455,7 +1455,7 @@ phase failures.
     `load_config` is a no-op (returns `Ok(())`): `load_config` already
     invoked it.
 
-- `Config::validate_against(&self, registries: &Registries) -> Result<(), ConfigError>` <!-- rq-6082cd2d -->
+- `Config::validate_against(&self, registries: &Registries) -> Result<(), ConfigError>`
   - Runs the registry-dispatched per-kind validation: looks up each
     open-builder slot's `kind` in the corresponding registry, calls
     the builder's `validate_params(&toml::Value)`, and then queries
@@ -1476,7 +1476,7 @@ phase failures.
     `[constraints]` count) lives in
     `Config::validate_constraint_compatibility`.
 
-- `Config::validate_constraint_compatibility(&self, registries: &Registries, has_constraints: bool) -> Result<(), ConfigError>` <!-- rq-723d202b -->
+- `Config::validate_constraint_compatibility(&self, registries: &Registries, has_constraints: bool) -> Result<(), ConfigError>`
   - When `has_constraints` is `true` and the chosen integrator
     builder's `supports_constraints(&integrator.params)` returns
     `false`, returns
@@ -1485,7 +1485,7 @@ phase failures.
   - The runner calls this method after `load_topology_file` returns
     so the topology's `[constraints]` count is known.
 
-- `Registries` — host-side bundle of the four open registries the <!-- rq-32308250 -->
+- `Registries` — host-side bundle of the four open registries the
   config-validation API consults.
 
   ```rust

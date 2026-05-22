@@ -1,0 +1,40 @@
+// rq-b719c42c
+/// Discriminated union over the unified phase sequence. The runner
+/// walks `Config::phases: Vec<PhaseKind>` in source-document order
+/// (see `Phase kinds` in `rqm/io/config-schema.md`).
+#[derive(Debug, Clone)]
+pub enum PhaseKind {
+    Md(PhaseConfig),
+    Minimization(MinimizationConfig),
+}
+
+impl PhaseKind {
+    pub fn name(&self) -> &str {
+        match self {
+            PhaseKind::Md(p) => &p.name,
+            PhaseKind::Minimization(m) => &m.name,
+        }
+    }
+
+    pub fn timings_path(&self) -> &Path {
+        match self {
+            PhaseKind::Md(p) => &p.output.timings_path,
+            PhaseKind::Minimization(m) => &m.output.timings_path,
+        }
+    }
+
+    pub fn as_md(&self) -> Option<&PhaseConfig> {
+        match self {
+            PhaseKind::Md(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    pub fn as_minimization(&self) -> Option<&MinimizationConfig> {
+        match self {
+            PhaseKind::Minimization(m) => Some(m),
+            _ => None,
+        }
+    }
+}
+

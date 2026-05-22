@@ -1,4 +1,5 @@
 pub mod codec;
+pub mod dealias;
 pub mod edit;
 pub mod insert;
 pub mod log;

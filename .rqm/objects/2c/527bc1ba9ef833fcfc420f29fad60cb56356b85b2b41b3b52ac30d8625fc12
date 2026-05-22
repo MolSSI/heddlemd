@@ -1,0 +1,43 @@
+### Types <!-- rq-66067eba -->
+
+- `SpmeConfig` — parsed `[spme]` table. Fields:
+  - `alpha: f64`
+  - `r_cut_real: f64`
+  - `grid: [u32; 3]`
+  - `spline_order: u32`
+
+- `SpmeRealSpaceState` — implements `Potential` with
+  `label() == "spme_real"`. Reports
+  `max_cutoff() = Some(r_cut_real as f32)` so the shared neighbor list
+  sizes its search radius. Fields private; the slot's public surface is
+  the per-step methods invoked by `ForceField::step` (see
+  `framework.md`).
+
+  Constructor:
+  - `SpmeRealSpaceState::new(gpu: &GpuContext, particle_count: usize, alpha: f32, r_cut_real: f32, max_neighbors: u32, exclusion_list: &ExclusionList) -> Result<SpmeRealSpaceState, NeighborListError>`
+
+- `SpmeReciprocalState` — implements `Potential` with
+  `label() == "spme_reciprocal"`. Reports `max_cutoff() = None` (it does
+  not contribute to the shared neighbor list's search radius). Fields
+  private. The slot owns its own bin-only `NeighborListState` for the
+  spread / gather kernels.
+
+  Constructor:
+  - `SpmeReciprocalState::new(gpu: &GpuContext, sim_box: &SimulationBox, particle_count: usize, charges: &[f32], alpha: f32, grid: [u32; 3], spline_order: u32) -> Result<SpmeReciprocalState, SpmeError>`
+
+- `SpmeError` — error type for SPME slot construction. Variants:
+  - `NeighborList(NeighborListError)` — from the bin-only neighbor-list
+    construction (e.g. `BoxTooSmallForCells` if the FFT grid dims
+    exceed what the box can accommodate).
+  - `CuFft(CuFftError)` — cuFFT plan construction failed.
+  - `InvalidGrid { axis: &'static str, n: u32, spline_order: u32 }` —
+    one of the grid dimensions is less than `2 · spline_order`. Loader
+    validation enforces this before construction, but the slot
+    re-validates as a guard against direct API misuse.
+  - `Gpu(GpuError)` — a CUDA driver operation failed during buffer
+    allocation.
+
+- `CuFftError` — wrapper around cuFFT failure codes from the underlying
+  bindings. Variants follow the `cufftResult_t` enumeration as needed by
+  the implementation (`InvalidPlan`, `ExecFailed`, etc.).
+

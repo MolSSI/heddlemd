@@ -1,0 +1,10 @@
+// rq-b719c42c
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ParticleTypeConfig {
+    pub name: String,
+    pub mass: f64,
+    #[serde(default)]
+    pub charge: f64,
+}
+

@@ -1,0 +1,315 @@
+// rq-6c5b4246 — per-kind validation lives in each builder's
+// `validate_params(&toml::Value)` method (see `integration/framework.md`).
+// `Config::validate_against` looks up the right builder and dispatches.
+
+// Used by Config::validate to enforce just the structural constraints
+// of `[[constraint_types]]` that do not require registry knowledge.
+fn validate_constraint_type_names(cts: &[NamedSlotConfig]) -> Result<(), ConfigError> {
+    let mut seen: Vec<&str> = Vec::with_capacity(cts.len());
+    for (i, ct) in cts.iter().enumerate() {
+        if ct.name.is_empty() {
+            return Err(invalid(
+                format!("constraint_types[{i}].name"),
+                "name must not be empty",
+            ));
+        }
+        if seen.iter().any(|n| *n == ct.name.as_str()) {
+            return Err(ConfigError::DuplicateConstraintTypeName {
+                name: ct.name.clone(),
+            });
+        }
+        seen.push(ct.name.as_str());
+    }
+    Ok(())
+}
+
+fn validate_particle_types(pts: &[ParticleTypeConfig]) -> Result<(), ConfigError> {
+    if pts.is_empty() {
+        return Err(ConfigError::MissingField {
+            field: "particle_types".to_string(),
+        });
+    }
+    let mut seen: Vec<&str> = Vec::with_capacity(pts.len());
+    for (i, pt) in pts.iter().enumerate() {
+        if pt.name.is_empty() {
+            return Err(invalid(
+                format!("particle_types[{i}].name"),
+                "name must not be empty",
+            ));
+        }
+        require_finite_positive(&format!("particle_types[{i}].mass"), pt.mass)?;
+        require_finite(&format!("particle_types[{i}].charge"), pt.charge)?;
+        if seen.iter().any(|n| *n == pt.name) {
+            return Err(ConfigError::DuplicateTypeName {
+                name: pt.name.clone(),
+            });
+        }
+        seen.push(&pt.name);
+    }
+    Ok(())
+}
+
+fn validate_pair_interactions(
+    pis: &[PairInteractionConfig],
+    pts: &[ParticleTypeConfig],
+) -> Result<(), ConfigError> {
+    if pis.is_empty() {
+        // No pair interactions at all — surfaces as a missing pair for the
+        // first declared type pair. (Pair-coverage check below covers the
+        // case where the array is non-empty but incomplete.)
+        return Err(ConfigError::MissingPairInteraction {
+            types: (pts[0].name.clone(), pts[0].name.clone()),
+        });
+    }
+    for (i, p) in pis.iter().enumerate() {
+        require_finite_positive(&format!("pair_interactions[{i}].cutoff"), p.cutoff)?;
+        require_finite_positive(&format!("pair_interactions[{i}].r_switch"), p.r_switch)?;
+        if p.r_switch > p.cutoff {
+            return Err(invalid(
+                format!("pair_interactions[{i}].r_switch"),
+                format!(
+                    "r_switch ({}) exceeds cutoff ({})",
+                    p.r_switch, p.cutoff
+                ),
+            ));
+        }
+        // 1: every name in `between` refers to a declared type.
+        for name in [&p.between.0, &p.between.1] {
+            if !pts.iter().any(|t| t.name == *name) {
+                return Err(ConfigError::UnknownTypeInPair {
+                    name: name.clone(),
+                    pair_index: i,
+                });
+            }
+        }
+        match &p.potential {
+            PairPotentialParams::LennardJones { sigma, epsilon } => {
+                require_finite_positive(&format!("pair_interactions[{i}].sigma"), *sigma)?;
+                require_finite_positive(&format!("pair_interactions[{i}].epsilon"), *epsilon)?;
+            }
+        }
+    }
+    // Duplicate-pair check.
+    for i in 0..pis.len() {
+        for j in 0..i {
+            if pis[i].between == pis[j].between {
+                return Err(ConfigError::DuplicatePairInteraction {
+                    types: pis[i].between.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_bond_types(bts: &[BondTypeConfig]) -> Result<(), ConfigError> {
+    let mut seen: Vec<&str> = Vec::with_capacity(bts.len());
+    for (i, bt) in bts.iter().enumerate() {
+        match bt {
+            BondTypeConfig::Morse { name, de, a, re } => {
+                if name.is_empty() {
+                    return Err(invalid(
+                        format!("bond_types[{i}].name"),
+                        "name must not be empty",
+                    ));
+                }
+                if seen.iter().any(|n| *n == name) {
+                    return Err(ConfigError::DuplicateBondTypeName { name: name.clone() });
+                }
+                seen.push(name);
+                require_finite_positive(&format!("bond_types[{i}].de"), *de)?;
+                require_finite_positive(&format!("bond_types[{i}].a"), *a)?;
+                require_finite_positive(&format!("bond_types[{i}].re"), *re)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_angle_types(ats: &[AngleTypeConfig]) -> Result<(), ConfigError> {
+    let mut seen: Vec<&str> = Vec::with_capacity(ats.len());
+    for (i, at) in ats.iter().enumerate() {
+        match at {
+            AngleTypeConfig::Harmonic {
+                name,
+                k_theta,
+                theta_0,
+            } => {
+                if name.is_empty() {
+                    return Err(invalid(
+                        format!("angle_types[{i}].name"),
+                        "name must not be empty",
+                    ));
+                }
+                if seen.iter().any(|n| *n == name) {
+                    return Err(ConfigError::DuplicateAngleTypeName { name: name.clone() });
+                }
+                seen.push(name);
+                require_finite_positive(&format!("angle_types[{i}].k_theta"), *k_theta)?;
+                if !theta_0.is_finite()
+                    || !(0.0..=std::f64::consts::PI).contains(theta_0)
+                {
+                    return Err(invalid(
+                        format!("angle_types[{i}].theta_0"),
+                        "theta_0 must be finite and in [0, π]",
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_coulomb(c: &CoulombConfig) -> Result<(), ConfigError> {
+    require_finite_positive("coulomb.cutoff", c.cutoff)?;
+    require_finite_positive("coulomb.r_switch", c.r_switch)?;
+    if c.r_switch > c.cutoff {
+        return Err(invalid(
+            "coulomb.r_switch",
+            format!(
+                "r_switch ({}) exceeds cutoff ({})",
+                c.r_switch, c.cutoff
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_spme(s: &SpmeConfig) -> Result<(), ConfigError> {
+    require_finite_positive("spme.alpha", s.alpha)?;
+    require_finite_positive("spme.r_cut_real", s.r_cut_real)?;
+    let required = 2 * s.spline_order;
+    let axes = ["a", "b", "c"];
+    for (d, n) in s.grid.iter().enumerate() {
+        if *n < required {
+            return Err(invalid(
+                format!("spme.grid[{d}]"),
+                format!("grid[{}] = {n} must be >= 2 * spline_order = {required}", axes[d]),
+            ));
+        }
+    }
+    if !matches!(s.spline_order, 4 | 5 | 6 | 7 | 8) {
+        return Err(invalid(
+            "spme.spline_order",
+            "spline_order must be one of 4, 5, 6, 7, 8",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_neighbor_list(n: &NeighborListConfig) -> Result<(), ConfigError> {
+    match n {
+        NeighborListConfig::AllPairs => Ok(()),
+        NeighborListConfig::CellList {
+            max_neighbors,
+            r_skin,
+        } => {
+            if *max_neighbors == 0 {
+                return Err(invalid(
+                    "neighbor_list.max_neighbors",
+                    "max_neighbors must be strictly positive",
+                ));
+            }
+            require_finite_positive("neighbor_list.r_skin", *r_skin)?;
+            Ok(())
+        }
+    }
+}
+
+fn check_pair_coverage(
+    pts: &[ParticleTypeConfig],
+    pis: &[PairInteractionConfig],
+) -> Result<(), ConfigError> {
+    for i in 0..pts.len() {
+        for j in i..pts.len() {
+            let key = normalise_pair(&pts[i].name, &pts[j].name);
+            if !pis.iter().any(|p| p.between == key) {
+                return Err(ConfigError::MissingPairInteraction { types: key });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn check_path_collisions(config: &Config) -> Result<(), ConfigError> {
+    let mut entries: Vec<(PathRole, PathBuf)> =
+        Vec::with_capacity(2 + 3 * config.phases.len());
+    entries.push((PathRole::Init, config.init.clone()));
+    if let Some(p) = config.topology.as_deref() {
+        entries.push((PathRole::Topology, p.to_path_buf()));
+    }
+    for phase in &config.phases {
+        match phase {
+            PhaseKind::Md(p) => {
+                entries.push((
+                    PathRole::PhaseTrajectory {
+                        phase: p.name.clone(),
+                    },
+                    p.output.trajectory_path.clone(),
+                ));
+                entries.push((
+                    PathRole::PhaseLog {
+                        phase: p.name.clone(),
+                    },
+                    p.output.log_path.clone(),
+                ));
+                entries.push((
+                    PathRole::PhaseTimings {
+                        phase: p.name.clone(),
+                    },
+                    p.output.timings_path.clone(),
+                ));
+            }
+            PhaseKind::Minimization(m) => {
+                entries.push((
+                    PathRole::MinimizationMinlog {
+                        phase: m.name.clone(),
+                    },
+                    m.output.minlog_path.clone(),
+                ));
+                entries.push((
+                    PathRole::MinimizationTrajectory {
+                        phase: m.name.clone(),
+                    },
+                    m.output.trajectory_path.clone(),
+                ));
+                entries.push((
+                    PathRole::MinimizationTimings {
+                        phase: m.name.clone(),
+                    },
+                    m.output.timings_path.clone(),
+                ));
+            }
+        }
+    }
+
+    for i in 0..entries.len() {
+        for j in (i + 1)..entries.len() {
+            if entries[i].1 == entries[j].1 {
+                return Err(ConfigError::PathCollision {
+                    kind_a: entries[i].0.clone(),
+                    kind_b: entries[j].0.clone(),
+                    path: entries[i].1.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn resolve_path(base_dir: &Path, raw: &str) -> PathBuf {
+    let p = Path::new(raw);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        base_dir.join(p)
+    }
+}
+
+fn normalise_pair(a: &str, b: &str) -> (String, String) {
+    if a <= b {
+        (a.to_string(), b.to_string())
+    } else {
+        (b.to_string(), a.to_string())
+    }
+}

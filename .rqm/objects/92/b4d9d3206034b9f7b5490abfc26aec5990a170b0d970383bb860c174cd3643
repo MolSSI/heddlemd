@@ -1,0 +1,39 @@
+    // rq-39891001
+    /// Structural validation that does not require registry access.
+    /// Per-field domain checks for the per-slot `params` and the
+    /// integrator-thermostat / integrator-barostat / lossless-with-
+    /// constraints compatibility checks live in
+    /// [`Config::validate_against`] because they consult the open
+    /// builder registries.
+    pub fn validate(&self) -> Result<(), ConfigError> {
+        // Per-field domain checks in declaration order.
+        validate_simulation(&self.simulation)?;
+        validate_phases(&self.phases)?;
+        validate_particle_types(&self.particle_types)?;
+        validate_pair_interactions(&self.pair_interactions, &self.particle_types)?;
+        validate_bond_types(&self.bond_types)?;
+        validate_angle_types(&self.angle_types)?;
+        validate_constraint_type_names(&self.constraint_types)?;
+        if let Some(c) = &self.coulomb {
+            validate_coulomb(c)?;
+        }
+        if let Some(s) = &self.spme {
+            validate_spme(s)?;
+        }
+        validate_neighbor_list(&self.neighbor_list)?;
+
+        // Structural cross-validation: pair coverage, path collisions,
+        // and electrostatics exclusivity. The integrator/thermostat/
+        // barostat compatibility rules require builder predicates, so
+        // they live in `validate_against`.
+        check_pair_coverage(&self.particle_types, &self.pair_interactions)?;
+        check_path_collisions(self)?;
+        if self.coulomb.is_some() && self.spme.is_some() {
+            return Err(ConfigError::ConflictingElectrostatics);
+        }
+        Ok(())
+    }
+
+    /// Registry-dispatched validation: looks up each slot's `kind` in
+    /// the corresponding registry, calls
+    /// `builder.validate_params(&params)`, and enforces the

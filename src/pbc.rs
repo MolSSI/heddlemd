@@ -1,6 +1,6 @@
 // rq-03830444
 #[derive(Debug, Clone, Copy, PartialEq)]
-// rq-b75afb31
+// rq-fdf2db79
 pub struct SimulationBox {
     lx: f32,
     ly: f32,
@@ -11,7 +11,7 @@ pub struct SimulationBox {
     generation: u64,
 }
 
-// rq-aef9888b
+// rq-fdf2db79
 #[derive(Debug, thiserror::Error)]
 pub enum SimulationBoxError {
     #[error("non-finite simulation-box lattice value for `{name}`: {value}")]
@@ -63,7 +63,7 @@ fn validate_lattice(
 }
 
 impl SimulationBox {
-    // rq-f0da71ea
+    // rq-b8070abb
     pub fn new(
         lx: f32,
         ly: f32,
@@ -84,7 +84,7 @@ impl SimulationBox {
         })
     }
 
-    // rq-71fbbafb
+    // rq-b033ac1d
     pub fn set_lattice(
         &mut self,
         lx: f32,
@@ -122,47 +122,47 @@ impl SimulationBox {
         )
     }
 
-    // rq-dc17132d
+    // rq-b015ef15
     pub fn generation(&self) -> u64 {
         self.generation
     }
 
-    // rq-e8be1a1c
+    // rq-b015ef15
     pub fn lattice(&self) -> [f32; 6] {
         [self.lx, self.ly, self.lz, self.xy, self.xz, self.yz]
     }
 
-    // rq-f73a0f99
+    // rq-b015ef15
     pub fn lx(&self) -> f32 {
         self.lx
     }
 
-    // rq-f73a0f99
+    // rq-b015ef15
     pub fn ly(&self) -> f32 {
         self.ly
     }
 
-    // rq-f73a0f99
+    // rq-b015ef15
     pub fn lz(&self) -> f32 {
         self.lz
     }
 
-    // rq-f73a0f99
+    // rq-b015ef15
     pub fn xy(&self) -> f32 {
         self.xy
     }
 
-    // rq-f73a0f99
+    // rq-b015ef15
     pub fn xz(&self) -> f32 {
         self.xz
     }
 
-    // rq-f73a0f99
+    // rq-b015ef15
     pub fn yz(&self) -> f32 {
         self.yz
     }
 
-    // rq-3b9ed390
+    // rq-b015ef15
     pub fn volume(&self) -> f32 {
         self.lx * self.ly * self.lz
     }
@@ -192,13 +192,13 @@ impl SimulationBox {
         [w_a, w_b, w_c]
     }
 
-    // rq-5fe22acb
+    // rq-b015ef15
     pub fn min_perpendicular_width(&self) -> f32 {
         let [w_a, w_b, w_c] = self.perpendicular_widths();
         w_a.min(w_b).min(w_c)
     }
 
-    // rq-1a7bd47a
+    // rq-b015ef15
     //
     // Scans the three perpendicular widths in lattice-direction order
     // (a, b, c) and returns the first one whose width is strictly less
@@ -222,19 +222,19 @@ impl SimulationBox {
         Ok(())
     }
 
-    // rq-d49c9093
+    // rq-fb632dfc
     pub fn minimum_image(&self, displacement: [f32; 3]) -> [f32; 3] {
         let (wrapped, _image) = self.wrap_with_image_count(displacement);
         wrapped
     }
 
-    // rq-9b1c84c3
+    // rq-fb632dfc
     pub fn wrap_position(&self, position: [f32; 3]) -> [f32; 3] {
         let (wrapped, _image) = self.wrap_with_image_count(position);
         wrapped
     }
 
-    // rq-a4d5e711
+    // rq-fb632dfc
     pub fn wrap_position_with_image_count(
         &self,
         position: [f32; 3],
@@ -273,7 +273,7 @@ impl SimulationBox {
         ([vx, vy, vz], [k_a_f as i32, k_b_f as i32, k_c_f as i32])
     }
 
-    // rq-1a3ec0c8
+    // rq-fb632dfc
     pub fn fractional_coords(&self, position: [f32; 3]) -> [f32; 3] {
         let s_c = position[2] / self.lz;
         let s_b = (position[1] - s_c * self.yz) / self.ly;
@@ -281,7 +281,7 @@ impl SimulationBox {
         [s_a, s_b, s_c]
     }
 
-    // rq-be7b9fe6
+    // rq-fb632dfc
     pub fn cartesian_coords(&self, fractional: [f32; 3]) -> [f32; 3] {
         let s_a = fractional[0];
         let s_b = fractional[1];

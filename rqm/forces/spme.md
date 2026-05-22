@@ -425,13 +425,13 @@ only inside the `SpmeReciprocalState` construction path.
 
 ### Types <!-- rq-66067eba -->
 
-- `SpmeConfig` — parsed `[spme]` table. Fields: <!-- rq-61889ff1 -->
+- `SpmeConfig` — parsed `[spme]` table. Fields:
   - `alpha: f64`
   - `r_cut_real: f64`
   - `grid: [u32; 3]`
   - `spline_order: u32`
 
-- `SpmeRealSpaceState` — implements `Potential` with <!-- rq-22171569 -->
+- `SpmeRealSpaceState` — implements `Potential` with
   `label() == "spme_real"`. Reports
   `max_cutoff() = Some(r_cut_real as f32)` so the shared neighbor list
   sizes its search radius. Fields private; the slot's public surface is
@@ -441,7 +441,7 @@ only inside the `SpmeReciprocalState` construction path.
   Constructor:
   - `SpmeRealSpaceState::new(gpu: &GpuContext, particle_count: usize, alpha: f32, r_cut_real: f32, max_neighbors: u32, exclusion_list: &ExclusionList) -> Result<SpmeRealSpaceState, NeighborListError>`
 
-- `SpmeReciprocalState` — implements `Potential` with <!-- rq-b1148667 -->
+- `SpmeReciprocalState` — implements `Potential` with
   `label() == "spme_reciprocal"`. Reports `max_cutoff() = None` (it does
   not contribute to the shared neighbor list's search radius). Fields
   private. The slot owns its own bin-only `NeighborListState` for the
@@ -450,7 +450,7 @@ only inside the `SpmeReciprocalState` construction path.
   Constructor:
   - `SpmeReciprocalState::new(gpu: &GpuContext, sim_box: &SimulationBox, particle_count: usize, charges: &[f32], alpha: f32, grid: [u32; 3], spline_order: u32) -> Result<SpmeReciprocalState, SpmeError>`
 
-- `SpmeError` — error type for SPME slot construction. Variants: <!-- rq-ebfa6e1f -->
+- `SpmeError` — error type for SPME slot construction. Variants:
   - `NeighborList(NeighborListError)` — from the bin-only neighbor-list
     construction (e.g. `BoxTooSmallForCells` if the FFT grid dims
     exceed what the box can accommodate).
@@ -462,34 +462,34 @@ only inside the `SpmeReciprocalState` construction path.
   - `Gpu(GpuError)` — a CUDA driver operation failed during buffer
     allocation.
 
-- `CuFftError` — wrapper around cuFFT failure codes from the underlying <!-- rq-1ad7e751 -->
+- `CuFftError` — wrapper around cuFFT failure codes from the underlying
   bindings. Variants follow the `cufftResult_t` enumeration as needed by
   the implementation (`InvalidPlan`, `ExecFailed`, etc.).
 
 ### Functions <!-- rq-cf82e422 -->
 
-- `spme_real_pair_force(particle_buffers, pair_buffer, sim_box, alpha, r_cut_real, atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales, neighbor_list, neighbor_counts) -> Result<(), GpuError>` <!-- rq-f735ea05 -->
+- `spme_real_pair_force(particle_buffers, pair_buffer, sim_box, alpha, r_cut_real, atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales, neighbor_list, neighbor_counts) -> Result<(), GpuError>`
   Launches the `spme_real_pair_force` kernel.
 
-- `spme_charge_spread(particle_buffers, spme_state) -> Result<(), GpuError>` <!-- rq-f69698b8 -->
+- `spme_charge_spread(particle_buffers, spme_state) -> Result<(), GpuError>`
   Launches the charge-spread kernel. Writes `spme_state.rho`.
 
-- `spme_forward_fft(spme_state) -> Result<(), CuFftError>` <!-- rq-24e36eba -->
+- `spme_forward_fft(spme_state) -> Result<(), CuFftError>`
   Runs the cuFFT R2C transform `rho → rho_hat`.
 
-- `spme_influence_multiply(spme_state) -> Result<(), GpuError>` <!-- rq-8326d2d1 -->
+- `spme_influence_multiply(spme_state) -> Result<(), GpuError>`
   Multiplies `rho_hat[k] *= G[k]` in place, also writing the per-cell
   virial contribution to a scratch buffer for the subsequent reduction.
 
-- `spme_inverse_fft(spme_state) -> Result<(), CuFftError>` <!-- rq-a98abc35 -->
+- `spme_inverse_fft(spme_state) -> Result<(), CuFftError>`
   Runs the cuFFT C2R transform `V_hat → V`.
 
-- `spme_force_gather(particle_buffers, spme_state, slot_output) -> Result<(), GpuError>` <!-- rq-c6f6a13c -->
+- `spme_force_gather(particle_buffers, spme_state, slot_output) -> Result<(), GpuError>`
   Launches the force-gather kernel. Writes per-particle force,
   reciprocal energy, and (after the deterministic virial reduction)
   per-particle virial.
 
-- `cufft_determinism_smoke_test(device: &Arc<CudaDevice>) -> Result<(), CuFftError>` <!-- rq-d880c228 -->
+- `cufft_determinism_smoke_test(device: &Arc<CudaDevice>) -> Result<(), CuFftError>`
   Used by `init_device` when SPME is enabled. Returns `Err` on a
   byte-difference between two consecutive R2C transforms.
 
@@ -552,13 +552,13 @@ implementation).
 
 ### Launch configuration <!-- rq-03d9869d -->
 
-- `spme_real_pair_force`: 16×16×1 = 256 threads/block, grid <!-- rq-eb9e5cc3 -->
+- `spme_real_pair_force`: 16×16×1 = 256 threads/block, grid
   `(ceil(max_neighbors/16), ceil(N/16), 1)`. Matches the LJ kernel.
-- `spme_charge_spread`: one thread per real grid cell, block size 256, <!-- rq-16f6c7dc -->
+- `spme_charge_spread`: one thread per real grid cell, block size 256,
   grid `ceil(M / 256)` where `M = n_a · n_b · n_c`.
-- `spme_influence_multiply`: one thread per complex grid cell, block <!-- rq-127df3d6 -->
+- `spme_influence_multiply`: one thread per complex grid cell, block
   size 256, grid `ceil(M_complex / 256)`.
-- `spme_force_gather`: one thread per particle, block size 256, grid <!-- rq-35b76155 -->
+- `spme_force_gather`: one thread per particle, block size 256, grid
   `ceil(N / 256)`.
 
 All kernels run on the default stream carried by `particle_buffers.device`.

@@ -1,0 +1,10 @@
+### `Thermostat` trait overrides <!-- rq-5aae9633 -->
+
+`CsvrThermostat` overrides the diagnostic-column trait methods
+declared in `framework.md`:
+
+- `log_column_names() -> &'static ["csvr_conserved"]`.
+- `log_column_values(ke, pe) -> vec![ke + pe − self.cumulative_injection]`.
+
+`apply_pre` is left at its trait default (no-op).
+

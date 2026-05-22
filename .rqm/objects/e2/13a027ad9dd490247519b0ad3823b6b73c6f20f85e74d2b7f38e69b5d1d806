@@ -1,0 +1,73 @@
+// rq-1c26a108
+#[derive(Debug)]
+pub struct CsvrThermostat {
+    pub temperature: f64,
+    pub tau: f64,
+    pub seed: u64,
+    pub draw_counter: u64,
+    pub g_dof: u32,
+    pub kt_target: f64,
+    pub cumulative_injection: f64,
+    ke_scratch: CudaSlice<f32>,
+    most_recent_ke: f64,
+}
+
+impl CsvrThermostat {
+    fn new(
+        gpu: &GpuContext,
+        particle_count: usize,
+        n_constraints: usize,
+        temperature: f64,
+        tau: f64,
+        seed: u64,
+    ) -> Result<Self, GpuError> {
+        let g_dof =
+            ((3 * particle_count) as i64 - n_constraints as i64 - 3).max(1) as u32;
+        let kt_target = BOLTZMANN_J_PER_K * temperature;
+        let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
+        Ok(CsvrThermostat {
+            temperature,
+            tau,
+            seed,
+            draw_counter: 0,
+            g_dof,
+            kt_target,
+            cumulative_injection: 0.0,
+            ke_scratch,
+            most_recent_ke: 0.0,
+        })
+    }
+
+    fn draw_new_kinetic_energy(&self, k_old: f64, dt: f32) -> f64 {
+        let c = (-(dt as f64) / self.tau).exp();
+        let nf = self.g_dof as f64;
+        let k_target = (nf / 2.0) * self.kt_target;
+        let one_minus_c = 1.0 - c;
+
+        let seed_lo = self.seed as u32;
+        let seed_hi = (self.seed >> 32) as u32;
+        let ctr_lo = self.draw_counter as u32;
+        let ctr_hi = (self.draw_counter >> 32) as u32;
+
+        let r = philox_normal(seed_lo, seed_hi, ctr_lo, ctr_hi, 0, 0);
+        let mut s = 0.0_f64;
+        for sample_index in 1..self.g_dof {
+            let xi = philox_normal(seed_lo, seed_hi, ctr_lo, ctr_hi, sample_index, 0);
+            s += xi * xi;
+        }
+
+        let cross = if k_old > 0.0 {
+            2.0 * r * (c * one_minus_c * k_old * k_target / nf).sqrt()
+        } else {
+            0.0
+        };
+        let k_new = c * k_old + (k_target / nf) * one_minus_c * (s + r * r) + cross;
+        if k_new.is_finite() && k_new > 0.0 {
+            k_new
+        } else {
+            k_old
+        }
+    }
+}
+
+impl Thermostat for CsvrThermostat {

@@ -1,0 +1,336 @@
+### Types <!-- rq-b719c42c -->
+
+- `Config` — parsed configuration. All fields are `pub`; field names match
+  TOML keys directly (snake_case).
+
+  Fields:
+  - `schema_version: u64`
+  - `init: PathBuf` — resolved against the config file's directory.
+  - `topology: Option<PathBuf>` — `Some(_)` when the optional top-level
+    `topology` field is present; resolved against the config file's
+    directory.
+  - `simulation: SimulationConfig`
+  - `phases: Vec<PhaseKind>` — one entry per `[[phase]]` or
+    `[[minimization]]` table in **source-document order** across
+    both arrays (merged by byte-span comparison; see *Schema*
+    above). Non-empty (enforced by `Config::validate`).
+    `PhaseKind::Md(PhaseConfig)` for `[[phase]]` entries;
+    `PhaseKind::Minimization(MinimizationConfig)` for
+    `[[minimization]]` entries. The `MinimizationConfig` type is
+    documented in `rqm/minimization/steepest-descent.md`.
+  - `particle_types: Vec<ParticleTypeConfig>`
+  - `pair_interactions: Vec<PairInteractionConfig>`
+  - `bond_types: Vec<BondTypeConfig>` — empty when the `[[bond_types]]`
+    array is absent.
+  - `angle_types: Vec<AngleTypeConfig>` — empty when the
+    `[[angle_types]]` array is absent.
+  - `constraint_types: Vec<NamedSlotConfig>` — empty when the
+    `[[constraint_types]]` array is absent.
+  - `coulomb: Option<CoulombConfig>` — `Some` when the `[coulomb]` table
+    is present in the config, `None` otherwise. Mutually exclusive with
+    `spme`.
+  - `spme: Option<SpmeConfig>` — `Some` when the `[spme]` table is
+    present in the config, `None` otherwise. Mutually exclusive with
+    `coulomb`.
+  - `neighbor_list: NeighborListConfig` — defaults to
+    `NeighborListConfig::CellList { max_neighbors: 256, r_skin: 0.3 *
+    max_cutoff }` when the `[neighbor_list]` table is omitted from the
+    config, where `max_cutoff` is the largest cutoff across
+    `[[pair_interactions]]`, the `[coulomb]` table, and the `[spme]`
+    table's `r_cut_real` (whichever are present).
+  - `config_path: PathBuf` — the absolute path of the source config file,
+    retained for error messages and default output-path derivation.
+
+- `SimulationConfig`
+  - `seed: u64`
+  - `temperature: f64`
+
+- `PhaseConfig` — parsed `[[phase]]` (MD) entry.
+  - `name: String`
+  - `n_steps: u64`
+  - `dt: f64`
+  - `integrator: SlotConfig` — the chosen integrator kind plus its
+    raw `toml::Value` parameters.
+  - `thermostat: Option<SlotConfig>` — `Some` when the phase declares
+    `[phase.thermostat]`, `None` otherwise.
+  - `barostat: Option<SlotConfig>` — `Some` when the phase declares
+    `[phase.barostat]`, `None` otherwise.
+  - `output: OutputConfig` — resolved per-phase trajectory/log/timings
+    paths and cadences, with defaults derived from
+    `<config-root>.out.<phase-name>.{xyz,log,timings}` when omitted.
+
+- `PhaseKind` — discriminated union over the unified phase sequence.
+  ```rust
+  pub enum PhaseKind {
+      Md(PhaseConfig),
+      Minimization(MinimizationConfig),
+  }
+  ```
+  `MinimizationConfig` is documented in
+  `rqm/minimization/steepest-descent.md`. `Config.phases` is a
+  `Vec<PhaseKind>` in source-document order across the two arrays.
+
+- `SlotConfig` — open-shaped parsed selection for a per-phase
+  `[phase.integrator]`, `[phase.thermostat]`, or `[phase.barostat]`
+  section.
+
+  ```rust
+  pub struct SlotConfig {
+      pub kind: String,
+      pub params: toml::Value,
+  }
+  ```
+
+  - `kind` carries the user-supplied `kind = "..."` field verbatim
+    (case-sensitive). It is the lookup key the runner uses against
+    the corresponding registry (`integration/framework.md`).
+  - `params` carries every other field of the section flattened into
+    a `toml::Value` (via `#[serde(flatten)]`). The framework never
+    inspects `params`; each registered builder deserialises its own
+    typed parameter struct from it via `validate_params(&toml::Value)`
+    and `build(...)`.
+
+- `NamedSlotConfig` — open-shaped parsed entry for the
+  `[[constraint_types]]` array (and any future similarly-shaped array
+  of named, kind-tagged entries).
+
+  ```rust
+  pub struct NamedSlotConfig {
+      pub name: String,
+      pub kind: String,
+      pub params: toml::Value,
+  }
+  ```
+
+  - `name` is the user-facing identifier referenced from elsewhere in
+    the config (for `[[constraint_types]]`, from the topology file's
+    `[constraints]` section).
+  - `kind` and `params` work the same as `SlotConfig`'s fields; the
+    matching builder (`ConstraintBuilder` for constraint types)
+    deserialises and validates `params`.
+
+  See `integration/framework.md` for the integrator / thermostat /
+  barostat builder traits and `integration/constraint-framework.md`
+  for the `ConstraintBuilder` trait; each defines the
+  `validate_params`, `build`, and (where relevant) compatibility
+  predicate methods that consume `SlotConfig`'s and
+  `NamedSlotConfig`'s `params`.
+
+- `ParticleTypeConfig`
+  - `name: String`
+  - `mass: f64`
+  - `charge: f64` — defaults to `0.0` when the TOML field is omitted.
+
+- `PairInteractionConfig`
+  - `between: (String, String)` — stored normalised so the lexicographically
+    smaller string comes first, regardless of source order.
+  - `cutoff: f64` — pair distance in metres beyond which the force is
+    treated as zero.
+  - `r_switch: f64` — inner switching radius. Populated from the
+    user-supplied `r_switch` when present, otherwise from the default
+    `0.9 * cutoff`. Always satisfies `0 < r_switch <= cutoff`.
+  - `potential: PairPotentialParams` — tagged enum carrying the chosen
+    pair potential's functional-form parameters.
+
+- `PairPotentialParams` — tagged enum carrying the functional-form
+  parameters of a pair potential. Variants:
+  - `LennardJones { sigma: f64, epsilon: f64 }` — selected by
+    `potential = "lennard-jones"`. `sigma` is the LJ zero-crossing
+    distance in metres; `epsilon` is the LJ well depth in joules.
+
+- `BondTypeConfig` — tagged enum carrying the chosen bonded-potential
+  parameters. Variants:
+  - `Morse { name: String, de: f64, a: f64, re: f64 }` — selected by
+    `potential = "morse"`.
+
+  The `name` field is the lookup key referenced from the `.topology`
+  file's `[bonds]` section.
+
+- `AngleTypeConfig` — tagged enum carrying the chosen angle-potential
+  parameters. Variants:
+  - `Harmonic { name: String, k_theta: f64, theta_0: f64 }` — selected
+    by `potential = "harmonic"`.
+
+  The `name` field is the lookup key referenced from the `.topology`
+  file's `[angles]` section.
+
+- `[[constraint_types]]` entries deserialise into `NamedSlotConfig`
+  values (see `NamedSlotConfig` above). Each entry's `kind` selects
+  the algorithm; each registered `ConstraintBuilder` (see
+  `integration/constraint-framework.md`) deserialises its own typed
+  parameter struct from `params` via `validate_params(&toml::Value)`
+  and answers `expected_atom_count(&toml::Value)` for the topology
+  parser's row-column-count check. For
+  `kind = "settle-water"`, the builder's typed params are
+  `{ r_oh: f64, r_hh: f64 }` (see `integration/settle.md`).
+
+- `CoulombConfig`
+  - `cutoff: f64` — real-space cutoff in metres.
+  - `r_switch: f64` — populated from the optional `r_switch` field with
+    the documented default `0.9 * cutoff`.
+
+- `SpmeConfig`
+  - `alpha: f64` — Ewald splitting parameter (1/m).
+  - `r_cut_real: f64` — real-space cutoff in metres.
+  - `grid: [u32; 3]` — FFT grid dimensions `[n_a, n_b, n_c]`.
+  - `spline_order: u32` — populated from the optional `spline_order`
+    field with the documented default `4`.
+
+- `NeighborListConfig` — tagged enum selecting the algorithm used by
+  every short-range pair-force slot (Lennard-Jones, truncated Coulomb,
+  SPME real-space) to enumerate non-bonded pairs. Variants:
+  - `AllPairs` — selected by `mode = "all-pairs"`. Carries no
+    parameters; pair-force slots use the O(N²) kernel.
+  - `CellList { max_neighbors: u32, r_skin: f64 }` — selected by
+    `mode = "cell-list"` (and used as the default when the
+    `[neighbor_list]` table is omitted). `max_neighbors` is the
+    per-particle neighbor capacity; `r_skin` is the skin distance in
+    metres.
+
+  See `forces/neighbor-list.md` for the runtime semantics of each
+  variant.
+
+- `OutputConfig`
+  - `trajectory_path: PathBuf` — resolved.
+  - `trajectory_every: u64`
+  - `include_velocities: bool`
+  - `include_images: bool`
+  - `log_path: PathBuf` — resolved.
+  - `log_every: u64`
+  - `timings_path: PathBuf` — resolved.
+
+- `PathRole` — `enum`. Used in `PathCollision`. Variants:
+  - `Init`
+  - `Topology`
+  - `PhaseTrajectory { phase: String }`
+  - `PhaseLog { phase: String }`
+  - `PhaseTimings { phase: String }`
+  - `MinimizationMinlog { phase: String }`
+  - `MinimizationTrajectory { phase: String }`
+  - `MinimizationTimings { phase: String }`
+
+- `ConfigError` — error type returned by `load_config` and by
+  `Config::validate`. Variants:
+  - `InvalidConfigFilename { path: PathBuf }` — the path passed to
+    `load_config` / `load_config_raw` does not satisfy the
+    config-filename convention: either the final filename component
+    does not end in `.in.toml` (case-sensitive `.in` segment), or the
+    derived `<config-root>` is empty (e.g. the filename is `.in.toml`).
+    Produced before the file is opened.
+  - `Io(String)` — failed to read the config file (with the OS error
+    message). Only produced by `load_config`.
+  - `Parse { path: String, message: String }` — the TOML deserialiser
+    rejected the document for a structural reason: a syntax error, a
+    type mismatch, a field that is unknown for its enclosing table,
+    or an enum tag (`kind`, `potential`, `mode`) whose string does not
+    match any registered variant. `path` is a dotted, JSON-pointer-like
+    location within the document; `message` is the underlying
+    parser/deserialiser message.
+    - For an **unknown enum tag** (e.g. `[integrator] kind =
+      "custom"`), `path` is the path of the tag field itself
+      (`"integrator.kind"`, `"pair_interactions[0].potential"`,
+      `"bond_types[0].potential"`, `"angle_types[0].potential"`,
+      `"neighbor_list.mode"`, etc.).
+    - For an **unknown field** (e.g. `[integrator] kind =
+      "velocity-verlet" friction = 1.0e12`), `path` is the path of
+      the enclosing table (`"integrator"`, `"thermostat"`,
+      `"barostat"`, `"pair_interactions[0]"`, `"bond_types[0]"`,
+      `"angle_types[0]"`, `"neighbor_list"`). The offending field
+      name appears in `message`.
+    - For a **type mismatch or syntax error**, `path` is the path
+      reached before the failure (empty string for top-level syntax
+      errors).
+  - `UnsupportedSchemaVersion { actual: u64, supported: u64 }` —
+    `schema_version` was structurally a u64 but its value is not the
+    supported version (`1`).
+  - `MissingField { field: String }` — a required field is absent at
+    deserialisation time. `field` uses the same dotted notation as
+    `Parse.path` (e.g. `"simulation.dt"`, `"integrator.kind"`,
+    `"pair_interactions[0].sigma"`).
+  - `InvalidValue { field: String, reason: String }` — a field
+    deserialised to the right type but failed a range, finiteness, or
+    domain check (positive, non-NaN, in `[0, π]`, non-empty string,
+    `r_switch <= cutoff`, etc.). Produced exclusively by the post-parse
+    `Config::validate` pass; the deserialiser itself never emits this
+    variant.
+  - `DuplicateTypeName { name: String }` — two `[[particle_types]]`
+    entries share a `name`.
+  - `UnknownTypeInPair { name: String, pair_index: usize }` — a
+    `[[pair_interactions]]` entry's `between` field names a type not
+    declared in `[[particle_types]]`.
+  - `MissingPairInteraction { types: (String, String) }` — the
+    declared types omit an unordered pair from `[[pair_interactions]]`.
+    Tuple is normalised so the lexicographically smaller name comes
+    first.
+  - `DuplicatePairInteraction { types: (String, String) }` — two
+    `[[pair_interactions]]` entries cover the same unordered pair.
+    Tuple normalised as above.
+  - `PathCollision { kind_a: PathRole, kind_b: PathRole, path: PathBuf }`
+    — two supplied file paths resolve to the same location. `PathRole`
+    carries variants `Init`, `Topology`, and
+    `PhaseTrajectory { phase: String }` /
+    `PhaseLog { phase: String }` /
+    `PhaseTimings { phase: String }` for per-phase outputs.
+  - `ConflictingElectrostatics` — the config declares both `[coulomb]`
+    and `[spme]`. Only one electrostatics method may be active per run.
+  - `EmptyPhases` — the merged phase sequence
+    (`[[phase]]` ∪ `[[minimization]]`) is empty. A simulation
+    requires at least one phase of either kind.
+  - `DuplicatePhaseName { name: String }` — two phases across the
+    merged `[[phase]]` ∪ `[[minimization]]` sequence share a
+    `name`. Phase names must be unique because they derive per-phase
+    output filenames.
+  - `DuplicatePhaseSeed { kind: String, seed: u64 }` — two stochastic
+    slots of the same `kind` across the `[[phase]]` array share the
+    same numerical `seed`. The check applies across every phase's
+    `[phase.thermostat]`, `[phase.barostat]`, and any seeded
+    `[phase.integrator]` (e.g. `langevin-baoab`).
+  - `IncompatibleThermostat { integrator: String, phase: String }` —
+    a phase pairs an integrator that owns its own thermostat
+    (`langevin-baoab` or `mtk-npt`) with a `[phase.thermostat]`
+    table. `phase` is the offending phase's `name`.
+  - `IncompatibleBarostat { integrator: String, phase: String }` —
+    a phase pairs an integrator that owns its own barostat
+    (currently only `mtk-npt`) with a `[phase.barostat]` table.
+  - `DuplicateBondTypeName { name: String }` — two `[[bond_types]]`
+    entries share a `name`.
+  - `DuplicateAngleTypeName { name: String }` — two `[[angle_types]]`
+    entries share a `name`.
+  - `DuplicateConstraintTypeName { name: String }` — two
+    `[[constraint_types]]` entries share a `name`.
+  - `IncompatibleConstraint { integrator: String, phase: String }` —
+    the topology file's `[constraints]` section is non-empty and the
+    chosen integrator builder's
+    `IntegratorBuilder::supports_constraints(&params)` returns
+    `false` for the named phase (in the default registry:
+    `langevin-baoab`, `mtk-npt`, or `velocity-verlet` with
+    `lossless = true`).
+  - `UnknownKind { slot: &'static str, kind: String }` — a
+    `[integrator]`, `[thermostat]`, `[barostat]`,
+    `[[constraint_types]]`, or `[minimization.algorithm]` entry's
+    `kind` field does not match any registered builder in the
+    corresponding registry. `slot` carries `"integrator"`,
+    `"thermostat"`, `"barostat"`, `"constraint_types"`, or
+    `"minimization"`.
+  - `SettleGeometryInfeasible { name: String, r_oh: f64, r_hh: f64 }`
+    — a `[[constraint_types]]` entry with `kind = "settle-water"`
+    declares `r_hh ≥ 2 · r_oh`.
+
+  `Parse` covers every shape error the typed deserialiser flags
+  structurally that does not require registry knowledge: unknown
+  fields under a closed-enum table (e.g. `mode` outside the accepted
+  set in `[neighbor_list]`, an unknown `potential` in
+  `[[pair_interactions]]`); wrong TOML types (e.g. a string where an
+  integer is required); and raw TOML syntax errors. `path` carries the
+  document location so callers can present a useful diagnostic without
+  inspecting `message`.
+
+  Per-kind parameter shape errors for the open-builder slots
+  (`[integrator]`, `[thermostat]`, `[barostat]`,
+  `[[constraint_types]]`) — including unknown fields under the chosen
+  `kind` and out-of-domain numeric values — surface from the matching
+  builder's `validate_params(&toml::Value)` during
+  `Config::validate_against(&registries)`. Builders return
+  `ConfigError::InvalidValue`, `ConfigError::SettleGeometryInfeasible`,
+  or `ConfigError::Parse` as appropriate for their parameter shape.
+

@@ -1,0 +1,107 @@
+    // rq-39891001
+    /// a non-empty constraint list when the chosen integrator's
+    /// builder `IntegratorBuilder::supports_constraints(&params)`
+    /// returns `false`. For every minimization phase: rejects a
+    /// non-empty constraint list when any registered constraint-type
+    /// builder reports
+    /// `ConstraintBuilder::supports_position_projection_only(&params) == false`.
+    pub fn validate_constraint_compatibility(
+        &self,
+        registries: &crate::Registries,
+        has_constraints: bool,
+    ) -> Result<(), ConfigError> {
+        if !has_constraints {
+            return Ok(());
+        }
+        for phase in &self.phases {
+            match phase {
+                PhaseKind::Md(md) => {
+                    let integ_builder = registries
+                        .integrators
+                        .lookup(&md.integrator.kind)
+                        .ok_or_else(|| ConfigError::UnknownKind {
+                            slot: "integrator",
+                            kind: md.integrator.kind.clone(),
+                        })?;
+                    if !integ_builder.supports_constraints(&md.integrator.params) {
+                        return Err(ConfigError::IncompatibleConstraint {
+                            integrator: md.integrator.kind.clone(),
+                            phase: md.name.clone(),
+                        });
+                    }
+                }
+                PhaseKind::Minimization(min) => {
+                    // Cross-check every registered constraint type: if
+                    // any reports `supports_position_projection_only =
+                    // false`, the combination with this minimization
+                    // phase is rejected. In the default registry
+                    // SETTLE returns `true`, so this branch is
+                    // reachable only with custom builders.
+                    for ct in &self.constraint_types {
+                        let cb = registries
+                            .constraint_types
+                            .lookup(&ct.kind)
+                            .ok_or_else(|| ConfigError::UnknownKind {
+                                slot: "constraint_types",
+                                kind: ct.kind.clone(),
+                            })?;
+                        if !cb.supports_position_projection_only(&ct.params) {
+                            return Err(ConfigError::IncompatibleConstraint {
+                                integrator: min.algorithm.kind.clone(),
+                                phase: min.name.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+// =====================================================================
+// Per-field validation helpers
+// =====================================================================
+
+fn invalid(field: impl Into<String>, reason: impl Into<String>) -> ConfigError {
+    ConfigError::InvalidValue {
+        field: field.into(),
+        reason: reason.into(),
+    }
+}
+
+fn require_finite_positive(field: &str, value: f64) -> Result<(), ConfigError> {
+    if !value.is_finite() {
+        return Err(invalid(field, format!("expected a finite number, got {value}")));
+    }
+    if value <= 0.0 {
+        return Err(invalid(
+            field,
+            format!("expected a strictly positive value, got {value}"),
+        ));
+    }
+    Ok(())
+}
+
+fn require_finite_non_negative(field: &str, value: f64) -> Result<(), ConfigError> {
+    if !value.is_finite() {
+        return Err(invalid(field, format!("expected a finite number, got {value}")));
+    }
+    if value < 0.0 {
+        return Err(invalid(field, format!("expected a non-negative value, got {value}")));
+    }
+    Ok(())
+}
+
+fn require_finite(field: &str, value: f64) -> Result<(), ConfigError> {
+    if !value.is_finite() {
+        return Err(invalid(field, format!("expected a finite number, got {value}")));
+    }
+    Ok(())
+}
+
+fn validate_simulation(s: &SimulationConfig) -> Result<(), ConfigError> {
+    require_finite_non_negative("simulation.temperature", s.temperature)?;
+    Ok(())
+}
+

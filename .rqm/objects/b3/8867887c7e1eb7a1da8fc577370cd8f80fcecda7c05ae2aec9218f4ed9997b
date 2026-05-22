@@ -1,0 +1,24 @@
+    // rq-b015ef15
+    //
+    // Scans the three perpendicular widths in lattice-direction order
+    // (a, b, c) and returns the first one whose width is strictly less
+    // than `required`. `required` is taken verbatim — no sign or
+    // finiteness pre-check is applied.
+    pub fn check_min_perpendicular_width(
+        &self,
+        required: f32,
+    ) -> Result<(), SimulationBoxError> {
+        let widths = self.perpendicular_widths();
+        let directions: [&'static str; 3] = ["a", "b", "c"];
+        for d in 0..3 {
+            if widths[d] < required {
+                return Err(SimulationBoxError::PerpendicularWidthTooSmall {
+                    direction: directions[d],
+                    width: widths[d],
+                    required,
+                });
+            }
+        }
+        Ok(())
+    }
+

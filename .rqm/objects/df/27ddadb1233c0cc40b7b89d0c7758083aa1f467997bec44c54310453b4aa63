@@ -1,0 +1,51 @@
+### Accessors <!-- rq-b015ef15 -->
+
+- `SimulationBox::lattice(&self) -> [f32; 6]`
+  - Returns `[lx, ly, lz, xy, xz, yz]` in that order.
+
+- `SimulationBox::lx(&self) -> f32`, `SimulationBox::ly(&self) -> f32`,
+  `SimulationBox::lz(&self) -> f32`, `SimulationBox::xy(&self) -> f32`,
+  `SimulationBox::xz(&self) -> f32`, `SimulationBox::yz(&self) -> f32`
+  - Per-parameter getters.
+
+- `SimulationBox::volume(&self) -> f32`
+  - Returns `lx * ly * lz` (multiplication left-to-right in `f32`). The
+    determinant of a lower-triangular matrix is the product of its
+    diagonal entries, so tilts do not enter.
+
+- `SimulationBox::min_perpendicular_width(&self) -> f32`
+  - Returns `min(w_a, w_b, w_c)` computed via the closed-form expressions
+    in *Perpendicular Widths*. All intermediate operations are `f32` in
+    the order shown.
+
+- `SimulationBox::check_min_perpendicular_width(&self, required: f32) -> Result<(), SimulationBoxError>`
+  - Computes the three perpendicular widths via the closed-form
+    expressions in *Perpendicular Widths* (no allocation), then scans
+    them in lattice-direction order `a → b → c` and returns
+    `Err(SimulationBoxError::PerpendicularWidthTooSmall { direction,
+    width, required })` on the first direction whose width is strictly
+    less than `required`. `direction` is `"a"`, `"b"`, or `"c"`
+    matching the failing direction; `width` is that direction's
+    `f32` perpendicular width. Returns `Ok(())` when every direction
+    has `width >= required`.
+  - The scan order is fixed at `a → b → c`. When more than one
+    direction fails, the variant reports the lowest-indexed failing
+    direction; remaining directions are not inspected.
+  - `required` is taken verbatim — no transformation or sign check is
+    applied. A `required <= 0` always returns `Ok(())` because every
+    `f32` perpendicular width produced by a valid box is strictly
+    positive. A non-finite `required` (NaN or infinity) yields
+    `Err(...)` for direction `"a"` because every `f32 < NaN` and every
+    finite width is `< +inf`.
+  - The widths' computation is pure `f32` in the order shown by
+    `perpendicular_widths`; two calls with identical `required` on the
+    same `SimulationBox` produce byte-identical outcomes.
+
+- `SimulationBox::generation(&self) -> u64`
+  - Returns the box's generation counter. The counter is `0` immediately
+    after construction and increments by `1` on every successful
+    `set_lattice` call. A consumer that caches a value derived from the
+    box's lattice records the generation alongside the cache and
+    re-derives the cached value whenever the observed generation differs
+    from the recorded one.
+

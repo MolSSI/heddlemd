@@ -1,0 +1,94 @@
+### Functions <!-- rq-3553aab2 -->
+
+- `NeighborListState::new_cell_list(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>`
+  - Constructs a `CellList`-mode state.
+  - Computes `n_cells` per lattice direction from
+    `floor(w_d / (r_cut + r_skin))` where `w_d` is the box's perpendicular
+    width along direction `d` (see `simulation-box.md`).
+  - Returns `BoxTooSmallForCells` if any direction has `n_cells < 3`.
+  - Returns `TooManyCells` if `n_cells_total` exceeds `u32::MAX`.
+  - Allocates every device buffer described in the *CellList*-mode field
+    list, including the persistent scratch buffers (`cell_indices`,
+    `cell_counts`, `write_cursors`) and the block-totals stack
+    (`scan_block_totals`). Reference positions start at zero;
+    `needs_rebuild` starts at `true`.
+  - Stores `r_cut` so the cache-refresh path (see *Box Generation
+    Tracking*) can recompute `n_cells` from a mutated box. `r_cut` is the
+    largest cutoff across every consumer of the shared list; the framework
+    computes this as the maximum of every `Potential::max_cutoff()` value
+    it observes.
+  - Records `cached_generation = sim_box.generation()`.
+
+- `NeighborListState::new_cell_list_only(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, n_cells_per_direction: [u32; 3]) -> Result<NeighborListState, NeighborListError>`
+  - Constructs a `CellListOnly`-mode state with explicit grid
+    dimensions, bypassing the `r_cut + r_skin` derivation used by
+    `new_cell_list`.
+  - Stores `n_cells = n_cells_per_direction` directly; the constructor
+    rejects any direction with `n_cells_per_direction[d] < 3` via
+    `BoxTooSmallForCells { direction, width: 0.0, required: 3.0 }`
+    (the `width: 0.0` field reflects that the rejection comes from the
+    grid spec, not from a measured box width).
+  - Allocates the cell-list scratch buffers (`cell_indices`,
+    `cell_counts`, `write_cursors`, `scan_block_totals`,
+    `sorted_particle_ids`, `cell_offsets`) sized to `n_cells_total`.
+    Does **not** allocate `neighbor_list`, `neighbor_counts`,
+    `reference_positions_*`, `disp_sq`, or `overflow_flag` (these
+    fields are absent from `CellListOnly`-mode states).
+  - `r_cut`, `r_skin`, `r_search_sq` are not stored.
+  - The state's `pre_step` rebuilds the cell list on every call,
+    unconditionally; the displacement-check kernel is never launched
+    in `CellListOnly` mode.
+  - Records `cached_generation = sim_box.generation()`. A box-generation
+    mismatch on subsequent `pre_step` calls triggers a layout refresh
+    that reverifies the grid against the new box (the `n_cells` value
+    is fixed; the box-generation refresh re-derives the cell sizes
+    implicitly through the kernels' fractional-coordinate math).
+
+- `NeighborListState::new_trivial(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize) -> Result<NeighborListState, NeighborListError>` <!-- inline -->
+  - Constructs a `Trivial`-mode state. The `sim_box` argument is accepted
+    for API uniformity; `Trivial` mode does not consult it.
+  - `max_neighbors = particle_count`.
+  - Allocates `neighbor_list` of length `particle_count *
+    particle_count` and `neighbor_counts` of length `particle_count`.
+  - Fills the buffers on the host so that
+    `neighbor_list[i * particle_count + k] == k` for every `(i, k)` in
+    `[0, particle_count) × [0, particle_count)`, and
+    `neighbor_counts[i] == particle_count` for every `i`. Uploads both
+    buffers once.
+  - When `particle_count == 0`, both buffers have length zero.
+
+- `NeighborListState::displacement_check(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<f32, NeighborListError>`
+  - Launches the displacement-check kernel against current positions and
+    the stored reference positions, using `(lx, ly, lz)` from `sim_box`
+    for the minimum-image PBC wrap.
+  - Downloads the per-atom buffer and returns the maximum displacement.
+  - Returns `0.0` when `particle_count == 0`.
+  - Returns `0.0` when the state is in `Trivial` mode (no rebuild
+    machinery exists).
+
+- `NeighborListState::rebuild(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`
+  - Runs the device-side cell-list pipeline (see *Cell List
+    Construction*) followed by the neighbor-list-build pipeline (see
+    *Neighbor List Construction*), using `(lx, ly, lz)` from `sim_box`
+    throughout. Updates reference positions.
+  - Performs no host-device transfers of particle data; all
+    intermediates (`cell_indices`, `cell_counts`, `cell_offsets`,
+    `write_cursors`, `sorted_particle_ids`) are populated on the device.
+  - Returns `NeighborListOverflow` when the build kernel set the
+    overflow flag.
+  - Returns `Ok(())` immediately when `particle_count == 0` or when the
+    state is in `Trivial` mode.
+
+- `NeighborListState::pre_step(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`
+  - Called by `ForceField::step` once per timestep before any slot's
+    `contribute` runs. In `CellList` mode:
+    1. Compares `sim_box.generation()` against `cached_generation`. On
+       mismatch refreshes the cell-layout cache (see *Box Generation
+       Tracking*), sets `needs_rebuild = true`, and skips the
+       displacement check for this step. May return
+       `BoxTooSmallForCells`.
+    2. Otherwise, if `!needs_rebuild`, runs the displacement check and
+       sets `needs_rebuild = true` if `max_disp > r_skin / 2`.
+    3. If `needs_rebuild`, runs the rebuild and clears the flag.
+    In `Trivial` mode this is a no-op.
+

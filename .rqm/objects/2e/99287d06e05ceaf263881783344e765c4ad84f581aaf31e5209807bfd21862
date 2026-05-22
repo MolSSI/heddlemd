@@ -1,0 +1,7 @@
+// rq-ad7eb40f
+#[derive(Debug, Clone, PartialEq)]
+pub enum NeighborListConfig {
+    AllPairs,
+    CellList { max_neighbors: u32, r_skin: f64 },
+}
+

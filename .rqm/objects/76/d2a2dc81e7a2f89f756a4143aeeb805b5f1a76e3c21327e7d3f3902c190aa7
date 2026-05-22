@@ -1,0 +1,28 @@
+### Types <!-- rq-fdf2db79 -->
+
+- `SimulationBox` — host-side, `Copy`. Carries six `f32` lattice
+  parameters (`lx`, `ly`, `lz`, `xy`, `xz`, `yz`) and a `u64` `generation`
+  counter. The constructor enforces invariants on the lattice parameters
+  and starts the generation at `0`; `set_lattice` enforces the same
+  invariants on each subsequent mutation and increments the generation
+  on success. All accessors are total.
+
+- `SimulationBoxError` — error type returned by the constructor, the
+  mutator, and `check_min_perpendicular_width`:
+  - `NonFiniteLatticeValue { name: &'static str, value: f32 }` — at least
+    one lattice parameter is NaN or infinite. `name` is one of `"lx"`,
+    `"ly"`, `"lz"`, `"xy"`, `"xz"`, `"yz"`.
+  - `NonPositiveDiagonal { name: &'static str, value: f32 }` — at least
+    one diagonal is finite but `<= 0.0`. `name` is one of `"lx"`, `"ly"`,
+    `"lz"`. Tilts (`xy`, `xz`, `yz`) are not subject to this check; any
+    finite sign or magnitude is accepted.
+  - `PerpendicularWidthTooSmall { direction: &'static str, width: f32, required: f32 }`
+    — at least one of the box's perpendicular widths is strictly less
+    than the supplied `required` value. `direction` is one of `"a"`,
+    `"b"`, `"c"` and identifies the first lattice direction (scanning
+    `a → b → c`) whose perpendicular width fails the threshold. `width`
+    is the failing direction's `f32` perpendicular width; `required` is
+    the supplied threshold. Only produced by
+    `check_min_perpendicular_width`; the constructor and mutator never
+    surface this variant.
+

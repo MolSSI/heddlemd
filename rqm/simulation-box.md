@@ -160,14 +160,14 @@ width.
 
 ### Types <!-- rq-fdf2db79 -->
 
-- `SimulationBox` — host-side, `Copy`. Carries six `f32` lattice <!-- rq-b75afb31 -->
+- `SimulationBox` — host-side, `Copy`. Carries six `f32` lattice
   parameters (`lx`, `ly`, `lz`, `xy`, `xz`, `yz`) and a `u64` `generation`
   counter. The constructor enforces invariants on the lattice parameters
   and starts the generation at `0`; `set_lattice` enforces the same
   invariants on each subsequent mutation and increments the generation
   on success. All accessors are total.
 
-- `SimulationBoxError` — error type returned by the constructor, the <!-- rq-aef9888b -->
+- `SimulationBoxError` — error type returned by the constructor, the
   mutator, and `check_min_perpendicular_width`:
   - `NonFiniteLatticeValue { name: &'static str, value: f32 }` — at least
     one lattice parameter is NaN or infinite. `name` is one of `"lx"`,
@@ -188,7 +188,7 @@ width.
 
 ### Constructor <!-- rq-b8070abb -->
 
-- `SimulationBox::new(lx: f32, ly: f32, lz: f32, xy: f32, xz: f32, yz: f32) -> Result<SimulationBox, SimulationBoxError>` <!-- rq-f0da71ea -->
+- `SimulationBox::new(lx: f32, ly: f32, lz: f32, xy: f32, xz: f32, yz: f32) -> Result<SimulationBox, SimulationBoxError>`
   - Validates each parameter in declaration order (`lx`, `ly`, `lz`, `xy`,
     `xz`, `yz`).
   - For each parameter, checks finiteness first (returns
@@ -203,25 +203,25 @@ width.
 
 ### Accessors <!-- rq-b015ef15 -->
 
-- `SimulationBox::lattice(&self) -> [f32; 6]` <!-- rq-e8be1a1c -->
+- `SimulationBox::lattice(&self) -> [f32; 6]`
   - Returns `[lx, ly, lz, xy, xz, yz]` in that order.
 
-- `SimulationBox::lx(&self) -> f32`, `SimulationBox::ly(&self) -> f32`, <!-- rq-f73a0f99 -->
+- `SimulationBox::lx(&self) -> f32`, `SimulationBox::ly(&self) -> f32`,
   `SimulationBox::lz(&self) -> f32`, `SimulationBox::xy(&self) -> f32`,
   `SimulationBox::xz(&self) -> f32`, `SimulationBox::yz(&self) -> f32`
   - Per-parameter getters.
 
-- `SimulationBox::volume(&self) -> f32` <!-- rq-3b9ed390 -->
+- `SimulationBox::volume(&self) -> f32`
   - Returns `lx * ly * lz` (multiplication left-to-right in `f32`). The
     determinant of a lower-triangular matrix is the product of its
     diagonal entries, so tilts do not enter.
 
-- `SimulationBox::min_perpendicular_width(&self) -> f32` <!-- rq-5fe22acb -->
+- `SimulationBox::min_perpendicular_width(&self) -> f32`
   - Returns `min(w_a, w_b, w_c)` computed via the closed-form expressions
     in *Perpendicular Widths*. All intermediate operations are `f32` in
     the order shown.
 
-- `SimulationBox::check_min_perpendicular_width(&self, required: f32) -> Result<(), SimulationBoxError>` <!-- rq-1a7bd47a -->
+- `SimulationBox::check_min_perpendicular_width(&self, required: f32) -> Result<(), SimulationBoxError>`
   - Computes the three perpendicular widths via the closed-form
     expressions in *Perpendicular Widths* (no allocation), then scans
     them in lattice-direction order `a → b → c` and returns
@@ -244,7 +244,7 @@ width.
     `perpendicular_widths`; two calls with identical `required` on the
     same `SimulationBox` produce byte-identical outcomes.
 
-- `SimulationBox::generation(&self) -> u64` <!-- rq-dc17132d -->
+- `SimulationBox::generation(&self) -> u64`
   - Returns the box's generation counter. The counter is `0` immediately
     after construction and increments by `1` on every successful
     `set_lattice` call. A consumer that caches a value derived from the
@@ -254,7 +254,7 @@ width.
 
 ### Mutators <!-- rq-b033ac1d -->
 
-- `SimulationBox::set_lattice(&mut self, lx: f32, ly: f32, lz: f32, xy: f32, xz: f32, yz: f32) -> Result<(), SimulationBoxError>` <!-- rq-71fbbafb -->
+- `SimulationBox::set_lattice(&mut self, lx: f32, ly: f32, lz: f32, xy: f32, xz: f32, yz: f32) -> Result<(), SimulationBoxError>`
   - Validates the six parameters in declaration order (`lx`, `ly`, `lz`,
     `xy`, `xz`, `yz`) using the same finiteness-then-positivity rules as
     the constructor.
@@ -267,15 +267,15 @@ width.
 
 ### Periodic-boundary operations <!-- rq-fb632dfc -->
 
-- `SimulationBox::minimum_image(&self, displacement: [f32; 3]) -> [f32; 3]` <!-- rq-d49c9093 -->
+- `SimulationBox::minimum_image(&self, displacement: [f32; 3]) -> [f32; 3]`
   - Applies the *Wrap Algorithm* and returns the minimum-image
     displacement. The image triple `(k_a, k_b, k_c)` is discarded.
 
-- `SimulationBox::wrap_position(&self, position: [f32; 3]) -> [f32; 3]` <!-- rq-9b1c84c3 -->
+- `SimulationBox::wrap_position(&self, position: [f32; 3]) -> [f32; 3]`
   - Applies the *Wrap Algorithm* and returns the position inside the
     primary image. The image triple is discarded.
 
-- `SimulationBox::wrap_position_with_image_count(&self, position: [f32; 3]) -> ([f32; 3], [i32; 3])` <!-- rq-a4d5e711 -->
+- `SimulationBox::wrap_position_with_image_count(&self, position: [f32; 3]) -> ([f32; 3], [i32; 3])`
   - Applies the *Wrap Algorithm* and returns both the wrapped position
     and the integer image triple `(k_a, k_b, k_c)`. Integrator drift
     kernels use the integer triple to update the per-particle image
@@ -283,12 +283,12 @@ width.
     `wrapped + k_a · a + k_b · b + k_c · c` is invariant under the
     wrap.
 
-- `SimulationBox::fractional_coords(&self, position: [f32; 3]) -> [f32; 3]` <!-- rq-1a3ec0c8 -->
+- `SimulationBox::fractional_coords(&self, position: [f32; 3]) -> [f32; 3]`
   - Returns `s = H^(-T) · position` computed via back-substitution in the
     order `s_c → s_b → s_a` described in *Lattice Convention*. All
     operations are `f32` in the order shown.
 
-- `SimulationBox::cartesian_coords(&self, fractional: [f32; 3]) -> [f32; 3]` <!-- rq-be7b9fe6 -->
+- `SimulationBox::cartesian_coords(&self, fractional: [f32; 3]) -> [f32; 3]`
   - Returns `v = H^T · fractional` computed via forward substitution in
     the order `v_z → v_y → v_x` described in *Lattice Convention*. All
     operations are `f32` in the order shown.

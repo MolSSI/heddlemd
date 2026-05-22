@@ -1,0 +1,32 @@
+### Periodic-boundary operations <!-- rq-fb632dfc -->
+
+- `SimulationBox::minimum_image(&self, displacement: [f32; 3]) -> [f32; 3]`
+  - Applies the *Wrap Algorithm* and returns the minimum-image
+    displacement. The image triple `(k_a, k_b, k_c)` is discarded.
+
+- `SimulationBox::wrap_position(&self, position: [f32; 3]) -> [f32; 3]`
+  - Applies the *Wrap Algorithm* and returns the position inside the
+    primary image. The image triple is discarded.
+
+- `SimulationBox::wrap_position_with_image_count(&self, position: [f32; 3]) -> ([f32; 3], [i32; 3])`
+  - Applies the *Wrap Algorithm* and returns both the wrapped position
+    and the integer image triple `(k_a, k_b, k_c)`. Integrator drift
+    kernels use the integer triple to update the per-particle image
+    flags so that the unwrapped position
+    `wrapped + k_a · a + k_b · b + k_c · c` is invariant under the
+    wrap.
+
+- `SimulationBox::fractional_coords(&self, position: [f32; 3]) -> [f32; 3]`
+  - Returns `s = H^(-T) · position` computed via back-substitution in the
+    order `s_c → s_b → s_a` described in *Lattice Convention*. All
+    operations are `f32` in the order shown.
+
+- `SimulationBox::cartesian_coords(&self, fractional: [f32; 3]) -> [f32; 3]`
+  - Returns `v = H^T · fractional` computed via forward substitution in
+    the order `v_z → v_y → v_x` described in *Lattice Convention*. All
+    operations are `f32` in the order shown.
+
+`minimum_image` and `wrap_position` produce identical output for identical
+input; they exist as separate names so call sites communicate intent
+(displacement vs absolute position).
+

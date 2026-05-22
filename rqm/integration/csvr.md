@@ -221,7 +221,7 @@ log-write time.
 
 ### Types <!-- rq-1c26a108 -->
 
-- `CsvrThermostat` — implements the `Thermostat` trait declared in <!-- rq-47d91c7d -->
+- `CsvrThermostat` — implements the `Thermostat` trait declared in
   `framework.md`. Registered in `ThermostatRegistry::with_builtins`
   under `kind_name() == "csvr"`. Fields:
 
@@ -251,7 +251,7 @@ log-write time.
   fields are public for parity with other slots' state so a future
   restart-from-checkpoint flow can restore them explicitly.
 
-- `CsvrBuilder` — implements `ThermostatBuilder` with <!-- rq-750b828f -->
+- `CsvrBuilder` — implements `ThermostatBuilder` with
   `kind_name() == "csvr"`. `build(gpu, particle_count, n_constraints,
   params)` deserialises `CsvrParams` from `params`, computes
   `g_dof = max(1, 3 · particle_count − n_constraints − 3)`, allocates
@@ -263,8 +263,8 @@ log-write time.
 `CsvrThermostat` overrides the diagnostic-column trait methods
 declared in `framework.md`:
 
-- `log_column_names() -> &'static ["csvr_conserved"]`. <!-- rq-8ee58ec1 -->
-- `log_column_values(ke, pe) -> vec![ke + pe − self.cumulative_injection]`. <!-- rq-2a5de2ab -->
+- `log_column_names() -> &'static ["csvr_conserved"]`.
+- `log_column_values(ke, pe) -> vec![ke + pe − self.cumulative_injection]`.
 
 `apply_pre` is left at its trait default (no-op).
 

@@ -1,0 +1,38 @@
+    // rq-b033ac1d
+    pub fn set_lattice(
+        &mut self,
+        lx: f32,
+        ly: f32,
+        lz: f32,
+        xy: f32,
+        xz: f32,
+        yz: f32,
+    ) -> Result<(), SimulationBoxError> {
+        validate_lattice(lx, ly, lz, xy, xz, yz)?;
+        self.lx = lx;
+        self.ly = ly;
+        self.lz = lz;
+        self.xy = xy;
+        self.xz = xz;
+        self.yz = yz;
+        self.generation = self.generation.wrapping_add(1);
+        Ok(())
+    }
+
+    // Multiply all six lattice parameters by `factor` in a single
+    // mutation that bumps the generation counter exactly once. Preserves
+    // the triclinic shape (every angle ratio is invariant). Convenience
+    // over `set_lattice(factor*lx, ...)`; provided so callers cannot
+    // accidentally apply different scale factors to the orthogonal and
+    // shear components.
+    pub fn rescale_isotropic(&mut self, factor: f32) -> Result<(), SimulationBoxError> {
+        self.set_lattice(
+            self.lx * factor,
+            self.ly * factor,
+            self.lz * factor,
+            self.xy * factor,
+            self.xz * factor,
+            self.yz * factor,
+        )
+    }
+

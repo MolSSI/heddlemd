@@ -1,0 +1,29 @@
+### Functions and methods <!-- rq-e38eed0c -->
+
+- `run_minimization_phase(phase: &MinimizationConfig, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, registries: &Registries, gpu: &GpuContext) -> Result<MinimizationPhaseSummary, RunnerError>`
+  - The runner's per-phase entry point for a minimization phase.
+    Constructs the minimizer slot via
+    `registries.minimizers.build(...)`, opens the `.minlog` and
+    optional `.xyz` writers, runs the loop documented under
+    *Algorithm*, flushes and closes the writers, drains the per-phase
+    `Timings`, and returns a summary suitable for the runner's final
+    summary line.
+  - Non-convergence after `max_iterations` returns
+    `Err(RunnerError::MinimizerNonConvergence { phase:
+    phase.name.clone(), iterations, final_force, final_step })`. The
+    runner propagates the error and exits with code `2`. No further
+    phases run.
+
+- `Minimizer::step(&mut self, buffers, sim_box, force_field, constraint, timings)`
+  - As described under *Types*.
+
+- `Minimizer::check_convergence(&self, report)`
+  - As described under *Types*.
+
+- `MinimizerRegistry::with_builtins() -> MinimizerRegistry`
+  - Returns a registry with one registered builder
+    (`SteepestDescentBuilder`).
+
+- `MinlogWriter::open`, `MinlogWriter::write_row`,
+  `MinlogWriter::flush` — as described under *Types*.
+

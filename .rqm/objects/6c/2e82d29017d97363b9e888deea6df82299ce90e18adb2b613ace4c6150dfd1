@@ -1,0 +1,52 @@
+// rq-fdf2db79
+#[derive(Debug, thiserror::Error)]
+pub enum SimulationBoxError {
+    #[error("non-finite simulation-box lattice value for `{name}`: {value}")]
+    NonFiniteLatticeValue { name: &'static str, value: f32 },
+    #[error("non-positive simulation-box diagonal for `{name}`: {value}")]
+    NonPositiveDiagonal { name: &'static str, value: f32 },
+    #[error("simulation-box perpendicular width along lattice direction `{direction}` is {width}, below the required {required}")]
+    PerpendicularWidthTooSmall {
+        direction: &'static str,
+        width: f32,
+        required: f32,
+    },
+}
+
+fn check_finite(name: &'static str, value: f32) -> Result<(), SimulationBoxError> {
+    if !value.is_finite() {
+        return Err(SimulationBoxError::NonFiniteLatticeValue { name, value });
+    }
+    Ok(())
+}
+
+fn check_diagonal(name: &'static str, value: f32) -> Result<(), SimulationBoxError> {
+    check_finite(name, value)?;
+    if value <= 0.0 {
+        return Err(SimulationBoxError::NonPositiveDiagonal { name, value });
+    }
+    Ok(())
+}
+
+fn check_tilt(name: &'static str, value: f32) -> Result<(), SimulationBoxError> {
+    check_finite(name, value)
+}
+
+fn validate_lattice(
+    lx: f32,
+    ly: f32,
+    lz: f32,
+    xy: f32,
+    xz: f32,
+    yz: f32,
+) -> Result<(), SimulationBoxError> {
+    check_diagonal("lx", lx)?;
+    check_diagonal("ly", ly)?;
+    check_diagonal("lz", lz)?;
+    check_tilt("xy", xy)?;
+    check_tilt("xz", xz)?;
+    check_tilt("yz", yz)?;
+    Ok(())
+}
+
+impl SimulationBox {

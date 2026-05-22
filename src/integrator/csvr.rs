@@ -14,7 +14,7 @@ use crate::timings::{KernelStage, Timings};
 use super::philox::philox_normal;
 use super::{Thermostat, ThermostatBuilder, ThermostatError};
 
-// rq-1f87880c
+// rq-6c5b4246
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CsvrParams {
@@ -40,7 +40,7 @@ fn require_finite_positive(field: &str, value: f64) -> Result<(), ConfigError> {
     Ok(())
 }
 
-// rq-47d91c7d
+// rq-1c26a108
 #[derive(Debug)]
 pub struct CsvrThermostat {
     pub temperature: f64,
@@ -113,7 +113,7 @@ impl CsvrThermostat {
 }
 
 impl Thermostat for CsvrThermostat {
-    // rq-7a124d43
+    // rq-c8848b7f
     fn apply_post(
         &mut self,
         buffers: &mut ParticleBuffers,
@@ -143,12 +143,12 @@ impl Thermostat for CsvrThermostat {
         Ok(())
     }
 
-    // rq-8ee58ec1
+    // rq-5aae9633
     fn log_column_names(&self) -> &'static [&'static str] {
         &["csvr_conserved"]
     }
 
-    // rq-2a5de2ab
+    // rq-5aae9633
     fn log_column_values(
         &self,
         kinetic_energy: f64,
@@ -158,7 +158,7 @@ impl Thermostat for CsvrThermostat {
     }
 }
 
-// rq-750b828f
+// rq-1c26a108
 #[derive(Debug)]
 pub struct CsvrBuilder;
 

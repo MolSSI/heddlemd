@@ -1,0 +1,12 @@
+// rq-187a5252
+/// Resolved per-phase outputs for a `[[minimization]]` entry.
+#[derive(Debug, Clone)]
+pub struct MinimizationOutputConfig {
+    pub minlog_path: PathBuf,
+    pub minlog_every: u64,
+    pub trajectory_path: PathBuf,
+    pub trajectory_every: u64,
+    pub include_images: bool,
+    pub timings_path: PathBuf,
+}
+

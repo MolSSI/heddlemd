@@ -1,0 +1,18 @@
+// rq-b719c42c
+#[derive(Debug, Clone)]
+pub enum AngleTypeConfig {
+    Harmonic {
+        name: String,
+        k_theta: f64,
+        theta_0: f64,
+    },
+}
+
+impl AngleTypeConfig {
+    pub fn name(&self) -> &str {
+        match self {
+            AngleTypeConfig::Harmonic { name, .. } => name,
+        }
+    }
+}
+

@@ -1,0 +1,13 @@
+### Mutators <!-- rq-b033ac1d -->
+
+- `SimulationBox::set_lattice(&mut self, lx: f32, ly: f32, lz: f32, xy: f32, xz: f32, yz: f32) -> Result<(), SimulationBoxError>`
+  - Validates the six parameters in declaration order (`lx`, `ly`, `lz`,
+    `xy`, `xz`, `yz`) using the same finiteness-then-positivity rules as
+    the constructor.
+  - On validation failure: returns the matching `SimulationBoxError`;
+    the box's stored lattice and `generation` counter are left
+    unchanged.
+  - On success: replaces all six parameters with the new values and
+    increments `generation` by `1` (wrapping at `u64::MAX`; collisions
+    take `2^64` mutations and are not considered).
+

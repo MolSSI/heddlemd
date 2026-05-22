@@ -1,0 +1,12 @@
+// rq-b719c42c
+#[derive(Debug, Clone)]
+pub struct OutputConfig {
+    pub trajectory_path: PathBuf,
+    pub trajectory_every: u64,
+    pub include_velocities: bool,
+    pub include_images: bool,
+    pub log_path: PathBuf,
+    pub log_every: u64,
+    pub timings_path: PathBuf,
+}
+

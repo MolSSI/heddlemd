@@ -1,0 +1,256 @@
+### Types <!-- rq-187a5252 -->
+
+- `Minimizer` — object-safe trait implemented by every concrete
+  minimizer slot.
+
+  ```rust
+  pub trait Minimizer: std::fmt::Debug + Send {
+      /// Execute one outer iteration. Reads `buffers.forces_*` at
+      /// the current accepted positions (populated by the runner via
+      /// `force_field.step` before the call), proposes a trial
+      /// position, optionally projects constraints, evaluates the
+      /// trial energy via the supplied `force_field` callback,
+      /// accepts or rejects, and reports the outcome.
+      fn step(
+          &mut self,
+          buffers: &mut ParticleBuffers,
+          sim_box: &SimulationBox,
+          force_field: &mut dyn ForceFieldCallback,
+          constraint: Option<&mut dyn Constraint>,
+          timings: &mut Timings,
+      ) -> Result<MinimizerStepReport, MinimizerError>;
+
+      /// Convergence-check helper used by the runner between calls
+      /// to `step`. Returns `Some(reason)` when the most recent
+      /// accepted state satisfies any of the configured criteria,
+      /// or `None` to continue iterating.
+      fn check_convergence(
+          &self,
+          report: &MinimizerStepReport,
+      ) -> Option<MinimizerConvergence>;
+  }
+  ```
+
+  - `step` is called once per outer iteration by the runner. It must
+    not call `force_field.step` more than once per call (one trial
+    evaluation per iteration). It must not advance any output
+    counter; the runner owns the iteration counter.
+  - `ForceFieldCallback` is a thin trait re-exposing
+    `force_field.step(buffers, sim_box, timings)` for the minimizer
+    to invoke; the runner's `ForceField` implements it. The
+    indirection keeps the `Minimizer` trait object-safe and avoids
+    threading the full `ForceField` type through the trait surface.
+  - The runner exposes the constraint slot to `step` as
+    `Option<&mut dyn Constraint>` so the minimizer can invoke
+    `apply_position_projection_only` after the position update.
+    Passing `None` is permitted (no constraints).
+  - `check_convergence` is pure (no kernel launches, no buffer
+    mutations).
+
+- `MinimizerStepReport` — outcome of one `step` call.
+
+  ```rust
+  pub struct MinimizerStepReport {
+      pub accepted: bool,
+      pub energy: f64,       // joules, at the post-step accepted positions
+      pub max_force: f64,    // newtons, at the post-step accepted positions
+      pub step_size: f64,    // metres, the step used for this iteration's trial
+      pub prev_energy: f64,  // joules, accepted energy before this iteration
+  }
+  ```
+
+  - `energy` is the accepted-state energy. For an accepted iteration
+    it is the new trial's energy; for a rejected iteration it is the
+    pre-trial accepted energy (unchanged from the previous row).
+  - `max_force` is the accepted-state `F_max`. Same accepted-vs-
+    rejected semantics as `energy`.
+  - `prev_energy` is the accepted energy *entering* the iteration
+    (i.e., before any trial). Used by the runner's energy-tolerance
+    check.
+
+- `MinimizerConvergence` — enum reporting why the loop ended.
+
+  ```rust
+  pub enum MinimizerConvergence {
+      ForceTolerance,
+      EnergyTolerance,
+      ForceZero,
+      MaxIterations,
+  }
+  ```
+
+  - `ForceTolerance` — `F_max ≤ force_tolerance` after the iteration.
+  - `EnergyTolerance` — `|ΔE| / max(|E_prev|, |E_curr|, 1e-30) ≤
+    energy_tolerance` between consecutive accepted iterations.
+  - `ForceZero` — `F_max == 0.0` at iteration `k`'s accepted state
+    (force evaluation produced an exact-zero gradient). Used for the
+    `particle_count == 0` case and for already-converged inputs.
+  - `MaxIterations` — the iteration counter reached
+    `max_iterations` without any physical criterion firing. Drives
+    `RunnerError::MinimizerNonConvergence`.
+
+- `MinimizerError` — error type returned by every trait method.
+  Variants:
+  - `Gpu(GpuError)` — CUDA driver / kernel-launch failure.
+  - `Timings(TimingsError)` — CUDA event recording failure.
+  - `ForceField(ForceFieldError)` — the embedded
+    `force_field.step` call failed.
+  - `Constraint(ConstraintError)` — the embedded
+    `apply_position_projection_only` call failed.
+  - `UnknownKind(String)` — registry has no builder for the requested
+    minimizer kind.
+
+  The runner's `RunnerError` wraps this via
+  `RunnerError::Minimizer(MinimizerError)`.
+
+- `MinimizerRegistry` — host-side registry of minimizer builders.
+  Holds `builders: Vec<Box<dyn MinimizerBuilder>>`.
+
+  Methods:
+
+  - `MinimizerRegistry::with_builtins() -> MinimizerRegistry` —
+    constructs a registry pre-populated with the `steepest-descent`
+    builder.
+  - `MinimizerRegistry::register(&mut self, builder: Box<dyn MinimizerBuilder>)`
+    — appends a builder. Duplicate `kind_name()` is not detected at
+    registration; the lookup returns the first match.
+  - `MinimizerRegistry::lookup(&self, kind: &str) -> Option<&dyn MinimizerBuilder>`
+    — returns the first registered builder whose `kind_name()`
+    equals `kind`.
+  - `MinimizerRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Minimizer>, MinimizerError>`
+    — looks up the builder whose `kind_name()` equals `slot.kind` and
+    delegates `build(gpu, particle_count, n_constraints,
+    &slot.params)`. Returns
+    `MinimizerError::UnknownKind(slot.kind.clone())` when no builder
+    matches.
+
+  `Registries` (the runner-level bundle in `simulation-runner.md`)
+  carries a new field `minimizers: MinimizerRegistry`, populated by
+  `MinimizerRegistry::with_builtins()` in
+  `Registries::with_builtins()`.
+
+- `MinimizerBuilder` — trait describing a registered minimizer
+  implementation. Implementations are stateless and self-register at
+  construction time.
+
+  ```rust
+  pub trait MinimizerBuilder: std::fmt::Debug + Send + Sync {
+      fn kind_name(&self) -> &'static str;
+
+      fn validate_params(&self, params: &toml::Value)
+          -> Result<(), ConfigError>;
+
+      /// `true` iff this minimizer can drive a constraint slot whose
+      /// `apply_position_projection_only` predicate is `true`. The
+      /// default returns `true`; future minimizers that cannot
+      /// participate in constrained minimization may override.
+      fn supports_constraints(&self, _params: &toml::Value) -> bool { true }
+
+      fn build(
+          &self,
+          gpu: &GpuContext,
+          particle_count: usize,
+          n_constraints: usize,
+          params: &toml::Value,
+      ) -> Result<Box<dyn Minimizer>, MinimizerError>;
+  }
+  ```
+
+  - `validate_params` is a pure function of the supplied parameters
+    and is called by `Config::validate_against` before any GPU work.
+  - The `steepest-descent` builder's `validate_params` deserialises
+    every optional parameter, fills in defaults for absent fields,
+    enforces domains (positivity, ranges, `max_step ≥ initial_step`,
+    `step_increase ≥ 1.0`, `0.0 < step_decrease < 1.0`), and rejects
+    unknown fields.
+  - `build` constructs the device-side slot. Allocations include a
+    length-`particle_count` snapshot buffer for rollback and two
+    length-1 reduction scratches (`f_max_scratch`, `pe_scratch`).
+    `particle_count == 0` is permitted; reduction scratches still
+    allocate at length 1.
+
+- `SteepestDescentMinimizer` — concrete implementor of `Minimizer`
+  for `kind = "steepest-descent"`. Fields:
+  - `device: Arc<CudaDevice>`
+  - `particle_count: usize`
+  - `n_constraints: usize`
+  - `initial_step: f32`
+  - `max_step: f32`
+  - `step_increase: f32`
+  - `step_decrease: f32`
+  - `force_tolerance: f64`
+  - `energy_tolerance: f64`
+  - `max_iterations: u64`
+  - `current_step: f32` — the accumulated adaptive step size; reset
+    to `initial_step` at slot construction.
+  - `iteration: u64` — phase-local iteration counter owned by the
+    minimizer for diagnostic purposes (the runner also tracks
+    iterations independently for the `.minlog`).
+  - `snapshot_x: CudaSlice<f32>`, `snapshot_y: CudaSlice<f32>`,
+    `snapshot_z: CudaSlice<f32>` — per-particle position snapshot
+    captured before each trial and used to roll back on rejection.
+  - `f_max_scratch: CudaSlice<f32>` — length-1 device buffer for the
+    deterministic `F_max` reduction.
+  - `pe_scratch: CudaSlice<f32>` — length-1 device buffer for the
+    deterministic total-potential-energy reduction.
+
+- `MinimizationConfig` — parsed `[[minimization]]` entry. Lives in
+  `crate::io::config` alongside `PhaseConfig`.
+
+  ```rust
+  pub struct MinimizationConfig {
+      pub name: String,
+      pub algorithm: SlotConfig,
+      pub output: MinimizationOutputConfig,
+  }
+  ```
+
+- `MinimizationOutputConfig` — parsed `[minimization.output]` table
+  with resolved paths and populated defaults.
+
+  ```rust
+  pub struct MinimizationOutputConfig {
+      pub minlog_path: PathBuf,
+      pub minlog_every: u64,
+      pub trajectory_path: PathBuf,
+      pub trajectory_every: u64,
+      pub include_images: bool,
+      pub timings_path: PathBuf,
+  }
+  ```
+
+- `PhaseKind` — runtime-level discriminated union over the unified
+  phase sequence. Lives in `crate::runner`.
+
+  ```rust
+  pub enum PhaseKind {
+      Md(PhaseConfig),
+      Minimization(MinimizationConfig),
+  }
+  ```
+
+  The `Config` type's `phases` field is replaced by
+  `phases: Vec<PhaseKind>` (see `io/config-schema.md` for the
+  config-schema-level statement of this).
+
+- `MinlogWriter` — handle to an open `.minlog` file. Fields are
+  private; the type encapsulates the buffered writer. The header
+  emitted at open is exactly
+  `iter,energy,max_force,step,accepted\n`.
+
+  Methods:
+
+  - `MinlogWriter::open(path: &Path) -> Result<MinlogWriter, MinlogWriterError>`
+    — creates the file with `OpenOptions::new().write(true).create_new(true)`;
+    returns `OutputExists { path }` when the file already exists; writes
+    the header line immediately.
+  - `MinlogWriter::write_row(&mut self, iter: u64, energy: f64, max_force: f64, step: f64, accepted: bool) -> Result<(), MinlogWriterError>`
+    — writes one CSV row in the format described under *Output /
+    `.minlog` format*. The `accepted` bool serialises as the integer
+    `1` or `0`.
+  - `MinlogWriter::flush(&mut self) -> Result<(), MinlogWriterError>`
+    — flushes the internal buffer.
+
+- `MinlogWriterError` — error type. Variants `OutputExists { path:
+  PathBuf }` and `Io(String)`, parallel to `LogWriterError`.
+

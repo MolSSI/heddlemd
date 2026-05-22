@@ -1,0 +1,13 @@
+### Launch configuration <!-- rq-03d9869d -->
+
+- `spme_real_pair_force`: 16×16×1 = 256 threads/block, grid
+  `(ceil(max_neighbors/16), ceil(N/16), 1)`. Matches the LJ kernel.
+- `spme_charge_spread`: one thread per real grid cell, block size 256,
+  grid `ceil(M / 256)` where `M = n_a · n_b · n_c`.
+- `spme_influence_multiply`: one thread per complex grid cell, block
+  size 256, grid `ceil(M_complex / 256)`.
+- `spme_force_gather`: one thread per particle, block size 256, grid
+  `ceil(N / 256)`.
+
+All kernels run on the default stream carried by `particle_buffers.device`.
+

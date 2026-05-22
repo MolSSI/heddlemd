@@ -1,0 +1,9 @@
+### Functions <!-- rq-7bae4b69 -->
+
+- `coulomb_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &CoulombParameters, atom_excl_offsets: &CudaSlice<u32>, atom_excl_partners: &CudaSlice<u32>, atom_excl_coul_scales: &CudaSlice<f32>, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>`
+  - Launches the `coulomb_pair_force` kernel with the layout described
+    in *Launch Configuration*.
+  - When `particle_buffers.particle_count() == 0`, returns `Ok(())`
+    without launching.
+  - Returns the underlying `GpuError` if the kernel launch fails.
+

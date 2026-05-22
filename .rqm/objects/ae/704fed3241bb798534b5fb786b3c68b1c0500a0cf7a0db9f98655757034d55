@@ -1,0 +1,5 @@
+    // rq-b015ef15
+    pub fn lattice(&self) -> [f32; 6] {
+        [self.lx, self.ly, self.lz, self.xy, self.xz, self.yz]
+    }
+

@@ -1,0 +1,10 @@
+    // rq-5aae9633
+    fn log_column_values(
+        &self,
+        kinetic_energy: f64,
+        potential_energy: f64,
+    ) -> Vec<f64> {
+        vec![kinetic_energy + potential_energy - self.cumulative_injection]
+    }
+}
+

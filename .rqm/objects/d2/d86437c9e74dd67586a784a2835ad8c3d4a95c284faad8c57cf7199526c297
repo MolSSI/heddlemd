@@ -1,0 +1,6 @@
+    // rq-b015ef15
+    pub fn min_perpendicular_width(&self) -> f32 {
+        let [w_a, w_b, w_c] = self.perpendicular_widths();
+        w_a.min(w_b).min(w_c)
+    }
+

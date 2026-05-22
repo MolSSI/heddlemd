@@ -338,12 +338,12 @@ lifetime of the run.
 
 ### Types <!-- rq-ad7eb40f -->
 
-- `NeighborListConfig` — value of the parsed `[neighbor_list]` table. <!-- rq-060b1fab -->
+- `NeighborListConfig` — value of the parsed `[neighbor_list]` table.
   Variants:
   - `AllPairs`
   - `CellList { max_neighbors: u32, r_skin: f64 }`
 
-- `NeighborListState` — host-side wrapper carrying the device buffers <!-- rq-b2d68288 -->
+- `NeighborListState` — host-side wrapper carrying the device buffers
   and parameters that make up the shared neighbor list. The state is in
   one of two modes, fixed at construction.
 
@@ -401,7 +401,7 @@ lifetime of the run.
   `neighbor_list` and `neighbor_counts` buffers are populated once at
   construction and never modified.
 
-- `NeighborListMode` — discriminator. Variants: <!-- inline --> <!-- inline --> <!-- rq-ff424773 -->
+- `NeighborListMode` — discriminator. Variants: <!-- inline --> <!-- inline -->
   - `Trivial`
   - `CellList` — the cell-list-mode state described above; produces both
     the cell-list output (sorted particle IDs and per-cell offsets) and a
@@ -411,7 +411,7 @@ lifetime of the run.
     gather kernels read `sorted_particle_ids` and `cell_offsets` but do
     not consult `neighbor_list` or `neighbor_counts`.
 
-- `NeighborListError` — error type. Variants: <!-- rq-d8e4407a -->
+- `NeighborListError` — error type. Variants:
   - `Gpu(GpuError)` — CUDA driver / kernel-launch failure.
   - `NeighborListOverflow { max: u32 }` — the build kernel detected an
     atom whose neighbor count would exceed `max_neighbors`. The
@@ -435,7 +435,7 @@ lifetime of the run.
 
 ### Functions <!-- rq-3553aab2 -->
 
-- `NeighborListState::new_cell_list(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>` <!-- rq-14033af1 -->
+- `NeighborListState::new_cell_list(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, r_cut: f32, max_neighbors: u32, r_skin: f32) -> Result<NeighborListState, NeighborListError>`
   - Constructs a `CellList`-mode state.
   - Computes `n_cells` per lattice direction from
     `floor(w_d / (r_cut + r_skin))` where `w_d` is the box's perpendicular
@@ -454,7 +454,7 @@ lifetime of the run.
     it observes.
   - Records `cached_generation = sim_box.generation()`.
 
-- `NeighborListState::new_cell_list_only(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, n_cells_per_direction: [u32; 3]) -> Result<NeighborListState, NeighborListError>` <!-- rq-d47caa3d -->
+- `NeighborListState::new_cell_list_only(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, n_cells_per_direction: [u32; 3]) -> Result<NeighborListState, NeighborListError>`
   - Constructs a `CellListOnly`-mode state with explicit grid
     dimensions, bypassing the `r_cut + r_skin` derivation used by
     `new_cell_list`.
@@ -479,7 +479,7 @@ lifetime of the run.
     is fixed; the box-generation refresh re-derives the cell sizes
     implicitly through the kernels' fractional-coordinate math).
 
-- `NeighborListState::new_trivial(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize) -> Result<NeighborListState, NeighborListError>` <!-- inline --> <!-- rq-c96fd9d2 -->
+- `NeighborListState::new_trivial(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize) -> Result<NeighborListState, NeighborListError>` <!-- inline -->
   - Constructs a `Trivial`-mode state. The `sim_box` argument is accepted
     for API uniformity; `Trivial` mode does not consult it.
   - `max_neighbors = particle_count`.
@@ -492,7 +492,7 @@ lifetime of the run.
     buffers once.
   - When `particle_count == 0`, both buffers have length zero.
 
-- `NeighborListState::displacement_check(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<f32, NeighborListError>` <!-- rq-c49b2fe6 -->
+- `NeighborListState::displacement_check(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<f32, NeighborListError>`
   - Launches the displacement-check kernel against current positions and
     the stored reference positions, using `(lx, ly, lz)` from `sim_box`
     for the minimum-image PBC wrap.
@@ -501,7 +501,7 @@ lifetime of the run.
   - Returns `0.0` when the state is in `Trivial` mode (no rebuild
     machinery exists).
 
-- `NeighborListState::rebuild(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>` <!-- rq-7db97132 -->
+- `NeighborListState::rebuild(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`
   - Runs the device-side cell-list pipeline (see *Cell List
     Construction*) followed by the neighbor-list-build pipeline (see
     *Neighbor List Construction*), using `(lx, ly, lz)` from `sim_box`
@@ -514,7 +514,7 @@ lifetime of the run.
   - Returns `Ok(())` immediately when `particle_count == 0` or when the
     state is in `Trivial` mode.
 
-- `NeighborListState::pre_step(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>` <!-- rq-1217c816 -->
+- `NeighborListState::pre_step(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`
   - Called by `ForceField::step` once per timestep before any slot's
     `contribute` runs. In `CellList` mode:
     1. Compares `sim_box.generation()` against `cached_generation`. On
@@ -637,14 +637,14 @@ Each is a no-op when `particle_count == 0`.
 
 Neighbor-list-build pipeline:
 
-- `neighbor_displacement_squared(particle_buffers, reference_x, reference_y, reference_z, sim_box, disp_sq) -> Result<(), GpuError>` <!-- rq-884b5cd6 -->
-- `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>` <!-- rq-a1262872 -->
-- `copy_positions_into_reference(particle_buffers, reference_x, reference_y, reference_z) -> Result<(), GpuError>` <!-- rq-344f7af0 -->
+- `neighbor_displacement_squared(particle_buffers, reference_x, reference_y, reference_z, sim_box, disp_sq) -> Result<(), GpuError>`
+- `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>`
+- `copy_positions_into_reference(particle_buffers, reference_x, reference_y, reference_z) -> Result<(), GpuError>`
 
 Spatial-hash pipeline:
 
-- `compute_cell_indices_and_histogram(particle_buffers, sim_box, n_cells, cell_indices, cell_counts) -> Result<(), GpuError>` <!-- rq-10f6f831 -->
-- `prefix_scan_cell_counts(cell_counts, cell_offsets, scan_block_totals, n_cells_total, particle_count) -> Result<(), GpuError>` — <!-- rq-2ef5e222 -->
+- `compute_cell_indices_and_histogram(particle_buffers, sim_box, n_cells, cell_indices, cell_counts) -> Result<(), GpuError>`
+- `prefix_scan_cell_counts(cell_counts, cell_offsets, scan_block_totals, n_cells_total, particle_count) -> Result<(), GpuError>` —
   drives the recursive multi-level exclusive scan. Scans `cell_counts`
   into `cell_offsets` with `prefix_scan_local_blocks`, emitting
   `scan_block_totals[0]`; recursively scans each block-totals level of
@@ -653,9 +653,9 @@ Spatial-hash pipeline:
   `prefix_scan_finalize_offsets` to write the
   `cell_offsets[n_cells_total] = particle_count` sentinel. Issues
   `O(log(n_cells_total))` kernel launches.
-- `scatter_atoms_into_cells(cell_indices, cell_offsets, write_cursors, sorted_particle_ids, particle_count) -> Result<(), GpuError>` — <!-- rq-9d0cb192 -->
+- `scatter_atoms_into_cells(cell_indices, cell_offsets, write_cursors, sorted_particle_ids, particle_count) -> Result<(), GpuError>` —
   zeroes `write_cursors` before launching the scatter kernel.
-- `sort_cells_by_particle_id(cell_offsets, sorted_particle_ids, n_cells_total) -> Result<(), GpuError>` <!-- rq-165c4422 -->
+- `sort_cells_by_particle_id(cell_offsets, sorted_particle_ids, n_cells_total) -> Result<(), GpuError>`
 
 ## Launch Configuration <!-- rq-2e15fed7 -->
 

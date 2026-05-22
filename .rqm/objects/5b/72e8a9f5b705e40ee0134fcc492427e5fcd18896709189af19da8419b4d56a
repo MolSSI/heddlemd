@@ -1,0 +1,30 @@
+    // rq-c8848b7f
+    fn apply_post(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), ThermostatError> {
+        if buffers.particle_count() == 0 {
+            return Ok(());
+        }
+
+        timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
+        let k_old = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+        timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
+
+        self.draw_counter += 1;
+        let k_new = self.draw_new_kinetic_energy(k_old, dt);
+        self.cumulative_injection += k_new - k_old;
+        self.most_recent_ke = k_new;
+
+        if k_old > 0.0 && (k_new - k_old).abs() > 0.0 {
+            let factor = (k_new / k_old).sqrt() as f32;
+            timings.kernel_start(KernelStage::CSVR_RESCALE_VELOCITIES)?;
+            rescale_velocities(buffers, factor)?;
+            timings.kernel_stop(KernelStage::CSVR_RESCALE_VELOCITIES)?;
+        }
+
+        Ok(())
+    }
+

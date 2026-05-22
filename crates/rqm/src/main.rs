@@ -136,6 +136,17 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// Remove bullet-level alias stable_ids.
+    ///
+    /// Strips ` <!-- rq-A -->` annotations from markdown bullets,
+    /// substitutes `rq-A` -> `rq-C` in source stamps (where C is the
+    /// canonical), and deletes the alias entries. Without arguments,
+    /// dealiases every alias in the store.
+    Dealias {
+        /// Specific alias ids to remove. If empty, all aliases are
+        /// removed.
+        aliases: Vec<String>,
+    },
     /// Change a requirement's stable_id everywhere.
     ///
     /// Updates the ref, the meta, every child's parents, every
@@ -380,6 +391,32 @@ fn run(cli: Cli) -> Result<ExitCode> {
                     for p in &report.written {
                         println!("  wrote {}", p.display());
                     }
+                }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Cmd::Dealias { aliases } => {
+            let store = rqm::store::Store::open(&cli.rqm_dir)?;
+            let subset = if aliases.is_empty() {
+                None
+            } else {
+                Some(aliases.into_iter().map(rqm::object::StableId::new).collect())
+            };
+            let outcome = rqm::dealias::do_dealias(&store, subset)?;
+            println!("removed {} alias(es)", outcome.aliases_removed.len());
+            if outcome.blobs_rewritten > 0 {
+                println!("  blobs rewritten: {}", outcome.blobs_rewritten);
+            }
+            for id in &outcome.metas_updated {
+                println!("  updated meta: {id}");
+            }
+            for p in &outcome.paths_updated {
+                println!("  rewrote file-tree: {}", p.display());
+            }
+            if !outcome.paths_updated.is_empty() {
+                let report = rqm::materialize::build(&store, &root)?;
+                for p in &report.written {
+                    println!("  wrote {}", p.display());
                 }
             }
             Ok(ExitCode::SUCCESS)

@@ -1,0 +1,97 @@
+### Types <!-- rq-ad7eb40f -->
+
+- `NeighborListConfig` — value of the parsed `[neighbor_list]` table.
+  Variants:
+  - `AllPairs`
+  - `CellList { max_neighbors: u32, r_skin: f64 }`
+
+- `NeighborListState` — host-side wrapper carrying the device buffers
+  and parameters that make up the shared neighbor list. The state is in
+  one of two modes, fixed at construction.
+
+  Fields present in both modes:
+  - `device: Arc<CudaDevice>`
+  - `particle_count: usize`
+  - `max_neighbors: u32`
+  - `neighbor_list: CudaSlice<u32>` (length `N * max_neighbors`)
+  - `neighbor_counts: CudaSlice<u32>` (length `N`)
+  - `mode: NeighborListMode` — discriminator (`Trivial` or `CellList`).
+
+  Fields present only in `CellList` mode:
+  - `n_cells: [u32; 3]` — number of cells along each lattice direction
+    `(n_a, n_b, n_c)`.
+  - `n_cells_total: usize`
+  - `r_cut: f32` — the largest `Potential::max_cutoff()` value reported by
+    a consumer, captured at construction. Stored so the cache-refresh
+    path can recompute `n_cells` from a mutated box.
+  - `r_skin: f32`
+  - `r_search_sq: f32` — pre-computed `(r_cut + r_skin)²` for the build
+    kernel. Independent of the box; not refreshed on generation change.
+  - `cached_generation: u64` — the box's `generation()` value at the time
+    the cell-layout cache was populated. Compared against the live box's
+    generation on every `pre_step`; a mismatch refreshes the cache (see
+    *Box Generation Tracking*).
+  - `cell_indices: CudaSlice<u32>` (length `N`) — per-atom scratch
+    populated by the cell-indexing stage. Sized by `particle_count`; not
+    reallocated on box-generation refresh.
+  - `cell_counts: CudaSlice<u32>` (length `n_cells_total`) — per-cell
+    occupancy scratch populated by the histogram stage and consumed by
+    the prefix scan. Reallocated when `n_cells_total` changes.
+  - `cell_offsets: CudaSlice<u32>` (length `n_cells_total + 1`) — output
+    of the exclusive prefix scan over `cell_counts`. Reallocated when
+    `n_cells_total` changes.
+  - `write_cursors: CudaSlice<u32>` (length `n_cells_total`) — per-cell
+    atomic write cursors used by the scatter stage. Reset to zero at the
+    start of every rebuild. Reallocated when `n_cells_total` changes.
+  - `scan_block_totals: Vec<CudaSlice<u32>>` — the block-totals stack
+    for the recursive prefix scan. Buffer `l` holds the per-block
+    inclusive totals produced at recursion level `l` and has length
+    `ceil(n_cells_total / scan_block_size^(l + 1))`; the stack carries
+    one buffer per recursion level — `O(log(n_cells_total))` buffers, at
+    most four at the 256-thread block size since the buffer count is
+    bounded by the `u32` cell-addressing limit. Rebuilt as a whole when
+    `n_cells_total` changes.
+  - `sorted_particle_ids: CudaSlice<u32>` (length `N`)
+  - `reference_positions_x/y/z: CudaSlice<f32>` (length `N`)
+  - `disp_sq: CudaSlice<f32>` (length `N`) — scratch for the
+    displacement-check kernel.
+  - `overflow_flag: CudaSlice<u32>` (length `1`) — set non-zero by the
+    build kernel when any atom exceeds `max_neighbors`.
+  - `needs_rebuild: bool` — initial value `true`.
+
+  In `Trivial` mode the cell-list-specific fields are absent; the
+  `neighbor_list` and `neighbor_counts` buffers are populated once at
+  construction and never modified.
+
+- `NeighborListMode` — discriminator. Variants: <!-- inline --> <!-- inline -->
+  - `Trivial`
+  - `CellList` — the cell-list-mode state described above; produces both
+    the cell-list output (sorted particle IDs and per-cell offsets) and a
+    neighbor list.
+  - `CellListOnly` — same cell-list output, no neighbor list. Used by
+    the SPME reciprocal-space slot (see `spme.md`); the spread and
+    gather kernels read `sorted_particle_ids` and `cell_offsets` but do
+    not consult `neighbor_list` or `neighbor_counts`.
+
+- `NeighborListError` — error type. Variants:
+  - `Gpu(GpuError)` — CUDA driver / kernel-launch failure.
+  - `NeighborListOverflow { max: u32 }` — the build kernel detected an
+    atom whose neighbor count would exceed `max_neighbors`. The
+    simulation halts; the user must raise `max_neighbors` or reduce
+    density.
+  - `BoxTooSmallForCells { direction: &'static str, width: f32, required: f32 }`
+    — the simulation box's perpendicular width is smaller than
+    `3 * (r_cut + r_skin)` along the named lattice direction.
+    `direction` is one of `"a"`, `"b"`, `"c"`. `width` is the box's
+    perpendicular width along that direction; `required` is
+    `3 * (r_cut + r_skin)`. Detected at construction and on
+    box-generation refresh.
+  - `TooManyCells { n_cells_total: usize, max_supported: usize }` — the
+    cell layout would produce more cells than the device can address
+    with a `u32` cell index. `max_supported` is `u32::MAX as usize`.
+    Detected at construction and on box-generation refresh, before any
+    device buffer is allocated. In practice GPU memory is exhausted by
+    the `n_cells_total`-sized buffers long before this ceiling is
+    reached, but the check makes that case an explicit error rather
+    than silent integer overflow in the cell-index arithmetic.
+

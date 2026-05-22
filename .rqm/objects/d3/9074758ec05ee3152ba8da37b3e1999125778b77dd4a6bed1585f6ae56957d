@@ -1,0 +1,430 @@
+### Types <!-- rq-6c5b4246 -->
+
+- `SubStep` — closed enum describing one piece of an integrator's
+  per-timestep work. Variants:
+
+  ```rust
+  pub enum SubStep {
+      /// Velocity half-kick: v ← v + (F/m) · dt/2 (or the
+      /// integrator-private equivalent). No position update.
+      KickHalf { dt: f32, label: &'static str },
+
+      /// Position drift: x ← x + v · dt (or the integrator-private
+      /// equivalent). No velocity update.
+      Drift { dt: f32, label: &'static str },
+
+      /// Fused KickHalf + Drift in a single kernel launch (e.g. the
+      /// `vv_kick_drift` kernel for velocity-Verlet).
+      KickDrift { dt: f32, label: &'static str },
+
+      /// Force-pipeline evaluation. Dispatched by the runner, not by
+      /// the integrator's `execute()`. The `class` field selects
+      /// which force class(es) to re-evaluate (see
+      /// `rqm/forces/framework.md`):
+      ///   - `None` → runner calls `force_field.step(...)` (every
+      ///     slot, every class).
+      ///   - `Some(class)` → runner calls
+      ///     `force_field.step_class(class, ...)` (only slots whose
+      ///     `frequency_class() == class`).
+      /// In both cases the combiner re-runs across every class so
+      /// `ParticleBuffers.forces_*` always holds the latest total.
+      ForceEval { class: Option<ForceClass> },
+
+      /// Integrator-private sub-step that doesn't fit the
+      /// kick/drift/force triad (Langevin's OU step, MTK's chain or
+      /// barostat sub-steps, kinetic-energy reductions for a
+      /// barostat, etc.). The `label` lets the integrator's
+      /// `execute()` dispatch to the right kernel.
+      Custom { label: &'static str },
+  }
+  ```
+
+  - `label` on every variant is integrator-private and exists for
+    debugging, timings stage selection, and (for `Custom`) dispatch
+    inside `execute()`. The runner does not interpret the label.
+  - The constraint slot's hook insertion logic
+    (`constraint-framework.md`) reads only the variant tag, not the
+    label or the `class` payload.
+  - Single-step integrators (velocity-Verlet, Langevin BAOAB,
+    NHC/CSVR/Andersen/Berendsen-paired plans, MTK-NPT) emit
+    `ForceEval { class: None }` so the runner re-evaluates every
+    slot. A future RESPA-style integrator emits
+    `ForceEval { class: Some(Fast) }` many times per outer step and
+    `ForceEval { class: Some(Slow) }` once.
+  - `ForceClass` is re-exported from `crate::forces` (see
+    `rqm/forces/framework.md` for its definition).
+
+- `StepPlan` — ordered list of `SubStep`s describing one full
+  timestep. `Debug + Clone`.
+
+  ```rust
+  pub struct StepPlan {
+      pub steps: Vec<SubStep>,
+  }
+  ```
+
+  - `steps.len() == 0` is allowed and represents an integrator that
+    does nothing this timestep. The runner walks an empty plan
+    without launching any kernel.
+  - The plan may contain zero, one, or more `ForceEval` sub-steps.
+    Zero: forces stay at their previous value (suitable for inertial
+    drift or analytic propagation). One: the standard symplectic
+    pattern. More than one: predictor-corrector or future multi-step
+    integrators.
+
+- `Integrator` — object-safe trait implemented by every concrete
+  integrator. Owns the core time-stepping algorithm.
+
+  ```rust
+  pub trait Integrator: std::fmt::Debug + Send {
+      /// Return the ordered sequence of sub-steps that constitute one
+      /// timestep of size `dt`. Pure: must return the same shape for
+      /// the same `dt` and the same integrator state across calls.
+      fn plan(&self, dt: f32) -> StepPlan;
+
+      /// Execute one sub-step from this integrator's plan. Receives
+      /// every sub-step except `SubStep::ForceEval` (which the runner
+      /// dispatches directly to the force field).
+      fn execute(
+          &mut self,
+          substep: &SubStep,
+          buffers: &mut ParticleBuffers,
+          sim_box: &mut SimulationBox,
+          timings: &mut Timings,
+      ) -> Result<(), IntegratorError>;
+
+      /// Diagnostic column names this integrator wants the runner to
+      /// include in the CSV log (`io/log-output.md`). Returned slice
+      /// has `'static` lifetime so the runner can pass it to
+      /// `LogWriter::open` without copying. Default: empty.
+      fn log_column_names(&self) -> &'static [&'static str] { &[] }
+
+      /// Current values of those columns. The runner supplies the
+      /// total kinetic and potential energies it has just computed
+      /// for the log row (in joules); the integrator combines them
+      /// with its own state to produce the requested values. The
+      /// returned `Vec` must have the same length as
+      /// `log_column_names()`. Default: empty.
+      fn log_column_values(
+          &self,
+          kinetic_energy: f64,
+          potential_energy: f64,
+      ) -> Vec<f64> { Vec::new() }
+  }
+  ```
+
+  - `plan(dt)` is called once per timestep by the runner. It does
+    no I/O, launches no kernels, and may not allocate per-particle
+    GPU buffers (those are constructed once at slot construction).
+  - `execute(sub, ...)` is called once per non-`ForceEval` sub-step,
+    in plan order, by the runner. The integrator dispatches on
+    `sub`'s variant and label to choose the right kernel. Sub-steps
+    are independent of each other apart from their effect on
+    `buffers` and the integrator's `&mut self`.
+  - `execute()` is never called with `SubStep::ForceEval`; the runner
+    dispatches force evaluation directly via `force_field.step(...)`.
+    An integrator that places `ForceEval` in its plan but receives a
+    `ForceEval` in `execute()` (e.g. due to misuse) should return an
+    `IntegratorError` describing the misuse; conforming runners
+    never produce this call.
+  - `sim_box` is passed mutably to `execute()` so future integrators
+    that mutate the box during the step (integrated barostats) can
+    do so. Integrators that do not mutate the box leave it
+    unchanged.
+  - On a successful return from the runner's plan walk,
+    `buffers.forces_*` holds `F` evaluated at the post-step positions
+    (so the next iteration's plan can begin with a `KickHalf` /
+    `KickDrift` that reads `F(t)`).
+  - `plan(dt)` returns an empty plan when the integrator has nothing
+    to do for that timestep; this is the canonical way to express a
+    no-op step.
+
+- `Thermostat` — object-safe trait implemented by every concrete
+  thermostat.
+
+  ```rust
+  pub trait Thermostat: std::fmt::Debug + Send {
+      /// Apply the thermostat's pre-step modification (typically a
+      /// Trotter half-step). Mutates velocities; never touches
+      /// positions, box, or forces. Default: no-op.
+      fn apply_pre(
+          &mut self,
+          buffers: &mut ParticleBuffers,
+          dt: f32,
+          timings: &mut Timings,
+      ) -> Result<(), ThermostatError> { Ok(()) }
+
+      /// Apply the thermostat's post-step modification. Mutates
+      /// velocities; never touches positions, box, or forces.
+      fn apply_post(
+          &mut self,
+          buffers: &mut ParticleBuffers,
+          dt: f32,
+          timings: &mut Timings,
+      ) -> Result<(), ThermostatError>;
+
+      fn log_column_names(&self) -> &'static [&'static str] { &[] }
+      fn log_column_values(
+          &self,
+          kinetic_energy: f64,
+          potential_energy: f64,
+      ) -> Vec<f64> { Vec::new() }
+  }
+  ```
+
+  - `apply_pre` and `apply_post` each receive the same `dt` the
+    integrator received. Thermostats that internally split this into
+    half-steps do so themselves (NHC takes `dt/2` for each side of
+    its symmetric chain step; CSVR / Berendsen / Andersen use the
+    full `dt` in their relaxation formula and only act on the post
+    side).
+  - The thermostat never reads or writes `sim_box`, `force_field`,
+    or `buffers.forces_*` / `buffers.virials`.
+  - `apply_pre` returns immediately when
+    `buffers.particle_count() == 0`. So does `apply_post`.
+
+- `Barostat` — object-safe trait implemented by every concrete
+  barostat.
+
+  ```rust
+  pub trait Barostat: std::fmt::Debug + Send {
+      /// Apply the barostat's box / position rescale. Reads
+      /// virial and kinetic data from `buffers` (already populated
+      /// by the integrator's in-step force evaluation), mutates
+      /// `buffers.positions_*` and `sim_box`. Never launches the
+      /// force pipeline directly.
+      fn apply(
+          &mut self,
+          buffers: &mut ParticleBuffers,
+          sim_box: &mut SimulationBox,
+          dt: f32,
+          timings: &mut Timings,
+      ) -> Result<(), BarostatError>;
+
+      fn log_column_names(&self) -> &'static [&'static str] { &[] }
+      fn log_column_values(
+          &self,
+          kinetic_energy: f64,
+          potential_energy: f64,
+      ) -> Vec<f64> { Vec::new() }
+  }
+  ```
+
+  - `apply` returns immediately when
+    `buffers.particle_count() == 0`.
+  - Mutating `sim_box` bumps its generation counter, which the next
+    iteration's force pipeline observes via the existing
+    change-detection path (`forces/neighbor-list.md`,
+    `forces/spme.md`).
+
+- `SlotConfig` — open-shaped parsed slot selection. Lives alongside
+  the rest of the config types in `crate::io::config`. Its TOML
+  mapping is defined in `io/config-schema.md`.
+
+  ```rust
+  pub struct SlotConfig {
+      pub kind: String,
+      pub params: toml::Value,
+  }
+  ```
+
+  - `kind` is the registry lookup key (e.g. `"velocity-verlet"`,
+    `"csvr"`, `"berendsen"`). It is the bridge between the open
+    config layer and the open registries.
+  - `params` carries every TOML field of the section other than
+    `kind`, flattened into a `toml::Value`. Each registered builder
+    deserialises its own typed parameter struct from this value (see
+    `IntegratorBuilder::validate_params` and
+    `IntegratorBuilder::build`); the framework never inspects
+    `params` itself.
+
+  The same `SlotConfig` shape is used by the `[integrator]`,
+  `[thermostat]`, and `[barostat]` sections. The `[[constraint_types]]`
+  array uses a closely related `NamedSlotConfig { name, kind, params }`
+  shape that adds the type's user-facing name (see
+  `io/config-schema.md`).
+
+- `IntegratorBuilder`, `ThermostatBuilder`, `BarostatBuilder` —
+  parallel traits describing a registered slot implementation.
+  Implementations are stateless and self-register at construction
+  time. Each builder owns its parameter shape: it deserialises a
+  typed parameter struct from the `params: toml::Value` carried by
+  the `SlotConfig`, validates per-kind constraints, exposes the
+  compatibility predicates the runner needs, and constructs a boxed
+  trait object on demand.
+
+  ```rust
+  pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
+      /// Lookup key used by `IntegratorRegistry` to dispatch a parsed
+      /// `SlotConfig` to this builder. Matches the TOML `kind` field.
+      fn kind_name(&self) -> &'static str;
+
+      /// Validate the kind-specific parameters at config-load time,
+      /// before any GPU setup runs. Implementations deserialise the
+      /// `toml::Value` into their typed parameter struct and surface
+      /// every domain check (finite, positive, in-range, allowed
+      /// enum value, …) as a `ConfigError::InvalidValue` (or one of
+      /// the more specific `ConfigError` variants documented in
+      /// `io/config-schema.md`).
+      fn validate_params(&self, params: &toml::Value)
+          -> Result<(), ConfigError>;
+
+      /// `true` iff the integrator fuses its own thermostat (so
+      /// composing it with a `[thermostat]` slot is rejected at
+      /// load time). The default returns `false`.
+      fn owns_thermostat(&self, _params: &toml::Value) -> bool { false }
+
+      /// `true` iff the integrator fuses its own barostat. Default
+      /// `false`.
+      fn owns_barostat(&self, _params: &toml::Value) -> bool { false }
+
+      /// `true` iff the integrator drives the three `Constraint`
+      /// slot hooks (see `constraint-framework.md`). Default
+      /// `false`.
+      fn supports_constraints(&self, _params: &toml::Value) -> bool { false }
+
+      /// Construct the integrator. The caller has already invoked
+      /// `validate_params(&params)`, so the builder may unwrap
+      /// trusted fields; any failure inside `build` surfaces as
+      /// `IntegratorError::Gpu` (the typical case is a failed GPU
+      /// allocation). `n_constraints` is the total holonomic
+      /// constraint count of the run (sum of every constraint group's
+      /// `constraint_count`, zero when the topology has no
+      /// `[constraints]` section). Integrators that compute internal
+      /// degrees-of-freedom counts (e.g. `mtk-npt`) consume it; others
+      /// ignore it.
+      fn build(
+          &self,
+          gpu: &GpuContext,
+          particle_count: usize,
+          n_constraints: usize,
+          params: &toml::Value,
+      ) -> Result<Box<dyn Integrator>, IntegratorError>;
+  }
+
+  pub trait ThermostatBuilder: std::fmt::Debug + Send + Sync {
+      fn kind_name(&self) -> &'static str;
+      fn validate_params(&self, params: &toml::Value)
+          -> Result<(), ConfigError>;
+
+      /// `n_constraints` is the total holonomic constraint count of
+      /// the run (sum of every constraint group's `constraint_count`,
+      /// zero when the topology has no `[constraints]` section).
+      /// Implementations use it to compute their thermostatted
+      /// degrees-of-freedom count; see each thermostat's requirements
+      /// file for the exact formula.
+      fn build(
+          &self,
+          gpu: &GpuContext,
+          particle_count: usize,
+          n_constraints: usize,
+          params: &toml::Value,
+      ) -> Result<Box<dyn Thermostat>, ThermostatError>;
+  }
+
+  pub trait BarostatBuilder: std::fmt::Debug + Send + Sync {
+      fn kind_name(&self) -> &'static str;
+      fn validate_params(&self, params: &toml::Value)
+          -> Result<(), ConfigError>;
+
+      /// `n_constraints` is the total holonomic constraint count of
+      /// the run (sum of every constraint group's `constraint_count`,
+      /// zero when the topology has no `[constraints]` section).
+      /// Barostats that compute kinetic-pressure or internal
+      /// degrees-of-freedom counts consume it; others ignore it.
+      fn build(
+          &self,
+          gpu: &GpuContext,
+          particle_count: usize,
+          n_constraints: usize,
+          params: &toml::Value,
+      ) -> Result<Box<dyn Barostat>, BarostatError>;
+  }
+  ```
+
+  - `kind_name` returns the registry's lookup key.
+  - `validate_params` is a pure function of the supplied parameters
+    and is called by `Config::validate_against` before any GPU work.
+    It must not allocate device memory.
+  - The integrator-specific predicates
+    (`owns_thermostat`, `owns_barostat`, `supports_constraints`) are
+    pure functions of the supplied parameters. Predicate
+    implementations that depend on the params (e.g.
+    `velocity-verlet`'s `supports_constraints` flipping on
+    `lossless`) deserialise the relevant field on demand.
+  - `build` constructs the concrete slot. The caller is responsible
+    for having passed the same `params` through `validate_params`
+    first; conforming registry helpers (`build_or_validate_first`
+    below) chain the two calls.
+
+- `IntegratorRegistry`, `ThermostatRegistry`, `BarostatRegistry` —
+  parallel host-side registries of builders. Each holds:
+  - `builders: Vec<Box<dyn *Builder>>`
+
+  Methods (illustrated for the integrator registry; the thermostat
+  and barostat registries follow the same shape with the
+  corresponding types):
+
+  - `IntegratorRegistry::with_builtins() -> IntegratorRegistry` —
+    constructs a registry pre-populated with builders for every
+    `kind` value in the slot's "Slots" table above.
+    `ThermostatRegistry::with_builtins()` pre-populates
+    `nose-hoover-chain`, `csvr`, `andersen`, `berendsen`.
+    `BarostatRegistry::with_builtins()` pre-populates `berendsen`
+    and `c-rescale`.
+  - `IntegratorRegistry::register(&mut self, builder: Box<dyn
+    IntegratorBuilder>)` — appends a builder. Two builders sharing
+    the same `kind_name()` are not detected at registration; the
+    lookup returns the first match.
+  - `IntegratorRegistry::lookup(&self, kind: &str) -> Option<&dyn IntegratorBuilder>`
+    — returns the first registered builder whose `kind_name()`
+    equals `kind`, or `None` when no builder matches. The runner
+    uses this both to query compatibility predicates
+    (`owns_thermostat`, `supports_constraints`) and to drive
+    `validate_params` against the parsed config before any GPU
+    work runs.
+  - `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Integrator>, IntegratorError>`
+    — looks up the builder whose `kind_name()` equals `slot.kind`
+    and delegates `build(gpu, particle_count, n_constraints, &slot.params)` to it.
+    Returns `IntegratorError::UnknownKind(slot.kind.clone())` when
+    no builder matches.
+  - The thermostat and barostat registries expose
+    `build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>`
+    (and the corresponding barostat variant): if `slot` is `None`,
+    returns `Ok(None)` without consulting the builders; otherwise
+    dispatches the same way as `build` and wraps the result in
+    `Some(..)`.
+  - The three integrator-side registries (plus `ConstraintRegistry`
+    from `constraint-framework.md` and `PotentialRegistry` from
+    `forces/framework.md`) are also reachable as fields of the
+    runner-level `dynamics::Registries` bundle. See
+    `simulation-runner.md` for the bundle's constructors and
+    convenience `register_*` methods. The inner registries can be
+    constructed and composed independently of the bundle when
+    callers want one-at-a-time control.
+
+- `IntegratorError`, `ThermostatError`, `BarostatError` — error types
+  returned by the corresponding trait methods. Variants for each:
+  - `Gpu(GpuError)` — CUDA driver / kernel-launch failure.
+  - `Timings(TimingsError)` — CUDA event recording failure.
+  - `UnknownKind(String)` — the registry has no builder for the
+    requested `kind` name.
+  - `UnexpectedSubStep { variant: &'static str }` — the integrator's
+    `execute()` was called with a sub-step variant it does not
+    handle (e.g., the integrator received `SubStep::ForceEval`,
+    which the runner is supposed to dispatch directly). Only present
+    on `IntegratorError`. Conforming runners never produce this.
+
+  Force-field errors raised by `force_field.step(...)` surface to the
+  runner as `RunnerError::ForceField(ForceFieldError)` directly; the
+  call site is the runner's plan walk, not the integrator's
+  `execute()`, so `IntegratorError` does not wrap `ForceFieldError`.
+
+  The runner's `RunnerError` wraps all three via
+  `RunnerError::Integrator(IntegratorError)`,
+  `RunnerError::Thermostat(ThermostatError)`, and
+  `RunnerError::Barostat(BarostatError)`, plus
+  `RunnerError::Constraint(ConstraintError)` for constraint-slot
+  construction failures and hook-invocation failures
+  (`constraint-framework.md`).
+
