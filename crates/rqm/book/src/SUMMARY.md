@@ -10,6 +10,7 @@
   - [`rqm check`](./commands/check.md)
   - [`rqm edit`](./commands/edit.md)
   - [`rqm log`](./commands/log.md)
+  - [`rqm view`](./commands/view.md)
   - [`rqm mv`](./commands/mv.md)
   - [`rqm insert`](./commands/insert.md)
   - [`rqm rm`](./commands/rm.md)

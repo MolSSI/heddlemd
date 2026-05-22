@@ -10,3 +10,4 @@ pub mod reassign;
 pub mod rename;
 pub mod rm;
 pub mod store;
+pub mod view;

@@ -54,6 +54,16 @@ enum Cmd {
         /// Either `rq-XXXXXXXX` or `<path>:<line>`.
         target: String,
     },
+    /// Dump a requirement and its full associated content: the
+    /// text_blob, every source_blob (with file location), and every
+    /// direct child's text_blob. Designed for reading the
+    /// requirements-to-source mapping in full.
+    View {
+        /// Either `rq-XXXXXXXX` or `<path>:<line>`. A `<path>:<line>`
+        /// pointing at a source blob resolves to its owning canonical
+        /// requirement.
+        target: String,
+    },
     /// Insert a new blob at a specified position in a managed file.
     /// Auto-creates the file if it is not yet managed (use `:start` or
     /// `:end` in that case).
@@ -242,6 +252,12 @@ fn run(cli: Cli) -> Result<ExitCode> {
             let store = rqm::store::Store::open(&cli.rqm_dir)?;
             let target = rqm::edit::EditTarget::parse(&target)?;
             rqm::log::run(&store, &target)?;
+            Ok(ExitCode::SUCCESS)
+        }
+        Cmd::View { target } => {
+            let store = rqm::store::Store::open(&cli.rqm_dir)?;
+            let target = rqm::edit::EditTarget::parse(&target)?;
+            rqm::view::run(&store, &target)?;
             Ok(ExitCode::SUCCESS)
         }
         Cmd::Insert {

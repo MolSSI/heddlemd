@@ -24,6 +24,7 @@ Both options can be passed before any subcommand.
 | [`check`](./commands/check.md) | Verify the working tree matches `.rqm/` |
 | [`edit`](./commands/edit.md) | Open a blob in `$EDITOR`; apply on save |
 | [`log`](./commands/log.md) | Show a requirement's current state |
+| [`view`](./commands/view.md) | Dump a requirement with full text + source content |
 | [`mv`](./commands/mv.md) | Relocate a blob within or across files |
 | [`insert`](./commands/insert.md) | Add a new blob at a specified position |
 | [`rm`](./commands/rm.md) | Remove a blob or a requirement |
