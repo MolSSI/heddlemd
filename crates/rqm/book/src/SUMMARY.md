@@ -14,6 +14,7 @@
   - [`rqm mv`](./commands/mv.md)
   - [`rqm insert`](./commands/insert.md)
   - [`rqm rm`](./commands/rm.md)
+  - [`rqm split`](./commands/split.md)
   - [`rqm reassign`](./commands/reassign.md)
   - [`rqm rename`](./commands/rename.md)
 - [Workflows](./workflows.md)

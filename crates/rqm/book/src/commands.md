@@ -26,6 +26,7 @@ Both options can be passed before any subcommand.
 | [`log`](./commands/log.md) | Show a requirement's current state |
 | [`view`](./commands/view.md) | Dump a requirement with full text + source content |
 | [`mv`](./commands/mv.md) | Relocate a blob within or across files |
+| [`split`](./commands/split.md) | Divide a blob, optionally re-attributing each half |
 | [`insert`](./commands/insert.md) | Add a new blob at a specified position |
 | [`rm`](./commands/rm.md) | Remove a blob or a requirement |
 | [`reassign`](./commands/reassign.md) | Change a requirement's parents in the DAG |

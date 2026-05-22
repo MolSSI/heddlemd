@@ -136,6 +136,27 @@ enum Cmd {
         #[arg(long)]
         force: bool,
     },
+    /// Split a blob at a line, optionally re-attributing either half
+    /// to different owners.
+    ///
+    /// `<file>:<line>` identifies the split point. The blob covering
+    /// that line is divided: the left half is everything before the
+    /// line, the right half is the line itself and everything after.
+    ///
+    /// `--left <id>` / `--right <id>` (each repeatable) re-attribute
+    /// the corresponding half to new owners. Omitting a flag keeps
+    /// the original blob's owners on that half. Each `<id>` is
+    /// `rq-XXXXXXXX` or `<path>:<line>`; aliases are rejected.
+    Split {
+        /// `<path>:<line>` — split point.
+        target: String,
+        /// New owner(s) for the left half. Repeatable.
+        #[arg(long = "left")]
+        left: Vec<String>,
+        /// New owner(s) for the right half. Repeatable.
+        #[arg(long = "right")]
+        right: Vec<String>,
+    },
     /// Remove bullet-level alias stable_ids.
     ///
     /// Strips ` <!-- rq-A -->` annotations from markdown bullets,
@@ -196,6 +217,17 @@ enum Cmd {
         #[arg(long, conflicts_with = "before")]
         split: bool,
     },
+}
+
+fn fmt_ids(ids: &[rqm::object::StableId]) -> String {
+    if ids.is_empty() {
+        "(none)".to_string()
+    } else {
+        ids.iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
 fn main() -> ExitCode {
@@ -392,6 +424,36 @@ fn run(cli: Cli) -> Result<ExitCode> {
                         println!("  wrote {}", p.display());
                     }
                 }
+            }
+            Ok(ExitCode::SUCCESS)
+        }
+        Cmd::Split { target, left, right } => {
+            let store = rqm::store::Store::open(&cli.rqm_dir)?;
+            let spec = rqm::split::SplitSpec::parse(&target)?;
+            let resolve = |args: Vec<String>| -> Result<Option<Vec<rqm::object::StableId>>> {
+                if args.is_empty() {
+                    return Ok(None);
+                }
+                let mut out = Vec::with_capacity(args.len());
+                for a in &args {
+                    let t = rqm::edit::EditTarget::parse(a)?;
+                    out.push(rqm::edit::target_to_canonical_id_strict(&store, &t)?);
+                }
+                Ok(Some(out))
+            };
+            let left_owners = resolve(left)?;
+            let right_owners = resolve(right)?;
+            let outcome =
+                rqm::split::do_split(&store, spec, left_owners, right_owners)?;
+            println!("split blob: {}", outcome.original_blob);
+            println!("  left  blob: {} (owners: {})", outcome.left_blob, fmt_ids(&outcome.left_owners));
+            println!("  right blob: {} (owners: {})", outcome.right_blob, fmt_ids(&outcome.right_owners));
+            for id in &outcome.metas_updated {
+                println!("  updated meta: {id}");
+            }
+            let report = rqm::materialize::build(&store, &root)?;
+            for p in &report.written {
+                println!("  wrote {}", p.display());
             }
             Ok(ExitCode::SUCCESS)
         }

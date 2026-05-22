@@ -10,5 +10,6 @@ pub mod object;
 pub mod reassign;
 pub mod rename;
 pub mod rm;
+pub mod split;
 pub mod store;
 pub mod view;
