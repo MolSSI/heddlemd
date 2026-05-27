@@ -1,0 +1,23 @@
+// rq-4d1082c4 — Radial distribution function analysis.
+
+use std::fs::OpenOptions;
+use std::io::{BufWriter, Write};
+use std::path::Path;
+
+use serde::Deserialize;
+
+use crate::analysis::{
+    Analysis, AnalysisBuilder, AnalysisRuntimeError, AnalyzeError,
+};
+use crate::io::{TrajectoryFrame, TrajectoryFrameHeader};
+use crate::io::config::Config;
+use crate::pbc::SimulationBox;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RdfParams {
+    between: [String; 2],
+    r_max: f64,
+    n_bins: u64,
+}
+

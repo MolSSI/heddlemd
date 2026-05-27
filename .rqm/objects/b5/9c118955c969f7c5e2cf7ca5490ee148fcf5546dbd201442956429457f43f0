@@ -1,0 +1,86 @@
+impl Analysis for RdfAnalysis {
+    fn consume_frame(
+        &mut self,
+        frame: &TrajectoryFrame,
+        sim_box: &SimulationBox,
+    ) -> Result<(), AnalysisRuntimeError> {
+        // Verify per-type counts haven't changed mid-trajectory.
+        let n_a_now = frame.type_indices.iter().filter(|&&t| t == self.t_a).count();
+        let n_b_now = if self.same_type {
+            n_a_now
+        } else {
+            frame.type_indices.iter().filter(|&&t| t == self.t_b).count()
+        };
+        if n_a_now != self.n_a || n_b_now != self.n_b {
+            return Err(AnalysisRuntimeError::Other(format!(
+                "trajectory composition changed: expected N_A={} N_B={}, got N_A={n_a_now} N_B={n_b_now}",
+                self.n_a, self.n_b
+            )));
+        }
+
+        // Build particle-index lists in ascending order.
+        let idx_a: Vec<usize> = frame
+            .type_indices
+            .iter()
+            .enumerate()
+            .filter_map(|(i, &t)| if t == self.t_a { Some(i) } else { None })
+            .collect();
+        let idx_b: Vec<usize> = if self.same_type {
+            idx_a.clone()
+        } else {
+            frame
+                .type_indices
+                .iter()
+                .enumerate()
+                .filter_map(|(i, &t)| if t == self.t_b { Some(i) } else { None })
+                .collect()
+        };
+
+        let r_max_sq = self.r_max * self.r_max;
+        let px = &frame.positions_x;
+        let py = &frame.positions_y;
+        let pz = &frame.positions_z;
+
+        if self.same_type {
+            for (ia, &i) in idx_a.iter().enumerate() {
+                for &j in idx_a.iter().skip(ia + 1) {
+                    let dx = px[j] as f64 - px[i] as f64;
+                    let dy = py[j] as f64 - py[i] as f64;
+                    let dz = pz[j] as f64 - pz[i] as f64;
+                    let mi = sim_box.minimum_image([dx as f32, dy as f32, dz as f32]);
+                    let mdx = mi[0] as f64;
+                    let mdy = mi[1] as f64;
+                    let mdz = mi[2] as f64;
+                    let d2 = mdx * mdx + mdy * mdy + mdz * mdz;
+                    if d2 < r_max_sq {
+                        let d = d2.sqrt();
+                        let bin = (d / self.dr).floor() as i64;
+                        let bin = bin.clamp(0, (self.n_bins as i64) - 1) as usize;
+                        self.histogram[bin] = self.histogram[bin].saturating_add(1);
+                    }
+                }
+            }
+        } else {
+            for &i in &idx_a {
+                for &j in &idx_b {
+                    let dx = px[j] as f64 - px[i] as f64;
+                    let dy = py[j] as f64 - py[i] as f64;
+                    let dz = pz[j] as f64 - pz[i] as f64;
+                    let mi = sim_box.minimum_image([dx as f32, dy as f32, dz as f32]);
+                    let mdx = mi[0] as f64;
+                    let mdy = mi[1] as f64;
+                    let mdz = mi[2] as f64;
+                    let d2 = mdx * mdx + mdy * mdy + mdz * mdz;
+                    if d2 < r_max_sq {
+                        let d = d2.sqrt();
+                        let bin = (d / self.dr).floor() as i64;
+                        let bin = bin.clamp(0, (self.n_bins as i64) - 1) as usize;
+                        self.histogram[bin] = self.histogram[bin].saturating_add(1);
+                    }
+                }
+            }
+        }
+        self.frames_consumed += 1;
+        Ok(())
+    }
+

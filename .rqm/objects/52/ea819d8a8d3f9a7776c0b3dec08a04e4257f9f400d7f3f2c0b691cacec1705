@@ -1,0 +1,73 @@
+// rq-4d1082c4 — Radial distribution function analysis.
+
+use std::fs::OpenOptions;
+use std::io::{BufWriter, Write};
+use std::path::Path;
+
+use serde::Deserialize;
+
+use crate::analysis::{
+    Analysis, AnalysisBuilder, AnalysisRuntimeError, AnalyzeError,
+};
+use crate::io::{TrajectoryFrame, TrajectoryFrameHeader};
+use crate::io::config::Config;
+use crate::pbc::SimulationBox;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RdfParams {
+    between: [String; 2],
+    r_max: f64,
+    n_bins: u64,
+}
+
+#[derive(Debug)]
+pub struct RdfBuilder;
+
+impl AnalysisBuilder for RdfBuilder {
+    fn kind_name(&self) -> &'static str {
+        "rdf"
+    }
+
+    fn validate_params(&self, params: &toml::Value) -> Result<(), AnalyzeError> {
+        let p: RdfParams = match params.clone().try_into() {
+            Ok(p) => p,
+            Err(e) => {
+                let msg = e.to_string();
+                if let Some(field) = extract_missing_field(&msg) {
+                    return Err(AnalyzeError::MissingField { field });
+                }
+                return Err(AnalyzeError::Parse {
+                    path: String::new(),
+                    message: msg,
+                });
+            }
+        };
+        if p.between[0].is_empty() || p.between[1].is_empty() {
+            return Err(AnalyzeError::InvalidValue {
+                field: "between".to_string(),
+                reason: "both type names must be non-empty".to_string(),
+            });
+        }
+        if !p.r_max.is_finite() || p.r_max <= 0.0 {
+            return Err(AnalyzeError::InvalidValue {
+                field: "r_max".to_string(),
+                reason: "must be finite and strictly positive".to_string(),
+            });
+        }
+        if p.n_bins == 0 {
+            return Err(AnalyzeError::InvalidValue {
+                field: "n_bins".to_string(),
+                reason: "must be >= 1".to_string(),
+            });
+        }
+        if p.n_bins > (1u64 << 30) {
+            return Err(AnalyzeError::InvalidValue {
+                field: "n_bins".to_string(),
+                reason: "must be <= 2^30".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    fn build(

@@ -1,0 +1,14 @@
+fn extract_missing_field(msg: &str) -> Option<String> {
+    let needle = "missing field";
+    let idx = msg.find(needle)?;
+    let rest = &msg[idx + needle.len()..].trim_start();
+    let open = rest.chars().next()?;
+    let close = match open {
+        '`' => '`',
+        '"' => '"',
+        _ => return None,
+    };
+    let after_open = &rest[open.len_utf8()..];
+    let end = after_open.find(close)?;
+    Some(after_open[..end].to_string())
+}

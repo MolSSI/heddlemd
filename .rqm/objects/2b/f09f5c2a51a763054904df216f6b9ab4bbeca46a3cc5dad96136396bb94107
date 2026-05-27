@@ -1,0 +1,8 @@
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RdfParams {
+    between: [String; 2],
+    r_max: f64,
+    n_bins: u64,
+}
+

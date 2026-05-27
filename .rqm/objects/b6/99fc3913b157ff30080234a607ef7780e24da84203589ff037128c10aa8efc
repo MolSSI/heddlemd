@@ -1,0 +1,42 @@
+    fn finalize_and_write(
+        &mut self,
+        output_path: &Path,
+        _sim_config: &Config,
+    ) -> Result<(), AnalysisRuntimeError> {
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(output_path)
+            .map_err(|e| AnalysisRuntimeError::Io(format!("{}: {}", output_path.display(), e)))?;
+        let mut w = BufWriter::new(file);
+        writeln!(w, "r,g_r,count").map_err(|e| AnalysisRuntimeError::Io(format!("{e}")))?;
+
+        let n_pairs: f64 = if self.same_type {
+            (self.n_a as f64) * ((self.n_a as f64) - 1.0) / 2.0
+        } else {
+            (self.n_a as f64) * (self.n_b as f64)
+        };
+        let four_pi_over_three = 4.0 * std::f64::consts::PI / 3.0;
+        let frames = self.frames_consumed as f64;
+
+        for i in 0..self.n_bins {
+            let r_inner = (i as f64) * self.dr;
+            let r_outer = ((i + 1) as f64) * self.dr;
+            let r_center = (i as f64 + 0.5) * self.dr;
+            let shell_volume = four_pi_over_three
+                * (r_outer * r_outer * r_outer - r_inner * r_inner * r_inner);
+            let ideal = frames * n_pairs * shell_volume / self.volume;
+            let count = self.histogram[i];
+            let g_r = if ideal > 0.0 && count > 0 {
+                (count as f64) / ideal
+            } else {
+                0.0
+            };
+            writeln!(w, "{r_center:.9e},{g_r:.9e},{count}")
+                .map_err(|e| AnalysisRuntimeError::Io(format!("{e}")))?;
+        }
+        w.flush().map_err(|e| AnalysisRuntimeError::Io(format!("{e}")))?;
+        Ok(())
+    }
+}
+

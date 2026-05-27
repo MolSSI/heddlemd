@@ -1,0 +1,181 @@
+// rq-4d1082c4 — Radial distribution function analysis.
+
+use std::fs::OpenOptions;
+use std::io::{BufWriter, Write};
+use std::path::Path;
+
+use serde::Deserialize;
+
+use crate::analysis::{
+    Analysis, AnalysisBuilder, AnalysisRuntimeError, AnalyzeError,
+};
+use crate::io::{TrajectoryFrame, TrajectoryFrameHeader};
+use crate::io::config::Config;
+use crate::pbc::SimulationBox;
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RdfParams {
+    between: [String; 2],
+    r_max: f64,
+    n_bins: u64,
+}
+
+#[derive(Debug)]
+pub struct RdfBuilder;
+
+impl AnalysisBuilder for RdfBuilder {
+    fn kind_name(&self) -> &'static str {
+        "rdf"
+    }
+
+    fn validate_params(&self, params: &toml::Value) -> Result<(), AnalyzeError> {
+        let p: RdfParams = match params.clone().try_into() {
+            Ok(p) => p,
+            Err(e) => {
+                let msg = e.to_string();
+                if let Some(field) = extract_missing_field(&msg) {
+                    return Err(AnalyzeError::MissingField { field });
+                }
+                return Err(AnalyzeError::Parse {
+                    path: String::new(),
+                    message: msg,
+                });
+            }
+        };
+        if p.between[0].is_empty() || p.between[1].is_empty() {
+            return Err(AnalyzeError::InvalidValue {
+                field: "between".to_string(),
+                reason: "both type names must be non-empty".to_string(),
+            });
+        }
+        if !p.r_max.is_finite() || p.r_max <= 0.0 {
+            return Err(AnalyzeError::InvalidValue {
+                field: "r_max".to_string(),
+                reason: "must be finite and strictly positive".to_string(),
+            });
+        }
+        if p.n_bins == 0 {
+            return Err(AnalyzeError::InvalidValue {
+                field: "n_bins".to_string(),
+                reason: "must be >= 1".to_string(),
+            });
+        }
+        if p.n_bins > (1u64 << 30) {
+            return Err(AnalyzeError::InvalidValue {
+                field: "n_bins".to_string(),
+                reason: "must be <= 2^30".to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    fn build(
+        &self,
+        params: &toml::Value,
+        header: &TrajectoryFrameHeader,
+        sim_config: &Config,
+    ) -> Result<Box<dyn Analysis>, AnalysisRuntimeError> {
+        let p: RdfParams = params.clone().try_into().map_err(|e: toml::de::Error| {
+            AnalysisRuntimeError::Other(format!("internal: re-deserialise failed: {e}"))
+        })?;
+
+        // Resolve `between` against sim_config.particle_types.
+        let t_a = sim_config
+            .particle_types
+            .iter()
+            .position(|t| t.name == p.between[0])
+            .ok_or_else(|| AnalysisRuntimeError::InvalidValue {
+                field: "between".to_string(),
+                reason: format!(
+                    "type `{}` is not declared in [[particle_types]]",
+                    p.between[0]
+                ),
+            })? as u32;
+        let t_b = sim_config
+            .particle_types
+            .iter()
+            .position(|t| t.name == p.between[1])
+            .ok_or_else(|| AnalysisRuntimeError::InvalidValue {
+                field: "between".to_string(),
+                reason: format!(
+                    "type `{}` is not declared in [[particle_types]]",
+                    p.between[1]
+                ),
+            })? as u32;
+
+        // Box check.
+        let half_min_perp = header.sim_box.min_perpendicular_width() as f64 / 2.0;
+        if p.r_max > half_min_perp {
+            return Err(AnalysisRuntimeError::InvalidValue {
+                field: "r_max".to_string(),
+                reason: format!(
+                    "r_max = {:.3e} m exceeds half the box's minimum perpendicular width ({:.3e} m); the minimum-image convention requires r_max <= min_perp_width / 2",
+                    p.r_max, half_min_perp
+                ),
+            });
+        }
+
+        let n_a = header.type_indices.iter().filter(|&&t| t == t_a).count();
+        let n_b = if t_a == t_b {
+            n_a
+        } else {
+            header.type_indices.iter().filter(|&&t| t == t_b).count()
+        };
+        let same_type = t_a == t_b;
+        if same_type && n_a < 2 {
+            return Err(AnalysisRuntimeError::InvalidValue {
+                field: "between".to_string(),
+                reason: format!(
+                    "same-type RDF requires N_A >= 2; type `{}` has {n_a} particles in the trajectory",
+                    p.between[0]
+                ),
+            });
+        }
+        if !same_type && (n_a == 0 || n_b == 0) {
+            return Err(AnalysisRuntimeError::InvalidValue {
+                field: "between".to_string(),
+                reason: format!(
+                    "cross-type RDF requires N_A,N_B >= 1; got N_A={n_a} N_B={n_b}"
+                ),
+            });
+        }
+
+        let dr = p.r_max / (p.n_bins as f64);
+        let volume = header.sim_box.volume() as f64;
+        if volume <= 0.0 {
+            return Err(AnalysisRuntimeError::InvalidValue {
+                field: "between".to_string(),
+                reason: "trajectory box has non-positive volume".to_string(),
+            });
+        }
+        Ok(Box::new(RdfAnalysis {
+            t_a,
+            t_b,
+            same_type,
+            n_a,
+            n_b,
+            volume,
+            r_max: p.r_max,
+            dr,
+            n_bins: p.n_bins as usize,
+            histogram: vec![0u64; p.n_bins as usize],
+            frames_consumed: 0,
+        }))
+    }
+}
+
+pub struct RdfAnalysis {
+    t_a: u32,
+    t_b: u32,
+    same_type: bool,
+    n_a: usize,
+    n_b: usize,
+    volume: f64,
+    r_max: f64,
+    dr: f64,
+    n_bins: usize,
+    histogram: Vec<u64>,
+    frames_consumed: u64,
+}
+
