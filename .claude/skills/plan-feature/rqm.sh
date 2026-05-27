@@ -193,8 +193,7 @@ _fix_duplicates() {
 
       if [[ "$line" =~ ^(#{1,6})[[:space:]] ]]; then
         # Capture the heading-hash count BEFORE calling _has_id, which
-        # runs its own regex match and would otherwise clobber
-        # BASH_REMATCH.
+        # runs its own regex match and would otherwise clobber BASH_REMATCH.
         local hashes="${BASH_REMATCH[1]}"
         if _has_id "$line"; then
           local id; id=$(_get_id "$line")
@@ -589,11 +588,21 @@ cmd_check() {
 
   local exit_code=0
 
+  # Preload registry keys into an associative array. The previous shape spawned
+  # one `jq` subprocess per `rq-` reference; with thousands of references in a
+  # mature project this dominated runtime (~30 min on this project). A single
+  # `jq keys[]` invocation plus O(1) bash lookups brings the check to under a
+  # second.
+  declare -A REGISTRY_KEYS
+  while IFS= read -r k; do
+    REGISTRY_KEYS[$k]=1
+  done < <(jq -r 'keys[]' "$REGISTRY")
+
   # Collect all IDs referenced in source files
   while IFS= read -r src; do
     local rel_src="${src#./}"
     while IFS= read -r ref_id; do
-      if ! jq -e --arg id "$ref_id" 'has($id)' "$REGISTRY" > /dev/null 2>&1; then
+      if [[ -z "${REGISTRY_KEYS[$ref_id]+x}" ]]; then
         echo "STALE: ${rel_src} references ${ref_id} (not in registry)" >&2
         exit_code=1
       fi
