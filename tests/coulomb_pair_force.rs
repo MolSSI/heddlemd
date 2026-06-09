@@ -249,7 +249,13 @@ fn pair_inside_inner_plateau_is_unsmoothed() {
     let expected_energy = 0.5 * K_COULOMB_F32 * qq / r;
     // Atom 0 at origin, atom 1 at +x, same-sign repulsion pushes atom 0 along
     // -x. fx = factor * dx with dx = -r and factor > 0, so fx < 0.
-    let expected_fx = K_COULOMB_F32 * qq * (-r) / (r * r * r);
+    // Compute in the same order as the kernel (factor * dx, where
+    // factor = K * qq / r^3 evaluated via inverse r and r^2) to avoid
+    // f32 underflow in the intermediate `K * qq * r` term.
+    let inv_r = 1.0_f32 / r;
+    let inv_r2 = inv_r * inv_r;
+    let factor = K_COULOMB_F32 * qq * inv_r * inv_r2;
+    let expected_fx = factor * (-r);
     assert!(
         (energies[0 * 2 + 1] - expected_energy).abs() / expected_energy < 1.0e-5,
         "energies = {}, expected {}",

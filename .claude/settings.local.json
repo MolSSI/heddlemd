@@ -1,14 +1,18 @@
 {
   "permissions": {
     "allow": [
-
       "Bash(cargo check:*)",
       "Bash(cargo build:*)",
       "Bash(cargo run:*)",
       "Bash(cargo test:*)",
-
-
-      "Skill(plan-feature)"
+      "Skill(plan-feature)",
+      "Bash(rm -f water.out.*)",
+      "Bash(sed 's/max_neighbors = 1024/max_neighbors = 2048/' water.in.toml)",
+      "Bash(cp water.in.xyz water.in.topology water.in.analysis /tmp/)",
+      "Read(//tmp/**)",
+      "Bash(mkdir -p _stash_pre_atomic)",
+      "Bash(mv water.out.probe.log water.out.probe.timings _stash_pre_atomic/)",
+      "Bash(/work/target/release/dynamics run *)"
     ]
   },
   "hooks": {

@@ -301,9 +301,11 @@ pub fn lj_pair_force(
     Ok(())
 }
 
-/// Coulomb constant `k_C = 1 / (4 π ε₀)` in SI units (N·m²/C²),
-/// rounded to f32. See `forces/coulomb-pair-force.md`. rq-bfd7004c
-pub const K_COULOMB_F32: f32 = 8.987_551_787e9_f32;
+/// Coulomb prefactor `k_C = 1 / (4 π ε₀)`. In the engine's internal
+/// Hartree atomic units `k_C = 1` exactly, so no permittivity factor
+/// appears in the pair-force or SPME kernels. See
+/// `forces/coulomb-pair-force.md`. rq-bfd7004c
+pub const K_COULOMB_F32: f32 = 1.0_f32;
 
 // rq-846bdb8b
 #[allow(clippy::too_many_arguments)]
