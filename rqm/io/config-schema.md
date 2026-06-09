@@ -46,6 +46,7 @@ Sections:
 | Section | Required | Purpose |
 | ------- | -------- | ------- |
 | top-level `schema_version` | yes | format version |
+| top-level `units` | no | unit system the file is written in (`"si"` default, or `"atomic"`) |
 | top-level `init` | yes | path to initial-state file |
 | top-level `topology` | no | path to .topology file |
 | `[simulation]` | yes | RNG seed and target temperature for initial-velocity sampling |
@@ -202,15 +203,47 @@ the config resolve to the same location.
 
 ### Units <!-- rq-ed997636 -->
 
-All physical quantities are SI: lengths in metres, mass in kilograms, time in
-seconds, energy in joules, temperature in kelvin. No alternative unit systems
-or unit suffixes are supported in schema v1.
+The top-level `units` field selects the unit system the file is written
+in. Two values are accepted: `"si"` (the default, equivalent to omitting
+the field) and `"atomic"` (Hartree atomic units). Any other value is
+rejected with `ConfigError::UnknownUnits { got: <value> }`.
+
+The loader converts every unit-bearing scalar — both typed fields and
+the unit-bearing fields of open-shaped slot `params` (e.g.
+`[phase.thermostat]` `temperature` and `tau`) — to SI before populating
+the `Config` struct. All downstream consumers therefore see SI values:
+lengths in metres, mass in kilograms, time in seconds, energy in
+joules, temperature in kelvin, pressure in pascals, charge in
+coulombs, velocity in metres per second. The chosen unit system is
+preserved on the returned `Config` as the `units: UnitSystem` field
+for callers that need to know how the source file was authored.
+
+Validation runs on the post-conversion (SI) values; range and ordering
+checks are preserved by the strictly-positive conversion factors, so the
+same checks fire on the same physical inputs regardless of the chosen
+unit system.
+
+Defaults the loader computes from other fields (e.g.
+`r_switch = 0.9 * cutoff`, `r_skin = 0.3 * max_cutoff`,
+`[output]` paths) inherit their dimension from the field they default
+off, so the defaults end up SI without any extra conversion logic.
+
+The referenced `.in.xyz` initial-state file follows the same unit
+system; see `init-state-file.md`. The full mechanism — accepted
+values, conversion factors, slot-kind field-to-dimension table — is
+documented in `unit-system.md`.
 
 ### Field reference <!-- rq-e367855a -->
 
 #### Top level <!-- rq-4c42a952 -->
 
 - `schema_version: u64` — must equal `1`. See *Schema version handling* below.
+- `units: String` — optional. Selects the unit system the file is
+  written in. Accepted values are `"si"` (the default; equivalent to
+  omitting the field) and `"atomic"` (Hartree atomic units). Any other
+  string is rejected with `ConfigError::UnknownUnits { got }`.
+  Comparison is case-sensitive. See *Units* above and
+  `unit-system.md` for the full mechanism.
 - `init: String` — path to the extended-XYZ initial-state file. Resolved
   relative to the config file's directory; absolute paths are honored as-is.
 - `topology: String` — optional path to a `.topology` file (see
@@ -1050,6 +1083,11 @@ phase failures.
 
   Fields:
   - `schema_version: u64`
+  - `units: UnitSystem` — the unit system the source TOML and the
+    referenced `.in.xyz` file were written in. The loader has already
+    converted every unit-bearing value to SI in the returned `Config`;
+    this field records which system the user authored the file in. See
+    `unit-system.md`.
   - `init: PathBuf` — resolved against the config file's directory.
   - `topology: Option<PathBuf>` — `Some(_)` when the optional top-level
     `topology` field is present; resolved against the config file's
@@ -1288,6 +1326,9 @@ phase failures.
   - `UnsupportedSchemaVersion { actual: u64, supported: u64 }` —
     `schema_version` was structurally a u64 but its value is not the
     supported version (`1`).
+  - `UnknownUnits { got: String }` — the top-level `units` field is
+    present but is not one of the accepted lowercase strings (`"si"`
+    or `"atomic"`). Comparison is case-sensitive.
   - `MissingField { field: String }` — a required field is absent at
     deserialisation time. `field` uses the same dotted notation as
     `Parse.path` (e.g. `"simulation.dt"`, `"integrator.kind"`,
@@ -1400,15 +1441,20 @@ phase failures.
   - Validates the config-filename convention (see *Config filename
     convention*) on `path` before opening the file; failures return
     `ConfigError::InvalidConfigFilename { path }` without any I/O.
-  - Reads the file at `path`, runs the typed TOML deserialiser, fills
-    in field-derived defaults (`r_switch = 0.9 * cutoff` for
-    `[[pair_interactions]]` and `[coulomb]`, `r_skin = 0.3 * max_cutoff`
-    for the `cell-list` `[neighbor_list]` mode, `[output]` defaults
-    derived from `<config-root>` per *Config filename convention*),
-    resolves every supplied path against `path.parent()` (or `"."` if
-    `path` has no parent), calls `Config::validate(&config)` on the
-    resulting `Config`, and returns it. Does not run
-    `Config::validate_against` — that is the caller's responsibility.
+  - Reads the file at `path`, runs the typed TOML deserialiser, parses
+    the top-level `units` selector (defaulting to `UnitSystem::Si`;
+    rejecting any other value with `ConfigError::UnknownUnits`),
+    rescales every unit-bearing scalar to SI as it builds the `Config`
+    (both typed fields and the unit-bearing fields of open-shaped slot
+    `params` — see `unit-system.md`), fills in field-derived defaults
+    (`r_switch = 0.9 * cutoff` for `[[pair_interactions]]` and
+    `[coulomb]`, `r_skin = 0.3 * max_cutoff` for the `cell-list`
+    `[neighbor_list]` mode, `[output]` defaults derived from
+    `<config-root>` per *Config filename convention*), resolves every
+    supplied path against `path.parent()` (or `"."` if `path` has no
+    parent), calls `Config::validate(&config)` on the resulting
+    `Config`, and returns it. Does not run `Config::validate_against`
+    — that is the caller's responsibility.
   - File-read failure yields `Io(String)`. Filename-convention failure
     yields `InvalidConfigFilename { path }`. Deserialiser failures
     yield either `MissingField`, `UnsupportedSchemaVersion`, or
@@ -1506,7 +1552,11 @@ phase failures.
 
 ## Out of Scope <!-- rq-35722a66 -->
 
-- Non-SI units (LJ-reduced, nm/ps, ...).
+- Per-quantity unit suffixes (e.g. `cutoff = "1.0 nm"`). Numeric values
+  are bare floats interpreted under the file-level `units` selector
+  (see *Units* above and `unit-system.md`).
+- Reduced-unit systems other than the two named in `unit-system.md`
+  (e.g. LJ-reduced, GROMACS nm/ps, LAMMPS real/metal).
 - Non-orthorhombic boxes (the box lives in the init file; see
   `init-state-file.md`).
 - Potentials other than Lennard-Jones; bonded terms; long-range
@@ -2728,4 +2778,40 @@ Feature: TOML simulation config schema
       kind_a: PathRole::PhaseTrajectory { phase: _ },
       kind_b: PathRole::PhaseTrajectory { phase: _ },
       path: _ })
+
+  # --- Top-level units field ---
+
+  @rq-062438e7
+  Scenario: Top-level units field defaults to SI when absent
+    Given a TOML file with no top-level units field
+    When load_config is called
+    Then config.units equals UnitSystem::Si
+
+  @rq-b68761f1
+  Scenario: Top-level units = "atomic" is accepted and recorded on Config
+    Given a TOML file with `units = "atomic"` at the top level
+    When load_config is called
+    Then config.units equals UnitSystem::Atomic
+
+  @rq-e5f889f3
+  Scenario: Top-level units with an unknown string is rejected
+    Given a TOML file with `units = "imperial"` at the top level
+    When load_config is called
+    Then it returns Err(ConfigError::UnknownUnits { got: "imperial" })
+
+  @rq-971663ba
+  Scenario: Atomic-mode physical scalars are SI on the returned Config
+    Given a TOML file with `units = "atomic"` and a pair_interaction
+      sigma in Bohr
+    When load_config is called
+    Then config.pair_interactions[0].potential's sigma equals the input
+      sigma times the bohr -> meter conversion factor
+
+  @rq-cedbd670
+  Scenario: Validation of atomic-mode input runs on post-conversion values
+    Given a TOML file with `units = "atomic"` and a [phase.thermostat]
+      with `tau = -1.0`
+    When load_config is called
+    Then it returns Err(ConfigError::InvalidValue { .. }) referring to
+      the post-conversion (negative SI) value
 ```

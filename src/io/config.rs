@@ -37,6 +37,8 @@ impl std::fmt::Display for PathRole {
     }
 }
 
+use crate::units::UnitSystem;
+
 // rq-3108381e rq-e1ceb5c0 rq-1bbcf3b7
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
@@ -99,6 +101,8 @@ pub enum ConfigError {
     SettleGeometryInfeasible { name: String, r_oh: f64, r_hh: f64 },
     #[error("[{slot}] section's `kind = \"{kind}\"` does not match any registered builder")]
     UnknownKind { slot: &'static str, kind: String },
+    #[error("unknown `units` value `{got}`: expected one of `si`, `atomic`")]
+    UnknownUnits { got: String },
 }
 
 // =====================================================================
@@ -443,6 +447,11 @@ pub struct OutputConfig {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub schema_version: u64,
+    /// Unit system the source TOML and the referenced `.in.xyz` file
+    /// are written in. The loader converts every unit-bearing value to
+    /// SI before populating this struct, so all downstream code can
+    /// continue to assume SI.
+    pub units: UnitSystem,
     pub init: PathBuf,
     pub topology: Option<PathBuf>,
     pub simulation: SimulationConfig,
@@ -494,6 +503,10 @@ const SUPPORTED_SCHEMA_VERSION: u64 = 1;
 #[derive(Debug, Deserialize)]
 struct RawConfig {
     schema_version: u64,
+    /// Optional `units` selector. Accepts the strings `"si"` (default)
+    /// or `"atomic"`. Translated to `UnitSystem` in `build_config`.
+    #[serde(default)]
+    units: Option<String>,
     init: String,
     #[serde(default)]
     topology: Option<String>,
@@ -630,16 +643,6 @@ struct RawCoulombConfig {
     r_switch: Option<f64>,
 }
 
-impl From<RawCoulombConfig> for CoulombConfig {
-    fn from(r: RawCoulombConfig) -> Self {
-        let r_switch = r.r_switch.unwrap_or(0.9 * r.cutoff);
-        CoulombConfig {
-            cutoff: r.cutoff,
-            r_switch,
-        }
-    }
-}
-
 #[derive(Debug, Deserialize)]
 #[serde(tag = "mode", rename_all = "kebab-case", deny_unknown_fields)]
 enum RawNeighborList {
@@ -710,8 +713,21 @@ pub fn load_config_raw(path: &Path) -> Result<Config, ConfigError> {
         });
     }
 
+    // Resolve the optional `units` selector. Default to SI; reject
+    // anything else with `UnknownUnits` so the user gets a precise
+    // pointer at the offending value.
+    let units = match raw_config.units.as_deref() {
+        None | Some("si") => UnitSystem::Si,
+        Some("atomic") => UnitSystem::Atomic,
+        Some(other) => {
+            return Err(ConfigError::UnknownUnits {
+                got: other.to_string(),
+            });
+        }
+    };
+
     let base_dir = path.parent().unwrap_or(Path::new("."));
-    let config = build_config(raw_config, path, base_dir);
+    let config = build_config(raw_config, path, base_dir, units);
     config.validate()?;
     Ok(config)
 }
@@ -863,7 +879,28 @@ fn extract_missing_field(msg: &str) -> Option<String> {
 // Populate `Config` from `RawConfig` by resolving paths, filling
 // derived defaults, and converting the Raw sub-types. Does not validate
 // (that's `Config::validate`).
-fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
+//
+// When `units != Si`, every unit-bearing scalar from the source is
+// rescaled to SI as it flows in. Defaults that we compute here
+// (`r_switch = 0.9 * cutoff`, `r_skin = 0.3 * max_cutoff`, …) inherit
+// their dimension from the field they default off of, so the
+// arithmetic is unit-agnostic and happens after the inputs themselves
+// have already been converted.
+fn build_config(
+    raw: RawConfig,
+    config_path: &Path,
+    base_dir: &Path,
+    units: UnitSystem,
+) -> Config {
+    use crate::units::{convert_slot_params, Dimension};
+    let len_f = units.factor(Dimension::Length);
+    let mass_f = units.factor(Dimension::Mass);
+    let charge_f = units.factor(Dimension::Charge);
+    let energy_f = units.factor(Dimension::Energy);
+    let time_f = units.factor(Dimension::Time);
+    let inv_len_f = units.factor(Dimension::InverseLength);
+    let temp_f = units.factor(Dimension::Temperature);
+
     let init = resolve_path(base_dir, &raw.init);
     let topology = raw.topology.as_deref().map(|s| resolve_path(base_dir, s));
 
@@ -879,20 +916,75 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
                 r_switch,
                 sigma,
                 epsilon,
-            } => PairInteractionConfig {
-                between: normalise_pair(&between[0], &between[1]),
-                cutoff,
-                r_switch: r_switch.unwrap_or(0.9 * cutoff),
-                potential: PairPotentialParams::LennardJones { sigma, epsilon },
-            },
+            } => {
+                let cutoff = cutoff * len_f;
+                let r_switch = r_switch.map(|v| v * len_f).unwrap_or(0.9 * cutoff);
+                PairInteractionConfig {
+                    between: normalise_pair(&between[0], &between[1]),
+                    cutoff,
+                    r_switch,
+                    potential: PairPotentialParams::LennardJones {
+                        sigma: sigma * len_f,
+                        epsilon: epsilon * energy_f,
+                    },
+                }
+            }
         })
         .collect();
 
-    let bond_types: Vec<BondTypeConfig> = raw.bond_types.into_iter().map(Into::into).collect();
-    let angle_types: Vec<AngleTypeConfig> = raw.angle_types.into_iter().map(Into::into).collect();
-    let constraint_types: Vec<NamedSlotConfig> = raw.constraint_types;
-    let coulomb: Option<CoulombConfig> = raw.coulomb.map(Into::into);
-    let spme = raw.spme;
+    let bond_types: Vec<BondTypeConfig> = raw
+        .bond_types
+        .into_iter()
+        .map(|b| {
+            let mut bt: BondTypeConfig = b.into();
+            match &mut bt {
+                BondTypeConfig::Morse { name: _, de, a, re } => {
+                    *de *= energy_f;
+                    *a *= inv_len_f;
+                    *re *= len_f;
+                }
+            }
+            bt
+        })
+        .collect();
+
+    let angle_types: Vec<AngleTypeConfig> = raw
+        .angle_types
+        .into_iter()
+        .map(|a| {
+            let mut at: AngleTypeConfig = a.into();
+            match &mut at {
+                AngleTypeConfig::Harmonic {
+                    name: _,
+                    k_theta,
+                    theta_0: _,
+                } => {
+                    // theta_0 is in radians (dimensionless); k_theta has
+                    // units of energy / radian^2 = energy.
+                    *k_theta *= energy_f;
+                }
+            }
+            at
+        })
+        .collect();
+
+    // Constraint types: open-shaped params, rescale in place by kind.
+    let mut constraint_types: Vec<NamedSlotConfig> = raw.constraint_types;
+    for ct in &mut constraint_types {
+        convert_slot_params(units, &ct.kind, &mut ct.params);
+    }
+
+    let coulomb: Option<CoulombConfig> = raw.coulomb.map(|r| {
+        let cutoff = r.cutoff * len_f;
+        let r_switch = r.r_switch.map(|v| v * len_f).unwrap_or(0.9 * cutoff);
+        CoulombConfig { cutoff, r_switch }
+    });
+    let spme = raw.spme.map(|s| SpmeConfig {
+        alpha: s.alpha * inv_len_f,
+        r_cut_real: s.r_cut_real * len_f,
+        grid: s.grid,
+        spline_order: s.spline_order,
+    });
 
     // Compute the maximum cutoff across pair_interactions, coulomb,
     // and spme.r_cut_real; used to derive r_skin's default when
@@ -928,7 +1020,7 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
             r_skin,
         }) => NeighborListConfig::CellList {
             max_neighbors,
-            r_skin: r_skin.unwrap_or(0.3 * max_cutoff),
+            r_skin: r_skin.map(|v| v * len_f).unwrap_or(0.3 * max_cutoff),
         },
     };
 
@@ -1023,13 +1115,23 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
                             }),
                     },
                 };
+                let mut integrator = p.integrator;
+                convert_slot_params(units, &integrator.kind, &mut integrator.params);
+                let thermostat = p.thermostat.map(|mut t| {
+                    convert_slot_params(units, &t.kind, &mut t.params);
+                    t
+                });
+                let barostat = p.barostat.map(|mut b| {
+                    convert_slot_params(units, &b.kind, &mut b.params);
+                    b
+                });
                 PhaseKind::Md(PhaseConfig {
                     name,
                     n_steps: p.n_steps,
-                    dt: p.dt,
-                    integrator: p.integrator,
-                    thermostat: p.thermostat,
-                    barostat: p.barostat,
+                    dt: p.dt * time_f,
+                    integrator,
+                    thermostat,
+                    barostat,
                     output,
                 })
             }
@@ -1075,22 +1177,42 @@ fn build_config(raw: RawConfig, config_path: &Path, base_dir: &Path) -> Config {
                             }),
                     },
                 };
+                let mut algorithm = m.algorithm;
+                convert_slot_params(units, &algorithm.kind, &mut algorithm.params);
                 PhaseKind::Minimization(MinimizationConfig {
                     name,
-                    algorithm: m.algorithm,
+                    algorithm,
                     output,
                 })
             }
         })
         .collect();
 
+    // Top-level [simulation] is typed: rescale its one unit-bearing
+    // field directly.
+    let simulation = SimulationConfig {
+        seed: raw.simulation.seed,
+        temperature: raw.simulation.temperature * temp_f,
+    };
+
+    let particle_types: Vec<ParticleTypeConfig> = raw
+        .particle_types
+        .into_iter()
+        .map(|p| ParticleTypeConfig {
+            name: p.name,
+            mass: p.mass * mass_f,
+            charge: p.charge * charge_f,
+        })
+        .collect();
+
     Config {
         schema_version: raw.schema_version,
+        units,
         init,
         topology,
-        simulation: raw.simulation,
+        simulation,
         phases,
-        particle_types: raw.particle_types,
+        particle_types,
         pair_interactions,
         bond_types,
         angle_types,

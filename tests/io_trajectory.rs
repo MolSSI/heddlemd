@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use dynamics::io::{TrajectoryWriter, TrajectoryWriterError, load_init_state};
 use dynamics::pbc::SimulationBox;
+use dynamics::units::UnitSystem;
 
 fn tmp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -234,7 +235,7 @@ fn round_trip_via_init_parser() {
         )
         .unwrap();
     writer.flush().unwrap();
-    let state = load_init_state(&path, &["Ar"]).unwrap();
+    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
     assert_eq!(state.particle_count, 4);
     assert_eq!(state.positions_x.as_slice(), &positions_x);
     assert_eq!(state.positions_y.as_slice(), &positions_y);
@@ -267,7 +268,7 @@ fn f32_position_round_trip() {
         )
         .unwrap();
     writer.flush().unwrap();
-    let state = load_init_state(&path, &["Ar"]).unwrap();
+    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
     assert_eq!(state.positions_x[0].to_bits(), p.to_bits());
 }
 
@@ -403,7 +404,7 @@ fn image_round_trip_via_init_parser() {
         )
         .unwrap();
     writer.flush().unwrap();
-    let state = load_init_state(&path, &["Ar"]).unwrap();
+    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
     assert_eq!(state.particle_count, 4);
     let imgs = state.images.unwrap();
     assert_eq!(imgs.images_x, images_x);
@@ -432,7 +433,7 @@ fn round_trip_preserves_triclinic_lattice() {
         )
         .unwrap();
     writer.flush().unwrap();
-    let state = load_init_state(&path, &["Ar"]).unwrap();
+    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
     let parsed = state.sim_box.lattice();
     let original = tri.lattice();
     for d in 0..6 {

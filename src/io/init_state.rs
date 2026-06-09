@@ -2,6 +2,7 @@
 use std::path::Path;
 
 use crate::pbc::SimulationBox;
+use crate::units::{Dimension, UnitSystem};
 
 // rq-8df7fb0c
 #[derive(Debug, Clone)]
@@ -173,7 +174,7 @@ fn parse_attribute_line(line: &str) -> Vec<(String, String)> {
 // become the six SimulationBox lattice parameters:
 //   vals[0] = lx (a_x), vals[3] = xy (b_x), vals[4] = ly (b_y),
 //   vals[6] = xz (c_x), vals[7] = yz (c_y), vals[8] = lz (c_z).
-fn parse_lattice(raw: &str) -> Result<SimulationBox, InitStateError> {
+fn parse_lattice(raw: &str, len_factor: f64) -> Result<SimulationBox, InitStateError> {
     let parts: Vec<&str> = raw.split_ascii_whitespace().collect();
     if parts.len() != 9 {
         return Err(InitStateError::InvalidLattice(format!(
@@ -183,9 +184,10 @@ fn parse_lattice(raw: &str) -> Result<SimulationBox, InitStateError> {
     }
     let mut vals = [0.0_f64; 9];
     for (i, p) in parts.iter().enumerate() {
-        vals[i] = p.parse::<f64>().map_err(|_| {
+        let parsed = p.parse::<f64>().map_err(|_| {
             InitStateError::InvalidLattice(format!("component {i} is not a number: {p:?}"))
         })?;
+        vals[i] = parsed * len_factor;
     }
     for (i, v) in vals.iter().enumerate() {
         if !v.is_finite() {
@@ -237,16 +239,20 @@ fn parse_properties(raw: &str) -> Result<PropertiesShape, InitStateError> {
 pub fn load_init_state(
     path: &Path,
     type_names: &[&str],
+    units: UnitSystem,
 ) -> Result<InitState, InitStateError> {
     let raw = std::fs::read_to_string(path)
         .map_err(|e| InitStateError::Io(format!("{}: {}", path.display(), e)))?;
-    parse_init_state(&raw, type_names)
+    parse_init_state(&raw, type_names, units)
 }
 
 pub(crate) fn parse_init_state(
     raw: &str,
     type_names: &[&str],
+    units: UnitSystem,
 ) -> Result<InitState, InitStateError> {
+    let len_factor = units.factor(Dimension::Length);
+    let vel_factor = units.factor(Dimension::Velocity);
     let mut lines = raw.lines();
     let first = lines.next().ok_or(InitStateError::Empty)?;
     let count_str = first.trim();
@@ -268,7 +274,7 @@ pub(crate) fn parse_init_state(
         .find(|(k, _)| k == "Lattice")
         .map(|(_, v)| v.as_str())
         .ok_or(InitStateError::MissingAttribute { name: "Lattice" })?;
-    let sim_box = parse_lattice(lattice_value)?;
+    let sim_box = parse_lattice(lattice_value, len_factor)?;
 
     let properties_value = attrs
         .iter()
@@ -327,18 +333,18 @@ pub(crate) fn parse_init_state(
                 });
             }
         };
-        let px = parse_number(cols[1], current_line_number, "pos_x")?;
-        let py = parse_number(cols[2], current_line_number, "pos_y")?;
-        let pz = parse_number(cols[3], current_line_number, "pos_z")?;
+        let px = parse_number(cols[1], current_line_number, "pos_x")? * len_factor;
+        let py = parse_number(cols[2], current_line_number, "pos_y")? * len_factor;
+        let pz = parse_number(cols[3], current_line_number, "pos_z")? * len_factor;
         check_finite(px, current_line_number, "pos_x")?;
         check_finite(py, current_line_number, "pos_y")?;
         check_finite(pz, current_line_number, "pos_z")?;
         check_in_primary_image(px, py, pz, current_line_number, &sim_box)?;
 
         let (vx, vy, vz) = if has_velo {
-            let vx = parse_number(cols[4], current_line_number, "velo_x")?;
-            let vy = parse_number(cols[5], current_line_number, "velo_y")?;
-            let vz = parse_number(cols[6], current_line_number, "velo_z")?;
+            let vx = parse_number(cols[4], current_line_number, "velo_x")? * vel_factor;
+            let vy = parse_number(cols[5], current_line_number, "velo_y")? * vel_factor;
+            let vz = parse_number(cols[6], current_line_number, "velo_z")? * vel_factor;
             check_finite(vx, current_line_number, "velo_x")?;
             check_finite(vy, current_line_number, "velo_y")?;
             check_finite(vz, current_line_number, "velo_z")?;

@@ -3419,3 +3419,251 @@ fn filename_check_runs_before_io() {
         other => panic!("expected InvalidConfigFilename, got {other:?}"),
     }
 }
+
+// =====================================================================
+// Unit-system selector (`units = "si" | "atomic"`)
+// =====================================================================
+
+use dynamics::io::PairPotentialParams;
+use dynamics::units::{Dimension, UnitSystem};
+
+#[test]
+fn units_default_is_si() {
+    let dir = tmp_path("units_default_si");
+    let path = write_config(&dir, &minimal_config());
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.units, UnitSystem::Si);
+    // SI-mode values round-trip unchanged.
+    assert_eq!(cfg.simulation.temperature, 300.0);
+    assert_eq!(cfg.phases[0].as_md().unwrap().dt, 1.0e-15);
+    assert_eq!(cfg.particle_types[0].mass, 6.6335e-26);
+}
+
+#[test]
+fn units_explicit_si_accepted() {
+    let dir = tmp_path("units_explicit_si");
+    let cfg_text = format!("units = \"si\"\n{}", minimal_config());
+    let path = write_config(&dir, &cfg_text);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.units, UnitSystem::Si);
+}
+
+#[test]
+fn units_unknown_value_rejected() {
+    let dir = tmp_path("units_unknown");
+    let cfg_text = format!("units = \"imperial\"\n{}", minimal_config());
+    let path = write_config(&dir, &cfg_text);
+    match load_config(&path).unwrap_err() {
+        ConfigError::UnknownUnits { got } => assert_eq!(got, "imperial"),
+        other => panic!("expected UnknownUnits, got {other:?}"),
+    }
+}
+
+#[test]
+fn atomic_units_yield_same_si_config_as_native_si() {
+    // Two TOML files describing the same physical system: one in SI,
+    // one in atomic units. After `load_config` the two `Config`
+    // structs should be numerically equal (to f64 round-off) on every
+    // unit-bearing field. Conversion factors come from the units
+    // module, so this test pins the SI side and lets the atomic side
+    // be derived through the conversion path.
+    let len_f = UnitSystem::Atomic.factor(Dimension::Length);
+    let mass_f = UnitSystem::Atomic.factor(Dimension::Mass);
+    let energy_f = UnitSystem::Atomic.factor(Dimension::Energy);
+    let time_f = UnitSystem::Atomic.factor(Dimension::Time);
+    let temp_f = UnitSystem::Atomic.factor(Dimension::Temperature);
+
+    // Argon Lennard-Jones; values picked so the SI-side numbers are
+    // physical and the atomic-side numbers stay finite and well-scaled.
+    let sigma_si = 3.40e-10;
+    let epsilon_si = 1.65e-21;
+    let cutoff_si = 1.0e-9;
+    let mass_si = 6.6335e-26;
+    let dt_si = 1.0e-15;
+    let temperature_si = 300.0;
+
+    let sigma_au = sigma_si / len_f;
+    let epsilon_au = epsilon_si / energy_f;
+    let cutoff_au = cutoff_si / len_f;
+    let mass_au = mass_si / mass_f;
+    let dt_au = dt_si / time_f;
+    let temperature_au = temperature_si / temp_f;
+
+    let cfg_si = format!(
+        r#"schema_version = 1
+init = "argon.in.xyz"
+
+[simulation]
+seed = 12345
+temperature = {temperature_si}
+
+[[phase]]
+name = "run"
+n_steps = 10
+dt = {dt_si:.16e}
+
+[phase.integrator]
+kind = "velocity-verlet"
+
+[[particle_types]]
+name = "Ar"
+mass = {mass_si:.16e}
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = {sigma_si:.16e}
+epsilon = {epsilon_si:.16e}
+cutoff = {cutoff_si:.16e}
+"#
+    );
+
+    let cfg_au = format!(
+        r#"schema_version = 1
+units = "atomic"
+init = "argon.in.xyz"
+
+[simulation]
+seed = 12345
+temperature = {temperature_au:.16e}
+
+[[phase]]
+name = "run"
+n_steps = 10
+dt = {dt_au:.16e}
+
+[phase.integrator]
+kind = "velocity-verlet"
+
+[[particle_types]]
+name = "Ar"
+mass = {mass_au:.16e}
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = {sigma_au:.16e}
+epsilon = {epsilon_au:.16e}
+cutoff = {cutoff_au:.16e}
+"#
+    );
+
+    let dir_si = tmp_path("atomic_vs_si_si_side");
+    let dir_au = tmp_path("atomic_vs_si_au_side");
+    let path_si = write_config(&dir_si, &cfg_si);
+    let path_au = write_config(&dir_au, &cfg_au);
+
+    let loaded_si = load_config(&path_si).unwrap();
+    let loaded_au = load_config(&path_au).unwrap();
+
+    assert_eq!(loaded_si.units, UnitSystem::Si);
+    assert_eq!(loaded_au.units, UnitSystem::Atomic);
+
+    // After conversion, both configs hold SI values.
+    fn approx_eq(a: f64, b: f64, rel: f64) -> bool {
+        if a == b {
+            return true;
+        }
+        let scale = a.abs().max(b.abs());
+        (a - b).abs() <= rel * scale
+    }
+
+    let rel = 1e-12;
+    assert!(approx_eq(
+        loaded_au.simulation.temperature,
+        loaded_si.simulation.temperature,
+        rel
+    ));
+    let md_si = loaded_si.phases[0].as_md().unwrap();
+    let md_au = loaded_au.phases[0].as_md().unwrap();
+    assert!(approx_eq(md_au.dt, md_si.dt, rel));
+    assert!(approx_eq(
+        loaded_au.particle_types[0].mass,
+        loaded_si.particle_types[0].mass,
+        rel
+    ));
+
+    let pi_si = &loaded_si.pair_interactions[0];
+    let pi_au = &loaded_au.pair_interactions[0];
+    assert!(approx_eq(pi_au.cutoff, pi_si.cutoff, rel));
+    assert!(approx_eq(pi_au.r_switch, pi_si.r_switch, rel));
+    match (&pi_si.potential, &pi_au.potential) {
+        (
+            PairPotentialParams::LennardJones {
+                sigma: s_si,
+                epsilon: e_si,
+            },
+            PairPotentialParams::LennardJones {
+                sigma: s_au,
+                epsilon: e_au,
+            },
+        ) => {
+            assert!(approx_eq(*s_au, *s_si, rel));
+            assert!(approx_eq(*e_au, *e_si, rel));
+        }
+    }
+}
+
+#[test]
+fn atomic_units_rescale_csvr_thermostat_params() {
+    // Verify that slot params (open-shaped toml::Value) get rescaled by
+    // walking a CSVR thermostat block.
+    let dir = tmp_path("atomic_csvr_params");
+    let temp_au = 9.5e-4; // ~300 K in Hartree/k_B
+    let tau_au = 41.34;   // ~1 fs in atomic time units
+    let cfg = format!(
+        r#"schema_version = 1
+units = "atomic"
+init = "argon.in.xyz"
+
+[simulation]
+seed = 12345
+temperature = {temp_au}
+
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 41.34
+
+[phase.integrator]
+kind = "velocity-verlet"
+
+[phase.thermostat]
+kind = "csvr"
+temperature = {temp_au}
+tau = {tau_au}
+seed = 7
+
+[[particle_types]]
+name = "Ar"
+mass = 72820.0
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 6.43
+epsilon = 3.78e-4
+cutoff = 18.9
+"#
+    );
+    let path = write_config(&dir, &cfg);
+    let loaded = load_config(&path).unwrap();
+
+    let temp_f = UnitSystem::Atomic.factor(Dimension::Temperature);
+    let time_f = UnitSystem::Atomic.factor(Dimension::Time);
+
+    let thermostat = loaded.phases[0]
+        .as_md()
+        .unwrap()
+        .thermostat
+        .as_ref()
+        .unwrap();
+    assert_eq!(thermostat.kind, "csvr");
+    let t = param_f64(thermostat, "temperature");
+    let tau = param_f64(thermostat, "tau");
+    let seed = param_u64(thermostat, "seed");
+    let rel = 1e-12;
+    assert!((t - temp_au * temp_f).abs() <= rel * (temp_au * temp_f));
+    assert!((tau - tau_au * time_f).abs() <= rel * (tau_au * time_f));
+    assert_eq!(seed, 7);
+}

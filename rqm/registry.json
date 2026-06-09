@@ -163,6 +163,13 @@
     "title": "Build kernel signals overflow when an atom exceeds max_neighbors",
     "type": "scenario"
   },
+  "rq-01d30cb4": {
+    "decl": "Scenario: Position-in-box check runs against the post-conversion box",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "Position-in-box check runs against the post-conversion box",
+    "type": "scenario"
+  },
   "rq-020ff80e": {
     "decl": "Scenario: SD does not modify velocities",
     "file": "minimization/steepest-descent",
@@ -472,6 +479,13 @@
     "title": "Default output paths drop a single trailing `.in` from the config-file root",
     "type": "scenario"
   },
+  "rq-062438e7": {
+    "decl": "Scenario: Top-level units field defaults to SI when absent",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Top-level units field defaults to SI when absent",
+    "type": "scenario"
+  },
   "rq-062ea284": {
     "decl": "## Algorithm",
     "file": "integration/csvr",
@@ -641,7 +655,12 @@
   "rq-08aba7ee": {
     "decl": "# Feature: Steepest-Descent Energy Minimizer",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: Steepest-Descent Energy Minimizer",
     "type": "file"
   },
@@ -725,7 +744,12 @@
     "decl": "### `[minimization.algorithm]`",
     "file": "minimization/steepest-descent",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/steepest_descent.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`[minimization.algorithm]`",
     "type": "section"
   },
@@ -1136,6 +1160,13 @@
     "title": "n_steps = 0 is accepted",
     "type": "scenario"
   },
+  "rq-1077b559": {
+    "decl": "# Feature: Unit-System Selector and Atomic-Units Input",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Feature: Unit-System Selector and Atomic-Units Input",
+    "type": "file"
+  },
   "rq-107a7187": {
     "decl": "Scenario: KE of a single particle at rest is zero",
     "file": "io/log-output",
@@ -1251,7 +1282,12 @@
     "decl": "### `.minlog` format",
     "file": "minimization/steepest-descent",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/minlog_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`.minlog` format",
     "type": "section"
   },
@@ -1484,7 +1520,16 @@
   "rq-1440b6e6": {
     "decl": "- `Minimizer::check_convergence(&self, report)`",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/minimizer/steepest_descent.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Minimizer",
     "type": "api-item"
   },
@@ -1791,6 +1836,13 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-18ad751a": {
+    "decl": "Scenario: Negative atomic-unit input is rejected as a negative SI value",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Negative atomic-unit input is rejected as a negative SI value",
+    "type": "scenario"
+  },
   "rq-18f5ef7a": {
     "decl": "Scenario: Constraint group adds implicit exclusions for every intra-group pair",
     "file": "integration/constraint-framework",
@@ -1808,7 +1860,12 @@
   "rq-19226daf": {
     "decl": "- `PhaseKind` — discriminated union over the unified phase sequence.",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PhaseKind",
     "type": "api-item"
   },
@@ -1921,6 +1978,13 @@
     "file": "integration/nose-hoover-chain",
     "refs": [],
     "title": "Construct for a SETTLE'd water system",
+    "type": "scenario"
+  },
+  "rq-1ab7aed8": {
+    "decl": "Scenario: r_skin default tracks the maximum atomic-unit cutoff",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "r_skin default tracks the maximum atomic-unit cutoff",
     "type": "scenario"
   },
   "rq-1ad7e751": {
@@ -2154,6 +2218,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "Accept r_switch equal to cutoff (hard-cutoff degenerate case)",
+    "type": "scenario"
+  },
+  "rq-1dc0b44c": {
+    "decl": "Scenario: Lattice components in atomic units are converted to metres",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "Lattice components in atomic units are converted to metres",
     "type": "scenario"
   },
   "rq-1ddf84f1": {
@@ -2429,7 +2500,12 @@
   "rq-208aaa72": {
     "decl": "- `MinimizerStepReport` — outcome of one `step` call.",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MinimizerStepReport",
     "type": "api-item"
   },
@@ -2732,7 +2808,12 @@
   "rq-237b5543": {
     "decl": "- `MinimizerRegistry::with_builtins() -> MinimizerRegistry`",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MinimizerRegistry",
     "type": "api-item"
   },
@@ -2750,6 +2831,13 @@
     "refs": [],
     "title": "Launch Configuration",
     "type": "section"
+  },
+  "rq-23d439dd": {
+    "decl": "Scenario: Atomic-mode c-rescale barostat params are converted to SI",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Atomic-mode c-rescale barostat params are converted to SI",
+    "type": "scenario"
   },
   "rq-23e2bb88": {
     "decl": "#### `mtk_position_drift`",
@@ -2806,7 +2894,12 @@
   "rq-2456a906": {
     "decl": "- `TrajectoryReader::first_frame_header: TrajectoryFrameHeader`",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "TrajectoryReader",
     "type": "api-item"
   },
@@ -3303,6 +3396,13 @@
     "title": "SPME reciprocal state's internal cell list uses one bin per FFT grid cell",
     "type": "scenario"
   },
+  "rq-2ae919ff": {
+    "decl": "Scenario: Atomic-mode pair-interaction values are converted to SI",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Atomic-mode pair-interaction values are converted to SI",
+    "type": "scenario"
+  },
   "rq-2afb76f2": {
     "decl": "Scenario: validate_against surfaces per-builder validate_params errors",
     "file": "io/config-schema",
@@ -3501,6 +3601,13 @@
     "title": "C-rescale composes with langevin-baoab",
     "type": "scenario"
   },
+  "rq-2d394728": {
+    "decl": "Scenario: UnitSystem::Si factor is unity for every dimension",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "UnitSystem::Si factor is unity for every dimension",
+    "type": "scenario"
+  },
   "rq-2d46cad5": {
     "decl": "Scenario: MtkNpt owns its own barostat",
     "file": "integration/mtk-npt",
@@ -3609,7 +3716,12 @@
   "rq-2f230ccb": {
     "decl": "- `BondTypeConfig` — tagged enum carrying the chosen bonded-potential",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "BondTypeConfig",
     "type": "api-item"
   },
@@ -3710,7 +3822,12 @@
   "rq-3108381e": {
     "decl": "- `ConfigError` — error type returned by `load_config` and by",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ConfigError",
     "type": "api-item"
   },
@@ -4314,7 +4431,12 @@
     "decl": "### Initial iteration",
     "file": "minimization/steepest-descent",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/steepest_descent.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Initial iteration",
     "type": "section"
   },
@@ -4686,7 +4808,12 @@
     "decl": "### Per-iteration sequence",
     "file": "minimization/steepest-descent",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/steepest_descent.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Per-iteration sequence",
     "type": "section"
   },
@@ -4716,6 +4843,13 @@
     "title": "NamedSlotConfig",
     "type": "api-item"
   },
+  "rq-3fe1680a": {
+    "decl": "Scenario: Position columns in atomic units are converted to metres",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "Position columns in atomic units are converted to metres",
+    "type": "scenario"
+  },
   "rq-402cea33": {
     "decl": "## Constraint-Type Validation",
     "file": "integration/constraint-framework",
@@ -4735,6 +4869,14 @@
     ],
     "title": "TrajectoryWriter",
     "type": "api-item"
+  },
+  "rq-40a6a8aa": {
+    "decl": "## Physical Constants Source",
+    "file": "io/unit-system",
+    "level": 2,
+    "refs": [],
+    "title": "Physical Constants Source",
+    "type": "section"
   },
   "rq-40dd09ae": {
     "decl": "Scenario: Reject `between` referencing a type with zero particles",
@@ -5026,6 +5168,13 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-46984575": {
+    "decl": "Scenario: Atomic and SI .xyz files for the same physical state agree",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Atomic and SI .xyz files for the same physical state agree",
+    "type": "scenario"
+  },
   "rq-46a39249": {
     "decl": "- `compute_temperature(kinetic_energy: f64, n_thermal_dof: u32) -> f64`",
     "file": "io/log-output",
@@ -5100,7 +5249,12 @@
     "decl": "## CUDA Kernels",
     "file": "minimization/steepest-descent",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "CUDA Kernels",
     "type": "section"
   },
@@ -5811,6 +5965,14 @@
     "title": "velocity-verlet (lossless) does not support constraints",
     "type": "scenario"
   },
+  "rq-534f7332": {
+    "decl": "### Types",
+    "file": "io/unit-system",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-5355f3f0": {
     "decl": "Scenario: wrap_position_with_image_count tracks per-direction image counts for a triclinic box",
     "file": "simulation-box",
@@ -5856,7 +6018,12 @@
   "rq-53d48fb8": {
     "decl": "- `Minimizer::step(&mut self, buffers, sim_box, force_field, constraint, timings)`",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Minimizer",
     "type": "api-item"
   },
@@ -5955,6 +6122,14 @@
     "title": "Repeated kernel_start/kernel_stop pairs accumulate",
     "type": "scenario"
   },
+  "rq-560ae5ee": {
+    "decl": "## Supported Unit Systems",
+    "file": "io/unit-system",
+    "level": 2,
+    "refs": [],
+    "title": "Supported Unit Systems",
+    "type": "section"
+  },
   "rq-560dffb8": {
     "decl": "Scenario: Reject duplicate type names",
     "file": "io/config-schema",
@@ -6024,7 +6199,7 @@
     "type": "scenario"
   },
   "rq-5711e6b2": {
-    "decl": "- `load_init_state(path: &Path, type_names: &[&str]) -> Result<InitState, InitStateError>`",
+    "decl": "- `load_init_state(path: &Path, type_names: &[&str], units: UnitSystem) -> Result<InitState, InitStateError>`",
     "file": "io/init-state-file",
     "refs": [
       {
@@ -6665,7 +6840,12 @@
   "rq-6082cd2d": {
     "decl": "- `Config::validate_against(&self, registries: &Registries) -> Result<(), ConfigError>`",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Config",
     "type": "api-item"
   },
@@ -6882,6 +7062,13 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-641c2685": {
+    "decl": "- `slot_kind_field_dims(kind: &str) -> Option<&'static [(&'static str, Dimension)]>`",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "slot_kind_field_dims",
+    "type": "api-item"
+  },
   "rq-6432ab1f": {
     "decl": "# Feature: TOML Simulation Config Schema",
     "file": "io/config-schema",
@@ -6963,6 +7150,14 @@
     "level": 3,
     "refs": [],
     "title": "`[[analyses]]` array",
+    "type": "section"
+  },
+  "rq-65bc7978": {
+    "decl": "## Feature API",
+    "file": "io/unit-system",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
     "type": "section"
   },
   "rq-6606584b": {
@@ -7073,6 +7268,13 @@
     "refs": [],
     "title": "Box compatibility picks up SPME's real-space cutoff",
     "type": "scenario"
+  },
+  "rq-6753380c": {
+    "decl": "- `convert_slot_params(system: UnitSystem, kind: &str, params: &mut toml::Value)`",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "convert_slot_params",
+    "type": "api-item"
   },
   "rq-67678030": {
     "decl": "Scenario: Switching interval r_switch == cutoff selects hard-cutoff",
@@ -7764,6 +7966,14 @@
     "title": "A trajectory frame can be re-parsed by load_init_state",
     "type": "scenario"
   },
+  "rq-70eddcdc": {
+    "decl": "## Out of Scope",
+    "file": "io/unit-system",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-70fe268a": {
     "decl": "Scenario: init_device exposes the lossless integrator kernels",
     "file": "integration/velocity-verlet",
@@ -7833,7 +8043,12 @@
   "rq-723d202b": {
     "decl": "- `Config::validate_constraint_compatibility(&self, registries: &Registries, has_constraints: bool) -> Result<(), ConfigError>`",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Config",
     "type": "api-item"
   },
@@ -8093,7 +8308,12 @@
   "rq-758b03ef": {
     "decl": "- `MinimizationOutputConfig` — parsed `[minimization.output]` table",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MinimizationOutputConfig",
     "type": "api-item"
   },
@@ -8162,6 +8382,13 @@
     "refs": [],
     "title": "Determinism Guarantees",
     "type": "section"
+  },
+  "rq-76d522e3": {
+    "decl": "Scenario: Atomic-mode .xyz lattice and positions are converted to SI",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Atomic-mode .xyz lattice and positions are converted to SI",
+    "type": "scenario"
   },
   "rq-76d8bba2": {
     "decl": "## `<root>.in.analysis` file",
@@ -8264,7 +8491,12 @@
   "rq-77f64e46": {
     "decl": "- `MinimizerConvergence` — enum reporting why the loop ended.",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MinimizerConvergence",
     "type": "api-item"
   },
@@ -8278,7 +8510,12 @@
   "rq-78041a25": {
     "decl": "- `MinimizerError` — error type returned by every trait method.",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MinimizerError",
     "type": "api-item"
   },
@@ -8311,6 +8548,13 @@
     "refs": [],
     "title": "`[[particle_types]]` (array of tables)",
     "type": "section"
+  },
+  "rq-78606847": {
+    "decl": "Scenario: Atomic-mode CSVR thermostat params are converted to SI",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Atomic-mode CSVR thermostat params are converted to SI",
+    "type": "scenario"
   },
   "rq-7884e3ff": {
     "decl": "## Per-Step Kernel Sequence",
@@ -8603,6 +8847,13 @@
     "file": "build-pipeline",
     "refs": [],
     "title": "Cross-subsystem reads pull from the kernel's home sub-struct",
+    "type": "scenario"
+  },
+  "rq-7b6dcff3": {
+    "decl": "Scenario: Atomic-mode steepest-descent minimizer params are converted",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Atomic-mode steepest-descent minimizer params are converted",
     "type": "scenario"
   },
   "rq-7ba4f321": {
@@ -8930,6 +9181,13 @@
     "title": "LintReport API short-circuits and carries the structured error",
     "type": "scenario"
   },
+  "rq-8053cec1": {
+    "decl": "Scenario: Atomic-mode dt and simulation temperature are converted to SI",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Atomic-mode dt and simulation temperature are converted to SI",
+    "type": "scenario"
+  },
   "rq-8057cb7e": {
     "decl": "Scenario: Reject row with infinite velocity",
     "file": "io/init-state-file",
@@ -8997,7 +9255,12 @@
   "rq-82621837": {
     "decl": "- `MinlogWriterError` — error type. Variants `OutputExists { path:",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/minlog_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MinlogWriterError",
     "type": "api-item"
   },
@@ -9042,6 +9305,13 @@
     ],
     "title": "CLI",
     "type": "section"
+  },
+  "rq-82d934b0": {
+    "decl": "Scenario: r_switch <= cutoff ordering survives positive-factor rescaling",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "r_switch <= cutoff ordering survives positive-factor rescaling",
+    "type": "scenario"
   },
   "rq-82e4f74e": {
     "decl": "Scenario: Same-sign charges repel",
@@ -9091,6 +9361,13 @@
     "refs": [],
     "title": "Reject unsupported Properties form",
     "type": "scenario"
+  },
+  "rq-837962c2": {
+    "decl": "- `UnitSystem::from_str(s: &str) -> Option<Self>`",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "UnitSystem",
+    "type": "api-item"
   },
   "rq-838acdee": {
     "decl": "Scenario: sorted_particle_ids sorts particles by (cell_index, particle_id)",
@@ -9220,6 +9497,13 @@
     "refs": [],
     "title": "AnalysisBuilder",
     "type": "api-item"
+  },
+  "rq-86f3ca2b": {
+    "decl": "Scenario: units field defaulting to SI when absent",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "units field defaulting to SI when absent",
+    "type": "scenario"
   },
   "rq-870ed681": {
     "decl": "Scenario: wrap_position_with_image_count returns the image triple together with the wrapped position",
@@ -9440,6 +9724,13 @@
     "title": "Timings",
     "type": "api-item"
   },
+  "rq-8aa2d069": {
+    "decl": "Scenario: SI mode leaves every unit-bearing value unchanged",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "SI mode leaves every unit-bearing value unchanged",
+    "type": "scenario"
+  },
   "rq-8aae6b06": {
     "decl": "Scenario: Frame selection: last_frame past end is rejected at trajectory-open time",
     "file": "analysis/framework",
@@ -9488,6 +9779,13 @@
     ],
     "title": "Functions and methods",
     "type": "section"
+  },
+  "rq-8b657ee3": {
+    "decl": "Scenario: Atomic-mode .xyz velocities are converted to SI",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Atomic-mode .xyz velocities are converted to SI",
+    "type": "scenario"
   },
   "rq-8c045718": {
     "decl": "Scenario: minimum_image of the zero displacement is zero",
@@ -9697,6 +9995,13 @@
     "title": "Reject log_path = timings_path",
     "type": "scenario"
   },
+  "rq-8f9cfb8a": {
+    "decl": "Scenario: Atomic-mode mass and charge are converted to SI",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Atomic-mode mass and charge are converted to SI",
+    "type": "scenario"
+  },
   "rq-8fbdbc0c": {
     "decl": "Scenario: lookup returns the builder for a registered kind",
     "file": "integration/framework",
@@ -9723,6 +10028,13 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "LennardJonesState reports its max cutoff to the framework",
+    "type": "scenario"
+  },
+  "rq-90171906": {
+    "decl": "Scenario: Atomic-mode SETTLE constraint distances are converted to SI",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Atomic-mode SETTLE constraint distances are converted to SI",
     "type": "scenario"
   },
   "rq-901c006f": {
@@ -9980,6 +10292,13 @@
     "title": "neighbor_list all-pairs mode is accepted",
     "type": "scenario"
   },
+  "rq-9329ece2": {
+    "decl": "Scenario: Reject an unknown units value",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Reject an unknown units value",
+    "type": "scenario"
+  },
   "rq-9331ede2": {
     "decl": "- `IntegratorBuilder::supports_constraints(&self, params: &toml::Value) -> bool`",
     "file": "integration/constraint-framework",
@@ -10015,6 +10334,13 @@
     "refs": [],
     "title": "wrap_position is idempotent",
     "type": "scenario"
+  },
+  "rq-942f1618": {
+    "decl": "- `Dimension` — discriminated enum naming the physical dimensions the",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Dimension",
+    "type": "api-item"
   },
   "rq-9447dfcf": {
     "decl": "Scenario: NaN values are accepted at construction",
@@ -10190,6 +10516,13 @@
     "title": "Slot for a pair beyond cutoff is zero",
     "type": "scenario"
   },
+  "rq-971663ba": {
+    "decl": "Scenario: Atomic-mode physical scalars are SI on the returned Config",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Atomic-mode physical scalars are SI on the returned Config",
+    "type": "scenario"
+  },
   "rq-971ca980": {
     "decl": "### Step Plan",
     "file": "integration/mtk-npt",
@@ -10201,7 +10534,12 @@
   "rq-972e319b": {
     "decl": "- `TrajectoryFrameHeader` — `Clone`, `Debug` struct exposing:",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "TrajectoryFrameHeader",
     "type": "api-item"
   },
@@ -10417,7 +10755,12 @@
   "rq-9adb9a5b": {
     "decl": "- `TrajectoryReaderError` — error type. Variants:",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "TrajectoryReaderError",
     "type": "api-item"
   },
@@ -10860,6 +11203,14 @@
     "title": "Reject non-positive tau_t",
     "type": "scenario"
   },
+  "rq-a01c4173": {
+    "decl": "### Per-slot field-to-dimension mapping",
+    "file": "io/unit-system",
+    "level": 3,
+    "refs": [],
+    "title": "Per-slot field-to-dimension mapping",
+    "type": "section"
+  },
   "rq-a034083a": {
     "decl": "### PTX Module Loading",
     "file": "integration/berendsen-barostat",
@@ -11071,6 +11422,13 @@
     "title": "File Format",
     "type": "section"
   },
+  "rq-a34386a2": {
+    "decl": "- `UnitSystem::as_str(self) -> &'static str`",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "UnitSystem",
+    "type": "api-item"
+  },
   "rq-a3563587": {
     "decl": "Scenario: Successful set_lattice increments generation by 1",
     "file": "simulation-box",
@@ -11139,7 +11497,12 @@
   "rq-a47beb76": {
     "decl": "- `AngleTypeConfig` — tagged enum carrying the chosen angle-potential",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "AngleTypeConfig",
     "type": "api-item"
   },
@@ -11178,6 +11541,13 @@
     "title": "Lint never creates output files",
     "type": "scenario"
   },
+  "rq-a509260e": {
+    "decl": "- `UnitSystem::to_si(self, dim: Dimension, value: f64) -> f64`",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "UnitSystem",
+    "type": "api-item"
+  },
   "rq-a50cb6a1": {
     "decl": "Scenario: Pair beyond cutoff yields zero energy and virial slots",
     "file": "forces/lj-pair-force",
@@ -11188,7 +11558,12 @@
   "rq-a54cc657": {
     "decl": "- `Config::validate(&self) -> Result<(), ConfigError>`",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Config",
     "type": "api-item"
   },
@@ -11787,7 +12162,12 @@
   "rq-af0518f8": {
     "decl": "- `InitImages`",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "InitImages",
     "type": "api-item"
   },
@@ -11801,7 +12181,12 @@
   "rq-af1c88ae": {
     "decl": "- `TrajectoryReader::open(path: &Path, type_names: &[&str]) -> Result<TrajectoryReader, TrajectoryReaderError>`",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "TrajectoryReader",
     "type": "api-item"
   },
@@ -11946,12 +12331,27 @@
     "title": "SpmeReciprocalState",
     "type": "api-item"
   },
+  "rq-b115f099": {
+    "decl": "- `UnitSystem::factor(self, dim: Dimension) -> f64`",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "UnitSystem",
+    "type": "api-item"
+  },
   "rq-b13eba96": {
     "decl": "Scenario: Particles evolve independently with their own forces",
     "file": "integration/velocity-verlet",
     "refs": [],
     "title": "Particles evolve independently with their own forces",
     "type": "scenario"
+  },
+  "rq-b17e3c4a": {
+    "decl": "## Initial-State File",
+    "file": "io/unit-system",
+    "level": 2,
+    "refs": [],
+    "title": "Initial-State File",
+    "type": "section"
   },
   "rq-b17e6de6": {
     "decl": "- `Timings::kernel_stop(&mut self, stage: KernelStage) -> Result<(), TimingsError>`",
@@ -12109,6 +12509,13 @@
     "title": "C-rescale barostat missing seed is rejected",
     "type": "scenario"
   },
+  "rq-b3580237": {
+    "decl": "Scenario: r_switch default tracks atomic-unit cutoff",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "r_switch default tracks atomic-unit cutoff",
+    "type": "scenario"
+  },
   "rq-b39d3be7": {
     "decl": "Scenario: Displacement check uses minimum-image displacement",
     "file": "forces/neighbor-list",
@@ -12143,6 +12550,13 @@
     "file": "integration/framework",
     "refs": [],
     "title": "Construct an integrator with particle_count = 0",
+    "type": "scenario"
+  },
+  "rq-b45f38d9": {
+    "decl": "Scenario: units field set to \"atomic\"",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "units field set to \"atomic\"",
     "type": "scenario"
   },
   "rq-b47589c9": {
@@ -12231,6 +12645,13 @@
     "refs": [],
     "title": "log_column_names",
     "type": "api-item"
+  },
+  "rq-b68761f1": {
+    "decl": "Scenario: Top-level units = \"atomic\" is accepted and recorded on Config",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Top-level units = \"atomic\" is accepted and recorded on Config",
+    "type": "scenario"
   },
   "rq-b68b3445": {
     "decl": "Scenario: Two-particle pair energy matches the closed-form Lennard-Jones expression",
@@ -12378,6 +12799,13 @@
     "refs": [],
     "title": "Frame Properties carries image:I:3 when include_images=true and include_velocities=false",
     "type": "scenario"
+  },
+  "rq-b87d8d05": {
+    "decl": "- `UnitSystem` — discriminated enum naming the two supported systems.",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "UnitSystem",
+    "type": "api-item"
   },
   "rq-b87fd5e8": {
     "decl": "Scenario: Positions visibly evolve over the 100-step lossless forward run",
@@ -12640,6 +13068,13 @@
     "title": "Near-collinear geometry (sin θ ≈ 0) produces zero force",
     "type": "scenario"
   },
+  "rq-bd5157fc": {
+    "decl": "Scenario: Velocity columns in atomic units are converted to m/s",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "Velocity columns in atomic units are converted to m/s",
+    "type": "scenario"
+  },
   "rq-bd684a0d": {
     "decl": "Scenario: Force gather on one isolated particle returns the gradient of its own spread",
     "file": "forces/spme",
@@ -12784,6 +13219,13 @@
     "file": "integration/nose-hoover-chain",
     "refs": [],
     "title": "rescale_velocities on empty state is a no-op",
+    "type": "scenario"
+  },
+  "rq-bf0d5b9c": {
+    "decl": "Scenario: units field explicitly set to \"si\"",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "units field explicitly set to \"si\"",
     "type": "scenario"
   },
   "rq-bf3ec42e": {
@@ -13256,6 +13698,13 @@
     "title": "Determinism",
     "type": "section"
   },
+  "rq-c6362139": {
+    "decl": "Scenario: Slot kind unknown to the unit module passes through unchanged",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Slot kind unknown to the unit module passes through unchanged",
+    "type": "scenario"
+  },
   "rq-c669b757": {
     "decl": "## Smoke Test",
     "file": "build-pipeline",
@@ -13341,6 +13790,13 @@
     "file": "integration/andersen",
     "refs": [],
     "title": "draw_counter starts at 0 and increments by 1 per apply_post",
+    "type": "scenario"
+  },
+  "rq-c8477085": {
+    "decl": "Scenario: Round-trip equivalence between SI and atomic descriptions",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Round-trip equivalence between SI and atomic descriptions",
     "type": "scenario"
   },
   "rq-c8848b7f": {
@@ -13613,6 +14069,13 @@
     "title": "Slots",
     "type": "section"
   },
+  "rq-cc806e11": {
+    "decl": "Scenario: Reject case-mismatched units value",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Reject case-mismatched units value",
+    "type": "scenario"
+  },
   "rq-cc87744c": {
     "decl": "Scenario: Self-interaction slots are zero",
     "file": "forces/lj-pair-force",
@@ -13624,7 +14087,12 @@
     "decl": "### Empty state",
     "file": "minimization/steepest-descent",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/steepest_descent.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Empty state",
     "type": "section"
   },
@@ -13730,6 +14198,13 @@
     "file": "particle-state",
     "refs": [],
     "title": "Reject when masses has the wrong length",
+    "type": "scenario"
+  },
+  "rq-cedbd670": {
+    "decl": "Scenario: Validation of atomic-mode input runs on post-conversion values",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Validation of atomic-mode input runs on post-conversion values",
     "type": "scenario"
   },
   "rq-cedda168": {
@@ -13944,7 +14419,12 @@
     "decl": "### `TrajectoryReader`",
     "file": "io/trajectory-output",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`TrajectoryReader`",
     "type": "section"
   },
@@ -13961,6 +14441,14 @@
     "refs": [],
     "title": "minimum_image at the -L/2 boundary stays at -L/2",
     "type": "scenario"
+  },
+  "rq-d1b55ef5": {
+    "decl": "## Gherkin Scenarios",
+    "file": "io/unit-system",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-d1d84e31": {
     "decl": "Scenario: Accept user-supplied r_switch in pair_interactions",
@@ -14068,7 +14556,12 @@
   "rq-d2b595a3": {
     "decl": "- `TrajectoryReader::frames(&mut self)` — convenience iterator",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "TrajectoryReader",
     "type": "api-item"
   },
@@ -14169,7 +14662,12 @@
     "decl": "## Algorithm",
     "file": "minimization/steepest-descent",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/steepest_descent.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Algorithm",
     "type": "section"
   },
@@ -14237,7 +14735,12 @@
   "rq-d5b07d2a": {
     "decl": "- `MinimizerRegistry` — host-side registry of minimizer builders.",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MinimizerRegistry",
     "type": "api-item"
   },
@@ -14536,6 +15039,13 @@
     "title": "andersen_resample",
     "type": "api-item"
   },
+  "rq-da50f1d6": {
+    "decl": "Scenario: Non-numeric value at a unit-bearing field name is left untouched",
+    "file": "io/unit-system",
+    "refs": [],
+    "title": "Non-numeric value at a unit-bearing field name is left untouched",
+    "type": "scenario"
+  },
   "rq-daadfc1a": {
     "decl": "## Per-Step Interface",
     "file": "integration/framework",
@@ -14694,7 +15204,12 @@
   "rq-dc140510": {
     "decl": "- `MinlogWriter` — handle to an open `.minlog` file. Fields are",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/minlog_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MinlogWriter",
     "type": "api-item"
   },
@@ -14720,7 +15235,12 @@
   "rq-dc3b1bb5": {
     "decl": "- `SteepestDescentMinimizer` — concrete implementor of `Minimizer`",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/steepest_descent.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SteepestDescentMinimizer",
     "type": "api-item"
   },
@@ -14831,7 +15351,16 @@
   "rq-dddb8e7a": {
     "decl": "- `MinimizerBuilder` — trait describing a registered minimizer",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/minimizer/steepest_descent.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MinimizerBuilder",
     "type": "api-item"
   },
@@ -14901,7 +15430,12 @@
   "rq-deaf8b59": {
     "decl": "- `load_config_raw(path: &Path) -> Result<Config, ConfigError>`",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "load_config_raw",
     "type": "api-item"
   },
@@ -15179,7 +15713,12 @@
     "decl": "### Cross-validation",
     "file": "minimization/steepest-descent",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/steepest_descent.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Cross-validation",
     "type": "section"
   },
@@ -15193,7 +15732,12 @@
   "rq-e2e25bba": {
     "decl": "- `TrajectoryReader::next_frame(&mut self) -> Result<Option<TrajectoryFrame>, TrajectoryReaderError>`",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "TrajectoryReader",
     "type": "api-item"
   },
@@ -15466,6 +16010,13 @@
     "title": "Functions",
     "type": "section"
   },
+  "rq-e5f889f3": {
+    "decl": "Scenario: Top-level units with an unknown string is rejected",
+    "file": "io/config-schema",
+    "refs": [],
+    "title": "Top-level units with an unknown string is rejected",
+    "type": "scenario"
+  },
   "rq-e60481e9": {
     "decl": "Scenario: apply_post on empty state is a no-op",
     "file": "integration/framework",
@@ -15690,7 +16241,12 @@
   "rq-e963f27a": {
     "decl": "- `MinlogWriter::open`, `MinlogWriter::write_row`,",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/minlog_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MinlogWriter",
     "type": "api-item"
   },
@@ -15806,6 +16362,14 @@
     "refs": [],
     "title": "Reduction does not modify neighbor_counts",
     "type": "scenario"
+  },
+  "rq-eb923418": {
+    "decl": "### Functions",
+    "file": "io/unit-system",
+    "level": 3,
+    "refs": [],
+    "title": "Functions",
+    "type": "section"
   },
   "rq-eb9e43e7": {
     "decl": "Scenario: run_simulation rejects a custom-kind config because its built-in registries do not match",
@@ -15949,7 +16513,12 @@
   "rq-ed61cf26": {
     "decl": "- `MinimizationConfig` — parsed `[[minimization]]` entry. Lives in",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MinimizationConfig",
     "type": "api-item"
   },
@@ -16416,6 +16985,13 @@
     "title": "`[[angle_types]]` (optional array of tables)",
     "type": "section"
   },
+  "rq-f2cb8772": {
+    "decl": "Scenario: SI mode reads the file with no conversion applied",
+    "file": "io/init-state-file",
+    "refs": [],
+    "title": "SI mode reads the file with no conversion applied",
+    "type": "scenario"
+  },
   "rq-f2e3fa58": {
     "decl": "- `vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError>`",
     "file": "integration/velocity-verlet",
@@ -16490,7 +17066,12 @@
   "rq-f3e82236": {
     "decl": "- `TrajectoryFrame` — borrowed view into the reader's internal",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "TrajectoryFrame",
     "type": "api-item"
   },
@@ -16629,7 +17210,12 @@
   "rq-f69350df": {
     "decl": "- `Minimizer` — object-safe trait implemented by every concrete",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/minimizer/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Minimizer",
     "type": "api-item"
   },
@@ -17088,6 +17674,14 @@
     "refs": [],
     "title": "Append frames in order",
     "type": "scenario"
+  },
+  "rq-fd665908": {
+    "decl": "## Conversion Semantics",
+    "file": "io/unit-system",
+    "level": 2,
+    "refs": [],
+    "title": "Conversion Semantics",
+    "type": "section"
   },
   "rq-fd8bb824": {
     "decl": "# Feature: Analysis Framework and `dynamics analyze`",

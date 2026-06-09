@@ -318,7 +318,7 @@ pub fn lint_simulation_with_registries(
         .map(|t| t.name.clone())
         .collect();
     let type_name_refs: Vec<&str> = type_name_strings.iter().map(|s| s.as_str()).collect();
-    let init = match load_init_state(&config.init, &type_name_refs) {
+    let init = match load_init_state(&config.init, &type_name_refs, config.units) {
         Ok(i) => {
             stages.push(LintStage {
                 label: "init",
@@ -806,7 +806,7 @@ fn run_simulation_with_phase(
 
     let mut init_load_duration = Duration::ZERO;
     let init = timed(&mut init_load_duration, || {
-        load_init_state(&config.init, &type_name_refs)
+        load_init_state(&config.init, &type_name_refs, config.units)
     })
     .map_err(|e| (RunnerError::InitState(e), ExitPhase::Setup))?;
 

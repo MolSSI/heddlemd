@@ -9,6 +9,7 @@ pub mod registries;
 pub mod runner;
 pub mod state;
 pub mod timings;
+pub mod units;
 
 // rq-74bb02cc
 pub use registries::Registries;
