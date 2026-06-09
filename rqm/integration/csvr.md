@@ -44,7 +44,8 @@ the post-step velocities. For each invocation with timestep `dt`, let
    2007 / PLUMED `csvr.cc`):
 
    ```text
-   K_target = (N_f / 2) · k_B · T
+   K_target = (N_f / 2) · T          # k_B = 1 in atomic units; T carries
+                                     # k_B · T (Hartrees)
    K_new    = c · K
               + (K_target / N_f) · (1 − c) · (S + R²)
               + 2 · R · sqrt(c · (1 − c) · K · K_target / N_f)
@@ -71,7 +72,9 @@ the post-step velocities. For each invocation with timestep `dt`, let
 
 The CSVR Markov kernel is exact in the sense that repeated
 application from any non-zero initial `K` converges to the canonical
-distribution `P(K) ∝ K^{(N_f/2)−1} · exp(−K / (k_B · T))`.
+distribution `P(K) ∝ K^{(N_f/2)−1} · exp(−K / T)` (with `k_B = 1` and
+all quantities in Hartree atomic units; `T` is the engine-side
+`k_B · T` value).
 
 The instantaneous kinetic energy is the only piece of particle state
 the thermostat reads; it has no auxiliary degrees of freedom.
@@ -107,14 +110,16 @@ per-step sequence.
 
 The matching builder deserialises a typed `CsvrParams` from the `[thermostat]` section's `SlotConfig::params` (see `framework.md`); the per-field reference below documents that parameter struct:
 
-- `temperature: f64` — bath temperature `T` in kelvin. Required.
-  Finite and strictly positive. Independent of `simulation.temperature`,
-  which governs the initial-velocity sampler.
-- `tau: f64` — thermostat coupling time in seconds. Required. Finite
-  and strictly positive. Larger `τ` leaves the dynamics closer to NVE
-  (slow thermostat coupling); smaller `τ` enforces the target
-  temperature more aggressively. Typical values for liquid water are
-  100 fs – 1 ps.
+- `temperature: f64` — bath temperature `T` as `k_B · T` in Hartrees
+  (the engine's internal temperature representation; `k_B = 1`).
+  Required. Finite and strictly positive. Independent of
+  `simulation.temperature`, which governs the initial-velocity sampler.
+- `tau: f64` — thermostat coupling time in atomic time units
+  (`hbar / E_h` ≈ 24.2 attoseconds). Required. Finite and strictly
+  positive. Larger `τ` leaves the dynamics closer to NVE (slow
+  thermostat coupling); smaller `τ` enforces the target temperature
+  more aggressively. Typical values for liquid water are 100 fs – 1 ps
+  (i.e. ~4.1e3 – 4.1e4 atomic time units).
 - `seed: u64` — counter-based RNG seed. Required, independent of
   `simulation.seed` and any other slot's seed. Two runs with
   identical configs on the same GPU produce byte-identical
@@ -234,7 +239,9 @@ log-write time.
   - `g_dof: u32` — `max(1, 3 · particle_count − n_constraints − 3)`,
     computed at construction from the `n_constraints` parameter passed
     by the runner.
-  - `kt_target: f64` — `BOLTZMANN_J_PER_K · temperature`.
+  - `kt_target: f64` — equals `temperature` (the engine stores
+    `k_B · T` in Hartrees directly; `k_B = 1`, so no Boltzmann constant
+    appears in this field).
   - `cumulative_injection: f64` — running sum of `K_new − K_old` over
     every completed `apply_post` call. Initialised to `0.0`. Used by
     `log_column_values`.
@@ -363,13 +370,15 @@ Feature: CSVR stochastic velocity-rescaling thermostat
 
   @rq-a6cd03aa
   Scenario: Construct CsvrThermostat via the registry (unconstrained system)
-    Given a ThermostatKind::Csvr { temperature: 300.0, tau: 1.0e-13, seed: 42 }
+    Given a ThermostatKind::Csvr { temperature: 9.5e-4, tau: 41.34, seed: 42 }
+      (300 K and 1 ps expressed in atomic units)
     When registry.build_optional(Some(&kind), device, particle_count=4, n_constraints=0) is called
     Then it returns Ok(Some(thermostat))
     And the underlying CsvrThermostat has draw_counter == 0
     And state.cumulative_injection == 0.0
     And state.g_dof == max(1, 3*4 − 0 − 3) == 9
-    And state.kt_target == k_B * 300.0
+    And state.kt_target == 9.5e-4 (the engine stores k_B · T directly,
+      so kt_target equals the user-supplied temperature value)
 
   @rq-70a46202
   Scenario: Construct CsvrThermostat for a SETTLE'd water system
@@ -549,13 +558,18 @@ Feature: CSVR stochastic velocity-rescaling thermostat
   # --- Physical correctness ---
 
   @rq-f70f7c1e
-  Scenario: Equilibrium kinetic energy approaches (N_f / 2) k_B T
+  Scenario: Equilibrium kinetic energy approaches (N_f / 2) · T
     Given a composed runner of velocity-Verlet + CSVR with N=512 LJ particles,
-      temperature=300, tau=1e-13, dt=1e-15, n_steps=5000, seed=1
+      configured via TOML `units = "si"` with temperature=300 K,
+      tau=1e-13 s, dt=1e-15 s, n_steps=5000, seed=1 (the loader converts
+      these to the engine's atomic-unit values T_atomic, tau_atomic,
+      dt_atomic before integration)
     When the run completes
     Then the time-averaged kinetic energy over the last 1000 log rows is
-      within 5% of (N_f / 2) · k_B · 300
-    And the time-averaged temperature is within 5% of 300 K
+      within 5% of (N_f / 2) · T_atomic (with `k_B = 1` so no Boltzmann
+      factor appears)
+    And the time-averaged temperature column read from the SI-mode CSV log
+      is within 5% of 300 K
 
   @rq-4ae77a72
   Scenario: csvr_conserved drifts as a zero-mean martingale (no systematic bias)

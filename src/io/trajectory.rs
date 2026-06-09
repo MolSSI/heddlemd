@@ -4,10 +4,12 @@ use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::pbc::SimulationBox;
+use crate::units::{Dimension, UnitSystem};
 
 // rq-40a34caa
 pub struct TrajectoryWriter {
     writer: BufWriter<File>,
+    units: UnitSystem,
     include_velocities: bool,
     include_images: bool,
     type_names: Vec<String>,
@@ -36,6 +38,7 @@ impl TrajectoryWriter {
     // rq-28659fbe
     pub fn open(
         path: &Path,
+        units: UnitSystem,
         include_velocities: bool,
         include_images: bool,
         type_names: Vec<String>,
@@ -43,6 +46,7 @@ impl TrajectoryWriter {
         match OpenOptions::new().write(true).create_new(true).open(path) {
             Ok(file) => Ok(TrajectoryWriter {
                 writer: BufWriter::new(file),
+                units,
                 include_velocities,
                 include_images,
                 type_names,
@@ -93,6 +97,12 @@ impl TrajectoryWriter {
 
         let lat = sim_box.lattice();
         let time = (step as f64) * dt;
+        // Output-direction conversion factors. For UnitSystem::Atomic
+        // these all reduce to 1.0 and the engine's internal scalars
+        // are emitted directly.
+        let len_f = self.units.factor(Dimension::Length) as f32;
+        let vel_f = self.units.factor(Dimension::Velocity) as f32;
+        let time_out = self.units.to_user(Dimension::Time, time);
 
         // rq-1658f77d rq-c5518458 rq-e06bcfb0 rq-df244549 rq-6ec75323 rq-88ec92fc
         //
@@ -111,16 +121,16 @@ impl TrajectoryWriter {
         writeln!(
             self.writer,
             "Lattice=\"{lx:.9e} {z:.9e} {z:.9e} {xy:.9e} {ly:.9e} {z:.9e} {xz:.9e} {yz:.9e} {lz:.9e}\" Properties={props} Step={step} Time={time:.9e}",
-            lx = lat[0],
-            ly = lat[1],
-            lz = lat[2],
-            xy = lat[3],
-            xz = lat[4],
-            yz = lat[5],
+            lx = lat[0] * len_f,
+            ly = lat[1] * len_f,
+            lz = lat[2] * len_f,
+            xy = lat[3] * len_f,
+            xz = lat[4] * len_f,
+            yz = lat[5] * len_f,
             z = zero,
             props = props,
             step = step,
-            time = time,
+            time = time_out,
         )
         .map_err(io_err)?;
 
@@ -134,7 +144,9 @@ impl TrajectoryWriter {
             write!(
                 self.writer,
                 "{name} {:.9e} {:.9e} {:.9e}",
-                positions_x[i], positions_y[i], positions_z[i]
+                positions_x[i] * len_f,
+                positions_y[i] * len_f,
+                positions_z[i] * len_f,
             )
             .map_err(io_err)?;
             if self.include_velocities {
@@ -142,7 +154,9 @@ impl TrajectoryWriter {
                 write!(
                     self.writer,
                     " {:.9e} {:.9e} {:.9e}",
-                    vx[i], vy[i], vz[i]
+                    vx[i] * vel_f,
+                    vy[i] * vel_f,
+                    vz[i] * vel_f,
                 )
                 .map_err(io_err)?;
             }
@@ -252,6 +266,11 @@ pub struct TrajectoryReader {
     type_names: Vec<String>,
     /// Buffer reused for reading lines.
     line_buf: String,
+    /// Unit system the file is written in. The reader applies
+    /// `from_user` to every numeric column on read so the
+    /// `TrajectoryFrame` slices and `SimulationBox` it exposes are in
+    /// the engine's atomic units.
+    units: UnitSystem,
     /// `Some` when `open` peeked the first frame's data rows during
     /// header construction (they are buffered here so `next_frame` can
     /// return them on the first call without re-reading).
@@ -272,6 +291,7 @@ impl TrajectoryReader {
     // rq-af1c88ae
     pub fn open(
         path: &Path,
+        units: UnitSystem,
         type_names: &[&str],
     ) -> Result<TrajectoryReader, TrajectoryReaderError> {
         let file = File::open(path)
@@ -292,6 +312,7 @@ impl TrajectoryReader {
             &mut line_buf,
             0,
             None,
+            units,
         )?;
         let first_frame = match first_frame {
             Some(f) => f,
@@ -314,6 +335,7 @@ impl TrajectoryReader {
             path: path.to_path_buf(),
             type_names: owned_type_names,
             line_buf,
+            units,
             first_frame: Some(first_frame),
         })
     }
@@ -331,6 +353,7 @@ impl TrajectoryReader {
             &mut self.line_buf,
             self.next_frame_index,
             Some(&self.first_frame_header),
+            self.units,
         )?;
         if frame.is_some() {
             self.next_frame_index += 1;
@@ -370,7 +393,10 @@ fn read_one_frame<R: BufRead>(
     line_buf: &mut String,
     frame_index: u64,
     expected_header: Option<&TrajectoryFrameHeader>,
+    units: UnitSystem,
 ) -> Result<Option<TrajectoryFrame>, TrajectoryReaderError> {
+    let len_f = units.factor(Dimension::Length) as f32;
+    let vel_f = units.factor(Dimension::Velocity) as f32;
     // Particle-count line.
     let count_line = match read_nonblank_line(reader, line_number, line_buf)? {
         Some(s) => s,
@@ -407,7 +433,7 @@ fn read_one_frame<R: BufRead>(
             line_number: comment_line_number,
             reason: "missing `Lattice` attribute".to_string(),
         })?;
-    let sim_box = parse_lattice(lattice_value).map_err(|e| {
+    let sim_box = parse_lattice(lattice_value, len_f).map_err(|e| {
         TrajectoryReaderError::MalformedHeader {
             line_number: comment_line_number,
             reason: e,
@@ -438,6 +464,7 @@ fn read_one_frame<R: BufRead>(
         .iter()
         .find(|(k, _)| k == "Time")
         .and_then(|(_, v)| v.parse::<f64>().ok())
+        .map(|t| units.from_user(Dimension::Time, t))
         .unwrap_or(0.0);
 
     // Cross-check against expected_header (frames 1..).
@@ -529,20 +556,20 @@ fn read_one_frame<R: BufRead>(
                 });
             }
         }
-        let px = parse_f64_col(cols[1], *line_number, "pos_x")?;
-        let py = parse_f64_col(cols[2], *line_number, "pos_y")?;
-        let pz = parse_f64_col(cols[3], *line_number, "pos_z")?;
+        let px = parse_f64_col(cols[1], *line_number, "pos_x")? as f32;
+        let py = parse_f64_col(cols[2], *line_number, "pos_y")? as f32;
+        let pz = parse_f64_col(cols[3], *line_number, "pos_z")? as f32;
         type_indices.push(type_index);
-        positions_x.push(px as f32);
-        positions_y.push(py as f32);
-        positions_z.push(pz as f32);
+        positions_x.push(px / len_f);
+        positions_y.push(py / len_f);
+        positions_z.push(pz / len_f);
         if include_velocities {
-            let vx = parse_f64_col(cols[4], *line_number, "velo_x")?;
-            let vy = parse_f64_col(cols[5], *line_number, "velo_y")?;
-            let vz = parse_f64_col(cols[6], *line_number, "velo_z")?;
-            velocities_x.push(vx as f32);
-            velocities_y.push(vy as f32);
-            velocities_z.push(vz as f32);
+            let vx = parse_f64_col(cols[4], *line_number, "velo_x")? as f32;
+            let vy = parse_f64_col(cols[5], *line_number, "velo_y")? as f32;
+            let vz = parse_f64_col(cols[6], *line_number, "velo_z")? as f32;
+            velocities_x.push(vx / vel_f);
+            velocities_y.push(vy / vel_f);
+            velocities_z.push(vz / vel_f);
         }
         if include_images {
             let ix = parse_i32_col(cols[image_offset], *line_number, "image_x")?;
@@ -647,7 +674,7 @@ fn parse_attribute_line(line: &str) -> Vec<(String, String)> {
     out
 }
 
-fn parse_lattice(raw: &str) -> Result<SimulationBox, String> {
+fn parse_lattice(raw: &str, len_f: f32) -> Result<SimulationBox, String> {
     let parts: Vec<&str> = raw.split_ascii_whitespace().collect();
     if parts.len() != 9 {
         return Err(format!(
@@ -675,12 +702,15 @@ fn parse_lattice(raw: &str) -> Result<SimulationBox, String> {
             ));
         }
     }
-    let lx = vals[0] as f32;
-    let xy = vals[3] as f32;
-    let ly = vals[4] as f32;
-    let xz = vals[6] as f32;
-    let yz = vals[7] as f32;
-    let lz = vals[8] as f32;
+    // Convert from the file's units to engine-side atomic units by
+    // dividing by `len_f` (the user-system value of one atomic length
+    // unit). No-op when the file is already in atomic units.
+    let lx = vals[0] as f32 / len_f;
+    let xy = vals[3] as f32 / len_f;
+    let ly = vals[4] as f32 / len_f;
+    let xz = vals[6] as f32 / len_f;
+    let yz = vals[7] as f32 / len_f;
+    let lz = vals[8] as f32 / len_f;
     SimulationBox::new(lx, ly, lz, xy, xz, yz)
         .map_err(|e| format!("`Lattice` produced an invalid SimulationBox: {e}"))
 }

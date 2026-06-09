@@ -33,7 +33,7 @@ fn sim_box() -> SimulationBox {
 fn open_creates_new_file() {
     let dir = tmp_path("open_new");
     let path = dir.join("traj.xyz");
-    let _writer = TrajectoryWriter::open(&path, true, false, vec!["Ar".to_string()]).unwrap();
+    let _writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, true, false, vec!["Ar".to_string()]).unwrap();
     assert!(path.exists());
 }
 
@@ -43,7 +43,7 @@ fn open_refuses_overwrite() {
     let dir = tmp_path("refuse_overwrite");
     let path = dir.join("traj.xyz");
     std::fs::write(&path, "existing").unwrap();
-    match TrajectoryWriter::open(&path, true, false, vec!["Ar".to_string()]).unwrap_err() {
+    match TrajectoryWriter::open(&path, UnitSystem::Atomic, true, false, vec!["Ar".to_string()]).unwrap_err() {
         TrajectoryWriterError::OutputExists { path: p } => assert_eq!(p, path),
         other => panic!("unexpected: {other:?}"),
     }
@@ -55,7 +55,7 @@ fn open_refuses_overwrite() {
 fn open_fails_when_parent_missing() {
     let dir = tmp_path("missing_parent");
     let path = dir.join("missing-dir").join("traj.xyz");
-    match TrajectoryWriter::open(&path, true, false, vec!["Ar".to_string()]).unwrap_err() {
+    match TrajectoryWriter::open(&path, UnitSystem::Atomic, true, false, vec!["Ar".to_string()]).unwrap_err() {
         TrajectoryWriterError::Io(_) => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -66,7 +66,7 @@ fn open_fails_when_parent_missing() {
 fn write_single_frame_no_velocities() {
     let dir = tmp_path("single_no_velo");
     let path = dir.join("traj.xyz");
-    let mut writer = TrajectoryWriter::open(&path, false, false, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, false, false, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
             0,
@@ -98,7 +98,7 @@ fn write_single_frame_no_velocities() {
 fn write_single_frame_with_velocities() {
     let dir = tmp_path("single_with_velo");
     let path = dir.join("traj.xyz");
-    let mut writer = TrajectoryWriter::open(&path, true, false, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, true, false, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
             10,
@@ -132,7 +132,7 @@ fn write_single_frame_with_velocities() {
 fn append_frames_in_order() {
     let dir = tmp_path("append_frames");
     let path = dir.join("traj.xyz");
-    let mut writer = TrajectoryWriter::open(&path, false, false, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, false, false, vec!["Ar".to_string()]).unwrap();
     for step in [0_u64, 10, 20] {
         writer
             .write_frame(
@@ -162,7 +162,7 @@ fn append_frames_in_order() {
 fn write_empty_frame() {
     let dir = tmp_path("empty_frame");
     let path = dir.join("traj.xyz");
-    let mut writer = TrajectoryWriter::open(&path, false, false, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, false, false, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(0, 1.0e-15, &sim_box(), &[], &[], &[], &[], None, None)
         .unwrap();
@@ -178,12 +178,7 @@ fn write_empty_frame() {
 fn render_multiple_type_names() {
     let dir = tmp_path("multi_names");
     let path = dir.join("traj.xyz");
-    let mut writer = TrajectoryWriter::open(
-        &path,
-        false,
-        false,
-        vec!["Ar".to_string(), "Kr".to_string()],
-    )
+    let mut writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, false, false, vec!["Ar".to_string(), "Kr".to_string()], )
     .unwrap();
     writer
         .write_frame(
@@ -220,7 +215,7 @@ fn round_trip_via_init_parser() {
     let velocities_x = [1.0_f32, -1.0_f32, 2.0_f32, -2.0_f32];
     let velocities_y = [0.0_f32; 4];
     let velocities_z = [0.0_f32; 4];
-    let mut writer = TrajectoryWriter::open(&path, true, false, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, true, false, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
             0,
@@ -235,7 +230,9 @@ fn round_trip_via_init_parser() {
         )
         .unwrap();
     writer.flush().unwrap();
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    // Reader uses the same UnitSystem the writer was opened with so the
+    // numerical round-trip is the identity.
+    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
     assert_eq!(state.particle_count, 4);
     assert_eq!(state.positions_x.as_slice(), &positions_x);
     assert_eq!(state.positions_y.as_slice(), &positions_y);
@@ -253,7 +250,7 @@ fn f32_position_round_trip() {
     let path = dir.join("traj.xyz");
     // Arbitrary f32 value that's not exactly representable in decimal.
     let p: f32 = 0.123456_f32;
-    let mut writer = TrajectoryWriter::open(&path, false, false, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, false, false, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
             0,
@@ -268,7 +265,7 @@ fn f32_position_round_trip() {
         )
         .unwrap();
     writer.flush().unwrap();
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
     assert_eq!(state.positions_x[0].to_bits(), p.to_bits());
 }
 
@@ -277,7 +274,7 @@ fn f32_position_round_trip() {
 fn flush_is_idempotent() {
     let dir = tmp_path("flush_idempotent");
     let path = dir.join("traj.xyz");
-    let mut writer = TrajectoryWriter::open(&path, false, false, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, false, false, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
             0,
@@ -301,7 +298,7 @@ fn drop_flushes_best_effort() {
     let dir = tmp_path("drop_flush");
     let path = dir.join("traj.xyz");
     {
-        let mut writer = TrajectoryWriter::open(&path, false, false, vec!["Ar".to_string()]).unwrap();
+        let mut writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, false, false, vec!["Ar".to_string()]).unwrap();
         writer
             .write_frame(
                 0,
@@ -330,7 +327,7 @@ fn drop_flushes_best_effort() {
 fn frame_with_images_only_carries_image_property() {
     let dir = tmp_path("images_only");
     let path = dir.join("traj.xyz");
-    let mut writer = TrajectoryWriter::open(&path, false, true, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, false, true, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
             0,
@@ -355,7 +352,7 @@ fn frame_with_images_only_carries_image_property() {
 fn frame_with_velocities_and_images_carries_both_properties() {
     let dir = tmp_path("velo_images");
     let path = dir.join("traj.xyz");
-    let mut writer = TrajectoryWriter::open(&path, true, true, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, true, true, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
             0,
@@ -389,7 +386,7 @@ fn image_round_trip_via_init_parser() {
     let images_x = vec![1_i32, -2, 3, 0];
     let images_y = vec![0_i32, 4, -5, 6];
     let images_z = vec![-7_i32, 0, 8, -9];
-    let mut writer = TrajectoryWriter::open(&path, true, true, vec!["Ar".to_string()]).unwrap();
+    let mut writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, true, true, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
             0,
@@ -418,7 +415,7 @@ fn round_trip_preserves_triclinic_lattice() {
     let path = dir.join("traj.xyz");
     let tri = SimulationBox::new(1.0, 1.0, 1.0, 0.2, 0.1, -0.3).unwrap();
     let mut writer =
-        TrajectoryWriter::open(&path, false, false, vec!["Ar".to_string()]).unwrap();
+        TrajectoryWriter::open(&path, UnitSystem::Atomic, false, false, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
             0,
@@ -433,7 +430,7 @@ fn round_trip_preserves_triclinic_lattice() {
         )
         .unwrap();
     writer.flush().unwrap();
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
     let parsed = state.sim_box.lattice();
     let original = tri.lattice();
     for d in 0..6 {

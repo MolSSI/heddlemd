@@ -38,7 +38,7 @@ carries an extended set of host-side scalar DOFs:
 - `p_ε: f64` — cell momentum (single scalar; isotropic). Initialised
   to `0.0`.
 - `W: f64` — cell mass. Precomputed at construction as
-  `W = (N_f + 3) · k_B · T · τ_P²` (Martyna-Tobias-Klein 1994,
+  `W = (N_f + 3) · T · τ_P²` (Martyna-Tobias-Klein 1994,
   Eq. 4.8) where `N_f = max(1, 3·N − n_constraints − 3)` is the
   number of thermostatted DOFs (the same constraint- and
   COM-removed convention used by CSVR — see `csvr.md` — and by
@@ -47,19 +47,21 @@ carries an extended set of host-side scalar DOFs:
   run.
 - Particle thermostat chain `{ξ_j, p_ξ_j, Q_j}` for `j = 1..M` — a
   standard NHC chain identical in shape to `nose-hoover-chain.md`,
-  with `Q_1 = N_f · k_B · T · τ_T²` and `Q_j = k_B · T · τ_T²` for
+  with `Q_1 = N_f · T · τ_T²` and `Q_j = T · τ_T²` for
   `j > 1` (`τ_T` is the user-supplied thermostat coupling time). The
   chain dynamics use the same MKT splitting and the same shared
   `nhc_chain_sub_step` host-side helper from
   `nose-hoover-chain.md`.
 - Cell thermostat chain `{ξ'_j, p_ξ'_j, Q'_j}` for `j = 1..M` — a
   second NHC chain thermostatting the cell kinetic energy
-  `K_cell = (1/2) · p_ε² / W`. Chain mass `Q'_j = k_B · T · τ_T²`
+  `K_cell = (1/2) · p_ε² / W`. Chain mass `Q'_j = T · τ_T²`
   for all `j` (a 1-DOF chain has no `g`-prefactor on `Q'_1`). Uses
   the same shared `nhc_chain_sub_step` helper.
 
-`T` is the user-supplied target temperature; `P_ext` is the
-user-supplied target pressure; `k_B = 1.380649 × 10⁻²³ J/K`.
+`T` is the user-supplied target temperature in the engine's atomic
+units (`k_B · T` in Hartrees; `k_B = 1`); `P_ext` is the user-supplied
+target pressure in `E_h / a_0^3`. No explicit Boltzmann factor appears
+in any expression above.
 
 ### Equations of motion <!-- rq-d93f05a5 -->
 
@@ -71,11 +73,11 @@ v̇_i  = F_i / m_i − ((1 + 3/N_f) · (p_ε / W) + p_ξ_1 / Q_1) · v_i
 ε̇   = p_ε / W
 ṗ_ε  = 3 · V · (P − P_ext) + (3/N_f) · 2K − (p_ξ'_1 / Q'_1) · p_ε
 ξ̇_j  = p_ξ_j / Q_j                              (j = 1..M)
-ṗ_ξ_1 = (2K − N_f · k_B · T) − (p_ξ_2/Q_2) · p_ξ_1
-ṗ_ξ_j = (p_ξ_{j-1}²/Q_{j-1} − k_B · T) − (p_ξ_{j+1}/Q_{j+1}) · p_ξ_j
+ṗ_ξ_1 = (2K − N_f · T) − (p_ξ_2/Q_2) · p_ξ_1
+ṗ_ξ_j = (p_ξ_{j-1}²/Q_{j-1} − T) − (p_ξ_{j+1}/Q_{j+1}) · p_ξ_j
 ξ̇'_j  = p_ξ'_j / Q'_j                           (j = 1..M)
-ṗ_ξ'_1 = (p_ε²/W − k_B · T) − (p_ξ'_2/Q'_2) · p_ξ'_1
-ṗ_ξ'_j = (p_ξ'_{j-1}²/Q'_{j-1} − k_B · T) − (p_ξ'_{j+1}/Q'_{j+1}) · p_ξ'_j
+ṗ_ξ'_1 = (p_ε²/W − T) − (p_ξ'_2/Q'_2) · p_ξ'_1
+ṗ_ξ'_j = (p_ξ'_{j-1}²/Q'_{j-1} − T) − (p_ξ'_{j+1}/Q'_{j+1}) · p_ξ'_j
 ```
 
 `K = (1/2) Σ_i m_i |v_i|²` is the instantaneous particle kinetic
@@ -208,17 +210,21 @@ The `"mtk-npt"` builder deserialises `MtkNptParams` (with the fields
 listed below) from the `[integrator]` section's `SlotConfig::params`
 field:
 
-- `temperature: f64` — bath temperature `T` in kelvin. Required.
+- `temperature: f64` — bath temperature `T` as `k_B · T` in Hartrees
+  (the engine's internal temperature representation; `k_B = 1`).
+  Required.
   Finite and strictly positive. Independent of
   `simulation.temperature` (which seeds the initial Maxwell-Boltzmann
   sampler).
-- `pressure: f64` — target pressure `P_ext` in pascals (Pa).
+- `pressure: f64` — target pressure `P_ext` in `E_h / a_0^3`.
   Required. Finite. May be any sign or zero.
-- `tau_t: f64` — thermostat coupling time in seconds. Required.
+- `tau_t: f64` — thermostat coupling time in atomic time units
+  (`hbar / E_h`). Required.
   Finite and strictly positive. Controls both the particle-chain
   and cell-chain masses. Typical values for liquid water are 50–100
   fs.
-- `tau_p: f64` — barostat coupling time in seconds. Required. Finite
+- `tau_p: f64` — barostat coupling time in atomic time units
+  (`hbar / E_h`). Required. Finite
   and strictly positive. Controls the cell mass `W`. Typical values
   for liquid water are 1–5 ps (10–50× `tau_t` so the barostat
   responds slowly relative to the thermostat).
@@ -248,9 +254,9 @@ H_MTK = K + U + P_ext · V
         + (1/2) · p_ε² / W
         + Σ_{j=1..M} p_ξ_j²  / (2 Q_j)
         + Σ_{j=1..M} p_ξ'_j² / (2 Q'_j)
-        + N_f · k_B · T · ξ_1
-        + k_B · T · Σ_{j=2..M} ξ_j
-        + k_B · T · Σ_{j=1..M} ξ'_j
+        + N_f · T · ξ_1
+        + T · Σ_{j=2..M} ξ_j
+        + T · Σ_{j=1..M} ξ'_j
 ```
 
 `H_MTK` is invariant under the exact MTK dynamics; under the
@@ -317,7 +323,8 @@ post-step `V`.
   - `g_dof: u32` — `max(1, 3 · particle_count − n_constraints − 3)`,
     computed at construction from the `n_constraints` parameter
     passed by the runner.
-  - `kt: f64` — `BOLTZMANN_J_PER_K · temperature`.
+  - `kt: f64` — equals `temperature` (the engine stores `k_B · T` in
+    Hartrees directly; `k_B = 1`, so no Boltzmann constant appears).
   - `w_cell: f64` — `(g_dof + 3) · kt · τ_p²`.
   - `p_eps: f64` — cell momentum. Initialised to `0.0`.
   - `eps: f64` — `(1/3) · ln(V / V_0)`, tracked for the conserved

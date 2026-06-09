@@ -359,9 +359,10 @@ Each `[[constraint_types]]` entry in the config with `kind =
 "settle-water"` contributes one row to the per-type parameter table
 uploaded to the device. Each row carries:
 
-- `r_oh: f64` — O–H constraint distance, metres. Required. Finite
-  and strictly positive.
-- `r_hh: f64` — H–H constraint distance, metres. Required. Finite
+- `r_oh: f64` — O–H constraint distance, Bohr (`a_0`). Required.
+  Finite and strictly positive.
+- `r_hh: f64` — H–H constraint distance, Bohr (`a_0`). Required.
+  Finite
   and strictly positive. Must satisfy `r_hh < 2 · r_oh` (geometric
   feasibility of the triangle); the config loader rejects out-of-range
   values.

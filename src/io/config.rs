@@ -893,13 +893,13 @@ fn build_config(
     units: UnitSystem,
 ) -> Config {
     use crate::units::{convert_slot_params, Dimension};
-    let len_f = units.factor(Dimension::Length);
-    let mass_f = units.factor(Dimension::Mass);
-    let charge_f = units.factor(Dimension::Charge);
-    let energy_f = units.factor(Dimension::Energy);
-    let time_f = units.factor(Dimension::Time);
-    let inv_len_f = units.factor(Dimension::InverseLength);
-    let temp_f = units.factor(Dimension::Temperature);
+    let to_au_length = |v: f64| units.from_user(Dimension::Length, v);
+    let to_au_inv_length = |v: f64| units.from_user(Dimension::InverseLength, v);
+    let to_au_mass = |v: f64| units.from_user(Dimension::Mass, v);
+    let to_au_charge = |v: f64| units.from_user(Dimension::Charge, v);
+    let to_au_energy = |v: f64| units.from_user(Dimension::Energy, v);
+    let to_au_time = |v: f64| units.from_user(Dimension::Time, v);
+    let to_au_temperature = |v: f64| units.from_user(Dimension::Temperature, v);
 
     let init = resolve_path(base_dir, &raw.init);
     let topology = raw.topology.as_deref().map(|s| resolve_path(base_dir, s));
@@ -917,15 +917,15 @@ fn build_config(
                 sigma,
                 epsilon,
             } => {
-                let cutoff = cutoff * len_f;
-                let r_switch = r_switch.map(|v| v * len_f).unwrap_or(0.9 * cutoff);
+                let cutoff = to_au_length(cutoff);
+                let r_switch = r_switch.map(to_au_length).unwrap_or(0.9 * cutoff);
                 PairInteractionConfig {
                     between: normalise_pair(&between[0], &between[1]),
                     cutoff,
                     r_switch,
                     potential: PairPotentialParams::LennardJones {
-                        sigma: sigma * len_f,
-                        epsilon: epsilon * energy_f,
+                        sigma: to_au_length(sigma),
+                        epsilon: to_au_energy(epsilon),
                     },
                 }
             }
@@ -939,9 +939,9 @@ fn build_config(
             let mut bt: BondTypeConfig = b.into();
             match &mut bt {
                 BondTypeConfig::Morse { name: _, de, a, re } => {
-                    *de *= energy_f;
-                    *a *= inv_len_f;
-                    *re *= len_f;
+                    *de = to_au_energy(*de);
+                    *a = to_au_inv_length(*a);
+                    *re = to_au_length(*re);
                 }
             }
             bt
@@ -961,7 +961,7 @@ fn build_config(
                 } => {
                     // theta_0 is in radians (dimensionless); k_theta has
                     // units of energy / radian^2 = energy.
-                    *k_theta *= energy_f;
+                    *k_theta = to_au_energy(*k_theta);
                 }
             }
             at
@@ -975,13 +975,13 @@ fn build_config(
     }
 
     let coulomb: Option<CoulombConfig> = raw.coulomb.map(|r| {
-        let cutoff = r.cutoff * len_f;
-        let r_switch = r.r_switch.map(|v| v * len_f).unwrap_or(0.9 * cutoff);
+        let cutoff = to_au_length(r.cutoff);
+        let r_switch = r.r_switch.map(to_au_length).unwrap_or(0.9 * cutoff);
         CoulombConfig { cutoff, r_switch }
     });
     let spme = raw.spme.map(|s| SpmeConfig {
-        alpha: s.alpha * inv_len_f,
-        r_cut_real: s.r_cut_real * len_f,
+        alpha: to_au_inv_length(s.alpha),
+        r_cut_real: to_au_length(s.r_cut_real),
         grid: s.grid,
         spline_order: s.spline_order,
     });
@@ -1020,7 +1020,7 @@ fn build_config(
             r_skin,
         }) => NeighborListConfig::CellList {
             max_neighbors,
-            r_skin: r_skin.map(|v| v * len_f).unwrap_or(0.3 * max_cutoff),
+            r_skin: r_skin.map(to_au_length).unwrap_or(0.3 * max_cutoff),
         },
     };
 
@@ -1128,7 +1128,7 @@ fn build_config(
                 PhaseKind::Md(PhaseConfig {
                     name,
                     n_steps: p.n_steps,
-                    dt: p.dt * time_f,
+                    dt: to_au_time(p.dt),
                     integrator,
                     thermostat,
                     barostat,
@@ -1192,7 +1192,7 @@ fn build_config(
     // field directly.
     let simulation = SimulationConfig {
         seed: raw.simulation.seed,
-        temperature: raw.simulation.temperature * temp_f,
+        temperature: to_au_temperature(raw.simulation.temperature),
     };
 
     let particle_types: Vec<ParticleTypeConfig> = raw
@@ -1200,8 +1200,8 @@ fn build_config(
         .into_iter()
         .map(|p| ParticleTypeConfig {
             name: p.name,
-            mass: p.mass * mass_f,
-            charge: p.charge * charge_f,
+            mass: to_au_mass(p.mass),
+            charge: to_au_charge(p.charge),
         })
         .collect();
 

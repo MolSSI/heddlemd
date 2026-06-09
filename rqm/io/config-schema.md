@@ -203,37 +203,59 @@ the config resolve to the same location.
 
 ### Units <!-- rq-ed997636 -->
 
-The top-level `units` field selects the unit system the file is written
-in. Two values are accepted: `"si"` (the default, equivalent to omitting
-the field) and `"atomic"` (Hartree atomic units). Any other value is
-rejected with `ConfigError::UnknownUnits { got: <value> }`.
+The top-level `units` field selects the unit system the user's TOML
+file, the referenced `.in.xyz` initial-state file, and every output
+file the run produces are written in. Two values are accepted: `"si"`
+(the default, equivalent to omitting the field) and `"atomic"`
+(Hartree atomic units). Any other value is rejected with
+`ConfigError::UnknownUnits { got: <value> }`.
 
-The loader converts every unit-bearing scalar — both typed fields and
-the unit-bearing fields of open-shaped slot `params` (e.g.
-`[phase.thermostat]` `temperature` and `tau`) — to SI before populating
-the `Config` struct. All downstream consumers therefore see SI values:
-lengths in metres, mass in kilograms, time in seconds, energy in
-joules, temperature in kelvin, pressure in pascals, charge in
-coulombs, velocity in metres per second. The chosen unit system is
-preserved on the returned `Config` as the `units: UnitSystem` field
-for callers that need to know how the source file was authored.
+The engine itself stores and computes in **Hartree atomic units**. The
+loader converts every unit-bearing scalar — both typed fields and the
+unit-bearing fields of open-shaped slot `params` (e.g.
+`[phase.thermostat]` `temperature` and `tau`) — from the user's chosen
+system into atomic units before populating the `Config` struct. All
+downstream consumers therefore see atomic-unit values: length in Bohr
+radii, mass in electron masses, time in atomic time units (`hbar /
+E_h`), energy in Hartrees, temperature in `E_h / k_B` (i.e. each
+"temperature" value is `k_B · T` in atomic units), pressure in
+`E_h / a_0^3`, charge in elementary charges, velocity in
+`a_0 / (hbar / E_h)`. The chosen unit system is preserved on the
+returned `Config` as the `units: UnitSystem` field; the runner threads
+it to every output writer so the user's view stays consistent
+end-to-end.
 
-Validation runs on the post-conversion (SI) values; range and ordering
-checks are preserved by the strictly-positive conversion factors, so the
-same checks fire on the same physical inputs regardless of the chosen
-unit system.
+Validation runs on the post-conversion (atomic-unit) values; range and
+ordering checks are preserved by the strictly-positive conversion
+factors, so the same checks fire on the same physical inputs
+regardless of the chosen unit system.
 
 Defaults the loader computes from other fields (e.g.
 `r_switch = 0.9 * cutoff`, `r_skin = 0.3 * max_cutoff`,
 `[output]` paths) inherit their dimension from the field they default
-off, so the defaults end up SI without any extra conversion logic.
+off, so the defaults end up atomic-unit-valued without any extra
+conversion logic.
 
-The referenced `.in.xyz` initial-state file follows the same unit
-system; see `init-state-file.md`. The full mechanism — accepted
-values, conversion factors, slot-kind field-to-dimension table — is
-documented in `unit-system.md`.
+The full mechanism — accepted values, conversion factors, slot-kind
+field-to-dimension table, output-writer conversion — is documented in
+`unit-system.md`. The `.in.xyz` side is documented in
+`init-state-file.md`; the trajectory- and CSV-log output sides in
+`trajectory-output.md` and `log-output.md` respectively.
 
 ### Field reference <!-- rq-e367855a -->
+
+Unit-bearing scalars below name their SI form for clarity (e.g. "in
+metres", "in joules"). The `units` selector at the top of the file
+controls whether the user writes a given field in SI or in Hartree
+atomic units; the loader converts every value to atomic units before
+storing it on the returned `Config`. The corresponding atomic-unit
+dimension for each named SI unit is fixed (length → Bohr,
+mass → electron mass, time → atomic time, energy → Hartree,
+temperature → `E_h / k_B`, pressure → `E_h / a_0^3`,
+charge → elementary charge, velocity → `a_0 / (hbar / E_h)`); the
+mapping is enumerated in `unit-system.md`. Fields are validated on
+their post-conversion (atomic-unit) values, but the same positivity
+and ordering invariants hold regardless of the chosen unit system.
 
 #### Top level <!-- rq-4c42a952 -->
 
@@ -265,13 +287,16 @@ the `[[phase]]` array.
 - `seed: u64` — RNG seed used for Maxwell-Boltzmann velocity
   generation. Required even when the init file supplies explicit
   velocities (still validated, even though unused). No default.
-- `temperature: f64` — initial-velocity temperature in kelvin.
-  Required. Used to initialise velocities at the Maxwell-Boltzmann
-  distribution when the init file's `Properties` lacks a `velo:R:3`
-  field; ignored (but still required and validated) when the init
-  file supplies velocities. Must be finite and `>= 0.0`. The
-  thermostat's bath temperature is a separate per-phase field under
-  `[phase.thermostat]`.
+- `temperature: f64` — initial-velocity temperature, expressed in the
+  unit system selected by the top-level `units` field (kelvin in `si`
+  mode, `E_h / k_B` in `atomic` mode). Required. The loader converts
+  the value to atomic units (`k_B · T` in Hartrees) before storing it
+  on the returned `Config`. Used to initialise velocities at the
+  Maxwell-Boltzmann distribution when the init file's `Properties`
+  lacks a `velo:R:3` field; ignored (but still required and
+  validated) when the init file supplies velocities. Must be finite
+  and `>= 0.0`. The thermostat's bath temperature is a separate
+  per-phase field under `[phase.thermostat]`.
 
 #### `[[phase]]` (array of tables, >= 1 entry) <!-- rq-18441e33 -->
 
@@ -293,8 +318,11 @@ Each `[[phase]]` entry carries:
   executes. `0` is permitted (the phase writes its initial-state
   snapshot to its trajectory/log, then immediately advances to the
   next phase or exits).
-- `dt: f64` — required. Integration timestep in seconds for this
-  phase. Must be finite and strictly positive.
+- `dt: f64` — required. Integration timestep for this phase, expressed
+  in the unit system selected by the top-level `units` field (seconds
+  in `si` mode, atomic time units `hbar / E_h` in `atomic` mode). The
+  loader converts the value to atomic time units before storing it on
+  the returned `Config`. Must be finite and strictly positive.
 - `[phase.integrator]` — required. Selects the per-phase integrator
   slot and its kind-specific parameters; see *`[phase.integrator]`*
   below for the field reference (the schema is identical to the
@@ -1083,11 +1111,13 @@ phase failures.
 
   Fields:
   - `schema_version: u64`
-  - `units: UnitSystem` — the unit system the source TOML and the
-    referenced `.in.xyz` file were written in. The loader has already
-    converted every unit-bearing value to SI in the returned `Config`;
-    this field records which system the user authored the file in. See
-    `unit-system.md`.
+  - `units: UnitSystem` — the unit system the source TOML, the
+    referenced `.in.xyz` file, and every output file the run produces
+    are written in. The loader has already converted every
+    unit-bearing value to Hartree atomic units in the returned
+    `Config`; this field is the selector the runner threads to every
+    output writer so trajectory, log, and minlog files come back in
+    the same system the user authored. See `unit-system.md`.
   - `init: PathBuf` — resolved against the config file's directory.
   - `topology: Option<PathBuf>` — `Some(_)` when the optional top-level
     `topology` field is present; resolved against the config file's
@@ -1444,9 +1474,10 @@ phase failures.
   - Reads the file at `path`, runs the typed TOML deserialiser, parses
     the top-level `units` selector (defaulting to `UnitSystem::Si`;
     rejecting any other value with `ConfigError::UnknownUnits`),
-    rescales every unit-bearing scalar to SI as it builds the `Config`
-    (both typed fields and the unit-bearing fields of open-shaped slot
-    `params` — see `unit-system.md`), fills in field-derived defaults
+    rescales every unit-bearing scalar from the user's chosen system
+    into Hartree atomic units as it builds the `Config` (both typed
+    fields and the unit-bearing fields of open-shaped slot `params`
+    — see `unit-system.md`), fills in field-derived defaults
     (`r_switch = 0.9 * cutoff` for `[[pair_interactions]]` and
     `[coulomb]`, `r_skin = 0.3 * max_cutoff` for the `cell-list`
     `[neighbor_list]` mode, `[output]` defaults derived from
@@ -2800,18 +2831,27 @@ Feature: TOML simulation config schema
     Then it returns Err(ConfigError::UnknownUnits { got: "imperial" })
 
   @rq-971663ba
-  Scenario: Atomic-mode physical scalars are SI on the returned Config
-    Given a TOML file with `units = "atomic"` and a pair_interaction
-      sigma in Bohr
+  Scenario: SI-mode physical scalars are atomic-unit on the returned Config
+    Given a TOML file with `units = "si"` and a pair_interaction
+      sigma written in metres
     When load_config is called
     Then config.pair_interactions[0].potential's sigma equals the input
-      sigma times the bohr -> meter conversion factor
+      sigma divided by the bohr -> meter conversion factor (i.e. expressed
+      in Bohr)
+
+  @rq-6c7779ef
+  Scenario: Atomic-mode physical scalars pass through unchanged
+    Given a TOML file with `units = "atomic"` and a pair_interaction
+      sigma written in Bohr
+    When load_config is called
+    Then config.pair_interactions[0].potential's sigma equals the input
+      sigma exactly
 
   @rq-cedbd670
-  Scenario: Validation of atomic-mode input runs on post-conversion values
-    Given a TOML file with `units = "atomic"` and a [phase.thermostat]
-      with `tau = -1.0`
+  Scenario: Validation of SI-mode input runs on post-conversion atomic values
+    Given a TOML file with `units = "si"` and a [phase.thermostat]
+      with `tau = -1.0` (a negative time in seconds)
     When load_config is called
     Then it returns Err(ConfigError::InvalidValue { .. }) referring to
-      the post-conversion (negative SI) value
+      the post-conversion (negative atomic-unit) value
 ```

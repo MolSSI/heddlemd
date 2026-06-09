@@ -19,7 +19,13 @@ use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 use dynamics::timings::{KernelStage, Timings};
 
+#[allow(dead_code)]
 const KB: f64 = 1.380649e-23;
+const LEN_F: f64 = 5.29177210903e-11;
+const MASS_F: f64 = 9.1093837015e-31;
+const TIME_F: f64 = 2.4188843265857195e-17;
+const TEMP_F: f64 = 315775.0248040668;
+const VEL_F: f64 = 2187691.2636411153;
 
 fn small_state(n: usize, mass: f32) -> ParticleState {
     let pos: Vec<f32> = (0..n).map(|i| (i as f32) * 0.1).collect();
@@ -41,7 +47,8 @@ fn small_state(n: usize, mass: f32) -> ParticleState {
 }
 
 fn box_large() -> SimulationBox {
-    SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap()
+    let l = (1.0e6 / LEN_F) as f32;
+    SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
@@ -72,6 +79,9 @@ fn nhc_kind(
     yoshida_order: u32,
     n_resp: u32,
 ) -> SlotConfig {
+    // Convert SI inputs (K, s) to atomic units.
+    let temperature = temperature / TEMP_F;
+    let tau = tau / TIME_F;
     SlotConfig::from_params_str(
         "nose-hoover-chain",
         &format!(
@@ -102,11 +112,13 @@ fn registry_builds_nhc_with_defaults() {
     assert_eq!(state.chain_length, 3);
     assert_eq!(state.xi, vec![0.0, 0.0, 0.0]);
     assert_eq!(state.p_xi, vec![0.0, 0.0, 0.0]);
-    let kt = KB * 300.0;
-    let tau2 = 1.0e-13_f64.powi(2);
-    assert!((state.q_mass[0] - (state.g_dof as f64) * kt * tau2).abs() < 1.0e-60);
-    assert!((state.q_mass[1] - kt * tau2).abs() < 1.0e-60);
-    assert!((state.q_mass[2] - kt * tau2).abs() < 1.0e-60);
+    // nhc_kind converts SI inputs; the engine stores atomic-unit values.
+    let kt = 300.0 / TEMP_F;
+    let tau2 = (1.0e-13_f64 / TIME_F).powi(2);
+    let tol = (state.g_dof as f64) * kt * tau2 * 1.0e-14;
+    assert!((state.q_mass[0] - (state.g_dof as f64) * kt * tau2).abs() < tol);
+    assert!((state.q_mass[1] - kt * tau2).abs() < kt * tau2 * 1.0e-14);
+    assert!((state.q_mass[2] - kt * tau2).abs() < kt * tau2 * 1.0e-14);
     assert_eq!(state.g_dof, 9);
 }
 
@@ -299,10 +311,10 @@ fn nhc_apply_pre_and_apply_post_launch_expected_kernels() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_nhc(&gpu, n, &nhc_kind(300.0, 1.0e-13, 3, 3, 1));
     therm
-        .apply_pre(&mut buffers, 1.0e-15, &mut timings)
+        .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
         .unwrap();
     therm
-        .apply_post(&mut buffers, 1.0e-15, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count_for = |stage: KernelStage| -> u64 {
@@ -331,7 +343,7 @@ fn nhc_apply_pre_empty_state_is_noop() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_nhc(&gpu, 0, &nhc_kind(300.0, 1.0e-13, 3, 3, 1));
     therm
-        .apply_pre(&mut buffers, 1.0e-15, &mut timings)
+        .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
         .unwrap();
 }
 
@@ -344,7 +356,7 @@ fn nhc_apply_post_empty_state_is_noop() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_nhc(&gpu, 0, &nhc_kind(300.0, 1.0e-13, 3, 3, 1));
     therm
-        .apply_post(&mut buffers, 1.0e-15, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
         .unwrap();
 }
 
@@ -356,7 +368,8 @@ fn nhc_log_column_names_returns_nhc_conserved() {
     let gpu = init_device().unwrap();
     let kind = nhc_kind(300.0, 1.0e-13, 3, 3, 1);
     let therm = build_nhc(&gpu, 4, &kind);
-    assert_eq!(therm.log_column_names(), &["nhc_conserved"]);
+    let names: Vec<&str> = therm.log_column_names().iter().map(|(n, _)| *n).collect();
+    assert_eq!(names, vec!["nhc_conserved"]);
 }
 
 // rq-7909b92c
@@ -388,9 +401,11 @@ fn vv_and_langevin_log_column_names_are_empty() {
 fn nhc_log_column_values_combines_ke_pe_and_chain_term() {
     let gpu = init_device().unwrap();
     let mut s = unbox_nhc(build_nhc(&gpu, 4, &nhc_kind(300.0, 1.0e-13, 2, 3, 1)));
-    let kt = KB * 300.0;
-    let q1 = (s.g_dof as f64) * kt * 1.0e-13_f64.powi(2);
-    let q2 = kt * 1.0e-13_f64.powi(2);
+    // All values are in atomic units. k_B = 1 inside the engine.
+    let kt = 300.0 / TEMP_F;
+    let tau_au = 1.0e-13_f64 / TIME_F;
+    let q1 = (s.g_dof as f64) * kt * tau_au.powi(2);
+    let q2 = kt * tau_au.powi(2);
     s.xi[0] = 0.1;
     s.xi[1] = 0.2;
     s.p_xi[0] = 0.5e-30;
@@ -411,10 +426,10 @@ fn nhc_log_column_values_combines_ke_pe_and_chain_term() {
 // --- End-to-end determinism + COM conservation ---
 
 fn atomic_state(n: usize) -> ParticleState {
-    let mass: f32 = 1.66e-27;
+    let mass: f32 = (1.66e-27 / MASS_F) as f32;
     let mut vx: Vec<f32> = Vec::with_capacity(n);
     for i in 0..n / 2 {
-        let v = 500.0 * ((i as f32) + 1.0);
+        let v = (500.0 / VEL_F) as f32 * ((i as f32) + 1.0);
         vx.push(v);
         vx.push(-v);
     }
@@ -423,7 +438,7 @@ fn atomic_state(n: usize) -> ParticleState {
     }
     let zero = vec![0.0_f32; n];
     ParticleState::new(
-        (0..n).map(|i| (i as f32) * 1.0e-10).collect(),
+        (0..n).map(|i| (i as f32) * (1.0e-10 / LEN_F) as f32).collect(),
         zero.clone(),
         zero.clone(),
         vx,
@@ -451,10 +466,10 @@ fn nhc_two_runs_with_identical_inputs_match() {
         let mut therm = build_nhc(gpu, n, &nhc_kind(300.0, 1.0e-13, 3, 3, 1));
         for _ in 0..5 {
             therm
-                .apply_pre(&mut buffers, 1.0e-15, &mut timings)
+                .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
                 .unwrap();
             therm
-                .apply_post(&mut buffers, 1.0e-15, &mut timings)
+                .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
                 .unwrap();
         }
         gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap()
@@ -489,13 +504,13 @@ fn nhc_preserves_com_momentum_to_round_off() {
     ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
     for _ in 0..20 {
         therm
-            .apply_pre(&mut buffers, 1.0e-15, &mut timings)
+            .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
             .unwrap();
         integ
-            .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, None, (1.0e-15 / TIME_F) as f32, &mut timings)
             .unwrap();
         therm
-            .apply_post(&mut buffers, 1.0e-15, &mut timings)
+            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
             .unwrap();
     }
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();

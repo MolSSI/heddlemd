@@ -41,6 +41,7 @@ fn two_argon_offset_init() -> &'static str {
 
 fn argon_min_config() -> String {
     r#"schema_version = 1
+units = "atomic"
 init = "argon.in.xyz"
 
 [simulation]

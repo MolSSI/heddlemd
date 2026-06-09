@@ -37,7 +37,8 @@ the post-step velocities. For each invocation with timestep `dt`:
    - If `U_i < p` where `p = clamp(collision_rate · dt, 0, 1)`:
      replace the particle's velocity with a fresh Maxwell-Boltzmann
      sample at temperature `T`:
-     `v_i ← σ_i · (ξ_x, ξ_y, ξ_z)` with `σ_i = sqrt(k_B · T / m_i)`
+     `v_i ← σ_i · (ξ_x, ξ_y, ξ_z)` with `σ_i = sqrt(T / m_i)` (`k_B = 1`
+     in the engine's atomic units; `T` carries `k_B · T` in Hartrees)
      and `ξ_a ~ N(0, 1)` independently per axis.
    - Otherwise leave `v_i` unchanged.
 3. Compute the instantaneous kinetic energy `K_new` via the same
@@ -78,15 +79,17 @@ part of this slot's per-step sequence.
 
 The matching builder deserialises a typed `AndersenParams` from the `[thermostat]` section's `SlotConfig::params` (see `framework.md`); the per-field reference below documents that parameter struct:
 
-- `temperature: f64` — bath temperature `T` in kelvin. Required.
-  Finite and strictly positive. Independent of
+- `temperature: f64` — bath temperature `T` as `k_B · T` in Hartrees
+  (the engine's internal temperature representation; `k_B = 1`).
+  Required. Finite and strictly positive. Independent of
   `simulation.temperature`, which governs the initial-velocity
   sampler.
 - `collision_rate: f64` — per-particle stochastic collision frequency
-  `ν` in inverse seconds. Required. Finite and `≥ 0` (`0`
-  degenerates to NVE — no resampling — and is permitted as a
-  diagnostic mode). Typical values for liquid water are `10¹¹–10¹²
-  s⁻¹` (collision probability `≈ 10⁻⁴–10⁻²` per fs).
+  `ν` in inverse atomic time units (`1 / (hbar / E_h)`). Required.
+  Finite and `≥ 0` (`0` degenerates to NVE — no resampling — and is
+  permitted as a diagnostic mode). Typical values for liquid water are
+  `10¹¹–10¹² s⁻¹`, i.e. `~2.4e-6 – 2.4e-5` in atomic units (collision
+  probability `≈ 10⁻⁴–10⁻²` per fs).
 - `seed: u64` — counter-based RNG seed. Required, independent of
   `simulation.seed` and any other slot's seed.
 
@@ -191,7 +194,8 @@ above.
   - `draw_counter: u64` — Philox counter advance for the per-step
     resample kernel. Initialised to `0`; pre-incremented on every
     `apply_post` call.
-  - `kt: f64` — `BOLTZMANN_J_PER_K · temperature`.
+  - `kt: f64` — equals `temperature` (the engine stores `k_B · T` in
+    Hartrees directly; `k_B = 1`, so no Boltzmann constant appears).
   - `cumulative_injection: f64` — running sum of `K_new − K_old`
     across every completed `apply_post` call. Initialised to `0.0`.
     Used by `log_column_values`.

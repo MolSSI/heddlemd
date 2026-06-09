@@ -28,10 +28,12 @@ fn write_init(dir: &Path, contents: &str) -> PathBuf {
 // rq-38ebe278
 #[test]
 fn load_two_particles_no_velocities() {
+    // Authored in atomic units so the file values pass through the loader
+    // unchanged and the asserts compare numerically equal floats.
     let dir = tmp_path("two_no_velo");
     let body = "2\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0.0 0.0 0.0\nAr 3.4e-10 0.0 0.0\n";
     let path = write_init(&dir, body);
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
     assert_eq!(state.particle_count, 2);
     assert!((state.sim_box.lx() - 1.0e-9_f32).abs() < 1.0e-18);
     assert!((state.sim_box.ly() - 1.0e-9_f32).abs() < 1.0e-18);
@@ -48,7 +50,7 @@ fn load_with_velocities() {
     let dir = tmp_path("with_velo");
     let body = "2\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3:velo:R:3\nAr 0.0 0.0 0.0 100.0 0.0 0.0\nAr 3.4e-10 0.0 0.0 -100.0 0.0 0.0\n";
     let path = write_init(&dir, body);
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
     let v = state.velocities.unwrap();
     assert!((v.velocities_x[0] - 100.0_f32).abs() < 1e-3);
     assert!((v.velocities_x[1] - (-100.0_f32)).abs() < 1e-3);
@@ -522,8 +524,9 @@ fn implicit_ids_in_row_order() {
         &dir,
         "3\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" Properties=species:S:1:pos:R:3\nAr 0 0 0\nAr 1e-10 0 0\nAr 2e-10 0 0\n",
     );
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
-    // Positions correspond to row order.
+    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
+    // Positions correspond to row order; atomic mode passes the file
+    // values through unchanged.
     assert!(state.positions_x[0].abs() < 1e-30);
     assert!((state.positions_x[1] - 1.0e-10_f32).abs() < 1e-20);
     assert!((state.positions_x[2] - 2.0e-10_f32).abs() < 1e-20);
@@ -651,7 +654,7 @@ fn accept_lower_triangular_triclinic_lattice() {
         &dir,
         "0\nLattice=\"1.0e-9 0 0 0.2e-9 1.0e-9 0 0.1e-9 -0.3e-9 1.0e-9\" Properties=species:S:1:pos:R:3\n",
     );
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
     let lat = state.sim_box.lattice();
     let eps = 1.0e-18_f32;
     assert!((lat[0] - 1.0e-9_f32).abs() < eps);

@@ -636,8 +636,9 @@ pub fn run_analyses_with_registries(
         .map(|t| t.name.clone())
         .collect();
     let type_name_refs: Vec<&str> = type_names_owned.iter().map(|s| s.as_str()).collect();
-    let mut reader = TrajectoryReader::open(&analysis.trajectory, &type_name_refs)
-        .map_err(AnalyzeError::Trajectory)?;
+    let mut reader =
+        TrajectoryReader::open(&analysis.trajectory, sim_config.units, &type_name_refs)
+            .map_err(AnalyzeError::Trajectory)?;
 
     // Stage 4: construct analysis slots from the first-frame header.
     let mut slots: Vec<Box<dyn Analysis>> = Vec::with_capacity(analysis.analyses.len());
@@ -832,7 +833,7 @@ pub fn lint_analyses_with_registries(
         .map(|t| t.name.clone())
         .collect();
     let type_name_refs: Vec<&str> = type_names_owned.iter().map(|s| s.as_str()).collect();
-    let reader = match TrajectoryReader::open(&analysis.trajectory, &type_name_refs) {
+    let reader = match TrajectoryReader::open(&analysis.trajectory, sim_config.units, &type_name_refs) {
         Ok(r) => {
             let h = &r.first_frame_header;
             stages.push(LintStage {

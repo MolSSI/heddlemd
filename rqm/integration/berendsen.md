@@ -39,7 +39,8 @@ the post-step velocities. For each invocation with timestep `dt`:
 2. Compute the rescale factor
 
    ```text
-   K_target = (N_f / 2) · k_B · T
+   K_target = (N_f / 2) · T          # k_B = 1 in atomic units; T carries
+                                     # k_B · T (Hartrees)
    λ² = 1 + (dt / τ) · (K_target / K_old − 1)
    λ  = sqrt(max(λ², 0))
    ```
@@ -97,11 +98,14 @@ and are not part of this slot's per-step sequence.
 
 The matching builder deserialises a typed `BerendsenParams` from the `[thermostat]` section's `SlotConfig::params` (see `framework.md`); the per-field reference below documents that parameter struct:
 
-- `temperature: f64` — bath temperature `T` in kelvin. Required.
+- `temperature: f64` — bath temperature `T` as `k_B · T` in Hartrees
+  (the engine's internal temperature representation; `k_B = 1`).
+  Required.
   Finite and strictly positive. Independent of
   `simulation.temperature`, which governs the initial-velocity
   sampler.
-- `tau: f64` — thermostat coupling time in seconds. Required. Finite
+- `tau: f64` — thermostat coupling time in atomic time units
+  (`hbar / E_h`). Required. Finite
   and strictly positive. Typical values for liquid water are 100 fs
   – 1 ps. Smaller `τ` couples more strongly (faster temperature
   relaxation, larger departure from NVE); larger `τ` leaves the
@@ -159,7 +163,9 @@ systematic non-`O(dt²)` drift indicates an implementation bug.
   - `g_dof: u32` — `max(1, 3 · particle_count − n_constraints − 3)`,
     computed at construction from the `n_constraints` parameter
     passed by the runner.
-  - `kt_target: f64` — `BOLTZMANN_J_PER_K · temperature`.
+  - `kt_target: f64` — equals `temperature` (the engine stores
+    `k_B · T` in Hartrees directly; `k_B = 1`, so no Boltzmann
+    constant appears).
   - `cumulative_injection: f64` — running sum of `K_new − K_old`
     across every completed `apply_post` invocation. Initialised to
     `0.0`. Used by `log_column_values`.

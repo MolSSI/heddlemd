@@ -8,7 +8,6 @@ use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy, rescale_velocities,
 };
 use crate::io::config::ConfigError;
-use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::timings::{KernelStage, Timings};
 
 use super::philox::philox_normal;
@@ -65,7 +64,9 @@ impl CsvrThermostat {
     ) -> Result<Self, GpuError> {
         let g_dof =
             ((3 * particle_count) as i64 - n_constraints as i64 - 3).max(1) as u32;
-        let kt_target = BOLTZMANN_J_PER_K * temperature;
+        // k_B = 1 in atomic units; the temperature parameter is already
+        // `k_B · T` in Hartrees, so `kt_target` is just the temperature.
+        let kt_target = temperature;
         let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
         Ok(CsvrThermostat {
             temperature,
@@ -144,8 +145,9 @@ impl Thermostat for CsvrThermostat {
     }
 
     // rq-8ee58ec1
-    fn log_column_names(&self) -> &'static [&'static str] {
-        &["csvr_conserved"]
+    fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
+        // csvr_conserved is a conserved Hamiltonian-like scalar in Hartrees.
+        &[("csvr_conserved", crate::units::Dimension::Energy)]
     }
 
     // rq-2a5de2ab

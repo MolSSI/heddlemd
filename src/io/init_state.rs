@@ -187,7 +187,7 @@ fn parse_lattice(raw: &str, len_factor: f64) -> Result<SimulationBox, InitStateE
         let parsed = p.parse::<f64>().map_err(|_| {
             InitStateError::InvalidLattice(format!("component {i} is not a number: {p:?}"))
         })?;
-        vals[i] = parsed * len_factor;
+        vals[i] = parsed / len_factor;
     }
     for (i, v) in vals.iter().enumerate() {
         if !v.is_finite() {
@@ -333,18 +333,18 @@ pub(crate) fn parse_init_state(
                 });
             }
         };
-        let px = parse_number(cols[1], current_line_number, "pos_x")? * len_factor;
-        let py = parse_number(cols[2], current_line_number, "pos_y")? * len_factor;
-        let pz = parse_number(cols[3], current_line_number, "pos_z")? * len_factor;
+        let px = parse_number(cols[1], current_line_number, "pos_x")? / len_factor;
+        let py = parse_number(cols[2], current_line_number, "pos_y")? / len_factor;
+        let pz = parse_number(cols[3], current_line_number, "pos_z")? / len_factor;
         check_finite(px, current_line_number, "pos_x")?;
         check_finite(py, current_line_number, "pos_y")?;
         check_finite(pz, current_line_number, "pos_z")?;
         check_in_primary_image(px, py, pz, current_line_number, &sim_box)?;
 
         let (vx, vy, vz) = if has_velo {
-            let vx = parse_number(cols[4], current_line_number, "velo_x")? * vel_factor;
-            let vy = parse_number(cols[5], current_line_number, "velo_y")? * vel_factor;
-            let vz = parse_number(cols[6], current_line_number, "velo_z")? * vel_factor;
+            let vx = parse_number(cols[4], current_line_number, "velo_x")? / vel_factor;
+            let vy = parse_number(cols[5], current_line_number, "velo_y")? / vel_factor;
+            let vz = parse_number(cols[6], current_line_number, "velo_z")? / vel_factor;
             check_finite(vx, current_line_number, "velo_x")?;
             check_finite(vy, current_line_number, "velo_y")?;
             check_finite(vz, current_line_number, "velo_z")?;

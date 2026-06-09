@@ -8,7 +8,6 @@ use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy, rescale_velocities,
 };
 use crate::io::config::ConfigError;
-use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::timings::{KernelStage, Timings};
 
 use super::{Thermostat, ThermostatBuilder, ThermostatError};
@@ -60,7 +59,8 @@ impl BerendsenThermostat {
     ) -> Result<Self, GpuError> {
         let g_dof =
             ((3 * particle_count) as i64 - n_constraints as i64 - 3).max(1) as u32;
-        let kt_target = BOLTZMANN_J_PER_K * temperature;
+        // k_B = 1 in atomic units; temperature is already k_B · T.
+        let kt_target = temperature;
         let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
         Ok(BerendsenThermostat {
             temperature,
@@ -112,8 +112,9 @@ impl Thermostat for BerendsenThermostat {
     }
 
     // rq-c908bbf1
-    fn log_column_names(&self) -> &'static [&'static str] {
-        &["berendsen_conserved"]
+    fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
+        // berendsen_conserved is a conserved Hamiltonian-like scalar in Hartrees.
+        &[("berendsen_conserved", crate::units::Dimension::Energy)]
     }
 
     // rq-3589910b

@@ -63,7 +63,7 @@ For each invocation with timestep `dt`:
    P = (2 K + W) / (3 V)
    ```
 
-   in pascals.
+   in `E_h / a_0^3` (the engine's atomic pressure unit).
 
 5. Advance the host-side `draw_counter` (pre-increment by `+1`) and
    draw a single standard-normal sample `R` via the counter-based
@@ -74,19 +74,20 @@ For each invocation with timestep `dt`:
 
    ```text
    μ³ = 1 − β · (dt / τ_P) · (P_target − P)
-       + sqrt( 2 · β · k_B · T · dt / (τ_P · V) ) · R
+       + sqrt( 2 · β · T · dt / (τ_P · V) ) · R
    μ  = max(μ_min, μ³)^(1/3)
    ```
 
-   where:
-   - `β` is the user-supplied isothermal compressibility (in 1/Pa),
-   - `τ_P` is the user-supplied pressure-coupling time constant (in
-     s),
-   - `P_target` is the user-supplied target pressure (in Pa),
-   - `T` is the user-supplied target temperature (in K) used in the
-     noise amplitude,
-   - `k_B = 1.380649 × 10⁻²³ J/K` is the same CODATA-2019 value
-     used by `io/log-output.md`,
+   where, with `k_B = 1` exactly in the engine's atomic units (no
+   Boltzmann factor appears in the noise amplitude):
+   - `β` is the user-supplied isothermal compressibility in
+     `a_0^3 / E_h`,
+   - `τ_P` is the user-supplied pressure-coupling time constant in
+     atomic time units (`hbar / E_h`),
+   - `P_target` is the user-supplied target pressure in
+     `E_h / a_0^3`,
+   - `T` is the user-supplied target temperature carrying `k_B · T`
+     in Hartrees,
    - `R` is the standard-normal sample from step 5,
    - `μ_min = 1.0e-6` is the host-side safety floor (shared with
      the Berendsen barostat) that prevents pathological collapse
@@ -155,25 +156,31 @@ sequence.
 
 The matching builder deserialises a typed `CRescaleBarostatParams` from the `[barostat]` section's `SlotConfig::params` (see `framework.md`); the per-field reference below documents that parameter struct:
 
-- `pressure: f64` — target pressure `P_target` in pascals (Pa).
+- `pressure: f64` — target pressure `P_target` in `E_h / a_0^3` (the
+  engine's atomic pressure unit).
   Required. Finite. May be any sign or zero (the formula handles
   negative and zero targets identically to positive ones).
-- `temperature: f64` — target temperature `T` in kelvin used in the
+- `temperature: f64` — target temperature `T` as `k_B · T` in Hartrees
+  (the engine's internal temperature representation; `k_B = 1`) used
+  in the
   noise term. Required. Finite and strictly positive. Independent
   of `simulation.temperature` and of any `[thermostat].temperature`;
   the framework performs no cross-slot validation. For canonical
   NPT sampling the user must keep this value consistent with the
   thermostat (or, for langevin-baoab, with the integrator's bath
   temperature).
-- `tau: f64` — pressure-coupling time constant in seconds. Required.
+- `tau: f64` — pressure-coupling time constant in atomic time units
+  (`hbar / E_h`). Required.
   Finite and strictly positive. Typical values for liquid water are
   1–5 ps. Smaller `τ_P` couples the barostat more strongly to the
   physical system; larger `τ_P` smooths the response.
-- `compressibility: f64` — isothermal compressibility `β` in 1/Pa
-  (= m³/J). Required. Finite and strictly positive. Typical values:
-  water ≈ `4.5e-10 1/Pa`; LJ argon at liquid density similar order.
-  An inaccurate value produces a different effective relaxation rate
-  but does not break correctness of the long-time NPT distribution.
+- `compressibility: f64` — isothermal compressibility `β` in
+  `a_0^3 / E_h` (= the inverse atomic pressure unit). Required. Finite
+  and strictly positive. Typical values: water ≈ `4.5e-10` 1/Pa
+  ≈ `1.5e-2` in atomic units; LJ argon at liquid density similar
+  order. An inaccurate value produces a different effective
+  relaxation rate but does not break correctness of the long-time NPT
+  distribution.
 - `seed: u64` — counter-based RNG seed for the per-step normal draw.
   Required, independent of `simulation.seed` and any other slot's
   seed.
@@ -220,7 +227,7 @@ quantities run in `f64` from `f32` inputs.
 The barostat exposes three per-log-row diagnostic columns when it
 is configured (see `io/log-output.md`):
 
-- `pressure` — instantaneous pressure `P` in pascals as computed in
+- `pressure` — instantaneous pressure `P` in `E_h / a_0^3` as computed in
   step 4 of the algorithm. This is the value used to derive the
   step's `μ`. When `buffers.particle_count() == 0`, `pressure` is
   reported as `0.0`.

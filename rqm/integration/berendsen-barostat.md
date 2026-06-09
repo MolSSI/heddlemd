@@ -63,7 +63,8 @@ For each invocation with timestep `dt`:
    P = (2 K + W) / (3 V)
    ```
 
-   in pascals. `K` and `V` are positive; `W` may be negative (e.g.
+   in `E_h / a_0^3` (the engine's atomic pressure unit). `K` and `V`
+   are positive; `W` may be negative (e.g.
    purely repulsive systems above the LJ minimum produce positive
    `W`, attractive systems produce negative `W`).
 
@@ -74,9 +75,11 @@ For each invocation with timestep `dt`:
    μ  = max(μ_min, μ³)^(1/3)
    ```
 
-   where `β` is the user-supplied isothermal compressibility (in
-   1/Pa), `τ` is the user-supplied pressure-coupling time constant
-   (in s), `P_target` is the user-supplied target pressure (in Pa),
+   where `β` is the user-supplied isothermal compressibility in
+   `a_0^3 / E_h` (the inverse atomic pressure unit), `τ` is the
+   user-supplied pressure-coupling time constant in atomic time units
+   (`hbar / E_h`), `P_target` is the user-supplied target pressure in
+   `E_h / a_0^3`,
    and `μ_min = 1.0e-6` is a host-side safety floor that prevents
    pathological collapse when `μ³` is non-positive (e.g. extreme
    parameter combinations early in equilibration). Sensible
@@ -129,18 +132,21 @@ sequence.
 
 The matching builder deserialises a typed `BerendsenBarostatParams` from the `[barostat]` section's `SlotConfig::params` (see `framework.md`); the per-field reference below documents that parameter struct:
 
-- `pressure: f64` — target pressure `P_target` in pascals (Pa).
+- `pressure: f64` — target pressure `P_target` in `E_h / a_0^3` (the
+  engine's atomic pressure unit).
   Required. Finite. May be any sign or zero; the formula handles
   negative targets, zero target (e.g. vacuum equilibration), and
   positive targets (the common case) identically.
-- `tau: f64` — pressure-coupling time constant in seconds. Required.
+- `tau: f64` — pressure-coupling time constant in atomic time units
+  (`hbar / E_h`). Required.
   Finite and strictly positive. Typical values for liquid water are
   1–5 ps; longer than the thermostat's `τ` so that pressure
   fluctuations average out before the barostat responds.
 - `compressibility: f64` — isothermal compressibility `β` in
-  1/Pa (= m³/J). Required. Finite and strictly positive. Typical
-  values: water ≈ `4.5e-10 1/Pa`; LJ argon at liquid density
-  similar order; condensed organics ≈ `5e-10–1e-9 1/Pa`. An
+  `a_0^3 / E_h` (the inverse atomic pressure unit). Required. Finite
+  and strictly positive. Typical values: water ≈ `4.5e-10` 1/Pa
+  ≈ `1.5e-2` in atomic units; LJ argon at liquid density similar
+  order. An
   inaccurate value produces a different effective relaxation rate
   (`β · 1/τ`) but does not break correctness.
 
@@ -151,7 +157,8 @@ No RNG seed: the Berendsen barostat is deterministic.
 The barostat exposes two per-log-row diagnostic columns when it is
 configured (see `io/log-output.md`):
 
-- `pressure` — instantaneous pressure `P` in pascals as computed in
+- `pressure` — instantaneous pressure `P` in `E_h / a_0^3` (the
+  engine's atomic pressure unit) as computed in
   step 4 of the algorithm. This is the value used to derive the
   step's `μ`. When `buffers.particle_count() == 0`, `pressure` is
   reported as `0.0`.
@@ -309,7 +316,7 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
     `scratch` (a length-1 device buffer the caller owns; reused
     across calls to avoid per-step allocation).
   - Downloads `scratch[0]` host-side via `dtoh_sync_copy_into` and
-    returns the value in joules.
+    returns the value in Hartrees.
   - Block size 256, single block, no shared-memory tuning beyond
     what the kernel declares.
   - When `buffers.particle_count() == 0`, returns `Ok(0.0_f32)`

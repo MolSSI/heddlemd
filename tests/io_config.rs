@@ -47,7 +47,14 @@ fn tmp_path(name: &str) -> PathBuf {
 }
 
 fn minimal_config() -> String {
+    // Author the helper in `units = "atomic"` so the numeric values
+    // round-trip through the loader unchanged — every test that
+    // checks `cfg.X == <value>` exercises parsing structure rather
+    // than the unit conversion. Conversion-specific tests use
+    // `units = "si"` explicitly and verify the post-conversion
+    // (atomic) value.
     r#"schema_version = 1
+units = "atomic"
 init = "argon.in.xyz"
 
 [simulation]
@@ -1976,6 +1983,7 @@ fn config_with_thermostat(thermostat_block: &str) -> String {
         .replace("[integrator]", "[phase.integrator]");
     format!(
         r#"schema_version = 1
+units = "atomic"
 init = "argon.in.xyz"
 
 [simulation]
@@ -2521,6 +2529,7 @@ fn integrator_kind_owns_barostat_matrix_config_layer() {
 fn mtk_minimal_body(extras: &str) -> String {
     format!(
         r#"schema_version = 1
+units = "atomic"
 init = "argon.in.xyz"
 
 [simulation]
@@ -2775,6 +2784,7 @@ fn config_with_barostat(barostat_block: &str) -> String {
         .replace("[integrator]", "[phase.integrator]");
     format!(
         r#"schema_version = 1
+units = "atomic"
 init = "argon.in.xyz"
 
 [simulation]
@@ -3427,22 +3437,32 @@ fn filename_check_runs_before_io() {
 use dynamics::io::PairPotentialParams;
 use dynamics::units::{Dimension, UnitSystem};
 
+// Build a minimal SI-mode config (the test helper `minimal_config()`
+// is atomic-mode for round-trip ergonomics; these tests need SI to
+// verify the conversion direction).
+fn minimal_si_config() -> String {
+    minimal_config().replace("units = \"atomic\"\n", "")
+}
+
 #[test]
 fn units_default_is_si() {
     let dir = tmp_path("units_default_si");
-    let path = write_config(&dir, &minimal_config());
+    let path = write_config(&dir, &minimal_si_config());
     let cfg = load_config(&path).unwrap();
     assert_eq!(cfg.units, UnitSystem::Si);
-    // SI-mode values round-trip unchanged.
-    assert_eq!(cfg.simulation.temperature, 300.0);
-    assert_eq!(cfg.phases[0].as_md().unwrap().dt, 1.0e-15);
-    assert_eq!(cfg.particle_types[0].mass, 6.6335e-26);
+    // Loader converts SI input to atomic units on Config.
+    let expected_temp = 300.0 / UnitSystem::Si.factor(Dimension::Temperature);
+    let expected_dt = 1.0e-15 / UnitSystem::Si.factor(Dimension::Time);
+    let expected_mass = 6.6335e-26 / UnitSystem::Si.factor(Dimension::Mass);
+    assert!((cfg.simulation.temperature - expected_temp).abs() < 1e-12 * expected_temp);
+    assert!((cfg.phases[0].as_md().unwrap().dt - expected_dt).abs() < 1e-12 * expected_dt);
+    assert!((cfg.particle_types[0].mass - expected_mass).abs() < 1e-12 * expected_mass);
 }
 
 #[test]
 fn units_explicit_si_accepted() {
     let dir = tmp_path("units_explicit_si");
-    let cfg_text = format!("units = \"si\"\n{}", minimal_config());
+    let cfg_text = format!("units = \"si\"\n{}", minimal_si_config());
     let path = write_config(&dir, &cfg_text);
     let cfg = load_config(&path).unwrap();
     assert_eq!(cfg.units, UnitSystem::Si);
@@ -3451,7 +3471,7 @@ fn units_explicit_si_accepted() {
 #[test]
 fn units_unknown_value_rejected() {
     let dir = tmp_path("units_unknown");
-    let cfg_text = format!("units = \"imperial\"\n{}", minimal_config());
+    let cfg_text = format!("units = \"imperial\"\n{}", minimal_si_config());
     let path = write_config(&dir, &cfg_text);
     match load_config(&path).unwrap_err() {
         ConfigError::UnknownUnits { got } => assert_eq!(got, "imperial"),
@@ -3467,11 +3487,15 @@ fn atomic_units_yield_same_si_config_as_native_si() {
     // unit-bearing field. Conversion factors come from the units
     // module, so this test pins the SI side and lets the atomic side
     // be derived through the conversion path.
-    let len_f = UnitSystem::Atomic.factor(Dimension::Length);
-    let mass_f = UnitSystem::Atomic.factor(Dimension::Mass);
-    let energy_f = UnitSystem::Atomic.factor(Dimension::Energy);
-    let time_f = UnitSystem::Atomic.factor(Dimension::Time);
-    let temp_f = UnitSystem::Atomic.factor(Dimension::Temperature);
+    // `factor()` returns the user-per-atomic factor: in SI mode it is
+    // the SI value of one atomic unit, in atomic mode it is 1.0. Use
+    // the SI mode factors to convert physical SI values to their
+    // atomic-unit counterparts for the atomic-side TOML file.
+    let len_f = UnitSystem::Si.factor(Dimension::Length);
+    let mass_f = UnitSystem::Si.factor(Dimension::Mass);
+    let energy_f = UnitSystem::Si.factor(Dimension::Energy);
+    let time_f = UnitSystem::Si.factor(Dimension::Time);
+    let temp_f = UnitSystem::Si.factor(Dimension::Temperature);
 
     // Argon Lennard-Jones; values picked so the SI-side numbers are
     // physical and the atomic-side numbers stay finite and well-scaled.
@@ -3559,7 +3583,7 @@ cutoff = {cutoff_au:.16e}
     assert_eq!(loaded_si.units, UnitSystem::Si);
     assert_eq!(loaded_au.units, UnitSystem::Atomic);
 
-    // After conversion, both configs hold SI values.
+    // After conversion, both configs hold atomic-unit values.
     fn approx_eq(a: f64, b: f64, rel: f64) -> bool {
         if a == b {
             return true;
@@ -3649,9 +3673,6 @@ cutoff = 18.9
     let path = write_config(&dir, &cfg);
     let loaded = load_config(&path).unwrap();
 
-    let temp_f = UnitSystem::Atomic.factor(Dimension::Temperature);
-    let time_f = UnitSystem::Atomic.factor(Dimension::Time);
-
     let thermostat = loaded.phases[0]
         .as_md()
         .unwrap()
@@ -3662,8 +3683,9 @@ cutoff = 18.9
     let t = param_f64(thermostat, "temperature");
     let tau = param_f64(thermostat, "tau");
     let seed = param_u64(thermostat, "seed");
-    let rel = 1e-12;
-    assert!((t - temp_au * temp_f).abs() <= rel * (temp_au * temp_f));
-    assert!((tau - tau_au * time_f).abs() <= rel * (tau_au * time_f));
+    // Atomic-mode input passes through; the Config stores the same
+    // numerical values supplied in the TOML.
+    assert_eq!(t, temp_au);
+    assert_eq!(tau, tau_au);
     assert_eq!(seed, 7);
 }

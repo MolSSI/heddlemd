@@ -42,7 +42,7 @@ A nine-element space-separated list of `f64` values inside double quotes
 representing the three Cartesian box vectors in row-major order (row 1 =
 `a` vector, row 2 = `b` vector, row 3 = `c` vector). Each component is
 interpreted in the unit system passed to `load_init_state` (metres in
-`UnitSystem::Si`, Bohr in `UnitSystem::Atomic`) and converted to metres
+`UnitSystem::Si`, Bohr in `UnitSystem::Atomic`) and converted to Bohr
 before the `SimulationBox` is constructed; see `unit-system.md`:
 
 ```
@@ -78,12 +78,12 @@ Properties=species:S:1:pos:R:3:velo:R:3:image:I:3
 - `species:S:1` — one string column for the particle type name.
 - `pos:R:3` — three real columns for the position (x, y, z) in the
   unit system passed to `load_init_state` (metres in
-  `UnitSystem::Si`, Bohr in `UnitSystem::Atomic`); converted to metres
+  `UnitSystem::Si`, Bohr in `UnitSystem::Atomic`); converted to Bohr
   by the loader. See `unit-system.md`.
 - `velo:R:3` — optional three real columns for velocity (vx, vy, vz) in
   the unit system passed to `load_init_state` (m/s in
   `UnitSystem::Si`, Bohr per atomic time unit in `UnitSystem::Atomic`);
-  converted to m/s by the loader.
+  converted to Bohr per atomic time unit by the loader.
 - `image:I:3` — optional three integer columns for the image triple
   `(n_a, n_b, n_c)`, one per lattice direction. The unwrapped position
   is `pos + n_a · a + n_b · b + n_c · c` (see `particle-state.md`).
@@ -117,7 +117,7 @@ more whitespace characters. The number of columns must match the
   in the consumer-supplied type list (see *Feature API*).
 - `pos` — three `f64` values in the unit system passed to
   `load_init_state` (metres in `UnitSystem::Si`, Bohr in
-  `UnitSystem::Atomic`). The loader rescales each component to metres
+  `UnitSystem::Atomic`). The loader rescales each component to Bohr
   before validation. Each particle must lie in the primary image of
   the (post-conversion) simulation box: its fractional coordinates
   (computed via `SimulationBox::fractional_coords`) must satisfy
@@ -128,7 +128,7 @@ more whitespace characters. The number of columns must match the
 - `velo` (when present) — three `f64` values in the unit system passed
   to `load_init_state` (m/s in `UnitSystem::Si`, Bohr per atomic time
   unit in `UnitSystem::Atomic`). The loader rescales each component to
-  m/s. No range restriction.
+  Bohr per atomic time unit. No range restriction.
 - `image` (when present) — three `i32` values. No range restriction
   beyond the type bounds; negative and positive values are both accepted.
 
@@ -220,16 +220,17 @@ This produces an empty `ParticleState` and a valid `SimulationBox`.
     one of these names; the parser stores the corresponding zero-based
     index in `type_indices`.
   - `units` is the unit system the file is written in. The loader
-    multiplies the nine `Lattice` components by the length factor before
-    constructing the `SimulationBox`, multiplies position columns by
-    the length factor, and multiplies velocity columns by the velocity
-    factor. The returned `InitState` is in SI throughout (metres,
-    metres per second). Callers typically pass `Config.units` from the
-    matching configuration file; the loader itself does not enforce
-    this pairing. See `unit-system.md`.
+    divides the nine `Lattice` components by the length factor before
+    constructing the `SimulationBox`, divides position columns by the
+    length factor, and divides velocity columns by the velocity factor
+    (the divisions are no-ops when `units == UnitSystem::Atomic`). The
+    returned `InitState` is in Hartree atomic units throughout (Bohr,
+    Bohr per atomic time unit). Callers typically pass `Config.units`
+    from the matching configuration file; the loader itself does not
+    enforce this pairing. See `unit-system.md`.
   - Validates every field as described, including position-in-box checks
     using the post-conversion `SimulationBox` (both positions and box
-    edges in metres).
+    edges in Bohr).
   - Returns the populated `InitState` on success.
 
 The function reads the file once, in a single linear pass. Validation
@@ -267,9 +268,11 @@ Feature: Extended-XYZ initial-state file
 
   Background:
     Given a type_names slice of ["Ar"]
-    And a box lx=ly=lz=1.0e-9 in metres
-    And `load_init_state` is called with `units = UnitSystem::Si` unless
-      a scenario explicitly states otherwise
+    And a box whose Lattice diagonal is 1.0e-9 in the file's own units
+    And `load_init_state` is called with `units = UnitSystem::Atomic` unless
+      a scenario explicitly states otherwise (so file numbers are read
+      unchanged into the returned InitState; SI-mode scenarios call out
+      the conversion factor explicitly)
 
   # --- Happy paths ---
 
@@ -609,43 +612,45 @@ Feature: Extended-XYZ initial-state file
 
   # --- Unit system selector ---
 
-  @rq-1dc0b44c
-  Scenario: Lattice components in atomic units are converted to metres
-    Given a file with Lattice="L 0 0 0 L 0 0 0 L" where L = 1.0e-9 / a_0
-      (the SI box edge of 1 nm divided by the Bohr radius in metres)
+  @rq-306def4b
+  Scenario: Atomic-mode file passes lattice, positions, and velocities through unchanged
+    Given a file written in atomic units
     When load_init_state is called with units = UnitSystem::Atomic
-    Then state.box.lengths() equals [1.0e-9, 1.0e-9, 1.0e-9] cast to f32
+    Then state.box.lengths() equals the file's Lattice diagonal cast to f32
+    And state.positions_x equals the file's pos_x column cast to f32
+    And state.velocities.unwrap().velocities_x equals the file's velo_x
+      column cast to f32
+    And no multiplication is applied at any stage
 
-  @rq-3fe1680a
-  Scenario: Position columns in atomic units are converted to metres
-    Given a file with `units = UnitSystem::Atomic`-equivalent positions
-      whose Cartesian components are the SI positions divided by the Bohr
-      radius
-    When load_init_state is called with units = UnitSystem::Atomic
-    Then state.positions_x / y / z each equal the SI counterpart values
-      to within f32 round-off
+  @rq-5137c6f5
+  Scenario: SI-mode lattice components are converted to Bohr
+    Given a file with Lattice="1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9" (metres)
+    When load_init_state is called with units = UnitSystem::Si
+    Then state.box.lengths() equals [1.0e-9, 1.0e-9, 1.0e-9] each divided
+      by the bohr -> meter factor (i.e. ≈ 18.9 Bohr per side) cast to f32
 
-  @rq-bd5157fc
-  Scenario: Velocity columns in atomic units are converted to m/s
-    Given a file declaring velo:R:3 whose components are the SI
-      velocities divided by the (Bohr / atomic time) -> (metre / second)
-      factor
-    When load_init_state is called with units = UnitSystem::Atomic
-    Then state.velocities.unwrap().velocities_x equals the SI counterpart
-      values to within f32 round-off
+  @rq-371ae8cd
+  Scenario: SI-mode position columns are converted to Bohr
+    Given a file with a row "Ar 3.4e-10 0 0" (metres)
+    When load_init_state is called with units = UnitSystem::Si
+    Then state.positions_x[0] equals 3.4e-10 divided by the bohr -> meter
+      factor cast to f32
 
-  @rq-01d30cb4
+  @rq-999eddbb
+  Scenario: SI-mode velocity columns are converted to Bohr per atomic time
+    Given a file declaring velo:R:3 with a row whose velocity is 500 m/s
+      along x
+    When load_init_state is called with units = UnitSystem::Si
+    Then state.velocities.unwrap().velocities_x[0] equals 500 divided by
+      the (Bohr / atomic time) -> (metre / second) factor, cast to f32
+
+  @rq-6e1ba10f
   Scenario: Position-in-box check runs against the post-conversion box
     Given a Lattice and a position that both lie at the same fractional
-      coordinate when interpreted as atomic units
-    When load_init_state is called with units = UnitSystem::Atomic
-    Then the position-in-box check succeeds (or fails identically to its
-      SI-mode counterpart)
-
-  @rq-f2cb8772
-  Scenario: SI mode reads the file with no conversion applied
-    Given the same file content
-    When load_init_state is called with units = UnitSystem::Si
-    Then state.positions_x equals the input pos_x cast to f32 (no
-      multiplication is applied)
+      coordinate in the file's native units
+    When load_init_state is called with units matching the file
+    Then the position-in-box check evaluates the fractional coordinate
+      against the post-conversion (Bohr) SimulationBox
+    And accept/reject is identical between the SI and atomic encodings of
+      the same physical state
 ```

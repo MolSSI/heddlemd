@@ -66,7 +66,6 @@ fn require_finite_positive(field: &str, value: f64) -> Result<(), ConfigError> {
     }
     Ok(())
 }
-use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
@@ -140,7 +139,8 @@ impl MtkNptIntegrator {
         let m = chain_length as usize;
         let g_dof =
             ((3 * particle_count) as i64 - n_constraints as i64 - 3).max(1) as u32;
-        let kt = BOLTZMANN_J_PER_K * temperature;
+        // k_B = 1 in atomic units; temperature is already k_B · T.
+        let kt = temperature;
         let tau_t2 = tau_t * tau_t;
         let tau_p2 = tau_p * tau_p;
 
@@ -439,8 +439,13 @@ impl Integrator for MtkNptIntegrator {
     }
 
     // rq-3b6d5001
-    fn log_column_names(&self) -> &'static [&'static str] {
-        &["pressure", "box_volume", "mtk_npt_conserved"]
+    fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
+        use crate::units::Dimension;
+        &[
+            ("pressure", Dimension::Pressure),
+            ("box_volume", Dimension::Dimensionless),
+            ("mtk_npt_conserved", Dimension::Energy),
+        ]
     }
 
     fn log_column_values(&self, kinetic_energy: f64, potential_energy: f64) -> Vec<f64> {

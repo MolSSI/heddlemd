@@ -5,9 +5,12 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use crate::units::{Dimension, UnitSystem};
+
 // rq-dc140510
 pub struct MinlogWriter {
     writer: BufWriter<File>,
+    units: UnitSystem,
 }
 
 impl std::fmt::Debug for MinlogWriter {
@@ -27,14 +30,14 @@ pub enum MinlogWriterError {
 
 impl MinlogWriter {
     // rq-e963f27a
-    pub fn open(path: &Path) -> Result<Self, MinlogWriterError> {
+    pub fn open(path: &Path, units: UnitSystem) -> Result<Self, MinlogWriterError> {
         match OpenOptions::new().write(true).create_new(true).open(path) {
             Ok(file) => {
                 let mut writer = BufWriter::new(file);
                 writer
                     .write_all(b"iter,energy,max_force,step,accepted\n")
                     .map_err(io_err)?;
-                Ok(MinlogWriter { writer })
+                Ok(MinlogWriter { writer, units })
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                 Err(MinlogWriterError::OutputExists {
@@ -54,9 +57,12 @@ impl MinlogWriter {
         accepted: bool,
     ) -> Result<(), MinlogWriterError> {
         let acc = if accepted { 1 } else { 0 };
+        let energy_out = self.units.to_user(Dimension::Energy, energy);
+        let force_out = self.units.to_user(Dimension::Force, max_force);
+        let step_out = self.units.to_user(Dimension::Length, step);
         writeln!(
             self.writer,
-            "{iter},{energy:.9e},{max_force:.9e},{step:.9e},{acc}"
+            "{iter},{energy_out:.9e},{force_out:.9e},{step_out:.9e},{acc}"
         )
         .map_err(io_err)
     }

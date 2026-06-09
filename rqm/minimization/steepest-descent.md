@@ -195,15 +195,20 @@ Columns:
 - `iter: u64` — phase-local iteration counter. The pre-loop step-0
   row carries `iter = 0`. Rejected iterations advance the counter
   alongside accepted ones.
-- `energy: f64` — total potential energy at the iteration's
-  accepted positions (joules), computed via
+- `energy: f64` — total potential energy at the iteration's accepted
+  positions, expressed in the unit system the minlog writer was opened
+  with (joules in `UnitSystem::Si`, Hartrees in `UnitSystem::Atomic`).
+  The engine computes the value in Hartrees via
   `compute_total_potential_energy`. For a rejected iteration the
   reported `energy` is the accepted energy *before* the rejected
   trial (i.e., the same energy that was reported on the previous
   accepted row), since the rejected trial's positions and energy are
   discarded.
-- `max_force: f64` — `F_max` at the iteration's accepted positions
-  in newtons.
+- `max_force: f64` — `F_max` at the iteration's accepted positions,
+  expressed in the unit system the minlog writer was opened with
+  (newtons in `UnitSystem::Si`, `E_h / a_0` in `UnitSystem::Atomic`).
+  The engine computes `F_max` in atomic-unit force and the writer
+  applies the output-direction conversion before formatting.
 - `step: f64` — the step size *used for the trial that this row
   represents*. The step-0 row carries `initial_step`.
 - `accepted: u32` — `1` if the trial was accepted, `0` if rejected.
@@ -304,19 +309,22 @@ rejects unknown fields.
 Fields accepted for `kind = "steepest-descent"` (all optional with
 defaults):
 
-- `initial_step: f64` — initial scalar step `step_0` in metres.
-  Default `1.0e-12`. Finite and strictly positive.
-- `max_step: f64` — upper bound on `step` in metres. Default
-  `1.0e-10` (1 Å). Finite, strictly positive, and `≥ initial_step`.
+- `initial_step: f64` — initial scalar step `step_0` in Bohr (`a_0`).
+  Default `1.0e-12` metres ≈ `1.89e-2` Bohr (the loader converts
+  user-supplied SI defaults). Finite and strictly positive.
+- `max_step: f64` — upper bound on `step` in Bohr (`a_0`). Default
+  `1.0e-10` metres = 1 Å ≈ 1.89 Bohr. Finite, strictly positive, and
+  `≥ initial_step`.
 - `step_increase: f64` — multiplicative factor applied to `step` on
   an accepted iteration. Default `1.2`. Finite and `≥ 1.0`. A value
   of `1.0` disables step growth (a fixed-step variant).
 - `step_decrease: f64` — multiplicative factor applied to `step` on
   a rejected iteration. Default `0.2`. Finite and in `(0.0, 1.0)`.
 - `force_tolerance: f64` — convergence threshold on `F_max` in
-  newtons. Default `1.0e-10` (≈ 600 kJ/mol/nm in chemistry units).
-  Finite and `≥ 0.0`. A value of `0.0` disables this criterion (only
-  `energy_tolerance` and `max_iterations` end the loop).
+  `E_h / a_0` (the engine's atomic force unit). Default `1.0e-10`
+  newtons ≈ `1.2e-3` in atomic units. Finite and `≥ 0.0`. A value of
+  `0.0` disables this criterion (only `energy_tolerance` and
+  `max_iterations` end the loop).
 - `energy_tolerance: f64` — relative convergence threshold on
   `|ΔE| / max(|E_prev|, |E_curr|, 1.0e-30)` between consecutive
   accepted iterations. Default `1.0e-7`. Finite and `≥ 0.0`. A value
@@ -498,10 +506,10 @@ produce byte-identical post-minimization positions and byte-identical
   ```rust
   pub struct MinimizerStepReport {
       pub accepted: bool,
-      pub energy: f64,       // joules, at the post-step accepted positions
-      pub max_force: f64,    // newtons, at the post-step accepted positions
-      pub step_size: f64,    // metres, the step used for this iteration's trial
-      pub prev_energy: f64,  // joules, accepted energy before this iteration
+      pub energy: f64,       // Hartrees, at the post-step accepted positions
+      pub max_force: f64,    // E_h / a_0, at the post-step accepted positions
+      pub step_size: f64,    // Bohr (a_0), the step used for this iteration's trial
+      pub prev_energy: f64,  // Hartrees, accepted energy before this iteration
   }
   ```
 

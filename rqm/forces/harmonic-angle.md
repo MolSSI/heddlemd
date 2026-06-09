@@ -18,7 +18,7 @@ The harmonic potential at angle `θ` formed at atom `j` between rays
 U(θ) = (1/2) · k · (θ − θ₀)²
 ```
 
-where the angle-type parameters are `k` (force constant, J/rad²) and
+where the angle-type parameters are `k` (force constant, E_h/rad²) and
 `θ₀` (equilibrium angle, radians). The minimum-image displacements
 `r_ij` and `r_kj` honour periodic boundary conditions; the angle is
 *not* truncated by any cutoff distance — harmonic angles are intended
@@ -121,7 +121,7 @@ Each `[[angle_types]]` entry in the config that uses
 `potential = "harmonic"` contributes one row to a per-angle-type
 parameter table uploaded to the device:
 
-- `k_theta: f64` — force constant in J/rad². Required. Finite and
+- `k_theta: f64` — force constant in E_h/rad². Required. Finite and
   strictly positive.
 - `theta_0: f64` — equilibrium angle in radians. Required. Finite and
   in `[0, π]`.
@@ -354,7 +354,7 @@ Feature: Harmonic angle bonded potential
   Scenario: Construct HarmonicAngleState
     Given an AngleList with 2 angles among 5 atoms and one angle type
     And [[angle_types]] with one entry "HOH" potential="harmonic"
-      k_theta=5.27e-19 theta_0=1.911 (J/rad², radians; flexible-SPC
+      k_theta=5.27e-19 theta_0=1.911 (E_h/rad², radians; flexible-SPC
       Toukan-Rahman bend stiffness)
     When HarmonicAngleState::new(device, &angle_list, &angle_types) is called
     Then it returns Ok(state)
@@ -399,7 +399,7 @@ Feature: Harmonic angle bonded potential
     isolated angle in vacuum
     Given positions placed at d_ij = d_kj = 1.0e-10 with θ = 1.911 + 0.1
       and theta_0 = 1.911
-    And an angle (i, j, k) with k_theta = 5.27e-19 J/rad²
+    And an angle (i, j, k) with k_theta = 5.27e-19 E_h/rad²
     When harmonic_angle_force is launched
     Then sum of per-atom force magnitudes matches the analytical
       |F_i| + |F_j| + |F_k| within 5 × 10⁻³ relative error
@@ -518,7 +518,7 @@ Feature: Harmonic angle bonded potential
   @rq-ee7566b4
   Scenario: A bent angle's energy matches the closed-form expression
     Given an AngleList with one angle (0, 1, 2)
-    And angle type "HOH" with k_theta = 5.27e-19 J/rad², theta_0 = 1.911 rad
+    And angle type "HOH" with k_theta = 5.27e-19 E_h/rad², theta_0 = 1.911 rad
     And atoms placed at θ = 1.911 + 0.2
     When harmonic_angle_force is called
     Then angle_triple_energy[0] + angle_triple_energy[1] + angle_triple_energy[2]
@@ -566,7 +566,7 @@ Feature: Harmonic angle bonded potential
       that 2·D_e·a² equals the SPC harmonic stiffness 4.515e5 J/m²
       at r_e = 1.0e-10 m
     And [[angle_types]] with one entry "HOH" potential="harmonic"
-      k_theta = 5.27e-19 J/rad² theta_0 = 1.911 rad
+      k_theta = 5.27e-19 E_h/rad² theta_0 = 1.911 rad
     And a .topology file declaring two OH bonds and one HOH angle (so
       1-2 and 1-3 exclusions auto-derive to (0,0))
     When force_field.step(...) is called

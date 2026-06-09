@@ -1599,6 +1599,7 @@ fn switching_from_config_receives_default_r_switch_when_omitted() {
         &config_path,
         r#"
 schema_version = 1
+units = "atomic"
 init = "sim.in.xyz"
 
 [simulation]

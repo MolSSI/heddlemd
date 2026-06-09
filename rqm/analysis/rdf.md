@@ -38,7 +38,7 @@ n_bins = 100              # required, u64
   pairs (`["A", "A"]`) are accepted and use the unordered-pair
   counting convention documented in *Algorithm* below.
 - `r_max: f64` — required. Maximum pair distance considered, in
-  metres. Finite and strictly positive. Must satisfy
+  Bohr (`a_0`). Finite and strictly positive. Must satisfy
   `r_max <= sim_box.min_perpendicular_width() / 2` so the minimum-
   image convention assigns at most one image per pair; violations
   produce `AnalysisRuntimeError::InvalidValue { field: "r_max",
@@ -163,7 +163,11 @@ r,g_r,count
 
 ### Columns <!-- rq-964b59fd -->
 
-- `r: f64` — bin centre `(i + 0.5) · Δr`, in metres. Formatted with
+- `r: f64` — bin centre `(i + 0.5) · Δr`, expressed in the unit system
+  the writer was opened with (metres in `UnitSystem::Si`, Bohr in
+  `UnitSystem::Atomic`); the engine computes `Δr` and the bin centres
+  in Bohr and the writer applies the output-direction length
+  conversion before formatting. Formatted with
   Rust's `{:.9e}` (nine fractional digits, lower-case `e` exponent).
 - `g_r: f64` — `g_AB(r_i)`, dimensionless. Formatted with `{:.9e}`.
 - `count: u64` — raw histogram count for the bin. Base-10

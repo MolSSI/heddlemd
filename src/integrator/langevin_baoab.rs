@@ -10,7 +10,6 @@ use crate::gpu::device::get_func;
 use crate::gpu::{GpuContext, GpuError, ParticleBuffers, lan_drift_half, lan_ou_step, vv_kick};
 use crate::kernels;
 use crate::io::config::ConfigError;
-use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
@@ -95,7 +94,8 @@ impl Integrator for LangevinBaoabState {
             }
             SubStep::Custom { dt, label } if *label == "O" => {
                 let alpha = (-(self.friction as f32) * *dt).exp();
-                let kt = (BOLTZMANN_J_PER_K * self.temperature) as f32;
+                // k_B = 1 in atomic units; temperature is already k_B · T.
+                let kt = self.temperature as f32;
                 self.draw_counter += 1;
                 timings.kernel_start(KernelStage::LANGEVIN_OU_STEP)?;
                 lan_ou_step(buffers, self.seed, self.draw_counter, alpha, kt)?;

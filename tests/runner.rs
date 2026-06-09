@@ -1,7 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use dynamics::io::{BOLTZMANN_J_PER_K, load_config};
+use dynamics::io::load_config;
 use dynamics::runner::{RunnerError, cli_main_u8, run_simulation};
+
+// k_B = 1 in the engine's atomic units; this is the SI value used to
+// construct SI-mode test inputs and to verify converted output values.
+const BOLTZMANN_J_PER_K: f64 = 1.380649e-23;
 
 fn tmp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()

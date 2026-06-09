@@ -250,6 +250,23 @@ CUDA kernels are compiled to PTX during `cargo build` via a `build.rs` build
 script that invokes `nvcc`. The resulting PTX is loaded at runtime using
 `CudaDevice::load_ptx`.
 
+## Units
+
+The engine stores and computes in **Hartree atomic units** throughout:
+lengths in Bohr radii (`a_0`), masses in electron rest masses (`m_e`),
+times in atomic time units (`hbar / E_h` ≈ 24.2 attoseconds), energies
+in Hartrees (`E_h`), charges in elementary charges (`e`), and
+temperatures as `k_B · T` in Hartrees (so `k_B = 1` exactly inside the
+engine, and the Coulomb prefactor `1 / (4πε₀) = 1` exactly inside every
+electrostatic kernel).
+
+The TOML configuration file, the extended-XYZ initial-state file, and
+all output files (trajectory, CSV log, minimization log) optionally
+accept SI input/output through a top-level `units = "si" | "atomic"`
+selector — see `rqm/io/unit-system.md`. The conversion to and from
+atomic units happens at the I/O boundary; the internal pipeline below
+sees atomic units only.
+
 ## Precision policy
 
 All positions, velocities, and forces use `f32`. This is sufficient for most

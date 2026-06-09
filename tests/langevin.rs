@@ -4,8 +4,11 @@ use dynamics::gpu::{ParticleBuffers, init_device, lan_drift_half, lan_ou_step};
 use dynamics::integrator::IntegratorStepExt;
 use dynamics::integrator::{LangevinBaoabBuilder, IntegratorBuilder, IntegratorRegistry};
 use dynamics::io::SlotConfig;
-use dynamics::io::log_output::BOLTZMANN_J_PER_K;
 use dynamics::pbc::SimulationBox;
+
+// k_B = 1 in the engine's atomic units; this is the SI value used by
+// SI-mode test inputs that get converted on load.
+const BOLTZMANN_J_PER_K: f64 = 1.380649e-23;
 use dynamics::runner::run_simulation;
 use dynamics::state::ParticleState;
 use dynamics::timings::Timings;

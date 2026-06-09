@@ -38,8 +38,12 @@ Lines end in `\n` (Unix line endings). The file is UTF-8.
 
 `Lattice="lx 0 0 xy ly 0 xz yz lz"` where the nine values are the row-major
 entries of the lower-triangular lattice matrix (row 1 = `a` vector, row 2
-= `b` vector, row 3 = `c` vector) in metres. The three upper-triangular
-slots (`a_y`, `a_z`, `b_z`) are always written as `0` to make the file
+= `b` vector, row 3 = `c` vector), formatted in the unit system the
+writer was opened with (metres in `UnitSystem::Si`, Bohr in
+`UnitSystem::Atomic`). The engine's internal lattice is in Bohr; the
+writer applies the output-direction length conversion described in
+`unit-system.md` before formatting. The three upper-triangular slots
+(`a_y`, `a_z`, `b_z`) are always written as `0` to make the file
 consumable by tools that expect a 9-component lattice. The orthorhombic
 case (`xy = xz = yz = 0`) prints the three middle slots as zeros and is
 indistinguishable from the v0 format. The runner writes a constant
@@ -77,15 +81,17 @@ frames inside a phase carry `Step=trajectory_every`,
 
 ### `Time` <!-- rq-6ec75323 -->
 
-A real number, the **phase-local** simulation time in seconds:
-`Time = step * dt_phase`, where `dt_phase` is the owning phase's
-`dt` from the config. Written using `{:.9e}`. The phase's
-initial-state frame carries `Time=0.0e0`. Identical to
-`Step * dt_phase` evaluated in `f64`. Phase-local timing means each
-per-phase trajectory file is structurally identical to a single-phase
-trajectory of the same `n_steps`/`dt`; tooling that wants the
-elapsed time across phases must consult the config's per-phase `dt`
-values and sum them.
+A real number, the **phase-local** simulation time, formatted in the
+writer's unit system (seconds in `UnitSystem::Si`, atomic time units
+in `UnitSystem::Atomic`). The engine computes the value as
+`step * dt_phase` in atomic time units using the owning phase's
+atomic-unit `dt`; the writer applies the output-direction time
+conversion before formatting. Written using `{:.9e}`. The phase's
+initial-state frame carries `Time=0.0e0`. Phase-local timing means
+each per-phase trajectory file is structurally identical to a
+single-phase trajectory of the same `n_steps`/`dt`; tooling that
+wants the elapsed time across phases must consult the config's
+per-phase `dt` values and sum them.
 
 ### Data rows <!-- rq-00c68095 -->
 
@@ -94,13 +100,16 @@ The first column is the type **name** (the string declared in the config's
 without quoting. Subsequent columns are real numbers written with `{:.9e}`,
 separated by single spaces.
 
-Positions are written in their current (live) wrapped value: each
-particle lies inside the primary image of the simulation box (its
-fractional coordinates are in `[-1/2, 1/2)³`; see `simulation-box.md`).
-The integrator's drift kernels enforce this invariant on the device
-state, so positions read out for the trajectory are always
-already-wrapped. For an orthorhombic box this reduces to
-`pos_x ∈ [-lx/2, lx/2)` etc.
+Positions are formatted in the writer's unit system (metres in
+`UnitSystem::Si`, Bohr in `UnitSystem::Atomic`); the engine state
+stores Bohr internally and the writer applies the output-direction
+length conversion before formatting each column. Positions are
+written in their current (live) wrapped value: each particle lies
+inside the primary image of the simulation box (its fractional
+coordinates are in `[-1/2, 1/2)³`; see `simulation-box.md`). The
+integrator's drift kernels enforce this invariant on the device state,
+so positions read out for the trajectory are always already-wrapped.
+For an orthorhombic box this reduces to `pos_x ∈ [-lx/2, lx/2)` etc.
 
 Image columns (when `Properties` declares `image:I:3`) are the per-
 particle integer image triple `(images_x[i], images_y[i],
@@ -110,7 +119,11 @@ The unwrapped position used by external analyses is
 `pos + images_x · a + images_y · b + images_z · c`, which reduces to
 `pos + image · (lx, ly, lz)` for an orthorhombic box.
 
-Velocities, when included, are written in m/s.
+Velocities, when included, are formatted in the writer's unit system
+(m/s in `UnitSystem::Si`, Bohr per atomic time unit in
+`UnitSystem::Atomic`). The engine state stores velocities in atomic
+units internally and the writer applies the output-direction velocity
+conversion before formatting each column.
 
 ## Cadence <!-- rq-74b5c137 -->
 
@@ -148,11 +161,16 @@ itself the signal that the phase suppressed trajectory output.
 
 ### Functions and methods <!-- rq-3adef71d -->
 
-- `TrajectoryWriter::open(path: &Path, include_velocities: bool, include_images: bool, type_names: Vec<String>) -> Result<TrajectoryWriter, TrajectoryWriterError>` <!-- rq-28659fbe -->
+- `TrajectoryWriter::open(path: &Path, units: UnitSystem, include_velocities: bool, include_images: bool, type_names: Vec<String>) -> Result<TrajectoryWriter, TrajectoryWriterError>` <!-- rq-28659fbe -->
   - Creates the output file at `path`. If the file already exists, returns
     `OutputExists { path }`. The check and create are performed atomically
     via `OpenOptions::new().write(true).create_new(true)`.
   - Wraps the file in a buffered writer.
+  - Stores `units` so every subsequent `write_frame` call applies the
+    correct output-direction conversion (length factor to Lattice and
+    positions, velocity factor to velocity columns, time factor to the
+    `Time` attribute). The conversion reduces to the identity when
+    `units == UnitSystem::Atomic`.
   - Stores `include_velocities`, `include_images`, and `type_names` so
     future `write_frame` calls produce the correct columns.
     `type_names[i]` is the string used to render particles whose
@@ -161,6 +179,12 @@ itself the signal that the phase suppressed trajectory output.
 
 - `TrajectoryWriter::write_frame(&mut self, step: u64, dt: f64, box: &SimulationBox, type_indices: &[u32], positions_x: &[f32], positions_y: &[f32], positions_z: &[f32], velocities: Option<(&[f32], &[f32], &[f32])>, images: Option<(&[i32], &[i32], &[i32])>) -> Result<(), TrajectoryWriterError>` <!-- rq-be899bef -->
   - Writes one frame to the underlying file in the format described above.
+  - The `dt`, `box`, `positions_*`, and `velocities` inputs are
+    engine-side atomic-unit values (`dt` in atomic time, `box` in Bohr,
+    positions in Bohr, velocities in `a_0 / (hbar / E_h)`). The writer
+    applies the output-direction conversion to each formatted column
+    using the `units` value supplied at `open` time. Image columns and
+    step indices are dimensionless and pass through unchanged.
   - Asserts in debug builds that all slice lengths agree (`type_indices`,
     `positions_*`, each `velocities` slice, and each `images` slice).
   - When `self.include_velocities == true`, the caller must supply
@@ -195,11 +219,20 @@ declaration order without holding the whole file in memory.
 Fields are private; the type encapsulates the buffered reader and
 the metadata extracted from the first frame's comment line.
 
-- `TrajectoryReader::open(path: &Path, type_names: &[&str]) -> Result<TrajectoryReader, TrajectoryReaderError>` <!-- rq-af1c88ae -->
+- `TrajectoryReader::open(path: &Path, units: UnitSystem, type_names: &[&str]) -> Result<TrajectoryReader, TrajectoryReaderError>` <!-- rq-af1c88ae -->
   - Opens the file at `path` read-only and wraps it in a buffered
     reader. Reads the first frame's header to populate the public
     `first_frame_header` field (see below) without consuming the
     frame's data rows. Returns the reader on success.
+  - `units` is the unit system the file is written in. The reader
+    applies the input-direction conversion (divide by the relevant
+    factor; see `unit-system.md`) to the `Lattice` components, the
+    `Time` attribute, positions, and velocities on every frame, so
+    the `SimulationBox` and column slices exposed via
+    `TrajectoryFrame` are in Hartree atomic units regardless of the
+    file's encoding. The conversion is a no-op when
+    `units == UnitSystem::Atomic`. Image columns and step indices are
+    dimensionless and pass through unchanged.
   - `type_names` is the same caller-supplied slice that
     `load_init_state` accepts (`rqm/io/init-state-file.md`); each
     data row's species name is looked up against this list to
@@ -315,8 +348,13 @@ Feature: Extended-XYZ trajectory output
 
   Background:
     Given a temporary directory tmp
-    And a SimulationBox lx=ly=lz=1.0e-9
+    And a SimulationBox lx=ly=lz=1.0e-9 (in Bohr, the engine's internal units)
     And type_names = ["Ar"]
+    And TrajectoryWriter::open is called with units = UnitSystem::Atomic
+      unless a scenario specifies otherwise (so engine-side values pass
+      through verbatim and formatted columns match the input f32s);
+      the actual open signature is open(path, units, include_velocities,
+      include_images, type_names)
 
   # --- Open and overwrite policy ---
 
@@ -499,8 +537,59 @@ Feature: Extended-XYZ trajectory output
   Scenario: Round-trip through load_init_state preserves a triclinic lattice
     Given a writer opened on a frame produced by a triclinic SimulationBox
     When writer.write_frame is called and the file is flushed
-    And load_init_state is called on the same file
+    And load_init_state is called on the same file with the matching
+      UnitSystem
     Then it returns Ok(state)
     And state.box.lattice() agrees with the write-side lattice byte-for-byte
       after casting back to f32
+
+  # --- Unit system selector ---
+
+  @rq-afde087b
+  Scenario: SI-mode writer multiplies positions by the bohr -> meter factor
+    Given a TrajectoryWriter opened with units = UnitSystem::Si
+    And an engine state with a particle at positions_x[0] = 1.0 Bohr
+    When write_frame is called
+    Then the first position column in the written frame equals
+      1.0 * (bohr -> meter factor), formatted with `{:.9e}`
+
+  @rq-f61f5d24
+  Scenario: SI-mode writer multiplies velocities by the velocity factor
+    Given a TrajectoryWriter opened with units = UnitSystem::Si and
+      include_velocities = true
+    And an engine state with velocities_x[0] = 1.0e-3 (atomic-unit velocity)
+    When write_frame is called
+    Then the first velocity column in the written frame equals
+      1.0e-3 * ((Bohr / atomic time) -> (metre / second) factor)
+
+  @rq-6d9f6db6
+  Scenario: SI-mode writer multiplies the Lattice by the bohr -> meter factor
+    Given a TrajectoryWriter opened with units = UnitSystem::Si
+    And a SimulationBox lx=ly=lz=18.9 Bohr
+    When write_frame is called
+    Then the Lattice diagonal in the written frame equals
+      18.9 * (bohr -> meter factor) ≈ 1.0e-9 metres
+
+  @rq-a1d80d47
+  Scenario: SI-mode writer multiplies Time by the atomic-time -> second factor
+    Given a TrajectoryWriter opened with units = UnitSystem::Si
+    And a step / dt_phase product equal to 41.3 atomic time units
+    When write_frame is called
+    Then the Time attribute in the frame equals
+      41.3 * (atomic-time -> second factor) ≈ 1.0e-15 s
+
+  @rq-c19d0ce4
+  Scenario: SI-mode reader divides Lattice and positions by the bohr -> meter factor
+    Given a trajectory file whose Lattice and positions are written in metres
+    When TrajectoryReader::open is called with units = UnitSystem::Si
+    Then each TrajectoryFrame's sim_box and positions_* slices are in Bohr,
+      i.e. the file values divided by the bohr -> meter factor
+
+  @rq-64e90d53
+  Scenario: Atomic-mode round-trip is the identity for every column
+    Given a TrajectoryWriter opened with units = UnitSystem::Atomic
+    When a frame is written and then read back via TrajectoryReader::open
+      with units = UnitSystem::Atomic
+    Then the read-back sim_box, positions, and velocities equal the
+      write-side values byte-for-byte after f32 round-trip
 ```

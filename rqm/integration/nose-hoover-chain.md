@@ -29,10 +29,10 @@ velocities `{v_i}` to a chain of `M` auxiliary variables
 ẋ_i      = v_i
 v̇_i      = F_i/m_i − (p_ξ_1 / Q_1) v_i
 ξ̇_j      = p_ξ_j / Q_j                          (j = 1..M)
-ṗ_ξ_1    = (2K − g k_B T) − (p_ξ_2 / Q_2) p_ξ_1
-ṗ_ξ_j    = (p_ξ_{j−1}² / Q_{j−1} − k_B T)
+ṗ_ξ_1    = (2K − g T) − (p_ξ_2 / Q_2) p_ξ_1
+ṗ_ξ_j    = (p_ξ_{j−1}² / Q_{j−1} − T)
            − (p_ξ_{j+1} / Q_{j+1}) p_ξ_j         (1 < j < M)
-ṗ_ξ_M    = (p_ξ_{M−1}² / Q_{M−1} − k_B T)
+ṗ_ξ_M    = (p_ξ_{M−1}² / Q_{M−1} − T)
 ```
 
 where `K = (1/2) Σ_i m_i |v_i|²` is the instantaneous kinetic energy,
@@ -40,20 +40,20 @@ where `K = (1/2) Σ_i m_i |v_i|²` is the instantaneous kinetic energy,
 degrees of freedom (the three centre-of-mass modes are removed at
 initial-velocity generation, and any holonomic constraints carried by
 the run are also subtracted; the same convention used by CSVR and by
-`compute_temperature` in `io/log-output.md`), and
-`k_B = 1.380649 × 10⁻²³ J/K` is the same CODATA-2019 value used by
-`io/log-output.md`.
+`compute_temperature` in `io/log-output.md`), and `T` is the
+engine-side temperature value carrying `k_B · T` in Hartrees
+(`k_B = 1` exactly in atomic units, so no Boltzmann factor appears).
 
 ### Chain masses <!-- rq-d0cb986d -->
 
 ```text
-Q_1 = g k_B T τ²
-Q_j = k_B T τ²        (j > 1)
+Q_1 = g T τ²
+Q_j = T τ²        (j > 1)
 ```
 
-where `τ` is the user-supplied thermostat coupling time in seconds.
-The masses are precomputed once at construction and never updated
-during the run.
+where `τ` is the user-supplied thermostat coupling time in atomic time
+units (`hbar / E_h`). The masses are precomputed once at construction
+and never updated during the run.
 
 ### MKT Liouville splitting <!-- rq-312906a6 -->
 
@@ -101,7 +101,7 @@ Any other `n_yoshida` is rejected at config-load time.
 Each Yoshida sub-step of length `δt` consists of:
 
 1. **Outermost chain-momentum kick** (one direction):
-   `p_ξ_M ← p_ξ_M + (δt/4) · (p_ξ_{M−1}²/Q_{M−1} − k_B T)`
+   `p_ξ_M ← p_ξ_M + (δt/4) · (p_ξ_{M−1}²/Q_{M−1} − T)`
    *(omitted when `M = 1`)*.
 
 2. **Inner chain-momentum updates, M−1 → 1**:
@@ -109,9 +109,9 @@ Each Yoshida sub-step of length `δt` consists of:
      `s = exp(−(δt/8) · p_ξ_{j+1}/Q_{j+1})`  *(or `s = 1` when `j = M`)*
      `p_ξ_j ← p_ξ_j · s`
      if `j == 1`:
-       `p_ξ_1 ← p_ξ_1 + (δt/4) · (2K − g k_B T)`
+       `p_ξ_1 ← p_ξ_1 + (δt/4) · (2K − g T)`
      else:
-       `p_ξ_j ← p_ξ_j + (δt/4) · (p_ξ_{j−1}²/Q_{j−1} − k_B T)`
+       `p_ξ_j ← p_ξ_j + (δt/4) · (p_ξ_{j−1}²/Q_{j−1} − T)`
      `p_ξ_j ← p_ξ_j · s`
 
 3. **Particle velocity rescale**:
@@ -127,13 +127,13 @@ Each Yoshida sub-step of length `δt` consists of:
      `s = exp(−(δt/8) · p_ξ_{j+1}/Q_{j+1})`
      `p_ξ_j ← p_ξ_j · s`
      if `j == 1`:
-       `p_ξ_1 ← p_ξ_1 + (δt/4) · (2K − g k_B T)`
+       `p_ξ_1 ← p_ξ_1 + (δt/4) · (2K − g T)`
      else:
-       `p_ξ_j ← p_ξ_j + (δt/4) · (p_ξ_{j−1}²/Q_{j−1} − k_B T)`
+       `p_ξ_j ← p_ξ_j + (δt/4) · (p_ξ_{j−1}²/Q_{j−1} − T)`
      `p_ξ_j ← p_ξ_j · s`
 
 6. **Outermost chain-momentum kick** (closing direction):
-   `p_ξ_M ← p_ξ_M + (δt/4) · (p_ξ_{M−1}²/Q_{M−1} − k_B T)`
+   `p_ξ_M ← p_ξ_M + (δt/4) · (p_ξ_{M−1}²/Q_{M−1} − T)`
    *(omitted when `M = 1`)*.
 
 Steps 1–6 are the standard MKT symmetric sub-step (Tuckerman, *Statistical
@@ -167,10 +167,13 @@ n_resp = 1`, that is `2 + 6 = 8` thermostat-related launches per step.
 
 The matching builder deserialises a typed `NoseHooverChainParams` from the `[thermostat]` section's `SlotConfig::params` (see `framework.md`); the per-field reference below documents that parameter struct:
 
-- `temperature: f64` — bath temperature `T` in kelvin. Required. Finite
+- `temperature: f64` — bath temperature `T` as `k_B · T` in Hartrees
+  (the engine's internal temperature representation; `k_B = 1`).
+  Required. Finite
   and strictly positive. Independent of `simulation.temperature`, which
   governs the initial-velocity sampler.
-- `tau: f64` — thermostat coupling time in seconds. Required. Finite
+- `tau: f64` — thermostat coupling time in atomic time units
+  (`hbar / E_h`). Required. Finite
   and strictly positive. Typical values for liquid water are 50–100 fs
   (≈ 10× the natural OH stretching period). Smaller `τ` couples the
   thermostat more strongly to the physical system and dampens kinetic
@@ -196,7 +199,8 @@ Host-side state on `NoseHooverChainThermostat`:
 - `p_xi: Vec<f64>` — length `M`, chain momenta. Initialised to `0.0`
   at construction.
 - `q_mass: Vec<f64>` — length `M`, precomputed chain masses. Element
-  `0` is `g · k_B · T · τ²`; elements `1..M` are `k_B · T · τ²`.
+  `0` is `g · T · τ²`; elements `1..M` are `T · τ²` (with `k_B = 1`
+  and `T` carrying `k_B · T` in atomic units).
 - `g_dof: u32` — degrees of freedom thermostatted by the chain,
   computed at construction as
   `max(0, 3 · particle_count − n_constraints − 3)` from the
@@ -220,8 +224,8 @@ The extended Hamiltonian conserved by the NHC equations is
 ```text
 H' = K + U
      + Σ_{j=1..M} p_ξ_j² / (2 Q_j)
-     + g k_B T · ξ_1
-     + k_B T · Σ_{j=2..M} ξ_j
+     + g T · ξ_1
+     + T · Σ_{j=2..M} ξ_j
 ```
 
 where `K` is the instantaneous kinetic energy and `U` is the total
@@ -233,7 +237,7 @@ NHC implementation.
 `H'` is exposed as a per-log-row diagnostic column named
 `nhc_conserved` when NHC is the configured thermostat (see
 `io/log-output.md`). The thermostat computes its chain term
-(`Σ p_ξ²/(2Q) + g k_B T ξ_1 + k_B T Σ_{j>1} ξ_j`) from its host-side
+(`Σ p_ξ²/(2Q) + g T ξ_1 + T Σ_{j>1} ξ_j`) from its host-side
 state and combines it with the kinetic and potential energies supplied
 by the runner at log-write time.
 
@@ -244,7 +248,7 @@ by the runner at log-write time.
   allocated with `M` elements regardless (since `M` is a config-time
   constant); the `g_dof` is `0`.
 - `particle_count == 1`: `g_dof = 0`. The chain still propagates but
-  drives the kinetic energy toward zero (the target `g k_B T` is
+  drives the kinetic energy toward zero (the target `g T` is
   zero). This is the mathematically correct behaviour for a system
   with zero thermal degrees of freedom; users should not run NHC on a
   one-particle system but the thermostat does not refuse to construct.
@@ -426,7 +430,7 @@ Three free functions in `src/gpu/kernels.rs`, re-exported from
     device buffer the caller owns; reused across calls to avoid per-step
     allocation).
   - Downloads `scratch[0]` host-side via `dtoh_sync_copy_into` and
-    returns the value in joules.
+    returns the value in Hartrees.
   - Block size 256, single block, no shared-memory tuning beyond what
     the kernel declares. Tracked under
     `KernelStage::POTENTIAL_ENERGY_REDUCE` (distinct from
@@ -563,9 +567,10 @@ Feature: Nosé-Hoover chain (NHC) thermostat
     And the underlying NoseHooverChainThermostat has chain_length=3
     And xi equals [0.0, 0.0, 0.0]
     And p_xi equals [0.0, 0.0, 0.0]
-    And q_mass[0] equals g_dof * k_B * 300 * tau²
-    And q_mass[1] equals k_B * 300 * tau²
-    And q_mass[2] equals k_B * 300 * tau²
+    And q_mass[0] equals g_dof * T_atomic * tau² (the temperature parameter
+      supplied to the kind, no Boltzmann factor)
+    And q_mass[1] equals T_atomic * tau²
+    And q_mass[2] equals T_atomic * tau²
     And g_dof equals 9 (3 * 4 − 0 − 3)
 
   @rq-1aa67999
@@ -574,7 +579,7 @@ Feature: Nosé-Hoover chain (NHC) thermostat
     When registry.build_optional(Some(&kind), device, particle_count=24, n_constraints=24) is called
     Then it returns Ok(Some(thermostat))
     And g_dof equals 45 (3 * 24 − 24 − 3)
-    And q_mass[0] equals 45 * k_B * 300 * tau²
+    And q_mass[0] equals 45 * T_atomic * tau²
 
   @rq-12d7c3fe
   Scenario: Construct with chain_length = 1 reduces to vanilla Nosé-Hoover
@@ -726,13 +731,14 @@ Feature: Nosé-Hoover chain (NHC) thermostat
   Scenario: log_column_values returns the conserved Hamiltonian
     Given an NHC thermostat with chain_length=2, temperature=300, tau=1e-13, g_dof=9,
       xi=[0.1, 0.2], p_xi=[0.5, -0.3]
-    When state.log_column_values(ke=1.0e-20, pe=2.0e-20) is called
+    When state.log_column_values(ke=1.0e-3, pe=2.0e-3) is called (engine-
+      side Hartrees)
     Then it returns a Vec with one entry equal to
-      1.0e-20 + 2.0e-20
+      1.0e-3 + 2.0e-3
       + 0.5² / (2 * q_mass[0]) + (-0.3)² / (2 * q_mass[1])
-      + 9 * k_B * 300 * 0.1
-      + k_B * 300 * 0.2
-      within f64 round-off
+      + 9 * T_atomic * 0.1
+      + T_atomic * 0.2
+      (with `k_B = 1`; no Boltzmann factor) within f64 round-off
 
   @rq-a16c37bd
   Scenario: Log file header includes nhc_conserved when NHC is the thermostat
@@ -751,12 +757,12 @@ Feature: Nosé-Hoover chain (NHC) thermostat
   # --- Physical correctness ---
 
   @rq-6fb70c93
-  Scenario: At equilibrium, NHC drives the kinetic energy to (g/2) k_B T
+  Scenario: At equilibrium, NHC drives the kinetic energy to (g/2) T
     Given a composed runner of velocity-Verlet + NHC with N=512 LJ particles,
       temperature=300, tau=1e-13, dt=1e-15, initial v sampled at 300 K, n_steps=5000
     When the run completes
     Then the time-averaged kinetic energy over the last 1000 log rows is within 5%
-      of (g_dof / 2) * k_B * 300
+      of (g_dof / 2) * T_atomic (with `k_B = 1` in the engine's units)
 
   @rq-d938350a
   Scenario: NHC conserved Hamiltonian drifts only by O(dt²) per step

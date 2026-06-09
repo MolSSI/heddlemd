@@ -26,6 +26,7 @@ fn tmp_path(name: &str) -> PathBuf {
 
 fn minimal_sim_toml() -> String {
     r#"schema_version = 1
+units = "atomic"
 init = "sim.in.xyz"
 
 [simulation]

@@ -163,7 +163,11 @@ documented in `lj-pair-force.md`.
 ## Parameters <!-- rq-f9a9c569 -->
 
 The slot owns a single `CoulombParameters` record (host-side) carrying
-the cutoff and the inner switching radius, both in metres:
+the cutoff and the inner switching radius, both in Bohr (`a_0`). The
+kernel evaluates the bare Coulomb pair force `F = q_i · q_j · r̂ / r²`
+with the configured switching window applied; the prefactor
+`1 / (4πε₀) = 1` exactly in the engine's atomic units and is therefore
+absent from every expression.
 
 - `cutoff: f32` — finite, strictly positive.
 - `r_switch: f32` — finite, strictly positive, and `r_switch <= cutoff`.

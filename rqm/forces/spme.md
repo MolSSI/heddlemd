@@ -53,10 +53,10 @@ The `[spme]` table parses into a `SpmeConfig` carried as
 `Config::spme: Option<SpmeConfig>` (see `io/config-schema.md`). Required
 fields:
 
-- `alpha: f64` — Ewald splitting parameter in inverse metres. Finite,
+- `alpha: f64` — Ewald splitting parameter in inverse Bohr (`1/a_0`).
+  Finite, strictly positive.
+- `r_cut_real: f64` — real-space cutoff in Bohr (`a_0`). Finite,
   strictly positive.
-- `r_cut_real: f64` — real-space cutoff in metres. Finite, strictly
-  positive.
 - `grid: [u32; 3]` — FFT grid dimensions, in the lattice-direction order
   `[n_a, n_b, n_c]`. Each component must satisfy
   `n_d >= 2 · spline_order`.

@@ -9,7 +9,6 @@ use crate::gpu::{
     rescale_positions,
 };
 use crate::io::config::ConfigError;
-use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
@@ -136,7 +135,8 @@ impl Barostat for CRescaleBarostat {
         let ctr_hi = (self.draw_counter >> 32) as u32;
         let r = philox_normal(seed_lo, seed_hi, ctr_lo, ctr_hi, 0, 0);
 
-        let kt = BOLTZMANN_J_PER_K * self.temperature;
+        // k_B = 1 in atomic units; temperature is already k_B · T.
+        let kt = self.temperature;
         let dt_f64 = dt as f64;
         let deterministic = -self.compressibility * (dt_f64 / self.tau)
             * (self.pressure - pressure);
@@ -167,8 +167,15 @@ impl Barostat for CRescaleBarostat {
     }
 
     // rq-11f5dfd1
-    fn log_column_names(&self) -> &'static [&'static str] {
-        &["pressure", "box_volume", "c_rescale_conserved"]
+    fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
+        use crate::units::Dimension;
+        &[
+            ("pressure", Dimension::Pressure),
+            // box_volume has no Dimension::Volume variant; report in Bohr^3 and
+            // pass through unchanged (dimensionless w.r.t. the unit converter).
+            ("box_volume", Dimension::Dimensionless),
+            ("c_rescale_conserved", Dimension::Energy),
+        ]
     }
 
     // rq-11f5dfd1

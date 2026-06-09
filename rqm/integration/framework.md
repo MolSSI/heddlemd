@@ -343,18 +343,27 @@ successfully.
           timings: &mut Timings,
       ) -> Result<(), IntegratorError>;
 
-      /// Diagnostic column names this integrator wants the runner to
-      /// include in the CSV log (`io/log-output.md`). Returned slice
-      /// has `'static` lifetime so the runner can pass it to
-      /// `LogWriter::open` without copying. Default: empty.
-      fn log_column_names(&self) -> &'static [&'static str] { &[] }
+      /// Diagnostic column names and physical dimensions this
+      /// integrator wants the runner to include in the CSV log
+      /// (`io/log-output.md`). Each entry is a `(name, Dimension)`
+      /// pair. The writer applies the output-direction conversion to
+      /// the f64 value of each extra column on every row, using the
+      /// declared dimension. Columns that carry pure ratios or other
+      /// already-normalized values declare `Dimension::Dimensionless`
+      /// and pass through unchanged. Returned slice has `'static`
+      /// lifetime so the runner can pass it to `LogWriter::open`
+      /// without copying. Default: empty.
+      fn log_column_names(&self) -> &'static [(&'static str, Dimension)] { &[] }
 
       /// Current values of those columns. The runner supplies the
       /// total kinetic and potential energies it has just computed
-      /// for the log row (in joules); the integrator combines them
-      /// with its own state to produce the requested values. The
-      /// returned `Vec` must have the same length as
-      /// `log_column_names()`. Default: empty.
+      /// for the log row (in Hartrees, the engine's atomic energy
+      /// unit; output-direction conversion happens later in
+      /// `LogWriter::write_row`). The integrator combines them with
+      /// its own state to produce the requested values, themselves
+      /// in atomic units of the dimension declared by
+      /// `log_column_names()`. The returned `Vec` must have the same
+      /// length as `log_column_names()`. Default: empty.
       fn log_column_values(
           &self,
           kinetic_energy: f64,

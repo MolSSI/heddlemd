@@ -12,7 +12,6 @@ use crate::gpu::{
 };
 use crate::kernels;
 use crate::io::config::ConfigError;
-use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::timings::{KernelStage, Timings};
 
 use super::{Thermostat, ThermostatBuilder, ThermostatError};
@@ -74,7 +73,8 @@ impl AndersenThermostat {
         collision_rate: f64,
         seed: u64,
     ) -> Result<Self, GpuError> {
-        let kt = BOLTZMANN_J_PER_K * temperature;
+        // k_B = 1 in atomic units; temperature is already k_B · T.
+        let kt = temperature;
         let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
         Ok(AndersenThermostat {
             temperature,
@@ -123,8 +123,9 @@ impl Thermostat for AndersenThermostat {
     }
 
     // rq-1163481e
-    fn log_column_names(&self) -> &'static [&'static str] {
-        &["andersen_conserved"]
+    fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
+        // andersen_conserved is a conserved Hamiltonian-like scalar in Hartrees.
+        &[("andersen_conserved", crate::units::Dimension::Energy)]
     }
 
     // rq-6d2daea0

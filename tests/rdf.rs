@@ -31,6 +31,7 @@ fn tmp_path(name: &str) -> PathBuf {
 fn sim_toml_with_types(types: &[&str], box_edge_m: f64) -> String {
     let mut s = String::from(
         r#"schema_version = 1
+units = "atomic"
 init = "sim.in.xyz"
 
 [simulation]

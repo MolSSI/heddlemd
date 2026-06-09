@@ -19,10 +19,25 @@ use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 use dynamics::timings::{KernelStage, Timings};
 
+// k_B = 1 inside the engine (atomic units). The tests below operate
+// in atomic units throughout; this SI value of the Boltzmann constant
+// is retained only as a reference for converting human-readable SI
+// inputs to atomic units.
+#[allow(dead_code)]
 const KB: f64 = 1.380649e-23;
+// SI-per-atomic conversion factors. Divide an SI value by the
+// matching factor to express it in atomic units (e.g. `1e-9 / LEN_F`
+// converts 1 nm to ~18.9 Bohr).
+const LEN_F: f64 = 5.29177210903e-11;
+const MASS_F: f64 = 9.1093837015e-31;
+const TIME_F: f64 = 2.4188843265857195e-17;
+const PRESSURE_F: f64 = 29421015696522.1;
+const TEMP_F: f64 = 315775.0248040668;
 
 fn box_small() -> SimulationBox {
-    SimulationBox::new(1.0e-9, 1.0e-9, 1.0e-9, 0.0, 0.0, 0.0).unwrap()
+    // 1 nm cubic box, expressed in atomic units (~18.9 Bohr per side).
+    let l = (1.0e-9 / LEN_F) as f32;
+    SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
@@ -53,6 +68,12 @@ fn c_rescale_kind(
     compressibility: f64,
     seed: u64,
 ) -> SlotConfig {
+    // Accept SI inputs (Pa, K, s, 1/Pa) for human readability and
+    // convert to atomic units (E_h/a_0^3, E_h/k_B, hbar/E_h, a_0^3/E_h).
+    let pressure = pressure / PRESSURE_F;
+    let temperature = temperature / TEMP_F;
+    let tau = tau / TIME_F;
+    let compressibility = compressibility * PRESSURE_F;
     SlotConfig::from_params_str(
         "c-rescale",
         &format!(
@@ -108,20 +129,26 @@ fn make_state(
 fn system_with_pressure(
     target_pressure_pa: f64,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+    // All quantities are expressed in atomic units, since the engine
+    // operates in atomic units throughout. The SI target pressure
+    // input is converted to atomic on the way in.
     let n = 8;
-    let mass: f32 = 1.66e-27;
-    let v_mag: f32 = 500.0;
+    let mass: f32 = (1.66e-27 / MASS_F) as f32;
+    let v_mag: f32 = (500.0 / 2187691.2636411153_f64) as f32;
     let v_squared_sum = (n as f64) * (v_mag as f64).powi(2);
     let k = 0.5 * (mass as f64) * v_squared_sum;
-    let v = (1.0e-9_f64).powi(3);
-    let w_required = 3.0 * v * target_pressure_pa - 2.0 * k;
+    let box_edge_au = 1.0e-9 / LEN_F; // 1 nm cubic box, in Bohr
+    let v = box_edge_au.powi(3);
+    let target_pressure_au = target_pressure_pa / PRESSURE_F;
+    let w_required = 3.0 * v * target_pressure_au - 2.0 * k;
     let per_particle_virial = (w_required / n as f64) as f32;
     let mut vx: Vec<f32> = Vec::with_capacity(n);
     for _ in 0..n / 2 {
         vx.push(v_mag);
         vx.push(-v_mag);
     }
-    let px: Vec<f32> = (0..n).map(|i| 1.0e-10 * (i as f32 - 3.5)).collect();
+    let px: Vec<f32> =
+        (0..n).map(|i| (1.0e-10 / LEN_F) as f32 * (i as f32 - 3.5)).collect();
     (px, vx, vec![mass; n], vec![per_particle_virial; n])
 }
 
@@ -135,10 +162,12 @@ fn registry_builds_c_rescale() {
     let baro = unbox_c_rescale(build_c_rescale(&gpu, 4, &kind));
     assert_eq!(baro.draw_counter, 0);
     assert_eq!(baro.cumulative_barostat_injection, 0.0);
-    assert_eq!(baro.pressure, 1.0e5);
-    assert_eq!(baro.temperature, 85.0);
-    assert_eq!(baro.tau, 1.0e-12);
-    assert_eq!(baro.compressibility, 4.5e-10);
+    // Stored values are in atomic units after `c_rescale_kind` converts
+    // its SI inputs.
+    assert_eq!(baro.pressure, 1.0e5 / PRESSURE_F);
+    assert_eq!(baro.temperature, 85.0 / TEMP_F);
+    assert_eq!(baro.tau, 1.0e-12 / TIME_F);
+    assert_eq!(baro.compressibility, 4.5e-10 * PRESSURE_F);
     assert_eq!(baro.seed, 42);
 }
 
@@ -181,7 +210,7 @@ fn apply_launches_expected_kernel_set() {
     let mut sim_box = box_small();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1));
-    baro.apply(&mut buffers, &mut sim_box, 1.0e-15, &mut timings)
+    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count_for = |stage: KernelStage| -> u64 {
@@ -217,7 +246,7 @@ fn apply_on_empty_state_is_noop() {
     let g_before = sim_box.generation();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, 0, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1));
-    baro.apply(&mut buffers, &mut sim_box, 1.0e-15, &mut timings)
+    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
         .unwrap();
     assert_eq!(sim_box.generation(), g_before);
     // Underlying state's draw_counter should be unchanged when n == 0.
@@ -241,10 +270,10 @@ fn draw_counter_starts_at_zero_and_increments_per_apply() {
     let mut baro =
         unbox_c_rescale(build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1)));
     assert_eq!(baro.draw_counter, 0);
-    baro.apply(&mut buffers, &mut sim_box, 1.0e-15, &mut timings)
+    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
         .unwrap();
     assert_eq!(baro.draw_counter, 1);
-    baro.apply(&mut buffers, &mut sim_box, 1.0e-15, &mut timings)
+    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
         .unwrap();
     assert_eq!(baro.draw_counter, 2);
 }
@@ -265,10 +294,10 @@ fn two_barostats_at_same_seed_and_counter_produce_identical_outputs() {
     let mut baro_a = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 7));
     let mut baro_b = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 7));
     baro_a
-        .apply(&mut buffers_a, &mut sim_box_a, 1.0e-15, &mut timings_a)
+        .apply(&mut buffers_a, &mut sim_box_a, (1.0e-15 / TIME_F as f32), &mut timings_a)
         .unwrap();
     baro_b
-        .apply(&mut buffers_b, &mut sim_box_b, 1.0e-15, &mut timings_b)
+        .apply(&mut buffers_b, &mut sim_box_b, (1.0e-15 / TIME_F as f32), &mut timings_b)
         .unwrap();
     let px_a = gpu.device.dtoh_sync_copy(&buffers_a.positions_x).unwrap();
     let px_b = gpu.device.dtoh_sync_copy(&buffers_b.positions_x).unwrap();
@@ -293,7 +322,8 @@ fn mu_cubed_matches_analytical_formula_with_known_philox_draw() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_small();
     let v_pre = sim_box.volume() as f64;
-    let dt = 1.0e-13_f32;
+    let dt_si = 1.0e-13_f64;
+    let dt = (dt_si / TIME_F) as f32;
     let tau = 1.0e-12_f64;
     let beta = 4.5e-10_f64;
     let temperature = 85.0_f64;
@@ -305,11 +335,20 @@ fn mu_cubed_matches_analytical_formula_with_known_philox_draw() {
     let v_post = sim_box.volume() as f64;
     let mu_cubed_actual = v_post / v_pre;
 
-    // Reproduce the host computation.
+    // Reproduce the host computation in the engine's atomic units.
+    // `c_rescale_kind` already converts the SI inputs above; the
+    // expected formula must therefore use the matching atomic-unit
+    // values, and the Boltzmann constant collapses to 1 (kt = T).
     let r = philox_normal(seed as u32, (seed >> 32) as u32, 1, 0, 0, 0);
-    let kt = KB * temperature;
-    let deterministic = -beta * ((dt as f64) / tau) * (p_target - p_target / 2.0);
-    let noise_amplitude = (2.0 * beta * kt * (dt as f64) / (tau * v_pre)).sqrt();
+    let temperature_au = temperature / TEMP_F;
+    let p_target_au = p_target / PRESSURE_F;
+    let p_current_au = (p_target / 2.0) / PRESSURE_F;
+    let tau_au = tau / TIME_F;
+    let beta_au = beta * PRESSURE_F;
+    let dt_au = dt as f64;
+    let kt_au = temperature_au;
+    let deterministic = -beta_au * (dt_au / tau_au) * (p_target_au - p_current_au);
+    let noise_amplitude = (2.0 * beta_au * kt_au * dt_au / (tau_au * v_pre)).sqrt();
     let expected_mu_cubed = 1.0 + deterministic + noise_amplitude * r;
     let rel = (mu_cubed_actual - expected_mu_cubed).abs() / expected_mu_cubed.abs();
     assert!(
@@ -334,7 +373,8 @@ fn temperature_zero_limit_matches_berendsen_barostat() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_small();
     let v_pre = sim_box.volume() as f64;
-    let dt = 1.0e-13_f32;
+    let dt_si = 1.0e-13_f64;
+    let dt = (dt_si / TIME_F) as f32;
     let tau = 1.0e-12_f64;
     let beta = 4.5e-10_f64;
     let mut timings = Timings::new(&gpu).unwrap();
@@ -343,10 +383,16 @@ fn temperature_zero_limit_matches_berendsen_barostat() {
         .unwrap();
     let v_post = sim_box.volume() as f64;
     let mu_cubed_actual = v_post / v_pre;
-    // Expected Berendsen μ³ = 1 − β·(dt/τ)·(P_target − P)
-    let expected_mu_cubed = 1.0 - beta * ((dt as f64) / tau) * (p_target - p_target / 2.0);
+    // Expected Berendsen μ³ = 1 − β·(dt/τ)·(P_target − P) in atomic units
+    let p_target_au = p_target / PRESSURE_F;
+    let p_current_au = (p_target / 2.0) / PRESSURE_F;
+    let tau_au = tau / TIME_F;
+    let beta_au = beta * PRESSURE_F;
+    let dt_au = dt as f64;
+    let expected_mu_cubed =
+        1.0 - beta_au * (dt_au / tau_au) * (p_target_au - p_current_au);
     let rel = (mu_cubed_actual - expected_mu_cubed).abs() / expected_mu_cubed.abs();
-    assert!(rel < 1.0e-6);
+    assert!(rel < 1.0e-6, "actual {mu_cubed_actual}, expected {expected_mu_cubed}, rel {rel}");
 }
 
 // --- Fractional-coord and shape invariants ---
@@ -364,7 +410,7 @@ fn fractional_coordinates_invariant_under_apply() {
     let lx_pre = sim_box.lx();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(p_target, 85.0, 1.0e-12, 4.5e-10, 1));
-    baro.apply(&mut buffers, &mut sim_box, 1.0e-13, &mut timings)
+    baro.apply(&mut buffers, &mut sim_box, (1.0e-13 / TIME_F as f32), &mut timings)
         .unwrap();
     let lx_post = sim_box.lx();
     let px_post = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
@@ -393,7 +439,7 @@ fn triclinic_shape_preserved_under_apply() {
     let r_yz_pre = (yz_pre / lx_pre) as f64;
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(p_target, 85.0, 1.0e-12, 4.5e-10, 1));
-    baro.apply(&mut buffers, &mut sim_box, 1.0e-13, &mut timings)
+    baro.apply(&mut buffers, &mut sim_box, (1.0e-13 / TIME_F as f32), &mut timings)
         .unwrap();
     let [lx_post, _, _, xy_post, xz_post, yz_post] = sim_box.lattice();
     let r_xy_post = (xy_post / lx_post) as f64;
@@ -418,7 +464,7 @@ fn generation_advances_after_apply() {
     let g_pre = sim_box.generation();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1));
-    baro.apply(&mut buffers, &mut sim_box, 1.0e-15, &mut timings)
+    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
         .unwrap();
     assert_eq!(sim_box.generation(), g_pre + 1);
 }
@@ -430,29 +476,34 @@ fn generation_advances_after_apply() {
 fn log_column_names_returns_pressure_volume_and_conserved() {
     let gpu = init_device().unwrap();
     let baro = build_c_rescale(&gpu, 4, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1));
-    assert_eq!(
-        baro.log_column_names(),
-        &["pressure", "box_volume", "c_rescale_conserved"]
-    );
+    let names: Vec<&str> = baro.log_column_names().iter().map(|(n, _)| *n).collect();
+    assert_eq!(names, vec!["pressure", "box_volume", "c_rescale_conserved"]);
 }
 
 // rq-fb78338b
 #[test]
 fn log_column_values_combines_pressure_volume_and_cumulative_injection() {
     let gpu = init_device().unwrap();
+    // Build the barostat in atomic units (c_rescale_kind converts SI
+    // inputs); after construction, override the diagnostic-only
+    // fields to known atomic-unit values so the formula composition
+    // can be verified in isolation.
     let mut baro =
         unbox_c_rescale(build_c_rescale(&gpu, 4, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1)));
-    baro.most_recent_pressure = 1.01e5;
-    baro.most_recent_volume = 1.0e-27;
-    baro.cumulative_barostat_injection = 3.0e-22;
-    let ke = 1.5e-20_f64;
-    let pe = 2.0e-20_f64;
+    let pressure_au = baro.pressure; // = 1.0e5 / PRESSURE_F (atomic)
+    let volume_au = 1.0e-27 / (LEN_F * LEN_F * LEN_F);
+    baro.most_recent_pressure = 1.01e5 / PRESSURE_F;
+    baro.most_recent_volume = volume_au;
+    baro.cumulative_barostat_injection = 3.0e-22 / (4.359744722207101e-18);
+    let ke = 1.5e-20 / 4.359744722207101e-18;
+    let pe = 2.0e-20 / 4.359744722207101e-18;
     let extras = baro.log_column_values(ke, pe);
     assert_eq!(extras.len(), 3);
-    assert_eq!(extras[0], 1.01e5);
-    assert_eq!(extras[1], 1.0e-27);
-    let expected_conserved: f64 = ke + pe + 1.0e5 * 1.0e-27 - 3.0e-22;
-    assert!((extras[2] - expected_conserved).abs() < 1.0e-30);
+    assert_eq!(extras[0], 1.01e5 / PRESSURE_F);
+    assert_eq!(extras[1], volume_au);
+    let expected_conserved: f64 = ke + pe + pressure_au * volume_au
+        - baro.cumulative_barostat_injection;
+    assert!((extras[2] - expected_conserved).abs() < 1.0e-20 * expected_conserved.abs().max(1.0));
 }
 
 // --- Composition with the orthogonal framework ---
@@ -503,12 +554,12 @@ fn composes_with_velocity_verlet_and_csvr_thermostat() {
         // Order: thermostat.apply_pre (trait default no-op for CSVR)
         // → integrator.step → thermostat.apply_post → barostat.apply
         integ
-            .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, None, (1.0e-15 / TIME_F as f32), &mut timings)
             .unwrap();
         therm
-            .apply_post(&mut buffers, 1.0e-15, &mut timings)
+            .apply_post(&mut buffers, (1.0e-15 / TIME_F as f32), &mut timings)
             .unwrap();
-        baro.apply(&mut buffers, &mut sim_box, 1.0e-15, &mut timings)
+        baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
             .unwrap();
     }
     let v_final = sim_box.volume();
@@ -544,7 +595,7 @@ fn two_runs_with_same_seed_are_byte_identical() {
         let mut timings = Timings::new(gpu).unwrap();
         let mut baro = build_c_rescale(gpu, n, &c_rescale_kind(1.0e6, 85.0, 1.0e-12, 4.5e-10, seed));
         for _ in 0..5 {
-            baro.apply(&mut buffers, &mut sim_box, 1.0e-15, &mut timings)
+            baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
                 .unwrap();
         }
         let positions_x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
@@ -586,7 +637,7 @@ fn different_seeds_produce_different_trajectories() {
         let mut timings = Timings::new(gpu).unwrap();
         let mut baro = build_c_rescale(gpu, n, &c_rescale_kind(1.0e6, 85.0, 1.0e-12, 4.5e-10, seed));
         for _ in 0..5 {
-            baro.apply(&mut buffers, &mut sim_box, 1.0e-15, &mut timings)
+            baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
                 .unwrap();
         }
         gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap()

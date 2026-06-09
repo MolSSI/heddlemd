@@ -23,7 +23,7 @@ use crate::io::{
     ConfigError, InitState, InitStateError, InitVelocities, LogWriter, LogWriterError,
     TrajectoryWriter, TrajectoryWriterError, load_config_raw, load_init_state,
 };
-use crate::io::log_output::{BOLTZMANN_J_PER_K, compute_kinetic_energy, compute_temperature};
+use crate::io::log_output::{compute_kinetic_energy, compute_temperature};
 use crate::state::{ParticleState, ParticleStateError};
 use crate::timings::{
     HostStage, KernelStage, Timings, TimingsError, TimingsWriterError, write_timings_file,
@@ -1025,8 +1025,9 @@ fn run_simulation_with_phase(
                 .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?
                 as f64;
             let n_thermal_dof_f64 = n_thermal_dof as f64;
+            // k_B = 1 in atomic units; simulation.temperature is k_B · T in Hartrees.
             let target_ke =
-                0.5 * n_thermal_dof_f64 * BOLTZMANN_J_PER_K * config.simulation.temperature;
+                0.5 * n_thermal_dof_f64 * config.simulation.temperature;
             if ke_after > 0.0 && target_ke > 0.0 {
                 let factor = (target_ke / ke_after).sqrt() as f32;
                 crate::gpu::rescale_velocities(&mut buffers, factor)
@@ -1135,6 +1136,7 @@ fn run_simulation_with_phase(
             Some(
                 TrajectoryWriter::open(
                     &phase.output.trajectory_path,
+                    config.units,
                     phase.output.include_velocities,
                     phase.output.include_images,
                     type_name_strings.clone(),
@@ -1144,7 +1146,7 @@ fn run_simulation_with_phase(
         } else {
             None
         };
-        let mut log_extra_columns: Vec<&'static str> =
+        let mut log_extra_columns: Vec<(&'static str, crate::units::Dimension)> =
             integrator.log_column_names().to_vec();
         if let Some(t) = thermostat.as_ref() {
             log_extra_columns.extend_from_slice(t.log_column_names());
@@ -1154,7 +1156,7 @@ fn run_simulation_with_phase(
         }
         let mut log_writer: Option<LogWriter> = if phase.output.log_every > 0 {
             Some(
-                LogWriter::open(&phase.output.log_path, &log_extra_columns)
+                LogWriter::open(&phase.output.log_path, config.units, &log_extra_columns)
                     .map_err(|e| (RunnerError::Log(e), ExitPhase::Setup))?,
             )
         } else {
@@ -1453,7 +1455,7 @@ fn run_minimization_phase(
 
     let mut minlog_writer: Option<MinlogWriter> = if min.output.minlog_every > 0 {
         Some(
-            MinlogWriter::open(&min.output.minlog_path)
+            MinlogWriter::open(&min.output.minlog_path, config.units)
                 .map_err(|e| (RunnerError::Minlog(e), ExitPhase::Setup))?,
         )
     } else {
@@ -1463,6 +1465,7 @@ fn run_minimization_phase(
         Some(
             TrajectoryWriter::open(
                 &min.output.trajectory_path,
+                config.units,
                 false, // never include velocities for minimization frames
                 min.output.include_images,
                 type_name_strings.to_vec(),
@@ -1802,7 +1805,8 @@ fn generate_velocities(
     }
     let mut rng = ChaCha8Rng::seed_from_u64(seed);
     for i in 0..n {
-        let sigma = (BOLTZMANN_J_PER_K * temperature / masses[i]).sqrt();
+        // k_B = 1 in atomic units; temperature is k_B · T in Hartrees.
+        let sigma = (temperature / masses[i]).sqrt();
         for axis in 0..3 {
             let u1 = 1.0 - rng.r#gen::<f64>(); // (0, 1]
             let u2 = rng.r#gen::<f64>();        // [0, 1)
@@ -1863,8 +1867,9 @@ fn generate_velocities(
             })
             .sum();
         if ke > 0.0 {
+            // k_B = 1 in atomic units; temperature is k_B · T in Hartrees.
             let target_ke =
-                0.5 * (n_thermal_dof as f64) * BOLTZMANN_J_PER_K * temperature;
+                0.5 * (n_thermal_dof as f64) * temperature;
             let scale = (target_ke / ke).sqrt();
             for i in 0..n {
                 vx[i] = ((vx[i] as f64) * scale) as f32;

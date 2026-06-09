@@ -52,35 +52,62 @@ per row (see `integration/nose-hoover-chain.md`).
 
 ### Field semantics <!-- rq-f4750851 -->
 
+Each `time`, `kinetic_energy`, `temperature`, and integrator-extra
+column is formatted in the unit system the writer was opened with (see
+`UnitSystem`-aware `LogWriter::open` in *Feature API* below). The
+engine itself stores and computes in Hartree atomic units; the writer
+applies the output-direction conversion described in `unit-system.md`
+to each f64 column as it formats the row. In atomic mode the
+conversion reduces to the identity and the engine's internal scalars
+are emitted directly; in SI mode each column is multiplied by the SI
+value of one atomic unit of the named dimension.
+
 - `step: u64` — integration-step index **within the owning phase**
   at which the diagnostic was captured. The phase's initial state has
   `step=0`; subsequent rows carry `log_every`, `2*log_every`, ...,
   up to the last multiple of `log_every` that is `<= n_steps` for
   that phase. Step numbering does **not** accumulate across phases —
-  each per-phase log file starts again at `step=0`.
-- `time: f64` — phase-local simulation time in seconds, computed as
-  `step * dt_phase` using the owning phase's `dt`.
-- `kinetic_energy: f64` — total kinetic energy in joules, computed as
-  `0.5 * sum_i(m_i * (v_xi^2 + v_yi^2 + v_zi^2))`. The sum runs over all
-  particles in source-array order (i.e. by particle ID). Masses are taken
-  from the device-side `masses` buffer (downloaded once into host memory
-  by the runner; subsequent log writes reuse the cached host copy).
-- `temperature: f64` — instantaneous thermodynamic temperature in
-  kelvin, computed as `T = 2 * kinetic_energy / (N_thermal_dof * k_B)`
-  using the CODATA-2019 value `k_B = 1.380649e-23 J/K`, where
-  `N_thermal_dof = max(0, 3 * N - n_constraints - 3)` is the
-  centre-of-mass-removed thermal degrees of freedom of the system. The
-  `n_constraints` term is the total number of holonomic constraints
-  carried by the run's `ConstraintList` (zero when the topology has no
-  `[constraints]` section; `3 * n_settle_groups` for a SETTLE'd water
-  system). The `-3` term removes the three centre-of-mass translational
-  degrees of freedom, which are frozen by the velocity-generation
-  procedure (see *Velocity generation* in `simulation-runner.md`).
-  When `N_thermal_dof == 0` (e.g. `N <= 1`, or so heavily constrained
-  that no thermal DOFs remain) `temperature` is written as `0.0e0`
-  rather than NaN. Under this convention an equilibrated thermostat at
+  each per-phase log file starts again at `step=0`. Dimensionless;
+  unaffected by the unit selector.
+- `time: f64` — phase-local simulation time, computed inside the
+  engine as `step * dt_phase` in atomic time units using the owning
+  phase's atomic-unit `dt`. The writer formats the value in seconds
+  (SI mode) or atomic time units (atomic mode).
+- `kinetic_energy: f64` — total kinetic energy, computed inside the
+  engine as `0.5 * sum_i(m_i * (v_xi^2 + v_yi^2 + v_zi^2))` over all
+  particles in source-array order (i.e. by particle ID), with masses
+  in electron masses and velocities in atomic-unit velocity (so the
+  result is in Hartrees). Masses are taken from the device-side
+  `masses` buffer (downloaded once into host memory by the runner;
+  subsequent log writes reuse the cached host copy). The writer
+  formats the value in joules (SI mode) or Hartrees (atomic mode).
+- `temperature: f64` — instantaneous thermodynamic temperature,
+  computed inside the engine as `T = 2 * kinetic_energy /
+  N_thermal_dof` with all quantities in Hartree atomic units (so the
+  Boltzmann constant `k_B = 1` and the expression carries no explicit
+  prefactor; the result is `k_B · T` in Hartrees). `N_thermal_dof =
+  max(0, 3 * N - n_constraints - 3)` is the centre-of-mass-removed
+  thermal degrees of freedom of the system. The `n_constraints` term
+  is the total number of holonomic constraints carried by the run's
+  `ConstraintList` (zero when the topology has no `[constraints]`
+  section; `3 * n_settle_groups` for a SETTLE'd water system). The
+  `-3` term removes the three centre-of-mass translational degrees of
+  freedom, which are frozen by the velocity-generation procedure (see
+  *Velocity generation* in `simulation-runner.md`). When
+  `N_thermal_dof == 0` (e.g. `N <= 1`, or so heavily constrained that
+  no thermal DOFs remain) the engine's internal `temperature` is
+  `0.0_f64` and the writer emits `0.0e0` rather than NaN. The writer
+  formats the value in kelvin (SI mode; the engine value is multiplied
+  by the `(E_h / k_B) -> kelvin` factor) or in Hartrees (atomic mode;
+  emitted as-is). Under this convention an equilibrated thermostat at
   setpoint `T_set` produces a long-run mean of `temperature` equal to
-  `T_set` to within sampling fluctuations.
+  `T_set` in the user's chosen unit system to within sampling
+  fluctuations.
+
+Extra columns supplied by the integrator (see *Extra columns* above)
+carry a `Dimension` declared by the integrator alongside the column
+name; the writer applies the corresponding output conversion. Columns
+declared dimensionless pass through unchanged.
 
 ### Number formatting <!-- rq-4a6969aa -->
 
@@ -129,23 +156,40 @@ When a phase declares `n_steps == 0`, its log file (if enabled by
 
 ### Functions and methods <!-- rq-8b4243e0 -->
 
-- `LogWriter::open(path: &Path, extra_columns: &[&str]) -> Result<LogWriter, LogWriterError>` <!-- rq-e0ef1221 -->
+- `LogWriter::open(path: &Path, units: UnitSystem, extra_columns: &[(&str, Dimension)]) -> Result<LogWriter, LogWriterError>` <!-- rq-e0ef1221 -->
   - Creates the file at `path`. If the file already exists, returns
     `OutputExists { path }`. The check and create are performed atomically
     via `OpenOptions::new().write(true).create_new(true)`.
+  - Stores `units` for use at every subsequent `write_row` call. The
+    writer applies the corresponding output-direction conversion to
+    each f64 column (see `unit-system.md`); the conversion reduces to
+    the identity when `units == UnitSystem::Atomic`.
   - Writes the header line
-    `step,time,kinetic_energy,temperature[,<extra_columns[0]>,<extra_columns[1]>,…]\n`
+    `step,time,kinetic_energy,temperature[,<extra_columns[0].0>,<extra_columns[1].0>,…]\n`
     immediately. The fixed four columns always appear first; extra
     columns are appended in the order supplied. When `extra_columns`
-    is empty the header is exactly the four fixed columns.
-  - Stores the count of extra columns internally so subsequent
-    `write_row` calls can debug-assert the row width.
+    is empty the header is exactly the four fixed columns. The
+    header carries no unit annotation; the row values themselves
+    follow the `units` selector.
+  - Stores the (`name`, `Dimension`) pairs for the extra columns so
+    each subsequent `write_row` call can apply the matching
+    output-direction conversion. Extra-column dimensions come from the
+    integrator's `Integrator::log_column_names` companion method
+    documented in `integration/framework.md`.
   - Returns the writer on success.
 
 - `LogWriter::write_row(&mut self, step: u64, time: f64, kinetic_energy: f64, temperature: f64, extras: &[f64]) -> Result<(), LogWriterError>` <!-- rq-e409ce75 -->
   - Writes one CSV row in the format described above, terminated by `\n`.
     The four fixed fields are followed by `extras.len()` extra values,
     each formatted with `{:.9e}` (see *Number formatting*).
+  - The four fixed-column f64 inputs are engine-side atomic-unit values
+    (`time` in atomic time, `kinetic_energy` in Hartree, `temperature`
+    in Hartree). The writer converts each to the unit system supplied
+    at `open` time using the dimension assigned to that column
+    (`Dimension::Time` for `time`, `Dimension::Energy` for
+    `kinetic_energy`, `Dimension::Temperature` for `temperature`).
+    Each extra column is converted using the `Dimension` registered
+    for it at `open` time.
   - Debug-asserts that `extras.len()` equals the count of extra columns
     declared at `open` time.
   - Does not flush; the caller flushes via `flush` or relies on `Drop`.
@@ -157,6 +201,9 @@ When a phase declares `n_steps == 0`, its log file (if enabled by
 - `compute_kinetic_energy(masses: &[f32], vx: &[f32], vy: &[f32], vz: &[f32]) -> f64` <!-- rq-6e51f09c -->
   - Free helper. Returns
     `0.5 * sum_i(masses[i] as f64 * (vx[i] as f64 * vx[i] as f64 + vy[i] as f64 * vy[i] as f64 + vz[i] as f64 * vz[i] as f64))`.
+  - Inputs are engine-side atomic-unit values: `masses` in electron
+    masses, velocities in `a_0 / (hbar / E_h)`. The result is in
+    Hartrees.
   - The summation order is fixed left-to-right by particle index; this
     is what makes the log bit-wise reproducible across runs on the same
     GPU even though IEEE addition is not associative.
@@ -164,8 +211,15 @@ When a phase declares `n_steps == 0`, its log file (if enabled by
   - Returns `0.0_f64` when the slices are empty.
 
 - `compute_temperature(kinetic_energy: f64, n_thermal_dof: u32) -> f64` <!-- rq-46a39249 -->
-  - Free helper. Returns `0.0_f64` when `n_thermal_dof == 0`. Otherwise
-    returns `2.0 * kinetic_energy / (n_thermal_dof as f64 * 1.380649e-23_f64)`.
+  - Free helper operating entirely in atomic units. Returns `0.0_f64`
+    when `n_thermal_dof == 0`. Otherwise returns
+    `2.0 * kinetic_energy / n_thermal_dof as f64`, with no Boltzmann
+    constant in the expression (`k_B = 1` exactly in the engine's
+    Hartree atomic units).
+  - The `kinetic_energy` input is in Hartrees and the returned value
+    is in Hartrees (`k_B · T` in atomic units). The CSV log's
+    output-direction conversion to kelvin (SI mode) happens later in
+    `LogWriter::write_row`.
   - `n_thermal_dof` is supplied by the runner as
     `max(0, 3 * particle_count - n_constraints - 3)`; see the
     `temperature` field description above for the formula and its
@@ -198,6 +252,12 @@ Feature: CSV diagnostic log
 
   Background:
     Given a temporary directory tmp
+    And LogWriter::open is called with units = UnitSystem::Atomic unless a
+      scenario specifies otherwise (so engine-side atomic-unit values
+      pass through verbatim and the formatted columns match the input
+      f64s)
+    And the LogWriter::open signature is open(path, units, extra_columns)
+      with extra_columns of type &[(&str, Dimension)]
 
   # --- Open and overwrite policy ---
 
@@ -312,24 +372,41 @@ Feature: CSV diagnostic log
     Then it returns 0.0
 
   @rq-7d831804
-  Scenario: Temperature uses k_B = 1.380649e-23 and N_thermal_dof as divisor
-    Given N_thermal_dof = 27 and KE = (N_thermal_dof / 2) * k_B * T_target for T_target = 300 K
-    When compute_temperature(KE, 27) is called
-    Then it returns 300.0 within an absolute tolerance of 1.0e-12
+  Scenario: Temperature uses k_B = 1 and N_thermal_dof as divisor
+    Given N_thermal_dof = 27 and KE_atomic = (N_thermal_dof / 2) * T_target_atomic
+      with T_target_atomic = 9.5e-4 Hartrees (≈ 300 K in atomic units)
+    When compute_temperature(KE_atomic, 27) is called
+    Then it returns 9.5e-4 within a relative tolerance of 1.0e-12
 
   @rq-9d8f0c97
   Scenario: Temperature for an unconstrained 10-particle COM-removed system
     Given a 10-particle unconstrained run (n_constraints = 0), so N_thermal_dof = 3 * 10 - 0 - 3 = 27
-    And KE = (27 / 2) * k_B * 300
-    When compute_temperature(KE, 27) is called
-    Then it returns 300.0 within an absolute tolerance of 1.0e-12
+    And KE_atomic = (27 / 2) * 9.5e-4
+    When compute_temperature(KE_atomic, 27) is called
+    Then it returns 9.5e-4 within a relative tolerance of 1.0e-12
 
   @rq-5939f04a
   Scenario: Temperature for a 3-atom SETTLE'd water (one rigid molecule, COM removed)
     Given a system with N = 3, n_constraints = 3, so N_thermal_dof = 3 * 3 - 3 - 3 = 3
-    And KE = (3 / 2) * k_B * 300
-    When compute_temperature(KE, 3) is called
-    Then it returns 300.0 within an absolute tolerance of 1.0e-12
+    And KE_atomic = (3 / 2) * 9.5e-4
+    When compute_temperature(KE_atomic, 3) is called
+    Then it returns 9.5e-4 within a relative tolerance of 1.0e-12
+
+  @rq-9c883334
+  Scenario: LogWriter in SI mode multiplies temperature by the temperature factor
+    Given a LogWriter opened with UnitSystem::Si and no extra columns
+    When write_row is called with temperature = 9.5e-4 (Hartrees, engine
+      internal)
+    Then the temperature column in the file equals 9.5e-4 * (E_h / k_B
+      -> kelvin factor), formatted with `{:.9e}`
+
+  @rq-7986038d
+  Scenario: LogWriter in atomic mode emits engine scalars verbatim
+    Given a LogWriter opened with UnitSystem::Atomic and no extra columns
+    When write_row is called with time = 41.34 (atomic time), kinetic_energy
+      = 1.0e-3 (Hartrees), temperature = 9.5e-4 (Hartrees)
+    Then the formatted columns equal 4.134000000e1, 1.000000000e-3,
+      9.500000000e-4 (no multiplication is applied)
 
   # --- Empty-simulation edge case ---
 

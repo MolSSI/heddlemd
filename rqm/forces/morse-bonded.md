@@ -82,10 +82,11 @@ Each `[[bond_types]]` entry in the config that uses `potential = "morse"`
 contributes one row to a per-bond-type parameter table uploaded to the
 device:
 
-- `de: f64` — well depth, joules. Required. Finite and strictly positive.
-- `a: f64` — width parameter, inverse metres. Required. Finite and
+- `de: f64` — well depth, Hartrees (`E_h`). Required. Finite and
   strictly positive.
-- `re: f64` — equilibrium distance, metres. Required. Finite and
+- `a: f64` — width parameter, inverse Bohr (`1/a_0`). Required.
+  Finite and strictly positive.
+- `re: f64` — equilibrium distance, Bohr (`a_0`). Required. Finite and
   strictly positive.
 
 The parameter table on the device is three `CudaSlice<f32>` arrays

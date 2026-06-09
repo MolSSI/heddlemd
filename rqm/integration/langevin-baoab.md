@@ -22,7 +22,7 @@ The Langevin equation of motion is
 
 ```text
 dx = v dt
-dv = (F/m) dt - γ v dt + sqrt(2 γ k_B T / m) dW
+dv = (F/m) dt - γ v dt + sqrt(2 γ T / m) dW
 ```
 
 where `γ` is the friction coefficient, `T` is the bath temperature, and
@@ -37,7 +37,7 @@ For each timestep of size `dt` with `α = exp(-γ dt)`:
 
 1. **B(dt/2)**: `v ← v + (F/m) (dt/2)`
 2. **A(dt/2)**: `x ← x + v (dt/2)`
-3. **O(dt)**:   `v ← α v + sqrt((1 - α²) k_B T / m) ξ`
+3. **O(dt)**:   `v ← α v + sqrt((1 - α²) T / m) ξ`
 4. **A(dt/2)**: `x ← x + v (dt/2)`
 5. **Force evaluation**: recompute `F(x)` using the new positions.
 6. **B(dt/2)**: `v ← v + (F/m) (dt/2)`
@@ -51,8 +51,9 @@ by the runner's standard warm-up pass.
 `ξ` is a vector of independent standard normal random variables, one per
 particle per axis, generated as described in *RNG* below.
 
-The constant `k_B = 1.380649e-23 J/K` is the same CODATA-2019 value used
-by the log-output feature.
+The Boltzmann constant `k_B = 1` exactly in the engine's Hartree
+atomic units; the bath temperature `T` carries `k_B · T` in Hartrees
+and no explicit Boltzmann factor appears in any expression above.
 
 ## Step Plan <!-- rq-ff46e833 -->
 
@@ -80,7 +81,7 @@ appropriate factor. Likewise both `KickHalf`s apply `dt/2` internally.
 | ------------------------ | -------- | ---------------- | -------------------------------------- | -------------------- |
 | `SubStep::KickHalf`      | `B`      | `vv_kick`        | `v += (F/m) (dt/2)`                    | `LangevinKickHalf`   |
 | `SubStep::Drift`         | `A_pre`  | `lan_drift_half` | `x += v (dt/2)`                        | `LangevinDriftHalf`  |
-| `SubStep::Custom`        | `O`      | `lan_ou_step`    | `v ← α v + sqrt((1-α²) k_B T/m) ξ`     | `LangevinOuStep`     |
+| `SubStep::Custom`        | `O`      | `lan_ou_step`    | `v ← α v + sqrt((1-α²) T/m) ξ`     | `LangevinOuStep`     |
 | `SubStep::Drift`         | `A_post` | `lan_drift_half` | `x += v (dt/2)`                        | `LangevinDriftHalf`  |
 | (`SubStep::ForceEval`)   |          | force pipeline   | dispatched by runner                   | (force-pipeline stages) |
 | `SubStep::KickHalf`      | `B`      | `vv_kick`        | `v += (F/m) (dt/2)`                    | `LangevinKickHalf`   |
@@ -111,11 +112,14 @@ The `"langevin-baoab"` builder deserialises
 `LangevinBaoabParams { friction: f64, temperature: f64, seed: u64 }`
 from the `[integrator]` section's `SlotConfig::params` field:
 
-- `friction: f64` — the damping coefficient `γ` in inverse seconds.
-  Required. Finite and strictly positive; `friction = 0` is rejected
+- `friction: f64` — the damping coefficient `γ` in inverse atomic
+  time units (`1 / (hbar / E_h)`). Required. Finite and strictly
+  positive; `friction = 0` is rejected
   (the integrator would degenerate to velocity Verlet and users should
   select `kind = "velocity-verlet"` explicitly).
-- `temperature: f64` — bath temperature `T` in kelvin. Required.
+- `temperature: f64` — bath temperature `T` as `k_B · T` in Hartrees
+  (the engine's internal temperature representation; `k_B = 1`).
+  Required.
   Finite and strictly positive. Independent of `simulation.temperature`,
   which governs the initial-velocity sampler; users may quench or heat
   between the initial state and the run by supplying different values.
@@ -240,7 +244,7 @@ extern "C" __global__ void lan_ou_step(
     unsigned int seed_lo, unsigned int seed_hi,
     unsigned int draw_counter_lo, unsigned int draw_counter_hi,
     float alpha,
-    float kt,        // k_B * temperature, in joules
+    float kt,        // engine-side temperature value: k_B · T in Hartrees
     unsigned int n);
 ```
 
@@ -270,8 +274,9 @@ v[a][i] = alpha * v[a][i] + sigma * (float) xi
 ```
 
 The host pre-computes `alpha = expf(- (friction as f32) * dt)` and
-`kt = (k_B * temperature) as f32` once per timestep and passes them to
-the kernel.
+`kt = temperature as f32` once per timestep and passes them to the
+kernel (the engine stores `k_B · T` directly; `k_B = 1`, so no
+multiplication is performed).
 
 ### PTX Module Loading <!-- rq-8586776f -->
 
@@ -445,8 +450,9 @@ Feature: Langevin BAOAB integrator
 
   @rq-50baca8c
   Scenario: Variance scales with sqrt((1 - alpha^2) * kt / m)
-    Given a ParticleBuffers of N=10000 particles all with v=0, m=6.6335e-26 kg
-    And alpha = 0.5, kt = 1.380649e-23 * 300.0
+    Given a ParticleBuffers of N=10000 particles all with v=0, m=7.28e4
+      m_e (the engine's argon mass in atomic units)
+    And alpha = 0.5, kt = 9.5e-4 (≈ k_B · 300 K in Hartrees)
     When lan_ou_step is called with seed=42, draw_counter=1
     And velocities are downloaded
     Then the sample variance of each axis is within 5% of (1 - alpha^2) * kt / m

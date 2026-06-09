@@ -20,10 +20,16 @@ use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 use dynamics::timings::{KernelStage, Timings};
 
+#[allow(dead_code)]
 const KB: f64 = 1.380649e-23;
+const LEN_F: f64 = 5.29177210903e-11;
+const TIME_F: f64 = 2.4188843265857195e-17;
+const PRESSURE_F: f64 = 29421015696522.1;
+const TEMP_F: f64 = 315775.0248040668;
 
 fn box_small() -> SimulationBox {
-    SimulationBox::new(1.0e-9, 1.0e-9, 1.0e-9, 0.0, 0.0, 0.0).unwrap()
+    let l = (1.0e-9 / LEN_F) as f32;
+    SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
@@ -56,6 +62,11 @@ fn mtk_kind(
     yoshida_order: u32,
     n_resp: u32,
 ) -> SlotConfig {
+    // Convert SI inputs (K, Pa, s) to atomic units.
+    let temperature = temperature / TEMP_F;
+    let pressure = pressure / PRESSURE_F;
+    let tau_t = tau_t / TIME_F;
+    let tau_p = tau_p / TIME_F;
     SlotConfig::from_params_str(
         "mtk-npt",
         &format!(
@@ -141,9 +152,13 @@ fn registry_builds_mtk_npt_with_defaults() {
     assert_eq!(state.p_eps, 0.0);
     assert_eq!(state.eps, 0.0);
     let g_dof = state.g_dof as f64;
-    let expected_w = (g_dof + 3.0) * KB * 85.0 * (1.0e-12_f64).powi(2);
+    // mtk_kind converts SI inputs; the engine stores atomic-unit values.
+    let kt = 85.0 / TEMP_F;
+    let tau_p_au = 1.0e-12 / TIME_F;
+    let tau_t_au = 1.0e-13 / TIME_F;
+    let expected_w = (g_dof + 3.0) * kt * tau_p_au.powi(2);
     assert!((state.w_cell - expected_w).abs() / expected_w < 1.0e-10);
-    let expected_q1 = g_dof * KB * 85.0 * (1.0e-13_f64).powi(2);
+    let expected_q1 = g_dof * kt * tau_t_au.powi(2);
     assert!((state.q_mass_part[0] - expected_q1).abs() / expected_q1 < 1.0e-10);
 }
 
@@ -409,10 +424,8 @@ fn log_column_names_returns_pressure_volume_and_conserved() {
     let gpu = init_device().unwrap();
     let kind = mtk_kind(85.0, 1.0e5, 1.0e-13, 1.0e-12, 3, 3, 1);
     let integ = build_mtk(&gpu, 4, &kind);
-    assert_eq!(
-        integ.log_column_names(),
-        &["pressure", "box_volume", "mtk_npt_conserved"]
-    );
+    let names: Vec<&str> = integ.log_column_names().iter().map(|(n, _)| *n).collect();
+    assert_eq!(names, vec!["pressure", "box_volume", "mtk_npt_conserved"]);
 }
 
 // rq-a722f7ce

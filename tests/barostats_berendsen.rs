@@ -629,7 +629,8 @@ fn generation_advances_after_apply() {
 fn log_column_names_returns_pressure_and_box_volume() {
     let gpu = init_device().unwrap();
     let baro = build_berendsen_barostat(&gpu, 4, &berendsen_kind(1.0e5, 1.0e-12, 4.5e-10));
-    assert_eq!(baro.log_column_names(), &["pressure", "box_volume"]);
+    let names: Vec<&str> = baro.log_column_names().iter().map(|(n, _)| *n).collect();
+    assert_eq!(names, vec!["pressure", "box_volume"]);
 }
 
 // rq-24073418

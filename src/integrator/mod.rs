@@ -182,7 +182,7 @@ pub trait Integrator: std::fmt::Debug + Send {
         timings: &mut Timings,
     ) -> Result<(), IntegratorError>;
 
-    fn log_column_names(&self) -> &'static [&'static str] {
+    fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
         &[]
     }
 
@@ -475,7 +475,7 @@ pub trait Thermostat: std::fmt::Debug + Send {
         timings: &mut Timings,
     ) -> Result<(), ThermostatError>;
 
-    fn log_column_names(&self) -> &'static [&'static str] {
+    fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
         &[]
     }
 
@@ -576,7 +576,7 @@ pub trait Barostat: std::fmt::Debug + Send {
         timings: &mut Timings,
     ) -> Result<(), BarostatError>;
 
-    fn log_column_names(&self) -> &'static [&'static str] {
+    fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
         &[]
     }
 

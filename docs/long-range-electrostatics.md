@@ -17,18 +17,22 @@ neighbor-list service.
 The Coulomb energy between particle `i` and `j` at separation `r` is
 
 ```
-U_ij(r) = k_C · q_i · q_j / r
+U_ij(r) = q_i · q_j / r
 ```
 
-where `k_C = 1 / (4π ε₀)`. Ewald's identity rewrites `1/r` as the sum of a
-short-range and a long-range part using the error function:
+with `k_C = 1 / (4πε₀) = 1` exactly in the engine's Hartree atomic
+units (`q` in elementary charges, `r` in Bohr, `U` in Hartrees);
+no permittivity prefactor appears in the kernel. Ewald's identity
+rewrites `1/r` as the sum of a short-range and a long-range part
+using the error function:
 
 ```
 1/r = erfc(α · r) / r        (short-range, real space)
     + erf (α · r) / r        (long-range, smooth)
 ```
 
-`α` is the Ewald splitting parameter, in inverse metres. Larger `α` shifts
+`α` is the Ewald splitting parameter, in inverse Bohr (`1/a_0`).
+Larger `α` shifts
 work into reciprocal space (short real-space cutoff, fine reciprocal grid);
 smaller `α` shifts work into real space (long cutoff, coarse grid). The
 total energy is partitioned into three contributions:
@@ -275,7 +279,7 @@ choice of reciprocal lattice. Concretely:
 
 - **FFT grid.** The grid has `n_a × n_b × n_c` cells in fractional
   coordinates. Grid resolution per direction is chosen as a target
-  spacing in metres divided by the corresponding perpendicular width.
+  spacing in Bohr divided by the corresponding perpendicular width.
 - **k-vectors.** `k = 2π · (i_a · b_a + i_b · b_b + i_c · b_c)` where
   `b_a, b_b, b_c` are the rows of `H^{−T}` (the reciprocal lattice).
   The dot products in the influence function use the full Cartesian

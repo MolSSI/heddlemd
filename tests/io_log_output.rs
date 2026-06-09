@@ -1,8 +1,15 @@
 use std::path::{Path, PathBuf};
 
 use dynamics::io::{
-    BOLTZMANN_J_PER_K, LogWriter, LogWriterError, compute_kinetic_energy, compute_temperature,
+    LogWriter, LogWriterError, compute_kinetic_energy, compute_temperature,
 };
+use dynamics::units::{Dimension, UnitSystem};
+
+// k_B = 1 in the engine's atomic units. Tests still need an SI value
+// to set up SI-mode kinetic energies whose `compute_temperature` output
+// is verified in either system.
+#[allow(dead_code)]
+const BOLTZMANN_J_PER_K: f64 = 1.380649e-23;
 
 fn tmp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -29,7 +36,7 @@ fn read(path: &Path) -> String {
 fn open_creates_log_with_header() {
     let dir = tmp_path("open_header");
     let path = dir.join("run.log");
-    let mut writer = LogWriter::open(&path, &[]).unwrap();
+    let mut writer = LogWriter::open(&path, UnitSystem::Atomic, &[]).unwrap();
     writer.flush().unwrap();
     drop(writer);
     let body = read(&path);
@@ -42,7 +49,7 @@ fn open_refuses_existing_log() {
     let dir = tmp_path("refuse_existing");
     let path = dir.join("run.log");
     std::fs::write(&path, "preexisting").unwrap();
-    match LogWriter::open(&path, &[]).unwrap_err() {
+    match LogWriter::open(&path, UnitSystem::Atomic, &[]).unwrap_err() {
         LogWriterError::OutputExists { path: p } => assert_eq!(p, path),
         other => panic!("unexpected: {other:?}"),
     }
@@ -54,7 +61,7 @@ fn open_refuses_existing_log() {
 fn open_fails_missing_parent() {
     let dir = tmp_path("missing_parent");
     let path = dir.join("missing").join("run.log");
-    match LogWriter::open(&path, &[]).unwrap_err() {
+    match LogWriter::open(&path, UnitSystem::Atomic, &[]).unwrap_err() {
         LogWriterError::Io(_) => {}
         other => panic!("unexpected: {other:?}"),
     }
@@ -65,7 +72,7 @@ fn open_fails_missing_parent() {
 fn write_single_row_step_zero() {
     let dir = tmp_path("row_step_zero");
     let path = dir.join("run.log");
-    let mut writer = LogWriter::open(&path, &[]).unwrap();
+    let mut writer = LogWriter::open(&path, UnitSystem::Atomic, &[]).unwrap();
     writer.write_row(0, 0.0, 0.0, 300.0, &[]).unwrap();
     writer.flush().unwrap();
     let body = read(&path);
@@ -83,7 +90,7 @@ fn write_single_row_step_zero() {
 fn write_row_non_trivial_values() {
     let dir = tmp_path("row_nontrivial");
     let path = dir.join("run.log");
-    let mut writer = LogWriter::open(&path, &[]).unwrap();
+    let mut writer = LogWriter::open(&path, UnitSystem::Atomic, &[]).unwrap();
     writer
         .write_row(100, 1.0e-13, 4.123456789e-21, 298.7654321, &[]).unwrap();
     writer.flush().unwrap();
@@ -103,7 +110,7 @@ fn write_row_non_trivial_values() {
 fn append_rows_in_order() {
     let dir = tmp_path("append_rows");
     let path = dir.join("run.log");
-    let mut writer = LogWriter::open(&path, &[]).unwrap();
+    let mut writer = LogWriter::open(&path, UnitSystem::Atomic, &[]).unwrap();
     writer.write_row(0, 0.0, 0.0, 0.0, &[]).unwrap();
     writer.write_row(100, 1.0e-13, 1.0, 100.0, &[]).unwrap();
     writer.write_row(200, 2.0e-13, 2.0, 200.0, &[]).unwrap();
@@ -169,13 +176,14 @@ fn temperature_of_empty_is_zero() {
 
 // rq-7d831804
 #[test]
-fn temperature_uses_codata_kb() {
+fn temperature_uses_kb_unity() {
+    // k_B = 1 inside the engine: temperature is `k_B · T` in Hartrees.
     // 10 unconstrained particles, COM-removed: N_thermal_dof = 3*10 - 0 - 3 = 27.
     let n_thermal_dof: u32 = 27;
-    let t_target = 300.0_f64;
-    let ke = 0.5 * (n_thermal_dof as f64) * BOLTZMANN_J_PER_K * t_target;
+    let t_target_au = 9.5e-4_f64; // ~300 K in atomic units
+    let ke = 0.5 * (n_thermal_dof as f64) * t_target_au;
     let t = compute_temperature(ke, n_thermal_dof);
-    assert!((t - t_target).abs() < 1.0e-12);
+    assert!((t - t_target_au).abs() < 1.0e-12);
 }
 
 // rq-1b97afd8
@@ -183,7 +191,7 @@ fn temperature_uses_codata_kb() {
 fn log_header_plus_step_zero_only() {
     let dir = tmp_path("step_zero_only");
     let path = dir.join("run.log");
-    let mut writer = LogWriter::open(&path, &[]).unwrap();
+    let mut writer = LogWriter::open(&path, UnitSystem::Atomic, &[]).unwrap();
     writer.write_row(0, 0.0, 0.0, 0.0, &[]).unwrap();
     writer.flush().unwrap();
     let body = read(&path);
@@ -195,7 +203,7 @@ fn log_header_plus_step_zero_only() {
 fn log_flush_idempotent() {
     let dir = tmp_path("flush_idem");
     let path = dir.join("run.log");
-    let mut writer = LogWriter::open(&path, &[]).unwrap();
+    let mut writer = LogWriter::open(&path, UnitSystem::Atomic, &[]).unwrap();
     writer.flush().unwrap();
     writer.flush().unwrap();
 }
@@ -206,7 +214,7 @@ fn drop_flushes_log() {
     let dir = tmp_path("drop_flush");
     let path = dir.join("run.log");
     {
-        let mut writer = LogWriter::open(&path, &[]).unwrap();
+        let mut writer = LogWriter::open(&path, UnitSystem::Atomic, &[]).unwrap();
         writer.write_row(0, 0.0, 0.0, 0.0, &[]).unwrap();
     }
     let body = read(&path);

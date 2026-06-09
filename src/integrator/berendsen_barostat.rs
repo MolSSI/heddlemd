@@ -142,8 +142,12 @@ impl Barostat for BerendsenBarostat {
     }
 
     // rq-62b44dc9
-    fn log_column_names(&self) -> &'static [&'static str] {
-        &["pressure", "box_volume"]
+    fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
+        use crate::units::Dimension;
+        &[
+            ("pressure", Dimension::Pressure),
+            ("box_volume", Dimension::Dimensionless),
+        ]
     }
 
     // rq-62b44dc9

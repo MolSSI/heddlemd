@@ -12,7 +12,6 @@ use crate::gpu::{
 };
 use crate::kernels;
 use crate::io::config::ConfigError;
-use crate::io::log_output::BOLTZMANN_J_PER_K;
 use crate::timings::{KernelStage, Timings};
 
 use super::{Thermostat, ThermostatBuilder, ThermostatError};
@@ -207,7 +206,8 @@ impl NoseHooverChainThermostat {
         let m = chain_length as usize;
         let g_dof =
             ((3 * particle_count) as i64 - n_constraints as i64 - 3).max(0) as u32;
-        let kt = BOLTZMANN_J_PER_K * temperature;
+        // k_B = 1 in atomic units; temperature is already k_B · T.
+        let kt = temperature;
         let tau2 = tau * tau;
         let mut q_mass = vec![0.0_f64; m];
         if m > 0 {
@@ -306,8 +306,9 @@ impl Thermostat for NoseHooverChainThermostat {
     }
 
     // rq-8a571737
-    fn log_column_names(&self) -> &'static [&'static str] {
-        &["nhc_conserved"]
+    fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
+        // nhc_conserved is a conserved Hamiltonian-like scalar in Hartrees.
+        &[("nhc_conserved", crate::units::Dimension::Energy)]
     }
 
     // rq-f94f6bac

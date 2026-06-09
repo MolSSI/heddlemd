@@ -566,7 +566,7 @@ for i in 0..N:
         u1 = sample_uniform_open(rng)   # f64 in (0.0, 1.0]
         u2 = sample_uniform_unit(rng)   # f64 in [0.0, 1.0)
         z  = sqrt(-2.0 * ln(u1)) * cos(2.0 * pi * u2)
-        sigma = sqrt(k_B * T / (masses[i] as f64))
+        sigma = sqrt(T / (masses[i] as f64))
         v_high_precision = z * sigma
         v[axis][i] = v_high_precision as f32
 ```
@@ -575,8 +575,11 @@ for i in 0..N:
   `1.0 - rng.gen::<f64>()` where `rng.gen::<f64>()` returns `[0.0, 1.0)`.
 - `sample_uniform_unit(rng)`: draws an `f64` in `[0.0, 1.0)` directly via
   `rng.gen::<f64>()`.
-- `k_B = 1.380649e-23` (CODATA 2019). Same constant used by
-  `compute_temperature`.
+- `k_B = 1` exactly in the engine's Hartree atomic units, so no
+  Boltzmann constant appears in `sigma`. `T` is the
+  `simulation.temperature` value stored on `Config` (carrying
+  `k_B · T` in Hartrees); `masses[i]` is in electron masses; the
+  resulting `sigma` is in atomic-unit velocity.
 
 When `temperature == 0.0`, every velocity is `0.0_f32`. The runner takes
 the explicit `T == 0.0` shortcut to avoid generating samples that all
@@ -776,8 +779,9 @@ wrapper that dispatches between the two on the first CLI argument.
     — a `[[minimization]]` phase reached `max_iterations` without
     meeting any physical convergence criterion. Surfaces as exit
     code `2` (failure during the loop). `final_force` is the
-    `F_max` at the last accepted state in newtons; `final_step` is
-    the adaptive step size at the time of giving up.
+    `F_max` at the last accepted state in `E_h / a_0` (the engine's
+    atomic force unit); `final_step` is the adaptive step size in
+    Bohr at the time of giving up.
   - `MinlogWriter(MinlogWriterError)` — from minlog-writer
     construction or `write_row`/`flush`.
 

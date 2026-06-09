@@ -157,7 +157,8 @@ The constraints of group `g` are
 `group_constraints[g.constraint_offset .. g.constraint_offset + g.constraint_count]`.
 Each `GroupConstraint` is `{ local_i: u8, local_j: u8, r0: f32 }`,
 where `local_i` and `local_j` are indices into the group's atom slice
-(so `0..g.atom_count`) and `r0` is the constraint distance in metres.
+(so `0..g.atom_count`) and `r0` is the constraint distance in Bohr
+(`a_0`).
 Local indices restrict any single group to at most 256 atoms — sufficient
 for all known SETTLE and M-SHAKE clusters; LINCS-class systems use a
 different layout outside this framework.

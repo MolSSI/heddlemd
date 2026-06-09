@@ -18,10 +18,17 @@ use dynamics::pbc::SimulationBox;
 use dynamics::state::ParticleState;
 use dynamics::timings::{KernelStage, Timings};
 
+#[allow(dead_code)]
 const KB: f64 = 1.380649e-23;
+const LEN_F: f64 = 5.29177210903e-11;
+const MASS_F: f64 = 9.1093837015e-31;
+const TIME_F: f64 = 2.4188843265857195e-17;
+const TEMP_F: f64 = 315775.0248040668;
+const VEL_F: f64 = 2187691.2636411153;
 
 fn box_large() -> SimulationBox {
-    SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap()
+    let l = (1.0e6 / LEN_F) as f32;
+    SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
@@ -46,6 +53,9 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
 }
 
 fn andersen_kind(temperature: f64, collision_rate: f64, seed: u64) -> SlotConfig {
+    // Convert SI inputs (K, 1/s) to atomic units.
+    let temperature = temperature / TEMP_F;
+    let collision_rate = collision_rate * TIME_F;
     SlotConfig::from_params_str(
         "andersen",
         &format!(
@@ -66,10 +76,10 @@ fn unbox_andersen(boxed: Box<dyn Thermostat>) -> AndersenThermostat {
 }
 
 fn atomic_state(n: usize) -> ParticleState {
-    let mass: f32 = 1.66e-27;
+    let mass: f32 = (1.66e-27 / MASS_F) as f32;
     let mut vx: Vec<f32> = Vec::with_capacity(n);
     for i in 0..n / 2 {
-        let v = 500.0 * ((i as f32) + 1.0);
+        let v = (500.0 / VEL_F) as f32 * ((i as f32) + 1.0);
         vx.push(v);
         vx.push(-v);
     }
@@ -78,7 +88,7 @@ fn atomic_state(n: usize) -> ParticleState {
     }
     let zero = vec![0.0_f32; n];
     ParticleState::new(
-        (0..n).map(|i| (i as f32) * 1.0e-10).collect(),
+        (0..n).map(|i| (i as f32) * (1.0e-10 / LEN_F) as f32).collect(),
         zero.clone(),
         zero.clone(),
         vx,
@@ -103,7 +113,8 @@ fn registry_builds_andersen() {
     let therm = unbox_andersen(build_andersen(&gpu, 4, &kind));
     assert_eq!(therm.draw_counter, 0);
     assert_eq!(therm.cumulative_injection, 0.0);
-    assert!((therm.kt - KB * 300.0).abs() < 1.0e-30);
+    // andersen_kind converts SI; the engine stores kt = temperature (k_B = 1).
+    assert!((therm.kt - 300.0 / TEMP_F).abs() < 1.0e-30);
 }
 
 // rq-abcae430
@@ -134,7 +145,7 @@ fn andersen_resample_p_zero_is_identity() {
     let snap_vy: Vec<f32> = state.velocities_y.clone();
     let snap_vz: Vec<f32> = state.velocities_z.clone();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    andersen_resample(&mut buffers, 1, 1, 0.0, (KB * 300.0) as f32).unwrap();
+    andersen_resample(&mut buffers, 1, 1, 0.0, ((300.0 / TEMP_F)) as f32).unwrap();
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     let vy = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
     let vz = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
@@ -167,7 +178,7 @@ fn andersen_resample_p_one_replaces_every_particle() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let kt = KB * 300.0;
+    let kt = (300.0 / TEMP_F);
     andersen_resample(&mut buffers, 42, 1, 1.0, kt as f32).unwrap();
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     let vy = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
@@ -206,7 +217,7 @@ fn andersen_resample_deterministic_across_runs() {
     let state = atomic_state(n);
     let mut a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let kt = (KB * 300.0) as f32;
+    let kt = ((300.0 / TEMP_F)) as f32;
     andersen_resample(&mut a, 7, 3, 1.0, kt).unwrap();
     andersen_resample(&mut b, 7, 3, 1.0, kt).unwrap();
     let va = gpu.device.dtoh_sync_copy(&a.velocities_x).unwrap();
@@ -222,7 +233,7 @@ fn andersen_resample_different_seeds_differ() {
     let state = atomic_state(n);
     let mut a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let kt = (KB * 300.0) as f32;
+    let kt = ((300.0 / TEMP_F)) as f32;
     andersen_resample(&mut a, 1, 1, 1.0, kt).unwrap();
     andersen_resample(&mut b, 2, 1, 1.0, kt).unwrap();
     let va = gpu.device.dtoh_sync_copy(&a.velocities_x).unwrap();
@@ -239,7 +250,7 @@ fn andersen_resample_different_draw_counters_differ() {
     let state = atomic_state(n);
     let mut a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let kt = (KB * 300.0) as f32;
+    let kt = ((300.0 / TEMP_F)) as f32;
     andersen_resample(&mut a, 1, 1, 1.0, kt).unwrap();
     andersen_resample(&mut b, 1, 2, 1.0, kt).unwrap();
     let va = gpu.device.dtoh_sync_copy(&a.velocities_x).unwrap();
@@ -260,7 +271,7 @@ fn andersen_apply_post_launches_expected_kernels() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_andersen(&gpu, n, &andersen_kind(300.0, 1.0e12, 1));
     therm
-        .apply_post(&mut buffers, 1.0e-15, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count_for = |stage: KernelStage| -> u64 {
@@ -286,7 +297,7 @@ fn andersen_apply_post_empty_state_is_noop() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_andersen(&gpu, 0, &andersen_kind(300.0, 1.0e12, 1));
     therm
-        .apply_post(&mut buffers, 1.0e-15, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
         .unwrap();
 }
 
@@ -301,7 +312,7 @@ fn andersen_apply_pre_is_trait_default_noop() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_andersen(&gpu, n, &andersen_kind(300.0, 1.0e12, 1));
     therm
-        .apply_pre(&mut buffers, 1.0e-15, &mut timings)
+        .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
         .unwrap();
     let vx_after = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     assert_eq!(vx_after, snap_vx);
@@ -324,11 +335,11 @@ fn andersen_draw_counter_increments_per_apply_post() {
     let mut therm = unbox_andersen(build_andersen(&gpu, n, &andersen_kind(300.0, 1.0e12, 1)));
     assert_eq!(therm.draw_counter, 0);
     therm
-        .apply_post(&mut buffers, 1.0e-15, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
         .unwrap();
     assert_eq!(therm.draw_counter, 1);
     therm
-        .apply_post(&mut buffers, 1.0e-15, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
         .unwrap();
     assert_eq!(therm.draw_counter, 2);
 }
@@ -345,7 +356,7 @@ fn andersen_cumulative_injection_tracks_ke_change() {
     let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
     let k_before = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
     therm
-        .apply_post(&mut buffers, 1.0e-15, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
         .unwrap();
     let k_after = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
     let expected = k_after - k_before;
@@ -361,7 +372,8 @@ fn andersen_log_column_names_returns_andersen_conserved() {
     let gpu = init_device().unwrap();
     let kind = andersen_kind(300.0, 1.0e12, 1);
     let therm = build_andersen(&gpu, 4, &kind);
-    assert_eq!(therm.log_column_names(), &["andersen_conserved"]);
+    let names: Vec<&str> = therm.log_column_names().iter().map(|(n, _)| *n).collect();
+    assert_eq!(names, vec!["andersen_conserved"]);
 }
 
 // rq-26ff4aea
@@ -390,7 +402,7 @@ fn andersen_collision_rate_above_one_clamped_to_full_resample() {
     // collision_rate · dt = 10
     let mut therm = build_andersen(&gpu, n, &andersen_kind(300.0, 1.0e16, 1));
     therm
-        .apply_post(&mut buffers, 1.0e-15, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
         .unwrap();
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     for (i, (a, b)) in vx.iter().zip(snap_vx.iter()).enumerate() {
@@ -409,7 +421,7 @@ fn andersen_collision_rate_zero_leaves_velocities_unchanged() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_andersen(&gpu, n, &andersen_kind(300.0, 0.0, 1));
     therm
-        .apply_post(&mut buffers, 1.0e-15, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
         .unwrap();
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     assert_eq!(vx, snap_vx);
@@ -430,7 +442,7 @@ fn andersen_two_runs_with_identical_inputs_match() {
         let mut therm = build_andersen(gpu, n, &andersen_kind(300.0, 1.0e12, 42));
         for _ in 0..5 {
             therm
-                .apply_post(&mut buffers, 1.0e-15, &mut timings)
+                .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
                 .unwrap();
         }
         gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap()
@@ -457,7 +469,7 @@ fn andersen_different_seeds_diverge() {
         let mut therm = build_andersen(gpu, n, &andersen_kind(300.0, 1.0e16, seed));
         for _ in 0..3 {
             therm
-                .apply_post(&mut buffers, 1.0e-15, &mut timings)
+                .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
                 .unwrap();
         }
         gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap()
@@ -473,16 +485,17 @@ fn andersen_different_seeds_diverge() {
 fn andersen_time_averaged_ke_tracks_target() {
     let gpu = init_device().unwrap();
     let n = 64usize;
-    let mass: f32 = 1.66e-27;
+    // Atomic-unit values; k_B = 1.
+    let mass: f32 = (1.66e-27 / MASS_F) as f32;
     let temperature = 300.0_f64;
-    let kt = KB * temperature;
+    let kt = temperature / TEMP_F;
     let k_target = (3.0 * n as f64 / 2.0) * kt;
     let zero = vec![0.0_f32; n];
     let state = ParticleState::new(
-        (0..n).map(|i| (i as f32) * 1.0e-10).collect(),
+        (0..n).map(|i| (i as f32) * (1.0e-10 / LEN_F) as f32).collect(),
         zero.clone(),
         zero.clone(),
-        vec![100.0_f32; n],
+        vec![(100.0 / VEL_F) as f32; n],
         zero.clone(),
         vec![0.0_f32; n],
         vec![mass; n],
@@ -507,20 +520,20 @@ fn andersen_time_averaged_ke_tracks_target() {
     let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
     for _ in 0..200 {
         integ
-            .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, None, (1.0e-15 / TIME_F) as f32, &mut timings)
             .unwrap();
         therm
-            .apply_post(&mut buffers, 1.0e-15, &mut timings)
+            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
             .unwrap();
     }
     let mut sum = 0.0_f64;
     let n_samples = 500;
     for _ in 0..n_samples {
         integ
-            .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, None, (1.0e-15 / TIME_F) as f32, &mut timings)
             .unwrap();
         therm
-            .apply_post(&mut buffers, 1.0e-15, &mut timings)
+            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
             .unwrap();
         sum += compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
     }

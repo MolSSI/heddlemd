@@ -12,7 +12,7 @@ pub use config::{
 };
 pub use init_state::{InitImages, InitState, InitStateError, InitVelocities, load_init_state};
 pub use log_output::{
-    BOLTZMANN_J_PER_K, LogWriter, LogWriterError, compute_kinetic_energy, compute_temperature,
+    LogWriter, LogWriterError, compute_kinetic_energy, compute_temperature,
 };
 pub use minlog_output::{MinlogWriter, MinlogWriterError};
 pub use trajectory::{
