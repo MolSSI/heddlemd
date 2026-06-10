@@ -8,6 +8,7 @@
 use std::os::raw::{c_int, c_void};
 use std::sync::Arc;
 
+use cudarc::driver::sys::CUstream;
 use cudarc::driver::{CudaDevice, CudaSlice, DevicePtr, DevicePtrMut};
 
 pub type CufftResult = c_int;
@@ -40,6 +41,7 @@ unsafe extern "C" {
         idata: *mut c_void,
         odata: *mut f32,
     ) -> CufftResult;
+    fn cufftSetStream(plan: CufftHandle, stream: *mut c_void) -> CufftResult;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -112,6 +114,15 @@ impl Plan3dR2C {
         let result = unsafe { cufftExecR2C(self.handle, idata, odata) };
         check(result)
     }
+
+    /// Bind the plan to the given CUDA stream. Subsequent `execute()`
+    /// calls run on this stream. Per rqm/forces/spme.md, the SPME
+    /// reciprocal plans are bound once at slot construction and never
+    /// rebound.
+    pub fn set_stream(&self, stream: CUstream) -> Result<(), CuFftError> {
+        let result = unsafe { cufftSetStream(self.handle, stream as *mut c_void) };
+        check(result)
+    }
 }
 
 impl Drop for Plan3dR2C {
@@ -169,6 +180,13 @@ impl Plan3dC2R {
         let idata = *input.device_ptr() as *mut c_void;
         let odata = *output.device_ptr_mut() as *mut f32;
         let result = unsafe { cufftExecC2R(self.handle, idata, odata) };
+        check(result)
+    }
+
+    /// Bind the plan to the given CUDA stream. Subsequent `execute()`
+    /// calls run on this stream.
+    pub fn set_stream(&self, stream: CUstream) -> Result<(), CuFftError> {
+        let result = unsafe { cufftSetStream(self.handle, stream as *mut c_void) };
         check(result)
     }
 }

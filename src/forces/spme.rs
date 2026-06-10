@@ -10,14 +10,15 @@
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice};
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice, CudaStream};
 use cudarc::nvrtc::Ptx;
 
 use crate::gpu::cufft::{CuFftError, Plan3dC2R, Plan3dR2C};
 use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, K_COULOMB_F32, PairBuffer, ParticleBuffers, reduce_pair_forces,
-    spme_charge_spread, spme_force_gather, spme_influence_multiply, spme_real_pair_force,
+    spme_charge_spread_on_stream, spme_force_gather, spme_influence_multiply_on_stream,
+    spme_real_pair_force,
 };
 use crate::kernels;
 use crate::io::config::SpmeConfig;
@@ -99,6 +100,35 @@ pub struct SpmeReciprocalGrid {
     pub cached_box_generation: u64,
     pub forward_plan: Plan3dR2C,
     pub inverse_plan: Plan3dC2R,
+    /// Dedicated stream for the 4-kernel reciprocal pipeline. The cuFFT
+    /// plans above are bound to this stream at construction; the
+    /// charge-spread and influence-multiply kernels are launched via
+    /// `*_on_stream` variants that target it. Cross-stream sync with
+    /// the default stream is handled in `compute` and in
+    /// `SpmeReciprocalState::reduce` via cudarc's
+    /// `CudaStream::wait_for_default` / `CudaDevice::wait_for`.
+    pub recip_stream: SendableStream,
+}
+
+/// `CudaStream` wraps a raw `CUstream` pointer and cudarc 0.13 does not
+/// mark it `Send`/`Sync`, but CUDA streams are safe to share across
+/// threads as long as the using thread has called
+/// `CudaDevice::bind_to_thread` (which `init_device` and every kernel
+/// launch path ensures). Every other CUDA handle this slot holds
+/// (`CudaSlice`, `CudaFunction`, `Arc<CudaDevice>`) is explicitly
+/// `Send`/`Sync` in cudarc; this wrapper closes the gap so
+/// `SpmeReciprocalState` satisfies the `Potential: Send` bound.
+#[derive(Debug)]
+pub struct SendableStream(pub CudaStream);
+
+unsafe impl Send for SendableStream {}
+unsafe impl Sync for SendableStream {}
+
+impl std::ops::Deref for SendableStream {
+    type Target = CudaStream;
+    fn deref(&self) -> &CudaStream {
+        &self.0
+    }
 }
 
 impl SpmeReciprocalGrid {
@@ -165,6 +195,11 @@ impl SpmeReciprocalGrid {
         let forward_plan = Plan3dR2C::new(&device, n_a, n_b, n_c)?;
         let inverse_plan = Plan3dC2R::new(&device, n_a, n_b, n_c)?;
 
+        let recip_stream = device.fork_default_stream().map_err(GpuError::from)?;
+        forward_plan.set_stream(recip_stream.stream)?;
+        inverse_plan.set_stream(recip_stream.stream)?;
+        let recip_stream = SendableStream(recip_stream);
+
         Ok(SpmeReciprocalGrid {
             device,
             params,
@@ -181,6 +216,7 @@ impl SpmeReciprocalGrid {
             cached_box_generation: sim_box.generation(),
             forward_plan,
             inverse_plan,
+            recip_stream,
         })
     }
 
@@ -221,15 +257,24 @@ impl SpmeReciprocalGrid {
             self.cached_box_generation = sim_box.generation();
         }
 
-        // 1. Rebuild bin structure.
+        // 1. Rebuild bin structure (default stream).
         self.bin_list.pre_step(sim_box, particle_buffers, timings)?;
 
-        // 2. Charge spreading (writes rho).
+        // 2. Hand off to the dedicated recip stream. wait_for_default
+        // records an event on the default stream capturing all work
+        // queued so far (integrator + bin_list rebuild + any other
+        // default-stream slot launches that already returned to host)
+        // and makes recip_stream wait on that event.
+        self.recip_stream
+            .wait_for_default()
+            .map_err(GpuError::from)?;
+
+        // 3. Charge spreading on recip_stream (writes rho).
         let cl = self
             .bin_list
             .cell_list_data()
             .expect("SpmeReciprocalGrid bin list must be in cell-list-only mode");
-        spme_charge_spread(
+        spme_charge_spread_on_stream(
             particle_buffers,
             sim_box,
             &cl.sorted_particle_ids,
@@ -237,16 +282,19 @@ impl SpmeReciprocalGrid {
             self.params.grid,
             self.params.spline_order,
             &mut self.rho,
+            &self.recip_stream,
         )?;
 
-        // 3. Forward FFT (rho → rho_hat).
+        // 4. Forward FFT (rho → rho_hat). cuFFT plan bound to recip_stream
+        // at slot construction.
         self.forward_plan
             .execute(&self.rho, &mut self.rho_hat_interleaved)?;
 
-        // 4. Influence multiply (rho_hat *= G; also writes per-cell virial).
+        // 5. Influence multiply on recip_stream (rho_hat *= G; also
+        //    writes per-cell virial).
         let n_c = self.params.grid[2];
         let n_c_complex = (n_c / 2 + 1) as u32;
-        spme_influence_multiply(
+        spme_influence_multiply_on_stream(
             &particle_buffers.kernels,
             &self.influence_g,
             &self.virial_factor,
@@ -255,13 +303,30 @@ impl SpmeReciprocalGrid {
             n_c,
             n_c_complex,
             self.m_complex as u32,
+            &self.recip_stream,
         )?;
 
-        // 5. Inverse FFT (rho_hat → V).
+        // 6. Inverse FFT (rho_hat → V) on recip_stream.
         self.inverse_plan
             .execute(&self.rho_hat_interleaved, &mut self.v)?;
 
+        // Host returns immediately. The default stream's join with
+        // recip_stream happens at the start of SpmeReciprocalState::reduce
+        // via CudaDevice::wait_for(&recip_stream) before any dtoh of
+        // virial_per_cell or any read of V by spme_force_gather.
         Ok(())
+    }
+
+    /// Block the device's default stream until the reciprocal pipeline
+    /// queued on `recip_stream` has finished. Production paths call this
+    /// implicitly at the start of `SpmeReciprocalState::reduce`. Tests
+    /// and other direct consumers that read `rho` / `v` / `virial_per_cell`
+    /// straight after `compute` must call this first so the dtoh sees
+    /// finalized buffers.
+    pub fn sync_recip(&self) -> Result<(), GpuError> {
+        self.device
+            .wait_for(&self.recip_stream.0)
+            .map_err(GpuError::from)
     }
 }
 
@@ -628,13 +693,39 @@ impl Potential for SpmeReciprocalState {
             self.w_per_particle_virial = 0.0;
             return Ok(());
         }
+        // Launch-only: queues the 4 reciprocal kernels onto
+        // grid.recip_stream and returns. The host does not block on
+        // cuFFT or on virial_per_cell here; the join with the default
+        // stream and the virial dtoh+sum run at the start of reduce().
         timings.kernel_start(KernelStage::SPME_RECIP_PIPELINE)?;
         self.grid
             .compute(sim_box, buffers, timings)
             .map_err(map_spme_err)?;
         timings.kernel_stop(KernelStage::SPME_RECIP_PIPELINE)?;
+        Ok(())
+    }
 
-        // Reduce `virial_per_cell` host-side. The 0.5 factor matches the
+    fn reduce(
+        &mut self,
+        mut output: SlotOutputView<'_>,
+        cx: &ForceFieldContext<'_>,
+        timings: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        let n = self.grid.particle_count;
+        if n == 0 {
+            return Ok(());
+        }
+
+        // Join the default stream with recip_stream so the dtoh below
+        // and the force_gather launch that follows both see finalized
+        // virial_per_cell and V buffers. wait_for records an event on
+        // recip_stream and makes the default stream wait on it.
+        self.grid
+            .device
+            .wait_for(&self.grid.recip_stream)
+            .map_err(GpuError::from)?;
+
+        // Reduce virial_per_cell host-side. The 0.5 factor matches the
         // Ewald half-sum that defines U_recip in
         // `docs/long-range-electrostatics.md`.
         if self.virial_host_scratch.len() != self.grid.m_complex {
@@ -649,19 +740,7 @@ impl Potential for SpmeReciprocalState {
             w_recip += v as f64;
         }
         self.w_per_particle_virial = (0.5 * w_recip / n as f64) as f32;
-        Ok(())
-    }
 
-    fn reduce(
-        &mut self,
-        mut output: SlotOutputView<'_>,
-        cx: &ForceFieldContext<'_>,
-        timings: &mut Timings,
-    ) -> Result<(), ForceFieldError> {
-        let n = self.grid.particle_count;
-        if n == 0 {
-            return Ok(());
-        }
         timings.kernel_start(KernelStage::SPME_FORCE_GATHER)?;
         spme_force_gather(
             cx.buffers,

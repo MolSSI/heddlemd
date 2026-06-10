@@ -940,6 +940,13 @@
     "title": "Dimension",
     "type": "api-item"
   },
+  "rq-0d5e76ec": {
+    "decl": "- `recip_ready_event` — recorded on `recip_stream` immediately after",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "recip_ready_event",
+    "type": "api-item"
+  },
   "rq-0d7ebeb6": {
     "decl": "Scenario: Custom integrator builder is selectable",
     "file": "integration/framework",
@@ -1115,6 +1122,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "[barostat] kind = \"berendsen\" with all required fields accepted",
+    "type": "scenario"
+  },
+  "rq-0fd9a581": {
+    "decl": "Scenario: contribute() records recip_ready_event on the recip stream after the inverse FFT",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "contribute() records recip_ready_event on the recip stream after the inverse FFT",
     "type": "scenario"
   },
   "rq-0ffccee0": {
@@ -1907,6 +1921,13 @@
     "title": "rescale_positions",
     "type": "api-item"
   },
+  "rq-19bc076f": {
+    "decl": "Scenario: contribute() records default_ready_event on the default stream and the recip stream waits on it before the first kernel",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "contribute() records default_ready_event on the default stream and the recip stream waits on it before the first kernel",
+    "type": "scenario"
+  },
   "rq-19ccc047": {
     "decl": "Scenario: [thermostat] unknown kind is rejected",
     "file": "io/config-schema",
@@ -2008,6 +2029,13 @@
     "file": "integration/nose-hoover-chain",
     "refs": [],
     "title": "Construct for a SETTLE'd water system",
+    "type": "scenario"
+  },
+  "rq-1aa9e851": {
+    "decl": "Scenario: recip_stream and the two events are released when the slot is dropped",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "recip_stream and the two events are released when the slot is dropped",
     "type": "scenario"
   },
   "rq-1ad7e751": {
@@ -3178,6 +3206,13 @@
     "title": "SI-mode .xyz velocities are converted to atomic-unit velocity",
     "type": "scenario"
   },
+  "rq-274db88b": {
+    "decl": "- `default_ready_event` — recorded on the default stream at the start",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "default_ready_event",
+    "type": "api-item"
+  },
   "rq-278cb574": {
     "decl": "- `SettleBuilder` — implements `ConstraintBuilder` with",
     "file": "integration/settle",
@@ -3327,6 +3362,13 @@
     "refs": [],
     "title": "Self-energy",
     "type": "section"
+  },
+  "rq-29d0e458": {
+    "decl": "Scenario: cuFFT R2C and C2R plans are bound to the recip stream at construction",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "cuFFT R2C and C2R plans are bound to the recip stream at construction",
+    "type": "scenario"
   },
   "rq-29dda250": {
     "decl": "- `apply(buffers, sim_box, dt, timings)` — runs the per-step",
@@ -5131,6 +5173,13 @@
     "title": "Reject too few data rows",
     "type": "scenario"
   },
+  "rq-44cce069": {
+    "decl": "- `spme_real_pair_force` and `spme_force_gather` run on the device's",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_real_pair_force",
+    "type": "api-item"
+  },
   "rq-44ce75ec": {
     "decl": "## Governed Error Types",
     "file": "error-handling",
@@ -5226,6 +5275,13 @@
     ],
     "title": "LogWriterError",
     "type": "api-item"
+  },
+  "rq-46530505": {
+    "decl": "Scenario: reduce() waits for the recip stream before reading the per-cell virial",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "reduce() waits for the recip stream before reading the per-cell virial",
+    "type": "scenario"
   },
   "rq-46792e3e": {
     "decl": "### Types",
@@ -6546,6 +6602,13 @@
     "title": "`Thermostat` trait overrides",
     "type": "section"
   },
+  "rq-5abda6fa": {
+    "decl": "Scenario: Reciprocal pipeline kernels enqueue on the recip stream",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Reciprocal pipeline kernels enqueue on the recip stream",
+    "type": "scenario"
+  },
   "rq-5ac172fc": {
     "decl": "Scenario: andersen_resample on empty state is a no-op",
     "file": "integration/andersen",
@@ -6850,6 +6913,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Prefix scan is correct for cell counts beyond a single block-totals pass",
+    "type": "scenario"
+  },
+  "rq-5f54b9b3": {
+    "decl": "Scenario: SpmeReciprocalState owns a dedicated CUDA stream and two synchronization events",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SpmeReciprocalState owns a dedicated CUDA stream and two synchronization events",
     "type": "scenario"
   },
   "rq-5f59fa80": {
@@ -8226,6 +8296,13 @@
     "title": "Device-side Pair-Force Frame Helper",
     "type": "section"
   },
+  "rq-73efd4be": {
+    "decl": "Scenario: Two-stream pipeline preserves bit-exact reproducibility across runs",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Two-stream pipeline preserves bit-exact reproducibility across runs",
+    "type": "scenario"
+  },
   "rq-73fbb111": {
     "decl": "## Progress reporting",
     "file": "simulation-runner",
@@ -8238,6 +8315,13 @@
     ],
     "title": "Progress reporting",
     "type": "section"
+  },
+  "rq-7404b017": {
+    "decl": "Scenario: spme_force_gather runs on the default stream after the recip-stream wait",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_force_gather runs on the default stream after the recip-stream wait",
+    "type": "scenario"
   },
   "rq-743ae35c": {
     "decl": "Scenario: check_min_perpendicular_width reports the first failing direction when multiple fail",
@@ -12526,6 +12610,13 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-b1d70f2f": {
+    "decl": "Scenario: contribute() returns without blocking on the reciprocal pipeline",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "contribute() returns without blocking on the reciprocal pipeline",
+    "type": "scenario"
   },
   "rq-b1e87ce4": {
     "decl": "Scenario: cumulative_injection records K_new − K_old per invocation",

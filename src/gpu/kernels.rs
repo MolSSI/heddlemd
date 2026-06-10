@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaSlice, CudaViewMut, DeviceSlice, LaunchAsync, LaunchConfig};
+use cudarc::driver::{
+    CudaDevice, CudaSlice, CudaStream, CudaViewMut, DeviceSlice, LaunchAsync, LaunchConfig,
+};
 
 use crate::gpu::{GpuError, Kernels, LosslessBuffers, PairBuffer, ParticleBuffers};
 use crate::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
@@ -470,6 +472,53 @@ pub fn spme_charge_spread(
     spline_order: u32,
     rho: &mut CudaSlice<f32>,
 ) -> Result<(), GpuError> {
+    spme_charge_spread_impl(
+        particle_buffers,
+        sim_box,
+        sorted_particle_ids,
+        cell_offsets,
+        grid,
+        spline_order,
+        rho,
+        None,
+    )
+}
+
+// rq-9ca00d25
+#[allow(clippy::too_many_arguments)]
+pub fn spme_charge_spread_on_stream(
+    particle_buffers: &ParticleBuffers,
+    sim_box: &SimulationBox,
+    sorted_particle_ids: &CudaSlice<u32>,
+    cell_offsets: &CudaSlice<u32>,
+    grid: [u32; 3],
+    spline_order: u32,
+    rho: &mut CudaSlice<f32>,
+    stream: &CudaStream,
+) -> Result<(), GpuError> {
+    spme_charge_spread_impl(
+        particle_buffers,
+        sim_box,
+        sorted_particle_ids,
+        cell_offsets,
+        grid,
+        spline_order,
+        rho,
+        Some(stream),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spme_charge_spread_impl(
+    particle_buffers: &ParticleBuffers,
+    sim_box: &SimulationBox,
+    sorted_particle_ids: &CudaSlice<u32>,
+    cell_offsets: &CudaSlice<u32>,
+    grid: [u32; 3],
+    spline_order: u32,
+    rho: &mut CudaSlice<f32>,
+    stream: Option<&CudaStream>,
+) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     let n_a = grid[0];
     let n_b = grid[1];
@@ -485,31 +534,31 @@ pub fn spme_charge_spread(
     let cfg = launch_config(m_u32);
     let lat = sim_box.lattice();
     let n_u32 = n as u32;
+    let args = (
+        &particle_buffers.positions_x,
+        &particle_buffers.positions_y,
+        &particle_buffers.positions_z,
+        &particle_buffers.charges,
+        sorted_particle_ids,
+        cell_offsets,
+        lat[0],
+        lat[1],
+        lat[2],
+        lat[3],
+        lat[4],
+        lat[5],
+        n_a,
+        n_b,
+        n_c,
+        spline_order,
+        rho,
+        n_u32,
+    );
     unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                &particle_buffers.charges,
-                sorted_particle_ids,
-                cell_offsets,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
-                n_a,
-                n_b,
-                n_c,
-                spline_order,
-                rho,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
+        match stream {
+            Some(s) => func.launch_on_stream(s, cfg, args).map_err(GpuError::from)?,
+            None => func.launch(cfg, args).map_err(GpuError::from)?,
+        }
     }
     Ok(())
 }
@@ -526,6 +575,57 @@ pub fn spme_influence_multiply(
     n_c_complex: u32,
     n_complex: u32,
 ) -> Result<(), GpuError> {
+    spme_influence_multiply_impl(
+        kernels,
+        influence_g,
+        virial_factor,
+        rho_hat_interleaved,
+        virial_per_cell,
+        n_c,
+        n_c_complex,
+        n_complex,
+        None,
+    )
+}
+
+// rq-9ca00d25
+#[allow(clippy::too_many_arguments)]
+pub fn spme_influence_multiply_on_stream(
+    kernels: &Kernels,
+    influence_g: &CudaSlice<f32>,
+    virial_factor: &CudaSlice<f32>,
+    rho_hat_interleaved: &mut CudaSlice<f32>,
+    virial_per_cell: &mut CudaSlice<f32>,
+    n_c: u32,
+    n_c_complex: u32,
+    n_complex: u32,
+    stream: &CudaStream,
+) -> Result<(), GpuError> {
+    spme_influence_multiply_impl(
+        kernels,
+        influence_g,
+        virial_factor,
+        rho_hat_interleaved,
+        virial_per_cell,
+        n_c,
+        n_c_complex,
+        n_complex,
+        Some(stream),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn spme_influence_multiply_impl(
+    kernels: &Kernels,
+    influence_g: &CudaSlice<f32>,
+    virial_factor: &CudaSlice<f32>,
+    rho_hat_interleaved: &mut CudaSlice<f32>,
+    virial_per_cell: &mut CudaSlice<f32>,
+    n_c: u32,
+    n_c_complex: u32,
+    n_complex: u32,
+    stream: Option<&CudaStream>,
+) -> Result<(), GpuError> {
     if n_complex == 0 {
         return Ok(());
     }
@@ -535,20 +635,20 @@ pub fn spme_influence_multiply(
     debug_assert_eq!(virial_per_cell.len(), n_complex as usize);
     let func = kernels.spme_recip.spme_influence_multiply.clone();
     let cfg = launch_config(n_complex);
+    let args = (
+        influence_g,
+        virial_factor,
+        rho_hat_interleaved,
+        virial_per_cell,
+        n_c,
+        n_c_complex,
+        n_complex,
+    );
     unsafe {
-        func.launch(
-            cfg,
-            (
-                influence_g,
-                virial_factor,
-                rho_hat_interleaved,
-                virial_per_cell,
-                n_c,
-                n_c_complex,
-                n_complex,
-            ),
-        )
-        .map_err(GpuError::from)?;
+        match stream {
+            Some(s) => func.launch_on_stream(s, cfg, args).map_err(GpuError::from)?,
+            None => func.launch(cfg, args).map_err(GpuError::from)?,
+        }
     }
     Ok(())
 }

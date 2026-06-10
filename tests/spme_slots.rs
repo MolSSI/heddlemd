@@ -113,6 +113,8 @@ fn spme_reciprocal_state_two_independent_constructs_produce_byte_identical_grids
     };
     s1.contribute(&buffers, &sim_box, &cx, &mut t).unwrap();
     s2.contribute(&buffers, &sim_box, &cx, &mut t).unwrap();
+    s1.grid().sync_recip().unwrap();
+    s2.grid().sync_recip().unwrap();
 
     let v1: Vec<f32> = gpu.device.dtoh_sync_copy(&s1.grid().v).unwrap();
     let v2: Vec<f32> = gpu.device.dtoh_sync_copy(&s2.grid().v).unwrap();
@@ -158,6 +160,7 @@ fn spme_reciprocal_total_energy_equals_recip_minus_self() {
         sim_box: &sim_box,
     };
     slot.contribute(&buffers, &sim_box, &cx, &mut t).unwrap();
+    slot.grid().sync_recip().unwrap();
 
     // Independent U_recip from the pipeline-resident buffers.
     let device = gpu.device.clone();

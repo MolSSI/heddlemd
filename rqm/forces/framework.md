@@ -615,8 +615,20 @@ in either class does not change the kernel's signature.
 
 ## Determinism Guarantees <!-- rq-76cb9922 -->
 
-- All slot kernels and the combiner launch on the default stream of the
-  same `Arc<CudaDevice>` carried by `ParticleBuffers`.
+- The combiner launches on the default stream of the same
+  `Arc<CudaDevice>` carried by `ParticleBuffers`. Slot kernels launch
+  on the default stream unless the slot explicitly owns a dedicated
+  CUDA stream and synchronizes against the default stream at its
+  `contribute` / `reduce` boundary (see `spme.md` for the only such
+  slot, the SPME reciprocal pipeline). A slot that owns a stream must
+  guarantee that, by the time its `reduce` returns, every device
+  buffer it has written is visible to subsequent default-stream
+  launches, and that every device buffer it reads has been written by
+  a preceding default-stream launch the slot waited on. The combiner
+  reads only the slot-output buffers, which are written either on the
+  default stream (by slots without their own stream) or on the default
+  stream during `reduce` after the slot has synchronised its own
+  stream — so the combiner sees a consistent state.
 - The slot order produced by `ForceField::new` is deterministic and
   identical across runs with the same config.
 - Each slot writes into its assigned row of its class's flat

@@ -187,6 +187,16 @@ The reciprocal-space slot owns:
   `b_factors_a: [f32; n_a]`, `b_factors_b: [f32; n_b]`,
   `b_factors_c: [f32; n_c]` precomputed once at slot construction.
 - A cuFFT plan handle for the `(n_a, n_b, n_c)` R2C / C2R transforms.
+  Both plans are bound to the slot's `recip_stream` via `cufftSetStream`
+  at construction and are never rebound.
+- A dedicated CUDA stream `recip_stream` on which the four reciprocal
+  kernels execute concurrently with the default stream's work for the
+  same timestep.
+- Two CUDA events `default_ready_event` and `recip_ready_event` used to
+  synchronize `recip_stream` with the device's default stream at the
+  entry and exit of the reciprocal pipeline (see *Launch configuration*).
+- A host-side scratch `Vec<f32>` of length `M_complex` for the
+  `virial_per_cell` dtoh that runs at the start of `reduce()`.
 
 ### Bin structure <!-- rq-618bc65e -->
 
@@ -355,9 +365,15 @@ W_recip = (k_C / 2) · Σ_{k ≠ 0} G[k] · |rho_hat[k]|² · (1 − K² / (2 α
 The contribution per complex-grid cell is computed by the same kernel
 that does the influence-function multiply (or a separate kernel that
 runs alongside; the implementation is free to fuse or split). The cell
-values are summed deterministically — either by a tree reduction in
-fixed topology or by a sorted-segment reduction — to produce a single
-scalar `W_recip` on the device.
+values are summed into a single scalar `W_recip` by host-side
+accumulation of the `virial_per_cell` buffer: at the start of
+`SpmeReciprocalState::reduce()`, the default stream issues
+`cudaStreamWaitEvent(default_stream, recip_ready_event)` so the
+subsequent `dtoh_sync_copy_into(virial_per_cell, host_scratch)` sees
+finalized values, the host walks the scratch in `0..M_complex` order
+and accumulates into an `f64`, and the result is scaled to
+`W_recip / N`. The host `f64` accumulation order is fixed across runs;
+the scalar is therefore byte-identical on the same hardware.
 
 The scalar is distributed per particle by equal division: each particle
 receives `W_recip / N` in its `virials[i]` slot. Summing `virials` over
@@ -445,7 +461,11 @@ only inside the `SpmeReciprocalState` construction path.
   `label() == "spme_reciprocal"`. Reports `max_cutoff() = None` (it does
   not contribute to the shared neighbor list's search radius). Fields
   private. The slot owns its own bin-only `NeighborListState` for the
-  spread / gather kernels.
+  spread / gather kernels, plus the dedicated `recip_stream` and the
+  two cross-stream events used by the reciprocal pipeline (see
+  *Reciprocal-space pipeline*). `recip_stream` and the two events are
+  allocated by `SpmeReciprocalState::new` and released in the slot's
+  `Drop` impl.
 
   Constructor:
   - `SpmeReciprocalState::new(gpu: &GpuContext, sim_box: &SimulationBox, particle_count: usize, charges: &[f32], alpha: f32, grid: [u32; 3], spline_order: u32) -> Result<SpmeReciprocalState, SpmeError>`
@@ -561,12 +581,43 @@ implementation).
 - `spme_force_gather`: one thread per particle, block size 256, grid <!-- rq-35b76155 -->
   `ceil(N / 256)`.
 
-All kernels run on the default stream carried by `particle_buffers.device`.
+Stream assignment:
+
+- `spme_real_pair_force` and `spme_force_gather` run on the device's <!-- rq-44cce069 -->
+  default stream carried by `particle_buffers.device`.
+- The four reciprocal-pipeline kernels — `spme_charge_spread`, the
+  cuFFT R2C transform, `spme_influence_multiply`, and the cuFFT C2R
+  transform — run on a dedicated CUDA stream `recip_stream` owned by
+  `SpmeReciprocalState`. The R2C and C2R plans are bound to
+  `recip_stream` via `cufftSetStream` once at slot construction and
+  are never rebound.
+
+Cross-stream synchronization uses two CUDA events owned by
+`SpmeReciprocalState`:
+
+- `default_ready_event` — recorded on the default stream at the start <!-- rq-274db88b -->
+  of `SpmeReciprocalState::contribute()` and waited on by
+  `recip_stream` (via `cudaStreamWaitEvent`) before the first
+  reciprocal kernel enqueues. Guarantees that the integrator's writes
+  to `positions_x/y/z` and the construction-time writes to `charges`
+  are visible to the reciprocal pipeline.
+- `recip_ready_event` — recorded on `recip_stream` immediately after <!-- rq-0d5e76ec -->
+  the inverse FFT enqueues at the end of `contribute()`, and waited on
+  by the default stream at the start of `SpmeReciprocalState::reduce()`.
+  Guarantees that `V` and `virial_per_cell` are finalized before the
+  default stream's `virial_per_cell` dtoh and the `spme_force_gather`
+  launch.
+
+Both events are reused across timesteps; they are created in
+`SpmeReciprocalState::new` and released when the slot is dropped. The
+host call to `SpmeReciprocalState::contribute()` returns as soon as the
+four reciprocal kernels have been enqueued on `recip_stream`; the host
+does not block on cuFFT or on the reciprocal kernels.
 
 ## Reproducibility <!-- rq-20530653 -->
 
 SPME on Dynamics is bit-exact GPU-vs-GPU when run on the same hardware
-with identical inputs. Five components carry the reproducibility
+with identical inputs. Six components carry the reproducibility
 invariant:
 
 1. **Bin structure.** Inherits the existing cell-list service's
@@ -575,9 +626,11 @@ invariant:
 2. **Charge spread.** One thread per grid point; per-thread accumulation
    in fixed `(bin_index, particle_id)` order.
 3. **cuFFT.** Deterministic for fixed plan dimensions, single-stream
-   usage, and the same hardware. The `cufft_determinism_smoke_test` run
-   at `init_device` time validates the contract on the host's specific
-   cuFFT version.
+   usage, and the same hardware. "Single-stream usage" is satisfied
+   because both cuFFT plans are bound once at slot construction to
+   `recip_stream` via `cufftSetStream` and are never rebound. The
+   `cufft_determinism_smoke_test` run at `init_device` time validates
+   the contract on the host's specific cuFFT version.
 4. **Influence-function multiply and virial-per-cell write.** One
    thread per complex grid cell; no atomics; no inter-thread reads.
 5. **Force gather.** One thread per particle; each thread reads `p³`
@@ -586,10 +639,24 @@ invariant:
    `W_recip / N` (the slot's `reduce()` distributes the scalar
    identically to every particle, so the SoA convention is preserved
    regardless of summation order).
+6. **Two-stream model.** The reciprocal pipeline runs on
+   `recip_stream`; the real-space slot, the force-gather kernel, and
+   every non-SPME slot's kernel run on the default stream. The two
+   streams write to disjoint device buffers — `recip_stream` writes
+   `rho`, `rho_hat`, `V`, and `virial_per_cell`; the default stream
+   writes the real-space `PairBuffer`, the slot-output buffers, and
+   `forces_*`. Cross-stream ordering is enforced by the two events
+   `default_ready_event` and `recip_ready_event` recorded at
+   deterministic points in `contribute()` and waited on at
+   deterministic points in `contribute()` / `reduce()`; the
+   wait edges are independent of host thread scheduling. Two runs with
+   identical inputs on the same GPU therefore observe byte-identical
+   writes from both streams.
 
-The reciprocal-virial scalar reduction uses a fixed-topology tree
-reduction (or equivalent deterministic sum); the implementation must
-not use unordered atomic-add for the scalar accumulation.
+The reciprocal-virial scalar reduction sums `virial_per_cell` on the
+host in `f64` in fixed index order at the start of `reduce()`; the
+implementation must not use unordered atomic-add or any
+non-deterministic device-side reduction.
 
 ## Out of Scope <!-- rq-f0038583 -->
 
@@ -878,4 +945,73 @@ Feature: Smooth particle-mesh Ewald (SPME)
     Then the influence function uses k-vectors from the reciprocal lattice H^(-T)
     And the per-particle reciprocal-space force agrees with an explicit-Ewald reference
       on the same triclinic box to within 1e-3 relative
+
+  # --- Streams and cross-stream synchronization ---
+
+  @rq-5f54b9b3
+  Scenario: SpmeReciprocalState owns a dedicated CUDA stream and two synchronization events
+    Given a constructed SpmeReciprocalState built via SpmeReciprocalState::new
+    Then state.recip_stream is a CudaStream handle distinct from the device's default stream
+    And state.default_ready_event and state.recip_ready_event are CudaEvent handles
+
+  @rq-29d0e458
+  Scenario: cuFFT R2C and C2R plans are bound to the recip stream at construction
+    Given a constructed SpmeReciprocalState
+    Then cufftSetStream was called on the R2C plan with recip_stream during SpmeReciprocalState::new
+    And cufftSetStream was called on the C2R plan with recip_stream during SpmeReciprocalState::new
+    And no further cufftSetStream calls are issued during step execution
+
+  @rq-5abda6fa
+  Scenario: Reciprocal pipeline kernels enqueue on the recip stream
+    Given a constructed SpmeReciprocalState
+    When SpmeReciprocalState::contribute is called
+    Then spme_charge_spread, the forward cuFFT R2C, spme_influence_multiply, and the inverse cuFFT C2R each enqueue on recip_stream
+    And the default stream's pending work queue contains no reciprocal-pipeline launches
+
+  @rq-b1d70f2f
+  Scenario: contribute() returns without blocking on the reciprocal pipeline
+    Given a constructed SpmeReciprocalState
+    When SpmeReciprocalState::contribute is called
+    Then contribute() returns Ok(()) without invoking cudaStreamSynchronize or any dtoh on the recip stream
+    And the host-side virial_host_scratch has not been read
+
+  @rq-19bc076f
+  Scenario: contribute() records default_ready_event on the default stream and the recip stream waits on it before the first kernel
+    Given a constructed SpmeReciprocalState
+    When SpmeReciprocalState::contribute is called
+    Then a cudaEventRecord(default_ready_event, default_stream) call precedes the recip pipeline launches
+    And a cudaStreamWaitEvent(recip_stream, default_ready_event) call precedes the first reciprocal kernel enqueue
+
+  @rq-0fd9a581
+  Scenario: contribute() records recip_ready_event on the recip stream after the inverse FFT
+    Given a constructed SpmeReciprocalState
+    When SpmeReciprocalState::contribute is called
+    Then a cudaEventRecord(recip_ready_event, recip_stream) call follows the inverse cuFFT C2R enqueue
+
+  @rq-46530505
+  Scenario: reduce() waits for the recip stream before reading the per-cell virial
+    Given SpmeReciprocalState::contribute has just been called and the recip pipeline is still in flight
+    When SpmeReciprocalState::reduce is called
+    Then a cudaStreamWaitEvent(default_stream, recip_ready_event) call precedes the dtoh_sync_copy_into of virial_per_cell
+    And after the dtoh completes, the host scratch holds finalized virial_per_cell values
+
+  @rq-7404b017
+  Scenario: spme_force_gather runs on the default stream after the recip-stream wait
+    Given SpmeReciprocalState::reduce has just been called
+    Then spme_force_gather was enqueued on the default stream
+    And the default stream's wait on recip_ready_event preceded the force_gather launch
+
+  @rq-73efd4be
+  Scenario: Two-stream pipeline preserves bit-exact reproducibility across runs
+    Given two independent ForceField instances A and B, both with SPME enabled and identical inputs
+    When each runs one full ForceField::step on the same GPU
+    And each pipeline's ParticleBuffers.forces_x, forces_y, forces_z, potential_energies, virials are downloaded
+    Then run A and run B agree byte-for-byte on every f32
+
+  @rq-1aa9e851
+  Scenario: recip_stream and the two events are released when the slot is dropped
+    Given a constructed SpmeReciprocalState
+    When the state is dropped
+    Then recip_stream is destroyed via the cudarc Drop path
+    And default_ready_event and recip_ready_event are destroyed via the cudarc Drop path
 ```

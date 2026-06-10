@@ -117,6 +117,7 @@ fn spme_pipeline_matches_explicit_ewald_two_charge_pair() {
     let mut spme = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     spme.compute(&sim_box, &buffers, &mut timings).unwrap();
+    spme.sync_recip().unwrap();
 
     let energy_spme = spme_energy_from_pipeline(&spme);
     let energy_ref = explicit_ewald_recip_energy(
@@ -163,6 +164,7 @@ fn spme_pipeline_matches_explicit_ewald_four_charges() {
         SpmeReciprocalGrid::new(&gpu, &sim_box, positions.len(), params).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     spme.compute(&sim_box, &buffers, &mut timings).unwrap();
+    spme.sync_recip().unwrap();
 
     let energy_spme = spme_energy_from_pipeline(&spme);
     let energy_ref = explicit_ewald_recip_energy(
@@ -210,6 +212,7 @@ fn spread_conserves_total_charge() {
         SpmeReciprocalGrid::new(&gpu, &sim_box, positions.len(), params).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     spme.compute(&sim_box, &buffers, &mut timings).unwrap();
+    spme.sync_recip().unwrap();
 
     let rho: Vec<f32> = gpu.device.dtoh_sync_copy(&spme.rho).unwrap();
     let summed: f64 = rho.iter().map(|&v| v as f64).sum();
@@ -265,6 +268,8 @@ fn identical_inputs_produce_byte_identical_grids() {
     let mut timings = Timings::new(&gpu).unwrap();
     spme1.compute(&sim_box, &buffers, &mut timings).unwrap();
     spme2.compute(&sim_box, &buffers, &mut timings).unwrap();
+    spme1.sync_recip().unwrap();
+    spme2.sync_recip().unwrap();
 
     let v1: Vec<f32> = gpu.device.dtoh_sync_copy(&spme1.v).unwrap();
     let v2: Vec<f32> = gpu.device.dtoh_sync_copy(&spme2.v).unwrap();
