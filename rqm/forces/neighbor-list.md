@@ -17,8 +17,11 @@ the parsed `NeighborListConfig`:
   atom's reference displacement exceeds `r_skin / 2`. The cell layout
   (number of cells per lattice direction, total cell count) is cached at
   construction from the simulation box's lattice parameters and refreshed
-  whenever the box's `generation` counter changes (see *Box Generation
-  Tracking* below).
+  whenever the box's `generation` counter changes; a refresh forces a
+  rebuild only when the refreshed `n_cells_total` differs from the
+  cached value (see *Box Generation Tracking* below). Plain
+  barostat-driven generation ticks that leave `n_cells_total`
+  unchanged let the displacement check govern rebuild timing.
 - **`Trivial`** — every particle's neighbor list contains every
   particle (including itself; consumers handle the self slot). The list
   is materialised once at construction and never rebuilt. Used when the
@@ -253,13 +256,31 @@ state:
 5. Stores the new `n_cells`, `n_cells_total`, and the cached lattice
    parameters used by the spatial-hash and build kernels, and replaces
    `cached_generation` with `sim_box.generation()`.
-6. Sets `needs_rebuild = true`. The rebuild that fires after the cache
-   refresh uses the new cell layout, so the displacement check is skipped
-   on a generation-mismatch step (current cell bins are stale by
-   construction).
+6. Sets `needs_rebuild = true` **only when `n_cells_total` differed
+   from the prior cached value**. In that case the existing cell-list
+   contents are stale (they were sized and indexed for the previous
+   `n_cells_total`) and the rebuild that follows uses the new cell
+   layout; the displacement check is skipped on this `pre_step` because
+   the next rebuild is already required. When `n_cells_total` is
+   unchanged across the refresh, `needs_rebuild` is **not** set by the
+   refresh; the existing cell-list contents remain valid (cell indices
+   in fractional space are preserved under uniform box scaling that
+   keeps the same `n_cells`) and the displacement check governs whether
+   a rebuild fires on this `pre_step` exactly as in the no-generation-
+   tick case.
 
 `r_search_sq` (`(r_cut + r_skin)²`) does not depend on the box and is left
 in place across refreshes.
+
+This policy is what makes NPT runs efficient: a barostat that ticks the
+box generation every step but leaves `n_cells_total` unchanged (the
+typical case, since per-step volume changes are <0.1 %) consults the
+displacement check on every `pre_step`, and the neighbor list is
+rebuilt at roughly the same rate as in NVT rather than every step. The
+displacement check operates in physical coordinates and therefore
+captures barostat-induced atom motion at the box edge — the worst-case
+contributor — so correctness is preserved without an additional
+box-scale-factor guard.
 
 In `Trivial` mode the cell layout is not used; `pre_step` ignores the box's
 generation and does no per-step work.
@@ -273,11 +294,15 @@ rebuild.
 Per timestep, after the integrator's pre-force step:
 
 1. If `sim_box.generation() != cached_generation`, refresh the cell-layout
-   cache (see *Box Generation Tracking*). This sets `needs_rebuild = true`
-   and skips the displacement-check kernel for this step. The refresh may
-   return `BoxTooSmallForCells`, in which case `pre_step` aborts and the
-   error propagates.
-2. Otherwise, run the displacement-check kernel, download the per-atom
+   cache (see *Box Generation Tracking*). The refresh sets
+   `needs_rebuild = true` and skips the displacement-check kernel for
+   this step only when the refreshed `n_cells_total` differs from the
+   prior cached value. When `n_cells_total` is unchanged the refresh
+   updates the cached lattice parameters and `cached_generation` only
+   and falls through to the displacement-check step below. The refresh
+   may return `BoxTooSmallForCells`, in which case `pre_step` aborts and
+   the error propagates.
+2. Run the displacement-check kernel, download the per-atom
    buffer, compute `max_disp`, and set `needs_rebuild = true` if
    `max_disp > r_skin / 2`. The displacement check is skipped when
    `needs_rebuild` is already true.
@@ -540,11 +565,14 @@ lifetime of the run.
     `contribute` runs. In `CellList` mode:
     1. Compares `sim_box.generation()` against `cached_generation`. On
        mismatch refreshes the cell-layout cache (see *Box Generation
-       Tracking*), sets `needs_rebuild = true`, and skips the
-       displacement check for this step. May return
+       Tracking*); sets `needs_rebuild = true` and skips the displacement
+       check **only when the refreshed `n_cells_total` differs from the
+       prior cached value**. When `n_cells_total` is unchanged the
+       refresh updates `cached_generation` and the cached lattice
+       parameters and falls through to step 2. May return
        `BoxTooSmallForCells`.
-    2. Otherwise, if `!needs_rebuild`, runs the displacement check and
-       sets `needs_rebuild = true` if `max_disp > r_skin / 2`.
+    2. If `!needs_rebuild`, runs the displacement check and sets
+       `needs_rebuild = true` if `max_disp > r_skin / 2`.
     3. If `needs_rebuild`, runs the rebuild and clears the flag.
     In `Trivial` mode this is a no-op.
 
@@ -1085,13 +1113,14 @@ Feature: Cell-list neighbor list
     And state.cached_generation is unchanged
 
   @rq-cf847c1f
-  Scenario: Box generation increment refreshes cell layout and forces a rebuild
+  Scenario: Box generation tick that changes n_cells_total forces a rebuild
     Given a NeighborListState in CellList mode immediately after its first pre_step
       with an orthorhombic box lx=ly=lz=10.0 and r_cut + r_skin = 1.3
-      (so n_cells = [7, 7, 7])
+      (so n_cells = [7, 7, 7], n_cells_total = 343)
     When box.set_lattice(20.0, 20.0, 20.0, 0.0, 0.0, 0.0) is called (generation 0 → 1)
     And pre_step is called with the updated box
     Then state.n_cells equals [15, 15, 15] (floor(20.0 / 1.3) = 15)
+    And state.n_cells_total equals 3375 (differs from prior 343)
     And state.cached_generation equals box.generation() after the call
     And state.needs_rebuild was set to true and a rebuild was performed in
       the same pre_step call
@@ -1151,16 +1180,50 @@ Feature: Cell-list neighbor list
     Then the second pre_step performs no cell-layout recompute
     And the second pre_step runs the displacement check (no longer skipped)
 
+  @rq-f79d1ac5
+  Scenario: Generation tick with unchanged n_cells_total still triggers rebuild when displacement exceeds threshold
+    Given a NeighborListState in CellList mode just past its first pre_step
+      with r_skin = 1.0 (so r_skin / 2 = 0.5)
+    And reference positions captured at the last rebuild
+    And at least one atom whose distance from its reference position exceeds 0.5
+    When box.set_lattice is called bumping the generation, with the new lattice
+      yielding the same n_cells_total as before
+    And pre_step is called with the updated box
+    Then the displacement-check kernel was launched
+    And max_disp > 0.5
+    And state.needs_rebuild was set to true and a rebuild was performed
+    And state.cached_generation equals the new box generation after the call
+
+  @rq-3288a78c
+  Scenario: NPT-style sequence of small barostat ticks rebuilds at the displacement-driven rate
+    Given a NeighborListState in CellList mode with r_skin = 1.0 just past its
+      first pre_step
+    And a fixed reference set of atom positions
+    When a sequence of K pre_step calls is issued, each preceded by a barostat
+      that ticks the generation and scales the box by 1.0e-4 (so n_cells_total
+      stays constant) and a small physical-coord atom drift
+    Then the number of rebuilds performed across the K pre_step calls equals
+      the number of pre_step calls on which max_disp first crossed r_skin / 2
+      (the same set that would have triggered in a no-barostat NVT run with
+      the same atom drifts)
+    And no pre_step call triggers a rebuild solely from the generation tick
+
   @rq-72aae589
-  Scenario: Generation mismatch is detected even when the box lattice parameters
-    are unchanged
+  Scenario: Generation tick with unchanged n_cells_total updates the cache without forcing rebuild
     Given a NeighborListState in CellList mode with an orthorhombic box
       lx=ly=lz=10.0 just past its first pre_step
-    When box.set_lattice(10.0, 10.0, 10.0, 0.0, 0.0, 0.0) is called
-      (same lattice but generation bumps from 0 to 1)
+      (n_cells_total = 343)
+    And reference positions captured at the last rebuild
+    And no atom has moved more than r_skin / 2 since the last rebuild
+    When box.set_lattice(10.001, 10.001, 10.001, 0.0, 0.0, 0.0) is called
+      (lattice barely changed; floor((10.001) / (r_cut + r_skin)) still equals the prior n_cells; generation bumps from 0 to 1)
     And pre_step is called with the updated box
     Then state.cached_generation equals 1 after the call
-    And state.needs_rebuild was set to true and a rebuild was performed
+    And state.n_cells_total equals its prior value (343)
+    And cell_offsets retains its prior device allocation
+    And the displacement-check kernel was launched
+    And state.needs_rebuild is false after pre_step returns
+    And no rebuild was performed
 
   # --- Device-side spatial hash ---
 

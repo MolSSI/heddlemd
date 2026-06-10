@@ -4008,6 +4008,13 @@
     "title": "Registries",
     "type": "api-item"
   },
+  "rq-3288a78c": {
+    "decl": "Scenario: NPT-style sequence of small barostat ticks rebuilds at the displacement-driven rate",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "NPT-style sequence of small barostat ticks rebuilds at the displacement-driven rate",
+    "type": "scenario"
+  },
   "rq-3298bdc5": {
     "decl": "Scenario: ConfigError::InvalidValue renders as prose",
     "file": "error-handling",
@@ -8237,10 +8244,10 @@
     "type": "section"
   },
   "rq-72aae589": {
-    "decl": "Scenario: Generation mismatch is detected even when the box lattice parameters",
+    "decl": "Scenario: Generation tick with unchanged n_cells_total updates the cache without forcing rebuild",
     "file": "forces/neighbor-list",
     "refs": [],
-    "title": "Generation mismatch is detected even when the box lattice parameters",
+    "title": "Generation tick with unchanged n_cells_total updates the cache without forcing rebuild",
     "type": "scenario"
   },
   "rq-72c57874": {
@@ -14514,10 +14521,10 @@
     "type": "section"
   },
   "rq-cf847c1f": {
-    "decl": "Scenario: Box generation increment refreshes cell layout and forces a rebuild",
+    "decl": "Scenario: Box generation tick that changes n_cells_total forces a rebuild",
     "file": "forces/neighbor-list",
     "refs": [],
-    "title": "Box generation increment refreshes cell layout and forces a rebuild",
+    "title": "Box generation tick that changes n_cells_total forces a rebuild",
     "type": "scenario"
   },
   "rq-cfb6aadb": {
@@ -17564,6 +17571,13 @@
     "file": "forces/morse-bonded",
     "refs": [],
     "title": "Compressed bond produces a repulsive force",
+    "type": "scenario"
+  },
+  "rq-f79d1ac5": {
+    "decl": "Scenario: Generation tick with unchanged n_cells_total still triggers rebuild when displacement exceeds threshold",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Generation tick with unchanged n_cells_total still triggers rebuild when displacement exceeds threshold",
     "type": "scenario"
   },
   "rq-f7a71238": {

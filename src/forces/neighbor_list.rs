@@ -358,7 +358,8 @@ impl NeighborListState {
         let new_n_cells_total =
             new_n_cells[0] as usize * new_n_cells[1] as usize * new_n_cells[2] as usize;
         check_n_cells_total(new_n_cells_total)?;
-        if new_n_cells_total != cl.n_cells_total {
+        let n_cells_total_changed = new_n_cells_total != cl.n_cells_total;
+        if n_cells_total_changed {
             cl.cell_offsets = device
                 .alloc_zeros::<u32>(new_n_cells_total + 1)
                 .map_err(GpuError::from)?;
@@ -374,8 +375,10 @@ impl NeighborListState {
         cl.n_cells = new_n_cells;
         cl.n_cells_total = new_n_cells_total;
         cl.cached_generation = sim_box.generation();
-        cl.needs_rebuild = true;
-        Ok(true)
+        if n_cells_total_changed {
+            cl.needs_rebuild = true;
+        }
+        Ok(n_cells_total_changed)
     }
 
     // rq-c49b2fe6
