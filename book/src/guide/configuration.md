@@ -446,7 +446,7 @@ Activates smooth particle-mesh Ewald. Mutually exclusive with
 
 Declare parameter sets referenced by name from the optional `.topology`
 file. All three arrays are optional. The schema details (Morse bonds,
-harmonic angles, SETTLE water constraints) live in
+harmonic angles, SHAKE constraint clusters) live in
 `rqm/io/config-schema.md` and the matching pages under `rqm/forces/`
 and `rqm/integration/`.
 

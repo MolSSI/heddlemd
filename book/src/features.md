@@ -76,8 +76,7 @@ this book or in `rqm/` where the feature is documented in full.
   max_force, step, accepted` columns.
 - **Constraint-aware.** When the topology declares constraint groups,
   the minimizer projects every trial position back onto the constraint
-  manifold before evaluating the trial energy (SETTLE rigid water in
-  v1).
+  manifold before evaluating the trial energy.
 
 ## Pair potentials (short-range, non-bonded)
 
@@ -110,17 +109,15 @@ this book or in `rqm/` where the feature is documented in full.
 
 ## Rigid constraints
 
-- `settle-water` — non-standard hybrid for rigid three-site water:
-  iterative SHAKE for the position projection and closed-form RATTLE
-  (3×3 Lagrange-multiplier solve via Cramer's rule) for the velocity
-  projection. **Not** the analytical SETTLE algorithm of Miyamoto &
-  Kollman 1992 despite the name; the `settle-water` kind string and
-  kernel names are kept for source-compatibility while the
-  underlying algorithm is replaced. Expected to be deprecated by
-  two follow-on features: a faithful analytical SETTLE and a
-  general M-SHAKE / SHAKE+RATTLE for arbitrary rigid clusters. See
-  `rqm/integration/settle.md` for the current implementation.
-  Configurable `r_OH` and `r_HH`.
+- `shake` — iterative SHAKE (Gauss-Seidel position projection) paired
+  with iterative RATTLE for the matching velocity projection. Handles
+  arbitrary rigid clusters up to 8 atoms / 12 constraint pairs per
+  group, with per-pair target distances declared on the constraint
+  type. A constraint type carries `atoms = <N>` and a
+  `constraints = [{ i, j, d }, ...]` array; each `[constraints]`
+  topology row then lists the global atom indices for one group of
+  that type. Rigid SPC/E water is a three-atom group with three
+  pairs `O–H₁`, `O–H₂`, `H₁–H₂`. See `rqm/integration/shake.md`.
 - Compatible with the lossy `velocity-verlet` integrator and with the
   `steepest-descent` minimizer (position-only projection in the
   latter). Langevin BAOAB, MTK NpT, and the lossless velocity-Verlet
