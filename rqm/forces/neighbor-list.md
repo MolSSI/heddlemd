@@ -141,23 +141,44 @@ host work per rebuild is the three per-atom / per-cell kernel launches
 
 Once the cell list is populated (see *Cell List Construction*), one
 device kernel builds the per-atom neighbor list. The kernel maps one
-thread to each atom `i`:
+thread block to each **home cell** — the cell whose resident atoms have
+their neighbor lists computed by that block — and within each block,
+threads cooperate so the 27 neighbour-cell position loads are issued
+once per block rather than once per atom.
 
-1. Compute atom `i`'s cell `(cx, cy, cz)` from its current position.
-2. Iterate the 27 adjacent cells `(cx + dx, cy + dy, cz + dz)` for
-   `dx, dy, dz` in `{-1, 0, +1}`, wrapping each per-axis cell index modulo
-   `n_cells_a`.
-3. For each visited cell `c'`, walk `sorted_particle_ids[cell_offsets[c']
-   .. cell_offsets[c' + 1]]` in order. For each candidate partner `j`,
-   skip if `j == i`, otherwise compute the minimum-image displacement
-   between `i` and `j`. If `r² <= (r_cut + r_skin)²`, append `j` to
-   atom `i`'s neighbor list.
-4. After all 27 cells are walked, sort atom `i`'s neighbor list in place
-   by partner index (an insertion sort over `<= max_neighbors` entries).
+For each home cell `(ca, cb, cc)`:
 
-The cell iteration order, the in-cell particle order, and the per-atom
-insertion sort are all deterministic given the inputs. No atomics are
-used.
+1. The block iterates the 27 adjacent cells `(ca + da, cb + db, cc + dc)`
+   for `(da, db, dc) ∈ {-1, 0, +1}³`, wrapping each per-axis cell index
+   modulo `n_cells_d`. Cell iteration order is **a outer, b middle,
+   c inner** (`da` slowest, `dc` fastest).
+2. For each visited cell `c'`, the block's threads cooperatively load
+   the candidate positions `sorted_particle_ids[cell_offsets[c'] ..
+   cell_offsets[c' + 1]]` into shared memory in a single coalesced pass:
+   thread `t` loads candidate `t` (and additional candidates with a
+   `blockDim.x` stride when the cell occupancy exceeds the block size).
+3. Threads synchronize. Each active thread is responsible for one home
+   atom `i` whose particle index it reads from
+   `sorted_particle_ids[cell_offsets[(ca, cb, cc)] + threadIdx.x]`. Each
+   such thread walks the shared-memory candidates in their stored order,
+   skips `j == i`, computes the minimum-image displacement between `i`
+   and `j`, and — if `r² <= (r_cut + r_skin)²` — appends `j` to atom
+   `i`'s neighbor list at the next free slot.
+
+The block's threads synchronize between successive cells; the
+shared-memory cache holds one neighbour cell at a time, so total shared
+memory use scales with the largest single cell occupancy, not with
+27× that.
+
+The neighbor list produced by this procedure orders each atom's
+partners by **cell-sweep order**: the outer ordering follows the
+deterministic (a, b, c) cell-iteration order above, and within each
+visited cell partners appear in ascending particle-index order (the
+order Sort 1 imposes on `sorted_particle_ids`). The neighbor list is
+not globally sorted by partner index. The order is bit-identical
+across runs given identical inputs on the same GPU and is the source
+of deterministic pair-buffer slot assignments in
+`pair-reduction.md`.
 
 The neighbor list is stored as:
 
@@ -660,8 +681,7 @@ Spatial-hash pipeline:
 ## Launch Configuration <!-- rq-2e15fed7 -->
 
 - Block size: 256 threads for the per-atom kernels
-  (`neighbor_displacement_squared`, `neighbor_list_build`,
-  `copy_positions_into_reference`,
+  (`neighbor_displacement_squared`, `copy_positions_into_reference`,
   `compute_cell_indices_and_histogram`, `scatter_atoms_into_cells`),
   with grid `ceil(n / 256)`.
 - Block size: 256 threads for the per-cell kernel
@@ -672,39 +692,59 @@ Spatial-hash pipeline:
   where `len_0 = n_cells_total` and `len_{l+1} = ceil(len_l / 256)`; the
   recursion terminates at the level whose input fits in a single block.
   `prefix_scan_finalize_offsets` runs a single thread.
-- Shared memory: zero, except for `prefix_scan_local_blocks`, which uses
-  one `unsigned int[2 * block_size]` for the double-buffered local scan.
+- Block size and grid: `neighbor_list_build` launches **one block per
+  home cell with `blockDim.x = 256`**, total grid `n_cells_total`. Each
+  block iterates the home cell's resident atoms with stride
+  `blockDim.x` — thread `t` handles home-cell atom positions
+  `t`, `t + blockDim.x`, … until the home cell's atom slice is
+  exhausted, so a single block correctly services arbitrarily dense
+  cells. Home cells with zero atoms exit immediately.
+- Shared memory: `prefix_scan_local_blocks` uses one
+  `unsigned int[2 * block_size]` for the double-buffered local scan.
+  `neighbor_list_build` uses `3 × max_cell_occupancy × sizeof(float)`
+  for the cached `(x, y, z)` of one neighbour cell at a time, where
+  `max_cell_occupancy` is computed by the host as `ceil(particle_count
+  / n_cells_total) × cell_occupancy_safety_factor` (safety factor 4 in
+  v1, accommodating density fluctuations). Other kernels use no shared
+  memory.
 - Stream: the default stream carried by `particle_buffers.device`.
 
 ## Determinism <!-- rq-c62bb861 -->
 
-Two-sort approach.
+The cell-list build canonicalises within-cell order, and the
+neighbour-list build inherits that canonical order via its
+deterministic cell sweep. Together these two stages produce a
+neighbour list that is bit-identical across runs given identical
+inputs on the same GPU.
 
-1. **Sort 1 — particles within each cell.** The spatial-hash pipeline
-   places atoms into cells with an `atomicAdd`-based scatter whose
-   within-cell order is non-deterministic, then runs a per-cell
+1. **Per-cell sort within `sorted_particle_ids`.** The spatial-hash
+   pipeline places atoms into cells with an `atomicAdd`-based scatter
+   whose within-cell order is non-deterministic, then runs a per-cell
    insertion sort over `sorted_particle_ids` keyed on particle index.
    Atomic integer addition is associative so the histogram and the
    write-cursor counts are run-to-run identical even though atomic
    ordering is not; the per-cell sort canonicalises the scatter output.
-   The end-to-end result is identical to a stable lexicographic sort on
-   `(cell_index, particle_id)`. **Required for run-to-run
+   The end-to-end result is identical to a stable lexicographic sort
+   on `(cell_index, particle_id)`. **Required for run-to-run
    reproducibility.**
 
-2. **Sort 2 — per-atom neighbor list by partner index.** The build
-   kernel's trailing insertion sort imposes a canonical ascending order
-   on each atom's neighbor list. **Not required** for run-to-run
-   reproducibility (sort 1 already guarantees identical orderings
-   across runs with identical inputs on the same GPU), but provides:
-   - A canonical neighbor-list contents/order independent of cell
-     decomposition, useful for testing.
-   - Stability under future cell-layout changes (different `r_skin`,
-     different cell size).
-   - Insurance against subtle regressions in sort 1.
+2. **Cell-sweep ordering of each atom's neighbour list.** The
+   build kernel walks the 27 neighbour cells in
+   `(da, db, dc) ∈ {-1, 0, +1}³` lexicographic order (a outer, b middle,
+   c inner) and within each cell appends partners in
+   `sorted_particle_ids` order — which is ascending particle-ID order
+   because of (1). Appends happen at the next free slot of the home
+   atom's row of `neighbor_list`; the slot index is the per-thread
+   running count, never an atomic. Each home atom is owned by exactly
+   one thread, so its row is written by exactly one thread in a
+   deterministic order.
 
-Future feature work may drop sort 2 if it becomes a measurable cost at
-very large N. Doing so does not weaken the project's bit-exact
-guarantee; it only forfeits the canonical-ordering testability.
+This ordering is **not** sorted by partner index globally — it is sorted
+by `(cell-sweep position, partner index within cell)`. Downstream
+consumers (pair-force kernels and `pair-reduction.md`) require a
+deterministic slot assignment but are commutative with respect to
+neighbour order, so the change of ordering is invisible to physics and
+to bit-exact reproducibility.
 
 ## Performance Notes <!-- rq-54a28837 -->
 
@@ -714,10 +754,17 @@ guarantee; it only forfeits the canonical-ordering testability.
   launches — a small constant, at most six up to ~16 M cells. Total
   work is `O(N)` for the per-atom kernels (cell index, histogram,
   scatter), `O(N · d)` for the per-cell sort at average cell density
-  `d`, and `O(n_cells_total)` for the prefix scan. At N = 10⁴ in liquid
-  density the rebuild completes in roughly tens of microseconds; rebuild
-  interval is typically 10–100 timesteps so amortised per-step cost is
-  well below the contribution kernel cost.
+  `d`, and `O(n_cells_total)` for the prefix scan.
+- `neighbor_list_build` total work is `O(N · d_cell · 27)` where
+  `d_cell` is the average per-cell occupancy: each home cell scans 27
+  neighbour cells against its own atoms. Position loads from the
+  global `positions_x/y/z` arrays are coalesced (one block tile-loads
+  one neighbour cell into shared memory at a time and amortises that
+  load across all atoms in the home cell). The distance-check inner
+  loop reads exclusively from shared memory. There is no per-atom
+  sort: neighbours are written in the cell-sweep / within-cell order
+  documented in *Neighbor List Construction*, which carries no
+  superlinear cost in the per-atom partner count.
 - Atomic-add contention: each cell sees on the order of `d` serialised
   `atomicAdd`s in the histogram and `d` in the scatter. Negligible at
   liquid density (`d` ≈ 5–20).
@@ -740,10 +787,16 @@ guarantee; it only forfeits the canonical-ordering testability.
   pair once instead of twice). Doubles the build complexity and would
   also force a different reduction strategy.
 - Constant or adaptive `r_skin`. v1 is constant.
-- Sort 2 (per-atom neighbor-list sort) being optional in v1 — the v1
-  implementation always sorts. A future feature may make it
-  conditional, but doing so is its own decision-point and is not
-  included here.
+- A per-atom sort that imposes partner-ID ordering across the whole
+  neighbour list. The build kernel emits partners in cell-sweep order
+  only (see *Determinism* above); no global per-atom sort is
+  performed. Consumers that want partner-ID order must sort in their
+  own host-side test harness.
+- Auto-tuning the shared-memory cell capacity. The v1 implementation
+  uses a fixed safety factor over `ceil(particle_count /
+  n_cells_total)`. A future feature may compute the empirical
+  `max(cell_occupancy)` from the cell-counts pass and size the cache
+  to that, dropping the static safety factor.
 - Per-pair-of-consumers cutoff filtering inside the neighbor-list build
   itself. The shared list is built once at the maximum cutoff across
   consumers; each consumer applies its own per-pair cutoff at force
@@ -857,11 +910,28 @@ Feature: Cell-list neighbor list
     And the displacement used was the minimum-image dx = +0.2 (not lx - 0.2)
 
   @rq-2bc559ec
-  Scenario: Each atom's neighbor list is sorted by partner index after build
+  Scenario: Each atom's neighbor list is emitted in cell-sweep order
     Given any non-empty system
     When NeighborListState::rebuild is called
     Then for every atom i, neighbor_list[i * max_neighbors .. i * max_neighbors + neighbor_counts[i]]
-      is a strictly ascending sequence of u32 partner indices
+      is the concatenation of the 27 visited neighbour-cell slices walked in
+      (da, db, dc) ∈ {-1, 0, +1}³ order (a outer, b middle, c inner), with
+      each cell's atoms enumerated in `sorted_particle_ids` order
+      (ascending particle index within the cell), the home atom itself
+      filtered out, and any partner further than r_cut + r_skin filtered
+      out
+    And within each per-cell slice the partner indices are strictly
+      ascending (inherited from the per-cell sort in `sorted_particle_ids`)
+
+  @rq-b5289acc
+  Scenario: Neighbour list is not globally partner-ID sorted across cells
+    Given a system with atoms in distinct cells whose 27-cell sweep visits
+      partner A's cell before partner B's cell, but where A's particle
+      index is greater than B's
+    When NeighborListState::rebuild is called
+    Then atom i's neighbour list lists A before B
+    And the global sequence is therefore not strictly ascending in
+      partner index
 
   @rq-0181787c
   Scenario: Build kernel signals overflow when an atom exceeds max_neighbors

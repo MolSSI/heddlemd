@@ -1267,8 +1267,17 @@ pub fn neighbor_list_build(
     debug_assert_eq!(overflow_flag.len(), 1);
 
     let n_u32 = n as u32;
+    let n_cells_total = n_cells[0] * n_cells[1] * n_cells[2];
+    // One block per home cell, BLOCK_SIZE threads per block. Each block
+    // tiles candidate positions for one neighbour cell at a time into
+    // dynamic shared memory, sized as four BLOCK_SIZE-wide arrays
+    // (x, y, z, particle_id).
     let func = particle_buffers.kernels.neighbor.neighbor_list_build.clone();
-    let cfg = launch_config(n_u32);
+    let cfg = LaunchConfig {
+        grid_dim: (n_cells_total, 1, 1),
+        block_dim: (BLOCK_SIZE, 1, 1),
+        shared_mem_bytes: BLOCK_SIZE * 4 * std::mem::size_of::<u32>() as u32,
+    };
     let lat = sim_box.lattice();
     unsafe {
         func.launch(

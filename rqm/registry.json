@@ -3517,10 +3517,10 @@
     "type": "scenario"
   },
   "rq-2bc559ec": {
-    "decl": "Scenario: Each atom's neighbor list is sorted by partner index after build",
+    "decl": "Scenario: Each atom's neighbor list is emitted in cell-sweep order",
     "file": "forces/neighbor-list",
     "refs": [],
-    "title": "Each atom's neighbor list is sorted by partner index after build",
+    "title": "Each atom's neighbor list is emitted in cell-sweep order",
     "type": "scenario"
   },
   "rq-2be0d376": {
@@ -12719,6 +12719,13 @@
     "file": "integration/csvr",
     "refs": [],
     "title": "Construct with particle_count = 0",
+    "type": "scenario"
+  },
+  "rq-b5289acc": {
+    "decl": "Scenario: Neighbour list is not globally partner-ID sorted across cells",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "Neighbour list is not globally partner-ID sorted across cells",
     "type": "scenario"
   },
   "rq-b54d8111": {

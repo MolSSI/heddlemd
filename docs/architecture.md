@@ -20,8 +20,11 @@ floats.
 
 The three invariants that make this work:
 
-1. **Deterministic neighbor lists.** Neighbor lists are sorted by particle
-   index so that every particle always sees its neighbors in the same order.
+1. **Deterministic neighbor lists.** Each particle's neighbor list is
+   produced in a fixed, deterministic order — the cell-sweep order
+   documented in `rqm/forces/neighbor-list.md` — so that every particle
+   always sees its neighbors in the same order across runs on the same
+   GPU.
 2. **No atomic float accumulation.** Force contributions are written to a
    pre-allocated pair buffer at deterministic offsets, not accumulated with
    `atomicAdd`.
