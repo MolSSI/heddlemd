@@ -143,6 +143,22 @@ pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
     /// validate row column counts. Pure function of the parameters.
     fn expected_atom_count(&self, params: &toml::Value) -> usize;
 
+    /// Expand the kind-specific parameter block into the list of
+    /// `GroupConstraint` entries (local-i, local-j, target distance)
+    /// that one group of this type owns. The topology parser calls
+    /// this once per `[constraints]` row to populate the per-group
+    /// constraint list; the parser then validates the resulting shape
+    /// against `validate_group_shape`. The default implementation
+    /// returns an empty vector — appropriate for algorithms (like a
+    /// future, parameter-free SETTLE) that derive their constraint
+    /// topology elsewhere; SHAKE-style algorithms override this.
+    fn expand_constraints(
+        &self,
+        _params: &toml::Value,
+    ) -> Result<Vec<GroupConstraint>, ConstraintError> {
+        Ok(Vec::new())
+    }
+
     /// Validate the cluster shape of a single constraint group against
     /// this algorithm's requirements (atom count, constraint-pair
     /// pattern, mass consistency, etc.). Called by
@@ -183,7 +199,7 @@ impl ConstraintRegistry {
 
     pub fn with_builtins() -> Self {
         ConstraintRegistry {
-            builders: vec![Box::new(crate::integrator::settle::SettleBuilder)],
+            builders: vec![Box::new(crate::integrator::shake::ShakeBuilder)],
         }
     }
 
@@ -239,13 +255,15 @@ impl ConstraintRegistry {
                 ..(g.constraint_offset + g.constraint_count) as usize];
             builder.validate_group_shape(gi, atoms, cstrs, &cfg.params, masses)?;
         }
-        // v1: every group is "settle-water"; one builder consumes all
-        // groups. When M-SHAKE arrives, this dispatch fans out per
-        // algorithm and the per-algorithm slots are combined.
-        let settle = self
-            .lookup("settle-water")
-            .ok_or_else(|| ConstraintError::UnsupportedKind("settle-water".to_string()))?;
-        let slot = settle.build(
+        // v1: every supported group is handled by the SHAKE builder
+        // (the same builder consumes every group regardless of its
+        // constraint-type entry, because v1 only registers "shake").
+        // When additional algorithms arrive, this dispatch fans out
+        // per algorithm and the per-algorithm slots are combined.
+        let shake = self
+            .lookup("shake")
+            .ok_or_else(|| ConstraintError::UnsupportedKind("shake".to_string()))?;
+        let slot = shake.build(
             gpu.device.clone(),
             gpu,
             particle_count,

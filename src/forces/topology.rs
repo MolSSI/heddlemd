@@ -270,6 +270,8 @@ pub enum TopologyFileError {
     DuplicateConstraintAtom { atom: u32 },
     #[error("pair (atoms {atom_i}, {atom_j}) appears in both [bonds] and [constraints]")]
     BondIsAlsoConstraint { atom_i: u32, atom_j: u32 },
+    #[error("constraint type `{name}`: {reason}")]
+    InvalidConstraintTypeParams { name: String, reason: String },
 }
 
 // rq-12b7dcb6
@@ -715,23 +717,29 @@ pub(crate) fn parse_topology_file(
         let atom_offset = group_atoms.len() as u32;
         let atom_count = atoms.len() as u32;
         let constraint_offset = group_constraints.len() as u32;
-        // Expand every group into its pairwise constraints. The
-        // per-algorithm shape check (SETTLE wants exactly 3 atoms and
-        // the (0,1)/(0,2)/(1,2) pattern) is enforced by the slot's
-        // builder; the topology parser produces the complete pairwise
-        // expansion so the data layout already matches the framework
-        // contract.
+        // The constraint type's builder owns the mapping from
+        // type-level parameters to the per-group list of local-index
+        // (i, j, r0) tuples. SHAKE-style entries return one entry per
+        // declared constraint pair with the configured target
+        // distance.
+        let entry = &constraint_types[*type_idx as usize];
+        let builder = constraint_registry.lookup(&entry.kind).ok_or_else(|| {
+            TopologyFileError::UnknownConstraintType {
+                line_number: 0,
+                name: entry.kind.clone(),
+            }
+        })?;
+        let expanded = builder.expand_constraints(&entry.params).map_err(|e| {
+            TopologyFileError::InvalidConstraintTypeParams {
+                name: entry.name.clone(),
+                reason: format!("{e}"),
+            }
+        })?;
         for &a in atoms {
             group_atoms.push(a);
         }
-        for i in 0..atoms.len() {
-            for j in (i + 1)..atoms.len() {
-                group_constraints.push(GroupConstraint {
-                    local_i: i as u8,
-                    local_j: j as u8,
-                    r0: 0.0,
-                });
-            }
+        for c in expanded {
+            group_constraints.push(c);
         }
         let constraint_count = group_constraints.len() as u32 - constraint_offset;
         constraint_groups.push(ConstraintGroup {

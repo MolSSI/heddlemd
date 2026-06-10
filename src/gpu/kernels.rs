@@ -1877,9 +1877,11 @@ pub fn vv_kick_lossless(
 // rq-67e62f4b — SETTLE launchers
 
 #[allow(clippy::too_many_arguments)]
-pub fn settle_snapshot(
+pub fn shake_snapshot(
     particle_buffers: &ParticleBuffers,
     group_atoms: &CudaSlice<u32>,
+    group_atom_offset: &CudaSlice<u32>,
+    group_atom_count: &CudaSlice<u32>,
     snapshot_x: &mut CudaSlice<f32>,
     snapshot_y: &mut CudaSlice<f32>,
     snapshot_z: &mut CudaSlice<f32>,
@@ -1889,7 +1891,7 @@ pub fn settle_snapshot(
         return Ok(());
     }
     let n_u32 = n_groups as u32;
-    let func = particle_buffers.kernels.settle.settle_snapshot.clone();
+    let func = particle_buffers.kernels.shake.shake_snapshot.clone();
     let cfg = launch_config(n_u32);
     unsafe {
         func.launch(
@@ -1899,6 +1901,8 @@ pub fn settle_snapshot(
                 &particle_buffers.positions_y,
                 &particle_buffers.positions_z,
                 group_atoms,
+                group_atom_offset,
+                group_atom_count,
                 snapshot_x,
                 snapshot_y,
                 snapshot_z,
@@ -1911,18 +1915,20 @@ pub fn settle_snapshot(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn settle_positions(
+pub fn shake_positions(
     particle_buffers: &mut ParticleBuffers,
     snapshot_x: &CudaSlice<f32>,
     snapshot_y: &CudaSlice<f32>,
     snapshot_z: &CudaSlice<f32>,
     group_atoms: &CudaSlice<u32>,
-    group_type_index: &CudaSlice<u32>,
-    type_canonical_x: &CudaSlice<f32>,
-    type_canonical_y: &CudaSlice<f32>,
-    type_canonical_z: &CudaSlice<f32>,
-    type_mass_o: &CudaSlice<f32>,
-    type_mass_h: &CudaSlice<f32>,
+    group_atom_offset: &CudaSlice<u32>,
+    group_atom_count: &CudaSlice<u32>,
+    group_constraint_offset: &CudaSlice<u32>,
+    group_constraint_count: &CudaSlice<u32>,
+    group_constraints_local_i: &CudaSlice<u8>,
+    group_constraints_local_j: &CudaSlice<u8>,
+    group_constraints_r2: &CudaSlice<f32>,
+    atom_mass: &CudaSlice<f32>,
     sim_box: &SimulationBox,
     dt: f32,
     constraint_virial: &mut CudaSlice<f32>,
@@ -1932,7 +1938,7 @@ pub fn settle_positions(
         return Ok(());
     }
     let n_u32 = n_groups as u32;
-    let func = particle_buffers.kernels.settle.settle_positions.clone();
+    let func = particle_buffers.kernels.shake.shake_positions.clone();
     let cfg = launch_config(n_u32);
     let lat = sim_box.lattice();
     unsafe {
@@ -1949,12 +1955,14 @@ pub fn settle_positions(
                 snapshot_y,
                 snapshot_z,
                 group_atoms,
-                group_type_index,
-                type_canonical_x,
-                type_canonical_y,
-                type_canonical_z,
-                type_mass_o,
-                type_mass_h,
+                group_atom_offset,
+                group_atom_count,
+                group_constraint_offset,
+                group_constraint_count,
+                group_constraints_local_i,
+                group_constraints_local_j,
+                group_constraints_r2,
+                atom_mass,
                 lat[0],
                 lat[1],
                 lat[2],
@@ -1972,22 +1980,22 @@ pub fn settle_positions(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn settle_virial_scatter(
+pub fn constraint_virial_scatter(
     particle_buffers: &mut ParticleBuffers,
     constraint_virial: &CudaSlice<f32>,
     group_atoms: &CudaSlice<u32>,
-    n_groups: usize,
+    n_atom_slots: usize,
 ) -> Result<(), GpuError> {
-    if n_groups == 0 {
+    if n_atom_slots == 0 {
         return Ok(());
     }
-    let n_atom_slots = (3 * n_groups) as u32;
+    let n_atom_slots_u32 = n_atom_slots as u32;
     let func = particle_buffers
         .kernels
-        .settle
-        .settle_virial_scatter
+        .shake
+        .constraint_virial_scatter
         .clone();
-    let cfg = launch_config(n_atom_slots);
+    let cfg = launch_config(n_atom_slots_u32);
     unsafe {
         func.launch(
             cfg,
@@ -1995,7 +2003,7 @@ pub fn settle_virial_scatter(
                 constraint_virial,
                 group_atoms,
                 &mut particle_buffers.virials,
-                n_atom_slots,
+                n_atom_slots_u32,
             ),
         )
         .map_err(GpuError::from)?;
@@ -2004,15 +2012,17 @@ pub fn settle_virial_scatter(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn settle_positions_no_velocity(
+pub fn shake_positions_no_velocity(
     particle_buffers: &mut ParticleBuffers,
     group_atoms: &CudaSlice<u32>,
-    group_type_index: &CudaSlice<u32>,
-    type_canonical_x: &CudaSlice<f32>,
-    type_canonical_y: &CudaSlice<f32>,
-    type_canonical_z: &CudaSlice<f32>,
-    type_mass_o: &CudaSlice<f32>,
-    type_mass_h: &CudaSlice<f32>,
+    group_atom_offset: &CudaSlice<u32>,
+    group_atom_count: &CudaSlice<u32>,
+    group_constraint_offset: &CudaSlice<u32>,
+    group_constraint_count: &CudaSlice<u32>,
+    group_constraints_local_i: &CudaSlice<u8>,
+    group_constraints_local_j: &CudaSlice<u8>,
+    group_constraints_r2: &CudaSlice<f32>,
+    atom_mass: &CudaSlice<f32>,
     sim_box: &SimulationBox,
     n_groups: usize,
 ) -> Result<(), GpuError> {
@@ -2022,8 +2032,8 @@ pub fn settle_positions_no_velocity(
     let n_u32 = n_groups as u32;
     let func = particle_buffers
         .kernels
-        .settle
-        .settle_positions_no_velocity
+        .shake
+        .shake_positions_no_velocity
         .clone();
     let cfg = launch_config(n_u32);
     let lat = sim_box.lattice();
@@ -2035,12 +2045,14 @@ pub fn settle_positions_no_velocity(
                 &mut particle_buffers.positions_y,
                 &mut particle_buffers.positions_z,
                 group_atoms,
-                group_type_index,
-                type_canonical_x,
-                type_canonical_y,
-                type_canonical_z,
-                type_mass_o,
-                type_mass_h,
+                group_atom_offset,
+                group_atom_count,
+                group_constraint_offset,
+                group_constraint_count,
+                group_constraints_local_i,
+                group_constraints_local_j,
+                group_constraints_r2,
+                atom_mass,
                 lat[0],
                 lat[1],
                 lat[2],
@@ -2056,12 +2068,16 @@ pub fn settle_positions_no_velocity(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn settle_velocities(
+pub fn rattle_velocities(
     particle_buffers: &mut ParticleBuffers,
     group_atoms: &CudaSlice<u32>,
-    group_type_index: &CudaSlice<u32>,
-    type_mass_o: &CudaSlice<f32>,
-    type_mass_h: &CudaSlice<f32>,
+    group_atom_offset: &CudaSlice<u32>,
+    group_atom_count: &CudaSlice<u32>,
+    group_constraint_offset: &CudaSlice<u32>,
+    group_constraint_count: &CudaSlice<u32>,
+    group_constraints_local_i: &CudaSlice<u8>,
+    group_constraints_local_j: &CudaSlice<u8>,
+    atom_mass: &CudaSlice<f32>,
     sim_box: &SimulationBox,
     dt: f32,
     constraint_virial: &mut CudaSlice<f32>,
@@ -2071,7 +2087,7 @@ pub fn settle_velocities(
         return Ok(());
     }
     let n_u32 = n_groups as u32;
-    let func = particle_buffers.kernels.settle.settle_velocities.clone();
+    let func = particle_buffers.kernels.shake.rattle_velocities.clone();
     let cfg = launch_config(n_u32);
     let lat = sim_box.lattice();
     unsafe {
@@ -2085,9 +2101,13 @@ pub fn settle_velocities(
                 &mut particle_buffers.velocities_y,
                 &mut particle_buffers.velocities_z,
                 group_atoms,
-                group_type_index,
-                type_mass_o,
-                type_mass_h,
+                group_atom_offset,
+                group_atom_count,
+                group_constraint_offset,
+                group_constraint_count,
+                group_constraints_local_i,
+                group_constraints_local_j,
+                atom_mass,
                 lat[0],
                 lat[1],
                 lat[2],

@@ -11,9 +11,9 @@ interfaces beyond the integrator's `step()` signature.
 
 The default registry exposes one constraint algorithm:
 
-| `kind` value     | Implementation                                                                            | File         |
-| ---------------- | ----------------------------------------------------------------------------------------- | ------------ |
-| `settle-water`   | non-standard hybrid: iterative SHAKE + closed-form RATTLE on three-atom rigid water (see `settle.md` *Status*; expected to be deprecated by separate analytical SETTLE and general M-SHAKE features) | `settle.md`  |
+| `kind` value | Implementation                                                                                         | File       |
+| ------------ | ------------------------------------------------------------------------------------------------------ | ---------- |
+| `shake`      | iterative SHAKE position projection + iterative RATTLE velocity projection on arbitrary rigid groups (compile-time caps `MAX_GROUP_ATOMS = 8`, `MAX_GROUP_CONSTRAINTS = 12`) | `shake.md` |
 
 The slot is selectable in any simulation whose declared integrator
 returns `IntegratorBuilder::supports_constraints(&params) == true`. In the default
@@ -121,9 +121,10 @@ minimum-image distance evaluation; none mutates the box.
 
 The host-side `ConstraintList` is the canonical parsed-and-validated
 view of every constraint declared by the topology file. It is shaped to
-accommodate algorithms that operate on arbitrarily-sized rigid clusters
-(future M-SHAKE, LINCS) as well as the fixed-shape three-atom SETTLE
-case in v1. The layout follows the project SoA convention.
+accommodate algorithms that operate on rigid clusters whose size fits
+the per-group caps of the active algorithm — for SHAKE in the default
+registry, `MAX_GROUP_ATOMS = 8` atoms and `MAX_GROUP_CONSTRAINTS = 12`
+constraints per group. The layout follows the project SoA convention.
 
 ```text
 groups:              Vec<ConstraintGroup>
@@ -146,12 +147,11 @@ constraints. Each group carries:
 The atoms of group `g` are
 `group_atoms[g.atom_offset .. g.atom_offset + g.atom_count]`. The atom
 order within a group is the order in which atoms appear in the
-`[constraints]` row that declared the group. Algorithm-specific
-positional conventions are encoded by that order — for `settle-water`,
-the first atom is the heavy atom (oxygen) and the next two are the
-hydrogens. The constraint-row order is preserved verbatim so that
-algorithms can rely on it; the per-group sort within `groups` (see
-*Group Ordering* below) is separate.
+`[constraints]` row that declared the group; the named constraint
+type's `[[constraint_types]]` entry references atoms by their position
+in this order via its `constraints` table. The constraint-row order
+is preserved verbatim so that algorithms can rely on it; the per-group
+sort within `groups` (see *Group Ordering* below) is separate.
 
 The constraints of group `g` are
 `group_constraints[g.constraint_offset .. g.constraint_offset + g.constraint_count]`.
@@ -160,7 +160,7 @@ where `local_i` and `local_j` are indices into the group's atom slice
 (so `0..g.atom_count`) and `r0` is the constraint distance in Bohr
 (`a_0`).
 Local indices restrict any single group to at most 256 atoms — sufficient
-for all known SETTLE and M-SHAKE clusters; LINCS-class systems use a
+for all known SHAKE and M-SHAKE clusters; LINCS-class systems use a
 different layout outside this framework.
 
 Each group's algorithm is determined by looking up
@@ -196,8 +196,8 @@ covers that pair. The intra-group pairs include:
   higher-order pairs reachable through chains of constraints inside
   the group).
 
-For a SETTLE water group with atoms `(O, H1, H2)`, the implicit
-exclusions are `(O, H1)`, `(O, H2)`, and `(H1, H2)`.
+For a SHAKE-constrained rigid-water group with atoms `(O, H1, H2)`,
+the implicit exclusions are `(O, H1)`, `(O, H2)`, and `(H1, H2)`.
 
 These implicit exclusions are merged into the `ExclusionList` returned
 by `load_topology_file` (see `forces/topology.md`). The precedence
@@ -217,17 +217,18 @@ matching builder's `validate_group_shape(...)` before delegating to
 `expected_atom_count(&params)` to size-check `[constraints]` rows.
 
 Per-builder shape rules are documented in each algorithm's
-requirements file. For SETTLE (see `settle.md`):
+requirements file. For SHAKE (see `shake.md`):
 
-- `expected_atom_count(&params)` returns `3`.
-- `validate_group_shape(...)` requires exactly 3 atoms and exactly 3
-  constraints. The constraint pairs (after local re-indexing) must be
-  `(0, 1)`, `(0, 2)`, and `(1, 2)`. The two constraints incident to
-  local atom 0 must have the same `r0` (the O–H distance); the third
-  constraint's `r0` is the H–H distance. Both distances are read from
-  the named `[[constraint_types]]` entry's `params` (`r_oh` and
-  `r_hh` fields), and the populated `r0` values come from those
-  config fields, not from the topology file.
+- `expected_atom_count(&params)` deserialises the named constraint
+  type's `params` as `ShakeParams` and returns `params.atoms as usize`.
+- `validate_group_shape(...)` requires that the group's atom count
+  equals the declared `atoms` field of the constraint type, that the
+  group's constraint count equals the length of the type's
+  `constraints` list, and that both counts fit within
+  `MAX_GROUP_ATOMS = 8` and `MAX_GROUP_CONSTRAINTS = 12`. The
+  constraint pairs (`local_i`, `local_j`) and the per-constraint `r0`
+  values come from the named constraint type's `constraints` table,
+  not from the topology file.
 
 Shape-mismatch failures surface as
 `ConstraintError::InvalidGroupShape { group_index, kind, reason }`
@@ -295,10 +296,10 @@ where `kind` is the algorithm's kind string.
     `apply_after_drift` and `apply_after_kick` populates virials
     first and the constraint contribution is folded in afterward.
     Concrete algorithms document the exact form of their
-    contribution (see `settle.md` for the `settle-water` two-half
-    decomposition: a position-level `m · Δr · r / dt²` part from
-    the SHAKE projection plus a velocity-level `m · Δv · r / dt`
-    part from the RATTLE projection).
+    contribution (see `shake.md` for the two-half decomposition:
+    a position-level `m · Δr · r / dt²` part from the SHAKE
+    projection plus a velocity-level `m · Δv · r / dt` part from
+    the RATTLE projection).
   - `apply_position_projection_only` mutates only
     `buffers.positions_*`. It does not touch `buffers.velocities_*`,
     `buffers.virials`, `buffers.forces_*`, or `sim_box`, and it does
@@ -336,7 +337,7 @@ where `kind` is the algorithm's kind string.
 
   - `ConstraintRegistry::with_builtins() -> ConstraintRegistry` —
     constructs a registry pre-populated with the builders for every
-    `kind` value in the table above. In v1 this is the single `settle`
+    `kind` value in the table above. In v1 this is the single `shake`
     builder.
   - `ConstraintRegistry::register(&mut self, builder: Box<dyn ConstraintBuilder>)`
     — appends a builder. Two builders sharing the same `kind_name()`
@@ -424,7 +425,8 @@ where `kind` is the algorithm's kind string.
   - `validate_params` is a pure function of the supplied parameters
     and must not allocate device memory.
   - `expected_atom_count` is also a pure function of the supplied
-    parameters. SETTLE returns `3` regardless of `params`.
+    parameters. SHAKE returns `params.atoms` from the deserialised
+    `ShakeParams`.
   - `validate_group_shape` runs before `build` and surfaces
     algorithm-specific cluster-shape errors as
     `ConstraintError::InvalidGroupShape`.
@@ -521,16 +523,18 @@ algorithm individually guarantees:
   minimum particle index. Two independently-constructed
   `ConstraintList`s from identical inputs are byte-identical, and
   every kernel that consumes them processes groups in the same order.
-- Concrete algorithms (SETTLE in v1) document the fixed-order
-  per-group computation that produces bit-identical outputs across
-  runs on the same GPU.
+- Concrete algorithms (SHAKE in the default registry) document the
+  fixed-order per-group computation that produces bit-identical
+  outputs across runs on the same GPU.
 
 ## Out of Scope <!-- rq-acb86c9b -->
 
-- Concrete constraint algorithms other than SETTLE. M-SHAKE is the
-  target of the next constraint feature and shares this framework's
-  data layout, trait, and dispatch. LINCS-class global constraint
-  solvers require a different layout and are not anticipated by this
+- Concrete constraint algorithms other than SHAKE. Analytical SETTLE
+  (Miyamoto-Kollman) for three-atom rigid water and M-SHAKE for
+  rigid clusters above the SHAKE per-group caps are the targets of
+  follow-up constraint features and share this framework's data
+  layout, trait, and dispatch. LINCS-class global constraint solvers
+  require a different layout and are not anticipated by this
   framework.
 - Composing constraints with `velocity-verlet { lossless: true }`,
   with `langevin-baoab`, or with `mtk-npt`. Each is rejected at
@@ -544,8 +548,10 @@ algorithm individually guarantees:
   overlap. The connected-components algorithm needed to merge shared
   atoms across rows arrives with M-SHAKE.
 - Constraint diagnostics beyond config-load validation (per-step
-  residual reporting, per-group iteration counts). SETTLE is
-  non-iterative; M-SHAKE will introduce its own diagnostics.
+  residual reporting, per-group iteration counts). SHAKE writes its
+  position-level residual into a buffer that is bit-reproducible but
+  not exposed to log output; future diagnostics features may surface
+  it.
 - Mid-run replacement of the constraint slot. The slot is fixed at
   construction and never replaced for the duration of a run.
 - User-defined constraint algorithms via a DSL. New algorithms are
@@ -589,9 +595,9 @@ Feature: Constraint slot framework
   @rq-18165336
   Scenario: Empty ConstraintRegistry on a non-empty list reports UnsupportedKind
     Given an empty ConstraintRegistry (no builders registered)
-    And a ConstraintList referencing one group with constraint type kind = "settle-water"
+    And a ConstraintList referencing one group with constraint type kind = "shake"
     When registry.build_optional(&list, &gpu, particle_count=3, &masses, &constraint_types) is called
-    Then it returns Err(ConstraintError::UnsupportedKind("settle-water"))
+    Then it returns Err(ConstraintError::UnsupportedKind("shake"))
 
   @rq-744ddd67
   Scenario: Construct on particle_count == 0 with an empty list
@@ -705,7 +711,7 @@ Feature: Constraint slot framework
 
   @rq-77f959b2
   Scenario: apply_position_projection_only is not fired during the MD plan walk
-    Given a velocity-Verlet integrator (lossless=false) with a SETTLE constraint slot
+    Given a velocity-Verlet integrator (lossless=false) with a SHAKE constraint slot
     And a recording wrapper that timestamps every Constraint hook call
     When the runner executes one MD timestep
     Then apply_position_projection_only is not recorded
@@ -730,8 +736,8 @@ Feature: Constraint slot framework
 
   @rq-fd51fccb
   Scenario: ConstraintBuilder default supports_position_projection_only returns true
-    Given the registered SETTLE builder
-    And any well-formed settle-water params
+    Given the registered SHAKE builder
+    And any well-formed shake params
     Then builder.supports_position_projection_only(&params) returns true
 
   @rq-309d8d50
@@ -772,7 +778,7 @@ Feature: Constraint slot framework
 
   @rq-930121d6
   Scenario: Group order is determined by minimum particle index
-    Given a topology file declaring three SETTLE waters with O atoms at indices 100, 4, 50
+    Given a topology file declaring three rigid-water groups with O atoms at indices 100, 4, 50
     When load_topology_file(...) is called
     Then constraint_list.groups[0]'s minimum atom index is 4
     And constraint_list.groups[1]'s minimum atom index is 50
@@ -788,20 +794,20 @@ Feature: Constraint slot framework
   @rq-2fbcb56c
   Scenario: SettleWater group with the wrong atom count is rejected
     Given a ConstraintList in which a SettleWater group has 4 atoms
-    When the SETTLE builder is invoked
+    When the SHAKE builder is invoked
     Then it returns Err(ConstraintError::InvalidGroupShape { kind: SettleWater, reason: contains "atom count", .. })
 
   @rq-c2e0c1fa
   Scenario: SettleWater group with a missing constraint pair is rejected
     Given a ConstraintList in which a SettleWater group declares only the (0,1) and (0,2) constraint pairs (no (1,2) constraint)
-    When the SETTLE builder is invoked
+    When the SHAKE builder is invoked
     Then it returns Err(ConstraintError::InvalidGroupShape { kind: SettleWater, reason: contains "constraint pattern", .. })
 
   # --- Implicit exclusions ---
 
   @rq-18f5ef7a
   Scenario: Constraint group adds implicit exclusions for every intra-group pair
-    Given a topology file with no [exclusions] section and one SETTLE row "0 1 2 SPCE"
+    Given a topology file with no [exclusions] section and one rigid-water row "0 1 2 SPCE"
     When load_topology_file(...) is called
     Then exclusion_list.entries contains (0, 1, 0.0, 0.0)
     And exclusion_list.entries contains (0, 2, 0.0, 0.0)
@@ -809,7 +815,7 @@ Feature: Constraint slot framework
 
   @rq-413d9c2b
   Scenario: Explicit [exclusions] entry overrides constraint-derived default
-    Given a topology file with one SETTLE row "0 1 2 SPCE" and an explicit exclusion "1 2 0.5 0.5"
+    Given a topology file with one rigid-water row "0 1 2 SPCE" and an explicit exclusion "1 2 0.5 0.5"
     When load_topology_file(...) is called
     Then exclusion_list.entries contains (1, 2, 0.5, 0.5)
     And exclusion_list.entries does not contain (1, 2, 0.0, 0.0)

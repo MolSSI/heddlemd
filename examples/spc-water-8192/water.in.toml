@@ -140,12 +140,16 @@ r_cut_real = 1.0e-9         # m
 grid = [48, 48, 96]         # one grid point per ~1.04 Å (small-prime-factored for cuFFT)
 spline_order = 4            # default
 
-# Rigid SPC/E geometry via SETTLE.
+# Rigid SPC/E geometry via SHAKE.
 [[constraint_types]]
 name = "SPCE"
-kind = "settle-water"
-r_oh = 1.0e-10              # m
-r_hh = 1.633e-10            # m  (= 2 · r_oh · sin(θ_HOH / 2), θ_HOH = 109.47°)
+kind = "shake"
+atoms = 3
+constraints = [
+    { i = 0, j = 1, d = 1.0e-10 },   # O–H1  (m)
+    { i = 0, j = 2, d = 1.0e-10 },   # O–H2  (m)
+    { i = 1, j = 2, d = 1.633e-10 }, # H1–H2 (m), = 2·r_oh·sin(θ_HOH/2), θ_HOH = 109.47°
+]
 
 [neighbor_list]
 mode = "cell-list"

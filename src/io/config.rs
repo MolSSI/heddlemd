@@ -97,8 +97,8 @@ pub enum ConfigError {
     DuplicateConstraintTypeName { name: String },
     #[error("integrator `{integrator}` in phase `{phase}` does not support holonomic constraints; remove the topology file's [constraints] section or choose a different integrator")]
     IncompatibleConstraint { integrator: String, phase: String },
-    #[error("constraint type `{name}` has infeasible SETTLE geometry: r_hh = {r_hh} must be < 2 * r_oh ({r_oh})")]
-    SettleGeometryInfeasible { name: String, r_oh: f64, r_hh: f64 },
+    #[error("constraint type `{name}` is malformed: {reason}")]
+    ShakeParamsMalformed { name: String, reason: String },
     #[error("[{slot}] section's `kind = \"{kind}\"` does not match any registered builder")]
     UnknownKind { slot: &'static str, kind: String },
     #[error("unknown `units` value `{got}`: expected one of `si`, `atomic`")]
@@ -1290,15 +1290,12 @@ impl Config {
                 // Promote the entry's `name` into name-bearing errors
                 // that the builder couldn't fill in itself (it only
                 // sees the params, not the entry's name).
-                ConfigError::SettleGeometryInfeasible {
-                    name: _,
-                    r_oh,
-                    r_hh,
-                } => ConfigError::SettleGeometryInfeasible {
-                    name: ct.name.clone(),
-                    r_oh,
-                    r_hh,
-                },
+                ConfigError::ShakeParamsMalformed { name: _, reason } => {
+                    ConfigError::ShakeParamsMalformed {
+                        name: ct.name.clone(),
+                        reason,
+                    }
+                }
                 other => other,
             })?;
         }

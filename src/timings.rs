@@ -79,13 +79,13 @@ impl KernelStage {
     pub const MTK_NPT_POSITION_DRIFT: KernelStage =
         KernelStage::new("mtk_npt_position_drift");
     // rq-de7601cd
-    pub const SETTLE_SNAPSHOT: KernelStage = KernelStage::new("settle_snapshot");
-    pub const SETTLE_POSITIONS: KernelStage = KernelStage::new("settle_positions");
-    pub const SETTLE_VELOCITIES: KernelStage = KernelStage::new("settle_velocities");
-    pub const SETTLE_VIRIAL_SCATTER: KernelStage =
-        KernelStage::new("settle_virial_scatter");
-    pub const SETTLE_POSITIONS_NO_VELOCITY: KernelStage =
-        KernelStage::new("settle_positions_no_velocity");
+    pub const SHAKE_SNAPSHOT: KernelStage = KernelStage::new("shake_snapshot");
+    pub const SHAKE_POSITIONS: KernelStage = KernelStage::new("shake_positions");
+    pub const RATTLE_VELOCITIES: KernelStage = KernelStage::new("rattle_velocities");
+    pub const CONSTRAINT_VIRIAL_SCATTER: KernelStage =
+        KernelStage::new("constraint_virial_scatter");
+    pub const SHAKE_POSITIONS_NO_VELOCITY: KernelStage =
+        KernelStage::new("shake_positions_no_velocity");
     pub const SD_F_MAX_REDUCTION: KernelStage = KernelStage::new("sd_f_max_reduction");
     pub const SD_COMPUTE_STEP: KernelStage = KernelStage::new("sd_compute_step");
     pub const SD_SNAPSHOT: KernelStage = KernelStage::new("sd_snapshot");
@@ -129,11 +129,11 @@ impl KernelStage {
         Self::MTK_NPT_RESCALE_VELOCITIES,
         Self::MTK_NPT_VELOCITY_HALF_KICK,
         Self::MTK_NPT_POSITION_DRIFT,
-        Self::SETTLE_SNAPSHOT,
-        Self::SETTLE_POSITIONS,
-        Self::SETTLE_VELOCITIES,
-        Self::SETTLE_VIRIAL_SCATTER,
-        Self::SETTLE_POSITIONS_NO_VELOCITY,
+        Self::SHAKE_SNAPSHOT,
+        Self::SHAKE_POSITIONS,
+        Self::RATTLE_VELOCITIES,
+        Self::CONSTRAINT_VIRIAL_SCATTER,
+        Self::SHAKE_POSITIONS_NO_VELOCITY,
         Self::SD_F_MAX_REDUCTION,
         Self::SD_COMPUTE_STEP,
         Self::SD_SNAPSHOT,

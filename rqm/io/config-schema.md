@@ -166,9 +166,13 @@ theta_0 = 1.911     # rad (~109.47°)
 # that processes any group declared with this type.
 [[constraint_types]]
 name = "SPCE"
-kind = "settle-water"
-r_oh = 1.0e-10        # m (O-H constraint distance)
-r_hh = 1.633e-10      # m (H-H constraint distance)
+kind = "shake"
+atoms = 3
+constraints = [
+    { i = 0, j = 1, d = 1.0e-10 },     # O-H1
+    { i = 0, j = 2, d = 1.0e-10 },     # O-H2
+    { i = 1, j = 2, d = 1.633e-10 },   # H1-H2
+]
 
 [neighbor_list]
 mode = "cell-list"
@@ -726,21 +730,24 @@ algorithm's builder to consume:
   array. Empty strings are rejected. Case-sensitive.
 - `kind: String` — selects the algorithm that processes any group
   declared with this type. The currently registered value is
-  `"settle-water"` (see `integration/settle.md`). Future values
-  (`"m-shake"`, `"lincs"`, ...) are added by registering additional
-  `ConstraintBuilder`s.
+  `"shake"` (see `integration/shake.md`). Future values
+  (`"settle"`, `"m-shake"`, `"lincs"`, ...) are added by registering
+  additional `ConstraintBuilder`s.
 
 Per-kind parameter fields are validated by the matching
 `ConstraintBuilder`'s `validate_params(&toml::Value)` method (see
-`integration/constraint-framework.md`). For `kind = "settle-water"`
-(documented in `integration/settle.md`):
+`integration/constraint-framework.md`). For `kind = "shake"`
+(documented in `integration/shake.md`):
 
-- `r_oh: f64` — O–H constraint distance in metres. Required. Finite,
-  strictly positive.
-- `r_hh: f64` — H–H constraint distance in metres. Required. Finite,
-  strictly positive. Must satisfy `r_hh < 2 · r_oh`; otherwise the
-  builder returns `ConfigError::SettleGeometryInfeasible { name,
-  r_oh, r_hh }`.
+- `atoms: u32` — number of atoms in every group of this type. Required.
+  Strictly positive; at most `MAX_GROUP_ATOMS = 8`.
+- `constraints: Vec<{ i: u32, j: u32, d: f64 }>` — one entry per
+  pair-distance constraint inside the group. Required. The list must
+  be non-empty and at most `MAX_GROUP_CONSTRAINTS = 12` entries long.
+  - `i` and `j` are local atom indices in `0..atoms`; the pair
+    `(min(i, j), max(i, j))` must be unique across constraints; `i`
+    and `j` must differ.
+  - `d` is the target distance in metres. Finite and strictly positive.
 
 Names must be unique within the array. Unknown parameter fields for
 the chosen `kind` are rejected by the matching builder's
@@ -1090,10 +1097,10 @@ after `load_topology_file` returns. This method runs the
 - Every minimization phase requires that every registered
   `[[constraint_types]]` entry's builder satisfies
   `ConstraintBuilder::supports_position_projection_only(&params)`.
-  In the default registry the `settle-water` builder returns
-  `true`, so the v1 registry never rejects on this path; future
-  constraint algorithms that cannot project positions in isolation
-  flip the predicate to `false` and surface here.
+  In the default registry the `shake` builder returns `true`, so the
+  current registry never rejects on this path; future constraint
+  algorithms that cannot project positions in isolation flip the
+  predicate to `false` and surface here.
 
 Failures of either form surface as
 `IncompatibleConstraint { integrator: <kind-or-algorithm name>,
@@ -1274,8 +1281,9 @@ phase failures.
   parameter struct from `params` via `validate_params(&toml::Value)`
   and answers `expected_atom_count(&toml::Value)` for the topology
   parser's row-column-count check. For
-  `kind = "settle-water"`, the builder's typed params are
-  `{ r_oh: f64, r_hh: f64 }` (see `integration/settle.md`).
+  `kind = "shake"`, the builder's typed params are
+  `ShakeParams { atoms: u32, constraints: Vec<{ i: u32, j: u32, d: f64 }> }`
+  (see `integration/shake.md`).
 
 - `CoulombConfig` <!-- rq-793a7cbb -->
   - `cutoff: f64` — real-space cutoff in metres.
@@ -1428,9 +1436,12 @@ phase failures.
     corresponding registry. `slot` carries `"integrator"`,
     `"thermostat"`, `"barostat"`, `"constraint_types"`, or
     `"minimization"`.
-  - `SettleGeometryInfeasible { name: String, r_oh: f64, r_hh: f64 }`
-    — a `[[constraint_types]]` entry with `kind = "settle-water"`
-    declares `r_hh ≥ 2 · r_oh`.
+  - `ShakeParamsMalformed { name: String, reason: String }`
+    — a `[[constraint_types]]` entry with `kind = "shake"` violates
+    one of the `ShakeParams` constraints documented in
+    `integration/shake.md` (`atoms` zero or above the per-group cap,
+    `constraints` empty or above the per-group cap, an out-of-range
+    `i` or `j`, `i == j`, a duplicated pair, or a non-positive `d`).
 
   `Parse` covers every shape error the typed deserialiser flags
   structurally that does not require registry knowledge: unknown
@@ -1447,7 +1458,7 @@ phase failures.
   `kind` and out-of-domain numeric values — surface from the matching
   builder's `validate_params(&toml::Value)` during
   `Config::validate_against(&registries)`. Builders return
-  `ConfigError::InvalidValue`, `ConfigError::SettleGeometryInfeasible`,
+  `ConfigError::InvalidValue`, `ConfigError::ShakeParamsMalformed`,
   or `ConfigError::Parse` as appropriate for their parameter shape.
 
 ### Functions <!-- rq-39891001 -->
@@ -1542,7 +1553,7 @@ phase failures.
   - Returns `ConfigError::UnknownKind { slot, kind }` for any
     `kind` that does not match a registered builder.
   - Surfaces every builder-produced `ConfigError` (typically
-    `InvalidValue`, `SettleGeometryInfeasible`, or `Parse`).
+    `InvalidValue`, `ShakeParamsMalformed`, or `Parse`).
   - Runs the `[thermostat]` integrator-ownership check and the
     `[barostat]` integrator-ownership check as documented in
     *Validation*; these produce `IncompatibleThermostat` and

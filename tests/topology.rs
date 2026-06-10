@@ -586,15 +586,15 @@ fn atom_angle_offsets_reflect_sorted_list() {
 fn spce() -> NamedSlotConfig {
     NamedSlotConfig::from_params_str(
         "SPCE",
-        "settle-water",
-        "r_oh = 1.0e-10\nr_hh = 1.633e-10\n",
+        "shake",
+        "atoms = 3\nconstraints = [\n  { i = 0, j = 1, d = 1.0e-10 },\n  { i = 0, j = 2, d = 1.0e-10 },\n  { i = 1, j = 2, d = 1.633e-10 },\n]\n",
     )
 }
 
 // rq-fe3b32cf
 #[test]
-fn load_topology_with_a_settle_constraint() {
-    let dir = tmp_path("constraint_settle");
+fn load_topology_with_a_shake_constraint() {
+    let dir = tmp_path("constraint_shake");
     let body = "[constraints]\n0 1 2 SPCE\n";
     let path = write(&dir, body);
     let cts = vec![spce()];
@@ -606,7 +606,7 @@ fn load_topology_with_a_settle_constraint() {
     // The algorithm is resolved at consume time via
     // `constraint_types[group.constraint_type_index].kind`.
     let resolved_kind = &cts[cl.groups[0].constraint_type_index as usize].kind;
-    assert_eq!(resolved_kind, "settle-water");
+    assert_eq!(resolved_kind, "shake");
     let atoms = &cl.group_atoms[cl.groups[0].atom_offset as usize
         ..(cl.groups[0].atom_offset + cl.groups[0].atom_count) as usize];
     assert_eq!(atoms, &[0, 1, 2]);

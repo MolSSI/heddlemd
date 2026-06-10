@@ -466,12 +466,12 @@ Feature: Unit-system selector and atomic-units internals
     And `compressibility` is divided by the (a_0^3/E_h) -> Pa^-1 factor
 
   @rq-1b03dbaa
-  Scenario: SI-mode SETTLE constraint distances are converted to Bohr
+  Scenario: SI-mode SHAKE constraint distances are converted to Bohr
     Given a TOML file with `units = "si"` and a `[[constraint_types]]`
-      entry with `kind = "settle-water"` and `r_oh`, `r_hh` in metres
+      entry with `kind = "shake"`, `atoms` set, and every `constraints[k].d`
+      in metres
     When load_config is called on that file
-    Then the constraint's `r_oh` and `r_hh` params are each divided by
-      the bohr -> meter factor
+    Then every constraint's `d` field is divided by the bohr -> meter factor
 
   @rq-8207d656
   Scenario: SI-mode steepest-descent minimizer params are converted

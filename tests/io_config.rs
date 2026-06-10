@@ -3176,13 +3176,13 @@ cutoff = 1.0e-9
     }
 }
 
-// rq-67e62f4b — [[constraint_types]] schema + IntegratorKind::supports_constraints tests.
+// rq-9a80c43c — [[constraint_types]] schema + IntegratorKind::supports_constraints tests.
 
 #[test]
-fn load_constraint_types_settle_water() {
-    let dir = tmp_path("constraint_types_settle");
+fn load_constraint_types_shake() {
+    let dir = tmp_path("constraint_types_shake");
     let body = format!(
-        "{}\n[[constraint_types]]\nname = \"SPCE\"\nkind = \"settle-water\"\nr_oh = 1.0e-10\nr_hh = 1.633e-10\n",
+        "{}\n[[constraint_types]]\nname = \"SPCE\"\nkind = \"shake\"\natoms = 3\nconstraints = [\n  {{ i = 0, j = 1, d = 1.0e-10 }},\n  {{ i = 0, j = 2, d = 1.0e-10 }},\n  {{ i = 1, j = 2, d = 1.633e-10 }},\n]\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
@@ -3190,29 +3190,32 @@ fn load_constraint_types_settle_water() {
     assert_eq!(cfg.constraint_types.len(), 1);
     let ct = &cfg.constraint_types[0];
     assert_eq!(ct.name, "SPCE");
-    assert_eq!(ct.kind, "settle-water");
-    assert_eq!(ct.params.get("r_oh").unwrap().as_float().unwrap(), 1.0e-10);
-    assert_eq!(ct.params.get("r_hh").unwrap().as_float().unwrap(), 1.633e-10);
-    // SETTLE expects three atoms per group; resolved via the registry.
+    assert_eq!(ct.kind, "shake");
+    assert_eq!(ct.params.get("atoms").unwrap().as_integer().unwrap(), 3);
+    let constraints = ct.params.get("constraints").unwrap().as_array().unwrap();
+    assert_eq!(constraints.len(), 3);
+    // The shake builder reports the per-row expected atom count from
+    // its `atoms` parameter.
     let registries = Registries::with_builtins();
-    let builder = registries.constraint_types.lookup("settle-water").unwrap();
+    let builder = registries.constraint_types.lookup("shake").unwrap();
     assert_eq!(builder.expected_atom_count(&ct.params), 3);
 }
 
-// rq-535abb5b
+// rq-9a80c43c
 #[test]
-fn reject_settle_geometry_infeasible() {
+fn reject_shake_params_malformed() {
     let dir = tmp_path("constraint_infeasible");
+    // Self-loop constraint (i == j): rejected by validate_shake_params.
     let body = format!(
-        "{}\n[[constraint_types]]\nname = \"BAD\"\nkind = \"settle-water\"\nr_oh = 1.0e-10\nr_hh = 3.0e-10\n",
+        "{}\n[[constraint_types]]\nname = \"BAD\"\nkind = \"shake\"\natoms = 3\nconstraints = [\n  {{ i = 0, j = 0, d = 1.0e-10 }},\n]\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);
     match load_config(&path).unwrap_err() {
-        ConfigError::SettleGeometryInfeasible { name, .. } => {
+        ConfigError::ShakeParamsMalformed { name, .. } => {
             assert_eq!(name, "BAD");
         }
-        other => panic!("expected SettleGeometryInfeasible, got {other:?}"),
+        other => panic!("expected ShakeParamsMalformed, got {other:?}"),
     }
 }
 
@@ -3220,7 +3223,7 @@ fn reject_settle_geometry_infeasible() {
 fn reject_duplicate_constraint_type_name() {
     let dir = tmp_path("constraint_dup_name");
     let body = format!(
-        "{}\n[[constraint_types]]\nname = \"X\"\nkind = \"settle-water\"\nr_oh = 1.0e-10\nr_hh = 1.6e-10\n\n[[constraint_types]]\nname = \"X\"\nkind = \"settle-water\"\nr_oh = 1.0e-10\nr_hh = 1.6e-10\n",
+        "{}\n[[constraint_types]]\nname = \"X\"\nkind = \"shake\"\natoms = 2\nconstraints = [\n  {{ i = 0, j = 1, d = 1.0e-10 }},\n]\n\n[[constraint_types]]\nname = \"X\"\nkind = \"shake\"\natoms = 2\nconstraints = [\n  {{ i = 0, j = 1, d = 1.0e-10 }},\n]\n",
         minimal_config()
     );
     let path = write_config(&dir, &body);

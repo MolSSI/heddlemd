@@ -121,7 +121,7 @@ fn kernels_is_composed_of_per_subsystem_sub_structs() {
     let _ = gpu.kernels.andersen.andersen_resample.clone();
     let _ = gpu.kernels.barostat.virial_sum_reduce.clone();
     let _ = gpu.kernels.mtk.mtk_velocity_half_kick.clone();
-    let _ = gpu.kernels.settle.settle_snapshot.clone();
+    let _ = gpu.kernels.shake.shake_snapshot.clone();
     let _ = gpu.kernels.forces.accumulate_forces.clone();
     let _ = gpu.kernels.neighbor.neighbor_displacement_squared.clone();
 }

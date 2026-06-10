@@ -140,10 +140,10 @@ without launching any kernel beyond the warm-up `force_field.step`
 
 Constraints participate in minimization through a new trait method on
 the `Constraint` slot, `apply_position_projection_only`, that performs
-the SHAKE-style position projection without the per-step velocity
+the SHAKE position projection without the per-step velocity
 correction that the integration hooks apply. The trait method, its
-contract, and the registered SETTLE implementation are documented in
-`integration/constraint-framework.md` and `integration/settle.md`.
+contract, and the registered SHAKE implementation are documented in
+`integration/constraint-framework.md` and `integration/shake.md`.
 
 A minimization phase consults the same global `ConstraintList` as the
 MD phases. The runner constructs the constraint slot at runner

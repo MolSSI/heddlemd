@@ -20,7 +20,7 @@ pub mod langevin_baoab;
 pub mod mtk_npt;
 pub mod nose_hoover_chain;
 pub mod philox;
-pub mod settle;
+pub mod shake;
 pub mod velocity_verlet;
 
 pub use andersen::{AndersenBuilder, AndersenThermostat};
@@ -35,7 +35,7 @@ pub use nose_hoover_chain::{
     NoseHooverChainBuilder, NoseHooverChainThermostat, nhc_chain_sub_step,
 };
 pub use philox::{philox_4x32_10, philox_normal};
-pub use settle::{SettleBuilder, SettleConstraintsState, SettleError};
+pub use shake::{ShakeBuilder, ShakeConstraintsState, ShakeError};
 pub use velocity_verlet::{VelocityVerletBuilder, VelocityVerletState};
 
 // rq-df6d79a1

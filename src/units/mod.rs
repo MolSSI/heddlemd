@@ -171,11 +171,11 @@ pub fn slot_kind_field_dims(kind: &str) -> Option<&'static [(&'static str, Dimen
             ("compressibility", InversePressure),
         ]),
 
-        // Constraints
-        "settle-water" => Some(&[
-            ("r_oh", Length),
-            ("r_hh", Length),
-        ]),
+        // Constraints — the SHAKE entry is special-cased by
+        // `convert_slot_params` (its `constraints` field is a nested
+        // array of tables) and therefore declares an empty top-level
+        // field set here.
+        "shake" => Some(&[]),
 
         // Minimizers
         "steepest-descent" => Some(&[
@@ -196,6 +196,31 @@ pub fn slot_kind_field_dims(kind: &str) -> Option<&'static [(&'static str, Dimen
 pub fn convert_slot_params(system: UnitSystem, kind: &str, params: &mut toml::Value) {
     if system == UnitSystem::Atomic {
         return;
+    }
+    // Kinds whose params include nested arrays of tables (e.g. the
+    // SHAKE `constraints` array) cannot be rescaled by the
+    // table-driven `slot_kind_field_dims` path. They are converted
+    // explicitly here before the regular field walk.
+    if kind == "shake" {
+        if let Some(table) = params.as_table_mut() {
+            if let Some(arr) = table.get_mut("constraints").and_then(|v| v.as_array_mut()) {
+                for entry in arr.iter_mut() {
+                    let Some(sub) = entry.as_table_mut() else {
+                        continue;
+                    };
+                    let Some(d_slot) = sub.get_mut("d") else {
+                        continue;
+                    };
+                    if let Some(f) = d_slot.as_float() {
+                        *d_slot = toml::Value::Float(system.from_user(Dimension::Length, f));
+                    } else if let Some(i) = d_slot.as_integer() {
+                        *d_slot = toml::Value::Float(
+                            system.from_user(Dimension::Length, i as f64),
+                        );
+                    }
+                }
+            }
+        }
     }
     let Some(fields) = slot_kind_field_dims(kind) else {
         return;
