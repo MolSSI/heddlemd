@@ -123,7 +123,11 @@ pub fn reduce_pair_forces(
 
     let n_u32 = n as u32;
     let func = pair_buffer.kernels.reduce.reduce_pair_forces.clone();
-    let cfg = launch_config(n_u32);
+    let cfg = LaunchConfig {
+        grid_dim: (n_u32, 1, 1),
+        block_dim: (BLOCK_SIZE, 1, 1),
+        shared_mem_bytes: 0,
+    };
     unsafe {
         func.launch(
             cfg,

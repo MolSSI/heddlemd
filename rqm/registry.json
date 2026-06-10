@@ -5269,6 +5269,13 @@
     "title": "trajectory_write count equals frames written",
     "type": "scenario"
   },
+  "rq-46d24bfb": {
+    "decl": "Scenario: One block per particle, blocks are independent",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "One block per particle, blocks are independent",
+    "type": "scenario"
+  },
   "rq-46d980b2": {
     "decl": "### `Thermostat` trait overrides",
     "file": "integration/berendsen",
@@ -8559,10 +8566,10 @@
     "type": "scenario"
   },
   "rq-77e88745": {
-    "decl": "Scenario: Block-non-aligned particle counts are handled by the bounds check",
+    "decl": "Scenario: Every particle is reduced exactly once across the full grid",
     "file": "pair-reduction",
     "refs": [],
-    "title": "Block-non-aligned particle counts are handled by the bounds check",
+    "title": "Every particle is reduced exactly once across the full grid",
     "type": "scenario"
   },
   "rq-77f3ae21": {
@@ -11161,10 +11168,10 @@
     "type": "api-item"
   },
   "rq-9e487c80": {
-    "decl": "Scenario: Reduction sums pair energies in left-to-right order",
+    "decl": "Scenario: Reduction sums pair energies and virials over slots 0..count",
     "file": "pair-reduction",
     "refs": [],
-    "title": "Reduction sums pair energies in left-to-right order",
+    "title": "Reduction sums pair energies and virials over slots 0..count",
     "type": "scenario"
   },
   "rq-9e4d8944": {
@@ -12274,6 +12281,13 @@
     "title": "Reject grid dimension below 2*spline_order",
     "type": "scenario"
   },
+  "rq-aee2bfb2": {
+    "decl": "Scenario: Reduction tree result agrees with a CPU pairwise tree reference to within a small relative tolerance",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Reduction tree result agrees with a CPU pairwise tree reference to within a small relative tolerance",
+    "type": "scenario"
+  },
   "rq-aeee8e44": {
     "decl": "Scenario: Slot kind unknown to the unit module passes through unchanged",
     "file": "io/unit-system",
@@ -12525,6 +12539,13 @@
     "file": "io/config-schema",
     "refs": [],
     "title": "neighbor_list cell-list with explicit parameters is accepted",
+    "type": "scenario"
+  },
+  "rq-b2221a99": {
+    "decl": "Scenario: Reduction with count_i larger than one warp uses the inter-warp tree",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Reduction with count_i larger than one warp uses the inter-warp tree",
     "type": "scenario"
   },
   "rq-b2314952": {
@@ -13411,6 +13432,13 @@
     ],
     "title": "Algorithm",
     "type": "section"
+  },
+  "rq-c009903e": {
+    "decl": "Scenario: Reduction with count_i larger than one block sweep accumulates across sweeps",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Reduction with count_i larger than one block sweep accumulates across sweeps",
+    "type": "scenario"
   },
   "rq-c02c6b45": {
     "decl": "## Lint flow",
@@ -16339,10 +16367,10 @@
     "type": "scenario"
   },
   "rq-e950f4e6": {
-    "decl": "Scenario: Reduction sums entries 0..count in left-to-right order",
+    "decl": "Scenario: Reduction sums slots 0..count and excludes slots beyond count",
     "file": "pair-reduction",
     "refs": [],
-    "title": "Reduction sums entries 0..count in left-to-right order",
+    "title": "Reduction sums slots 0..count and excludes slots beyond count",
     "type": "scenario"
   },
   "rq-e963f27a": {
