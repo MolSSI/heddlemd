@@ -208,7 +208,14 @@ impl Minimizer for SteepestDescentMinimizer {
         }
 
         // Evaluate forces and potential energy at the trial position.
-        force_field.step(buffers, sim_box, timings)?;
+        // Minimization needs energy every iteration to decide accept/reject,
+        // so always request ForcesAndScalars.
+        force_field.step(
+            buffers,
+            sim_box,
+            timings,
+            crate::forces::AggregateLevel::ForcesAndScalars,
+        )?;
         timings.kernel_start(KernelStage::POTENTIAL_ENERGY_REDUCE)?;
         let trial_energy =
             compute_total_potential_energy(buffers, &mut self.pe_scratch)? as f64;
@@ -242,7 +249,12 @@ impl Minimizer for SteepestDescentMinimizer {
                 &self.snapshot_z,
             )?;
             timings.kernel_stop(KernelStage::SD_RESTORE)?;
-            force_field.step(buffers, sim_box, timings)?;
+            force_field.step(
+                buffers,
+                sim_box,
+                timings,
+                crate::forces::AggregateLevel::ForcesAndScalars,
+            )?;
             self.current_step = self.current_step * self.step_decrease;
             // F_max at the restored (accepted) positions.
             timings.kernel_start(KernelStage::SD_F_MAX_REDUCTION)?;

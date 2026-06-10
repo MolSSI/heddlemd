@@ -113,7 +113,21 @@ pub enum SubStep {
     /// In both cases the combiner refreshes
     /// `ParticleBuffers.forces_*` from every class's slot-output
     /// buffers.
-    ForceEval { class: Option<crate::forces::ForceClass> },
+    ForceEval {
+        class: Option<crate::forces::ForceClass>,
+        /// Aggregation level the integrator needs at this sub-step.
+        ///
+        /// - `Some(ForcesAndScalars)` → integrator needs fresh energy
+        ///   and virial (e.g. NPT barostats reading virial every step).
+        /// - `Some(ForcesOnly)` → integrator only needs forces.
+        /// - `None` → no preference; the runner picks based on its own
+        ///   needs (logging cadence, trajectory cadence, minimization).
+        ///
+        /// The runner's `resolve_level` upgrades any request to
+        /// `ForcesAndScalars` whenever it independently needs scalars
+        /// at this step.
+        level: Option<crate::forces::AggregateLevel>,
+    },
     /// Integrator-private sub-step (e.g. Langevin's OU step, MTK's
     /// chain or barostat sub-steps). `dt` carries the outer plan
     /// timestep so the integrator's `execute()` can compute its
@@ -217,6 +231,7 @@ pub fn run_step(
     install_constraint_hooks: bool,
     dt: f32,
     timings: &mut Timings,
+    runner_needs_scalars: bool,
 ) -> Result<(), StepError> {
     let plan = integrator.plan(dt);
     let install = install_constraint_hooks && constraint.is_some();
@@ -228,11 +243,16 @@ pub fn run_step(
             }
         }
         match sub {
-            SubStep::ForceEval { class: None } => {
-                force_field.step(buffers, sim_box, timings)?;
+            SubStep::ForceEval { class: None, level } => {
+                let resolved = resolve_aggregate_level(*level, runner_needs_scalars);
+                force_field.step(buffers, sim_box, timings, resolved)?;
             }
-            SubStep::ForceEval { class: Some(c) } => {
-                force_field.step_class(*c, buffers, sim_box, timings)?;
+            SubStep::ForceEval {
+                class: Some(c),
+                level,
+            } => {
+                let resolved = resolve_aggregate_level(*level, runner_needs_scalars);
+                force_field.step_class(*c, buffers, sim_box, timings, resolved)?;
             }
             other => {
                 integrator.execute(other, buffers, sim_box, timings)?;
@@ -258,7 +278,35 @@ pub fn run_step(
 }
 
 /// Walk an integrator's plan without any constraint-slot hooks.
+/// Resolve the aggregation level for a single `SubStep::ForceEval`.
+///
+/// Returns `AggregateLevel::ForcesAndScalars` if either:
+///   - the integrator's sub-step requested it explicitly
+///     (`level == Some(ForcesAndScalars)`), or
+///   - the runner independently requires scalars this step
+///     (`runner_needs_scalars == true`; logging cadence, trajectory
+///     cadence, minimization observation, etc.).
+///
+/// Otherwise returns the integrator's preference (defaulting to
+/// `ForcesOnly` when the sub-step is `level: None`).
+pub fn resolve_aggregate_level(
+    sub_step_level: Option<crate::forces::AggregateLevel>,
+    runner_needs_scalars: bool,
+) -> crate::forces::AggregateLevel {
+    use crate::forces::AggregateLevel;
+    if runner_needs_scalars
+        || matches!(sub_step_level, Some(AggregateLevel::ForcesAndScalars))
+    {
+        AggregateLevel::ForcesAndScalars
+    } else {
+        sub_step_level.unwrap_or(AggregateLevel::ForcesOnly)
+    }
+}
+
 /// Convenience for tests and callers that don't need constraints.
+/// Always requests `ForcesAndScalars` so tests that read energy / virial
+/// after `run_step_no_constraint` see fresh values regardless of the
+/// integrator's per-step level preference.
 pub fn run_step_no_constraint(
     integrator: &mut dyn Integrator,
     buffers: &mut ParticleBuffers,
@@ -276,6 +324,7 @@ pub fn run_step_no_constraint(
         false,
         dt,
         timings,
+        true,
     )
 }
 
@@ -324,6 +373,7 @@ impl IntegratorStepExt for dyn Integrator + '_ {
             install,
             dt,
             timings,
+            true,
         )
     }
 }
@@ -351,6 +401,7 @@ impl<T: Integrator> IntegratorStepExt for T {
             install,
             dt,
             timings,
+            true,
         )
     }
 }

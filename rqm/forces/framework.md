@@ -145,12 +145,19 @@ call performs the following, in order:
    `PairBuffer` or a `BondPairBuffer`) with per-pair force, energy,
    and virial contributions; the framework does not inspect them.
 4. **Per-slot reductions.** For each selected slot, in canonical slot
-   order, invoke `Potential::reduce`, passing a `SlotOutputView` that
-   points to the slot's assigned row of its class's flat slot-output
-   buffer. The reduction overwrites that row with the slot's
-   per-particle reduced contributions: three force components, one
-   potential-energy share, and one scalar-virial share (five
-   quantities total).
+   order, invoke `Potential::reduce`, passing the call's
+   `AggregateLevel` and a `SlotOutputView` that points to the slot's
+   assigned row of its class's flat slot-output buffers. The reduction
+   overwrites the three force-component rows of that view on every
+   call regardless of level, and additionally overwrites the energy
+   and virial rows when `level == AggregateLevel::ForcesAndScalars`.
+   When `level == AggregateLevel::ForcesOnly`, the energy and virial
+   rows for the just-reduced slot retain whatever values the most
+   recent `ForcesAndScalars` reduce wrote into them. Slots whose
+   internal reduction kernels do not split along the force /
+   energy-virial boundary (today: every non-pair-buffer slot, e.g.
+   `MorseBondedState`, `HarmonicAngleState`) reduce all five
+   quantities on every call regardless of level.
 5. **Combiner.** Run `accumulate_forces` once. The combiner reads
    every class's slot-output buffers and writes, for each per-particle
    quantity `Q` in `{force_x, force_y, force_z, potential_energy,
@@ -158,14 +165,25 @@ call performs the following, in order:
    `particle_buffers.Q[i] = sum over all (class, k) in canonical class+slot order of class_slot_Q[k * n + i]`.
    The summation is left-to-right with classes ordered Fast, then Slow,
    and within each class by registration order; each thread handles
-   one `i`. Unselected slots' rows still contribute their last-written
-   values, so the total reflects the most recent evaluation of every
-   class.
+   one `i`. Unselected slots' rows and rows whose energy / virial
+   contents were not refreshed by step 4 (`ForcesOnly` runs) still
+   contribute their last-written values, so the aggregated
+   `potential_energies` and `virials` on `ParticleBuffers` reflect the
+   most recent `ForcesAndScalars` evaluation across every class. The
+   combiner runs on every `step` / `step_class` call regardless of
+   level; the level only affects which slot-output rows step 4
+   refreshes.
 
 Identical runs on the same GPU with the same config and the same
-sequence of `step` / `step_class` calls produce byte-identical
+sequence of `step` / `step_class` calls — including the same
+`AggregateLevel` value at each call site — produce byte-identical
 `particle_buffers.forces_*`, `potential_energies`, and `virials`, and
-therefore byte-identical trajectories.
+therefore byte-identical trajectories. A change in the cadence at
+which `ForcesAndScalars` versus `ForcesOnly` is requested is a
+configuration change, not a non-determinism: two runs that issue the
+same sequence of (call kind, level) pairs are reproducible; two runs
+that differ in that sequence produce different `potential_energies`
+and `virials` at the steps where they diverge, exactly as expected.
 
 ## Slot Output Buffers <!-- rq-cd28340e -->
 
@@ -248,6 +266,27 @@ rows.)
     RESPA-3's "extra-slow") is a deliberate API change, not a default
     extension point.
 
+- `AggregateLevel` — two-variant enum that selects whether the <!-- inline --> <!-- rq-81ac7d6a -->
+  framework's per-step force-evaluation pipeline aggregates only the
+  force components or also the scalar quantities (energy, virial).
+
+  ```rust
+  #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+  pub enum AggregateLevel {
+      ForcesOnly,
+      ForcesAndScalars,
+  }
+  ```
+
+  - `ForcesOnly` (the cheap case, ~3/5 of the per-call reduction work)
+    runs only the force-component reductions. The energy and virial
+    rows of every slot-output buffer retain whatever values the most
+    recent `ForcesAndScalars` call wrote into them.
+  - `ForcesAndScalars` runs both the force-component reductions and
+    the scalar (energy + virial) reductions.
+  - The variant set is closed. Adding a third level requires editing
+    every consumer; it is not an open extension point.
+
 - `Potential` — object-safe trait implemented by every slot. <!-- rq-67ebf3b1 -->
 
   ```rust
@@ -273,6 +312,7 @@ rows.)
           output: SlotOutputView<'_>,
           cx: &ForceFieldContext<'_>,
           timings: &mut Timings,
+          level: AggregateLevel,
       ) -> Result<(), ForceFieldError>;
   }
   ```
@@ -300,9 +340,17 @@ rows.)
     `Some(_)`; implementations that report `None` are free to ignore
     `cx.neighbor_list` (it may be `None` or `Some` depending on whether
     any other slot needs the list).
-  - `reduce` writes exactly `buffers.particle_count()` floats per slice
-    into the five slices referenced by `output`: per-particle force x,
-    force y, force z, potential-energy share, and scalar-virial share.
+  - `reduce` writes exactly `buffers.particle_count()` floats into each
+    of the three force-component slices referenced by `output` on every
+    call regardless of `level`. When `level == AggregateLevel::ForcesAndScalars`
+    the implementation additionally writes `buffers.particle_count()`
+    floats into the energy and virial slices. When `level ==
+    AggregateLevel::ForcesOnly` the energy and virial slices are not
+    written. Slot implementations that do not have a force / scalar
+    split available in their internal reduction kernel (today: every
+    non-pair-buffer slot) reduce all five quantities on every call
+    regardless of `level` — the cost is small and the behaviour is
+    indistinguishable from `ForcesAndScalars` for that slot.
 
   Implementations are responsible for emitting their own
   `KernelStage` start/stop events through `timings`.
@@ -521,7 +569,7 @@ rows.)
   - Returns `ForceFieldError::DuplicateLabel(_)` if two slots end up
     with the same `label()`.
 
-- `ForceField::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings) -> Result<(), ForceFieldError>` <!-- rq-3579df3b -->
+- `ForceField::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings, level: AggregateLevel) -> Result<(), ForceFieldError>` <!-- rq-3579df3b -->
   - Evaluates every slot regardless of class. Equivalent to invoking
     `step_class` once for each class present, except that the
     neighbor-list update and combiner each run exactly once.
@@ -535,19 +583,28 @@ rows.)
   - For each slot in `self.slots`, in canonical slot order, calls
     `slot.contribute(buffers, sim_box, &cx, timings)`.
   - For each slot in `self.slots`, in canonical slot order, calls
-    `slot.reduce(view, &cx, timings)` where `view` is a `SlotOutputView`
-    whose five fields point into the row
+    `slot.reduce(view, &cx, timings, level)` where `view` is a
+    `SlotOutputView` whose five fields point into the row
     `class_local_index * particle_count ..  (class_local_index + 1) *
     particle_count` of the slot's class's flat slot-output buffers.
+    The slot writes into the force-component fields of `view` on every
+    call and into the energy and virial fields only when
+    `level == AggregateLevel::ForcesAndScalars`.
   - Launches `accumulate_forces` once (with
-    `KernelStage::AccumulateForces`). When the slot list is empty
-    across every class, `accumulate_forces` still launches and writes
-    zeros to `buffers.forces_*`, `buffers.potential_energies`, and
-    `buffers.virials`.
+    `KernelStage::AccumulateForces`). The combiner runs regardless of
+    `level`. When the slot list is empty across every class,
+    `accumulate_forces` still launches and writes zeros to
+    `buffers.forces_*`, `buffers.potential_energies`, and
+    `buffers.virials`. When `level == AggregateLevel::ForcesOnly`,
+    `buffers.potential_energies` and `buffers.virials` aggregate
+    whatever slot-output values the most recent `ForcesAndScalars`
+    call wrote — they are *not* refreshed by a `ForcesOnly` call. The
+    caller is responsible for issuing a `ForcesAndScalars` call before
+    reading those fields (see *Force Evaluation Pipeline* above).
   - Returns `Ok(())` on success.
   - Empty-state contract per *Empty State* above.
 
-- `ForceField::step_class(&mut self, class: ForceClass, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings) -> Result<(), ForceFieldError>` <!-- rq-be1eb548 -->
+- `ForceField::step_class(&mut self, class: ForceClass, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings, level: AggregateLevel) -> Result<(), ForceFieldError>` <!-- rq-be1eb548 -->
   - Re-evaluates only slots whose `frequency_class() == class`.
   - When the framework contains no slots of `class`, returns `Ok(())`
     immediately, launching no kernels and leaving
@@ -555,9 +612,11 @@ rows.)
     *Empty State*).
   - Otherwise, performs the same neighbor-list-update / contribute /
     reduce / combiner sequence as `step`, but restricted to slots in
-    `class`. The combiner still reads every class's slot-output buffers
-    (not just `class`'s) so that `ParticleBuffers.forces_*` reflects
-    the most recent total across both classes.
+    `class`, and propagates `level` to each selected slot's `reduce`
+    call with the same semantics as `step` above. The combiner still
+    reads every class's slot-output buffers (not just `class`'s) so
+    that `ParticleBuffers.forces_*` reflects the most recent total
+    across both classes.
   - Returns `Ok(())` when `particle_count == 0`, launching no kernels.
 
 ### Combiner Kernel <!-- rq-c0f98145 -->
@@ -1121,7 +1180,68 @@ Feature: Pluggable potential slot framework
   @rq-7fe57a77
   Scenario: System total scalar virial equals sum of particle shares
     Given a constructed ForceField with one LennardJones slot and N atoms
-    When ForceField::step is called
+    When ForceField::step is called with AggregateLevel::ForcesAndScalars
     And the per-particle virials are downloaded
     Then their sum equals Σ_{i<j within cutoff} r_ij · F_ij within f32 round-off
+
+  # --- AggregateLevel ---
+
+  @rq-5985846f
+  Scenario: step(ForcesOnly) updates forces and leaves potential_energies / virials stale
+    Given a constructed ForceField with one LennardJones slot and N atoms
+    And ForceField::step has just been called with AggregateLevel::ForcesAndScalars,
+      producing potential_energies = E_0 and virials = W_0 on the device
+    When particle positions are changed and ForceField::step is called with
+      AggregateLevel::ForcesOnly
+    Then forces_x, forces_y, forces_z reflect the LJ contribution at the new positions
+    And potential_energies on the device is byte-identical to E_0
+    And virials on the device is byte-identical to W_0
+    And per-slot LJ energy and virial slot-output rows are byte-identical to the
+      rows the prior ForcesAndScalars call wrote
+
+  @rq-beccac31
+  Scenario: step(ForcesAndScalars) refreshes potential_energies and virials
+    Given a constructed ForceField with one LennardJones slot and N atoms
+    And ForceField::step has just been called with AggregateLevel::ForcesAndScalars
+      at positions P_0, producing potential_energies = E_0 on the device
+    When particle positions are changed to P_1
+    And ForceField::step is called with AggregateLevel::ForcesAndScalars
+    Then potential_energies on the device is the LJ potential energy share evaluated
+      at P_1, differing from E_0 by the position change
+    And forces_x, forces_y, forces_z reflect the LJ contribution at P_1
+
+  @rq-55d441ee
+  Scenario: Two runs with identical (call, level) sequences are byte-identical
+    Given two independent ForceField instances A and B with identical configs and
+      identical initial ParticleBuffers
+    When each runs the same sequence of K force evaluations, each step at the same
+      AggregateLevel value (a mix of ForcesOnly and ForcesAndScalars)
+    Then forces_x, forces_y, forces_z, potential_energies, and virials on the
+      device agree byte-for-byte between A and B
+
+  @rq-fcc5cea5
+  Scenario: A bonded-only slot reduces all five quantities regardless of level
+    Given a constructed ForceField with one MorseBonded slot (a non-pair-buffer
+      slot whose internal reduction kernel is not split)
+    When ForceField::step is called with AggregateLevel::ForcesOnly
+    Then the MorseBonded slot-output row's energy and virial entries are written
+      by the call (the slot's reduce ignores level)
+    And forces_x, forces_y, forces_z on the device reflect the bonded contribution
+
+  @rq-d2bf331b
+  Scenario: A pair-buffer slot honours ForcesOnly
+    Given a constructed ForceField with one LennardJones slot
+    And the LJ slot's slot-output energy and virial rows initialised to known
+      nonzero patterns E_slot and W_slot
+    When ForceField::step is called with AggregateLevel::ForcesOnly
+    Then the LJ slot's slot-output energy and virial rows are byte-identical to
+      E_slot and W_slot (the pair-buffer slot's reduce skipped them)
+    And the LJ slot's slot-output force rows are overwritten
+
+  @rq-82822681
+  Scenario: Combiner always runs regardless of level
+    Given a constructed ForceField with at least one slot
+    When ForceField::step is called with AggregateLevel::ForcesOnly
+    Then accumulate_forces is launched exactly once
+    And the timings record a single AccumulateForces stage tick for this call
 ```

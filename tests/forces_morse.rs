@@ -1,4 +1,4 @@
-use dynamics::forces::{BondList, ExclusionList, ForceField, MorseBondedState, PotentialRegistry};
+use dynamics::forces::{AggregateLevel, BondList, ExclusionList, ForceField, MorseBondedState, PotentialRegistry};
 use dynamics::gpu::{
     ParticleBuffers, init_device, morse_bond_force, reduce_bond_forces,
 };
@@ -470,7 +470,7 @@ fn diatomic_equilibrium_produces_zero_net_force() {
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
     assert!(downloaded.forces_x[0].abs() < 1.0e-6);
@@ -508,7 +508,7 @@ fn newtons_third_law_holds_for_combined_force() {
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
     let sum_x = downloaded.forces_x[0] + downloaded.forces_x[1];

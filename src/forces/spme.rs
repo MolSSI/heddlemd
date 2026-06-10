@@ -16,9 +16,9 @@ use cudarc::nvrtc::Ptx;
 use crate::gpu::cufft::{CuFftError, Plan3dC2R, Plan3dR2C};
 use crate::gpu::device::get_func;
 use crate::gpu::{
-    GpuContext, GpuError, K_COULOMB_F32, PairBuffer, ParticleBuffers, reduce_pair_forces,
-    spme_charge_spread_on_stream, spme_force_gather, spme_influence_multiply_on_stream,
-    spme_real_pair_force,
+    GpuContext, GpuError, K_COULOMB_F32, PairBuffer, ParticleBuffers,
+    reduce_pair_energy_virial, reduce_pair_forces, spme_charge_spread_on_stream,
+    spme_force_gather, spme_influence_multiply_on_stream, spme_real_pair_force,
 };
 use crate::kernels;
 use crate::io::config::SpmeConfig;
@@ -28,8 +28,8 @@ use crate::timings::{KernelStage, Timings};
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::{NeighborListError, NeighborListState};
 use super::{
-    ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder,
-    SlotOutputView,
+    AggregateLevel, ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext,
+    PotentialBuilder, SlotOutputView,
 };
 
 // rq-7bd2d9ca
@@ -571,6 +571,7 @@ impl Potential for SpmeRealSpaceState {
         mut output: SlotOutputView<'_>,
         cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
+        level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
         if self.particle_count == 0 {
             return Ok(());
@@ -585,11 +586,20 @@ impl Potential for SpmeRealSpaceState {
             &mut output.force_x,
             &mut output.force_y,
             &mut output.force_z,
-            &mut output.energy,
-            &mut output.virial,
             self.particle_count,
         )?;
         timings.kernel_stop(KernelStage::REDUCE_PAIR_FORCES)?;
+        if level.includes_scalars() {
+            timings.kernel_start(KernelStage::REDUCE_PAIR_ENERGY_VIRIAL)?;
+            reduce_pair_energy_virial(
+                &self.pair_buffer,
+                &nl.neighbor_counts,
+                &mut output.energy,
+                &mut output.virial,
+                self.particle_count,
+            )?;
+            timings.kernel_stop(KernelStage::REDUCE_PAIR_ENERGY_VIRIAL)?;
+        }
         Ok(())
     }
 }
@@ -710,11 +720,18 @@ impl Potential for SpmeReciprocalState {
         mut output: SlotOutputView<'_>,
         cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
+        _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
         let n = self.grid.particle_count;
         if n == 0 {
             return Ok(());
         }
+
+        // SpmeReciprocalState uses spme_force_gather, which writes
+        // forces, energy, and virial in a single kernel call. The
+        // gather cost is small relative to the recip pipeline and
+        // splitting it would yield no measurable saving, so this slot
+        // ignores `level` and always writes all five output rows.
 
         // Join the default stream with recip_stream so the dtoh below
         // and the force_gather launch that follows both see finalized

@@ -102,8 +102,6 @@ pub fn reduce_pair_forces(
     target_force_x: &mut CudaViewMut<'_, f32>,
     target_force_y: &mut CudaViewMut<'_, f32>,
     target_force_z: &mut CudaViewMut<'_, f32>,
-    target_energy: &mut CudaViewMut<'_, f32>,
-    target_virial: &mut CudaViewMut<'_, f32>,
     particle_count: usize,
 ) -> Result<(), GpuError> {
     let n = particle_count;
@@ -116,8 +114,6 @@ pub fn reduce_pair_forces(
     debug_assert_eq!(target_force_x.len(), n);
     debug_assert_eq!(target_force_y.len(), n);
     debug_assert_eq!(target_force_z.len(), n);
-    debug_assert_eq!(target_energy.len(), n);
-    debug_assert_eq!(target_virial.len(), n);
     debug_assert_eq!(
         pair_buffer.pair_forces_x.len(),
         n * max_neighbors as usize
@@ -137,13 +133,59 @@ pub fn reduce_pair_forces(
                 &pair_buffer.pair_forces_x,
                 &pair_buffer.pair_forces_y,
                 &pair_buffer.pair_forces_z,
-                &pair_buffer.pair_energies,
-                &pair_buffer.pair_virials,
                 neighbor_counts,
                 max_neighbors,
                 target_force_x,
                 target_force_y,
                 target_force_z,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+pub fn reduce_pair_energy_virial(
+    pair_buffer: &PairBuffer,
+    neighbor_counts: &CudaSlice<u32>,
+    target_energy: &mut CudaViewMut<'_, f32>,
+    target_virial: &mut CudaViewMut<'_, f32>,
+    particle_count: usize,
+) -> Result<(), GpuError> {
+    let n = particle_count;
+    if n == 0 {
+        return Ok(());
+    }
+    let max_neighbors = pair_buffer.max_neighbors();
+    debug_assert_eq!(pair_buffer.particle_count(), n);
+    debug_assert_eq!(neighbor_counts.len(), n);
+    debug_assert_eq!(target_energy.len(), n);
+    debug_assert_eq!(target_virial.len(), n);
+    debug_assert_eq!(
+        pair_buffer.pair_energies.len(),
+        n * max_neighbors as usize
+    );
+
+    let n_u32 = n as u32;
+    let func = pair_buffer
+        .kernels
+        .reduce
+        .reduce_pair_energy_virial
+        .clone();
+    let cfg = LaunchConfig {
+        grid_dim: (n_u32, 1, 1),
+        block_dim: (BLOCK_SIZE, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &pair_buffer.pair_energies,
+                &pair_buffer.pair_virials,
+                neighbor_counts,
+                max_neighbors,
                 target_energy,
                 target_virial,
                 n_u32,

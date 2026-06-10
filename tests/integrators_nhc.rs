@@ -5,7 +5,7 @@
 // shared kinetic_energy_reduce / rescale_velocities helpers documented
 // in `nose-hoover-chain.md` are also exercised directly.
 
-use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, compute_kinetic_energy, init_device, rescale_velocities,
 };
@@ -501,7 +501,7 @@ fn nhc_preserves_com_momentum_to_round_off() {
             n, 0)
         .unwrap();
     let mut therm = build_nhc(&gpu, n, &nhc_kind(300.0, 1.0e-13, 3, 3, 1));
-    ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+    ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     for _ in 0..20 {
         therm
             .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)

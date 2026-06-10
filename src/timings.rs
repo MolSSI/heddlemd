@@ -40,6 +40,8 @@ impl KernelStage {
         KernelStage::new("spme_recip_pipeline");
     pub const SPME_FORCE_GATHER: KernelStage = KernelStage::new("spme_force_gather");
     pub const REDUCE_PAIR_FORCES: KernelStage = KernelStage::new("reduce_pair_forces");
+    pub const REDUCE_PAIR_ENERGY_VIRIAL: KernelStage =
+        KernelStage::new("reduce_pair_energy_virial");
     pub const LANGEVIN_KICK_HALF: KernelStage = KernelStage::new("langevin_kick_half");
     pub const LANGEVIN_DRIFT_HALF: KernelStage = KernelStage::new("langevin_drift_half");
     pub const LANGEVIN_OU_STEP: KernelStage = KernelStage::new("langevin_ou_step");
@@ -110,6 +112,7 @@ impl KernelStage {
         Self::SPME_RECIP_PIPELINE,
         Self::SPME_FORCE_GATHER,
         Self::REDUCE_PAIR_FORCES,
+        Self::REDUCE_PAIR_ENERGY_VIRIAL,
         Self::MORSE_BOND_FORCE,
         Self::REDUCE_BOND_FORCES,
         Self::HARMONIC_ANGLE_FORCE,

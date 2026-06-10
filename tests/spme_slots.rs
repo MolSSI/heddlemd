@@ -187,7 +187,7 @@ fn spme_reciprocal_total_energy_equals_recip_minus_self() {
             energy: energy.slice_mut(0..n),
             virial: virial.slice_mut(0..n),
         };
-        slot.reduce(view, &cx, &mut t).unwrap();
+        slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars).unwrap();
     }
     let energies: Vec<f32> = device.dtoh_sync_copy(&energy).unwrap();
     let total: f64 = energies.iter().map(|&e| e as f64).sum();
@@ -257,7 +257,7 @@ fn spme_real_slot_zero_outside_r_cut() {
             energy: energy.slice_mut(0..n),
             virial: virial.slice_mut(0..n),
         };
-        slot.reduce(view, &cx, &mut t).unwrap();
+        slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars).unwrap();
     }
     let fx: Vec<f32> = device.dtoh_sync_copy(&force_x).unwrap();
     assert!(
@@ -319,7 +319,7 @@ fn spme_real_slot_matches_closed_form_erfc_pair() {
             energy: energy.slice_mut(0..n),
             virial: virial.slice_mut(0..n),
         };
-        slot.reduce(view, &cx, &mut t).unwrap();
+        slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars).unwrap();
     }
     let fx: Vec<f32> = device.dtoh_sync_copy(&force_x).unwrap();
 
@@ -560,7 +560,7 @@ fn run_spme_recip_energy(
             energy: energy.slice_mut(0..n),
             virial: virial.slice_mut(0..n),
         };
-        slot.reduce(view, &cx, &mut t).unwrap();
+        slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars).unwrap();
     }
     let energies: Vec<f32> = device.dtoh_sync_copy(&energy).unwrap();
     energies.iter().map(|&e| e as f64).sum()

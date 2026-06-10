@@ -5,7 +5,7 @@
 // and `rescale_positions` helpers are also exercised directly, and
 // `SimulationBox::rescale_isotropic` is unit-tested host-side.
 
-use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, compute_total_virial, init_device, rescale_positions,
 };
@@ -690,7 +690,7 @@ fn composes_with_velocity_verlet_and_berendsen_thermostat() {
         .unwrap()
         .unwrap();
     let mut baro = build_berendsen_barostat(&gpu, n, &berendsen_kind(1.0e5, 1.0e-12, 1.0e-9));
-    ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+    ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     for _ in 0..10 {
         therm
             .apply_pre(&mut buffers, 1.0e-15, &mut timings)

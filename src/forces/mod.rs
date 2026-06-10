@@ -47,6 +47,21 @@ pub enum ForceClass {
     Slow,
 }
 
+/// Selects whether a force-evaluation call aggregates only the three force
+/// components, or also the per-particle potential-energy and scalar-virial
+/// shares. See `rqm/forces/framework.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AggregateLevel {
+    ForcesOnly,
+    ForcesAndScalars,
+}
+
+impl AggregateLevel {
+    pub fn includes_scalars(self) -> bool {
+        matches!(self, AggregateLevel::ForcesAndScalars)
+    }
+}
+
 // rq-67ebf3b1
 pub trait Potential: std::fmt::Debug + Send {
     fn label(&self) -> &'static str;
@@ -70,6 +85,7 @@ pub trait Potential: std::fmt::Debug + Send {
         output: SlotOutputView<'_>,
         cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
+        level: AggregateLevel,
     ) -> Result<(), ForceFieldError>;
 }
 
@@ -339,8 +355,9 @@ impl ForceField {
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,
         timings: &mut Timings,
+        level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
-        self.run(None, buffers, sim_box, timings)
+        self.run(None, buffers, sim_box, timings, level)
     }
 
     pub fn step_class(
@@ -349,6 +366,7 @@ impl ForceField {
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,
         timings: &mut Timings,
+        level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
         // No-op when the class has no slots: nothing to recompute and
         // the existing combined total in ParticleBuffers.forces_* is
@@ -360,7 +378,7 @@ impl ForceField {
         if class_count == 0 {
             return Ok(());
         }
-        self.run(Some(class), buffers, sim_box, timings)
+        self.run(Some(class), buffers, sim_box, timings, level)
     }
 
     fn run(
@@ -369,6 +387,7 @@ impl ForceField {
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,
         timings: &mut Timings,
+        level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
         let n = self.particle_count;
         if n == 0 {
@@ -440,7 +459,7 @@ impl ForceField {
                 buffers: &*buffers,
                 sim_box,
             };
-            slot.reduce(view, &cx, timings)?;
+            slot.reduce(view, &cx, timings, level)?;
         }
 
         timings.kernel_start(KernelStage::ACCUMULATE_FORCES)?;

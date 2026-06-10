@@ -1180,9 +1180,15 @@ fn run_simulation_with_phase(
         // Warm-up: refresh forces to match current positions. Phase 0
         // populates F(x_0); subsequent phases re-compute the carried-over
         // force buffer, which is bit-identical to the previous phase's
-        // final F(x).
+        // final F(x). Always uses ForcesAndScalars so the step-0
+        // logging path below sees fresh potential_energies and virials.
         force_field
-            .step(&mut buffers, &sim_box, &mut timings)
+            .step(
+                &mut buffers,
+                &sim_box,
+                &mut timings,
+                crate::forces::AggregateLevel::ForcesAndScalars,
+            )
             .map_err(|e| (RunnerError::ForceField(e), ExitPhase::Setup))?;
 
         let mut frames_written: u64 = 0;
@@ -1266,6 +1272,20 @@ fn run_simulation_with_phase(
                     .lookup(&phase.integrator.kind)
                     .map(|b| b.supports_constraints(&phase.integrator.params))
                     .unwrap_or(false);
+                // Upgrade to ForcesAndScalars when the runner needs fresh
+                // energy / virial this step: an output frame, a log row,
+                // or any barostat that reads virial each step. The
+                // barostat case is handled by the integrator's own
+                // SubStep::ForceEval level (MTK-NPT emits ForcesAndScalars
+                // unconditionally); c-rescale barostats run as a separate
+                // post-step phase and require the integrator's most
+                // recent force evaluation to have produced virials.
+                let trajectory_due = phase.output.trajectory_every > 0
+                    && step % phase.output.trajectory_every == 0;
+                let log_due = phase.output.log_every > 0
+                    && step % phase.output.log_every == 0;
+                let runner_needs_scalars =
+                    trajectory_due || log_due || barostat.is_some();
                 crate::integrator::run_step(
                     integrator.as_mut(),
                     &mut buffers,
@@ -1275,6 +1295,7 @@ fn run_simulation_with_phase(
                     supports_constraints,
                     dt_f32,
                     &mut timings,
+                    runner_needs_scalars,
                 )
                 .map_err(|e| {
                     let runner_err = match e {
@@ -1480,7 +1501,12 @@ fn run_minimization_phase(
 
     // Warm up forces and potential energy at the current positions.
     force_field
-        .step(buffers, sim_box, timings)
+        .step(
+            buffers,
+            sim_box,
+            timings,
+            crate::forces::AggregateLevel::ForcesAndScalars,
+        )
         .map_err(|e| (RunnerError::ForceField(e), ExitPhase::Setup))?;
 
     // Compute initial accepted state via the minimizer.

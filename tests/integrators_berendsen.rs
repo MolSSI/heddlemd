@@ -6,7 +6,7 @@
 // covered by the integrator framework tests in
 // `tests/integrator_framework.rs`.
 
-use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, compute_kinetic_energy, init_device,
 };
@@ -467,7 +467,7 @@ fn berendsen_temperature_relaxes_toward_target() {
         .unwrap();
     let mut therm = build_berendsen(&gpu, n, &berendsen_kind(temperature, tau));
 
-    ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+    ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let n_steps = 500usize;
     for _ in 0..n_steps {
         integrator

@@ -522,6 +522,7 @@ fn rows_appear_in_documented_order() {
         "vv_kick_drift",
         "lj_pair_force",
         "reduce_pair_forces",
+        "reduce_pair_energy_virial",
         "accumulate_forces",
         "vv_kick",
         "host_to_device_upload",

@@ -63,7 +63,10 @@ impl Integrator for LangevinBaoabState {
                 SubStep::Drift { dt, label: "A_pre" },
                 SubStep::Custom { dt, label: "O" },
                 SubStep::Drift { dt, label: "A_post" },
-                SubStep::ForceEval { class: None },
+                SubStep::ForceEval {
+                    class: None,
+                    level: Some(crate::forces::AggregateLevel::ForcesOnly),
+                },
                 SubStep::KickHalf { dt, label: "B" },
             ],
         }

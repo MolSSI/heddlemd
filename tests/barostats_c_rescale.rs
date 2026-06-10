@@ -6,7 +6,7 @@
 // `SimulationBox::rescale_isotropic` convenience are covered in
 // `tests/barostats_berendsen.rs` and not re-tested here.
 
-use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use dynamics::gpu::{GpuContext, ParticleBuffers, init_device};
 use dynamics::integrator::IntegratorStepExt;
 use dynamics::integrator::{
@@ -549,7 +549,7 @@ fn composes_with_velocity_verlet_and_csvr_thermostat() {
         .unwrap()
         .unwrap();
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 1.0e-9, 19));
-    ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+    ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     for _ in 0..10 {
         // Order: thermostat.apply_pre (trait default no-op for CSVR)
         // → integrator.step → thermostat.apply_post → barostat.apply

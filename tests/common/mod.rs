@@ -110,6 +110,7 @@ pub fn reduce_pair_forces_into_buffers(
     let mut vz = particle_buffers.forces_z.slice_mut(..);
     let mut ve = particle_buffers.potential_energies.slice_mut(..);
     let mut vw = particle_buffers.virials.slice_mut(..);
-    reduce_pair_forces(pair, counts, &mut vx, &mut vy, &mut vz, &mut ve, &mut vw, n)
+    reduce_pair_forces(pair, counts, &mut vx, &mut vy, &mut vz, n)?;
+    dynamics::gpu::reduce_pair_energy_virial(pair, counts, &mut ve, &mut vw, n)
 }
 

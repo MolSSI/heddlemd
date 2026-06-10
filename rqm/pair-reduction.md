@@ -53,14 +53,26 @@ isolation.
 ## Reduction Algorithm <!-- rq-b0913965 -->
 
 Each particle `i` is reduced by one CUDA block of `BLOCK_SIZE = 256`
-threads. The block computes five per-particle sums (three force
-components, energy, virial) cooperatively using a fixed-shape
-register-level partial accumulation followed by a fixed-shape pairwise
-reduction tree.
+threads. Two kernels share the same block-per-particle algorithm and
+the same fixed-shape reduction tree but operate on disjoint subsets of
+the pair-buffer fields:
 
-The algorithm is identical for all five sums; the description below uses
-a single quantity `q` standing for any of `pair_forces_x`, `pair_forces_y`,
-`pair_forces_z`, `pair_energies`, `pair_virials`.
+- `reduce_pair_forces` reduces the three force components (`pair_forces_x`,
+  `pair_forces_y`, `pair_forces_z`) into the per-particle net-force
+  output buffers. Launched every timestep.
+- `reduce_pair_energy_virial` reduces the two scalar quantities
+  (`pair_energies`, `pair_virials`) into the per-particle energy-share
+  and virial-share output buffers. Launched only when the requesting
+  framework call has `AggregateLevel::ForcesAndScalars` (see
+  `forces/framework.md`); on `AggregateLevel::ForcesOnly` calls it is
+  not launched at all.
+
+The algorithm is identical for every reduced quantity; the description
+below uses a single quantity `q` standing for any of `pair_forces_x`,
+`pair_forces_y`, `pair_forces_z`, `pair_energies`, `pair_virials`. The
+kernel that reduces forces issues three independent register accumulators
+through the same tree; the kernel that reduces energy and virial issues
+two.
 
 ```text
 count = neighbor_counts[i]
@@ -320,22 +332,28 @@ zero in this case receive no writes.
   - private `particle_count: usize`
   - private `max_neighbors: u32`
 
-### CUDA Kernel <!-- rq-31bd2eee -->
+### CUDA Kernels <!-- rq-31bd2eee -->
 
-`kernels/reduce.cu` declares one `extern "C"` kernel:
+`kernels/reduce.cu` declares two `extern "C"` kernels that share the
+same block-per-particle reduction topology:
 
 ```c
 extern "C" __global__ void reduce_pair_forces(
     const float *pair_forces_x,
     const float *pair_forces_y,
     const float *pair_forces_z,
-    const float *pair_energies,
-    const float *pair_virials,
     const unsigned int *neighbor_counts,
     unsigned int max_neighbors,
     float *net_forces_x,
     float *net_forces_y,
     float *net_forces_z,
+    unsigned int n);
+
+extern "C" __global__ void reduce_pair_energy_virial(
+    const float *pair_energies,
+    const float *pair_virials,
+    const unsigned int *neighbor_counts,
+    unsigned int max_neighbors,
     float *net_energy,
     float *net_virial,
     unsigned int n);
@@ -344,24 +362,29 @@ extern "C" __global__ void reduce_pair_forces(
 Each block reduces one particle: `i = blockIdx.x`. If `i >= n` every
 thread in the block returns without touching any buffer. Otherwise, the
 block's 256 threads cooperatively execute the reduction algorithm above
-for particle `i`.
+for particle `i` — three accumulators in `reduce_pair_forces`, two in
+`reduce_pair_energy_virial`.
 
 Phase-3 inter-warp partial sums are exchanged through a static
-shared-memory buffer declared inside the kernel as
-`__shared__ float warp_partials[NUM_WARPS][5]` (one slot per warp per
-quantity, `NUM_WARPS = 8`). The kernel declares no dynamic shared
-memory.
+shared-memory buffer declared inside each kernel as
+`__shared__ float warp_partials[NUM_WARPS][K]` where `K = 3` for
+`reduce_pair_forces` and `K = 2` for `reduce_pair_energy_virial`
+(`NUM_WARPS = 8`). Neither kernel declares dynamic shared memory.
 
-The kernel reads the five input pair-contribution arrays and
-`neighbor_counts`, and writes the five output per-particle arrays. It
-does not modify the pair-contribution buffers, the neighbor counts, or
-any other particle state.
+Each kernel reads only the pair-contribution arrays for the quantities
+it sums and writes only the corresponding output arrays. Neither
+modifies the pair-contribution buffers, `neighbor_counts`, or any other
+particle state. The pair-buffer's energy and virial arrays therefore
+hold whatever values the most recent pair-force kernel wrote, regardless
+of whether `reduce_pair_energy_virial` was launched this step; the next
+launch picks them up.
 
 ### PTX Module Loading <!-- rq-56d8375d -->
 
 `init_device()` loads the compiled `kernels/reduce.cu` PTX as module
-`"reduce"` and captures its `reduce_pair_forces` function into the
-`Kernels` handle (see `build-pipeline.md`).
+`"reduce"` and captures both `reduce_pair_forces` and
+`reduce_pair_energy_virial` into the `Kernels` handle (see
+`build-pipeline.md`).
 
 ### Constructor and Accessors <!-- rq-be5fe064 -->
 
@@ -380,16 +403,15 @@ any other particle state.
 - `PairBuffer::max_neighbors(&self) -> u32` <!-- rq-12657190 -->
   - Returns the value supplied at construction.
 
-### Reduction Launcher <!-- rq-6f2452d1 -->
+### Reduction Launchers <!-- rq-6f2452d1 -->
 
-A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
+Two free functions in `src/gpu/kernels.rs`, re-exported from
+`crate::gpu`:
 
-- `reduce_pair_forces(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_force_x: &mut CudaViewMut<'_, f32>, target_force_y: &mut CudaViewMut<'_, f32>, target_force_z: &mut CudaViewMut<'_, f32>, target_energy: &mut CudaViewMut<'_, f32>, target_virial: &mut CudaViewMut<'_, f32>, particle_count: usize) -> Result<(), GpuError>` <!-- rq-6690fae9 -->
-  - Launches the `reduce_pair_forces` kernel against the five caller-
-    supplied target buffers. The targets receive the per-particle net
-    force (three components), per-particle potential-energy share, and
-    per-particle scalar-virial share from the pair-buffer reduction
-    (overwriting any prior contents).
+- `reduce_pair_forces(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_force_x: &mut CudaViewMut<'_, f32>, target_force_y: &mut CudaViewMut<'_, f32>, target_force_z: &mut CudaViewMut<'_, f32>, particle_count: usize) -> Result<(), GpuError>` <!-- rq-6690fae9 -->
+  - Launches the `reduce_pair_forces` kernel against the three caller-
+    supplied force-component target buffers. Overwrites them with the
+    per-particle net force from the pair-buffer reduction.
   - Block size is 256; grid size is `particle_count` blocks (one block
     per particle).
   - When `particle_count == 0`, returns `Ok(())` without launching a
@@ -401,11 +423,26 @@ A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
 
   The launcher trusts the caller for shape consistency: it asserts (debug
   builds only) that `pair_buffer.particle_count() == particle_count`,
-  that `neighbor_counts.len() == particle_count`, that each of the five
-  target views has length `particle_count`, and that the pair-buffer
-  slices have length `particle_count * pair_buffer.max_neighbors()`.
-  Release builds skip the asserts for parity with the other kernel
-  launchers.
+  that `neighbor_counts.len() == particle_count`, that each of the
+  three target views has length `particle_count`, and that the
+  pair-buffer slices have length
+  `particle_count * pair_buffer.max_neighbors()`. Release builds skip
+  the asserts for parity with the other kernel launchers.
+
+- `reduce_pair_energy_virial(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_energy: &mut CudaViewMut<'_, f32>, target_virial: &mut CudaViewMut<'_, f32>, particle_count: usize) -> Result<(), GpuError>` <!-- rq-c9240ed4 -->
+  - Launches the `reduce_pair_energy_virial` kernel against the two
+    caller-supplied scalar target buffers. Overwrites them with the
+    per-particle potential-energy share and scalar-virial share from
+    the pair-buffer reduction.
+  - Block size, grid size, empty-state, error, and debug-assertion
+    semantics mirror `reduce_pair_forces`, applied to the two scalar
+    targets instead of the three force targets.
+
+  Both launchers read `pair_buffer.pair_*` and `neighbor_counts` as
+  shared immutable inputs and write only into the targets handed to
+  them. A caller that runs the force launcher without the
+  energy-virial launcher leaves the corresponding target buffers
+  unchanged from their last write.
 
   Within the pluggable potential framework, the `LennardJonesState` slot
   passes its assigned rows of the framework's flat slot-output buffers
@@ -413,13 +450,17 @@ A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
 
 ## Launch Configuration <!-- rq-9be271aa -->
 
-- Block size: 256 threads (8 warps of 32).
-- Grid size: `n` blocks in the x dimension — one block per particle.
-- Shared memory: static, `NUM_WARPS * 5 * sizeof(f32) = 160` bytes per
-  block (a `[NUM_WARPS][5]` array of per-warp partials, where
-  `NUM_WARPS = blockDim.x / 32 = 8`). The kernel requests no dynamic
-  shared memory at launch.
-- Stream: the default stream carried by `pair_buffer.device`.
+- Block size: 256 threads (8 warps of 32) for both kernels.
+- Grid size: `n` blocks in the x dimension — one block per particle —
+  for both kernels.
+- Shared memory: static, `NUM_WARPS * K * sizeof(f32)` bytes per block
+  for a `[NUM_WARPS][K]` array of per-warp partials, where
+  `NUM_WARPS = blockDim.x / 32 = 8` and `K` is the number of summed
+  quantities — `K = 3` for `reduce_pair_forces` (96 bytes per block),
+  `K = 2` for `reduce_pair_energy_virial` (64 bytes per block). Neither
+  kernel requests dynamic shared memory at launch.
+- Stream: the default stream carried by `pair_buffer.device` for both
+  kernels.
 
 ## Out of Scope <!-- rq-2b7cfbaf -->
 
@@ -428,6 +469,12 @@ A free function in `src/gpu/kernels.rs`, re-exported from `crate::gpu`:
   feature).
 - Bonded force terms, electrostatics, accumulation across multiple force
   kernels into the same `forces_*` buffer.
+- Splitting the bonded and angle slot reduction kernels (in
+  `reduce_bond_forces`, `reduce_angle_forces`) along the same
+  force-only / energy-virial boundary. Those reductions are not
+  pair-buffer reductions and their cost is small; they continue to
+  reduce all five quantities on every call regardless of the requesting
+  `AggregateLevel`.
 - Sub-block parallelism: multiple particles per block, multi-block
   cooperative reductions over a single particle, persistent-kernel
   schemes. One block reduces exactly one particle.
@@ -475,10 +522,11 @@ Feature: Pair buffer and deterministic segmented reduction
   # --- Module loading ---
 
   @rq-a43552d5
-  Scenario: init_device exposes the reduction kernel on the Kernels handle
+  Scenario: init_device exposes both reduction kernels on the Kernels handle
     Given a CUDA-capable GPU is available as device 0
     When init_device() is called
     Then the returned GpuContext's kernels handle exposes the reduce_pair_forces function
+    And the returned GpuContext's kernels handle exposes the reduce_pair_energy_virial function
 
   # --- Reduction correctness: trivial cases ---
 
@@ -676,32 +724,85 @@ Feature: Pair buffer and deterministic segmented reduction
   # --- Energy and virial reduction ---
 
   @rq-9e487c80
-  Scenario: Reduction sums pair energies and virials over slots 0..count
+  Scenario: Energy and virial reduction sums slots 0..count
     Given a PairBuffer with particle_count=1 and max_neighbors=4
     And pair_energies = [0.5, 1.5, 2.0, 999.0]
     And pair_virials = [-1.0, 2.0, 3.0, 0.0]
     And neighbor_counts is [3]
-    When reduce_pair_forces is called
+    When reduce_pair_energy_virial is called
     Then net_energy[0] equals 4.0_f32
     And net_virial[0] equals 4.0_f32
 
   @rq-961c2ee6
-  Scenario: Reduction with zero count writes zero to energy and virial targets
+  Scenario: Energy-virial reduction with zero count writes zero to its targets
     Given a PairBuffer with particle_count=2 and max_neighbors=4
     And pair_energies and pair_virials contain arbitrary nonzero values
     And neighbor_counts is [0, 0]
-    When reduce_pair_forces is called
+    When reduce_pair_energy_virial is called
     Then net_energy and net_virial are each [0.0, 0.0]
 
   @rq-41d9e514
-  Scenario: Energy and virial reductions share the same indexing as force
+  Scenario: Force and energy-virial reductions share the same indexing
     Given a PairBuffer with particle_count=2 and max_neighbors=2
     And pair_forces_x = [1.0, 2.0, 3.0, 4.0]
     And pair_energies = [10.0, 20.0, 30.0, 40.0]
     And pair_virials  = [100.0, 200.0, 300.0, 400.0]
     And neighbor_counts is [2, 2]
     When reduce_pair_forces is called
+    And then reduce_pair_energy_virial is called
     Then net_forces_x[0] equals 3.0 and net_forces_x[1] equals 7.0
     And net_energy[0] equals 30.0 and net_energy[1] equals 70.0
     And net_virial[0] equals 300.0 and net_virial[1] equals 700.0
+
+  # --- Split independence ---
+
+  @rq-9f3a36aa
+  Scenario: reduce_pair_forces does not touch energy or virial targets
+    Given a PairBuffer with particle_count=4 and max_neighbors=2
+    And neighbor_counts is [2, 2, 2, 2]
+    And net_energy and net_virial target buffers initialised to known nonzero
+      patterns A_energy and A_virial respectively
+    When reduce_pair_forces is called
+    Then net_energy is byte-identical to A_energy
+    And net_virial is byte-identical to A_virial
+
+  @rq-75ee70dd
+  Scenario: reduce_pair_energy_virial does not touch force targets
+    Given a PairBuffer with particle_count=4 and max_neighbors=2
+    And neighbor_counts is [2, 2, 2, 2]
+    And net_forces_x, net_forces_y, net_forces_z target buffers initialised to
+      known nonzero patterns A_fx, A_fy, A_fz respectively
+    When reduce_pair_energy_virial is called
+    Then net_forces_x, net_forces_y, net_forces_z are byte-identical to
+      A_fx, A_fy, A_fz respectively
+
+  @rq-803ee7e5
+  Scenario: Skipping reduce_pair_energy_virial leaves stale energy and virial targets
+    Given a PairBuffer with particle_count=2 and max_neighbors=2
+    And neighbor_counts is [2, 2]
+    And pair_energies = [10.0, 20.0, 30.0, 40.0] producing per-particle
+      energy sums 30.0 and 70.0 when reduce_pair_energy_virial runs
+    And reduce_pair_energy_virial has just run, leaving net_energy = [30.0, 70.0]
+    When pair_energies is overwritten to [1.0, 1.0, 1.0, 1.0] (would now sum to 2.0, 2.0)
+    And reduce_pair_forces is called (without running reduce_pair_energy_virial)
+    Then net_energy still equals [30.0, 70.0]
+    And reading net_energy without first running reduce_pair_energy_virial yields the
+      stale value from the previous full reduction
+
+  @rq-b4c772c9
+  Scenario: Two independent runs of reduce_pair_energy_virial produce byte-identical scalars
+    Given two independently-constructed PairBuffers populated with identical
+      pair_energies and pair_virials contents at particle_count=128 and
+      max_neighbors=16
+    And identical neighbor_counts in both runs
+    When reduce_pair_energy_virial is launched on each
+    And both net_energy and net_virial are downloaded to the host
+    Then run A and run B agree byte-for-byte on every f32
+
+  @rq-41453204
+  Scenario: reduce_pair_energy_virial on an empty state is a no-op
+    Given a PairBuffer with particle_count=0 and max_neighbors=8
+    And empty net_energy and net_virial target views
+    When reduce_pair_energy_virial is called
+    Then it returns Ok(()) without launching a kernel
 ```

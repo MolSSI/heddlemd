@@ -14,7 +14,8 @@ use crate::timings::{KernelStage, Timings};
 
 use super::topology::AngleList;
 use super::{
-    ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder, SlotOutputView,
+    AggregateLevel, ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder,
+    SlotOutputView,
 };
 
 // rq-21a8063c
@@ -143,7 +144,10 @@ impl Potential for HarmonicAngleState {
         mut output: SlotOutputView<'_>,
         _cx: &crate::forces::ForceFieldContext<'_>,
         timings: &mut Timings,
+        _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
+        // Harmonic-angle reduction is a small kernel; it writes all
+        // five output rows on every call regardless of `level`.
         if self.particle_count == 0 {
             return Ok(());
         }

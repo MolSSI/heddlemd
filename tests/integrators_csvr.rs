@@ -3,7 +3,7 @@
 // CSVR (Bussi-Donadio-Parrinello) thermostat tests. The thermostat is
 // exercised in isolation through its `apply_post` hook.
 
-use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, compute_kinetic_energy, init_device, lan_ou_step,
 };
@@ -466,7 +466,7 @@ fn csvr_time_averaged_ke_tracks_k_target() {
             n, 0)
         .unwrap();
     let mut therm = build_csvr(&gpu, n, &csvr_kind(temperature_si, 1.0e-14, 11));
-    ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+    ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
     for _ in 0..100 {
         integ

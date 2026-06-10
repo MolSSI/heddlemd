@@ -11,6 +11,7 @@ use crate::kernels;
 #[derive(Debug, Clone)]
 pub struct ReduceKernels {
     pub reduce_pair_forces: CudaFunction,
+    pub reduce_pair_energy_virial: CudaFunction,
 }
 
 impl ReduceKernels {
@@ -18,10 +19,15 @@ impl ReduceKernels {
         device.load_ptx(
             Ptx::from_src(kernels::REDUCE),
             "reduce",
-            &["reduce_pair_forces"],
+            &["reduce_pair_forces", "reduce_pair_energy_virial"],
         )?;
         Ok(ReduceKernels {
             reduce_pair_forces: get_func(device, "reduce", "reduce_pair_forces")?,
+            reduce_pair_energy_virial: get_func(
+                device,
+                "reduce",
+                "reduce_pair_energy_virial",
+            )?,
         })
     }
 }

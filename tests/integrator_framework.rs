@@ -821,10 +821,10 @@ fn plan_with_multiple_force_evals_dispatches_each() {
             steps: vec![
                 SubStep::KickHalf { dt: 0.1, label: "k1" },
                 SubStep::Drift { dt: 0.1, label: "d1" },
-                SubStep::ForceEval { class: None },
+                SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::KickHalf { dt: 0.1, label: "k2" },
                 SubStep::Drift { dt: 0.1, label: "d2" },
-                SubStep::ForceEval { class: None },
+                SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::KickHalf { dt: 0.1, label: "k3" },
             ],
         },
@@ -868,7 +868,7 @@ fn execute_with_force_eval_directly_returns_unexpected_substep() {
         log: CallLog { events: log.events.clone() },
     };
     let err = stub
-        .execute(&SubStep::ForceEval { class: None }, &mut buffers, &mut sim_box, &mut timings)
+        .execute(&SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) }, &mut buffers, &mut sim_box, &mut timings)
         .unwrap_err();
     match err {
         IntegratorError::UnexpectedSubStep { variant } => {
@@ -888,7 +888,7 @@ fn plan_with_one_drift_fires_before_after_drift() {
         plan: StepPlan {
             steps: vec![
                 SubStep::Drift { dt: 0.1, label: "d" },
-                SubStep::ForceEval { class: None },
+                SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::KickHalf { dt: 0.1, label: "k" },
             ],
         },
@@ -907,6 +907,7 @@ fn plan_with_one_drift_fires_before_after_drift() {
         true,
         0.1,
         &mut timings,
+    true,
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -926,7 +927,7 @@ fn plan_with_two_drifts_fires_before_after_drift_twice() {
                 SubStep::Drift { dt: 0.1, label: "A_pre" },
                 SubStep::Custom { dt: 0.1, label: "O" },
                 SubStep::Drift { dt: 0.1, label: "A_post" },
-                SubStep::ForceEval { class: None },
+                SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::KickHalf { dt: 0.1, label: "B" },
             ],
         },
@@ -945,6 +946,7 @@ fn plan_with_two_drifts_fires_before_after_drift_twice() {
         true,
         0.1,
         &mut timings,
+    true,
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -970,7 +972,7 @@ fn plan_whose_final_substep_is_not_a_kick_does_not_fire_after_kick() {
         plan: StepPlan {
             steps: vec![
                 SubStep::KickHalf { dt: 0.1, label: "k" },
-                SubStep::ForceEval { class: None },
+                SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::Custom { dt: 0.1, label: "post" },
             ],
         },
@@ -989,6 +991,7 @@ fn plan_whose_final_substep_is_not_a_kick_does_not_fire_after_kick() {
         true,
         0.1,
         &mut timings,
+    true,
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -1020,6 +1023,7 @@ fn custom_substep_alone_fires_no_constraint_hooks() {
         true,
         0.1,
         &mut timings,
+    true,
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -1036,7 +1040,7 @@ fn install_constraint_hooks_false_suppresses_all_hooks() {
         plan: StepPlan {
             steps: vec![
                 SubStep::KickDrift { dt: 0.1, label: "kd" },
-                SubStep::ForceEval { class: None },
+                SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::KickHalf { dt: 0.1, label: "k" },
             ],
         },
@@ -1055,6 +1059,7 @@ fn install_constraint_hooks_false_suppresses_all_hooks() {
         false, // install_constraint_hooks == false
         0.1,
         &mut timings,
+    true,
     )
     .unwrap();
     let events = constraint_log.events.lock().unwrap().clone();
@@ -1200,7 +1205,7 @@ fn execute_with_force_eval_some_class_also_returns_unexpected_substep() {
     };
     let err = stub
         .execute(
-            &SubStep::ForceEval { class: Some(ForceClass::Fast) },
+            &SubStep::ForceEval { class: Some(ForceClass::Fast), level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) },
             &mut buffers,
             &mut sim_box,
             &mut timings,
@@ -1257,7 +1262,7 @@ fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
     let log = CallLog::default();
     let mut stub = PlanStub {
         plan: StepPlan {
-            steps: vec![SubStep::ForceEval { class: Some(ForceClass::Fast) }],
+            steps: vec![SubStep::ForceEval { class: Some(ForceClass::Fast), level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) }],
         },
         log: CallLog { events: log.events.clone() },
     };
@@ -1316,7 +1321,7 @@ fn force_eval_some_slow_class_on_fast_only_ff_is_noop() {
     let log = CallLog::default();
     let mut stub = PlanStub {
         plan: StepPlan {
-            steps: vec![SubStep::ForceEval { class: Some(ForceClass::Slow) }],
+            steps: vec![SubStep::ForceEval { class: Some(ForceClass::Slow), level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) }],
         },
         log: CallLog { events: log.events.clone() },
     };
@@ -1373,7 +1378,7 @@ fn force_eval_none_class_continues_to_dispatch_to_step() {
     let log = CallLog::default();
     let mut stub = PlanStub {
         plan: StepPlan {
-            steps: vec![SubStep::ForceEval { class: None }],
+            steps: vec![SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) }],
         },
         log: CallLog { events: log.events.clone() },
     };

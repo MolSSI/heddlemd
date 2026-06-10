@@ -2380,6 +2380,13 @@
     "title": "Content before any section header",
     "type": "scenario"
   },
+  "rq-1ee2ef41": {
+    "decl": "Scenario: runner.resolve_level upgrades to ForcesAndScalars on a trajectory frame",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "runner.resolve_level upgrades to ForcesAndScalars on a trajectory frame",
+    "type": "scenario"
+  },
   "rq-1f2b5320": {
     "decl": "Scenario: draw_counter starts at 0 and increments by 1 per apply",
     "file": "integration/c-rescale-barostat",
@@ -3981,11 +3988,11 @@
     "type": "scenario"
   },
   "rq-31bd2eee": {
-    "decl": "### CUDA Kernel",
+    "decl": "### CUDA Kernels",
     "file": "pair-reduction",
     "level": 3,
     "refs": [],
-    "title": "CUDA Kernel",
+    "title": "CUDA Kernels",
     "type": "section"
   },
   "rq-321fe0d0": {
@@ -4219,7 +4226,7 @@
     "type": "file"
   },
   "rq-3579df3b": {
-    "decl": "- `ForceField::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings) -> Result<(), ForceFieldError>`",
+    "decl": "- `ForceField::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings, level: AggregateLevel) -> Result<(), ForceFieldError>`",
     "file": "forces/framework",
     "refs": [
       {
@@ -4588,6 +4595,13 @@
     "refs": [],
     "title": "Types",
     "type": "section"
+  },
+  "rq-3a9cb990": {
+    "decl": "Scenario: MTK-NPT emits ForceEval with ForcesAndScalars",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "MTK-NPT emits ForceEval with ForcesAndScalars",
+    "type": "scenario"
   },
   "rq-3abb71cd": {
     "decl": "Scenario: Construct a SETTLE slot for one water",
@@ -5050,6 +5064,13 @@
     "title": "Explicit [exclusions] entry overrides constraint-derived default",
     "type": "scenario"
   },
+  "rq-41453204": {
+    "decl": "Scenario: reduce_pair_energy_virial on an empty state is a no-op",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "reduce_pair_energy_virial on an empty state is a no-op",
+    "type": "scenario"
+  },
   "rq-414ed5ef": {
     "decl": "Scenario: Missing compressibility rejected",
     "file": "integration/berendsen-barostat",
@@ -5072,10 +5093,10 @@
     "type": "scenario"
   },
   "rq-41d9e514": {
-    "decl": "Scenario: Energy and virial reductions share the same indexing as force",
+    "decl": "Scenario: Force and energy-virial reductions share the same indexing",
     "file": "pair-reduction",
     "refs": [],
-    "title": "Energy and virial reductions share the same indexing as force",
+    "title": "Force and energy-virial reductions share the same indexing",
     "type": "scenario"
   },
   "rq-41eb5e02": {
@@ -6258,6 +6279,13 @@
     "title": "ForceFieldContext",
     "type": "api-item"
   },
+  "rq-55d441ee": {
+    "decl": "Scenario: Two runs with identical (call, level) sequences are byte-identical",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Two runs with identical (call, level) sequences are byte-identical",
+    "type": "scenario"
+  },
   "rq-55f89976": {
     "decl": "Scenario: Reduction summation order is sorted bond index",
     "file": "forces/morse-bonded",
@@ -6550,6 +6578,13 @@
     "title": "Temperature for a 3-atom SETTLE'd water (one rigid molecule, COM removed)",
     "type": "scenario"
   },
+  "rq-5985846f": {
+    "decl": "Scenario: step(ForcesOnly) updates forces and leaves potential_energies / virials stale",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "step(ForcesOnly) updates forces and leaves potential_energies / virials stale",
+    "type": "scenario"
+  },
   "rq-599b2eb4": {
     "decl": "## Fill Kernel",
     "file": "build-pipeline",
@@ -6600,6 +6635,13 @@
     "refs": [],
     "title": "Analyze lint flow",
     "type": "section"
+  },
+  "rq-5a7e597e": {
+    "decl": "Scenario: A symplectic integrator emits ForceEval with ForcesOnly by default",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "A symplectic integrator emits ForceEval with ForcesOnly by default",
+    "type": "scenario"
   },
   "rq-5aae9633": {
     "decl": "### `Thermostat` trait overrides",
@@ -6861,6 +6903,13 @@
     "file": "integration/mtk-npt",
     "refs": [],
     "title": "At equilibrium, time-averaged temperature tracks T_target",
+    "type": "scenario"
+  },
+  "rq-5e5f48da": {
+    "decl": "Scenario: runner.resolve_level falls through to ForcesOnly when neither logging",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "runner.resolve_level falls through to ForcesOnly when neither logging",
     "type": "scenario"
   },
   "rq-5e69125b": {
@@ -7364,7 +7413,7 @@
     "type": "scenario"
   },
   "rq-6690fae9": {
-    "decl": "- `reduce_pair_forces(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_force_x: &mut CudaViewMut<'_, f32>, target_force_y: &mut CudaViewMut<'_, f32>, target_force_z: &mut CudaViewMut<'_, f32>, target_energy: &mut CudaViewMut<'_, f32>, target_virial: &mut CudaViewMut<'_, f32>, particle_count: usize) -> Result<(), GpuError>`",
+    "decl": "- `reduce_pair_forces(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_force_x: &mut CudaViewMut<'_, f32>, target_force_y: &mut CudaViewMut<'_, f32>, target_force_z: &mut CudaViewMut<'_, f32>, particle_count: usize) -> Result<(), GpuError>`",
     "file": "pair-reduction",
     "refs": [
       {
@@ -8014,11 +8063,11 @@
     "type": "scenario"
   },
   "rq-6f2452d1": {
-    "decl": "### Reduction Launcher",
+    "decl": "### Reduction Launchers",
     "file": "pair-reduction",
     "level": 3,
     "refs": [],
-    "title": "Reduction Launcher",
+    "title": "Reduction Launchers",
     "type": "section"
   },
   "rq-6f4f5ece": {
@@ -8529,11 +8578,25 @@
     "title": "Top-level fields",
     "type": "section"
   },
+  "rq-75a19aca": {
+    "decl": "Scenario: runner.resolve_level keeps ForcesAndScalars when the sub-step already requests it",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "runner.resolve_level keeps ForcesAndScalars when the sub-step already requests it",
+    "type": "scenario"
+  },
   "rq-75a9815d": {
     "decl": "Scenario: Constraint groups are sorted by minimum particle index",
     "file": "forces/topology",
     "refs": [],
     "title": "Constraint groups are sorted by minimum particle index",
+    "type": "scenario"
+  },
+  "rq-75ee70dd": {
+    "decl": "Scenario: reduce_pair_energy_virial does not touch force targets",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "reduce_pair_energy_virial does not touch force targets",
     "type": "scenario"
   },
   "rq-7600786b": {
@@ -9371,6 +9434,13 @@
     "title": "System total scalar virial equals sum of particle shares",
     "type": "scenario"
   },
+  "rq-803ee7e5": {
+    "decl": "Scenario: Skipping reduce_pair_energy_virial leaves stale energy and virial targets",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Skipping reduce_pair_energy_virial leaves stale energy and virial targets",
+    "type": "scenario"
+  },
   "rq-8040ce8a": {
     "decl": "Scenario: Different draw_counters yield different post-call velocities",
     "file": "integration/andersen",
@@ -9421,6 +9491,13 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-81ac7d6a": {
+    "decl": "- `AggregateLevel` — two-variant enum that selects whether the <!-- inline -->",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "AggregateLevel",
+    "type": "api-item"
+  },
   "rq-81b241e7": {
     "decl": "Scenario: Different seeds produce different velocities",
     "file": "simulation-runner",
@@ -9467,6 +9544,13 @@
     ],
     "title": "MinlogWriterError",
     "type": "api-item"
+  },
+  "rq-82822681": {
+    "decl": "Scenario: Combiner always runs regardless of level",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Combiner always runs regardless of level",
+    "type": "scenario"
   },
   "rq-828c169c": {
     "decl": "### `analyze` subcommand",
@@ -9976,6 +10060,13 @@
     ],
     "title": "Functions and methods",
     "type": "section"
+  },
+  "rq-8b8e9a4e": {
+    "decl": "Scenario: Runner warm-up call uses ForcesAndScalars",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Runner warm-up call uses ForcesAndScalars",
+    "type": "scenario"
   },
   "rq-8c045718": {
     "decl": "Scenario: minimum_image of the zero displacement is zero",
@@ -10624,10 +10715,10 @@
     "type": "scenario"
   },
   "rq-961c2ee6": {
-    "decl": "Scenario: Reduction with zero count writes zero to energy and virial targets",
+    "decl": "Scenario: Energy-virial reduction with zero count writes zero to its targets",
     "file": "pair-reduction",
     "refs": [],
-    "title": "Reduction with zero count writes zero to energy and virial targets",
+    "title": "Energy-virial reduction with zero count writes zero to its targets",
     "type": "scenario"
   },
   "rq-963604a4": {
@@ -11259,10 +11350,10 @@
     "type": "api-item"
   },
   "rq-9e487c80": {
-    "decl": "Scenario: Reduction sums pair energies and virials over slots 0..count",
+    "decl": "Scenario: Energy and virial reduction sums slots 0..count",
     "file": "pair-reduction",
     "refs": [],
-    "title": "Reduction sums pair energies and virials over slots 0..count",
+    "title": "Energy and virial reduction sums slots 0..count",
     "type": "scenario"
   },
   "rq-9e4d8944": {
@@ -11325,6 +11416,20 @@
     "file": "forces/morse-bonded",
     "refs": [],
     "title": "Construct MorseBondedState",
+    "type": "scenario"
+  },
+  "rq-9f3a36aa": {
+    "decl": "Scenario: reduce_pair_forces does not touch energy or virial targets",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "reduce_pair_forces does not touch energy or virial targets",
+    "type": "scenario"
+  },
+  "rq-9f551521": {
+    "decl": "Scenario: runner.resolve_level upgrades to ForcesAndScalars on a logging step",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "runner.resolve_level upgrades to ForcesAndScalars on a logging step",
     "type": "scenario"
   },
   "rq-9f596df3": {
@@ -11685,10 +11790,10 @@
     "type": "file"
   },
   "rq-a43552d5": {
-    "decl": "Scenario: init_device exposes the reduction kernel on the Kernels handle",
+    "decl": "Scenario: init_device exposes both reduction kernels on the Kernels handle",
     "file": "pair-reduction",
     "refs": [],
-    "title": "init_device exposes the reduction kernel on the Kernels handle",
+    "title": "init_device exposes both reduction kernels on the Kernels handle",
     "type": "scenario"
   },
   "rq-a479680a": {
@@ -12805,6 +12910,13 @@
     "title": "Reject upload when one host array drifts in length",
     "type": "scenario"
   },
+  "rq-b4c772c9": {
+    "decl": "Scenario: Two independent runs of reduce_pair_energy_virial produce byte-identical scalars",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Two independent runs of reduce_pair_energy_virial produce byte-identical scalars",
+    "type": "scenario"
+  },
   "rq-b4d2ac96": {
     "decl": "Scenario: Missing tau rejected",
     "file": "integration/c-rescale-barostat",
@@ -13342,7 +13454,7 @@
     "type": "scenario"
   },
   "rq-be1eb548": {
-    "decl": "- `ForceField::step_class(&mut self, class: ForceClass, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings) -> Result<(), ForceFieldError>`",
+    "decl": "- `ForceField::step_class(&mut self, class: ForceClass, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings, level: AggregateLevel) -> Result<(), ForceFieldError>`",
     "file": "forces/framework",
     "refs": [],
     "title": "ForceField",
@@ -13430,6 +13542,13 @@
     ],
     "title": "ParticleStateError",
     "type": "api-item"
+  },
+  "rq-beccac31": {
+    "decl": "Scenario: step(ForcesAndScalars) refreshes potential_energies and virials",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "step(ForcesAndScalars) refreshes potential_energies and virials",
+    "type": "scenario"
   },
   "rq-bedbd6d9": {
     "decl": "Scenario: Reject an output_path equal to the simulation's log file",
@@ -14093,6 +14212,13 @@
       }
     ],
     "title": "log_column_names",
+    "type": "api-item"
+  },
+  "rq-c9240ed4": {
+    "decl": "- `reduce_pair_energy_virial(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_energy: &mut CudaViewMut<'_, f32>, target_virial: &mut CudaViewMut<'_, f32>, particle_count: usize) -> Result<(), GpuError>`",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "reduce_pair_energy_virial",
     "type": "api-item"
   },
   "rq-c9618bdd": {
@@ -14789,6 +14915,13 @@
     ],
     "title": "TrajectoryReader",
     "type": "api-item"
+  },
+  "rq-d2bf331b": {
+    "decl": "Scenario: A pair-buffer slot honours ForcesOnly",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "A pair-buffer slot honours ForcesOnly",
+    "type": "scenario"
   },
   "rq-d2d0fb5f": {
     "decl": "### `Integrator` trait overrides",
@@ -17710,6 +17843,13 @@
     "title": "SI-mode trajectory frame converts positions to metres",
     "type": "scenario"
   },
+  "rq-f996df7a": {
+    "decl": "Scenario: SD minimization iterations always read ForcesAndScalars",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "SD minimization iterations always read ForcesAndScalars",
+    "type": "scenario"
+  },
   "rq-f9a9c569": {
     "decl": "## Parameters",
     "file": "forces/coulomb-pair-force",
@@ -17909,6 +18049,13 @@
     "file": "forces/framework",
     "refs": [],
     "title": "step() on a ForceField with zero slots writes zeros to forces_*",
+    "type": "scenario"
+  },
+  "rq-fcc5cea5": {
+    "decl": "Scenario: A bonded-only slot reduces all five quantities regardless of level",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "A bonded-only slot reduces all five quantities regardless of level",
     "type": "scenario"
   },
   "rq-fd07b4dc": {

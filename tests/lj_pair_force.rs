@@ -979,8 +979,8 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
         &NeighborListConfig::CellList { max_neighbors: 32, r_skin: 0.4 },
     )
     .unwrap();
-    ff_trivial.step(&mut buffers_a, &sim_box, &mut t_a).unwrap();
-    ff_cell.step(&mut buffers_b, &sim_box, &mut t_b).unwrap();
+    ff_trivial.step(&mut buffers_a, &sim_box, &mut t_a, dynamics::forces::AggregateLevel::ForcesAndScalars).unwrap();
+    ff_cell.step(&mut buffers_b, &sim_box, &mut t_b, dynamics::forces::AggregateLevel::ForcesAndScalars).unwrap();
 
     let fx_a = device.dtoh_sync_copy(&buffers_a.forces_x).unwrap();
     let fx_b = device.dtoh_sync_copy(&buffers_b.forces_x).unwrap();

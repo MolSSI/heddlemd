@@ -289,7 +289,10 @@ impl Integrator for MtkNptIntegrator {
                 SubStep::Custom { dt, label: "baro_kick_pre" },
                 SubStep::KickHalf { dt, label: "vel_kick_pre" },
                 SubStep::Drift { dt, label: "drift_box" },
-                SubStep::ForceEval { class: None },
+                SubStep::ForceEval {
+                    class: None,
+                    level: Some(crate::forces::AggregateLevel::ForcesAndScalars),
+                },
                 SubStep::Custom { dt, label: "ke_reduce_post" },
                 SubStep::Custom { dt, label: "vir_reduce_post" },
                 SubStep::KickHalf { dt, label: "vel_kick_post" },

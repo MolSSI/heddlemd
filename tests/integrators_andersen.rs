@@ -4,7 +4,7 @@
 // through its `apply_post` hook; the `andersen_resample` kernel is
 // also exercised directly.
 
-use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, andersen_resample, compute_kinetic_energy, init_device,
 };
@@ -516,7 +516,7 @@ fn andersen_time_averaged_ke_tracks_target() {
             n, 0)
         .unwrap();
     let mut therm = build_andersen(&gpu, n, &andersen_kind(temperature, 5.0e14, 11));
-    ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+    ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
     for _ in 0..200 {
         integ

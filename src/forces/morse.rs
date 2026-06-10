@@ -14,7 +14,8 @@ use crate::timings::{KernelStage, Timings};
 
 use super::topology::BondList;
 use super::{
-    ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder, SlotOutputView,
+    AggregateLevel, ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder,
+    SlotOutputView,
 };
 
 // rq-2361f2b8 rq-ec18d174
@@ -147,7 +148,10 @@ impl Potential for MorseBondedState {
         mut output: SlotOutputView<'_>,
         _cx: &crate::forces::ForceFieldContext<'_>,
         timings: &mut Timings,
+        _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
+        // Morse bonded reduction is a small kernel; it writes all five
+        // output rows on every call regardless of `level`.
         if self.particle_count == 0 {
             return Ok(());
         }

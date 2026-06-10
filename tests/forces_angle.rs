@@ -1,7 +1,7 @@
 // rq-d9adc4cb Feature: Harmonic Angle Bonded Potential
 use std::f64::consts::PI;
 
-use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, HarmonicAngleState, PotentialRegistry};
+use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, HarmonicAngleState, PotentialRegistry};
 use dynamics::forces::topology::Angle;
 use dynamics::gpu::{ParticleBuffers, harmonic_angle_force, init_device};
 use dynamics::io::config::{
@@ -481,7 +481,7 @@ fn spc_single_step_satisfies_newtons_third_law() {
     )
     .unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+    ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
 
     let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     let fy = gpu.device.dtoh_sync_copy(&buffers.forces_y).unwrap();

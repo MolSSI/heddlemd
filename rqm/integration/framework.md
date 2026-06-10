@@ -104,10 +104,12 @@ loop step in 1..=n_steps:
             constraint.apply_before_drift(buffers, sim_box, dt, timings)
         }
         match sub:
-            SubStep::ForceEval { class: None } =>
-                force_field.step(buffers, sim_box, timings)
-            SubStep::ForceEval { class: Some(c) } =>
-                force_field.step_class(c, buffers, sim_box, timings)
+            SubStep::ForceEval { class: None, level } =>
+                force_field.step(buffers, sim_box, timings,
+                                 runner.resolve_level(level))
+            SubStep::ForceEval { class: Some(c), level } =>
+                force_field.step_class(c, buffers, sim_box, timings,
+                                       runner.resolve_level(level))
             other =>
                 integrator.execute(other, buffers, sim_box, timings)
         if install_hooks && is_drift {
@@ -157,19 +159,42 @@ or forces. Thermostats that only need post-step coupling leave
 virial / kinetic data from `buffers`. The integrator has already
 populated `buffers.virials` and `buffers.forces_*` during its
 in-step force evaluation; the barostat consumes those without
-re-launching the force pipeline. The mutated box is observed by the
-next iteration's plan walk through the existing
+re-launching the force pipeline. For barostats that read virial every
+step, the integrator's `ForceEval` sub-step must request
+`AggregateLevel::ForcesAndScalars` (either explicitly via its
+`level: Some(ForcesAndScalars)` or by deferring to the runner with
+`level: None` on a step the runner upgrades). The mutated box is
+observed by the next iteration's plan walk through the existing
 `SimulationBox::generation()` change-detection path
 (`forces/neighbor-list.md`, `forces/spme.md`).
 
-The runner performs one warm-up `force_field.step(...)` call before
-entering the timestep loop so the first iteration's plan walk reads
-valid `forces_*` and `virials`. Integrators that follow the
-symplectic-with-cached-F contract place a `KickHalf` or `KickDrift`
-sub-step before the `ForceEval` so they consume `F(t)`, and place
-their final velocity update (a `KickHalf` or `KickDrift`) after the
-`ForceEval` so it consumes `F(t+dt)`. Every integrator in the
-default registry follows this contract.
+`runner.resolve_level(sub_step_level: Option<AggregateLevel>) ->
+AggregateLevel` upgrades the sub-step's request to
+`AggregateLevel::ForcesAndScalars` whenever the runner needs the
+scalar aggregates this step for its own purposes — specifically:
+
+- the step writes a trajectory frame (`step % trajectory_every == 0`),
+- the step writes a log row (`step % log_every == 0`),
+- the step is a minimization iteration (the SD minimizer reads energy
+  every iteration),
+- or any output / observable subsystem indicates it requires energy
+  or virial at this step.
+
+Otherwise `resolve_level` returns `sub_step_level.unwrap_or(AggregateLevel::ForcesOnly)`.
+An integrator that always requires scalars (e.g. MTK-NPT) emits
+`level: Some(ForcesAndScalars)` and the runner's upgrade is a no-op
+for that sub-step. An integrator that has no scalar requirement
+emits `level: None` or `level: Some(ForcesOnly)` and the runner picks
+the cheap level on steps that don't need scalars.
+
+The runner performs one warm-up `force_field.step(..., AggregateLevel::ForcesAndScalars)`
+call before entering the timestep loop so the first iteration's plan
+walk reads valid `forces_*`, `potential_energies`, and `virials`.
+Integrators that follow the symplectic-with-cached-F contract place a
+`KickHalf` or `KickDrift` sub-step before the `ForceEval` so they
+consume `F(t)`, and place their final velocity update (a `KickHalf`
+or `KickDrift`) after the `ForceEval` so it consumes `F(t+dt)`. Every
+integrator in the default registry follows this contract.
 
 ## Construction and Lifetime <!-- rq-5a1771b2 -->
 
@@ -278,7 +303,27 @@ successfully.
       ///     `frequency_class() == class`).
       /// In both cases the combiner re-runs across every class so
       /// `ParticleBuffers.forces_*` always holds the latest total.
-      ForceEval { class: Option<ForceClass> },
+      ///
+      /// `level` selects the aggregation level passed through to
+      /// `ForceField::step` / `step_class`:
+      ///   - `Some(ForcesAndScalars)` → integrator requires fresh
+      ///     potential_energies and virials at this sub-step (e.g. NPT
+      ///     barostats that read virial every step).
+      ///   - `Some(ForcesOnly)` → integrator only needs forces;
+      ///     potential_energies / virials may stay at their previous
+      ///     value.
+      ///   - `None` → integrator has no preference; the runner picks
+      ///     based on its own needs (logging / minimization /
+      ///     observable sampling on this step).
+      /// The runner's `resolve_level` upgrades any sub-step request to
+      /// `ForcesAndScalars` whenever it independently needs the
+      /// scalars this step (e.g. an output frame is being written),
+      /// so an integrator that emits `Some(ForcesOnly)` never causes
+      /// stale scalars to leak into an output.
+      ForceEval {
+          class: Option<ForceClass>,
+          level: Option<AggregateLevel>,
+      },
 
       /// Integrator-private sub-step that doesn't fit the
       /// kick/drift/force triad (Langevin's OU step, MTK's chain or
@@ -296,13 +341,23 @@ successfully.
     (`constraint-framework.md`) reads only the variant tag, not the
     label or the `class` payload.
   - Single-step integrators (velocity-Verlet, Langevin BAOAB,
-    NHC/CSVR/Andersen/Berendsen-paired plans, MTK-NPT) emit
-    `ForceEval { class: None }` so the runner re-evaluates every
-    slot. A future RESPA-style integrator emits
-    `ForceEval { class: Some(Fast) }` many times per outer step and
-    `ForceEval { class: Some(Slow) }` once.
-  - `ForceClass` is re-exported from `crate::forces` (see
-    `rqm/forces/framework.md` for its definition).
+    NHC/CSVR/Andersen/Berendsen-paired plans) emit
+    `ForceEval { class: None, level: Some(ForcesOnly) }` so the runner
+    re-evaluates every slot at the cheap level. Integrators that
+    require fresh scalars every step emit
+    `ForceEval { class: None, level: Some(ForcesAndScalars) }` —
+    MTK-NPT (its barostat reads virial every step) and the constant-
+    pressure c-rescale integrator both fall in this group. An
+    integrator that has no scalar requirement of its own emits
+    `level: None` and defers entirely to the runner. A future
+    RESPA-style integrator emits
+    `ForceEval { class: Some(Fast), level: ... }` many times per
+    outer step and `ForceEval { class: Some(Slow), level: ... }` once,
+    with `level` set to whichever level that integrator needs at each
+    sub-step.
+  - `ForceClass` and `AggregateLevel` are both re-exported from
+    `crate::forces` (see `rqm/forces/framework.md` for their
+    definitions).
 
 - `StepPlan` — ordered list of `SubStep`s describing one full <!-- rq-9fbba3be -->
   timestep. `Debug + Clone`.
@@ -1177,4 +1232,65 @@ Feature: Pluggable integration framework
     And two ParticleBuffers built from byte-identical ParticleStates
     When each runs N=10 timesteps with the same dt
     Then the two final ParticleStates agree byte-for-byte
+
+  # --- AggregateLevel resolution ---
+
+  @rq-5a7e597e
+  Scenario: A symplectic integrator emits ForceEval with ForcesOnly by default
+    Given a velocity-Verlet integrator built from its default registry
+    When integrator.plan(dt) is called
+    Then the returned StepPlan contains exactly one SubStep::ForceEval
+    And that sub-step's `level` field equals Some(AggregateLevel::ForcesOnly)
+    And the sub-step's `class` field equals None
+
+  @rq-3a9cb990
+  Scenario: MTK-NPT emits ForceEval with ForcesAndScalars
+    Given an MTK-NPT integrator built from its default registry
+    When integrator.plan(dt) is called
+    Then the returned StepPlan contains exactly one SubStep::ForceEval
+    And that sub-step's `level` field equals Some(AggregateLevel::ForcesAndScalars)
+
+  @rq-9f551521
+  Scenario: runner.resolve_level upgrades to ForcesAndScalars on a logging step
+    Given a runner with log_every = 100
+    And a SubStep::ForceEval with level = Some(AggregateLevel::ForcesOnly)
+    When step % log_every == 0 holds at this iteration
+    Then runner.resolve_level(level) returns AggregateLevel::ForcesAndScalars
+
+  @rq-1ee2ef41
+  Scenario: runner.resolve_level upgrades to ForcesAndScalars on a trajectory frame
+    Given a runner with trajectory_every = 50
+    And a SubStep::ForceEval with level = None
+    When step % trajectory_every == 0 holds at this iteration
+    Then runner.resolve_level(level) returns AggregateLevel::ForcesAndScalars
+
+  @rq-5e5f48da
+  Scenario: runner.resolve_level falls through to ForcesOnly when neither logging
+    nor trajectory output is due
+    Given a runner with log_every = 100 and trajectory_every = 50
+    And a SubStep::ForceEval with level = Some(AggregateLevel::ForcesOnly)
+    When step is not a multiple of either log_every or trajectory_every
+      and no other observable subsystem requests scalars
+    Then runner.resolve_level(level) returns AggregateLevel::ForcesOnly
+
+  @rq-75a19aca
+  Scenario: runner.resolve_level keeps ForcesAndScalars when the sub-step already requests it
+    Given a SubStep::ForceEval with level = Some(AggregateLevel::ForcesAndScalars)
+    When runner.resolve_level(level) is called
+    Then it returns AggregateLevel::ForcesAndScalars regardless of step counters
+
+  @rq-8b8e9a4e
+  Scenario: Runner warm-up call uses ForcesAndScalars
+    Given a runner about to enter its timestep loop
+    When the runner issues its one warm-up `force_field.step` call
+    Then the call passes AggregateLevel::ForcesAndScalars
+    And buffers.potential_energies and buffers.virials are valid before the first
+      timestep's plan walk begins
+
+  @rq-f996df7a
+  Scenario: SD minimization iterations always read ForcesAndScalars
+    Given a minimization run using the steepest-descent minimizer
+    When the minimizer issues a force evaluation for any iteration
+    Then the dispatched force_field call uses AggregateLevel::ForcesAndScalars
+      regardless of any log_every or trajectory_every cadence
 ```

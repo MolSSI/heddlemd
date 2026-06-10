@@ -6,7 +6,7 @@
 // kernels (mtk_velocity_half_kick, mtk_position_drift) and the
 // shared nhc_chain_sub_step host helper are also exercised directly.
 
-use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
 use dynamics::gpu::{
     GpuContext, ParticleBuffers, init_device, mtk_position_drift, mtk_velocity_half_kick,
 };
@@ -210,7 +210,7 @@ fn step_launches_expected_kernel_set() {
     let mut integ = build_mtk(&gpu, n, &mtk_kind(85.0, 1.0e5, 1.0e-13, 1.0e-12, 3, 3, 1));
     // Warm up the force pipeline so virials are populated before the
     // first step (matches the runner's contract).
-    ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+    ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     integ
         .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
         .unwrap();
@@ -405,7 +405,7 @@ fn generation_advances_every_step() {
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = build_mtk(&gpu, n, &mtk_kind(85.0, 1.0e5, 1.0e-13, 1.0e-12, 3, 3, 1));
-    ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+    ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let g0 = sim_box.generation();
     integ
         .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
@@ -487,7 +487,7 @@ fn two_runs_with_identical_configs_are_byte_identical() {
         let mut ff = empty_force_field(gpu, n);
         let mut timings = Timings::new(gpu).unwrap();
         let mut integ = build_mtk(gpu, n, &mtk_kind(85.0, 1.0e5, 1.0e-13, 1.0e-12, 3, 3, 1));
-        ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+        ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
         for _ in 0..5 {
             integ
                 .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
@@ -554,7 +554,7 @@ fn mtk_approximate_time_reversibility_smoke() {
     ));
 
     // Warm up the force pipeline so virials are populated.
-    ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+    ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
 
     // --- Forward 50 steps ---
     for _ in 0..50 {
@@ -591,7 +591,7 @@ fn mtk_approximate_time_reversibility_smoke() {
     // which we did not — so this is conceptually a no-op for the
     // empty force field. We run it anyway to mirror the runner's
     // per-step contract.
-    ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+    ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
 
     // --- Reverse 50 steps ---
     for _ in 0..50 {
@@ -668,7 +668,7 @@ fn finite_step_keeps_velocities_and_positions_finite() {
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = build_mtk(&gpu, n, &mtk_kind(85.0, 1.0e5, 1.0e-13, 1.0e-12, 3, 3, 1));
-    ff.step(&mut buffers, &sim_box, &mut timings).unwrap();
+    ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     for _ in 0..50 {
         integ
             .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)

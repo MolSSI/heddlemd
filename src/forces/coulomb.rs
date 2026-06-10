@@ -6,7 +6,8 @@ use cudarc::nvrtc::Ptx;
 
 use crate::gpu::device::get_func;
 use crate::gpu::{
-    GpuContext, GpuError, PairBuffer, ParticleBuffers, coulomb_pair_force, reduce_pair_forces,
+    GpuContext, GpuError, PairBuffer, ParticleBuffers, coulomb_pair_force,
+    reduce_pair_energy_virial, reduce_pair_forces,
 };
 use crate::kernels;
 use crate::io::config::CoulombConfig;
@@ -16,8 +17,8 @@ use crate::timings::{KernelStage, Timings};
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::NeighborListError;
 use super::{
-    ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder,
-    SlotOutputView,
+    AggregateLevel, ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext,
+    PotentialBuilder, SlotOutputView,
 };
 
 // CoulombParameters carries the runtime real-space parameters: the
@@ -118,6 +119,7 @@ impl Potential for CoulombState {
         mut output: SlotOutputView<'_>,
         cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
+        level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
         if self.particle_count == 0 {
             return Ok(());
@@ -132,11 +134,20 @@ impl Potential for CoulombState {
             &mut output.force_x,
             &mut output.force_y,
             &mut output.force_z,
-            &mut output.energy,
-            &mut output.virial,
             self.particle_count,
         )?;
         timings.kernel_stop(KernelStage::REDUCE_PAIR_FORCES)?;
+        if level.includes_scalars() {
+            timings.kernel_start(KernelStage::REDUCE_PAIR_ENERGY_VIRIAL)?;
+            reduce_pair_energy_virial(
+                &self.pair_buffer,
+                &nl.neighbor_counts,
+                &mut output.energy,
+                &mut output.virial,
+                self.particle_count,
+            )?;
+            timings.kernel_stop(KernelStage::REDUCE_PAIR_ENERGY_VIRIAL)?;
+        }
         Ok(())
     }
 }

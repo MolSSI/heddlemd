@@ -1,7 +1,7 @@
 mod common;
 
 use cudarc::driver::DeviceSlice;
-use dynamics::forces::{Bond, BondList, ExclusionList, ForceField, ForceFieldContext, ForceFieldError, Potential, PotentialRegistry, SlotOutputView};
+use dynamics::forces::{AggregateLevel, Bond, BondList, ExclusionList, ForceField, ForceFieldContext, ForceFieldError, Potential, PotentialRegistry, SlotOutputView};
 use dynamics::gpu::{ParticleBuffers, init_device};
 use dynamics::io::config::{
     BondTypeConfig, NeighborListConfig, PairInteractionConfig, PairPotentialParams,
@@ -258,6 +258,7 @@ impl Potential for LabelStub {
         _output: SlotOutputView<'_>,
         _cx: &ForceFieldContext<'_>,
         _timings: &mut Timings,
+    _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
         Ok(())
     }
@@ -303,7 +304,7 @@ fn step_lj_only_writes_lj_forces() {
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
     assert!(downloaded.forces_x[0] != 0.0);
@@ -345,7 +346,7 @@ fn step_both_slots_sums_lj_and_morse() {
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff_lj.step(&mut buffers_lj_only, &box_10(), &mut timings_lj).unwrap();
+    ff_lj.step(&mut buffers_lj_only, &box_10(), &mut timings_lj, AggregateLevel::ForcesAndScalars).unwrap();
     let mut lj_state = state.clone();
     lj_state.download_from(&buffers_lj_only).unwrap();
 
@@ -370,7 +371,7 @@ fn step_both_slots_sums_lj_and_morse() {
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff_morse.step(&mut buffers_b, &box_10(), &mut timings_b).unwrap();
+    ff_morse.step(&mut buffers_b, &box_10(), &mut timings_b, AggregateLevel::ForcesAndScalars).unwrap();
     let mut morse_state = state.clone();
     morse_state.download_from(&buffers_b).unwrap();
 
@@ -389,7 +390,7 @@ fn step_both_slots_sums_lj_and_morse() {
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff_both.step(&mut buffers_a, &box_10(), &mut timings_a).unwrap();
+    ff_both.step(&mut buffers_a, &box_10(), &mut timings_a, AggregateLevel::ForcesAndScalars).unwrap();
     let mut combined = state.clone();
     combined.download_from(&buffers_a).unwrap();
 
@@ -449,7 +450,7 @@ fn step_zero_slots_writes_zero_forces() {
         &NeighborListConfig::AllPairs)
     .unwrap();
     assert!(ff.slots.is_empty());
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
 
     let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     let fy = device.dtoh_sync_copy(&buffers.forces_y).unwrap();
@@ -503,7 +504,7 @@ fn step_empty_launches_no_kernels() {
         &ExclusionList::empty(0),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let report = timings.finalize().unwrap();
     assert!(report.stages.is_empty());
 }
@@ -538,7 +539,7 @@ fn each_slot_writes_its_own_row() {
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
 
     // Recompute slot 0 (LJ) in isolation to compare.
     let mut buffers_lj = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -558,7 +559,7 @@ fn each_slot_writes_its_own_row() {
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff_lj.step(&mut buffers_lj, &box_10(), &mut t_lj).unwrap();
+    ff_lj.step(&mut buffers_lj, &box_10(), &mut t_lj, AggregateLevel::ForcesAndScalars).unwrap();
     let lj_x = device.dtoh_sync_copy(&buffers_lj.forces_x).unwrap();
 
     // And slot 1 (Morse) in isolation.
@@ -585,7 +586,7 @@ fn each_slot_writes_its_own_row() {
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff_m.step(&mut buffers_m, &box_10(), &mut t_m).unwrap();
+    ff_m.step(&mut buffers_m, &box_10(), &mut t_m, AggregateLevel::ForcesAndScalars).unwrap();
     let morse_x = device.dtoh_sync_copy(&buffers_m.forces_x).unwrap();
 
     let row_x = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
@@ -633,6 +634,7 @@ impl Potential for ConstStub {
         mut output: SlotOutputView<'_>,
         _cx: &ForceFieldContext<'_>,
         _timings: &mut Timings,
+    _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
         let n = output.force_x.len();
         if n == 0 {
@@ -709,7 +711,7 @@ fn third_potential_extensibility() {
         &NeighborListConfig::AllPairs)
     .unwrap();
 
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
 
     // The stub writes (1, 2, 3) per particle. Subtract the LJ-only result
     // to recover the stub's contribution.
@@ -730,7 +732,7 @@ fn third_potential_extensibility() {
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff_lj.step(&mut buffers_lj, &box_10(), &mut t_lj).unwrap();
+    ff_lj.step(&mut buffers_lj, &box_10(), &mut t_lj, AggregateLevel::ForcesAndScalars).unwrap();
     let lj_x = device.dtoh_sync_copy(&buffers_lj.forces_x).unwrap();
     let lj_y = device.dtoh_sync_copy(&buffers_lj.forces_y).unwrap();
     let lj_z = device.dtoh_sync_copy(&buffers_lj.forces_z).unwrap();
@@ -790,8 +792,8 @@ fn two_independent_runs_byte_identical() {
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff_a.step(&mut buffers_a, &box_10(), &mut timings_a).unwrap();
-    ff_b.step(&mut buffers_b, &box_10(), &mut timings_b).unwrap();
+    ff_a.step(&mut buffers_a, &box_10(), &mut timings_a, AggregateLevel::ForcesAndScalars).unwrap();
+    ff_b.step(&mut buffers_b, &box_10(), &mut timings_b, AggregateLevel::ForcesAndScalars).unwrap();
     let mut state_a = state.clone();
     let mut state_b = state.clone();
     state_a.download_from(&buffers_a).unwrap();
@@ -829,6 +831,7 @@ impl Potential for ConstStubB {
         mut output: SlotOutputView<'_>,
         _cx: &ForceFieldContext<'_>,
         _t: &mut Timings,
+    _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
         let n = output.force_x.len();
         let vx = vec![10.0_f32; n];
@@ -892,7 +895,7 @@ fn combiner_sums_slot_rows_in_slot_order() {
         &NeighborListConfig::AllPairs)
     .unwrap();
 
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     assert_eq!(fx, vec![11.0, 11.0]);
 }
@@ -926,7 +929,7 @@ fn combiner_with_zero_slots_writes_zeros() {
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     let fy = device.dtoh_sync_copy(&buffers.forces_y).unwrap();
     let fz = device.dtoh_sync_copy(&buffers.forces_z).unwrap();
@@ -957,10 +960,10 @@ fn combiner_idempotent_across_two_calls() {
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let mut first = state.clone();
     first.download_from(&buffers).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let mut second = state.clone();
     second.download_from(&buffers).unwrap();
     assert_eq!(first.forces_x, second.forces_x);
@@ -1052,7 +1055,7 @@ fn bonded_only_step_launches_no_neighbor_list_kernels() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let report = timings.finalize().unwrap();
     let names: Vec<&str> = report.stages.iter().map(|s| s.name.as_str()).collect();
     assert!(!names.contains(&"neighbor_displacement_squared"));
@@ -1087,6 +1090,7 @@ impl Potential for ContextProbeStub {
         output: SlotOutputView<'_>,
         _cx: &ForceFieldContext<'_>,
         _t: &mut Timings,
+    _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
         // Write zeros to the output row.
         let n = output.force_x.len();
@@ -1144,7 +1148,7 @@ fn context_exposes_shared_neighbor_list_to_contribute() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     assert_eq!(*probe.lock().unwrap(), Some(true));
 }
 
@@ -1177,6 +1181,7 @@ impl Potential for CutoffProbeStub {
         _output: SlotOutputView<'_>,
         _cx: &ForceFieldContext<'_>,
         _t: &mut Timings,
+    _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
         Ok(())
     }
@@ -1240,7 +1245,7 @@ fn force_field_lj_only_populates_energy_and_virial() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let pe = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
     assert!(pe.iter().any(|&v| v != 0.0), "potential_energies should be non-zero");
@@ -1326,7 +1331,7 @@ fn combiner_sums_slot_energies_and_virials_in_slot_order() {
         .htod_sync_copy_into(&vec![0.5_f32, 1.0, 5.0, 10.0], &mut ff.fast_slot_virials)
         .unwrap();
 
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let pe = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
     assert_eq!(pe, vec![11.0_f32, 22.0]);
@@ -1364,7 +1369,7 @@ fn zero_slot_step_writes_zeros_to_energy_and_virial() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let pe = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
     assert_eq!(pe, vec![0.0_f32; 4]);
@@ -1407,7 +1412,7 @@ fn system_total_potential_energy_equals_sum_of_particle_shares() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let pe = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let total: f32 = pe.iter().sum();
     // Closed-form LJ energy at r=1.5 with σ=1, ε=1.
@@ -1455,7 +1460,7 @@ fn system_total_virial_equals_sum_of_particle_shares() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
     let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     let total_virial: f32 = vw.iter().sum();
@@ -1696,6 +1701,7 @@ impl Potential for RegistryLabelStub {
         _o: SlotOutputView<'_>,
         _cx: &ForceFieldContext<'_>,
         _t: &mut Timings,
+    _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
         Ok(())
     }
@@ -1947,6 +1953,7 @@ impl Potential for CountingSlowStub {
         mut output: SlotOutputView<'_>,
         _cx: &ForceFieldContext<'_>,
         _t: &mut Timings,
+    _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
         let n = output.force_x.len();
         if n == 0 {
@@ -2160,7 +2167,7 @@ fn step_class_slow_with_no_slow_slots_is_noop() {
     )
     .unwrap();
     // Prime the total via step() so forces_* hold the canonical LJ total.
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let snap_x = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     let snap_y = device.dtoh_sync_copy(&buffers.forces_y).unwrap();
     let snap_z = device.dtoh_sync_copy(&buffers.forces_z).unwrap();
@@ -2172,7 +2179,7 @@ fn step_class_slow_with_no_slow_slots_is_noop() {
         .collect();
     let mut timings = Timings::new(&gpu).unwrap();
 
-    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(), &mut timings)
+    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars)
         .unwrap();
 
     let after_x = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
@@ -2227,11 +2234,11 @@ fn step_class_fast_with_no_fast_slots_is_noop() {
     )
     .unwrap();
     // Prime the total so forces_* hold the Slow stub's value.
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let snap_x = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
 
-    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings)
+    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars)
         .unwrap();
 
     let after_x = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
@@ -2279,9 +2286,9 @@ fn step_class_n0_launches_no_kernels() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings)
+    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars)
         .unwrap();
-    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(), &mut timings)
+    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars)
         .unwrap();
     let report = timings.finalize().unwrap();
     assert!(
@@ -2330,7 +2337,7 @@ fn step_evaluates_every_class_and_produces_total_in_particle_buffers() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     // Fast contributes 1.0; Slow contributes counter=1.0 → total 2.0.
     assert_eq!(fx, vec![2.0_f32, 2.0]);
@@ -2376,10 +2383,10 @@ fn step_class_fast_refreshes_only_fast_slots_contributions() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     assert_eq!(*counter.lock().unwrap(), 1.0); // Slow ran once
 
-    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings)
+    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars)
         .unwrap();
     assert_eq!(*counter.lock().unwrap(), 1.0); // Slow did NOT run again
     let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
@@ -2425,10 +2432,10 @@ fn step_class_slow_refreshes_only_slow_slots_contributions() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     assert_eq!(*counter.lock().unwrap(), 1.0);
 
-    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(), &mut timings)
+    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars)
         .unwrap();
     assert_eq!(*counter.lock().unwrap(), 2.0); // Slow advanced
     let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
@@ -2485,10 +2492,10 @@ fn respa_style_call_sequence_is_deterministic_across_two_runs() {
     let run_sequence = |ff: &mut ForceField,
                         buf: &mut ParticleBuffers,
                         tt: &mut Timings| {
-        ff.step(buf, &box_10(), tt).unwrap();
-        ff.step_class(ForceClass::Fast, buf, &box_10(), tt).unwrap();
-        ff.step_class(ForceClass::Fast, buf, &box_10(), tt).unwrap();
-        ff.step_class(ForceClass::Slow, buf, &box_10(), tt).unwrap();
+        ff.step(buf, &box_10(), tt, AggregateLevel::ForcesAndScalars).unwrap();
+        ff.step_class(ForceClass::Fast, buf, &box_10(), tt, AggregateLevel::ForcesAndScalars).unwrap();
+        ff.step_class(ForceClass::Fast, buf, &box_10(), tt, AggregateLevel::ForcesAndScalars).unwrap();
+        ff.step_class(ForceClass::Slow, buf, &box_10(), tt, AggregateLevel::ForcesAndScalars).unwrap();
     };
     run_sequence(&mut ff_a, &mut buf_a, &mut t_a);
     run_sequence(&mut ff_b, &mut buf_b, &mut t_b);
