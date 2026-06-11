@@ -1219,6 +1219,7 @@ fn execute_with_force_eval_some_class_also_returns_unexpected_substep() {
     }
 }
 
+// rq-256287cb
 #[test]
 fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
     // Walk a plan with one ForceEval{class: Some(Fast)} against a
@@ -1335,6 +1336,7 @@ fn force_eval_some_slow_class_on_fast_only_ff_is_noop() {
     );
 }
 
+// rq-5855473b
 #[test]
 fn force_eval_none_class_continues_to_dispatch_to_step() {
     // Plan emits ForceEval{class: None} against a Fast-only LJ ForceField.

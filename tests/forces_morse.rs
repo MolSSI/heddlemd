@@ -684,3 +684,209 @@ fn bond_reduction_sums_energy_and_virial_alongside_forces() {
     assert_eq!(acc_w_host[0], bv[0]);
     assert_eq!(acc_w_host[1], bv[1]);
 }
+
+// --- Reduction kernel direct passthrough ----------------------------------
+
+fn run_reduce_with_buffers(
+    gpu: &dynamics::gpu::GpuContext,
+    bond_pair_x: &[f32],
+    bond_pair_y: &[f32],
+    bond_pair_z: &[f32],
+    bond_pair_energy: &[f32],
+    bond_pair_virial: &[f32],
+    atom_bond_offsets: &[u32],
+    atom_bond_indices: &[u32],
+    particle_count: usize,
+) -> Vec<f32> {
+    use cudarc::driver::DeviceSlice;
+    let device = gpu.device.clone();
+    let bx = device.htod_sync_copy(bond_pair_x).unwrap();
+    let by = device.htod_sync_copy(bond_pair_y).unwrap();
+    let bz = device.htod_sync_copy(bond_pair_z).unwrap();
+    let be = device.htod_sync_copy(bond_pair_energy).unwrap();
+    let bv = device.htod_sync_copy(bond_pair_virial).unwrap();
+    let offsets = device.htod_sync_copy(atom_bond_offsets).unwrap();
+    let indices = if atom_bond_indices.is_empty() {
+        device.alloc_zeros::<u32>(1).unwrap()
+    } else {
+        device.htod_sync_copy(atom_bond_indices).unwrap()
+    };
+    let mut acc_x = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
+    let mut acc_y = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
+    let mut acc_z = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
+    let mut acc_e = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
+    let mut acc_w = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
+    let up_x = acc_x.len();
+    let up_y = acc_y.len();
+    let up_z = acc_z.len();
+    let up_e = acc_e.len();
+    let up_w = acc_w.len();
+    reduce_bond_forces(
+        &gpu.kernels,
+        &bx, &by, &bz, &be, &bv,
+        &offsets, &indices,
+        &mut acc_x.slice_mut(0..up_x),
+        &mut acc_y.slice_mut(0..up_y),
+        &mut acc_z.slice_mut(0..up_z),
+        &mut acc_e.slice_mut(0..up_e),
+        &mut acc_w.slice_mut(0..up_w),
+        particle_count,
+    )
+    .unwrap();
+    device.dtoh_sync_copy(&acc_x).unwrap()
+}
+
+// rq-2d4efead
+#[test]
+fn atom_with_one_bond_receives_the_bonds_force_directly() {
+    let gpu = init_device().unwrap();
+    let bond_pair_x = vec![2.0_f32, -2.0];
+    let zeros = vec![0.0_f32; 2];
+    let atom_bond_offsets = vec![0u32, 1, 2];
+    let atom_bond_indices = vec![0u32, 1];
+    let acc_x = run_reduce_with_buffers(
+        &gpu,
+        &bond_pair_x, &zeros, &zeros, &zeros, &zeros,
+        &atom_bond_offsets, &atom_bond_indices,
+        2,
+    );
+    assert_eq!(acc_x[0], 2.0_f32);
+    assert_eq!(acc_x[1], -2.0_f32);
+}
+
+// rq-55f89976
+#[test]
+fn reduction_summation_order_is_sorted_bond_index() {
+    let gpu = init_device().unwrap();
+    // Atom 0 receives contributions from bonds 0 and 1; slots [0, 2].
+    // The reduction walks atom_bond_indices left-to-right, so accumulator
+    // = bond_pair_x[0] + bond_pair_x[2].
+    let bond_pair_x = vec![1.5_f32, -7.0, 4.0, -0.5];
+    let zeros = vec![0.0_f32; 4];
+    // 3 particles. atom 0 → [0, 2] (the two slots that name it); atom 1 → [1]; atom 2 → [3].
+    let atom_bond_offsets = vec![0u32, 2, 3, 4];
+    let atom_bond_indices = vec![0u32, 2, 1, 3];
+    let acc_x = run_reduce_with_buffers(
+        &gpu,
+        &bond_pair_x, &zeros, &zeros, &zeros, &zeros,
+        &atom_bond_offsets, &atom_bond_indices,
+        3,
+    );
+    assert_eq!(acc_x[0], 1.5_f32 + 4.0, "atom 0 must sum slots [0, 2] in left-to-right order");
+    assert_eq!(acc_x[1], -7.0);
+    assert_eq!(acc_x[2], -0.5);
+}
+
+// rq-556b7c13
+#[test]
+fn minimum_image_is_applied_to_bond_displacement() {
+    use cudarc::driver::DeviceSlice;
+    let gpu = init_device().unwrap();
+    let sim_box = box_10(); // L=10
+    // p0 = (-4.5, 0, 0), p1 = (4.5, 0, 0). Naive r_ij = -9.0, wraps to +1.0
+    // (the periodic image). The bond is at r=1.0 = re for the type
+    // re=1.0, so the morse force is exactly zero — confirming the kernel
+    // used the wrapped displacement, not r=9.0 which would give a large
+    // attractive force.
+    let state = two_particle_state([-4.5, 0.0, 0.0], [4.5, 0.0, 0.0]);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let bl = single_bond_list(2);
+    let bt = vec![morse_type(1.0, 2.0, 1.0)];
+    let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
+    morse_bond_force(
+        &buffers,
+        &mb.bonds,
+        &mb.bond_de,
+        &mb.bond_a,
+        &mb.bond_re,
+        &sim_box,
+        &mut mb.bond_pair_x,
+        &mut mb.bond_pair_y,
+        &mut mb.bond_pair_z,
+        &mut mb.bond_pair_energy,
+        &mut mb.bond_pair_virial,
+        1,
+    )
+    .unwrap();
+    let bx = gpu.device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
+    let energy = gpu.device.dtoh_sync_copy(&mb.bond_pair_energy).unwrap();
+    let _ = bx.len();
+    for v in &bx {
+        assert!(v.abs() < 1.0e-5, "wrapped r = 1.0 (= re); force must be ~0, got {v}");
+    }
+    for e in &energy {
+        assert!(e.abs() < 1.0e-5, "wrapped r = 1.0 (= re); energy must be ~0, got {e}");
+    }
+}
+
+// rq-696caf8e
+#[test]
+fn two_independent_calls_produce_byte_identical_accumulators() {
+    use cudarc::driver::DeviceSlice;
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
+    // Stretched bond so the forces are non-zero and the comparison is
+    // meaningful.
+    let state = two_particle_state([0.0, 0.0, 0.0], [1.3, 0.0, 0.0]);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let bl = single_bond_list(2);
+    let bt = vec![morse_type(1.0, 2.0, 1.0)];
+
+    let run = || -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+        let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
+        morse_bond_force(
+            &buffers,
+            &mb.bonds,
+            &mb.bond_de,
+            &mb.bond_a,
+            &mb.bond_re,
+            &box_10(),
+            &mut mb.bond_pair_x,
+            &mut mb.bond_pair_y,
+            &mut mb.bond_pair_z,
+            &mut mb.bond_pair_energy,
+            &mut mb.bond_pair_virial,
+            1,
+        )
+        .unwrap();
+        let mut acc_x = device.alloc_zeros::<f32>(2).unwrap();
+        let mut acc_y = device.alloc_zeros::<f32>(2).unwrap();
+        let mut acc_z = device.alloc_zeros::<f32>(2).unwrap();
+        let mut acc_e = device.alloc_zeros::<f32>(2).unwrap();
+        let mut acc_w = device.alloc_zeros::<f32>(2).unwrap();
+        let up_x = acc_x.len();
+        let up_y = acc_y.len();
+        let up_z = acc_z.len();
+        let up_e = acc_e.len();
+        let up_w = acc_w.len();
+        reduce_bond_forces(
+            &gpu.kernels,
+            &mb.bond_pair_x, &mb.bond_pair_y, &mb.bond_pair_z,
+            &mb.bond_pair_energy, &mb.bond_pair_virial,
+            &mb.atom_bond_offsets, &mb.atom_bond_indices,
+            &mut acc_x.slice_mut(0..up_x),
+            &mut acc_y.slice_mut(0..up_y),
+            &mut acc_z.slice_mut(0..up_z),
+            &mut acc_e.slice_mut(0..up_e),
+            &mut acc_w.slice_mut(0..up_w),
+            2,
+        )
+        .unwrap();
+        (
+            device.dtoh_sync_copy(&acc_x).unwrap(),
+            device.dtoh_sync_copy(&acc_y).unwrap(),
+            device.dtoh_sync_copy(&acc_z).unwrap(),
+            device.dtoh_sync_copy(&acc_e).unwrap(),
+            device.dtoh_sync_copy(&acc_w).unwrap(),
+        )
+    };
+    let a = run();
+    let b = run();
+    assert_eq!(a.0, b.0, "acc_x not bit-exact");
+    assert_eq!(a.1, b.1, "acc_y not bit-exact");
+    assert_eq!(a.2, b.2, "acc_z not bit-exact");
+    assert_eq!(a.3, b.3, "acc_e not bit-exact");
+    assert_eq!(a.4, b.4, "acc_w not bit-exact");
+    // The bond is stretched, so accumulators must be non-trivially non-zero.
+    assert!(a.0[0].abs() > 0.0, "stretched bond must produce non-zero force");
+}

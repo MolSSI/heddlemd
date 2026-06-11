@@ -1521,7 +1521,7 @@ fn bond_type_missing_potential() {
     }
 }
 
-// rq-3f01c746
+// rq-3f01c746 rq-1fc667cd
 #[test]
 fn bond_type_unknown_potential() {
     let dir = tmp_path("bond_type_unknown");
@@ -1871,7 +1871,7 @@ fn angle_type_missing_potential_rejected() {
     }
 }
 
-// rq-ffa771bd
+// rq-ffa771bd rq-225633c4
 #[test]
 fn angle_type_unknown_potential_rejected() {
     let dir = tmp_path("angle_unk_pot");

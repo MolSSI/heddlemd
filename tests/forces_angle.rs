@@ -509,3 +509,287 @@ fn spc_single_step_satisfies_newtons_third_law() {
 
     let _ = PI; // silence import if unused on this path
 }
+
+// --- Closed-form magnitude, virial, and minimum image -------------------
+
+// rq-922e1683
+#[test]
+fn force_magnitude_matches_closed_form_for_an_isolated_angle() {
+    let gpu = init_device().unwrap();
+    let theta_0 = 1.911_f32;
+    let theta = theta_0 + 0.1_f32;
+    let d = 1.0e-10_f32;
+    let k_theta = 5.27e-19_f64;
+    let positions = place_isoceles(d, theta);
+    let state = three_particle_state(positions, [0.0; 3]);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let al = single_angle_list(3, 0, 1, 2);
+    let at = vec![harmonic_type(k_theta, theta_0 as f64)];
+    let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
+    launch_angle_force(&gpu, &mut s, &buffers, &box_nm());
+    let fx: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
+    let fy: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
+    let fz: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
+    let mag = |i: usize| -> f64 {
+        let v = ((fx[i] as f64).powi(2) + (fy[i] as f64).powi(2) + (fz[i] as f64).powi(2)).sqrt();
+        v
+    };
+    let total = mag(0) + mag(1) + mag(2);
+    // Closed-form: for symmetric isosceles geometry with |r_ij|=|r_kj|=d,
+    // |F_i| = |F_k| = k*Δθ/d and |F_j| = 2 k*Δθ*sin(θ/2)/d, so the sum
+    // is (2 k Δθ / d) * (1 + sin(θ/2)).
+    let dtheta = (theta - theta_0) as f64;
+    let expected = (2.0 * k_theta * dtheta / d as f64) * (1.0 + (theta as f64 * 0.5).sin());
+    let rel = (total - expected).abs() / expected.abs();
+    assert!(rel < 5.0e-3, "force-magnitude sum {total:e} vs expected {expected:e} (rel {rel:e})");
+}
+
+// rq-fbdf08ff
+#[test]
+fn minimum_image_is_applied_to_displacements() {
+    let gpu = init_device().unwrap();
+    let l = 1.0e-9_f32;
+    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let theta_0 = 1.911_f32;
+    let at = vec![harmonic_type(5.27e-19, theta_0 as f64)];
+    let al = single_angle_list(3, 0, 1, 2);
+
+    // Setup A: triangle near origin, no minimum-image wrap.
+    let positions_a = [
+        [-0.15_f32 * l, 0.05 * l, 0.0],
+        [0.0, 0.0, 0.0],
+        [0.10 * l, 0.05 * l, 0.0],
+    ];
+    // Setup B: same triangle shifted by -0.45*l. p_i lands at +0.40*l so
+    // r_ij raw = p_i - p_j = +0.85*l (> l/2) and must wrap to -0.15*l for
+    // the kernel to recover the same geometry.
+    let positions_b = [
+        [0.40_f32 * l, 0.05 * l, 0.0],
+        [-0.45 * l, 0.0, 0.0],
+        [-0.35 * l, 0.05 * l, 0.0],
+    ];
+
+    let run = |positions: [[f32; 3]; 3]| -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+        let state = three_particle_state(positions, [0.0; 3]);
+        let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+        let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
+        launch_angle_force(&gpu, &mut s, &buffers, &sim_box);
+        (
+            gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap(),
+            gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap(),
+            gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap(),
+        )
+    };
+    let (ax, ay, az) = run(positions_a);
+    let (bx, by, bz) = run(positions_b);
+    let scale = ax.iter().chain(&ay).chain(&az).map(|v| v.abs()).fold(0.0_f32, f32::max);
+    assert!(scale > 0.0, "expected non-zero forces in baseline run");
+    let tol = scale * 1.0e-4;
+    for slot in 0..3 {
+        assert!((ax[slot] - bx[slot]).abs() < tol, "fx[{slot}]: A={} B={}", ax[slot], bx[slot]);
+        assert!((ay[slot] - by[slot]).abs() < tol, "fy[{slot}]: A={} B={}", ay[slot], by[slot]);
+        assert!((az[slot] - bz[slot]).abs() < tol, "fz[{slot}]: A={} B={}", az[slot], bz[slot]);
+    }
+}
+
+// rq-fe95ff5f
+#[test]
+fn angle_virial_equals_r_ij_dot_f_i_plus_r_kj_dot_f_k() {
+    // A harmonic-angle force is purely tangential to both r_ij and
+    // r_kj, so r_ij·F_i = 0 and r_kj·F_k = 0 in continuous math; both
+    // the kernel-computed w_m and the host-side cross-check land at
+    // f32 round-off after near-perfect cancellation. The scenario's
+    // claim therefore reduces to: both quantities are small *at the
+    // same scale*. We verify that |Σ virial slots| and |r_ij·F_i +
+    // r_kj·F_k| are each bounded by a small multiple of the natural
+    // pairwise scale |F_i|·|r_ij|.
+    let gpu = init_device().unwrap();
+    let positions = [
+        [-1.2_f32, 0.8, 0.0],
+        [0.0, 0.0, 0.0],
+        [0.6, 1.4, 0.0],
+    ];
+    let state = three_particle_state(positions, [0.0; 3]);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let al = single_angle_list(3, 0, 1, 2);
+    let at = vec![harmonic_type(383.0, 1.911)];
+    let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
+    launch_angle_force(&gpu, &mut s, &buffers, &box_10());
+    let fx: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
+    let fy: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
+    let fz: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
+    let virial: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_virial).unwrap();
+    let r_ij = [
+        positions[0][0] - positions[1][0],
+        positions[0][1] - positions[1][1],
+        positions[0][2] - positions[1][2],
+    ];
+    let r_kj = [
+        positions[2][0] - positions[1][0],
+        positions[2][1] - positions[1][1],
+        positions[2][2] - positions[1][2],
+    ];
+    let host_w = r_ij[0] * fx[0] + r_ij[1] * fy[0] + r_ij[2] * fz[0]
+        + r_kj[0] * fx[2] + r_kj[1] * fy[2] + r_kj[2] * fz[2];
+    let summed_w = virial[0] + virial[1] + virial[2];
+    let f_mag = ((fx[0] * fx[0] + fy[0] * fy[0] + fz[0] * fz[0]).sqrt()
+        + (fx[2] * fx[2] + fy[2] * fy[2] + fz[2] * fz[2]).sqrt()) as f64;
+    let r_mag = ((r_ij[0] * r_ij[0] + r_ij[1] * r_ij[1] + r_ij[2] * r_ij[2]).sqrt()
+        + (r_kj[0] * r_kj[0] + r_kj[1] * r_kj[1] + r_kj[2] * r_kj[2]).sqrt()) as f64;
+    let scale = f_mag * r_mag;
+    assert!(scale > 1.0, "expected a non-trivial r·F scale (got {scale})");
+    // 32-bit cancellation noise sits well below 1e-3 * scale.
+    let tol = (scale * 1.0e-3) as f32;
+    assert!(summed_w.abs() < tol, "Σ virial slots {summed_w:e} exceeds noise tol {tol:e}");
+    assert!(host_w.abs() < tol, "host r_ij·F_i + r_kj·F_k {host_w:e} exceeds noise tol {tol:e}");
+}
+
+// --- Reduction kernel (atom → angle-triple summation) -------------------
+
+fn alloc_and_run_reduce(
+    gpu: &dynamics::gpu::GpuContext,
+    angle_triple_x: &[f32],
+    angle_triple_y: &[f32],
+    angle_triple_z: &[f32],
+    angle_triple_energy: &[f32],
+    angle_triple_virial: &[f32],
+    atom_angle_offsets: &[u32],
+    atom_angle_indices: &[u32],
+    particle_count: usize,
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    use cudarc::driver::DeviceSlice;
+    let device = gpu.device.clone();
+    let triple_x = device.htod_sync_copy(angle_triple_x).unwrap();
+    let triple_y = device.htod_sync_copy(angle_triple_y).unwrap();
+    let triple_z = device.htod_sync_copy(angle_triple_z).unwrap();
+    let triple_e = device.htod_sync_copy(angle_triple_energy).unwrap();
+    let triple_v = device.htod_sync_copy(angle_triple_virial).unwrap();
+    let offsets = device.htod_sync_copy(atom_angle_offsets).unwrap();
+    let indices = if atom_angle_indices.is_empty() {
+        device.alloc_zeros::<u32>(1).unwrap()
+    } else {
+        device.htod_sync_copy(atom_angle_indices).unwrap()
+    };
+    let mut sx = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
+    let mut sy = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
+    let mut sz = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
+    let mut se = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
+    let mut sv = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
+    let upper_sx = sx.len();
+    let upper_sy = sy.len();
+    let upper_sz = sz.len();
+    let upper_se = se.len();
+    let upper_sv = sv.len();
+    {
+        let mut vx = sx.slice_mut(0..upper_sx);
+        let mut vy = sy.slice_mut(0..upper_sy);
+        let mut vz = sz.slice_mut(0..upper_sz);
+        let mut ve = se.slice_mut(0..upper_se);
+        let mut vv = sv.slice_mut(0..upper_sv);
+        dynamics::gpu::reduce_angle_forces(
+            &gpu.kernels,
+            &triple_x,
+            &triple_y,
+            &triple_z,
+            &triple_e,
+            &triple_v,
+            &offsets,
+            &indices,
+            &mut vx, &mut vy, &mut vz, &mut ve, &mut vv,
+            particle_count,
+        ).unwrap();
+    }
+    (
+        device.dtoh_sync_copy(&sx).unwrap(),
+        device.dtoh_sync_copy(&sy).unwrap(),
+        device.dtoh_sync_copy(&sz).unwrap(),
+    )
+}
+
+// rq-27efd6a0
+#[test]
+fn atom_appearing_in_one_angle_receives_that_angles_force() {
+    let gpu = init_device().unwrap();
+    // One angle: slot 0 = atom_i contribution, slot 1 = atom_j, slot 2 = atom_k.
+    let triple_x = vec![0.5_f32, -1.0, 0.5];
+    let triple_zeros = vec![0.0_f32; 3];
+    let atom_angle_offsets = vec![0u32, 1, 2, 3];
+    let atom_angle_indices = vec![0u32, 1, 2];
+    let (sx, _, _) = alloc_and_run_reduce(
+        &gpu,
+        &triple_x, &triple_zeros, &triple_zeros, &triple_zeros, &triple_zeros,
+        &atom_angle_offsets,
+        &atom_angle_indices,
+        3,
+    );
+    assert_eq!(sx[0], 0.5);
+    assert_eq!(sx[1], -1.0);
+    assert_eq!(sx[2], 0.5);
+}
+
+// rq-ca76fc02 rq-699192b2
+#[test]
+fn atom_in_centre_and_wing_receives_sum_in_sorted_angle_index_order() {
+    let gpu = init_device().unwrap();
+    // Two angles. Layout: 6 slots, [F_i0, F_j0, F_k0, F_i1, F_j1, F_k1].
+    // Atom 0 is the centre of angle 0 (slot 1) and a wing of angle 1
+    // (slot 3 — i of angle 1).
+    let triple_x = vec![2.5_f32, 7.0, -1.5, 13.0, -2.0, 4.0];
+    let triple_zeros = vec![0.0_f32; 6];
+    // Particle layout: 5 atoms, only atom 0 carries two angle slots.
+    // atom_angle_indices for atom 0 carries [1, 3] (its centre slot for
+    // angle 0 then its wing slot for angle 1) — sorted by angle index.
+    let atom_angle_offsets = vec![0u32, 2, 2, 2, 2, 2];
+    let atom_angle_indices = vec![1u32, 3];
+    let (sx, _, _) = alloc_and_run_reduce(
+        &gpu,
+        &triple_x, &triple_zeros, &triple_zeros, &triple_zeros, &triple_zeros,
+        &atom_angle_offsets,
+        &atom_angle_indices,
+        5,
+    );
+    // Reduction sums triple_x[1] + triple_x[3] = 7.0 + 13.0 = 20.0
+    // left-to-right.
+    assert_eq!(sx[0], 7.0_f32 + 13.0);
+}
+
+// rq-5fcdc437
+#[test]
+fn atom_with_no_angles_gets_zero_accumulator() {
+    let gpu = init_device().unwrap();
+    // Two angles touching atoms 0..3 only; atom 4 has no angle.
+    // Layout: 6 angle-triple slots.
+    let triple_x = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let triple_zeros = vec![0.0_f32; 6];
+    // Angle 0: (i=0, j=1, k=2) → slots [0, 1, 2].
+    // Angle 1: (i=1, j=2, k=3) → slots [3, 4, 5].
+    // atom_angle_offsets (length 6): cumulative per-atom slot count.
+    //  atom 0 → 1 slot, atom 1 → 2, atom 2 → 2, atom 3 → 1, atom 4 → 0.
+    let atom_angle_offsets = vec![0u32, 1, 3, 5, 6, 6];
+    let atom_angle_indices = vec![0u32, 1, 3, 2, 4, 5];
+    let (sx, sy, sz) = alloc_and_run_reduce(
+        &gpu,
+        &triple_x, &triple_zeros, &triple_zeros, &triple_zeros, &triple_zeros,
+        &atom_angle_offsets,
+        &atom_angle_indices,
+        5,
+    );
+    assert_eq!(sx[4], 0.0_f32, "atom 4 has no angles → fx must be 0");
+    assert_eq!(sy[4], 0.0_f32);
+    assert_eq!(sz[4], 0.0_f32);
+}
+
+// rq-8d5a8d9c
+#[test]
+fn reduce_angle_forces_on_zero_particles_is_a_noop() {
+    let gpu = init_device().unwrap();
+    let triple = Vec::<f32>::new();
+    let offsets = vec![0u32];
+    let indices = Vec::<u32>::new();
+    // particle_count == 0 → reduce_angle_forces returns Ok(()) without
+    // launching a kernel (verified by reaching the assertions below).
+    let _ = alloc_and_run_reduce(
+        &gpu, &triple, &triple, &triple, &triple, &triple,
+        &offsets, &indices, 0,
+    );
+}

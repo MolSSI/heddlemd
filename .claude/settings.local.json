@@ -12,7 +12,8 @@
       "Read(//tmp/**)",
       "Bash(mkdir -p _stash_pre_atomic)",
       "Bash(mv water.out.probe.log water.out.probe.timings _stash_pre_atomic/)",
-      "Bash(/work/target/release/dynamics run *)"
+      "Bash(/work/target/release/dynamics run *)",
+      "Bash(python3 -c ' *)"
     ]
   },
   "hooks": {

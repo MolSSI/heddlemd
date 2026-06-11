@@ -2510,3 +2510,201 @@ fn respa_style_call_sequence_is_deterministic_across_two_runs() {
     assert_eq!(ay, by);
     assert_eq!(az, bz);
 }
+
+// --- AggregateLevel-level effects ----------------------------------------
+
+fn lj_only_force_field(n: usize) -> (
+    dynamics::gpu::GpuContext,
+    ForceField,
+    ParticleBuffers,
+) {
+    let gpu = init_device().unwrap();
+    let state = state_n(n);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let ff = ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        &gpu,
+        n,
+        &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
+        &[lj_pair_config()],
+        &[],
+        &[],
+        None,
+        None,
+        &[],
+        &BondList::empty(n),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    (gpu, ff, buffers)
+}
+
+fn morse_only_force_field(n: usize) -> (
+    dynamics::gpu::GpuContext,
+    ForceField,
+    ParticleBuffers,
+) {
+    let gpu = init_device().unwrap();
+    let state = state_n(n);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let bt = vec![BondTypeConfig::Morse {
+        name: "CC".to_string(),
+        de: 1.0,
+        a: 2.0,
+        re: 1.0,
+    }];
+    let ff = ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        &gpu,
+        n,
+        &box_10(),
+        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
+        &[],
+        &bt,
+        &[],
+        None,
+        None,
+        &[],
+        &single_bond_list(n),
+        &dynamics::forces::AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    (gpu, ff, buffers)
+}
+
+// rq-5985846f
+#[test]
+fn step_forces_only_updates_forces_and_leaves_energies_and_virials_stale() {
+    let (gpu, mut ff, mut buffers) = lj_only_force_field(4);
+    let device = gpu.device.clone();
+    let mut t = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesAndScalars).unwrap();
+    let e0: Vec<f32> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let w0: Vec<f32> = device.dtoh_sync_copy(&buffers.virials).unwrap();
+    let slot_e0: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
+    let slot_w0: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
+    assert!(e0.iter().any(|&v| v != 0.0), "expected non-zero baseline energy");
+
+    // Perturb positions so a refreshed force evaluation would change
+    // forces, energies, and virials.
+    let new_x: Vec<f32> = (0..4).map(|i| i as f32 * 1.5 + 0.3).collect();
+    device.htod_sync_copy_into(&new_x, &mut buffers.positions_x).unwrap();
+
+    let mut t2 = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut t2, AggregateLevel::ForcesOnly).unwrap();
+    let fx: Vec<f32> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    assert!(fx.iter().any(|&v| v != 0.0), "expected non-zero forces at new positions");
+    let e1: Vec<f32> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let w1: Vec<f32> = device.dtoh_sync_copy(&buffers.virials).unwrap();
+    let slot_e1: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
+    let slot_w1: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
+    assert_eq!(e1, e0, "ParticleBuffers.potential_energies must be unchanged under ForcesOnly");
+    assert_eq!(w1, w0, "ParticleBuffers.virials must be unchanged under ForcesOnly");
+    assert_eq!(slot_e1, slot_e0, "LJ slot's energy row must not be rewritten under ForcesOnly");
+    assert_eq!(slot_w1, slot_w0, "LJ slot's virial row must not be rewritten under ForcesOnly");
+}
+
+// rq-beccac31
+#[test]
+fn step_forces_and_scalars_refreshes_energies_and_virials() {
+    let (gpu, mut ff, mut buffers) = lj_only_force_field(4);
+    let device = gpu.device.clone();
+    let mut t = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesAndScalars).unwrap();
+    let e0: Vec<f32> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let fx0: Vec<f32> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    assert!(e0.iter().any(|&v| v != 0.0));
+
+    let new_x: Vec<f32> = (0..4).map(|i| i as f32 * 1.5 + 0.3).collect();
+    device.htod_sync_copy_into(&new_x, &mut buffers.positions_x).unwrap();
+
+    ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesAndScalars).unwrap();
+    let e1: Vec<f32> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let fx1: Vec<f32> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    assert_ne!(e1, e0, "potential_energies must refresh under ForcesAndScalars when positions change");
+    assert_ne!(fx1, fx0, "forces_x must reflect the new positions");
+}
+
+// rq-fcc5cea5
+#[test]
+fn bonded_only_slot_reduces_all_five_quantities_regardless_of_level() {
+    let (gpu, mut ff, mut buffers) = morse_only_force_field(4);
+    let device = gpu.device.clone();
+    let mut t = Timings::new(&gpu).unwrap();
+    // Single ForcesOnly call against a Morse-only ForceField. The bonded
+    // reduction kernel writes all five output rows regardless of `level`,
+    // so the combiner finds non-zero energy and virial entries.
+    ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesOnly).unwrap();
+    let e: Vec<f32> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let w: Vec<f32> = device.dtoh_sync_copy(&buffers.virials).unwrap();
+    let fx: Vec<f32> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    assert!(e.iter().any(|&v| v != 0.0), "Morse slot must have populated energy under ForcesOnly");
+    assert!(w.iter().any(|&v| v != 0.0), "Morse slot must have populated virial under ForcesOnly");
+    assert!(fx.iter().any(|&v| v != 0.0), "Morse slot must have populated forces under ForcesOnly");
+}
+
+// rq-d2bf331b
+#[test]
+fn pair_buffer_slot_honours_forces_only() {
+    // The LJ slot is the canonical pair-buffer-backed Potential. Its
+    // reduce splits forces (always) from energy + virial (only when
+    // level includes scalars). After a baseline ForcesAndScalars step
+    // we capture the per-slot energy / virial rows; a subsequent
+    // ForcesOnly step must leave those rows byte-identical (the kernel
+    // that writes them never re-enqueues) while still overwriting the
+    // per-slot force rows.
+    let (gpu, mut ff, mut buffers) = lj_only_force_field(4);
+    let device = gpu.device.clone();
+    let mut t = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesAndScalars).unwrap();
+    let report = t.finalize().unwrap();
+    let count_of = |name: &str| {
+        report.stages.iter().find(|s| s.name == name).map(|s| s.count).unwrap_or(0)
+    };
+    assert_eq!(count_of("reduce_pair_energy_virial"), 1, "baseline call must run energy/virial reduce");
+    let slot_e_baseline: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
+    let slot_w_baseline: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
+    let slot_fx_baseline: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
+    assert!(slot_e_baseline.iter().any(|&v| v != 0.0));
+
+    let new_x: Vec<f32> = (0..4).map(|i| i as f32 * 1.5 + 0.4).collect();
+    device.htod_sync_copy_into(&new_x, &mut buffers.positions_x).unwrap();
+
+    let mut t2 = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut t2, AggregateLevel::ForcesOnly).unwrap();
+    let report2 = t2.finalize().unwrap();
+    let count_of2 = |name: &str| {
+        report2.stages.iter().find(|s| s.name == name).map(|s| s.count).unwrap_or(0)
+    };
+    assert_eq!(
+        count_of2("reduce_pair_energy_virial"),
+        0,
+        "ForcesOnly step must not run the energy/virial reduction kernel"
+    );
+    let slot_e_after: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
+    let slot_w_after: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
+    let slot_fx_after: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
+    assert_eq!(slot_e_after, slot_e_baseline, "LJ slot energy row must be untouched under ForcesOnly");
+    assert_eq!(slot_w_after, slot_w_baseline, "LJ slot virial row must be untouched under ForcesOnly");
+    assert_ne!(slot_fx_after, slot_fx_baseline, "LJ slot force row must be overwritten");
+}
+
+// rq-82822681
+#[test]
+fn combiner_always_runs_regardless_of_level() {
+    let (gpu, mut ff, mut buffers) = lj_only_force_field(4);
+    let mut t = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesOnly).unwrap();
+    let report = t.finalize().unwrap();
+    let acc = report
+        .stages
+        .iter()
+        .find(|s| s.name == "accumulate_forces")
+        .expect("accumulate_forces stage must be present after a ForcesOnly step");
+    assert_eq!(acc.count, 1, "combiner must launch exactly once per step");
+}

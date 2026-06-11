@@ -3381,7 +3381,12 @@
   "rq-1fc667cd": {
     "decl": "Scenario: Config bond_type with potential != \"morse\" is rejected",
     "file": "forces/morse-bonded",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Config bond_type with potential != \"morse\" is rejected",
     "type": "scenario"
   },
@@ -3755,7 +3760,12 @@
   "rq-225633c4": {
     "decl": "Scenario: Config angle_type with potential != \"harmonic\" is rejected",
     "file": "forces/harmonic-angle",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Config angle_type with potential != \"harmonic\" is rejected",
     "type": "scenario"
   },
@@ -4066,7 +4076,12 @@
   "rq-256287cb": {
     "decl": "Scenario: SubStep::ForceEval { class: Some(Fast) } dispatches to step_class(Fast)",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SubStep::ForceEval { class: Some(Fast) } dispatches to step_class(Fast)",
     "type": "scenario"
   },
@@ -4299,7 +4314,12 @@
   "rq-27efd6a0": {
     "decl": "Scenario: Atom appearing in one angle receives that angle's force",
     "file": "forces/harmonic-angle",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_angle.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Atom appearing in one angle receives that angle's force",
     "type": "scenario"
   },
@@ -4896,7 +4916,12 @@
   "rq-2d4efead": {
     "decl": "Scenario: Atom with one bond receives the bond's force directly",
     "file": "forces/morse-bonded",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Atom with one bond receives the bond's force directly",
     "type": "scenario"
   },
@@ -5232,7 +5257,12 @@
   "rq-31430003": {
     "decl": "Scenario: Half-strength exclusion (scale=0.5) halves the LJ contribution",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Half-strength exclusion (scale=0.5) halves the LJ contribution",
     "type": "scenario"
   },
@@ -6082,7 +6112,12 @@
   "rq-3a1eea58": {
     "decl": "Scenario: Scale = 1.0 is equivalent to no exclusion",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Scale = 1.0 is equivalent to no exclusion",
     "type": "scenario"
   },
@@ -8288,7 +8323,12 @@
   "rq-535c2b1e": {
     "decl": "Scenario: LJ kernel reads the shared neighbor list from ForceFieldContext",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LJ kernel reads the shared neighbor list from ForceFieldContext",
     "type": "scenario"
   },
@@ -8443,7 +8483,12 @@
   "rq-556b7c13": {
     "decl": "Scenario: Minimum image is applied",
     "file": "forces/morse-bonded",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Minimum image is applied",
     "type": "scenario"
   },
@@ -8486,7 +8531,12 @@
   "rq-55f89976": {
     "decl": "Scenario: Reduction summation order is sorted bond index",
     "file": "forces/morse-bonded",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reduction summation order is sorted bond index",
     "type": "scenario"
   },
@@ -8818,7 +8868,12 @@
   "rq-5855473b": {
     "decl": "Scenario: SubStep::ForceEval { class: None } dispatches to step()",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SubStep::ForceEval { class: None } dispatches to step()",
     "type": "scenario"
   },
@@ -8888,7 +8943,12 @@
   "rq-5985846f": {
     "decl": "Scenario: step(ForcesOnly) updates forces and leaves potential_energies / virials stale",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "step(ForcesOnly) updates forces and leaves potential_energies / virials stale",
     "type": "scenario"
   },
@@ -9428,7 +9488,12 @@
   "rq-5fcdc437": {
     "decl": "Scenario: Atom with no angles gets zero accumulator",
     "file": "forces/harmonic-angle",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_angle.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Atom with no angles gets zero accumulator",
     "type": "scenario"
   },
@@ -10268,14 +10333,24 @@
   "rq-696caf8e": {
     "decl": "Scenario: Two independent calls produce byte-identical accumulators",
     "file": "forces/morse-bonded",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_morse.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two independent calls produce byte-identical accumulators",
     "type": "scenario"
   },
   "rq-699192b2": {
     "decl": "Scenario: Reduction summation order is sorted angle index",
     "file": "forces/harmonic-angle",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_angle.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reduction summation order is sorted angle index",
     "type": "scenario"
   },
@@ -12703,7 +12778,12 @@
   "rq-80dcfa97": {
     "decl": "Scenario: Full exclusion (scale=0) zeros the LJ contribution for the excluded pair",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Full exclusion (scale=0) zeros the LJ contribution for the excluded pair",
     "type": "scenario"
   },
@@ -12846,7 +12926,12 @@
   "rq-82822681": {
     "decl": "Scenario: Combiner always runs regardless of level",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Combiner always runs regardless of level",
     "type": "scenario"
   },
@@ -13648,7 +13733,12 @@
   "rq-8c786f79": {
     "decl": "Scenario: Exclusion only applies to the listed pair",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Exclusion only applies to the listed pair",
     "type": "scenario"
   },
@@ -13699,7 +13789,12 @@
   "rq-8d5a8d9c": {
     "decl": "Scenario: reduce_angle_forces on zero particles is a no-op",
     "file": "forces/harmonic-angle",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_angle.rs",
+        "kind": "code"
+      }
+    ],
     "title": "reduce_angle_forces on zero particles is a no-op",
     "type": "scenario"
   },
@@ -14200,7 +14295,12 @@
   "rq-922e1683": {
     "decl": "Scenario: Force magnitude matches closed-form expression for an",
     "file": "forces/harmonic-angle",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_angle.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Force magnitude matches closed-form expression for an",
     "type": "scenario"
   },
@@ -18443,7 +18543,12 @@
   "rq-beccac31": {
     "decl": "Scenario: step(ForcesAndScalars) refreshes potential_energies and virials",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "step(ForcesAndScalars) refreshes potential_energies and virials",
     "type": "scenario"
   },
@@ -19532,7 +19637,12 @@
   "rq-ca76fc02": {
     "decl": "Scenario: Atom appearing as the centre of one angle and a wing of",
     "file": "forces/harmonic-angle",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_angle.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Atom appearing as the centre of one angle and a wing of",
     "type": "scenario"
   },
@@ -20323,7 +20433,12 @@
   "rq-d2bf331b": {
     "decl": "Scenario: A pair-buffer slot honours ForcesOnly",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "A pair-buffer slot honours ForcesOnly",
     "type": "scenario"
   },
@@ -22350,7 +22465,12 @@
   "rq-e80653f1": {
     "decl": "Scenario: Empty exclusion list leaves all pair forces unchanged",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Empty exclusion list leaves all pair forces unchanged",
     "type": "scenario"
   },
@@ -24462,7 +24582,12 @@
   "rq-fbdf08ff": {
     "decl": "Scenario: Minimum image is applied",
     "file": "forces/harmonic-angle",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_angle.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Minimum image is applied",
     "type": "scenario"
   },
@@ -24562,7 +24687,12 @@
   "rq-fcc5cea5": {
     "decl": "Scenario: A bonded-only slot reduces all five quantities regardless of level",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "A bonded-only slot reduces all five quantities regardless of level",
     "type": "scenario"
   },
@@ -24744,7 +24874,12 @@
   "rq-fe95ff5f": {
     "decl": "Scenario: Angle virial equals r_ij · F_i + r_kj · F_k",
     "file": "forces/harmonic-angle",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_angle.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Angle virial equals r_ij · F_i + r_kj · F_k",
     "type": "scenario"
   },

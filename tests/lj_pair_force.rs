@@ -114,7 +114,7 @@ fn init_device_loads_pair_force_module() {
 
 // --- Two-particle correctness ---
 
-#[test] // rq-c538b29d
+#[test] // rq-c538b29d rq-e80653f1
 fn two_particles_at_fixed_separation_produce_closed_form_force() {
     let gpu = init_device().expect("init_device");
     let sim_box = default_box();
@@ -915,7 +915,7 @@ fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
     assert_eq!(lj_slot.max_cutoff(), Some(4.0_f32));
 }
 
-#[test] // rq-e90c6feb
+#[test] // rq-e90c6feb rq-535c2b1e
 fn trivial_mode_and_cell_list_mode_forces_agree() {
     use dynamics::forces::{
         BondList, ExclusionList, ForceField, PotentialRegistry,
@@ -1103,7 +1103,7 @@ fn self_slots_carry_zero_energy_and_virial() {
     }
 }
 
-#[test] // rq-95c2f543
+#[test] // rq-95c2f543 rq-31430003
 fn exclusion_scaling_applies_uniformly_to_force_energy_virial() {
     use dynamics::forces::{DeviceExclusionList, ExclusionList, Exclusion};
     let gpu = init_device().expect("init_device");
@@ -1658,4 +1658,124 @@ cutoff = 5.0
     .expect("from_config");
     let switch = device.dtoh_sync_copy(&table.switch).unwrap();
     assert_eq!(switch, vec![4.5_f32, 4.5, 4.5, 4.5]);
+}
+
+// --- Per-pair exclusion semantics ----------------------------------------
+
+fn run_lj_with_exclusion(
+    gpu: &dynamics::gpu::GpuContext,
+    sim_box: &SimulationBox,
+    positions: &[[f32; 3]],
+    table: &LennardJonesParameterTable,
+    excl: &dynamics::forces::ExclusionList,
+) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    let n = positions.len();
+    let state = build_state_xyz(positions);
+    let particle_buffers = ParticleBuffers::new(gpu, &state).unwrap();
+    let max = n as u32;
+    let mut pair = PairBuffer::new(gpu, n, max).unwrap();
+    let dev_excl = dynamics::forces::DeviceExclusionList::from_host(&gpu.device, excl).unwrap();
+    let nl = trivial_neighbor_list(gpu, sim_box, n);
+    dynamics::gpu::lj_pair_force(
+        &particle_buffers,
+        &mut pair,
+        sim_box,
+        table,
+        &dev_excl.atom_excl_offsets,
+        &dev_excl.atom_excl_partners,
+        &dev_excl.atom_excl_lj_scales,
+        &nl.neighbor_list,
+        &nl.neighbor_counts,
+    )
+    .unwrap();
+    download_pair_forces(&pair)
+}
+
+// rq-80dcfa97
+#[test]
+fn full_exclusion_zeros_the_lj_contribution_for_the_excluded_pair() {
+    use dynamics::forces::{Exclusion, ExclusionList};
+    let gpu = init_device().expect("init_device");
+    let sim_box = default_box();
+    let table = table_from_scalar(&gpu.device, default_params());
+    let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
+    let host = ExclusionList {
+        entries: vec![
+            Exclusion { atom_i: 0, atom_j: 1, scale_lj: 0.0, scale_coul: 0.0 },
+            Exclusion { atom_i: 1, atom_j: 0, scale_lj: 0.0, scale_coul: 0.0 },
+        ],
+        atom_excl_offsets: vec![0u32, 1, 2],
+        atom_excl_partners: vec![1u32, 0],
+        atom_excl_lj_scales: vec![0.0_f32, 0.0],
+        atom_excl_coul_scales: vec![0.0_f32, 0.0],
+        particle_count: 2,
+    };
+    let (px, py, pz) = run_lj_with_exclusion(&gpu, &sim_box, &positions, &table, &host);
+    for &slot in &[0 * 2 + 1, 1 * 2 + 0] {
+        assert_eq!(px[slot], 0.0_f32, "px[{slot}] must be exactly 0 under scale=0");
+        assert_eq!(py[slot], 0.0_f32, "py[{slot}] must be exactly 0 under scale=0");
+        assert_eq!(pz[slot], 0.0_f32, "pz[{slot}] must be exactly 0 under scale=0");
+    }
+}
+
+// rq-3a1eea58
+#[test]
+fn scale_one_exclusion_is_equivalent_to_no_exclusion() {
+    use dynamics::forces::{Exclusion, ExclusionList};
+    let gpu = init_device().expect("init_device");
+    let sim_box = default_box();
+    let params = default_params();
+    let table = table_from_scalar(&gpu.device, params);
+    let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
+    let host = ExclusionList {
+        entries: vec![
+            Exclusion { atom_i: 0, atom_j: 1, scale_lj: 1.0, scale_coul: 1.0 },
+            Exclusion { atom_i: 1, atom_j: 0, scale_lj: 1.0, scale_coul: 1.0 },
+        ],
+        atom_excl_offsets: vec![0u32, 1, 2],
+        atom_excl_partners: vec![1u32, 0],
+        atom_excl_lj_scales: vec![1.0_f32, 1.0],
+        atom_excl_coul_scales: vec![1.0_f32, 1.0],
+        particle_count: 2,
+    };
+    let (px_scaled, _, _) = run_lj_with_exclusion(&gpu, &sim_box, &positions, &table, &host);
+    let expected = lj_force_components(positions[0], positions[1], &sim_box, params);
+    assert_eq!(
+        px_scaled[0 * 2 + 1], expected[0],
+        "scale = 1.0 must produce the unscaled closed-form force"
+    );
+}
+
+// rq-8c786f79
+#[test]
+fn exclusion_only_applies_to_the_listed_pair() {
+    use dynamics::forces::{Exclusion, ExclusionList};
+    let gpu = init_device().expect("init_device");
+    let sim_box = default_box();
+    let table = table_from_scalar(&gpu.device, default_params());
+    let positions = [
+        [0.0_f32, 0.0, 0.0],
+        [1.5, 0.0, 0.0],
+        [3.0, 0.0, 0.0],
+    ];
+    let host = ExclusionList {
+        entries: vec![
+            Exclusion { atom_i: 0, atom_j: 1, scale_lj: 0.0, scale_coul: 0.0 },
+            Exclusion { atom_i: 1, atom_j: 0, scale_lj: 0.0, scale_coul: 0.0 },
+        ],
+        atom_excl_offsets: vec![0u32, 1, 2, 2],
+        atom_excl_partners: vec![1u32, 0],
+        atom_excl_lj_scales: vec![0.0_f32, 0.0],
+        atom_excl_coul_scales: vec![0.0_f32, 0.0],
+        particle_count: 3,
+    };
+    let (px, _, _) = run_lj_with_exclusion(&gpu, &sim_box, &positions, &table, &host);
+    // The (0,1) pair is fully excluded; (0,2) and (1,2) keep the
+    // unscaled closed-form force.
+    assert_eq!(px[0 * 3 + 1], 0.0_f32, "(0,1) is fully excluded");
+    assert_eq!(px[1 * 3 + 0], 0.0_f32, "(1,0) is fully excluded");
+    assert_ne!(px[0 * 3 + 2], 0.0_f32, "(0,2) is unaffected by the (0,1) exclusion");
+    assert_ne!(px[2 * 3 + 0], 0.0_f32, "(2,0) is unaffected by the (0,1) exclusion");
+    assert_ne!(px[1 * 3 + 2], 0.0_f32, "(1,2) is unaffected by the (0,1) exclusion");
+    assert_ne!(px[2 * 3 + 1], 0.0_f32, "(2,1) is unaffected by the (0,1) exclusion");
 }
