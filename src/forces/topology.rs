@@ -162,6 +162,41 @@ impl ConstraintList {
     pub fn total_constraint_count(&self) -> usize {
         self.group_constraints.len()
     }
+
+    // rq-b6f167a4 — driven by ConstraintRegistry::build_optional's
+    // per-builder partition (see `rqm/integration/constraint-framework.md`,
+    // *Slot Composition*).
+    pub fn subset(&self, group_indices: &[usize]) -> ConstraintList {
+        let mut groups = Vec::with_capacity(group_indices.len());
+        let mut group_atoms = Vec::new();
+        let mut group_constraints = Vec::new();
+        for &gi in group_indices {
+            let g = self.groups[gi];
+            let atom_offset = group_atoms.len() as u32;
+            let constraint_offset = group_constraints.len() as u32;
+            group_atoms.extend_from_slice(
+                &self.group_atoms[g.atom_offset as usize
+                    ..(g.atom_offset + g.atom_count) as usize],
+            );
+            group_constraints.extend_from_slice(
+                &self.group_constraints[g.constraint_offset as usize
+                    ..(g.constraint_offset + g.constraint_count) as usize],
+            );
+            groups.push(ConstraintGroup {
+                atom_offset,
+                atom_count: g.atom_count,
+                constraint_offset,
+                constraint_count: g.constraint_count,
+                constraint_type_index: g.constraint_type_index,
+            });
+        }
+        ConstraintList {
+            groups,
+            group_atoms,
+            group_constraints,
+            particle_count: self.particle_count,
+        }
+    }
 }
 
 /// Host-side handle around the exclusion list's four device buffers.

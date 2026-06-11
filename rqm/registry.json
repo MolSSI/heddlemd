@@ -390,6 +390,13 @@
     "title": "New state has zero-initialised potential_energies and virials",
     "type": "scenario"
   },
+  "rq-051a8191": {
+    "decl": "Scenario: Empty bucket for a registered kind skips its builder",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Empty bucket for a registered kind skips its builder",
+    "type": "scenario"
+  },
   "rq-053613b6": {
     "decl": "Scenario: Pair interaction rejects an extra field for the chosen potential",
     "file": "io/config-schema",
@@ -670,6 +677,13 @@
     "file": "integration/mtk-npt",
     "refs": [],
     "title": "Missing tau_p rejected",
+    "type": "scenario"
+  },
+  "rq-08ece93d": {
+    "decl": "Scenario: Slot-firing order under the composite matches registration order",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Slot-firing order under the composite matches registration order",
     "type": "scenario"
   },
   "rq-090b70bb": {
@@ -1482,6 +1496,13 @@
     "file": "integration/nose-hoover-chain",
     "refs": [],
     "title": "Construct with chain_length = 1 reduces to vanilla Nosé-Hoover",
+    "type": "scenario"
+  },
+  "rq-135a6e30": {
+    "decl": "Scenario: Two registered kinds on a mixed-kind topology fan out",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Two registered kinds on a mixed-kind topology fan out",
     "type": "scenario"
   },
   "rq-136f7d15": {
@@ -4733,6 +4754,13 @@
     "title": "PairBuffer",
     "type": "api-item"
   },
+  "rq-3c6753bc": {
+    "decl": "Scenario: ConstraintList::subset preserves the supplied index order",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "ConstraintList::subset preserves the supplied index order",
+    "type": "scenario"
+  },
   "rq-3c98d7a9": {
     "decl": "## Gherkin Scenarios",
     "file": "forces/lj-pair-force",
@@ -7682,6 +7710,13 @@
     "title": "Out-of-range Coulomb scale in four-column form rejected",
     "type": "scenario"
   },
+  "rq-6abcd773": {
+    "decl": "Scenario: Single registered kind on a single-kind topology returns a bare slot",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Single registered kind on a single-kind topology returns a bare slot",
+    "type": "scenario"
+  },
   "rq-6ac1c0f2": {
     "decl": "Scenario: andersen_resample with p_collision = 0 is identity",
     "file": "integration/andersen",
@@ -8213,6 +8248,13 @@
     "refs": [],
     "title": "Feature: End-to-End Pipeline Reproducibility Test",
     "type": "file"
+  },
+  "rq-721e0fdb": {
+    "decl": "Scenario: ConstraintList::subset with empty indices yields an empty list",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "ConstraintList::subset with empty indices yields an empty list",
+    "type": "scenario"
   },
   "rq-7225b86f": {
     "decl": "### CUDA kernels",
@@ -9534,6 +9576,13 @@
     "file": "integration/framework",
     "refs": [],
     "title": "build_optional with None returns Ok(None) on the barostat registry",
+    "type": "scenario"
+  },
+  "rq-82cf45a2": {
+    "decl": "Scenario: Composite hook short-circuits on the first inner-slot error",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "Composite hook short-circuits on the first inner-slot error",
     "type": "scenario"
   },
   "rq-82d0c34a": {
@@ -11100,6 +11149,14 @@
     "level": 2,
     "refs": [],
     "title": "Launch Configuration",
+    "type": "section"
+  },
+  "rq-9be2f56a": {
+    "decl": "## Slot Composition",
+    "file": "integration/constraint-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Slot Composition",
     "type": "section"
   },
   "rq-9bef7cd0": {
@@ -15685,6 +15742,13 @@
     "refs": [],
     "title": "BondList",
     "type": "api-item"
+  },
+  "rq-de35dea7": {
+    "decl": "Scenario: ConstraintList::subset preserves global atom indices and particle_count",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "ConstraintList::subset preserves global atom indices and particle_count",
+    "type": "scenario"
   },
   "rq-de47c1ac": {
     "decl": "Scenario: step() with N=0 launches no kernels",

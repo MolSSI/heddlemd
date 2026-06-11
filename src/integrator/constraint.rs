@@ -217,14 +217,14 @@ impl ConstraintRegistry {
     }
 
     /// Construct the constraint slot, if any, that handles every group
-    /// in `list`. v1 produces a single slot implementation covering
-    /// every supported algorithm kind referenced by `list`. Returns
-    /// `Ok(None)` when `list.is_empty()`.
-    ///
-    /// For every group, looks up the algorithm via
-    /// `constraint_types[group.constraint_type_index].kind`, finds the
-    /// matching builder, calls `validate_group_shape(...)`, and
-    /// finally delegates to the slot constructor.
+    /// in `list`. Returns `Ok(None)` when `list.is_empty()`. Verifies
+    /// that every group's algorithm has a registered builder, runs
+    /// per-builder `validate_group_shape` against every group, then
+    /// fans out: walks `self.builders` in registration order, gathers
+    /// each builder's matching groups, partitions the list via
+    /// `ConstraintList::subset`, and constructs a per-builder slot.
+    /// One contributing builder → bare slot; two or more → composite
+    /// wrapper firing inner slots in registration order.
     pub fn build_optional(
         &self,
         list: &ConstraintList,
@@ -255,23 +255,118 @@ impl ConstraintRegistry {
                 ..(g.constraint_offset + g.constraint_count) as usize];
             builder.validate_group_shape(gi, atoms, cstrs, &cfg.params, masses)?;
         }
-        // v1: every supported group is handled by the SHAKE builder
-        // (the same builder consumes every group regardless of its
-        // constraint-type entry, because v1 only registers "shake").
-        // When additional algorithms arrive, this dispatch fans out
-        // per algorithm and the per-algorithm slots are combined.
-        let shake = self
-            .lookup("shake")
-            .ok_or_else(|| ConstraintError::UnsupportedKind("shake".to_string()))?;
-        let slot = shake.build(
-            gpu.device.clone(),
-            gpu,
-            particle_count,
-            list,
-            masses,
-            constraint_types,
-        )?;
-        Ok(Some(slot))
+        // Fan out across builders in registration order. Each
+        // contributing builder receives a sub-list of only its own
+        // groups.
+        let mut slots: Vec<Box<dyn Constraint>> = Vec::new();
+        for builder in &self.builders {
+            let kind = builder.kind_name();
+            let group_indices: Vec<usize> = list
+                .groups
+                .iter()
+                .enumerate()
+                .filter(|(_, g)| {
+                    constraint_types[g.constraint_type_index as usize].kind == kind
+                })
+                .map(|(i, _)| i)
+                .collect();
+            if group_indices.is_empty() {
+                continue;
+            }
+            let sublist = list.subset(&group_indices);
+            let slot = builder.build(
+                gpu.device.clone(),
+                gpu,
+                particle_count,
+                &sublist,
+                masses,
+                constraint_types,
+            )?;
+            slots.push(slot);
+        }
+        match slots.len() {
+            0 => Ok(None),
+            1 => Ok(Some(slots.into_iter().next().unwrap())),
+            _ => Ok(Some(Box::new(CompositeConstraint { slots }))),
+        }
+    }
+}
+
+// rq-9be2f56a — private composite slot returned by
+// `ConstraintRegistry::build_optional` when more than one builder
+// contributes. Forwards each `Constraint` trait method to its inner
+// slots in registration order, short-circuiting on the first `Err`.
+#[derive(Debug)]
+struct CompositeConstraint {
+    slots: Vec<Box<dyn Constraint>>,
+}
+
+impl Constraint for CompositeConstraint {
+    fn apply_before_drift(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        for slot in &mut self.slots {
+            slot.apply_before_drift(buffers, sim_box, dt, timings)?;
+        }
+        Ok(())
+    }
+
+    fn apply_after_drift(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        for slot in &mut self.slots {
+            slot.apply_after_drift(buffers, sim_box, dt, timings)?;
+        }
+        Ok(())
+    }
+
+    fn apply_after_kick(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        for slot in &mut self.slots {
+            slot.apply_after_kick(buffers, sim_box, dt, timings)?;
+        }
+        Ok(())
+    }
+
+    fn apply_initial_velocity_projection(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        timings: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        for slot in &mut self.slots {
+            slot.apply_initial_velocity_projection(buffers, sim_box, timings)?;
+        }
+        Ok(())
+    }
+
+    fn apply_position_projection_only(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        timings: &mut Timings,
+    ) -> Result<(), ConstraintError> {
+        for slot in &mut self.slots {
+            slot.apply_position_projection_only(buffers, sim_box, timings)?;
+        }
+        Ok(())
+    }
+
+    fn group_count(&self) -> usize {
+        self.slots.iter().map(|s| s.group_count()).sum()
     }
 }
 

@@ -214,8 +214,9 @@ impl ShakeConstraintsState {
         constraint_types: &[NamedSlotConfig],
     ) -> Result<Self, ShakeError> {
         // Per-type validation: deserialise and bound-check every shake
-        // type's params. Non-shake entries are skipped (the framework
-        // will route their groups to another builder).
+        // type's params. Non-shake entries belong to other algorithms
+        // and are skipped here; their builders validate them
+        // separately.
         for ct in constraint_types {
             if ct.kind != "shake" {
                 continue;
@@ -240,16 +241,10 @@ impl ShakeConstraintsState {
             }
         }
 
-        // Pack only the groups whose constraint type kind is "shake".
-        // (In v1 a single registry hosts every group, but the slot
-        // structure already accommodates per-kind filtering.)
-        let n_groups: usize = list
-            .groups
-            .iter()
-            .filter(|g| {
-                constraint_types[g.constraint_type_index as usize].kind == "shake"
-            })
-            .count();
+        // `ConstraintRegistry::build_optional` partitions the topology
+        // by builder before calling here, so every group in `list`
+        // belongs to a SHAKE-kind constraint type.
+        let n_groups = list.groups.len();
 
         let mut group_atoms_host: Vec<u32> = Vec::new();
         let mut group_atom_offset_host: Vec<u32> = Vec::with_capacity(n_groups);
@@ -262,9 +257,6 @@ impl ShakeConstraintsState {
 
         for (gi, g) in list.groups.iter().enumerate() {
             let ct = &constraint_types[g.constraint_type_index as usize];
-            if ct.kind != "shake" {
-                continue;
-            }
             let params: ShakeParams = ct
                 .params
                 .clone()

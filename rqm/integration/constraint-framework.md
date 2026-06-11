@@ -212,8 +212,9 @@ Per-group shape validation lives on the `ConstraintBuilder` trait
 constructs the slot, it iterates the `ConstraintList`'s groups, looks
 up each group's algorithm via
 `constraint_types[group.constraint_type_index].kind`, and calls the
-matching builder's `validate_group_shape(...)` before delegating to
-`build(...)`. The topology parser also calls the builder's
+matching builder's `validate_group_shape(...)` before partitioning the
+list and delegating to `build(...)` (see *Slot Composition* below).
+The topology parser also calls the builder's
 `expected_atom_count(&params)` to size-check `[constraints]` rows.
 
 Per-builder shape rules are documented in each algorithm's
@@ -233,6 +234,55 @@ requirements file. For SHAKE (see `shake.md`):
 Shape-mismatch failures surface as
 `ConstraintError::InvalidGroupShape { group_index, kind, reason }`
 where `kind` is the algorithm's kind string.
+
+## Slot Composition <!-- rq-9be2f56a -->
+
+A topology may declare constraint groups whose algorithm kinds are not
+all the same — e.g. SHAKE for general rigid clusters alongside
+analytical SETTLE for specialised three-atom water groups.
+`ConstraintRegistry::build_optional` partitions the topology across
+the registered builders so that each builder constructs a slot
+covering only the groups it owns.
+
+The partition is driven by the registry's builder order:
+
+1. Iterate `self.builders` in registration order.
+2. For each builder, collect the indices of every group `g` in
+   `list.groups` whose
+   `constraint_types[g.constraint_type_index].kind` equals the
+   builder's `kind_name()`.
+3. If the collected index set is non-empty, construct a sub-list via
+   `ConstraintList::subset(&self, group_indices: &[usize])` and call
+   the builder's `build(...)` with that sub-list. The sub-list shares
+   `particle_count` with the original, stores global atom indices in
+   `group_atoms` unchanged, and continues to reference the original
+   `constraint_types` array through each group's
+   `constraint_type_index`.
+4. If the collected index set is empty, skip the builder. No slot is
+   constructed for builders with no groups in this topology.
+
+The fan-out produces:
+
+- Zero slots when `list.is_empty()` → `Ok(None)`.
+- One slot when exactly one builder contributed → `Ok(Some(slot))`,
+  where `slot` is the builder's bare output.
+- Two or more slots when multiple builders contributed →
+  `Ok(Some(composite))`, where `composite` wraps the contributing
+  slots in registration order and forwards each `Constraint` trait
+  method call to every wrapped slot in that order.
+
+The composite wrapper is a private implementation detail. Callers
+receive `Box<dyn Constraint>` regardless of whether one slot or
+several are inside it. The composite's `group_count()` is the sum of
+its wrapped slots' counts.
+
+Each composite hook propagates the first inner-slot `Err` it
+encounters and does not call subsequent slots. The runner's error
+handling does not distinguish a composite from a single slot.
+
+Two builders registered under the same `kind_name()` are not detected:
+the first one in registration order receives every matching group; the
+second receives an empty index set and contributes no slot.
 
 ## Feature API <!-- rq-6f8f049b -->
 
@@ -323,8 +373,23 @@ where `kind` is the algorithm's kind string.
   - `group_constraints: Vec<GroupConstraint>`
   - `particle_count: usize`
 
-  Method `ConstraintList::is_empty(&self) -> bool` —
-  `self.groups.is_empty()`.
+  Methods:
+
+  - `ConstraintList::is_empty(&self) -> bool` —
+    `self.groups.is_empty()`.
+  - `ConstraintList::subset(&self, group_indices: &[usize]) -> ConstraintList`
+    — returns a fresh `ConstraintList` containing only the groups at
+    the supplied indices, in the order supplied. The returned list's
+    `groups[k]` has `atom_offset` and `constraint_offset` relabeled
+    into the sub-list's own SoA arrays; `atom_count`,
+    `constraint_count`, and `constraint_type_index` are copied from
+    the source group unchanged. `group_atoms` continues to store
+    global atom indices (no remapping into the subset). `particle_count`
+    equals the source list's `particle_count`. `group_indices` may be
+    empty, producing an empty list with the source's `particle_count`
+    preserved. Indices outside `0..self.groups.len()` cause a panic;
+    the caller is expected to derive `group_indices` from a walk of
+    `self.groups`.
 
   Each group's algorithm is resolved at consume time from
   `constraint_types[group.constraint_type_index].kind` (the
@@ -350,13 +415,15 @@ where `kind` is the algorithm's kind string.
     runner uses it to drive `validate_params` and
     `validate_group_shape` at config-validation time.
   - `ConstraintRegistry::build_optional(&self, list: &ConstraintList, gpu: &GpuContext, particle_count: usize, masses: &[f32], constraint_types: &[NamedSlotConfig]) -> Result<Option<Box<dyn Constraint>>, ConstraintError>`
-    — when `list.is_empty()`, returns `Ok(None)`. Otherwise, for every
-    group in `list`, looks up the algorithm via
-    `constraint_types[group.constraint_type_index].kind`, finds the
-    matching builder, calls `validate_group_shape(...)`, and finally
-    delegates to the slot constructor. Returns
-    `ConstraintError::UnsupportedKind(kind)` when any group references
-    a kind not present in the registry.
+    — when `list.is_empty()`, returns `Ok(None)`. Otherwise verifies
+    that every group's algorithm has a registered builder (returns
+    `ConstraintError::UnsupportedKind(kind)` for the first unmatched
+    kind), runs every group through its builder's
+    `validate_group_shape(...)`, then fans out across builders per
+    *Slot Composition* above. Returns a bare slot when exactly one
+    builder contributes; returns the private composite wrapper when
+    two or more contribute. Slot-firing order follows the registry's
+    builder registration order.
 
 - `ConstraintBuilder` — trait describing a registered constraint <!-- rq-7896e33a -->
   implementation. Implementations are stateless and self-register at
@@ -406,11 +473,17 @@ where `kind` is the algorithm's kind string.
           masses: &[f32],
       ) -> Result<(), ConstraintError>;
 
-      /// Construct the slot implementation. Receives the full
-      /// `ConstraintList` and the `NamedSlotConfig` array; the
-      /// builder filters internally to the groups whose algorithm
-      /// matches its `kind_name()`. In v1 the single registered
-      /// builder consumes every group.
+      /// Construct the slot implementation. Receives a sub-list
+      /// containing only the groups this builder owns, with offsets
+      /// relabeled into the sub-list's own SoA (see
+      /// `ConstraintList::subset`). `particle_count` is the full
+      /// particle count of the simulation (not the count covered by
+      /// this sub-list); `masses` is indexed by global atom index;
+      /// `constraint_types` is the full array, indexable by each
+      /// sub-list group's `constraint_type_index`. The builder may
+      /// rely on every group in `list` belonging to its own
+      /// `kind_name()` — the registry has already partitioned by
+      /// kind.
       fn build(
           &self,
           gpu: &GpuContext,
@@ -429,8 +502,11 @@ where `kind` is the algorithm's kind string.
     `ShakeParams`.
   - `validate_group_shape` runs before `build` and surfaces
     algorithm-specific cluster-shape errors as
-    `ConstraintError::InvalidGroupShape`.
-  - `build` constructs the device-side slot.
+    `ConstraintError::InvalidGroupShape`. `validate_group_shape` runs
+    against every group the builder will own; `build` is then called
+    once with the sub-list containing those groups.
+  - `build` constructs the device-side slot from the sub-list it
+    receives. A builder whose group set is empty is not called at all.
 
 - `ConstraintError` — error type returned by every trait method. <!-- rq-feb0501c -->
   Variants:
@@ -523,6 +599,12 @@ algorithm individually guarantees:
   minimum particle index. Two independently-constructed
   `ConstraintList`s from identical inputs are byte-identical, and
   every kernel that consumes them processes groups in the same order.
+- Slot-firing order under the private composite wrapper is the
+  registration order of the contributing builders. Two runs that
+  construct `ConstraintRegistry` identically (e.g. both via
+  `with_builtins()`) see byte-identical slot-firing order. The order
+  is load-bearing because slots' `apply_after_kick` hooks accumulate
+  into `buffers.virials` in-place via floating-point `+=`.
 - Concrete algorithms (SHAKE in the default registry) document the
   fixed-order per-group computation that produces bit-identical
   outputs across runs on the same GPU.
@@ -833,4 +915,77 @@ Feature: Constraint slot framework
     Given a topology file with bond "0 1 OH" and constraint row "0 1 2 SPCE" (constraint expands to (0,1), (0,2), (1,2))
     When load_topology_file(...) is called
     Then it returns Err(ConstraintError::ConstraintBondPairOverlap { atom_i: 0, atom_j: 1 })
+
+  # --- Slot composition ---
+
+  @rq-6abcd773
+  Scenario: Single registered kind on a single-kind topology returns a bare slot
+    Given a ConstraintRegistry registered with only the SHAKE builder
+    And a ConstraintList of two SHAKE groups
+    When registry.build_optional(...) is called
+    Then it returns Ok(Some(slot))
+    And slot.group_count() == 2
+
+  @rq-135a6e30
+  Scenario: Two registered kinds on a mixed-kind topology fan out
+    Given a ConstraintRegistry that registers a SHAKE builder, then a recording stub builder under kind = "stub"
+    And a ConstraintList of two SHAKE groups and one "stub"-kind group
+    When registry.build_optional(...) is called
+    Then it returns Ok(Some(composite))
+    And the SHAKE builder.build() received a sub-list whose group_count == 2
+    And the stub builder.build() received a sub-list whose group_count == 1
+    And composite.group_count() == 3
+
+  @rq-08ece93d
+  Scenario: Slot-firing order under the composite matches registration order
+    Given a registry that registers recording stub builder A under kind = "alpha", then recording stub builder B under kind = "beta"
+    And a ConstraintList containing one alpha-kind group and one beta-kind group
+    When the resulting slot's apply_after_drift is invoked once
+    Then A.apply_after_drift fires before B.apply_after_drift
+    And reversing the registration order so that B is registered before A reverses the firing order
+
+  @rq-051a8191
+  Scenario: Empty bucket for a registered kind skips its builder
+    Given a registry that registers a SHAKE builder and a recording stub builder under kind = "stub"
+    And a ConstraintList of two SHAKE groups and zero "stub"-kind groups
+    When registry.build_optional(...) is called
+    Then the stub builder's build() is not called
+    And the returned slot's group_count() == 2
+
+  @rq-82cf45a2
+  Scenario: Composite hook short-circuits on the first inner-slot error
+    Given a registry that registers recording stub builder A, then recording stub builder B, both under distinct kinds
+    And A.apply_after_drift is configured to return Err(...)
+    And a ConstraintList containing one A-kind group and one B-kind group
+    When the resulting slot's apply_after_drift is invoked once
+    Then it returns Err(...) propagated from A
+    And B.apply_after_drift is not called
+
+  @rq-de35dea7
+  Scenario: ConstraintList::subset preserves global atom indices and particle_count
+    Given a ConstraintList with particle_count == 100 and three groups whose group_atoms slices are [12, 14, 17], [90, 91, 92], [50, 51, 52]
+    When list.subset(&[1]) is called
+    Then the returned sub-list has particle_count == 100
+    And the returned sub-list's group_atoms equals [90, 91, 92]
+    And the returned sub-list has groups.len() == 1
+    And the returned sub-list's groups[0].atom_offset == 0
+    And the returned sub-list's groups[0].atom_count == 3
+    And the returned sub-list's groups[0].constraint_type_index equals the source group's constraint_type_index
+
+  @rq-721e0fdb
+  Scenario: ConstraintList::subset with empty indices yields an empty list
+    Given any ConstraintList with particle_count == 100
+    When list.subset(&[]) is called
+    Then the returned sub-list satisfies is_empty()
+    And the returned sub-list's group_atoms is empty
+    And the returned sub-list's group_constraints is empty
+    And the returned sub-list's particle_count == 100
+
+  @rq-3c6753bc
+  Scenario: ConstraintList::subset preserves the supplied index order
+    Given a ConstraintList with three groups whose group_atoms slices are [10], [20], [30]
+    When list.subset(&[2, 0]) is called
+    Then the returned sub-list's groups[0] corresponds to the source's groups[2]
+    And the returned sub-list's groups[1] corresponds to the source's groups[0]
+    And the returned sub-list's group_atoms equals [30, 10]
 ```
