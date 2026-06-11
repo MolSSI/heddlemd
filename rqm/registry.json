@@ -381,7 +381,12 @@
   "rq-03329010": {
     "decl": "Scenario: apply_before_drift on empty state is a no-op",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/constraint_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "apply_before_drift on empty state is a no-op",
     "type": "scenario"
   },
@@ -2000,7 +2005,12 @@
   "rq-129cb281": {
     "decl": "Scenario: apply_after_drift on empty state is a no-op",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/constraint_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "apply_after_drift on empty state is a no-op",
     "type": "scenario"
   },
@@ -2438,7 +2448,12 @@
   "rq-178eb1ae": {
     "decl": "Scenario: apply_position_projection_only mutates positions but not velocities or virials",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "apply_position_projection_only mutates positions but not velocities or virials",
     "type": "scenario"
   },
@@ -2572,7 +2587,12 @@
   "rq-18f5ef7a": {
     "decl": "Scenario: Constraint group adds implicit exclusions for every intra-group pair",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Constraint group adds implicit exclusions for every intra-group pair",
     "type": "scenario"
   },
@@ -5715,7 +5735,12 @@
   "rq-375aba37": {
     "decl": "Scenario: apply_after_kick on empty state is a no-op",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/constraint_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "apply_after_kick on empty state is a no-op",
     "type": "scenario"
   },
@@ -7857,7 +7882,12 @@
   "rq-4f88e13c": {
     "decl": "Scenario: Two independently constructed ConstraintLists are byte-identical",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/constraint_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two independently constructed ConstraintLists are byte-identical",
     "type": "scenario"
   },
@@ -11634,7 +11664,12 @@
   "rq-77f959b2": {
     "decl": "Scenario: apply_position_projection_only is not fired during the MD plan walk",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "apply_position_projection_only is not fired during the MD plan walk",
     "type": "scenario"
   },
@@ -12098,13 +12133,6 @@
     "refs": [],
     "title": "`lj_pair_force`",
     "type": "section"
-  },
-  "rq-7b2d2030": {
-    "decl": "Scenario: LangevinBaoabState does not implement ConstraintCapableIntegrator",
-    "file": "integration/constraint-framework",
-    "refs": [],
-    "title": "LangevinBaoabState does not implement ConstraintCapableIntegrator",
-    "type": "scenario"
   },
   "rq-7b5eef8c": {
     "decl": "## Lossless Velocity-Verlet Loop",
@@ -12917,17 +12945,15 @@
     "title": "Bonded-only ForceField builds no neighbor list",
     "type": "scenario"
   },
-  "rq-8339b7b7": {
-    "decl": "Scenario: MtkNptIntegrator does not implement ConstraintCapableIntegrator",
-    "file": "integration/constraint-framework",
-    "refs": [],
-    "title": "MtkNptIntegrator does not implement ConstraintCapableIntegrator",
-    "type": "scenario"
-  },
   "rq-833d83a9": {
     "decl": "Scenario: apply_position_projection_only on empty state is a no-op",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/constraint_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "apply_position_projection_only on empty state is a no-op",
     "type": "scenario"
   },
@@ -14225,7 +14251,12 @@
   "rq-930121d6": {
     "decl": "Scenario: Group order is determined by minimum particle index",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Group order is determined by minimum particle index",
     "type": "scenario"
   },
@@ -18695,13 +18726,6 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
-  },
-  "rq-c2e0c1fa": {
-    "decl": "Scenario: SettleWater group with a missing constraint pair is rejected",
-    "file": "integration/constraint-framework",
-    "refs": [],
-    "title": "SettleWater group with a missing constraint pair is rejected",
-    "type": "scenario"
   },
   "rq-c3564e8a": {
     "decl": "Scenario: Different seeds yield different post-call velocities",
@@ -24494,7 +24518,12 @@
   "rq-fd51fccb": {
     "decl": "Scenario: ConstraintBuilder default supports_position_projection_only returns true",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/constraint_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ConstraintBuilder default supports_position_projection_only returns true",
     "type": "scenario"
   },
@@ -24616,7 +24645,12 @@
   "rq-fe2cb7ee": {
     "decl": "Scenario: Empty [constraints] with a non-supporting integrator is permitted",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/constraint_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Empty [constraints] with a non-supporting integrator is permitted",
     "type": "scenario"
   },

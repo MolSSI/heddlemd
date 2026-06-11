@@ -591,7 +591,7 @@ fn spce() -> NamedSlotConfig {
     )
 }
 
-// rq-fe3b32cf
+// rq-fe3b32cf rq-18f5ef7a
 #[test]
 fn load_topology_with_a_shake_constraint() {
     let dir = tmp_path("constraint_shake");
@@ -719,7 +719,7 @@ fn explicit_exclusion_overrides_constraint_derived_default() {
     assert_eq!(entry.scale_coul, 0.25);
 }
 
-// rq-75a9815d
+// rq-75a9815d rq-930121d6
 #[test]
 fn constraint_groups_sorted_by_minimum_atom_index() {
     let dir = tmp_path("constraint_sort");

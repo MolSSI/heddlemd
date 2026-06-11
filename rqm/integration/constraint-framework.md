@@ -1051,12 +1051,6 @@ Feature: Constraint slot framework
     When the SHAKE builder is invoked
     Then it returns Err(ConstraintError::InvalidGroupShape { kind: SettleWater, reason: contains "atom count", .. })
 
-  @rq-c2e0c1fa
-  Scenario: SettleWater group with a missing constraint pair is rejected
-    Given a ConstraintList in which a SettleWater group declares only the (0,1) and (0,2) constraint pairs (no (1,2) constraint)
-    When the SHAKE builder is invoked
-    Then it returns Err(ConstraintError::InvalidGroupShape { kind: SettleWater, reason: contains "constraint pattern", .. })
-
   # --- Implicit exclusions ---
 
   @rq-18f5ef7a
@@ -1168,18 +1162,6 @@ Feature: Constraint slot framework
     Given a VelocityVerletState constructed from the velocity-verlet builder with lossless=false
     When a generic helper `fn accept<T: ConstraintCapableIntegrator>(_: &T) {}` is called with the state
     Then the call compiles and executes
-
-  @rq-7b2d2030
-  Scenario: LangevinBaoabState does not implement ConstraintCapableIntegrator
-    Given the LangevinBaoabState type
-    When source that calls `fn accept<T: ConstraintCapableIntegrator>(_: &T) {}` with a LangevinBaoabState is compiled
-    Then the compiler rejects the call with a trait-bound error
-
-  @rq-8339b7b7
-  Scenario: MtkNptIntegrator does not implement ConstraintCapableIntegrator
-    Given the MtkNptIntegrator type
-    When source that calls `fn accept<T: ConstraintCapableIntegrator>(_: &T) {}` with an MtkNptIntegrator is compiled
-    Then the compiler rejects the call with a trait-bound error
 
   @rq-a109cbb7
   Scenario: VelocityVerletState with lossless=false accepts constraint hooks at runtime

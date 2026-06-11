@@ -683,3 +683,206 @@ fn step_with_constraint_short_circuits_on_lossless_velocity_verlet() {
         other => panic!("expected IntegratorRejectsConstraint, got {other:?}"),
     }
 }
+
+// --- Empty particle_count: all four hooks are no-ops ---------------------
+
+fn empty_particle_state() -> ParticleState {
+    ParticleState::new(
+        vec![], vec![], vec![],
+        vec![], vec![], vec![],
+        vec![], vec![], vec![],
+        None, None,
+    )
+    .unwrap()
+}
+
+fn empty_shake_slot(
+    gpu: &GpuContext,
+) -> dynamics::integrator::shake::ShakeConstraintsState {
+    use dynamics::integrator::shake::ShakeConstraintsState;
+    ShakeConstraintsState::new(
+        gpu.device.clone(),
+        &ConstraintList::empty(0),
+        &[],
+        &[],
+    )
+    .unwrap()
+}
+
+// rq-03329010
+#[test]
+fn apply_before_drift_on_empty_state_is_a_noop() {
+    let gpu = init_device().unwrap();
+    let mut slot = empty_shake_slot(&gpu);
+    let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
+    let sb = big_box();
+    let mut t = Timings::new(&gpu).unwrap();
+    assert_eq!(buffers.particle_count(), 0);
+    use dynamics::integrator::Constraint;
+    slot.apply_before_drift(&mut buffers, &sb, 0.1, &mut t).unwrap();
+    let report = t.finalize().unwrap();
+    assert!(report.stages.is_empty(), "empty-state apply_before_drift launched: {:?}", report.stages);
+}
+
+// rq-129cb281
+#[test]
+fn apply_after_drift_on_empty_state_is_a_noop() {
+    let gpu = init_device().unwrap();
+    let mut slot = empty_shake_slot(&gpu);
+    let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
+    let sb = big_box();
+    let mut t = Timings::new(&gpu).unwrap();
+    use dynamics::integrator::Constraint;
+    slot.apply_after_drift(&mut buffers, &sb, 0.1, &mut t).unwrap();
+    let report = t.finalize().unwrap();
+    assert!(report.stages.is_empty(), "empty-state apply_after_drift launched: {:?}", report.stages);
+}
+
+// rq-375aba37
+#[test]
+fn apply_after_kick_on_empty_state_is_a_noop() {
+    let gpu = init_device().unwrap();
+    let mut slot = empty_shake_slot(&gpu);
+    let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
+    let sb = big_box();
+    let mut t = Timings::new(&gpu).unwrap();
+    use dynamics::integrator::Constraint;
+    slot.apply_after_kick(&mut buffers, &sb, 0.1, &mut t).unwrap();
+    let report = t.finalize().unwrap();
+    assert!(report.stages.is_empty(), "empty-state apply_after_kick launched: {:?}", report.stages);
+}
+
+// rq-833d83a9
+#[test]
+fn apply_position_projection_only_on_empty_state_is_a_noop() {
+    let gpu = init_device().unwrap();
+    let mut slot = empty_shake_slot(&gpu);
+    let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
+    let sb = big_box();
+    let mut t = Timings::new(&gpu).unwrap();
+    use dynamics::integrator::Constraint;
+    slot.apply_position_projection_only(&mut buffers, &sb, &mut t).unwrap();
+    let report = t.finalize().unwrap();
+    assert!(report.stages.is_empty(), "empty-state apply_position_projection_only launched: {:?}", report.stages);
+}
+
+// --- ConstraintBuilder default and byte-equivalence ---------------------
+
+// rq-fd51fccb
+#[test]
+fn constraint_builder_default_supports_position_projection_only_returns_true() {
+    use dynamics::integrator::shake::ShakeBuilder;
+    let b = ShakeBuilder;
+    let mut tbl = toml::map::Map::new();
+    tbl.insert(
+        "kind".to_string(),
+        toml::Value::String("shake".to_string()),
+    );
+    tbl.insert("r0".to_string(), toml::Value::Float(1.0));
+    tbl.insert("tolerance".to_string(), toml::Value::Float(1.0e-6));
+    tbl.insert("max_iterations".to_string(), toml::Value::Integer(50));
+    let params = toml::Value::Table(tbl);
+    assert!(b.supports_position_projection_only(&params));
+}
+
+// rq-4f88e13c
+#[test]
+fn two_independently_constructed_constraint_lists_are_byte_identical() {
+    fn build(seed: &[(usize, &str)]) -> ConstraintList {
+        let mut groups = Vec::with_capacity(seed.len());
+        let mut group_atoms = Vec::with_capacity(seed.len());
+        for (i, &(ti, _)) in seed.iter().enumerate() {
+            groups.push(ConstraintGroup {
+                atom_offset: i as u32,
+                atom_count: 1,
+                constraint_offset: 0,
+                constraint_count: 0,
+                constraint_type_index: ti as u32,
+            });
+            group_atoms.push(i as u32);
+        }
+        ConstraintList {
+            groups,
+            group_atoms,
+            group_constraints: Vec::new(),
+            particle_count: seed.len(),
+        }
+    }
+    let cl_a = build(&[(0, "stub-a"), (1, "stub-a"), (2, "stub-b")]);
+    let cl_b = build(&[(0, "stub-a"), (1, "stub-a"), (2, "stub-b")]);
+    assert_eq!(cl_a.groups.len(), cl_b.groups.len());
+    assert_eq!(cl_a.group_atoms, cl_b.group_atoms);
+    assert_eq!(cl_a.group_constraints.len(), cl_b.group_constraints.len());
+    for (c1, c2) in cl_a.group_constraints.iter().zip(cl_b.group_constraints.iter()) {
+        assert_eq!(c1.local_i, c2.local_i);
+        assert_eq!(c1.local_j, c2.local_j);
+        assert_eq!(c1.r0.to_bits(), c2.r0.to_bits());
+    }
+    assert_eq!(cl_a.particle_count, cl_b.particle_count);
+    for (g1, g2) in cl_a.groups.iter().zip(cl_b.groups.iter()) {
+        assert_eq!(g1.atom_offset, g2.atom_offset);
+        assert_eq!(g1.atom_count, g2.atom_count);
+        assert_eq!(g1.constraint_offset, g2.constraint_offset);
+        assert_eq!(g1.constraint_count, g2.constraint_count);
+        assert_eq!(g1.constraint_type_index, g2.constraint_type_index);
+    }
+}
+
+// rq-fe2cb7ee
+#[test]
+fn empty_constraints_with_non_supporting_integrator_is_permitted() {
+    use dynamics::io::load_config;
+    use std::fs;
+    let dir = std::env::temp_dir().join(format!(
+        "dynamics-empty-constraints-non-supporting-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("argon.in.xyz"),
+        "1\nLattice=\"1.0e-8 0 0 0 1.0e-8 0 0 0 1.0e-8\" \
+         Properties=species:S:1:pos:R:3\nAr 0 0 0\n",
+    )
+    .unwrap();
+    let cfg = r#"schema_version = 1
+init = "argon.in.xyz"
+
+[simulation]
+seed = 1
+temperature = 0.0
+
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "langevin-baoab"
+friction = 1.0e12
+temperature = 300.0
+seed = 11
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.5e-9
+
+[neighbor_list]
+mode = "all-pairs"
+"#;
+    let path = dir.join("argon.in.toml");
+    fs::write(&path, cfg).unwrap();
+    load_config(&path)
+        .expect("empty [constraints] with langevin-baoab should load (no constraint slot)");
+}
+

@@ -669,7 +669,7 @@ fn shake_positions_writes_non_zero_position_level_constraint_virial() {
     assert!(nonzero >= 2, "expected ≥2 non-zero virial entries, got {virial:?}");
 }
 
-// rq-13f424a1
+// rq-13f424a1 rq-178eb1ae
 #[test]
 fn shake_positions_no_velocity_restores_constraint_distances_from_off_manifold_positions() {
     // apply_position_projection_only must restore constraint distances
@@ -1639,7 +1639,7 @@ fn lossless_velocity_verlet_kind_does_not_support_constraints() {
 
 // --- Integration through Integrator::step --------------------------------
 
-// rq-90538790 rq-4e47cdad
+// rq-90538790 rq-4e47cdad rq-77f959b2
 #[test]
 fn integrator_step_dispatches_all_three_constraint_hooks() {
     use std::sync::{Arc as StdArc, Mutex};
