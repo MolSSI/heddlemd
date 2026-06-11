@@ -6,8 +6,11 @@ The runner exposes a fourth orthogonal slot — `Constraint` — alongside the
 velocities onto a holonomic constraint manifold (rigid bonds, rigid
 groups, etc.) at fixed sub-step boundaries inside the integrator. The
 slot is independently registered, independently selectable from the
-config, and composes with the other three slots without affecting their
-interfaces beyond the integrator's `step()` signature.
+config, and composes with the other three slots without modifying the
+base `Integrator` trait. The convenience-trait surface that lets
+callers invoke an integrator with a constraint slot is split so that
+only constraint-capable integrators expose it; see *Convenience Trait
+Surface* below.
 
 The default registry exposes one constraint algorithm:
 
@@ -96,6 +99,64 @@ finer-grained stages within those brackets.
 receive `&SimulationBox` (immutably) to read lattice parameters for
 minimum-image distance evaluation; none mutates the box.
 
+## Convenience Trait Surface <!-- rq-0e26dde0 -->
+
+The runner walks an integrator's plan via the free function
+[`run_step`] in `src/integrator/mod.rs`, threading the runner-side
+`install_constraint_hooks` flag from
+`IntegratorBuilder::supports_constraints(&params)` explicitly. Tests
+and direct library consumers use a convenience layer instead. That
+layer is split into two traits so that the `&mut dyn Constraint`
+argument is reachable only from a type that has statically opted in to
+constraint-hook insertion:
+
+- **`IntegratorStepExt`** — a blanket convenience trait implemented
+  for every type that implements `Integrator`. Its single method
+  `step(...)` walks the integrator's plan without installing any
+  constraint hooks. The method takes no `Constraint` argument and
+  the runner-side `install_constraint_hooks` flag is hard-wired to
+  `false`. Available on every `Integrator` (`velocity-verlet`,
+  `langevin-baoab`, `mtk-npt`, …).
+- **`IntegratorStepWithConstraintExt`** — a convenience trait whose
+  blanket impl is bounded on `Self: ConstraintCapableIntegrator`. Its
+  single method `step_with_constraint(..., &mut dyn Constraint, ...)`
+  walks the plan with `install_constraint_hooks = true`. Available
+  only on types that statically declare themselves
+  constraint-capable; calling it on a non-marker type is a compile
+  error.
+
+The runner consumes `run_step` directly and bypasses both convenience
+traits, so its hook-insertion behaviour is unaffected.
+
+### ConstraintCapableIntegrator marker <!-- rq-866dcea2 -->
+
+`ConstraintCapableIntegrator: Integrator` is implemented exactly for
+the integrator types whose `StepPlan` shape is compatible with the
+constraint slot's hook positions. In the default registry:
+
+- `VelocityVerletState` implements `ConstraintCapableIntegrator`.
+- `LangevinBaoabState` does not implement
+  `ConstraintCapableIntegrator`.
+- `MtkNptIntegrator` does not implement
+  `ConstraintCapableIntegrator`.
+
+A constraint-capable integrator type whose runtime state nevertheless
+forbids constraint-hook installation declares that state through the
+trait's `check_accepts_constraints_now(&self) -> Result<(), &'static str>`
+method. The default returns `Ok(())`; `VelocityVerletState` overrides
+it to return `Err("velocity-Verlet in lossless mode does not yet
+support constraints")` when its `lossless` field is `true`.
+
+`step_with_constraint` consults `check_accepts_constraints_now()`
+before walking the plan. When the predicate returns `Err(reason)`,
+the call returns `StepError::IntegratorRejectsConstraint { reason }`
+without dispatching `plan()`, `execute()`, or any kernel. This makes
+the runtime mismatch between a constraint-capable type and a
+constraint-rejecting state visible to programmatic callers; the
+runner remains protected by the config-load validation in
+`Config::validate_against(&registries)` and never calls
+`step_with_constraint` itself.
+
 ## Compatibility Rules <!-- rq-acfda5d4 -->
 
 - An integrator whose builder's
@@ -116,6 +177,17 @@ minimum-image distance evaluation; none mutates the box.
   `supports_constraints(&params)` returns `true` but the topology has
   no `[constraints]` section, the runner holds `None` for the
   constraint slot and the integrator's hooks are skipped.
+- The convenience-trait surface enforces the type-level half of the
+  same rule. `IntegratorStepWithConstraintExt::step_with_constraint`
+  is bounded on `Self: ConstraintCapableIntegrator`, so calling it on
+  a non-marker type (`LangevinBaoabState`, `MtkNptIntegrator`, …) is
+  a compile error. The runtime half — declaring that a
+  `ConstraintCapableIntegrator` instance's current state forbids
+  hook installation — runs through
+  `check_accepts_constraints_now()` and surfaces as
+  `StepError::IntegratorRejectsConstraint`. `VelocityVerletState`
+  with `lossless = true` is the one current trigger of this runtime
+  rejection.
 
 ## Constraint Data Layout <!-- rq-be5d5b33 -->
 
@@ -530,6 +602,106 @@ second receives an empty index set and contributes no slot.
 
   The runner's `RunnerError` wraps the type via
   `RunnerError::Constraint(ConstraintError)`.
+
+- `ConstraintCapableIntegrator` — supertrait of `Integrator`. Marks <!-- rq-ab8c77bc -->
+  types whose `StepPlan` shape is compatible with the constraint
+  slot's hook positions and carries the runtime-state predicate that
+  decides whether a specific instance currently accepts hook
+  installation.
+
+  ```rust
+  pub trait ConstraintCapableIntegrator: Integrator {
+      /// Runtime check: does this integrator instance currently
+      /// accept constraint-hook installation? `Ok(())` accepts;
+      /// `Err(reason)` rejects with a human-readable explanation
+      /// that propagates into
+      /// `StepError::IntegratorRejectsConstraint`. The default
+      /// returns `Ok(())`.
+      fn check_accepts_constraints_now(&self) -> Result<(), &'static str> {
+          Ok(())
+      }
+  }
+  ```
+
+  Default-registry implementations:
+
+  - `VelocityVerletState` implements `ConstraintCapableIntegrator`.
+    Its `check_accepts_constraints_now` returns `Ok(())` when the
+    instance was constructed with `lossless = false`; otherwise it
+    returns `Err("velocity-Verlet in lossless mode does not yet
+    support constraints")`.
+  - `LangevinBaoabState` and `MtkNptIntegrator` do not implement
+    `ConstraintCapableIntegrator`. Attempting to call
+    `step_with_constraint` on either is a compile-time error.
+
+- `IntegratorStepExt` — blanket convenience trait implemented for <!-- rq-1ac78590 -->
+  every `Integrator`. Drives a one-shot plan walk with no constraint
+  hooks.
+
+  ```rust
+  pub trait IntegratorStepExt {
+      fn step(
+          &mut self,
+          buffers: &mut ParticleBuffers,
+          sim_box: &mut SimulationBox,
+          force_field: &mut ForceField,
+          dt: f32,
+          timings: &mut Timings,
+      ) -> Result<(), StepError>;
+  }
+
+  impl<T: Integrator + ?Sized> IntegratorStepExt for T { /* … */ }
+  ```
+
+  `step` calls `run_step(self, …, install_constraint_hooks: false,
+  …)` with no `Constraint` slot. The runner uses the lower-level
+  `run_step` directly and does not depend on this trait.
+
+- `IntegratorStepWithConstraintExt` — convenience trait whose blanket <!-- rq-f71ff87f -->
+  impl is bounded on `Self: ConstraintCapableIntegrator`. Drives a
+  one-shot plan walk with the constraint slot installed.
+
+  ```rust
+  pub trait IntegratorStepWithConstraintExt {
+      fn step_with_constraint(
+          &mut self,
+          buffers: &mut ParticleBuffers,
+          sim_box: &mut SimulationBox,
+          force_field: &mut ForceField,
+          constraint: &mut dyn Constraint,
+          dt: f32,
+          timings: &mut Timings,
+      ) -> Result<(), StepError>;
+  }
+
+  impl<T: ConstraintCapableIntegrator + ?Sized> IntegratorStepWithConstraintExt
+      for T
+  { /* … */ }
+  ```
+
+  `step_with_constraint` first calls
+  `self.check_accepts_constraints_now()`; if that returns
+  `Err(reason)`, the method returns
+  `StepError::IntegratorRejectsConstraint { reason }` without
+  dispatching `plan()`, `execute()`, or any kernel. Otherwise it
+  calls `run_step(self, …, install_constraint_hooks: true,
+  Some(constraint), …)`.
+
+- `StepError` — unified error type returned by `run_step` and both <!-- rq-52e52d7b -->
+  convenience-trait methods. Defined in `src/integrator/mod.rs`.
+  Variants:
+
+  - `Integrator(IntegratorError)` — wraps an integrator sub-step
+    failure from `Integrator::execute`.
+  - `ForceField(ForceFieldError)` — wraps a force-evaluation failure
+    from `force_field.step(...)` / `force_field.step_class(...)`.
+  - `Constraint(ConstraintError)` — wraps a failure from any
+    `Constraint` trait method (hooks fired by `run_step`).
+  - `IntegratorRejectsConstraint { reason: &'static str }` — returned
+    by `IntegratorStepWithConstraintExt::step_with_constraint` when
+    `check_accepts_constraints_now()` returns `Err(reason)`. The
+    `reason` string is the integrator's verbatim rejection message
+    (see the trait's documentation).
 
 ### Functions and Methods <!-- rq-dfd47225 -->
 
@@ -988,4 +1160,58 @@ Feature: Constraint slot framework
     Then the returned sub-list's groups[0] corresponds to the source's groups[2]
     And the returned sub-list's groups[1] corresponds to the source's groups[0]
     And the returned sub-list's group_atoms equals [30, 10]
+
+  # --- Convenience trait surface ---
+
+  @rq-2e028ba6
+  Scenario: VelocityVerletState implements ConstraintCapableIntegrator
+    Given a VelocityVerletState constructed from the velocity-verlet builder with lossless=false
+    When a generic helper `fn accept<T: ConstraintCapableIntegrator>(_: &T) {}` is called with the state
+    Then the call compiles and executes
+
+  @rq-7b2d2030
+  Scenario: LangevinBaoabState does not implement ConstraintCapableIntegrator
+    Given the LangevinBaoabState type
+    When source that calls `fn accept<T: ConstraintCapableIntegrator>(_: &T) {}` with a LangevinBaoabState is compiled
+    Then the compiler rejects the call with a trait-bound error
+
+  @rq-8339b7b7
+  Scenario: MtkNptIntegrator does not implement ConstraintCapableIntegrator
+    Given the MtkNptIntegrator type
+    When source that calls `fn accept<T: ConstraintCapableIntegrator>(_: &T) {}` with an MtkNptIntegrator is compiled
+    Then the compiler rejects the call with a trait-bound error
+
+  @rq-a109cbb7
+  Scenario: VelocityVerletState with lossless=false accepts constraint hooks at runtime
+    Given a VelocityVerletState constructed with lossless=false
+    Then state.check_accepts_constraints_now() returns Ok(())
+
+  @rq-ca6d04ca
+  Scenario: VelocityVerletState with lossless=true rejects constraint hooks at runtime
+    Given a VelocityVerletState constructed with lossless=true
+    Then state.check_accepts_constraints_now() returns Err("velocity-Verlet in lossless mode does not yet support constraints")
+
+  @rq-a4a2bf11
+  Scenario: IntegratorStepExt::step never installs constraint hooks
+    Given a VelocityVerletState (lossless=false) with a recording stub Constraint slot reachable in scope but not passed in
+    When integrator.step(buffers, sim_box, force_field, dt, timings) is called
+    Then the call returns Ok(())
+    And no Constraint hooks are recorded
+
+  @rq-4e47cdad
+  Scenario: IntegratorStepWithConstraintExt::step_with_constraint installs hooks on a constraint-accepting state
+    Given a VelocityVerletState constructed with lossless=false
+    And a recording Constraint slot
+    When integrator.step_with_constraint(buffers, sim_box, force_field, &mut slot, dt, timings) is called
+    Then the call returns Ok(())
+    And the recorded hook order is exactly [apply_before_drift, apply_after_drift, apply_after_kick]
+
+  @rq-e9706f76
+  Scenario: step_with_constraint short-circuits on a constraint-rejecting state
+    Given a VelocityVerletState constructed with lossless=true
+    And a recording Constraint slot
+    When integrator.step_with_constraint(buffers, sim_box, force_field, &mut slot, dt, timings) is called
+    Then it returns Err(StepError::IntegratorRejectsConstraint { reason }) where reason equals the VV lossless rejection message
+    And no integrator sub-step is dispatched (Integrator::plan and Integrator::execute are not called)
+    And no Constraint hook is recorded
 ```

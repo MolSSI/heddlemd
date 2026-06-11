@@ -471,7 +471,7 @@ fn berendsen_temperature_relaxes_toward_target() {
     let n_steps = 500usize;
     for _ in 0..n_steps {
         integrator
-            .step(&mut buffers, &mut sim_box, &mut ff, None, dt, &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, dt, &mut timings)
             .unwrap();
         therm
             .apply_post(&mut buffers, dt, &mut timings)

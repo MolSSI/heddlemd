@@ -790,8 +790,7 @@ fn integrator_step_dispatches_all_three_constraint_hooks() {
     use std::sync::{Arc as StdArc, Mutex};
     use dynamics::forces::AngleList;
     use dynamics::forces::ForceField;
-    use dynamics::integrator::IntegratorRegistry;
-    use dynamics::io::SlotConfig;
+    use dynamics::integrator::{IntegratorStepWithConstraintExt, VelocityVerletState};
     use dynamics::io::config::NeighborListConfig;
 
     #[derive(Debug)]
@@ -853,15 +852,12 @@ fn integrator_step_dispatches_all_three_constraint_hooks() {
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
-    let registry = IntegratorRegistry::with_builtins();
-    let vv = SlotConfig::from_params_str("velocity-verlet", "lossless = false\n");
-    let mut integrator = registry.build(&vv, &gpu, 3, 0).unwrap();
+    let mut integrator = VelocityVerletState::new(&gpu, 3, false).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     let log = StdArc::new(Mutex::new(Vec::new()));
     let mut rec = RecordingConstraint { log: log.clone() };
-    let arg: Option<&mut dyn Constraint> = Some(&mut rec);
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, arg, 1.0, &mut timings)
+        .step_with_constraint(&mut buffers, &mut sim_box, &mut ff, &mut rec, 1.0, &mut timings)
         .unwrap();
     let order = log.lock().unwrap().clone();
     assert_eq!(order, vec!["before_drift", "after_drift", "after_kick"]);
@@ -903,7 +899,7 @@ fn integrator_step_with_none_constraint_skips_all_hooks() {
     let mut integrator = registry.build(&vv, &gpu, 3, 0).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, 1.0, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     for s in report.stages {

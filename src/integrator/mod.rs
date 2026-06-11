@@ -65,6 +65,13 @@ pub enum StepError {
     ForceField(#[from] ForceFieldError),
     #[error("{0}")]
     Constraint(#[from] ConstraintError),
+    /// Returned by `IntegratorStepWithConstraintExt::step_with_constraint`
+    /// when the integrator's `check_accepts_constraints_now()`
+    /// rejected hook installation for the instance's current runtime
+    /// state (e.g., velocity-Verlet with `lossless = true`). The
+    /// `reason` is the integrator's verbatim message.
+    #[error("integrator rejected constraint hook installation: {reason}")]
+    IntegratorRejectsConstraint { reason: &'static str },
 }
 
 // rq-2ccf40de
@@ -334,20 +341,19 @@ pub fn run_step_no_constraint(
 /// `framework.md`); this extension is purely a convenience wrapper for
 /// callers — chiefly tests — that want a single method invocation per
 /// timestep. The runner uses the lower-level [`run_step`] free
-/// function directly so it can thread the kind-level
-/// `supports_constraints()` predicate into hook insertion.
+/// function directly.
 ///
-/// When `constraint` is `Some(_)`, the extension installs constraint
-/// hooks unconditionally (the caller is responsible for the
-/// integrator/constraint compatibility check that the runner enforces
-/// via `IntegratorKind::supports_constraints()`).
+/// `step` walks the plan with no constraint slot. Callers that need
+/// a constraint slot installed use [`IntegratorStepWithConstraintExt::step_with_constraint`],
+/// which is bounded on `Self: ConstraintCapableIntegrator` and is
+/// therefore unavailable on integrators whose plan shape is not
+/// constraint-compatible.
 pub trait IntegratorStepExt {
     fn step(
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
-        constraint: Option<&mut dyn Constraint>,
         dt: f32,
         timings: &mut Timings,
     ) -> Result<(), StepError>;
@@ -359,18 +365,93 @@ impl IntegratorStepExt for dyn Integrator + '_ {
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
-        constraint: Option<&mut dyn Constraint>,
         dt: f32,
         timings: &mut Timings,
     ) -> Result<(), StepError> {
-        let install = constraint.is_some();
+        run_step(self, buffers, sim_box, force_field, None, false, dt, timings, true)
+    }
+}
+
+// Blanket impl for concrete (Sized) integrators so tests can call
+// `state.step(...)` directly without coercing to `&mut dyn Integrator`.
+impl<T: Integrator> IntegratorStepExt for T {
+    fn step(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &mut SimulationBox,
+        force_field: &mut ForceField,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), StepError> {
+        run_step(self, buffers, sim_box, force_field, None, false, dt, timings, true)
+    }
+}
+
+/// Marker (with a runtime-state predicate) for integrator types whose
+/// `StepPlan` shape is compatible with the constraint slot's hook
+/// positions. Implemented by integrators whose plans place a single
+/// `Drift` / `KickDrift` sub-step and a terminal `KickHalf` /
+/// `KickDrift` — currently `VelocityVerletState`.
+///
+/// `check_accepts_constraints_now` is consulted at runtime by
+/// `IntegratorStepWithConstraintExt::step_with_constraint`. The
+/// default returns `Ok(())`; implementations whose internal state can
+/// transiently forbid hook installation (e.g., `VelocityVerletState`
+/// with `lossless = true`) override it to return `Err(reason)`. The
+/// returned message propagates verbatim into
+/// `StepError::IntegratorRejectsConstraint { reason }`.
+pub trait ConstraintCapableIntegrator: Integrator {
+    fn check_accepts_constraints_now(&self) -> Result<(), &'static str> {
+        Ok(())
+    }
+}
+
+/// Extension trait offering a single-call `step_with_constraint()`
+/// convenience method on top of [`IntegratorStepExt::step`]. Bounded
+/// on `Self: ConstraintCapableIntegrator`, so only the integrator
+/// types whose plan shape is constraint-compatible expose the method
+/// at all. Calling `step_with_constraint` on `LangevinBaoabState`,
+/// `MtkNptIntegrator`, or any other non-marker type is a compile
+/// error.
+///
+/// Before walking the plan, the method calls
+/// `self.check_accepts_constraints_now()`. If it returns
+/// `Err(reason)`, the method returns
+/// `Err(StepError::IntegratorRejectsConstraint { reason })` without
+/// dispatching `plan()`, `execute()`, the force field, or any
+/// constraint hook.
+pub trait IntegratorStepWithConstraintExt {
+    fn step_with_constraint(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &mut SimulationBox,
+        force_field: &mut ForceField,
+        constraint: &mut dyn Constraint,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), StepError>;
+}
+
+impl IntegratorStepWithConstraintExt for dyn ConstraintCapableIntegrator + '_ {
+    fn step_with_constraint(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &mut SimulationBox,
+        force_field: &mut ForceField,
+        constraint: &mut dyn Constraint,
+        dt: f32,
+        timings: &mut Timings,
+    ) -> Result<(), StepError> {
+        if let Err(reason) = self.check_accepts_constraints_now() {
+            return Err(StepError::IntegratorRejectsConstraint { reason });
+        }
         run_step(
             self,
             buffers,
             sim_box,
             force_field,
-            constraint,
-            install,
+            Some(constraint),
+            true,
             dt,
             timings,
             true,
@@ -379,26 +460,27 @@ impl IntegratorStepExt for dyn Integrator + '_ {
 }
 
 // Blanket impl for concrete (Sized) integrators so tests can call
-// `langevin_state.step(...)` directly without first coercing to
-// `&mut dyn Integrator`.
-impl<T: Integrator> IntegratorStepExt for T {
-    fn step(
+// `state.step_with_constraint(...)` directly.
+impl<T: ConstraintCapableIntegrator> IntegratorStepWithConstraintExt for T {
+    fn step_with_constraint(
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
-        constraint: Option<&mut dyn Constraint>,
+        constraint: &mut dyn Constraint,
         dt: f32,
         timings: &mut Timings,
     ) -> Result<(), StepError> {
-        let install = constraint.is_some();
+        if let Err(reason) = self.check_accepts_constraints_now() {
+            return Err(StepError::IntegratorRejectsConstraint { reason });
+        }
         run_step(
             self,
             buffers,
             sim_box,
             force_field,
-            constraint,
-            install,
+            Some(constraint),
+            true,
             dt,
             timings,
             true,

@@ -212,7 +212,7 @@ fn step_launches_expected_kernel_set() {
     // first step (matches the runner's contract).
     ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     integ
-        .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count_for = |stage: KernelStage| -> u64 {
@@ -250,7 +250,7 @@ fn step_on_empty_state_is_noop() {
     let g_pre = sim_box.generation();
     let mut integ = build_mtk(&gpu, 0, &mtk_kind(85.0, 1.0e5, 1.0e-13, 1.0e-12, 3, 3, 1));
     integ
-        .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
         .unwrap();
     assert_eq!(sim_box.generation(), g_pre);
     let s = unbox_mtk(integ);
@@ -408,7 +408,7 @@ fn generation_advances_every_step() {
     ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let g0 = sim_box.generation();
     integ
-        .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
         .unwrap();
     // step() calls sim_box.rescale_isotropic once, which bumps the
     // generation by 1. (The runner-level force_field.step before the
@@ -490,7 +490,7 @@ fn two_runs_with_identical_configs_are_byte_identical() {
         ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
         for _ in 0..5 {
             integ
-                .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
+                .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
                 .unwrap();
         }
         let px = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
@@ -559,7 +559,7 @@ fn mtk_approximate_time_reversibility_smoke() {
     // --- Forward 50 steps ---
     for _ in 0..50 {
         integ
-            .step(&mut buffers, &mut sim_box, &mut ff, None, dt, &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, dt, &mut timings)
             .unwrap();
     }
 
@@ -596,7 +596,7 @@ fn mtk_approximate_time_reversibility_smoke() {
     // --- Reverse 50 steps ---
     for _ in 0..50 {
         integ
-            .step(&mut buffers, &mut sim_box, &mut ff, None, dt, &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, dt, &mut timings)
             .unwrap();
     }
 
@@ -671,7 +671,7 @@ fn finite_step_keeps_velocities_and_positions_finite() {
     ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     for _ in 0..50 {
         integ
-            .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
             .unwrap();
     }
     let v_final = sim_box.volume();

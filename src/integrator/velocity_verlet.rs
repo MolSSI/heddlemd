@@ -16,7 +16,10 @@ use crate::io::config::ConfigError;
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
-use super::{Integrator, IntegratorBuilder, IntegratorError, StepPlan, SubStep};
+use super::{
+    ConstraintCapableIntegrator, Integrator, IntegratorBuilder, IntegratorError, StepPlan,
+    SubStep,
+};
 
 // rq-1f87880c — typed parameter struct for the "velocity-verlet"
 // builder, deserialised from the `[integrator]` section's
@@ -38,6 +41,21 @@ fn deserialize_params(params: &toml::Value) -> Result<VelocityVerletParams, Conf
 #[derive(Debug)]
 pub struct VelocityVerletState {
     lossless: Option<LosslessBuffers>,
+}
+
+impl VelocityVerletState {
+    pub fn new(
+        gpu: &GpuContext,
+        particle_count: usize,
+        lossless: bool,
+    ) -> Result<Self, IntegratorError> {
+        let buffers = if lossless {
+            Some(LosslessBuffers::new(gpu, particle_count)?)
+        } else {
+            None
+        };
+        Ok(VelocityVerletState { lossless: buffers })
+    }
 }
 
 impl Integrator for VelocityVerletState {
@@ -93,6 +111,21 @@ impl Integrator for VelocityVerletState {
             other => Err(IntegratorError::UnexpectedSubStep {
                 variant: other.variant_name(),
             }),
+        }
+    }
+}
+
+// Velocity-Verlet's plan `[KickDrift, ForceEval, KickHalf]` lines up
+// with the constraint slot's hook positions (one drift bracket plus a
+// terminal kick). The lossless mode rejects hook installation at
+// runtime — its compensated-sum bookkeeping doesn't yet account for
+// constraint corrections.
+impl ConstraintCapableIntegrator for VelocityVerletState {
+    fn check_accepts_constraints_now(&self) -> Result<(), &'static str> {
+        if self.lossless.is_some() {
+            Err("velocity-Verlet in lossless mode does not yet support constraints")
+        } else {
+            Ok(())
         }
     }
 }

@@ -470,7 +470,7 @@ fn csvr_time_averaged_ke_tracks_k_target() {
     let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
     for _ in 0..100 {
         integ
-            .step(&mut buffers, &mut sim_box, &mut ff, None, (1.0e-15 / TIME_F) as f32, &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, (1.0e-15 / TIME_F) as f32, &mut timings)
             .unwrap();
         therm
             .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
@@ -480,7 +480,7 @@ fn csvr_time_averaged_ke_tracks_k_target() {
     let n_samples = 250;
     for _ in 0..n_samples {
         integ
-            .step(&mut buffers, &mut sim_box, &mut ff, None, (1.0e-15 / TIME_F) as f32, &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, (1.0e-15 / TIME_F) as f32, &mut timings)
             .unwrap();
         therm
             .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)

@@ -345,7 +345,7 @@ fn step_launches_all_six_expected_kernel_calls() {
             4, 0)
         .unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count = |name: &str| -> u64 {
@@ -403,7 +403,7 @@ fn langevin_step_on_empty_is_noop() {
             0, 0)
         .unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, None, 1.0e-15, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
         .unwrap();
 }
 

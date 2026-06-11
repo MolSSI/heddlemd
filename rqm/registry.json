@@ -1034,6 +1034,14 @@
     "title": "Reject a phase name containing non-ASCII characters",
     "type": "scenario"
   },
+  "rq-0e26dde0": {
+    "decl": "## Convenience Trait Surface",
+    "file": "integration/constraint-framework",
+    "level": 2,
+    "refs": [],
+    "title": "Convenience Trait Surface",
+    "type": "section"
+  },
   "rq-0e5ac409": {
     "decl": "## Algorithm",
     "file": "integration/langevin-baoab",
@@ -2051,6 +2059,13 @@
     "refs": [],
     "title": "recip_stream and the two events are released when the slot is dropped",
     "type": "scenario"
+  },
+  "rq-1ac78590": {
+    "decl": "- `IntegratorStepExt` — blanket convenience trait implemented for",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "IntegratorStepExt",
+    "type": "api-item"
   },
   "rq-1ad7e751": {
     "decl": "- `CuFftError` — wrapper around cuFFT failure codes from the underlying",
@@ -3711,6 +3726,13 @@
     "refs": [],
     "title": "RdfBuilder",
     "type": "api-item"
+  },
+  "rq-2e028ba6": {
+    "decl": "Scenario: VelocityVerletState implements ConstraintCapableIntegrator",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "VelocityVerletState implements ConstraintCapableIntegrator",
+    "type": "scenario"
   },
   "rq-2e15fed7": {
     "decl": "## Launch Configuration",
@@ -5856,6 +5878,13 @@
     "title": "Unknown analysis kind is reported with UnknownKind",
     "type": "scenario"
   },
+  "rq-4e47cdad": {
+    "decl": "Scenario: IntegratorStepWithConstraintExt::step_with_constraint installs hooks on a constraint-accepting state",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "IntegratorStepWithConstraintExt::step_with_constraint installs hooks on a constraint-accepting state",
+    "type": "scenario"
+  },
   "rq-4e9e09f0": {
     "decl": "Scenario: apply_post launches the expected kernel set",
     "file": "integration/csvr",
@@ -6106,6 +6135,13 @@
     "refs": [],
     "title": "Per-class slot-output buffers are zero-initialised",
     "type": "scenario"
+  },
+  "rq-52e52d7b": {
+    "decl": "- `StepError` — unified error type returned by `run_step` and both",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "StepError",
+    "type": "api-item"
   },
   "rq-52f547fd": {
     "decl": "Scenario: NeighborListState with particle_count = 1 produces an empty neighbor list",
@@ -9077,6 +9113,13 @@
     "title": "`lj_pair_force`",
     "type": "section"
   },
+  "rq-7b2d2030": {
+    "decl": "Scenario: LangevinBaoabState does not implement ConstraintCapableIntegrator",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "LangevinBaoabState does not implement ConstraintCapableIntegrator",
+    "type": "scenario"
+  },
   "rq-7b5eef8c": {
     "decl": "## Lossless Velocity-Verlet Loop",
     "file": "pipeline-reversibility",
@@ -9633,6 +9676,13 @@
     "title": "Bonded-only ForceField builds no neighbor list",
     "type": "scenario"
   },
+  "rq-8339b7b7": {
+    "decl": "Scenario: MtkNptIntegrator does not implement ConstraintCapableIntegrator",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "MtkNptIntegrator does not implement ConstraintCapableIntegrator",
+    "type": "scenario"
+  },
   "rq-833d83a9": {
     "decl": "Scenario: apply_position_projection_only on empty state is a no-op",
     "file": "integration/constraint-framework",
@@ -9782,6 +9832,14 @@
     "refs": [],
     "title": "Timings file is absent when run fails before the loop",
     "type": "scenario"
+  },
+  "rq-866dcea2": {
+    "decl": "### ConstraintCapableIntegrator marker",
+    "file": "integration/constraint-framework",
+    "level": 3,
+    "refs": [],
+    "title": "ConstraintCapableIntegrator marker",
+    "type": "section"
   },
   "rq-86aa2be7": {
     "decl": "Scenario: Langevin BAOAB kind with valid parameters is accepted",
@@ -11155,7 +11213,12 @@
     "decl": "## Slot Composition",
     "file": "integration/constraint-framework",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/constraint.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Slot Composition",
     "type": "section"
   },
@@ -11600,6 +11663,13 @@
     "title": "Builder",
     "type": "section"
   },
+  "rq-a109cbb7": {
+    "decl": "Scenario: VelocityVerletState with lossless=false accepts constraint hooks at runtime",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "VelocityVerletState with lossless=false accepts constraint hooks at runtime",
+    "type": "scenario"
+  },
   "rq-a1262872": {
     "decl": "- `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>`",
     "file": "forces/neighbor-list",
@@ -11839,6 +11909,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-a4a2bf11": {
+    "decl": "Scenario: IntegratorStepExt::step never installs constraint hooks",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "IntegratorStepExt::step never installs constraint hooks",
+    "type": "scenario"
   },
   "rq-a4d5e711": {
     "decl": "- `SimulationBox::wrap_position_with_image_count(&self, position: [f32; 3]) -> ([f32; 3], [i32; 3])`",
@@ -12273,6 +12350,13 @@
     "refs": [],
     "title": "Reject grid dimension below 2*spline_order along b",
     "type": "scenario"
+  },
+  "rq-ab8c77bc": {
+    "decl": "- `ConstraintCapableIntegrator` — supertrait of `Integrator`. Marks",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "ConstraintCapableIntegrator",
+    "type": "api-item"
   },
   "rq-abcae430": {
     "decl": "Scenario: Construct with particle_count = 0",
@@ -13050,7 +13134,12 @@
   "rq-b6f167a4": {
     "decl": "- `ConstraintList` — host-side parsed-and-validated constraint data.",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ConstraintList",
     "type": "api-item"
   },
@@ -14337,6 +14426,13 @@
     "file": "forces/morse-bonded",
     "refs": [],
     "title": "A stretched bond's virial equals r * F_mag",
+    "type": "scenario"
+  },
+  "rq-ca6d04ca": {
+    "decl": "Scenario: VelocityVerletState with lossless=true rejects constraint hooks at runtime",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "VelocityVerletState with lossless=true rejects constraint hooks at runtime",
     "type": "scenario"
   },
   "rq-ca6db610": {
@@ -16615,6 +16711,13 @@
     "title": "MinlogWriter",
     "type": "api-item"
   },
+  "rq-e9706f76": {
+    "decl": "Scenario: step_with_constraint short-circuits on a constraint-rejecting state",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "step_with_constraint short-circuits on a constraint-rejecting state",
+    "type": "scenario"
+  },
   "rq-e9994f86": {
     "decl": "Scenario: Construct with particle_count = 0",
     "file": "integration/langevin-baoab",
@@ -17663,6 +17766,13 @@
     "refs": [],
     "title": "Equilibrium kinetic energy approaches (N_f / 2) · T",
     "type": "scenario"
+  },
+  "rq-f71ff87f": {
+    "decl": "- `IntegratorStepWithConstraintExt` — convenience trait whose blanket",
+    "file": "integration/constraint-framework",
+    "refs": [],
+    "title": "IntegratorStepWithConstraintExt",
+    "type": "api-item"
   },
   "rq-f721b7a1": {
     "decl": "Scenario: vv_kick does not modify forces, masses, or positions",

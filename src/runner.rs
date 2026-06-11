@@ -1308,6 +1308,15 @@ fn run_simulation_with_phase(
                         crate::integrator::StepError::Constraint(e) => {
                             RunnerError::Constraint(e)
                         }
+                        // Produced only by
+                        // `IntegratorStepWithConstraintExt::step_with_constraint`;
+                        // the runner uses `run_step` directly, so this
+                        // variant cannot reach here.
+                        crate::integrator::StepError::IntegratorRejectsConstraint {
+                            reason,
+                        } => unreachable!(
+                            "run_step returned IntegratorRejectsConstraint ({reason})"
+                        ),
                     };
                     (runner_err, ExitPhase::Loop)
                 })?;
