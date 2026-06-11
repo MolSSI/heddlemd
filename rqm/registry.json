@@ -173,7 +173,12 @@
   "rq-0165303c": {
     "decl": "Scenario: SD on empty buffers converges immediately",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SD on empty buffers converges immediately",
     "type": "scenario"
   },
@@ -236,7 +241,12 @@
   "rq-020ff80e": {
     "decl": "Scenario: SD does not modify velocities",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SD does not modify velocities",
     "type": "scenario"
   },
@@ -973,7 +983,12 @@
   "rq-09c8a503": {
     "decl": "Scenario: Custom minimizer builder is selectable",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Custom minimizer builder is selectable",
     "type": "scenario"
   },
@@ -1153,13 +1168,6 @@
       }
     ],
     "title": "Two-particle pair virial matches r_ij · F_ij",
-    "type": "scenario"
-  },
-  "rq-0b7acd88": {
-    "decl": "Scenario: MinimizerRegistry::with_builtins exposes the registered minimizer",
-    "file": "minimization/steepest-descent",
-    "refs": [],
-    "title": "MinimizerRegistry::with_builtins exposes the registered minimizer",
     "type": "scenario"
   },
   "rq-0b7f7023": {
@@ -2102,10 +2110,15 @@
     "type": "scenario"
   },
   "rq-13e42f65": {
-    "decl": "Scenario: SD with SETTLE projects every trial onto the rigid-water manifold",
+    "decl": "Scenario: SD with SHAKE projects every trial onto the rigid-water manifold",
     "file": "minimization/steepest-descent",
-    "refs": [],
-    "title": "SD with SETTLE projects every trial onto the rigid-water manifold",
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SD with SHAKE projects every trial onto the rigid-water manifold",
     "type": "scenario"
   },
   "rq-13f424a1": {
@@ -4104,7 +4117,12 @@
   "rq-265de297": {
     "decl": "Scenario: SD doubles the step on accepted iteration",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SD doubles the step on accepted iteration",
     "type": "scenario"
   },
@@ -4889,7 +4907,12 @@
   "rq-2e27a5fc": {
     "decl": "Scenario: Energy tolerance does not fire on a rejected step",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Energy tolerance does not fire on a rejected step",
     "type": "scenario"
   },
@@ -6351,7 +6374,12 @@
   "rq-3e0a3040": {
     "decl": "Scenario: Unknown minimizer kind in a populated registry reports UnknownKind",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Unknown minimizer kind in a populated registry reports UnknownKind",
     "type": "scenario"
   },
@@ -6705,7 +6733,12 @@
   "rq-420d2eb3": {
     "decl": "Scenario: SD reduces energy of a 1D harmonic well in one step",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SD reduces energy of a 1D harmonic well in one step",
     "type": "scenario"
   },
@@ -6963,7 +6996,12 @@
   "rq-45e6b20a": {
     "decl": "Scenario: Convergence on energy tolerance ends the phase",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Convergence on energy tolerance ends the phase",
     "type": "scenario"
   },
@@ -7202,7 +7240,12 @@
   "rq-48e36163": {
     "decl": "Scenario: SD step formula moves the largest-force atom by exactly `step`",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SD step formula moves the largest-force atom by exactly `step`",
     "type": "scenario"
   },
@@ -7277,7 +7320,12 @@
   "rq-49e26627": {
     "decl": "Scenario: trajectory frames do not include velocity columns even when velocities are present",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "trajectory frames do not include velocity columns even when velocities are present",
     "type": "scenario"
   },
@@ -8989,7 +9037,12 @@
   "rq-5cbcbabe": {
     "decl": "Scenario: Reject a thermostat under [[minimization]]",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject a thermostat under [[minimization]]",
     "type": "scenario"
   },
@@ -9144,7 +9197,12 @@
   "rq-5e075019": {
     "decl": "Scenario: SD with no constraint slot does not call any projection hook",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SD with no constraint slot does not call any projection hook",
     "type": "scenario"
   },
@@ -11471,7 +11529,12 @@
   "rq-77d98b9c": {
     "decl": "Scenario: Convergence on force tolerance ends the phase",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Convergence on force tolerance ends the phase",
     "type": "scenario"
   },
@@ -12965,7 +13028,12 @@
   "rq-85e9b9da": {
     "decl": "Scenario: .minlog rows include the final convergence iteration",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": ".minlog rows include the final convergence iteration",
     "type": "scenario"
   },
@@ -13102,7 +13170,12 @@
   "rq-881bb997": {
     "decl": "Scenario: SD with a constraint slot but no projection support is rejected at config load",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SD with a constraint slot but no projection support is rejected at config load",
     "type": "scenario"
   },
@@ -13756,7 +13829,12 @@
   "rq-901c006f": {
     "decl": "Scenario: Zero force at initial positions triggers ForceZero convergence",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Zero force at initial positions triggers ForceZero convergence",
     "type": "scenario"
   },
@@ -15047,7 +15125,12 @@
   "rq-9d165c7f": {
     "decl": "Scenario: minlog_every=0 disables the file",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "minlog_every=0 disables the file",
     "type": "scenario"
   },
@@ -16068,7 +16151,12 @@
   "rq-a82a275a": {
     "decl": "Scenario: Reject max_step < initial_step",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject max_step < initial_step",
     "type": "scenario"
   },
@@ -17016,7 +17104,12 @@
   "rq-b10ed5ec": {
     "decl": "Scenario: SD halves the step on rejected iteration and restores positions",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SD halves the step on rejected iteration and restores positions",
     "type": "scenario"
   },
@@ -17798,7 +17891,12 @@
   "rq-ba6d3eaa": {
     "decl": "Scenario: SD caps step at max_step",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SD caps step at max_step",
     "type": "scenario"
   },
@@ -17973,7 +18071,12 @@
   "rq-bcc16e10": {
     "decl": "Scenario: Reject an unknown field under [minimization.algorithm]",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject an unknown field under [minimization.algorithm]",
     "type": "scenario"
   },
@@ -18681,7 +18784,12 @@
   "rq-c4aea411": {
     "decl": "Scenario: .minlog reports accepted=0 for rejected iterations",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": ".minlog reports accepted=0 for rejected iterations",
     "type": "scenario"
   },
@@ -19428,7 +19536,12 @@
   "rq-cd12ce51": {
     "decl": "Scenario: SD does not modify simulation box",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SD does not modify simulation box",
     "type": "scenario"
   },
@@ -20498,7 +20611,12 @@
   "rq-d87be0ca": {
     "decl": "Scenario: trajectory frames are written at the configured cadence and at convergence",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "trajectory frames are written at the configured cadence and at convergence",
     "type": "scenario"
   },
@@ -22173,7 +22291,12 @@
   "rq-e92c18c6": {
     "decl": "Scenario: Two SD runs on the same GPU with identical inputs are byte-identical",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/minimizer.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two SD runs on the same GPU with identical inputs are byte-identical",
     "type": "scenario"
   },

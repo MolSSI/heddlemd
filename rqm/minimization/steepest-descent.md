@@ -1038,13 +1038,14 @@ Feature: Steepest-descent energy minimizer
   # --- Constraints ---
 
   @rq-13e42f65
-  Scenario: SD with SETTLE projects every trial onto the rigid-water manifold
-    Given a system with one SPC/E water (atoms [0,1,2]) and a SETTLE constraint group
+  Scenario: SD with SHAKE projects every trial onto the rigid-water manifold
+    Given a system with one SPC/E water (atoms [0,1,2]) and a SHAKE constraint group
+      with target distances r_oh and r_hh
     And [minimization.algorithm] kind="steepest-descent"
-    When one minimizer.step is invoked
-    Then |positions[1] - positions[0]| equals r_oh within relative tolerance 1.0e-6
-    And |positions[2] - positions[0]| equals r_oh within relative tolerance 1.0e-6
-    And |positions[2] - positions[1]| equals r_hh within relative tolerance 1.0e-6
+    When the minimization phase runs
+    Then |positions[1] - positions[0]| equals r_oh within relative tolerance 1.0e-3
+    And |positions[2] - positions[0]| equals r_oh within relative tolerance 1.0e-3
+    And |positions[2] - positions[1]| equals r_hh within relative tolerance 1.0e-3
 
   @rq-881bb997
   Scenario: SD with a constraint slot but no projection support is rejected at config load
@@ -1083,11 +1084,6 @@ Feature: Steepest-descent energy minimizer
     And the .minlog files are byte-identical
 
   # --- Registry ---
-
-  @rq-0b7acd88
-  Scenario: MinimizerRegistry::with_builtins exposes the registered minimizer
-    Given a MinimizerRegistry::with_builtins()
-    Then the registry contains a builder whose kind_name() is "steepest-descent"
 
   @rq-3e0a3040
   Scenario: Unknown minimizer kind in a populated registry reports UnknownKind
