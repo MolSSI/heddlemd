@@ -54,6 +54,7 @@ pub enum IntegratorError {
     UnexpectedSubStep { variant: &'static str },
 }
 
+// rq-52e52d7b
 /// Unified error returned by [`run_step`]: the plan walker can surface
 /// failures from the integrator's `execute()`, from the runner-dispatched
 /// `force_field.step(...)`, or from any constraint hook.
@@ -99,6 +100,7 @@ pub enum BarostatError {
 
 // --- Integrator trait, builder, registry ------------------------------
 
+// rq-dbbffa7d
 /// One piece of an integrator's per-timestep work, described in the
 /// `StepPlan` returned by [`Integrator::plan`].
 #[derive(Debug, Clone, Copy)]
@@ -172,6 +174,7 @@ impl SubStep {
     }
 }
 
+// rq-9fbba3be
 /// Ordered list of sub-steps that constitute one full timestep.
 #[derive(Debug, Clone)]
 pub struct StepPlan {
@@ -336,7 +339,7 @@ pub fn run_step_no_constraint(
     )
 }
 
-// rq-0e26dde0
+// rq-0e26dde0 rq-1ac78590
 /// Extension trait offering a single-call `step()` convenience method
 /// on top of the core `Integrator` trait's `plan()` + `execute()`
 /// methods. The trait itself defines only the plan/execute pair (see
@@ -389,7 +392,7 @@ impl<T: Integrator> IntegratorStepExt for T {
     }
 }
 
-// rq-0e26dde0
+// rq-0e26dde0 rq-ab8c77bc
 /// Marker (with a runtime-state predicate) for integrator types whose
 /// `StepPlan` shape is compatible with the constraint slot's hook
 /// positions. Implemented by integrators whose plans place a single
@@ -409,7 +412,7 @@ pub trait ConstraintCapableIntegrator: Integrator {
     }
 }
 
-// rq-0e26dde0
+// rq-0e26dde0 rq-f71ff87f
 /// Extension trait offering a single-call `step_with_constraint()`
 /// convenience method on top of [`IntegratorStepExt::step`]. Bounded
 /// on `Self: ConstraintCapableIntegrator`, so only the integrator
@@ -569,7 +572,7 @@ impl IntegratorRegistry {
         None
     }
 
-    // rq-24f6b8b9
+    // rq-24f6b8b9 rq-1e30bbf4
     pub fn build(
         &self,
         slot: &SlotConfig,
@@ -669,6 +672,7 @@ impl ThermostatRegistry {
         self.builders.push(builder);
     }
 
+    // rq-c44b25af
     pub fn lookup(&self, kind: &str) -> Option<&dyn ThermostatBuilder> {
         for b in &self.builders {
             if b.kind_name() == kind {
@@ -768,6 +772,7 @@ impl BarostatRegistry {
         self.builders.push(builder);
     }
 
+    // rq-acbb6d0e
     pub fn lookup(&self, kind: &str) -> Option<&dyn BarostatBuilder> {
         for b in &self.builders {
             if b.kind_name() == kind {

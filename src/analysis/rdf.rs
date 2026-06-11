@@ -21,6 +21,7 @@ struct RdfParams {
     n_bins: u64,
 }
 
+// rq-2dc76b67
 #[derive(Debug)]
 pub struct RdfBuilder;
 
@@ -165,6 +166,7 @@ impl AnalysisBuilder for RdfBuilder {
     }
 }
 
+// rq-e0b5377f
 pub struct RdfAnalysis {
     t_a: u32,
     t_b: u32,

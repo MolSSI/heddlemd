@@ -57,7 +57,7 @@ fn require_finite_positive(field: &str, value: f64) -> Result<(), ConfigError> {
 // the floor only triggers under pathological combinations.
 const MU_MIN: f64 = 1.0e-6;
 
-// rq-11f5dfd1
+// rq-11f5dfd1 rq-e38993a3
 #[derive(Debug)]
 pub struct CRescaleBarostat {
     pub pressure: f64,
@@ -103,7 +103,7 @@ impl CRescaleBarostat {
 }
 
 impl Barostat for CRescaleBarostat {
-    // rq-1179e42f
+    // rq-1179e42f rq-2b405d23
     fn apply(
         &mut self,
         buffers: &mut ParticleBuffers,
@@ -166,7 +166,7 @@ impl Barostat for CRescaleBarostat {
         Ok(())
     }
 
-    // rq-11f5dfd1
+    // rq-11f5dfd1 rq-b8e6dfb3
     fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
         use crate::units::Dimension;
         &[
@@ -178,7 +178,7 @@ impl Barostat for CRescaleBarostat {
         ]
     }
 
-    // rq-11f5dfd1
+    // rq-11f5dfd1 rq-9a88810a
     fn log_column_values(
         &self,
         kinetic_energy: f64,
@@ -196,6 +196,7 @@ impl Barostat for CRescaleBarostat {
     }
 }
 
+// rq-d521381a
 #[derive(Debug)]
 pub struct CRescaleBarostatBuilder;
 

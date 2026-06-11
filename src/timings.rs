@@ -78,7 +78,7 @@ impl KernelStage {
         KernelStage::new("mtk_npt_velocity_half_kick");
     pub const MTK_NPT_POSITION_DRIFT: KernelStage =
         KernelStage::new("mtk_npt_position_drift");
-    // rq-de7601cd
+    // rq-157e59ad
     pub const SHAKE_SNAPSHOT: KernelStage = KernelStage::new("shake_snapshot");
     pub const SHAKE_POSITIONS: KernelStage = KernelStage::new("shake_positions");
     pub const RATTLE_VELOCITIES: KernelStage = KernelStage::new("rattle_velocities");

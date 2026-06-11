@@ -50,7 +50,7 @@ fn require_finite_positive(field: &str, value: f64) -> Result<(), ConfigError> {
     Ok(())
 }
 
-// rq-0d8c8688
+// rq-0d8c8688 rq-5c758681
 #[derive(Debug)]
 pub struct BerendsenBarostat {
     pub pressure: f64,
@@ -90,7 +90,7 @@ impl BerendsenBarostat {
 const MU_MIN: f64 = 1.0e-6;
 
 impl Barostat for BerendsenBarostat {
-    // rq-1179e42f
+    // rq-1179e42f rq-29dda250
     fn apply(
         &mut self,
         buffers: &mut ParticleBuffers,
@@ -141,7 +141,7 @@ impl Barostat for BerendsenBarostat {
         Ok(())
     }
 
-    // rq-62b44dc9
+    // rq-62b44dc9 rq-b6728f3c
     fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
         use crate::units::Dimension;
         &[
@@ -150,7 +150,7 @@ impl Barostat for BerendsenBarostat {
         ]
     }
 
-    // rq-62b44dc9
+    // rq-62b44dc9 rq-82baba1a
     fn log_column_values(
         &self,
         _kinetic_energy: f64,
@@ -160,6 +160,7 @@ impl Barostat for BerendsenBarostat {
     }
 }
 
+// rq-4ef89c50
 #[derive(Debug)]
 pub struct BerendsenBarostatBuilder;
 

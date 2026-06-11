@@ -18,6 +18,7 @@ use atomic_constants::{
     PRESSURE_AU_TO_PA, TEMPERATURE_AU_TO_K, TIME_AU_TO_S, VELOCITY_AU_TO_M_PER_S,
 };
 
+// rq-34446ef5
 /// The unit system the user's I/O files are written in. `Atomic` is the
 /// engine's native form and a no-op for every conversion; `Si` is the
 /// default selector and triggers the SI ↔ atomic conversion at every
@@ -30,6 +31,7 @@ pub enum UnitSystem {
 }
 
 impl UnitSystem {
+    // rq-1c857adf
     pub fn from_str(s: &str) -> Option<Self> {
         match s {
             "si" => Some(UnitSystem::Si),
@@ -38,6 +40,7 @@ impl UnitSystem {
         }
     }
 
+    // rq-7513f933
     pub fn as_str(self) -> &'static str {
         match self {
             UnitSystem::Si => "si",
@@ -46,6 +49,7 @@ impl UnitSystem {
     }
 }
 
+// rq-0d49f455
 /// The physical dimensions the I/O conversion knows how to rescale.
 /// Every unit-bearing scalar the loader handles or a writer emits maps
 /// to exactly one of these.
@@ -70,6 +74,7 @@ pub enum Dimension {
 }
 
 impl UnitSystem {
+    // rq-fb7c4429
     /// The user-system value of one atomic unit of `dim`. Returns
     /// `1.0` for [`UnitSystem::Atomic`] (the user's view coincides
     /// with the engine), and the SI-per-atomic-unit factor for
@@ -116,6 +121,7 @@ impl UnitSystem {
     }
 }
 
+// rq-ecb8aa60
 /// Look up the unit-bearing fields of a slot kind. Returns `None` for
 /// kinds this module doesn't know about — the slot will pass through
 /// unchanged, and the builder registry will reject it later if the
@@ -197,6 +203,7 @@ pub fn slot_kind_field_dims(kind: &str) -> Option<&'static [(&'static str, Dimen
     }
 }
 
+// rq-8f5ebdc1
 /// Rescale every unit-bearing field of a slot's `params` table in-place,
 /// converting the user-supplied values into engine-side atomic units.
 /// No-op when `system` is `Atomic` (identity) or when the kind is

@@ -111,6 +111,7 @@ impl SimulationBox {
     // over `set_lattice(factor*lx, ...)`; provided so callers cannot
     // accidentally apply different scale factors to the orthogonal and
     // shear components.
+    // rq-9e2e9d4e
     pub fn rescale_isotropic(&mut self, factor: f32) -> Result<(), SimulationBoxError> {
         self.set_lattice(
             self.lx * factor,

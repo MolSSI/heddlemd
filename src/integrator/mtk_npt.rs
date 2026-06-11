@@ -86,7 +86,7 @@ fn sinh_over_x(alpha: f64) -> f64 {
     }
 }
 
-// rq-3b6d5001
+// rq-3b6d5001 rq-508680c7
 #[derive(Debug)]
 pub struct MtkNptIntegrator {
     pub temperature: f64,
@@ -270,7 +270,7 @@ impl MtkNptIntegrator {
 }
 
 impl Integrator for MtkNptIntegrator {
-    // rq-aa68f468
+    // rq-aa68f468 rq-8cda2c89
     fn plan(&self, dt: f32) -> StepPlan {
         // The MTK symmetric Trotter splitting. Most sub-steps are
         // integrator-private (`Custom`) because they involve host-side
@@ -441,7 +441,7 @@ impl Integrator for MtkNptIntegrator {
         }
     }
 
-    // rq-3b6d5001
+    // rq-3b6d5001 rq-14a7685e
     fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
         use crate::units::Dimension;
         &[
@@ -451,12 +451,14 @@ impl Integrator for MtkNptIntegrator {
         ]
     }
 
+    // rq-f9ebe53f
     fn log_column_values(&self, kinetic_energy: f64, potential_energy: f64) -> Vec<f64> {
         let h = self.conserved_hamiltonian(kinetic_energy, potential_energy);
         vec![self.most_recent_pressure, self.most_recent_volume, h]
     }
 }
 
+// rq-0b7f7023
 #[derive(Debug)]
 pub struct MtkNptBuilder;
 

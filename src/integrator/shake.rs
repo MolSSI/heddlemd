@@ -23,7 +23,7 @@ use super::constraint::{Constraint, ConstraintBuilder, ConstraintError};
 pub const MAX_GROUP_ATOMS: u32 = 8;
 pub const MAX_GROUP_CONSTRAINTS: u32 = 12;
 
-// rq-f17b858f
+// rq-f17b858f rq-811ba2a0
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShakeConstraintSpec {
@@ -32,6 +32,7 @@ pub struct ShakeConstraintSpec {
     pub d: f64,
 }
 
+// rq-55f60603
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ShakeParams {
@@ -116,7 +117,7 @@ fn validate_shake_params(name: &str, p: &ShakeParams) -> Result<(), ConfigError>
     Ok(())
 }
 
-// rq-f17b858f
+// rq-f17b858f rq-0b4600e2
 #[derive(Debug, thiserror::Error)]
 pub enum ShakeError {
     #[error("{0}")]
@@ -185,6 +186,7 @@ impl From<ShakeError> for ConstraintError {
     }
 }
 
+// rq-d9a47c62
 #[derive(Debug)]
 pub struct ShakeConstraintsState {
     pub device: Arc<CudaDevice>,
@@ -388,6 +390,7 @@ fn pad_min1_f32(v: &[f32]) -> Vec<f32> {
 }
 
 impl Constraint for ShakeConstraintsState {
+    // rq-e538c545
     fn apply_before_drift(
         &mut self,
         buffers: &mut ParticleBuffers,

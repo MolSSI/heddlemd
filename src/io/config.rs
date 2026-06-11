@@ -123,6 +123,7 @@ pub struct SimulationConfig {
 // rq-18441e33 — parsed `[[phase]]` entry. The runner walks
 // `Config::phases` in declaration order; particle state carries
 // across phase boundaries while slot state is rebuilt at each one.
+// rq-f1c04d3b
 #[derive(Debug, Clone)]
 pub struct PhaseConfig {
     pub name: String,
@@ -157,7 +158,7 @@ pub struct MinimizationOutputConfig {
     pub timings_path: PathBuf,
 }
 
-// rq-19226daf
+// rq-19226daf rq-4a0c5f2e
 /// Discriminated union over the unified phase sequence. The runner
 /// walks `Config::phases: Vec<PhaseKind>` in source-document order
 /// (see `Phase kinds` in `rqm/io/config-schema.md`).
@@ -406,7 +407,7 @@ impl AngleTypeConfig {
     }
 }
 
-// rq-060b1fab
+// rq-060b1fab rq-a8320030
 #[derive(Debug, Clone, PartialEq)]
 pub enum NeighborListConfig {
     AllPairs,
@@ -414,6 +415,7 @@ pub enum NeighborListConfig {
 }
 
 // CoulombConfig — parsed `[coulomb]` table; rq-846bdb8b
+// rq-793a7cbb
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoulombConfig {
     pub cutoff: f64,
@@ -421,6 +423,7 @@ pub struct CoulombConfig {
 }
 
 // SpmeConfig — parsed `[spme]` table; rq-7bd2d9ca rq-202493a5
+// rq-61889ff1 rq-a03de3d5
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SpmeConfig {

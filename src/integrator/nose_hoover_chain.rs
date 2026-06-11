@@ -270,7 +270,7 @@ impl NoseHooverChainThermostat {
 }
 
 impl Thermostat for NoseHooverChainThermostat {
-    // rq-2fe47a86
+    // rq-2fe47a86 rq-a9c46f51
     fn apply_pre(
         &mut self,
         buffers: &mut ParticleBuffers,
@@ -287,7 +287,7 @@ impl Thermostat for NoseHooverChainThermostat {
         Ok(())
     }
 
-    // rq-7a124d43
+    // rq-7a124d43 rq-370bf3a8
     fn apply_post(
         &mut self,
         buffers: &mut ParticleBuffers,

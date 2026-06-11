@@ -582,7 +582,12 @@
   "rq-07d003c4": {
     "decl": "- `AngleList` — host-side. Fields: `angles: Vec<Angle>`,",
     "file": "forces/topology",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "AngleList",
     "type": "api-item"
   },
@@ -737,7 +742,12 @@
   "rq-09e04194": {
     "decl": "- `rescale_velocities(buffers: &mut ParticleBuffers, factor: f32) -> Result<(), GpuError>`",
     "file": "integration/nose-hoover-chain",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "rescale_velocities",
     "type": "api-item"
   },
@@ -785,7 +795,12 @@
   "rq-0a8831b1": {
     "decl": "- `Bond` — `Debug, Clone, Copy`. Fields: `atom_i: u32`, `atom_j: u32`,",
     "file": "forces/topology",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Bond",
     "type": "api-item"
   },
@@ -821,7 +836,12 @@
   "rq-0b4600e2": {
     "decl": "- `ShakeError` — error type returned by `ShakeConstraintsState::new`.",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ShakeError",
     "type": "api-item"
   },
@@ -856,7 +876,12 @@
   "rq-0b7f7023": {
     "decl": "- `MtkNptBuilder` — implements `IntegratorBuilder` with",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mtk_npt.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MtkNptBuilder",
     "type": "api-item"
   },
@@ -901,7 +926,12 @@
   "rq-0c717392": {
     "decl": "- `Exclusion` — `Debug, Clone, Copy`. Fields: `atom_i: u32`,",
     "file": "forces/topology",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Exclusion",
     "type": "api-item"
   },
@@ -958,7 +988,12 @@
   "rq-0d49f455": {
     "decl": "- `Dimension` — discriminated enum naming the physical dimensions the",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/units/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Dimension",
     "type": "api-item"
   },
@@ -1122,7 +1157,12 @@
   "rq-0f50dade": {
     "decl": "- `compute_total_virial(buffers: &ParticleBuffers, scratch: &mut CudaSlice<f32>) -> Result<f32, GpuError>`",
     "file": "integration/berendsen-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "compute_total_virial",
     "type": "api-item"
   },
@@ -1159,7 +1199,12 @@
   "rq-0faddd62": {
     "decl": "- `ConstraintGroup` — `Debug, Clone, Copy`. Fields: `atom_offset: u32`,",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ConstraintGroup",
     "type": "api-item"
   },
@@ -1266,7 +1311,12 @@
   "rq-10adebc4": {
     "decl": "- `reduce_bond_forces(state: &mut MorseBondedState, output_force_x: &mut CudaViewMut<'_, f32>, output_force_y: &mut CudaViewMut<'_, f32>, output_force_z: &mut CudaViewMut<'_, f32>, output_energy: &mut CudaViewMut<'_, f32>, output_virial: &mut CudaViewMut<'_, f32>) -> Result<(), GpuError>`",
     "file": "forces/morse-bonded",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "reduce_bond_forces",
     "type": "api-item"
   },
@@ -1288,7 +1338,12 @@
   "rq-10f6f831": {
     "decl": "- `compute_cell_indices_and_histogram(particle_buffers, sim_box, n_cells, cell_indices, cell_counts) -> Result<(), GpuError>`",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "compute_cell_indices_and_histogram",
     "type": "api-item"
   },
@@ -1470,7 +1525,12 @@
   "rq-127df3d6": {
     "decl": "- `spme_influence_multiply`: one thread per complex grid cell, block",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "spme_influence_multiply",
     "type": "api-item"
   },
@@ -1632,7 +1692,12 @@
   "rq-14a7685e": {
     "decl": "- `log_column_names() -> &'static [\"pressure\", \"box_volume\",",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mtk_npt.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_column_names",
     "type": "api-item"
   },
@@ -1689,7 +1754,12 @@
     "decl": "## Per-Step Kernel Sequence",
     "file": "integration/shake",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Per-Step Kernel Sequence",
     "type": "section"
   },
@@ -1745,7 +1815,12 @@
   "rq-165c4422": {
     "decl": "- `sort_cells_by_particle_id(cell_offsets, sorted_particle_ids, n_cells_total) -> Result<(), GpuError>`",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "sort_cells_by_particle_id",
     "type": "api-item"
   },
@@ -1775,7 +1850,12 @@
   "rq-16f6c7dc": {
     "decl": "- `spme_charge_spread`: one thread per real grid cell, block size 256,",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "spme_charge_spread",
     "type": "api-item"
   },
@@ -1956,7 +2036,12 @@
   "rq-19916fb0": {
     "decl": "- `rescale_positions(buffers: &mut ParticleBuffers, factor: f32) -> Result<(), GpuError>`",
     "file": "integration/berendsen-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "rescale_positions",
     "type": "api-item"
   },
@@ -2072,14 +2157,24 @@
   "rq-1ac78590": {
     "decl": "- `IntegratorStepExt` — blanket convenience trait implemented for",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "IntegratorStepExt",
     "type": "api-item"
   },
   "rq-1ad7e751": {
     "decl": "- `CuFftError` — wrapper around cuFFT failure codes from the underlying",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/cufft.rs",
+        "kind": "code"
+      }
+    ],
     "title": "CuFftError",
     "type": "api-item"
   },
@@ -2283,7 +2378,12 @@
   "rq-1c857adf": {
     "decl": "- `UnitSystem::from_str(s: &str) -> Option<Self>`",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/units/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "UnitSystem",
     "type": "api-item"
   },
@@ -2370,7 +2470,12 @@
   "rq-1e30bbf4": {
     "decl": "- `IntegratorRegistry::build(&self, slot: &SlotConfig, gpu: &GpuContext, particle_count: usize, n_constraints: usize) -> Result<Box<dyn Integrator>, IntegratorError>`",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "IntegratorRegistry",
     "type": "api-item"
   },
@@ -2799,7 +2904,12 @@
   "rq-22171569": {
     "decl": "- `SpmeRealSpaceState` — implements `Potential` with",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SpmeRealSpaceState",
     "type": "api-item"
   },
@@ -3376,7 +3486,12 @@
   "rq-29dda250": {
     "decl": "- `apply(buffers, sim_box, dt, timings)` — runs the per-step",
     "file": "integration/berendsen-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/berendsen_barostat.rs",
+        "kind": "code"
+      }
+    ],
     "title": "apply",
     "type": "api-item"
   },
@@ -3528,7 +3643,12 @@
   "rq-2b405d23": {
     "decl": "- `apply(buffers, sim_box, dt, timings)` — runs the per-step",
     "file": "integration/c-rescale-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/c_rescale_barostat.rs",
+        "kind": "code"
+      }
+    ],
     "title": "apply",
     "type": "api-item"
   },
@@ -3732,7 +3852,12 @@
   "rq-2dc76b67": {
     "decl": "- `RdfBuilder` — implements `AnalysisBuilder` (see",
     "file": "analysis/rdf",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/rdf.rs",
+        "kind": "code"
+      }
+    ],
     "title": "RdfBuilder",
     "type": "api-item"
   },
@@ -4029,7 +4154,12 @@
   "rq-32308250": {
     "decl": "- `Registries` — host-side bundle of the four open registries the",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/registries.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Registries",
     "type": "api-item"
   },
@@ -4135,7 +4265,12 @@
   "rq-34446ef5": {
     "decl": "- `UnitSystem` — discriminated enum naming the two supported systems.",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/units/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "UnitSystem",
     "type": "api-item"
   },
@@ -4190,7 +4325,12 @@
   "rq-34bfe79a": {
     "decl": "- `reduce_angle_forces(state: &mut HarmonicAngleState, output_force_x: &mut CudaViewMut<'_, f32>, output_force_y: &mut CudaViewMut<'_, f32>, output_force_z: &mut CudaViewMut<'_, f32>, output_energy: &mut CudaViewMut<'_, f32>, output_virial: &mut CudaViewMut<'_, f32>) -> Result<(), GpuError>`",
     "file": "forces/harmonic-angle",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "reduce_angle_forces",
     "type": "api-item"
   },
@@ -4284,7 +4424,12 @@
   "rq-35b76155": {
     "decl": "- `spme_force_gather`: one thread per particle, block size 256, grid",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "spme_force_gather",
     "type": "api-item"
   },
@@ -4336,7 +4481,12 @@
   "rq-370bf3a8": {
     "decl": "- `apply_post(buffers, dt, timings)` — runs the right",
     "file": "integration/nose-hoover-chain",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/nose_hoover_chain.rs",
+        "kind": "code"
+      }
+    ],
     "title": "apply_post",
     "type": "api-item"
   },
@@ -4428,7 +4578,12 @@
   "rq-3825d7c4": {
     "decl": "- `AnalysisRuntimeError` — per-analysis error type returned by the",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "AnalysisRuntimeError",
     "type": "api-item"
   },
@@ -4463,7 +4618,12 @@
   "rq-38676211": {
     "decl": "- `coulomb_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &CoulombParameters, atom_excl_offsets: &CudaSlice<u32>, atom_excl_partners: &CudaSlice<u32>, atom_excl_coul_scales: &CudaSlice<f32>, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>`",
     "file": "forces/coulomb-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "coulomb_pair_force",
     "type": "api-item"
   },
@@ -4522,7 +4682,12 @@
   "rq-393a57e4": {
     "decl": "- `run_minimization_phase(phase: &MinimizationConfig, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, force_field: &mut ForceField, constraint: Option<&mut dyn Constraint>, registries: &Registries, gpu: &GpuContext) -> Result<MinimizationPhaseSummary, RunnerError>`",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "run_minimization_phase",
     "type": "api-item"
   },
@@ -4803,7 +4968,12 @@
   "rq-3cca2cb1": {
     "decl": "- `ConstraintRegistry` — host-side registry of constraint builders.",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/constraint.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ConstraintRegistry",
     "type": "api-item"
   },
@@ -5236,7 +5406,12 @@
   "rq-44cce069": {
     "decl": "- `spme_real_pair_force` and `spme_force_gather` run on the device's",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "spme_real_pair_force",
     "type": "api-item"
   },
@@ -5272,7 +5447,12 @@
   "rq-454ad2cf": {
     "decl": "- `HarmonicAngleState` — implements `Potential` with `label() == \"harmonic_angle\"` and `frequency_class() == ForceClass::Fast` (the trait default).",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/angle.rs",
+        "kind": "code"
+      }
+    ],
     "title": "HarmonicAngleState",
     "type": "api-item"
   },
@@ -5586,7 +5766,12 @@
   "rq-4a0c5f2e": {
     "decl": "- `PhaseKind` — runtime-level discriminated union over the unified",
     "file": "minimization/steepest-descent",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PhaseKind",
     "type": "api-item"
   },
@@ -5770,7 +5955,12 @@
   "rq-4c21c386": {
     "decl": "- `execute(sub, buffers, sim_box, timings)` — dispatches each",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/cufft.rs",
+        "kind": "code"
+      }
+    ],
     "title": "execute",
     "type": "api-item"
   },
@@ -5904,14 +6094,24 @@
   "rq-4ea8bbb2": {
     "decl": "- `vv_kick_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, dt: f32) -> Result<(), GpuError>`",
     "file": "integration/velocity-verlet",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "vv_kick_lossless",
     "type": "api-item"
   },
   "rq-4ef89c50": {
     "decl": "- `BerendsenBarostatBuilder` — implements `BarostatBuilder` with",
     "file": "integration/berendsen-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/berendsen_barostat.rs",
+        "kind": "code"
+      }
+    ],
     "title": "BerendsenBarostatBuilder",
     "type": "api-item"
   },
@@ -6022,7 +6222,12 @@
   "rq-508680c7": {
     "decl": "- `MtkNptIntegrator` — implements the `Integrator` trait declared",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mtk_npt.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MtkNptIntegrator",
     "type": "api-item"
   },
@@ -6063,7 +6268,12 @@
   "rq-511f4606": {
     "decl": "- `compute_kinetic_energy(buffers: &ParticleBuffers, scratch: &mut CudaSlice<f32>) -> Result<f32, GpuError>`",
     "file": "integration/nose-hoover-chain",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "compute_kinetic_energy",
     "type": "api-item"
   },
@@ -6148,7 +6358,12 @@
   "rq-52e52d7b": {
     "decl": "- `StepError` — unified error type returned by `run_step` and both",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "StepError",
     "type": "api-item"
   },
@@ -6224,7 +6439,12 @@
     "decl": "### CUDA Kernels",
     "file": "integration/shake",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "CUDA Kernels",
     "type": "section"
   },
@@ -6331,7 +6551,12 @@
   "rq-559783fe": {
     "decl": "- `ForceFieldContext<'a>` — bundle of shared services that the framework <!-- inline -->",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ForceFieldContext",
     "type": "api-item"
   },
@@ -6345,7 +6570,12 @@
   "rq-55f60603": {
     "decl": "- `ShakeParams` — typed deserialiser for the `[[constraint_types]]`",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ShakeParams",
     "type": "api-item"
   },
@@ -6810,7 +7040,12 @@
   "rq-5c758681": {
     "decl": "- `BerendsenBarostat` — implements the `Barostat` trait declared in",
     "file": "integration/berendsen-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/berendsen_barostat.rs",
+        "kind": "code"
+      }
+    ],
     "title": "BerendsenBarostat",
     "type": "api-item"
   },
@@ -7196,7 +7431,12 @@
   "rq-61889ff1": {
     "decl": "- `SpmeConfig` — parsed `[spme]` table. Fields:",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SpmeConfig",
     "type": "api-item"
   },
@@ -7504,7 +7744,12 @@
   "rq-66d80d54": {
     "decl": "- `morse_bond_force(state: &mut MorseBondedState, particle_buffers: &ParticleBuffers, sim_box: &SimulationBox) -> Result<(), GpuError>`",
     "file": "forces/morse-bonded",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "morse_bond_force",
     "type": "api-item"
   },
@@ -7810,7 +8055,12 @@
   "rq-6bdfdd6d": {
     "decl": "- `CoulombParameters` — host-side parameter container. Fields:",
     "file": "forces/coulomb-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/coulomb.rs",
+        "kind": "code"
+      }
+    ],
     "title": "CoulombParameters",
     "type": "api-item"
   },
@@ -8060,7 +8310,12 @@
   "rq-6eb18608": {
     "decl": "- `lint_analyses_with_registries(config_path: &Path, registries: &Registries) -> LintReport`",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "lint_analyses_with_registries",
     "type": "api-item"
   },
@@ -8526,7 +8781,12 @@
   "rq-7513f933": {
     "decl": "- `UnitSystem::as_str(self) -> &'static str`",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/units/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "UnitSystem",
     "type": "api-item"
   },
@@ -8841,7 +9101,12 @@
   "rq-7896e33a": {
     "decl": "- `ConstraintBuilder` — trait describing a registered constraint",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/constraint.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ConstraintBuilder",
     "type": "api-item"
   },
@@ -8971,7 +9236,12 @@
   "rq-793a7cbb": {
     "decl": "- `CoulombConfig`",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "CoulombConfig",
     "type": "api-item"
   },
@@ -9266,7 +9536,12 @@
   "rq-7d5e87ee": {
     "decl": "- `vv_kick_drift_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers, sim_box: &SimulationBox, dt: f32) -> Result<(), GpuError>`",
     "file": "integration/velocity-verlet",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "vv_kick_drift_lossless",
     "type": "api-item"
   },
@@ -9513,7 +9788,12 @@
   "rq-811ba2a0": {
     "decl": "- `ShakeConstraintSpec` — one row of the `constraints` array. Fields:",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ShakeConstraintSpec",
     "type": "api-item"
   },
@@ -9542,7 +9822,12 @@
   "rq-81ac7d6a": {
     "decl": "- `AggregateLevel` — two-variant enum that selects whether the <!-- inline -->",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "AggregateLevel",
     "type": "api-item"
   },
@@ -9626,7 +9911,12 @@
   "rq-82baba1a": {
     "decl": "- `log_column_values(_ke, _pe) -> vec![most_recent_pressure,",
     "file": "integration/berendsen-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/berendsen_barostat.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_column_values",
     "type": "api-item"
   },
@@ -9681,7 +9971,12 @@
   "rq-8326d2d1": {
     "decl": "- `spme_influence_multiply(spme_state) -> Result<(), GpuError>`",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "spme_influence_multiply",
     "type": "api-item"
   },
@@ -9730,14 +10025,24 @@
   "rq-83e752cd": {
     "decl": "- `Integrator::execute(&mut self, substep: &SubStep, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, timings: &mut Timings) -> Result<(), IntegratorError>`",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/velocity_verlet.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Integrator",
     "type": "api-item"
   },
   "rq-8464775b": {
     "decl": "- `Analysis` — per-run handle returned by an `AnalysisBuilder`.",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Analysis",
     "type": "api-item"
   },
@@ -9867,7 +10172,12 @@
   "rq-86f01d20": {
     "decl": "- `AnalysisBuilder` — open-shaped builder trait. Mirrors",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "AnalysisBuilder",
     "type": "api-item"
   },
@@ -9988,7 +10298,12 @@
   "rq-8914e9ff": {
     "decl": "- `AnalyzeSummary` — public struct returned by `run_analyses` on",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "AnalyzeSummary",
     "type": "api-item"
   },
@@ -10155,7 +10470,12 @@
   "rq-8c1de56e": {
     "decl": "- `run_analyses(config_path: &Path) -> Result<AnalyzeSummary, AnalyzeError>`",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "run_analyses",
     "type": "api-item"
   },
@@ -10184,7 +10504,12 @@
   "rq-8cda2c89": {
     "decl": "- `plan(dt)` — returns the fourteen-element `StepPlan` defined in",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mtk_npt.rs",
+        "kind": "code"
+      }
+    ],
     "title": "plan",
     "type": "api-item"
   },
@@ -10349,7 +10674,12 @@
   "rq-8f5ebdc1": {
     "decl": "- `convert_slot_params(system: UnitSystem, kind: &str, params: &mut toml::Value)`",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/units/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "convert_slot_params",
     "type": "api-item"
   },
@@ -10646,7 +10976,12 @@
   "rq-9331ede2": {
     "decl": "- `IntegratorBuilder::supports_constraints(&self, params: &toml::Value) -> bool`",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/velocity_verlet.rs",
+        "kind": "code"
+      }
+    ],
     "title": "IntegratorBuilder",
     "type": "api-item"
   },
@@ -11091,7 +11426,12 @@
   "rq-9a88810a": {
     "decl": "- `log_column_values(ke, pe) -> vec![most_recent_pressure,",
     "file": "integration/c-rescale-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/c_rescale_barostat.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_column_values",
     "type": "api-item"
   },
@@ -11327,7 +11667,12 @@
   "rq-9d0cb192": {
     "decl": "- `scatter_atoms_into_cells(cell_indices, cell_offsets, write_cursors, sorted_particle_ids, particle_count) -> Result<(), GpuError>` —",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "scatter_atoms_into_cells",
     "type": "api-item"
   },
@@ -11434,14 +11779,24 @@
   "rq-9e1eee68": {
     "decl": "# Feature: Topology File, Bond List, Angle List, Exclusion List, and Constraint List",
     "file": "forces/topology",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: Topology File, Bond List, Angle List, Exclusion List, and Constraint List",
     "type": "file"
   },
   "rq-9e2e9d4e": {
     "decl": "- `SimulationBox::rescale_isotropic(&mut self, factor: f32) ->",
     "file": "integration/berendsen-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/pbc.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SimulationBox",
     "type": "api-item"
   },
@@ -11568,14 +11923,24 @@
   "rq-9fa942b1": {
     "decl": "- `load_analysis_config(path: &Path) -> Result<AnalysisConfig, AnalyzeError>`",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "load_analysis_config",
     "type": "api-item"
   },
   "rq-9fbba3be": {
     "decl": "- `StepPlan` — ordered list of `SubStep`s describing one full",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "StepPlan",
     "type": "api-item"
   },
@@ -11612,7 +11977,12 @@
   "rq-a03de3d5": {
     "decl": "- `SpmeConfig`",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SpmeConfig",
     "type": "api-item"
   },
@@ -12068,7 +12438,12 @@
   "rq-a7211dfd": {
     "decl": "- `Registries` (the bundle defined in `rqm/simulation-runner.md`)",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/registries.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Registries",
     "type": "api-item"
   },
@@ -12122,7 +12497,12 @@
   "rq-a8320030": {
     "decl": "- `NeighborListConfig` — tagged enum selecting the algorithm used by",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "NeighborListConfig",
     "type": "api-item"
   },
@@ -12250,7 +12630,12 @@
   "rq-a9c46f51": {
     "decl": "- `apply_pre(buffers, dt, timings)` — runs the left",
     "file": "integration/nose-hoover-chain",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/nose_hoover_chain.rs",
+        "kind": "code"
+      }
+    ],
     "title": "apply_pre",
     "type": "api-item"
   },
@@ -12321,7 +12706,12 @@
   "rq-aa91623d": {
     "decl": "- `AnalysisConfig` — parsed `<root>.in.analysis`. All fields are",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "AnalysisConfig",
     "type": "api-item"
   },
@@ -12370,7 +12760,12 @@
   "rq-ab8c77bc": {
     "decl": "- `ConstraintCapableIntegrator` — supertrait of `Integrator`. Marks",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ConstraintCapableIntegrator",
     "type": "api-item"
   },
@@ -12459,7 +12854,12 @@
   "rq-acbb6d0e": {
     "decl": "- `BarostatRegistry::lookup(&self, kind: &str) -> Option<&dyn BarostatBuilder>`",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "BarostatRegistry",
     "type": "api-item"
   },
@@ -12724,14 +13124,24 @@
   "rq-b00170c6": {
     "decl": "- `PhaseSummary` — per-phase outcome record carried in",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PhaseSummary",
     "type": "api-item"
   },
   "rq-b004196f": {
     "decl": "- `ConstraintRegistry::build_optional(&self, list: &ConstraintList, gpu: &GpuContext, particle_count: usize, masses: &[f32], constraint_types: &[NamedSlotConfig]) -> Result<Option<Box<dyn Constraint>>, ConstraintError>`",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/constraint.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ConstraintRegistry",
     "type": "api-item"
   },
@@ -12809,7 +13219,12 @@
   "rq-b1148667": {
     "decl": "- `SpmeReciprocalState` — implements `Potential` with",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SpmeReciprocalState",
     "type": "api-item"
   },
@@ -13115,7 +13530,12 @@
   "rq-b6728f3c": {
     "decl": "- `log_column_names() -> &'static [\"pressure\", \"box_volume\"]`.",
     "file": "integration/berendsen-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/berendsen_barostat.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_column_names",
     "type": "api-item"
   },
@@ -13295,7 +13715,12 @@
   "rq-b8e6dfb3": {
     "decl": "- `log_column_names() -> &'static [\"pressure\", \"box_volume\",",
     "file": "integration/c-rescale-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/c_rescale_barostat.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_column_names",
     "type": "api-item"
   },
@@ -13477,7 +13902,12 @@
   "rq-bcb0f58a": {
     "decl": "- `LangevinBaoabState` — Langevin-BAOAB integrator state, registered",
     "file": "integration/langevin-baoab",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/langevin_baoab.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LangevinBaoabState",
     "type": "api-item"
   },
@@ -13498,7 +13928,12 @@
   "rq-bcf7e0eb": {
     "decl": "- `lint_analyses(config_path: &Path) -> LintReport`",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "lint_analyses",
     "type": "api-item"
   },
@@ -13562,7 +13997,12 @@
   "rq-be1eb548": {
     "decl": "- `ForceField::step_class(&mut self, class: ForceClass, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings, level: AggregateLevel) -> Result<(), ForceFieldError>`",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ForceField",
     "type": "api-item"
   },
@@ -13968,7 +14408,12 @@
   "rq-c44b25af": {
     "decl": "- `ThermostatRegistry::lookup(&self, kind: &str) -> Option<&dyn ThermostatBuilder>`",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ThermostatRegistry",
     "type": "api-item"
   },
@@ -14010,7 +14455,12 @@
   "rq-c4861786": {
     "decl": "- `ForceClass` — two-variant enum partitioning every slot into one of",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ForceClass",
     "type": "api-item"
   },
@@ -14201,7 +14651,12 @@
   "rq-c6f6a13c": {
     "decl": "- `spme_force_gather(particle_buffers, spme_state, slot_output) -> Result<(), GpuError>`",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "spme_force_gather",
     "type": "api-item"
   },
@@ -14336,7 +14791,12 @@
   "rq-c9240ed4": {
     "decl": "- `reduce_pair_energy_virial(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_energy: &mut CudaViewMut<'_, f32>, target_virial: &mut CudaViewMut<'_, f32>, particle_count: usize) -> Result<(), GpuError>`",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "reduce_pair_energy_virial",
     "type": "api-item"
   },
@@ -14369,7 +14829,12 @@
   "rq-c9a3109a": {
     "decl": "- `run_analyses_with_registries(config_path: &Path, registries: &Registries) -> Result<AnalyzeSummary, AnalyzeError>`",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "run_analyses_with_registries",
     "type": "api-item"
   },
@@ -14433,7 +14898,12 @@
   "rq-ca3ec865": {
     "decl": "- `AnalysisEntry` — one row of the `[[analyses]]` array.",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "AnalysisEntry",
     "type": "api-item"
   },
@@ -14454,7 +14924,12 @@
   "rq-ca6db610": {
     "decl": "- `Constraint` — object-safe trait implemented by every concrete",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/constraint.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Constraint",
     "type": "api-item"
   },
@@ -14475,7 +14950,12 @@
   "rq-cadfb824": {
     "decl": "- `mtk_velocity_half_kick(buffers: &mut ParticleBuffers, exp_minus_alpha: f32, phi_v_dt_half: f32) -> Result<(), GpuError>`",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "mtk_velocity_half_kick",
     "type": "api-item"
   },
@@ -14613,7 +15093,12 @@
   "rq-cd7d7ee5": {
     "decl": "- `AnalyzeError` — error type returned by `load_analysis_config`",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "AnalyzeError",
     "type": "api-item"
   },
@@ -14971,7 +15456,12 @@
   "rq-d278bb01": {
     "decl": "- `Angle` — `Debug, Clone, Copy`. Fields: `atom_i: u32`, `atom_j: u32`",
     "file": "forces/topology",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Angle",
     "type": "api-item"
   },
@@ -15059,7 +15549,12 @@
   "rq-d340b338": {
     "decl": "- `CoulombState` — implements the `Potential` trait with",
     "file": "forces/coulomb-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/coulomb.rs",
+        "kind": "code"
+      }
+    ],
     "title": "CoulombState",
     "type": "api-item"
   },
@@ -15110,7 +15605,12 @@
   "rq-d47caa3d": {
     "decl": "- `NeighborListState::new_cell_list_only(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, n_cells_per_direction: [u32; 3]) -> Result<NeighborListState, NeighborListError>`",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "NeighborListState",
     "type": "api-item"
   },
@@ -15179,7 +15679,12 @@
   "rq-d521381a": {
     "decl": "- `CRescaleBarostatBuilder` — implements `BarostatBuilder` with",
     "file": "integration/c-rescale-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/c_rescale_barostat.rs",
+        "kind": "code"
+      }
+    ],
     "title": "CRescaleBarostatBuilder",
     "type": "api-item"
   },
@@ -15358,7 +15863,12 @@
   "rq-d79986d0": {
     "decl": "- `AnalysisConfig::validate_against(&self, registries: &Registries) -> Result<(), AnalyzeError>`",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "AnalysisConfig",
     "type": "api-item"
   },
@@ -15505,7 +16015,12 @@
   "rq-d9a47c62": {
     "decl": "- `ShakeConstraintsState` — implements the `Constraint` trait. Fields",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ShakeConstraintsState",
     "type": "api-item"
   },
@@ -15526,7 +16041,12 @@
   "rq-da36d746": {
     "decl": "- `andersen_resample(buffers: &mut ParticleBuffers, seed: u64, draw_counter: u64, p_collision: f32, kt: f32) -> Result<(), GpuError>`",
     "file": "integration/andersen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "andersen_resample",
     "type": "api-item"
   },
@@ -15631,7 +16151,12 @@
   "rq-db5924d8": {
     "decl": "- `harmonic_angle_force(state: &mut HarmonicAngleState, particle_buffers: &ParticleBuffers, sim_box: &SimulationBox) -> Result<(), GpuError>`",
     "file": "forces/harmonic-angle",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "harmonic_angle_force",
     "type": "api-item"
   },
@@ -15659,7 +16184,12 @@
   "rq-dbbffa7d": {
     "decl": "- `SubStep` — closed enum describing one piece of an integrator's",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SubStep",
     "type": "api-item"
   },
@@ -15851,7 +16381,12 @@
   "rq-ddf51309": {
     "decl": "- `BondList` — host-side. Fields: `bonds: Vec<Bond>`,",
     "file": "forces/topology",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "BondList",
     "type": "api-item"
   },
@@ -16042,7 +16577,12 @@
   "rq-e0b5377f": {
     "decl": "- `RdfAnalysis` — per-run handle. Fields are private; the type",
     "file": "analysis/rdf",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/rdf.rs",
+        "kind": "code"
+      }
+    ],
     "title": "RdfAnalysis",
     "type": "api-item"
   },
@@ -16245,7 +16785,12 @@
   "rq-e38993a3": {
     "decl": "- `CRescaleBarostat` — implements the `Barostat` trait declared in",
     "file": "integration/c-rescale-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/c_rescale_barostat.rs",
+        "kind": "code"
+      }
+    ],
     "title": "CRescaleBarostat",
     "type": "api-item"
   },
@@ -16288,7 +16833,12 @@
   "rq-e3ba8c3b": {
     "decl": "- `AnalysisRegistry` — open-builder registry, mirrors",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/analysis/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "AnalysisRegistry",
     "type": "api-item"
   },
@@ -16398,7 +16948,12 @@
   "rq-e538c545": {
     "decl": "- `Constraint::apply_before_drift`, `Constraint::apply_after_drift`,",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Constraint",
     "type": "api-item"
   },
@@ -16857,7 +17412,12 @@
   "rq-eb9e5cc3": {
     "decl": "- `spme_real_pair_force`: 16×16×1 = 256 threads/block, grid",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "spme_real_pair_force",
     "type": "api-item"
   },
@@ -16871,7 +17431,12 @@
   "rq-ebfa6e1f": {
     "decl": "- `SpmeError` — error type for SPME slot construction. Variants:",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SpmeError",
     "type": "api-item"
   },
@@ -16945,7 +17510,12 @@
   "rq-ecb8aa60": {
     "decl": "- `slot_kind_field_dims(kind: &str) -> Option<&'static [(&'static str, Dimension)]>`",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/units/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "slot_kind_field_dims",
     "type": "api-item"
   },
@@ -17440,14 +18010,24 @@
   "rq-f1c04d3b": {
     "decl": "- `PhaseConfig` — parsed `[[phase]]` (MD) entry.",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/io/config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PhaseConfig",
     "type": "api-item"
   },
   "rq-f1c96a3f": {
     "decl": "- `mtk_position_drift(buffers: &mut ParticleBuffers, exp_b_dt: f32, phi_x_dt: f32) -> Result<(), GpuError>`",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "mtk_position_drift",
     "type": "api-item"
   },
@@ -17483,7 +18063,12 @@
   "rq-f28b82a7": {
     "decl": "- `GroupConstraint` — `Debug, Clone, Copy`. Fields: `local_i: u8`,",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "GroupConstraint",
     "type": "api-item"
   },
@@ -17748,7 +18333,12 @@
   "rq-f69698b8": {
     "decl": "- `spme_charge_spread(particle_buffers, spme_state) -> Result<(), GpuError>`",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "spme_charge_spread",
     "type": "api-item"
   },
@@ -17786,7 +18376,12 @@
   "rq-f71ff87f": {
     "decl": "- `IntegratorStepWithConstraintExt` — convenience trait whose blanket",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "IntegratorStepWithConstraintExt",
     "type": "api-item"
   },
@@ -17800,7 +18395,12 @@
   "rq-f735ea05": {
     "decl": "- `spme_real_pair_force(particle_buffers, pair_buffer, sim_box, alpha, r_cut_real, atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales, neighbor_list, neighbor_counts) -> Result<(), GpuError>`",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "spme_real_pair_force",
     "type": "api-item"
   },
@@ -17903,7 +18503,12 @@
   "rq-f807cd11": {
     "decl": "- `ExclusionList` — host-side. Fields: `entries: Vec<Exclusion>`,",
     "file": "forces/topology",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ExclusionList",
     "type": "api-item"
   },
@@ -17999,7 +18604,12 @@
   "rq-f9ebe53f": {
     "decl": "- `log_column_values(ke, pe) -> vec![most_recent_pressure,",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mtk_npt.rs",
+        "kind": "code"
+      }
+    ],
     "title": "log_column_values",
     "type": "api-item"
   },
@@ -18086,7 +18696,12 @@
   "rq-fb7c4429": {
     "decl": "- `UnitSystem::factor(self, dim: Dimension) -> f64`",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/units/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "UnitSystem",
     "type": "api-item"
   },
@@ -18107,7 +18722,12 @@
   "rq-fbd32983": {
     "decl": "- `ConstraintList` — host-side. The per-group SoA layout, including",
     "file": "forces/topology",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ConstraintList",
     "type": "api-item"
   },
@@ -18336,7 +18956,12 @@
   "rq-feb0501c": {
     "decl": "- `ConstraintError` — error type returned by every trait method.",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/constraint.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ConstraintError",
     "type": "api-item"
   },
@@ -18406,7 +19031,12 @@
   "rq-ff424773": {
     "decl": "- `NeighborListMode` — discriminator. Variants: <!-- inline --> <!-- inline -->",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "NeighborListMode",
     "type": "api-item"
   },

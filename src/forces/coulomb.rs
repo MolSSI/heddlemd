@@ -24,6 +24,7 @@ use super::{
 // CoulombParameters carries the runtime real-space parameters: the
 // cutoff and the inner switching radius. Per-particle charges live on
 // `ParticleBuffers`. See rq-bfd7004c.
+// rq-6bdfdd6d
 #[derive(Debug, Clone, Copy)]
 pub struct CoulombParameters {
     pub cutoff: f32,
@@ -39,7 +40,7 @@ impl From<&CoulombConfig> for CoulombParameters {
     }
 }
 
-// rq-846bdb8b
+// rq-846bdb8b rq-d340b338
 #[derive(Debug)]
 pub struct CoulombState {
     #[allow(dead_code)]

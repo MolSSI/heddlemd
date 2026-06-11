@@ -40,13 +40,14 @@ pub use neighbor_list::{
     CellListData, NeighborListError, NeighborListMode, NeighborListState,
 };
 
-// rq-df6d79a1
+// rq-df6d79a1 rq-c4861786
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ForceClass {
     Fast,
     Slow,
 }
 
+// rq-81ac7d6a
 /// Selects whether a force-evaluation call aggregates only the three force
 /// components, or also the per-particle potential-energy and scalar-virial
 /// shares. See `rqm/forces/framework.md`.
@@ -98,7 +99,7 @@ pub struct SlotOutputView<'a> {
     pub virial: CudaViewMut<'a, f32>,
 }
 
-// rq-9f7d4b40
+// rq-559783fe
 pub struct ForceFieldContext<'a> {
     pub neighbor_list: Option<&'a NeighborListState>,
     pub buffers: &'a ParticleBuffers,
@@ -360,6 +361,7 @@ impl ForceField {
         self.run(None, buffers, sim_box, timings, level)
     }
 
+    // rq-be1eb548
     pub fn step_class(
         &mut self,
         class: ForceClass,

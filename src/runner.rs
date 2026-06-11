@@ -100,7 +100,7 @@ pub enum RunnerError {
     },
 }
 
-// rq-5c1cfc93
+// rq-5c1cfc93 rq-b00170c6
 #[derive(Debug, Clone)]
 pub struct PhaseSummary {
     pub name: String,
@@ -1449,6 +1449,7 @@ fn run_simulation_with_phase(
 // `rqm/minimization/steepest-descent.md`, and returns a phase
 // summary on success. Non-convergence after `max_iterations` is a
 // hard error and exits the run with code 2.
+// rq-393a57e4
 #[allow(clippy::too_many_arguments)]
 fn run_minimization_phase(
     min: &crate::io::MinimizationConfig,

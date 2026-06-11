@@ -25,7 +25,7 @@ pub use rdf::RdfBuilder;
 // Public types: AnalysisConfig, AnalysisEntry, AnalyzeError, etc.
 // =====================================================================
 
-// rq-fd8bb824
+// rq-fd8bb824 rq-aa91623d
 #[derive(Debug, Clone)]
 pub struct AnalysisConfig {
     pub schema_version: u64,
@@ -45,6 +45,7 @@ pub struct AnalysisConfig {
     pub config_path: PathBuf,
 }
 
+// rq-ca3ec865
 #[derive(Debug, Clone)]
 pub struct AnalysisEntry {
     pub name: String,
@@ -65,6 +66,7 @@ pub enum AnalysisPathRole {
     AnalysisOutput { name: String },
 }
 
+// rq-cd7d7ee5
 #[derive(Debug, thiserror::Error)]
 pub enum AnalyzeError {
     #[error(
@@ -115,6 +117,7 @@ pub enum AnalyzeError {
     UnknownPhase { phase: String, available: Vec<String> },
 }
 
+// rq-3825d7c4
 #[derive(Debug, thiserror::Error)]
 pub enum AnalysisRuntimeError {
     #[error("invalid value for `{field}`: {reason}")]
@@ -125,6 +128,7 @@ pub enum AnalysisRuntimeError {
     Other(String),
 }
 
+// rq-8914e9ff
 #[derive(Debug, Clone, Copy)]
 pub struct AnalyzeSummary {
     pub frames_consumed: u64,
@@ -136,6 +140,7 @@ pub struct AnalyzeSummary {
 // AnalysisBuilder / Analysis traits + AnalysisRegistry
 // =====================================================================
 
+// rq-86f01d20
 pub trait AnalysisBuilder: std::fmt::Debug + Send + Sync {
     fn kind_name(&self) -> &'static str;
 
@@ -149,6 +154,7 @@ pub trait AnalysisBuilder: std::fmt::Debug + Send + Sync {
     ) -> Result<Box<dyn Analysis>, AnalysisRuntimeError>;
 }
 
+// rq-8464775b
 pub trait Analysis: Send {
     fn consume_frame(
         &mut self,
@@ -163,6 +169,7 @@ pub trait Analysis: Send {
     ) -> Result<(), AnalysisRuntimeError>;
 }
 
+// rq-e3ba8c3b
 #[derive(Debug)]
 pub struct AnalysisRegistry {
     pub builders: Vec<Box<dyn AnalysisBuilder>>,
@@ -262,6 +269,7 @@ fn resolve_path(base: &Path, raw: &str) -> PathBuf {
 // load_analysis_config
 // =====================================================================
 
+// rq-9fa942b1
 pub fn load_analysis_config(path: &Path) -> Result<AnalysisConfig, AnalyzeError> {
     let root = derive_analysis_root(path)?;
     let base_dir = path.parent().unwrap_or(Path::new("."));
@@ -412,6 +420,7 @@ fn extract_missing_field(msg: &str) -> Option<String> {
 // =====================================================================
 
 impl AnalysisConfig {
+    // rq-d79986d0
     pub fn validate_against(
         &self,
         registries: &crate::Registries,
@@ -596,11 +605,13 @@ fn check_path_collisions(
 // run_analyses entry points
 // =====================================================================
 
+// rq-8c1de56e
 pub fn run_analyses(config_path: &Path) -> Result<AnalyzeSummary, AnalyzeError> {
     let registries = crate::Registries::with_builtins();
     run_analyses_with_registries(config_path, &registries)
 }
 
+// rq-c9a3109a
 pub fn run_analyses_with_registries(
     config_path: &Path,
     registries: &crate::Registries,
@@ -729,11 +740,13 @@ pub fn run_analyses_with_registries(
 
 use crate::runner::{LintOverall, LintReport, LintStage, LintStatus, RunnerError};
 
+// rq-bcf7e0eb
 pub fn lint_analyses(config_path: &Path) -> LintReport {
     let registries = crate::Registries::with_builtins();
     lint_analyses_with_registries(config_path, &registries)
 }
 
+// rq-6eb18608
 pub fn lint_analyses_with_registries(
     config_path: &Path,
     registries: &crate::Registries,

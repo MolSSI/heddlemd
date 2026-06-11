@@ -114,7 +114,7 @@ fn io_err(e: std::io::Error) -> LogWriterError {
     LogWriterError::Io(format!("{e}"))
 }
 
-// rq-6e51f09c
+// rq-6e51f09c rq-511f4606
 pub fn compute_kinetic_energy(
     masses: &[f32],
     vx: &[f32],

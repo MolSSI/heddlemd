@@ -10,7 +10,7 @@ use crate::io::config::{ConfigError, NamedSlotConfig};
 use crate::pbc::SimulationBox;
 use crate::timings::{Timings, TimingsError};
 
-// rq-7b1cdfb0
+// rq-feb0501c
 #[derive(Debug, thiserror::Error)]
 pub enum ConstraintError {
     #[error("{0}")]
@@ -37,6 +37,7 @@ pub enum ConstraintError {
 
 // rq-f08d7a33 — Constraint trait. Hooks fire at sub-step boundaries
 // inside the integrator (see `constraint-framework.md`).
+// rq-ca6db610
 pub trait Constraint: std::fmt::Debug + Send {
     /// Snapshot pre-drift positions for the slot's owned atoms.
     fn apply_before_drift(
@@ -118,6 +119,7 @@ pub trait Constraint: std::fmt::Debug + Send {
 
 // rq-3d5f2e98 — builder trait. Concrete slots register a builder in
 // `ConstraintRegistry::with_builtins()`.
+// rq-7896e33a
 pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
     fn kind_name(&self) -> &'static str;
 
@@ -184,7 +186,7 @@ pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
     ) -> Result<Box<dyn Constraint>, ConstraintError>;
 }
 
-// rq-3d5f2e98
+// rq-3d5f2e98 rq-3cca2cb1
 #[derive(Debug)]
 pub struct ConstraintRegistry {
     pub builders: Vec<Box<dyn ConstraintBuilder>>,
@@ -216,6 +218,7 @@ impl ConstraintRegistry {
         None
     }
 
+    // rq-b004196f
     /// Construct the constraint slot, if any, that handles every group
     /// in `list`. Returns `Ok(None)` when `list.is_empty()`. Verifies
     /// that every group's algorithm has a registered builder, runs

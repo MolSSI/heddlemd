@@ -146,6 +146,7 @@ pub fn reduce_pair_forces(
     Ok(())
 }
 
+// rq-c9240ed4
 pub fn reduce_pair_energy_virial(
     pair_buffer: &PairBuffer,
     neighbor_counts: &CudaSlice<u32>,
@@ -355,7 +356,7 @@ pub fn lj_pair_force(
 /// `forces/coulomb-pair-force.md`. rq-bfd7004c
 pub const K_COULOMB_F32: f32 = 1.0_f32;
 
-// rq-846bdb8b
+// rq-846bdb8b rq-38676211
 #[allow(clippy::too_many_arguments)]
 pub fn coulomb_pair_force(
     particle_buffers: &ParticleBuffers,
@@ -429,7 +430,7 @@ pub fn coulomb_pair_force(
     Ok(())
 }
 
-// rq-9a512ed1 rq-f6d45062
+// rq-9a512ed1 rq-f6d45062 rq-44cce069 rq-eb9e5cc3 rq-f735ea05
 #[allow(clippy::too_many_arguments)]
 pub fn spme_real_pair_force(
     particle_buffers: &ParticleBuffers,
@@ -503,7 +504,7 @@ pub fn spme_real_pair_force(
     Ok(())
 }
 
-// rq-9ca00d25 rq-202493a5
+// rq-9ca00d25 rq-202493a5 rq-16f6c7dc rq-f69698b8
 #[allow(clippy::too_many_arguments)]
 pub fn spme_charge_spread(
     particle_buffers: &ParticleBuffers,
@@ -605,7 +606,7 @@ fn spme_charge_spread_impl(
     Ok(())
 }
 
-// rq-9ca00d25
+// rq-9ca00d25 rq-127df3d6 rq-8326d2d1
 #[allow(clippy::too_many_arguments)]
 pub fn spme_influence_multiply(
     kernels: &Kernels,
@@ -695,7 +696,7 @@ fn spme_influence_multiply_impl(
     Ok(())
 }
 
-// rq-9ca00d25
+// rq-9ca00d25 rq-35b76155 rq-c6f6a13c
 #[allow(clippy::too_many_arguments)]
 pub fn spme_force_gather(
     particle_buffers: &ParticleBuffers,
@@ -764,7 +765,7 @@ pub fn spme_force_gather(
     Ok(())
 }
 
-// rq-f00f729e (morse_bond_force launcher mirroring the `gpu` convention)
+// rq-f00f729e rq-66d80d54 (morse_bond_force launcher mirroring the `gpu` convention)
 #[allow(clippy::too_many_arguments)]
 pub fn morse_bond_force(
     particle_buffers: &ParticleBuffers,
@@ -819,6 +820,7 @@ pub fn morse_bond_force(
 
 // rq-6435723d (well, that was Langevin's id; this is the bond reduction —
 // using a fresh id-comment in the spec rqm-bond reduction declaration.)
+// rq-10adebc4
 #[allow(clippy::too_many_arguments)]
 pub fn reduce_bond_forces(
     kernels: &Kernels,
@@ -867,6 +869,7 @@ pub fn reduce_bond_forces(
 }
 
 // Launch helper for the harmonic-angle kernel. One thread per angle.
+// rq-db5924d8
 #[allow(clippy::too_many_arguments)]
 pub fn harmonic_angle_force(
     particle_buffers: &ParticleBuffers,
@@ -918,6 +921,7 @@ pub fn harmonic_angle_force(
 }
 
 // Launch helper for the per-atom angle reduction. One thread per atom.
+// rq-34bfe79a
 #[allow(clippy::too_many_arguments)]
 pub fn reduce_angle_forces(
     kernels: &Kernels,
@@ -1010,7 +1014,7 @@ pub fn compute_kinetic_energy(
 
 // Uniform per-particle velocity rescale. Block size 256, grid
 // ceil(n / 256). When n == 0 returns Ok(()) without launching.
-// rq-f606ff6f
+// rq-f606ff6f rq-09e04194
 pub fn rescale_velocities(
     particle_buffers: &mut ParticleBuffers,
     factor: f32,
@@ -1041,7 +1045,7 @@ pub fn rescale_velocities(
 // Launch helper for the Andersen per-particle resample kernel. Block
 // size 256, grid `ceil(n / 256)`. When `n == 0` returns Ok(()) without
 // launching. Debug-asserts `p_collision ∈ [0, 1]` (caller clamps).
-// rq-5e059f6b
+// rq-5e059f6b rq-da36d746
 #[allow(clippy::too_many_arguments)]
 pub fn andersen_resample(
     buffers: &mut ParticleBuffers,
@@ -1090,7 +1094,7 @@ pub fn andersen_resample(
 // length-1 device buffer the caller owns (typically reused across calls
 // to avoid per-step allocation). The helper synchronously downloads the
 // value and returns it as f32.
-// rq-0d8c8688
+// rq-0d8c8688 rq-0f50dade
 pub fn compute_total_virial(
     particle_buffers: &ParticleBuffers,
     scratch: &mut CudaSlice<f32>,
@@ -1172,7 +1176,7 @@ pub fn compute_total_potential_energy(
 // Block size 256, grid ceil(n / 256). When n == 0 returns Ok(()) without
 // launching. Does NOT touch velocities, forces, image flags, or any
 // neighbor-list reference positions.
-// rq-0d8c8688
+// rq-0d8c8688 rq-19916fb0
 pub fn rescale_positions(
     particle_buffers: &mut ParticleBuffers,
     factor: f32,
@@ -1204,7 +1208,7 @@ pub fn rescale_positions(
 // size 256, grid ceil(n / 256). When n == 0 returns Ok(()) without
 // launching. The host pre-computes both scalar arguments in f64 and
 // passes them as f32.
-// rq-3b6d5001
+// rq-3b6d5001 rq-cadfb824
 pub fn mtk_velocity_half_kick(
     particle_buffers: &mut ParticleBuffers,
     exp_minus_alpha: f32,
@@ -1241,7 +1245,7 @@ pub fn mtk_velocity_half_kick(
 // Launch helper for the MTK cell-coupled position drift. Block size
 // 256, grid ceil(n / 256). When n == 0 returns Ok(()) without
 // launching.
-// rq-3b6d5001
+// rq-3b6d5001 rq-f1c96a3f
 pub fn mtk_position_drift(
     particle_buffers: &mut ParticleBuffers,
     exp_b_dt: f32,
@@ -1493,6 +1497,7 @@ pub fn copy_positions_into_reference(
 
 pub const SPATIAL_HASH_SCAN_BLOCK_SIZE: u32 = 256;
 
+// rq-10f6f831
 #[allow(clippy::too_many_arguments)]
 pub fn compute_cell_indices_and_histogram(
     particle_buffers: &ParticleBuffers,
@@ -1656,6 +1661,7 @@ pub fn prefix_scan_cell_counts(
     Ok(())
 }
 
+// rq-9d0cb192
 pub fn scatter_atoms_into_cells(
     device: &Arc<CudaDevice>,
     kernels: &Kernels,
@@ -1681,6 +1687,7 @@ pub fn scatter_atoms_into_cells(
     Ok(())
 }
 
+// rq-165c4422
 pub fn sort_cells_by_particle_id(
     kernels: &Kernels,
     cell_offsets: &CudaSlice<u32>,
@@ -1701,6 +1708,7 @@ pub fn sort_cells_by_particle_id(
     Ok(())
 }
 
+// rq-7d5e87ee
 pub fn vv_kick_drift_lossless(
     buffers: &mut ParticleBuffers,
     lossless: &mut LosslessBuffers,
@@ -1838,6 +1846,7 @@ pub fn lan_ou_step(
     Ok(())
 }
 
+// rq-4ea8bbb2
 pub fn vv_kick_lossless(
     buffers: &mut ParticleBuffers,
     lossless: &mut LosslessBuffers,
@@ -1874,7 +1883,7 @@ pub fn vv_kick_lossless(
     Ok(())
 }
 
-// rq-67e62f4b — SETTLE launchers
+// rq-53800cef — SHAKE / RATTLE / constraint-virial-scatter launchers
 
 #[allow(clippy::too_many_arguments)]
 pub fn shake_snapshot(

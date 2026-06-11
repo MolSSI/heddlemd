@@ -43,6 +43,7 @@ fn require_finite_positive(field: &str, value: f64) -> Result<(), ConfigError> {
     Ok(())
 }
 
+// rq-bcb0f58a
 #[derive(Debug)]
 pub struct LangevinBaoabState {
     pub friction: f64,

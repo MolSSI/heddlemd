@@ -1,4 +1,4 @@
-// rq-c2dbaa72 (topology module — defined in forces/topology.md)
+// rq-9e1eee68 (topology module — defined in forces/topology.md)
 use std::path::Path;
 use std::sync::Arc;
 
@@ -8,6 +8,7 @@ use crate::gpu::GpuError;
 use crate::integrator::ConstraintRegistry;
 use crate::io::config::NamedSlotConfig;
 
+// rq-0a8831b1
 #[derive(Debug, Clone, Copy)]
 pub struct Bond {
     pub atom_i: u32,
@@ -15,6 +16,7 @@ pub struct Bond {
     pub bond_type_index: u32,
 }
 
+// rq-d278bb01
 #[derive(Debug, Clone, Copy)]
 pub struct Angle {
     pub atom_i: u32,
@@ -23,6 +25,7 @@ pub struct Angle {
     pub angle_type_index: u32,
 }
 
+// rq-0c717392
 #[derive(Debug, Clone, Copy)]
 pub struct Exclusion {
     pub atom_i: u32,
@@ -31,6 +34,7 @@ pub struct Exclusion {
     pub scale_coul: f32,
 }
 
+// rq-ddf51309
 #[derive(Debug, Clone)]
 pub struct BondList {
     pub bonds: Vec<Bond>,
@@ -54,6 +58,7 @@ impl BondList {
     }
 }
 
+// rq-07d003c4
 #[derive(Debug, Clone)]
 pub struct AngleList {
     pub angles: Vec<Angle>,
@@ -77,6 +82,7 @@ impl AngleList {
     }
 }
 
+// rq-f807cd11
 #[derive(Debug, Clone)]
 pub struct ExclusionList {
     pub entries: Vec<Exclusion>,
@@ -103,6 +109,7 @@ impl ExclusionList {
 // rq-3d5f2e98 — constraint slot framework data layout. See
 // `integration/constraint-framework.md` for the SoA contract.
 
+// rq-f28b82a7
 /// One pairwise distance constraint inside a `ConstraintGroup`. The
 /// local indices `(local_i, local_j)` refer to slots in the group's
 /// own atom slice (`0..group.atom_count`) — not into the global
@@ -114,6 +121,7 @@ pub struct GroupConstraint {
     pub r0: f32,
 }
 
+// rq-0faddd62
 /// One connected component of the constraint graph: a set of atoms
 /// rigidified by a set of pairwise distance constraints. Algorithms
 /// (SETTLE in v1; M-SHAKE in a future feature) dispatch one thread per
@@ -127,6 +135,7 @@ pub struct ConstraintGroup {
     pub constraint_type_index: u32,
 }
 
+// rq-fbd32983
 /// Host-side parsed-and-validated view of every constraint declared by
 /// the topology file. See `integration/constraint-framework.md`.
 ///

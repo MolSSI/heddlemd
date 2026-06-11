@@ -36,7 +36,7 @@ pub enum NeighborListError {
     },
 }
 
-// rq-77754ad1
+// rq-ff424773
 #[derive(Debug)]
 pub enum NeighborListMode {
     Trivial,
@@ -47,7 +47,7 @@ pub enum NeighborListMode {
     CellListOnly(CellListData),
 }
 
-// rq-77754ad1
+// rq-ff424773
 #[derive(Debug)]
 pub struct CellListData {
     pub n_cells: [u32; 3],
@@ -202,6 +202,7 @@ impl NeighborListState {
     // The state produces sorted particle IDs and per-cell offsets but
     // no neighbor list; the neighbor-list-build and displacement-check
     // kernels are never launched.
+    // rq-d47caa3d
     pub fn new_cell_list_only(
         gpu: &GpuContext,
         sim_box: &SimulationBox,

@@ -73,6 +73,7 @@ impl Integrator for VelocityVerletState {
         }
     }
 
+    // rq-83e752cd
     fn execute(
         &mut self,
         substep: &SubStep,
@@ -142,6 +143,7 @@ impl IntegratorBuilder for VelocityVerletBuilder {
         deserialize_params(params).map(|_| ())
     }
 
+    // rq-9331ede2
     fn supports_constraints(&self, params: &toml::Value) -> bool {
         // Reads `params.lossless`; falls back to `false` if params are
         // malformed (callers should run validate_params first).

@@ -44,6 +44,7 @@ unsafe extern "C" {
     fn cufftSetStream(plan: CufftHandle, stream: *mut c_void) -> CufftResult;
 }
 
+// rq-1ad7e751
 #[derive(Debug, thiserror::Error)]
 pub enum CuFftError {
     #[error("cuFFT call failed with status code {0}")]
@@ -100,6 +101,7 @@ impl Plan3dR2C {
         })
     }
 
+    // rq-4c21c386
     /// Execute the R2C transform `input → output`. `input` must hold
     /// `n_a * n_b * n_c` `f32` values; `output` must hold
     /// `n_a * n_b * (n_c / 2 + 1)` `cufftComplex` values (laid out as

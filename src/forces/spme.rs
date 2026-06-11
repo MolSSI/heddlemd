@@ -52,7 +52,7 @@ impl From<&SpmeConfig> for SpmeParameters {
     }
 }
 
-// rq-846bdb8b
+// rq-846bdb8b rq-ebfa6e1f
 #[derive(Debug, thiserror::Error)]
 pub enum SpmeError {
     #[error("{0}")]
@@ -493,6 +493,7 @@ fn cardinal_bspline(p: usize, x: f64) -> f64 {
 // `LennardJonesState` and `CoulombState`: owns a `PairBuffer` and a
 // `DeviceExclusionList`, contributes via the `spme_real_pair_force`
 // kernel, and reduces via `reduce_pair_forces`.
+// rq-22171569
 #[derive(Debug)]
 pub struct SpmeRealSpaceState {
     #[allow(dead_code)]
@@ -612,6 +613,7 @@ impl Potential for SpmeRealSpaceState {
 // scalar; `reduce()` runs the force-gather kernel which writes per-
 // particle force, energy (with self-energy subtracted), and the
 // uniform per-particle virial share.
+// rq-b1148667
 #[derive(Debug)]
 pub struct SpmeReciprocalState {
     grid: SpmeReciprocalGrid,
