@@ -127,7 +127,7 @@ fn assert_parse_path_and_field(err: &ConfigError, expected_path: &str, unknown_f
     }
 }
 
-// rq-7df1515f
+// rq-7df1515f rq-993ec182 rq-9ce1bd52
 #[test]
 fn load_valid_minimal_config() {
     let dir = tmp_path("load_valid_minimal_config");
@@ -1317,7 +1317,7 @@ fn langevin_friction_zero_rejected() {
     }
 }
 
-// rq-583201cb
+// rq-583201cb rq-2afb76f2
 #[test]
 fn langevin_friction_negative_rejected() {
     let dir = tmp_path("langevin_friction_negative");
@@ -2408,7 +2408,7 @@ tau = 1.0e-13"#,
 
 // --- Integrator-owns-thermostat compatibility ---
 
-// rq-bdd03f85
+// rq-bdd03f85 rq-0040baca rq-982ddb8d
 #[test]
 fn langevin_with_thermostat_is_rejected() {
     let dir = tmp_path("incompat_langevin_therm");
@@ -3487,7 +3487,7 @@ fn minimal_si_config() -> String {
     minimal_config().replace("units = \"atomic\"\n", "")
 }
 
-// rq-870a3aa5 rq-1027778f
+// rq-870a3aa5 rq-1027778f rq-062438e7
 #[test]
 fn units_default_is_si() {
     let dir = tmp_path("units_default_si");
@@ -3525,7 +3525,7 @@ fn units_unknown_value_rejected() {
     }
 }
 
-// rq-971663ba rq-b68761f1 rq-1027778f rq-7bcdd62f rq-839540d9 rq-863cf49f rq-870a3aa5 rq-3e3add64 rq-07e5568c
+// rq-971663ba rq-b68761f1 rq-1027778f rq-7bcdd62f rq-839540d9 rq-863cf49f rq-870a3aa5 rq-3e3add64 rq-07e5568c rq-6c7779ef
 #[test]
 fn atomic_units_yield_same_si_config_as_native_si() {
     // Two TOML files describing the same physical system: one in SI,
@@ -3953,4 +3953,303 @@ mode = "all-pairs"
     assert!(approx_eq(max, max_si / len_f), "max_step {} vs expected {}", max, max_si / len_f);
     assert!(approx_eq(ftol, ftol_si / force_f), "force_tolerance {} vs expected {}", ftol, ftol_si / force_f);
     assert!(approx_eq(etol, etol_si / energy_f), "energy_tolerance {} vs expected {}", etol, etol_si / energy_f);
+}
+
+// --- Multi-phase config and cross-phase rules ---------------------------
+
+// rq-5e69125b
+#[test]
+fn reject_empty_phase_array() {
+    let dir = tmp_path("empty_phase_array");
+    let body = r#"schema_version = 1
+units = "atomic"
+init = "argon.in.xyz"
+
+[simulation]
+seed = 1
+temperature = 300.0
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#;
+    let path = write_config(&dir, body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::EmptyPhases => {}
+        other => panic!("expected EmptyPhases, got {other:?}"),
+    }
+}
+
+// rq-0dc50ce0
+#[test]
+fn reject_phase_name_with_non_ascii_characters() {
+    let dir = tmp_path("phase_name_non_ascii");
+    let body = minimal_config().replace(r#"name = "run""#, r#"name = "αβ""#);
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "phase[0].name"),
+        other => panic!("expected InvalidValue, got {other:?}"),
+    }
+}
+
+fn two_phase_config_body(extra_phase0: &str, extra_phase1: &str) -> String {
+    format!(
+        r#"schema_version = 1
+units = "atomic"
+init = "argon.in.xyz"
+
+[simulation]
+seed = 1
+temperature = 300.0
+
+[[phase]]
+name = "equil"
+n_steps = 5000
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+{extra_phase0}
+
+[[phase]]
+name = "prod"
+n_steps = 10000
+dt = 2.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+{extra_phase1}
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#
+    )
+}
+
+// rq-90e307b2
+#[test]
+fn two_phase_config_loads_with_distinct_per_phase_parameters() {
+    let dir = tmp_path("two_phase_distinct");
+    let body = two_phase_config_body("", "");
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    assert_eq!(cfg.phases.len(), 2);
+    let p0 = cfg.phases[0].as_md().unwrap();
+    let p1 = cfg.phases[1].as_md().unwrap();
+    assert_eq!(p0.name, "equil");
+    assert_eq!(p0.n_steps, 5000);
+    assert_eq!(p0.dt, 1.0e-15);
+    assert_eq!(p1.name, "prod");
+    assert_eq!(p1.n_steps, 10000);
+    assert_eq!(p1.dt, 2.0e-15);
+}
+
+// rq-707b5520
+#[test]
+fn per_phase_output_defaults_derive_from_root_and_phase_name() {
+    let dir = tmp_path("two_phase_default_output");
+    let body = two_phase_config_body("", "");
+    let path = write_config_named(&dir, "argon.in.toml", &body);
+    let cfg = load_config(&path).unwrap();
+    let canon = std::fs::canonicalize(&dir).unwrap();
+    let p0 = cfg.phases[0].as_md().unwrap();
+    let p1 = cfg.phases[1].as_md().unwrap();
+    assert_eq!(p0.output.trajectory_path, canon.join("argon.out.equil.xyz"));
+    assert_eq!(p0.output.log_path, canon.join("argon.out.equil.log"));
+    assert_eq!(p0.output.timings_path, canon.join("argon.out.equil.timings"));
+    assert_eq!(p1.output.trajectory_path, canon.join("argon.out.prod.xyz"));
+    assert_eq!(p1.output.log_path, canon.join("argon.out.prod.log"));
+    assert_eq!(p1.output.timings_path, canon.join("argon.out.prod.timings"));
+}
+
+// rq-46b1a697
+#[test]
+fn reject_two_phases_same_thermostat_kind_sharing_seed() {
+    let dir = tmp_path("two_phase_dup_seed_same_kind");
+    let extra = r#"
+[phase.thermostat]
+kind = "csvr"
+temperature = 300.0
+tau = 1.0e-13
+seed = 7
+"#;
+    let body = two_phase_config_body(extra, extra);
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::DuplicatePhaseSeed { kind, seed } => {
+            assert_eq!(kind, "csvr");
+            assert_eq!(seed, 7);
+        }
+        other => panic!("expected DuplicatePhaseSeed, got {other:?}"),
+    }
+}
+
+// rq-60b19852
+#[test]
+fn two_phases_different_kinds_may_share_a_numerical_seed() {
+    let dir = tmp_path("two_phase_diff_kind_same_seed");
+    let extra0 = r#"
+[phase.thermostat]
+kind = "csvr"
+temperature = 300.0
+tau = 1.0e-13
+seed = 7
+"#;
+    let extra1 = r#"
+[phase.barostat]
+kind = "c-rescale"
+temperature = 300.0
+pressure = 1.0e5
+tau = 1.0e-12
+compressibility = 4.5e-10
+seed = 7
+"#;
+    let body = two_phase_config_body(extra0, extra1);
+    let path = write_config(&dir, &body);
+    load_config(&path).expect("two phases of different stochastic kinds may share a numerical seed");
+}
+
+// rq-57bcb870
+#[test]
+fn reject_two_phases_with_colliding_trajectory_paths() {
+    let dir = tmp_path("two_phase_traj_collision");
+    let extra0 = r#"
+[phase.output]
+trajectory_path = "shared.xyz"
+"#;
+    let extra1 = r#"
+[phase.output]
+trajectory_path = "shared.xyz"
+"#;
+    let body = two_phase_config_body(extra0, extra1);
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::PathCollision { kind_a, kind_b, .. } => {
+            assert!(matches!(kind_a, PathRole::PhaseTrajectory { .. }));
+            assert!(matches!(kind_b, PathRole::PhaseTrajectory { .. }));
+        }
+        other => panic!("expected PathCollision, got {other:?}"),
+    }
+}
+
+// rq-d70c3517
+#[test]
+fn topology_with_constraints_paired_with_mtk_npt_phase_is_rejected() {
+    let dir = tmp_path("mtk_npt_plus_constraints");
+    let body = r#"schema_version = 1
+units = "atomic"
+init = "argon.in.xyz"
+
+[simulation]
+seed = 1
+temperature = 85.0
+
+[[phase]]
+name = "p"
+n_steps = 1
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "mtk-npt"
+temperature = 85.0
+pressure = 1.0e-9
+tau_t = 100.0
+tau_p = 1000.0
+
+[[constraint_types]]
+name = "SPCE"
+kind = "shake"
+atoms = 3
+constraints = [
+  { i = 0, j = 1, d = 1.0 },
+  { i = 0, j = 2, d = 1.0 },
+  { i = 1, j = 2, d = 1.633 },
+]
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#;
+    let path = write_config(&dir, body);
+    let cfg = load_config(&path).unwrap();
+    let registries = Registries::with_builtins();
+    match cfg
+        .validate_constraint_compatibility(&registries, true)
+        .unwrap_err()
+    {
+        ConfigError::IncompatibleConstraint { integrator, phase } => {
+            assert_eq!(integrator, "mtk-npt");
+            assert_eq!(phase, "p");
+        }
+        other => panic!("expected IncompatibleConstraint, got {other:?}"),
+    }
+}
+
+// rq-cedbd670
+#[test]
+fn si_mode_validation_runs_on_post_conversion_atomic_values() {
+    let dir = tmp_path("si_mode_negative_tau");
+    let body = r#"schema_version = 1
+units = "si"
+init = "argon.in.xyz"
+
+[simulation]
+seed = 1
+temperature = 300.0
+
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[phase.thermostat]
+kind = "csvr"
+temperature = 300.0
+tau = -1.0
+seed = 1
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#;
+    let path = write_config(&dir, body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "thermostat.tau"),
+        other => panic!("expected InvalidValue on thermostat.tau, got {other:?}"),
+    }
 }

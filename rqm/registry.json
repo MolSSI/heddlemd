@@ -2,7 +2,12 @@
   "rq-0040baca": {
     "decl": "Scenario: validate_against enforces IncompatibleThermostat from the builder predicate",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "validate_against enforces IncompatibleThermostat from the builder predicate",
     "type": "scenario"
   },
@@ -660,7 +665,12 @@
   "rq-062438e7": {
     "decl": "Scenario: Top-level units field defaults to SI when absent",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Top-level units field defaults to SI when absent",
     "type": "scenario"
   },
@@ -1406,7 +1416,12 @@
   "rq-0dc50ce0": {
     "decl": "Scenario: Reject a phase name containing non-ASCII characters",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject a phase name containing non-ASCII characters",
     "type": "scenario"
   },
@@ -4598,7 +4613,12 @@
   "rq-2afb76f2": {
     "decl": "Scenario: validate_against surfaces per-builder validate_params errors",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "validate_against surfaces per-builder validate_params errors",
     "type": "scenario"
   },
@@ -7126,7 +7146,12 @@
   "rq-46b1a697": {
     "decl": "Scenario: Reject two phases of the same stochastic kind sharing a seed",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject two phases of the same stochastic kind sharing a seed",
     "type": "scenario"
   },
@@ -8665,7 +8690,12 @@
   "rq-57bcb870": {
     "decl": "Scenario: Reject two phases whose default trajectory paths collide",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject two phases whose default trajectory paths collide",
     "type": "scenario"
   },
@@ -9293,7 +9323,12 @@
   "rq-5e69125b": {
     "decl": "Scenario: Reject an empty [[phase]] array",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject an empty [[phase]] array",
     "type": "scenario"
   },
@@ -9482,7 +9517,12 @@
   "rq-60b19852": {
     "decl": "Scenario: Two phases of different kinds may share a numerical seed",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two phases of different kinds may share a numerical seed",
     "type": "scenario"
   },
@@ -10482,7 +10522,12 @@
   "rq-6c7779ef": {
     "decl": "Scenario: Atomic-mode physical scalars pass through unchanged",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Atomic-mode physical scalars pass through unchanged",
     "type": "scenario"
   },
@@ -10943,7 +10988,12 @@
   "rq-707b5520": {
     "decl": "Scenario: Per-phase [phase.output] defaults derive from <root> and phase name",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Per-phase [phase.output] defaults derive from <root> and phase name",
     "type": "scenario"
   },
@@ -14012,7 +14062,12 @@
   "rq-90e307b2": {
     "decl": "Scenario: Two-phase config loads with distinct per-phase parameters",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two-phase config loads with distinct per-phase parameters",
     "type": "scenario"
   },
@@ -14683,7 +14738,12 @@
   "rq-982ddb8d": {
     "decl": "Scenario: Reject [phase.thermostat] alongside an integrator that owns its own",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject [phase.thermostat] alongside an integrator that owns its own",
     "type": "scenario"
   },
@@ -14794,7 +14854,12 @@
   "rq-993ec182": {
     "decl": "Scenario: [integrator] section parses into a SlotConfig",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "[integrator] section parses into a SlotConfig",
     "type": "scenario"
   },
@@ -15183,7 +15248,12 @@
   "rq-9ce1bd52": {
     "decl": "Scenario: validate_against accepts a well-formed config",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "validate_against accepts a well-formed config",
     "type": "scenario"
   },
@@ -19764,7 +19834,12 @@
   "rq-cedbd670": {
     "decl": "Scenario: Validation of SI-mode input runs on post-conversion atomic values",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Validation of SI-mode input runs on post-conversion atomic values",
     "type": "scenario"
   },
@@ -20644,7 +20719,12 @@
   "rq-d70c3517": {
     "decl": "Scenario: A topology with constraint groups paired with mtk-npt in a phase is rejected",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "A topology with constraint groups paired with mtk-npt in a phase is rejected",
     "type": "scenario"
   },
