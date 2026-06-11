@@ -86,6 +86,44 @@ fn write_single_row_step_zero() {
 }
 
 // rq-9198cc8e
+// rq-4381eec2 rq-a9cb9e03
+#[test]
+fn si_mode_log_row_multiplies_time_kinetic_energy_and_temperature_by_factors() {
+    // Open the log writer with UnitSystem::Si. The engine state is in
+    // atomic units; the writer must multiply time by the atu→second
+    // factor, kinetic_energy by the Hartree→Joule factor, and
+    // temperature by the (E_h/k_B)→Kelvin factor before formatting.
+    let dir = tmp_path("si_log_factors");
+    let path = dir.join("run.log");
+    let mut writer = LogWriter::open(&path, UnitSystem::Si, &[]).unwrap();
+    let t_au: f64 = 41.34;     // ~1 fs in atomic time units
+    let ke_au: f64 = 0.0128;   // arbitrary Hartrees
+    let temp_au: f64 = 9.5e-4; // ~300 K in Hartree/k_B
+    writer.write_row(100, t_au, ke_au, temp_au, &[]).unwrap();
+    writer.flush().unwrap();
+
+    let time_factor = UnitSystem::Si.factor(Dimension::Time);
+    let energy_factor = UnitSystem::Si.factor(Dimension::Energy);
+    let temp_factor = UnitSystem::Si.factor(Dimension::Temperature);
+
+    let body = std::fs::read_to_string(&path).unwrap();
+    let last = body.lines().last().unwrap();
+    let cols: Vec<&str> = last.split(',').collect();
+    assert_eq!(cols.len(), 4, "header + step,time,ke,temperature row, got {cols:?}");
+    assert_eq!(cols[0], "100");
+    let t_si: f64 = cols[1].parse().unwrap();
+    let ke_si: f64 = cols[2].parse().unwrap();
+    let temp_si: f64 = cols[3].parse().unwrap();
+    let rel = 1e-9;
+    let approx = |a: f64, b: f64| (a - b).abs() <= rel * a.abs().max(b.abs()).max(1e-300);
+    assert!(approx(t_si, t_au * time_factor),
+            "time SI {} != t_au * time_factor {}", t_si, t_au * time_factor);
+    assert!(approx(ke_si, ke_au * energy_factor),
+            "kinetic_energy SI {} != ke_au * energy_factor {}", ke_si, ke_au * energy_factor);
+    assert!(approx(temp_si, temp_au * temp_factor),
+            "temperature SI {} != temp_au * temp_factor {}", temp_si, temp_au * temp_factor);
+}
+
 // rq-5b934ecd
 #[test]
 fn write_row_non_trivial_values() {

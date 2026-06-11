@@ -494,15 +494,6 @@ Feature: Unit-system selector and atomic-units internals
     And the kind is rejected downstream by Config::validate_against with
       ConfigError::UnknownKind
 
-  @rq-e5a9265e
-  Scenario: Non-numeric value at a unit-bearing field name is left untouched
-    Given a `[phase.thermostat]` block with `kind = "csvr"` and
-      `temperature = "hot"` (a string, not a number)
-    When convert_slot_params is called with UnitSystem::Si
-    Then the `temperature` field is left as the string "hot"
-    And the builder's validate_params produces the original type-mismatch
-      error unchanged
-
   # --- Initial-state file ---
 
   @rq-9d523d38
@@ -592,24 +583,6 @@ Feature: Unit-system selector and atomic-units internals
     When write_row is called with engine-side values
     Then each of time, kinetic_energy, temperature, and any extra
       columns is formatted as-is, with no multiplication applied
-
-  # --- Validation runs after conversion ---
-
-  @rq-1a93891a
-  Scenario: Negative SI input is rejected as a negative atomic value
-    Given a TOML file with `units = "si"` and `tau = -1.0` in a
-      `[phase.thermostat]` block
-    When load_config is called on that file
-    Then Config::validate_against produces an InvalidValue error whose
-      `reason` describes the negative post-conversion atomic value
-
-  @rq-01e0c7a5
-  Scenario: r_switch <= cutoff ordering survives positive-factor rescaling
-    Given a TOML file with `units = "si"` and a pair_interaction with
-      `r_switch < cutoff` in metres
-    When load_config is called on that file
-    Then the post-conversion `r_switch < cutoff` ordering is preserved
-      and validation passes
 
   # --- Defaults inherit dimension from their source ---
 

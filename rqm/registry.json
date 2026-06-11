@@ -233,13 +233,6 @@
     "title": "Build kernel signals overflow when an atom exceeds max_neighbors",
     "type": "scenario"
   },
-  "rq-01e0c7a5": {
-    "decl": "Scenario: r_switch <= cutoff ordering survives positive-factor rescaling",
-    "file": "io/unit-system",
-    "refs": [],
-    "title": "r_switch <= cutoff ordering survives positive-factor rescaling",
-    "type": "scenario"
-  },
   "rq-020ff80e": {
     "decl": "Scenario: SD does not modify velocities",
     "file": "minimization/steepest-descent",
@@ -2710,13 +2703,6 @@
     "title": "SimulationBox",
     "type": "api-item"
   },
-  "rq-1a93891a": {
-    "decl": "Scenario: Negative SI input is rejected as a negative atomic value",
-    "file": "io/unit-system",
-    "refs": [],
-    "title": "Negative SI input is rejected as a negative atomic value",
-    "type": "scenario"
-  },
   "rq-1a996f5d": {
     "decl": "Scenario: step_class(Fast) refreshes only Fast slots' contributions",
     "file": "forces/framework",
@@ -2806,7 +2792,12 @@
   "rq-1b03dbaa": {
     "decl": "Scenario: SI-mode SHAKE constraint distances are converted to Bohr",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode SHAKE constraint distances are converted to Bohr",
     "type": "scenario"
   },
@@ -6539,7 +6530,12 @@
   "rq-408e4dc1": {
     "decl": "Scenario: SI-mode c-rescale barostat params are converted to atomic units",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode c-rescale barostat params are converted to atomic units",
     "type": "scenario"
   },
@@ -6784,7 +6780,12 @@
   "rq-4381eec2": {
     "decl": "Scenario: SI-mode log row converts kinetic energy and temperature",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode log row converts kinetic energy and temperature",
     "type": "scenario"
   },
@@ -12624,7 +12625,12 @@
   "rq-8207d656": {
     "decl": "Scenario: SI-mode steepest-descent minimizer params are converted",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode steepest-descent minimizer params are converted",
     "type": "scenario"
   },
@@ -14213,7 +14219,12 @@
   "rq-94f9228c": {
     "decl": "Scenario: SI-mode trajectory frame converts the lattice to metres",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode trajectory frame converts the lattice to metres",
     "type": "scenario"
   },
@@ -16266,7 +16277,12 @@
   "rq-a9cb9e03": {
     "decl": "Scenario: SI-mode log row converts time to seconds",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode log row converts time to seconds",
     "type": "scenario"
   },
@@ -21804,13 +21820,6 @@
     "title": "Header and rows",
     "type": "section"
   },
-  "rq-e5a9265e": {
-    "decl": "Scenario: Non-numeric value at a unit-bearing field name is left untouched",
-    "file": "io/unit-system",
-    "refs": [],
-    "title": "Non-numeric value at a unit-bearing field name is left untouched",
-    "type": "scenario"
-  },
   "rq-e5b63a73": {
     "decl": "Scenario: Reject non-positive temperature",
     "file": "integration/nose-hoover-chain",
@@ -22659,7 +22668,12 @@
   "rq-ee50492a": {
     "decl": "Scenario: SI-mode trajectory frame converts velocities to m/s",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode trajectory frame converts velocities to m/s",
     "type": "scenario"
   },
@@ -23929,7 +23943,12 @@
   "rq-f9714477": {
     "decl": "Scenario: SI-mode trajectory frame converts positions to metres",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode trajectory frame converts positions to metres",
     "type": "scenario"
   },

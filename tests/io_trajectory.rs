@@ -205,6 +205,96 @@ fn render_multiple_type_names() {
 }
 
 // rq-70e9fd38
+// rq-f9714477 rq-94f9228c rq-ee50492a
+#[test]
+fn si_mode_writer_multiplies_positions_lattice_and_velocities_by_factors() {
+    // Open the trajectory writer with UnitSystem::Si. The engine state
+    // is in atomic units; the writer must multiply positions and
+    // lattice components by the bohr→meter factor and velocities by
+    // the (Bohr/atu)→(m/s) factor before formatting.
+    let dir = tmp_path("si_writer_factors");
+    let path = dir.join("traj.xyz");
+
+    // Engine-side (atomic) values.
+    let l_au: f32 = 10.0;
+    let pos_x_au: f32 = 3.7;
+    let pos_y_au: f32 = -2.1;
+    let pos_z_au: f32 = 0.5;
+    let vx_au: f32 = 0.04;
+    let vy_au: f32 = -0.02;
+    let vz_au: f32 = 0.01;
+
+    let length_factor = UnitSystem::Si.factor(dynamics::units::Dimension::Length) as f32;
+    let velocity_factor = UnitSystem::Si.factor(dynamics::units::Dimension::Velocity) as f32;
+
+    let sim_box = SimulationBox::new(l_au, l_au, l_au, 0.0, 0.0, 0.0).unwrap();
+    let mut writer = TrajectoryWriter::open(
+        &path,
+        UnitSystem::Si,
+        true,  // include_velocities
+        false, // include_images
+        vec!["Ar".to_string()],
+    )
+    .unwrap();
+    writer
+        .write_frame(
+            0,
+            1.0,
+            &sim_box,
+            &[0],
+            &[pos_x_au],
+            &[pos_y_au],
+            &[pos_z_au],
+            Some((&[vx_au], &[vy_au], &[vz_au])),
+            None,
+        )
+        .unwrap();
+    writer.flush().unwrap();
+
+    let body = read(&path);
+    let lines: Vec<&str> = body.lines().collect();
+    let header = lines[1];
+
+    // --- Lattice: header has Lattice="lx 0 0 0 ly 0 0 0 lz" with
+    //              each component in metres. ---
+    let lat_start = header.find("Lattice=\"").unwrap() + "Lattice=\"".len();
+    let lat_end = lat_start + header[lat_start..].find('"').unwrap();
+    let lat_values: Vec<f32> = header[lat_start..lat_end]
+        .split_ascii_whitespace()
+        .map(|s| s.parse().unwrap())
+        .collect();
+    assert_eq!(lat_values.len(), 9);
+    let rel = 1e-5_f32;
+    let approx = |a: f32, b: f32| {
+        (a - b).abs() <= rel * a.abs().max(b.abs()).max(f32::MIN_POSITIVE)
+    };
+    assert!(
+        approx(lat_values[0], l_au * length_factor),
+        "Lattice[0,0] {} != l_au * length_factor {}",
+        lat_values[0],
+        l_au * length_factor
+    );
+    assert!(approx(lat_values[4], l_au * length_factor));
+    assert!(approx(lat_values[8], l_au * length_factor));
+
+    // --- Particle row: species pos_x pos_y pos_z velo_x velo_y velo_z ---
+    let cols: Vec<&str> = lines[2].split_ascii_whitespace().collect();
+    assert!(cols.len() >= 7, "expected 7+ columns, got {}: {:?}", cols.len(), cols);
+    assert_eq!(cols[0], "Ar");
+    let px: f32 = cols[1].parse().unwrap();
+    let py: f32 = cols[2].parse().unwrap();
+    let pz: f32 = cols[3].parse().unwrap();
+    let vx: f32 = cols[4].parse().unwrap();
+    let vy: f32 = cols[5].parse().unwrap();
+    let vz: f32 = cols[6].parse().unwrap();
+    assert!(approx(px, pos_x_au * length_factor), "px {} != pos_x_au * length_factor {}", px, pos_x_au * length_factor);
+    assert!(approx(py, pos_y_au * length_factor));
+    assert!(approx(pz, pos_z_au * length_factor));
+    assert!(approx(vx, vx_au * velocity_factor), "vx {} != vx_au * velocity_factor {}", vx, vx_au * velocity_factor);
+    assert!(approx(vy, vy_au * velocity_factor));
+    assert!(approx(vz, vz_au * velocity_factor));
+}
+
 // rq-7edb9c67
 #[test]
 fn round_trip_via_init_parser() {

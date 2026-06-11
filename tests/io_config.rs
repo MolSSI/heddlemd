@@ -3697,3 +3697,220 @@ cutoff = 18.9
     assert_eq!(tau, tau_au);
     assert_eq!(seed, 7);
 }
+
+// rq-1b03dbaa
+#[test]
+fn si_units_rescale_shake_constraint_distances() {
+    // Verify the nested-array conversion in convert_slot_params: under
+    // SI mode, every `constraints[k].d` entry of a `[[constraint_types]]`
+    // block with `kind = "shake"` is divided by the bohr -> meter
+    // factor. This is the only nested-array shape in the unit-system
+    // table; the flat-table path (CSVR, c-rescale, etc.) cannot exercise
+    // it.
+    let dir = tmp_path("si_shake_constraints");
+    let len_f = UnitSystem::Si.factor(Dimension::Length);
+    let d_si_oh = 1.0e-10_f64;     // 1.0 Å
+    let d_si_hh = 1.633e-10_f64;   // 1.633 Å
+    let cfg = format!(
+        r#"schema_version = 1
+units = "si"
+init = "argon.in.xyz"
+
+[simulation]
+seed = 12345
+temperature = 300.0
+
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+
+[[constraint_types]]
+name = "SPCE"
+kind = "shake"
+atoms = 3
+constraints = [
+    {{ i = 0, j = 1, d = {d_si_oh:.16e} }},
+    {{ i = 0, j = 2, d = {d_si_oh:.16e} }},
+    {{ i = 1, j = 2, d = {d_si_hh:.16e} }},
+]
+"#
+    );
+    let path = write_config(&dir, &cfg);
+    let loaded = load_config(&path).unwrap();
+    assert_eq!(loaded.constraint_types.len(), 1);
+    let ct = &loaded.constraint_types[0];
+    assert_eq!(ct.kind, "shake");
+    let constraints = ct.params.get("constraints").unwrap().as_array().unwrap();
+    assert_eq!(constraints.len(), 3);
+    let rel = 1e-12;
+    let approx_eq = |a: f64, b: f64| (a - b).abs() <= rel * a.abs().max(b.abs());
+    let d0 = constraints[0].get("d").unwrap().as_float().unwrap();
+    let d1 = constraints[1].get("d").unwrap().as_float().unwrap();
+    let d2 = constraints[2].get("d").unwrap().as_float().unwrap();
+    assert!(approx_eq(d0, d_si_oh / len_f), "constraint 0 d {} vs expected {}", d0, d_si_oh / len_f);
+    assert!(approx_eq(d1, d_si_oh / len_f), "constraint 1 d {} vs expected {}", d1, d_si_oh / len_f);
+    assert!(approx_eq(d2, d_si_hh / len_f), "constraint 2 d {} vs expected {}", d2, d_si_hh / len_f);
+}
+
+// rq-408e4dc1
+#[test]
+fn si_units_rescale_c_rescale_barostat_params() {
+    // Pin the c-rescale arm of slot_kind_field_dims: every one of
+    // (pressure, temperature, tau, compressibility) is rescaled by its
+    // declared dimension. A typo in the table (e.g. `("pressure",
+    // Time)`) would slip past the parallel CSVR test, so this is the
+    // dedicated check.
+    let dir = tmp_path("si_c_rescale_params");
+    let pres_f = UnitSystem::Si.factor(Dimension::Pressure);
+    let temp_f = UnitSystem::Si.factor(Dimension::Temperature);
+    let time_f = UnitSystem::Si.factor(Dimension::Time);
+    let invp_f = UnitSystem::Si.factor(Dimension::InversePressure);
+    let pres_si = 1.0e5_f64;        // 1 bar
+    let temp_si = 300.0_f64;
+    let tau_si  = 1.0e-12_f64;
+    let beta_si = 4.5e-10_f64;
+    let cfg = format!(
+        r#"schema_version = 1
+units = "si"
+init = "argon.in.xyz"
+
+[simulation]
+seed = 12345
+temperature = {temp_si}
+
+[[phase]]
+name = "run"
+n_steps = 10
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+
+[phase.barostat]
+kind = "c-rescale"
+pressure = {pres_si}
+temperature = {temp_si}
+tau = {tau_si}
+compressibility = {beta_si}
+seed = 17
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+"#
+    );
+    let path = write_config(&dir, &cfg);
+    let loaded = load_config(&path).unwrap();
+    let baro = loaded.phases[0]
+        .as_md()
+        .unwrap()
+        .barostat
+        .as_ref()
+        .unwrap();
+    assert_eq!(baro.kind, "c-rescale");
+    let rel = 1e-12;
+    let approx_eq = |a: f64, b: f64| (a - b).abs() <= rel * a.abs().max(b.abs()).max(1e-300);
+    let p = param_f64(baro, "pressure");
+    let t = param_f64(baro, "temperature");
+    let tau = param_f64(baro, "tau");
+    let beta = param_f64(baro, "compressibility");
+    assert!(approx_eq(p, pres_si / pres_f), "pressure {} vs expected {}", p, pres_si / pres_f);
+    assert!(approx_eq(t, temp_si / temp_f), "temperature {} vs expected {}", t, temp_si / temp_f);
+    assert!(approx_eq(tau, tau_si / time_f), "tau {} vs expected {}", tau, tau_si / time_f);
+    assert!(approx_eq(beta, beta_si / invp_f), "compressibility {} vs expected {}", beta, beta_si / invp_f);
+}
+
+// rq-8207d656
+#[test]
+fn si_units_rescale_steepest_descent_params() {
+    // Pin the steepest-descent arm of slot_kind_field_dims: every one of
+    // (initial_step, max_step, force_tolerance, energy_tolerance) is
+    // rescaled by its declared dimension.
+    use dynamics::io::PhaseKind;
+    let dir = tmp_path("si_steepest_descent_params");
+    let len_f = UnitSystem::Si.factor(Dimension::Length);
+    let force_f = UnitSystem::Si.factor(Dimension::Force);
+    let energy_f = UnitSystem::Si.factor(Dimension::Energy);
+    let init_si = 1.0e-12_f64;
+    let max_si = 1.0e-10_f64;
+    let ftol_si = 1.0e-12_f64;
+    let etol_si = 1.0e-22_f64;
+    let cfg = format!(
+        r#"schema_version = 1
+units = "si"
+init = "argon.in.xyz"
+
+[simulation]
+seed = 1
+temperature = 0.0
+
+[[minimization]]
+name = "min"
+
+[minimization.algorithm]
+kind = "steepest-descent"
+initial_step = {init_si:.16e}
+max_step = {max_si:.16e}
+force_tolerance = {ftol_si:.16e}
+energy_tolerance = {etol_si:.16e}
+max_iterations = 100
+
+[minimization.output]
+minlog_every = 1
+trajectory_every = 0
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+
+[neighbor_list]
+mode = "all-pairs"
+"#
+    );
+    let path = write_config(&dir, &cfg);
+    let loaded = load_config(&path).unwrap();
+    let algo = match &loaded.phases[0] {
+        PhaseKind::Minimization(m) => &m.algorithm,
+        _ => panic!("expected a minimization phase"),
+    };
+    assert_eq!(algo.kind, "steepest-descent");
+    let rel = 1e-12;
+    let approx_eq = |a: f64, b: f64| (a - b).abs() <= rel * a.abs().max(b.abs()).max(1e-300);
+    let init = param_f64(algo, "initial_step");
+    let max = param_f64(algo, "max_step");
+    let ftol = param_f64(algo, "force_tolerance");
+    let etol = param_f64(algo, "energy_tolerance");
+    assert!(approx_eq(init, init_si / len_f), "initial_step {} vs expected {}", init, init_si / len_f);
+    assert!(approx_eq(max, max_si / len_f), "max_step {} vs expected {}", max, max_si / len_f);
+    assert!(approx_eq(ftol, ftol_si / force_f), "force_tolerance {} vs expected {}", ftol, ftol_si / force_f);
+    assert!(approx_eq(etol, etol_si / energy_f), "energy_tolerance {} vs expected {}", etol, etol_si / energy_f);
+}
