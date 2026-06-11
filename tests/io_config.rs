@@ -3201,7 +3201,7 @@ fn load_constraint_types_shake() {
     assert_eq!(builder.expected_atom_count(&ct.params), 3);
 }
 
-// rq-9a80c43c
+// rq-9a80c43c rq-09f2d9c2
 #[test]
 fn reject_shake_params_malformed() {
     let dir = tmp_path("constraint_infeasible");
@@ -3217,6 +3217,46 @@ fn reject_shake_params_malformed() {
         }
         other => panic!("expected ShakeParamsMalformed, got {other:?}"),
     }
+}
+
+// Helper for `[[constraint_types]]` SHAKE config-load rejection tests.
+fn assert_load_config_rejects_shake_params(constraints_body: &str, atoms: u32) {
+    let dir = tmp_path("constraint_load_reject");
+    let body = format!(
+        "{}\n[[constraint_types]]\nname = \"BAD\"\nkind = \"shake\"\natoms = {}\nconstraints = [\n{}]\n",
+        minimal_config(),
+        atoms,
+        constraints_body,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::ShakeParamsMalformed { name, .. } => assert_eq!(name, "BAD"),
+        other => panic!("expected ShakeParamsMalformed, got {other:?}"),
+    }
+}
+
+// rq-2f9b0e01
+#[test]
+fn config_load_rejects_shake_atoms_exceeds_max_group_atoms() {
+    assert_load_config_rejects_shake_params(
+        "  { i = 0, j = 1, d = 1.0e-10 },\n",
+        9,
+    );
+}
+
+// rq-ad2f7a73
+#[test]
+fn config_load_rejects_shake_constraints_exceeds_max_group_constraints() {
+    let mut entries = String::new();
+    let mut count = 0;
+    'outer: for i in 0..8u32 {
+        for j in (i + 1)..8u32 {
+            if count >= 13 { break 'outer; }
+            entries.push_str(&format!("  {{ i = {i}, j = {j}, d = 1.0e-10 }},\n"));
+            count += 1;
+        }
+    }
+    assert_load_config_rejects_shake_params(&entries, 8);
 }
 
 #[test]

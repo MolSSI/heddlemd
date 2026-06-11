@@ -1035,7 +1035,12 @@
   "rq-09f2d9c2": {
     "decl": "Scenario: ShakeConstraintsState::new rejects a constraint with i == j",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ShakeConstraintsState::new rejects a constraint with i == j",
     "type": "scenario"
   },
@@ -2124,7 +2129,12 @@
   "rq-13f424a1": {
     "decl": "Scenario: shake_positions_no_velocity restores constraint distances from off-manifold positions",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "shake_positions_no_velocity restores constraint distances from off-manifold positions",
     "type": "scenario"
   },
@@ -3071,7 +3081,12 @@
   "rq-1d06fac7": {
     "decl": "Scenario: A 5-atom methane group's C-H constraints remain within tolerance after 100 steps",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "A 5-atom methane group's C-H constraints remain within tolerance after 100 steps",
     "type": "scenario"
   },
@@ -5018,7 +5033,12 @@
   "rq-2f9b0e01": {
     "decl": "Scenario: A group whose declared atoms field exceeds MAX_GROUP_ATOMS is rejected at config load",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "A group whose declared atoms field exceeds MAX_GROUP_ATOMS is rejected at config load",
     "type": "scenario"
   },
@@ -6058,7 +6078,12 @@
   "rq-3aef0b06": {
     "decl": "Scenario: rattle_velocities skips the velocity-level virial accumulation when dt <= 0",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "rattle_velocities skips the velocity-level virial accumulation when dt <= 0",
     "type": "scenario"
   },
@@ -6117,7 +6142,12 @@
   "rq-3b6f4dec": {
     "decl": "Scenario: rattle_velocities accumulates a velocity-level constraint virial when dt > 0",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "rattle_velocities accumulates a velocity-level constraint virial when dt > 0",
     "type": "scenario"
   },
@@ -7997,7 +8027,12 @@
   "rq-513b4dbe": {
     "decl": "Scenario: constraint_virial_scatter handles two disjoint groups",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "constraint_virial_scatter handles two disjoint groups",
     "type": "scenario"
   },
@@ -8931,7 +8966,12 @@
   "rq-5be2064b": {
     "decl": "Scenario: ShakeConstraintsState::new rejects a non-positive target distance",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ShakeConstraintsState::new rejects a non-positive target distance",
     "type": "scenario"
   },
@@ -9701,7 +9741,12 @@
   "rq-64700eb0": {
     "decl": "Scenario: ShakeConstraintsState::new with a single 3-atom water group succeeds",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ShakeConstraintsState::new with a single 3-atom water group succeeds",
     "type": "scenario"
   },
@@ -9791,7 +9836,12 @@
   "rq-659836c5": {
     "decl": "Scenario: ShakeConstraintsState::new rejects a constraint type with atoms == 0",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ShakeConstraintsState::new rejects a constraint type with atoms == 0",
     "type": "scenario"
   },
@@ -11318,7 +11368,12 @@
   "rq-757a5bad": {
     "decl": "Scenario: shake_positions writes a non-zero position-level constraint virial",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "shake_positions writes a non-zero position-level constraint virial",
     "type": "scenario"
   },
@@ -11870,7 +11925,12 @@
   "rq-79c091e0": {
     "decl": "Scenario: ShakeConstraintsState::new with empty constraint list succeeds and is a no-op",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ShakeConstraintsState::new with empty constraint list succeeds and is a no-op",
     "type": "scenario"
   },
@@ -12966,7 +13026,12 @@
   "rq-8471c200": {
     "decl": "Scenario: constraint_virial_scatter additively writes per-atom virial into particle_virials",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "constraint_virial_scatter additively writes per-atom virial into particle_virials",
     "type": "scenario"
   },
@@ -14954,7 +15019,12 @@
   "rq-9bd207b2": {
     "decl": "Scenario: ShakeConstraintsState::new rejects constraints > MAX_GROUP_CONSTRAINTS",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ShakeConstraintsState::new rejects constraints > MAX_GROUP_CONSTRAINTS",
     "type": "scenario"
   },
@@ -16207,7 +16277,12 @@
   "rq-a8971153": {
     "decl": "Scenario: ShakeConstraintsState::new rejects a duplicate constraint pair",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ShakeConstraintsState::new rejects a duplicate constraint pair",
     "type": "scenario"
   },
@@ -16696,7 +16771,12 @@
   "rq-ad2f7a73": {
     "decl": "Scenario: A group whose constraints list exceeds MAX_GROUP_CONSTRAINTS is rejected at config load",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "A group whose constraints list exceeds MAX_GROUP_CONSTRAINTS is rejected at config load",
     "type": "scenario"
   },
@@ -18993,7 +19073,12 @@
   "rq-c70532a9": {
     "decl": "Scenario: ShakeConstraintsState::new with a 5-atom methane group succeeds",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ShakeConstraintsState::new with a 5-atom methane group succeeds",
     "type": "scenario"
   },
@@ -19784,7 +19869,12 @@
   "rq-cfb1e3aa": {
     "decl": "Scenario: The constraint-iteration order matches the topology's declared order",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "The constraint-iteration order matches the topology's declared order",
     "type": "scenario"
   },
@@ -22086,7 +22176,12 @@
   "rq-e6e7d6e2": {
     "decl": "Scenario: ShakeConstraintsState::new rejects atoms > MAX_GROUP_ATOMS",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ShakeConstraintsState::new rejects atoms > MAX_GROUP_ATOMS",
     "type": "scenario"
   },
@@ -24300,7 +24395,12 @@
   "rq-fc27df14": {
     "decl": "Scenario: A SHAKE-only run with no Constraint slot active leaves constraint distances drifting",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "A SHAKE-only run with no Constraint slot active leaves constraint distances drifting",
     "type": "scenario"
   },
@@ -24642,7 +24742,12 @@
   "rq-ff235ded": {
     "decl": "Scenario: A full velocity-Verlet timestep with one rigid SPC/E group preserves all three",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "A full velocity-Verlet timestep with one rigid SPC/E group preserves all three",
     "type": "scenario"
   },

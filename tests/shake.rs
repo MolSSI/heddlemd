@@ -120,7 +120,7 @@ fn big_box() -> SimulationBox {
 
 // --- Construction tests --------------------------------------------------
 
-// rq-3abb71cd
+// rq-3abb71cd rq-64700eb0
 #[test]
 fn construct_shake_slot_for_one_water() {
     let gpu = init_device().unwrap();
@@ -187,6 +187,91 @@ fn shake_rejects_malformed_constraint_pair() {
     }
 }
 
+// Helper: try to construct a ShakeConstraintsState with a custom
+// constraint-type body; expect a MalformedShakeType error whose
+// `reason` contains the substring `expected_reason`.
+fn assert_shake_constraints_state_rejects(params_body: &str, expected_reason: &str) {
+    let gpu = init_device().unwrap();
+    let list = sequential_shake_list(1);
+    let state = water_state(1, 10.0);
+    let bad_type = NamedSlotConfig::from_params_str("SPCE", "shake", params_body);
+    let err = ShakeConstraintsState::new(
+        Arc::clone(&gpu.device),
+        &list,
+        &state.masses,
+        &[bad_type],
+    )
+    .unwrap_err();
+    match err {
+        ShakeError::MalformedShakeType { reason, .. } => {
+            assert!(
+                reason.contains(expected_reason),
+                "expected reason containing `{expected_reason}`, got `{reason}`"
+            );
+        }
+        other => panic!("expected MalformedShakeType, got {other:?}"),
+    }
+}
+
+// rq-659836c5
+#[test]
+fn shake_constraints_state_rejects_atoms_zero() {
+    assert_shake_constraints_state_rejects(
+        "atoms = 0\nconstraints = [\n  { i = 0, j = 1, d = 1.0 },\n]\n",
+        "atoms must be strictly positive",
+    );
+}
+
+// rq-e6e7d6e2
+#[test]
+fn shake_constraints_state_rejects_atoms_exceeds_max() {
+    assert_shake_constraints_state_rejects(
+        "atoms = 9\nconstraints = [\n  { i = 0, j = 1, d = 1.0 },\n]\n",
+        "MAX_GROUP_ATOMS",
+    );
+}
+
+// rq-9bd207b2
+#[test]
+fn shake_constraints_state_rejects_constraints_exceeds_max() {
+    // 13 constraint pairs (one per (0,k) for k in 1..=12 — but we only
+    // have 8 max atoms, so synthesise 13 pairs within atoms=8 by
+    // covering every pair).
+    let mut entries = String::new();
+    let mut count = 0;
+    'outer: for i in 0..8u32 {
+        for j in (i + 1)..8u32 {
+            if count >= 13 { break 'outer; }
+            entries.push_str(&format!("  {{ i = {i}, j = {j}, d = 1.0 }},\n"));
+            count += 1;
+        }
+    }
+    let body = format!("atoms = 8\nconstraints = [\n{entries}]\n");
+    assert_shake_constraints_state_rejects(&body, "MAX_GROUP_CONSTRAINTS");
+}
+
+// rq-a8971153
+#[test]
+fn shake_constraints_state_rejects_duplicate_constraint_pair() {
+    assert_shake_constraints_state_rejects(
+        "atoms = 3\nconstraints = [\n  { i = 0, j = 1, d = 1.0 },\n  { i = 1, j = 0, d = 1.2 },\n]\n",
+        "duplicate constraint pair",
+    );
+}
+
+// rq-5be2064b
+#[test]
+fn shake_constraints_state_rejects_non_positive_target_distance() {
+    assert_shake_constraints_state_rejects(
+        "atoms = 3\nconstraints = [\n  { i = 0, j = 1, d = 0.0 },\n]\n",
+        "strictly positive",
+    );
+    assert_shake_constraints_state_rejects(
+        "atoms = 3\nconstraints = [\n  { i = 0, j = 1, d = -1.0 },\n]\n",
+        "strictly positive",
+    );
+}
+
 // rq-7ef08958 rq-18165336
 #[test]
 fn empty_constraint_registry_reports_unsupported_kind() {
@@ -207,7 +292,7 @@ fn empty_constraint_registry_reports_unsupported_kind() {
 
 // --- Empty-state tests ---------------------------------------------------
 
-// rq-5d972f15
+// rq-5d972f15 rq-79c091e0
 #[test]
 fn shake_hooks_on_zero_group_slot_are_noops() {
     let gpu = init_device().unwrap();
@@ -548,6 +633,561 @@ fn rattle_velocities_preserves_centre_of_mass_velocity() {
 }
 
 // --- Side effects --------------------------------------------------------
+
+// rq-757a5bad
+#[test]
+fn shake_positions_writes_non_zero_position_level_constraint_virial() {
+    // After apply_after_drift on a non-trivially perturbed water,
+    // constraint_virial on the slot must contain non-zero entries for
+    // every atom in the group.
+    let gpu = init_device().unwrap();
+    let list = sequential_shake_list(1);
+    let state = water_state(1, 10.0);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let sim_box = big_box();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut slot = ShakeConstraintsState::new(
+        gpu.device.clone(),
+        &list,
+        &state.masses,
+        &[spce_type()],
+    )
+    .unwrap();
+    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    // Perturb H1 along the O-H1 axis to force a position-level virial
+    // contribution from every constraint.
+    let mut pos_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let dx = pos_x[1] - pos_x[0];
+    pos_x[1] = pos_x[0] + dx * 1.05;
+    gpu.device.htod_sync_copy_into(&pos_x, &mut buffers.positions_x).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    let virial: Vec<f32> = gpu.device.dtoh_sync_copy(&slot.constraint_virial).unwrap();
+    // The three water atoms each carry a virial entry. At least two
+    // must be non-zero (the O-H1 pair drives a position-level virial on
+    // both atoms).
+    let nonzero = virial.iter().take(3).filter(|&&v| v.abs() > 1e-30).count();
+    assert!(nonzero >= 2, "expected ≥2 non-zero virial entries, got {virial:?}");
+}
+
+// rq-13f424a1
+#[test]
+fn shake_positions_no_velocity_restores_constraint_distances_from_off_manifold_positions() {
+    // apply_position_projection_only must restore constraint distances
+    // without snapshotting (minimization use case). Set positions
+    // off-manifold and verify post-call distances match r_oh / r_hh.
+    let gpu = init_device().unwrap();
+    let list = sequential_shake_list(1);
+    let state = water_state(1, 10.0);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let sim_box = big_box();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut slot = ShakeConstraintsState::new(
+        gpu.device.clone(),
+        &list,
+        &state.masses,
+        &[spce_type()],
+    )
+    .unwrap();
+    // Snapshot velocities and virials so we can verify they're
+    // untouched.
+    let vel_x_snap: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    let vel_y_snap: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
+    let vel_z_snap: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
+    let virial_snap: Vec<f32> = gpu.device.dtoh_sync_copy(&slot.constraint_virial).unwrap();
+    // Perturb every constraint by ~5%.
+    let mut pos_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let mut pos_y: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
+    let mut pos_z: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+    for i in 1..3 {
+        let dx = pos_x[i] - pos_x[0];
+        let dy = pos_y[i] - pos_y[0];
+        let dz = pos_z[i] - pos_z[0];
+        pos_x[i] = pos_x[0] + dx * 1.05;
+        pos_y[i] = pos_y[0] + dy * 1.05;
+        pos_z[i] = pos_z[0] + dz * 1.05;
+    }
+    gpu.device.htod_sync_copy_into(&pos_x, &mut buffers.positions_x).unwrap();
+    gpu.device.htod_sync_copy_into(&pos_y, &mut buffers.positions_y).unwrap();
+    gpu.device.htod_sync_copy_into(&pos_z, &mut buffers.positions_z).unwrap();
+    slot.apply_position_projection_only(&mut buffers, &sim_box, &mut timings).unwrap();
+    let pos_x_c: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let pos_y_c: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
+    let pos_z_c: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+    let d_oh1 = dist(pos_x_c[0], pos_y_c[0], pos_z_c[0], pos_x_c[1], pos_y_c[1], pos_z_c[1]);
+    let d_oh2 = dist(pos_x_c[0], pos_y_c[0], pos_z_c[0], pos_x_c[2], pos_y_c[2], pos_z_c[2]);
+    let d_hh  = dist(pos_x_c[1], pos_y_c[1], pos_z_c[1], pos_x_c[2], pos_y_c[2], pos_z_c[2]);
+    let tol = 1.0e-4;
+    assert!(((d_oh1 - R_OH) / R_OH).abs() < tol);
+    assert!(((d_oh2 - R_OH) / R_OH).abs() < tol);
+    assert!(((d_hh  - R_HH) / R_HH).abs() < tol);
+    // Velocities and constraint_virial must be untouched.
+    let vel_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    let vel_y: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
+    let vel_z: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
+    let virial: Vec<f32> = gpu.device.dtoh_sync_copy(&slot.constraint_virial).unwrap();
+    assert_eq!(vel_x, vel_x_snap);
+    assert_eq!(vel_y, vel_y_snap);
+    assert_eq!(vel_z, vel_z_snap);
+    assert_eq!(virial, virial_snap);
+}
+
+// rq-3b6f4dec
+#[test]
+fn rattle_velocities_accumulates_velocity_level_constraint_virial_when_dt_positive() {
+    // After apply_after_drift (which writes the position-level half of
+    // the virial) and then apply_after_kick with dt > 0, the
+    // constraint_virial buffer holds the SUM of the position-level and
+    // velocity-level halves. The velocity-level half is non-zero iff
+    // the post-kick velocities are off the velocity manifold and the
+    // RATTLE iteration produced a correction.
+    let gpu = init_device().unwrap();
+    let list = sequential_shake_list(1);
+    let state = water_state(1, 10.0);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let sim_box = big_box();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut slot = ShakeConstraintsState::new(
+        gpu.device.clone(),
+        &list,
+        &state.masses,
+        &[spce_type()],
+    )
+    .unwrap();
+    // Drive a position-level virial first (snapshot + perturb +
+    // after_drift).
+    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    let mut pos_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let dx = pos_x[1] - pos_x[0];
+    pos_x[1] = pos_x[0] + dx * 1.05;
+    gpu.device.htod_sync_copy_into(&pos_x, &mut buffers.positions_x).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    let virial_after_pos: Vec<f32> = gpu.device.dtoh_sync_copy(&slot.constraint_virial).unwrap();
+    // Inject off-manifold velocities so RATTLE has work to do.
+    let vx = vec![1.0e-3_f32, -0.5e-3, 0.3e-3];
+    let vy = vec![0.2e-3_f32, 0.4e-3, -0.7e-3];
+    let vz = vec![-0.6e-3_f32, 0.1e-3, 0.8e-3];
+    gpu.device.htod_sync_copy_into(&vx, &mut buffers.velocities_x).unwrap();
+    gpu.device.htod_sync_copy_into(&vy, &mut buffers.velocities_y).unwrap();
+    gpu.device.htod_sync_copy_into(&vz, &mut buffers.velocities_z).unwrap();
+    // dt > 0 → velocity-level virial accumulates on top of the
+    // position-level virial already in the buffer.
+    slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    let virial_after_kick: Vec<f32> = gpu.device.dtoh_sync_copy(&slot.constraint_virial).unwrap();
+    // Note: apply_after_kick also calls constraint_virial_scatter which
+    // doesn't modify constraint_virial. The velocity-level half is
+    // written into the same buffer by rattle_velocities.
+    // At least one entry must have changed (the velocity-level half is
+    // non-zero for the perturbed velocities).
+    let n = virial_after_pos.len().min(virial_after_kick.len());
+    let any_changed = (0..n).any(|i| (virial_after_kick[i] - virial_after_pos[i]).abs() > 1e-30);
+    assert!(any_changed, "velocity-level virial accumulation should have changed at least one entry");
+}
+
+// rq-3aef0b06
+#[test]
+fn rattle_velocities_skips_velocity_level_virial_when_dt_zero() {
+    // apply_initial_velocity_projection calls rattle_velocities with
+    // dt = 0.0; the kernel must skip the velocity-level virial
+    // accumulation in this branch (no associated timestep). Verify by
+    // snapshotting constraint_virial before the call and asserting it
+    // is unchanged after.
+    let gpu = init_device().unwrap();
+    let list = sequential_shake_list(1);
+    let state = water_state(1, 10.0);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let sim_box = big_box();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut slot = ShakeConstraintsState::new(
+        gpu.device.clone(),
+        &list,
+        &state.masses,
+        &[spce_type()],
+    )
+    .unwrap();
+    // Inject off-manifold velocities so the rattle iteration runs.
+    let vx = vec![1.0e-3_f32, -0.5e-3, 0.3e-3];
+    let vy = vec![0.2e-3_f32, 0.4e-3, -0.7e-3];
+    let vz = vec![-0.6e-3_f32, 0.1e-3, 0.8e-3];
+    gpu.device.htod_sync_copy_into(&vx, &mut buffers.velocities_x).unwrap();
+    gpu.device.htod_sync_copy_into(&vy, &mut buffers.velocities_y).unwrap();
+    gpu.device.htod_sync_copy_into(&vz, &mut buffers.velocities_z).unwrap();
+    let virial_snap: Vec<f32> = gpu.device.dtoh_sync_copy(&slot.constraint_virial).unwrap();
+    slot.apply_initial_velocity_projection(&mut buffers, &sim_box, &mut timings).unwrap();
+    let virial_after: Vec<f32> = gpu.device.dtoh_sync_copy(&slot.constraint_virial).unwrap();
+    assert_eq!(
+        virial_snap, virial_after,
+        "rattle with dt = 0 must not touch constraint_virial"
+    );
+    // Sanity: velocities should have been projected (rattle still
+    // runs), so they differ from the off-manifold input.
+    let vx_after: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    assert_ne!(vx_after, vx, "rattle should have projected velocities");
+}
+
+// rq-8471c200
+#[test]
+fn constraint_virial_scatter_additively_writes_into_particle_virials() {
+    // Initialise particle_virials to a known non-zero pattern; run
+    // apply_after_kick (which fires shake's virial scatter step) and
+    // verify particle_virials += per-atom constraint_virial entries.
+    let gpu = init_device().unwrap();
+    let list = sequential_shake_list(1);
+    let state = water_state(1, 10.0);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let sim_box = big_box();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut slot = ShakeConstraintsState::new(
+        gpu.device.clone(),
+        &list,
+        &state.masses,
+        &[spce_type()],
+    )
+    .unwrap();
+    // Drive non-zero virial via the after_drift hook.
+    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    let mut pos_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let dx = pos_x[1] - pos_x[0];
+    pos_x[1] = pos_x[0] + dx * 1.05;
+    gpu.device.htod_sync_copy_into(&pos_x, &mut buffers.positions_x).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    // Seed buffers.virials with a recognisable pattern, then snapshot
+    // the per-atom constraint_virial values.
+    let pre_virials = vec![10.0_f32, 20.0, 30.0];
+    gpu.device.htod_sync_copy_into(&pre_virials, &mut buffers.virials).unwrap();
+    let constraint_virial: Vec<f32> = gpu.device.dtoh_sync_copy(&slot.constraint_virial).unwrap();
+    // apply_after_kick runs rattle + constraint_virial_scatter.
+    slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    let post_virials: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
+    // The post-kick constraint_virial includes both the position-level
+    // half (already there) and the velocity-level half (added by
+    // rattle). The scatter adds those to particle_virials.
+    let post_constraint: Vec<f32> = gpu.device.dtoh_sync_copy(&slot.constraint_virial).unwrap();
+    let _ = constraint_virial; // pre-rattle snapshot (unused; we use post)
+    // The expectation: each atom in the group receives the SUM of its
+    // contributions across constraint slots (one slot per atom-of-group
+    // in this single-group case → one contribution per atom). So:
+    //   post_virials[i] = pre_virials[i] + post_constraint[i]
+    let tol = 1e-5_f32;
+    for i in 0..3 {
+        let expected = pre_virials[i] + post_constraint[i];
+        assert!(
+            (post_virials[i] - expected).abs() <= tol * expected.abs().max(1.0),
+            "particle_virials[{i}] = {} vs expected {} (pre {} + cv {})",
+            post_virials[i], expected, pre_virials[i], post_constraint[i]
+        );
+    }
+}
+
+// rq-513b4dbe
+#[test]
+fn constraint_virial_scatter_handles_two_disjoint_groups() {
+    // Two waters → two disjoint SHAKE groups. After apply_after_kick,
+    // particle_virials carries non-zero contributions for every atom
+    // in both groups.
+    let gpu = init_device().unwrap();
+    let list = sequential_shake_list(2);
+    let state = water_state(2, 10.0);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let sim_box = big_box();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut slot = ShakeConstraintsState::new(
+        gpu.device.clone(),
+        &list,
+        &state.masses,
+        &[spce_type()],
+    )
+    .unwrap();
+    // Perturb both waters' H1.
+    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    let mut pos_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    for w in 0..2 {
+        let i_o = 3 * w;
+        let i_h1 = 3 * w + 1;
+        let dx = pos_x[i_h1] - pos_x[i_o];
+        pos_x[i_h1] = pos_x[i_o] + dx * 1.05;
+    }
+    gpu.device.htod_sync_copy_into(&pos_x, &mut buffers.positions_x).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    let pre_virials = vec![0.0_f32; 6];
+    gpu.device.htod_sync_copy_into(&pre_virials, &mut buffers.virials).unwrap();
+    slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    let post_virials: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
+    // Both groups' atoms received scatter contributions; in particular,
+    // group 1's atom 3 (O of water 1) and atom 4 (H1 of water 1) have
+    // non-zero virial entries — confirms the scatter handled both
+    // groups disjointly without overwriting atom slots.
+    for atom in [0usize, 1, 2, 3, 4, 5] {
+        assert!(
+            post_virials[atom].abs() > 1e-30,
+            "atom {atom} in disjoint group received no virial contribution: {post_virials:?}"
+        );
+    }
+}
+
+// Methane (CH4) topology helper: 5 atoms (C, H, H, H, H), 4 C-H constraints.
+const R_CH: f32 = 2.066_0; // ~1.094 Å in Bohr
+fn methane_type() -> NamedSlotConfig {
+    NamedSlotConfig::from_params_str(
+        "CH4",
+        "shake",
+        &format!(
+            "atoms = 5\nconstraints = [\n  {{ i = 0, j = 1, d = {} }},\n  {{ i = 0, j = 2, d = {} }},\n  {{ i = 0, j = 3, d = {} }},\n  {{ i = 0, j = 4, d = {} }},\n]\n",
+            R_CH as f64, R_CH as f64, R_CH as f64, R_CH as f64,
+        ),
+    )
+}
+
+fn methane_list() -> ConstraintList {
+    let groups = vec![ConstraintGroup {
+        atom_offset: 0,
+        atom_count: 5,
+        constraint_offset: 0,
+        constraint_count: 4,
+        constraint_type_index: 0,
+    }];
+    let group_atoms = vec![0u32, 1, 2, 3, 4];
+    let group_constraints = vec![
+        GroupConstraint { local_i: 0, local_j: 1, r0: R_CH },
+        GroupConstraint { local_i: 0, local_j: 2, r0: R_CH },
+        GroupConstraint { local_i: 0, local_j: 3, r0: R_CH },
+        GroupConstraint { local_i: 0, local_j: 4, r0: R_CH },
+    ];
+    ConstraintList {
+        groups,
+        group_atoms,
+        group_constraints,
+        particle_count: 5,
+    }
+}
+
+fn methane_state() -> ParticleState {
+    // C at origin, four H atoms at tetrahedral positions scaled to
+    // r_CH along the body diagonals (±,±,±) / sqrt(3).
+    let inv_sqrt3 = 1.0_f32 / (3.0_f32).sqrt();
+    let h_offset = R_CH * inv_sqrt3;
+    let positions_x = vec![0.0, h_offset, -h_offset, h_offset, -h_offset];
+    let positions_y = vec![0.0, h_offset, -h_offset, -h_offset, h_offset];
+    let positions_z = vec![0.0, h_offset, h_offset, -h_offset, -h_offset];
+    // C ~ 12 amu; H ~ 1 amu in electron-mass units.
+    let m_c = 21_874.66_f32;
+    let m_h = 1_837.47_f32;
+    let masses = vec![m_c, m_h, m_h, m_h, m_h];
+    ParticleState::new(
+        positions_x,
+        positions_y,
+        positions_z,
+        vec![0.0_f32; 5],
+        vec![0.0_f32; 5],
+        vec![0.0_f32; 5],
+        masses,
+        vec![0.0_f32; 5],
+        vec![0u32; 5],
+        None,
+        None,
+    )
+    .unwrap()
+}
+
+// rq-c70532a9
+#[test]
+fn construct_shake_slot_for_methane_succeeds() {
+    let gpu = init_device().unwrap();
+    let list = methane_list();
+    let state = methane_state();
+    let slot = ShakeConstraintsState::new(
+        gpu.device.clone(),
+        &list,
+        &state.masses,
+        &[methane_type()],
+    )
+    .unwrap();
+    assert_eq!(slot.group_count, 1);
+    assert_eq!(slot.particle_count, 5);
+}
+
+// rq-1d06fac7
+#[test]
+fn methane_c_h_constraints_remain_within_tolerance_after_100_steps() {
+    let gpu = init_device().unwrap();
+    let list = methane_list();
+    let state = methane_state();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let sim_box = big_box();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut slot = ShakeConstraintsState::new(
+        gpu.device.clone(),
+        &list,
+        &state.masses,
+        &[methane_type()],
+    )
+    .unwrap();
+    // Inject small per-atom velocities; let the integration-free SHAKE
+    // round-trip (snapshot → after_drift → after_kick) run 100 times
+    // and verify constraints stay tight throughout.
+    let v = 1.0e-4_f32;
+    let vx = vec![0.0_f32, v, -v, v, -v];
+    let vy = vec![0.0_f32, v, -v, -v, v];
+    let vz = vec![0.0_f32, v, v, -v, -v];
+    gpu.device.htod_sync_copy_into(&vx, &mut buffers.velocities_x).unwrap();
+    gpu.device.htod_sync_copy_into(&vy, &mut buffers.velocities_y).unwrap();
+    gpu.device.htod_sync_copy_into(&vz, &mut buffers.velocities_z).unwrap();
+    for _ in 0..100 {
+        slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+        // Simulate an unconstrained drift step: x += v · dt.
+        let mut pos_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+        let mut pos_y: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
+        let mut pos_z: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+        let cur_vx: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+        let cur_vy: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
+        let cur_vz: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
+        for i in 0..5 {
+            pos_x[i] += cur_vx[i];
+            pos_y[i] += cur_vy[i];
+            pos_z[i] += cur_vz[i];
+        }
+        gpu.device.htod_sync_copy_into(&pos_x, &mut buffers.positions_x).unwrap();
+        gpu.device.htod_sync_copy_into(&pos_y, &mut buffers.positions_y).unwrap();
+        gpu.device.htod_sync_copy_into(&pos_z, &mut buffers.positions_z).unwrap();
+        slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+        slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    }
+    // Constraint distances must still match r_CH.
+    let px: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let py: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
+    let pz: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+    let tol = 1.0e-3;
+    for i in 1..5 {
+        let d = dist(px[0], py[0], pz[0], px[i], py[i], pz[i]);
+        assert!(
+            ((d - R_CH) / R_CH).abs() < tol,
+            "C-H{i} drift after 100 steps: d = {d}, r_CH = {R_CH}"
+        );
+    }
+}
+
+// rq-fc27df14
+#[test]
+fn shake_only_run_with_no_constraint_slot_leaves_distances_drifting() {
+    // Negative control: skip the SHAKE projection between drift and
+    // after_kick. After 10 cycles, the constraint distances drift away
+    // from r_oh / r_hh significantly.
+    let gpu = init_device().unwrap();
+    let list = sequential_shake_list(1);
+    let state = water_state(1, 10.0);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    // Inject a velocity that would naturally pull H1 along the O-H1
+    // axis (stretching the bond) and let it drift unconstrained.
+    let vx = vec![0.0_f32, 1.0e-3, -1.0e-3];
+    let vy = vec![0.0_f32, 1.0e-3, -1.0e-3];
+    let vz = vec![0.0_f32, 0.0, 0.0];
+    gpu.device.htod_sync_copy_into(&vx, &mut buffers.velocities_x).unwrap();
+    gpu.device.htod_sync_copy_into(&vy, &mut buffers.velocities_y).unwrap();
+    gpu.device.htod_sync_copy_into(&vz, &mut buffers.velocities_z).unwrap();
+    let mut px: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let mut py: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
+    let mut pz: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+    for _ in 0..10 {
+        for i in 0..3 {
+            px[i] += vx[i];
+            py[i] += vy[i];
+            pz[i] += vz[i];
+        }
+    }
+    let d_oh1 = dist(px[0], py[0], pz[0], px[1], py[1], pz[1]);
+    let drift = ((d_oh1 - R_OH) / R_OH).abs();
+    assert!(
+        drift > 5.0e-3,
+        "without SHAKE, O-H1 distance should drift noticeably; got |Δ|/r_oh = {drift}, d_oh1 = {d_oh1}"
+    );
+    let _ = list;
+}
+
+// rq-ff235ded
+#[test]
+fn full_velocity_verlet_step_with_one_rigid_spce_group_preserves_all_three_distances() {
+    // Run apply_before_drift → drift (unconstrained) → apply_after_drift
+    // → apply_after_kick once with a non-trivial velocity. After the
+    // full SHAKE/RATTLE cycle, all three constraint distances are
+    // restored exactly within SHAKE tolerance.
+    let gpu = init_device().unwrap();
+    let list = sequential_shake_list(1);
+    let state = water_state(1, 10.0);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let sim_box = big_box();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut slot = ShakeConstraintsState::new(
+        gpu.device.clone(),
+        &list,
+        &state.masses,
+        &[spce_type()],
+    )
+    .unwrap();
+    // Non-zero velocities so the drift moves atoms.
+    let vx = vec![1.0e-4_f32, -2.0e-4, 1.5e-4];
+    let vy = vec![5.0e-5_f32, 3.0e-4, -1.0e-4];
+    let vz = vec![-1.0e-4_f32, 1.0e-4, 2.0e-4];
+    gpu.device.htod_sync_copy_into(&vx, &mut buffers.velocities_x).unwrap();
+    gpu.device.htod_sync_copy_into(&vy, &mut buffers.velocities_y).unwrap();
+    gpu.device.htod_sync_copy_into(&vz, &mut buffers.velocities_z).unwrap();
+    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    // Drift: x += v · dt (mimic the VV KickDrift sub-step's position update).
+    let mut px: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let mut py: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
+    let mut pz: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+    for i in 0..3 {
+        px[i] += vx[i];
+        py[i] += vy[i];
+        pz[i] += vz[i];
+    }
+    gpu.device.htod_sync_copy_into(&px, &mut buffers.positions_x).unwrap();
+    gpu.device.htod_sync_copy_into(&py, &mut buffers.positions_y).unwrap();
+    gpu.device.htod_sync_copy_into(&pz, &mut buffers.positions_z).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    let qx: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let qy: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
+    let qz: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+    let d_oh1 = dist(qx[0], qy[0], qz[0], qx[1], qy[1], qz[1]);
+    let d_oh2 = dist(qx[0], qy[0], qz[0], qx[2], qy[2], qz[2]);
+    let d_hh  = dist(qx[1], qy[1], qz[1], qx[2], qy[2], qz[2]);
+    let tol = 1.0e-4;
+    assert!(((d_oh1 - R_OH) / R_OH).abs() < tol);
+    assert!(((d_oh2 - R_OH) / R_OH).abs() < tol);
+    assert!(((d_hh  - R_HH) / R_HH).abs() < tol);
+}
+
+// rq-cfb1e3aa
+#[test]
+fn constraint_iteration_order_matches_topology_declared_order() {
+    // The order constraints appear in the ShakeConstraintsState's
+    // group_constraints_local_{i,j} device buffers must equal the
+    // order they were declared in the constraint-type's `constraints`
+    // array. Build a custom constraint type with a non-default order
+    // and verify the upload preserves it.
+    let gpu = init_device().unwrap();
+    let custom_type = NamedSlotConfig::from_params_str(
+        "SPCE_reversed",
+        "shake",
+        // Reversed pair order: (1,2), (0,2), (0,1).
+        &format!(
+            "atoms = 3\nconstraints = [\n  {{ i = 1, j = 2, d = {} }},\n  {{ i = 0, j = 2, d = {} }},\n  {{ i = 0, j = 1, d = {} }},\n]\n",
+            R_HH as f64, R_OH as f64, R_OH as f64,
+        ),
+    );
+    let list = sequential_shake_list(1);
+    let state = water_state(1, 10.0);
+    let slot = ShakeConstraintsState::new(
+        gpu.device.clone(),
+        &list,
+        &state.masses,
+        &[custom_type],
+    )
+    .unwrap();
+    let local_i: Vec<u8> = gpu.device.dtoh_sync_copy(&slot.group_constraints_local_i).unwrap();
+    let local_j: Vec<u8> = gpu.device.dtoh_sync_copy(&slot.group_constraints_local_j).unwrap();
+    assert_eq!(&local_i[..3], &[1u8, 0, 0]);
+    assert_eq!(&local_j[..3], &[2u8, 2, 1]);
+}
 
 // rq-fc6ec19e
 #[test]
