@@ -226,6 +226,7 @@ fn spread_conserves_total_charge() {
     );
 }
 
+// rq-e5bf6fea
 #[test]
 fn k_zero_entry_of_influence_function_is_zero() {
     let gpu = init_device().unwrap();

@@ -71,7 +71,7 @@ fn subset_preserves_global_atom_indices_and_particle_count() {
     assert_eq!(sub.groups[0].constraint_type_index, 11);
 }
 
-// rq-721e0fdb
+// rq-721e0fdb rq-744ddd67
 #[test]
 fn subset_with_empty_indices_yields_empty_list_preserving_particle_count() {
     let list = sample_list_three_groups();

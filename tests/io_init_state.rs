@@ -138,7 +138,7 @@ fn reject_negative_count() {
     }
 }
 
-// rq-4994ba90
+// rq-4994ba90 rq-dad92a8c
 #[test]
 fn reject_missing_comment_line() {
     let dir = tmp_path("missing_comment");

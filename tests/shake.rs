@@ -137,7 +137,7 @@ fn construct_shake_slot_for_one_water() {
     assert_eq!(slot.particle_count, 3);
 }
 
-// rq-3abb71cd
+// rq-3abb71cd rq-7921e537
 #[test]
 fn shake_registry_with_builtins_returns_some_for_non_empty_list() {
     let gpu = init_device().unwrap();
@@ -187,6 +187,7 @@ fn shake_rejects_malformed_constraint_pair() {
     }
 }
 
+// rq-7ef08958
 #[test]
 fn empty_constraint_registry_reports_unsupported_kind() {
     let gpu = init_device().unwrap();
@@ -268,7 +269,7 @@ fn dist(ax: f32, ay: f32, az: f32, bx: f32, by: f32, bz: f32) -> f32 {
     ((ax - bx).powi(2) + (ay - by).powi(2) + (az - bz).powi(2)).sqrt()
 }
 
-// rq-a8b68f59
+// rq-a8b68f59 rq-0f5c9f99 rq-7c13040a
 #[test]
 fn shake_positions_restores_constraint_distances_after_bond_stretch() {
     let gpu = init_device().unwrap();
@@ -395,7 +396,7 @@ fn shake_positions_preserves_centre_of_mass() {
     assert!((com_c.2 - com_u.2).abs() < tol, "COM z drifted: {} vs {}", com_c.2, com_u.2);
 }
 
-// rq-25acc667
+// rq-25acc667 rq-5d18fa01
 #[test]
 fn shake_positions_updates_half_step_velocities_consistently() {
     let gpu = init_device().unwrap();
@@ -441,7 +442,7 @@ fn shake_positions_updates_half_step_velocities_consistently() {
 
 // --- Velocity projection -------------------------------------------------
 
-// rq-66e657bf
+// rq-66e657bf rq-17b28c63
 #[test]
 fn rattle_velocities_zeroes_constraint_derivatives() {
     let gpu = init_device().unwrap();
@@ -497,7 +498,7 @@ fn rattle_velocities_zeroes_constraint_derivatives() {
     assert!(dot(1, 2).abs() < tol, "(v_H1 - v_H2) · r_HH = {}", dot(1, 2));
 }
 
-// rq-13af93b9
+// rq-13af93b9 rq-7e084b5e
 #[test]
 fn rattle_velocities_preserves_centre_of_mass_velocity() {
     let gpu = init_device().unwrap();
@@ -706,6 +707,7 @@ fn multiple_water_groups_evolve_independently() {
 // `shake_positions` must bring every atom into atom 0's image before
 // projecting, then write atoms 1..n-1 back via delta so their global
 // image bookkeeping is preserved.
+// rq-7a0a23e3
 #[test]
 fn shake_positions_handles_water_straddling_periodic_boundary() {
     let gpu = init_device().unwrap();
@@ -910,7 +912,7 @@ fn shake_positions_handles_water_straddling_periodic_boundary() {
 
 // --- Reproducibility -----------------------------------------------------
 
-// rq-99ee814d
+// rq-99ee814d rq-aa5ac09f rq-c7fc10c5
 #[test]
 fn two_independent_shake_runs_produce_byte_identical_outputs() {
     let gpu = init_device().unwrap();
@@ -984,6 +986,7 @@ fn shake_builder_kind_name_is_shake() {
 // constraints rejection. The integrator's `execute()` no longer
 // receives a constraint slot, so it cannot itself return any
 // "unsupported" error at run time.
+// rq-047c1f4d rq-09a19014 rq-53237ec4
 #[test]
 fn lossless_velocity_verlet_kind_does_not_support_constraints() {
     use dynamics::integrator::IntegratorRegistry;
@@ -996,6 +999,7 @@ fn lossless_velocity_verlet_kind_does_not_support_constraints() {
 
 // --- Integration through Integrator::step --------------------------------
 
+// rq-90538790
 #[test]
 fn integrator_step_dispatches_all_three_constraint_hooks() {
     use std::sync::{Arc as StdArc, Mutex};

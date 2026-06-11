@@ -712,6 +712,7 @@ fn run_empty_simulation() {
 // This scenario tests behavior when no GPU is available; on this CI we
 // have a GPU so we can't directly exercise the failure path. We assert
 // that the RunnerError::Gpu variant exists and could be returned.
+// rq-57c1b6a3
 #[test]
 fn no_gpu_available_variant_exists() {
     // Compile-time check that the variant exists; runtime check is impossible
@@ -737,6 +738,7 @@ fn run_summary_reflects_writes() {
 // preflight/init pathways instead. A full kernel-failure scenario would
 // require fault injection or a deliberately malformed PTX, both outside
 // this feature's scope.
+// rq-889076d5
 #[test]
 fn kernel_failure_exit_code_mapping_smoke() {
     // The cli_main_u8 returns 1 on setup-phase errors. Verified by

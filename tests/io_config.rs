@@ -645,7 +645,7 @@ fn accept_user_supplied_r_switch() {
     assert_eq!(cfg.pair_interactions[0].r_switch, 9.0e-10);
 }
 
-// rq-6f4f5ece
+// rq-6f4f5ece rq-c195ddf0
 #[test]
 fn default_r_switch_to_0_9_times_cutoff_when_omitted() {
     let dir = tmp_path("default_r_switch");
@@ -775,7 +775,7 @@ fn reject_empty_type_name() {
     }
 }
 
-// rq-560dffb8
+// rq-560dffb8 rq-f6107e43
 #[test]
 fn reject_duplicate_type_names() {
     let dir = tmp_path("duplicate_type_names");
@@ -1347,7 +1347,7 @@ fn langevin_temperature_zero_rejected() {
     }
 }
 
-// rq-f067338a
+// rq-f067338a rq-aa1492a7
 #[test]
 fn integrator_rejects_unknown_field_for_chosen_kind() {
     // Consolidates the per-kind "unknown integrator field" check across
@@ -1807,7 +1807,7 @@ fn neighbor_list_rejects_zero_max_neighbors() {
     ), "got {err:?}");
 }
 
-// rq-f7856bcc
+// rq-f7856bcc rq-ec28cbfb
 #[test]
 fn neighbor_list_rejects_non_positive_r_skin() {
     let dir = tmp_path("nl_zero_rskin");
@@ -1854,7 +1854,7 @@ fn valid_harmonic_angle_type_accepted() {
     }
 }
 
-// rq-57518e01
+// rq-57518e01 rq-dc94d9e3
 #[test]
 fn angle_type_missing_potential_rejected() {
     let dir = tmp_path("angle_no_pot");
@@ -3248,7 +3248,7 @@ fn supports_constraints_velocity_verlet_lossy_true() {
     assert!(supports_constraints_for(&k));
 }
 
-// rq-53237ec4
+// rq-53237ec4 rq-66ec7ee4
 #[test]
 fn supports_constraints_velocity_verlet_lossless_false() {
     let k = SlotConfig::from_params_str("velocity-verlet", "lossless = true\n");
@@ -3378,7 +3378,7 @@ cutoff = 1.0e-9
     }
 }
 
-// rq-43819abc — config filename must end in `.in.toml`.
+// rq-43819abc rq-1514bec6 — config filename must end in `.in.toml`.
 #[test]
 fn reject_config_without_in_toml_suffix() {
     let dir = tmp_path("reject_no_in_suffix");
@@ -3471,6 +3471,7 @@ fn units_explicit_si_accepted() {
     assert_eq!(cfg.units, UnitSystem::Si);
 }
 
+// rq-4b760f1c
 #[test]
 fn units_unknown_value_rejected() {
     let dir = tmp_path("units_unknown");
@@ -3631,6 +3632,7 @@ cutoff = {cutoff_au:.16e}
     }
 }
 
+// rq-a17033aa
 #[test]
 fn atomic_units_rescale_csvr_thermostat_params() {
     // Verify that slot params (open-shaped toml::Value) get rescaled by

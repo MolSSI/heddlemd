@@ -753,7 +753,7 @@ fn third_potential_extensibility() {
     }
 }
 
-// rq-c8e5b14e
+// rq-c8e5b14e rq-55d441ee
 #[test]
 fn two_independent_runs_byte_identical() {
     let gpu = init_device().unwrap();
@@ -862,7 +862,7 @@ impl dynamics::forces::PotentialBuilder for ConstStubBBuilder {
     }
 }
 
-// rq-a5aa743e
+// rq-a5aa743e rq-3d38868e
 #[test]
 fn combiner_sums_slot_rows_in_slot_order() {
     let gpu = init_device().unwrap();
@@ -1719,7 +1719,7 @@ impl PotentialBuilder for DuplicateLabelBuilder {
     }
 }
 
-// rq-24c36f8d
+// rq-24c36f8d rq-c170c0b7
 #[test]
 fn two_builders_producing_slots_with_same_label_fail_construction() {
     let gpu = init_device().unwrap();

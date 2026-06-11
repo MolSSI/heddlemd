@@ -647,6 +647,7 @@ fn log_column_values_returns_cached_pressure_and_volume() {
 
 // --- Composition with the orthogonal framework ---
 
+// rq-13bf10fc
 #[test]
 fn composes_with_velocity_verlet_and_berendsen_thermostat() {
     // Smoke test: full per-step dispatch order

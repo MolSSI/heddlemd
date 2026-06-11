@@ -517,7 +517,7 @@ fn dynamics_lint_reports_missing_trajectory() {
     assert!(matches!(lint_stage(&report, "trajectory"), LintStatus::Fail { .. }));
 }
 
-// rq-c67ad79e
+// rq-c67ad79e rq-b306b357
 #[test]
 fn dynamics_lint_reports_geometric_failure_under_analyses_stage() {
     let dir = tmp_path("lint_geom_fail");

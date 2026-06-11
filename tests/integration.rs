@@ -336,7 +336,7 @@ fn dt_zero_leaves_state_unchanged_for_kick() {
     assert_eq!(result.particle_ids, snapshot.particle_ids);
 }
 
-// rq-1e2d749d
+// rq-1e2d749d rq-58cac735
 #[test]
 fn vv_kick_drift_on_empty_state_is_noop() {
     let gpu = init_device().expect("init_device");
@@ -431,7 +431,7 @@ fn block_non_aligned_particle_count_is_handled() {
     assert_eq!(result.particle_ids, snapshot.particle_ids);
 }
 
-// rq-7dfa14cf
+// rq-7dfa14cf rq-bb075030
 #[test]
 fn vv_kick_drift_does_not_modify_forces_or_masses() {
     let gpu = init_device().expect("init_device");
@@ -449,7 +449,7 @@ fn vv_kick_drift_does_not_modify_forces_or_masses() {
     assert_eq!(result.masses, snapshot.masses);
 }
 
-// rq-f721b7a1
+// rq-f721b7a1 rq-acafdfe4
 #[test]
 fn vv_kick_does_not_modify_forces_masses_or_positions() {
     let gpu = init_device().expect("init_device");
@@ -469,7 +469,7 @@ fn vv_kick_does_not_modify_forces_masses_or_positions() {
     assert_eq!(result.positions_z, snapshot.positions_z);
 }
 
-// rq-37e6f318
+// rq-37e6f318 rq-2a0e97f5
 #[test]
 fn two_independent_runs_produce_byte_identical_outputs() {
     let gpu = init_device().expect("init_device");

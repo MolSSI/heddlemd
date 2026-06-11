@@ -91,6 +91,7 @@ fn force_field_registers_spme_slots_when_configured() {
 }
 
 // @rq-09d4e13f
+// rq-09d4e13f
 #[test]
 fn spme_reciprocal_state_two_independent_constructs_produce_byte_identical_grids() {
     let gpu = init_device().unwrap();
@@ -214,6 +215,7 @@ fn spme_reciprocal_total_energy_equals_recip_minus_self() {
 // The real-space `erfc` slot writes zero force for a pair whose
 // separation exceeds `r_cut_real`. We construct an isolated pair just
 // outside the cutoff and verify that the per-particle force is zero.
+// rq-af7018c0
 #[test]
 fn spme_real_slot_zero_outside_r_cut() {
     let gpu = init_device().unwrap();
@@ -272,6 +274,7 @@ fn spme_real_slot_zero_outside_r_cut() {
 // Real-space `erfc` slot matches the closed-form pair force
 //   F = k_C · q_i q_j / r² · (erfc(α r) / r + 2 α / √π · exp(−(α r)²))
 // for an isolated pair well inside the cutoff.
+// rq-83088c2f
 #[test]
 fn spme_real_slot_matches_closed_form_erfc_pair() {
     let gpu = init_device().unwrap();
@@ -386,6 +389,7 @@ fn cufft_smoke_test_passes_on_this_device() {
 //
 // We bypass `run_simulation` (which would require disk artifacts) and
 // instead recompute the threshold the same way the runner does.
+// rq-674cc467
 #[test]
 fn box_compatibility_picks_up_spme_r_cut_real() {
     let r_skin: f64 = 0.05;
@@ -404,6 +408,7 @@ fn box_compatibility_picks_up_spme_r_cut_real() {
 // @rq-203ecf81
 //
 // Reject a config that declares both [spme] and [coulomb].
+// rq-203ecf81
 #[test]
 fn config_rejects_both_spme_and_coulomb() {
     let toml = r#"schema_version = 1

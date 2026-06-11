@@ -183,7 +183,7 @@ fn registry_builds_mtk_npt_with_particle_count_zero() {
 
 // --- Ownership flags ---
 
-// rq-fecc63ef rq-2d46cad5
+// rq-fecc63ef rq-2d46cad5 rq-1b467c03 rq-6478b9c9
 #[test]
 fn mtk_npt_owns_thermostat_and_barostat() {
     use dynamics::integrator::IntegratorRegistry;

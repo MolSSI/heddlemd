@@ -341,7 +341,7 @@ fn exclusion_scale_out_of_range_above_one() {
     }
 }
 
-// rq-2b4a324a
+// rq-2b4a324a rq-9f658edf rq-f0b9b0f5
 #[test]
 fn exclusion_scale_nan_rejected() {
     let dir = tmp_path("scale_nan");

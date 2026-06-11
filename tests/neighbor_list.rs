@@ -128,7 +128,7 @@ fn neighbor_list_contains_all_within_search_radius_and_is_sorted() {
     }
 }
 
-// rq-25faef11
+// rq-25faef11 rq-b39d3be7
 #[test]
 fn neighbor_list_uses_minimum_image() {
     let gpu = init_device().unwrap();
