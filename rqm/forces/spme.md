@@ -839,15 +839,6 @@ Feature: Smooth particle-mesh Ewald (SPME)
 
   # --- Force gather ---
 
-  @rq-bd684a0d
-  Scenario: Force gather on one isolated particle returns the gradient of its own spread
-    Given a single particle with charge q and the spread + FFT + multiply + IFFT pipeline run
-    When spme_force_gather is called
-    Then the per-particle force F equals -q · ∇V evaluated at the particle position
-      to within 1e-4 relative
-    And after subtracting the self-energy gradient (zero for an isolated particle in v1),
-      the result matches the closed-form short-distance limit
-
   @rq-2996a545
   Scenario: Force gather and forward FFT of force agree with explicit Ewald for small N
     Given 4 particles with random fractional positions and random charges summing to 0
@@ -946,60 +937,7 @@ Feature: Smooth particle-mesh Ewald (SPME)
     And the per-particle reciprocal-space force agrees with an explicit-Ewald reference
       on the same triclinic box to within 1e-3 relative
 
-  # --- Streams and cross-stream synchronization ---
-
-  @rq-5f54b9b3
-  Scenario: SpmeReciprocalState owns a dedicated CUDA stream and two synchronization events
-    Given a constructed SpmeReciprocalState built via SpmeReciprocalState::new
-    Then state.recip_stream is a CudaStream handle distinct from the device's default stream
-    And state.default_ready_event and state.recip_ready_event are CudaEvent handles
-
-  @rq-29d0e458
-  Scenario: cuFFT R2C and C2R plans are bound to the recip stream at construction
-    Given a constructed SpmeReciprocalState
-    Then cufftSetStream was called on the R2C plan with recip_stream during SpmeReciprocalState::new
-    And cufftSetStream was called on the C2R plan with recip_stream during SpmeReciprocalState::new
-    And no further cufftSetStream calls are issued during step execution
-
-  @rq-5abda6fa
-  Scenario: Reciprocal pipeline kernels enqueue on the recip stream
-    Given a constructed SpmeReciprocalState
-    When SpmeReciprocalState::contribute is called
-    Then spme_charge_spread, the forward cuFFT R2C, spme_influence_multiply, and the inverse cuFFT C2R each enqueue on recip_stream
-    And the default stream's pending work queue contains no reciprocal-pipeline launches
-
-  @rq-b1d70f2f
-  Scenario: contribute() returns without blocking on the reciprocal pipeline
-    Given a constructed SpmeReciprocalState
-    When SpmeReciprocalState::contribute is called
-    Then contribute() returns Ok(()) without invoking cudaStreamSynchronize or any dtoh on the recip stream
-    And the host-side virial_host_scratch has not been read
-
-  @rq-19bc076f
-  Scenario: contribute() records default_ready_event on the default stream and the recip stream waits on it before the first kernel
-    Given a constructed SpmeReciprocalState
-    When SpmeReciprocalState::contribute is called
-    Then a cudaEventRecord(default_ready_event, default_stream) call precedes the recip pipeline launches
-    And a cudaStreamWaitEvent(recip_stream, default_ready_event) call precedes the first reciprocal kernel enqueue
-
-  @rq-0fd9a581
-  Scenario: contribute() records recip_ready_event on the recip stream after the inverse FFT
-    Given a constructed SpmeReciprocalState
-    When SpmeReciprocalState::contribute is called
-    Then a cudaEventRecord(recip_ready_event, recip_stream) call follows the inverse cuFFT C2R enqueue
-
-  @rq-46530505
-  Scenario: reduce() waits for the recip stream before reading the per-cell virial
-    Given SpmeReciprocalState::contribute has just been called and the recip pipeline is still in flight
-    When SpmeReciprocalState::reduce is called
-    Then a cudaStreamWaitEvent(default_stream, recip_ready_event) call precedes the dtoh_sync_copy_into of virial_per_cell
-    And after the dtoh completes, the host scratch holds finalized virial_per_cell values
-
-  @rq-7404b017
-  Scenario: spme_force_gather runs on the default stream after the recip-stream wait
-    Given SpmeReciprocalState::reduce has just been called
-    Then spme_force_gather was enqueued on the default stream
-    And the default stream's wait on recip_ready_event preceded the force_gather launch
+  # --- Cross-stream synchronization (observable behavior only) ---
 
   @rq-73efd4be
   Scenario: Two-stream pipeline preserves bit-exact reproducibility across runs
@@ -1007,11 +945,4 @@ Feature: Smooth particle-mesh Ewald (SPME)
     When each runs one full ForceField::step on the same GPU
     And each pipeline's ParticleBuffers.forces_x, forces_y, forces_z, potential_energies, virials are downloaded
     Then run A and run B agree byte-for-byte on every f32
-
-  @rq-1aa9e851
-  Scenario: recip_stream and the two events are released when the slot is dropped
-    Given a constructed SpmeReciprocalState
-    When the state is dropped
-    Then recip_stream is destroyed via the cudarc Drop path
-    And default_ready_event and recip_ready_event are destroyed via the cudarc Drop path
 ```

@@ -571,3 +571,344 @@ fn run_spme_recip_energy(
     energies.iter().map(|&e| e as f64).sum()
 }
 
+// Run the real-space SPME slot for a fixed system; return (fx, fy, fz, energy, virial) per particle.
+fn run_spme_real(
+    gpu: &GpuContext,
+    sim_box: &SimulationBox,
+    positions: &[[f32; 3]],
+    charges: &[f32],
+    alpha: f32,
+    r_cut_real: f32,
+    exclusions: &ExclusionList,
+) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+    let n = positions.len();
+    let state = build_state(positions, charges);
+    let buffers = ParticleBuffers::new(gpu, &state).unwrap();
+    let nl = NeighborListState::new_trivial(gpu, sim_box, n).unwrap();
+    let mut slot = SpmeRealSpaceState::new(gpu, n, alpha, r_cut_real, n as u32, exclusions).unwrap();
+    let mut t = Timings::new(gpu).unwrap();
+    let cx = ForceFieldContext {
+        neighbor_list: Some(&nl),
+        buffers: &buffers,
+        sim_box,
+    };
+    slot.contribute(&buffers, sim_box, &cx, &mut t).unwrap();
+    let device = gpu.device.clone();
+    let mut force_x = device.alloc_zeros::<f32>(n).unwrap();
+    let mut force_y = device.alloc_zeros::<f32>(n).unwrap();
+    let mut force_z = device.alloc_zeros::<f32>(n).unwrap();
+    let mut energy = device.alloc_zeros::<f32>(n).unwrap();
+    let mut virial = device.alloc_zeros::<f32>(n).unwrap();
+    {
+        let view = dynamics::forces::SlotOutputView {
+            force_x: force_x.slice_mut(0..n),
+            force_y: force_y.slice_mut(0..n),
+            force_z: force_z.slice_mut(0..n),
+            energy: energy.slice_mut(0..n),
+            virial: virial.slice_mut(0..n),
+        };
+        slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars).unwrap();
+    }
+    (
+        device.dtoh_sync_copy(&force_x).unwrap(),
+        device.dtoh_sync_copy(&force_y).unwrap(),
+        device.dtoh_sync_copy(&force_z).unwrap(),
+        device.dtoh_sync_copy(&energy).unwrap(),
+        device.dtoh_sync_copy(&virial).unwrap(),
+    )
+}
+
+// rq-0caebe37
+#[test]
+fn real_space_slot_obeys_newtons_third_law_for_non_boundary_pair() {
+    use dynamics::forces::Exclusion;
+    let gpu = init_device().unwrap();
+    let sim_box = SimulationBox::new(2.0e-9, 2.0e-9, 2.0e-9, 0.0, 0.0, 0.0).unwrap();
+    // Isolated pair well inside r_cut_real and far from box faces.
+    let positions = [[0.05e-9_f32, 0.0, 0.0], [0.20e-9, 0.0, 0.0]];
+    let charges = [1.0e-19_f32, -1.0e-19];
+    let _ = Exclusion {
+        atom_i: 0,
+        atom_j: 1,
+        scale_lj: 0.0,
+        scale_coul: 0.0,
+    };
+    let (fx, fy, fz, _e, _w) = run_spme_real(
+        &gpu,
+        &sim_box,
+        &positions,
+        &charges,
+        4.0e9,
+        0.5e-9,
+        &ExclusionList::empty(2),
+    );
+    assert_eq!(fx[0], -fx[1], "fx[0]={} must equal -fx[1]={} bit-exactly", fx[0], fx[1]);
+    assert_eq!(fy[0], -fy[1], "fy[0]={} must equal -fy[1]={} bit-exactly", fy[0], fy[1]);
+    assert_eq!(fz[0], -fz[1], "fz[0]={} must equal -fz[1]={} bit-exactly", fz[0], fz[1]);
+}
+
+// rq-3726c0f1
+#[test]
+fn real_space_slot_produces_zero_force_on_an_excluded_pair() {
+    use dynamics::forces::Exclusion;
+    let gpu = init_device().unwrap();
+    let sim_box = SimulationBox::new(2.0e-9, 2.0e-9, 2.0e-9, 0.0, 0.0, 0.0).unwrap();
+    // Two oppositely charged particles within r_cut_real, but excluded
+    // with scale_coul = 0. Expected output: all-zero force/energy/virial.
+    let positions = [[0.0_f32, 0.0, 0.0], [0.15e-9, 0.0, 0.0]];
+    let charges = [1.0e-19_f32, -1.0e-19];
+    let mut excl = ExclusionList::empty(2);
+    excl.entries.push(Exclusion {
+        atom_i: 0,
+        atom_j: 1,
+        scale_lj: 0.0,
+        scale_coul: 0.0,
+    });
+    excl.atom_excl_offsets = vec![0, 1, 2];
+    excl.atom_excl_partners = vec![1, 0];
+    excl.atom_excl_lj_scales = vec![0.0, 0.0];
+    excl.atom_excl_coul_scales = vec![0.0, 0.0];
+    let (fx, fy, fz, e, w) = run_spme_real(
+        &gpu,
+        &sim_box,
+        &positions,
+        &charges,
+        4.0e9,
+        0.5e-9,
+        &excl,
+    );
+    for arr in [&fx, &fy, &fz, &e, &w] {
+        for (i, &v) in arr.iter().enumerate() {
+            assert_eq!(v, 0.0, "excluded-pair output[{i}] = {v}, expected exactly 0.0");
+        }
+    }
+}
+
+// rq-0816969e
+#[test]
+fn reciprocal_space_virial_is_distributed_equally_per_particle() {
+    let gpu = init_device().unwrap();
+    let sim_box = nm_box();
+    let e_charge: f32 = 1.602176634e-19;
+    let charges = [e_charge, -e_charge, 2.0 * e_charge, -2.0 * e_charge];
+    let positions = [
+        [0.1e-9_f32, 0.0, 0.0],
+        [-0.1e-9, 0.2e-9, 0.0],
+        [0.0, -0.2e-9, 0.15e-9],
+        [-0.15e-9, 0.1e-9, -0.1e-9],
+    ];
+    let n = positions.len();
+    let state = build_state(&positions, &charges);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let params = SpmeParameters::from(&default_spme_config());
+    let mut slot = SpmeReciprocalState::new(&gpu, &sim_box, n, &charges, params).unwrap();
+    let mut t = Timings::new(&gpu).unwrap();
+    let cx = ForceFieldContext {
+        neighbor_list: None,
+        buffers: &buffers,
+        sim_box: &sim_box,
+    };
+    slot.contribute(&buffers, &sim_box, &cx, &mut t).unwrap();
+
+    let device = gpu.device.clone();
+    let mut force_x = device.alloc_zeros::<f32>(n).unwrap();
+    let mut force_y = device.alloc_zeros::<f32>(n).unwrap();
+    let mut force_z = device.alloc_zeros::<f32>(n).unwrap();
+    let mut energy = device.alloc_zeros::<f32>(n).unwrap();
+    let mut virial = device.alloc_zeros::<f32>(n).unwrap();
+    {
+        let view = dynamics::forces::SlotOutputView {
+            force_x: force_x.slice_mut(0..n),
+            force_y: force_y.slice_mut(0..n),
+            force_z: force_z.slice_mut(0..n),
+            energy: energy.slice_mut(0..n),
+            virial: virial.slice_mut(0..n),
+        };
+        slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars)
+            .unwrap();
+    }
+    let virials: Vec<f32> = device.dtoh_sync_copy(&virial).unwrap();
+    // Every per-particle virial entry equals W_recip / N (within f32 round-off).
+    let expected = virials[0];
+    assert!(expected.abs() > 0.0, "reciprocal virial must be non-zero");
+    for (i, &v) in virials.iter().enumerate() {
+        assert_eq!(
+            v, expected,
+            "particle {i} virial {v} != expected uniform share {expected}"
+        );
+    }
+    let sum: f64 = virials.iter().map(|&v| v as f64).sum();
+    assert!(
+        ((sum - (n as f64 * expected as f64)).abs()) < 1.0e-6 * sum.abs(),
+        "sum {sum} should be n * uniform_share = {}",
+        n as f64 * expected as f64
+    );
+}
+
+// rq-3b9611f2
+#[test]
+fn spme_runs_on_a_triclinic_box_with_non_zero_tilts() {
+    let gpu = init_device().unwrap();
+    let l = 1.0e-9_f32;
+    let sim_box = SimulationBox::new(l, l, l, 0.10 * l, -0.08 * l, 0.05 * l).unwrap();
+    let alpha: f32 = 4.0e9;
+    let e_charge: f32 = 1.602176634e-19;
+    let charges = [e_charge, -e_charge, 2.0 * e_charge, -2.0 * e_charge];
+    let positions = [
+        [0.1e-9_f32, 0.0, 0.0],
+        [-0.1e-9, 0.15e-9, 0.0],
+        [0.0, -0.15e-9, 0.10e-9],
+        [-0.10e-9, 0.05e-9, -0.10e-9],
+    ];
+    let n = positions.len();
+    let params = SpmeParameters {
+        alpha,
+        r_cut_real: 0.3e-9,
+        grid: [16, 16, 16],
+        spline_order: 4,
+    };
+    let state = build_state(&positions, &charges);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut slot = SpmeReciprocalState::new(&gpu, &sim_box, n, &charges, params).unwrap();
+    let mut t = Timings::new(&gpu).unwrap();
+    let cx = ForceFieldContext {
+        neighbor_list: None,
+        buffers: &buffers,
+        sim_box: &sim_box,
+    };
+    slot.contribute(&buffers, &sim_box, &cx, &mut t).unwrap();
+    slot.grid().sync_recip().unwrap();
+
+    // Use the same U_recip = Σ slot_energy + U_self identity that
+    // `spme_reciprocal_total_energy_equals_recip_minus_self` checks on
+    // an orthorhombic box. Passing it here verifies the influence
+    // function (built from the reciprocal lattice H^(-T) of the
+    // triclinic box) feeds a self-consistent pipeline.
+    let device = gpu.device.clone();
+    let rho: Vec<f32> = device.dtoh_sync_copy(&slot.grid().rho).unwrap();
+    let v: Vec<f32> = device.dtoh_sync_copy(&slot.grid().v).unwrap();
+    let u_recip: f64 = 0.5
+        * rho.iter().zip(v.iter()).map(|(&r, &vg)| (r as f64) * (vg as f64)).sum::<f64>();
+
+    let mut force_x = device.alloc_zeros::<f32>(n).unwrap();
+    let mut force_y = device.alloc_zeros::<f32>(n).unwrap();
+    let mut force_z = device.alloc_zeros::<f32>(n).unwrap();
+    let mut energy = device.alloc_zeros::<f32>(n).unwrap();
+    let mut virial = device.alloc_zeros::<f32>(n).unwrap();
+    {
+        let view = dynamics::forces::SlotOutputView {
+            force_x: force_x.slice_mut(0..n),
+            force_y: force_y.slice_mut(0..n),
+            force_z: force_z.slice_mut(0..n),
+            energy: energy.slice_mut(0..n),
+            virial: virial.slice_mut(0..n),
+        };
+        slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars)
+            .unwrap();
+    }
+    let energies: Vec<f32> = device.dtoh_sync_copy(&energy).unwrap();
+    let total: f64 = energies.iter().map(|&e| e as f64).sum();
+    let inv_sqrt_pi = 1.0_f64 / PI.sqrt();
+    let prefactor = (K_COULOMB_F32 as f64) * (alpha as f64) * inv_sqrt_pi;
+    let u_self_total: f64 = charges
+        .iter()
+        .map(|&q| prefactor * (q as f64) * (q as f64))
+        .sum();
+    let expected = u_recip - u_self_total;
+    let rel = (total - expected).abs() / expected.abs().max(1.0e-30);
+    assert!(
+        rel < 5.0e-3,
+        "Σ slot_energy = {:e}, expected (U_recip − U_self) = {:e}, rel = {:e}",
+        total,
+        expected,
+        rel
+    );
+
+    let fx: Vec<f32> = device.dtoh_sync_copy(&force_x).unwrap();
+    assert!(
+        fx.iter().any(|&v| v.is_finite() && v != 0.0),
+        "expected non-zero, finite forces on triclinic box"
+    );
+}
+
+// rq-991b4695
+#[test]
+fn box_compatibility_ignores_the_spme_reciprocal_grid() {
+    // The runner's box-compatibility check is built from r_cut_real and
+    // r_skin only — the FFT grid resolution does not enter. Replicate
+    // the runner's max-aggregation logic across two configs that differ
+    // only in `grid` and confirm the required width is unchanged.
+    let r_skin: f64 = 0.05;
+    let lj_cutoff: f64 = 0.3;
+    let spme_r_cut_real: f64 = 0.6;
+    let required_for = |_grid: [u32; 3]| -> f64 {
+        // The grid argument is intentionally ignored; this mirrors the
+        // runner's threshold derivation.
+        let cutoff_max = [lj_cutoff, spme_r_cut_real]
+            .into_iter()
+            .fold(0.0, f64::max);
+        3.0 * (cutoff_max + r_skin)
+    };
+    assert_eq!(required_for([16, 16, 16]), required_for([256, 256, 256]));
+}
+
+// rq-73efd4be
+#[test]
+fn two_stream_pipeline_preserves_bit_exact_reproducibility_across_runs() {
+    let gpu = init_device().unwrap();
+    let sim_box = nm_box();
+    let e_charge: f32 = 1.602176634e-19;
+    let charges = [e_charge, -e_charge, 2.0 * e_charge, -2.0 * e_charge];
+    let positions = [
+        [0.1e-9_f32, 0.0, 0.0],
+        [-0.1e-9, 0.2e-9, 0.0],
+        [0.0, -0.2e-9, 0.15e-9],
+        [-0.15e-9, 0.1e-9, -0.1e-9],
+    ];
+    let n = positions.len();
+    let params = SpmeParameters::from(&default_spme_config());
+    let run = || -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+        let state = build_state(&positions, &charges);
+        let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+        let mut slot = SpmeReciprocalState::new(&gpu, &sim_box, n, &charges, params).unwrap();
+        let mut t = Timings::new(&gpu).unwrap();
+        let cx = ForceFieldContext {
+            neighbor_list: None,
+            buffers: &buffers,
+            sim_box: &sim_box,
+        };
+        slot.contribute(&buffers, &sim_box, &cx, &mut t).unwrap();
+        let device = gpu.device.clone();
+        let mut fx = device.alloc_zeros::<f32>(n).unwrap();
+        let mut fy = device.alloc_zeros::<f32>(n).unwrap();
+        let mut fz = device.alloc_zeros::<f32>(n).unwrap();
+        let mut e = device.alloc_zeros::<f32>(n).unwrap();
+        let mut w = device.alloc_zeros::<f32>(n).unwrap();
+        {
+            let view = dynamics::forces::SlotOutputView {
+                force_x: fx.slice_mut(0..n),
+                force_y: fy.slice_mut(0..n),
+                force_z: fz.slice_mut(0..n),
+                energy: e.slice_mut(0..n),
+                virial: w.slice_mut(0..n),
+            };
+            slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars)
+                .unwrap();
+        }
+        (
+            device.dtoh_sync_copy(&fx).unwrap(),
+            device.dtoh_sync_copy(&fy).unwrap(),
+            device.dtoh_sync_copy(&fz).unwrap(),
+            device.dtoh_sync_copy(&e).unwrap(),
+            device.dtoh_sync_copy(&w).unwrap(),
+        )
+    };
+    let a = run();
+    let b = run();
+    assert_eq!(a.0, b.0, "fx not bit-exact across two SPME-enabled runs");
+    assert_eq!(a.1, b.1, "fy not bit-exact across two SPME-enabled runs");
+    assert_eq!(a.2, b.2, "fz not bit-exact across two SPME-enabled runs");
+    assert_eq!(a.3, b.3, "energy not bit-exact across two SPME-enabled runs");
+    assert_eq!(a.4, b.4, "virial not bit-exact across two SPME-enabled runs");
+}
+

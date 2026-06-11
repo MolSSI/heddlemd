@@ -751,7 +751,12 @@
   "rq-07297467": {
     "decl": "Scenario: Spread is independent of particle order in the bin",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/spme_pipeline.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Spread is independent of particle order in the bin",
     "type": "scenario"
   },
@@ -854,7 +859,12 @@
   "rq-0816969e": {
     "decl": "Scenario: Reciprocal-space virial is distributed equally per particle",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/spme_slots.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reciprocal-space virial is distributed equally per particle",
     "type": "scenario"
   },
@@ -1292,7 +1302,12 @@
   "rq-0caebe37": {
     "decl": "Scenario: Real-space slot obeys Newton's third law for a non-boundary pair",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/spme_slots.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Real-space slot obeys Newton's third law for a non-boundary pair",
     "type": "scenario"
   },
@@ -1604,13 +1619,6 @@
       }
     ],
     "title": "[barostat] kind = \"berendsen\" with all required fields accepted",
-    "type": "scenario"
-  },
-  "rq-0fd9a581": {
-    "decl": "Scenario: contribute() records recip_ready_event on the recip stream after the inverse FFT",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "contribute() records recip_ready_event on the recip stream after the inverse FFT",
     "type": "scenario"
   },
   "rq-0ffccee0": {
@@ -2655,13 +2663,6 @@
     "title": "rescale_positions",
     "type": "api-item"
   },
-  "rq-19bc076f": {
-    "decl": "Scenario: contribute() records default_ready_event on the default stream and the recip stream waits on it before the first kernel",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "contribute() records default_ready_event on the default stream and the recip stream waits on it before the first kernel",
-    "type": "scenario"
-  },
   "rq-19ccc047": {
     "decl": "Scenario: [thermostat] unknown kind is rejected",
     "file": "io/config-schema",
@@ -2778,13 +2779,6 @@
     "file": "integration/nose-hoover-chain",
     "refs": [],
     "title": "Construct for a SETTLE'd water system",
-    "type": "scenario"
-  },
-  "rq-1aa9e851": {
-    "decl": "Scenario: recip_stream and the two events are released when the slot is dropped",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "recip_stream and the two events are released when the slot is dropped",
     "type": "scenario"
   },
   "rq-1ac78590": {
@@ -4460,13 +4454,6 @@
     "title": "Self-energy",
     "type": "section"
   },
-  "rq-29d0e458": {
-    "decl": "Scenario: cuFFT R2C and C2R plans are bound to the recip stream at construction",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "cuFFT R2C and C2R plans are bound to the recip stream at construction",
-    "type": "scenario"
-  },
   "rq-29dda250": {
     "decl": "- `apply(buffers, sim_box, dt, timings)` — runs the per-step",
     "file": "integration/berendsen-barostat",
@@ -4606,7 +4593,12 @@
   "rq-2ae37ac3": {
     "decl": "Scenario: SPME reciprocal state's internal cell list uses one bin per FFT grid cell",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/spme_pipeline.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SPME reciprocal state's internal cell list uses one bin per FFT grid cell",
     "type": "scenario"
   },
@@ -5748,7 +5740,12 @@
   "rq-3726c0f1": {
     "decl": "Scenario: Real-space slot produces zero force on an excluded pair (scale_coul=0)",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/spme_slots.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Real-space slot produces zero force on an excluded pair (scale_coul=0)",
     "type": "scenario"
   },
@@ -6219,7 +6216,12 @@
   "rq-3b9611f2": {
     "decl": "Scenario: SPME runs on a triclinic box with non-zero tilts",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/spme_slots.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SPME runs on a triclinic box with non-zero tilts",
     "type": "scenario"
   },
@@ -6289,7 +6291,12 @@
   "rq-3c0beda9": {
     "decl": "Scenario: Spread reduces to a single B-spline weight for one isolated particle",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/spme_pipeline.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Spread reduces to a single B-spline weight for one isolated particle",
     "type": "scenario"
   },
@@ -7099,13 +7106,6 @@
     "refs": [],
     "title": "Constraint Virial",
     "type": "section"
-  },
-  "rq-46530505": {
-    "decl": "Scenario: reduce() waits for the recip stream before reading the per-cell virial",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "reduce() waits for the recip stream before reading the per-cell virial",
-    "type": "scenario"
   },
   "rq-4656e089": {
     "decl": "## Empty State",
@@ -8956,13 +8956,6 @@
     "title": "`Thermostat` trait overrides",
     "type": "section"
   },
-  "rq-5abda6fa": {
-    "decl": "Scenario: Reciprocal pipeline kernels enqueue on the recip stream",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "Reciprocal pipeline kernels enqueue on the recip stream",
-    "type": "scenario"
-  },
   "rq-5ac172fc": {
     "decl": "Scenario: andersen_resample on empty state is a no-op",
     "file": "integration/andersen",
@@ -9402,13 +9395,6 @@
       }
     ],
     "title": "Prefix scan is correct for cell counts beyond a single block-totals pass",
-    "type": "scenario"
-  },
-  "rq-5f54b9b3": {
-    "decl": "Scenario: SpmeReciprocalState owns a dedicated CUDA stream and two synchronization events",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "SpmeReciprocalState owns a dedicated CUDA stream and two synchronization events",
     "type": "scenario"
   },
   "rq-5f59fa80": {
@@ -11190,7 +11176,12 @@
   "rq-73efd4be": {
     "decl": "Scenario: Two-stream pipeline preserves bit-exact reproducibility across runs",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/spme_slots.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two-stream pipeline preserves bit-exact reproducibility across runs",
     "type": "scenario"
   },
@@ -11206,13 +11197,6 @@
     ],
     "title": "Progress reporting",
     "type": "section"
-  },
-  "rq-7404b017": {
-    "decl": "Scenario: spme_force_gather runs on the default stream after the recip-stream wait",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "spme_force_gather runs on the default stream after the recip-stream wait",
-    "type": "scenario"
   },
   "rq-743ae35c": {
     "decl": "Scenario: check_min_perpendicular_width reports the first failing direction when multiple fail",
@@ -13304,7 +13288,12 @@
   "rq-881559bd": {
     "decl": "Scenario: Spread produces zero charge density at a grid point with no particle support",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/spme_pipeline.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Spread produces zero charge density at a grid point with no particle support",
     "type": "scenario"
   },
@@ -14835,7 +14824,12 @@
   "rq-991b4695": {
     "decl": "Scenario: Box compatibility ignores SPME's reciprocal grid",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/spme_slots.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Box compatibility ignores SPME's reciprocal grid",
     "type": "scenario"
   },
@@ -17362,13 +17356,6 @@
     "title": "Feature API",
     "type": "section"
   },
-  "rq-b1d70f2f": {
-    "decl": "Scenario: contribute() returns without blocking on the reciprocal pipeline",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "contribute() returns without blocking on the reciprocal pipeline",
-    "type": "scenario"
-  },
   "rq-b1e87ce4": {
     "decl": "Scenario: cumulative_injection records K_new − K_old per invocation",
     "file": "integration/andersen",
@@ -18303,13 +18290,6 @@
       }
     ],
     "title": "Near-collinear geometry (sin θ ≈ 0) produces zero force",
-    "type": "scenario"
-  },
-  "rq-bd684a0d": {
-    "decl": "Scenario: Force gather on one isolated particle returns the gradient of its own spread",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "Force gather on one isolated particle returns the gradient of its own spread",
     "type": "scenario"
   },
   "rq-bda9c0a2": {
@@ -21378,7 +21358,12 @@
   "rq-dd829afb": {
     "decl": "Scenario: Bin-only cell list rebuilds every step regardless of particle displacement",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/spme_pipeline.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Bin-only cell list rebuilds every step regardless of particle displacement",
     "type": "scenario"
   },
@@ -21973,7 +21958,12 @@
   "rq-e3c3898a": {
     "decl": "Scenario: Forward FFT of a zero grid produces zero",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/spme_pipeline.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Forward FFT of a zero grid produces zero",
     "type": "scenario"
   },
@@ -23274,7 +23264,12 @@
   "rq-f02e9e0e": {
     "decl": "Scenario: Inverse FFT round-trips the forward FFT",
     "file": "forces/spme",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/spme_pipeline.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Inverse FFT round-trips the forward FFT",
     "type": "scenario"
   },

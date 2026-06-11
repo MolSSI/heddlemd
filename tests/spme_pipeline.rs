@@ -279,3 +279,288 @@ fn identical_inputs_produce_byte_identical_grids() {
     let rho2: Vec<f32> = gpu.device.dtoh_sync_copy(&spme2.rho).unwrap();
     assert_eq!(rho1, rho2);
 }
+
+// Cardinal B-spline M_p(x) via Cox–de Boor recursion. Host-side replica
+// of the (private) helper in src/forces/spme.rs used to derive a
+// closed-form prediction for the charge-spread weight in tests below.
+fn host_cardinal_bspline(p: usize, x: f64) -> f64 {
+    let mut vals: Vec<f64> = (0..p)
+        .map(|i| {
+            let xi = x - (i as f64);
+            if (0.0..1.0).contains(&xi) { 1.0 } else { 0.0 }
+        })
+        .collect();
+    for order in 2..=p {
+        let inv = 1.0 / (order as f64 - 1.0);
+        for i in 0..(p - order + 1) {
+            let xi = x - i as f64;
+            vals[i] = xi * inv * vals[i] + ((order as f64) - xi) * inv * vals[i + 1];
+        }
+    }
+    vals[0]
+}
+
+fn small_box_grid(spme: SpmeParameters, n: usize) -> (
+    dynamics::gpu::GpuContext,
+    SimulationBox,
+    SpmeReciprocalGrid,
+) {
+    let gpu = init_device().unwrap();
+    let l = 1.0e-9_f32;
+    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let grid = SpmeReciprocalGrid::new(&gpu, &sim_box, n, spme).unwrap();
+    (gpu, sim_box, grid)
+}
+
+// rq-3c0beda9
+#[test]
+fn spread_for_one_isolated_particle_matches_b_spline_weights() {
+    let gpu = init_device().unwrap();
+    let l = 1.0e-9_f32;
+    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let p_u = 4u32;
+    let n_grid = 16u32;
+    // Fractional position in [-0.5, 0.5) (box is centred at origin).
+    let s = [0.11_f64, -0.18, 0.37];
+    let q: f32 = 0.5;
+    let positions = [[(s[0] as f32) * l, (s[1] as f32) * l, (s[2] as f32) * l]];
+    let state = build_state(&positions, &[q]);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let params = SpmeParameters {
+        alpha: 4.0e9,
+        r_cut_real: 0.3e-9,
+        grid: [n_grid, n_grid, n_grid],
+        spline_order: p_u,
+    };
+    let mut grid = SpmeReciprocalGrid::new(&gpu, &sim_box, 1, params).unwrap();
+    let mut t = Timings::new(&gpu).unwrap();
+    grid.compute(&sim_box, &buffers, &mut t).unwrap();
+    grid.sync_recip().unwrap();
+    let rho: Vec<f32> = gpu.device.dtoh_sync_copy(&grid.rho).unwrap();
+    // The kernel maps each particle to fractional coords s_a, computes
+    // u = (s_a + 0.5) * n, bin = floor(u), t = u - bin, and adds the
+    // contribution `q · M_p(da + t)` to grid point `(bin + da) % n` for
+    // da = 0..p. Equivalently for axis a, the grid point g_a receives a
+    // contribution iff da_a := (bin_a - g_a) mod n is in [0, p).
+    let n = n_grid as i64;
+    let p_i = p_u as usize;
+    let u: [f64; 3] = [
+        (s[0] + 0.5) * n as f64,
+        (s[1] + 0.5) * n as f64,
+        (s[2] + 0.5) * n as f64,
+    ];
+    let bin = [u[0].floor() as i64, u[1].floor() as i64, u[2].floor() as i64];
+    let t_axis = [u[0] - u[0].floor(), u[1] - u[1].floor(), u[2] - u[2].floor()];
+    let axis_weight = |axis: usize, g: i64| -> f64 {
+        let da = (bin[axis] - g).rem_euclid(n);
+        if da < p_i as i64 {
+            host_cardinal_bspline(p_i, da as f64 + t_axis[axis])
+        } else {
+            0.0
+        }
+    };
+    for ga in 0..n {
+        for gb in 0..n {
+            for gc in 0..n {
+                let idx = ((ga * n + gb) * n + gc) as usize;
+                let expected = (q as f64)
+                    * axis_weight(0, ga)
+                    * axis_weight(1, gb)
+                    * axis_weight(2, gc);
+                let got = rho[idx] as f64;
+                assert!(
+                    (got - expected).abs() < 1.0e-5 * (1.0 + expected.abs()),
+                    "rho[{ga},{gb},{gc}] = {got}, expected {expected}"
+                );
+            }
+        }
+    }
+}
+
+// rq-881559bd
+#[test]
+fn spread_is_zero_at_a_grid_point_with_no_particle_support() {
+    let gpu = init_device().unwrap();
+    let l = 1.0e-9_f32;
+    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    // Particle at fractional s = (0.2, 0.2, 0.2); with the kernel's
+    // centring shift s + 0.5 → 0.7 and grid size 16, the spline bins are
+    // {8, 9, 10, 11} on each axis (p = 4). Grid point (0, 0, 0) sits
+    // outside that support on every axis, so rho[0] must be exactly zero.
+    let positions = [[0.2_f32 * l, 0.2 * l, 0.2 * l]];
+    let state = build_state(&positions, &[1.0_f32]);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let params = SpmeParameters {
+        alpha: 4.0e9,
+        r_cut_real: 0.3e-9,
+        grid: [16, 16, 16],
+        spline_order: 4,
+    };
+    let mut grid = SpmeReciprocalGrid::new(&gpu, &sim_box, 1, params).unwrap();
+    let mut t = Timings::new(&gpu).unwrap();
+    grid.compute(&sim_box, &buffers, &mut t).unwrap();
+    grid.sync_recip().unwrap();
+    let rho: Vec<f32> = gpu.device.dtoh_sync_copy(&grid.rho).unwrap();
+    assert_eq!(rho[0], 0.0, "rho at unsupported grid point must be exactly zero");
+}
+
+// rq-07297467
+#[test]
+fn spread_is_byte_identical_under_two_input_orderings_in_same_bin() {
+    let gpu = init_device().unwrap();
+    let l = 1.0e-9_f32;
+    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    // Two particles in the same primary bin (close in fractional coords)
+    // submitted in two different orderings.
+    let p0 = [0.31_f32 * l, 0.42 * l, 0.57 * l];
+    let p1 = [0.32_f32 * l, 0.43 * l, 0.58 * l];
+    let q0: f32 = 0.5;
+    let q1: f32 = -0.7;
+    let state_a = build_state(&[p0, p1], &[q0, q1]);
+    let state_b = build_state(&[p1, p0], &[q1, q0]);
+    let buffers_a = ParticleBuffers::new(&gpu, &state_a).unwrap();
+    let buffers_b = ParticleBuffers::new(&gpu, &state_b).unwrap();
+    let params = SpmeParameters {
+        alpha: 4.0e9,
+        r_cut_real: 0.3e-9,
+        grid: [16, 16, 16],
+        spline_order: 4,
+    };
+    let mut grid_a = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
+    let mut grid_b = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
+    let mut t = Timings::new(&gpu).unwrap();
+    grid_a.compute(&sim_box, &buffers_a, &mut t).unwrap();
+    grid_b.compute(&sim_box, &buffers_b, &mut t).unwrap();
+    grid_a.sync_recip().unwrap();
+    grid_b.sync_recip().unwrap();
+    let rho_a: Vec<f32> = gpu.device.dtoh_sync_copy(&grid_a.rho).unwrap();
+    let rho_b: Vec<f32> = gpu.device.dtoh_sync_copy(&grid_b.rho).unwrap();
+    assert_eq!(rho_a, rho_b, "cell-list sort must canonicalise particle order within a bin");
+}
+
+// rq-e3c3898a
+#[test]
+fn forward_fft_of_a_zero_grid_produces_zero() {
+    let params = SpmeParameters {
+        alpha: 4.0e9,
+        r_cut_real: 0.3e-9,
+        grid: [16, 16, 16],
+        spline_order: 4,
+    };
+    let (gpu, _sim_box, mut grid) = small_box_grid(params, 0);
+    // grid.rho was zero-allocated; execute forward FFT directly.
+    grid.forward_plan
+        .execute(&grid.rho, &mut grid.rho_hat_interleaved)
+        .unwrap();
+    grid.sync_recip().unwrap();
+    let rho_hat: Vec<f32> = gpu
+        .device
+        .dtoh_sync_copy(&grid.rho_hat_interleaved)
+        .unwrap();
+    assert!(
+        rho_hat.iter().all(|&v| v == 0.0),
+        "FFT of zero rho must produce zero rho_hat"
+    );
+}
+
+// rq-f02e9e0e
+#[test]
+fn inverse_fft_round_trips_forward_fft_up_to_scale_factor() {
+    let params = SpmeParameters {
+        alpha: 4.0e9,
+        r_cut_real: 0.3e-9,
+        grid: [8, 8, 8],
+        spline_order: 4,
+    };
+    let (gpu, _sim_box, mut grid) = small_box_grid(params, 0);
+    // Fill rho with a deterministic non-trivial pattern.
+    let m = grid.m;
+    let input: Vec<f32> = (0..m).map(|i| ((i as f32) * 0.013).sin()).collect();
+    gpu.device
+        .htod_sync_copy_into(&input, &mut grid.rho)
+        .unwrap();
+    grid.forward_plan
+        .execute(&grid.rho, &mut grid.rho_hat_interleaved)
+        .unwrap();
+    // Round-trip back to V via inverse, no influence multiply in between.
+    grid.inverse_plan
+        .execute(&grid.rho_hat_interleaved, &mut grid.v)
+        .unwrap();
+    grid.sync_recip().unwrap();
+    let round_trip: Vec<f32> = gpu.device.dtoh_sync_copy(&grid.v).unwrap();
+    let scale = m as f64;
+    for (i, (&a, &b)) in input.iter().zip(round_trip.iter()).enumerate() {
+        let expected = (a as f64) * scale;
+        let rel = ((b as f64) - expected).abs() / expected.abs().max(1.0);
+        assert!(rel < 1.0e-4, "round-trip mismatch at {i}: got {b}, expected {expected}");
+    }
+}
+
+// rq-2ae37ac3
+#[test]
+fn spme_reciprocal_internal_cell_list_uses_one_bin_per_fft_grid_cell() {
+    use cudarc::driver::DeviceSlice;
+    let gpu = init_device().unwrap();
+    let l = 1.0e-9_f32;
+    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let params = SpmeParameters {
+        alpha: 4.0e9,
+        r_cut_real: 0.3e-9,
+        grid: [16, 16, 16],
+        spline_order: 4,
+    };
+    let grid = SpmeReciprocalGrid::new(&gpu, &sim_box, 1, params).unwrap();
+    assert!(grid.bin_list.is_bin_only());
+    let cl = grid
+        .bin_list
+        .cell_list_data()
+        .expect("CellListOnly should expose cell-list data");
+    assert_eq!(cl.n_cells, [16, 16, 16]);
+    assert_eq!(grid.bin_list.max_neighbors, 0);
+    assert_eq!(grid.bin_list.neighbor_list.len(), 0);
+    assert_eq!(grid.bin_list.neighbor_counts.len(), 0);
+}
+
+// rq-dd829afb
+#[test]
+fn bin_only_cell_list_rebuilds_every_step_regardless_of_displacement() {
+    use dynamics::timings::{HostStage, KernelStage};
+    let gpu = init_device().unwrap();
+    let l = 1.0e-9_f32;
+    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let positions = [[0.1e-9_f32, 0.0, 0.0], [-0.1e-9, 0.0, 0.0]];
+    let charges = [1.0_f32, -1.0];
+    let state = build_state(&positions, &charges);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let params = SpmeParameters {
+        alpha: 4.0e9,
+        r_cut_real: 0.3e-9,
+        grid: [16, 16, 16],
+        spline_order: 4,
+    };
+    let mut grid = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
+    let mut t = Timings::new(&gpu).unwrap();
+    // Two back-to-back pipeline runs with no position change.
+    grid.compute(&sim_box, &buffers, &mut t).unwrap();
+    grid.compute(&sim_box, &buffers, &mut t).unwrap();
+    grid.sync_recip().unwrap();
+    let report = t.finalize().unwrap();
+    // The displacement-check + neighbor_list_build kernels must never
+    // fire (they are absent in CellListOnly mode); each pre_step call
+    // must perform a fresh rebuild (host-side stage).
+    for forbidden in [
+        KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED.name(),
+        KernelStage::NEIGHBOR_LIST_BUILD.name(),
+    ] {
+        assert!(
+            !report.stages.iter().any(|s| s.name == forbidden),
+            "{forbidden} kernel must not run in bin-only mode"
+        );
+    }
+    let rebuild = report
+        .stages
+        .iter()
+        .find(|s| s.name == HostStage::NEIGHBOR_LIST_REBUILD.name())
+        .expect("neighbor_list_rebuild host stage should be present");
+    assert_eq!(rebuild.count, 2, "expected one rebuild per pipeline call");
+}
