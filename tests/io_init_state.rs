@@ -691,6 +691,7 @@ fn accept_position_inside_primary_parallelepiped_of_triclinic_box() {
     load_init_state(&path, &["Ar"], UnitSystem::Si).expect("position should be accepted");
 }
 
+// rq-9d523d38 rq-6b8e5397
 #[test]
 fn atomic_units_rescale_lattice_and_positions() {
     // Same physical system written in atomic and SI units must produce
@@ -735,6 +736,7 @@ fn atomic_units_rescale_lattice_and_positions() {
     assert!(approx(state_au.sim_box.lz(), state_si.sim_box.lz()));
 }
 
+// rq-274a4899
 #[test]
 fn atomic_units_rescale_velocities() {
     let dir = tmp_path("atomic_units_velocities");

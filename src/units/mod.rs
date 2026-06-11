@@ -261,6 +261,7 @@ pub fn convert_slot_params(system: UnitSystem, kind: &str, params: &mut toml::Va
 mod tests {
     use super::*;
 
+    // rq-4c40f859
     #[test]
     fn atomic_factors_are_unity() {
         for dim in [
@@ -370,6 +371,7 @@ mod tests {
         assert_eq!(params["temperature"].as_float().unwrap(), 9.5e-4);
     }
 
+    // rq-aeee8e44
     #[test]
     fn convert_slot_params_no_op_for_unknown_kind() {
         let mut params: toml::Value = toml::from_str("temperature = 300.0\n").unwrap();

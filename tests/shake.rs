@@ -151,7 +151,7 @@ fn shake_registry_with_builtins_returns_some_for_non_empty_list() {
     assert_eq!(slot.unwrap().group_count(), 1);
 }
 
-// rq-fd0add61
+// rq-fd0add61 rq-aea6734a
 #[test]
 fn shake_registry_with_builtins_returns_none_for_empty_list() {
     let gpu = init_device().unwrap();
@@ -187,7 +187,7 @@ fn shake_rejects_malformed_constraint_pair() {
     }
 }
 
-// rq-7ef08958
+// rq-7ef08958 rq-18165336
 #[test]
 fn empty_constraint_registry_reports_unsupported_kind() {
     let gpu = init_device().unwrap();
@@ -999,7 +999,7 @@ fn lossless_velocity_verlet_kind_does_not_support_constraints() {
 
 // --- Integration through Integrator::step --------------------------------
 
-// rq-90538790
+// rq-90538790 rq-4e47cdad
 #[test]
 fn integrator_step_dispatches_all_three_constraint_hooks() {
     use std::sync::{Arc as StdArc, Mutex};
@@ -1078,6 +1078,7 @@ fn integrator_step_dispatches_all_three_constraint_hooks() {
     assert_eq!(order, vec!["before_drift", "after_drift", "after_kick"]);
 }
 
+// rq-7047ea32
 #[test]
 fn integrator_step_with_none_constraint_skips_all_hooks() {
     // Verify that step succeeds and produces no SHAKE/RATTLE timings

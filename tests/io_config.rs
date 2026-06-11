@@ -183,7 +183,7 @@ fn defaults_strip_only_one_trailing_in() {
     assert_eq!(cfg.phases[0].as_md().unwrap().output.timings_path, canonical_dir.join("foo.in.out.run.timings"));
 }
 
-// rq-d148149f
+// rq-d148149f rq-bdfb11e3
 #[test]
 fn explicit_output_overrides_defaults() {
     let dir = tmp_path("explicit_output");
@@ -524,7 +524,7 @@ mass = 1.0
     }
 }
 
-// rq-025b2c3b
+// rq-025b2c3b rq-96d9c9df
 #[test]
 fn reject_zero_dt() {
     let dir = tmp_path("zero_dt");
@@ -536,7 +536,7 @@ fn reject_zero_dt() {
     }
 }
 
-// rq-0051b248
+// rq-0051b248 rq-96d9c9df
 #[test]
 fn reject_negative_dt() {
     let dir = tmp_path("neg_dt");
@@ -1667,7 +1667,7 @@ fn log_every_zero_accepted() {
 
 // --- Neighbor list ---
 
-// rq-e2f32af0
+// rq-e2f32af0 rq-eebf9f95
 #[test]
 fn neighbor_list_defaults_to_cell_list_when_section_omitted() {
     let dir = tmp_path("nl_default");
@@ -2664,7 +2664,7 @@ cutoff = 1.0e-9
     }
 }
 
-// rq-fbb836fb rq-1b467c03
+// rq-fbb836fb rq-1b467c03 rq-d617bf4a
 #[test]
 fn mtk_npt_with_barostat_is_rejected() {
     let dir = tmp_path("mtk_plus_baro");
@@ -3447,6 +3447,7 @@ fn minimal_si_config() -> String {
     minimal_config().replace("units = \"atomic\"\n", "")
 }
 
+// rq-870a3aa5 rq-1027778f
 #[test]
 fn units_default_is_si() {
     let dir = tmp_path("units_default_si");
@@ -3462,6 +3463,7 @@ fn units_default_is_si() {
     assert!((cfg.particle_types[0].mass - expected_mass).abs() < 1e-12 * expected_mass);
 }
 
+// rq-64d19c46
 #[test]
 fn units_explicit_si_accepted() {
     let dir = tmp_path("units_explicit_si");
@@ -3471,7 +3473,7 @@ fn units_explicit_si_accepted() {
     assert_eq!(cfg.units, UnitSystem::Si);
 }
 
-// rq-4b760f1c
+// rq-4b760f1c rq-e5f889f3 rq-ac1c8916
 #[test]
 fn units_unknown_value_rejected() {
     let dir = tmp_path("units_unknown");
@@ -3483,6 +3485,7 @@ fn units_unknown_value_rejected() {
     }
 }
 
+// rq-971663ba rq-b68761f1 rq-1027778f rq-7bcdd62f rq-839540d9 rq-863cf49f rq-870a3aa5 rq-3e3add64 rq-07e5568c
 #[test]
 fn atomic_units_yield_same_si_config_as_native_si() {
     // Two TOML files describing the same physical system: one in SI,

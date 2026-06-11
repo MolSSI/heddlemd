@@ -99,6 +99,7 @@ fn download_pair_virials(pair: &PairBuffer) -> Vec<f32> {
 }
 
 // rq-4f23c656
+// rq-4d3f63fb
 #[test]
 fn opposite_sign_charges_attract() {
     let gpu = init_device().unwrap();

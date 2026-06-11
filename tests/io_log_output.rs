@@ -86,6 +86,7 @@ fn write_single_row_step_zero() {
 }
 
 // rq-9198cc8e
+// rq-5b934ecd
 #[test]
 fn write_row_non_trivial_values() {
     let dir = tmp_path("row_nontrivial");
@@ -174,7 +175,7 @@ fn temperature_of_empty_is_zero() {
     assert_eq!(compute_temperature(0.0, 0), 0.0);
 }
 
-// rq-7d831804
+// rq-7d831804 rq-fee5b8e2
 #[test]
 fn temperature_uses_kb_unity() {
     // k_B = 1 inside the engine: temperature is `k_B · T` in Hartrees.

@@ -149,7 +149,7 @@ fn launch_angle_force(
     let _ = gpu;
 }
 
-// rq-a57bcebe
+// rq-a57bcebe rq-9bb3094c
 #[test]
 fn equilibrium_angle_produces_zero_force() {
     let gpu = init_device().unwrap();

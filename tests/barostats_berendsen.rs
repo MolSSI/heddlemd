@@ -624,7 +624,7 @@ fn generation_advances_after_apply() {
 
 // --- Log columns ---
 
-// rq-7564b1e7
+// rq-7564b1e7 rq-75297a48
 #[test]
 fn log_column_names_returns_pressure_and_box_volume() {
     let gpu = init_device().unwrap();

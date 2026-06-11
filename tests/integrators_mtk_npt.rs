@@ -418,7 +418,7 @@ fn generation_advances_every_step() {
 
 // --- Log columns ---
 
-// rq-aae13334
+// rq-aae13334 rq-34943524
 #[test]
 fn log_column_names_returns_pressure_volume_and_conserved() {
     let gpu = init_device().unwrap();

@@ -616,7 +616,7 @@ fn load_topology_with_a_shake_constraint() {
     assert!(el.entries.iter().any(|e| e.atom_i == 1 && e.atom_j == 2));
 }
 
-// rq-5dfc02a9
+// rq-5dfc02a9 rq-2fbcb56c
 #[test]
 fn constraint_row_wrong_atom_count_rejected() {
     let dir = tmp_path("constraint_wrong_count");
@@ -676,7 +676,7 @@ fn unknown_constraint_type_rejected() {
     }
 }
 
-// rq-15b6d3a4
+// rq-15b6d3a4 rq-7f5b3a74
 #[test]
 fn duplicate_constraint_atom_across_rows_rejected() {
     let dir = tmp_path("constraint_dup_atom");
@@ -689,7 +689,7 @@ fn duplicate_constraint_atom_across_rows_rejected() {
     }
 }
 
-// rq-8ea6cf9c
+// rq-8ea6cf9c rq-d05a8f16
 #[test]
 fn bond_and_constraint_pair_overlap_rejected() {
     let dir = tmp_path("constraint_bond_overlap");
@@ -705,7 +705,7 @@ fn bond_and_constraint_pair_overlap_rejected() {
     }
 }
 
-// rq-be8dfaa5
+// rq-be8dfaa5 rq-413d9c2b
 #[test]
 fn explicit_exclusion_overrides_constraint_derived_default() {
     let dir = tmp_path("constraint_excl_override");

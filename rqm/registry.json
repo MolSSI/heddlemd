@@ -788,7 +788,12 @@
   "rq-07e5568c": {
     "decl": "Scenario: Round-trip equivalence between SI and atomic descriptions",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Round-trip equivalence between SI and atomic descriptions",
     "type": "scenario"
   },
@@ -1637,7 +1642,12 @@
   "rq-1027778f": {
     "decl": "Scenario: SI-mode dt and simulation temperature are converted to atomic",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode dt and simulation temperature are converted to atomic",
     "type": "scenario"
   },
@@ -2501,7 +2511,12 @@
   "rq-18165336": {
     "decl": "Scenario: Empty ConstraintRegistry on a non-empty list reports UnsupportedKind",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Empty ConstraintRegistry on a non-empty list reports UnsupportedKind",
     "type": "scenario"
   },
@@ -4212,7 +4227,12 @@
   "rq-274a4899": {
     "decl": "Scenario: SI-mode .xyz velocities are converted to atomic-unit velocity",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode .xyz velocities are converted to atomic-unit velocity",
     "type": "scenario"
   },
@@ -4991,7 +5011,12 @@
   "rq-2fbcb56c": {
     "decl": "Scenario: SettleWater group with the wrong atom count is rejected",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SettleWater group with the wrong atom count is rejected",
     "type": "scenario"
   },
@@ -5410,7 +5435,12 @@
   "rq-34943524": {
     "decl": "Scenario: Log file header includes pressure, box_volume, mtk_npt_conserved",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_mtk_npt.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Log file header includes pressure, box_volume, mtk_npt_conserved",
     "type": "scenario"
   },
@@ -6345,7 +6375,12 @@
   "rq-3e3add64": {
     "decl": "Scenario: Atomic mode leaves every unit-bearing input value unchanged",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Atomic mode leaves every unit-bearing input value unchanged",
     "type": "scenario"
   },
@@ -6599,7 +6634,12 @@
   "rq-413d9c2b": {
     "decl": "Scenario: Explicit [exclusions] entry overrides constraint-derived default",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Explicit [exclusions] entry overrides constraint-derived default",
     "type": "scenario"
   },
@@ -7496,7 +7536,12 @@
   "rq-4c40f859": {
     "decl": "Scenario: UnitSystem::Atomic factor is unity for every dimension",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/units/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "UnitSystem::Atomic factor is unity for every dimension",
     "type": "scenario"
   },
@@ -7580,7 +7625,12 @@
   "rq-4d3f63fb": {
     "decl": "Scenario: Coulomb prefactor is unity in pair-force evaluation",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/coulomb_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Coulomb prefactor is unity in pair-force evaluation",
     "type": "scenario"
   },
@@ -7631,7 +7681,12 @@
   "rq-4e47cdad": {
     "decl": "Scenario: IntegratorStepWithConstraintExt::step_with_constraint installs hooks on a constraint-accepting state",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "IntegratorStepWithConstraintExt::step_with_constraint installs hooks on a constraint-accepting state",
     "type": "scenario"
   },
@@ -8807,7 +8862,12 @@
   "rq-5b934ecd": {
     "decl": "Scenario: Atomic-mode log row emits engine scalars verbatim",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Atomic-mode log row emits engine scalars verbatim",
     "type": "scenario"
   },
@@ -9617,7 +9677,12 @@
   "rq-64d19c46": {
     "decl": "Scenario: units field explicitly set to \"si\"",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "units field explicitly set to \"si\"",
     "type": "scenario"
   },
@@ -10201,7 +10266,12 @@
   "rq-6b8e5397": {
     "decl": "Scenario: Atomic-mode .xyz lattice and positions pass through unchanged",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Atomic-mode .xyz lattice and positions pass through unchanged",
     "type": "scenario"
   },
@@ -10710,7 +10780,12 @@
   "rq-7047ea32": {
     "decl": "Scenario: Integrator without constraints skips all three hooks",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Integrator without constraints skips all three hooks",
     "type": "scenario"
   },
@@ -11121,7 +11196,12 @@
   "rq-75297a48": {
     "decl": "Scenario: Log file header includes pressure and box_volume when the Berendsen barostat is the configured barostat",
     "file": "integration/berendsen-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/barostats_berendsen.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Log file header includes pressure and box_volume when the Berendsen barostat is the configured barostat",
     "type": "scenario"
   },
@@ -11958,7 +12038,12 @@
   "rq-7bcdd62f": {
     "decl": "Scenario: SI-mode mass and charge are converted to atomic units",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode mass and charge are converted to atomic units",
     "type": "scenario"
   },
@@ -12278,7 +12363,12 @@
   "rq-7edb9c67": {
     "decl": "Scenario: Atomic-mode trajectory frame emits engine scalars verbatim",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Atomic-mode trajectory frame emits engine scalars verbatim",
     "type": "scenario"
   },
@@ -12316,7 +12406,12 @@
   "rq-7f5b3a74": {
     "decl": "Scenario: Two constraint rows sharing an atom are rejected",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two constraint rows sharing an atom are rejected",
     "type": "scenario"
   },
@@ -12734,7 +12829,12 @@
   "rq-839540d9": {
     "decl": "Scenario: SI-mode pair-interaction values are converted to atomic units",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode pair-interaction values are converted to atomic units",
     "type": "scenario"
   },
@@ -12878,7 +12978,12 @@
   "rq-863cf49f": {
     "decl": "Scenario: units field set to \"atomic\"",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "units field set to \"atomic\"",
     "type": "scenario"
   },
@@ -12929,7 +13034,12 @@
   "rq-870a3aa5": {
     "decl": "Scenario: units field defaulting to SI when absent",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "units field defaulting to SI when absent",
     "type": "scenario"
   },
@@ -14256,7 +14366,12 @@
   "rq-96d9c9df": {
     "decl": "Scenario: Reject phase dt <= 0",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject phase dt <= 0",
     "type": "scenario"
   },
@@ -14287,7 +14402,12 @@
   "rq-971663ba": {
     "decl": "Scenario: SI-mode physical scalars are atomic-unit on the returned Config",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode physical scalars are atomic-unit on the returned Config",
     "type": "scenario"
   },
@@ -14733,7 +14853,12 @@
   "rq-9bb3094c": {
     "decl": "Scenario: Triatomic at equilibrium gives zero net force on all atoms",
     "file": "forces/harmonic-angle",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_angle.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Triatomic at equilibrium gives zero net force on all atoms",
     "type": "scenario"
   },
@@ -14930,7 +15055,12 @@
   "rq-9d523d38": {
     "decl": "Scenario: SI-mode .xyz lattice and positions are converted to Bohr",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode .xyz lattice and positions are converted to Bohr",
     "type": "scenario"
   },
@@ -16354,7 +16484,12 @@
   "rq-ac1c8916": {
     "decl": "Scenario: Reject case-mismatched units value",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject case-mismatched units value",
     "type": "scenario"
   },
@@ -16595,7 +16730,12 @@
   "rq-aea6734a": {
     "decl": "Scenario: Empty constraint list yields None",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Empty constraint list yields None",
     "type": "scenario"
   },
@@ -16621,7 +16761,12 @@
   "rq-aeee8e44": {
     "decl": "Scenario: Slot kind unknown to the unit module passes through unchanged",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/units/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Slot kind unknown to the unit module passes through unchanged",
     "type": "scenario"
   },
@@ -17300,7 +17445,12 @@
   "rq-b68761f1": {
     "decl": "Scenario: Top-level units = \"atomic\" is accepted and recorded on Config",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Top-level units = \"atomic\" is accepted and recorded on Config",
     "type": "scenario"
   },
@@ -17901,7 +18051,12 @@
   "rq-bdfb11e3": {
     "decl": "Scenario: Per-phase [phase.output] overrides default paths",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Per-phase [phase.output] overrides default paths",
     "type": "scenario"
   },
@@ -19578,7 +19733,12 @@
   "rq-d05a8f16": {
     "decl": "Scenario: Pair appearing in both [bonds] and [constraints] is rejected",
     "file": "integration/constraint-framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Pair appearing in both [bonds] and [constraints] is rejected",
     "type": "scenario"
   },
@@ -20117,7 +20277,12 @@
   "rq-d617bf4a": {
     "decl": "Scenario: Reject [phase.barostat] alongside mtk-npt in any single phase",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject [phase.barostat] alongside mtk-npt in any single phase",
     "type": "scenario"
   },
@@ -21718,7 +21883,12 @@
   "rq-e5f889f3": {
     "decl": "Scenario: Top-level units with an unknown string is rejected",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Top-level units with an unknown string is rejected",
     "type": "scenario"
   },
@@ -22535,7 +22705,12 @@
   "rq-eebf9f95": {
     "decl": "Scenario: r_skin default tracks the maximum atomic-unit cutoff",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "r_skin default tracks the maximum atomic-unit cutoff",
     "type": "scenario"
   },
@@ -24313,7 +24488,12 @@
   "rq-fee5b8e2": {
     "decl": "Scenario: compute_temperature uses k_B = 1 internally",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "compute_temperature uses k_B = 1 internally",
     "type": "scenario"
   },
