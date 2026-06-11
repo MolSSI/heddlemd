@@ -115,9 +115,9 @@ impl Integrator for VelocityVerletState {
     }
 }
 
-// Velocity-Verlet's plan `[KickDrift, ForceEval, KickHalf]` lines up
-// with the constraint slot's hook positions (one drift bracket plus a
-// terminal kick). The lossless mode rejects hook installation at
+// rq-0e26dde0 — Velocity-Verlet's plan `[KickDrift, ForceEval, KickHalf]`
+// lines up with the constraint slot's hook positions (one drift bracket
+// plus a terminal kick). The lossless mode rejects hook installation at
 // runtime — its compensated-sum bookkeeping doesn't yet account for
 // constraint corrections.
 impl ConstraintCapableIntegrator for VelocityVerletState {

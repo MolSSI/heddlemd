@@ -56,6 +56,7 @@ fn sample_list_three_groups() -> ConstraintList {
     }
 }
 
+// rq-de35dea7
 #[test]
 fn subset_preserves_global_atom_indices_and_particle_count() {
     let list = sample_list_three_groups();
@@ -70,6 +71,7 @@ fn subset_preserves_global_atom_indices_and_particle_count() {
     assert_eq!(sub.groups[0].constraint_type_index, 11);
 }
 
+// rq-721e0fdb
 #[test]
 fn subset_with_empty_indices_yields_empty_list_preserving_particle_count() {
     let list = sample_list_three_groups();
@@ -80,6 +82,7 @@ fn subset_with_empty_indices_yields_empty_list_preserving_particle_count() {
     assert_eq!(sub.particle_count, 100);
 }
 
+// rq-3c6753bc
 #[test]
 fn subset_preserves_supplied_index_order() {
     let mut list = sample_list_three_groups();
@@ -290,6 +293,7 @@ fn list_of_kinds(kinds: &[(usize, &str)], constraint_types: &[NamedSlotConfig]) 
 
 // --- Fan-out scenarios ----------------------------------------------------
 
+// rq-6abcd773
 #[test]
 fn single_registered_kind_on_single_kind_topology_returns_bare_slot() {
     let gpu = init_device().unwrap();
@@ -312,6 +316,7 @@ fn single_registered_kind_on_single_kind_topology_returns_bare_slot() {
     assert_eq!(r.build_received_group_count, vec![("stub-a".to_string(), 2)]);
 }
 
+// rq-135a6e30
 #[test]
 fn two_registered_kinds_on_mixed_topology_fan_out() {
     let gpu = init_device().unwrap();
@@ -362,6 +367,7 @@ fn two_registered_kinds_on_mixed_topology_fan_out() {
     assert_eq!(kinds_called, vec!["stub-a", "stub-b"]);
 }
 
+// rq-08ece93d
 #[test]
 fn slot_firing_order_matches_registration_order_and_reverses_when_registration_reverses() {
     fn run(register_a_first: bool) -> Vec<String> {
@@ -410,6 +416,7 @@ fn slot_firing_order_matches_registration_order_and_reverses_when_registration_r
     assert_eq!(run(false), vec!["beta", "alpha"]);
 }
 
+// rq-051a8191
 #[test]
 fn empty_bucket_for_registered_kind_skips_its_builder() {
     let gpu = init_device().unwrap();
@@ -436,6 +443,7 @@ fn empty_bucket_for_registered_kind_skips_its_builder() {
     assert_eq!(r.build_received_group_count, vec![("stub-a".to_string(), 2)]);
 }
 
+// rq-82cf45a2
 #[test]
 fn composite_short_circuits_on_first_inner_error() {
     let gpu = init_device().unwrap();
@@ -493,6 +501,7 @@ fn composite_short_circuits_on_first_inner_error() {
 
 fn accept_constraint_capable<T: dynamics::integrator::ConstraintCapableIntegrator>(_: &T) {}
 
+// rq-2e028ba6
 #[test]
 fn velocity_verlet_state_implements_constraint_capable_integrator() {
     let gpu = init_device().unwrap();
@@ -500,6 +509,7 @@ fn velocity_verlet_state_implements_constraint_capable_integrator() {
     accept_constraint_capable(&state);
 }
 
+// rq-a109cbb7
 #[test]
 fn velocity_verlet_lossless_false_accepts_constraints_now() {
     use dynamics::integrator::ConstraintCapableIntegrator;
@@ -508,6 +518,7 @@ fn velocity_verlet_lossless_false_accepts_constraints_now() {
     assert_eq!(state.check_accepts_constraints_now(), Ok(()));
 }
 
+// rq-ca6d04ca
 #[test]
 fn velocity_verlet_lossless_true_rejects_constraints_now() {
     use dynamics::integrator::ConstraintCapableIntegrator;
@@ -519,6 +530,7 @@ fn velocity_verlet_lossless_true_rejects_constraints_now() {
     );
 }
 
+// rq-a4a2bf11
 #[test]
 fn integrator_step_ext_step_has_no_constraint_argument() {
     // The non-constraint convenience surface compiles with five
@@ -574,6 +586,7 @@ fn integrator_step_ext_step_has_no_constraint_argument() {
         .unwrap();
 }
 
+// rq-e9706f76
 #[test]
 fn step_with_constraint_short_circuits_on_lossless_velocity_verlet() {
     use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};

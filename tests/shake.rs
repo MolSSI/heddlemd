@@ -697,6 +697,217 @@ fn multiple_water_groups_evolve_independently() {
     }
 }
 
+// --- Periodic boundary handling ------------------------------------------
+
+// rq-7a0a23e3
+//
+// A SPC/E water whose atoms appear on opposite sides of the +x periodic
+// boundary: the kernel's `min_image_to` alignment at the start of
+// `shake_positions` must bring every atom into atom 0's image before
+// projecting, then write atoms 1..n-1 back via delta so their global
+// image bookkeeping is preserved.
+#[test]
+fn shake_positions_handles_water_straddling_periodic_boundary() {
+    let gpu = init_device().unwrap();
+    let list = sequential_shake_list(1);
+
+    // Small orthorhombic box; the primary cell is [-5, +5)^3.
+    let box_l: f32 = 10.0;
+    let sim_box = SimulationBox::new(box_l, box_l, box_l, 0.0, 0.0, 0.0).unwrap();
+
+    // Equilibrium-geometry water centred at x = +4.5 in the +x edge of
+    // the primary cell. With d_OH = sqrt(R_OH^2 - (R_HH/2)^2) ≈ 1.09:
+    //   O at (4.5 + d_oh, 0, 0) ≈ (5.59, 0, 0) — outside the primary
+    //                                            cell along +x.
+    //   H1 at (4.5, -R_HH/2, 0)
+    //   H2 at (4.5, +R_HH/2, 0)
+    // We then wrap O into the primary cell: (-4.41, 0, 0). The molecule
+    // is now visually "split" across the +x boundary, even though under
+    // minimum-image its geometry is the equilibrium triangle.
+    let d_oh = (R_OH * R_OH - (R_HH * 0.5) * (R_HH * 0.5)).sqrt();
+    let cx: f32 = 4.5;
+    let mut o_pos = [cx + d_oh, 0.0_f32, 0.0_f32];
+    o_pos[0] -= box_l; // wrap O into the primary cell at x ≈ -4.41
+    let h1_pos = [cx, -R_HH * 0.5, 0.0];
+    let h2_pos = [cx, R_HH * 0.5, 0.0];
+
+    // Sanity: under minimum-image, the configuration sits on the
+    // constraint manifold.
+    fn min_image_dist_ortho(a: [f32; 3], b: [f32; 3], box_l: f32) -> f32 {
+        let mut d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+        for k in 0..3 {
+            let ki = (d[k] / box_l + 0.5).floor();
+            d[k] -= ki * box_l;
+        }
+        (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
+    }
+    assert!(
+        (min_image_dist_ortho(o_pos, h1_pos, box_l) - R_OH).abs() < 1.0e-5,
+        "fixture sanity: pre-perturb O-H1 should equal R_OH under minimum-image",
+    );
+
+    // Build a ParticleState with the wrap-straddling positions.
+    let state = ParticleState::new(
+        vec![o_pos[0], h1_pos[0], h2_pos[0]],
+        vec![o_pos[1], h1_pos[1], h2_pos[1]],
+        vec![o_pos[2], h1_pos[2], h2_pos[2]],
+        vec![0.0_f32; 3],
+        vec![0.0_f32; 3],
+        vec![0.0_f32; 3],
+        vec![M_O, M_H, M_H],
+        vec![0.0_f32; 3],
+        vec![0u32; 3],
+        None,
+        None,
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut slot = ShakeConstraintsState::new(
+        gpu.device.clone(),
+        &list,
+        &state.masses,
+        &[spce_type()],
+    )
+    .unwrap();
+
+    // Snapshot pre-drift state.
+    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings)
+        .unwrap();
+
+    // Snapshot the *global* positions for a "no spurious wrap" check
+    // after the projection.
+    let pre_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let pre_y: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
+    let pre_z: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+
+    // Perturb H1 by ~0.01 a₀ along the (min-image) O→H1 direction —
+    // small enough to leave atoms in their original lattice image but
+    // large enough to drive SHAKE into a few iterations.
+    let mut dx = h1_pos[0] - o_pos[0];
+    let mut dy = h1_pos[1] - o_pos[1];
+    let mut dz = h1_pos[2] - o_pos[2];
+    let kx = (dx / box_l + 0.5).floor();
+    let ky = (dy / box_l + 0.5).floor();
+    let kz = (dz / box_l + 0.5).floor();
+    dx -= kx * box_l;
+    dy -= ky * box_l;
+    dz -= kz * box_l;
+    let norm = (dx * dx + dy * dy + dz * dz).sqrt();
+    let stretch = 0.01_f32;
+    let mut h1_pert = h1_pos;
+    h1_pert[0] += stretch * dx / norm;
+    h1_pert[1] += stretch * dy / norm;
+    h1_pert[2] += stretch * dz / norm;
+    let pos_x = vec![o_pos[0], h1_pert[0], h2_pos[0]];
+    let pos_y = vec![o_pos[1], h1_pert[1], h2_pos[1]];
+    let pos_z = vec![o_pos[2], h1_pert[2], h2_pos[2]];
+    gpu.device.htod_sync_copy_into(&pos_x, &mut buffers.positions_x).unwrap();
+    gpu.device.htod_sync_copy_into(&pos_y, &mut buffers.positions_y).unwrap();
+    gpu.device.htod_sync_copy_into(&pos_z, &mut buffers.positions_z).unwrap();
+
+    // Unconstrained mass-weighted COM (under minimum-image w.r.t. O).
+    let m_total = (M_O + 2.0 * M_H) as f64;
+    let unconstrained_com = {
+        let bring_to_o = |p: [f32; 3]| -> [f32; 3] {
+            let mut d = [p[0] - o_pos[0], p[1] - o_pos[1], p[2] - o_pos[2]];
+            for k in 0..3 {
+                let ki = (d[k] / box_l + 0.5).floor();
+                d[k] -= ki * box_l;
+            }
+            [o_pos[0] + d[0], o_pos[1] + d[1], o_pos[2] + d[2]]
+        };
+        let o_loc = bring_to_o(o_pos);
+        let h1_loc = bring_to_o(h1_pert);
+        let h2_loc = bring_to_o(h2_pos);
+        [
+            (M_O * o_loc[0] + M_H * h1_loc[0] + M_H * h2_loc[0]) as f64 / m_total,
+            (M_O * o_loc[1] + M_H * h1_loc[1] + M_H * h2_loc[1]) as f64 / m_total,
+            (M_O * o_loc[2] + M_H * h1_loc[2] + M_H * h2_loc[2]) as f64 / m_total,
+        ]
+    };
+
+    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings)
+        .unwrap();
+
+    let post_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let post_y: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
+    let post_z: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+
+    // Constraint distances restored under minimum-image.
+    let o = [post_x[0], post_y[0], post_z[0]];
+    let h1 = [post_x[1], post_y[1], post_z[1]];
+    let h2 = [post_x[2], post_y[2], post_z[2]];
+    let d_oh1 = min_image_dist_ortho(o, h1, box_l);
+    let d_oh2 = min_image_dist_ortho(o, h2, box_l);
+    let d_hh = min_image_dist_ortho(h1, h2, box_l);
+    let tol = 1.0e-4;
+    assert!(
+        ((d_oh1 - R_OH) / R_OH).abs() < tol,
+        "O-H1 distance under min-image {d_oh1} differs from R_OH {R_OH}"
+    );
+    assert!(
+        ((d_oh2 - R_OH) / R_OH).abs() < tol,
+        "O-H2 distance under min-image {d_oh2} differs from R_OH {R_OH}"
+    );
+    assert!(
+        ((d_hh - R_HH) / R_HH).abs() < tol,
+        "H1-H2 distance under min-image {d_hh} differs from R_HH {R_HH}"
+    );
+
+    // No atom moved more than the constraint-correction magnitude
+    // (~0.01 a₀): in particular, no atom jumped across the cell. Were
+    // the kernel to accidentally wrap an atom while writing back, the
+    // displacement would be ~box_l.
+    for i in 0..3 {
+        let dxg = post_x[i] - pre_x[i];
+        let dyg = post_y[i] - pre_y[i];
+        let dzg = post_z[i] - pre_z[i];
+        let mag = (dxg * dxg + dyg * dyg + dzg * dzg).sqrt();
+        assert!(
+            mag < 0.5 * box_l,
+            "atom {i} displaced by {mag} a₀ — suspicious wrap (box_l = {box_l})",
+        );
+    }
+
+    // Mass-weighted COM under min-image is preserved.
+    let constrained_com = {
+        let bring_to_o = |p: [f32; 3]| -> [f32; 3] {
+            let mut d = [p[0] - o[0], p[1] - o[1], p[2] - o[2]];
+            for k in 0..3 {
+                let ki = (d[k] / box_l + 0.5).floor();
+                d[k] -= ki * box_l;
+            }
+            [o[0] + d[0], o[1] + d[1], o[2] + d[2]]
+        };
+        let o_loc = bring_to_o(o);
+        let h1_loc = bring_to_o(h1);
+        let h2_loc = bring_to_o(h2);
+        [
+            (M_O * o_loc[0] + M_H * h1_loc[0] + M_H * h2_loc[0]) as f64 / m_total,
+            (M_O * o_loc[1] + M_H * h1_loc[1] + M_H * h2_loc[1]) as f64 / m_total,
+            (M_O * o_loc[2] + M_H * h1_loc[2] + M_H * h2_loc[2]) as f64 / m_total,
+        ]
+    };
+    // COM may differ from the unconstrained COM by a small amount due to
+    // the H1 perturbation being projected; allow ~1e-3 a₀ slack.
+    let com_tol = 1.0e-3;
+    assert!(
+        (constrained_com[0] - unconstrained_com[0]).abs() < com_tol,
+        "COM x drifted across the wrap: pre {} vs post {}",
+        unconstrained_com[0],
+        constrained_com[0]
+    );
+    assert!(
+        (constrained_com[1] - unconstrained_com[1]).abs() < com_tol,
+        "COM y drifted across the wrap",
+    );
+    assert!(
+        (constrained_com[2] - unconstrained_com[2]).abs() < com_tol,
+        "COM z drifted across the wrap",
+    );
+}
+
 // --- Reproducibility -----------------------------------------------------
 
 // rq-99ee814d

@@ -124,6 +124,14 @@ impl UnitSystem {
 /// Kinds that exist but carry no unit-bearing fields (e.g.
 /// `velocity-verlet`) return `Some(&[])` so a maintainer adding a new
 /// slot can spot at a glance that the entry was considered.
+///
+/// The table below mirrors the kinds registered by
+/// `Registries::with_builtins()` (see `src/registries.rs`) and by
+/// each `XRegistry::with_builtins()` (in `src/integrator/mod.rs` and
+/// `src/minimizer/mod.rs`). When adding a new built-in builder, add
+/// the matching arm here. The `convert_slot_params` special-case
+/// block immediately below this function handles nested-array shapes
+/// (`shake`'s `constraints[k].d`) that the flat table can't express.
 pub fn slot_kind_field_dims(kind: &str) -> Option<&'static [(&'static str, Dimension)]> {
     use Dimension::*;
     match kind {

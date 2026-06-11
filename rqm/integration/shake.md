@@ -627,6 +627,23 @@ Feature: SHAKE + RATTLE rigid constraints
       unconstrained post-drift positions break every constraint by ~1.0e-12 m
     When apply_after_drift is called with dt = 2.0e-15 s
     Then constraint_virial on the device contains three nonzero entries for this group
+
+  @rq-7a0a23e3
+  Scenario: shake_positions handles a water group straddling a periodic boundary
+    Given a constructed ShakeConstraintsState with one SPC/E water group
+    And a small orthorhombic simulation box (Lx = Ly = Lz = 10.0 a₀)
+    And pre-drift positions placing the O atom near +Lx/2 and the two H atoms near −Lx/2,
+      so that the molecule straddles the +x periodic boundary
+    And unconstrained post-drift positions that perturb the O–H1 bond by ~1.0e-2 a₀
+      along the O→H1 direction (computed under minimum-image)
+    When apply_after_drift is called with dt = 1.0 atu
+    Then every constraint distance (O–H1, O–H2, H1–H2), computed under minimum-image,
+      equals its target r₀ to within 1.0e-4 a₀ relative
+    And the per-atom global positions remain in the same lattice image they were in
+      before the call (no spurious wrap of any atom)
+    And the mass-weighted centre of mass, computed by bringing every atom into atom 0's
+      image, equals the same COM of the unconstrained post-drift positions to within
+      1.0e-3 a₀
     And the per-group sum Σ_i constraint_virial[i] is finite
 
   # --- Velocity projection (RATTLE) ---

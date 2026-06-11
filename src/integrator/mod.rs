@@ -65,6 +65,7 @@ pub enum StepError {
     ForceField(#[from] ForceFieldError),
     #[error("{0}")]
     Constraint(#[from] ConstraintError),
+    // rq-0e26dde0
     /// Returned by `IntegratorStepWithConstraintExt::step_with_constraint`
     /// when the integrator's `check_accepts_constraints_now()`
     /// rejected hook installation for the instance's current runtime
@@ -335,6 +336,7 @@ pub fn run_step_no_constraint(
     )
 }
 
+// rq-0e26dde0
 /// Extension trait offering a single-call `step()` convenience method
 /// on top of the core `Integrator` trait's `plan()` + `execute()`
 /// methods. The trait itself defines only the plan/execute pair (see
@@ -387,6 +389,7 @@ impl<T: Integrator> IntegratorStepExt for T {
     }
 }
 
+// rq-0e26dde0
 /// Marker (with a runtime-state predicate) for integrator types whose
 /// `StepPlan` shape is compatible with the constraint slot's hook
 /// positions. Implemented by integrators whose plans place a single
@@ -406,6 +409,7 @@ pub trait ConstraintCapableIntegrator: Integrator {
     }
 }
 
+// rq-0e26dde0
 /// Extension trait offering a single-call `step_with_constraint()`
 /// convenience method on top of [`IntegratorStepExt::step`]. Bounded
 /// on `Self: ConstraintCapableIntegrator`, so only the integrator

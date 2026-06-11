@@ -1038,7 +1038,16 @@
     "decl": "## Convenience Trait Surface",
     "file": "integration/constraint-framework",
     "level": 2,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/mod.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/velocity_verlet.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Convenience Trait Surface",
     "type": "section"
   },
@@ -9012,6 +9021,13 @@
     "file": "integration/framework",
     "refs": [],
     "title": "Builder validate_params rejects an unknown field",
+    "type": "scenario"
+  },
+  "rq-7a0a23e3": {
+    "decl": "Scenario: shake_positions handles a water group straddling a periodic boundary",
+    "file": "integration/shake",
+    "refs": [],
+    "title": "shake_positions handles a water group straddling a periodic boundary",
     "type": "scenario"
   },
   "rq-7a124d43": {
