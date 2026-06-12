@@ -494,15 +494,21 @@ only inside the `SpmeReciprocalState` construction path.
 - `spme_charge_spread(particle_buffers, spme_state) -> Result<(), GpuError>` <!-- rq-f69698b8 -->
   Launches the charge-spread kernel. Writes `spme_state.rho`.
 
-- `spme_forward_fft(spme_state) -> Result<(), CuFftError>` <!-- rq-24e36eba -->
-  Runs the cuFFT R2C transform `rho → rho_hat`.
+- The R2C forward transform `rho → rho_hat` is invoked via <!-- rq-24e36eba -->
+  `SpmeReciprocalGrid::forward_plan.execute(&rho, &mut rho_hat)`, where
+  `forward_plan: Plan3dR2C` is constructed in
+  `SpmeReciprocalGrid::new` and pre-bound to `recip_stream` via
+  `set_stream`. The call returns `Result<(), CuFftError>`.
 
 - `spme_influence_multiply(spme_state) -> Result<(), GpuError>` <!-- rq-8326d2d1 -->
   Multiplies `rho_hat[k] *= G[k]` in place, also writing the per-cell
   virial contribution to a scratch buffer for the subsequent reduction.
 
-- `spme_inverse_fft(spme_state) -> Result<(), CuFftError>` <!-- rq-a98abc35 -->
-  Runs the cuFFT C2R transform `V_hat → V`.
+- The C2R inverse transform `rho_hat → V` is invoked via <!-- rq-a98abc35 -->
+  `SpmeReciprocalGrid::inverse_plan.execute(&rho_hat, &mut V)`, where
+  `inverse_plan: Plan3dC2R` is constructed in
+  `SpmeReciprocalGrid::new` and pre-bound to `recip_stream` via
+  `set_stream`. The call returns `Result<(), CuFftError>`.
 
 - `spme_force_gather(particle_buffers, spme_state, slot_output) -> Result<(), GpuError>` <!-- rq-c6f6a13c -->
   Launches the force-gather kernel. Writes per-particle force,
@@ -595,21 +601,27 @@ Stream assignment:
 Cross-stream synchronization uses two CUDA events owned by
 `SpmeReciprocalState`:
 
-- `default_ready_event` — recorded on the default stream at the start <!-- rq-274db88b -->
-  of `SpmeReciprocalState::contribute()` and waited on by
-  `recip_stream` (via `cudaStreamWaitEvent`) before the first
-  reciprocal kernel enqueues. Guarantees that the integrator's writes
-  to `positions_x/y/z` and the construction-time writes to `charges`
-  are visible to the reciprocal pipeline.
-- `recip_ready_event` — recorded on `recip_stream` immediately after <!-- rq-0d5e76ec -->
-  the inverse FFT enqueues at the end of `contribute()`, and waited on
-  by the default stream at the start of `SpmeReciprocalState::reduce()`.
-  Guarantees that `V` and `virial_per_cell` are finalized before the
-  default stream's `virial_per_cell` dtoh and the `spme_force_gather`
-  launch.
+- A "default → recip_stream" handoff at the start of <!-- rq-274db88b -->
+  `SpmeReciprocalState::contribute()` is implemented via
+  `recip_stream.wait_for_default()`. cudarc records an event on the
+  default stream that captures every prior default-stream launch
+  (integrator updates, bin-list rebuild, any other default-stream
+  slot launches that already returned to host) and makes
+  `recip_stream` wait on it. This guarantees that the integrator's
+  writes to `positions_x/y/z` and the construction-time writes to
+  `charges` are visible before the first reciprocal kernel enqueues.
+- A "recip_stream → default" join at the start of <!-- rq-0d5e76ec -->
+  `SpmeReciprocalState::reduce()` is implemented via
+  `device.wait_for(&recip_stream)`. cudarc records an event on
+  `recip_stream` that captures the inverse FFT and every prior
+  recip-stream launch, and makes the default stream wait on it.
+  This guarantees that `V` and `virial_per_cell` are finalized
+  before the default stream's `virial_per_cell` dtoh and the
+  `spme_force_gather` launch.
 
-Both events are reused across timesteps; they are created in
-`SpmeReciprocalState::new` and released when the slot is dropped. The
+Both event handles are managed internally by cudarc on each
+`wait_for_default` / `wait_for` invocation; `SpmeReciprocalState` holds
+no explicit `CudaEvent` fields. The
 host call to `SpmeReciprocalState::contribute()` returns as soon as the
 four reciprocal kernels have been enqueued on `recip_stream`; the host
 does not block on cuFFT or on the reciprocal kernels.

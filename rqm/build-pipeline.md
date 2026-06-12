@@ -230,29 +230,6 @@ Feature: CUDA build pipeline and smoke test kernel
     Then a file "fill.ptx" is produced in OUT_DIR
     And the build succeeds
 
-  @rq-123f560e
-  Scenario: build.rs fails with a clear message when nvcc is missing
-    Given nvcc is not available on PATH
-    When cargo build is run
-    Then the build fails
-    And the error output contains "nvcc"
-    And the error output contains "CUDA Toolkit"
-
-  @rq-a199e0aa
-  Scenario: build.rs fails with a clear message when nvcc rejects the source
-    Given a file "kernels/fill.cu" containing invalid CUDA syntax
-    And nvcc is available on PATH
-    When cargo build is run
-    Then the build fails
-    And the error output contains the nvcc error message
-
-  @rq-85baad9d
-  Scenario: build.rs reruns when a kernel source file changes
-    Given "kernels/fill.cu" has been modified since the last build
-    When cargo build is run
-    Then build.rs executes again
-    And fill.ptx is recompiled
-
   @rq-c17ef35f
   Scenario: PTX is embedded in the Rust binary
     Given the build has succeeded

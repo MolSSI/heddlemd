@@ -443,7 +443,7 @@ handle (see `build-pipeline.md`).
 
 ### Builder <!-- rq-a0ddb391 -->
 
-- `ShakeConstraintBuilder` — implements `ConstraintBuilder` (see <!-- rq-c623013e -->
+- `ShakeBuilder` — implements `ConstraintBuilder` (see <!-- rq-c623013e -->
   `integration/constraint-framework.md`). Methods:
   - `kind_name() -> &'static str` returns `"shake"`.
   - `expected_atom_count(&params: &toml::Value) -> usize`

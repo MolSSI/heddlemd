@@ -261,7 +261,7 @@ Mixing is not supported.
 
   Every unit-bearing scalar the loader or writer handles maps to
   exactly one of these variants. `Dimensionless` is the identity for
-  both `to_si` and `from_si` regardless of `UnitSystem`; it tags
+  both `to_user` and `from_user` regardless of `UnitSystem`; it tags
   counter-like or already-normalized values (e.g. an integrator
   diagnostic that reports a pure ratio) that flow through the
   conversion pipeline unchanged.
@@ -279,13 +279,13 @@ Mixing is not supported.
   - Inverse dimensions return the reciprocal of the corresponding base
     dimension's factor.
 
-- `UnitSystem::to_si(self, dim: Dimension, value: f64) -> f64` <!-- rq-a7677c61 -->
+- `UnitSystem::to_user(self, dim: Dimension, value: f64) -> f64` <!-- rq-a7677c61 -->
   - Output-direction convenience: returns `value * self.factor(dim)`.
     Used by the trajectory, CSV log, and minlog writers to translate
     one engine-side atomic-unit scalar into the user's chosen unit
     system.
 
-- `UnitSystem::from_si(self, dim: Dimension, value: f64) -> f64` <!-- rq-fdeba84b -->
+- `UnitSystem::from_user(self, dim: Dimension, value: f64) -> f64` <!-- rq-fdeba84b -->
   - Input-direction convenience: returns `value / self.factor(dim)`.
     Used by `load_config` and `load_init_state` to translate one
     user-supplied scalar into the engine's atomic-unit representation.

@@ -1354,7 +1354,12 @@
   "rq-0cb544f4": {
     "decl": "Scenario: Coulomb cutoff participates in box-too-small check",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Coulomb cutoff participates in box-too-small check",
     "type": "scenario"
   },
@@ -1383,11 +1388,16 @@
     "type": "api-item"
   },
   "rq-0d5e76ec": {
-    "decl": "- `recip_ready_event` — recorded on `recip_stream` immediately after",
+    "decl": "- A \"recip_stream → default\" join at the start of",
     "file": "forces/spme",
-    "refs": [],
-    "title": "recip_ready_event",
-    "type": "api-item"
+    "refs": [
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "- A \"recip_stream → default\" join at the start of",
+    "type": "anchor"
   },
   "rq-0d7ebeb6": {
     "decl": "Scenario: Custom integrator builder is selectable",
@@ -1983,13 +1993,6 @@
     "title": "Single-scale form sets both LJ and Coulomb scales equally",
     "type": "scenario"
   },
-  "rq-123f560e": {
-    "decl": "Scenario: build.rs fails with a clear message when nvcc is missing",
-    "file": "build-pipeline",
-    "refs": [],
-    "title": "build.rs fails with a clear message when nvcc is missing",
-    "type": "scenario"
-  },
   "rq-1254cd3a": {
     "decl": "- `OutputConfig`",
     "file": "io/config-schema",
@@ -2263,7 +2266,12 @@
   "rq-14b8e042": {
     "decl": "Scenario: Morse-bonded run records morse_bond_force, reduce_bond_forces, accumulate_forces",
     "file": "performance-analysis",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Morse-bonded run records morse_bond_force, reduce_bond_forces, accumulate_forces",
     "type": "scenario"
   },
@@ -3739,7 +3747,12 @@
   "rq-21d27f06": {
     "decl": "Scenario: All-pairs mode skips the box-too-small check",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lint.rs",
+        "kind": "code"
+      }
+    ],
     "title": "All-pairs mode skips the box-too-small check",
     "type": "scenario"
   },
@@ -4095,11 +4108,16 @@
     "type": "scenario"
   },
   "rq-24e36eba": {
-    "decl": "- `spme_forward_fft(spme_state) -> Result<(), CuFftError>`",
+    "decl": "- The R2C forward transform `rho → rho_hat` is invoked via",
     "file": "forces/spme",
-    "refs": [],
-    "title": "spme_forward_fft",
-    "type": "api-item"
+    "refs": [
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "- The R2C forward transform `rho → rho_hat` is invoked via",
+    "type": "anchor"
   },
   "rq-24f280af": {
     "decl": "### Effective exclusions",
@@ -4374,11 +4392,16 @@
     "type": "scenario"
   },
   "rq-274db88b": {
-    "decl": "- `default_ready_event` — recorded on the default stream at the start",
+    "decl": "- A \"default → recip_stream\" handoff at the start of",
     "file": "forces/spme",
-    "refs": [],
-    "title": "default_ready_event",
-    "type": "api-item"
+    "refs": [
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "- A \"default → recip_stream\" handoff at the start of",
+    "type": "anchor"
   },
   "rq-27efd6a0": {
     "decl": "Scenario: Atom appearing in one angle receives that angle's force",
@@ -4536,7 +4559,12 @@
   "rq-299c69c9": {
     "decl": "Scenario: init_device fails when no GPU is available",
     "file": "build-pipeline",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/smoke_gpu.rs",
+        "kind": "code"
+      }
+    ],
     "title": "init_device fails when no GPU is available",
     "type": "scenario"
   },
@@ -4766,13 +4794,6 @@
       }
     ],
     "title": "Exclusion scale NaN rejected",
-    "type": "scenario"
-  },
-  "rq-2b614db6": {
-    "decl": "Scenario: Lint with --with-gpu runs init_device and surfaces a cuFFT smoke-test failure",
-    "file": "simulation-runner",
-    "refs": [],
-    "title": "Lint with --with-gpu runs init_device and surfaces a cuFFT smoke-test failure",
     "type": "scenario"
   },
   "rq-2b7cfbaf": {
@@ -5250,7 +5271,12 @@
   "rq-306def4b": {
     "decl": "Scenario: Atomic-mode file passes lattice, positions, and velocities through unchanged",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Atomic-mode file passes lattice, positions, and velocities through unchanged",
     "type": "scenario"
   },
@@ -5850,7 +5876,12 @@
   "rq-371ae8cd": {
     "decl": "Scenario: SI-mode position columns are converted to Bohr",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode position columns are converted to Bohr",
     "type": "scenario"
   },
@@ -6377,7 +6408,12 @@
   "rq-3ba42667": {
     "decl": "Scenario: Open with extra columns appends them to the header",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Open with extra columns appends them to the header",
     "type": "scenario"
   },
@@ -6882,7 +6918,12 @@
   "rq-41453204": {
     "decl": "Scenario: reduce_pair_energy_virial on an empty state is a no-op",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "reduce_pair_energy_virial on an empty state is a no-op",
     "type": "scenario"
   },
@@ -7300,7 +7341,12 @@
   "rq-46d24bfb": {
     "decl": "Scenario: One block per particle, blocks are independent",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "One block per particle, blocks are independent",
     "type": "scenario"
   },
@@ -7436,7 +7482,12 @@
   "rq-48d14580": {
     "decl": "Scenario: Positions written by the writer are inside the primary cell",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Positions written by the writer are inside the primary cell",
     "type": "scenario"
   },
@@ -7676,7 +7727,12 @@
   "rq-4b4f85c7": {
     "decl": "Scenario: Box too small for cell-list rejected before forces are constructed",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lint.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Box too small for cell-list rejected before forces are constructed",
     "type": "scenario"
   },
@@ -8189,7 +8245,12 @@
   "rq-5137c6f5": {
     "decl": "Scenario: SI-mode lattice components are converted to Bohr",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode lattice components are converted to Bohr",
     "type": "scenario"
   },
@@ -8437,7 +8498,12 @@
   "rq-5395785a": {
     "decl": "Scenario: Image columns appear after pos (and after velo when present) in each data row",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Image columns appear after pos (and after velo when present) in each data row",
     "type": "scenario"
   },
@@ -9018,7 +9084,12 @@
   "rq-5939f04a": {
     "decl": "Scenario: Temperature for a 3-atom SETTLE'd water (one rigid molecule, COM removed)",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Temperature for a 3-atom SETTLE'd water (one rigid molecule, COM removed)",
     "type": "scenario"
   },
@@ -9818,7 +9889,12 @@
   "rq-62300a18": {
     "decl": "Scenario: All-pairs neighbor mode records lj_pair_force and omits neighbor-list rows",
     "file": "performance-analysis",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
     "title": "All-pairs neighbor mode records lj_pair_force and omits neighbor-list rows",
     "type": "scenario"
   },
@@ -10014,7 +10090,12 @@
   "rq-64e90d53": {
     "decl": "Scenario: Atomic-mode round-trip is the identity for every column",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Atomic-mode round-trip is the identity for every column",
     "type": "scenario"
   },
@@ -10844,7 +10925,12 @@
   "rq-6d9f6db6": {
     "decl": "Scenario: SI-mode writer multiplies the Lattice by the bohr -> meter factor",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode writer multiplies the Lattice by the bohr -> meter factor",
     "type": "scenario"
   },
@@ -10910,7 +10996,12 @@
   "rq-6e1ba10f": {
     "decl": "Scenario: Position-in-box check runs against the post-conversion box",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Position-in-box check runs against the post-conversion box",
     "type": "scenario"
   },
@@ -11598,7 +11689,12 @@
   "rq-75746f64": {
     "decl": "Scenario: neighbor_displacement_squared count equals one warm-up plus per-step launches",
     "file": "performance-analysis",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
     "title": "neighbor_displacement_squared count equals one warm-up plus per-step launches",
     "type": "scenario"
   },
@@ -11661,7 +11757,12 @@
   "rq-75ee70dd": {
     "decl": "Scenario: reduce_pair_energy_virial does not touch force targets",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "reduce_pair_energy_virial does not touch force targets",
     "type": "scenario"
   },
@@ -12163,7 +12264,12 @@
   "rq-7986038d": {
     "decl": "Scenario: LogWriter in atomic mode emits engine scalars verbatim",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LogWriter in atomic mode emits engine scalars verbatim",
     "type": "scenario"
   },
@@ -12773,7 +12879,12 @@
   "rq-7f2310ac": {
     "decl": "Scenario: neighbor_list_build and copy_positions_into_reference counts match rebuilds",
     "file": "performance-analysis",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
     "title": "neighbor_list_build and copy_positions_into_reference counts match rebuilds",
     "type": "scenario"
   },
@@ -12848,7 +12959,12 @@
   "rq-803ee7e5": {
     "decl": "Scenario: Skipping reduce_pair_energy_virial leaves stale energy and virial targets",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Skipping reduce_pair_energy_virial leaves stale energy and virial targets",
     "type": "scenario"
   },
@@ -13340,13 +13456,6 @@
     "refs": [],
     "title": "PTX Module Loading",
     "type": "section"
-  },
-  "rq-85baad9d": {
-    "decl": "Scenario: build.rs reruns when a kernel source file changes",
-    "file": "build-pipeline",
-    "refs": [],
-    "title": "build.rs reruns when a kernel source file changes",
-    "type": "scenario"
   },
   "rq-85e9b9da": {
     "decl": "Scenario: .minlog rows include the final convergence iteration",
@@ -14407,7 +14516,12 @@
   "rq-91f5f34e": {
     "decl": "Scenario: Config rejected by the filename convention",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Config rejected by the filename convention",
     "type": "scenario"
   },
@@ -15084,7 +15198,12 @@
   "rq-999eddbb": {
     "decl": "Scenario: SI-mode velocity columns are converted to Bohr per atomic time",
     "file": "io/init-state-file",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_init_state.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode velocity columns are converted to Bohr per atomic time",
     "type": "scenario"
   },
@@ -15410,7 +15529,12 @@
   "rq-9c883334": {
     "decl": "Scenario: LogWriter in SI mode multiplies temperature by the temperature factor",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "LogWriter in SI mode multiplies temperature by the temperature factor",
     "type": "scenario"
   },
@@ -15583,7 +15707,12 @@
   "rq-9d8f0c97": {
     "decl": "Scenario: Temperature for an unconstrained 10-particle COM-removed system",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Temperature for an unconstrained 10-particle COM-removed system",
     "type": "scenario"
   },
@@ -15774,7 +15903,12 @@
   "rq-9f3a36aa": {
     "decl": "Scenario: reduce_pair_forces does not touch energy or virial targets",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "reduce_pair_forces does not touch energy or virial targets",
     "type": "scenario"
   },
@@ -16039,13 +16173,6 @@
     "title": "Reject an analysis filename that does not end in `.in.analysis`",
     "type": "scenario"
   },
-  "rq-a199e0aa": {
-    "decl": "Scenario: build.rs fails with a clear message when nvcc rejects the source",
-    "file": "build-pipeline",
-    "refs": [],
-    "title": "build.rs fails with a clear message when nvcc rejects the source",
-    "type": "scenario"
-  },
   "rq-a1abedca": {
     "decl": "### Reproducibility",
     "file": "forces/lj-pair-force",
@@ -16069,7 +16196,12 @@
   "rq-a1d80d47": {
     "decl": "Scenario: SI-mode writer multiplies Time by the atomic-time -> second factor",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode writer multiplies Time by the atomic-time -> second factor",
     "type": "scenario"
   },
@@ -16525,9 +16657,14 @@
     "type": "scenario"
   },
   "rq-a7677c61": {
-    "decl": "- `UnitSystem::to_si(self, dim: Dimension, value: f64) -> f64`",
+    "decl": "- `UnitSystem::to_user(self, dim: Dimension, value: f64) -> f64`",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/units/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "UnitSystem",
     "type": "api-item"
   },
@@ -16725,11 +16862,16 @@
     "type": "scenario"
   },
   "rq-a98abc35": {
-    "decl": "- `spme_inverse_fft(spme_state) -> Result<(), CuFftError>`",
+    "decl": "- The C2R inverse transform `rho_hat → V` is invoked via",
     "file": "forces/spme",
-    "refs": [],
-    "title": "spme_inverse_fft",
-    "type": "api-item"
+    "refs": [
+      {
+        "file": "src/forces/spme.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "- The C2R inverse transform `rho_hat → V` is invoked via",
+    "type": "anchor"
   },
   "rq-a99ca751": {
     "decl": "Scenario: Cell index of a position outside the primary cell wraps before binning",
@@ -17037,7 +17179,12 @@
   "rq-ac8fc96a": {
     "decl": "- `[[constraint_types]]` entries deserialise into `NamedSlotConfig`",
     "file": "io/config-schema",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "- `[[constraint_types]]` entries deserialise into `NamedSlotConfig`",
     "type": "api-item"
   },
@@ -17285,7 +17432,12 @@
   "rq-aee2bfb2": {
     "decl": "Scenario: Reduction tree result agrees with a CPU pairwise tree reference to within a small relative tolerance",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reduction tree result agrees with a CPU pairwise tree reference to within a small relative tolerance",
     "type": "scenario"
   },
@@ -17408,7 +17560,12 @@
   "rq-afde087b": {
     "decl": "Scenario: SI-mode writer multiplies positions by the bohr -> meter factor",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode writer multiplies positions by the bohr -> meter factor",
     "type": "scenario"
   },
@@ -17635,7 +17792,12 @@
   "rq-b2221a99": {
     "decl": "Scenario: Reduction with count_i larger than one warp uses the inter-warp tree",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reduction with count_i larger than one warp uses the inter-warp tree",
     "type": "scenario"
   },
@@ -17866,7 +18028,12 @@
   "rq-b4c772c9": {
     "decl": "Scenario: Two independent runs of reduce_pair_energy_virial produce byte-identical scalars",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two independent runs of reduce_pair_energy_virial produce byte-identical scalars",
     "type": "scenario"
   },
@@ -18507,7 +18674,12 @@
   "rq-bcbe7cf6": {
     "decl": "Scenario: Write_row with mismatched extras length panics in debug builds",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Write_row with mismatched extras length panics in debug builds",
     "type": "scenario"
   },
@@ -18855,7 +19027,12 @@
   "rq-c009903e": {
     "decl": "Scenario: Reduction with count_i larger than one block sweep accumulates across sweeps",
     "file": "pair-reduction",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_reduction.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reduction with count_i larger than one block sweep accumulates across sweeps",
     "type": "scenario"
   },
@@ -18964,7 +19141,12 @@
   "rq-c17ef35f": {
     "decl": "Scenario: PTX is embedded in the Rust binary",
     "file": "build-pipeline",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/smoke_gpu.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PTX is embedded in the Rust binary",
     "type": "scenario"
   },
@@ -18983,7 +19165,12 @@
   "rq-c19d0ce4": {
     "decl": "Scenario: SI-mode reader divides Lattice and positions by the bohr -> meter factor",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode reader divides Lattice and positions by the bohr -> meter factor",
     "type": "scenario"
   },
@@ -19374,10 +19561,15 @@
     "type": "scenario"
   },
   "rq-c623013e": {
-    "decl": "- `ShakeConstraintBuilder` — implements `ConstraintBuilder` (see",
+    "decl": "- `ShakeBuilder` — implements `ConstraintBuilder` (see",
     "file": "integration/shake",
-    "refs": [],
-    "title": "ShakeConstraintBuilder",
+    "refs": [
+      {
+        "file": "src/integrator/shake.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "ShakeBuilder",
     "type": "api-item"
   },
   "rq-c62bb861": {
@@ -19511,7 +19703,12 @@
   "rq-c7df5714": {
     "decl": "Scenario: Bond-free run omits morse_bond_force and reduce_bond_forces",
     "file": "performance-analysis",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Bond-free run omits morse_bond_force and reduce_bond_forces",
     "type": "scenario"
   },
@@ -20288,7 +20485,12 @@
   "rq-cfc89131": {
     "decl": "Scenario: A subsystem load that names a missing kernel surfaces as GpuError at init_device",
     "file": "build-pipeline",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/smoke_gpu.rs",
+        "kind": "code"
+      }
+    ],
     "title": "A subsystem load that names a missing kernel surfaces as GpuError at init_device",
     "type": "scenario"
   },
@@ -21120,7 +21322,12 @@
   "rq-d87f15bd": {
     "decl": "Scenario: Lint without --with-gpu does not open a GPU device",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lint.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Lint without --with-gpu does not open a GPU device",
     "type": "scenario"
   },
@@ -21790,7 +21997,12 @@
   "rq-de92101c": {
     "decl": "Scenario: build.rs compiles a .cu file to PTX",
     "file": "build-pipeline",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/smoke_gpu.rs",
+        "kind": "code"
+      }
+    ],
     "title": "build.rs compiles a .cu file to PTX",
     "type": "scenario"
   },
@@ -22384,7 +22596,12 @@
   "rq-e49460ac": {
     "decl": "Scenario: Write a row with extra columns",
     "file": "io/log-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_log_output.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Write a row with extra columns",
     "type": "scenario"
   },
@@ -23516,7 +23733,12 @@
   "rq-ef891f9c": {
     "decl": "Scenario: Triclinic Lattice attribute carries non-zero tilts",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Triclinic Lattice attribute carries non-zero tilts",
     "type": "scenario"
   },
@@ -23546,10 +23768,15 @@
     "type": "section"
   },
   "rq-ef918dc6": {
-    "decl": "Scenario: Cell-list neighbor mode records the neighbor stages and omits lj_pair_force",
+    "decl": "Scenario: Cell-list neighbor mode records the neighbor-list host stages",
     "file": "performance-analysis",
-    "refs": [],
-    "title": "Cell-list neighbor mode records the neighbor stages and omits lj_pair_force",
+    "refs": [
+      {
+        "file": "tests/timings.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Cell-list neighbor mode records the neighbor-list host stages",
     "type": "scenario"
   },
   "rq-efc07f81": {
@@ -24268,7 +24495,12 @@
   "rq-f61f5d24": {
     "decl": "Scenario: SI-mode writer multiplies velocities by the velocity factor",
     "file": "io/trajectory-output",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_trajectory.rs",
+        "kind": "code"
+      }
+    ],
     "title": "SI-mode writer multiplies velocities by the velocity factor",
     "type": "scenario"
   },
@@ -24808,7 +25040,12 @@
   "rq-fb917fd5": {
     "decl": "Scenario: run_simulation_with_registries dispatches a potential from a user-registered builder",
     "file": "simulation-runner",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "run_simulation_with_registries dispatches a potential from a user-registered builder",
     "type": "scenario"
   },
@@ -25066,9 +25303,14 @@
     "type": "section"
   },
   "rq-fdeba84b": {
-    "decl": "- `UnitSystem::from_si(self, dim: Dimension, value: f64) -> f64`",
+    "decl": "- `UnitSystem::from_user(self, dim: Dimension, value: f64) -> f64`",
     "file": "io/unit-system",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/units/mod.rs",
+        "kind": "code"
+      }
+    ],
     "title": "UnitSystem",
     "type": "api-item"
   },

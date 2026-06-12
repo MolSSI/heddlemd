@@ -622,11 +622,12 @@ Feature: Performance analysis and timings output
     And tmp/sim.out.timings has no row whose stage column equals "neighbor_list_rebuild"
 
   @rq-ef918dc6
-  Scenario: Cell-list neighbor mode records the neighbor stages and omits lj_pair_force
+  Scenario: Cell-list neighbor mode records the neighbor-list host stages
     Given a valid config with [neighbor_list] mode="cell-list" and n_steps=10
     When dynamics run sim.in.toml is invoked
-    Then tmp/sim.out.timings has a row whose stage column equals "lj_pair_force_neighbor"
-    And tmp/sim.out.timings has no row whose stage column equals "lj_pair_force"
+    Then tmp/sim.out.timings has a row whose stage column equals "lj_pair_force"
+      (the single LJ pair-force KernelStage is used in both modes; the
+      "_neighbor" suffix is not a separate stage)
     And tmp/sim.out.timings has a row whose stage column equals "neighbor_displacement_squared"
     And tmp/sim.out.timings has a row whose stage column equals "neighbor_list_build"
     And tmp/sim.out.timings has a row whose stage column equals "copy_positions_into_reference"

@@ -550,3 +550,336 @@ fn energy_and_virial_share_force_indexing() {
     assert_eq!(state.potential_energies, vec![30.0_f32, 70.0]);
     assert_eq!(state.virials, vec![300.0_f32, 700.0]);
 }
+
+// --- Block-tree reduction shape ---
+
+#[test] // rq-b2221a99
+fn reduction_with_count_larger_than_one_warp_uses_inter_warp_tree() {
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let mut pair = PairBuffer::new(&gpu, 1, 128).unwrap();
+    let mut data = vec![0.0_f32; 128];
+    for slot in data.iter_mut().take(96) {
+        *slot = 1.0;
+    }
+    upload_pair_x(&mut pair, &data);
+    let mut buffers = zero_particle_buffers(&gpu, 1);
+    let counts = device.htod_sync_copy(&[96u32]).unwrap();
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
+    let (fx, _, _) = download_forces(&buffers);
+    assert_eq!(fx[0], 96.0_f32);
+}
+
+#[test] // rq-c009903e
+fn reduction_with_count_larger_than_one_block_sweep_accumulates_across_sweeps() {
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let mut pair = PairBuffer::new(&gpu, 1, 1024).unwrap();
+    let mut data = vec![0.0_f32; 1024];
+    for slot in data.iter_mut().take(600) {
+        *slot = 1.0;
+    }
+    for slot in data.iter_mut().skip(600) {
+        *slot = 99.0;
+    }
+    upload_pair_x(&mut pair, &data);
+    let mut buffers = zero_particle_buffers(&gpu, 1);
+    let counts = device.htod_sync_copy(&[600u32]).unwrap();
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
+    let (fx, _, _) = download_forces(&buffers);
+    assert_eq!(fx[0], 600.0_f32);
+    assert!(fx[0].is_finite());
+}
+
+/// Replicates the device-side block tree reduction shape so a CPU
+/// reference can be compared bit-for-bit with the GPU output. Matches
+/// the per-block algorithm documented in `rqm/pair-reduction.md`:
+/// per-thread strided sweep into a register accumulator, warp pairwise
+/// XOR reduction, then inter-warp reduction over the same tree shape.
+fn cpu_block_tree_sum(slots: &[f32], count: usize, max_neighbors: usize) -> f32 {
+    const BLOCK_SIZE: usize = 256;
+    const WARP_SIZE: usize = 32;
+    const NUM_WARPS: usize = BLOCK_SIZE / WARP_SIZE;
+    // Phase 1: per-thread strided register accumulators.
+    let mut p_t = vec![0.0_f32; BLOCK_SIZE];
+    let sweeps = (max_neighbors + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    for s in 0..sweeps {
+        for t in 0..BLOCK_SIZE {
+            let k = s * BLOCK_SIZE + t;
+            let v = if k < count.min(max_neighbors) {
+                slots[k]
+            } else {
+                0.0_f32
+            };
+            p_t[t] += v;
+        }
+    }
+    // Phase 2: warp pairwise XOR butterfly tree, 5 steps.
+    let mut warp_partials = [0.0_f32; NUM_WARPS];
+    for w in 0..NUM_WARPS {
+        let mut lanes = [0.0_f32; WARP_SIZE];
+        for lane in 0..WARP_SIZE {
+            lanes[lane] = p_t[w * WARP_SIZE + lane];
+        }
+        for &stride in &[16usize, 8, 4, 2, 1] {
+            let mut next = lanes;
+            for lane in 0..WARP_SIZE {
+                next[lane] = lanes[lane] + lanes[lane ^ stride];
+            }
+            lanes = next;
+        }
+        warp_partials[w] = lanes[0];
+    }
+    // Phase 3: first warp pulls per-warp partials into 32 lanes (the
+    // upper 24 read 0.0f) and runs the same butterfly tree.
+    let mut lanes = [0.0_f32; WARP_SIZE];
+    for w in 0..NUM_WARPS {
+        lanes[w] = warp_partials[w];
+    }
+    for &stride in &[16usize, 8, 4, 2, 1] {
+        let mut next = lanes;
+        for lane in 0..WARP_SIZE {
+            next[lane] = lanes[lane] + lanes[lane ^ stride];
+        }
+        lanes = next;
+    }
+    lanes[0]
+}
+
+#[test] // rq-aee2bfb2
+fn reduction_tree_result_agrees_with_cpu_block_tree_reference() {
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let max_neighbors: u32 = 1024;
+    let count: usize = 800;
+    let mut data = vec![0.0_f32; max_neighbors as usize];
+    for k in 0..count {
+        data[k] = (k as f32 * 0.1).sin();
+    }
+    let mut pair = PairBuffer::new(&gpu, 1, max_neighbors).unwrap();
+    upload_pair_x(&mut pair, &data);
+    let mut buffers = zero_particle_buffers(&gpu, 1);
+    let counts = device.htod_sync_copy(&[count as u32]).unwrap();
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
+    let (fx, _, _) = download_forces(&buffers);
+
+    let cpu_reference = cpu_block_tree_sum(&data, count, max_neighbors as usize);
+    assert_eq!(fx[0].to_bits(), cpu_reference.to_bits());
+
+    // Sequential left-to-right f32 sum is close but not bit-exact.
+    let seq: f32 = data.iter().take(count).copied().sum();
+    let rel = 1e-5_f32;
+    assert!(
+        (fx[0] - seq).abs() <= rel * seq.abs().max(f32::MIN_POSITIVE),
+        "GPU tree-sum {} vs sequential left-to-right sum {} differ outside 1e-5",
+        fx[0],
+        seq
+    );
+}
+
+#[test] // rq-46d24bfb
+fn one_block_per_particle_blocks_are_independent() {
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let n: usize = 512;
+    let max_neighbors: u32 = 64;
+    let total = n * max_neighbors as usize;
+    // Deterministic pseudo-random: linear congruential.
+    let mut state: u32 = 0xDEAD_BEEF;
+    let mut next_f32 = || {
+        state = state.wrapping_mul(1664525).wrapping_add(1013904223);
+        // Map to [-1.0, 1.0].
+        ((state >> 8) as f32) / ((1u32 << 23) as f32) - 1.0
+    };
+    let data: Vec<f32> = (0..total).map(|_| next_f32()).collect();
+    let counts: Vec<u32> = (0..n)
+        .map(|i| (i as u32).wrapping_mul(2654435761).wrapping_rem(max_neighbors + 1))
+        .collect();
+    let mut pair = PairBuffer::new(&gpu, n, max_neighbors).unwrap();
+    upload_pair_x(&mut pair, &data);
+    let mut buffers = zero_particle_buffers(&gpu, n);
+    let counts_dev = device.htod_sync_copy(&counts).unwrap();
+    reduce_pair_forces_into_buffers(&pair, &counts_dev, &mut buffers).unwrap();
+    let (fx, _, _) = download_forces(&buffers);
+
+    for i in 0..n {
+        let slot_base = i * max_neighbors as usize;
+        let slots = &data[slot_base..slot_base + max_neighbors as usize];
+        let expected = cpu_block_tree_sum(slots, counts[i] as usize, max_neighbors as usize);
+        assert_eq!(
+            fx[i].to_bits(),
+            expected.to_bits(),
+            "particle {i}: GPU {} (bits {:x}) != CPU block-tree {} (bits {:x})",
+            fx[i],
+            fx[i].to_bits(),
+            expected,
+            expected.to_bits()
+        );
+    }
+}
+
+// --- Split independence (force vs. energy-virial launcher) ---
+
+#[test] // rq-9f3a36aa
+fn reduce_pair_forces_does_not_touch_energy_or_virial_targets() {
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let n: usize = 4;
+    let max_neighbors: u32 = 2;
+    let mut pair = PairBuffer::new(&gpu, n, max_neighbors).unwrap();
+    upload_pair_x(&mut pair, &[1.0_f32; 8]);
+    device
+        .htod_sync_copy_into(&[99.0_f32; 8], &mut pair.pair_energies)
+        .unwrap();
+    device
+        .htod_sync_copy_into(&[123.0_f32; 8], &mut pair.pair_virials)
+        .unwrap();
+
+    let mut buffers = zero_particle_buffers(&gpu, n);
+    // Seed the energy/virial targets with known nonzero patterns.
+    let pattern_e: Vec<f32> = vec![11.0, 22.0, 33.0, 44.0];
+    let pattern_v: Vec<f32> = vec![-1.0, -2.0, -3.0, -4.0];
+    device
+        .htod_sync_copy_into(&pattern_e, &mut buffers.potential_energies)
+        .unwrap();
+    device
+        .htod_sync_copy_into(&pattern_v, &mut buffers.virials)
+        .unwrap();
+
+    let counts = device.htod_sync_copy(&[2u32; 4]).unwrap();
+    let mut vx = buffers.forces_x.slice_mut(..);
+    let mut vy = buffers.forces_y.slice_mut(..);
+    let mut vz = buffers.forces_z.slice_mut(..);
+    dynamics::gpu::reduce_pair_forces(&pair, &counts, &mut vx, &mut vy, &mut vz, n).unwrap();
+
+    let read_e = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let read_v = device.dtoh_sync_copy(&buffers.virials).unwrap();
+    assert_eq!(read_e, pattern_e);
+    assert_eq!(read_v, pattern_v);
+}
+
+#[test] // rq-75ee70dd
+fn reduce_pair_energy_virial_does_not_touch_force_targets() {
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let n: usize = 4;
+    let max_neighbors: u32 = 2;
+    let mut pair = PairBuffer::new(&gpu, n, max_neighbors).unwrap();
+    device
+        .htod_sync_copy_into(&[1.0_f32; 8], &mut pair.pair_energies)
+        .unwrap();
+    device
+        .htod_sync_copy_into(&[1.0_f32; 8], &mut pair.pair_virials)
+        .unwrap();
+
+    let mut buffers = zero_particle_buffers(&gpu, n);
+    let pattern_fx: Vec<f32> = vec![10.0, 20.0, 30.0, 40.0];
+    let pattern_fy: Vec<f32> = vec![-10.0, -20.0, -30.0, -40.0];
+    let pattern_fz: Vec<f32> = vec![1.5, 2.5, 3.5, 4.5];
+    device
+        .htod_sync_copy_into(&pattern_fx, &mut buffers.forces_x)
+        .unwrap();
+    device
+        .htod_sync_copy_into(&pattern_fy, &mut buffers.forces_y)
+        .unwrap();
+    device
+        .htod_sync_copy_into(&pattern_fz, &mut buffers.forces_z)
+        .unwrap();
+
+    let counts = device.htod_sync_copy(&[2u32; 4]).unwrap();
+    let mut ve = buffers.potential_energies.slice_mut(..);
+    let mut vw = buffers.virials.slice_mut(..);
+    dynamics::gpu::reduce_pair_energy_virial(&pair, &counts, &mut ve, &mut vw, n).unwrap();
+
+    let read_fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    let read_fy = device.dtoh_sync_copy(&buffers.forces_y).unwrap();
+    let read_fz = device.dtoh_sync_copy(&buffers.forces_z).unwrap();
+    assert_eq!(read_fx, pattern_fx);
+    assert_eq!(read_fy, pattern_fy);
+    assert_eq!(read_fz, pattern_fz);
+}
+
+#[test] // rq-803ee7e5
+fn skipping_reduce_pair_energy_virial_leaves_stale_energy_targets() {
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let n: usize = 2;
+    let max_neighbors: u32 = 2;
+    let mut pair = PairBuffer::new(&gpu, n, max_neighbors).unwrap();
+    device
+        .htod_sync_copy_into(&[10.0_f32, 20.0, 30.0, 40.0], &mut pair.pair_energies)
+        .unwrap();
+    device
+        .htod_sync_copy_into(&[1.0_f32, 1.0, 1.0, 1.0], &mut pair.pair_virials)
+        .unwrap();
+
+    let mut buffers = zero_particle_buffers(&gpu, n);
+    let counts = device.htod_sync_copy(&[2u32, 2]).unwrap();
+
+    // Run the full reduction once: energy targets land at [30.0, 70.0].
+    {
+        let mut ve = buffers.potential_energies.slice_mut(..);
+        let mut vw = buffers.virials.slice_mut(..);
+        dynamics::gpu::reduce_pair_energy_virial(&pair, &counts, &mut ve, &mut vw, n).unwrap();
+    }
+    let pre = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    assert_eq!(pre, vec![30.0_f32, 70.0]);
+
+    // Overwrite pair_energies; the new sums would be [2.0, 2.0]. Then
+    // run only reduce_pair_forces. The energy targets must stay stale.
+    device
+        .htod_sync_copy_into(&[1.0_f32, 1.0, 1.0, 1.0], &mut pair.pair_energies)
+        .unwrap();
+    let mut vx = buffers.forces_x.slice_mut(..);
+    let mut vy = buffers.forces_y.slice_mut(..);
+    let mut vz = buffers.forces_z.slice_mut(..);
+    dynamics::gpu::reduce_pair_forces(&pair, &counts, &mut vx, &mut vy, &mut vz, n).unwrap();
+    let post = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    assert_eq!(post, vec![30.0_f32, 70.0]);
+}
+
+#[test] // rq-b4c772c9
+fn two_independent_runs_of_reduce_pair_energy_virial_produce_byte_identical_scalars() {
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let n: usize = 128;
+    let max_neighbors: u32 = 16;
+    let total = n * max_neighbors as usize;
+    let pair_e: Vec<f32> = (0..total).map(|i| (i as f32) * 0.001 - 0.5).collect();
+    let pair_v: Vec<f32> = (0..total).map(|i| (i as f32) * -0.002 + 0.25).collect();
+    let counts: Vec<u32> = (0..n).map(|i| (i as u32) % (max_neighbors + 1)).collect();
+
+    let run = || -> (Vec<f32>, Vec<f32>) {
+        let mut pair = PairBuffer::new(&gpu, n, max_neighbors).unwrap();
+        device.htod_sync_copy_into(&pair_e, &mut pair.pair_energies).unwrap();
+        device.htod_sync_copy_into(&pair_v, &mut pair.pair_virials).unwrap();
+        let mut buffers = zero_particle_buffers(&gpu, n);
+        let counts_dev = device.htod_sync_copy(&counts).unwrap();
+        let mut ve = buffers.potential_energies.slice_mut(..);
+        let mut vw = buffers.virials.slice_mut(..);
+        dynamics::gpu::reduce_pair_energy_virial(&pair, &counts_dev, &mut ve, &mut vw, n).unwrap();
+        drop(ve);
+        drop(vw);
+        (
+            device.dtoh_sync_copy(&buffers.potential_energies).unwrap(),
+            device.dtoh_sync_copy(&buffers.virials).unwrap(),
+        )
+    };
+    let (a_e, a_v) = run();
+    let (b_e, b_v) = run();
+    assert_eq!(a_e, b_e);
+    assert_eq!(a_v, b_v);
+}
+
+#[test] // rq-41453204
+fn reduce_pair_energy_virial_on_empty_state_is_noop() {
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let pair = PairBuffer::new(&gpu, 0, 8).unwrap();
+    let counts: CudaSlice<u32> = device.htod_sync_copy(&Vec::<u32>::new()).unwrap();
+    let mut buffers = zero_particle_buffers(&gpu, 0);
+    let mut ve = buffers.potential_energies.slice_mut(..);
+    let mut vw = buffers.virials.slice_mut(..);
+    // particle_count=0 must early-return Ok without launching a kernel.
+    dynamics::gpu::reduce_pair_energy_virial(&pair, &counts, &mut ve, &mut vw, 0).unwrap();
+}

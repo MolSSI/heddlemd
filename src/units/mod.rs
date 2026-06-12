@@ -104,6 +104,7 @@ impl UnitSystem {
         }
     }
 
+    // rq-a7677c61
     /// Output-direction conversion: translates one engine-side
     /// atomic-unit scalar into the user's chosen unit system. Returns
     /// `value * self.factor(dim)`. Used by trajectory, CSV-log, and
@@ -112,6 +113,7 @@ impl UnitSystem {
         value * self.factor(dim)
     }
 
+    // rq-fdeba84b
     /// Input-direction conversion: translates one user-supplied scalar
     /// into the engine's atomic-unit representation. Returns
     /// `value / self.factor(dim)`. Used by `load_config` and

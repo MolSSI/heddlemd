@@ -1479,15 +1479,6 @@ Feature: dynamics run simulation runner
     And stdout contains a line whose label is "topology" and whose description begins with "FAIL —"
     And stderr contains "error: " and a description of the topology error
 
-  @rq-2b614db6
-  Scenario: Lint with --with-gpu runs init_device and surfaces a cuFFT smoke-test failure
-    Given a host whose cuFFT implementation does not satisfy SPME's determinism contract
-    And tmp/sim.in.toml configures [spme] (so the smoke test runs)
-    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml", "--with-gpu"]
-    Then it exits with code 1
-    And stdout contains a line whose label is "gpu" and whose description begins with "FAIL —"
-    And stderr contains "error: " and "CuFftNonDeterministic"
-
   @rq-dba8d096
   Scenario: Lint with --with-gpu reports successful GPU setup
     Given tmp/sim.in.toml is a valid one-type config

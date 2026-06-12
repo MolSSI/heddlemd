@@ -265,6 +265,7 @@ impl SpmeReciprocalGrid {
         // queued so far (integrator + bin_list rebuild + any other
         // default-stream slot launches that already returned to host)
         // and makes recip_stream wait on that event.
+        // rq-274db88b
         self.recip_stream
             .wait_for_default()
             .map_err(GpuError::from)?;
@@ -287,6 +288,7 @@ impl SpmeReciprocalGrid {
 
         // 4. Forward FFT (rho → rho_hat). cuFFT plan bound to recip_stream
         // at slot construction.
+        // rq-24e36eba
         self.forward_plan
             .execute(&self.rho, &mut self.rho_hat_interleaved)?;
 
@@ -307,6 +309,7 @@ impl SpmeReciprocalGrid {
         )?;
 
         // 6. Inverse FFT (rho_hat → V) on recip_stream.
+        // rq-a98abc35
         self.inverse_plan
             .execute(&self.rho_hat_interleaved, &mut self.v)?;
 
@@ -739,6 +742,7 @@ impl Potential for SpmeReciprocalState {
         // and the force_gather launch that follows both see finalized
         // virial_per_cell and V buffers. wait_for records an event on
         // recip_stream and makes the default stream wait on it.
+        // rq-0d5e76ec
         self.grid
             .device
             .wait_for(&self.grid.recip_stream)

@@ -86,7 +86,7 @@ fn write_single_row_step_zero() {
 }
 
 // rq-9198cc8e
-// rq-4381eec2 rq-a9cb9e03
+// rq-4381eec2 rq-a9cb9e03 rq-9c883334
 #[test]
 fn si_mode_log_row_multiplies_time_kinetic_energy_and_temperature_by_factors() {
     // Open the log writer with UnitSystem::Si. The engine state is in
@@ -124,7 +124,7 @@ fn si_mode_log_row_multiplies_time_kinetic_energy_and_temperature_by_factors() {
             "temperature SI {} != temp_au * temp_factor {}", temp_si, temp_au * temp_factor);
 }
 
-// rq-5b934ecd
+// rq-5b934ecd rq-7986038d
 #[test]
 fn write_row_non_trivial_values() {
     let dir = tmp_path("row_nontrivial");
@@ -213,7 +213,7 @@ fn temperature_of_empty_is_zero() {
     assert_eq!(compute_temperature(0.0, 0), 0.0);
 }
 
-// rq-7d831804 rq-fee5b8e2
+// rq-7d831804 rq-fee5b8e2 rq-9d8f0c97
 #[test]
 fn temperature_uses_kb_unity() {
     // k_B = 1 inside the engine: temperature is `k_B · T` in Hartrees.
@@ -259,4 +259,66 @@ fn drop_flushes_log() {
     let body = read(&path);
     assert!(body.contains("step,time,"));
     assert_eq!(body.lines().count(), 2);
+}
+
+// rq-3ba42667
+#[test]
+fn open_with_extra_columns_appends_to_header() {
+    let dir = tmp_path("open_extras_header");
+    let path = dir.join("run.log");
+    let mut writer = LogWriter::open(&path, UnitSystem::Atomic, &[
+        ("nhc_conserved", Dimension::Energy),
+    ]).unwrap();
+    writer.flush().unwrap();
+    drop(writer);
+    let body = read(&path);
+    assert_eq!(body, "step,time,kinetic_energy,temperature,nhc_conserved\n");
+}
+
+// rq-e49460ac
+#[test]
+fn write_row_with_extra_columns() {
+    let dir = tmp_path("write_row_extras");
+    let path = dir.join("run.log");
+    let mut writer = LogWriter::open(&path, UnitSystem::Atomic, &[
+        ("nhc_conserved", Dimension::Energy),
+    ]).unwrap();
+    writer.write_row(100, 1.0e-13, 4.0e-21, 298.0, &[5.5e-20]).unwrap();
+    writer.flush().unwrap();
+    let body = read(&path);
+    let last = body.lines().last().unwrap();
+    let expected = format!(
+        "100,{},{},{},{}",
+        format_args!("{:.9e}", 1.0e-13_f64),
+        format_args!("{:.9e}", 4.0e-21_f64),
+        format_args!("{:.9e}", 298.0_f64),
+        format_args!("{:.9e}", 5.5e-20_f64),
+    );
+    assert_eq!(last, expected);
+}
+
+// rq-bcbe7cf6
+#[test]
+#[should_panic]
+fn write_row_panics_on_mismatched_extras_length() {
+    let dir = tmp_path("write_row_mismatched_extras");
+    let path = dir.join("run.log");
+    let mut writer = LogWriter::open(&path, UnitSystem::Atomic, &[
+        ("nhc_conserved", Dimension::Energy),
+    ]).unwrap();
+    // One extra column declared at open, zero extras supplied to write_row:
+    // the debug-build assertion is expected to fail.
+    writer.write_row(0, 0.0, 0.0, 300.0, &[]).unwrap();
+}
+
+// rq-5939f04a
+#[test]
+fn temperature_for_3atom_settled_water() {
+    // N = 3, n_constraints = 3 (one rigid SETTLE'd water molecule);
+    // N_thermal_dof = 3 * 3 - 3 - 3 = 3. KE = (3/2) * 9.5e-4
+    let n_thermal_dof: u32 = 3;
+    let t_target_au = 9.5e-4_f64;
+    let ke = 0.5 * (n_thermal_dof as f64) * t_target_au;
+    let t = compute_temperature(ke, n_thermal_dof);
+    assert!((t - t_target_au).abs() < 1.0e-12);
 }

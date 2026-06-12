@@ -99,7 +99,7 @@ fn stage_status<'a>(report: &'a dynamics::runner::LintReport, label: &str) -> &'
         .status
 }
 
-// rq-c52b8ece
+// rq-c52b8ece rq-d87f15bd
 #[test]
 fn lint_cpu_only_valid_config_succeeds_with_gpu_not_checked() {
     let dir = tmp_path("cpu_only_ok");
@@ -193,7 +193,7 @@ fn lint_reports_pre_existing_output_file() {
     assert_eq!(std::fs::read(&traj).unwrap(), b"existing");
 }
 
-// rq-a479680a
+// rq-a479680a rq-4b4f85c7
 #[test]
 fn lint_reports_box_too_small_failure() {
     let dir = tmp_path("box_too_small");
@@ -257,7 +257,7 @@ log_every = 0
     assert!(matches!(stage_status(&report, "topology"), LintStatus::Skipped { .. }));
 }
 
-// rq-cdf1cd7c
+// rq-cdf1cd7c rq-21d27f06
 #[test]
 fn lint_marks_box_cutoff_not_applicable_in_all_pairs_mode() {
     let dir = tmp_path("all_pairs_box");

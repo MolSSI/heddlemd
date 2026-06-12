@@ -988,3 +988,158 @@ fn custom_kind_with_empty_registries_fails_with_unknown_kind() {
         other => panic!("expected UnknownKind, got {other:?}"),
     }
 }
+
+// rq-91f5f34e
+#[test]
+fn run_simulation_rejects_invalid_config_filename() {
+    let dir = tmp_path("run_bad_filename");
+    // Build a config that would otherwise pass, but write it with a
+    // filename that does not end in `.in.toml`.
+    let cfg_path = write_pair(&dir, 1, 0, 0, 0.0, false, false, 1, 1);
+    let bad = dir.join("sim.toml");
+    std::fs::rename(&cfg_path, &bad).unwrap();
+    let err = run_simulation(&bad).unwrap_err();
+    match err {
+        RunnerError::Config(dynamics::io::ConfigError::InvalidConfigFilename { path }) => {
+            assert_eq!(path, bad);
+        }
+        other => panic!("expected InvalidConfigFilename, got {other:?}"),
+    }
+}
+
+// rq-0cb544f4
+#[test]
+fn coulomb_cutoff_participates_in_box_too_small_check() {
+    // The neighbor-list / box-too-small check uses the maximum cutoff
+    // across every pair-force kind. With LJ cutoff = 5e-10 (small) and
+    // a Coulomb cutoff = 2e-9 (large), the Coulomb cutoff drives the
+    // minimum-perpendicular-width requirement. Box edges of 5e-9 are
+    // too small under cell-list mode with r_skin = 1e-10.
+    let dir = tmp_path("coulomb_drives_box_check");
+    let cfg = r#"schema_version = 1
+init = "sim.in.xyz"
+
+[simulation]
+seed = 1
+temperature = 0.0
+
+[[phase]]
+name = "run"
+n_steps = 1
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[phase.output]
+trajectory_every = 0
+log_every = 0
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+charge = 0.0
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 5.0e-10
+
+[coulomb]
+cutoff = 2.0e-9
+
+[neighbor_list]
+mode = "cell-list"
+r_skin = 1.0e-10
+"#;
+    let cfg_path = dir.join("sim.in.toml");
+    std::fs::write(&cfg_path, cfg).unwrap();
+    // 5e-9 box edge → 3 * (2e-9 + 1e-10) = 6.3e-9 > 5e-9 → reject.
+    let xyz =
+        "1\nLattice=\"5.0e-9 0 0 0 5.0e-9 0 0 0 5.0e-9\" Properties=species:S:1:pos:R:3\nAr 0.0 0.0 0.0\n";
+    std::fs::write(dir.join("sim.in.xyz"), xyz).unwrap();
+    let err = run_simulation(&cfg_path).unwrap_err();
+    matches!(err, RunnerError::CellListBoxTooSmall { .. });
+}
+
+// rq-fb917fd5
+#[test]
+fn run_simulation_with_registries_dispatches_user_registered_potential() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+    use dynamics::forces::{
+        AggregateLevel, ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext,
+        PotentialBuilder, SlotOutputView,
+    };
+    use dynamics::gpu::ParticleBuffers;
+    use dynamics::pbc::SimulationBox;
+    use dynamics::timings::Timings;
+
+    #[derive(Debug)]
+    struct CountingStubPotential {
+        contribute_calls: Arc<AtomicU64>,
+    }
+    impl Potential for CountingStubPotential {
+        fn label(&self) -> &'static str {
+            "stub-potential"
+        }
+        fn max_cutoff(&self) -> Option<f32> {
+            None
+        }
+        fn contribute(
+            &mut self,
+            _buffers: &ParticleBuffers,
+            _sim_box: &SimulationBox,
+            _cx: &ForceFieldContext<'_>,
+            _timings: &mut Timings,
+        ) -> Result<(), ForceFieldError> {
+            self.contribute_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+        fn reduce(
+            &mut self,
+            _output: SlotOutputView<'_>,
+            _cx: &ForceFieldContext<'_>,
+            _timings: &mut Timings,
+            _level: AggregateLevel,
+        ) -> Result<(), ForceFieldError> {
+            Ok(())
+        }
+    }
+    #[derive(Debug)]
+    struct CountingStubPotentialBuilder {
+        contribute_calls: Arc<AtomicU64>,
+    }
+    impl PotentialBuilder for CountingStubPotentialBuilder {
+        fn build(
+            &self,
+            _cx: &PotentialBuildContext<'_>,
+        ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
+            Ok(Some(Box::new(CountingStubPotential {
+                contribute_calls: self.contribute_calls.clone(),
+            })))
+        }
+    }
+
+    let dir = tmp_path("user_registered_potential");
+    let cfg_path = write_pair(&dir, 3, 0, 0, 300.0, true, false, 7, 4);
+
+    let contribute_calls = Arc::new(AtomicU64::new(0));
+    let mut registries = Registries::with_builtins();
+    registries.register_potential(Box::new(CountingStubPotentialBuilder {
+        contribute_calls: contribute_calls.clone(),
+    }));
+
+    let summary = run_simulation_with_registries(&cfg_path, &registries).unwrap();
+    assert_eq!(summary.total_n_steps, 3);
+    // The stub's contribute() runs at least once per force evaluation
+    // throughout the n_steps = 3 phase. If the runner had not picked up
+    // the user-registered builder this counter would have stayed at 0.
+    assert!(
+        contribute_calls.load(Ordering::SeqCst) > 0,
+        "user-registered potential was not dispatched"
+    );
+}

@@ -206,6 +206,7 @@ fn render_multiple_type_names() {
 
 // rq-70e9fd38
 // rq-f9714477 rq-94f9228c rq-ee50492a
+// rq-afde087b rq-f61f5d24 rq-6d9f6db6
 #[test]
 fn si_mode_writer_multiplies_positions_lattice_and_velocities_by_factors() {
     // Open the trajectory writer with UnitSystem::Si. The engine state
@@ -295,7 +296,7 @@ fn si_mode_writer_multiplies_positions_lattice_and_velocities_by_factors() {
     assert!(approx(vz, vz_au * velocity_factor));
 }
 
-// rq-7edb9c67
+// rq-7edb9c67 rq-64e90d53
 #[test]
 fn round_trip_via_init_parser() {
     let dir = tmp_path("round_trip");
@@ -438,7 +439,7 @@ fn frame_with_images_only_carries_image_property() {
     assert!(lines[1].contains("Properties=species:S:1:pos:R:3:image:I:3"));
 }
 
-// rq-3df3a993
+// rq-3df3a993 rq-5395785a
 #[test]
 fn frame_with_velocities_and_images_carries_both_properties() {
     let dir = tmp_path("velo_images");
@@ -500,7 +501,7 @@ fn image_round_trip_via_init_parser() {
     assert_eq!(imgs.images_z, images_z);
 }
 
-#[test] // rq-ce15e04e
+#[test] // rq-ce15e04e rq-ef891f9c
 fn round_trip_preserves_triclinic_lattice() {
     let dir = tmp_path("triclinic_roundtrip");
     let path = dir.join("traj.xyz");
@@ -531,5 +532,139 @@ fn round_trip_preserves_triclinic_lattice() {
             parsed[d],
             original[d]
         );
+    }
+}
+
+// rq-a1d80d47
+#[test]
+fn si_mode_writer_multiplies_time_by_atomic_time_factor() {
+    let dir = tmp_path("si_writer_time_factor");
+    let path = dir.join("traj.xyz");
+    let dt_au: f64 = 41.3;
+    let mut writer =
+        TrajectoryWriter::open(&path, UnitSystem::Si, false, false, vec!["Ar".to_string()])
+            .unwrap();
+    writer
+        .write_frame(
+            1,
+            dt_au,
+            &sim_box(),
+            &[0],
+            &[0.0_f32],
+            &[0.0_f32],
+            &[0.0_f32],
+            None,
+            None,
+        )
+        .unwrap();
+    writer.flush().unwrap();
+    let body = read(&path);
+    let header = body.lines().nth(1).unwrap();
+    let needle = "Time=";
+    let tstart = header.find(needle).unwrap() + needle.len();
+    let trest = &header[tstart..];
+    let tend = trest.find(' ').unwrap_or(trest.len());
+    let time_written: f64 = trest[..tend].parse().unwrap();
+    let factor = UnitSystem::Si.factor(dynamics::units::Dimension::Time);
+    let expected = dt_au * factor;
+    // The header formats Time with `{:.9e}`, so the read-back value
+    // matches the unrounded product only to ~1e-9 relative precision.
+    let rel = 1e-8_f64;
+    assert!(
+        (time_written - expected).abs() <= rel * expected.abs(),
+        "Time written {} != expected {} (factor {})",
+        time_written,
+        expected,
+        factor
+    );
+}
+
+// rq-c19d0ce4
+#[test]
+fn si_mode_reader_divides_lattice_and_positions_by_length_factor() {
+    use dynamics::io::TrajectoryReader;
+    let dir = tmp_path("si_reader_divides");
+    let path = dir.join("traj.xyz");
+    let l_au: f32 = 10.0;
+    let pos_au: [f32; 3] = [3.7, -2.1, 0.5];
+    let sim_box = SimulationBox::new(l_au, l_au, l_au, 0.0, 0.0, 0.0).unwrap();
+    let mut writer =
+        TrajectoryWriter::open(&path, UnitSystem::Si, false, false, vec!["Ar".to_string()]).unwrap();
+    writer
+        .write_frame(
+            0,
+            1.0,
+            &sim_box,
+            &[0],
+            &[pos_au[0]],
+            &[pos_au[1]],
+            &[pos_au[2]],
+            None,
+            None,
+        )
+        .unwrap();
+    writer.flush().unwrap();
+
+    // Read the same file back with the matching unit system.
+    let mut reader = TrajectoryReader::open(&path, UnitSystem::Si, &["Ar"]).unwrap();
+    let frame = reader.next_frame().unwrap().expect("at least one frame");
+    let rel = 1e-5_f32;
+    let approx = |a: f32, b: f32| {
+        (a - b).abs() <= rel * a.abs().max(b.abs()).max(f32::MIN_POSITIVE)
+    };
+    assert!(approx(frame.sim_box.lx(), l_au));
+    assert!(approx(frame.sim_box.ly(), l_au));
+    assert!(approx(frame.sim_box.lz(), l_au));
+    assert!(approx(frame.positions_x[0], pos_au[0]));
+    assert!(approx(frame.positions_y[0], pos_au[1]));
+    assert!(approx(frame.positions_z[0], pos_au[2]));
+}
+
+// rq-48d14580
+#[test]
+fn writer_emits_positions_inside_primary_cell() {
+    let dir = tmp_path("positions_in_primary_cell");
+    let path = dir.join("traj.xyz");
+    let l_au: f32 = 4.0;
+    let sim_box = SimulationBox::new(l_au, l_au, l_au, 0.0, 0.0, 0.0).unwrap();
+    // Caller's invariant: every position lies in [-L/2, L/2). The writer
+    // is expected to emit exactly these values; the reader (atomic
+    // round-trip) must read back values that still satisfy the bound.
+    let positions_x = [-1.999_f32, 0.0, 1.0];
+    let positions_y = [-1.0_f32, 0.5, 1.999];
+    let positions_z = [0.0_f32, -1.5, 1.5];
+    let mut writer = TrajectoryWriter::open(
+        &path,
+        UnitSystem::Atomic,
+        false,
+        true,
+        vec!["Ar".to_string()],
+    )
+    .unwrap();
+    writer
+        .write_frame(
+            0,
+            1.0e-15,
+            &sim_box,
+            &[0, 0, 0],
+            &positions_x,
+            &positions_y,
+            &positions_z,
+            None,
+            Some((&[0_i32, 0, 0], &[0_i32, 0, 0], &[0_i32, 0, 0])),
+        )
+        .unwrap();
+    writer.flush().unwrap();
+    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
+    let half = l_au / 2.0;
+    for (i, (&x, (&y, &z))) in state
+        .positions_x
+        .iter()
+        .zip(state.positions_y.iter().zip(state.positions_z.iter()))
+        .enumerate()
+    {
+        assert!(x >= -half && x < half, "x[{i}] = {x} not in [-{half}, {half})");
+        assert!(y >= -half && y < half, "y[{i}] = {y} not in [-{half}, {half})");
+        assert!(z >= -half && z < half, "z[{i}] = {z} not in [-{half}, {half})");
     }
 }

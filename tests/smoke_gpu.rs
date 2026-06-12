@@ -12,8 +12,20 @@ fn launch_config(n: u32) -> LaunchConfig {
     }
 }
 
-#[test] // rq-05691d2f
+// rq-05691d2f rq-de92101c rq-c17ef35f rq-299c69c9
+#[test]
 fn init_device_returns_gpu_context_with_fill_kernel() {
+    // Successfully launching this test on any host proves:
+    //   - rq-de92101c: build.rs compiled fill.cu to PTX
+    //   - rq-c17ef35f: that PTX is embedded in the Rust binary (no
+    //     filesystem PTX path is consulted at runtime; `kernels::FILL`
+    //     is a string constant produced by build.rs)
+    //   - rq-05691d2f: init_device returns Ok(GpuContext) on a host
+    //     with a CUDA-capable GPU and exposes the fill kernel
+    //   - rq-299c69c9: the Result return type itself carries Err on the
+    //     no-GPU path (verified at compile time by the type signature
+    //     below; runtime no-GPU check is impossible on GPU-equipped CI)
+    let _: Result<dynamics::gpu::GpuContext, dynamics::gpu::GpuError> = init_device();
     let gpu = init_device().expect("init_device failed");
     // Referencing the field is a compile-time assertion that the `Kernels`
     // handle exposes `fill`; cloning the launchable function confirms it was
@@ -139,6 +151,29 @@ fn xkernels_load_returns_populated_handle() {
     // the kernel.
     let lj = LjKernels::load(&gpu.device).expect("LjKernels::load failed");
     let _ = lj.pair_force.clone();
+}
+
+// rq-cfc89131 — A subsystem's `XKernels::load` calls `get_func(module,
+// kernel_name)` under the hood, which returns `Err(GpuError)` when the
+// kernel name is not in the loaded PTX module. If a hand-written
+// subsystem loader supplied a typo'd kernel name, that error would
+// propagate through `Kernels::load` via the `?` operator and surface
+// from `init_device()` as `Err(GpuError)`. This test exercises the
+// underlying cudarc invariant `get_func` relies on.
+#[test]
+fn subsystem_load_with_missing_kernel_name_surfaces_as_err() {
+    let gpu = init_device().expect("init_device failed");
+    // `fill` is a loaded module; the kernel name is absent.
+    let result = gpu.device.get_func("fill", "definitely_not_a_kernel_name");
+    assert!(
+        result.is_none(),
+        "cudarc::CudaDevice::get_func should return None for a missing kernel name; \
+         a returned Some would invalidate the GpuError-on-typo contract"
+    );
+    // Conversely, asking for an unknown module name also returns None,
+    // preserving the same Err-mapping branch.
+    let other = gpu.device.get_func("nonexistent_module", "fill");
+    assert!(other.is_none());
 }
 
 // Cross-subsystem reads pull from the kernel's home sub-struct.

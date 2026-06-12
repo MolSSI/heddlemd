@@ -44,7 +44,7 @@ fn load_two_particles_no_velocities() {
     assert!(state.velocities.is_none());
 }
 
-// rq-bb807252
+// rq-bb807252 rq-306def4b
 #[test]
 fn load_with_velocities() {
     let dir = tmp_path("with_velo");
@@ -691,7 +691,7 @@ fn accept_position_inside_primary_parallelepiped_of_triclinic_box() {
     load_init_state(&path, &["Ar"], UnitSystem::Si).expect("position should be accepted");
 }
 
-// rq-9d523d38 rq-6b8e5397
+// rq-9d523d38 rq-6b8e5397 rq-5137c6f5 rq-371ae8cd
 #[test]
 fn atomic_units_rescale_lattice_and_positions() {
     // Same physical system written in atomic and SI units must produce
@@ -736,7 +736,7 @@ fn atomic_units_rescale_lattice_and_positions() {
     assert!(approx(state_au.sim_box.lz(), state_si.sim_box.lz()));
 }
 
-// rq-274a4899
+// rq-274a4899 rq-999eddbb
 #[test]
 fn atomic_units_rescale_velocities() {
     let dir = tmp_path("atomic_units_velocities");
@@ -768,6 +768,61 @@ fn atomic_units_rescale_velocities() {
     let vx_au = state_au.velocities.as_ref().unwrap().velocities_x[0];
     let rel = 1e-5;
     assert!((vx_au - vx_si).abs() <= rel * vx_si.abs().max(f32::MIN_POSITIVE));
+}
+
+// rq-6e1ba10f
+#[test]
+fn position_in_box_check_runs_against_post_conversion_box() {
+    // Same physical state described in SI vs atomic units must produce
+    // the same accept/reject outcome: both load successfully, and the
+    // SI loader's box (in Bohr after conversion) matches the atomic
+    // loader's box.
+    let dir = tmp_path("in_box_check_post_conversion");
+
+    // Borderline-inside fractional coordinate (0.45) along x in a 1 nm
+    // box: the loader's position-in-box check must accept under either
+    // encoding.
+    let xyz_si = "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" \
+                  Properties=species:S:1:pos:R:3\n\
+                  Ar 4.5e-10 0 0\n";
+    let bohr_to_m = 5.29177210903e-11;
+    let l_au = 1.0e-9 / bohr_to_m;
+    let px_au = 4.5e-10 / bohr_to_m;
+    let xyz_au = format!(
+        "1\nLattice=\"{l_au:.16e} 0 0 0 {l_au:.16e} 0 0 0 {l_au:.16e}\" \
+         Properties=species:S:1:pos:R:3\nAr {px_au:.16e} 0 0\n"
+    );
+    let path_si = write_init(&dir, xyz_si);
+    let path_au = dir.join("atomic.in.xyz");
+    std::fs::write(&path_au, xyz_au).unwrap();
+    let state_si = load_init_state(&path_si, &["Ar"], UnitSystem::Si).unwrap();
+    let state_au = load_init_state(&path_au, &["Ar"], UnitSystem::Atomic).unwrap();
+    // Box matches after the SI conversion lands at the atomic encoding.
+    let rel = 1e-5;
+    let approx = |a: f32, b: f32| {
+        (a - b).abs() <= rel * a.abs().max(b.abs()).max(f32::MIN_POSITIVE)
+    };
+    assert!(approx(state_si.sim_box.lx(), state_au.sim_box.lx()));
+    assert!(approx(state_si.positions_x[0], state_au.positions_x[0]));
+
+    // Borderline-outside fractional coordinate (0.5) along x: both
+    // encodings must reject identically.
+    let xyz_si_bad = "1\nLattice=\"1.0e-9 0 0 0 1.0e-9 0 0 0 1.0e-9\" \
+                      Properties=species:S:1:pos:R:3\n\
+                      Ar 5.0e-10 0 0\n";
+    let px_au_bad = 5.0e-10 / bohr_to_m;
+    let xyz_au_bad = format!(
+        "1\nLattice=\"{l_au:.16e} 0 0 0 {l_au:.16e} 0 0 0 {l_au:.16e}\" \
+         Properties=species:S:1:pos:R:3\nAr {px_au_bad:.16e} 0 0\n"
+    );
+    let path_si_bad = dir.join("bad_si.in.xyz");
+    let path_au_bad = dir.join("bad_au.in.xyz");
+    std::fs::write(&path_si_bad, xyz_si_bad).unwrap();
+    std::fs::write(&path_au_bad, xyz_au_bad).unwrap();
+    let err_si = load_init_state(&path_si_bad, &["Ar"], UnitSystem::Si);
+    let err_au = load_init_state(&path_au_bad, &["Ar"], UnitSystem::Atomic);
+    assert!(err_si.is_err(), "SI encoding should be rejected");
+    assert!(err_au.is_err(), "atomic encoding should be rejected");
 }
 
 #[test] // rq-8a3858fd

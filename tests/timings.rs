@@ -352,10 +352,11 @@ fn velocity_generation_present_when_init_lacks_velocities() {
     assert_eq!(count, 1);
 }
 
-// rq-a9b511ea
+// rq-a9b511ea rq-62300a18 rq-c7df5714
 #[test]
 fn kernel_counts_match_runner_launches() {
     let dir = tmp_path("kernel_counts");
+    // write_pair emits an all-pairs config with no topology.
     let path = write_pair(&dir, 10, 0, 0, 0.0, true, false, 1, 2);
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
@@ -363,6 +364,19 @@ fn kernel_counts_match_runner_launches() {
     assert_eq!(stage_count(&body, "reduce_pair_forces"), Some(11));
     assert_eq!(stage_count(&body, "vv_kick_drift"), Some(10));
     assert_eq!(stage_count(&body, "vv_kick"), Some(10));
+    // rq-62300a18: all-pairs records lj_pair_force and omits every
+    // neighbor-list-related row.
+    assert!(stage_row(&body, "lj_pair_force_neighbor").is_none());
+    assert!(stage_row(&body, "neighbor_displacement_squared").is_none());
+    assert!(stage_row(&body, "neighbor_list_build").is_none());
+    assert!(stage_row(&body, "copy_positions_into_reference").is_none());
+    assert!(stage_row(&body, "neighbor_list_rebuild").is_none());
+    // rq-c7df5714: no topology → no morse_bond_force or reduce_bond_forces;
+    // accumulate_forces still runs because at least one pair-force slot is
+    // present.
+    assert!(stage_row(&body, "morse_bond_force").is_none());
+    assert!(stage_row(&body, "reduce_bond_forces").is_none());
+    assert!(stage_row(&body, "accumulate_forces").is_some());
 }
 
 // rq-46c317ef
@@ -933,6 +947,205 @@ fn record_host_with_unknown_host_stage_panics() {
     let mut timings = Timings::new(&gpu).unwrap();
     let unknown = HostStage::new("not_a_host_stage");
     timings.record_host(unknown, Duration::from_micros(10));
+}
+
+// =====================================================================
+// Cell-list and morse-bonded timings rows.
+// =====================================================================
+
+fn write_cell_list_pair(
+    dir: &Path,
+    n_steps: u64,
+    r_skin: f64,
+    seed: u64,
+    n_particles: usize,
+    include_velocities: bool,
+) -> PathBuf {
+    let config = format!(
+        r#"schema_version = 1
+init = "sim.in.xyz"
+
+[simulation]
+seed = {seed}
+temperature = 0.0
+
+[[phase]]
+name = "run"
+n_steps = {n_steps}
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[phase.output]
+trajectory_every = 0
+log_every = 0
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+
+[neighbor_list]
+mode = "cell-list"
+r_skin = {r_skin}
+"#
+    );
+    let config_path = dir.join("sim.in.toml");
+    std::fs::write(&config_path, config).unwrap();
+    // Box has to satisfy the box-too-small check: 3 * (cutoff + r_skin)
+    // must fit in every perpendicular width. With cutoff = 1e-9 and the
+    // r_skin values we pick, a 6e-9 cube is large enough.
+    let mut body = String::new();
+    body.push_str(&format!("{n_particles}\n"));
+    let props = if include_velocities {
+        "species:S:1:pos:R:3:velo:R:3"
+    } else {
+        "species:S:1:pos:R:3"
+    };
+    body.push_str(&format!(
+        "Lattice=\"6.0e-9 0 0 0 6.0e-9 0 0 0 6.0e-9\" Properties={props}\n"
+    ));
+    let spacing = if n_particles > 1 {
+        4.0e-9 / (n_particles as f64 - 1.0)
+    } else {
+        0.0
+    };
+    let half_n = (n_particles as f64 - 1.0) / 2.0;
+    for i in 0..n_particles {
+        let x = (i as f64 - half_n) * spacing;
+        if include_velocities {
+            body.push_str(&format!("Ar {x:.9e} 0.0 0.0 0.0 0.0 0.0\n"));
+        } else {
+            body.push_str(&format!("Ar {x:.9e} 0.0 0.0\n"));
+        }
+    }
+    std::fs::write(dir.join("sim.in.xyz"), body).unwrap();
+    config_path
+}
+
+// rq-ef918dc6 rq-75746f64
+#[test]
+fn cell_list_records_neighbor_stages() {
+    let dir = tmp_path("cell_list_stages");
+    let path = write_cell_list_pair(&dir, 10, 3.0e-10, 1, 4, true);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    // rq-ef918dc6: cell-list adds the four neighbor-list host stages on
+    // top of the regular lj_pair_force kernel stage.
+    assert!(stage_row(&body, "lj_pair_force").is_some());
+    assert!(stage_row(&body, "neighbor_displacement_squared").is_some());
+    assert!(stage_row(&body, "neighbor_list_build").is_some());
+    assert!(stage_row(&body, "copy_positions_into_reference").is_some());
+    assert!(stage_row(&body, "neighbor_list_rebuild").is_some());
+    // rq-75746f64: with n_steps=10, neighbor_displacement_squared runs
+    // once per loop step (no warm-up displacement check before step 1).
+    assert_eq!(stage_count(&body, "neighbor_displacement_squared"), Some(10));
+}
+
+// rq-7f2310ac
+#[test]
+fn neighbor_list_build_and_reference_copy_counts_match_rebuilds() {
+    // Whatever r_skin we choose, the runner emits one host-stage event
+    // for `neighbor_list_build`, `copy_positions_into_reference`, and
+    // `neighbor_list_rebuild` per rebuild (including the warm-up
+    // build). The architectural contract is that the three counts are
+    // equal — that is the invariant this test exercises. We do not
+    // try to engineer "exactly K rebuilds" via a tuned r_skin; doing so
+    // would couple the test to particle dynamics that aren't part of the
+    // contract.
+    let dir = tmp_path("nl_rebuild_counts");
+    let path = write_cell_list_pair(&dir, 10, 3.0e-10, 1, 4, true);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    let build = stage_count(&body, "neighbor_list_build").unwrap();
+    let copy = stage_count(&body, "copy_positions_into_reference").unwrap();
+    let rebuild = stage_count(&body, "neighbor_list_rebuild").unwrap();
+    assert!(build >= 1, "expected at least the warm-up build, got {build}");
+    assert_eq!(build, copy, "neighbor_list_build vs copy_positions_into_reference");
+    assert_eq!(build, rebuild, "neighbor_list_build vs neighbor_list_rebuild");
+}
+
+fn write_morse_bonded(
+    dir: &Path,
+    n_steps: u64,
+    seed: u64,
+) -> PathBuf {
+    let config = format!(
+        r#"schema_version = 1
+init = "sim.in.xyz"
+topology = "sim.in.topology"
+
+[simulation]
+seed = {seed}
+temperature = 0.0
+
+[[phase]]
+name = "run"
+n_steps = {n_steps}
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[phase.output]
+trajectory_every = 0
+log_every = 0
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+
+[[bond_types]]
+name = "ArAr"
+potential = "morse"
+de = 1.65e-21
+a = 1.9e10
+re = 3.4e-10
+
+[neighbor_list]
+mode = "all-pairs"
+"#
+    );
+    let config_path = dir.join("sim.in.toml");
+    std::fs::write(&config_path, config).unwrap();
+    // Two particles, one bond between them.
+    let xyz = "2\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" \
+               Properties=species:S:1:pos:R:3:velo:R:3\n\
+               Ar -1.5e-10 0.0 0.0 0.0 0.0 0.0\n\
+               Ar  1.5e-10 0.0 0.0 0.0 0.0 0.0\n";
+    std::fs::write(dir.join("sim.in.xyz"), xyz).unwrap();
+    let topo = "[bonds]\n0 1 ArAr\n";
+    std::fs::write(dir.join("sim.in.topology"), topo).unwrap();
+    config_path
+}
+
+// rq-14b8e042
+#[test]
+fn morse_bonded_records_bond_force_and_reduction_rows() {
+    let dir = tmp_path("morse_bonded_rows");
+    let path = write_morse_bonded(&dir, 10, 1);
+    run_simulation(&path).unwrap();
+    let body = read_timings(&dir);
+    // One warm-up + ten loop iterations = 11.
+    assert_eq!(stage_count(&body, "morse_bond_force"), Some(11));
+    assert_eq!(stage_count(&body, "reduce_bond_forces"), Some(11));
+    assert_eq!(stage_count(&body, "accumulate_forces"), Some(11));
 }
 
 // Silence unused-import warning when individual tests don't reference these.
