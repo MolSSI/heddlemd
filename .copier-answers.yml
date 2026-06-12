@@ -1,6 +1,6 @@
 # Changes here will be overwritten by Copier; DO NOT EDIT
 _commit: 5c1f901
-_src_path: guardrails
+_src_path: git@github.com:MolSSI/guardrails.git
 author_email: taylor.a.barnes@gmail.com
 author_name: Taylor Barnes
 language: rust
