@@ -586,9 +586,12 @@ Feature: Topology file with bonds, angles, and exclusions
       [(0, 1, scale_lj=0.0, scale_coul=0.0),
        (0, 2, scale_lj=0.5, scale_coul=0.5),
        (1, 3, scale_lj=0.5, scale_coul=0.833)]
-    Then atom_excl_offsets equals [0, 2, 3, 4, 5]
+    Then atom_excl_offsets equals [0, 2, 4, 5, 6]
+      (every pair is mirror-expanded so atom_j's partner list also names atom_i)
     And atom 0's partners are [1, 2] with LJ scales [0.0, 0.5] and Coulomb scales [0.0, 0.5]
     And atom 1's partners are [0, 3] with LJ scales [0.0, 0.5] and Coulomb scales [0.0, 0.833]
+    And atom 2's partners are [0] with LJ scales [0.5] and Coulomb scales [0.5]
+    And atom 3's partners are [1] with LJ scales [0.5] and Coulomb scales [0.833]
 
   # --- IO and parser errors ---
 

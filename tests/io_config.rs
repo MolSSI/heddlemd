@@ -1347,7 +1347,7 @@ fn langevin_temperature_zero_rejected() {
     }
 }
 
-// rq-f067338a rq-aa1492a7
+// rq-f067338a rq-aa1492a7 rq-e08baac0
 #[test]
 fn integrator_rejects_unknown_field_for_chosen_kind() {
     // Consolidates the per-kind "unknown integrator field" check across
@@ -2224,7 +2224,7 @@ n_resp = 0"#,
     }
 }
 
-// rq-f4eeb849
+// rq-f4eeb849 rq-8df9d74b rq-89d45c45 rq-0c7d1ff5 rq-fff341e9
 #[test]
 fn thermostat_rejects_unknown_field_for_chosen_kind() {
     // Consolidates the per-kind "unknown thermostat field" check across
@@ -2323,6 +2323,42 @@ tau = 1.0e-13"#,
 // CSVR extra-fields coverage lives in the parameterised
 // `thermostat_rejects_unknown_field_for_chosen_kind` test above.
 
+// rq-eba43990
+#[test]
+fn thermostat_csvr_rejects_non_positive_temperature() {
+    let dir = tmp_path("csvr_temp_neg");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "csvr"
+temperature = 0.0
+tau = 1.0e-13
+seed = 1"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "thermostat.temperature"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-e1a6bde9
+#[test]
+fn thermostat_csvr_rejects_non_positive_tau() {
+    let dir = tmp_path("csvr_tau_neg");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "csvr"
+temperature = 300.0
+tau = -1.0
+seed = 1"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "thermostat.tau"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
 // --- Andersen ---
 
 #[test]
@@ -2383,6 +2419,41 @@ seed = 42"#,
 // Andersen extra-fields coverage lives in the parameterised
 // `thermostat_rejects_unknown_field_for_chosen_kind` test above.
 
+// rq-b8aa57c6
+#[test]
+fn thermostat_andersen_rejects_non_positive_temperature() {
+    let dir = tmp_path("andersen_temp_neg");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "andersen"
+temperature = -1.0
+collision_rate = 1.0e12
+seed = 42"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "thermostat.temperature"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-c5b42daa
+#[test]
+fn thermostat_andersen_missing_seed_rejected() {
+    let dir = tmp_path("andersen_no_seed");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "andersen"
+temperature = 300.0
+collision_rate = 1.0e12"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "thermostat.seed"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
 // --- Berendsen ---
 
 // rq-b7cd6d16
@@ -2405,6 +2476,72 @@ tau = 1.0e-13"#,
 
 // Berendsen extra-fields coverage lives in the parameterised
 // `thermostat_rejects_unknown_field_for_chosen_kind` test above.
+
+// rq-cef1e640
+#[test]
+fn thermostat_berendsen_rejects_non_positive_temperature() {
+    let dir = tmp_path("berendsen_temp_neg");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "berendsen"
+temperature = 0.0
+tau = 1.0e-13"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "thermostat.temperature"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-14fdd6ef
+#[test]
+fn thermostat_berendsen_rejects_non_positive_tau() {
+    let dir = tmp_path("berendsen_tau_neg");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "berendsen"
+temperature = 300.0
+tau = -1.0"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "thermostat.tau"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-61a19da3
+#[test]
+fn thermostat_berendsen_missing_temperature_rejected() {
+    let dir = tmp_path("berendsen_no_temp");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "berendsen"
+tau = 1.0e-13"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "thermostat.temperature"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-d189e9be
+#[test]
+fn thermostat_berendsen_missing_tau_rejected() {
+    let dir = tmp_path("berendsen_no_tau");
+    let body = config_with_thermostat(
+        r#"[thermostat]
+kind = "berendsen"
+temperature = 300.0"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "thermostat.tau"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
 
 // --- Integrator-owns-thermostat compatibility ---
 
@@ -2611,6 +2748,54 @@ fn mtk_npt_rejects_non_positive_tau_p() {
 
 // `mtk-npt` extra-fields coverage lives in the parameterised
 // `integrator_rejects_unknown_field_for_chosen_kind` test above.
+
+// rq-071e19df
+#[test]
+fn mtk_npt_rejects_non_positive_temperature() {
+    let dir = tmp_path("mtk_temp_neg");
+    let body = mtk_minimal_body("").replace("temperature = 85.0\npressure", "temperature = 0.0\npressure");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "integrator.temperature"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-a003ec43
+#[test]
+fn mtk_npt_rejects_non_positive_tau_t() {
+    let dir = tmp_path("mtk_tau_t_neg");
+    let body = mtk_minimal_body("").replace("tau_t = 1.0e-13", "tau_t = -1.0");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "integrator.tau_t"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-ee43e3d6
+#[test]
+fn mtk_npt_rejects_yoshida_order_outside_allowed_set() {
+    let dir = tmp_path("mtk_yoshida_bad");
+    let body = mtk_minimal_body("yoshida_order = 2\n");
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::InvalidValue { field, .. } => assert_eq!(field, "integrator.yoshida_order"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-880349c0
+#[test]
+fn mtk_npt_accepts_any_sign_of_pressure() {
+    let dir = tmp_path("mtk_pressure_neg");
+    let body = mtk_minimal_body("").replace("pressure = 1.0e5", "pressure = -1.0e5");
+    let path = write_config(&dir, &body);
+    let cfg = load_config(&path).unwrap();
+    let i = &cfg.phases[0].as_md().unwrap().integrator;
+    let p = i.params.get("pressure").and_then(|v| v.as_float()).unwrap();
+    assert!(p < 0.0);
+}
 
 // rq-129edb76 rq-6478b9c9
 #[test]
@@ -2944,7 +3129,7 @@ compressibility = 0.0"#,
     }
 }
 
-// rq-5d91f07d
+// rq-5d91f07d rq-90eab90b rq-e9caf013
 #[test]
 fn barostat_rejects_unknown_field_for_chosen_kind() {
     // Consolidates the per-kind "unknown barostat field" check across
@@ -3131,6 +3316,63 @@ compressibility = 4.5e-10"#,
 
 // c-rescale extra-fields coverage lives in the parameterised
 // `barostat_rejects_unknown_field_for_chosen_kind` test above.
+
+// rq-1a2f0ba9
+#[test]
+fn barostat_c_rescale_missing_pressure_rejected() {
+    let dir = tmp_path("baro_c_rescale_no_pressure");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "c-rescale"
+temperature = 85.0
+tau = 1.0e-12
+compressibility = 4.5e-10
+seed = 1"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "barostat.pressure"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-b4d2ac96
+#[test]
+fn barostat_c_rescale_missing_tau_rejected() {
+    let dir = tmp_path("baro_c_rescale_no_tau");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "c-rescale"
+pressure = 1.0e5
+temperature = 85.0
+compressibility = 4.5e-10
+seed = 1"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "barostat.tau"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
+
+// rq-77f42047
+#[test]
+fn barostat_c_rescale_missing_compressibility_rejected() {
+    let dir = tmp_path("baro_c_rescale_no_compress");
+    let body = config_with_barostat(
+        r#"[barostat]
+kind = "c-rescale"
+pressure = 1.0e5
+temperature = 85.0
+tau = 1.0e-12
+seed = 1"#,
+    );
+    let path = write_config(&dir, &body);
+    match load_config(&path).unwrap_err() {
+        ConfigError::MissingField { field } => assert_eq!(field, "barostat.compressibility"),
+        other => panic!("unexpected: {other:?}"),
+    }
+}
 
 // rq-bda9c0a2
 #[test]

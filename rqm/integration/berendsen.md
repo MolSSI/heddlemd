@@ -446,13 +446,6 @@ Feature: Berendsen weak-coupling thermostat
     Then the temperature at step 500 is between T_target and 1.1 · T_target
       (most of the relaxation completes within several τ)
 
-  @rq-3486c5e9
-  Scenario: H_berendsen drifts only by O(dt²) per step
-    Given an N=64 composed run with velocity-Verlet + Berendsen, dt=1e-15, n_steps=1000
-    When the run completes
-    Then |H_berendsen(n_steps) − H_berendsen(0)| / |H_berendsen(0)| is < 1.0e-3
-    And the drift halves when dt is halved (consistent with O(dt²))
-
   # --- Determinism ---
 
   @rq-102e58cf

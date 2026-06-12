@@ -259,7 +259,7 @@ fn csvr_apply_pre_is_trait_default_noop() {
 
 // --- draw_counter advances ---
 
-// rq-1e5dcdc9
+// rq-1e5dcdc9 rq-b2d5886a
 #[test]
 fn csvr_draw_counter_increments_per_apply_post() {
     let gpu = init_device().unwrap();
@@ -304,7 +304,7 @@ fn csvr_two_thermostats_at_same_counter_produce_identical_velocities() {
 
 // --- Log columns ---
 
-// rq-2c1bb918
+// rq-2c1bb918 rq-1d25a0db
 #[test]
 fn csvr_log_column_names_returns_csvr_conserved() {
     let gpu = init_device().unwrap();
@@ -490,4 +490,70 @@ fn csvr_time_averaged_ke_tracks_k_target() {
     let k_avg = sum / (n_samples as f64);
     let rel = (k_avg - k_target).abs() / k_target;
     assert!(rel < 0.15, "k_avg = {k_avg:e}, target {k_target:e}, rel {rel}");
+}
+
+// rq-efea1b70
+#[test]
+fn csvr_skips_rescale_when_k_zero() {
+    let gpu = init_device().unwrap();
+    let n = 4usize;
+    // All-zero velocities → K = 0.
+    let state = ParticleState::new(
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![(1.66e-27 / MASS_F) as f32; n],
+        vec![0.0_f32; n],
+        vec![0u32; n],
+        None,
+        None,
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut therm = build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 1));
+    therm
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .unwrap();
+    let report = timings.finalize().unwrap();
+    let count = report
+        .stages
+        .iter()
+        .find(|r| r.name == dynamics::timings::KernelStage::CSVR_RESCALE_VELOCITIES.name())
+        .map(|r| r.count)
+        .unwrap_or(0);
+    assert_eq!(count, 0, "csvr should not launch rescale kernel when K=0");
+}
+
+// rq-70a46202
+#[test]
+fn csvr_constructs_for_a_settled_water_system() {
+    let gpu = init_device().unwrap();
+    let kind = csvr_kind(300.0, 1.0e-13, 1);
+    // 24 particles (8 waters) with 24 constraints (3 per water for SETTLE);
+    // g_dof = max(1, 3*24 - 24 - 3) = 45.
+    let therm = ThermostatRegistry::with_builtins()
+        .build_optional(Some(&kind), &gpu, 24, 24)
+        .unwrap()
+        .unwrap();
+    let therm = unbox_csvr(therm);
+    assert_eq!(therm.g_dof, 45);
+}
+
+// rq-d16be675
+#[test]
+fn csvr_clamps_g_dof_to_one_for_heavily_constrained_system() {
+    let gpu = init_device().unwrap();
+    let kind = csvr_kind(300.0, 1.0e-13, 1);
+    // 4 particles with 12 constraints (degenerate over-constrained case):
+    // 3*4 - 12 - 3 = -3 → clamped to 1.
+    let therm = ThermostatRegistry::with_builtins()
+        .build_optional(Some(&kind), &gpu, 4, 12)
+        .unwrap()
+        .unwrap();
+    let therm = unbox_csvr(therm);
+    assert_eq!(therm.g_dof, 1);
 }

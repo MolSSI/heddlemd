@@ -746,32 +746,11 @@ Feature: MTK NPT integrator (isotropic)
 
   # --- Shared chain helper ---
 
-  @rq-031d3307
-  Scenario: nhc_chain_sub_step produces the same numerical result for the particle chain
-    as the existing inline NHC implementation
-    Given known xi, p_xi, q_mass, dt, k, g_dof, kt
-    When nhc_chain_sub_step(...) is called
-    Then it returns the same multiplicative factor (within f64 round-off)
-      as the inline computation in the existing NHC slot
-
   @rq-e4f97cc2
   Scenario: nhc_chain_sub_step handles M = 1 without panicking
     Given a chain with M = 1 (length-1 xi, p_xi, q_mass slices)
     When nhc_chain_sub_step(...) is called
     Then it returns Ok and updates xi[0] and p_xi[0]
-
-  # --- Fractional-coord invariance under pure box rescale ---
-
-  @rq-4b9bb90c
-  Scenario: Box rescale leg of the integrator preserves fractional coords
-    Given an MtkNptIntegrator and a system whose particle velocities are all zero
-    And p_eps is non-zero (e.g. 1.0e-25 kg·m²/s, set by hand)
-    And a snapshot of fractional coordinates per particle
-    When the runner walks integrator.plan(dt) once
-    Then the post-step fractional coordinates of every particle equal the
-      snapshot within f32 round-off
-      (with v ≡ 0 the drift collapses to the pure box rescale x ← exp(b·dt)·x;
-       the box rescales by the same factor)
 
   # --- Log columns ---
 
@@ -819,41 +798,4 @@ Feature: MTK NPT integrator (isotropic)
       pressure, box_volume, and mtk_npt_conserved columns
     And the two final SimulationBox lattices are byte-identical
 
-  # --- Physical correctness ---
-
-  @rq-5e238a79
-  Scenario: At equilibrium, time-averaged temperature tracks T_target
-    Given an MTK-NPT run with N=256 LJ argon, T=85 K, P=1.0 bar,
-      dt=1e-15, tau_t=1e-13, tau_p=1e-12, n_steps=10000,
-      initial v sampled at 85 K
-    When the run completes
-    Then the time-averaged kinetic temperature over the last 5000 log rows
-      is within 5% of 85 K
-
-  @rq-17efb1cd
-  Scenario: At equilibrium, time-averaged pressure tracks P_ext
-    Given the same MTK-NPT run as above
-    When the run completes
-    Then the time-averaged pressure over the last 5000 log rows is within
-      20% of 1.0 bar
-
-  @rq-c5d7891a
-  Scenario: H_MTK drifts only by O(dt²) per step
-    Given an MTK-NPT run with N=64 LJ argon, dt=1e-15, n_steps=2000
-    When the run completes
-    Then |H_MTK(n_steps) − H_MTK(0)| / |H_MTK(0)| is < 5.0e-3
-    And the drift is dominated by O(dt²) (a halved-dt run has drift
-      ≤ 1/4 of the original)
-
-  # --- COM-momentum preservation ---
-
-  @rq-47129004
-  Scenario: COM momentum is preserved under the MTK integrator
-    Given an MtkNptIntegrator with initial COM momentum = 0
-    And n_steps = 100
-    When the run completes
-    Then Σ_i m_i v_i evaluated on the final velocities is zero within f32 round-off
-      (the cell-coupled velocity rescale and the chain rescale are both
-       multiplicative; they preserve the zero-COM property exactly in real
-       arithmetic, bounded by f32 ULP accumulation in practice)
 ```

@@ -915,7 +915,7 @@ fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
     assert_eq!(lj_slot.max_cutoff(), Some(4.0_f32));
 }
 
-#[test] // rq-e90c6feb rq-535c2b1e
+#[test] // rq-e90c6feb rq-535c2b1e rq-4b40604b
 fn trivial_mode_and_cell_list_mode_forces_agree() {
     use dynamics::forces::{
         BondList, ExclusionList, ForceField, PotentialRegistry,

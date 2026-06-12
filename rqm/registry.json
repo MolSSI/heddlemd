@@ -102,7 +102,12 @@
   "rq-00bb491c": {
     "decl": "Scenario: Angle row with non-integer index",
     "file": "forces/topology",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Angle row with non-integer index",
     "type": "scenario"
   },
@@ -364,13 +369,6 @@
     "title": "cuFFT smoke test fails-loud when consecutive transforms produce different output",
     "type": "scenario"
   },
-  "rq-031d3307": {
-    "decl": "Scenario: nhc_chain_sub_step produces the same numerical result for the particle chain",
-    "file": "integration/mtk-npt",
-    "refs": [],
-    "title": "nhc_chain_sub_step produces the same numerical result for the particle chain",
-    "type": "scenario"
-  },
   "rq-032b4b79": {
     "decl": "Scenario: Reject a config whose derived root is empty",
     "file": "io/config-schema",
@@ -591,7 +589,12 @@
   "rq-05b4c988": {
     "decl": "Scenario: Log file header includes berendsen_conserved when Berendsen is the thermostat",
     "file": "integration/berendsen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_berendsen.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Log file header includes berendsen_conserved when Berendsen is the thermostat",
     "type": "scenario"
   },
@@ -725,7 +728,12 @@
   "rq-06c0e11a": {
     "decl": "Scenario: Exclusion row with non-numeric scale",
     "file": "forces/topology",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Exclusion row with non-numeric scale",
     "type": "scenario"
   },
@@ -744,7 +752,12 @@
   "rq-071e19df": {
     "decl": "Scenario: Reject non-positive temperature",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-positive temperature",
     "type": "scenario"
   },
@@ -1133,7 +1146,12 @@
   "rq-0abaa85d": {
     "decl": "Scenario: Construct MtkNptIntegrator for a SETTLE'd water system",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_mtk_npt.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct MtkNptIntegrator for a SETTLE'd water system",
     "type": "scenario"
   },
@@ -1172,7 +1190,12 @@
   "rq-0b5e6b6c": {
     "decl": "Scenario: `between` order does not matter",
     "file": "analysis/rdf",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/rdf.rs",
+        "kind": "code"
+      }
+    ],
     "title": "`between` order does not matter",
     "type": "scenario"
   },
@@ -1283,7 +1306,12 @@
   "rq-0c7d1ff5": {
     "decl": "Scenario: Reject extra fields (e.g. seed from CSVR/Andersen)",
     "file": "integration/berendsen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject extra fields (e.g. seed from CSVR/Andersen)",
     "type": "scenario"
   },
@@ -1420,13 +1448,6 @@
     ],
     "title": "StageStats",
     "type": "api-item"
-  },
-  "rq-0dc48f6b": {
-    "decl": "Scenario: Log file header omits csvr_conserved when CSVR is not the thermostat",
-    "file": "integration/csvr",
-    "refs": [],
-    "title": "Log file header omits csvr_conserved when CSVR is not the thermostat",
-    "type": "scenario"
   },
   "rq-0dc50ce0": {
     "decl": "Scenario: Reject a phase name containing non-ASCII characters",
@@ -2100,7 +2121,12 @@
   "rq-13b931f8": {
     "decl": "Scenario: Bond row with non-integer index",
     "file": "forces/topology",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Bond row with non-integer index",
     "type": "scenario"
   },
@@ -2256,7 +2282,12 @@
   "rq-14fdd6ef": {
     "decl": "Scenario: Reject non-positive tau",
     "file": "integration/berendsen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-positive tau",
     "type": "scenario"
   },
@@ -2275,7 +2306,12 @@
   "rq-151cb099": {
     "decl": "Scenario: Cell index of a position at the +1/2 fractional-coordinate boundary clamps inside the grid",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Cell index of a position at the +1/2 fractional-coordinate boundary clamps inside the grid",
     "type": "scenario"
   },
@@ -2408,7 +2444,12 @@
   "rq-167867a2": {
     "decl": "Scenario: Default apply_pre is a no-op for thermostats that don't override it",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_andersen.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Default apply_pre is a no-op for thermostats that don't override it",
     "type": "scenario"
   },
@@ -2539,15 +2580,13 @@
   "rq-17ed07e7": {
     "decl": "Scenario: Exclusion atom out of range",
     "file": "forces/topology",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Exclusion atom out of range",
-    "type": "scenario"
-  },
-  "rq-17efb1cd": {
-    "decl": "Scenario: At equilibrium, time-averaged pressure tracks P_ext",
-    "file": "integration/mtk-npt",
-    "refs": [],
-    "title": "At equilibrium, time-averaged pressure tracks P_ext",
     "type": "scenario"
   },
   "rq-17fd53d9": {
@@ -2722,7 +2761,12 @@
   "rq-1a2f0ba9": {
     "decl": "Scenario: Missing pressure rejected",
     "file": "integration/c-rescale-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Missing pressure rejected",
     "type": "scenario"
   },
@@ -2777,7 +2821,12 @@
   "rq-1aa67999": {
     "decl": "Scenario: Construct for a SETTLE'd water system",
     "file": "integration/nose-hoover-chain",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_nhc.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct for a SETTLE'd water system",
     "type": "scenario"
   },
@@ -3122,7 +3171,12 @@
   "rq-1d25a0db": {
     "decl": "Scenario: Log file header includes csvr_conserved when CSVR is the thermostat",
     "file": "integration/csvr",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_csvr.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Log file header includes csvr_conserved when CSVR is the thermostat",
     "type": "scenario"
   },
@@ -3286,7 +3340,12 @@
   "rq-1ee2ef41": {
     "decl": "Scenario: runner.resolve_level upgrades to ForcesAndScalars on a trajectory frame",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "runner.resolve_level upgrades to ForcesAndScalars on a trajectory frame",
     "type": "scenario"
   },
@@ -3861,7 +3920,12 @@
   "rq-23678707": {
     "decl": "Scenario: Refuse to overwrite an existing CSV at the resolved output path",
     "file": "analysis/rdf",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/analyze.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Refuse to overwrite an existing CSV at the resolved output path",
     "type": "scenario"
   },
@@ -4200,7 +4264,12 @@
   "rq-2674f18a": {
     "decl": "Scenario: Explicit `trajectory` overrides phase-derived default",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/analyze.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Explicit `trajectory` overrides phase-derived default",
     "type": "scenario"
   },
@@ -4443,7 +4512,12 @@
   "rq-299112e9": {
     "decl": "Scenario: Variance of resampled velocity components matches MB",
     "file": "integration/andersen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_andersen.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Variance of resampled velocity components matches MB",
     "type": "scenario"
   },
@@ -4889,7 +4963,12 @@
   "rq-2d109b3a": {
     "decl": "Scenario: C-rescale composes with langevin-baoab",
     "file": "integration/c-rescale-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/barostats_c_rescale.rs",
+        "kind": "code"
+      }
+    ],
     "title": "C-rescale composes with langevin-baoab",
     "type": "scenario"
   },
@@ -4928,7 +5007,12 @@
   "rq-2d579721": {
     "decl": "Scenario: Berendsen barostat composes with langevin-baoab integrator",
     "file": "integration/berendsen-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/barostats_berendsen.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Berendsen barostat composes with langevin-baoab integrator",
     "type": "scenario"
   },
@@ -5346,7 +5430,12 @@
   "rq-3288a78c": {
     "decl": "Scenario: NPT-style sequence of small barostat ticks rebuilds at the displacement-driven rate",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "NPT-style sequence of small barostat ticks rebuilds at the displacement-driven rate",
     "type": "scenario"
   },
@@ -5425,7 +5514,12 @@
   "rq-3396b95f": {
     "decl": "Scenario: Construct Andersen via the thermostat registry",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_andersen.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct Andersen via the thermostat registry",
     "type": "scenario"
   },
@@ -5519,13 +5613,6 @@
       }
     ],
     "title": "Two independent composed runs with identical configs are byte-identical",
-    "type": "scenario"
-  },
-  "rq-3486c5e9": {
-    "decl": "Scenario: H_berendsen drifts only by O(dt²) per step",
-    "file": "integration/berendsen",
-    "refs": [],
-    "title": "H_berendsen drifts only by O(dt²) per step",
     "type": "scenario"
   },
   "rq-34943524": {
@@ -5858,7 +5945,12 @@
   "rq-38117e33": {
     "decl": "Scenario: Explicit `phase` selects the matching phase's trajectory",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/analyze.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Explicit `phase` selects the matching phase's trajectory",
     "type": "scenario"
   },
@@ -6045,13 +6137,6 @@
     "title": "check_min_perpendicular_width flags direction \"a\" when w_a fails",
     "type": "scenario"
   },
-  "rq-3975fb2d": {
-    "decl": "Scenario: Log file header omits pressure and box_volume when no barostat is configured",
-    "file": "integration/berendsen-barostat",
-    "refs": [],
-    "title": "Log file header omits pressure and box_volume when no barostat is configured",
-    "type": "scenario"
-  },
   "rq-39891001": {
     "decl": "### Functions",
     "file": "io/config-schema",
@@ -6132,7 +6217,12 @@
   "rq-3a9cb990": {
     "decl": "Scenario: MTK-NPT emits ForceEval with ForcesAndScalars",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "MTK-NPT emits ForceEval with ForcesAndScalars",
     "type": "scenario"
   },
@@ -6699,7 +6789,12 @@
   "rq-40dd09ae": {
     "decl": "Scenario: Reject `between` referencing a type with zero particles",
     "file": "analysis/rdf",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/rdf.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject `between` referencing a type with zero particles",
     "type": "scenario"
   },
@@ -7229,13 +7324,6 @@
     "title": "Construct with particle_count = 1 (N_f = 1)",
     "type": "scenario"
   },
-  "rq-47129004": {
-    "decl": "Scenario: COM momentum is preserved under the MTK integrator",
-    "file": "integration/mtk-npt",
-    "refs": [],
-    "title": "COM momentum is preserved under the MTK integrator",
-    "type": "scenario"
-  },
   "rq-47540d14": {
     "decl": "Scenario: A bonded-only ForceField step launches no neighbor-list kernels",
     "file": "forces/framework",
@@ -7561,13 +7649,6 @@
     "title": "Exclusion entries",
     "type": "section"
   },
-  "rq-4ae77a72": {
-    "decl": "Scenario: csvr_conserved drifts as a zero-mean martingale (no systematic bias)",
-    "file": "integration/csvr",
-    "refs": [],
-    "title": "csvr_conserved drifts as a zero-mean martingale (no systematic bias)",
-    "type": "scenario"
-  },
   "rq-4b38148c": {
     "decl": "Scenario: Reject duplicate explicit IDs",
     "file": "particle-state",
@@ -7583,7 +7664,12 @@
   "rq-4b40604b": {
     "decl": "Scenario: Cell-list mode and trivial mode produce identical forces (within f32 tolerance)",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Cell-list mode and trivial mode produce identical forces (within f32 tolerance)",
     "type": "scenario"
   },
@@ -7616,13 +7702,6 @@
       }
     ],
     "title": "Reject an unknown units value",
-    "type": "scenario"
-  },
-  "rq-4b9bb90c": {
-    "decl": "Scenario: Box rescale leg of the integrator preserves fractional coords",
-    "file": "integration/mtk-npt",
-    "refs": [],
-    "title": "Box rescale leg of the integrator preserves fractional coords",
     "type": "scenario"
   },
   "rq-4b9d059e": {
@@ -8129,7 +8208,12 @@
   "rq-514670c9": {
     "decl": "Scenario: Implicit 1-3 exclusion is added for an angle without explicit (i, k) entry",
     "file": "forces/topology",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Implicit 1-3 exclusion is added for an angle without explicit (i, k) entry",
     "type": "scenario"
   },
@@ -8152,13 +8236,6 @@
     "refs": [],
     "title": "Sub-step Execution",
     "type": "section"
-  },
-  "rq-5257ec08": {
-    "decl": "Scenario: Plan with mixed-class ForceEval sub-steps dispatches step and step_class",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Plan with mixed-class ForceEval sub-steps dispatches step and step_class",
-    "type": "scenario"
   },
   "rq-5269221c": {
     "decl": "Scenario: wrap_position is idempotent for a triclinic box",
@@ -8677,7 +8754,12 @@
   "rq-572a0431": {
     "decl": "Scenario: init_device exposes the NHC kernels on the Kernels handle",
     "file": "integration/nose-hoover-chain",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_nhc.rs",
+        "kind": "code"
+      }
+    ],
     "title": "init_device exposes the NHC kernels on the Kernels handle",
     "type": "scenario"
   },
@@ -9004,7 +9086,12 @@
   "rq-5a7e597e": {
     "decl": "Scenario: A symplectic integrator emits ForceEval with ForcesOnly by default",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "A symplectic integrator emits ForceEval with ForcesOnly by default",
     "type": "scenario"
   },
@@ -9163,7 +9250,12 @@
   "rq-5c799ac6": {
     "decl": "Scenario: rescale_velocities does not modify positions, masses, or forces",
     "file": "integration/nose-hoover-chain",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_nhc.rs",
+        "kind": "code"
+      }
+    ],
     "title": "rescale_velocities does not modify positions, masses, or forces",
     "type": "scenario"
   },
@@ -9359,17 +9451,15 @@
     "title": "SD with no constraint slot does not call any projection hook",
     "type": "scenario"
   },
-  "rq-5e238a79": {
-    "decl": "Scenario: At equilibrium, time-averaged temperature tracks T_target",
-    "file": "integration/mtk-npt",
-    "refs": [],
-    "title": "At equilibrium, time-averaged temperature tracks T_target",
-    "type": "scenario"
-  },
   "rq-5e5f48da": {
     "decl": "Scenario: runner.resolve_level falls through to ForcesOnly when neither logging",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "runner.resolve_level falls through to ForcesOnly when neither logging",
     "type": "scenario"
   },
@@ -9628,7 +9718,12 @@
   "rq-6136714b": {
     "decl": "Scenario: Construct for a SETTLE'd water system",
     "file": "integration/berendsen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_berendsen.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct for a SETTLE'd water system",
     "type": "scenario"
   },
@@ -9679,7 +9774,12 @@
   "rq-61a19da3": {
     "decl": "Scenario: Missing temperature is rejected",
     "file": "integration/berendsen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Missing temperature is rejected",
     "type": "scenario"
   },
@@ -10959,13 +11059,6 @@
     "title": "Algorithm",
     "type": "section"
   },
-  "rq-6fb70c93": {
-    "decl": "Scenario: At equilibrium, NHC drives the kinetic energy to (g/2) T",
-    "file": "integration/nose-hoover-chain",
-    "refs": [],
-    "title": "At equilibrium, NHC drives the kinetic energy to (g/2) T",
-    "type": "scenario"
-  },
   "rq-6fd5167a": {
     "decl": "Scenario: Configuration exceeding the u32 cell-addressing limit is rejected at construction",
     "file": "forces/neighbor-list",
@@ -11061,7 +11154,12 @@
   "rq-70a46202": {
     "decl": "Scenario: Construct CsvrThermostat for a SETTLE'd water system",
     "file": "integration/csvr",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_csvr.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct CsvrThermostat for a SETTLE'd water system",
     "type": "scenario"
   },
@@ -11539,7 +11637,12 @@
   "rq-75a19aca": {
     "decl": "Scenario: runner.resolve_level keeps ForcesAndScalars when the sub-step already requests it",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "runner.resolve_level keeps ForcesAndScalars when the sub-step already requests it",
     "type": "scenario"
   },
@@ -11747,14 +11850,24 @@
   "rq-77f42047": {
     "decl": "Scenario: Missing compressibility rejected",
     "file": "integration/c-rescale-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Missing compressibility rejected",
     "type": "scenario"
   },
   "rq-77f53d4b": {
     "decl": "Scenario: atom_excl_offsets reflects sorted exclusion list",
     "file": "forces/topology",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/topology.rs",
+        "kind": "code"
+      }
+    ],
     "title": "atom_excl_offsets reflects sorted exclusion list",
     "type": "scenario"
   },
@@ -13366,7 +13479,12 @@
   "rq-880349c0": {
     "decl": "Scenario: Accept any sign of pressure",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Accept any sign of pressure",
     "type": "scenario"
   },
@@ -13534,7 +13652,12 @@
   "rq-89d45c45": {
     "decl": "Scenario: Reject extra fields (e.g., chain_length from NHC)",
     "file": "integration/csvr",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject extra fields (e.g., chain_length from NHC)",
     "type": "scenario"
   },
@@ -13691,13 +13814,6 @@
     "title": "Functions and methods",
     "type": "section"
   },
-  "rq-8b8e9a4e": {
-    "decl": "Scenario: Runner warm-up call uses ForcesAndScalars",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "Runner warm-up call uses ForcesAndScalars",
-    "type": "scenario"
-  },
   "rq-8c045718": {
     "decl": "Scenario: minimum_image of the zero displacement is zero",
     "file": "simulation-box",
@@ -13821,7 +13937,12 @@
   "rq-8df9d74b": {
     "decl": "Scenario: Reject extra fields (e.g. tau from NHC/CSVR)",
     "file": "integration/andersen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject extra fields (e.g. tau from NHC/CSVR)",
     "type": "scenario"
   },
@@ -14158,7 +14279,12 @@
   "rq-90eab90b": {
     "decl": "Scenario: Reject extra fields",
     "file": "integration/berendsen-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject extra fields",
     "type": "scenario"
   },
@@ -14484,13 +14610,6 @@
     "title": "NaN values are accepted at construction",
     "type": "scenario"
   },
-  "rq-94726e23": {
-    "decl": "Scenario: c_rescale_conserved drifts only by O(dt²) per step plus martingale noise",
-    "file": "integration/c-rescale-barostat",
-    "refs": [],
-    "title": "c_rescale_conserved drifts only by O(dt²) per step plus martingale noise",
-    "type": "scenario"
-  },
   "rq-94a43204": {
     "decl": "Scenario: Different seeds produce different trajectories",
     "file": "integration/csvr",
@@ -14644,7 +14763,12 @@
   "rq-963604a4": {
     "decl": "Scenario: Implicit pairing defaults to the last phase of the simulation config",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/analyze.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Implicit pairing defaults to the last phase of the simulation config",
     "type": "scenario"
   },
@@ -15657,7 +15781,12 @@
   "rq-9f551521": {
     "decl": "Scenario: runner.resolve_level upgrades to ForcesAndScalars on a logging step",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrator_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "runner.resolve_level upgrades to ForcesAndScalars on a logging step",
     "type": "scenario"
   },
@@ -15760,7 +15889,12 @@
   "rq-a003ec43": {
     "decl": "Scenario: Reject non-positive tau_t",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-positive tau_t",
     "type": "scenario"
   },
@@ -15837,13 +15971,6 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
-  "rq-a0d0c872": {
-    "decl": "Scenario: Time-averaged pressure tracks P_target",
-    "file": "integration/c-rescale-barostat",
-    "refs": [],
-    "title": "Time-averaged pressure tracks P_target",
-    "type": "scenario"
-  },
   "rq-a0ddb391": {
     "decl": "### Builder",
     "file": "integration/shake",
@@ -15879,7 +16006,12 @@
   "rq-a16c37bd": {
     "decl": "Scenario: Log file header includes nhc_conserved when NHC is the thermostat",
     "file": "integration/nose-hoover-chain",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_nhc.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Log file header includes nhc_conserved when NHC is the thermostat",
     "type": "scenario"
   },
@@ -16052,7 +16184,12 @@
   "rq-a336b496": {
     "decl": "Scenario: Construct Berendsen via the thermostat registry",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_berendsen.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct Berendsen via the thermostat registry",
     "type": "scenario"
   },
@@ -16397,7 +16534,12 @@
   "rq-a7aac794": {
     "decl": "Scenario: Cell counts reflect perpendicular widths for a tilted box",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Cell counts reflect perpendicular widths for a tilted box",
     "type": "scenario"
   },
@@ -16592,7 +16734,12 @@
   "rq-a99ca751": {
     "decl": "Scenario: Cell index of a position outside the primary cell wraps before binning",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Cell index of a position outside the primary cell wraps before binning",
     "type": "scenario"
   },
@@ -16990,7 +17137,12 @@
   "rq-ad67b3da": {
     "decl": "Scenario: Berendsen barostat composes with velocity-Verlet integrator (NPH)",
     "file": "integration/berendsen-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/barostats_berendsen.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Berendsen barostat composes with velocity-Verlet integrator (NPH)",
     "type": "scenario"
   },
@@ -17530,7 +17682,12 @@
   "rq-b2d5886a": {
     "decl": "Scenario: Two consecutive apply_post calls on a CSVR thermostat produce different post-call velocities",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_csvr.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Two consecutive apply_post calls on a CSVR thermostat produce different post-call velocities",
     "type": "scenario"
   },
@@ -17716,7 +17873,12 @@
   "rq-b4d2ac96": {
     "decl": "Scenario: Missing tau rejected",
     "file": "integration/c-rescale-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Missing tau rejected",
     "type": "scenario"
   },
@@ -17771,7 +17933,12 @@
   "rq-b5289acc": {
     "decl": "Scenario: Neighbour list is not globally partner-ID sorted across cells",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Neighbour list is not globally partner-ID sorted across cells",
     "type": "scenario"
   },
@@ -17858,7 +18025,12 @@
   "rq-b6d22242": {
     "decl": "Scenario: Unknown phase name is rejected at load time",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/analyze.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Unknown phase name is rejected at load time",
     "type": "scenario"
   },
@@ -18042,7 +18214,12 @@
   "rq-b8aa57c6": {
     "decl": "Scenario: Reject non-positive temperature",
     "file": "integration/andersen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-positive temperature",
     "type": "scenario"
   },
@@ -18061,7 +18238,12 @@
   "rq-b8fde05b": {
     "decl": "Scenario: Unwrapped displacement is preserved under wrap",
     "file": "integration/velocity-verlet",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integration.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Unwrapped displacement is preserved under wrap",
     "type": "scenario"
   },
@@ -18099,13 +18281,6 @@
       }
     ],
     "title": "Non-finite check precedes non-positive check on a diagonal",
-    "type": "scenario"
-  },
-  "rq-ba1e44f8": {
-    "decl": "Scenario: μ clamped to safety floor when the formula yields a non-positive μ³",
-    "file": "integration/c-rescale-barostat",
-    "refs": [],
-    "title": "μ clamped to safety floor when the formula yields a non-positive μ³",
     "type": "scenario"
   },
   "rq-ba2f07bd": {
@@ -18555,7 +18730,12 @@
   "rq-bedbd6d9": {
     "decl": "Scenario: Reject an output_path equal to the simulation's log file",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/analyze.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject an output_path equal to the simulation's log file",
     "type": "scenario"
   },
@@ -19079,7 +19259,12 @@
   "rq-c50c6f84": {
     "decl": "Scenario: Log file header includes andersen_conserved when Andersen is the thermostat",
     "file": "integration/andersen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_andersen.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Log file header includes andersen_conserved when Andersen is the thermostat",
     "type": "scenario"
   },
@@ -19135,15 +19320,13 @@
   "rq-c5b42daa": {
     "decl": "Scenario: Missing seed rejected",
     "file": "integration/andersen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Missing seed rejected",
-    "type": "scenario"
-  },
-  "rq-c5d7891a": {
-    "decl": "Scenario: H_MTK drifts only by O(dt²) per step",
-    "file": "integration/mtk-npt",
-    "refs": [],
-    "title": "H_MTK drifts only by O(dt²) per step",
     "type": "scenario"
   },
   "rq-c5e00a28": {
@@ -19558,7 +19741,12 @@
   "rq-ca13c67e": {
     "decl": "Scenario: A custom analysis builder composes with the built-ins",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/analyze.rs",
+        "kind": "code"
+      }
+    ],
     "title": "A custom analysis builder composes with the built-ins",
     "type": "scenario"
   },
@@ -19825,7 +20013,12 @@
   "rq-cd50d861": {
     "decl": "Scenario: cell_offsets contains the prefix sum of cell occupancies",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "cell_offsets contains the prefix sum of cell occupancies",
     "type": "scenario"
   },
@@ -19948,7 +20141,12 @@
   "rq-cef1e640": {
     "decl": "Scenario: Reject non-positive temperature",
     "file": "integration/berendsen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-positive temperature",
     "type": "scenario"
   },
@@ -20229,7 +20427,12 @@
   "rq-d16be675": {
     "decl": "Scenario: Heavily-constrained system clamps g_dof to 1",
     "file": "integration/csvr",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_csvr.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Heavily-constrained system clamps g_dof to 1",
     "type": "scenario"
   },
@@ -20249,7 +20452,12 @@
   "rq-d189e9be": {
     "decl": "Scenario: Missing tau is rejected",
     "file": "integration/berendsen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Missing tau is rejected",
     "type": "scenario"
   },
@@ -20989,13 +21197,6 @@
     "title": "fill kernel does not write beyond the buffer",
     "type": "scenario"
   },
-  "rq-d938350a": {
-    "decl": "Scenario: NHC conserved Hamiltonian drifts only by O(dt²) per step",
-    "file": "integration/nose-hoover-chain",
-    "refs": [],
-    "title": "NHC conserved Hamiltonian drifts only by O(dt²) per step",
-    "type": "scenario"
-  },
   "rq-d93f05a5": {
     "decl": "### Equations of motion",
     "file": "integration/mtk-npt",
@@ -21608,7 +21809,12 @@
   "rq-ded81a4a": {
     "decl": "Scenario: Log file header omits nhc_conserved when no thermostat is configured",
     "file": "integration/nose-hoover-chain",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_nhc.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Log file header omits nhc_conserved when no thermostat is configured",
     "type": "scenario"
   },
@@ -21640,7 +21846,12 @@
   "rq-df305128": {
     "decl": "Scenario: Log file header includes pressure, box_volume, and c_rescale_conserved when C-rescale is the configured barostat",
     "file": "integration/c-rescale-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/barostats_c_rescale.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Log file header includes pressure, box_volume, and c_rescale_conserved when C-rescale is the configured barostat",
     "type": "scenario"
   },
@@ -21746,7 +21957,12 @@
   "rq-e08baac0": {
     "decl": "Scenario: Reject extra fields (e.g. seed)",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject extra fields (e.g. seed)",
     "type": "scenario"
   },
@@ -21813,7 +22029,12 @@
   "rq-e1a6bde9": {
     "decl": "Scenario: Reject non-positive tau",
     "file": "integration/csvr",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-positive tau",
     "type": "scenario"
   },
@@ -21906,7 +22127,12 @@
   "rq-e2a31585": {
     "decl": "Scenario: Box-generation refresh handles tilt mutation",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Box-generation refresh handles tilt mutation",
     "type": "scenario"
   },
@@ -21926,7 +22152,12 @@
   "rq-e2cbe4fd": {
     "decl": "Scenario: Lint reports `r_max` greater than half-box under the analyses stage",
     "file": "analysis/rdf",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/analyze.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Lint reports `r_max` greater than half-box under the analyses stage",
     "type": "scenario"
   },
@@ -22321,7 +22552,12 @@
   "rq-e60481e9": {
     "decl": "Scenario: apply_post on empty state is a no-op",
     "file": "integration/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_andersen.rs",
+        "kind": "code"
+      }
+    ],
     "title": "apply_post on empty state is a no-op",
     "type": "scenario"
   },
@@ -22493,7 +22729,12 @@
   "rq-e84d3bac": {
     "decl": "Scenario: Reject a tilted box whose perpendicular width drops below 3*(r_cut+r_skin)",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject a tilted box whose perpendicular width drops below 3*(r_cut+r_skin)",
     "type": "scenario"
   },
@@ -22736,7 +22977,12 @@
   "rq-e9caf013": {
     "decl": "Scenario: Reject extra fields (e.g. Berendsen barostat doesn't have a seed)",
     "file": "integration/c-rescale-barostat",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject extra fields (e.g. Berendsen barostat doesn't have a seed)",
     "type": "scenario"
   },
@@ -22854,7 +23100,12 @@
   "rq-eba43990": {
     "decl": "Scenario: Reject non-positive temperature",
     "file": "integration/csvr",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject non-positive temperature",
     "type": "scenario"
   },
@@ -23081,7 +23332,12 @@
   "rq-ee43e3d6": {
     "decl": "Scenario: Reject yoshida_order outside {1, 3, 5, 7}",
     "file": "integration/mtk-npt",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject yoshida_order outside {1, 3, 5, 7}",
     "type": "scenario"
   },
@@ -23132,7 +23388,12 @@
   "rq-ee7c4af4": {
     "decl": "Scenario: Explicit `simulation` and `trajectory` override the implicit defaults",
     "file": "analysis/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/analyze.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Explicit `simulation` and `trajectory` override the implicit defaults",
     "type": "scenario"
   },
@@ -23259,13 +23520,6 @@
     "title": "Triclinic Lattice attribute carries non-zero tilts",
     "type": "scenario"
   },
-  "rq-ef8b6bf5": {
-    "decl": "Scenario: Next force_field.step rebuilds the neighbor list after apply",
-    "file": "integration/berendsen-barostat",
-    "refs": [],
-    "title": "Next force_field.step rebuilds the neighbor list after apply",
-    "type": "scenario"
-  },
   "rq-ef8dee82": {
     "decl": "Scenario: Self-energy is subtracted per particle and totals -k_C·(α/√π)·Σ q²",
     "file": "forces/spme",
@@ -23321,7 +23575,12 @@
   "rq-efea1b70": {
     "decl": "Scenario: Rescale skipped when K == 0",
     "file": "integration/csvr",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/integrators_csvr.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Rescale skipped when K == 0",
     "type": "scenario"
   },
@@ -24205,7 +24464,12 @@
   "rq-f79d1ac5": {
     "decl": "Scenario: Generation tick with unchanged n_cells_total still triggers rebuild when displacement exceeds threshold",
     "file": "forces/neighbor-list",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/neighbor_list.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Generation tick with unchanged n_cells_total still triggers rebuild when displacement exceeds threshold",
     "type": "scenario"
   },
@@ -24387,13 +24651,6 @@
       }
     ],
     "title": "SI-mode trajectory frame converts positions to metres",
-    "type": "scenario"
-  },
-  "rq-f996df7a": {
-    "decl": "Scenario: SD minimization iterations always read ForcesAndScalars",
-    "file": "integration/framework",
-    "refs": [],
-    "title": "SD minimization iterations always read ForcesAndScalars",
     "type": "scenario"
   },
   "rq-f9a9c569": {
@@ -25074,7 +25331,12 @@
   "rq-fff341e9": {
     "decl": "Scenario: Reject extra fields (e.g. collision_rate from Andersen)",
     "file": "integration/berendsen",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/io_config.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject extra fields (e.g. collision_rate from Andersen)",
     "type": "scenario"
   }

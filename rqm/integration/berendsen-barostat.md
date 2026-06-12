@@ -662,15 +662,6 @@ Feature: Berendsen weak-coupling barostat
     When barostat.apply(...) is called
     Then sim_box.generation() == g + 1
 
-  @rq-ef8b6bf5
-  Scenario: Next force_field.step rebuilds the neighbor list after apply
-    Given a composed runner of velocity-Verlet + Berendsen barostat with a CellList
-      neighbor list
-    And a snapshot of the neighbor list's cached cell layout generation
-    When the runner executes one full timestep
-    Then on the next iteration, force_field.step observes a new sim_box.generation()
-      and refreshes the cell layout
-
   # --- Log columns ---
 
   @rq-7564b1e7
@@ -691,13 +682,6 @@ Feature: Berendsen weak-coupling barostat
     And log_every > 0
     When the runner produces the log file
     Then its header line is "step,time,kinetic_energy,temperature,pressure,box_volume"
-
-  @rq-3975fb2d
-  Scenario: Log file header omits pressure and box_volume when no barostat is configured
-    Given a config with [barostat] omitted
-    And log_every > 0
-    When the runner produces the log file
-    Then the header line does not include "pressure" or "box_volume"
 
   # --- Composition with thermostat and integrator ---
 

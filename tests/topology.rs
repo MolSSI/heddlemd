@@ -415,7 +415,7 @@ fn too_many_exclusion_columns_rejected() {
 
 // --- Angle parsing tests ---
 
-// rq-e768a2b1
+// rq-e768a2b1 rq-514670c9
 #[test]
 fn load_topology_with_an_angle() {
     let dir = tmp_path("angle_basic");
@@ -581,7 +581,7 @@ fn atom_angle_offsets_reflect_sorted_list() {
     assert_eq!(al.atom_angle_indices.len(), 6);
 }
 
-// rq-67e62f4b — constraint-section parsing tests.
+// --- constraint-section parsing tests --------------------------------
 
 fn spce() -> NamedSlotConfig {
     NamedSlotConfig::from_params_str(
@@ -746,4 +746,109 @@ fn empty_constraints_section_is_valid() {
     let (_bl, _al, _el, cl) =
         load_topology_file(&path, 3, &[], &[], &cts, &registry()).unwrap();
     assert!(cl.is_empty());
+}
+
+// --- Non-integer / non-numeric parser errors -----------------------------
+
+// rq-13b931f8
+#[test]
+fn bond_row_with_non_integer_index_rejected() {
+    let dir = tmp_path("bond_non_int");
+    let body = "[bonds]\nabc 1 CC\n";
+    let path = write(&dir, body);
+    match load_topology_file(&path, 4, &["CC"], &[], &[], &registry()).unwrap_err() {
+        TopologyFileError::InvalidBondRow { .. } => {}
+        other => panic!("expected InvalidBondRow, got {other:?}"),
+    }
+}
+
+// rq-00bb491c
+#[test]
+fn angle_row_with_non_integer_index_rejected() {
+    let dir = tmp_path("angle_non_int");
+    let body = "[angles]\nabc 1 2 HOH\n";
+    let path = write(&dir, body);
+    match load_topology_file(&path, 4, &[], &["HOH"], &[], &registry()).unwrap_err() {
+        TopologyFileError::InvalidAngleRow { .. } => {}
+        other => panic!("expected InvalidAngleRow, got {other:?}"),
+    }
+}
+
+// rq-06c0e11a
+#[test]
+fn exclusion_row_with_non_numeric_scale_rejected() {
+    let dir = tmp_path("excl_non_numeric_scale");
+    let body = "[exclusions]\n0 1 maybe\n";
+    let path = write(&dir, body);
+    match load_topology_file(&path, 4, &[], &[], &[], &registry()).unwrap_err() {
+        TopologyFileError::InvalidExclusionRow { .. } => {}
+        other => panic!("expected InvalidExclusionRow, got {other:?}"),
+    }
+}
+
+// rq-17ed07e7
+#[test]
+fn exclusion_atom_out_of_range_rejected() {
+    let dir = tmp_path("excl_oor");
+    let body = "[exclusions]\n0 9\n";
+    let path = write(&dir, body);
+    match load_topology_file(&path, 4, &[], &[], &[], &registry()).unwrap_err() {
+        TopologyFileError::AtomIndexOutOfRange { index, max, .. } => {
+            assert_eq!(index, 9);
+            assert_eq!(max, 3);
+        }
+        other => panic!("expected AtomIndexOutOfRange, got {other:?}"),
+    }
+}
+
+// --- ExclusionList CSR shape --------------------------------------------
+
+// rq-77f53d4b
+#[test]
+fn atom_excl_offsets_reflects_sorted_exclusion_list() {
+    // Build a 4-particle topology with the scenario's exclusion set:
+    //   (0, 1, lj=0.0, coul=0.0)
+    //   (0, 2, lj=0.5, coul=0.5)
+    //   (1, 3, lj=0.5, coul=0.833)
+    // Every pair is mirror-expanded — both atom_i's and atom_j's lists
+    // name the other. CSR offsets are [0, 2, 4, 5, 6]:
+    //   atom 0 → 2 partners (1, 2)
+    //   atom 1 → 2 partners (0, 3)
+    //   atom 2 → 1 partner  (0)
+    //   atom 3 → 1 partner  (1)
+    let dir = tmp_path("excl_csr_shape");
+    let body = "\
+[exclusions]
+0 1 0.0 0.0
+0 2 0.5 0.5
+1 3 0.5 0.833
+";
+    let path = write(&dir, body);
+    let (_bl, _al, el, _cl) =
+        load_topology_file(&path, 4, &[], &[], &[], &registry()).unwrap();
+    assert_eq!(el.atom_excl_offsets, vec![0u32, 2, 4, 5, 6]);
+
+    let slice = |a: usize| -> (usize, usize) {
+        (el.atom_excl_offsets[a] as usize, el.atom_excl_offsets[a + 1] as usize)
+    };
+    let (s0, e0) = slice(0);
+    assert_eq!(&el.atom_excl_partners[s0..e0], &[1u32, 2]);
+    assert_eq!(&el.atom_excl_lj_scales[s0..e0], &[0.0_f32, 0.5]);
+    assert_eq!(&el.atom_excl_coul_scales[s0..e0], &[0.0_f32, 0.5]);
+
+    let (s1, e1) = slice(1);
+    assert_eq!(&el.atom_excl_partners[s1..e1], &[0u32, 3]);
+    assert_eq!(&el.atom_excl_lj_scales[s1..e1], &[0.0_f32, 0.5]);
+    assert!((el.atom_excl_coul_scales[s1] - 0.0).abs() < 1.0e-6);
+    assert!((el.atom_excl_coul_scales[e1 - 1] - 0.833).abs() < 1.0e-6);
+
+    let (s2, e2) = slice(2);
+    assert_eq!(&el.atom_excl_partners[s2..e2], &[0u32]);
+    assert!((el.atom_excl_lj_scales[s2] - 0.5).abs() < 1.0e-6);
+    assert!((el.atom_excl_coul_scales[s2] - 0.5).abs() < 1.0e-6);
+
+    let (s3, e3) = slice(3);
+    assert_eq!(&el.atom_excl_partners[s3..e3], &[1u32]);
+    assert!((el.atom_excl_lj_scales[s3] - 0.5).abs() < 1.0e-6);
+    assert!((el.atom_excl_coul_scales[s3] - 0.833).abs() < 1.0e-6);
 }

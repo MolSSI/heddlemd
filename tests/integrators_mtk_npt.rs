@@ -685,3 +685,18 @@ fn finite_step_keeps_velocities_and_positions_finite() {
         assert!(p.is_finite(), "non-finite position {p}");
     }
 }
+
+// rq-0abaa85d
+#[test]
+fn mtk_npt_constructs_for_a_settled_water_system() {
+    let gpu = init_device().unwrap();
+    let kind = mtk_kind(85.0, 1.0e5, 1.0e-13, 1.0e-12, 3, 3, 1);
+    // 24 particles (8 waters) with 24 constraints; MTK-NPT subtracts the
+    // 3 centre-of-mass dofs internally so the integrator builds cleanly.
+    let integ = IntegratorRegistry::with_builtins()
+        .build(&kind, &gpu, 24, 24)
+        .unwrap();
+    let mtk = unbox_mtk(integ);
+    // 3*24 - 24 - 3 = 45 (thermal dof).
+    assert_eq!(mtk.g_dof, 45);
+}

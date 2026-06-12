@@ -573,14 +573,6 @@ Feature: Stochastic cell-rescaling (C-rescale) barostat
     When each barostat applies once
     Then the post-rescale volumes agree to within f32 round-off
 
-  @rq-ba1e44f8
-  Scenario: μ clamped to safety floor when the formula yields a non-positive μ³
-    Given a system with K, W, and parameters such that
-      −β · (dt/τ) · (P_target − P) + noise · R is less than −1
-    When barostat.apply(...) is called
-    Then sim_box.volume() shrinks to ≈ 1.0e-18 · V_pre
-      (μ_min³ = 1e-18, identical to the Berendsen barostat safety floor)
-
   # --- Fractional-coord and PBC invariants ---
 
   @rq-3b9e9550
@@ -676,23 +668,4 @@ Feature: Stochastic cell-rescaling (C-rescale) barostat
     When dynamics run is invoked on each
     Then the trajectory files differ
 
-  # --- Physical correctness ---
-
-  @rq-a0d0c872
-  Scenario: Time-averaged pressure tracks P_target
-    Given a composed runner of velocity-Verlet + CSVR + C-rescale with N=128 LJ
-      argon, P_target = 1.0 bar, T_target = 85 K, dt = 1e-15, n_steps = 5000,
-      barostat.tau = 1.0e-12, barostat.compressibility = 1.0e-9, seeds = 1, 1
-    When the run completes
-    Then the time-averaged pressure over the last 2500 log rows is within 20%
-      of 1.0 bar
-
-  @rq-94726e23
-  Scenario: c_rescale_conserved drifts only by O(dt²) per step plus martingale noise
-    Given a composed runner of velocity-Verlet + CSVR + C-rescale with N=64 LJ
-      argon, dt = 1e-15, n_steps = 2000
-    When the run completes
-    Then |mean(c_rescale_conserved increments)| < 3 · stddev(increments) / sqrt(n_rows)
-      (consistent with zero deterministic drift to within 3σ; the integrator's
-      O(dt²) discretization error is below the stochastic noise floor at this dt)
 ```

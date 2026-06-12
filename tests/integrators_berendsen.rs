@@ -108,7 +108,7 @@ fn symmetric_state(n: usize, mass_si: f32, v_mag_si: f32) -> ParticleState {
 
 // --- Construction ---
 
-// rq-e8252f10
+// rq-e8252f10 rq-a336b496
 #[test]
 fn registry_builds_berendsen() {
     let gpu = init_device().unwrap();
@@ -381,7 +381,7 @@ fn berendsen_cumulative_injection_matches_kinetic_change() {
 
 // --- Log columns ---
 
-// rq-a0b746c6
+// rq-a0b746c6 rq-05b4c988
 #[test]
 fn berendsen_log_column_names_returns_berendsen_conserved() {
     let gpu = init_device().unwrap();
@@ -484,4 +484,19 @@ fn berendsen_temperature_relaxes_toward_target() {
         rel < 0.05,
         "after 5τ, K_final = {k_final:e} vs K_target = {k_target:e} (rel {rel})"
     );
+}
+
+// rq-6136714b
+#[test]
+fn berendsen_constructs_for_a_settled_water_system() {
+    use dynamics::integrator::ThermostatRegistry;
+    let gpu = init_device().unwrap();
+    let kind = berendsen_kind(300.0, 1.0e-13);
+    // 24 particles (8 waters) with 24 constraints; g_dof = 45.
+    let therm = ThermostatRegistry::with_builtins()
+        .build_optional(Some(&kind), &gpu, 24, 24)
+        .unwrap()
+        .unwrap();
+    let state = unbox_berendsen(therm);
+    assert_eq!(state.g_dof, 45);
 }

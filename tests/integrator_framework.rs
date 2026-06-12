@@ -1393,3 +1393,92 @@ fn force_eval_none_class_continues_to_dispatch_to_step() {
     assert_eq!(count_of("accumulate_forces"), 1);
     assert_eq!(count_of("lj_pair_force"), 1);
 }
+
+// --- resolve_aggregate_level + integrator-plan level preferences -------
+
+// rq-9f551521
+#[test]
+fn resolve_aggregate_level_upgrades_on_a_logging_step() {
+    use dynamics::forces::AggregateLevel;
+    use dynamics::integrator::resolve_aggregate_level;
+    let resolved = resolve_aggregate_level(Some(AggregateLevel::ForcesOnly), true);
+    assert!(matches!(resolved, AggregateLevel::ForcesAndScalars));
+}
+
+// rq-1ee2ef41
+#[test]
+fn resolve_aggregate_level_upgrades_on_a_trajectory_frame() {
+    use dynamics::forces::AggregateLevel;
+    use dynamics::integrator::resolve_aggregate_level;
+    // None sub-step level + runner_needs_scalars upgrades to ForcesAndScalars.
+    let resolved = resolve_aggregate_level(None, true);
+    assert!(matches!(resolved, AggregateLevel::ForcesAndScalars));
+}
+
+// rq-75a19aca
+#[test]
+fn resolve_aggregate_level_keeps_forces_and_scalars_when_already_requested() {
+    use dynamics::forces::AggregateLevel;
+    use dynamics::integrator::resolve_aggregate_level;
+    let resolved = resolve_aggregate_level(Some(AggregateLevel::ForcesAndScalars), false);
+    assert!(matches!(resolved, AggregateLevel::ForcesAndScalars));
+}
+
+// rq-5e5f48da
+#[test]
+fn resolve_aggregate_level_falls_through_to_forces_only_when_no_logging_or_traj() {
+    use dynamics::forces::AggregateLevel;
+    use dynamics::integrator::resolve_aggregate_level;
+    let resolved = resolve_aggregate_level(Some(AggregateLevel::ForcesOnly), false);
+    assert!(matches!(resolved, AggregateLevel::ForcesOnly));
+    // None sub-step + no runner request → defaults to ForcesOnly.
+    let resolved = resolve_aggregate_level(None, false);
+    assert!(matches!(resolved, AggregateLevel::ForcesOnly));
+}
+
+// rq-5a7e597e
+#[test]
+fn velocity_verlet_plan_requests_forces_only_by_default() {
+    use dynamics::forces::AggregateLevel;
+    use dynamics::integrator::SubStep;
+    let gpu = init_device().unwrap();
+    let kind = SlotConfig::from_params_str("velocity-verlet", "lossless = false\n");
+    let integ = IntegratorRegistry::with_builtins()
+        .build(&kind, &gpu, 4, 0)
+        .unwrap();
+    let plan = integ.plan(1.0e-15);
+    let force_eval_level = plan
+        .steps
+        .iter()
+        .find_map(|s| match s {
+            SubStep::ForceEval { level, .. } => Some(*level),
+            _ => None,
+        })
+        .expect("VV plan must contain a ForceEval substep");
+    assert_eq!(force_eval_level, Some(AggregateLevel::ForcesOnly));
+}
+
+// rq-3a9cb990
+#[test]
+fn mtk_npt_plan_requests_forces_and_scalars() {
+    use dynamics::forces::AggregateLevel;
+    use dynamics::integrator::SubStep;
+    let gpu = init_device().unwrap();
+    let kind = SlotConfig::from_params_str(
+        "mtk-npt",
+        "temperature = 9.51e-4\npressure = 3.4e-9\ntau_t = 4131.0\ntau_p = 41310.0\n",
+    );
+    let integ = IntegratorRegistry::with_builtins()
+        .build(&kind, &gpu, 4, 0)
+        .unwrap();
+    let plan = integ.plan(1.0);
+    let force_eval_level = plan
+        .steps
+        .iter()
+        .find_map(|s| match s {
+            SubStep::ForceEval { level, .. } => Some(*level),
+            _ => None,
+        })
+        .expect("MTK-NPT plan must contain a ForceEval substep");
+    assert_eq!(force_eval_level, Some(AggregateLevel::ForcesAndScalars));
+}

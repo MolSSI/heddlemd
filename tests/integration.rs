@@ -633,7 +633,7 @@ fn vv_kick_drift_wraps_in_negative_x() {
     assert_eq!(r.images_x[0], -1);
 }
 
-// rq-dae60da6
+// rq-dae60da6 rq-b8fde05b
 #[test]
 fn vv_kick_drift_handles_multi_period_crossings() {
     let gpu = init_device().expect("init_device");

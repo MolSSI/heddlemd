@@ -105,7 +105,7 @@ fn atomic_state(n: usize) -> ParticleState {
 
 // --- Construction ---
 
-// rq-dc3c616a
+// rq-dc3c616a rq-3396b95f
 #[test]
 fn registry_builds_andersen() {
     let gpu = init_device().unwrap();
@@ -154,7 +154,7 @@ fn andersen_resample_p_zero_is_identity() {
     assert_eq!(vz, snap_vz);
 }
 
-// rq-4254b707
+// rq-4254b707 rq-299112e9
 #[test]
 fn andersen_resample_p_one_replaces_every_particle() {
     let gpu = init_device().unwrap();
@@ -288,7 +288,7 @@ fn andersen_apply_post_launches_expected_kernels() {
     assert_eq!(count_for(KernelStage::VV_KICK), 0);
 }
 
-// rq-8fdfc981
+// rq-8fdfc981 rq-e60481e9
 #[test]
 fn andersen_apply_post_empty_state_is_noop() {
     let gpu = init_device().unwrap();
@@ -301,7 +301,7 @@ fn andersen_apply_post_empty_state_is_noop() {
         .unwrap();
 }
 
-// rq-15e44a1b
+// rq-15e44a1b rq-167867a2
 #[test]
 fn andersen_apply_pre_is_trait_default_noop() {
     let gpu = init_device().unwrap();
@@ -366,7 +366,7 @@ fn andersen_cumulative_injection_tracks_ke_change() {
 
 // --- Log columns ---
 
-// rq-8eb14902
+// rq-8eb14902 rq-c50c6f84
 #[test]
 fn andersen_log_column_names_returns_andersen_conserved() {
     let gpu = init_device().unwrap();

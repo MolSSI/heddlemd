@@ -120,7 +120,7 @@ fn big_box() -> SimulationBox {
 
 // --- Construction tests --------------------------------------------------
 
-// rq-3abb71cd rq-64700eb0
+// rq-64700eb0
 #[test]
 fn construct_shake_slot_for_one_water() {
     let gpu = init_device().unwrap();
@@ -137,7 +137,7 @@ fn construct_shake_slot_for_one_water() {
     assert_eq!(slot.particle_count, 3);
 }
 
-// rq-3abb71cd rq-7921e537
+// rq-7921e537
 #[test]
 fn shake_registry_with_builtins_returns_some_for_non_empty_list() {
     let gpu = init_device().unwrap();
@@ -151,7 +151,7 @@ fn shake_registry_with_builtins_returns_some_for_non_empty_list() {
     assert_eq!(slot.unwrap().group_count(), 1);
 }
 
-// rq-fd0add61 rq-aea6734a
+// rq-aea6734a
 #[test]
 fn shake_registry_with_builtins_returns_none_for_empty_list() {
     let gpu = init_device().unwrap();
@@ -292,7 +292,7 @@ fn empty_constraint_registry_reports_unsupported_kind() {
 
 // --- Empty-state tests ---------------------------------------------------
 
-// rq-5d972f15 rq-79c091e0
+// rq-79c091e0
 #[test]
 fn shake_hooks_on_zero_group_slot_are_noops() {
     let gpu = init_device().unwrap();
@@ -319,7 +319,6 @@ fn shake_hooks_on_zero_group_slot_are_noops() {
 
 // --- Snapshot kernel -----------------------------------------------------
 
-// rq-4ec4d1d6
 #[test]
 fn shake_snapshot_copies_pre_drift_positions() {
     let gpu = init_device().unwrap();
@@ -354,7 +353,7 @@ fn dist(ax: f32, ay: f32, az: f32, bx: f32, by: f32, bz: f32) -> f32 {
     ((ax - bx).powi(2) + (ay - by).powi(2) + (az - bz).powi(2)).sqrt()
 }
 
-// rq-a8b68f59 rq-0f5c9f99 rq-7c13040a
+// rq-0f5c9f99 rq-7c13040a
 #[test]
 fn shake_positions_restores_constraint_distances_after_bond_stretch() {
     let gpu = init_device().unwrap();
@@ -415,7 +414,6 @@ fn shake_positions_restores_constraint_distances_after_bond_stretch() {
     );
 }
 
-// rq-f26ae0cc
 #[test]
 fn shake_positions_preserves_centre_of_mass() {
     let gpu = init_device().unwrap();
@@ -481,7 +479,7 @@ fn shake_positions_preserves_centre_of_mass() {
     assert!((com_c.2 - com_u.2).abs() < tol, "COM z drifted: {} vs {}", com_c.2, com_u.2);
 }
 
-// rq-25acc667 rq-5d18fa01
+// rq-5d18fa01
 #[test]
 fn shake_positions_updates_half_step_velocities_consistently() {
     let gpu = init_device().unwrap();
@@ -527,7 +525,7 @@ fn shake_positions_updates_half_step_velocities_consistently() {
 
 // --- Velocity projection -------------------------------------------------
 
-// rq-66e657bf rq-17b28c63
+// rq-17b28c63
 #[test]
 fn rattle_velocities_zeroes_constraint_derivatives() {
     let gpu = init_device().unwrap();
@@ -583,7 +581,7 @@ fn rattle_velocities_zeroes_constraint_derivatives() {
     assert!(dot(1, 2).abs() < tol, "(v_H1 - v_H2) · r_HH = {}", dot(1, 2));
 }
 
-// rq-13af93b9 rq-7e084b5e
+// rq-7e084b5e
 #[test]
 fn rattle_velocities_preserves_centre_of_mass_velocity() {
     let gpu = init_device().unwrap();
@@ -1189,7 +1187,6 @@ fn constraint_iteration_order_matches_topology_declared_order() {
     assert_eq!(&local_j[..3], &[2u8, 2, 1]);
 }
 
-// rq-fc6ec19e
 #[test]
 fn shake_does_not_modify_atoms_outside_groups() {
     let gpu = init_device().unwrap();
@@ -1244,7 +1241,6 @@ fn shake_does_not_modify_atoms_outside_groups() {
     }
 }
 
-// rq-fd498605
 #[test]
 fn shake_does_not_modify_forces_masses_or_ids() {
     let gpu = init_device().unwrap();
@@ -1293,7 +1289,6 @@ fn shake_does_not_modify_forces_masses_or_ids() {
 
 // --- Multi-water independence --------------------------------------------
 
-// rq-d5790d66
 #[test]
 fn multiple_water_groups_evolve_independently() {
     let gpu = init_device().unwrap();
@@ -1552,7 +1547,7 @@ fn shake_positions_handles_water_straddling_periodic_boundary() {
 
 // --- Reproducibility -----------------------------------------------------
 
-// rq-99ee814d rq-aa5ac09f rq-c7fc10c5
+// rq-aa5ac09f rq-c7fc10c5
 #[test]
 fn two_independent_shake_runs_produce_byte_identical_outputs() {
     let gpu = init_device().unwrap();
@@ -1599,7 +1594,6 @@ fn two_independent_shake_runs_produce_byte_identical_outputs() {
 
 // --- Module loading + builder construction -------------------------------
 
-// rq-bdb4af60
 #[test]
 fn init_device_exposes_shake_kernels() {
     let gpu = init_device().unwrap();
@@ -1610,7 +1604,6 @@ fn init_device_exposes_shake_kernels() {
     let _ = &gpu.kernels.shake.rattle_velocities;
 }
 
-// rq-278cb574
 #[test]
 fn shake_builder_kind_name_is_shake() {
     let b = ShakeBuilder;

@@ -344,7 +344,7 @@ fn end_to_end_one_frame_run_succeeds() {
     assert_eq!(lines[0], "r,g_r,count");
 }
 
-// rq-270637dd
+// rq-270637dd rq-23678707
 #[test]
 fn refuses_to_overwrite_existing_output() {
     let dir = tmp_path("no_overwrite");
@@ -517,7 +517,7 @@ fn dynamics_lint_reports_missing_trajectory() {
     assert!(matches!(lint_stage(&report, "trajectory"), LintStatus::Fail { .. }));
 }
 
-// rq-c67ad79e rq-b306b357
+// rq-c67ad79e rq-b306b357 rq-e2cbe4fd
 #[test]
 fn dynamics_lint_reports_geometric_failure_under_analyses_stage() {
     let dir = tmp_path("lint_geom_fail");
@@ -584,4 +584,301 @@ fn cli_analyze_returns_nonzero_on_failure() {
         path.to_string_lossy().to_string(),
     ]);
     assert_eq!(exit, 1);
+}
+
+// --- Phase / trajectory resolution ---------------------------------------
+
+fn two_phase_sim_toml() -> String {
+    r#"schema_version = 1
+units = "atomic"
+init = "sim.in.xyz"
+
+[simulation]
+seed = 1
+temperature = 0.0
+
+[[phase]]
+name = "equil"
+n_steps = 0
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[phase.output]
+trajectory_every = 1
+log_every = 0
+
+[[phase]]
+name = "prod"
+n_steps = 0
+dt = 1.0e-15
+
+[phase.integrator]
+kind = "velocity-verlet"
+lossless = false
+
+[phase.output]
+trajectory_every = 1
+log_every = 0
+
+[[particle_types]]
+name = "Ar"
+mass = 6.6335e-26
+
+[[pair_interactions]]
+between = ["Ar", "Ar"]
+potential = "lennard-jones"
+sigma = 3.40e-10
+epsilon = 1.65e-21
+cutoff = 1.0e-9
+
+[neighbor_list]
+mode = "all-pairs"
+"#
+    .to_string()
+}
+
+// rq-ee7c4af4
+#[test]
+fn explicit_simulation_and_trajectory_override_implicit_defaults() {
+    let dir = tmp_path("explicit_sim_and_traj");
+    std::fs::write(dir.join("other.in.toml"), minimal_sim_toml()).unwrap();
+    write_two_atom_init(&dir, 1.0e-9);
+    // Place the trajectory at a non-default name.
+    let body = format!(
+        "2\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3 Step=0 Time=0.0\n\
+         Ar -5.0e-10 0 0\nAr 5.0e-10 0 0\n"
+    );
+    std::fs::write(dir.join("other.out.xyz"), body).unwrap();
+    let analysis_body = format!(
+        r#"schema_version = 1
+simulation = "other.in.toml"
+trajectory = "other.out.xyz"
+
+[[analyses]]
+name = "ar-ar"
+kind = "rdf"
+between = ["Ar", "Ar"]
+r_max = 1.0e-9
+n_bins = 8
+"#
+    );
+    let path = dir.join("sim.in.analysis");
+    std::fs::write(&path, analysis_body).unwrap();
+    let cfg = load_analysis_config(&path).unwrap();
+    assert_eq!(cfg.simulation, dir.join("other.in.toml"));
+    assert_eq!(cfg.trajectory, dir.join("other.out.xyz"));
+}
+
+// rq-963604a4
+#[test]
+fn implicit_pairing_defaults_to_the_last_phase() {
+    let dir = tmp_path("implicit_last_phase");
+    std::fs::write(dir.join("sim.in.toml"), two_phase_sim_toml()).unwrap();
+    write_two_atom_init(&dir, 1.0e-9);
+    // Provide a trajectory at the *last* phase's default path (sim.out.prod.xyz).
+    let frame = "2\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3 Step=0 Time=0.0\n\
+                 Ar -5.0e-10 0 0\nAr 5.0e-10 0 0\n";
+    std::fs::write(dir.join("sim.out.prod.xyz"), frame).unwrap();
+    let analysis_body = rdf_analysis_body("ar-ar", 8.0e-10, 8);
+    let path = dir.join("sim.in.analysis");
+    std::fs::write(&path, analysis_body).unwrap();
+    let summary = run_analyses(&path).unwrap();
+    assert_eq!(summary.frames_consumed, 1);
+    assert_eq!(summary.analyses_written, 1);
+    // The output csv path is derived from the analysis-config root,
+    // independent of the phase name; the substantive check is that the
+    // run completed against the prod-phase trajectory.
+    assert!(dir.join("sim.out.ar-ar.csv").exists());
+}
+
+// rq-38117e33
+#[test]
+fn explicit_phase_selects_the_matching_phase_trajectory() {
+    let dir = tmp_path("explicit_phase_select");
+    std::fs::write(dir.join("sim.in.toml"), two_phase_sim_toml()).unwrap();
+    write_two_atom_init(&dir, 1.0e-9);
+    // Provide a trajectory for the equil phase only; prod is absent.
+    let frame = "2\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3 Step=0 Time=0.0\n\
+                 Ar -5.0e-10 0 0\nAr 5.0e-10 0 0\n";
+    std::fs::write(dir.join("sim.out.equil.xyz"), frame).unwrap();
+    let analysis_body = format!(
+        r#"schema_version = 1
+phase = "equil"
+
+[[analyses]]
+name = "ar-ar"
+kind = "rdf"
+between = ["Ar", "Ar"]
+r_max = 1.0e-9
+n_bins = 8
+"#
+    );
+    let path = dir.join("sim.in.analysis");
+    std::fs::write(&path, analysis_body).unwrap();
+    let cfg = load_analysis_config(&path).unwrap();
+    assert_eq!(cfg.phase, "equil");
+    // Running through end-to-end picks up the equil-phase trajectory.
+    let summary = run_analyses(&path).unwrap();
+    assert_eq!(summary.frames_consumed, 1);
+}
+
+// rq-b6d22242
+#[test]
+fn unknown_phase_name_is_rejected_at_run_time() {
+    let dir = tmp_path("unknown_phase");
+    std::fs::write(dir.join("sim.in.toml"), two_phase_sim_toml()).unwrap();
+    write_two_atom_init(&dir, 1.0e-9);
+    let analysis_body = format!(
+        r#"schema_version = 1
+phase = "warmup"
+
+[[analyses]]
+name = "ar-ar"
+kind = "rdf"
+between = ["Ar", "Ar"]
+r_max = 1.0e-9
+n_bins = 8
+"#
+    );
+    let path = dir.join("sim.in.analysis");
+    std::fs::write(&path, analysis_body).unwrap();
+    match run_analyses(&path).unwrap_err() {
+        AnalyzeError::UnknownPhase { phase, available } => {
+            assert_eq!(phase, "warmup");
+            assert_eq!(available, vec!["equil".to_string(), "prod".to_string()]);
+        }
+        other => panic!("expected UnknownPhase, got {other:?}"),
+    }
+}
+
+// rq-2674f18a
+#[test]
+fn explicit_trajectory_overrides_the_phase_derived_default() {
+    let dir = tmp_path("traj_override");
+    std::fs::write(dir.join("sim.in.toml"), two_phase_sim_toml()).unwrap();
+    write_two_atom_init(&dir, 1.0e-9);
+    // Provide a trajectory at a custom path, not the phase default.
+    let frame = "2\nLattice=\"4.0e-9 0 0 0 4.0e-9 0 0 0 4.0e-9\" Properties=species:S:1:pos:R:3 Step=0 Time=0.0\n\
+                 Ar -5.0e-10 0 0\nAr 5.0e-10 0 0\n";
+    std::fs::write(dir.join("alt.xyz"), frame).unwrap();
+    let analysis_body = format!(
+        r#"schema_version = 1
+trajectory = "alt.xyz"
+
+[[analyses]]
+name = "ar-ar"
+kind = "rdf"
+between = ["Ar", "Ar"]
+r_max = 1.0e-9
+n_bins = 8
+"#
+    );
+    let path = dir.join("sim.in.analysis");
+    std::fs::write(&path, analysis_body).unwrap();
+    let cfg = load_analysis_config(&path).unwrap();
+    assert_eq!(cfg.trajectory, dir.join("alt.xyz"));
+    // The explicit trajectory path is honoured at run time.
+    let summary = run_analyses(&path).unwrap();
+    assert_eq!(summary.frames_consumed, 1);
+}
+
+// rq-bedbd6d9
+#[test]
+fn reject_an_output_path_equal_to_the_simulations_log_file() {
+    let dir = tmp_path("output_equals_log");
+    std::fs::write(dir.join("sim.in.toml"), minimal_sim_toml()).unwrap();
+    write_two_atom_init(&dir, 1.0e-9);
+    write_one_frame_trajectory(&dir, 1.0e-9);
+    // minimal_sim_toml's phase "run" derives its log_path to
+    // {root}.out.run.log → sim.out.run.log. Set the analysis output to
+    // that exact path to trigger the collision check.
+    let analysis_body = r#"schema_version = 1
+
+[[analyses]]
+name = "ar-ar"
+kind = "rdf"
+output_path = "sim.out.run.log"
+between = ["Ar", "Ar"]
+r_max = 1.0e-9
+n_bins = 8
+"#;
+    let path = dir.join("sim.in.analysis");
+    std::fs::write(&path, analysis_body).unwrap();
+    match run_analyses(&path).unwrap_err() {
+        AnalyzeError::AnalyzePathCollision { kind_a, kind_b, .. } => {
+            let a = format!("{kind_a:?}");
+            let b = format!("{kind_b:?}");
+            assert!(
+                a.contains("Log") || b.contains("Log") || a.contains("AnalysisOutput") || b.contains("AnalysisOutput"),
+                "expected collision involving the phase log; got {kind_a:?} vs {kind_b:?}"
+            );
+        }
+        other => panic!("expected AnalyzePathCollision, got {other:?}"),
+    }
+}
+
+// rq-ca13c67e
+#[test]
+fn a_custom_analysis_builder_composes_with_the_built_ins() {
+    use dynamics::Registries;
+    use dynamics::analysis::{
+        Analysis, AnalysisBuilder, AnalysisRuntimeError, AnalyzeError,
+    };
+    use dynamics::io::Config;
+    use dynamics::pbc::SimulationBox;
+    use dynamics::io::trajectory::{TrajectoryFrame, TrajectoryFrameHeader};
+    use std::path::Path;
+
+    #[derive(Debug)]
+    struct MyAnalysisBuilder;
+    impl AnalysisBuilder for MyAnalysisBuilder {
+        fn kind_name(&self) -> &'static str {
+            "my-analysis"
+        }
+        fn validate_params(&self, _params: &toml::Value) -> Result<(), AnalyzeError> {
+            Ok(())
+        }
+        fn build(
+            &self,
+            _params: &toml::Value,
+            _header: &TrajectoryFrameHeader,
+            _sim_config: &Config,
+        ) -> Result<Box<dyn Analysis>, AnalysisRuntimeError> {
+            #[derive(Debug)]
+            struct MyAnalysis;
+            impl Analysis for MyAnalysis {
+                fn consume_frame(
+                    &mut self,
+                    _frame: &TrajectoryFrame,
+                    _sim_box: &SimulationBox,
+                ) -> Result<(), AnalysisRuntimeError> {
+                    Ok(())
+                }
+                fn finalize_and_write(
+                    &mut self,
+                    _output_path: &Path,
+                    _sim_config: &Config,
+                ) -> Result<(), AnalysisRuntimeError> {
+                    Ok(())
+                }
+            }
+            Ok(Box::new(MyAnalysis))
+        }
+    }
+
+    let mut registries = Registries::with_builtins();
+    assert!(registries.analyses.lookup("rdf").is_some());
+    assert!(registries.analyses.lookup("my-analysis").is_none());
+    registries.register_analysis(Box::new(MyAnalysisBuilder));
+    assert!(
+        registries.analyses.lookup("my-analysis").is_some(),
+        "custom builder must be registered alongside the built-ins"
+    );
+    assert!(
+        registries.analyses.lookup("rdf").is_some(),
+        "built-in rdf builder must remain after registering a custom one"
+    );
 }

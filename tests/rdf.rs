@@ -458,3 +458,85 @@ fn two_analyze_runs_produce_byte_identical_csv() {
     let b = std::fs::read(dir.join("sim.out.x.csv")).unwrap();
     assert_eq!(a, b);
 }
+
+// --- `between` selection ---------------------------------------------------
+
+// rq-40dd09ae
+#[test]
+fn reject_between_referencing_a_type_with_zero_particles() {
+    // Config declares both Ar and Kr (so `between = ["Kr", "Kr"]` passes
+    // the *undeclared-type* check), but the trajectory contains only Ar
+    // atoms. The RDF builder must reject the entry at build time because
+    // N_A = 0 for the Kr selector.
+    let dir = tmp_path("zero_particle_type");
+    std::fs::write(
+        dir.join("sim.in.toml"),
+        sim_toml_with_types(&["Ar", "Kr"], 4.0e-9),
+    )
+    .unwrap();
+    write_init(&dir, &["Ar", "Ar"]);
+    write_trajectory(
+        &dir,
+        &[vec![("Ar", -2.5e-10, 0.0, 0.0), ("Ar", 2.5e-10, 0.0, 0.0)]],
+    );
+    let path = write_analysis(&dir, &rdf_body("x", ["Kr", "Kr"], 1.0e-9, 8));
+    match run_analyses(&path).unwrap_err() {
+        AnalyzeError::Analysis { error, .. } => {
+            let s = format!("{error}");
+            assert!(
+                s.contains("between") || s.contains("Kr") || s.contains("N_A"),
+                "expected an error mentioning the empty type selector; got {s}"
+            );
+        }
+        other => panic!("expected Analysis error, got {other:?}"),
+    }
+}
+
+// rq-0b5e6b6c
+#[test]
+fn between_order_does_not_matter() {
+    // Two RDF entries, one with between = ["Ar","Kr"] and the other with
+    // between = ["Kr","Ar"]. Their output CSVs (modulo the
+    // `name`-derived filename) must be byte-identical: the cross-type
+    // pair count is symmetric in the type selectors.
+    let dir = tmp_path("between_order");
+    std::fs::write(
+        dir.join("sim.in.toml"),
+        sim_toml_with_types(&["Ar", "Kr"], 4.0e-9),
+    )
+    .unwrap();
+    write_init(&dir, &["Ar", "Kr", "Ar", "Kr"]);
+    write_trajectory(
+        &dir,
+        &[vec![
+            ("Ar", -1.5e-10, 0.0, 0.0),
+            ("Kr", -5.0e-11, 0.0, 0.0),
+            ("Ar", 5.0e-11, 0.0, 0.0),
+            ("Kr", 1.5e-10, 0.0, 0.0),
+        ]],
+    );
+    let body = r#"schema_version = 1
+
+[[analyses]]
+name = "forward"
+kind = "rdf"
+between = ["Ar", "Kr"]
+r_max = 1.0e-9
+n_bins = 10
+
+[[analyses]]
+name = "reverse"
+kind = "rdf"
+between = ["Kr", "Ar"]
+r_max = 1.0e-9
+n_bins = 10
+"#;
+    let path = write_analysis(&dir, body);
+    run_analyses(&path).unwrap();
+    let forward = std::fs::read(dir.join("sim.out.forward.csv")).unwrap();
+    let reverse = std::fs::read(dir.join("sim.out.reverse.csv")).unwrap();
+    assert_eq!(
+        forward, reverse,
+        "between = [A, B] and [B, A] must produce byte-identical CSV output"
+    );
+}

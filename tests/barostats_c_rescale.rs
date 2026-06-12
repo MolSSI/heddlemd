@@ -471,7 +471,7 @@ fn generation_advances_after_apply() {
 
 // --- Log columns ---
 
-// rq-e5cb5505
+// rq-e5cb5505 rq-df305128
 #[test]
 fn log_column_names_returns_pressure_volume_and_conserved() {
     let gpu = init_device().unwrap();
@@ -508,7 +508,7 @@ fn log_column_values_combines_pressure_volume_and_cumulative_injection() {
 
 // --- Composition with the orthogonal framework ---
 
-// rq-0f3f63c8
+// rq-0f3f63c8 rq-2d109b3a
 #[test]
 fn composes_with_velocity_verlet_and_csvr_thermostat() {
     let gpu = init_device().unwrap();

@@ -362,7 +362,7 @@ fn nhc_apply_post_empty_state_is_noop() {
 
 // --- Log columns ---
 
-// rq-17d3ddfe
+// rq-17d3ddfe rq-a16c37bd
 #[test]
 fn nhc_log_column_names_returns_nhc_conserved() {
     let gpu = init_device().unwrap();
@@ -372,7 +372,7 @@ fn nhc_log_column_names_returns_nhc_conserved() {
     assert_eq!(names, vec!["nhc_conserved"]);
 }
 
-// rq-7909b92c
+// rq-7909b92c rq-ded81a4a
 #[test]
 fn vv_and_langevin_log_column_names_are_empty() {
     use dynamics::integrator::IntegratorRegistry;
@@ -521,4 +521,58 @@ fn nhc_preserves_com_momentum_to_round_off() {
         p_com.abs() < tol,
         "p_com = {p_com} (tol {tol}), velocities = {vx:?}"
     );
+}
+
+// rq-572a0431
+#[test]
+fn init_device_exposes_nhc_kernels() {
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
+    assert!(device.has_func("nose_hoover", "rescale_velocities"));
+    assert!(device.has_func("nose_hoover", "kinetic_energy_reduce"));
+    let _ = gpu.kernels.nose_hoover.rescale_velocities.clone();
+    let _ = gpu.kernels.nose_hoover.kinetic_energy_reduce.clone();
+}
+
+// rq-5c799ac6
+#[test]
+fn rescale_velocities_does_not_modify_positions_masses_or_forces() {
+    let gpu = init_device().unwrap();
+    let n = 4usize;
+    let state = atomic_state(n);
+    let snap_px = state.positions_x.clone();
+    let snap_py = state.positions_y.clone();
+    let snap_pz = state.positions_z.clone();
+    let snap_masses = state.masses.clone();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    rescale_velocities(&mut buffers, 0.5).unwrap();
+    let px = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let py = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
+    let pz = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+    let masses = gpu.device.dtoh_sync_copy(&buffers.masses).unwrap();
+    let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    let fy = gpu.device.dtoh_sync_copy(&buffers.forces_y).unwrap();
+    let fz = gpu.device.dtoh_sync_copy(&buffers.forces_z).unwrap();
+    assert_eq!(px, snap_px);
+    assert_eq!(py, snap_py);
+    assert_eq!(pz, snap_pz);
+    assert_eq!(masses, snap_masses);
+    for v in fx.iter().chain(fy.iter()).chain(fz.iter()) {
+        assert_eq!(*v, 0.0_f32, "forces should remain at their pre-rescale value (zero here)");
+    }
+}
+
+// rq-1aa67999
+#[test]
+fn nhc_constructs_for_a_settled_water_system() {
+    use dynamics::integrator::ThermostatRegistry;
+    let gpu = init_device().unwrap();
+    let kind = nhc_kind(300.0, 1.0e-13, 3, 3, 1);
+    // 24 particles (8 waters) with 24 constraints; g_dof = 45.
+    let therm = ThermostatRegistry::with_builtins()
+        .build_optional(Some(&kind), &gpu, 24, 24)
+        .unwrap()
+        .unwrap();
+    let state = unbox_nhc(therm);
+    assert_eq!(state.g_dof, 45);
 }

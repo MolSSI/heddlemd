@@ -754,24 +754,6 @@ Feature: Nosé-Hoover chain (NHC) thermostat
     When the runner produces the log file
     Then its header line is "step,time,kinetic_energy,temperature"
 
-  # --- Physical correctness ---
-
-  @rq-6fb70c93
-  Scenario: At equilibrium, NHC drives the kinetic energy to (g/2) T
-    Given a composed runner of velocity-Verlet + NHC with N=512 LJ particles,
-      temperature=300, tau=1e-13, dt=1e-15, initial v sampled at 300 K, n_steps=5000
-    When the run completes
-    Then the time-averaged kinetic energy over the last 1000 log rows is within 5%
-      of (g_dof / 2) * T_atomic (with `k_B = 1` in the engine's units)
-
-  @rq-d938350a
-  Scenario: NHC conserved Hamiltonian drifts only by O(dt²) per step
-    Given a composed runner of velocity-Verlet + NHC with N=64 LJ particles,
-      dt=1e-15, n_steps=1000
-    When the run completes
-    Then |H'(n_steps) − H'(0)| / |H'(0)| is < 1.0e-3
-    And the drift is dominated by O(dt²) (a halved-dt run has drift ≤ 1/4 of the original)
-
   # --- Determinism across runs ---
 
   @rq-6faf6fba

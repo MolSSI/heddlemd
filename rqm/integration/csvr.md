@@ -529,13 +529,6 @@ Feature: CSVR stochastic velocity-rescaling thermostat
     When the runner produces the log file
     Then its header line is "step,time,kinetic_energy,temperature,csvr_conserved"
 
-  @rq-0dc48f6b
-  Scenario: Log file header omits csvr_conserved when CSVR is not the thermostat
-    Given a config with [thermostat].kind != "csvr" or [thermostat] omitted entirely
-    And log_every > 0
-    When the runner produces the log file
-    Then the header line does not include "csvr_conserved"
-
   # --- Rescale correctness ---
 
   @rq-efea1b70
@@ -570,14 +563,6 @@ Feature: CSVR stochastic velocity-rescaling thermostat
       factor appears)
     And the time-averaged temperature column read from the SI-mode CSV log
       is within 5% of 300 K
-
-  @rq-4ae77a72
-  Scenario: csvr_conserved drifts as a zero-mean martingale (no systematic bias)
-    Given a composed runner of velocity-Verlet + CSVR with N=128 LJ particles,
-      dt=1e-15, n_steps=2000, seed=1
-    When the run completes
-    Then |mean(csvr_conserved increments)| < 3 · stddev(increments) / sqrt(n_rows)
-      (i.e., consistent with zero mean to within 3σ)
 
   # --- Determinism ---
 

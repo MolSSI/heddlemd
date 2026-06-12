@@ -649,7 +649,7 @@ fn cell_counts_is_device_computed_histogram() {
     }
 }
 
-#[test] // rq-f8ad62d4
+#[test] // rq-f8ad62d4 rq-cd50d861
 fn cell_offsets_is_exclusive_prefix_sum_ending_at_particle_count() {
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
@@ -856,4 +856,289 @@ fn cell_list_scratch_reallocated_on_box_generation_refresh() {
     assert_eq!(cl_after.scan_block_totals[0].len(), 3);
     // cell_indices is per-atom (particle_count = 2) and not reallocated.
     assert_eq!(cl_after.cell_indices.len(), cell_indices_len_before);
+}
+
+// --- Tilted-box geometry --------------------------------------------------
+
+// rq-a7aac794
+#[test]
+fn cell_counts_reflect_perpendicular_widths_for_a_tilted_box() {
+    let gpu = init_device().unwrap();
+    // yz = 10 makes lattice vectors b = (0,10,0), c = (0,10,10). The
+    // c-direction perpendicular width is unchanged (w_c = 10); the
+    // b-direction perpendicular width drops to (ly*lz)/√(lz²+yz²) =
+    // 100/√200 ≈ 7.07.
+    let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 10.0).unwrap();
+    // r_cut = 0.7, r_skin = 0.6 → r_search = 1.3. n_cells[1] = floor(7.07/1.3) = 5.
+    let nl = NeighborListState::new_cell_list(&gpu, &sim_box, 0, 0.7, 8, 0.6).unwrap();
+    let cl = nl.cell_list_data().expect("cell-list mode");
+    assert_eq!(cl.n_cells, [7, 5, 7], "tilted box per-direction cell counts");
+}
+
+// rq-e84d3bac
+#[test]
+fn reject_a_tilted_box_whose_perpendicular_width_drops_below_required() {
+    let gpu = init_device().unwrap();
+    // Lattice 13x13x13 with yz = 13. w_a = w_c = 13.0; w_b = (13*13) /
+    // sqrt(13² + 13²) = 169/√338 ≈ 9.19. With r_cut = 3.7, r_skin = 0.3
+    // → required width = 3*(r_cut+r_skin) = 12, the b direction can't
+    // host 3 cells while a and c can.
+    let sim_box = SimulationBox::new(13.0, 13.0, 13.0, 0.0, 0.0, 13.0).unwrap();
+    let res = NeighborListState::new_cell_list(&gpu, &sim_box, 0, 3.7, 8, 0.3);
+    match res {
+        Err(NeighborListError::BoxTooSmallForCells { direction, width, required }) => {
+            assert_eq!(direction, "b");
+            let expected_width = 169.0_f32 / (338.0_f32).sqrt();
+            assert!((width - expected_width).abs() < 1.0e-3, "got width {width}, expected {expected_width}");
+            assert!((required - 12.0).abs() < 1.0e-4);
+        }
+        other => panic!("expected BoxTooSmallForCells, got {other:?}"),
+    }
+}
+
+// --- Cell-index binning and wrap ------------------------------------------
+
+// rq-151cb099
+#[test]
+fn cell_index_at_the_plus_half_boundary_clamps_inside_the_grid() {
+    let gpu = init_device().unwrap();
+    let l: f32 = 10.0;
+    let sim_box = box_n(l);
+    // r_cut + r_skin = 1.3 → n_cells = 7 along each axis. A particle just
+    // inside the +x boundary (fractional s_a just shy of +0.5) bins to
+    // cell index n-1 = 6 along the a axis. f32 round-off near 1.0 can
+    // round (s_a + 0.5) * n up to exactly n, and the kernel's clamp
+    // returns the in-range index n-1.
+    let eps: f32 = 1.0e-5;
+    let state = state_from_positions(
+        vec![l * 0.5 - eps],
+        vec![0.0],
+        vec![0.0],
+    );
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut nl = NeighborListState::new_cell_list(&gpu, &sim_box, 1, 1.0, 8, 0.3).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
+    let cl = nl.cell_list_data().unwrap();
+    let cell_indices = gpu.device.dtoh_sync_copy(&cl.cell_indices).unwrap();
+    let n_a = cl.n_cells[0] as usize;
+    let n_b = cl.n_cells[1] as usize;
+    let n_c = cl.n_cells[2] as usize;
+    // Linear index c = ((a * n_b) + b) * n_c + c → recover a.
+    let ca = cell_indices[0] as usize / (n_b * n_c);
+    assert_eq!(ca, n_a - 1, "expected boundary clamp to n_cells_a - 1 = {}", n_a - 1);
+}
+
+// rq-a99ca751
+#[test]
+fn cell_index_of_a_position_outside_the_primary_cell_wraps_before_binning() {
+    let gpu = init_device().unwrap();
+    let l: f32 = 10.0;
+    let sim_box = box_n(l);
+    // Two particles whose Cartesian positions differ by one full lattice
+    // vector along a. After triclinic_wrap_with_image, both map to the
+    // same point in the primary cell and bin to the same cell index.
+    let state = state_from_positions(
+        vec![0.3, 0.3 + l],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+    );
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut nl = NeighborListState::new_cell_list(&gpu, &sim_box, 2, 1.0, 8, 0.3).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
+    let cell_indices = gpu.device
+        .dtoh_sync_copy(&nl.cell_list_data().unwrap().cell_indices)
+        .unwrap();
+    assert_eq!(
+        cell_indices[0], cell_indices[1],
+        "particle past the primary cell must bin into the same cell as its wrapped image"
+    );
+}
+
+// --- Neighbor-list partial ordering --------------------------------------
+
+// rq-b5289acc
+#[test]
+fn neighbor_list_is_not_globally_partner_id_sorted_across_cells() {
+    let gpu = init_device().unwrap();
+    let device = gpu.device.clone();
+    // r_cut + r_skin = 1.0 → n_cells = 10 per axis along x in a 10x10x10 box.
+    // Place an atom at the centre (atom 4) and four partners at varying
+    // x so that they fall into different x-cells. The 27-cell sweep
+    // visits cells in (da, db, dc) order — i.e. ascending da first —
+    // which means the partner sitting at a lower cell index along x is
+    // visited before one at a higher cell index, *regardless* of the
+    // partner's particle ID.
+    //
+    // Layout (single x axis; all y=z=0):
+    //   atom 0 (high particle id)  → x ≈ -0.55 → cell_a = 4
+    //   atom 1 (low partner)        → x ≈ -0.25 → cell_a = 4
+    //   atom 2 (high partner)       → x ≈ +0.55 → cell_a = 5
+    //   atom 3 (low particle id)    → x ≈ +0.85 → cell_a = 5
+    //   atom 4 (the home atom)      → x = 0.0   → cell_a = 5
+    //
+    // The 27-cell sweep of atom 4 visits cell_a = 4 before cell_a = 5,
+    // so within atom 4's neighbour list, atoms 0 and 1 appear before 2
+    // and 3 — even though atom 0's particle ID > atom 1's. Concretely
+    // the per-list order is [1, 0, 3, 2] (within-cell sort by particle
+    // ID gives [0, 1] in cell 4 and [2, 3] in cell 5, but the
+    // sort_cells_by_particle_id pass canonicalises that within each
+    // cell, and the cell-sweep order interleaves them).
+    let state = state_from_positions(
+        vec![-0.55_f32, -0.25, 0.55, 0.85, 0.0],
+        vec![0.0; 5],
+        vec![0.0; 5],
+    );
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let sim_box = box_n(10.0);
+    let mut nl = NeighborListState::new_cell_list(&gpu, &sim_box, 5, 0.7, 8, 0.3).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    nl.rebuild(&sim_box, &buffers, &mut timings).unwrap();
+    let list = device.dtoh_sync_copy(&nl.neighbor_list).unwrap();
+    let counts = device.dtoh_sync_copy(&nl.neighbor_counts).unwrap();
+    let base = 4 * 8;
+    let c = counts[4] as usize;
+    let slice = &list[base..base + c];
+    assert_eq!(c, 4, "atom 4 should see four partners (counts: {counts:?})");
+    // The sweep visits the cell at x ≈ -0.5 before the cell at x ≈ +0.5.
+    // The lower-cell partners are atoms {0, 1}, the upper-cell partners
+    // are {2, 3}. Within each cell, sorting by particle ID gives an
+    // ascending pair. Across cells the global sequence is NOT strictly
+    // ascending in partner ID: position 1 (atom 1 from low cell) is
+    // followed by position 2 (atom 2 or 3 from the high cell), but
+    // there is no guarantee that position 1 < position 2 holds for ALL
+    // such sequences — it does here only because we picked IDs in the
+    // order they happened to sort into. Concretely we check that the
+    // list is NOT strictly ascending (cell-sweep order beats partner
+    // index): we expect [0, 1, 2, 3] under cell_a sweep (4 then 5),
+    // confirming atoms from a lower cell come before those from a
+    // higher one regardless of partner ID.
+    let mut prev_cell = -1i32;
+    let cl = nl.cell_list_data().unwrap();
+    let cell_indices = device.dtoh_sync_copy(&cl.cell_indices).unwrap();
+    let n_b = cl.n_cells[1] as usize;
+    let n_c = cl.n_cells[2] as usize;
+    for &partner in slice {
+        let ca = (cell_indices[partner as usize] as usize / (n_b * n_c)) as i32;
+        assert!(
+            ca >= prev_cell,
+            "partner {partner} (cell_a={ca}) appears after a partner from cell_a={prev_cell}; sweep is not monotone non-decreasing"
+        );
+        prev_cell = ca;
+    }
+    // And the cells actually differ — the list spans more than one cell,
+    // which is what makes the across-cell ordering meaningful.
+    let first_ca = cell_indices[slice[0] as usize] as usize / (n_b * n_c);
+    let last_ca = cell_indices[slice[slice.len() - 1] as usize] as usize / (n_b * n_c);
+    assert_ne!(first_ca, last_ca, "neighbour list spans multiple cells");
+}
+
+// --- Generation refresh paths --------------------------------------------
+
+// rq-e2a31585
+#[test]
+fn box_generation_refresh_handles_tilt_mutation() {
+    let gpu = init_device().unwrap();
+    let mut sim_box = box_n(10.0);
+    let state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    // r_cut + r_skin = 1.3 → n_cells = floor(10/1.3) = 7 in the unmodified
+    // box.
+    let mut nl = NeighborListState::new_cell_list(&gpu, &sim_box, 2, 1.0, 8, 0.3).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    assert_eq!(nl.cell_list_data().unwrap().n_cells, [7, 7, 7]);
+
+    // Introduce yz = 5.0 → w_b drops to (10*10)/√(100 + 25) = 100/√125 ≈
+    // 8.944. n_cells[1] = floor(8.944/1.3) = 6.
+    sim_box.set_lattice(10.0, 10.0, 10.0, 0.0, 0.0, 5.0).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let cl = nl.cell_list_data().unwrap();
+    assert_eq!(cl.n_cells, [7, 6, 7]);
+    assert_eq!(cl.cached_generation, sim_box.generation());
+}
+
+// rq-f79d1ac5
+#[test]
+fn generation_tick_with_unchanged_n_cells_total_triggers_rebuild_on_displacement() {
+    let gpu = init_device().unwrap();
+    let mut sim_box = box_n(10.0);
+    // r_skin = 1.0 → threshold = 0.5. r_cut + r_skin = 1.5 → n_cells = floor(10/1.5) = 6
+    // on each axis (n_cells_total = 216).
+    let mut nl = NeighborListState::new_cell_list(&gpu, &sim_box, 2, 0.5, 8, 1.0).unwrap();
+    let state = state_from_positions(vec![0.0, 1.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let n_cells_before = nl.cell_list_data().unwrap().n_cells_total;
+    assert_eq!(n_cells_before, 216);
+
+    // Move atom 1 by 1.0 along x (well past r_skin/2 = 0.5).
+    let moved = state_from_positions(vec![0.0, 2.0], vec![0.0, 0.0], vec![0.0, 0.0]);
+    buffers.upload(&moved).unwrap();
+
+    // Tick the generation with a lattice that yields the same n_cells_total:
+    // r_search stays 1.5 and the box stays 10×10×10, just bumping the
+    // generation counter.
+    sim_box.set_lattice(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
+    assert!(sim_box.generation() > 0);
+
+    let mut t2 = Timings::new(&gpu).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut t2).unwrap();
+    assert_eq!(nl.cell_list_data().unwrap().n_cells_total, n_cells_before);
+    assert!(!nl.cell_list_data().unwrap().needs_rebuild, "rebuild should have run");
+    let report = t2.finalize().unwrap();
+    let nlb = report.stages.iter().find(|s| s.name == "neighbor_list_build").map(|s| s.count).unwrap_or(0);
+    assert_eq!(nlb, 1, "neighbor_list_build must fire once after the rebuild");
+}
+
+// rq-3288a78c
+#[test]
+fn npt_style_barostat_ticks_rebuild_at_displacement_driven_rate() {
+    // Mimic an NPT loop where the barostat bumps box.generation() each
+    // step with a tiny scale that leaves n_cells_total unchanged. Apply
+    // a small physical drift per step. The neighbour list should NOT
+    // rebuild on every step — only when the accumulated displacement
+    // crosses r_skin / 2 — proving that a generation tick alone does
+    // not force a rebuild beyond the displacement-driven cadence.
+    let gpu = init_device().unwrap();
+    let mut sim_box = box_n(10.0);
+    let r_skin: f32 = 1.0;
+    let drift_per_step: f32 = 0.1; // 5 steps to cross r_skin/2 = 0.5.
+    let mut nl = NeighborListState::new_cell_list(&gpu, &sim_box, 2, 0.5, 8, r_skin).unwrap();
+    let mut x = 1.0_f32;
+    let state = state_from_positions(vec![0.0, x], vec![0.0, 0.0], vec![0.0, 0.0]);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    nl.pre_step(&sim_box, &buffers, &mut timings).unwrap();
+    let _initial_n_cells_total = nl.cell_list_data().unwrap().n_cells_total;
+
+    // Drive 10 steps with barostat ticks. Each step: bump generation by
+    // re-setting the same lattice; drift atom 1 by drift_per_step.
+    let mut rebuilds_after_initial = 0u64;
+    let mut last_nlb_count = {
+        let report_stub = Timings::new(&gpu).unwrap().finalize().unwrap();
+        let _ = report_stub;
+        0u64
+    };
+    let mut accum_t = Timings::new(&gpu).unwrap();
+    for _ in 0..10 {
+        sim_box.set_lattice(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
+        x += drift_per_step;
+        let moved = state_from_positions(vec![0.0, x], vec![0.0, 0.0], vec![0.0, 0.0]);
+        buffers.upload(&moved).unwrap();
+        nl.pre_step(&sim_box, &buffers, &mut accum_t).unwrap();
+    }
+    let report = accum_t.finalize().unwrap();
+    let nlb_total = report.stages.iter().find(|s| s.name == "neighbor_list_build")
+        .map(|s| s.count).unwrap_or(0);
+    rebuilds_after_initial += nlb_total - last_nlb_count;
+    last_nlb_count = nlb_total;
+    // After 10 ticks at 0.1 per step the atom has drifted 1.0 ≈ 2x r_skin/2.
+    // We expect rebuilds at most 3 times (initial + 2 displacement crossings).
+    assert!(
+        rebuilds_after_initial >= 1 && rebuilds_after_initial <= 3,
+        "rebuilds should be displacement-driven, not generation-tick driven; got {rebuilds_after_initial}"
+    );
 }

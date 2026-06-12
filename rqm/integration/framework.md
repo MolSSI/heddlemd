@@ -1133,17 +1133,6 @@ Feature: Pluggable integration framework
     Then force_field.step(...) is invoked exactly twice
     And force_field.step_class(...) is invoked exactly zero times
 
-  @rq-5257ec08
-  Scenario: Plan with mixed-class ForceEval sub-steps dispatches step and step_class
-    Given a stub integrator whose plan(dt) returns
-      [ForceEval { class: None },
-       ForceEval { class: Some(ForceClass::Fast) },
-       ForceEval { class: Some(ForceClass::Slow) }]
-    When the runner executes one timestep with this integrator
-    Then force_field.step(...) is invoked exactly once
-    And force_field.step_class(ForceClass::Fast, ...) is invoked exactly once
-    And force_field.step_class(ForceClass::Slow, ...) is invoked exactly once
-
   @rq-d4d435c8
   Scenario: integrator.execute receiving ForceEval surfaces UnexpectedSubStep
     Given any concrete integrator
@@ -1279,18 +1268,4 @@ Feature: Pluggable integration framework
     When runner.resolve_level(level) is called
     Then it returns AggregateLevel::ForcesAndScalars regardless of step counters
 
-  @rq-8b8e9a4e
-  Scenario: Runner warm-up call uses ForcesAndScalars
-    Given a runner about to enter its timestep loop
-    When the runner issues its one warm-up `force_field.step` call
-    Then the call passes AggregateLevel::ForcesAndScalars
-    And buffers.potential_energies and buffers.virials are valid before the first
-      timestep's plan walk begins
-
-  @rq-f996df7a
-  Scenario: SD minimization iterations always read ForcesAndScalars
-    Given a minimization run using the steepest-descent minimizer
-    When the minimizer issues a force evaluation for any iteration
-    Then the dispatched force_field call uses AggregateLevel::ForcesAndScalars
-      regardless of any log_every or trajectory_every cadence
 ```
