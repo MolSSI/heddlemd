@@ -1,3 +1,8 @@
+// Lossless mode is the velocity-Verlet compensated-summation path. It
+// is only available in the default (f32) build; the f64 build rejects
+// it at config-load time, so these tests do not run there.
+#![cfg(not(feature = "f64"))]
+
 use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice, DeviceSlice};
@@ -6,6 +11,7 @@ use heddle_md::gpu::{
 };
 use heddle_md::state::ParticleState;
 use heddle_md::pbc::SimulationBox;
+use heddle_md::precision::Real;
 
 // --- Helpers ---
 
@@ -18,7 +24,7 @@ fn empty_state(n: usize) -> ParticleState {
         vec![0.0; n],
         vec![0.0; n],
         vec![1.0; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
@@ -27,13 +33,13 @@ fn empty_state(n: usize) -> ParticleState {
 }
 
 fn diverse_state(n: usize) -> ParticleState {
-    let positions_x: Vec<f32> = (0..n).map(|i| 1.0 + i as f32 * 0.5).collect();
-    let positions_y: Vec<f32> = (0..n).map(|i| 2.0 - i as f32 * 0.3).collect();
-    let positions_z: Vec<f32> = (0..n).map(|i| -0.5 + i as f32 * 0.2).collect();
-    let velocities_x: Vec<f32> = (0..n).map(|i| 0.1 * (i as f32 + 1.0)).collect();
-    let velocities_y: Vec<f32> = (0..n).map(|i| -0.07 * (i as f32 + 1.0)).collect();
-    let velocities_z: Vec<f32> = (0..n).map(|i| 0.04 * (i as f32 + 1.0)).collect();
-    let masses: Vec<f32> = (0..n).map(|i| 1.0 + 0.25 * i as f32).collect();
+    let positions_x: Vec<Real> = (0..n).map(|i| 1.0 + i as Real * 0.5).collect();
+    let positions_y: Vec<Real> = (0..n).map(|i| 2.0 - i as Real * 0.3).collect();
+    let positions_z: Vec<Real> = (0..n).map(|i| -0.5 + i as Real * 0.2).collect();
+    let velocities_x: Vec<Real> = (0..n).map(|i| 0.1 * (i as Real + 1.0)).collect();
+    let velocities_y: Vec<Real> = (0..n).map(|i| -0.07 * (i as Real + 1.0)).collect();
+    let velocities_z: Vec<Real> = (0..n).map(|i| 0.04 * (i as Real + 1.0)).collect();
+    let masses: Vec<Real> = (0..n).map(|i| 1.0 + 0.25 * i as Real).collect();
     let mut state = ParticleState::new(
         positions_x,
         positions_y,
@@ -42,21 +48,21 @@ fn diverse_state(n: usize) -> ParticleState {
         velocities_y,
         velocities_z,
         masses,
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
     )
     .unwrap();
-    state.forces_x = (0..n).map(|i| 0.05 + i as f32 * 0.02).collect();
-    state.forces_y = (0..n).map(|i| -0.03 + i as f32 * 0.015).collect();
-    state.forces_z = (0..n).map(|i| 0.07 - i as f32 * 0.005).collect();
+    state.forces_x = (0..n).map(|i| 0.05 + i as Real * 0.02).collect();
+    state.forces_y = (0..n).map(|i| -0.03 + i as Real * 0.015).collect();
+    state.forces_z = (0..n).map(|i| 0.07 - i as Real * 0.005).collect();
     state
 }
 
-fn neg_in_place_f32(device: &Arc<CudaDevice>, slice: &mut CudaSlice<f32>) {
-    let host: Vec<f32> = device.dtoh_sync_copy(slice).unwrap();
-    let neg: Vec<f32> = host.into_iter().map(|x| -x).collect();
+fn neg_in_place(device: &Arc<CudaDevice>, slice: &mut CudaSlice<Real>) {
+    let host: Vec<Real> = device.dtoh_sync_copy(slice).unwrap();
+    let neg: Vec<Real> = host.into_iter().map(|x| -x).collect();
     device.htod_sync_copy_into(&neg, slice).unwrap();
 }
 
@@ -68,9 +74,9 @@ fn neg_in_place_f64(device: &Arc<CudaDevice>, slice: &mut CudaSlice<f64>) {
 
 fn negate_velocities(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers) {
     let device = buffers.device.clone();
-    neg_in_place_f32(&device, &mut buffers.velocities_x);
-    neg_in_place_f32(&device, &mut buffers.velocities_y);
-    neg_in_place_f32(&device, &mut buffers.velocities_z);
+    neg_in_place(&device, &mut buffers.velocities_x);
+    neg_in_place(&device, &mut buffers.velocities_y);
+    neg_in_place(&device, &mut buffers.velocities_z);
     neg_in_place_f64(&device, &mut lossless.velocities_x_lo);
     neg_in_place_f64(&device, &mut lossless.velocities_y_lo);
     neg_in_place_f64(&device, &mut lossless.velocities_z_lo);
@@ -78,16 +84,16 @@ fn negate_velocities(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffe
 
 #[derive(Clone, PartialEq, Debug)]
 struct FullSnapshot {
-    positions_x: Vec<f32>,
-    positions_y: Vec<f32>,
-    positions_z: Vec<f32>,
-    velocities_x: Vec<f32>,
-    velocities_y: Vec<f32>,
-    velocities_z: Vec<f32>,
-    forces_x: Vec<f32>,
-    forces_y: Vec<f32>,
-    forces_z: Vec<f32>,
-    masses: Vec<f32>,
+    positions_x: Vec<Real>,
+    positions_y: Vec<Real>,
+    positions_z: Vec<Real>,
+    velocities_x: Vec<Real>,
+    velocities_y: Vec<Real>,
+    velocities_z: Vec<Real>,
+    forces_x: Vec<Real>,
+    forces_y: Vec<Real>,
+    forces_z: Vec<Real>,
+    masses: Vec<Real>,
     particle_ids: Vec<u32>,
     positions_x_lo: Vec<f64>,
     positions_y_lo: Vec<f64>,
@@ -195,22 +201,22 @@ fn vv_kick_drift_lossless_block_non_aligned() {
     let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let n = 1000;
     let mut state = empty_state(n);
-    state.velocities_x = vec![1.0_f32; n];
+    state.velocities_x = vec![1.0; n];
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut lossless = LosslessBuffers::new(&gpu, n).unwrap();
 
     let initial_positions_x = state.positions_x.clone();
     vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, 0.1).expect("kick_drift_lossless");
 
-    let final_positions_x: Vec<f32> = device.dtoh_sync_copy(&buffers.positions_x).unwrap();
-    let final_velocities_x: Vec<f32> = device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    let final_positions_x: Vec<Real> = device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let final_velocities_x: Vec<Real> = device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     for i in 0..n {
         assert_eq!(
             final_positions_x[i],
-            initial_positions_x[i] + 0.1_f32,
+            initial_positions_x[i] + 0.1,
             "positions_x[{i}]"
         );
-        assert_eq!(final_velocities_x[i], 1.0_f32, "velocities_x[{i}]");
+        assert_eq!(final_velocities_x[i], 1.0, "velocities_x[{i}]");
     }
 }
 
@@ -298,12 +304,12 @@ fn single_step_round_trip_zero_force() {
     let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let n = 8;
-    let positions_x: Vec<f32> = (0..n).map(|i| 0.5 + i as f32 * 0.3).collect();
-    let positions_y: Vec<f32> = (0..n).map(|i| -1.0 + i as f32 * 0.2).collect();
-    let positions_z: Vec<f32> = (0..n).map(|i| 0.7 + i as f32 * 0.15).collect();
-    let velocities_x: Vec<f32> = (0..n).map(|i| 0.1 * (i as f32 + 1.0)).collect();
-    let velocities_y: Vec<f32> = (0..n).map(|i| -0.05 * (i as f32 + 1.0)).collect();
-    let velocities_z: Vec<f32> = (0..n).map(|i| 0.07 * (i as f32 + 1.0)).collect();
+    let positions_x: Vec<Real> = (0..n).map(|i| 0.5 + i as Real * 0.3).collect();
+    let positions_y: Vec<Real> = (0..n).map(|i| -1.0 + i as Real * 0.2).collect();
+    let positions_z: Vec<Real> = (0..n).map(|i| 0.7 + i as Real * 0.15).collect();
+    let velocities_x: Vec<Real> = (0..n).map(|i| 0.1 * (i as Real + 1.0)).collect();
+    let velocities_y: Vec<Real> = (0..n).map(|i| -0.05 * (i as Real + 1.0)).collect();
+    let velocities_z: Vec<Real> = (0..n).map(|i| 0.07 * (i as Real + 1.0)).collect();
     let state = ParticleState::new(
         positions_x,
         positions_y,
@@ -311,8 +317,8 @@ fn single_step_round_trip_zero_force() {
         velocities_x,
         velocities_y,
         velocities_z,
-        vec![1.0_f32; n],
-        vec![0.0_f32; n],
+        vec![1.0; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
@@ -344,7 +350,7 @@ fn multi_step_round_trip_constant_force() {
     let mut lossless = LosslessBuffers::new(&gpu, n).unwrap();
     let snapshot = capture_snapshot(&buffers, &lossless);
 
-    let dt = 0.001_f32;
+    let dt = 0.001;
     let n_steps = 50;
     for _ in 0..n_steps {
         vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, dt).expect("forward kd");
@@ -370,7 +376,7 @@ fn two_independent_lossless_runs_byte_identical() {
     let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let n = 64;
     let state = diverse_state(n);
-    let dt = 0.001_f32;
+    let dt = 0.001;
     let n_steps = 10;
 
     let run = |state: &ParticleState| -> FullSnapshot {

@@ -15,6 +15,7 @@ use crate::io::config::ConfigError;
 use crate::timings::{KernelStage, Timings};
 
 use super::{Thermostat, ThermostatBuilder, ThermostatError};
+use crate::precision::Real;
 
 // rq-1f87880c
 #[derive(Debug, Clone, Deserialize)]
@@ -61,7 +62,7 @@ pub struct AndersenThermostat {
     pub draw_counter: u64,
     pub kt: f64,
     pub cumulative_injection: f64,
-    ke_scratch: CudaSlice<f32>,
+    ke_scratch: CudaSlice<Real>,
     most_recent_ke: f64,
 }
 
@@ -75,7 +76,7 @@ impl AndersenThermostat {
     ) -> Result<Self, GpuError> {
         // k_B = 1 in atomic units; temperature is already k_B · T.
         let kt = temperature;
-        let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
+        let ke_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         Ok(AndersenThermostat {
             temperature,
             collision_rate,
@@ -94,7 +95,7 @@ impl Thermostat for AndersenThermostat {
     fn apply_post(
         &mut self,
         buffers: &mut ParticleBuffers,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ThermostatError> {
         if buffers.particle_count() == 0 {
@@ -107,8 +108,8 @@ impl Thermostat for AndersenThermostat {
 
         self.draw_counter += 1;
         let p_collision = ((self.collision_rate as f64) * (dt as f64))
-            .clamp(0.0, 1.0) as f32;
-        let kt = self.kt as f32;
+            .clamp(0.0, 1.0) as Real;
+        let kt = self.kt as Real;
         timings.kernel_start(KernelStage::ANDERSEN_RESAMPLE)?;
         andersen_resample(buffers, self.seed, self.draw_counter, p_collision, kt)?;
         timings.kernel_stop(KernelStage::ANDERSEN_RESAMPLE)?;

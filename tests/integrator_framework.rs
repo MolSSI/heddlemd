@@ -10,11 +10,12 @@ use heddle_md::io::config::NeighborListConfig;
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::{KernelStage, Timings};
+use heddle_md::precision::Real;
 
 fn small_state(n: usize) -> ParticleState {
-    let pos: Vec<f32> = (0..n).map(|i| (i as f32) * 0.1).collect();
-    let zero = vec![0.0_f32; n];
-    let m = vec![1.0_f32; n];
+    let pos: Vec<Real> = (0..n).map(|i| (i as Real) * 0.1).collect();
+    let zero = vec![0.0; n];
+    let m = vec![1.0; n];
     ParticleState::new(
         pos,
         zero.clone(),
@@ -23,7 +24,7 @@ fn small_state(n: usize) -> ParticleState {
         zero.clone(),
         zero,
         m,
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
@@ -79,6 +80,8 @@ fn construct_vv_lossy_via_registry() {
 }
 
 // rq-7d4c470a
+// Lossless mode is only available in the default (f32) build.
+#[cfg(not(feature = "f64"))]
 #[test]
 fn construct_vv_lossless_via_registry() {
     let gpu = init_device().unwrap();
@@ -158,7 +161,7 @@ impl IntegratorBuilder for StubBuilder {
 }
 
 impl Integrator for StubIntegrator {
-    fn plan(&self, _dt: f32) -> heddle_md::integrator::StepPlan {
+    fn plan(&self, _dt: Real) -> heddle_md::integrator::StepPlan {
         heddle_md::integrator::StepPlan::empty()
     }
 
@@ -205,7 +208,7 @@ fn step_on_empty_state_is_noop() {
     let gpu = init_device().unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
-        vec![0.0_f32; 0],
+        vec![0.0; 0],
         Vec::new(), None,
             None,
     )
@@ -232,7 +235,7 @@ fn vv_step_launches_kick_drift_force_and_kick() {
     // positions during step() even with zero forces.
     let n = 4;
     let mut state = small_state(n);
-    state.velocities_x = (0..n).map(|i| 0.5 + i as f32 * 0.1).collect();
+    state.velocities_x = (0..n).map(|i| 0.5 + i as Real * 0.1).collect();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_10();
     let mut ff = empty_force_field(&gpu, n);
@@ -263,6 +266,8 @@ fn vv_step_launches_kick_drift_force_and_kick() {
 }
 
 // rq-17def001
+// Lossless mode is only available in the default (f32) build.
+#[cfg(not(feature = "f64"))]
 #[test]
 fn lossless_vv_step_uses_lossless_kernels() {
     let gpu = init_device().unwrap();
@@ -587,7 +592,7 @@ struct RecordingIntegrator {
 }
 
 impl Integrator for RecordingIntegrator {
-    fn plan(&self, dt: f32) -> heddle_md::integrator::StepPlan {
+    fn plan(&self, dt: Real) -> heddle_md::integrator::StepPlan {
         heddle_md::integrator::StepPlan {
             steps: vec![heddle_md::integrator::SubStep::KickDrift { dt, label: "rec" }],
         }
@@ -614,7 +619,7 @@ impl heddle_md::integrator::Thermostat for RecordingThermostat {
     fn apply_pre(
         &mut self,
         _b: &mut ParticleBuffers,
-        _dt: f32,
+        _dt: Real,
         _t: &mut Timings,
     ) -> Result<(), ThermostatError> {
         self.log.record("apply_pre");
@@ -623,7 +628,7 @@ impl heddle_md::integrator::Thermostat for RecordingThermostat {
     fn apply_post(
         &mut self,
         _b: &mut ParticleBuffers,
-        _dt: f32,
+        _dt: Real,
         _t: &mut Timings,
     ) -> Result<(), ThermostatError> {
         self.log.record("apply_post");
@@ -684,7 +689,7 @@ struct PlanStub {
 }
 
 impl Integrator for PlanStub {
-    fn plan(&self, _dt: f32) -> StepPlan {
+    fn plan(&self, _dt: Real) -> StepPlan {
         self.plan.clone()
     }
     fn execute(
@@ -720,7 +725,7 @@ impl heddle_md::integrator::Constraint for RecordingConstraint {
         &mut self,
         _b: &mut ParticleBuffers,
         _sb: &SimulationBox,
-        _dt: f32,
+        _dt: Real,
         _t: &mut Timings,
     ) -> Result<(), ConstraintError> {
         self.log.record("before_drift");
@@ -730,7 +735,7 @@ impl heddle_md::integrator::Constraint for RecordingConstraint {
         &mut self,
         _b: &mut ParticleBuffers,
         _sb: &SimulationBox,
-        _dt: f32,
+        _dt: Real,
         _t: &mut Timings,
     ) -> Result<(), ConstraintError> {
         self.log.record("after_drift");
@@ -740,7 +745,7 @@ impl heddle_md::integrator::Constraint for RecordingConstraint {
         &mut self,
         _b: &mut ParticleBuffers,
         _sb: &SimulationBox,
-        _dt: f32,
+        _dt: Real,
         _t: &mut Timings,
     ) -> Result<(), ConstraintError> {
         self.log.record("after_kick");

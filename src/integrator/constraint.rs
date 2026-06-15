@@ -9,6 +9,7 @@ use crate::gpu::{GpuContext, GpuError, ParticleBuffers};
 use crate::io::config::{ConfigError, NamedSlotConfig};
 use crate::pbc::SimulationBox;
 use crate::timings::{Timings, TimingsError};
+use crate::precision::Real;
 
 // rq-feb0501c
 #[derive(Debug, thiserror::Error)]
@@ -44,7 +45,7 @@ pub trait Constraint: std::fmt::Debug + Send {
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ConstraintError>;
 
@@ -54,7 +55,7 @@ pub trait Constraint: std::fmt::Debug + Send {
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ConstraintError>;
 
@@ -65,7 +66,7 @@ pub trait Constraint: std::fmt::Debug + Send {
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ConstraintError>;
 
@@ -172,7 +173,7 @@ pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
         atoms: &[u32],
         constraints: &[GroupConstraint],
         params: &toml::Value,
-        masses: &[f32],
+        masses: &[Real],
     ) -> Result<(), ConstraintError>;
 
     fn build(
@@ -181,7 +182,7 @@ pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
         gpu: &GpuContext,
         particle_count: usize,
         list: &ConstraintList,
-        masses: &[f32],
+        masses: &[Real],
         constraint_types: &[NamedSlotConfig],
     ) -> Result<Box<dyn Constraint>, ConstraintError>;
 
@@ -243,7 +244,7 @@ impl ConstraintRegistry {
         list: &ConstraintList,
         gpu: &GpuContext,
         particle_count: usize,
-        masses: &[f32],
+        masses: &[Real],
         constraint_types: &[NamedSlotConfig],
     ) -> Result<Option<Box<dyn Constraint>>, ConstraintError> {
         if list.is_empty() {
@@ -319,7 +320,7 @@ impl Constraint for CompositeConstraint {
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ConstraintError> {
         for slot in &mut self.slots {
@@ -332,7 +333,7 @@ impl Constraint for CompositeConstraint {
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ConstraintError> {
         for slot in &mut self.slots {
@@ -345,7 +346,7 @@ impl Constraint for CompositeConstraint {
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ConstraintError> {
         for slot in &mut self.slots {

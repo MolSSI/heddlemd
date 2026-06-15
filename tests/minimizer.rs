@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use heddle_md::io::PhaseKind;
 use heddle_md::runner::{run_simulation, RunnerError};
+use heddle_md::precision::Real;
 
 fn tmp_dir(suffix: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
@@ -576,7 +577,7 @@ fn sd_with_no_projection_constraint_slot_rejected_at_config_load() {
             _a: &[u32],
             _c: &[GroupConstraint],
             _p: &toml::Value,
-            _m: &[f32],
+            _m: &[Real],
         ) -> Result<(), ConstraintError> { Ok(()) }
         fn build(
             &self,
@@ -584,7 +585,7 @@ fn sd_with_no_projection_constraint_slot_rejected_at_config_load() {
             _gpu: &GpuContext,
             _particle_count: usize,
             _list: &ConstraintList,
-            _masses: &[f32],
+            _masses: &[Real],
             _constraint_types: &[NamedSlotConfig],
         ) -> Result<Box<dyn Constraint>, ConstraintError> {
             unreachable!("rejected before construction")
@@ -1000,16 +1001,16 @@ fn build_sd_argon_pair(
 
     let gpu = init_device().unwrap();
     let box_au = 1.0e-7 / len_f;
-    let sim_box = SimulationBox::new(box_au as f32, box_au as f32, box_au as f32, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(box_au as Real, box_au as Real, box_au as Real, 0.0, 0.0, 0.0).unwrap();
     let particle_state = ParticleState::new(
-        vec![0.0_f32, r_au as f32],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![mass_au as f32, mass_au as f32],
-        vec![0.0_f32, 0.0],
+        vec![0.0, r_au as Real],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![mass_au as Real, mass_au as Real],
+        vec![0.0, 0.0],
         vec![0u32, 0u32],
         None,
         None,
@@ -1114,14 +1115,14 @@ fn sd_step_formula_moves_largest_force_atom_by_exactly_step() {
     // by comparing pre/post via the buffers.
     let (gpu, mut sd, mut ff, mut buffers, sim_box, mut timings) =
         build_sd_argon_pair(1.0e-13, 1.0e-11, 1.2, 0.2, 0.0, 0.0, 3.5e-10);
-    let pre_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let pre_x: Vec<Real> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     warm_up_forces(&mut ff, &mut buffers, &sim_box, &mut timings);
     let _ = sd.initial_state(&mut buffers, &mut timings).unwrap();
     let report = sd
         .step(&mut buffers, &sim_box, &mut ff, None, &mut timings)
         .unwrap();
     assert!(report.accepted);
-    let post_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let post_x: Vec<Real> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     let dx0 = (post_x[0] - pre_x[0]) as f64;
     let dx1 = (post_x[1] - pre_x[1]) as f64;
     let step = report.step_size;
@@ -1214,14 +1215,14 @@ fn sd_step_halves_and_restores_positions_on_rejection() {
     // At r = 3.5e-10 (compressed), the initial step massively overshoots.
     let (gpu, mut sd, mut ff, mut buffers, sim_box, mut timings) =
         build_sd_argon_pair(init, max, 1.0, step_decrease, 0.0, 0.0, 3.5e-10);
-    let pre_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let pre_x: Vec<Real> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     warm_up_forces(&mut ff, &mut buffers, &sim_box, &mut timings);
     let _ = sd.initial_state(&mut buffers, &mut timings).unwrap();
     let r1 = sd
         .step(&mut buffers, &sim_box, &mut ff, None, &mut timings)
         .unwrap();
     assert!(!r1.accepted, "first step should be rejected (initial_step too large)");
-    let post_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let post_x: Vec<Real> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     assert_eq!(post_x, pre_x, "positions should be restored byte-for-byte on rejection");
     // The next iteration's step has the decrease applied.
     let r2 = sd

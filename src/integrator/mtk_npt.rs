@@ -15,6 +15,7 @@ use crate::gpu::{
 use crate::kernels;
 use crate::io::config::ConfigError;
 use serde::Deserialize;
+use crate::precision::Real;
 
 // rq-1f87880c — typed parameter struct for the "mtk-npt" builder.
 #[derive(Debug, Clone, Deserialize)]
@@ -108,8 +109,8 @@ pub struct MtkNptIntegrator {
     pub xi_cell: Vec<f64>,
     pub p_xi_cell: Vec<f64>,
     yoshida: &'static [f64],
-    ke_scratch: CudaSlice<f32>,
-    virial_scratch: CudaSlice<f32>,
+    ke_scratch: CudaSlice<Real>,
+    virial_scratch: CudaSlice<Real>,
     pub most_recent_pressure: f64,
     pub most_recent_volume: f64,
     pub most_recent_ke: f64,
@@ -154,8 +155,8 @@ impl MtkNptIntegrator {
         let q_mass_cell = vec![kt * tau_t2; m];
         let w_cell = (g_dof as f64 + 3.0) * kt * tau_p2;
 
-        let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
-        let virial_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
+        let ke_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
+        let virial_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
 
         Ok(MtkNptIntegrator {
             temperature,
@@ -194,7 +195,7 @@ impl MtkNptIntegrator {
     // per Yoshida sub-step) and updates the particle-chain state.
     fn particle_chain_half_step(
         &mut self,
-        dt: f32,
+        dt: Real,
         buffers: &mut ParticleBuffers,
         mut k: f64,
         timings: &mut Timings,
@@ -214,18 +215,18 @@ impl MtkNptIntegrator {
                     g_dof,
                     self.kt,
                 );
-                let factor_f32 = factor as f32;
+                let factor = factor as Real;
                 timings.kernel_start(KernelStage::MTK_NPT_RESCALE_VELOCITIES)?;
-                rescale_velocities(buffers, factor_f32)?;
+                rescale_velocities(buffers, factor)?;
                 timings.kernel_stop(KernelStage::MTK_NPT_RESCALE_VELOCITIES)?;
-                let factor_f64 = factor_f32 as f64;
+                let factor_f64 = factor as f64;
                 k *= factor_f64 * factor_f64;
             }
         }
         Ok(k)
     }
 
-    fn cell_chain_half_step(&mut self, dt: f32) {
+    fn cell_chain_half_step(&mut self, dt: Real) {
         let dt = dt as f64;
         let n_resp = self.n_resp as f64;
         for w in self.yoshida.to_vec() {
@@ -271,7 +272,7 @@ impl MtkNptIntegrator {
 
 impl Integrator for MtkNptIntegrator {
     // rq-aa68f468 rq-8cda2c89
-    fn plan(&self, dt: f32) -> StepPlan {
+    fn plan(&self, dt: Real) -> StepPlan {
         // The MTK symmetric Trotter splitting. Most sub-steps are
         // integrator-private (`Custom`) because they involve host-side
         // chain arithmetic or KE / virial reductions that the constraint
@@ -314,7 +315,7 @@ impl Integrator for MtkNptIntegrator {
         if buffers.particle_count() == 0 {
             return Ok(());
         }
-        let dt_f32 = match substep {
+        let dt = match substep {
             SubStep::KickHalf { dt, .. }
             | SubStep::Drift { dt, .. }
             | SubStep::Custom { dt, .. } => *dt,
@@ -324,7 +325,7 @@ impl Integrator for MtkNptIntegrator {
                 });
             }
         };
-        let dt_f64 = dt_f32 as f64;
+        let dt_f64 = dt as f64;
         let nf = self.g_dof as f64;
 
         match substep {
@@ -344,12 +345,12 @@ impl Integrator for MtkNptIntegrator {
                 Ok(())
             }
             SubStep::Custom { label: "cell_chain_pre", .. } => {
-                self.cell_chain_half_step(dt_f32);
+                self.cell_chain_half_step(dt);
                 Ok(())
             }
             SubStep::Custom { label: "particle_chain_pre", .. } => {
                 self.scratch_k =
-                    self.particle_chain_half_step(dt_f32, buffers, self.scratch_k, timings)?;
+                    self.particle_chain_half_step(dt, buffers, self.scratch_k, timings)?;
                 Ok(())
             }
             SubStep::Custom { label: "baro_kick_pre", .. } => {
@@ -369,7 +370,7 @@ impl Integrator for MtkNptIntegrator {
                     * sinh_over_x(alpha_v * dt_f64 / 4.0)
                     * (-alpha_v * dt_f64 / 4.0).exp();
                 timings.kernel_start(KernelStage::MTK_NPT_VELOCITY_HALF_KICK)?;
-                mtk_velocity_half_kick(buffers, exp_ma_half as f32, phi_v_dt_half as f32)?;
+                mtk_velocity_half_kick(buffers, exp_ma_half as Real, phi_v_dt_half as Real)?;
                 timings.kernel_stop(KernelStage::MTK_NPT_VELOCITY_HALF_KICK)?;
                 Ok(())
             }
@@ -379,10 +380,10 @@ impl Integrator for MtkNptIntegrator {
                 let phi_x_dt =
                     dt_f64 * sinh_over_x(beta * dt_f64 / 2.0) * (beta * dt_f64 / 2.0).exp();
                 timings.kernel_start(KernelStage::MTK_NPT_POSITION_DRIFT)?;
-                mtk_position_drift(buffers, exp_b_dt as f32, phi_x_dt as f32)?;
+                mtk_position_drift(buffers, exp_b_dt as Real, phi_x_dt as Real)?;
                 timings.kernel_stop(KernelStage::MTK_NPT_POSITION_DRIFT)?;
                 self.eps += beta * dt_f64;
-                let mu_box = exp_b_dt as f32;
+                let mu_box = exp_b_dt as Real;
                 sim_box.rescale_isotropic(mu_box).map_err(|_| {
                     IntegratorError::Gpu(GpuError(cudarc::driver::DriverError(
                         cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,
@@ -421,7 +422,7 @@ impl Integrator for MtkNptIntegrator {
             }
             SubStep::Custom { label: "particle_chain_post", .. } => {
                 let k_after_part = self.particle_chain_half_step(
-                    dt_f32,
+                    dt,
                     buffers,
                     self.scratch_k_post_kick,
                     timings,
@@ -432,7 +433,7 @@ impl Integrator for MtkNptIntegrator {
                 Ok(())
             }
             SubStep::Custom { label: "cell_chain_post", .. } => {
-                self.cell_chain_half_step(dt_f32);
+                self.cell_chain_half_step(dt);
                 Ok(())
             }
             other => Err(IntegratorError::UnexpectedSubStep {

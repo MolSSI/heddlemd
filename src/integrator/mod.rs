@@ -9,6 +9,7 @@ use crate::gpu::{GpuContext, GpuError, ParticleBuffers};
 use crate::io::config::{ConfigError, SlotConfig};
 use crate::pbc::SimulationBox;
 use crate::timings::{Timings, TimingsError};
+use crate::precision::Real;
 
 pub mod andersen;
 pub mod berendsen;
@@ -107,13 +108,13 @@ pub enum BarostatError {
 pub enum SubStep {
     /// Velocity half-kick: `v ← v + (F/m) · dt/2` (or the integrator's
     /// equivalent). No position update.
-    KickHalf { dt: f32, label: &'static str },
+    KickHalf { dt: Real, label: &'static str },
     /// Position drift: `x ← x + v · dt` (or the integrator's
     /// equivalent). No velocity update.
-    Drift { dt: f32, label: &'static str },
+    Drift { dt: Real, label: &'static str },
     /// Fused KickHalf + Drift in a single kernel launch
     /// (e.g. `vv_kick_drift`).
-    KickDrift { dt: f32, label: &'static str },
+    KickDrift { dt: Real, label: &'static str },
     /// Force-pipeline evaluation. Dispatched by the runner, not by
     /// the integrator's `execute()`. `class` selects which force
     /// class(es) to re-evaluate:
@@ -144,7 +145,7 @@ pub enum SubStep {
     /// substep-specific factors without needing to cache `dt` in
     /// `&mut self`; the `label` lets `execute()` dispatch to the right
     /// kernel.
-    Custom { dt: f32, label: &'static str },
+    Custom { dt: Real, label: &'static str },
 }
 
 impl SubStep {
@@ -192,7 +193,7 @@ pub trait Integrator: std::fmt::Debug + Send {
     /// Return the ordered sequence of sub-steps that constitute one
     /// timestep of size `dt`. Pure: must return the same shape for the
     /// same `dt` and the same integrator state across calls.
-    fn plan(&self, dt: f32) -> StepPlan;
+    fn plan(&self, dt: Real) -> StepPlan;
 
     /// Execute one sub-step from this integrator's plan. The runner
     /// calls this for every sub-step EXCEPT `SubStep::ForceEval`, which
@@ -240,7 +241,7 @@ pub fn run_step(
     force_field: &mut ForceField,
     mut constraint: Option<&mut dyn Constraint>,
     install_constraint_hooks: bool,
-    dt: f32,
+    dt: Real,
     timings: &mut Timings,
     runner_needs_scalars: bool,
 ) -> Result<(), StepError> {
@@ -323,7 +324,7 @@ pub fn run_step_no_constraint(
     buffers: &mut ParticleBuffers,
     sim_box: &mut SimulationBox,
     force_field: &mut ForceField,
-    dt: f32,
+    dt: Real,
     timings: &mut Timings,
 ) -> Result<(), StepError> {
     run_step(
@@ -359,7 +360,7 @@ pub trait IntegratorStepExt {
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), StepError>;
 }
@@ -370,7 +371,7 @@ impl IntegratorStepExt for dyn Integrator + '_ {
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), StepError> {
         run_step(self, buffers, sim_box, force_field, None, false, dt, timings, true)
@@ -385,7 +386,7 @@ impl<T: Integrator> IntegratorStepExt for T {
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), StepError> {
         run_step(self, buffers, sim_box, force_field, None, false, dt, timings, true)
@@ -434,7 +435,7 @@ pub trait IntegratorStepWithConstraintExt {
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
         constraint: &mut dyn Constraint,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), StepError>;
 }
@@ -446,7 +447,7 @@ impl IntegratorStepWithConstraintExt for dyn ConstraintCapableIntegrator + '_ {
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
         constraint: &mut dyn Constraint,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), StepError> {
         if let Err(reason) = self.check_accepts_constraints_now() {
@@ -475,7 +476,7 @@ impl<T: ConstraintCapableIntegrator> IntegratorStepWithConstraintExt for T {
         sim_box: &mut SimulationBox,
         force_field: &mut ForceField,
         constraint: &mut dyn Constraint,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), StepError> {
         if let Err(reason) = self.check_accepts_constraints_now() {
@@ -614,7 +615,7 @@ pub trait Thermostat: std::fmt::Debug + Send {
     fn apply_pre(
         &mut self,
         _buffers: &mut ParticleBuffers,
-        _dt: f32,
+        _dt: Real,
         _timings: &mut Timings,
     ) -> Result<(), ThermostatError> {
         Ok(())
@@ -624,7 +625,7 @@ pub trait Thermostat: std::fmt::Debug + Send {
     fn apply_post(
         &mut self,
         buffers: &mut ParticleBuffers,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ThermostatError>;
 
@@ -736,7 +737,7 @@ pub trait Barostat: std::fmt::Debug + Send {
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), BarostatError>;
 

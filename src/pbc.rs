@@ -1,13 +1,15 @@
 // rq-03830444
+use crate::precision::Real;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 // rq-b75afb31
 pub struct SimulationBox {
-    lx: f32,
-    ly: f32,
-    lz: f32,
-    xy: f32,
-    xz: f32,
-    yz: f32,
+    lx: Real,
+    ly: Real,
+    lz: Real,
+    xy: Real,
+    xz: Real,
+    yz: Real,
     generation: u64,
 }
 
@@ -15,25 +17,25 @@ pub struct SimulationBox {
 #[derive(Debug, thiserror::Error)]
 pub enum SimulationBoxError {
     #[error("non-finite simulation-box lattice value for `{name}`: {value}")]
-    NonFiniteLatticeValue { name: &'static str, value: f32 },
+    NonFiniteLatticeValue { name: &'static str, value: Real },
     #[error("non-positive simulation-box diagonal for `{name}`: {value}")]
-    NonPositiveDiagonal { name: &'static str, value: f32 },
+    NonPositiveDiagonal { name: &'static str, value: Real },
     #[error("simulation-box perpendicular width along lattice direction `{direction}` is {width}, below the required {required}")]
     PerpendicularWidthTooSmall {
         direction: &'static str,
-        width: f32,
-        required: f32,
+        width: Real,
+        required: Real,
     },
 }
 
-fn check_finite(name: &'static str, value: f32) -> Result<(), SimulationBoxError> {
+fn check_finite(name: &'static str, value: Real) -> Result<(), SimulationBoxError> {
     if !value.is_finite() {
         return Err(SimulationBoxError::NonFiniteLatticeValue { name, value });
     }
     Ok(())
 }
 
-fn check_diagonal(name: &'static str, value: f32) -> Result<(), SimulationBoxError> {
+fn check_diagonal(name: &'static str, value: Real) -> Result<(), SimulationBoxError> {
     check_finite(name, value)?;
     if value <= 0.0 {
         return Err(SimulationBoxError::NonPositiveDiagonal { name, value });
@@ -41,17 +43,17 @@ fn check_diagonal(name: &'static str, value: f32) -> Result<(), SimulationBoxErr
     Ok(())
 }
 
-fn check_tilt(name: &'static str, value: f32) -> Result<(), SimulationBoxError> {
+fn check_tilt(name: &'static str, value: Real) -> Result<(), SimulationBoxError> {
     check_finite(name, value)
 }
 
 fn validate_lattice(
-    lx: f32,
-    ly: f32,
-    lz: f32,
-    xy: f32,
-    xz: f32,
-    yz: f32,
+    lx: Real,
+    ly: Real,
+    lz: Real,
+    xy: Real,
+    xz: Real,
+    yz: Real,
 ) -> Result<(), SimulationBoxError> {
     check_diagonal("lx", lx)?;
     check_diagonal("ly", ly)?;
@@ -65,12 +67,12 @@ fn validate_lattice(
 impl SimulationBox {
     // rq-f0da71ea
     pub fn new(
-        lx: f32,
-        ly: f32,
-        lz: f32,
-        xy: f32,
-        xz: f32,
-        yz: f32,
+        lx: Real,
+        ly: Real,
+        lz: Real,
+        xy: Real,
+        xz: Real,
+        yz: Real,
     ) -> Result<Self, SimulationBoxError> {
         validate_lattice(lx, ly, lz, xy, xz, yz)?;
         Ok(SimulationBox {
@@ -87,12 +89,12 @@ impl SimulationBox {
     // rq-71fbbafb
     pub fn set_lattice(
         &mut self,
-        lx: f32,
-        ly: f32,
-        lz: f32,
-        xy: f32,
-        xz: f32,
-        yz: f32,
+        lx: Real,
+        ly: Real,
+        lz: Real,
+        xy: Real,
+        xz: Real,
+        yz: Real,
     ) -> Result<(), SimulationBoxError> {
         validate_lattice(lx, ly, lz, xy, xz, yz)?;
         self.lx = lx;
@@ -112,7 +114,7 @@ impl SimulationBox {
     // accidentally apply different scale factors to the orthogonal and
     // shear components.
     // rq-9e2e9d4e
-    pub fn rescale_isotropic(&mut self, factor: f32) -> Result<(), SimulationBoxError> {
+    pub fn rescale_isotropic(&mut self, factor: Real) -> Result<(), SimulationBoxError> {
         self.set_lattice(
             self.lx * factor,
             self.ly * factor,
@@ -129,42 +131,42 @@ impl SimulationBox {
     }
 
     // rq-e8be1a1c
-    pub fn lattice(&self) -> [f32; 6] {
+    pub fn lattice(&self) -> [Real; 6] {
         [self.lx, self.ly, self.lz, self.xy, self.xz, self.yz]
     }
 
     // rq-f73a0f99
-    pub fn lx(&self) -> f32 {
+    pub fn lx(&self) -> Real {
         self.lx
     }
 
     // rq-f73a0f99
-    pub fn ly(&self) -> f32 {
+    pub fn ly(&self) -> Real {
         self.ly
     }
 
     // rq-f73a0f99
-    pub fn lz(&self) -> f32 {
+    pub fn lz(&self) -> Real {
         self.lz
     }
 
     // rq-f73a0f99
-    pub fn xy(&self) -> f32 {
+    pub fn xy(&self) -> Real {
         self.xy
     }
 
     // rq-f73a0f99
-    pub fn xz(&self) -> f32 {
+    pub fn xz(&self) -> Real {
         self.xz
     }
 
     // rq-f73a0f99
-    pub fn yz(&self) -> f32 {
+    pub fn yz(&self) -> Real {
         self.yz
     }
 
     // rq-3b9ed390
-    pub fn volume(&self) -> f32 {
+    pub fn volume(&self) -> Real {
         self.lx * self.ly * self.lz
     }
 
@@ -174,7 +176,7 @@ impl SimulationBox {
     //   w_a = (lx·ly·lz) / sqrt((ly·lz)² + (xy·lz)² + (xy·yz − ly·xz)²)
     //   w_b = (ly·lz)    / sqrt(lz² + yz²)
     //   w_c = lz
-    pub fn perpendicular_widths(&self) -> [f32; 3] {
+    pub fn perpendicular_widths(&self) -> [Real; 3] {
         let lx = self.lx;
         let ly = self.ly;
         let lz = self.lz;
@@ -194,7 +196,7 @@ impl SimulationBox {
     }
 
     // rq-5fe22acb
-    pub fn min_perpendicular_width(&self) -> f32 {
+    pub fn min_perpendicular_width(&self) -> Real {
         let [w_a, w_b, w_c] = self.perpendicular_widths();
         w_a.min(w_b).min(w_c)
     }
@@ -207,7 +209,7 @@ impl SimulationBox {
     // finiteness pre-check is applied.
     pub fn check_min_perpendicular_width(
         &self,
-        required: f32,
+        required: Real,
     ) -> Result<(), SimulationBoxError> {
         let widths = self.perpendicular_widths();
         let directions: [&'static str; 3] = ["a", "b", "c"];
@@ -224,13 +226,13 @@ impl SimulationBox {
     }
 
     // rq-d49c9093
-    pub fn minimum_image(&self, displacement: [f32; 3]) -> [f32; 3] {
+    pub fn minimum_image(&self, displacement: [Real; 3]) -> [Real; 3] {
         let (wrapped, _image) = self.wrap_with_image_count(displacement);
         wrapped
     }
 
     // rq-9b1c84c3
-    pub fn wrap_position(&self, position: [f32; 3]) -> [f32; 3] {
+    pub fn wrap_position(&self, position: [Real; 3]) -> [Real; 3] {
         let (wrapped, _image) = self.wrap_with_image_count(position);
         wrapped
     }
@@ -238,8 +240,8 @@ impl SimulationBox {
     // rq-a4d5e711
     pub fn wrap_position_with_image_count(
         &self,
-        position: [f32; 3],
-    ) -> ([f32; 3], [i32; 3]) {
+        position: [Real; 3],
+    ) -> ([Real; 3], [i32; 3]) {
         self.wrap_with_image_count(position)
     }
 
@@ -258,7 +260,7 @@ impl SimulationBox {
     // — the algorithm collapses to three independent per-axis wraps
     // that match the v0 orthorhombic implementation bit-for-bit.
     #[inline]
-    fn wrap_with_image_count(&self, v: [f32; 3]) -> ([f32; 3], [i32; 3]) {
+    fn wrap_with_image_count(&self, v: [Real; 3]) -> ([Real; 3], [i32; 3]) {
         let s_c = v[2] / self.lz;
         let s_b = (v[1] - s_c * self.yz) / self.ly;
         let s_a = (v[0] - s_b * self.xy - s_c * self.xz) / self.lx;
@@ -275,7 +277,7 @@ impl SimulationBox {
     }
 
     // rq-1a3ec0c8
-    pub fn fractional_coords(&self, position: [f32; 3]) -> [f32; 3] {
+    pub fn fractional_coords(&self, position: [Real; 3]) -> [Real; 3] {
         let s_c = position[2] / self.lz;
         let s_b = (position[1] - s_c * self.yz) / self.ly;
         let s_a = (position[0] - s_b * self.xy - s_c * self.xz) / self.lx;
@@ -283,7 +285,7 @@ impl SimulationBox {
     }
 
     // rq-be7b9fe6
-    pub fn cartesian_coords(&self, fractional: [f32; 3]) -> [f32; 3] {
+    pub fn cartesian_coords(&self, fractional: [Real; 3]) -> [Real; 3] {
         let s_a = fractional[0];
         let s_b = fractional[1];
         let s_c = fractional[2];

@@ -7,14 +7,15 @@ use cudarc::driver::{CudaDevice, CudaSlice, DeviceSlice};
 use heddle_md::gpu::{GpuContext, LennardJonesParameterTable, PairBuffer, ParticleBuffers, init_device};
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
+use heddle_md::precision::Real;
 
 // --- Helpers ---
 
 #[derive(Debug, Clone, Copy)]
 struct LjScalarParams {
-    sigma: f32,
-    epsilon: f32,
-    cutoff: f32,
+    sigma: Real,
+    epsilon: Real,
+    cutoff: Real,
 }
 
 fn default_box() -> SimulationBox {
@@ -33,11 +34,11 @@ fn table_from_scalar(device: &Arc<CudaDevice>, p: LjScalarParams) -> LennardJone
     single_type_lj_table(device, p.sigma, p.epsilon, p.cutoff)
 }
 
-fn build_state_xyz(positions: &[[f32; 3]]) -> ParticleState {
+fn build_state_xyz(positions: &[[Real; 3]]) -> ParticleState {
     let n = positions.len();
-    let px: Vec<f32> = positions.iter().map(|p| p[0]).collect();
-    let py: Vec<f32> = positions.iter().map(|p| p[1]).collect();
-    let pz: Vec<f32> = positions.iter().map(|p| p[2]).collect();
+    let px: Vec<Real> = positions.iter().map(|p| p[0]).collect();
+    let py: Vec<Real> = positions.iter().map(|p| p[1]).collect();
+    let pz: Vec<Real> = positions.iter().map(|p| p[2]).collect();
     ParticleState::new(
         px,
         py,
@@ -46,7 +47,7 @@ fn build_state_xyz(positions: &[[f32; 3]]) -> ParticleState {
         vec![0.0; n],
         vec![0.0; n],
         vec![1.0; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
@@ -55,11 +56,11 @@ fn build_state_xyz(positions: &[[f32; 3]]) -> ParticleState {
 }
 
 fn lj_force_components(
-    pi: [f32; 3],
-    pj: [f32; 3],
+    pi: [Real; 3],
+    pj: [Real; 3],
     sim_box: &SimulationBox,
     params: LjScalarParams,
-) -> [f32; 3] {
+) -> [Real; 3] {
     let d = sim_box.minimum_image([pi[0] - pj[0], pi[1] - pj[1], pi[2] - pj[2]]);
     let (dx, dy, dz) = (d[0], d[1], d[2]);
     let r2 = dx * dx + dy * dy + dz * dz;
@@ -75,7 +76,7 @@ fn lj_force_components(
     [factor * dx, factor * dy, factor * dz]
 }
 
-fn fill_pair_forces_with(pair: &mut PairBuffer, value: f32) {
+fn fill_pair_forces_with(pair: &mut PairBuffer, value: Real) {
     let device = pair.device.clone();
     let len = pair.pair_forces_x.len();
     let data = vec![value; len];
@@ -90,7 +91,7 @@ fn fill_pair_forces_with(pair: &mut PairBuffer, value: f32) {
         .unwrap();
 }
 
-fn download_pair_forces(pair: &PairBuffer) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+fn download_pair_forces(pair: &PairBuffer) -> (Vec<Real>, Vec<Real>, Vec<Real>) {
     let device = pair.device.clone();
     (
         device.dtoh_sync_copy(&pair.pair_forces_x).unwrap(),
@@ -176,9 +177,9 @@ fn self_interaction_slots_are_zero() {
     let (px, py, pz) = download_pair_forces(&pair);
     for i in 0..4 {
         let slot = i * 4 + i;
-        assert_eq!(px[slot], 0.0_f32, "px self slot for i={i}");
-        assert_eq!(py[slot], 0.0_f32, "py self slot for i={i}");
-        assert_eq!(pz[slot], 0.0_f32, "pz self slot for i={i}");
+        assert_eq!(px[slot], 0.0, "px self slot for i={i}");
+        assert_eq!(py[slot], 0.0, "py self slot for i={i}");
+        assert_eq!(pz[slot], 0.0, "pz self slot for i={i}");
     }
 }
 
@@ -198,12 +199,12 @@ fn slot_for_pair_beyond_cutoff_is_zero() {
 
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
-    assert_eq!(px[0 * 2 + 1], 0.0_f32);
-    assert_eq!(py[0 * 2 + 1], 0.0_f32);
-    assert_eq!(pz[0 * 2 + 1], 0.0_f32);
-    assert_eq!(px[1 * 2 + 0], 0.0_f32);
-    assert_eq!(py[1 * 2 + 0], 0.0_f32);
-    assert_eq!(pz[1 * 2 + 0], 0.0_f32);
+    assert_eq!(px[0 * 2 + 1], 0.0);
+    assert_eq!(py[0 * 2 + 1], 0.0);
+    assert_eq!(pz[0 * 2 + 1], 0.0);
+    assert_eq!(px[1 * 2 + 0], 0.0);
+    assert_eq!(py[1 * 2 + 0], 0.0);
+    assert_eq!(pz[1 * 2 + 0], 0.0);
 }
 
 #[test] // rq-d6bd915a
@@ -234,7 +235,7 @@ fn at_lj_minimum_force_is_near_zero() {
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&gpu.device, params);
-    let r_min = 2.0_f32.powf(1.0 / 6.0);
+    let r_min = (2.0 as Real).powf(1.0 / 6.0);
     let positions = [[0.0, 0.0, 0.0], [r_min, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -322,9 +323,9 @@ fn single_particle_state_only_self_slot() {
 
     lj_pair_force_no_excl(&particle_buffers, &mut pair, &sim_box, &table).expect("lj");
     let (px, py, pz) = download_pair_forces(&pair);
-    assert_eq!(px, vec![0.0_f32]);
-    assert_eq!(py, vec![0.0_f32]);
-    assert_eq!(pz, vec![0.0_f32]);
+    assert_eq!(px, vec![0.0]);
+    assert_eq!(py, vec![0.0]);
+    assert_eq!(pz, vec![0.0]);
 }
 
 #[test] // rq-fc220d87
@@ -361,9 +362,9 @@ fn block_non_aligned_particle_count() {
     let params = default_params();
     let table = table_from_scalar(&gpu.device, params);
     let n = 17;
-    let positions: Vec<[f32; 3]> = (0..n)
+    let positions: Vec<[Real; 3]> = (0..n)
         .map(|i| {
-            let fi = i as f32;
+            let fi = i as Real;
             [fi * 0.5 - 4.0, (fi * 0.5).sin(), (fi * 0.3).cos() * 0.7]
         })
         .collect();
@@ -378,7 +379,7 @@ fn block_non_aligned_particle_count() {
     // separate multiplies and adds. The two agree to within a few ULP per
     // operation, so closed-form comparison uses a small tolerance. Self
     // slots use exact equality because no FMA is involved.
-    let close_enough = |a: f32, b: f32| {
+    let close_enough = |a: Real, b: Real| {
         let scale = a.abs().max(b.abs()).max(1e-5);
         (a - b).abs() <= 1e-5 * scale
     };
@@ -386,9 +387,9 @@ fn block_non_aligned_particle_count() {
         for k in 0..n {
             let slot = i * n + k;
             if i == k {
-                assert_eq!(px[slot], 0.0_f32, "px self slot i={i}");
-                assert_eq!(py[slot], 0.0_f32, "py self slot i={i}");
-                assert_eq!(pz[slot], 0.0_f32, "pz self slot i={i}");
+                assert_eq!(px[slot], 0.0, "px self slot i={i}");
+                assert_eq!(py[slot], 0.0, "py self slot i={i}");
+                assert_eq!(pz[slot], 0.0, "pz self slot i={i}");
             } else {
                 let expected =
                     lj_force_components(positions[i], positions[k], &sim_box, params);
@@ -424,9 +425,9 @@ fn two_independent_runs_byte_identical() {
     let params = default_params();
     let table = table_from_scalar(&gpu.device, params);
     let n = 64;
-    let positions: Vec<[f32; 3]> = (0..n)
+    let positions: Vec<[Real; 3]> = (0..n)
         .map(|i| {
-            let fi = i as f32;
+            let fi = i as Real;
             [fi * 0.2 - 6.4, (fi * 0.3).sin() * 2.0, (fi * 0.7).cos() * 1.5]
         })
         .collect();
@@ -505,9 +506,9 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
     for i in 0..n {
         for k in counts[i] as usize..max_neighbors as usize {
             let slot = i * max_neighbors as usize + k;
-            assert_eq!(px[slot], 0.0_f32, "px[{i},{k}] should be 0 (beyond count)");
-            assert_eq!(py[slot], 0.0_f32, "py[{i},{k}] should be 0 (beyond count)");
-            assert_eq!(pz[slot], 0.0_f32, "pz[{i},{k}] should be 0 (beyond count)");
+            assert_eq!(px[slot], 0.0, "px[{i},{k}] should be 0 (beyond count)");
+            assert_eq!(py[slot], 0.0, "py[{i},{k}] should be 0 (beyond count)");
+            assert_eq!(pz[slot], 0.0, "pz[{i},{k}] should be 0 (beyond count)");
         }
     }
 }
@@ -528,7 +529,7 @@ fn does_not_modify_positions_velocities_masses_or_forces() {
         vec![-0.1, -0.2, -0.3, -0.4],
         vec![0.05, 0.1, 0.15, 0.2],
         vec![1.5, 2.5, 3.5, 4.5],
-        vec![0.0_f32; vec![1.5, 2.5, 3.5, 4.5].len()],
+        vec![0.0; vec![1.5, 2.5, 3.5, 4.5].len()],
         vec![0u32; 4],
         Some(vec![100, 200, 300, 400]),
             None,
@@ -595,14 +596,14 @@ fn nan_positions_propagate_to_nan_pair_forces() {
     let params = default_params();
     let table = table_from_scalar(&gpu.device, params);
     let state = ParticleState::new(
-        vec![f32::NAN, 1.5],
+        vec![Real::NAN, 1.5],
         vec![0.0, 0.0],
         vec![0.0, 0.0],
         vec![0.0, 0.0],
         vec![0.0, 0.0],
         vec![0.0, 0.0],
         vec![1.0, 1.0],
-        vec![0.0_f32; vec![1.0, 1.0].len()],
+        vec![0.0; vec![1.0, 1.0].len()],
         vec![0u32; 2],
         None,
             None,
@@ -627,11 +628,11 @@ fn nan_positions_propagate_to_nan_pair_forces() {
 fn build_table(
     device: &Arc<CudaDevice>,
     n_types: u32,
-    sigma: &[f32],
-    epsilon: &[f32],
-    cutoff: &[f32],
+    sigma: &[Real],
+    epsilon: &[Real],
+    cutoff: &[Real],
 ) -> LennardJonesParameterTable {
-    let switch: Vec<f32> = cutoff.to_vec();
+    let switch: Vec<Real> = cutoff.to_vec();
     build_table_with_switch(device, n_types, sigma, epsilon, cutoff, &switch)
 }
 
@@ -641,10 +642,10 @@ fn build_table(
 fn build_table_with_switch(
     device: &Arc<CudaDevice>,
     n_types: u32,
-    sigma: &[f32],
-    epsilon: &[f32],
-    cutoff: &[f32],
-    switch: &[f32],
+    sigma: &[Real],
+    epsilon: &[Real],
+    cutoff: &[Real],
+    switch: &[Real],
 ) -> LennardJonesParameterTable {
     let len = (n_types as usize) * (n_types as usize);
     assert_eq!(sigma.len(), len);
@@ -661,12 +662,12 @@ fn build_table_with_switch(
 }
 
 /// State builder with explicit type_indices.
-fn build_state_with_types(positions: &[[f32; 3]], type_indices: Vec<u32>) -> ParticleState {
+fn build_state_with_types(positions: &[[Real; 3]], type_indices: Vec<u32>) -> ParticleState {
     let n = positions.len();
     assert_eq!(type_indices.len(), n);
-    let px: Vec<f32> = positions.iter().map(|p| p[0]).collect();
-    let py: Vec<f32> = positions.iter().map(|p| p[1]).collect();
-    let pz: Vec<f32> = positions.iter().map(|p| p[2]).collect();
+    let px: Vec<Real> = positions.iter().map(|p| p[0]).collect();
+    let py: Vec<Real> = positions.iter().map(|p| p[1]).collect();
+    let pz: Vec<Real> = positions.iter().map(|p| p[2]).collect();
     ParticleState::new(
         px,
         py,
@@ -675,7 +676,7 @@ fn build_state_with_types(positions: &[[f32; 3]], type_indices: Vec<u32>) -> Par
         vec![0.0; n],
         vec![0.0; n],
         vec![1.0; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         type_indices,
         None,
             None,
@@ -871,10 +872,10 @@ fn lj_param_table_from_config_builds_symmetric_table() {
     let epsilon = device.dtoh_sync_copy(&table.epsilon).unwrap();
     let cutoff = device.dtoh_sync_copy(&table.cutoff).unwrap();
     let switch = device.dtoh_sync_copy(&table.switch).unwrap();
-    assert_eq!(sigma, vec![1.0_f32, 2.0, 2.0, 3.0]);
-    assert_eq!(epsilon, vec![1.0_f32, 0.5, 0.5, 2.0]);
-    assert_eq!(cutoff, vec![5.0_f32, 5.0, 5.0, 5.0]);
-    assert_eq!(switch, vec![5.0_f32, 5.0, 5.0, 5.0]);
+    assert_eq!(sigma, vec![1.0, 2.0, 2.0, 3.0]);
+    assert_eq!(epsilon, vec![1.0, 0.5, 0.5, 2.0]);
+    assert_eq!(cutoff, vec![5.0, 5.0, 5.0, 5.0]);
+    assert_eq!(switch, vec![5.0, 5.0, 5.0, 5.0]);
 }
 
 // --- Shared neighbor-list integration ---
@@ -912,7 +913,7 @@ fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
     )
     .unwrap();
     let lj_slot = ff.slots[0].as_ref();
-    assert_eq!(lj_slot.max_cutoff(), Some(4.0_f32));
+    assert_eq!(lj_slot.max_cutoff(), Some(4.0));
 }
 
 #[test] // rq-e90c6feb rq-535c2b1e rq-4b40604b
@@ -935,7 +936,7 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
     }];
     // 4 particles in a small cluster
     let positions = [
-        [0.0_f32, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
         [1.2, 0.0, 0.0],
         [0.0, 1.3, 0.0],
         [0.4, 0.5, 0.7],
@@ -997,12 +998,12 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
 
 // --- Energy and virial outputs ---
 
-fn download_pair_energies(pair: &PairBuffer) -> Vec<f32> {
+fn download_pair_energies(pair: &PairBuffer) -> Vec<Real> {
     let device = pair.device.clone();
     device.dtoh_sync_copy(&pair.pair_energies).unwrap()
 }
 
-fn download_pair_virials(pair: &PairBuffer) -> Vec<f32> {
+fn download_pair_virials(pair: &PairBuffer) -> Vec<Real> {
     let device = pair.device.clone();
     device.dtoh_sync_copy(&pair.pair_virials).unwrap()
 }
@@ -1013,7 +1014,7 @@ fn two_particle_pair_energy_matches_closed_form() {
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&gpu.device, params);
-    let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
@@ -1021,11 +1022,11 @@ fn two_particle_pair_energy_matches_closed_form() {
     let pe = download_pair_energies(&pair);
     let sigma = params.sigma;
     let epsilon = params.epsilon;
-    let r = 1.5_f32;
+    let r: Real = 1.5;
     let sr2 = (sigma / r).powi(2);
     let sr6 = sr2.powi(3);
     let sr12 = sr6 * sr6;
-    let expected = 4.0_f32 * epsilon * (sr12 - sr6);
+    let expected = 4.0 * epsilon * (sr12 - sr6);
     // Slots (0,1) and (1,0) each hold half the energy.
     assert!((pe[0 * 2 + 1] + pe[1 * 2 + 0] - expected).abs() < 1.0e-5);
 }
@@ -1036,7 +1037,7 @@ fn two_particle_pair_virial_matches_r_dot_f() {
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&gpu.device, params);
-    let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
@@ -1044,14 +1045,14 @@ fn two_particle_pair_virial_matches_r_dot_f() {
     let (px, _, _) = download_pair_forces(&pair);
     let pv = download_pair_virials(&pair);
     // r_ij = (1.5, 0, 0); F_ij = (px[0*2+1], 0, 0). w = r · F.
-    let r_dot_f = 1.5_f32 * px[0 * 2 + 1];
+    let r_dot_f = 1.5 * px[0 * 2 + 1];
     // The kernel computes w = (r_i - r_j) · F_i = (-1.5) * (-F_x_on_0) = 1.5 * F_x_on_0.
     // But our convention: slot (i, j) holds force on i due to j, so F_x_on_0 due to 1 is px[0*2+1].
     // Displacement vector used in kernel: r_i - r_j. For i=0, j=1: dx = -1.5.
     // r_ij · F_ij = dx * fx + dy * fy + dz * fz where (fx,fy,fz) is force on 0 due to 1.
     // Here dx=-1.5, fx=px[0*2+1]. So w = -1.5 * px[0*2+1].
     // Symmetrically for slot (1,0): dx=+1.5, fx=-px[0*2+1]. Same w.
-    let expected = -1.5_f32 * px[0 * 2 + 1];
+    let expected = -1.5 * px[0 * 2 + 1];
     let total = pv[0 * 2 + 1] + pv[1 * 2 + 0];
     assert!((total - expected).abs() < 1.0e-5, "got {total} expected {expected}");
     // Also: the slot's value should be exactly the (i==0,j==1) virial = -1.5*F.
@@ -1065,7 +1066,7 @@ fn pair_beyond_cutoff_yields_zero_energy_and_virial() {
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&gpu.device, params);
-    let positions = [[0.0_f32, 0.0, 0.0], [6.0, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [6.0, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
@@ -1085,7 +1086,7 @@ fn self_slots_carry_zero_energy_and_virial() {
     let params = default_params();
     let table = table_from_scalar(&gpu.device, params);
     let positions = [
-        [0.0_f32, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
         [1.5, 0.0, 0.0],
         [0.0, 1.5, 0.0],
         [0.0, 0.0, 1.5],
@@ -1098,8 +1099,8 @@ fn self_slots_carry_zero_energy_and_virial() {
     let pv = download_pair_virials(&pair);
     for i in 0..4 {
         let slot = i * 4 + i;
-        assert_eq!(pe[slot], 0.0_f32);
-        assert_eq!(pv[slot], 0.0_f32);
+        assert_eq!(pe[slot], 0.0);
+        assert_eq!(pv[slot], 0.0);
     }
 }
 
@@ -1111,7 +1112,7 @@ fn exclusion_scaling_applies_uniformly_to_force_energy_virial() {
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&device, params);
-    let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
 
@@ -1131,7 +1132,7 @@ fn exclusion_scaling_applies_uniformly_to_force_energy_virial() {
         ],
         atom_excl_offsets: vec![0u32, 1, 2],
         atom_excl_partners: vec![1u32, 0],
-        atom_excl_lj_scales: vec![0.5_f32, 0.5], atom_excl_coul_scales: vec![0.5_f32, 0.5],
+        atom_excl_lj_scales: vec![0.5, 0.5], atom_excl_coul_scales: vec![0.5, 0.5],
         particle_count: 2,
     };
     let excl = DeviceExclusionList::from_host(&device, &host).unwrap();
@@ -1165,7 +1166,7 @@ fn exclusion_scaling_applies_uniformly_to_force_energy_virial() {
 /// computed in f32 with the same arithmetic order the kernel uses
 /// (normalised-tau form to avoid the (r_c²−r_s²)³ underflow at SI
 /// scales).
-fn switched_fx_on_0(r: f32, sigma: f32, epsilon: f32, cutoff: f32, r_switch: f32) -> f32 {
+fn switched_fx_on_0(r: Real, sigma: Real, epsilon: Real, cutoff: Real, r_switch: Real) -> Real {
     let r2 = r * r;
     let r_c2 = cutoff * cutoff;
     if r2 > r_c2 {
@@ -1195,7 +1196,7 @@ fn switched_fx_on_0(r: f32, sigma: f32, epsilon: f32, cutoff: f32, r_switch: f32
 
 /// Closed-form switched LJ pair energy at separation `r` (full pair
 /// energy, not the half stored per slot).
-fn switched_pair_energy(r: f32, sigma: f32, epsilon: f32, cutoff: f32, r_switch: f32) -> f32 {
+fn switched_pair_energy(r: Real, sigma: Real, epsilon: Real, cutoff: Real, r_switch: Real) -> Real {
     let r2 = r * r;
     let r_c2 = cutoff * cutoff;
     if r2 > r_c2 {
@@ -1219,16 +1220,16 @@ fn switched_pair_energy(r: f32, sigma: f32, epsilon: f32, cutoff: f32, r_switch:
     energy
 }
 
-fn two_particle_pair(r: f32) -> [[f32; 3]; 2] {
+fn two_particle_pair(r: Real) -> [[Real; 3]; 2] {
     [[0.0, 0.0, 0.0], [r, 0.0, 0.0]]
 }
 
 fn run_lj_two_particle(
     gpu: &GpuContext,
     sim_box: &SimulationBox,
-    positions: [[f32; 3]; 2],
+    positions: [[Real; 3]; 2],
     table: &LennardJonesParameterTable,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> (Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>) {
     let state = build_state_xyz(&positions);
     let particle_buffers = ParticleBuffers::new(gpu, &state).unwrap();
     let mut pair = PairBuffer::new(gpu, 2, 2).unwrap();
@@ -1250,11 +1251,11 @@ fn switching_pair_inside_r_switch_sees_unmodified_lj() {
     assert!((px[0 * 2 + 1] - expected_fx).abs() < 1.0e-6);
     // Inside the plateau, the switched energy equals the unswitched LJ
     // energy. (Both slots hold half the pair energy.)
-    let r = 1.5_f32;
-    let sr2 = (1.0_f32 / r).powi(2);
+    let r: Real = 1.5;
+    let sr2 = (1.0 / r).powi(2);
     let sr6 = sr2.powi(3);
     let sr12 = sr6 * sr6;
-    let lj_energy = 4.0_f32 * (sr12 - sr6);
+    let lj_energy = 4.0 * (sr12 - sr6);
     assert!((pe[0 * 2 + 1] + pe[1 * 2 + 0] - lj_energy).abs() < 1.0e-5);
 }
 
@@ -1268,11 +1269,11 @@ fn switching_pair_exactly_at_r_switch_sees_unmodified_lj() {
     // returns the unswitched LJ force/energy.
     let expected_fx = switched_fx_on_0(4.0, 1.0, 1.0, 5.0, 4.0);
     assert!((px[0 * 2 + 1] - expected_fx).abs() < 1.0e-6);
-    let r = 4.0_f32;
-    let sr2 = (1.0_f32 / r).powi(2);
+    let r: Real = 4.0;
+    let sr2 = (1.0 / r).powi(2);
     let sr6 = sr2.powi(3);
     let sr12 = sr6 * sr6;
-    let lj_energy = 4.0_f32 * (sr12 - sr6);
+    let lj_energy = 4.0 * (sr12 - sr6);
     assert!((pe[0 * 2 + 1] + pe[1 * 2 + 0] - lj_energy).abs() < 1.0e-7);
 }
 
@@ -1296,7 +1297,7 @@ fn switching_pair_inside_window_matches_closed_form_switched_value() {
     let gpu = init_device().expect("init_device");
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
-    let r = 4.5_f32;
+    let r: Real = 4.5;
     let (px, _, _, pe, _) = run_lj_two_particle(&gpu, &sim_box, two_particle_pair(r), &table);
     let expected_fx = switched_fx_on_0(r, 1.0, 1.0, 5.0, 4.0);
     let rel = (px[0 * 2 + 1] - expected_fx).abs() / expected_fx.abs().max(1.0e-30);
@@ -1319,7 +1320,7 @@ fn switching_force_is_c1_continuous_at_r_switch() {
     let gpu = init_device().expect("init_device");
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
-    let eps = 1.0e-3_f32;
+    let eps = 1.0e-3;
     let (px_below, _, _, _, _) =
         run_lj_two_particle(&gpu, &sim_box, two_particle_pair(4.0 - eps), &table);
     let (px_above, _, _, _, _) =
@@ -1339,7 +1340,7 @@ fn switching_force_is_c1_continuous_at_r_cut() {
     let gpu = init_device().expect("init_device");
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
-    let eps = 1.0e-3_f32;
+    let eps = 1.0e-3;
     let (px_inside, _, _, _, _) =
         run_lj_two_particle(&gpu, &sim_box, two_particle_pair(5.0 - eps), &table);
     let f_inside = px_inside[0 * 2 + 1].abs();
@@ -1356,7 +1357,7 @@ fn switching_degenerate_reproduces_hard_cutoff_everywhere_inside() {
     let gpu = init_device().expect("init_device");
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 5.0);
-    for r in [1.5_f32, 3.0, 4.5] {
+    for r in [1.5, 3.0, 4.5] {
         let (px, _, _, pe, _) =
             run_lj_two_particle(&gpu, &sim_box, two_particle_pair(r), &table);
         let expected_fx = lj_force_components(
@@ -1366,10 +1367,10 @@ fn switching_degenerate_reproduces_hard_cutoff_everywhere_inside() {
             LjScalarParams { sigma: 1.0, epsilon: 1.0, cutoff: 5.0 },
         )[0];
         assert_eq!(px[0 * 2 + 1], expected_fx, "force at r={r}");
-        let sr2 = (1.0_f32 / r).powi(2);
+        let sr2 = (1.0 / r).powi(2);
         let sr6 = sr2.powi(3);
         let sr12 = sr6 * sr6;
-        let lj_energy = 4.0_f32 * (sr12 - sr6);
+        let lj_energy = 4.0 * (sr12 - sr6);
         assert!(
             (pe[0 * 2 + 1] + pe[1 * 2 + 0] - lj_energy).abs() < 1.0e-6,
             "energy at r={r}"
@@ -1396,7 +1397,7 @@ fn switching_pair_virial_inside_window_equals_factor_switched_times_r2() {
     let gpu = init_device().expect("init_device");
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
-    let r = 4.5_f32;
+    let r: Real = 4.5;
     let (px, _, _, _, pv) =
         run_lj_two_particle(&gpu, &sim_box, two_particle_pair(r), &table);
     // The pair virial is r_ij · F_ij = factor_new * r². For two particles
@@ -1416,7 +1417,7 @@ fn switching_newtons_third_law_holds_bitwise_across_window() {
     let gpu = init_device().expect("init_device");
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
-    let positions = [[0.0_f32, 0.0, 0.0], [4.5, 0.4, -0.2]];
+    let positions = [[0.0, 0.0, 0.0], [4.5, 0.4, -0.2]];
     let (px, py, pz, _, _) = run_lj_two_particle(&gpu, &sim_box, positions, &table);
     assert_eq!(px[0 * 2 + 1], -px[1 * 2 + 0]);
     assert_eq!(py[0 * 2 + 1], -py[1 * 2 + 0]);
@@ -1449,7 +1450,7 @@ fn switching_exclusion_scaling_multiplies_switched_quantities() {
         ],
         atom_excl_offsets: vec![0u32, 1, 2],
         atom_excl_partners: vec![1u32, 0],
-        atom_excl_lj_scales: vec![0.5_f32, 0.5], atom_excl_coul_scales: vec![0.5_f32, 0.5],
+        atom_excl_lj_scales: vec![0.5, 0.5], atom_excl_coul_scales: vec![0.5, 0.5],
         particle_count: 2,
     };
     let excl = DeviceExclusionList::from_host(&device, &host).unwrap();
@@ -1483,13 +1484,13 @@ fn switching_per_pair_type_r_switch_dispatches_correctly() {
     // n_types = 2. Diagonal slots (0,0) and (1,1) have r_switch = 5.0
     // (no switching); off-diagonal (0,1) and (1,0) have r_switch = 4.0
     // (active switching at r = 4.5).
-    let sigma = vec![1.0_f32, 1.0, 1.0, 1.0];
-    let epsilon = vec![1.0_f32, 1.0, 1.0, 1.0];
-    let cutoff = vec![5.0_f32, 5.0, 5.0, 5.0];
-    let switch = vec![5.0_f32, 4.0, 4.0, 5.0];
+    let sigma = vec![1.0, 1.0, 1.0, 1.0];
+    let epsilon = vec![1.0, 1.0, 1.0, 1.0];
+    let cutoff = vec![5.0, 5.0, 5.0, 5.0];
+    let switch = vec![5.0, 4.0, 4.0, 5.0];
     let table = build_table_with_switch(&gpu.device, 2, &sigma, &epsilon, &cutoff, &switch);
-    let r = 4.5_f32;
-    let positions = [[0.0_f32, 0.0, 0.0], [r, 0.0, 0.0]];
+    let r: Real = 4.5;
+    let positions = [[0.0, 0.0, 0.0], [r, 0.0, 0.0]];
 
     // Mixed-type pair: uses the off-diagonal switch = 4.0.
     let state_mixed = build_state_with_types(&positions, vec![0, 1]);
@@ -1523,9 +1524,9 @@ fn switching_bit_exact_reproducibility_across_runs() {
     let sim_box = default_box();
     let table = single_type_lj_table_with_switch(&gpu.device, 1.0, 1.0, 5.0, 4.0);
     let n = 64;
-    let positions: Vec<[f32; 3]> = (0..n)
+    let positions: Vec<[Real; 3]> = (0..n)
         .map(|i| {
-            let fi = i as f32;
+            let fi = i as Real;
             // Place atoms over a range that crosses the switching window
             // [4.0, 5.0] so the kernel exercises both branches.
             [fi * 0.15 - 4.8, (fi * 0.3).sin() * 1.5, (fi * 0.7).cos() * 1.2]
@@ -1570,7 +1571,7 @@ fn switching_from_config_populates_user_supplied_r_switch() {
         LennardJonesParameterTable::from_config(&device, &particle_types, &pair_interactions)
             .expect("from_config");
     let switch = device.dtoh_sync_copy(&table.switch).unwrap();
-    assert_eq!(switch, vec![4.0_f32]);
+    assert_eq!(switch, vec![4.0]);
 }
 
 #[test] // rq-6a542a0a
@@ -1657,7 +1658,7 @@ cutoff = 5.0
     )
     .expect("from_config");
     let switch = device.dtoh_sync_copy(&table.switch).unwrap();
-    assert_eq!(switch, vec![4.5_f32, 4.5, 4.5, 4.5]);
+    assert_eq!(switch, vec![4.5, 4.5, 4.5, 4.5]);
 }
 
 // --- Per-pair exclusion semantics ----------------------------------------
@@ -1665,10 +1666,10 @@ cutoff = 5.0
 fn run_lj_with_exclusion(
     gpu: &heddle_md::gpu::GpuContext,
     sim_box: &SimulationBox,
-    positions: &[[f32; 3]],
+    positions: &[[Real; 3]],
     table: &LennardJonesParameterTable,
     excl: &heddle_md::forces::ExclusionList,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> (Vec<Real>, Vec<Real>, Vec<Real>) {
     let n = positions.len();
     let state = build_state_xyz(positions);
     let particle_buffers = ParticleBuffers::new(gpu, &state).unwrap();
@@ -1698,7 +1699,7 @@ fn full_exclusion_zeros_the_lj_contribution_for_the_excluded_pair() {
     let gpu = init_device().expect("init_device");
     let sim_box = default_box();
     let table = table_from_scalar(&gpu.device, default_params());
-    let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
     let host = ExclusionList {
         entries: vec![
             Exclusion { atom_i: 0, atom_j: 1, scale_lj: 0.0, scale_coul: 0.0 },
@@ -1706,15 +1707,15 @@ fn full_exclusion_zeros_the_lj_contribution_for_the_excluded_pair() {
         ],
         atom_excl_offsets: vec![0u32, 1, 2],
         atom_excl_partners: vec![1u32, 0],
-        atom_excl_lj_scales: vec![0.0_f32, 0.0],
-        atom_excl_coul_scales: vec![0.0_f32, 0.0],
+        atom_excl_lj_scales: vec![0.0, 0.0],
+        atom_excl_coul_scales: vec![0.0, 0.0],
         particle_count: 2,
     };
     let (px, py, pz) = run_lj_with_exclusion(&gpu, &sim_box, &positions, &table, &host);
     for &slot in &[0 * 2 + 1, 1 * 2 + 0] {
-        assert_eq!(px[slot], 0.0_f32, "px[{slot}] must be exactly 0 under scale=0");
-        assert_eq!(py[slot], 0.0_f32, "py[{slot}] must be exactly 0 under scale=0");
-        assert_eq!(pz[slot], 0.0_f32, "pz[{slot}] must be exactly 0 under scale=0");
+        assert_eq!(px[slot], 0.0, "px[{slot}] must be exactly 0 under scale=0");
+        assert_eq!(py[slot], 0.0, "py[{slot}] must be exactly 0 under scale=0");
+        assert_eq!(pz[slot], 0.0, "pz[{slot}] must be exactly 0 under scale=0");
     }
 }
 
@@ -1726,7 +1727,7 @@ fn scale_one_exclusion_is_equivalent_to_no_exclusion() {
     let sim_box = default_box();
     let params = default_params();
     let table = table_from_scalar(&gpu.device, params);
-    let positions = [[0.0_f32, 0.0, 0.0], [1.5, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [1.5, 0.0, 0.0]];
     let host = ExclusionList {
         entries: vec![
             Exclusion { atom_i: 0, atom_j: 1, scale_lj: 1.0, scale_coul: 1.0 },
@@ -1734,8 +1735,8 @@ fn scale_one_exclusion_is_equivalent_to_no_exclusion() {
         ],
         atom_excl_offsets: vec![0u32, 1, 2],
         atom_excl_partners: vec![1u32, 0],
-        atom_excl_lj_scales: vec![1.0_f32, 1.0],
-        atom_excl_coul_scales: vec![1.0_f32, 1.0],
+        atom_excl_lj_scales: vec![1.0, 1.0],
+        atom_excl_coul_scales: vec![1.0, 1.0],
         particle_count: 2,
     };
     let (px_scaled, _, _) = run_lj_with_exclusion(&gpu, &sim_box, &positions, &table, &host);
@@ -1754,7 +1755,7 @@ fn exclusion_only_applies_to_the_listed_pair() {
     let sim_box = default_box();
     let table = table_from_scalar(&gpu.device, default_params());
     let positions = [
-        [0.0_f32, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
         [1.5, 0.0, 0.0],
         [3.0, 0.0, 0.0],
     ];
@@ -1765,17 +1766,17 @@ fn exclusion_only_applies_to_the_listed_pair() {
         ],
         atom_excl_offsets: vec![0u32, 1, 2, 2],
         atom_excl_partners: vec![1u32, 0],
-        atom_excl_lj_scales: vec![0.0_f32, 0.0],
-        atom_excl_coul_scales: vec![0.0_f32, 0.0],
+        atom_excl_lj_scales: vec![0.0, 0.0],
+        atom_excl_coul_scales: vec![0.0, 0.0],
         particle_count: 3,
     };
     let (px, _, _) = run_lj_with_exclusion(&gpu, &sim_box, &positions, &table, &host);
     // The (0,1) pair is fully excluded; (0,2) and (1,2) keep the
     // unscaled closed-form force.
-    assert_eq!(px[0 * 3 + 1], 0.0_f32, "(0,1) is fully excluded");
-    assert_eq!(px[1 * 3 + 0], 0.0_f32, "(1,0) is fully excluded");
-    assert_ne!(px[0 * 3 + 2], 0.0_f32, "(0,2) is unaffected by the (0,1) exclusion");
-    assert_ne!(px[2 * 3 + 0], 0.0_f32, "(2,0) is unaffected by the (0,1) exclusion");
-    assert_ne!(px[1 * 3 + 2], 0.0_f32, "(1,2) is unaffected by the (0,1) exclusion");
-    assert_ne!(px[2 * 3 + 1], 0.0_f32, "(2,1) is unaffected by the (0,1) exclusion");
+    assert_eq!(px[0 * 3 + 1], 0.0, "(0,1) is fully excluded");
+    assert_eq!(px[1 * 3 + 0], 0.0, "(1,0) is fully excluded");
+    assert_ne!(px[0 * 3 + 2], 0.0, "(0,2) is unaffected by the (0,1) exclusion");
+    assert_ne!(px[2 * 3 + 0], 0.0, "(2,0) is unaffected by the (0,1) exclusion");
+    assert_ne!(px[1 * 3 + 2], 0.0, "(1,2) is unaffected by the (0,1) exclusion");
+    assert_ne!(px[2 * 3 + 1], 0.0, "(2,1) is unaffected by the (0,1) exclusion");
 }

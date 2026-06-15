@@ -4,6 +4,7 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::units::{Dimension, UnitSystem};
+use crate::precision::{Real, REAL_FMT_DIGITS};
 
 // k_B = 1 exactly inside the engine: temperatures are stored as
 // `k_B · T` in Hartrees, so the kinetic-energy → temperature
@@ -86,14 +87,16 @@ impl LogWriter {
         let time_out = self.units.to_user(Dimension::Time, time);
         let ke_out = self.units.to_user(Dimension::Energy, kinetic_energy);
         let temp_out = self.units.to_user(Dimension::Temperature, temperature);
+        let p = REAL_FMT_DIGITS;
         write!(
             self.writer,
-            "{step},{time_out:.9e},{ke_out:.9e},{temp_out:.9e}"
+            "{step},{time_out:.9e},{ke_out:.p$e},{temp_out:.p$e}",
+            p = p,
         )
         .map_err(io_err)?;
         for (v, dim) in extras.iter().zip(self.extra_dims.iter()) {
             let v_out = self.units.to_user(*dim, *v);
-            write!(self.writer, ",{v_out:.9e}").map_err(io_err)?;
+            write!(self.writer, ",{v_out:.p$e}", p = p).map_err(io_err)?;
         }
         writeln!(self.writer).map_err(io_err)
     }
@@ -116,10 +119,10 @@ fn io_err(e: std::io::Error) -> LogWriterError {
 
 // rq-6e51f09c rq-511f4606
 pub fn compute_kinetic_energy(
-    masses: &[f32],
-    vx: &[f32],
-    vy: &[f32],
-    vz: &[f32],
+    masses: &[Real],
+    vx: &[Real],
+    vy: &[Real],
+    vz: &[Real],
 ) -> f64 {
     debug_assert_eq!(masses.len(), vx.len());
     debug_assert_eq!(masses.len(), vy.len());

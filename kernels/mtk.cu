@@ -8,23 +8,25 @@
 // where α = (1 + 3/N_f) · (p_eps / W) and Φ_v = sinh(α·dt/4)/(α·dt/4)
 // (with a host-side Taylor fallback near α ≈ 0). Implements the
 // closed-form solution of dv/dt = F/m - α · v over a half-step dt/2.
+#include "precision.cuh"
+
 extern "C" __global__ void mtk_velocity_half_kick(
-    float *velocities_x,
-    float *velocities_y,
-    float *velocities_z,
-    const float *forces_x,
-    const float *forces_y,
-    const float *forces_z,
-    const float *masses,
-    float exp_minus_alpha,
-    float phi_v_dt_half,
+    Real *velocities_x,
+    Real *velocities_y,
+    Real *velocities_z,
+    const Real *forces_x,
+    const Real *forces_y,
+    const Real *forces_z,
+    const Real *masses,
+    Real exp_minus_alpha,
+    Real phi_v_dt_half,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) {
     return;
   }
-  float inv_m = 1.0f / masses[i];
+  Real inv_m = R(1.0) / masses[i];
   velocities_x[i] = exp_minus_alpha * velocities_x[i]
                   + phi_v_dt_half * (forces_x[i] * inv_m);
   velocities_y[i] = exp_minus_alpha * velocities_y[i]
@@ -48,14 +50,14 @@ extern "C" __global__ void mtk_velocity_half_kick(
 // reference positions on the next force_field.step via the
 // box-generation change-detection path.
 extern "C" __global__ void mtk_position_drift(
-    float *positions_x,
-    float *positions_y,
-    float *positions_z,
-    const float *velocities_x,
-    const float *velocities_y,
-    const float *velocities_z,
-    float exp_b_dt,
-    float phi_x_dt,
+    Real *positions_x,
+    Real *positions_y,
+    Real *positions_z,
+    const Real *velocities_x,
+    const Real *velocities_y,
+    const Real *velocities_z,
+    Real exp_b_dt,
+    Real phi_x_dt,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;

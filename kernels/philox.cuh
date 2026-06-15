@@ -8,6 +8,7 @@
 
 #ifndef DYNAMICS_PHILOX_CUH
 #define DYNAMICS_PHILOX_CUH
+#include "precision.cuh"
 
 // --- Round constants (Salmon et al., SC11). --------------------------------
 
@@ -67,8 +68,72 @@ __device__ inline double u32_to_uniform_open(unsigned int x)
   return ((double)x + 0.5) * scale;
 }
 
+// rq-eade13fb
+// Precision-aware uniform converter. Returns a uniform Real in [0, 1).
+// In the f32 build, consumes only `hi` (top 24 bits → 2^-24 step) and
+// ignores `lo`. In the f64 build, concatenates the top 21 bits of `hi`
+// with all 32 bits of `lo` to fill a 53-bit mantissa and divides by
+// 2^53.
+__device__ __forceinline__ Real philox_uniform_real(
+    unsigned int hi, unsigned int lo)
+{
+#ifdef REAL_F64
+  // 53-bit fill from 21 top bits of hi + 32 bits of lo.
+  unsigned long long h21 = (unsigned long long)(hi >> 11);
+  unsigned long long bits = (h21 << 32) | (unsigned long long)lo;
+  const double scale = 1.0 / 9007199254740992.0; // 2^-53
+  return (Real)((double)bits * scale);
+#else
+  unsigned int top24 = hi >> 8;
+  const float scale = 1.0f / 16777216.0f; // 2^-24
+  return (Real)((float)top24 * scale);
+#endif
+}
+
+// rq-philox_normal_real_pair
+// Marsaglia polar method: returns two independent unit-normal samples
+// drawn from four Philox lanes. Consumes 2 (f32) or 4 (f64) lanes per
+// call.
+__device__ __forceinline__ void philox_normal_real_pair(
+    unsigned int a, unsigned int b, unsigned int c, unsigned int d,
+    Real *n0, Real *n1)
+{
+#ifdef REAL_F64
+  Real u0 = philox_uniform_real(a, b);
+  Real u1 = philox_uniform_real(c, d);
+#else
+  Real u0 = philox_uniform_real(a, 0u);
+  Real u1 = philox_uniform_real(b, 0u);
+  (void)c;
+  (void)d;
+#endif
+  // Map u0, u1 in [0, 1) to s in (-1, 1).
+  Real x = u0 * R(2.0) - R(1.0);
+  Real y = u1 * R(2.0) - R(1.0);
+  Real s = x * x + y * y;
+  // Guard against s == 0 or s >= 1 by falling back to a deterministic
+  // value (Marsaglia rejection is not feasible inside a single deterministic
+  // device function; the caller chooses lanes that avoid this region).
+  if (s <= R(0.0) || s >= R(1.0)) {
+    s = R(0.5);
+  }
+  Real factor = Real_sqrt(R(-2.0) * Real_log(s) / s);
+  *n0 = x * factor;
+  *n1 = y * factor;
+}
+
+#ifdef REAL_F64
+// rq-philox_lanes_uniform_real
+__device__ __constant__ unsigned int PHILOX_LANES_PER_UNIFORM_REAL = 2;
+// rq-philox_lanes_normal_real_pair
+__device__ __constant__ unsigned int PHILOX_LANES_PER_NORMAL_REAL_PAIR = 4;
+#else
+__device__ __constant__ unsigned int PHILOX_LANES_PER_UNIFORM_REAL = 1;
+__device__ __constant__ unsigned int PHILOX_LANES_PER_NORMAL_REAL_PAIR = 2;
+#endif
+
 // Generate one standard-normal sample for (particle_id, axis) at step_index.
-__device__ inline float philox_gaussian(
+__device__ inline Real philox_gaussian(
     unsigned int seed_lo, unsigned int seed_hi,
     unsigned int step_lo, unsigned int step_hi,
     unsigned int particle_id,
@@ -82,7 +147,7 @@ __device__ inline float philox_gaussian(
   double u2 = u32_to_uniform_open(o1);
   double r = sqrt(-2.0 * log(u1));
   double theta = 6.283185307179586 * u2; // 2 * pi
-  return (float)(r * cos(theta));
+  return (Real)(r * cos(theta));
 }
 
 #endif // DYNAMICS_PHILOX_CUH

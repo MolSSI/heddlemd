@@ -3,8 +3,9 @@
 #define BLOCK_SIZE 256
 #define WARP_SIZE 32
 #define NUM_WARPS (BLOCK_SIZE / WARP_SIZE)
+#include "precision.cuh"
 
-__device__ static inline float warp_reduce_sum(float v) {
+__device__ static inline Real warp_reduce_sum(Real v) {
   v += __shfl_xor_sync(0xffffffffu, v, 16);
   v += __shfl_xor_sync(0xffffffffu, v, 8);
   v += __shfl_xor_sync(0xffffffffu, v, 4);
@@ -14,14 +15,14 @@ __device__ static inline float warp_reduce_sum(float v) {
 }
 
 extern "C" __global__ void reduce_pair_forces(
-    const float *pair_forces_x,
-    const float *pair_forces_y,
-    const float *pair_forces_z,
+    const Real *pair_forces_x,
+    const Real *pair_forces_y,
+    const Real *pair_forces_z,
     const unsigned int *neighbor_counts,
     unsigned int max_neighbors,
-    float *net_forces_x,
-    float *net_forces_y,
-    float *net_forces_z,
+    Real *net_forces_x,
+    Real *net_forces_y,
+    Real *net_forces_z,
     unsigned int n)
 {
   unsigned int i = blockIdx.x;
@@ -32,18 +33,18 @@ extern "C" __global__ void reduce_pair_forces(
   unsigned int count = neighbor_counts[i];
   unsigned int row_base = i * max_neighbors;
 
-  float p_x = 0.0f;
-  float p_y = 0.0f;
-  float p_z = 0.0f;
+  Real p_x = R(0.0);
+  Real p_y = R(0.0);
+  Real p_z = R(0.0);
 
   for (unsigned int s = 0; s < max_neighbors; s += BLOCK_SIZE) {
     unsigned int k = s + threadIdx.x;
     if (k < max_neighbors) {
       unsigned int idx = row_base + k;
       bool active = (k < count);
-      p_x = p_x + (active ? pair_forces_x[idx] : 0.0f);
-      p_y = p_y + (active ? pair_forces_y[idx] : 0.0f);
-      p_z = p_z + (active ? pair_forces_z[idx] : 0.0f);
+      p_x = p_x + (active ? pair_forces_x[idx] : R(0.0));
+      p_y = p_y + (active ? pair_forces_y[idx] : R(0.0));
+      p_z = p_z + (active ? pair_forces_z[idx] : R(0.0));
     }
   }
 
@@ -51,7 +52,7 @@ extern "C" __global__ void reduce_pair_forces(
   p_y = warp_reduce_sum(p_y);
   p_z = warp_reduce_sum(p_z);
 
-  __shared__ float warp_partials[NUM_WARPS][3];
+  __shared__ Real warp_partials[NUM_WARPS][3];
 
   unsigned int lane = threadIdx.x & (WARP_SIZE - 1);
   unsigned int warp_id = threadIdx.x / WARP_SIZE;
@@ -64,9 +65,9 @@ extern "C" __global__ void reduce_pair_forces(
   __syncthreads();
 
   if (warp_id == 0) {
-    float q_x = (lane < NUM_WARPS) ? warp_partials[lane][0] : 0.0f;
-    float q_y = (lane < NUM_WARPS) ? warp_partials[lane][1] : 0.0f;
-    float q_z = (lane < NUM_WARPS) ? warp_partials[lane][2] : 0.0f;
+    Real q_x = (lane < NUM_WARPS) ? warp_partials[lane][0] : R(0.0);
+    Real q_y = (lane < NUM_WARPS) ? warp_partials[lane][1] : R(0.0);
+    Real q_z = (lane < NUM_WARPS) ? warp_partials[lane][2] : R(0.0);
 
     q_x = warp_reduce_sum(q_x);
     q_y = warp_reduce_sum(q_y);
@@ -81,12 +82,12 @@ extern "C" __global__ void reduce_pair_forces(
 }
 
 extern "C" __global__ void reduce_pair_energy_virial(
-    const float *pair_energies,
-    const float *pair_virials,
+    const Real *pair_energies,
+    const Real *pair_virials,
     const unsigned int *neighbor_counts,
     unsigned int max_neighbors,
-    float *net_energy,
-    float *net_virial,
+    Real *net_energy,
+    Real *net_virial,
     unsigned int n)
 {
   unsigned int i = blockIdx.x;
@@ -97,23 +98,23 @@ extern "C" __global__ void reduce_pair_energy_virial(
   unsigned int count = neighbor_counts[i];
   unsigned int row_base = i * max_neighbors;
 
-  float p_e = 0.0f;
-  float p_w = 0.0f;
+  Real p_e = R(0.0);
+  Real p_w = R(0.0);
 
   for (unsigned int s = 0; s < max_neighbors; s += BLOCK_SIZE) {
     unsigned int k = s + threadIdx.x;
     if (k < max_neighbors) {
       unsigned int idx = row_base + k;
       bool active = (k < count);
-      p_e = p_e + (active ? pair_energies[idx] : 0.0f);
-      p_w = p_w + (active ? pair_virials[idx] : 0.0f);
+      p_e = p_e + (active ? pair_energies[idx] : R(0.0));
+      p_w = p_w + (active ? pair_virials[idx] : R(0.0));
     }
   }
 
   p_e = warp_reduce_sum(p_e);
   p_w = warp_reduce_sum(p_w);
 
-  __shared__ float warp_partials[NUM_WARPS][2];
+  __shared__ Real warp_partials[NUM_WARPS][2];
 
   unsigned int lane = threadIdx.x & (WARP_SIZE - 1);
   unsigned int warp_id = threadIdx.x / WARP_SIZE;
@@ -125,8 +126,8 @@ extern "C" __global__ void reduce_pair_energy_virial(
   __syncthreads();
 
   if (warp_id == 0) {
-    float q_e = (lane < NUM_WARPS) ? warp_partials[lane][0] : 0.0f;
-    float q_w = (lane < NUM_WARPS) ? warp_partials[lane][1] : 0.0f;
+    Real q_e = (lane < NUM_WARPS) ? warp_partials[lane][0] : R(0.0);
+    Real q_w = (lane < NUM_WARPS) ? warp_partials[lane][1] : R(0.0);
 
     q_e = warp_reduce_sum(q_e);
     q_w = warp_reduce_sum(q_w);

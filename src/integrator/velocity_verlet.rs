@@ -7,10 +7,9 @@ use cudarc::nvrtc::Ptx;
 use serde::Deserialize;
 
 use crate::gpu::device::get_func;
-use crate::gpu::{
-    GpuContext, GpuError, LosslessBuffers, ParticleBuffers, vv_kick, vv_kick_drift,
-    vv_kick_drift_lossless, vv_kick_lossless,
-};
+#[cfg(not(feature = "f64"))]
+use crate::gpu::{LosslessBuffers, vv_kick_drift_lossless, vv_kick_lossless};
+use crate::gpu::{GpuContext, GpuError, ParticleBuffers, vv_kick, vv_kick_drift};
 use crate::kernels;
 use crate::io::config::ConfigError;
 use crate::pbc::SimulationBox;
@@ -20,6 +19,7 @@ use super::{
     ConstraintCapableIntegrator, Integrator, IntegratorBuilder, IntegratorError, StepPlan,
     SubStep,
 };
+use crate::precision::Real;
 
 // rq-1f87880c — typed parameter struct for the "velocity-verlet"
 // builder, deserialised from the `[integrator]` section's
@@ -40,6 +40,7 @@ fn deserialize_params(params: &toml::Value) -> Result<VelocityVerletParams, Conf
 
 #[derive(Debug)]
 pub struct VelocityVerletState {
+    #[cfg(not(feature = "f64"))]
     lossless: Option<LosslessBuffers>,
 }
 
@@ -49,18 +50,26 @@ impl VelocityVerletState {
         particle_count: usize,
         lossless: bool,
     ) -> Result<Self, IntegratorError> {
-        let buffers = if lossless {
-            Some(LosslessBuffers::new(gpu, particle_count)?)
-        } else {
-            None
-        };
-        Ok(VelocityVerletState { lossless: buffers })
+        #[cfg(not(feature = "f64"))]
+        {
+            let buffers = if lossless {
+                Some(LosslessBuffers::new(gpu, particle_count)?)
+            } else {
+                None
+            };
+            return Ok(VelocityVerletState { lossless: buffers });
+        }
+        #[cfg(feature = "f64")]
+        {
+            let _ = (gpu, particle_count, lossless);
+            return Ok(VelocityVerletState {});
+        }
     }
 }
 
 impl Integrator for VelocityVerletState {
     // rq-aa68f468
-    fn plan(&self, dt: f32) -> StepPlan {
+    fn plan(&self, dt: Real) -> StepPlan {
         StepPlan {
             steps: vec![
                 SubStep::KickDrift { dt, label: "vv_kick_drift" },
@@ -86,27 +95,29 @@ impl Integrator for VelocityVerletState {
         }
         match substep {
             SubStep::KickDrift { dt, .. } => {
+                #[cfg(not(feature = "f64"))]
                 if let Some(ll) = self.lossless.as_mut() {
                     timings.kernel_start(KernelStage::VV_KICK_DRIFT_LOSSLESS)?;
                     vv_kick_drift_lossless(buffers, ll, sim_box, *dt)?;
                     timings.kernel_stop(KernelStage::VV_KICK_DRIFT_LOSSLESS)?;
-                } else {
-                    timings.kernel_start(KernelStage::VV_KICK_DRIFT)?;
-                    vv_kick_drift(buffers, sim_box, *dt)?;
-                    timings.kernel_stop(KernelStage::VV_KICK_DRIFT)?;
+                    return Ok(());
                 }
+                timings.kernel_start(KernelStage::VV_KICK_DRIFT)?;
+                vv_kick_drift(buffers, sim_box, *dt)?;
+                timings.kernel_stop(KernelStage::VV_KICK_DRIFT)?;
                 Ok(())
             }
             SubStep::KickHalf { dt, .. } => {
+                #[cfg(not(feature = "f64"))]
                 if let Some(ll) = self.lossless.as_mut() {
                     timings.kernel_start(KernelStage::VV_KICK_LOSSLESS)?;
                     vv_kick_lossless(buffers, ll, *dt)?;
                     timings.kernel_stop(KernelStage::VV_KICK_LOSSLESS)?;
-                } else {
-                    timings.kernel_start(KernelStage::VV_KICK)?;
-                    vv_kick(buffers, *dt)?;
-                    timings.kernel_stop(KernelStage::VV_KICK)?;
+                    return Ok(());
                 }
+                timings.kernel_start(KernelStage::VV_KICK)?;
+                vv_kick(buffers, *dt)?;
+                timings.kernel_stop(KernelStage::VV_KICK)?;
                 Ok(())
             }
             other => Err(IntegratorError::UnexpectedSubStep {
@@ -123,11 +134,11 @@ impl Integrator for VelocityVerletState {
 // constraint corrections.
 impl ConstraintCapableIntegrator for VelocityVerletState {
     fn check_accepts_constraints_now(&self) -> Result<(), &'static str> {
+        #[cfg(not(feature = "f64"))]
         if self.lossless.is_some() {
-            Err("velocity-Verlet in lossless mode does not yet support constraints")
-        } else {
-            Ok(())
+            return Err("velocity-Verlet in lossless mode does not yet support constraints");
         }
+        Ok(())
     }
 }
 
@@ -140,7 +151,13 @@ impl IntegratorBuilder for VelocityVerletBuilder {
     }
 
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
-        deserialize_params(params).map(|_| ())
+        let p = deserialize_params(params)?;
+        #[cfg(feature = "f64")]
+        if p.lossless {
+            return Err(ConfigError::LosslessUnsupportedInF64Build);
+        }
+        let _ = p;
+        Ok(())
     }
 
     // rq-9331ede2
@@ -160,12 +177,20 @@ impl IntegratorBuilder for VelocityVerletBuilder {
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
         let params = deserialize_params(params)
             .map_err(|_| IntegratorError::UnknownKind("velocity-verlet (malformed params)".into()))?;
-        let buffers = if params.lossless {
-            Some(LosslessBuffers::new(gpu, particle_count)?)
-        } else {
-            None
-        };
-        Ok(Box::new(VelocityVerletState { lossless: buffers }))
+        #[cfg(not(feature = "f64"))]
+        {
+            let buffers = if params.lossless {
+                Some(LosslessBuffers::new(gpu, particle_count)?)
+            } else {
+                None
+            };
+            return Ok(Box::new(VelocityVerletState { lossless: buffers }));
+        }
+        #[cfg(feature = "f64")]
+        {
+            let _ = (gpu, particle_count, params);
+            return Ok(Box::new(VelocityVerletState {}));
+        }
     }
 
     fn box_clone(&self) -> Box<dyn IntegratorBuilder> {
@@ -178,26 +203,30 @@ impl IntegratorBuilder for VelocityVerletBuilder {
 pub struct IntegrateKernels {
     pub vv_kick_drift: CudaFunction,
     pub vv_kick: CudaFunction,
+    #[cfg(not(feature = "f64"))]
     pub vv_kick_drift_lossless: CudaFunction,
+    #[cfg(not(feature = "f64"))]
     pub vv_kick_lossless: CudaFunction,
 }
 
 impl IntegrateKernels {
     pub fn load(device: &Arc<CudaDevice>) -> Result<Self, GpuError> {
-        device.load_ptx(
-            Ptx::from_src(kernels::INTEGRATE),
-            "integrate",
-            &[
-                "vv_kick_drift",
-                "vv_kick",
-                "vv_kick_drift_lossless",
-                "vv_kick_lossless",
-            ],
-        )?;
+        #[cfg(not(feature = "f64"))]
+        let names: &[&str] = &[
+            "vv_kick_drift",
+            "vv_kick",
+            "vv_kick_drift_lossless",
+            "vv_kick_lossless",
+        ];
+        #[cfg(feature = "f64")]
+        let names: &[&str] = &["vv_kick_drift", "vv_kick"];
+        device.load_ptx(Ptx::from_src(kernels::INTEGRATE), "integrate", names)?;
         Ok(IntegrateKernels {
             vv_kick_drift: get_func(device, "integrate", "vv_kick_drift")?,
             vv_kick: get_func(device, "integrate", "vv_kick")?,
+            #[cfg(not(feature = "f64"))]
             vv_kick_drift_lossless: get_func(device, "integrate", "vv_kick_drift_lossless")?,
+            #[cfg(not(feature = "f64"))]
             vv_kick_lossless: get_func(device, "integrate", "vv_kick_lossless")?,
         })
     }

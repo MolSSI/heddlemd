@@ -12,13 +12,14 @@
 
 #ifndef DYNAMICS_KERNELS_PBC_CUH
 #define DYNAMICS_KERNELS_PBC_CUH
+#include "precision.cuh"
 
 // Cartesian -> fractional coordinates via back-substitution.
 __device__ static inline void triclinic_cart_to_frac(
-    float x, float y, float z,
-    float lx, float ly, float lz,
-    float xy, float xz, float yz,
-    float &s_a, float &s_b, float &s_c)
+    Real x, Real y, Real z,
+    Real lx, Real ly, Real lz,
+    Real xy, Real xz, Real yz,
+    Real &s_a, Real &s_b, Real &s_c)
 {
   s_c = z / lz;
   s_b = (y - s_c * yz) / ly;
@@ -27,15 +28,15 @@ __device__ static inline void triclinic_cart_to_frac(
 
 // In-place minimum-image wrap. Discards image counts.
 __device__ static inline void triclinic_min_image(
-    float &dx, float &dy, float &dz,
-    float lx, float ly, float lz,
-    float xy, float xz, float yz)
+    Real &dx, Real &dy, Real &dz,
+    Real lx, Real ly, Real lz,
+    Real xy, Real xz, Real yz)
 {
-  float s_a, s_b, s_c;
+  Real s_a, s_b, s_c;
   triclinic_cart_to_frac(dx, dy, dz, lx, ly, lz, xy, xz, yz, s_a, s_b, s_c);
-  float ka = floorf(s_a + 0.5f);
-  float kb = floorf(s_b + 0.5f);
-  float kc = floorf(s_c + 0.5f);
+  Real ka = Real_floor(s_a + R(0.5));
+  Real kb = Real_floor(s_b + R(0.5));
+  Real kc = Real_floor(s_c + R(0.5));
   dx -= ka * lx + kb * xy + kc * xz;
   dy -= kb * ly + kc * yz;
   dz -= kc * lz;
@@ -43,16 +44,16 @@ __device__ static inline void triclinic_min_image(
 
 // In-place wrap returning the integer image counts (k_a, k_b, k_c).
 __device__ static inline void triclinic_wrap_with_image(
-    float &x, float &y, float &z,
+    Real &x, Real &y, Real &z,
     int &k_a, int &k_b, int &k_c,
-    float lx, float ly, float lz,
-    float xy, float xz, float yz)
+    Real lx, Real ly, Real lz,
+    Real xy, Real xz, Real yz)
 {
-  float s_a, s_b, s_c;
+  Real s_a, s_b, s_c;
   triclinic_cart_to_frac(x, y, z, lx, ly, lz, xy, xz, yz, s_a, s_b, s_c);
-  float ka = floorf(s_a + 0.5f);
-  float kb = floorf(s_b + 0.5f);
-  float kc = floorf(s_c + 0.5f);
+  Real ka = Real_floor(s_a + R(0.5));
+  Real kb = Real_floor(s_b + R(0.5));
+  Real kc = Real_floor(s_c + R(0.5));
   x -= ka * lx + kb * xy + kc * xz;
   y -= kb * ly + kc * yz;
   z -= kc * lz;

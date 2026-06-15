@@ -14,6 +14,7 @@ use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::{Integrator, IntegratorBuilder, IntegratorError, StepPlan, SubStep};
+use crate::precision::Real;
 
 // rq-1f87880c — typed parameter struct for the "langevin-baoab"
 // builder, deserialised from the `[integrator]` section's
@@ -54,7 +55,7 @@ pub struct LangevinBaoabState {
 
 impl Integrator for LangevinBaoabState {
     // rq-aa68f468
-    fn plan(&self, dt: f32) -> StepPlan {
+    fn plan(&self, dt: Real) -> StepPlan {
         // The two Drift sub-steps internally use dt/2; the integrator's
         // execute() reads `dt` from the SubStep and applies the
         // appropriate factor inside the `lan_drift_half` kernel.
@@ -97,9 +98,9 @@ impl Integrator for LangevinBaoabState {
                 Ok(())
             }
             SubStep::Custom { dt, label } if *label == "O" => {
-                let alpha = (-(self.friction as f32) * *dt).exp();
+                let alpha = (-(self.friction as Real) * *dt).exp();
                 // k_B = 1 in atomic units; temperature is already k_B · T.
-                let kt = self.temperature as f32;
+                let kt = self.temperature as Real;
                 self.draw_counter += 1;
                 timings.kernel_start(KernelStage::LANGEVIN_OU_STEP)?;
                 lan_ou_step(buffers, self.seed, self.draw_counter, alpha, kt)?;

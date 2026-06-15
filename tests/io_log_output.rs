@@ -68,6 +68,9 @@ fn open_fails_missing_parent() {
 }
 
 // rq-90517bb6
+// Asserts the f32-build 9-digit formatter output; the f64 build uses
+// 17 digits (covered by precision_trajectory_format).
+#[cfg(not(feature = "f64"))]
 #[test]
 fn write_single_row_step_zero() {
     let dir = tmp_path("row_step_zero");
@@ -125,6 +128,7 @@ fn si_mode_log_row_multiplies_time_kinetic_energy_and_temperature_by_factors() {
 }
 
 // rq-5b934ecd rq-7986038d
+#[cfg(not(feature = "f64"))]
 #[test]
 fn write_row_non_trivial_values() {
     let dir = tmp_path("row_nontrivial");
@@ -165,24 +169,24 @@ fn append_rows_in_order() {
 // rq-107a7187
 #[test]
 fn ke_of_single_at_rest() {
-    let ke = compute_kinetic_energy(&[1.0_f32], &[0.0_f32], &[0.0_f32], &[0.0_f32]);
+    let ke = compute_kinetic_energy(&[1.0], &[0.0], &[0.0], &[0.0]);
     assert_eq!(ke, 0.0);
 }
 
 // rq-7c23d271
 #[test]
 fn ke_of_single_v_along_x() {
-    let ke = compute_kinetic_energy(&[2.0_f32], &[1.0_f32], &[0.0_f32], &[0.0_f32]);
+    let ke = compute_kinetic_energy(&[2.0], &[1.0], &[0.0], &[0.0]);
     assert_eq!(ke, 1.0_f64);
 }
 
 // rq-553f28a3
 #[test]
 fn ke_three_particles_in_order() {
-    let masses = [1.0_f32, 2.0_f32, 4.0_f32];
-    let vx = [1.0_f32; 3];
-    let vy = [0.0_f32; 3];
-    let vz = [0.0_f32; 3];
+    let masses = [1.0, 2.0, 4.0];
+    let vx = [1.0; 3];
+    let vy = [0.0; 3];
+    let vz = [0.0; 3];
     let ke = compute_kinetic_energy(&masses, &vx, &vy, &vz);
     // Each contribution: m_i * 1.0; sum = 1+2+4=7; KE = 0.5 * 7 = 3.5
     assert_eq!(ke, 3.5_f64);
@@ -191,10 +195,10 @@ fn ke_three_particles_in_order() {
 // rq-1feec66c
 #[test]
 fn ke_bit_identical_across_invocations() {
-    let masses = [1.0_f32, 2.5_f32, 7.5_f32];
-    let vx = [0.1_f32, -0.3_f32, 0.7_f32];
-    let vy = [0.4_f32, 0.5_f32, -0.6_f32];
-    let vz = [-0.2_f32, 0.0_f32, 0.8_f32];
+    let masses = [1.0, 2.5, 7.5];
+    let vx = [0.1, -0.3, 0.7];
+    let vy = [0.4, 0.5, -0.6];
+    let vz = [-0.2, 0.0, 0.8];
     let a = compute_kinetic_energy(&masses, &vx, &vy, &vz);
     let b = compute_kinetic_energy(&masses, &vx, &vy, &vz);
     assert_eq!(a.to_bits(), b.to_bits());
@@ -276,6 +280,7 @@ fn open_with_extra_columns_appends_to_header() {
 }
 
 // rq-e49460ac
+#[cfg(not(feature = "f64"))]
 #[test]
 fn write_row_with_extra_columns() {
     let dir = tmp_path("write_row_extras");

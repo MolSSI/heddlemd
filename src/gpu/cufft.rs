@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use cudarc::driver::sys::CUstream;
 use cudarc::driver::{CudaDevice, CudaSlice, DevicePtr, DevicePtrMut};
+use crate::precision::Real;
 
 pub type CufftResult = c_int;
 pub type CufftType = c_int;
@@ -21,7 +22,12 @@ pub struct CufftHandle(pub c_int);
 pub const CUFFT_SUCCESS: CufftResult = 0;
 pub const CUFFT_R2C: CufftType = 0x2a;
 pub const CUFFT_C2R: CufftType = 0x2c;
+// rq-d2zforward
+pub const CUFFT_D2Z: CufftType = 0x6a;
+// rq-z2dinverse
+pub const CUFFT_Z2D: CufftType = 0x6c;
 
+#[allow(dead_code)]
 unsafe extern "C" {
     fn cufftPlan3d(
         plan: *mut CufftHandle,
@@ -41,8 +47,28 @@ unsafe extern "C" {
         idata: *mut c_void,
         odata: *mut f32,
     ) -> CufftResult;
+    fn cufftExecD2Z(
+        plan: CufftHandle,
+        idata: *mut f64,
+        odata: *mut c_void,
+    ) -> CufftResult;
+    fn cufftExecZ2D(
+        plan: CufftHandle,
+        idata: *mut c_void,
+        odata: *mut f64,
+    ) -> CufftResult;
     fn cufftSetStream(plan: CufftHandle, stream: *mut c_void) -> CufftResult;
 }
+
+#[cfg(not(feature = "f64"))]
+const CUFFT_FWD_TYPE: CufftType = CUFFT_R2C;
+#[cfg(feature = "f64")]
+const CUFFT_FWD_TYPE: CufftType = CUFFT_D2Z;
+
+#[cfg(not(feature = "f64"))]
+const CUFFT_INV_TYPE: CufftType = CUFFT_C2R;
+#[cfg(feature = "f64")]
+const CUFFT_INV_TYPE: CufftType = CUFFT_Z2D;
 
 // rq-1ad7e751
 #[derive(Debug, thiserror::Error)]
@@ -88,7 +114,7 @@ impl Plan3dR2C {
                 n_a as c_int,
                 n_b as c_int,
                 n_c as c_int,
-                CUFFT_R2C,
+                CUFFT_FWD_TYPE,
             )
         };
         check(result)?;
@@ -103,17 +129,25 @@ impl Plan3dR2C {
 
     // rq-4c21c386
     /// Execute the R2C transform `input → output`. `input` must hold
-    /// `n_a * n_b * n_c` `f32` values; `output` must hold
-    /// `n_a * n_b * (n_c / 2 + 1)` `cufftComplex` values (laid out as
-    /// `2 * M_complex` `f32`s with interleaved real/imag parts).
+    /// `n_a * n_b * n_c` `Real` values; `output` must hold
+    /// `n_a * n_b * (n_c / 2 + 1)` `RealComplex` values (laid out as
+    /// `2 * M_complex` `Real`s with interleaved real/imag parts).
     pub fn execute(
         &self,
-        input: &CudaSlice<f32>,
-        output: &mut CudaSlice<f32>,
+        input: &CudaSlice<Real>,
+        output: &mut CudaSlice<Real>,
     ) -> Result<(), CuFftError> {
-        let idata = *input.device_ptr() as *mut f32;
         let odata = *output.device_ptr_mut() as *mut c_void;
-        let result = unsafe { cufftExecR2C(self.handle, idata, odata) };
+        #[cfg(not(feature = "f64"))]
+        let result = {
+            let idata = *input.device_ptr() as *mut f32;
+            unsafe { cufftExecR2C(self.handle, idata, odata) }
+        };
+        #[cfg(feature = "f64")]
+        let result = {
+            let idata = *input.device_ptr() as *mut f64;
+            unsafe { cufftExecD2Z(self.handle, idata, odata) }
+        };
         check(result)
     }
 
@@ -161,7 +195,7 @@ impl Plan3dC2R {
                 n_a as c_int,
                 n_b as c_int,
                 n_c as c_int,
-                CUFFT_C2R,
+                CUFFT_INV_TYPE,
             )
         };
         check(result)?;
@@ -176,12 +210,20 @@ impl Plan3dC2R {
 
     pub fn execute(
         &self,
-        input: &CudaSlice<f32>,
-        output: &mut CudaSlice<f32>,
+        input: &CudaSlice<Real>,
+        output: &mut CudaSlice<Real>,
     ) -> Result<(), CuFftError> {
         let idata = *input.device_ptr() as *mut c_void;
-        let odata = *output.device_ptr_mut() as *mut f32;
-        let result = unsafe { cufftExecC2R(self.handle, idata, odata) };
+        #[cfg(not(feature = "f64"))]
+        let result = {
+            let odata = *output.device_ptr_mut() as *mut f32;
+            unsafe { cufftExecC2R(self.handle, idata, odata) }
+        };
+        #[cfg(feature = "f64")]
+        let result = {
+            let odata = *output.device_ptr_mut() as *mut f64;
+            unsafe { cufftExecZ2D(self.handle, idata, odata) }
+        };
         check(result)
     }
 
@@ -222,11 +264,11 @@ pub fn cufft_determinism_smoke_test(
     let m = (N * N * N) as usize;
     let m_complex = (N as usize * N as usize) * (N as usize / 2 + 1);
 
-    let mut input_host = vec![0.0_f32; m];
+    let mut input_host = vec![0.0; m];
     for (i, v) in input_host.iter_mut().enumerate() {
         // Mix in a triangular and a frequency pattern so the FFT
         // output spreads across many output cells.
-        let x = (i as f32) * 0.123456_f32;
+        let x = (i as Real) * 0.123456;
         *v = x.sin() + 0.5 * x.cos();
     }
     let input = device
@@ -235,18 +277,18 @@ pub fn cufft_determinism_smoke_test(
 
     let plan = Plan3dR2C::new(device, N, N, N)?;
     let mut out_a = device
-        .alloc_zeros::<f32>(2 * m_complex)
+        .alloc_zeros::<Real>(2 * m_complex)
         .map_err(|_| CuFftError::Status(-1))?;
     let mut out_b = device
-        .alloc_zeros::<f32>(2 * m_complex)
+        .alloc_zeros::<Real>(2 * m_complex)
         .map_err(|_| CuFftError::Status(-1))?;
     plan.execute(&input, &mut out_a)?;
     plan.execute(&input, &mut out_b)?;
 
-    let host_a: Vec<f32> = device
+    let host_a: Vec<Real> = device
         .dtoh_sync_copy(&out_a)
         .map_err(|_| CuFftError::Status(-1))?;
-    let host_b: Vec<f32> = device
+    let host_b: Vec<Real> = device
         .dtoh_sync_copy(&out_b)
         .map_err(|_| CuFftError::Status(-1))?;
     let differences = host_a

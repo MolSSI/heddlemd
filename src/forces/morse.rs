@@ -17,6 +17,7 @@ use super::{
     AggregateLevel, ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder,
     SlotOutputView,
 };
+use crate::precision::Real;
 
 // rq-2361f2b8 rq-ec18d174
 #[derive(Debug)]
@@ -26,14 +27,14 @@ pub struct MorseBondedState {
     pub bonds: CudaSlice<u32>,
     pub atom_bond_offsets: CudaSlice<u32>,
     pub atom_bond_indices: CudaSlice<u32>,
-    pub bond_de: CudaSlice<f32>,
-    pub bond_a: CudaSlice<f32>,
-    pub bond_re: CudaSlice<f32>,
-    pub bond_pair_x: CudaSlice<f32>,
-    pub bond_pair_y: CudaSlice<f32>,
-    pub bond_pair_z: CudaSlice<f32>,
-    pub bond_pair_energy: CudaSlice<f32>,
-    pub bond_pair_virial: CudaSlice<f32>,
+    pub bond_de: CudaSlice<Real>,
+    pub bond_a: CudaSlice<Real>,
+    pub bond_re: CudaSlice<Real>,
+    pub bond_pair_x: CudaSlice<Real>,
+    pub bond_pair_y: CudaSlice<Real>,
+    pub bond_pair_z: CudaSlice<Real>,
+    pub bond_pair_energy: CudaSlice<Real>,
+    pub bond_pair_virial: CudaSlice<Real>,
     pub bond_count: usize,
     pub particle_count: usize,
 }
@@ -56,15 +57,15 @@ impl MorseBondedState {
             bonds_flat.push(b.bond_type_index);
         }
 
-        let mut de_vec: Vec<f32> = Vec::with_capacity(bond_types.len());
-        let mut a_vec: Vec<f32> = Vec::with_capacity(bond_types.len());
-        let mut re_vec: Vec<f32> = Vec::with_capacity(bond_types.len());
+        let mut de_vec: Vec<Real> = Vec::with_capacity(bond_types.len());
+        let mut a_vec: Vec<Real> = Vec::with_capacity(bond_types.len());
+        let mut re_vec: Vec<Real> = Vec::with_capacity(bond_types.len());
         for bt in bond_types {
             match bt {
                 BondTypeConfig::Morse { de, a, re, .. } => {
-                    de_vec.push(*de as f32);
-                    a_vec.push(*a as f32);
-                    re_vec.push(*re as f32);
+                    de_vec.push(*de as Real);
+                    a_vec.push(*a as Real);
+                    re_vec.push(*re as Real);
                 }
             }
         }
@@ -72,18 +73,18 @@ impl MorseBondedState {
         let bonds = htod_or_empty_u32(&device, &bonds_flat)?;
         let atom_bond_offsets = htod_or_empty_u32(&device, &bond_list.atom_bond_offsets)?;
         let atom_bond_indices = htod_or_empty_u32(&device, &bond_list.atom_bond_indices)?;
-        let bond_de = htod_or_empty_f32(&device, &de_vec)?;
-        let bond_a = htod_or_empty_f32(&device, &a_vec)?;
-        let bond_re = htod_or_empty_f32(&device, &re_vec)?;
+        let bond_de = htod_or_empty(&device, &de_vec)?;
+        let bond_a = htod_or_empty(&device, &a_vec)?;
+        let bond_re = htod_or_empty(&device, &re_vec)?;
 
         let bond_pair_len = 2 * bond_count;
-        let bond_pair_x = device.alloc_zeros::<f32>(bond_pair_len).map_err(GpuError::from)?;
-        let bond_pair_y = device.alloc_zeros::<f32>(bond_pair_len).map_err(GpuError::from)?;
-        let bond_pair_z = device.alloc_zeros::<f32>(bond_pair_len).map_err(GpuError::from)?;
+        let bond_pair_x = device.alloc_zeros::<Real>(bond_pair_len).map_err(GpuError::from)?;
+        let bond_pair_y = device.alloc_zeros::<Real>(bond_pair_len).map_err(GpuError::from)?;
+        let bond_pair_z = device.alloc_zeros::<Real>(bond_pair_len).map_err(GpuError::from)?;
         let bond_pair_energy =
-            device.alloc_zeros::<f32>(bond_pair_len).map_err(GpuError::from)?;
+            device.alloc_zeros::<Real>(bond_pair_len).map_err(GpuError::from)?;
         let bond_pair_virial =
-            device.alloc_zeros::<f32>(bond_pair_len).map_err(GpuError::from)?;
+            device.alloc_zeros::<Real>(bond_pair_len).map_err(GpuError::from)?;
 
         Ok(MorseBondedState {
             device,
@@ -110,7 +111,7 @@ impl Potential for MorseBondedState {
         "morse_bonded"
     }
 
-    fn max_cutoff(&self) -> Option<f32> {
+    fn max_cutoff(&self) -> Option<Real> {
         None
     }
 
@@ -196,12 +197,12 @@ fn htod_or_empty_u32(
     }
 }
 
-fn htod_or_empty_f32(
+fn htod_or_empty(
     device: &Arc<CudaDevice>,
-    data: &[f32],
-) -> Result<CudaSlice<f32>, GpuError> {
+    data: &[Real],
+) -> Result<CudaSlice<Real>, GpuError> {
     if data.is_empty() {
-        device.alloc_zeros::<f32>(0).map_err(GpuError::from)
+        device.alloc_zeros::<Real>(0).map_err(GpuError::from)
     } else {
         device.htod_sync_copy(data).map_err(GpuError::from)
     }

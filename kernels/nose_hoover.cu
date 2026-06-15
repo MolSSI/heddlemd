@@ -16,24 +16,26 @@
 // completely determined by `blockDim.x` and `n`, so two runs with
 // byte-identical inputs on the same GPU produce a byte-identical
 // `partial_out[0]`.
+#include "precision.cuh"
+
 extern "C" __global__ void kinetic_energy_reduce(
-    const float *velocities_x,
-    const float *velocities_y,
-    const float *velocities_z,
-    const float *masses,
-    float *partial_out,    // length 1; only thread 0 writes
+    const Real *velocities_x,
+    const Real *velocities_y,
+    const Real *velocities_z,
+    const Real *masses,
+    Real *partial_out,    // length 1; only thread 0 writes
     unsigned int n)
 {
-  __shared__ float partial[256];
+  __shared__ Real partial[256];
 
   unsigned int tid = threadIdx.x;
-  float sum = 0.0f;
+  Real sum = R(0.0);
   for (unsigned int i = tid; i < n; i += blockDim.x) {
-    float vx = velocities_x[i];
-    float vy = velocities_y[i];
-    float vz = velocities_z[i];
-    float m = masses[i];
-    sum += 0.5f * m * (vx * vx + vy * vy + vz * vz);
+    Real vx = velocities_x[i];
+    Real vy = velocities_y[i];
+    Real vz = velocities_z[i];
+    Real m = masses[i];
+    sum += R(0.5) * m * (vx * vx + vy * vy + vz * vz);
   }
   partial[tid] = sum;
   __syncthreads();
@@ -54,10 +56,10 @@ extern "C" __global__ void kinetic_energy_reduce(
 // component of every particle. One thread per particle, no inter-thread
 // interaction.
 extern "C" __global__ void rescale_velocities(
-    float *velocities_x,
-    float *velocities_y,
-    float *velocities_z,
-    float factor,
+    Real *velocities_x,
+    Real *velocities_y,
+    Real *velocities_z,
+    Real factor,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;

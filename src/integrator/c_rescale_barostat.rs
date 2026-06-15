@@ -14,6 +14,7 @@ use crate::timings::{KernelStage, Timings};
 
 use super::philox::philox_normal;
 use super::{Barostat, BarostatBuilder, BarostatError};
+use crate::precision::Real;
 
 // rq-1f87880c
 #[derive(Debug, Clone, Deserialize)]
@@ -69,8 +70,8 @@ pub struct CRescaleBarostat {
     pub cumulative_barostat_injection: f64,
     pub most_recent_pressure: f64,
     pub most_recent_volume: f64,
-    ke_scratch: CudaSlice<f32>,
-    virial_scratch: CudaSlice<f32>,
+    ke_scratch: CudaSlice<Real>,
+    virial_scratch: CudaSlice<Real>,
 }
 
 impl CRescaleBarostat {
@@ -84,8 +85,8 @@ impl CRescaleBarostat {
         compressibility: f64,
         seed: u64,
     ) -> Result<Self, GpuError> {
-        let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
-        let virial_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
+        let ke_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
+        let virial_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         Ok(CRescaleBarostat {
             pressure,
             temperature,
@@ -108,7 +109,7 @@ impl Barostat for CRescaleBarostat {
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &mut SimulationBox,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), BarostatError> {
         if buffers.particle_count() == 0 {
@@ -145,14 +146,14 @@ impl Barostat for CRescaleBarostat {
         let mu_cubed = 1.0 + deterministic + noise_amplitude * r;
         let mu_cubed_clamped = mu_cubed.max(MU_MIN * MU_MIN * MU_MIN);
         let mu = mu_cubed_clamped.cbrt();
-        let mu_f32 = mu as f32;
+        let mu = mu as Real;
 
         timings.kernel_start(KernelStage::C_RESCALE_BAROSTAT_RESCALE_POSITIONS)?;
-        rescale_positions(buffers, mu_f32)?;
+        rescale_positions(buffers, mu)?;
         timings.kernel_stop(KernelStage::C_RESCALE_BAROSTAT_RESCALE_POSITIONS)?;
 
         sim_box
-            .rescale_isotropic(mu_f32)
+            .rescale_isotropic(mu)
             .map_err(|_| BarostatError::Gpu(GpuError(
                 cudarc::driver::DriverError(
                     cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,

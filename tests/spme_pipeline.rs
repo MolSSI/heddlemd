@@ -12,8 +12,9 @@ use heddle_md::gpu::{K_COULOMB_F32, ParticleBuffers, init_device};
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::Timings;
+use heddle_md::precision::Real;
 
-fn build_state(positions: &[[f32; 3]], charges: &[f32]) -> ParticleState {
+fn build_state(positions: &[[Real; 3]], charges: &[Real]) -> ParticleState {
     let n = positions.len();
     assert_eq!(charges.len(), n);
     let mut px = Vec::with_capacity(n);
@@ -28,10 +29,10 @@ fn build_state(positions: &[[f32; 3]], charges: &[f32]) -> ParticleState {
         px,
         py,
         pz,
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
         charges.to_vec(),
         vec![0u32; n],
         None,
@@ -43,8 +44,8 @@ fn build_state(positions: &[[f32; 3]], charges: &[f32]) -> ParticleState {
 /// Explicit-Ewald reciprocal-space energy (truncated to |m_d| <= m_max).
 /// Returns U_recip in joules. For an orthorhombic box.
 fn explicit_ewald_recip_energy(
-    positions: &[[f32; 3]],
-    charges: &[f32],
+    positions: &[[Real; 3]],
+    charges: &[Real],
     box_lengths: [f64; 3],
     alpha: f64,
     m_max: i32,
@@ -85,8 +86,8 @@ fn spme_energy_from_pipeline(grid: &SpmeReciprocalGrid) -> f64 {
     // (1/2) Σ_g rho[g] · V[g] computed host-side after dtoh.
     let device = grid.device.clone();
     let m = grid.m;
-    let rho_host: Vec<f32> = device.dtoh_sync_copy(&grid.rho).expect("dtoh rho");
-    let v_host: Vec<f32> = device.dtoh_sync_copy(&grid.v).expect("dtoh V");
+    let rho_host: Vec<Real> = device.dtoh_sync_copy(&grid.rho).expect("dtoh rho");
+    let v_host: Vec<Real> = device.dtoh_sync_copy(&grid.v).expect("dtoh V");
     assert_eq!(rho_host.len(), m);
     assert_eq!(v_host.len(), m);
     let mut e = 0.0_f64;
@@ -100,10 +101,10 @@ fn spme_energy_from_pipeline(grid: &SpmeReciprocalGrid) -> f64 {
 #[test]
 fn spme_pipeline_matches_explicit_ewald_two_charge_pair() {
     let gpu = init_device().unwrap();
-    let l = 1.0e-9_f32;
+    let l = 1.0e-9;
     let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
-    let positions = [[0.2e-9_f32, 0.0, 0.0], [-0.2e-9, 0.0, 0.0]];
-    let e_charge = 1.602176634e-19_f32;
+    let positions = [[0.2e-9, 0.0, 0.0], [-0.2e-9, 0.0, 0.0]];
+    let e_charge = 1.602176634e-19;
     let charges = [e_charge, -e_charge];
     let state = build_state(&positions, &charges);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -141,15 +142,15 @@ fn spme_pipeline_matches_explicit_ewald_two_charge_pair() {
 #[test]
 fn spme_pipeline_matches_explicit_ewald_four_charges() {
     let gpu = init_device().unwrap();
-    let l = 1.0e-9_f32;
+    let l = 1.0e-9;
     let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
     let positions = [
-        [0.1e-9_f32, 0.0, 0.0],
+        [0.1e-9, 0.0, 0.0],
         [-0.1e-9, 0.2e-9, 0.0],
         [0.0, -0.2e-9, 0.15e-9],
         [-0.15e-9, 0.1e-9, -0.1e-9],
     ];
-    let e_charge = 1.602176634e-19_f32;
+    let e_charge = 1.602176634e-19;
     let charges = [e_charge, -e_charge, 2.0 * e_charge, -2.0 * e_charge];
     let state = build_state(&positions, &charges);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -188,16 +189,16 @@ fn spme_pipeline_matches_explicit_ewald_four_charges() {
 #[test]
 fn spread_conserves_total_charge() {
     let gpu = init_device().unwrap();
-    let l = 1.0e-9_f32;
+    let l = 1.0e-9;
     let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
     let positions = [
-        [0.1e-9_f32, 0.05e-9, -0.2e-9],
+        [0.1e-9, 0.05e-9, -0.2e-9],
         [-0.1e-9, 0.2e-9, 0.15e-9],
         [0.25e-9, -0.1e-9, 0.0],
     ];
     // Use a net-non-zero charge configuration so the relative-error
     // assertion is well-defined.
-    let charges = [0.3_f32, -0.5, 0.4];
+    let charges = [0.3, -0.5, 0.4];
     let total_charge: f64 = charges.iter().map(|&q| q as f64).sum();
     let state = build_state(&positions, &charges);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -214,7 +215,7 @@ fn spread_conserves_total_charge() {
     spme.compute(&sim_box, &buffers, &mut timings).unwrap();
     spme.sync_recip().unwrap();
 
-    let rho: Vec<f32> = gpu.device.dtoh_sync_copy(&spme.rho).unwrap();
+    let rho: Vec<Real> = gpu.device.dtoh_sync_copy(&spme.rho).unwrap();
     let summed: f64 = rho.iter().map(|&v| v as f64).sum();
     let rel = (summed - total_charge).abs() / total_charge.abs();
     assert!(
@@ -230,7 +231,7 @@ fn spread_conserves_total_charge() {
 #[test]
 fn k_zero_entry_of_influence_function_is_zero() {
     let gpu = init_device().unwrap();
-    let l = 1.0e-9_f32;
+    let l = 1.0e-9;
     let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
     let state = build_state(&[[0.0, 0.0, 0.0]], &[1.0]);
     let _buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -241,7 +242,7 @@ fn k_zero_entry_of_influence_function_is_zero() {
         spline_order: 4,
     };
     let spme = SpmeReciprocalGrid::new(&gpu, &sim_box, 1, params).unwrap();
-    let g: Vec<f32> = gpu.device.dtoh_sync_copy(&spme.influence_g).unwrap();
+    let g: Vec<Real> = gpu.device.dtoh_sync_copy(&spme.influence_g).unwrap();
     assert_eq!(g[0], 0.0, "influence_G[0] must be zero (tinfoil BC)");
 }
 
@@ -249,10 +250,10 @@ fn k_zero_entry_of_influence_function_is_zero() {
 #[test]
 fn identical_inputs_produce_byte_identical_grids() {
     let gpu = init_device().unwrap();
-    let l = 1.0e-9_f32;
+    let l = 1.0e-9;
     let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
-    let positions = [[0.1e-9_f32, 0.0, 0.0], [-0.1e-9, 0.0, 0.0]];
-    let e = 1.602176634e-19_f32;
+    let positions = [[0.1e-9, 0.0, 0.0], [-0.1e-9, 0.0, 0.0]];
+    let e = 1.602176634e-19;
     let charges = [e, -e];
     let state = build_state(&positions, &charges);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -272,11 +273,11 @@ fn identical_inputs_produce_byte_identical_grids() {
     spme1.sync_recip().unwrap();
     spme2.sync_recip().unwrap();
 
-    let v1: Vec<f32> = gpu.device.dtoh_sync_copy(&spme1.v).unwrap();
-    let v2: Vec<f32> = gpu.device.dtoh_sync_copy(&spme2.v).unwrap();
+    let v1: Vec<Real> = gpu.device.dtoh_sync_copy(&spme1.v).unwrap();
+    let v2: Vec<Real> = gpu.device.dtoh_sync_copy(&spme2.v).unwrap();
     assert_eq!(v1, v2);
-    let rho1: Vec<f32> = gpu.device.dtoh_sync_copy(&spme1.rho).unwrap();
-    let rho2: Vec<f32> = gpu.device.dtoh_sync_copy(&spme2.rho).unwrap();
+    let rho1: Vec<Real> = gpu.device.dtoh_sync_copy(&spme1.rho).unwrap();
+    let rho2: Vec<Real> = gpu.device.dtoh_sync_copy(&spme2.rho).unwrap();
     assert_eq!(rho1, rho2);
 }
 
@@ -306,7 +307,7 @@ fn small_box_grid(spme: SpmeParameters, n: usize) -> (
     SpmeReciprocalGrid,
 ) {
     let gpu = init_device().unwrap();
-    let l = 1.0e-9_f32;
+    let l = 1.0e-9;
     let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
     let grid = SpmeReciprocalGrid::new(&gpu, &sim_box, n, spme).unwrap();
     (gpu, sim_box, grid)
@@ -316,14 +317,14 @@ fn small_box_grid(spme: SpmeParameters, n: usize) -> (
 #[test]
 fn spread_for_one_isolated_particle_matches_b_spline_weights() {
     let gpu = init_device().unwrap();
-    let l = 1.0e-9_f32;
+    let l = 1.0e-9;
     let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
     let p_u = 4u32;
     let n_grid = 16u32;
     // Fractional position in [-0.5, 0.5) (box is centred at origin).
     let s = [0.11_f64, -0.18, 0.37];
-    let q: f32 = 0.5;
-    let positions = [[(s[0] as f32) * l, (s[1] as f32) * l, (s[2] as f32) * l]];
+    let q: Real = 0.5;
+    let positions = [[(s[0] as Real) * l, (s[1] as Real) * l, (s[2] as Real) * l]];
     let state = build_state(&positions, &[q]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let params = SpmeParameters {
@@ -336,7 +337,7 @@ fn spread_for_one_isolated_particle_matches_b_spline_weights() {
     let mut t = Timings::new(&gpu).unwrap();
     grid.compute(&sim_box, &buffers, &mut t).unwrap();
     grid.sync_recip().unwrap();
-    let rho: Vec<f32> = gpu.device.dtoh_sync_copy(&grid.rho).unwrap();
+    let rho: Vec<Real> = gpu.device.dtoh_sync_copy(&grid.rho).unwrap();
     // The kernel maps each particle to fractional coords s_a, computes
     // u = (s_a + 0.5) * n, bin = floor(u), t = u - bin, and adds the
     // contribution `q · M_p(da + t)` to grid point `(bin + da) % n` for
@@ -381,14 +382,14 @@ fn spread_for_one_isolated_particle_matches_b_spline_weights() {
 #[test]
 fn spread_is_zero_at_a_grid_point_with_no_particle_support() {
     let gpu = init_device().unwrap();
-    let l = 1.0e-9_f32;
+    let l = 1.0e-9;
     let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
     // Particle at fractional s = (0.2, 0.2, 0.2); with the kernel's
     // centring shift s + 0.5 → 0.7 and grid size 16, the spline bins are
     // {8, 9, 10, 11} on each axis (p = 4). Grid point (0, 0, 0) sits
     // outside that support on every axis, so rho[0] must be exactly zero.
-    let positions = [[0.2_f32 * l, 0.2 * l, 0.2 * l]];
-    let state = build_state(&positions, &[1.0_f32]);
+    let positions = [[0.2 * l, 0.2 * l, 0.2 * l]];
+    let state = build_state(&positions, &[1.0]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let params = SpmeParameters {
         alpha: 4.0e9,
@@ -400,7 +401,7 @@ fn spread_is_zero_at_a_grid_point_with_no_particle_support() {
     let mut t = Timings::new(&gpu).unwrap();
     grid.compute(&sim_box, &buffers, &mut t).unwrap();
     grid.sync_recip().unwrap();
-    let rho: Vec<f32> = gpu.device.dtoh_sync_copy(&grid.rho).unwrap();
+    let rho: Vec<Real> = gpu.device.dtoh_sync_copy(&grid.rho).unwrap();
     assert_eq!(rho[0], 0.0, "rho at unsupported grid point must be exactly zero");
 }
 
@@ -408,14 +409,14 @@ fn spread_is_zero_at_a_grid_point_with_no_particle_support() {
 #[test]
 fn spread_is_byte_identical_under_two_input_orderings_in_same_bin() {
     let gpu = init_device().unwrap();
-    let l = 1.0e-9_f32;
+    let l = 1.0e-9;
     let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
     // Two particles in the same primary bin (close in fractional coords)
     // submitted in two different orderings.
-    let p0 = [0.31_f32 * l, 0.42 * l, 0.57 * l];
-    let p1 = [0.32_f32 * l, 0.43 * l, 0.58 * l];
-    let q0: f32 = 0.5;
-    let q1: f32 = -0.7;
+    let p0 = [0.31 * l, 0.42 * l, 0.57 * l];
+    let p1 = [0.32 * l, 0.43 * l, 0.58 * l];
+    let q0: Real = 0.5;
+    let q1: Real = -0.7;
     let state_a = build_state(&[p0, p1], &[q0, q1]);
     let state_b = build_state(&[p1, p0], &[q1, q0]);
     let buffers_a = ParticleBuffers::new(&gpu, &state_a).unwrap();
@@ -433,8 +434,8 @@ fn spread_is_byte_identical_under_two_input_orderings_in_same_bin() {
     grid_b.compute(&sim_box, &buffers_b, &mut t).unwrap();
     grid_a.sync_recip().unwrap();
     grid_b.sync_recip().unwrap();
-    let rho_a: Vec<f32> = gpu.device.dtoh_sync_copy(&grid_a.rho).unwrap();
-    let rho_b: Vec<f32> = gpu.device.dtoh_sync_copy(&grid_b.rho).unwrap();
+    let rho_a: Vec<Real> = gpu.device.dtoh_sync_copy(&grid_a.rho).unwrap();
+    let rho_b: Vec<Real> = gpu.device.dtoh_sync_copy(&grid_b.rho).unwrap();
     assert_eq!(rho_a, rho_b, "cell-list sort must canonicalise particle order within a bin");
 }
 
@@ -453,7 +454,7 @@ fn forward_fft_of_a_zero_grid_produces_zero() {
         .execute(&grid.rho, &mut grid.rho_hat_interleaved)
         .unwrap();
     grid.sync_recip().unwrap();
-    let rho_hat: Vec<f32> = gpu
+    let rho_hat: Vec<Real> = gpu
         .device
         .dtoh_sync_copy(&grid.rho_hat_interleaved)
         .unwrap();
@@ -475,7 +476,7 @@ fn inverse_fft_round_trips_forward_fft_up_to_scale_factor() {
     let (gpu, _sim_box, mut grid) = small_box_grid(params, 0);
     // Fill rho with a deterministic non-trivial pattern.
     let m = grid.m;
-    let input: Vec<f32> = (0..m).map(|i| ((i as f32) * 0.013).sin()).collect();
+    let input: Vec<Real> = (0..m).map(|i| ((i as Real) * 0.013).sin()).collect();
     gpu.device
         .htod_sync_copy_into(&input, &mut grid.rho)
         .unwrap();
@@ -487,7 +488,7 @@ fn inverse_fft_round_trips_forward_fft_up_to_scale_factor() {
         .execute(&grid.rho_hat_interleaved, &mut grid.v)
         .unwrap();
     grid.sync_recip().unwrap();
-    let round_trip: Vec<f32> = gpu.device.dtoh_sync_copy(&grid.v).unwrap();
+    let round_trip: Vec<Real> = gpu.device.dtoh_sync_copy(&grid.v).unwrap();
     let scale = m as f64;
     for (i, (&a, &b)) in input.iter().zip(round_trip.iter()).enumerate() {
         let expected = (a as f64) * scale;
@@ -501,7 +502,7 @@ fn inverse_fft_round_trips_forward_fft_up_to_scale_factor() {
 fn spme_reciprocal_internal_cell_list_uses_one_bin_per_fft_grid_cell() {
     use cudarc::driver::DeviceSlice;
     let gpu = init_device().unwrap();
-    let l = 1.0e-9_f32;
+    let l = 1.0e-9;
     let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
     let params = SpmeParameters {
         alpha: 4.0e9,
@@ -526,10 +527,10 @@ fn spme_reciprocal_internal_cell_list_uses_one_bin_per_fft_grid_cell() {
 fn bin_only_cell_list_rebuilds_every_step_regardless_of_displacement() {
     use heddle_md::timings::{HostStage, KernelStage};
     let gpu = init_device().unwrap();
-    let l = 1.0e-9_f32;
+    let l = 1.0e-9;
     let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
-    let positions = [[0.1e-9_f32, 0.0, 0.0], [-0.1e-9, 0.0, 0.0]];
-    let charges = [1.0_f32, -1.0];
+    let positions = [[0.1e-9, 0.0, 0.0], [-0.1e-9, 0.0, 0.0]];
+    let charges = [1.0, -1.0];
     let state = build_state(&positions, &charges);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let params = SpmeParameters {

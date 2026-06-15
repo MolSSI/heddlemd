@@ -5,6 +5,7 @@ use heddle_md::integrator::IntegratorStepExt;
 use heddle_md::integrator::{LangevinBaoabBuilder, IntegratorBuilder, IntegratorRegistry};
 use heddle_md::io::SlotConfig;
 use heddle_md::pbc::SimulationBox;
+use heddle_md::precision::Real;
 
 // k_B = 1 in the engine's atomic units; this is the SI value used by
 // SI-mode test inputs that get converted on load.
@@ -31,14 +32,14 @@ fn tmp_path(name: &str) -> PathBuf {
 
 fn one_particle_state() -> ParticleState {
     ParticleState::new(
-        vec![1.0_f32],
-        vec![2.0_f32],
-        vec![3.0_f32],
-        vec![0.5_f32],
-        vec![-0.25_f32],
-        vec![0.125_f32],
-        vec![1.0_f32],
-        vec![0.0_f32; vec![1.0_f32].len()],
+        vec![1.0],
+        vec![2.0],
+        vec![3.0],
+        vec![0.5],
+        vec![-0.25],
+        vec![0.125],
+        vec![1.0],
+        vec![0.0; vec![1.0].len()],
         vec![0u32; 1],
         None,
             None,
@@ -47,8 +48,8 @@ fn one_particle_state() -> ParticleState {
 }
 
 fn n_particle_state(n: usize) -> ParticleState {
-    let pos: Vec<f32> = (0..n).map(|i| i as f32 * 0.1).collect();
-    let velos: Vec<f32> = (0..n).map(|i| i as f32 * 0.05).collect();
+    let pos: Vec<Real> = (0..n).map(|i| i as Real * 0.1).collect();
+    let velos: Vec<Real> = (0..n).map(|i| i as Real * 0.05).collect();
     ParticleState::new(
         pos.clone(),
         pos.clone(),
@@ -56,8 +57,8 @@ fn n_particle_state(n: usize) -> ParticleState {
         velos.clone(),
         velos.clone(),
         velos,
-        vec![1.0_f32; n],
-        vec![0.0_f32; n],
+        vec![1.0; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
@@ -149,7 +150,7 @@ fn lan_drift_half_on_empty_is_noop() {
     let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
-        vec![0.0_f32; 0],
+        vec![0.0; 0],
         Vec::new(), None,
             None,
     )
@@ -193,7 +194,7 @@ fn lan_ou_step_on_empty_is_noop() {
     let gpu = init_device().unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
-        vec![0.0_f32; 0],
+        vec![0.0; 0],
         Vec::new(), None,
             None,
     )
@@ -274,19 +275,19 @@ fn different_step_indices_produce_different_velocities() {
 fn ou_variance_scales_with_predicted_factor() {
     let gpu = init_device().unwrap();
     let n = 10_000;
-    let mass = 6.6335e-26_f32;
+    let mass = 6.6335e-26;
     let temperature = 300.0_f64;
-    let kt = (BOLTZMANN_J_PER_K * temperature) as f32;
-    let alpha = 0.5_f32;
+    let kt = (BOLTZMANN_J_PER_K * temperature) as Real;
+    let alpha = 0.5;
     let state = ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
         vec![mass; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
@@ -369,7 +370,7 @@ fn langevin_step_on_empty_is_noop() {
     let gpu = init_device().unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
-        vec![0.0_f32; 0],
+        vec![0.0; 0],
         Vec::new(), None,
             None,
     )
@@ -624,14 +625,14 @@ fn lan_drift_half_wraps_across_plus_l_half() {
     let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let state = heddle_md::state::ParticleState::new(
-        vec![4.95_f32],
+        vec![4.95],
         vec![0.0],
         vec![0.0],
-        vec![2.0_f32],
+        vec![2.0],
         vec![0.0],
         vec![0.0],
         vec![1.0],
-        vec![0.0_f32; vec![1.0].len()],
+        vec![0.0; vec![1.0].len()],
         vec![0u32; 1],
         None,
         None,
@@ -641,7 +642,7 @@ fn lan_drift_half_wraps_across_plus_l_half() {
     lan_drift_half(&mut buffers, &sim_box, 0.1).unwrap();
     let mut snap = state.clone();
     snap.download_from(&buffers).unwrap();
-    assert!((snap.positions_x[0] - (-4.95_f32)).abs() < 1e-5);
+    assert!((snap.positions_x[0] - (-4.95)).abs() < 1e-5);
     assert_eq!(snap.images_x[0], 1);
 }
 
@@ -651,14 +652,14 @@ fn lan_drift_half_preserves_image_flags_when_no_wrap() {
     let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let state = heddle_md::state::ParticleState::new(
-        vec![0.0_f32],
         vec![0.0],
         vec![0.0],
-        vec![0.1_f32],
-        vec![0.1_f32],
-        vec![0.1_f32],
+        vec![0.0],
+        vec![0.1],
+        vec![0.1],
+        vec![0.1],
         vec![1.0],
-        vec![0.0_f32; vec![1.0].len()],
+        vec![0.0; vec![1.0].len()],
         vec![0u32; 1],
         None,
         Some((vec![3], vec![-1], vec![0])),

@@ -4,28 +4,29 @@ use cudarc::driver::{CudaDevice, CudaSlice, DeviceSlice};
 
 use crate::gpu::{GpuContext, GpuError, Kernels};
 use crate::state::{ParticleState, ParticleStateError, check_len};
+use crate::precision::Real;
 
 // rq-4a8de06c
 #[derive(Debug)]
 pub struct ParticleBuffers {
     pub device: Arc<CudaDevice>,
     pub kernels: Arc<Kernels>,
-    pub positions_x: CudaSlice<f32>,
-    pub positions_y: CudaSlice<f32>,
-    pub positions_z: CudaSlice<f32>,
+    pub positions_x: CudaSlice<Real>,
+    pub positions_y: CudaSlice<Real>,
+    pub positions_z: CudaSlice<Real>,
     pub images_x: CudaSlice<i32>,
     pub images_y: CudaSlice<i32>,
     pub images_z: CudaSlice<i32>,
-    pub velocities_x: CudaSlice<f32>,
-    pub velocities_y: CudaSlice<f32>,
-    pub velocities_z: CudaSlice<f32>,
-    pub forces_x: CudaSlice<f32>,
-    pub forces_y: CudaSlice<f32>,
-    pub forces_z: CudaSlice<f32>,
-    pub potential_energies: CudaSlice<f32>,
-    pub virials: CudaSlice<f32>,
-    pub masses: CudaSlice<f32>,
-    pub charges: CudaSlice<f32>,
+    pub velocities_x: CudaSlice<Real>,
+    pub velocities_y: CudaSlice<Real>,
+    pub velocities_z: CudaSlice<Real>,
+    pub forces_x: CudaSlice<Real>,
+    pub forces_y: CudaSlice<Real>,
+    pub forces_z: CudaSlice<Real>,
+    pub potential_energies: CudaSlice<Real>,
+    pub virials: CudaSlice<Real>,
+    pub masses: CudaSlice<Real>,
+    pub charges: CudaSlice<Real>,
     pub type_indices: CudaSlice<u32>,
     pub particle_ids: CudaSlice<u32>,
 }

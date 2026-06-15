@@ -18,6 +18,7 @@ use heddle_md::io::config::NeighborListConfig;
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::{KernelStage, Timings};
+use heddle_md::precision::Real;
 
 #[allow(dead_code)]
 const KB: f64 = 1.380649e-23;
@@ -27,9 +28,9 @@ const TIME_F: f64 = 2.4188843265857195e-17;
 const TEMP_F: f64 = 315775.0248040668;
 const VEL_F: f64 = 2187691.2636411153;
 
-fn small_state(n: usize, mass: f32) -> ParticleState {
-    let pos: Vec<f32> = (0..n).map(|i| (i as f32) * 0.1).collect();
-    let zero = vec![0.0_f32; n];
+fn small_state(n: usize, mass: Real) -> ParticleState {
+    let pos: Vec<Real> = (0..n).map(|i| (i as Real) * 0.1).collect();
+    let zero = vec![0.0; n];
     ParticleState::new(
         pos,
         zero.clone(),
@@ -38,7 +39,7 @@ fn small_state(n: usize, mass: f32) -> ParticleState {
         zero.clone(),
         zero,
         vec![mass; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         None,
@@ -47,7 +48,7 @@ fn small_state(n: usize, mass: f32) -> ParticleState {
 }
 
 fn box_large() -> SimulationBox {
-    let l = (1.0e6 / LEN_F) as f32;
+    let l = (1.0e6 / LEN_F) as Real;
     SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
@@ -150,7 +151,7 @@ fn kinetic_energy_reduce_zero_velocity_returns_zero() {
     let gpu = init_device().unwrap();
     let state = small_state(4, 1.0);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
+    let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let ke = compute_kinetic_energy(&buffers, &mut scratch).unwrap();
     assert_eq!(ke, 0.0);
 }
@@ -160,28 +161,28 @@ fn kinetic_energy_reduce_zero_velocity_returns_zero() {
 fn kinetic_energy_reduce_matches_host_formula() {
     let gpu = init_device().unwrap();
     let n = 8usize;
-    let masses: Vec<f32> = (0..n).map(|i| 1.0 + 0.5 * i as f32).collect();
-    let vx: Vec<f32> = (0..n).map(|i| 0.1 + i as f32).collect();
-    let vy: Vec<f32> = (0..n).map(|i| -0.2 * i as f32).collect();
-    let vz: Vec<f32> = (0..n).map(|i| 0.3 - i as f32).collect();
+    let masses: Vec<Real> = (0..n).map(|i| 1.0 + 0.5 * i as Real).collect();
+    let vx: Vec<Real> = (0..n).map(|i| 0.1 + i as Real).collect();
+    let vy: Vec<Real> = (0..n).map(|i| -0.2 * i as Real).collect();
+    let vz: Vec<Real> = (0..n).map(|i| 0.3 - i as Real).collect();
     let state = ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
         vx.clone(),
         vy.clone(),
         vz.clone(),
         masses.clone(),
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         None,
     )
     .unwrap();
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
+    let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let ke = compute_kinetic_energy(&buffers, &mut scratch).unwrap();
-    let mut expected = 0.0_f32;
+    let mut expected = 0.0;
     for i in 0..n {
         expected += 0.5 * masses[i] * (vx[i] * vx[i] + vy[i] * vy[i] + vz[i] * vz[i]);
     }
@@ -194,19 +195,19 @@ fn kinetic_energy_reduce_matches_host_formula() {
 fn kinetic_energy_reduce_is_deterministic() {
     let gpu = init_device().unwrap();
     let n = 1000usize;
-    let masses: Vec<f32> = (0..n).map(|i| 1.0 + 0.001 * i as f32).collect();
-    let vx: Vec<f32> = (0..n).map(|i| (i as f32).sin()).collect();
-    let vy: Vec<f32> = (0..n).map(|i| (i as f32).cos()).collect();
-    let vz: Vec<f32> = (0..n).map(|i| 0.5 - 0.001 * i as f32).collect();
+    let masses: Vec<Real> = (0..n).map(|i| 1.0 + 0.001 * i as Real).collect();
+    let vx: Vec<Real> = (0..n).map(|i| (i as Real).sin()).collect();
+    let vy: Vec<Real> = (0..n).map(|i| (i as Real).cos()).collect();
+    let vz: Vec<Real> = (0..n).map(|i| 0.5 - 0.001 * i as Real).collect();
     let state = ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
         vx,
         vy,
         vz,
         masses,
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         None,
@@ -214,8 +215,8 @@ fn kinetic_energy_reduce_is_deterministic() {
     .unwrap();
     let buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
     let buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut scratch_a = gpu.device.alloc_zeros::<f32>(1).unwrap();
-    let mut scratch_b = gpu.device.alloc_zeros::<f32>(1).unwrap();
+    let mut scratch_a = gpu.device.alloc_zeros::<Real>(1).unwrap();
+    let mut scratch_b = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let ke_a = compute_kinetic_energy(&buffers_a, &mut scratch_a).unwrap();
     let ke_b = compute_kinetic_energy(&buffers_b, &mut scratch_b).unwrap();
     assert_eq!(ke_a.to_bits(), ke_b.to_bits());
@@ -227,7 +228,7 @@ fn kinetic_energy_reduce_empty_state_returns_zero() {
     let gpu = init_device().unwrap();
     let state = small_state(0, 1.0);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
+    let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let ke = compute_kinetic_energy(&buffers, &mut scratch).unwrap();
     assert_eq!(ke, 0.0);
 }
@@ -239,14 +240,14 @@ fn kinetic_energy_reduce_empty_state_returns_zero() {
 fn rescale_velocities_multiplies_components_by_factor() {
     let gpu = init_device().unwrap();
     let state = ParticleState::new(
-        vec![0.0_f32; 2],
-        vec![0.0_f32; 2],
-        vec![0.0_f32; 2],
-        vec![1.0_f32, -4.0_f32],
-        vec![2.0_f32, 5.0_f32],
-        vec![3.0_f32, -6.0_f32],
-        vec![1.0_f32; 2],
-        vec![0.0_f32; 2],
+        vec![0.0; 2],
+        vec![0.0; 2],
+        vec![0.0; 2],
+        vec![1.0, -4.0],
+        vec![2.0, 5.0],
+        vec![3.0, -6.0],
+        vec![1.0; 2],
+        vec![0.0; 2],
         vec![0u32; 2],
         None,
         None,
@@ -257,9 +258,9 @@ fn rescale_velocities_multiplies_components_by_factor() {
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     let vy = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
     let vz = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
-    assert_eq!(vx, vec![0.5_f32, -2.0_f32]);
-    assert_eq!(vy, vec![1.0_f32, 2.5_f32]);
-    assert_eq!(vz, vec![1.5_f32, -3.0_f32]);
+    assert_eq!(vx, vec![0.5, -2.0]);
+    assert_eq!(vy, vec![1.0, 2.5]);
+    assert_eq!(vz, vec![1.5, -3.0]);
 }
 
 // rq-393a7932
@@ -267,18 +268,18 @@ fn rescale_velocities_multiplies_components_by_factor() {
 fn rescale_velocities_factor_one_is_identity() {
     let gpu = init_device().unwrap();
     let n = 4usize;
-    let vx: Vec<f32> = (0..n).map(|i| 0.5 - i as f32).collect();
-    let vy: Vec<f32> = (0..n).map(|i| 1.0 + 0.3 * i as f32).collect();
-    let vz: Vec<f32> = (0..n).map(|i| -0.2 * i as f32).collect();
+    let vx: Vec<Real> = (0..n).map(|i| 0.5 - i as Real).collect();
+    let vy: Vec<Real> = (0..n).map(|i| 1.0 + 0.3 * i as Real).collect();
+    let vz: Vec<Real> = (0..n).map(|i| -0.2 * i as Real).collect();
     let state = ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
         vx.clone(),
         vy.clone(),
         vz.clone(),
-        vec![1.0_f32; n],
-        vec![0.0_f32; n],
+        vec![1.0; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         None,
@@ -311,10 +312,10 @@ fn nhc_apply_pre_and_apply_post_launch_expected_kernels() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_nhc(&gpu, n, &nhc_kind(300.0, 1.0e-13, 3, 3, 1));
     therm
-        .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
     therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count_for = |stage: KernelStage| -> u64 {
@@ -343,7 +344,7 @@ fn nhc_apply_pre_empty_state_is_noop() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_nhc(&gpu, 0, &nhc_kind(300.0, 1.0e-13, 3, 3, 1));
     therm
-        .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
 }
 
@@ -356,7 +357,7 @@ fn nhc_apply_post_empty_state_is_noop() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_nhc(&gpu, 0, &nhc_kind(300.0, 1.0e-13, 3, 3, 1));
     therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
 }
 
@@ -426,26 +427,26 @@ fn nhc_log_column_values_combines_ke_pe_and_chain_term() {
 // --- End-to-end determinism + COM conservation ---
 
 fn atomic_state(n: usize) -> ParticleState {
-    let mass: f32 = (1.66e-27 / MASS_F) as f32;
-    let mut vx: Vec<f32> = Vec::with_capacity(n);
+    let mass: Real = (1.66e-27 / MASS_F) as Real;
+    let mut vx: Vec<Real> = Vec::with_capacity(n);
     for i in 0..n / 2 {
-        let v = (500.0 / VEL_F) as f32 * ((i as f32) + 1.0);
+        let v = (500.0 / VEL_F) as Real * ((i as Real) + 1.0);
         vx.push(v);
         vx.push(-v);
     }
     if vx.len() < n {
         vx.push(0.0);
     }
-    let zero = vec![0.0_f32; n];
+    let zero = vec![0.0; n];
     ParticleState::new(
-        (0..n).map(|i| (i as f32) * (1.0e-10 / LEN_F) as f32).collect(),
+        (0..n).map(|i| (i as Real) * (1.0e-10 / LEN_F) as Real).collect(),
         zero.clone(),
         zero.clone(),
         vx,
         zero.clone(),
         zero,
         vec![mass; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         None,
@@ -459,17 +460,17 @@ fn nhc_two_runs_with_identical_inputs_match() {
     let gpu = init_device().unwrap();
     let state = atomic_state(8);
 
-    fn run_once(gpu: &GpuContext, state: &ParticleState) -> Vec<f32> {
+    fn run_once(gpu: &GpuContext, state: &ParticleState) -> Vec<Real> {
         let n = state.particle_count();
         let mut buffers = ParticleBuffers::new(gpu, state).unwrap();
         let mut timings = Timings::new(gpu).unwrap();
         let mut therm = build_nhc(gpu, n, &nhc_kind(300.0, 1.0e-13, 3, 3, 1));
         for _ in 0..5 {
             therm
-                .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+                .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
                 .unwrap();
             therm
-                .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+                .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
                 .unwrap();
         }
         gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap()
@@ -489,7 +490,7 @@ fn nhc_preserves_com_momentum_to_round_off() {
     let gpu = init_device().unwrap();
     let n = 16usize;
     let state = atomic_state(n);
-    let mass = 1.66e-27_f32;
+    let mass = 1.66e-27;
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_large();
     let mut ff = empty_force_field(&gpu, n);
@@ -504,18 +505,18 @@ fn nhc_preserves_com_momentum_to_round_off() {
     ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     for _ in 0..20 {
         therm
-            .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+            .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
             .unwrap();
         integ
-            .step(&mut buffers, &mut sim_box, &mut ff, (1.0e-15 / TIME_F) as f32, &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, (1.0e-15 / TIME_F) as Real, &mut timings)
             .unwrap();
         therm
-            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
             .unwrap();
     }
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     let p_com: f64 = vx.iter().map(|&v| (mass as f64) * (v as f64)).sum();
-    let scale: f32 = vx.iter().map(|v| v.abs()).fold(0.0, f32::max);
+    let scale: Real = vx.iter().map(|v| v.abs()).fold(0.0, Real::max);
     let tol = (mass as f64) * (scale as f64) * 1.0e-3;
     assert!(
         p_com.abs() < tol,
@@ -558,7 +559,7 @@ fn rescale_velocities_does_not_modify_positions_masses_or_forces() {
     assert_eq!(pz, snap_pz);
     assert_eq!(masses, snap_masses);
     for v in fx.iter().chain(fy.iter()).chain(fz.iter()) {
-        assert_eq!(*v, 0.0_f32, "forces should remain at their pre-rescale value (zero here)");
+        assert_eq!(*v, 0.0, "forces should remain at their pre-rescale value (zero here)");
     }
 }
 

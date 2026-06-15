@@ -15,6 +15,7 @@ use crate::io::config::ConfigError;
 use crate::timings::{KernelStage, Timings};
 
 use super::{Thermostat, ThermostatBuilder, ThermostatError};
+use crate::precision::Real;
 
 // rq-1f87880c
 #[derive(Debug, Clone, Deserialize)]
@@ -188,7 +189,7 @@ pub struct NoseHooverChainThermostat {
     pub xi: Vec<f64>,
     pub p_xi: Vec<f64>,
     yoshida: &'static [f64],
-    ke_scratch: CudaSlice<f32>,
+    ke_scratch: CudaSlice<Real>,
     most_recent_ke: f64,
 }
 
@@ -216,7 +217,7 @@ impl NoseHooverChainThermostat {
                 q_mass[j] = kt * tau2;
             }
         }
-        let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
+        let ke_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         Ok(NoseHooverChainThermostat {
             temperature,
             tau,
@@ -236,7 +237,7 @@ impl NoseHooverChainThermostat {
 
     fn thermostat_half_step(
         &mut self,
-        dt: f32,
+        dt: Real,
         buffers: &mut ParticleBuffers,
         mut k: f64,
         timings: &mut Timings,
@@ -257,11 +258,11 @@ impl NoseHooverChainThermostat {
                     g_dof,
                     kt,
                 );
-                let factor_f32 = factor as f32;
+                let factor = factor as Real;
                 timings.kernel_start(KernelStage::NHC_RESCALE_VELOCITIES)?;
-                rescale_velocities(buffers, factor_f32)?;
+                rescale_velocities(buffers, factor)?;
                 timings.kernel_stop(KernelStage::NHC_RESCALE_VELOCITIES)?;
-                let factor_f64 = factor_f32 as f64;
+                let factor_f64 = factor as f64;
                 k *= factor_f64 * factor_f64;
             }
         }
@@ -274,7 +275,7 @@ impl Thermostat for NoseHooverChainThermostat {
     fn apply_pre(
         &mut self,
         buffers: &mut ParticleBuffers,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ThermostatError> {
         if buffers.particle_count() == 0 {
@@ -291,7 +292,7 @@ impl Thermostat for NoseHooverChainThermostat {
     fn apply_post(
         &mut self,
         buffers: &mut ParticleBuffers,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ThermostatError> {
         if buffers.particle_count() == 0 {

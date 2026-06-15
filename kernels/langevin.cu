@@ -3,26 +3,28 @@
 // counter-based Philox-4x32-10 RNG so the kernel is stateless on the device side
 // and fully reproducible given (seed, step_index, particle_id, axis_id).
 
+#include "precision.cuh"
+
 #include "philox.cuh"
 #include "pbc.cuh"
 
 // --- A step: x <- x + v * (dt / 2), then wrap into the primary image. -------
 
 extern "C" __global__ void lan_drift_half(
-    float *positions_x, float *positions_y, float *positions_z,
+    Real *positions_x, Real *positions_y, Real *positions_z,
     int *images_x, int *images_y, int *images_z,
-    const float *velocities_x, const float *velocities_y, const float *velocities_z,
-    float lx, float ly, float lz, float xy, float xz, float yz,
-    float dt,
+    const Real *velocities_x, const Real *velocities_y, const Real *velocities_z,
+    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    Real dt,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) return;
 
-  float half_dt = dt * 0.5f;
-  float px = positions_x[i] + velocities_x[i] * half_dt;
-  float py = positions_y[i] + velocities_y[i] * half_dt;
-  float pz = positions_z[i] + velocities_z[i] * half_dt;
+  Real half_dt = dt * R(0.5);
+  Real px = positions_x[i] + velocities_x[i] * half_dt;
+  Real py = positions_y[i] + velocities_y[i] * half_dt;
+  Real pz = positions_z[i] + velocities_z[i] * half_dt;
 
   int nx = images_x[i];
   int ny = images_y[i];
@@ -44,25 +46,25 @@ extern "C" __global__ void lan_drift_half(
 // --- O step: v <- alpha * v + sigma_i * xi, sigma_i = sqrt((1-alpha^2) kT/m_i).
 
 extern "C" __global__ void lan_ou_step(
-    float *velocities_x, float *velocities_y, float *velocities_z,
-    const float *masses,
+    Real *velocities_x, Real *velocities_y, Real *velocities_z,
+    const Real *masses,
     const unsigned int *particle_ids,
     unsigned int seed_lo, unsigned int seed_hi,
     unsigned int draw_counter_lo, unsigned int draw_counter_hi,
-    float alpha,
-    float kt,
+    Real alpha,
+    Real kt,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) return;
 
-  float m = masses[i];
-  float sigma_factor = sqrtf((1.0f - alpha * alpha) * kt / m);
+  Real m = masses[i];
+  Real sigma_factor = Real_sqrt((R(1.0) - alpha * alpha) * kt / m);
   unsigned int pid = particle_ids[i];
 
-  float xi_x = philox_gaussian(seed_lo, seed_hi, draw_counter_lo, draw_counter_hi, pid, 0u);
-  float xi_y = philox_gaussian(seed_lo, seed_hi, draw_counter_lo, draw_counter_hi, pid, 1u);
-  float xi_z = philox_gaussian(seed_lo, seed_hi, draw_counter_lo, draw_counter_hi, pid, 2u);
+  Real xi_x = philox_gaussian(seed_lo, seed_hi, draw_counter_lo, draw_counter_hi, pid, 0u);
+  Real xi_y = philox_gaussian(seed_lo, seed_hi, draw_counter_lo, draw_counter_hi, pid, 1u);
+  Real xi_z = philox_gaussian(seed_lo, seed_hi, draw_counter_lo, draw_counter_hi, pid, 2u);
 
   velocities_x[i] = alpha * velocities_x[i] + sigma_factor * xi_x;
   velocities_y[i] = alpha * velocities_y[i] + sigma_factor * xi_y;

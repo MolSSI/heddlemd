@@ -11,6 +11,7 @@ use crate::io::config::ConfigError;
 use crate::timings::{KernelStage, Timings};
 
 use super::{Thermostat, ThermostatBuilder, ThermostatError};
+use crate::precision::Real;
 
 // rq-1f87880c
 #[derive(Debug, Clone, Deserialize)]
@@ -45,7 +46,7 @@ pub struct BerendsenThermostat {
     pub g_dof: u32,
     pub kt_target: f64,
     pub cumulative_injection: f64,
-    ke_scratch: CudaSlice<f32>,
+    ke_scratch: CudaSlice<Real>,
     most_recent_ke: f64,
 }
 
@@ -61,7 +62,7 @@ impl BerendsenThermostat {
             ((3 * particle_count) as i64 - n_constraints as i64 - 3).max(1) as u32;
         // k_B = 1 in atomic units; temperature is already k_B · T.
         let kt_target = temperature;
-        let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
+        let ke_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         Ok(BerendsenThermostat {
             temperature,
             tau,
@@ -79,7 +80,7 @@ impl Thermostat for BerendsenThermostat {
     fn apply_post(
         &mut self,
         buffers: &mut ParticleBuffers,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ThermostatError> {
         if buffers.particle_count() == 0 {
@@ -99,7 +100,7 @@ impl Thermostat for BerendsenThermostat {
         let k_target = (nf / 2.0) * self.kt_target;
         let lambda_sq = (1.0 + ((dt as f64) / self.tau) * (k_target / k_old - 1.0)).max(0.0);
         let lambda = lambda_sq.sqrt();
-        let factor = lambda as f32;
+        let factor = lambda as Real;
 
         timings.kernel_start(KernelStage::BERENDSEN_RESCALE_VELOCITIES)?;
         rescale_velocities(buffers, factor)?;

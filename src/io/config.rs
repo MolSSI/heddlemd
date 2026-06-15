@@ -79,6 +79,13 @@ pub enum ConfigError {
     },
     #[error("config declares both [coulomb] and [spme]; only one electrostatics method may be active per run")]
     ConflictingElectrostatics,
+    // rq-lossless_unsupported_in_f64
+    #[error(
+        "[integrator] lossless = true is not available in the f64 build (the velocity-Verlet \
+         compensated f64 low-part has no meaning when storage is already double precision); \
+         rebuild without --features f64 to use lossless mode, or set lossless = false"
+    )]
+    LosslessUnsupportedInF64Build,
     #[error("config declares no [[phase]] entries; a simulation requires at least one phase")]
     EmptyPhases,
     #[error("duplicate phase name `{name}`")]

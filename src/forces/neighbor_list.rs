@@ -15,6 +15,7 @@ use crate::gpu::{
 use crate::kernels;
 use crate::pbc::SimulationBox;
 use crate::timings::{HostStage, KernelStage, Timings};
+use crate::precision::Real;
 
 // rq-d8e4407a rq-e1ceb5c0 rq-6cf916af rq-1bbcf3b7
 #[derive(Debug, thiserror::Error)]
@@ -26,8 +27,8 @@ pub enum NeighborListError {
     #[error("simulation box perpendicular width along lattice direction `{direction}` is {width}, below the required {required}")]
     BoxTooSmallForCells {
         direction: &'static str,
-        width: f32,
-        required: f32,
+        width: Real,
+        required: Real,
     },
     #[error("cell grid has {n_cells_total} cells, exceeding the device limit of {max_supported}")]
     TooManyCells {
@@ -52,9 +53,9 @@ pub enum NeighborListMode {
 pub struct CellListData {
     pub n_cells: [u32; 3],
     pub n_cells_total: usize,
-    pub r_cut: f32,
-    pub r_skin: f32,
-    pub r_search_sq: f32,
+    pub r_cut: Real,
+    pub r_skin: Real,
+    pub r_search_sq: Real,
     pub cached_generation: u64,
     pub cell_indices: CudaSlice<u32>,
     pub cell_counts: CudaSlice<u32>,
@@ -62,10 +63,10 @@ pub struct CellListData {
     pub scan_block_totals: Vec<CudaSlice<u32>>,
     pub sorted_particle_ids: CudaSlice<u32>,
     pub cell_offsets: CudaSlice<u32>,
-    pub reference_positions_x: CudaSlice<f32>,
-    pub reference_positions_y: CudaSlice<f32>,
-    pub reference_positions_z: CudaSlice<f32>,
-    pub disp_sq: CudaSlice<f32>,
+    pub reference_positions_x: CudaSlice<Real>,
+    pub reference_positions_y: CudaSlice<Real>,
+    pub reference_positions_z: CudaSlice<Real>,
+    pub disp_sq: CudaSlice<Real>,
     pub overflow_flag: CudaSlice<u32>,
     pub needs_rebuild: bool,
 }
@@ -112,9 +113,9 @@ impl NeighborListState {
         gpu: &GpuContext,
         sim_box: &SimulationBox,
         particle_count: usize,
-        r_cut: f32,
+        r_cut: Real,
         max_neighbors: u32,
-        r_skin: f32,
+        r_skin: Real,
     ) -> Result<Self, NeighborListError> {
         let device = gpu.device.clone();
         let kernels = gpu.kernels.clone();
@@ -152,16 +153,16 @@ impl NeighborListState {
             .alloc_zeros::<u32>(particle_count.max(1))
             .map_err(GpuError::from)?;
         let reference_positions_x = device
-            .alloc_zeros::<f32>(particle_count.max(1))
+            .alloc_zeros::<Real>(particle_count.max(1))
             .map_err(GpuError::from)?;
         let reference_positions_y = device
-            .alloc_zeros::<f32>(particle_count.max(1))
+            .alloc_zeros::<Real>(particle_count.max(1))
             .map_err(GpuError::from)?;
         let reference_positions_z = device
-            .alloc_zeros::<f32>(particle_count.max(1))
+            .alloc_zeros::<Real>(particle_count.max(1))
             .map_err(GpuError::from)?;
         let disp_sq = device
-            .alloc_zeros::<f32>(particle_count.max(1))
+            .alloc_zeros::<Real>(particle_count.max(1))
             .map_err(GpuError::from)?;
         let overflow_flag = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
 
@@ -248,10 +249,10 @@ impl NeighborListState {
         // Neighbor-list-only buffers are zero-length in bin-only mode.
         let neighbor_list = device.alloc_zeros::<u32>(0).map_err(GpuError::from)?;
         let neighbor_counts = device.alloc_zeros::<u32>(0).map_err(GpuError::from)?;
-        let reference_positions_x = device.alloc_zeros::<f32>(0).map_err(GpuError::from)?;
-        let reference_positions_y = device.alloc_zeros::<f32>(0).map_err(GpuError::from)?;
-        let reference_positions_z = device.alloc_zeros::<f32>(0).map_err(GpuError::from)?;
-        let disp_sq = device.alloc_zeros::<f32>(0).map_err(GpuError::from)?;
+        let reference_positions_x = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
+        let reference_positions_y = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
+        let reference_positions_z = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
+        let disp_sq = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
         let overflow_flag = device.alloc_zeros::<u32>(0).map_err(GpuError::from)?;
 
         Ok(NeighborListState {
@@ -388,7 +389,7 @@ impl NeighborListState {
         sim_box: &SimulationBox,
         buffers: &ParticleBuffers,
         timings: &mut Timings,
-    ) -> Result<f32, NeighborListError> {
+    ) -> Result<Real, NeighborListError> {
         if self.particle_count == 0 {
             return Ok(0.0);
         }
@@ -413,7 +414,7 @@ impl NeighborListState {
             .kernel_stop(KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED)
             .map_err(map_timings_err)?;
 
-        let host: Vec<f32> = self
+        let host: Vec<Real> = self
             .device
             .dtoh_sync_copy(&cl.disp_sq)
             .map_err(GpuError::from)?;
@@ -424,7 +425,7 @@ impl NeighborListState {
                 max_sq = v64;
             }
         }
-        Ok(max_sq.sqrt() as f32)
+        Ok(max_sq.sqrt() as Real)
     }
 
     // rq-7db97132
@@ -612,7 +613,7 @@ impl NeighborListState {
 // any direction admits fewer than 3 cells.
 fn compute_cell_layout(
     sim_box: &SimulationBox,
-    r_search: f32,
+    r_search: Real,
 ) -> Result<[u32; 3], NeighborListError> {
     let widths = sim_box.perpendicular_widths();
     let direction_names: [&'static str; 3] = ["a", "b", "c"];

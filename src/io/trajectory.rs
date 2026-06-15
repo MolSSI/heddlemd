@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::pbc::SimulationBox;
 use crate::units::{Dimension, UnitSystem};
+use crate::precision::{Real, REAL_FMT_DIGITS};
 
 // rq-40a34caa
 pub struct TrajectoryWriter {
@@ -68,10 +69,10 @@ impl TrajectoryWriter {
         dt: f64,
         sim_box: &SimulationBox,
         type_indices: &[u32],
-        positions_x: &[f32],
-        positions_y: &[f32],
-        positions_z: &[f32],
-        velocities: Option<(&[f32], &[f32], &[f32])>,
+        positions_x: &[Real],
+        positions_y: &[Real],
+        positions_z: &[Real],
+        velocities: Option<(&[Real], &[Real], &[Real])>,
         images: Option<(&[i32], &[i32], &[i32])>,
     ) -> Result<(), TrajectoryWriterError> {
         let n = type_indices.len();
@@ -100,8 +101,8 @@ impl TrajectoryWriter {
         // Output-direction conversion factors. For UnitSystem::Atomic
         // these all reduce to 1.0 and the engine's internal scalars
         // are emitted directly.
-        let len_f = self.units.factor(Dimension::Length) as f32;
-        let vel_f = self.units.factor(Dimension::Velocity) as f32;
+        let len_f = self.units.factor(Dimension::Length) as Real;
+        let vel_f = self.units.factor(Dimension::Velocity) as Real;
         let time_out = self.units.to_user(Dimension::Time, time);
 
         // rq-1658f77d rq-c5518458 rq-e06bcfb0 rq-df244549 rq-6ec75323 rq-88ec92fc
@@ -111,16 +112,17 @@ impl TrajectoryWriter {
         // Orthorhombic boxes (xy = xz = yz = 0) print three middle zeros
         // and are byte-identical to the previous orthorhombic-only format.
         writeln!(self.writer, "{n}").map_err(io_err)?;
-        let zero = 0.0_f32;
+        let zero = 0.0;
         let props = match (self.include_velocities, self.include_images) {
             (false, false) => "species:S:1:pos:R:3",
             (false, true) => "species:S:1:pos:R:3:image:I:3",
             (true, false) => "species:S:1:pos:R:3:velo:R:3",
             (true, true) => "species:S:1:pos:R:3:velo:R:3:image:I:3",
         };
+        let p = REAL_FMT_DIGITS;
         writeln!(
             self.writer,
-            "Lattice=\"{lx:.9e} {z:.9e} {z:.9e} {xy:.9e} {ly:.9e} {z:.9e} {xz:.9e} {yz:.9e} {lz:.9e}\" Properties={props} Step={step} Time={time:.9e}",
+            "Lattice=\"{lx:.p$e} {z:.p$e} {z:.p$e} {xy:.p$e} {ly:.p$e} {z:.p$e} {xz:.p$e} {yz:.p$e} {lz:.p$e}\" Properties={props} Step={step} Time={time:.9e}",
             lx = lat[0] * len_f,
             ly = lat[1] * len_f,
             lz = lat[2] * len_f,
@@ -131,6 +133,7 @@ impl TrajectoryWriter {
             props = props,
             step = step,
             time = time_out,
+            p = p,
         )
         .map_err(io_err)?;
 
@@ -143,20 +146,22 @@ impl TrajectoryWriter {
                 .unwrap_or("?");
             write!(
                 self.writer,
-                "{name} {:.9e} {:.9e} {:.9e}",
+                "{name} {:.p$e} {:.p$e} {:.p$e}",
                 positions_x[i] * len_f,
                 positions_y[i] * len_f,
                 positions_z[i] * len_f,
+                p = p,
             )
             .map_err(io_err)?;
             if self.include_velocities {
                 let (vx, vy, vz) = velocities.unwrap();
                 write!(
                     self.writer,
-                    " {:.9e} {:.9e} {:.9e}",
+                    " {:.p$e} {:.p$e} {:.p$e}",
                     vx[i] * vel_f,
                     vy[i] * vel_f,
                     vz[i] * vel_f,
+                    p = p,
                 )
                 .map_err(io_err)?;
             }
@@ -215,10 +220,10 @@ pub struct TrajectoryFrame {
     pub time: f64,
     pub sim_box: SimulationBox,
     pub type_indices: Vec<u32>,
-    pub positions_x: Vec<f32>,
-    pub positions_y: Vec<f32>,
-    pub positions_z: Vec<f32>,
-    pub velocities: Option<(Vec<f32>, Vec<f32>, Vec<f32>)>,
+    pub positions_x: Vec<Real>,
+    pub positions_y: Vec<Real>,
+    pub positions_z: Vec<Real>,
+    pub velocities: Option<(Vec<Real>, Vec<Real>, Vec<Real>)>,
     pub images: Option<(Vec<i32>, Vec<i32>, Vec<i32>)>,
 }
 
@@ -395,8 +400,8 @@ fn read_one_frame<R: BufRead>(
     expected_header: Option<&TrajectoryFrameHeader>,
     units: UnitSystem,
 ) -> Result<Option<TrajectoryFrame>, TrajectoryReaderError> {
-    let len_f = units.factor(Dimension::Length) as f32;
-    let vel_f = units.factor(Dimension::Velocity) as f32;
+    let len_f = units.factor(Dimension::Length) as Real;
+    let vel_f = units.factor(Dimension::Velocity) as Real;
     // Particle-count line.
     let count_line = match read_nonblank_line(reader, line_number, line_buf)? {
         Some(s) => s,
@@ -503,12 +508,12 @@ fn read_one_frame<R: BufRead>(
     let image_offset = if include_velocities { 7 } else { 4 };
 
     let mut type_indices: Vec<u32> = Vec::with_capacity(particle_count);
-    let mut positions_x: Vec<f32> = Vec::with_capacity(particle_count);
-    let mut positions_y: Vec<f32> = Vec::with_capacity(particle_count);
-    let mut positions_z: Vec<f32> = Vec::with_capacity(particle_count);
-    let mut velocities_x: Vec<f32> = Vec::with_capacity(particle_count);
-    let mut velocities_y: Vec<f32> = Vec::with_capacity(particle_count);
-    let mut velocities_z: Vec<f32> = Vec::with_capacity(particle_count);
+    let mut positions_x: Vec<Real> = Vec::with_capacity(particle_count);
+    let mut positions_y: Vec<Real> = Vec::with_capacity(particle_count);
+    let mut positions_z: Vec<Real> = Vec::with_capacity(particle_count);
+    let mut velocities_x: Vec<Real> = Vec::with_capacity(particle_count);
+    let mut velocities_y: Vec<Real> = Vec::with_capacity(particle_count);
+    let mut velocities_z: Vec<Real> = Vec::with_capacity(particle_count);
     let mut images_x: Vec<i32> = Vec::with_capacity(particle_count);
     let mut images_y: Vec<i32> = Vec::with_capacity(particle_count);
     let mut images_z: Vec<i32> = Vec::with_capacity(particle_count);
@@ -556,17 +561,17 @@ fn read_one_frame<R: BufRead>(
                 });
             }
         }
-        let px = parse_f64_col(cols[1], *line_number, "pos_x")? as f32;
-        let py = parse_f64_col(cols[2], *line_number, "pos_y")? as f32;
-        let pz = parse_f64_col(cols[3], *line_number, "pos_z")? as f32;
+        let px = parse_f64_col(cols[1], *line_number, "pos_x")? as Real;
+        let py = parse_f64_col(cols[2], *line_number, "pos_y")? as Real;
+        let pz = parse_f64_col(cols[3], *line_number, "pos_z")? as Real;
         type_indices.push(type_index);
         positions_x.push(px / len_f);
         positions_y.push(py / len_f);
         positions_z.push(pz / len_f);
         if include_velocities {
-            let vx = parse_f64_col(cols[4], *line_number, "velo_x")? as f32;
-            let vy = parse_f64_col(cols[5], *line_number, "velo_y")? as f32;
-            let vz = parse_f64_col(cols[6], *line_number, "velo_z")? as f32;
+            let vx = parse_f64_col(cols[4], *line_number, "velo_x")? as Real;
+            let vy = parse_f64_col(cols[5], *line_number, "velo_y")? as Real;
+            let vz = parse_f64_col(cols[6], *line_number, "velo_z")? as Real;
             velocities_x.push(vx / vel_f);
             velocities_y.push(vy / vel_f);
             velocities_z.push(vz / vel_f);
@@ -674,7 +679,7 @@ fn parse_attribute_line(line: &str) -> Vec<(String, String)> {
     out
 }
 
-fn parse_lattice(raw: &str, len_f: f32) -> Result<SimulationBox, String> {
+fn parse_lattice(raw: &str, len_f: Real) -> Result<SimulationBox, String> {
     let parts: Vec<&str> = raw.split_ascii_whitespace().collect();
     if parts.len() != 9 {
         return Err(format!(
@@ -705,12 +710,12 @@ fn parse_lattice(raw: &str, len_f: f32) -> Result<SimulationBox, String> {
     // Convert from the file's units to engine-side atomic units by
     // dividing by `len_f` (the user-system value of one atomic length
     // unit). No-op when the file is already in atomic units.
-    let lx = vals[0] as f32 / len_f;
-    let xy = vals[3] as f32 / len_f;
-    let ly = vals[4] as f32 / len_f;
-    let xz = vals[6] as f32 / len_f;
-    let yz = vals[7] as f32 / len_f;
-    let lz = vals[8] as f32 / len_f;
+    let lx = vals[0] as Real / len_f;
+    let xy = vals[3] as Real / len_f;
+    let ly = vals[4] as Real / len_f;
+    let xz = vals[6] as Real / len_f;
+    let yz = vals[7] as Real / len_f;
+    let lz = vals[8] as Real / len_f;
     SimulationBox::new(lx, ly, lz, xy, xz, yz)
         .map_err(|e| format!("`Lattice` produced an invalid SimulationBox: {e}"))
 }

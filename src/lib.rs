@@ -5,6 +5,7 @@ pub mod integrator;
 pub mod io;
 pub mod minimizer;
 pub mod pbc;
+pub mod precision;
 pub mod registries;
 pub mod runner;
 pub mod state;

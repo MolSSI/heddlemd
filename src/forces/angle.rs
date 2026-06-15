@@ -17,6 +17,7 @@ use super::{
     AggregateLevel, ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder,
     SlotOutputView,
 };
+use crate::precision::Real;
 
 // rq-21a8063c rq-454ad2cf
 #[derive(Debug)]
@@ -26,13 +27,13 @@ pub struct HarmonicAngleState {
     pub angles: CudaSlice<u32>,
     pub atom_angle_offsets: CudaSlice<u32>,
     pub atom_angle_indices: CudaSlice<u32>,
-    pub angle_k_theta: CudaSlice<f32>,
-    pub angle_theta_0: CudaSlice<f32>,
-    pub angle_triple_x: CudaSlice<f32>,
-    pub angle_triple_y: CudaSlice<f32>,
-    pub angle_triple_z: CudaSlice<f32>,
-    pub angle_triple_energy: CudaSlice<f32>,
-    pub angle_triple_virial: CudaSlice<f32>,
+    pub angle_k_theta: CudaSlice<Real>,
+    pub angle_theta_0: CudaSlice<Real>,
+    pub angle_triple_x: CudaSlice<Real>,
+    pub angle_triple_y: CudaSlice<Real>,
+    pub angle_triple_z: CudaSlice<Real>,
+    pub angle_triple_energy: CudaSlice<Real>,
+    pub angle_triple_virial: CudaSlice<Real>,
     pub angle_count: usize,
     pub particle_count: usize,
 }
@@ -57,13 +58,13 @@ impl HarmonicAngleState {
             angles_flat.push(a.angle_type_index);
         }
 
-        let mut k_vec: Vec<f32> = Vec::with_capacity(angle_types.len());
-        let mut theta0_vec: Vec<f32> = Vec::with_capacity(angle_types.len());
+        let mut k_vec: Vec<Real> = Vec::with_capacity(angle_types.len());
+        let mut theta0_vec: Vec<Real> = Vec::with_capacity(angle_types.len());
         for at in angle_types {
             match at {
                 AngleTypeConfig::Harmonic { k_theta, theta_0, .. } => {
-                    k_vec.push(*k_theta as f32);
-                    theta0_vec.push(*theta_0 as f32);
+                    k_vec.push(*k_theta as Real);
+                    theta0_vec.push(*theta_0 as Real);
                 }
             }
         }
@@ -71,17 +72,17 @@ impl HarmonicAngleState {
         let angles = htod_or_empty_u32(&device, &angles_flat)?;
         let atom_angle_offsets = htod_or_empty_u32(&device, &angle_list.atom_angle_offsets)?;
         let atom_angle_indices = htod_or_empty_u32(&device, &angle_list.atom_angle_indices)?;
-        let angle_k_theta = htod_or_empty_f32(&device, &k_vec)?;
-        let angle_theta_0 = htod_or_empty_f32(&device, &theta0_vec)?;
+        let angle_k_theta = htod_or_empty(&device, &k_vec)?;
+        let angle_theta_0 = htod_or_empty(&device, &theta0_vec)?;
 
         let triple_len = 3 * angle_count;
-        let angle_triple_x = device.alloc_zeros::<f32>(triple_len).map_err(GpuError::from)?;
-        let angle_triple_y = device.alloc_zeros::<f32>(triple_len).map_err(GpuError::from)?;
-        let angle_triple_z = device.alloc_zeros::<f32>(triple_len).map_err(GpuError::from)?;
+        let angle_triple_x = device.alloc_zeros::<Real>(triple_len).map_err(GpuError::from)?;
+        let angle_triple_y = device.alloc_zeros::<Real>(triple_len).map_err(GpuError::from)?;
+        let angle_triple_z = device.alloc_zeros::<Real>(triple_len).map_err(GpuError::from)?;
         let angle_triple_energy =
-            device.alloc_zeros::<f32>(triple_len).map_err(GpuError::from)?;
+            device.alloc_zeros::<Real>(triple_len).map_err(GpuError::from)?;
         let angle_triple_virial =
-            device.alloc_zeros::<f32>(triple_len).map_err(GpuError::from)?;
+            device.alloc_zeros::<Real>(triple_len).map_err(GpuError::from)?;
 
         Ok(HarmonicAngleState {
             device,
@@ -107,7 +108,7 @@ impl Potential for HarmonicAngleState {
         "harmonic_angle"
     }
 
-    fn max_cutoff(&self) -> Option<f32> {
+    fn max_cutoff(&self) -> Option<Real> {
         None
     }
 
@@ -192,12 +193,12 @@ fn htod_or_empty_u32(
     }
 }
 
-fn htod_or_empty_f32(
+fn htod_or_empty(
     device: &Arc<CudaDevice>,
-    data: &[f32],
-) -> Result<CudaSlice<f32>, GpuError> {
+    data: &[Real],
+) -> Result<CudaSlice<Real>, GpuError> {
     if data.is_empty() {
-        device.alloc_zeros::<f32>(0).map_err(GpuError::from)
+        device.alloc_zeros::<Real>(0).map_err(GpuError::from)
     } else {
         device.htod_sync_copy(data).map_err(GpuError::from)
     }

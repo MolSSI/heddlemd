@@ -1,5 +1,7 @@
 // rq-0469400b
 
+#include "precision.cuh"
+
 #include "pbc.cuh"
 
 // Compute the parallelepiped cell index of a Cartesian position. Wraps
@@ -7,19 +9,19 @@
 // coordinates, and bins each fractional component to [0, n_cells_d - 1]
 // (clamping handles the +0.5 boundary case).
 __device__ static inline void parallelepiped_cell_indices(
-    float x, float y, float z,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    Real x, Real y, Real z,
+    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
     unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
     unsigned int &ca, unsigned int &cb, unsigned int &cc)
 {
   int dummy_a, dummy_b, dummy_c;
   triclinic_wrap_with_image(x, y, z, dummy_a, dummy_b, dummy_c,
                             lx, ly, lz, xy, xz, yz);
-  float s_a, s_b, s_c;
+  Real s_a, s_b, s_c;
   triclinic_cart_to_frac(x, y, z, lx, ly, lz, xy, xz, yz, s_a, s_b, s_c);
-  int ia = (int) floorf((s_a + 0.5f) * (float) n_cells_a);
-  int ib = (int) floorf((s_b + 0.5f) * (float) n_cells_b);
-  int ic = (int) floorf((s_c + 0.5f) * (float) n_cells_c);
+  int ia = (int) Real_floor((s_a + R(0.5)) * (Real) n_cells_a);
+  int ib = (int) Real_floor((s_b + R(0.5)) * (Real) n_cells_b);
+  int ic = (int) Real_floor((s_c + R(0.5)) * (Real) n_cells_c);
   if (ia < 0) ia = 0;
   if (ia >= (int) n_cells_a) ia = (int) n_cells_a - 1;
   if (ib < 0) ib = 0;
@@ -33,19 +35,19 @@ __device__ static inline void parallelepiped_cell_indices(
 
 // rq-884b5cd6
 extern "C" __global__ void neighbor_displacement_squared(
-    const float *positions_x, const float *positions_y, const float *positions_z,
-    const float *reference_x, const float *reference_y, const float *reference_z,
-    float lx, float ly, float lz, float xy, float xz, float yz,
-    float *disp_sq,
+    const Real *positions_x, const Real *positions_y, const Real *positions_z,
+    const Real *reference_x, const Real *reference_y, const Real *reference_z,
+    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    Real *disp_sq,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) {
     return;
   }
-  float dx = positions_x[i] - reference_x[i];
-  float dy = positions_y[i] - reference_y[i];
-  float dz = positions_z[i] - reference_z[i];
+  Real dx = positions_x[i] - reference_x[i];
+  Real dy = positions_y[i] - reference_y[i];
+  Real dz = positions_z[i] - reference_z[i];
   triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
   disp_sq[i] = dx * dx + dy * dy + dz * dz;
 }
@@ -62,18 +64,18 @@ extern "C" __global__ void neighbor_displacement_squared(
 // per-atom sort.
 //
 // Dynamic shared memory layout (in bytes), set at launch:
-//   shared_x : float[blockDim.x]
-//   shared_y : float[blockDim.x]
-//   shared_z : float[blockDim.x]
+//   shared_x : Real[blockDim.x]
+//   shared_y : Real[blockDim.x]
+//   shared_z : Real[blockDim.x]
 //   shared_id: unsigned int[blockDim.x]
-// Total = 4 * blockDim.x * sizeof(float).
+// Total = 4 * blockDim.x * sizeof(Real).
 extern "C" __global__ void neighbor_list_build(
-    const float *positions_x, const float *positions_y, const float *positions_z,
+    const Real *positions_x, const Real *positions_y, const Real *positions_z,
     const unsigned int *sorted_particle_ids,
     const unsigned int *cell_offsets,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
     unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
-    float r_search_sq,
+    Real r_search_sq,
     unsigned int max_neighbors,
     unsigned int *neighbor_list,
     unsigned int *neighbor_counts,
@@ -83,9 +85,9 @@ extern "C" __global__ void neighbor_list_build(
   (void) n;
 
   extern __shared__ unsigned char smem[];
-  float *shared_x = reinterpret_cast<float *>(smem);
-  float *shared_y = shared_x + blockDim.x;
-  float *shared_z = shared_y + blockDim.x;
+  Real *shared_x = reinterpret_cast<Real *>(smem);
+  Real *shared_y = shared_x + blockDim.x;
+  Real *shared_z = shared_y + blockDim.x;
   unsigned int *shared_id =
       reinterpret_cast<unsigned int *>(shared_z + blockDim.x);
 
@@ -118,7 +120,7 @@ extern "C" __global__ void neighbor_list_build(
     bool active = (thread_atom < home_count);
 
     unsigned int i = 0u;
-    float xi = 0.0f, yi = 0.0f, zi = 0.0f;
+    Real xi = R(0.0), yi = R(0.0), zi = R(0.0);
     if (active) {
       i = sorted_particle_ids[home_start + thread_atom];
       xi = positions_x[i];
@@ -177,12 +179,12 @@ extern "C" __global__ void neighbor_list_build(
                 if (j == i) {
                   continue;
                 }
-                float ddx = xi - shared_x[k];
-                float ddy = yi - shared_y[k];
-                float ddz = zi - shared_z[k];
+                Real ddx = xi - shared_x[k];
+                Real ddy = yi - shared_y[k];
+                Real ddz = zi - shared_z[k];
                 triclinic_min_image(ddx, ddy, ddz,
                                     lx, ly, lz, xy, xz, yz);
-                float r2 = ddx * ddx + ddy * ddy + ddz * ddz;
+                Real r2 = ddx * ddx + ddy * ddy + ddz * ddz;
                 if (r2 <= r_search_sq) {
                   if (count < max_neighbors) {
                     neighbor_list[(size_t) i * (size_t) max_neighbors
@@ -214,8 +216,8 @@ extern "C" __global__ void neighbor_list_build(
 
 // rq-344f7af0
 extern "C" __global__ void copy_positions_into_reference(
-    const float *positions_x, const float *positions_y, const float *positions_z,
-    float *reference_x, float *reference_y, float *reference_z,
+    const Real *positions_x, const Real *positions_y, const Real *positions_z,
+    Real *reference_x, Real *reference_y, Real *reference_z,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -230,8 +232,8 @@ extern "C" __global__ void copy_positions_into_reference(
 #define SCAN_BLOCK_SIZE 256u
 
 extern "C" __global__ void compute_cell_indices_and_histogram(
-    const float *positions_x, const float *positions_y, const float *positions_z,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const Real *positions_x, const Real *positions_y, const Real *positions_z,
+    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
     unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
     unsigned int *cell_indices,
     unsigned int *cell_counts,

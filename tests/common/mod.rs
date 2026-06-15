@@ -12,6 +12,7 @@ use heddle_md::gpu::{
     reduce_pair_forces,
 };
 use heddle_md::pbc::SimulationBox;
+use heddle_md::precision::Real;
 
 /// Build a `DeviceExclusionList` representing zero exclusions on `n`
 /// particles. The LJ kernel reads the buffers and never finds a match,
@@ -29,9 +30,9 @@ pub fn empty_exclusions(device: &Arc<CudaDevice>, n: usize) -> DeviceExclusionLi
 /// expression are unaffected.
 pub fn single_type_lj_table(
     device: &Arc<CudaDevice>,
-    sigma: f32,
-    epsilon: f32,
-    cutoff: f32,
+    sigma: Real,
+    epsilon: Real,
+    cutoff: Real,
 ) -> LennardJonesParameterTable {
     single_type_lj_table_with_switch(device, sigma, epsilon, cutoff, cutoff)
 }
@@ -41,10 +42,10 @@ pub fn single_type_lj_table(
 /// function use this helper.
 pub fn single_type_lj_table_with_switch(
     device: &Arc<CudaDevice>,
-    sigma: f32,
-    epsilon: f32,
-    cutoff: f32,
-    r_switch: f32,
+    sigma: Real,
+    epsilon: Real,
+    cutoff: Real,
+    r_switch: Real,
 ) -> LennardJonesParameterTable {
     LennardJonesParameterTable {
         n_types: 1,

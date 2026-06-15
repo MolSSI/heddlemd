@@ -19,6 +19,7 @@ use heddle_md::io::config::NeighborListConfig;
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::{KernelStage, Timings};
+use heddle_md::precision::Real;
 
 #[allow(dead_code)]
 const KB: f64 = 1.380649e-23;
@@ -28,7 +29,7 @@ const PRESSURE_F: f64 = 29421015696522.1;
 const TEMP_F: f64 = 315775.0248040668;
 
 fn box_small() -> SimulationBox {
-    let l = (1.0e-9 / LEN_F) as f32;
+    let l = (1.0e-9 / LEN_F) as Real;
     SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
@@ -93,13 +94,13 @@ fn unbox_mtk(boxed: Box<dyn Integrator>) -> MtkNptIntegrator {
 
 // Build a state with prescribed positions, velocities, masses, virials.
 fn make_state(
-    positions_x: Vec<f32>,
-    velocities_x: Vec<f32>,
-    masses: Vec<f32>,
-    virials: Vec<f32>,
+    positions_x: Vec<Real>,
+    velocities_x: Vec<Real>,
+    masses: Vec<Real>,
+    virials: Vec<Real>,
 ) -> ParticleState {
     let n = positions_x.len();
-    let zero = vec![0.0_f32; n];
+    let zero = vec![0.0; n];
     let state = ParticleState::new(
         positions_x,
         zero.clone(),
@@ -108,7 +109,7 @@ fn make_state(
         zero.clone(),
         zero.clone(),
         masses,
-        vec![0.0_f32; n],
+        vec![0.0; n],
         (0..n as u32).collect(),
         None,
         None,
@@ -121,18 +122,18 @@ fn make_state(
 
 // Convenience: build an N=8 system with symmetric ±v pairs (COM=0)
 // and zero virials, suitable for empty_force_field tests.
-fn symmetric_state(n: usize, mass: f32, v_mag: f32) -> ParticleState {
+fn symmetric_state(n: usize, mass: Real, v_mag: Real) -> ParticleState {
     assert!(n.is_multiple_of(2));
-    let mut vx: Vec<f32> = Vec::with_capacity(n);
+    let mut vx: Vec<Real> = Vec::with_capacity(n);
     for _ in 0..n / 2 {
         vx.push(v_mag);
         vx.push(-v_mag);
     }
     make_state(
-        (0..n).map(|i| 1.0e-10 * (i as f32 - (n as f32) / 2.0 + 0.5)).collect(),
+        (0..n).map(|i| 1.0e-10 * (i as Real - (n as Real) / 2.0 + 0.5)).collect(),
         vx,
         vec![mass; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
     )
 }
 
@@ -201,7 +202,7 @@ fn mtk_npt_owns_thermostat_and_barostat() {
 fn step_launches_expected_kernel_set() {
     let gpu = init_device().unwrap();
     let n = 4usize;
-    let mass: f32 = 1.66e-27;
+    let mass: Real = 1.66e-27;
     let state = symmetric_state(n, mass, 500.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_small();
@@ -267,14 +268,14 @@ fn mtk_velocity_half_kick_identity_mode_matches_half_vv_kick() {
     let n = 4usize;
     // m = 1 so F/m = F. Known v, F.
     let state = ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32, 2.0, 3.0, 4.0],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0, 2.0, 3.0, 4.0],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
+        vec![0.0; n],
         (0..n as u32).collect(),
         None,
         None,
@@ -282,9 +283,9 @@ fn mtk_velocity_half_kick_identity_mode_matches_half_vv_kick() {
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     // Write known forces.
-    let fx = vec![10.0_f32, -5.0, 1.0, 0.0];
-    let fy = vec![0.0_f32; n];
-    let fz = vec![0.0_f32; n];
+    let fx = vec![10.0, -5.0, 1.0, 0.0];
+    let fy = vec![0.0; n];
+    let fz = vec![0.0; n];
     gpu.device
         .htod_sync_copy_into(&fx, &mut buffers.forces_x)
         .unwrap();
@@ -297,7 +298,7 @@ fn mtk_velocity_half_kick_identity_mode_matches_half_vv_kick() {
     // exp_minus_alpha = 1, phi_v_dt_half = 0.5 → v ← v + 0.5·F
     mtk_velocity_half_kick(&mut buffers, 1.0, 0.5).unwrap();
     let vx_post = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
-    let expected: Vec<f32> = (0..n).map(|i| state.velocities_x[i] + 0.5 * fx[i]).collect();
+    let expected: Vec<Real> = (0..n).map(|i| state.velocities_x[i] + 0.5 * fx[i]).collect();
     for (a, b) in vx_post.iter().zip(expected.iter()) {
         assert!((a - b).abs() < 1.0e-5, "{a} vs {b}");
     }
@@ -309,14 +310,14 @@ fn mtk_position_drift_identity_mode_matches_plain_drift() {
     let gpu = init_device().unwrap();
     let n = 4usize;
     let state = ParticleState::new(
-        vec![1.0_f32, 2.0, -3.0, 0.5],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.5_f32, -1.0, 2.0, 0.0],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
-        vec![0.0_f32; n],
+        vec![1.0, 2.0, -3.0, 0.5],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.5, -1.0, 2.0, 0.0],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
+        vec![0.0; n],
         (0..n as u32).collect(),
         None,
         None,
@@ -480,7 +481,7 @@ fn two_runs_with_identical_configs_are_byte_identical() {
     let gpu = init_device().unwrap();
     let n = 4usize;
 
-    fn run_once(gpu: &GpuContext, n: usize) -> (Vec<f32>, [f32; 6]) {
+    fn run_once(gpu: &GpuContext, n: usize) -> (Vec<Real>, [Real; 6]) {
         let state = symmetric_state(n, 1.66e-27, 500.0);
         let mut buffers = ParticleBuffers::new(gpu, &state).unwrap();
         let mut sim_box = box_small();
@@ -525,14 +526,14 @@ fn two_runs_with_identical_configs_are_byte_identical() {
 fn mtk_approximate_time_reversibility_smoke() {
     let gpu = init_device().unwrap();
     let n = 8usize;
-    let mass: f32 = 1.66e-27;
+    let mass: Real = 1.66e-27;
     // Start at the chain's target kinetic energy so the chain isn't
     // strongly injecting/extracting energy (which would amplify f32
     // drift). K_target = (g_dof/2) · k_B · T with g_dof = 3N − 3.
     let temperature = 85.0_f64;
     let g_dof = (3 * n - 3) as f64;
     let k_target = (g_dof / 2.0) * KB * temperature;
-    let v_each = (k_target / ((n as f64) * 0.5 * (mass as f64))).sqrt() as f32;
+    let v_each = (k_target / ((n as f64) * 0.5 * (mass as f64))).sqrt() as Real;
     let state = symmetric_state(n, mass, v_each);
 
     // Snapshot the initial state (positions, velocities, lattice).
@@ -546,7 +547,7 @@ fn mtk_approximate_time_reversibility_smoke() {
     let mut timings = Timings::new(&gpu).unwrap();
 
     // Use a sensible dt and moderately stiff couplings.
-    let dt = 1.0e-15_f32;
+    let dt = 1.0e-15;
     let mut integ = unbox_mtk(build_mtk(
         &gpu,
         n,
@@ -571,7 +572,7 @@ fn mtk_approximate_time_reversibility_smoke() {
         &mut buffers.velocities_z,
     ] {
         let v = gpu.device.dtoh_sync_copy(axis_slice).unwrap();
-        let v_flipped: Vec<f32> = v.iter().map(|&x| -x).collect();
+        let v_flipped: Vec<Real> = v.iter().map(|&x| -x).collect();
         gpu.device
             .htod_sync_copy_into(&v_flipped, axis_slice)
             .unwrap();
@@ -608,7 +609,7 @@ fn mtk_approximate_time_reversibility_smoke() {
     // Use absolute tolerance scaled by the largest |x| in the system,
     // since the symmetric_state positions span 0 → 4e-10 m and
     // include a zero crossing where relative tolerance breaks down.
-    let max_abs_x: f32 = snap_px.iter().map(|x| x.abs()).fold(0.0, f32::max);
+    let max_abs_x: Real = snap_px.iter().map(|x| x.abs()).fold(0.0, Real::max);
     let pos_tol = max_abs_x * 1.0e-3;
     for (i, (a, b)) in px_final.iter().zip(snap_px.iter()).enumerate() {
         assert!(
@@ -622,7 +623,7 @@ fn mtk_approximate_time_reversibility_smoke() {
     // Velocities should return to NEGATIVE of the initial values
     // (because we flipped them between the two passes, so the reverse
     // pass leaves them at -v_initial).
-    let max_abs_v: f32 = snap_vx.iter().map(|v| v.abs()).fold(0.0, f32::max);
+    let max_abs_v: Real = snap_vx.iter().map(|v| v.abs()).fold(0.0, Real::max);
     let vel_tol = max_abs_v * 1.0e-3;
     for (i, (a, b)) in vx_final.iter().zip(snap_vx.iter()).enumerate() {
         let expected = -*b;

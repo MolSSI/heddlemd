@@ -4,9 +4,12 @@ use cudarc::driver::{
     CudaDevice, CudaSlice, CudaStream, CudaViewMut, DeviceSlice, LaunchAsync, LaunchConfig,
 };
 
-use crate::gpu::{GpuError, Kernels, LosslessBuffers, PairBuffer, ParticleBuffers};
+#[cfg(not(feature = "f64"))]
+use crate::gpu::LosslessBuffers;
+use crate::gpu::{GpuError, Kernels, PairBuffer, ParticleBuffers};
 use crate::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
 use crate::pbc::SimulationBox;
+use crate::precision::Real;
 
 const BLOCK_SIZE: u32 = 256;
 
@@ -23,7 +26,7 @@ fn launch_config(n: u32) -> LaunchConfig {
 pub fn vv_kick_drift(
     buffers: &mut ParticleBuffers,
     sim_box: &SimulationBox,
-    dt: f32,
+    dt: Real,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
@@ -66,7 +69,7 @@ pub fn vv_kick_drift(
 }
 
 // rq-f2e3fa58
-pub fn vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError> {
+pub fn vv_kick(buffers: &mut ParticleBuffers, dt: Real) -> Result<(), GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
         return Ok(());
@@ -99,9 +102,9 @@ pub fn vv_kick(buffers: &mut ParticleBuffers, dt: f32) -> Result<(), GpuError> {
 pub fn reduce_pair_forces(
     pair_buffer: &PairBuffer,
     neighbor_counts: &CudaSlice<u32>,
-    target_force_x: &mut CudaViewMut<'_, f32>,
-    target_force_y: &mut CudaViewMut<'_, f32>,
-    target_force_z: &mut CudaViewMut<'_, f32>,
+    target_force_x: &mut CudaViewMut<'_, Real>,
+    target_force_y: &mut CudaViewMut<'_, Real>,
+    target_force_z: &mut CudaViewMut<'_, Real>,
     particle_count: usize,
 ) -> Result<(), GpuError> {
     let n = particle_count;
@@ -150,8 +153,8 @@ pub fn reduce_pair_forces(
 pub fn reduce_pair_energy_virial(
     pair_buffer: &PairBuffer,
     neighbor_counts: &CudaSlice<u32>,
-    target_energy: &mut CudaViewMut<'_, f32>,
-    target_virial: &mut CudaViewMut<'_, f32>,
+    target_energy: &mut CudaViewMut<'_, Real>,
+    target_virial: &mut CudaViewMut<'_, Real>,
     particle_count: usize,
 ) -> Result<(), GpuError> {
     let n = particle_count;
@@ -201,10 +204,10 @@ pub fn reduce_pair_energy_virial(
 #[derive(Debug)]
 pub struct LennardJonesParameterTable {
     pub n_types: u32,
-    pub sigma: CudaSlice<f32>,
-    pub epsilon: CudaSlice<f32>,
-    pub cutoff: CudaSlice<f32>,
-    pub switch: CudaSlice<f32>,
+    pub sigma: CudaSlice<Real>,
+    pub epsilon: CudaSlice<Real>,
+    pub cutoff: CudaSlice<Real>,
+    pub switch: CudaSlice<Real>,
 }
 
 impl LennardJonesParameterTable {
@@ -216,10 +219,10 @@ impl LennardJonesParameterTable {
     ) -> Result<Self, GpuError> {
         let n_types = particle_types.len();
         let len = n_types * n_types;
-        let mut sigma_host: Vec<f32> = vec![0.0; len];
-        let mut epsilon_host: Vec<f32> = vec![0.0; len];
-        let mut cutoff_host: Vec<f32> = vec![0.0; len];
-        let mut switch_host: Vec<f32> = vec![0.0; len];
+        let mut sigma_host: Vec<Real> = vec![0.0; len];
+        let mut epsilon_host: Vec<Real> = vec![0.0; len];
+        let mut cutoff_host: Vec<Real> = vec![0.0; len];
+        let mut switch_host: Vec<Real> = vec![0.0; len];
 
         for pi in pair_interactions {
             let ti = particle_types
@@ -231,10 +234,10 @@ impl LennardJonesParameterTable {
                 .position(|pt| pt.name == pi.between.1)
                 .expect("pair_interactions type name absent from particle_types (config-layer invariant)");
             let PairPotentialParams::LennardJones { sigma, epsilon } = pi.potential;
-            let s = sigma as f32;
-            let e = epsilon as f32;
-            let c = pi.cutoff as f32;
-            let rs = pi.r_switch as f32;
+            let s = sigma as Real;
+            let e = epsilon as Real;
+            let c = pi.cutoff as Real;
+            let rs = pi.r_switch as Real;
             sigma_host[ti * n_types + tj] = s;
             sigma_host[tj * n_types + ti] = s;
             epsilon_host[ti * n_types + tj] = e;
@@ -245,10 +248,10 @@ impl LennardJonesParameterTable {
             switch_host[tj * n_types + ti] = rs;
         }
 
-        let sigma = htod_or_empty_f32(device, &sigma_host)?;
-        let epsilon = htod_or_empty_f32(device, &epsilon_host)?;
-        let cutoff = htod_or_empty_f32(device, &cutoff_host)?;
-        let switch = htod_or_empty_f32(device, &switch_host)?;
+        let sigma = htod_or_empty(device, &sigma_host)?;
+        let epsilon = htod_or_empty(device, &epsilon_host)?;
+        let cutoff = htod_or_empty(device, &cutoff_host)?;
+        let switch = htod_or_empty(device, &switch_host)?;
 
         Ok(LennardJonesParameterTable {
             n_types: n_types as u32,
@@ -260,12 +263,12 @@ impl LennardJonesParameterTable {
     }
 }
 
-fn htod_or_empty_f32(
+fn htod_or_empty(
     device: &Arc<CudaDevice>,
-    data: &[f32],
-) -> Result<CudaSlice<f32>, GpuError> {
+    data: &[Real],
+) -> Result<CudaSlice<Real>, GpuError> {
     if data.is_empty() {
-        device.alloc_zeros::<f32>(0).map_err(GpuError::from)
+        device.alloc_zeros::<Real>(0).map_err(GpuError::from)
     } else {
         device.htod_sync_copy(data).map_err(GpuError::from)
     }
@@ -280,7 +283,7 @@ pub fn lj_pair_force(
     params: &LennardJonesParameterTable,
     atom_excl_offsets: &CudaSlice<u32>,
     atom_excl_partners: &CudaSlice<u32>,
-    atom_excl_lj_scales: &CudaSlice<f32>,
+    atom_excl_lj_scales: &CudaSlice<Real>,
     neighbor_list: &CudaSlice<u32>,
     neighbor_counts: &CudaSlice<u32>,
 ) -> Result<(), GpuError> {
@@ -354,7 +357,7 @@ pub fn lj_pair_force(
 /// Hartree atomic units `k_C = 1` exactly, so no permittivity factor
 /// appears in the pair-force or SPME kernels. See
 /// `forces/coulomb-pair-force.md`. rq-bfd7004c
-pub const K_COULOMB_F32: f32 = 1.0_f32;
+pub const K_COULOMB_F32: Real = 1.0;
 
 // rq-846bdb8b rq-38676211
 #[allow(clippy::too_many_arguments)]
@@ -362,11 +365,11 @@ pub fn coulomb_pair_force(
     particle_buffers: &ParticleBuffers,
     pair_buffer: &mut PairBuffer,
     sim_box: &SimulationBox,
-    cutoff: f32,
-    r_switch: f32,
+    cutoff: Real,
+    r_switch: Real,
     atom_excl_offsets: &CudaSlice<u32>,
     atom_excl_partners: &CudaSlice<u32>,
-    atom_excl_coul_scales: &CudaSlice<f32>,
+    atom_excl_coul_scales: &CudaSlice<Real>,
     neighbor_list: &CudaSlice<u32>,
     neighbor_counts: &CudaSlice<u32>,
 ) -> Result<(), GpuError> {
@@ -436,11 +439,11 @@ pub fn spme_real_pair_force(
     particle_buffers: &ParticleBuffers,
     pair_buffer: &mut PairBuffer,
     sim_box: &SimulationBox,
-    alpha: f32,
-    r_cut_real: f32,
+    alpha: Real,
+    r_cut_real: Real,
     atom_excl_offsets: &CudaSlice<u32>,
     atom_excl_partners: &CudaSlice<u32>,
-    atom_excl_coul_scales: &CudaSlice<f32>,
+    atom_excl_coul_scales: &CudaSlice<Real>,
     neighbor_list: &CudaSlice<u32>,
     neighbor_counts: &CudaSlice<u32>,
 ) -> Result<(), GpuError> {
@@ -513,7 +516,7 @@ pub fn spme_charge_spread(
     cell_offsets: &CudaSlice<u32>,
     grid: [u32; 3],
     spline_order: u32,
-    rho: &mut CudaSlice<f32>,
+    rho: &mut CudaSlice<Real>,
 ) -> Result<(), GpuError> {
     spme_charge_spread_impl(
         particle_buffers,
@@ -536,7 +539,7 @@ pub fn spme_charge_spread_on_stream(
     cell_offsets: &CudaSlice<u32>,
     grid: [u32; 3],
     spline_order: u32,
-    rho: &mut CudaSlice<f32>,
+    rho: &mut CudaSlice<Real>,
     stream: &CudaStream,
 ) -> Result<(), GpuError> {
     spme_charge_spread_impl(
@@ -559,7 +562,7 @@ fn spme_charge_spread_impl(
     cell_offsets: &CudaSlice<u32>,
     grid: [u32; 3],
     spline_order: u32,
-    rho: &mut CudaSlice<f32>,
+    rho: &mut CudaSlice<Real>,
     stream: Option<&CudaStream>,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
@@ -610,10 +613,10 @@ fn spme_charge_spread_impl(
 #[allow(clippy::too_many_arguments)]
 pub fn spme_influence_multiply(
     kernels: &Kernels,
-    influence_g: &CudaSlice<f32>,
-    virial_factor: &CudaSlice<f32>,
-    rho_hat_interleaved: &mut CudaSlice<f32>,
-    virial_per_cell: &mut CudaSlice<f32>,
+    influence_g: &CudaSlice<Real>,
+    virial_factor: &CudaSlice<Real>,
+    rho_hat_interleaved: &mut CudaSlice<Real>,
+    virial_per_cell: &mut CudaSlice<Real>,
     n_c: u32,
     n_c_complex: u32,
     n_complex: u32,
@@ -635,10 +638,10 @@ pub fn spme_influence_multiply(
 #[allow(clippy::too_many_arguments)]
 pub fn spme_influence_multiply_on_stream(
     kernels: &Kernels,
-    influence_g: &CudaSlice<f32>,
-    virial_factor: &CudaSlice<f32>,
-    rho_hat_interleaved: &mut CudaSlice<f32>,
-    virial_per_cell: &mut CudaSlice<f32>,
+    influence_g: &CudaSlice<Real>,
+    virial_factor: &CudaSlice<Real>,
+    rho_hat_interleaved: &mut CudaSlice<Real>,
+    virial_per_cell: &mut CudaSlice<Real>,
     n_c: u32,
     n_c_complex: u32,
     n_complex: u32,
@@ -660,10 +663,10 @@ pub fn spme_influence_multiply_on_stream(
 #[allow(clippy::too_many_arguments)]
 fn spme_influence_multiply_impl(
     kernels: &Kernels,
-    influence_g: &CudaSlice<f32>,
-    virial_factor: &CudaSlice<f32>,
-    rho_hat_interleaved: &mut CudaSlice<f32>,
-    virial_per_cell: &mut CudaSlice<f32>,
+    influence_g: &CudaSlice<Real>,
+    virial_factor: &CudaSlice<Real>,
+    rho_hat_interleaved: &mut CudaSlice<Real>,
+    virial_per_cell: &mut CudaSlice<Real>,
     n_c: u32,
     n_c_complex: u32,
     n_complex: u32,
@@ -701,16 +704,16 @@ fn spme_influence_multiply_impl(
 pub fn spme_force_gather(
     particle_buffers: &ParticleBuffers,
     sim_box: &SimulationBox,
-    v: &CudaSlice<f32>,
-    u_self_per_particle: &CudaSlice<f32>,
-    w_per_particle_virial: f32,
+    v: &CudaSlice<Real>,
+    u_self_per_particle: &CudaSlice<Real>,
+    w_per_particle_virial: Real,
     grid: [u32; 3],
     spline_order: u32,
-    slot_force_x: &mut CudaViewMut<'_, f32>,
-    slot_force_y: &mut CudaViewMut<'_, f32>,
-    slot_force_z: &mut CudaViewMut<'_, f32>,
-    slot_energy: &mut CudaViewMut<'_, f32>,
-    slot_virial: &mut CudaViewMut<'_, f32>,
+    slot_force_x: &mut CudaViewMut<'_, Real>,
+    slot_force_y: &mut CudaViewMut<'_, Real>,
+    slot_force_z: &mut CudaViewMut<'_, Real>,
+    slot_energy: &mut CudaViewMut<'_, Real>,
+    slot_virial: &mut CudaViewMut<'_, Real>,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
@@ -770,15 +773,15 @@ pub fn spme_force_gather(
 pub fn morse_bond_force(
     particle_buffers: &ParticleBuffers,
     bonds: &CudaSlice<u32>,
-    bond_de: &CudaSlice<f32>,
-    bond_a: &CudaSlice<f32>,
-    bond_re: &CudaSlice<f32>,
+    bond_de: &CudaSlice<Real>,
+    bond_a: &CudaSlice<Real>,
+    bond_re: &CudaSlice<Real>,
     sim_box: &SimulationBox,
-    bond_pair_x: &mut CudaSlice<f32>,
-    bond_pair_y: &mut CudaSlice<f32>,
-    bond_pair_z: &mut CudaSlice<f32>,
-    bond_pair_energy: &mut CudaSlice<f32>,
-    bond_pair_virial: &mut CudaSlice<f32>,
+    bond_pair_x: &mut CudaSlice<Real>,
+    bond_pair_y: &mut CudaSlice<Real>,
+    bond_pair_z: &mut CudaSlice<Real>,
+    bond_pair_energy: &mut CudaSlice<Real>,
+    bond_pair_virial: &mut CudaSlice<Real>,
     n_bonds: usize,
 ) -> Result<(), GpuError> {
     if n_bonds == 0 {
@@ -824,18 +827,18 @@ pub fn morse_bond_force(
 #[allow(clippy::too_many_arguments)]
 pub fn reduce_bond_forces(
     kernels: &Kernels,
-    bond_pair_x: &CudaSlice<f32>,
-    bond_pair_y: &CudaSlice<f32>,
-    bond_pair_z: &CudaSlice<f32>,
-    bond_pair_energy: &CudaSlice<f32>,
-    bond_pair_virial: &CudaSlice<f32>,
+    bond_pair_x: &CudaSlice<Real>,
+    bond_pair_y: &CudaSlice<Real>,
+    bond_pair_z: &CudaSlice<Real>,
+    bond_pair_energy: &CudaSlice<Real>,
+    bond_pair_virial: &CudaSlice<Real>,
     atom_bond_offsets: &CudaSlice<u32>,
     atom_bond_indices: &CudaSlice<u32>,
-    slot_force_x: &mut CudaViewMut<'_, f32>,
-    slot_force_y: &mut CudaViewMut<'_, f32>,
-    slot_force_z: &mut CudaViewMut<'_, f32>,
-    slot_energy: &mut CudaViewMut<'_, f32>,
-    slot_virial: &mut CudaViewMut<'_, f32>,
+    slot_force_x: &mut CudaViewMut<'_, Real>,
+    slot_force_y: &mut CudaViewMut<'_, Real>,
+    slot_force_z: &mut CudaViewMut<'_, Real>,
+    slot_energy: &mut CudaViewMut<'_, Real>,
+    slot_virial: &mut CudaViewMut<'_, Real>,
     particle_count: usize,
 ) -> Result<(), GpuError> {
     if particle_count == 0 {
@@ -874,14 +877,14 @@ pub fn reduce_bond_forces(
 pub fn harmonic_angle_force(
     particle_buffers: &ParticleBuffers,
     angles: &CudaSlice<u32>,
-    angle_k_theta: &CudaSlice<f32>,
-    angle_theta_0: &CudaSlice<f32>,
+    angle_k_theta: &CudaSlice<Real>,
+    angle_theta_0: &CudaSlice<Real>,
     sim_box: &SimulationBox,
-    angle_triple_x: &mut CudaSlice<f32>,
-    angle_triple_y: &mut CudaSlice<f32>,
-    angle_triple_z: &mut CudaSlice<f32>,
-    angle_triple_energy: &mut CudaSlice<f32>,
-    angle_triple_virial: &mut CudaSlice<f32>,
+    angle_triple_x: &mut CudaSlice<Real>,
+    angle_triple_y: &mut CudaSlice<Real>,
+    angle_triple_z: &mut CudaSlice<Real>,
+    angle_triple_energy: &mut CudaSlice<Real>,
+    angle_triple_virial: &mut CudaSlice<Real>,
     n_angles: usize,
 ) -> Result<(), GpuError> {
     if n_angles == 0 {
@@ -925,18 +928,18 @@ pub fn harmonic_angle_force(
 #[allow(clippy::too_many_arguments)]
 pub fn reduce_angle_forces(
     kernels: &Kernels,
-    angle_triple_x: &CudaSlice<f32>,
-    angle_triple_y: &CudaSlice<f32>,
-    angle_triple_z: &CudaSlice<f32>,
-    angle_triple_energy: &CudaSlice<f32>,
-    angle_triple_virial: &CudaSlice<f32>,
+    angle_triple_x: &CudaSlice<Real>,
+    angle_triple_y: &CudaSlice<Real>,
+    angle_triple_z: &CudaSlice<Real>,
+    angle_triple_energy: &CudaSlice<Real>,
+    angle_triple_virial: &CudaSlice<Real>,
     atom_angle_offsets: &CudaSlice<u32>,
     atom_angle_indices: &CudaSlice<u32>,
-    slot_force_x: &mut CudaViewMut<'_, f32>,
-    slot_force_y: &mut CudaViewMut<'_, f32>,
-    slot_force_z: &mut CudaViewMut<'_, f32>,
-    slot_energy: &mut CudaViewMut<'_, f32>,
-    slot_virial: &mut CudaViewMut<'_, f32>,
+    slot_force_x: &mut CudaViewMut<'_, Real>,
+    slot_force_y: &mut CudaViewMut<'_, Real>,
+    slot_force_z: &mut CudaViewMut<'_, Real>,
+    slot_energy: &mut CudaViewMut<'_, Real>,
+    slot_virial: &mut CudaViewMut<'_, Real>,
     particle_count: usize,
 ) -> Result<(), GpuError> {
     if particle_count == 0 {
@@ -972,15 +975,15 @@ pub fn reduce_angle_forces(
 // Launch helper for the NHC kinetic-energy reduction. Single-block,
 // 256 threads. Output goes to a length-1 device buffer the caller owns
 // (typically reused across calls to avoid per-step allocation). The
-// helper synchronously downloads the value and returns it as f32.
+// helper synchronously downloads the value and returns it as Real.
 // rq-f606ff6f
 pub fn compute_kinetic_energy(
     particle_buffers: &ParticleBuffers,
-    scratch: &mut CudaSlice<f32>,
-) -> Result<f32, GpuError> {
+    scratch: &mut CudaSlice<Real>,
+) -> Result<Real, GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
-        return Ok(0.0_f32);
+        return Ok(0.0);
     }
     debug_assert_eq!(scratch.len(), 1);
     let n_u32 = n as u32;
@@ -1004,7 +1007,7 @@ pub fn compute_kinetic_energy(
         )
         .map_err(GpuError::from)?;
     }
-    let mut out = [0.0_f32; 1];
+    let mut out = [0.0; 1];
     particle_buffers
         .device
         .dtoh_sync_copy_into(scratch, &mut out)
@@ -1017,7 +1020,7 @@ pub fn compute_kinetic_energy(
 // rq-f606ff6f rq-09e04194
 pub fn rescale_velocities(
     particle_buffers: &mut ParticleBuffers,
-    factor: f32,
+    factor: Real,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
@@ -1051,8 +1054,8 @@ pub fn andersen_resample(
     buffers: &mut ParticleBuffers,
     seed: u64,
     draw_counter: u64,
-    p_collision: f32,
-    kt: f32,
+    p_collision: Real,
+    kt: Real,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
@@ -1093,15 +1096,15 @@ pub fn andersen_resample(
 // Berendsen barostat. Single-block, 256 threads. Output goes to a
 // length-1 device buffer the caller owns (typically reused across calls
 // to avoid per-step allocation). The helper synchronously downloads the
-// value and returns it as f32.
+// value and returns it as Real.
 // rq-0d8c8688 rq-0f50dade
 pub fn compute_total_virial(
     particle_buffers: &ParticleBuffers,
-    scratch: &mut CudaSlice<f32>,
-) -> Result<f32, GpuError> {
+    scratch: &mut CudaSlice<Real>,
+) -> Result<Real, GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
-        return Ok(0.0_f32);
+        return Ok(0.0);
     }
     debug_assert_eq!(scratch.len(), 1);
     let n_u32 = n as u32;
@@ -1122,7 +1125,7 @@ pub fn compute_total_virial(
         )
         .map_err(GpuError::from)?;
     }
-    let mut out = [0.0_f32; 1];
+    let mut out = [0.0; 1];
     particle_buffers
         .device
         .dtoh_sync_copy_into(scratch, &mut out)
@@ -1139,11 +1142,11 @@ pub fn compute_total_virial(
 // per-particle buffer.
 pub fn compute_total_potential_energy(
     particle_buffers: &ParticleBuffers,
-    scratch: &mut CudaSlice<f32>,
-) -> Result<f32, GpuError> {
+    scratch: &mut CudaSlice<Real>,
+) -> Result<Real, GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
-        return Ok(0.0_f32);
+        return Ok(0.0);
     }
     debug_assert_eq!(scratch.len(), 1);
     let n_u32 = n as u32;
@@ -1164,7 +1167,7 @@ pub fn compute_total_potential_energy(
         )
         .map_err(GpuError::from)?;
     }
-    let mut out = [0.0_f32; 1];
+    let mut out = [0.0; 1];
     particle_buffers
         .device
         .dtoh_sync_copy_into(scratch, &mut out)
@@ -1179,7 +1182,7 @@ pub fn compute_total_potential_energy(
 // rq-0d8c8688 rq-19916fb0
 pub fn rescale_positions(
     particle_buffers: &mut ParticleBuffers,
-    factor: f32,
+    factor: Real,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
@@ -1207,12 +1210,12 @@ pub fn rescale_positions(
 // Launch helper for the MTK cell-coupled velocity half-kick. Block
 // size 256, grid ceil(n / 256). When n == 0 returns Ok(()) without
 // launching. The host pre-computes both scalar arguments in f64 and
-// passes them as f32.
+// passes them as Real.
 // rq-3b6d5001 rq-cadfb824
 pub fn mtk_velocity_half_kick(
     particle_buffers: &mut ParticleBuffers,
-    exp_minus_alpha: f32,
-    phi_v_dt_half: f32,
+    exp_minus_alpha: Real,
+    phi_v_dt_half: Real,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
@@ -1248,8 +1251,8 @@ pub fn mtk_velocity_half_kick(
 // rq-3b6d5001 rq-f1c96a3f
 pub fn mtk_position_drift(
     particle_buffers: &mut ParticleBuffers,
-    exp_b_dt: f32,
-    phi_x_dt: f32,
+    exp_b_dt: Real,
+    phi_x_dt: Real,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
@@ -1282,17 +1285,17 @@ pub fn mtk_position_drift(
 #[allow(clippy::too_many_arguments)]
 pub fn accumulate_forces(
     particle_buffers: &mut ParticleBuffers,
-    fast_slot_forces_x: &CudaSlice<f32>,
-    fast_slot_forces_y: &CudaSlice<f32>,
-    fast_slot_forces_z: &CudaSlice<f32>,
-    fast_slot_energies: &CudaSlice<f32>,
-    fast_slot_virials: &CudaSlice<f32>,
+    fast_slot_forces_x: &CudaSlice<Real>,
+    fast_slot_forces_y: &CudaSlice<Real>,
+    fast_slot_forces_z: &CudaSlice<Real>,
+    fast_slot_energies: &CudaSlice<Real>,
+    fast_slot_virials: &CudaSlice<Real>,
     num_fast_slots: u32,
-    slow_slot_forces_x: &CudaSlice<f32>,
-    slow_slot_forces_y: &CudaSlice<f32>,
-    slow_slot_forces_z: &CudaSlice<f32>,
-    slow_slot_energies: &CudaSlice<f32>,
-    slow_slot_virials: &CudaSlice<f32>,
+    slow_slot_forces_x: &CudaSlice<Real>,
+    slow_slot_forces_y: &CudaSlice<Real>,
+    slow_slot_forces_z: &CudaSlice<Real>,
+    slow_slot_energies: &CudaSlice<Real>,
+    slow_slot_virials: &CudaSlice<Real>,
     num_slow_slots: u32,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
@@ -1346,11 +1349,11 @@ pub fn accumulate_forces(
 // rq-884b5cd6
 pub fn neighbor_displacement_squared(
     particle_buffers: &ParticleBuffers,
-    reference_x: &CudaSlice<f32>,
-    reference_y: &CudaSlice<f32>,
-    reference_z: &CudaSlice<f32>,
+    reference_x: &CudaSlice<Real>,
+    reference_y: &CudaSlice<Real>,
+    reference_z: &CudaSlice<Real>,
     sim_box: &SimulationBox,
-    disp_sq: &mut CudaSlice<f32>,
+    disp_sq: &mut CudaSlice<Real>,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
@@ -1397,7 +1400,7 @@ pub fn neighbor_list_build(
     cell_offsets: &CudaSlice<u32>,
     sim_box: &SimulationBox,
     n_cells: [u32; 3],
-    r_search_sq: f32,
+    r_search_sq: Real,
     max_neighbors: u32,
     neighbor_list: &mut CudaSlice<u32>,
     neighbor_counts: &mut CudaSlice<u32>,
@@ -1463,9 +1466,9 @@ pub fn neighbor_list_build(
 // rq-344f7af0
 pub fn copy_positions_into_reference(
     particle_buffers: &ParticleBuffers,
-    reference_x: &mut CudaSlice<f32>,
-    reference_y: &mut CudaSlice<f32>,
-    reference_z: &mut CudaSlice<f32>,
+    reference_x: &mut CudaSlice<Real>,
+    reference_y: &mut CudaSlice<Real>,
+    reference_z: &mut CudaSlice<Real>,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
@@ -1709,11 +1712,12 @@ pub fn sort_cells_by_particle_id(
 }
 
 // rq-7d5e87ee
+#[cfg(not(feature = "f64"))]
 pub fn vv_kick_drift_lossless(
     buffers: &mut ParticleBuffers,
     lossless: &mut LosslessBuffers,
     sim_box: &SimulationBox,
-    dt: f32,
+    dt: Real,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
@@ -1766,7 +1770,7 @@ pub fn vv_kick_drift_lossless(
 pub fn lan_drift_half(
     buffers: &mut ParticleBuffers,
     sim_box: &SimulationBox,
-    dt: f32,
+    dt: Real,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
@@ -1809,8 +1813,8 @@ pub fn lan_ou_step(
     buffers: &mut ParticleBuffers,
     seed: u64,
     draw_counter: u64,
-    alpha: f32,
-    kt: f32,
+    alpha: Real,
+    kt: Real,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
@@ -1847,10 +1851,11 @@ pub fn lan_ou_step(
 }
 
 // rq-4ea8bbb2
+#[cfg(not(feature = "f64"))]
 pub fn vv_kick_lossless(
     buffers: &mut ParticleBuffers,
     lossless: &mut LosslessBuffers,
-    dt: f32,
+    dt: Real,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
@@ -1891,9 +1896,9 @@ pub fn shake_snapshot(
     group_atoms: &CudaSlice<u32>,
     group_atom_offset: &CudaSlice<u32>,
     group_atom_count: &CudaSlice<u32>,
-    snapshot_x: &mut CudaSlice<f32>,
-    snapshot_y: &mut CudaSlice<f32>,
-    snapshot_z: &mut CudaSlice<f32>,
+    snapshot_x: &mut CudaSlice<Real>,
+    snapshot_y: &mut CudaSlice<Real>,
+    snapshot_z: &mut CudaSlice<Real>,
     n_groups: usize,
 ) -> Result<(), GpuError> {
     if n_groups == 0 {
@@ -1926,9 +1931,9 @@ pub fn shake_snapshot(
 #[allow(clippy::too_many_arguments)]
 pub fn shake_positions(
     particle_buffers: &mut ParticleBuffers,
-    snapshot_x: &CudaSlice<f32>,
-    snapshot_y: &CudaSlice<f32>,
-    snapshot_z: &CudaSlice<f32>,
+    snapshot_x: &CudaSlice<Real>,
+    snapshot_y: &CudaSlice<Real>,
+    snapshot_z: &CudaSlice<Real>,
     group_atoms: &CudaSlice<u32>,
     group_atom_offset: &CudaSlice<u32>,
     group_atom_count: &CudaSlice<u32>,
@@ -1936,11 +1941,11 @@ pub fn shake_positions(
     group_constraint_count: &CudaSlice<u32>,
     group_constraints_local_i: &CudaSlice<u8>,
     group_constraints_local_j: &CudaSlice<u8>,
-    group_constraints_r2: &CudaSlice<f32>,
-    atom_mass: &CudaSlice<f32>,
+    group_constraints_r2: &CudaSlice<Real>,
+    atom_mass: &CudaSlice<Real>,
     sim_box: &SimulationBox,
-    dt: f32,
-    constraint_virial: &mut CudaSlice<f32>,
+    dt: Real,
+    constraint_virial: &mut CudaSlice<Real>,
     n_groups: usize,
 ) -> Result<(), GpuError> {
     if n_groups == 0 {
@@ -1991,7 +1996,7 @@ pub fn shake_positions(
 #[allow(clippy::too_many_arguments)]
 pub fn constraint_virial_scatter(
     particle_buffers: &mut ParticleBuffers,
-    constraint_virial: &CudaSlice<f32>,
+    constraint_virial: &CudaSlice<Real>,
     group_atoms: &CudaSlice<u32>,
     n_atom_slots: usize,
 ) -> Result<(), GpuError> {
@@ -2030,8 +2035,8 @@ pub fn shake_positions_no_velocity(
     group_constraint_count: &CudaSlice<u32>,
     group_constraints_local_i: &CudaSlice<u8>,
     group_constraints_local_j: &CudaSlice<u8>,
-    group_constraints_r2: &CudaSlice<f32>,
-    atom_mass: &CudaSlice<f32>,
+    group_constraints_r2: &CudaSlice<Real>,
+    atom_mass: &CudaSlice<Real>,
     sim_box: &SimulationBox,
     n_groups: usize,
 ) -> Result<(), GpuError> {
@@ -2086,10 +2091,10 @@ pub fn rattle_velocities(
     group_constraint_count: &CudaSlice<u32>,
     group_constraints_local_i: &CudaSlice<u8>,
     group_constraints_local_j: &CudaSlice<u8>,
-    atom_mass: &CudaSlice<f32>,
+    atom_mass: &CudaSlice<Real>,
     sim_box: &SimulationBox,
-    dt: f32,
-    constraint_virial: &mut CudaSlice<f32>,
+    dt: Real,
+    constraint_virial: &mut CudaSlice<Real>,
     n_groups: usize,
 ) -> Result<(), GpuError> {
     if n_groups == 0 {

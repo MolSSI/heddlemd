@@ -19,6 +19,7 @@ use heddle_md::io::config::NeighborListConfig;
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::{KernelStage, Timings};
+use heddle_md::precision::Real;
 
 #[allow(dead_code)]
 const KB: f64 = 1.380649e-23;
@@ -29,7 +30,7 @@ const TEMP_F: f64 = 315775.0248040668;
 const VEL_F: f64 = 2187691.2636411153;
 
 fn box_large() -> SimulationBox {
-    let l = (1.0e6 / LEN_F) as f32;
+    let l = (1.0e6 / LEN_F) as Real;
     SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
@@ -79,26 +80,26 @@ fn unbox_berendsen(boxed: Box<dyn Thermostat>) -> BerendsenThermostat {
     unsafe { *Box::from_raw(Box::into_raw(boxed) as *mut BerendsenThermostat) }
 }
 
-fn symmetric_state(n: usize, mass_si: f32, v_mag_si: f32) -> ParticleState {
+fn symmetric_state(n: usize, mass_si: Real, v_mag_si: Real) -> ParticleState {
     assert!(n.is_multiple_of(2));
     // Convert SI inputs (kg, m/s) to atomic units (m_e, Bohr/au-time).
-    let mass = (mass_si as f64 / MASS_F) as f32;
-    let v_mag = (v_mag_si as f64 / VEL_F) as f32;
-    let mut vx: Vec<f32> = Vec::with_capacity(n);
+    let mass = (mass_si as f64 / MASS_F) as Real;
+    let v_mag = (v_mag_si as f64 / VEL_F) as Real;
+    let mut vx: Vec<Real> = Vec::with_capacity(n);
     for _ in 0..n / 2 {
         vx.push(v_mag);
         vx.push(-v_mag);
     }
-    let zero = vec![0.0_f32; n];
+    let zero = vec![0.0; n];
     ParticleState::new(
-        (0..n).map(|i| (i as f32) * (1.0e-10 / LEN_F) as f32).collect(),
+        (0..n).map(|i| (i as Real) * (1.0e-10 / LEN_F) as Real).collect(),
         zero.clone(),
         zero.clone(),
         vx,
         zero.clone(),
         zero,
         vec![mass; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         (0..n as u32).collect(),
         None,
         None,
@@ -157,7 +158,7 @@ fn berendsen_apply_post_launches_expected_kernels() {
     let kind = berendsen_kind(300.0, 1.0e-13);
     let mut therm = build_berendsen(&gpu, n, &kind);
     therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count_for = |stage: KernelStage| -> u64 {
@@ -186,7 +187,7 @@ fn berendsen_apply_post_empty_state_is_noop() {
     let kind = berendsen_kind(300.0, 1.0e-13);
     let mut therm = build_berendsen(&gpu, 0, &kind);
     therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
 }
 
@@ -202,7 +203,7 @@ fn berendsen_apply_pre_is_trait_default_noop() {
     let kind = berendsen_kind(300.0, 1.0e-13);
     let mut therm = build_berendsen(&gpu, n, &kind);
     therm
-        .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
     let vx_after = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     assert_eq!(vx_after, snap_vx);
@@ -219,7 +220,7 @@ fn berendsen_apply_pre_is_trait_default_noop() {
 fn berendsen_lambda_one_when_k_equals_target() {
     let gpu = init_device().unwrap();
     let n = 8usize;
-    let mass_si: f32 = 1.66e-27;
+    let mass_si: Real = 1.66e-27;
     let temperature = 300.0_f64;
     let g_dof = (3 * n - 3) as f64;
     // k_B = 1 in the engine; the helper supplies SI temperature so divide
@@ -229,14 +230,14 @@ fn berendsen_lambda_one_when_k_equals_target() {
     let v_each_au = (k_target / ((n as f64) * 0.5 * mass_au)).sqrt();
     // symmetric_state itself converts SI → atomic. Supply the
     // SI-equivalent velocity that matches the atomic v_each.
-    let v_each_si = (v_each_au * VEL_F) as f32;
+    let v_each_si = (v_each_au * VEL_F) as Real;
     let state = symmetric_state(n, mass_si, v_each_si);
     let snap_vx = state.velocities_x.clone();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_berendsen(&gpu, n, &berendsen_kind(temperature, 1.0e-13));
     therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
     let vx_after = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     for (a, b) in vx_after.iter().zip(snap_vx.iter()) {
@@ -250,21 +251,21 @@ fn berendsen_lambda_one_when_k_equals_target() {
 fn berendsen_lambda_squared_matches_analytical_when_cooling() {
     let gpu = init_device().unwrap();
     let n = 8usize;
-    let mass_si: f32 = 1.66e-27;
+    let mass_si: Real = 1.66e-27;
     let temperature = 300.0_f64;
     let g_dof = (3 * n - 3) as f64;
     let k_target = (g_dof / 2.0) * (temperature / TEMP_F);
     let k_old_desired = 2.0 * k_target;
     let mass_au = mass_si as f64 / MASS_F;
     let v_each_au = (k_old_desired / ((n as f64) * 0.5 * mass_au)).sqrt();
-    let v_each_si = (v_each_au * VEL_F) as f32;
+    let v_each_si = (v_each_au * VEL_F) as Real;
     let state = symmetric_state(n, mass_si, v_each_si);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let dt = (1.0e-14 / TIME_F) as f32;
+    let dt = (1.0e-14 / TIME_F) as Real;
     let tau = 1.0e-13_f64;
     let mut therm = build_berendsen(&gpu, n, &berendsen_kind(temperature, tau));
-    let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
+    let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let k_before = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
     therm.apply_post(&mut buffers, dt, &mut timings).unwrap();
     let k_after = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
@@ -284,23 +285,23 @@ fn berendsen_lambda_squared_matches_analytical_when_cooling() {
 fn berendsen_lambda_squared_clamped_to_zero_when_runaway() {
     let gpu = init_device().unwrap();
     let n = 8usize;
-    let mass_si: f32 = 1.66e-27;
+    let mass_si: Real = 1.66e-27;
     let temperature = 300.0_f64;
     let g_dof = (3 * n - 3) as f64;
     let k_target = (g_dof / 2.0) * (temperature / TEMP_F);
     let mass_au = mass_si as f64 / MASS_F;
     let v_each_au = (100.0 * k_target / ((n as f64) * 0.5 * mass_au)).sqrt();
-    let v_each_si = (v_each_au * VEL_F) as f32;
+    let v_each_si = (v_each_au * VEL_F) as Real;
     let state = symmetric_state(n, mass_si, v_each_si);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let dt = (2.0e-13 / TIME_F) as f32; // dt/τ = 2.0 in SI
+    let dt = (2.0e-13 / TIME_F) as Real; // dt/τ = 2.0 in SI
     let tau = 1.0e-13_f64;
     let mut therm = build_berendsen(&gpu, n, &berendsen_kind(temperature, tau));
     therm.apply_post(&mut buffers, dt, &mut timings).unwrap();
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     for v in &vx {
-        assert_eq!(*v, 0.0_f32, "all velocities should be quenched to zero, got {v}");
+        assert_eq!(*v, 0.0, "all velocities should be quenched to zero, got {v}");
     }
 }
 
@@ -316,7 +317,7 @@ fn berendsen_skips_rescale_when_k_zero() {
     // Apply once with the trait object so apply_post runs on the box.
     let mut therm = boxed;
     therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count = report
@@ -335,19 +336,19 @@ fn berendsen_skips_rescale_when_k_zero() {
 fn berendsen_preserves_com_momentum() {
     let gpu = init_device().unwrap();
     let n = 16usize;
-    let mass: f32 = 1.66e-27;
+    let mass: Real = 1.66e-27;
     let state = symmetric_state(n, mass, 500.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_berendsen(&gpu, n, &berendsen_kind(300.0, 1.0e-13));
     for _ in 0..20 {
         therm
-            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
             .unwrap();
     }
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     let p_com: f64 = vx.iter().map(|&v| (mass as f64) * (v as f64)).sum();
-    let scale: f32 = vx.iter().map(|v| v.abs()).fold(0.0, f32::max);
+    let scale: Real = vx.iter().map(|v| v.abs()).fold(0.0, Real::max);
     let tol = (mass as f64) * (scale as f64) * 1.0e-3;
     assert!(p_com.abs() < tol, "p_com = {p_com} (tol {tol})");
 }
@@ -359,15 +360,15 @@ fn berendsen_preserves_com_momentum() {
 fn berendsen_cumulative_injection_matches_kinetic_change() {
     let gpu = init_device().unwrap();
     let n = 16usize;
-    let mass: f32 = 1.66e-27;
+    let mass: Real = 1.66e-27;
     let state = symmetric_state(n, mass, 1000.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = unbox_berendsen(build_berendsen(&gpu, n, &berendsen_kind(300.0, 1.0e-13)));
-    let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
+    let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let k_before = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
     therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
     let k_after = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
     let expected = k_after - k_before;
@@ -411,14 +412,14 @@ fn berendsen_two_runs_with_identical_inputs_match() {
     let gpu = init_device().unwrap();
     let state = symmetric_state(8, 1.66e-27, 500.0);
 
-    fn run_once(gpu: &GpuContext, state: &ParticleState) -> Vec<f32> {
+    fn run_once(gpu: &GpuContext, state: &ParticleState) -> Vec<Real> {
         let n = state.particle_count();
         let mut buffers = ParticleBuffers::new(gpu, state).unwrap();
         let mut timings = Timings::new(gpu).unwrap();
         let mut therm = build_berendsen(gpu, n, &berendsen_kind(300.0, 1.0e-13));
         for _ in 0..5 {
             therm
-                .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+                .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
                 .unwrap();
         }
         gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap()
@@ -444,19 +445,19 @@ fn berendsen_temperature_relaxes_toward_target() {
     // thermostat drives K to K_target on the time scale τ.
     let gpu = init_device().unwrap();
     let n = 64usize;
-    let mass_si: f32 = 1.66e-27;
+    let mass_si: Real = 1.66e-27;
     let temperature = 300.0_f64;
     let g_dof = (3 * n - 3) as f64;
     let k_target = (g_dof / 2.0) * (temperature / TEMP_F);
     let mass_au = mass_si as f64 / MASS_F;
     let v_each_au = (2.0 * k_target / ((n as f64) * 0.5 * mass_au)).sqrt();
-    let v_each_si = (v_each_au * VEL_F) as f32;
+    let v_each_si = (v_each_au * VEL_F) as Real;
     let state = symmetric_state(n, mass_si, v_each_si);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_large();
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
-    let dt = (1.0e-15 / TIME_F) as f32;
+    let dt = (1.0e-15 / TIME_F) as Real;
     let tau = 1.0e-13_f64;
 
     let mut integrator = heddle_md::integrator::IntegratorRegistry::with_builtins()
@@ -477,7 +478,7 @@ fn berendsen_temperature_relaxes_toward_target() {
             .apply_post(&mut buffers, dt, &mut timings)
             .unwrap();
     }
-    let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
+    let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let k_final = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
     let rel = (k_final - k_target).abs() / k_target;
     assert!(

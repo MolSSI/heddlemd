@@ -12,6 +12,7 @@ use crate::analysis::{
 use crate::io::{TrajectoryFrame, TrajectoryFrameHeader};
 use crate::io::config::Config;
 use crate::pbc::SimulationBox;
+use crate::precision::Real;
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -234,7 +235,7 @@ impl Analysis for RdfAnalysis {
                     let dx = px[j] as f64 - px[i] as f64;
                     let dy = py[j] as f64 - py[i] as f64;
                     let dz = pz[j] as f64 - pz[i] as f64;
-                    let mi = sim_box.minimum_image([dx as f32, dy as f32, dz as f32]);
+                    let mi = sim_box.minimum_image([dx as Real, dy as Real, dz as Real]);
                     let mdx = mi[0] as f64;
                     let mdy = mi[1] as f64;
                     let mdz = mi[2] as f64;
@@ -253,7 +254,7 @@ impl Analysis for RdfAnalysis {
                     let dx = px[j] as f64 - px[i] as f64;
                     let dy = py[j] as f64 - py[i] as f64;
                     let dz = pz[j] as f64 - pz[i] as f64;
-                    let mi = sim_box.minimum_image([dx as f32, dy as f32, dz as f32]);
+                    let mi = sim_box.minimum_image([dx as Real, dy as Real, dz as Real]);
                     let mdx = mi[0] as f64;
                     let mdy = mi[1] as f64;
                     let mdz = mi[2] as f64;

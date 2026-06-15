@@ -6,6 +6,7 @@ use std::sync::Arc;
 use cudarc::driver::{CudaDevice, CudaSlice, DeviceSlice};
 use heddle_md::gpu::{GpuContext, PairBuffer, ParticleBuffers, init_device};
 use heddle_md::state::ParticleState;
+use heddle_md::precision::Real;
 
 fn zero_state(n: usize) -> ParticleState {
     ParticleState::new(
@@ -16,7 +17,7 @@ fn zero_state(n: usize) -> ParticleState {
         vec![0.0; n],
         vec![0.0; n],
         vec![1.0; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
@@ -32,40 +33,40 @@ fn upload_counts(device: &Arc<CudaDevice>, counts: &[u32]) -> CudaSlice<u32> {
     device.htod_sync_copy(counts).expect("upload counts")
 }
 
-fn upload_pair_x(pair: &mut PairBuffer, data: &[f32]) {
+fn upload_pair_x(pair: &mut PairBuffer, data: &[Real]) {
     let device = pair.device.clone();
     device
         .htod_sync_copy_into(data, &mut pair.pair_forces_x)
         .expect("upload pair_forces_x");
 }
 
-fn upload_pair_y(pair: &mut PairBuffer, data: &[f32]) {
+fn upload_pair_y(pair: &mut PairBuffer, data: &[Real]) {
     let device = pair.device.clone();
     device
         .htod_sync_copy_into(data, &mut pair.pair_forces_y)
         .expect("upload pair_forces_y");
 }
 
-fn upload_pair_z(pair: &mut PairBuffer, data: &[f32]) {
+fn upload_pair_z(pair: &mut PairBuffer, data: &[Real]) {
     let device = pair.device.clone();
     device
         .htod_sync_copy_into(data, &mut pair.pair_forces_z)
         .expect("upload pair_forces_z");
 }
 
-fn download_pair_x(pair: &PairBuffer) -> Vec<f32> {
+fn download_pair_x(pair: &PairBuffer) -> Vec<Real> {
     pair.device.dtoh_sync_copy(&pair.pair_forces_x).unwrap()
 }
 
-fn download_pair_y(pair: &PairBuffer) -> Vec<f32> {
+fn download_pair_y(pair: &PairBuffer) -> Vec<Real> {
     pair.device.dtoh_sync_copy(&pair.pair_forces_y).unwrap()
 }
 
-fn download_pair_z(pair: &PairBuffer) -> Vec<f32> {
+fn download_pair_z(pair: &PairBuffer) -> Vec<Real> {
     pair.device.dtoh_sync_copy(&pair.pair_forces_z).unwrap()
 }
 
-fn download_forces(buffers: &ParticleBuffers) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+fn download_forces(buffers: &ParticleBuffers) -> (Vec<Real>, Vec<Real>, Vec<Real>) {
     let device = buffers.device.clone();
     (
         device.dtoh_sync_copy(&buffers.forces_x).unwrap(),
@@ -85,9 +86,9 @@ fn pair_buffer_new_allocates_zero_initialised_buffers() {
     assert_eq!(pair.pair_forces_x.len(), 32);
     assert_eq!(pair.pair_forces_y.len(), 32);
     assert_eq!(pair.pair_forces_z.len(), 32);
-    assert_eq!(download_pair_x(&pair), vec![0.0_f32; 32]);
-    assert_eq!(download_pair_y(&pair), vec![0.0_f32; 32]);
-    assert_eq!(download_pair_z(&pair), vec![0.0_f32; 32]);
+    assert_eq!(download_pair_x(&pair), vec![0.0; 32]);
+    assert_eq!(download_pair_y(&pair), vec![0.0; 32]);
+    assert_eq!(download_pair_z(&pair), vec![0.0; 32]);
 }
 
 #[test] // rq-74e4bd02
@@ -125,9 +126,9 @@ fn init_device_loads_reduce_module() {
 fn reduction_with_all_zero_counts_zeroes_forces() {
     let gpu = init_device().expect("init_device");
     let mut pair = PairBuffer::new(&gpu, 4, 8).expect("PairBuffer::new");
-    upload_pair_x(&mut pair, &vec![3.14_f32; 32]);
-    upload_pair_y(&mut pair, &vec![2.71_f32; 32]);
-    upload_pair_z(&mut pair, &vec![1.41_f32; 32]);
+    upload_pair_x(&mut pair, &vec![3.14; 32]);
+    upload_pair_y(&mut pair, &vec![2.71; 32]);
+    upload_pair_z(&mut pair, &vec![1.41; 32]);
 
     let mut state = zero_state(4);
     state.forces_x = vec![10.0, 20.0, 30.0, 40.0];
@@ -139,27 +140,27 @@ fn reduction_with_all_zero_counts_zeroes_forces() {
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, fy, fz) = download_forces(&particle_buffers);
-    assert_eq!(fx, vec![0.0_f32; 4]);
-    assert_eq!(fy, vec![0.0_f32; 4]);
-    assert_eq!(fz, vec![0.0_f32; 4]);
+    assert_eq!(fx, vec![0.0; 4]);
+    assert_eq!(fy, vec![0.0; 4]);
+    assert_eq!(fz, vec![0.0; 4]);
 }
 
 #[test] // rq-8ee33aa0
 fn reduction_with_single_particle_single_neighbor() {
     let gpu = init_device().expect("init_device");
     let mut pair = PairBuffer::new(&gpu, 1, 4).expect("PairBuffer::new");
-    upload_pair_x(&mut pair, &[1.5_f32, 0.0, 0.0, 0.0]);
-    upload_pair_y(&mut pair, &[-2.5_f32, 0.0, 0.0, 0.0]);
-    upload_pair_z(&mut pair, &[0.75_f32, 0.0, 0.0, 0.0]);
+    upload_pair_x(&mut pair, &[1.5, 0.0, 0.0, 0.0]);
+    upload_pair_y(&mut pair, &[-2.5, 0.0, 0.0, 0.0]);
+    upload_pair_z(&mut pair, &[0.75, 0.0, 0.0, 0.0]);
 
     let mut particle_buffers = zero_particle_buffers(&gpu, 1);
     let counts = upload_counts(&gpu.device, &[1u32]);
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, fy, fz) = download_forces(&particle_buffers);
-    assert_eq!(fx, vec![1.5_f32]);
-    assert_eq!(fy, vec![-2.5_f32]);
-    assert_eq!(fz, vec![0.75_f32]);
+    assert_eq!(fx, vec![1.5]);
+    assert_eq!(fy, vec![-2.5]);
+    assert_eq!(fz, vec![0.75]);
 }
 
 // --- Reduction correctness: order and bounds ---
@@ -168,14 +169,14 @@ fn reduction_with_single_particle_single_neighbor() {
 fn reduction_sums_entries_left_to_right() {
     let gpu = init_device().expect("init_device");
     let mut pair = PairBuffer::new(&gpu, 1, 4).expect("PairBuffer::new");
-    upload_pair_x(&mut pair, &[1.0_f32, 2.0, 4.0, 999.0]);
+    upload_pair_x(&mut pair, &[1.0, 2.0, 4.0, 999.0]);
 
     let mut particle_buffers = zero_particle_buffers(&gpu, 1);
     let counts = upload_counts(&gpu.device, &[3u32]);
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, _, _) = download_forces(&particle_buffers);
-    let expected = (1.0_f32 + 2.0_f32) + 4.0_f32;
+    let expected = (1.0 + 2.0) + 4.0;
     assert_eq!(fx[0], expected);
     // The slot at index 3 (value 999.0) must not be included.
     assert!(fx[0] != expected + 999.0);
@@ -185,7 +186,7 @@ fn reduction_sums_entries_left_to_right() {
 fn reduction_ignores_slots_beyond_count() {
     let gpu = init_device().expect("init_device");
     let mut pair = PairBuffer::new(&gpu, 1, 8).expect("PairBuffer::new");
-    let mut data = vec![f32::INFINITY; 8];
+    let mut data = vec![Real::INFINITY; 8];
     data[0] = 10.0;
     data[1] = 20.0;
     upload_pair_x(&mut pair, &data);
@@ -195,7 +196,7 @@ fn reduction_ignores_slots_beyond_count() {
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, _, _) = download_forces(&particle_buffers);
-    assert_eq!(fx[0], 30.0_f32);
+    assert_eq!(fx[0], 30.0);
     assert!(fx[0].is_finite());
 }
 
@@ -203,14 +204,14 @@ fn reduction_ignores_slots_beyond_count() {
 fn reduction_at_full_max_neighbors_capacity() {
     let gpu = init_device().expect("init_device");
     let mut pair = PairBuffer::new(&gpu, 1, 4).expect("PairBuffer::new");
-    upload_pair_x(&mut pair, &[1.0_f32, 2.0, 3.0, 4.0]);
+    upload_pair_x(&mut pair, &[1.0, 2.0, 3.0, 4.0]);
 
     let mut particle_buffers = zero_particle_buffers(&gpu, 1);
     let counts = upload_counts(&gpu.device, &[4u32]);
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, _, _) = download_forces(&particle_buffers);
-    let expected = ((1.0_f32 + 2.0_f32) + 3.0_f32) + 4.0_f32;
+    let expected = ((1.0 + 2.0) + 3.0) + 4.0;
     assert_eq!(fx[0], expected);
 }
 
@@ -220,7 +221,7 @@ fn reduction_at_full_max_neighbors_capacity() {
 fn per_particle_reduction_with_varying_counts() {
     let gpu = init_device().expect("init_device");
     let mut pair = PairBuffer::new(&gpu, 3, 4).expect("PairBuffer::new");
-    let pair_x: Vec<f32> = vec![
+    let pair_x: Vec<Real> = vec![
         // particle 0: count = 2
         1.0, 2.0, 100.0, 100.0,
         // particle 1: count = 1
@@ -235,9 +236,9 @@ fn per_particle_reduction_with_varying_counts() {
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, _, _) = download_forces(&particle_buffers);
-    assert_eq!(fx[0], 3.0_f32);
-    assert_eq!(fx[1], 10.0_f32);
-    assert_eq!(fx[2], 2.0_f32);
+    assert_eq!(fx[0], 3.0);
+    assert_eq!(fx[1], 10.0);
+    assert_eq!(fx[2], 2.0);
 }
 
 // --- Empty state ---
@@ -259,10 +260,10 @@ fn block_non_aligned_particle_count_is_handled() {
     let n: usize = 1000;
     let max_neighbors: u32 = 2;
     let mut pair = PairBuffer::new(&gpu, n, max_neighbors).expect("PairBuffer::new");
-    let mut x_data = vec![0.0_f32; n * 2];
+    let mut x_data = vec![0.0; n * 2];
     for i in 0..n {
-        x_data[i * 2] = i as f32;
-        x_data[i * 2 + 1] = -(i as f32);
+        x_data[i * 2] = i as Real;
+        x_data[i * 2 + 1] = -(i as Real);
     }
     upload_pair_x(&mut pair, &x_data);
 
@@ -272,9 +273,9 @@ fn block_non_aligned_particle_count_is_handled() {
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, fy, fz) = download_forces(&particle_buffers);
     for i in 0..n {
-        assert_eq!(fx[i], 0.0_f32, "fx[{i}]");
-        assert_eq!(fy[i], 0.0_f32, "fy[{i}]");
-        assert_eq!(fz[i], 0.0_f32, "fz[{i}]");
+        assert_eq!(fx[i], 0.0, "fx[{i}]");
+        assert_eq!(fy[i], 0.0, "fy[{i}]");
+        assert_eq!(fz[i], 0.0, "fz[{i}]");
     }
 }
 
@@ -293,16 +294,16 @@ fn reduction_overwrites_prior_force_values() {
 
     reduce_pair_forces_into_buffers(&pair, &counts, &mut particle_buffers).expect("reduce");
     let (fx, _, _) = download_forces(&particle_buffers);
-    assert_eq!(fx, vec![0.0_f32, 0.0, 0.0, 0.0]);
+    assert_eq!(fx, vec![0.0, 0.0, 0.0, 0.0]);
 }
 
 #[test] // rq-9b794cff
 fn reduction_does_not_modify_pair_buffer() {
     let gpu = init_device().expect("init_device");
     let mut pair = PairBuffer::new(&gpu, 4, 4).expect("PairBuffer::new");
-    let pair_x: Vec<f32> = (0..16).map(|i| 0.1 + i as f32 * 0.5).collect();
-    let pair_y: Vec<f32> = (0..16).map(|i| -0.2 + i as f32 * 0.25).collect();
-    let pair_z: Vec<f32> = (0..16).map(|i| 0.3 + i as f32 * 0.125).collect();
+    let pair_x: Vec<Real> = (0..16).map(|i| 0.1 + i as Real * 0.5).collect();
+    let pair_y: Vec<Real> = (0..16).map(|i| -0.2 + i as Real * 0.25).collect();
+    let pair_z: Vec<Real> = (0..16).map(|i| 0.3 + i as Real * 0.125).collect();
     upload_pair_x(&mut pair, &pair_x);
     upload_pair_y(&mut pair, &pair_y);
     upload_pair_z(&mut pair, &pair_z);
@@ -334,7 +335,7 @@ fn reduction_does_not_modify_positions_velocities_masses() {
         vec![-0.1, -0.2, -0.3, -0.4],
         vec![0.05, 0.1, 0.15, 0.2],
         vec![1.5, 2.5, 3.5, 4.5],
-        vec![0.0_f32; vec![1.5, 2.5, 3.5, 4.5].len()],
+        vec![0.0; vec![1.5, 2.5, 3.5, 4.5].len()],
         vec![0u32; 4],
         Some(vec![100, 200, 300, 400]),
             None,
@@ -379,20 +380,20 @@ fn two_independent_runs_produce_byte_identical_net_forces() {
     let n: usize = 128;
     let max_neighbors: u32 = 16;
     let total = n * max_neighbors as usize;
-    let pair_x: Vec<f32> = (0..total).map(|i| (i as f32) * 0.001 - 0.5).collect();
-    let pair_y: Vec<f32> = (0..total).map(|i| (i as f32) * -0.002 + 0.25).collect();
-    let pair_z: Vec<f32> = (0..total).map(|i| (i as f32) * 0.0005).collect();
+    let pair_x: Vec<Real> = (0..total).map(|i| (i as Real) * 0.001 - 0.5).collect();
+    let pair_y: Vec<Real> = (0..total).map(|i| (i as Real) * -0.002 + 0.25).collect();
+    let pair_z: Vec<Real> = (0..total).map(|i| (i as Real) * 0.0005).collect();
     let counts: Vec<u32> = (0..n).map(|i| (i as u32) % (max_neighbors + 1)).collect();
 
     fn run(
         gpu: &GpuContext,
         n: usize,
         max_neighbors: u32,
-        pair_x: &[f32],
-        pair_y: &[f32],
-        pair_z: &[f32],
+        pair_x: &[Real],
+        pair_y: &[Real],
+        pair_z: &[Real],
         counts: &[u32],
-    ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    ) -> (Vec<Real>, Vec<Real>, Vec<Real>) {
         let mut pair =
             PairBuffer::new(gpu, n, max_neighbors).expect("PairBuffer::new");
         upload_pair_x(&mut pair, pair_x);
@@ -417,7 +418,7 @@ fn two_independent_runs_produce_byte_identical_net_forces() {
 fn nan_pair_contribution_propagates_to_nan() {
     let gpu = init_device().expect("init_device");
     let mut pair = PairBuffer::new(&gpu, 1, 4).expect("PairBuffer::new");
-    upload_pair_x(&mut pair, &[1.0_f32, f32::NAN, 3.0, 0.0]);
+    upload_pair_x(&mut pair, &[1.0, Real::NAN, 3.0, 0.0]);
 
     let mut particle_buffers = zero_particle_buffers(&gpu, 1);
     let counts = upload_counts(&gpu.device, &[3u32]);
@@ -431,7 +432,7 @@ fn nan_pair_contribution_propagates_to_nan() {
 fn infinite_pair_contribution_propagates_to_infinity() {
     let gpu = init_device().expect("init_device");
     let mut pair = PairBuffer::new(&gpu, 1, 4).expect("PairBuffer::new");
-    upload_pair_x(&mut pair, &[1.0_f32, f32::INFINITY, 3.0, 0.0]);
+    upload_pair_x(&mut pair, &[1.0, Real::INFINITY, 3.0, 0.0]);
 
     let mut particle_buffers = zero_particle_buffers(&gpu, 1);
     let counts = upload_counts(&gpu.device, &[3u32]);
@@ -450,14 +451,14 @@ fn reduction_sums_pair_energies_left_to_right() {
     let device = gpu.device.clone();
     let mut pair = PairBuffer::new(&gpu, 1, 4).unwrap();
     let mut state = ParticleState::new(
-        vec![0.0_f32],
-        vec![0.0_f32],
-        vec![0.0_f32],
-        vec![0.0_f32],
-        vec![0.0_f32],
-        vec![0.0_f32],
-        vec![1.0_f32],
-        vec![0.0_f32; vec![1.0_f32].len()],
+        vec![0.0],
+        vec![0.0],
+        vec![0.0],
+        vec![0.0],
+        vec![0.0],
+        vec![0.0],
+        vec![1.0],
+        vec![0.0; vec![1.0].len()],
         vec![0u32],
         None,
             None,
@@ -465,16 +466,16 @@ fn reduction_sums_pair_energies_left_to_right() {
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     device
-        .htod_sync_copy_into(&vec![0.5_f32, 1.5, 2.0, 999.0], &mut pair.pair_energies)
+        .htod_sync_copy_into(&vec![0.5, 1.5, 2.0, 999.0], &mut pair.pair_energies)
         .unwrap();
     device
-        .htod_sync_copy_into(&vec![-1.0_f32, 2.0, 3.0, 0.0], &mut pair.pair_virials)
+        .htod_sync_copy_into(&vec![-1.0, 2.0, 3.0, 0.0], &mut pair.pair_virials)
         .unwrap();
     let counts = device.htod_sync_copy(&[3u32]).unwrap();
     reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
     state.download_from(&buffers).unwrap();
-    assert_eq!(state.potential_energies[0], (0.5_f32 + 1.5_f32) + 2.0_f32);
-    assert_eq!(state.virials[0], (-1.0_f32 + 2.0_f32) + 3.0_f32);
+    assert_eq!(state.potential_energies[0], (0.5 + 1.5) + 2.0);
+    assert_eq!(state.virials[0], (-1.0 + 2.0) + 3.0);
 }
 
 #[test] // rq-961c2ee6
@@ -483,14 +484,14 @@ fn reduction_zero_count_writes_zero_to_energy_and_virial() {
     let device = gpu.device.clone();
     let mut pair = PairBuffer::new(&gpu, 2, 4).unwrap();
     let mut state = ParticleState::new(
-        vec![0.0_f32, 1.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![1.0_f32, 1.0],
-        vec![0.0_f32; vec![1.0_f32, 1.0].len()],
+        vec![0.0, 1.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![1.0, 1.0],
+        vec![0.0; vec![1.0, 1.0].len()],
         vec![0u32, 0],
         None,
             None,
@@ -499,16 +500,16 @@ fn reduction_zero_count_writes_zero_to_energy_and_virial() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     // Pre-fill energies and virials with non-zero junk to prove they get overwritten.
     device
-        .htod_sync_copy_into(&vec![7.0_f32; 8], &mut pair.pair_energies)
+        .htod_sync_copy_into(&vec![7.0; 8], &mut pair.pair_energies)
         .unwrap();
     device
-        .htod_sync_copy_into(&vec![-3.0_f32; 8], &mut pair.pair_virials)
+        .htod_sync_copy_into(&vec![-3.0; 8], &mut pair.pair_virials)
         .unwrap();
     let counts = device.htod_sync_copy(&[0u32, 0]).unwrap();
     reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
     state.download_from(&buffers).unwrap();
-    assert_eq!(state.potential_energies, vec![0.0_f32, 0.0]);
-    assert_eq!(state.virials, vec![0.0_f32, 0.0]);
+    assert_eq!(state.potential_energies, vec![0.0, 0.0]);
+    assert_eq!(state.virials, vec![0.0, 0.0]);
 }
 
 #[test] // rq-41d9e514
@@ -517,14 +518,14 @@ fn energy_and_virial_share_force_indexing() {
     let device = gpu.device.clone();
     let mut pair = PairBuffer::new(&gpu, 2, 2).unwrap();
     let mut state = ParticleState::new(
-        vec![0.0_f32, 1.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![1.0_f32, 1.0],
-        vec![0.0_f32; vec![1.0_f32, 1.0].len()],
+        vec![0.0, 1.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![1.0, 1.0],
+        vec![0.0; vec![1.0, 1.0].len()],
         vec![0u32, 0],
         None,
             None,
@@ -532,23 +533,23 @@ fn energy_and_virial_share_force_indexing() {
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     device
-        .htod_sync_copy_into(&vec![1.0_f32, 2.0, 3.0, 4.0], &mut pair.pair_forces_x)
+        .htod_sync_copy_into(&vec![1.0, 2.0, 3.0, 4.0], &mut pair.pair_forces_x)
         .unwrap();
     device
-        .htod_sync_copy_into(&vec![10.0_f32, 20.0, 30.0, 40.0], &mut pair.pair_energies)
+        .htod_sync_copy_into(&vec![10.0, 20.0, 30.0, 40.0], &mut pair.pair_energies)
         .unwrap();
     device
         .htod_sync_copy_into(
-            &vec![100.0_f32, 200.0, 300.0, 400.0],
+            &vec![100.0, 200.0, 300.0, 400.0],
             &mut pair.pair_virials,
         )
         .unwrap();
     let counts = device.htod_sync_copy(&[2u32, 2]).unwrap();
     reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
     state.download_from(&buffers).unwrap();
-    assert_eq!(state.forces_x, vec![3.0_f32, 7.0]);
-    assert_eq!(state.potential_energies, vec![30.0_f32, 70.0]);
-    assert_eq!(state.virials, vec![300.0_f32, 700.0]);
+    assert_eq!(state.forces_x, vec![3.0, 7.0]);
+    assert_eq!(state.potential_energies, vec![30.0, 70.0]);
+    assert_eq!(state.virials, vec![300.0, 700.0]);
 }
 
 // --- Block-tree reduction shape ---
@@ -558,7 +559,7 @@ fn reduction_with_count_larger_than_one_warp_uses_inter_warp_tree() {
     let gpu = init_device().expect("init_device");
     let device = gpu.device.clone();
     let mut pair = PairBuffer::new(&gpu, 1, 128).unwrap();
-    let mut data = vec![0.0_f32; 128];
+    let mut data = vec![0.0; 128];
     for slot in data.iter_mut().take(96) {
         *slot = 1.0;
     }
@@ -567,7 +568,7 @@ fn reduction_with_count_larger_than_one_warp_uses_inter_warp_tree() {
     let counts = device.htod_sync_copy(&[96u32]).unwrap();
     reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
     let (fx, _, _) = download_forces(&buffers);
-    assert_eq!(fx[0], 96.0_f32);
+    assert_eq!(fx[0], 96.0);
 }
 
 #[test] // rq-c009903e
@@ -575,7 +576,7 @@ fn reduction_with_count_larger_than_one_block_sweep_accumulates_across_sweeps() 
     let gpu = init_device().expect("init_device");
     let device = gpu.device.clone();
     let mut pair = PairBuffer::new(&gpu, 1, 1024).unwrap();
-    let mut data = vec![0.0_f32; 1024];
+    let mut data = vec![0.0; 1024];
     for slot in data.iter_mut().take(600) {
         *slot = 1.0;
     }
@@ -587,7 +588,7 @@ fn reduction_with_count_larger_than_one_block_sweep_accumulates_across_sweeps() 
     let counts = device.htod_sync_copy(&[600u32]).unwrap();
     reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
     let (fx, _, _) = download_forces(&buffers);
-    assert_eq!(fx[0], 600.0_f32);
+    assert_eq!(fx[0], 600.0);
     assert!(fx[0].is_finite());
 }
 
@@ -596,12 +597,12 @@ fn reduction_with_count_larger_than_one_block_sweep_accumulates_across_sweeps() 
 /// the per-block algorithm documented in `rqm/pair-reduction.md`:
 /// per-thread strided sweep into a register accumulator, warp pairwise
 /// XOR reduction, then inter-warp reduction over the same tree shape.
-fn cpu_block_tree_sum(slots: &[f32], count: usize, max_neighbors: usize) -> f32 {
+fn cpu_block_tree_sum(slots: &[Real], count: usize, max_neighbors: usize) -> Real {
     const BLOCK_SIZE: usize = 256;
     const WARP_SIZE: usize = 32;
     const NUM_WARPS: usize = BLOCK_SIZE / WARP_SIZE;
     // Phase 1: per-thread strided register accumulators.
-    let mut p_t = vec![0.0_f32; BLOCK_SIZE];
+    let mut p_t = vec![0.0; BLOCK_SIZE];
     let sweeps = (max_neighbors + BLOCK_SIZE - 1) / BLOCK_SIZE;
     for s in 0..sweeps {
         for t in 0..BLOCK_SIZE {
@@ -609,15 +610,15 @@ fn cpu_block_tree_sum(slots: &[f32], count: usize, max_neighbors: usize) -> f32 
             let v = if k < count.min(max_neighbors) {
                 slots[k]
             } else {
-                0.0_f32
+                0.0
             };
             p_t[t] += v;
         }
     }
     // Phase 2: warp pairwise XOR butterfly tree, 5 steps.
-    let mut warp_partials = [0.0_f32; NUM_WARPS];
+    let mut warp_partials = [0.0; NUM_WARPS];
     for w in 0..NUM_WARPS {
-        let mut lanes = [0.0_f32; WARP_SIZE];
+        let mut lanes = [0.0; WARP_SIZE];
         for lane in 0..WARP_SIZE {
             lanes[lane] = p_t[w * WARP_SIZE + lane];
         }
@@ -632,7 +633,7 @@ fn cpu_block_tree_sum(slots: &[f32], count: usize, max_neighbors: usize) -> f32 
     }
     // Phase 3: first warp pulls per-warp partials into 32 lanes (the
     // upper 24 read 0.0f) and runs the same butterfly tree.
-    let mut lanes = [0.0_f32; WARP_SIZE];
+    let mut lanes = [0.0; WARP_SIZE];
     for w in 0..NUM_WARPS {
         lanes[w] = warp_partials[w];
     }
@@ -652,9 +653,9 @@ fn reduction_tree_result_agrees_with_cpu_block_tree_reference() {
     let device = gpu.device.clone();
     let max_neighbors: u32 = 1024;
     let count: usize = 800;
-    let mut data = vec![0.0_f32; max_neighbors as usize];
+    let mut data = vec![0.0; max_neighbors as usize];
     for k in 0..count {
-        data[k] = (k as f32 * 0.1).sin();
+        data[k] = (k as Real * 0.1).sin();
     }
     let mut pair = PairBuffer::new(&gpu, 1, max_neighbors).unwrap();
     upload_pair_x(&mut pair, &data);
@@ -667,10 +668,10 @@ fn reduction_tree_result_agrees_with_cpu_block_tree_reference() {
     assert_eq!(fx[0].to_bits(), cpu_reference.to_bits());
 
     // Sequential left-to-right f32 sum is close but not bit-exact.
-    let seq: f32 = data.iter().take(count).copied().sum();
-    let rel = 1e-5_f32;
+    let seq: Real = data.iter().take(count).copied().sum();
+    let rel = 1e-5;
     assert!(
-        (fx[0] - seq).abs() <= rel * seq.abs().max(f32::MIN_POSITIVE),
+        (fx[0] - seq).abs() <= rel * seq.abs().max(Real::MIN_POSITIVE),
         "GPU tree-sum {} vs sequential left-to-right sum {} differ outside 1e-5",
         fx[0],
         seq
@@ -686,12 +687,12 @@ fn one_block_per_particle_blocks_are_independent() {
     let total = n * max_neighbors as usize;
     // Deterministic pseudo-random: linear congruential.
     let mut state: u32 = 0xDEAD_BEEF;
-    let mut next_f32 = || {
+    let mut next = || {
         state = state.wrapping_mul(1664525).wrapping_add(1013904223);
         // Map to [-1.0, 1.0].
-        ((state >> 8) as f32) / ((1u32 << 23) as f32) - 1.0
+        ((state >> 8) as Real) / ((1u32 << 23) as Real) - 1.0
     };
-    let data: Vec<f32> = (0..total).map(|_| next_f32()).collect();
+    let data: Vec<Real> = (0..total).map(|_| next()).collect();
     let counts: Vec<u32> = (0..n)
         .map(|i| (i as u32).wrapping_mul(2654435761).wrapping_rem(max_neighbors + 1))
         .collect();
@@ -727,18 +728,18 @@ fn reduce_pair_forces_does_not_touch_energy_or_virial_targets() {
     let n: usize = 4;
     let max_neighbors: u32 = 2;
     let mut pair = PairBuffer::new(&gpu, n, max_neighbors).unwrap();
-    upload_pair_x(&mut pair, &[1.0_f32; 8]);
+    upload_pair_x(&mut pair, &[1.0; 8]);
     device
-        .htod_sync_copy_into(&[99.0_f32; 8], &mut pair.pair_energies)
+        .htod_sync_copy_into(&[99.0; 8], &mut pair.pair_energies)
         .unwrap();
     device
-        .htod_sync_copy_into(&[123.0_f32; 8], &mut pair.pair_virials)
+        .htod_sync_copy_into(&[123.0; 8], &mut pair.pair_virials)
         .unwrap();
 
     let mut buffers = zero_particle_buffers(&gpu, n);
     // Seed the energy/virial targets with known nonzero patterns.
-    let pattern_e: Vec<f32> = vec![11.0, 22.0, 33.0, 44.0];
-    let pattern_v: Vec<f32> = vec![-1.0, -2.0, -3.0, -4.0];
+    let pattern_e: Vec<Real> = vec![11.0, 22.0, 33.0, 44.0];
+    let pattern_v: Vec<Real> = vec![-1.0, -2.0, -3.0, -4.0];
     device
         .htod_sync_copy_into(&pattern_e, &mut buffers.potential_energies)
         .unwrap();
@@ -766,16 +767,16 @@ fn reduce_pair_energy_virial_does_not_touch_force_targets() {
     let max_neighbors: u32 = 2;
     let mut pair = PairBuffer::new(&gpu, n, max_neighbors).unwrap();
     device
-        .htod_sync_copy_into(&[1.0_f32; 8], &mut pair.pair_energies)
+        .htod_sync_copy_into(&[1.0; 8], &mut pair.pair_energies)
         .unwrap();
     device
-        .htod_sync_copy_into(&[1.0_f32; 8], &mut pair.pair_virials)
+        .htod_sync_copy_into(&[1.0; 8], &mut pair.pair_virials)
         .unwrap();
 
     let mut buffers = zero_particle_buffers(&gpu, n);
-    let pattern_fx: Vec<f32> = vec![10.0, 20.0, 30.0, 40.0];
-    let pattern_fy: Vec<f32> = vec![-10.0, -20.0, -30.0, -40.0];
-    let pattern_fz: Vec<f32> = vec![1.5, 2.5, 3.5, 4.5];
+    let pattern_fx: Vec<Real> = vec![10.0, 20.0, 30.0, 40.0];
+    let pattern_fy: Vec<Real> = vec![-10.0, -20.0, -30.0, -40.0];
+    let pattern_fz: Vec<Real> = vec![1.5, 2.5, 3.5, 4.5];
     device
         .htod_sync_copy_into(&pattern_fx, &mut buffers.forces_x)
         .unwrap();
@@ -807,10 +808,10 @@ fn skipping_reduce_pair_energy_virial_leaves_stale_energy_targets() {
     let max_neighbors: u32 = 2;
     let mut pair = PairBuffer::new(&gpu, n, max_neighbors).unwrap();
     device
-        .htod_sync_copy_into(&[10.0_f32, 20.0, 30.0, 40.0], &mut pair.pair_energies)
+        .htod_sync_copy_into(&[10.0, 20.0, 30.0, 40.0], &mut pair.pair_energies)
         .unwrap();
     device
-        .htod_sync_copy_into(&[1.0_f32, 1.0, 1.0, 1.0], &mut pair.pair_virials)
+        .htod_sync_copy_into(&[1.0, 1.0, 1.0, 1.0], &mut pair.pair_virials)
         .unwrap();
 
     let mut buffers = zero_particle_buffers(&gpu, n);
@@ -823,19 +824,19 @@ fn skipping_reduce_pair_energy_virial_leaves_stale_energy_targets() {
         heddle_md::gpu::reduce_pair_energy_virial(&pair, &counts, &mut ve, &mut vw, n).unwrap();
     }
     let pre = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    assert_eq!(pre, vec![30.0_f32, 70.0]);
+    assert_eq!(pre, vec![30.0, 70.0]);
 
     // Overwrite pair_energies; the new sums would be [2.0, 2.0]. Then
     // run only reduce_pair_forces. The energy targets must stay stale.
     device
-        .htod_sync_copy_into(&[1.0_f32, 1.0, 1.0, 1.0], &mut pair.pair_energies)
+        .htod_sync_copy_into(&[1.0, 1.0, 1.0, 1.0], &mut pair.pair_energies)
         .unwrap();
     let mut vx = buffers.forces_x.slice_mut(..);
     let mut vy = buffers.forces_y.slice_mut(..);
     let mut vz = buffers.forces_z.slice_mut(..);
     heddle_md::gpu::reduce_pair_forces(&pair, &counts, &mut vx, &mut vy, &mut vz, n).unwrap();
     let post = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    assert_eq!(post, vec![30.0_f32, 70.0]);
+    assert_eq!(post, vec![30.0, 70.0]);
 }
 
 #[test] // rq-b4c772c9
@@ -845,11 +846,11 @@ fn two_independent_runs_of_reduce_pair_energy_virial_produce_byte_identical_scal
     let n: usize = 128;
     let max_neighbors: u32 = 16;
     let total = n * max_neighbors as usize;
-    let pair_e: Vec<f32> = (0..total).map(|i| (i as f32) * 0.001 - 0.5).collect();
-    let pair_v: Vec<f32> = (0..total).map(|i| (i as f32) * -0.002 + 0.25).collect();
+    let pair_e: Vec<Real> = (0..total).map(|i| (i as Real) * 0.001 - 0.5).collect();
+    let pair_v: Vec<Real> = (0..total).map(|i| (i as Real) * -0.002 + 0.25).collect();
     let counts: Vec<u32> = (0..n).map(|i| (i as u32) % (max_neighbors + 1)).collect();
 
-    let run = || -> (Vec<f32>, Vec<f32>) {
+    let run = || -> (Vec<Real>, Vec<Real>) {
         let mut pair = PairBuffer::new(&gpu, n, max_neighbors).unwrap();
         device.htod_sync_copy_into(&pair_e, &mut pair.pair_energies).unwrap();
         device.htod_sync_copy_into(&pair_v, &mut pair.pair_virials).unwrap();

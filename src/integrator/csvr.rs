@@ -12,6 +12,7 @@ use crate::timings::{KernelStage, Timings};
 
 use super::philox::philox_normal;
 use super::{Thermostat, ThermostatBuilder, ThermostatError};
+use crate::precision::Real;
 
 // rq-1f87880c
 #[derive(Debug, Clone, Deserialize)]
@@ -49,7 +50,7 @@ pub struct CsvrThermostat {
     pub g_dof: u32,
     pub kt_target: f64,
     pub cumulative_injection: f64,
-    ke_scratch: CudaSlice<f32>,
+    ke_scratch: CudaSlice<Real>,
     most_recent_ke: f64,
 }
 
@@ -67,7 +68,7 @@ impl CsvrThermostat {
         // k_B = 1 in atomic units; the temperature parameter is already
         // `k_B · T` in Hartrees, so `kt_target` is just the temperature.
         let kt_target = temperature;
-        let ke_scratch = gpu.device.alloc_zeros::<f32>(1).map_err(GpuError::from)?;
+        let ke_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         Ok(CsvrThermostat {
             temperature,
             tau,
@@ -81,7 +82,7 @@ impl CsvrThermostat {
         })
     }
 
-    fn draw_new_kinetic_energy(&self, k_old: f64, dt: f32) -> f64 {
+    fn draw_new_kinetic_energy(&self, k_old: f64, dt: Real) -> f64 {
         let c = (-(dt as f64) / self.tau).exp();
         let nf = self.g_dof as f64;
         let k_target = (nf / 2.0) * self.kt_target;
@@ -118,7 +119,7 @@ impl Thermostat for CsvrThermostat {
     fn apply_post(
         &mut self,
         buffers: &mut ParticleBuffers,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ThermostatError> {
         if buffers.particle_count() == 0 {
@@ -135,7 +136,7 @@ impl Thermostat for CsvrThermostat {
         self.most_recent_ke = k_new;
 
         if k_old > 0.0 && (k_new - k_old).abs() > 0.0 {
-            let factor = (k_new / k_old).sqrt() as f32;
+            let factor = (k_new / k_old).sqrt() as Real;
             timings.kernel_start(KernelStage::CSVR_RESCALE_VELOCITIES)?;
             rescale_velocities(buffers, factor)?;
             timings.kernel_stop(KernelStage::CSVR_RESCALE_VELOCITIES)?;

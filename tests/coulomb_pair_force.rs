@@ -9,16 +9,17 @@ use heddle_md::gpu::{
 };
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
+use heddle_md::precision::Real;
 
 mod common;
 
-const E_CHARGE: f32 = 1.602176634e-19_f32; // elementary charge (C)
+const E_CHARGE: Real = 1.602176634e-19; // elementary charge (C)
 
 fn default_box() -> SimulationBox {
     SimulationBox::new(10.0e-9, 10.0e-9, 10.0e-9, 0.0, 0.0, 0.0).unwrap()
 }
 
-fn build_state_with_charges(positions: &[[f32; 3]], charges: &[f32]) -> ParticleState {
+fn build_state_with_charges(positions: &[[Real; 3]], charges: &[Real]) -> ParticleState {
     let n = positions.len();
     assert_eq!(n, charges.len());
     let mut px = Vec::with_capacity(n);
@@ -33,10 +34,10 @@ fn build_state_with_charges(positions: &[[f32; 3]], charges: &[f32]) -> Particle
         px,
         py,
         pz,
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
         charges.to_vec(),
         vec![0u32; n],
         None,
@@ -58,8 +59,8 @@ fn run_coulomb(
     gpu: &GpuContext,
     sim_box: &SimulationBox,
     state: &ParticleState,
-    cutoff: f32,
-    r_switch: f32,
+    cutoff: Real,
+    r_switch: Real,
 ) -> (PairBuffer, NeighborListState, ParticleBuffers) {
     let n = state.particle_count();
     let particle_buffers = ParticleBuffers::new(gpu, state).expect("buffers");
@@ -82,7 +83,7 @@ fn run_coulomb(
     (pair, nl, particle_buffers)
 }
 
-fn download_pair_forces(pair: &PairBuffer) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+fn download_pair_forces(pair: &PairBuffer) -> (Vec<Real>, Vec<Real>, Vec<Real>) {
     let device = pair.device.clone();
     let fx = device.dtoh_sync_copy(&pair.pair_forces_x).unwrap();
     let fy = device.dtoh_sync_copy(&pair.pair_forces_y).unwrap();
@@ -90,11 +91,11 @@ fn download_pair_forces(pair: &PairBuffer) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     (fx, fy, fz)
 }
 
-fn download_pair_energies(pair: &PairBuffer) -> Vec<f32> {
+fn download_pair_energies(pair: &PairBuffer) -> Vec<Real> {
     pair.device.dtoh_sync_copy(&pair.pair_energies).unwrap()
 }
 
-fn download_pair_virials(pair: &PairBuffer) -> Vec<f32> {
+fn download_pair_virials(pair: &PairBuffer) -> Vec<Real> {
     pair.device.dtoh_sync_copy(&pair.pair_virials).unwrap()
 }
 
@@ -104,20 +105,20 @@ fn download_pair_virials(pair: &PairBuffer) -> Vec<f32> {
 fn opposite_sign_charges_attract() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let positions = [[0.0_f32, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
     let charges = [E_CHARGE, -E_CHARGE];
     let state = build_state_with_charges(&positions, &charges);
-    let r_cut = 5.0e-9_f32;
+    let r_cut = 5.0e-9;
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_cut);
     let (fx, _fy, _fz) = download_pair_forces(&pair);
-    let r: f32 = 3.0e-10;
+    let r: Real = 3.0e-10;
     // Atom 0 at origin, atom 1 at +x. Opposite charges attract atom 0 toward
     // atom 1 (along +x), so fx is positive.
     // fx = factor * dx where dx = positions[0] - positions[1] = -r and
     // factor = k_C * q_i * q_j / r^3 with q_i*q_j = -e²; fx = -k_C·e²·(-r)/r³ > 0.
     let expected = K_COULOMB_F32 * E_CHARGE * (-E_CHARGE) * (-r) / (r * r * r);
     assert!(
-        (fx[0 * 2 + 1] - expected).abs() < 1.0e-9_f32 * expected.abs().max(1.0),
+        (fx[0 * 2 + 1] - expected).abs() < 1.0e-9 * expected.abs().max(1.0),
         "got fx = {}, expected {}",
         fx[0 * 2 + 1],
         expected
@@ -130,10 +131,10 @@ fn opposite_sign_charges_attract() {
 fn same_sign_charges_repel_and_obey_newtons_third_law() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let positions = [[0.0_f32, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
     let charges = [E_CHARGE, E_CHARGE];
     let state = build_state_with_charges(&positions, &charges);
-    let r_cut = 5.0e-9_f32;
+    let r_cut = 5.0e-9;
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_cut);
     let (fx, _fy, _fz) = download_pair_forces(&pair);
     // Atom 0 at origin, atom 1 at +x. Same-sign repulsion pushes atom 0
@@ -147,9 +148,9 @@ fn same_sign_charges_repel_and_obey_newtons_third_law() {
 fn zero_charges_produce_zero_force() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let positions = [[0.0_f32, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
     let state = build_state_with_charges(&positions, &[0.0, 0.0]);
-    let r_cut = 5.0e-9_f32;
+    let r_cut = 5.0e-9;
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_cut);
     let (fx, fy, fz) = download_pair_forces(&pair);
     let energies = download_pair_energies(&pair);
@@ -168,8 +169,8 @@ fn zero_charges_produce_zero_force() {
 fn mixed_charge_magnitudes_scale_linearly() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let positions = [[0.0_f32, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
-    let r_cut = 5.0e-9_f32;
+    let positions = [[0.0, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
+    let r_cut = 5.0e-9;
     let (pair1, _nl1, _buf1) = run_coulomb(
         &gpu,
         &sim_box,
@@ -195,9 +196,9 @@ fn mixed_charge_magnitudes_scale_linearly() {
 fn pair_beyond_cutoff_contributes_zero() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let positions = [[0.0_f32, 0.0, 0.0], [5.0e-10, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [5.0e-10, 0.0, 0.0]];
     let state = build_state_with_charges(&positions, &[E_CHARGE, E_CHARGE]);
-    let r_cut = 2.0e-10_f32; // smaller than the 5e-10 separation
+    let r_cut = 2.0e-10; // smaller than the 5e-10 separation
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_cut);
     let (fx, _, _) = download_pair_forces(&pair);
     let energies = download_pair_energies(&pair);
@@ -212,8 +213,8 @@ fn pair_beyond_cutoff_contributes_zero() {
 fn pair_at_exactly_cutoff_contributes_smoothed_zero() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let r_cut = 3.0e-10_f32;
-    let positions = [[0.0_f32, 0.0, 0.0], [r_cut, 0.0, 0.0]];
+    let r_cut = 3.0e-10;
+    let positions = [[0.0, 0.0, 0.0], [r_cut, 0.0, 0.0]];
     let state = build_state_with_charges(&positions, &[E_CHARGE, E_CHARGE]);
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, 2.7e-10);
     let (fx, _, _) = download_pair_forces(&pair);
@@ -238,10 +239,10 @@ fn pair_at_exactly_cutoff_contributes_smoothed_zero() {
 fn pair_inside_inner_plateau_is_unsmoothed() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let r_cut = 5.0e-10_f32;
-    let r_switch = 4.0e-10_f32;
-    let r = 3.5e-10_f32; // < r_switch
-    let positions = [[0.0_f32, 0.0, 0.0], [r, 0.0, 0.0]];
+    let r_cut = 5.0e-10;
+    let r_switch = 4.0e-10;
+    let r = 3.5e-10; // < r_switch
+    let positions = [[0.0, 0.0, 0.0], [r, 0.0, 0.0]];
     let state = build_state_with_charges(&positions, &[E_CHARGE, E_CHARGE]);
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_switch);
     let (fx, _, _) = download_pair_forces(&pair);
@@ -253,7 +254,7 @@ fn pair_inside_inner_plateau_is_unsmoothed() {
     // Compute in the same order as the kernel (factor * dx, where
     // factor = K * qq / r^3 evaluated via inverse r and r^2) to avoid
     // f32 underflow in the intermediate `K * qq * r` term.
-    let inv_r = 1.0_f32 / r;
+    let inv_r = 1.0 / r;
     let inv_r2 = inv_r * inv_r;
     let factor = K_COULOMB_F32 * qq * inv_r * inv_r2;
     let expected_fx = factor * (-r);
@@ -276,10 +277,10 @@ fn pair_inside_inner_plateau_is_unsmoothed() {
 fn pair_inside_switching_interval_is_smoothed() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let r_cut = 5.0e-10_f32;
-    let r_switch = 4.0e-10_f32;
-    let r = 4.5e-10_f32; // between r_switch and cutoff
-    let positions = [[0.0_f32, 0.0, 0.0], [r, 0.0, 0.0]];
+    let r_cut = 5.0e-10;
+    let r_switch = 4.0e-10;
+    let r = 4.5e-10; // between r_switch and cutoff
+    let positions = [[0.0, 0.0, 0.0], [r, 0.0, 0.0]];
     let state = build_state_with_charges(&positions, &[E_CHARGE, E_CHARGE]);
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_switch);
     let (fx, _, _) = download_pair_forces(&pair);
@@ -302,9 +303,9 @@ fn pair_inside_switching_interval_is_smoothed() {
 fn switching_interval_equal_to_cutoff_selects_hard_cutoff() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let r_cut = 4.0e-10_f32;
-    let r = 3.9e-10_f32;
-    let positions = [[0.0_f32, 0.0, 0.0], [r, 0.0, 0.0]];
+    let r_cut = 4.0e-10;
+    let r = 3.9e-10;
+    let positions = [[0.0, 0.0, 0.0], [r, 0.0, 0.0]];
     let state = build_state_with_charges(&positions, &[E_CHARGE, E_CHARGE]);
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_cut);
     let energies = download_pair_energies(&pair);
@@ -322,14 +323,14 @@ fn switching_interval_equal_to_cutoff_selects_hard_cutoff() {
 fn pair_across_periodic_boundary_uses_minimum_image() {
     let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new(1.0e-9, 10.0e-9, 10.0e-9, 0.0, 0.0, 0.0).unwrap();
-    let lx = 1.0e-9_f32;
+    let lx = 1.0e-9;
     let positions = [
         [-lx * 0.5 + 1.0e-10, 0.0, 0.0],
         [lx * 0.5 - 1.0e-10, 0.0, 0.0],
     ];
     let charges = [E_CHARGE, -E_CHARGE];
     let state = build_state_with_charges(&positions, &charges);
-    let r_cut = 5.0e-10_f32;
+    let r_cut = 5.0e-10;
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_cut);
     let (fx, _, _) = download_pair_forces(&pair);
     // Minimum-image separation is 0.2e-10 across the +x boundary; attraction is
@@ -346,10 +347,10 @@ fn minimum_image_works_for_triclinic_box() {
     // the perpendicular-width-limited cutoff.
     let sim_box =
         SimulationBox::new(10.0e-9, 10.0e-9, 10.0e-9, 2.0e-10, 1.0e-10, -3.0e-10).unwrap();
-    let positions = [[0.0_f32, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
     let charges = [E_CHARGE, E_CHARGE];
     let state = build_state_with_charges(&positions, &charges);
-    let r_cut = 5.0e-10_f32;
+    let r_cut = 5.0e-10;
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_cut);
     let (fx, _, _) = download_pair_forces(&pair);
     // Same-sign charges, in-cell separation 3 Å with atom 1 at +x →
@@ -362,9 +363,9 @@ fn minimum_image_works_for_triclinic_box() {
 fn self_slot_in_trivial_mode_yields_zero() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let positions = [[0.0_f32, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0]];
     let state = build_state_with_charges(&positions, &[E_CHARGE]);
-    let r_cut = 5.0e-10_f32;
+    let r_cut = 5.0e-10;
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_cut);
     let (fx, _, _) = download_pair_forces(&pair);
     let energies = download_pair_energies(&pair);
@@ -379,8 +380,8 @@ fn run_coulomb_with_excl(
     sim_box: &SimulationBox,
     state: &ParticleState,
     excl: &ExclusionList,
-    cutoff: f32,
-    r_switch: f32,
+    cutoff: Real,
+    r_switch: Real,
 ) -> (PairBuffer, ParticleBuffers) {
     let n = state.particle_count();
     let particle_buffers = ParticleBuffers::new(gpu, state).expect("buffers");
@@ -403,7 +404,7 @@ fn run_coulomb_with_excl(
     (pair, particle_buffers)
 }
 
-fn excl_with_scales(n: usize, atom_i: u32, atom_j: u32, lj: f32, coul: f32) -> ExclusionList {
+fn excl_with_scales(n: usize, atom_i: u32, atom_j: u32, lj: Real, coul: Real) -> ExclusionList {
     let (a, b) = if atom_i < atom_j {
         (atom_i, atom_j)
     } else {
@@ -416,8 +417,8 @@ fn excl_with_scales(n: usize, atom_i: u32, atom_j: u32, lj: f32, coul: f32) -> E
         atom_excl_offsets[i] += atom_excl_offsets[i - 1];
     }
     let mut atom_excl_partners = vec![0u32; 2];
-    let mut atom_excl_lj_scales = vec![0.0_f32; 2];
-    let mut atom_excl_coul_scales = vec![0.0_f32; 2];
+    let mut atom_excl_lj_scales = vec![0.0; 2];
+    let mut atom_excl_coul_scales = vec![0.0; 2];
     // Slot for atom a: partner b
     let slot_a = atom_excl_offsets[a as usize] as usize;
     let slot_b = atom_excl_offsets[b as usize] as usize;
@@ -447,9 +448,9 @@ fn excl_with_scales(n: usize, atom_i: u32, atom_j: u32, lj: f32, coul: f32) -> E
 fn pair_with_coul_exclusion_scale_zero_contributes_nothing() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let positions = [[0.0_f32, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
     let state = build_state_with_charges(&positions, &[E_CHARGE, -E_CHARGE]);
-    let r_cut = 5.0e-10_f32;
+    let r_cut = 5.0e-10;
     let excl = excl_with_scales(2, 0, 1, 1.0, 0.0);
     let (pair, _buf) = run_coulomb_with_excl(&gpu, &sim_box, &state, &excl, r_cut, r_cut);
     let (fx, fy, fz) = download_pair_forces(&pair);
@@ -467,9 +468,9 @@ fn pair_with_coul_exclusion_scale_zero_contributes_nothing() {
 fn pair_with_coul_exclusion_scale_half_contributes_half() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let positions = [[0.0_f32, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
     let state = build_state_with_charges(&positions, &[E_CHARGE, -E_CHARGE]);
-    let r_cut = 5.0e-10_f32;
+    let r_cut = 5.0e-10;
     let excl_none = ExclusionList::empty(2);
     let excl_half = excl_with_scales(2, 0, 1, 1.0, 0.5);
     let (pair_full, _) = run_coulomb_with_excl(&gpu, &sim_box, &state, &excl_none, r_cut, r_cut);
@@ -494,7 +495,7 @@ fn coulomb_and_lj_exclusions_are_independent() {
     use heddle_md::gpu::LennardJonesParameterTable;
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let positions = [[0.0_f32, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
     let n = positions.len();
     let state = build_state_with_charges(&positions, &[E_CHARGE, -E_CHARGE]);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -506,7 +507,7 @@ fn coulomb_and_lj_exclusions_are_independent() {
 
     // Run Coulomb only first.
     let mut coul_pair = PairBuffer::new(&gpu, n, n as u32).unwrap();
-    let r_cut = 5.0e-10_f32;
+    let r_cut = 5.0e-10;
     coulomb_pair_force(
         &particle_buffers,
         &mut coul_pair,
@@ -543,13 +544,13 @@ fn coulomb_and_lj_exclusions_are_independent() {
     let coul_e_full = download_pair_energies(&coul_pair_full);
     // Coulomb is scaled by 0.833.
     assert!(
-        ((coul_e_scaled[0 * 2 + 1] / coul_e_full[0 * 2 + 1]) - 0.833_f32).abs() < 1.0e-5
+        ((coul_e_scaled[0 * 2 + 1] / coul_e_full[0 * 2 + 1]) - 0.833).abs() < 1.0e-5
     );
 
     // Run LJ with the same DeviceExclusionList (same partner table); LJ scales
     // by 0.5. Use sigma != r to get a non-zero LJ energy (LJ(r=σ) ≡ 0).
-    let sigma = 2.0e-10_f32;
-    let epsilon = 1.0e-21_f32;
+    let sigma = 2.0e-10;
+    let epsilon = 1.0e-21;
     let table = LennardJonesParameterTable {
         n_types: 1,
         sigma: gpu.device.htod_sync_copy(&[sigma]).unwrap(),
@@ -587,7 +588,7 @@ fn coulomb_and_lj_exclusions_are_independent() {
     let lj_e_full = download_pair_energies(&lj_pair_full);
     // LJ is scaled by 0.5.
     assert!(
-        ((lj_e_scaled[0 * 2 + 1] / lj_e_full[0 * 2 + 1]) - 0.5_f32).abs() < 1.0e-5
+        ((lj_e_scaled[0 * 2 + 1] / lj_e_full[0 * 2 + 1]) - 0.5).abs() < 1.0e-5
     );
 }
 
@@ -596,13 +597,13 @@ fn coulomb_and_lj_exclusions_are_independent() {
 fn pair_energies_carries_half_potential() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let r = 3.0e-10_f32;
-    let positions = [[0.0_f32, 0.0, 0.0], [r, 0.0, 0.0]];
+    let r = 3.0e-10;
+    let positions = [[0.0, 0.0, 0.0], [r, 0.0, 0.0]];
     let state = build_state_with_charges(&positions, &[E_CHARGE, E_CHARGE]);
-    let r_cut = 5.0e-10_f32;
+    let r_cut = 5.0e-10;
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_cut);
     let e = download_pair_energies(&pair);
-    let expected = 0.5_f32 * K_COULOMB_F32 * E_CHARGE * E_CHARGE / r;
+    let expected = 0.5 * K_COULOMB_F32 * E_CHARGE * E_CHARGE / r;
     assert!((e[0 * 2 + 1] - expected).abs() / expected < 1.0e-5);
     // The j→i slot is also half.
     assert!((e[1 * 2 + 0] - expected).abs() / expected < 1.0e-5);
@@ -613,15 +614,15 @@ fn pair_energies_carries_half_potential() {
 fn pair_virials_carries_half_scalar_virial() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let r = 3.0e-10_f32;
-    let positions = [[0.0_f32, 0.0, 0.0], [r, 0.0, 0.0]];
+    let r = 3.0e-10;
+    let positions = [[0.0, 0.0, 0.0], [r, 0.0, 0.0]];
     let state = build_state_with_charges(&positions, &[E_CHARGE, E_CHARGE]);
-    let r_cut = 5.0e-10_f32;
+    let r_cut = 5.0e-10;
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_cut);
     let w = download_pair_virials(&pair);
     // U = k_C q^2 / r, F = k_C q^2 / r^2, scalar virial = F · r = k_C q^2 / r.
     let scalar = K_COULOMB_F32 * E_CHARGE * E_CHARGE / r;
-    let expected_half = 0.5_f32 * scalar;
+    let expected_half = 0.5 * scalar;
     assert!((w[0 * 2 + 1] - expected_half).abs() / expected_half < 1.0e-5);
 }
 
@@ -634,7 +635,7 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
     // custom neighbor list whose `max_neighbors` exceeds each atom's actual
     // neighbor count. Two particles, max_neighbors = 4, neighbor_counts = 1
     // for each.
-    let positions = [[0.0_f32, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
     let n = positions.len();
     let state = build_state_with_charges(&positions, &[E_CHARGE, E_CHARGE]);
     let particle_buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -652,7 +653,7 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
     let neighbor_list = gpu.device.htod_sync_copy(&host_nl).unwrap();
     let neighbor_counts = gpu.device.htod_sync_copy(&host_counts).unwrap();
 
-    let r_cut = 1.0e-9_f32;
+    let r_cut = 1.0e-9;
     coulomb_pair_force(
         &particle_buffers,
         &mut pair,
@@ -688,9 +689,9 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
 fn identical_inputs_produce_byte_identical_outputs() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let positions = [[0.0_f32, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
     let state = build_state_with_charges(&positions, &[E_CHARGE, -E_CHARGE]);
-    let r_cut = 5.0e-10_f32;
+    let r_cut = 5.0e-10;
     let (pair1, _, _) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_cut);
     let (pair2, _, _) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_cut);
     let (fx1, fy1, fz1) = download_pair_forces(&pair1);
@@ -750,9 +751,9 @@ fn zero_particles_is_noop() -> Result<(), GpuError> {
 fn neutral_system_produces_zero_contribution() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
-    let positions = [[0.0_f32, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];
     let state = build_state_with_charges(&positions, &[0.0, 0.0]);
-    let r_cut = 5.0e-10_f32;
+    let r_cut = 5.0e-10;
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_cut);
     let (fx, fy, fz) = download_pair_forces(&pair);
     let energies = download_pair_energies(&pair);
@@ -773,9 +774,9 @@ fn forces_on_pair_members_are_equal_and_opposite_bit_exact() {
     let gpu = init_device().unwrap();
     let sim_box = default_box();
     // Off-axis pair to exercise all three force components.
-    let positions = [[0.0_f32, 0.0, 0.0], [3.0e-10, 1.0e-10, -0.5e-10]];
+    let positions = [[0.0, 0.0, 0.0], [3.0e-10, 1.0e-10, -0.5e-10]];
     let state = build_state_with_charges(&positions, &[E_CHARGE, -E_CHARGE]);
-    let r_cut = 5.0e-10_f32;
+    let r_cut = 5.0e-10;
     let (pair, _nl, _buf) = run_coulomb(&gpu, &sim_box, &state, r_cut, r_cut);
     let (fx, fy, fz) = download_pair_forces(&pair);
     assert_eq!(fx[0 * 2 + 1], -fx[1 * 2 + 0]);

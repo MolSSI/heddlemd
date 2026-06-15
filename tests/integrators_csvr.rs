@@ -16,6 +16,7 @@ use heddle_md::io::config::NeighborListConfig;
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::{KernelStage, Timings};
+use heddle_md::precision::Real;
 
 // k_B = 1 inside the engine; this SI value is retained as a reference
 // for converting human-readable SI inputs to atomic units.
@@ -28,7 +29,7 @@ const TEMP_F: f64 = 315775.0248040668;
 const VEL_F: f64 = 2187691.2636411153;
 
 fn box_large() -> SimulationBox {
-    let l = (1.0e6 / LEN_F) as f32;
+    let l = (1.0e6 / LEN_F) as Real;
     SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
@@ -77,26 +78,26 @@ fn unbox_csvr(boxed: Box<dyn Thermostat>) -> CsvrThermostat {
 fn atomic_state(n: usize) -> ParticleState {
     // Atomic-unit values: mass in m_e, velocity in Bohr/(hbar/E_h),
     // position in Bohr.
-    let mass: f32 = (1.66e-27 / MASS_F) as f32;
-    let mut vx: Vec<f32> = Vec::with_capacity(n);
+    let mass: Real = (1.66e-27 / MASS_F) as Real;
+    let mut vx: Vec<Real> = Vec::with_capacity(n);
     for i in 0..n / 2 {
-        let v = (500.0 / VEL_F) as f32 * ((i as f32) + 1.0);
+        let v = (500.0 / VEL_F) as Real * ((i as Real) + 1.0);
         vx.push(v);
         vx.push(-v);
     }
     if vx.len() < n {
         vx.push(0.0);
     }
-    let zero = vec![0.0_f32; n];
+    let zero = vec![0.0; n];
     ParticleState::new(
-        (0..n).map(|i| (i as f32) * (1.0e-10 / LEN_F) as f32).collect(),
+        (0..n).map(|i| (i as Real) * (1.0e-10 / LEN_F) as Real).collect(),
         zero.clone(),
         zero.clone(),
         vx,
         zero.clone(),
         zero,
         vec![mass; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         None,
@@ -144,26 +145,26 @@ fn registry_builds_csvr_particle_count_one() {
 fn host_philox_matches_device_philox() {
     let gpu = init_device().unwrap();
     let n = 1usize;
-    let mass: f32 = 1.0;
-    let kt: f32 = 1.0;
+    let mass: Real = 1.0;
+    let kt: Real = 1.0;
     let seed: u64 = 0x1234_5678_9ABC_DEF0;
     let draw: u64 = 7;
     let state = ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
         vec![mass; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         None,
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    lan_ou_step(&mut buffers, seed, draw, 0.0_f32, kt).unwrap();
+    lan_ou_step(&mut buffers, seed, draw, 0.0, kt).unwrap();
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     let vy = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
     let vz = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
@@ -172,16 +173,31 @@ fn host_philox_matches_device_philox() {
     let seed_hi = (seed >> 32) as u32;
     let draw_lo = draw as u32;
     let draw_hi = (draw >> 32) as u32;
-    let host_xi = |axis: u32| -> f32 {
-        philox_normal(seed_lo, seed_hi, draw_lo, draw_hi, 0, axis) as f32
+    let host_xi = |axis: u32| -> Real {
+        philox_normal(seed_lo, seed_hi, draw_lo, draw_hi, 0, axis) as Real
     };
     let sigma = (kt / mass).sqrt();
     let expected_vx = sigma * host_xi(0);
     let expected_vy = sigma * host_xi(1);
     let expected_vz = sigma * host_xi(2);
-    assert_eq!(vx[0].to_bits(), expected_vx.to_bits());
-    assert_eq!(vy[0].to_bits(), expected_vy.to_bits());
-    assert_eq!(vz[0].to_bits(), expected_vz.to_bits());
+    // Bit-exact equality holds in the default (f32) build because the
+    // cast to Real == f32 lops off the precision delta between Rust's
+    // f64 cos and CUDA's f64 cos. In the f64 build the kernel keeps
+    // double precision and the two implementations differ by at most a
+    // few ULPs.
+    #[cfg(not(feature = "f64"))]
+    {
+        assert_eq!(vx[0].to_bits(), expected_vx.to_bits());
+        assert_eq!(vy[0].to_bits(), expected_vy.to_bits());
+        assert_eq!(vz[0].to_bits(), expected_vz.to_bits());
+    }
+    #[cfg(feature = "f64")]
+    {
+        let tol = 4.0 * Real::EPSILON * sigma.max(1.0);
+        assert!((vx[0] - expected_vx).abs() <= tol);
+        assert!((vy[0] - expected_vy).abs() <= tol);
+        assert!((vz[0] - expected_vz).abs() <= tol);
+    }
 }
 
 // rq-db1298bd
@@ -206,7 +222,7 @@ fn csvr_apply_post_launches_expected_kernels() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 1));
     therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count_for = |stage: KernelStage| -> u64 {
@@ -232,7 +248,7 @@ fn csvr_apply_post_empty_state_is_noop() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_csvr(&gpu, 0, &csvr_kind(300.0, 1.0e-13, 1));
     therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
 }
 
@@ -247,7 +263,7 @@ fn csvr_apply_pre_is_trait_default_noop() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 1));
     therm
-        .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_pre(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
     let vx_after = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     assert_eq!(vx_after, snap_vx);
@@ -270,11 +286,11 @@ fn csvr_draw_counter_increments_per_apply_post() {
     let mut therm = unbox_csvr(build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 1)));
     assert_eq!(therm.draw_counter, 0);
     therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
     assert_eq!(therm.draw_counter, 1);
     therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
     assert_eq!(therm.draw_counter, 2);
 }
@@ -292,10 +308,10 @@ fn csvr_two_thermostats_at_same_counter_produce_identical_velocities() {
     let mut therm_a = build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 7));
     let mut therm_b = build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 7));
     therm_a
-        .apply_post(&mut buffers_a, (1.0e-15 / TIME_F) as f32, &mut timings_a)
+        .apply_post(&mut buffers_a, (1.0e-15 / TIME_F) as Real, &mut timings_a)
         .unwrap();
     therm_b
-        .apply_post(&mut buffers_b, (1.0e-15 / TIME_F) as f32, &mut timings_b)
+        .apply_post(&mut buffers_b, (1.0e-15 / TIME_F) as Real, &mut timings_b)
         .unwrap();
     let va = gpu.device.dtoh_sync_copy(&buffers_a.velocities_x).unwrap();
     let vb = gpu.device.dtoh_sync_copy(&buffers_b.velocities_x).unwrap();
@@ -337,10 +353,10 @@ fn csvr_cumulative_injection_tracks_kinetic_energy_changes() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = unbox_csvr(build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 1)));
-    let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
+    let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let k_before = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
     therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
     let k_after = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
     let expected = k_after - k_before;
@@ -356,14 +372,14 @@ fn csvr_two_runs_with_identical_inputs_match() {
     let gpu = init_device().unwrap();
     let state = atomic_state(8);
 
-    fn run_once(gpu: &GpuContext, state: &ParticleState) -> Vec<f32> {
+    fn run_once(gpu: &GpuContext, state: &ParticleState) -> Vec<Real> {
         let n = state.particle_count();
         let mut buffers = ParticleBuffers::new(gpu, state).unwrap();
         let mut timings = Timings::new(gpu).unwrap();
         let mut therm = build_csvr(gpu, n, &csvr_kind(300.0, 1.0e-13, 42));
         for _ in 0..5 {
             therm
-                .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+                .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
                 .unwrap();
         }
         gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap()
@@ -383,12 +399,12 @@ fn csvr_different_seeds_produce_different_trajectories() {
     let gpu = init_device().unwrap();
     let state = atomic_state(8);
 
-    fn run_once(gpu: &GpuContext, state: &ParticleState, seed: u64) -> Vec<f32> {
+    fn run_once(gpu: &GpuContext, state: &ParticleState, seed: u64) -> Vec<Real> {
         let n = state.particle_count();
         let mut buffers = ParticleBuffers::new(gpu, state).unwrap();
         let mut timings = Timings::new(gpu).unwrap();
         let mut therm = build_csvr(gpu, n, &csvr_kind(300.0, 1.0e-13, seed));
-        let dt = (1.0e-15 / TIME_F) as f32;
+        let dt = (1.0e-15 / TIME_F) as Real;
         for _ in 0..3 {
             therm.apply_post(&mut buffers, dt, &mut timings).unwrap();
         }
@@ -406,18 +422,18 @@ fn csvr_preserves_com_momentum() {
     let gpu = init_device().unwrap();
     let n = 16usize;
     let state = atomic_state(n);
-    let mass = 1.66e-27_f32;
+    let mass = 1.66e-27;
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 7));
     for _ in 0..20 {
         therm
-            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
             .unwrap();
     }
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     let p_com: f64 = vx.iter().map(|&v| (mass as f64) * (v as f64)).sum();
-    let scale: f32 = vx.iter().map(|v| v.abs()).fold(0.0, f32::max);
+    let scale: Real = vx.iter().map(|v| v.abs()).fold(0.0, Real::max);
     let tol = (mass as f64) * (scale as f64) * 1.0e-3;
     assert!(p_com.abs() < tol, "p_com = {p_com} (tol {tol})");
 }
@@ -428,28 +444,28 @@ fn csvr_time_averaged_ke_tracks_k_target() {
     let gpu = init_device().unwrap();
     let n = 32usize;
     // Atomic-unit values: mass in m_e, k_B = 1 so kt = T.
-    let mass: f32 = (1.66e-27 / MASS_F) as f32;
+    let mass: Real = (1.66e-27 / MASS_F) as Real;
     let temperature_si = 300.0_f64;
     let temperature_au = temperature_si / TEMP_F;
     let kt = temperature_au;
     let g_dof = (3 * n - 3) as f64;
     let k_target = (g_dof / 2.0) * kt;
-    let v_each = ((k_target / ((n as f64) * 0.5 * (mass as f64))) as f64).sqrt() as f32;
-    let mut vx: Vec<f32> = Vec::with_capacity(n);
+    let v_each = ((k_target / ((n as f64) * 0.5 * (mass as f64))) as f64).sqrt() as Real;
+    let mut vx: Vec<Real> = Vec::with_capacity(n);
     for _ in 0..n / 2 {
         vx.push(v_each);
         vx.push(-v_each);
     }
-    let zero = vec![0.0_f32; n];
+    let zero = vec![0.0; n];
     let state = ParticleState::new(
-        (0..n).map(|i| (i as f32) * (1.0e-10 / LEN_F) as f32).collect(),
+        (0..n).map(|i| (i as Real) * (1.0e-10 / LEN_F) as Real).collect(),
         zero.clone(),
         zero.clone(),
         vx,
         zero.clone(),
         zero,
         vec![mass; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         None,
@@ -467,23 +483,23 @@ fn csvr_time_averaged_ke_tracks_k_target() {
         .unwrap();
     let mut therm = build_csvr(&gpu, n, &csvr_kind(temperature_si, 1.0e-14, 11));
     ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
+    let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     for _ in 0..100 {
         integ
-            .step(&mut buffers, &mut sim_box, &mut ff, (1.0e-15 / TIME_F) as f32, &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, (1.0e-15 / TIME_F) as Real, &mut timings)
             .unwrap();
         therm
-            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
             .unwrap();
     }
     let mut sum = 0.0_f64;
     let n_samples = 250;
     for _ in 0..n_samples {
         integ
-            .step(&mut buffers, &mut sim_box, &mut ff, (1.0e-15 / TIME_F) as f32, &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, (1.0e-15 / TIME_F) as Real, &mut timings)
             .unwrap();
         therm
-            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
             .unwrap();
         sum += compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
     }
@@ -499,14 +515,14 @@ fn csvr_skips_rescale_when_k_zero() {
     let n = 4usize;
     // All-zero velocities → K = 0.
     let state = ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![(1.66e-27 / MASS_F) as f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![(1.66e-27 / MASS_F) as Real; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         None,
@@ -516,7 +532,7 @@ fn csvr_skips_rescale_when_k_zero() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = build_csvr(&gpu, n, &csvr_kind(300.0, 1.0e-13, 1));
     therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as f32, &mut timings)
+        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count = report

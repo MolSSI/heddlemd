@@ -2,6 +2,7 @@ use cudarc::driver::DeviceSlice;
 use heddle_md::gpu::{ParticleBuffers, init_device, vv_kick, vv_kick_drift};
 use heddle_md::state::ParticleState;
 use heddle_md::pbc::SimulationBox;
+use heddle_md::precision::Real;
 
 fn empty_state(n: usize) -> ParticleState {
     ParticleState::new(
@@ -12,7 +13,7 @@ fn empty_state(n: usize) -> ParticleState {
         vec![0.0; n],
         vec![0.0; n],
         vec![1.0; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
@@ -30,13 +31,13 @@ fn snapshot_via_download(buffers: &ParticleBuffers) -> ParticleState {
 fn diverse_state(n: usize) -> ParticleState {
     // Distinct nonzero values for every field so byte-identical comparisons
     // are meaningful.
-    let positions_x: Vec<f32> = (0..n).map(|i| 1.0 + i as f32).collect();
-    let positions_y: Vec<f32> = (0..n).map(|i| 2.0 + i as f32).collect();
-    let positions_z: Vec<f32> = (0..n).map(|i| 3.0 + i as f32).collect();
-    let velocities_x: Vec<f32> = (0..n).map(|i| 0.1 * (i as f32 + 1.0)).collect();
-    let velocities_y: Vec<f32> = (0..n).map(|i| -0.2 * (i as f32 + 1.0)).collect();
-    let velocities_z: Vec<f32> = (0..n).map(|i| 0.05 * (i as f32 + 1.0)).collect();
-    let masses: Vec<f32> = (0..n).map(|i| 1.0 + 0.5 * i as f32).collect();
+    let positions_x: Vec<Real> = (0..n).map(|i| 1.0 + i as Real).collect();
+    let positions_y: Vec<Real> = (0..n).map(|i| 2.0 + i as Real).collect();
+    let positions_z: Vec<Real> = (0..n).map(|i| 3.0 + i as Real).collect();
+    let velocities_x: Vec<Real> = (0..n).map(|i| 0.1 * (i as Real + 1.0)).collect();
+    let velocities_y: Vec<Real> = (0..n).map(|i| -0.2 * (i as Real + 1.0)).collect();
+    let velocities_z: Vec<Real> = (0..n).map(|i| 0.05 * (i as Real + 1.0)).collect();
+    let masses: Vec<Real> = (0..n).map(|i| 1.0 + 0.5 * i as Real).collect();
     let mut state = ParticleState::new(
         positions_x,
         positions_y,
@@ -45,15 +46,15 @@ fn diverse_state(n: usize) -> ParticleState {
         velocities_y,
         velocities_z,
         masses,
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
     )
     .unwrap();
-    state.forces_x = (0..n).map(|i| 0.5 + i as f32 * 0.1).collect();
-    state.forces_y = (0..n).map(|i| -0.3 + i as f32 * 0.2).collect();
-    state.forces_z = (0..n).map(|i| 0.7 - i as f32 * 0.05).collect();
+    state.forces_x = (0..n).map(|i| 0.5 + i as Real * 0.1).collect();
+    state.forces_y = (0..n).map(|i| -0.3 + i as Real * 0.2).collect();
+    state.forces_z = (0..n).map(|i| 0.7 - i as Real * 0.05).collect();
     state
 }
 
@@ -84,7 +85,7 @@ fn vv_kick_drift_advances_position_when_force_zero() {
         vec![-0.25],
         vec![0.125],
         vec![1.0],
-        vec![0.0_f32; vec![1.0].len()],
+        vec![0.0; vec![1.0].len()],
         vec![0u32; 1],
         None,
             None,
@@ -96,12 +97,12 @@ fn vv_kick_drift_advances_position_when_force_zero() {
     let result = snapshot_via_download(&buffers);
 
     // Force is zero, so velocities_* are unchanged and positions_* advance by v*dt.
-    assert_eq!(result.velocities_x, vec![0.5_f32]);
-    assert_eq!(result.velocities_y, vec![-0.25_f32]);
-    assert_eq!(result.velocities_z, vec![0.125_f32]);
-    assert_eq!(result.positions_x, vec![1.0_f32 + 0.5_f32 * 0.1_f32]);
-    assert_eq!(result.positions_y, vec![2.0_f32 + (-0.25_f32) * 0.1_f32]);
-    assert_eq!(result.positions_z, vec![3.0_f32 + 0.125_f32 * 0.1_f32]);
+    assert_eq!(result.velocities_x, vec![0.5]);
+    assert_eq!(result.velocities_y, vec![-0.25]);
+    assert_eq!(result.velocities_z, vec![0.125]);
+    assert_eq!(result.positions_x, vec![1.0 + 0.5 * 0.1]);
+    assert_eq!(result.positions_y, vec![2.0 + (-0.25) * 0.1]);
+    assert_eq!(result.positions_z, vec![3.0 + 0.125 * 0.1]);
 }
 
 // rq-d25000c5
@@ -117,7 +118,7 @@ fn vv_kick_drift_exact_half_step_under_constant_force() {
         vec![0.0],
         vec![0.0],
         vec![1.0],
-        vec![0.0_f32; vec![1.0].len()],
+        vec![0.0; vec![1.0].len()],
         vec![0u32; 1],
         None,
             None,
@@ -131,16 +132,16 @@ fn vv_kick_drift_exact_half_step_under_constant_force() {
     vv_kick_drift(&mut buffers, &sim_box, 0.1).expect("kick_drift");
     let result = snapshot_via_download(&buffers);
 
-    let half_dt = 0.1_f32 * 0.5_f32;
-    let vx = 2.0_f32 * half_dt;
-    let vy = -4.0_f32 * half_dt;
-    let vz = 1.0_f32 * half_dt;
+    let half_dt = 0.1 * 0.5;
+    let vx = 2.0 * half_dt;
+    let vy = -4.0 * half_dt;
+    let vz = 1.0 * half_dt;
     assert_eq!(result.velocities_x[0], vx);
     assert_eq!(result.velocities_y[0], vy);
     assert_eq!(result.velocities_z[0], vz);
-    assert_eq!(result.positions_x[0], vx * 0.1_f32);
-    assert_eq!(result.positions_y[0], vy * 0.1_f32);
-    assert_eq!(result.positions_z[0], vz * 0.1_f32);
+    assert_eq!(result.positions_x[0], vx * 0.1);
+    assert_eq!(result.positions_y[0], vy * 0.1);
+    assert_eq!(result.positions_z[0], vz * 0.1);
 }
 
 // rq-2f52c25e
@@ -155,7 +156,7 @@ fn vv_kick_leaves_velocity_unchanged_when_force_zero() {
         vec![-0.25],
         vec![0.125],
         vec![1.0],
-        vec![0.0_f32; vec![1.0].len()],
+        vec![0.0; vec![1.0].len()],
         vec![0u32; 1],
         None,
             None,
@@ -166,12 +167,12 @@ fn vv_kick_leaves_velocity_unchanged_when_force_zero() {
     vv_kick(&mut buffers, 0.1).expect("kick");
     let result = snapshot_via_download(&buffers);
 
-    assert_eq!(result.velocities_x, vec![0.5_f32]);
-    assert_eq!(result.velocities_y, vec![-0.25_f32]);
-    assert_eq!(result.velocities_z, vec![0.125_f32]);
-    assert_eq!(result.positions_x, vec![1.0_f32]);
-    assert_eq!(result.positions_y, vec![2.0_f32]);
-    assert_eq!(result.positions_z, vec![3.0_f32]);
+    assert_eq!(result.velocities_x, vec![0.5]);
+    assert_eq!(result.velocities_y, vec![-0.25]);
+    assert_eq!(result.velocities_z, vec![0.125]);
+    assert_eq!(result.positions_x, vec![1.0]);
+    assert_eq!(result.positions_y, vec![2.0]);
+    assert_eq!(result.positions_z, vec![3.0]);
 }
 
 // rq-29718dcf
@@ -187,7 +188,7 @@ fn full_step_matches_constant_acceleration_kinematics() {
         vec![0.0],
         vec![0.0],
         vec![1.0],
-        vec![0.0_f32; vec![1.0].len()],
+        vec![0.0; vec![1.0].len()],
         vec![0u32; 1],
         None,
             None,
@@ -200,9 +201,9 @@ fn full_step_matches_constant_acceleration_kinematics() {
     vv_kick(&mut buffers, 0.1).expect("kick");
     let result = snapshot_via_download(&buffers);
 
-    let dt = 0.1_f32;
-    let half_dt = dt * 0.5_f32;
-    let a = 2.0_f32 / 1.0_f32;
+    let dt = 0.1;
+    let half_dt = dt * 0.5;
+    let a = 2.0 / 1.0;
     // The kernel produces v_half = a*half_dt, then x += v_half*dt, then
     // v_final = v_half + a*half_dt. Match its arithmetic.
     let v_half = a * half_dt;
@@ -229,7 +230,7 @@ fn acceleration_scales_inversely_with_mass() {
         vec![0.0, 0.0],
         vec![0.0, 0.0],
         vec![1.0, 4.0],
-        vec![0.0_f32; vec![1.0, 4.0].len()],
+        vec![0.0; vec![1.0, 4.0].len()],
         vec![0u32; 2],
         None,
             None,
@@ -241,9 +242,9 @@ fn acceleration_scales_inversely_with_mass() {
     vv_kick_drift(&mut buffers, &sim_box, 0.2).expect("kick_drift");
     let result = snapshot_via_download(&buffers);
 
-    let half_dt = 0.2_f32 * 0.5_f32;
-    assert_eq!(result.velocities_x[0], (1.0_f32 / 1.0_f32) * half_dt);
-    assert_eq!(result.velocities_x[1], (1.0_f32 / 4.0_f32) * half_dt);
+    let half_dt = 0.2 * 0.5;
+    assert_eq!(result.velocities_x[0], (1.0 / 1.0) * half_dt);
+    assert_eq!(result.velocities_x[1], (1.0 / 4.0) * half_dt);
 }
 
 // rq-b13eba96
@@ -259,7 +260,7 @@ fn particles_evolve_independently() {
         vec![0.0, 0.0, 0.0],
         vec![0.0, 0.0, 0.0],
         vec![1.0, 1.0, 1.0],
-        vec![0.0_f32; vec![1.0, 1.0, 1.0].len()],
+        vec![0.0; vec![1.0, 1.0, 1.0].len()],
         vec![0u32; 3],
         None,
             None,
@@ -273,8 +274,8 @@ fn particles_evolve_independently() {
     vv_kick(&mut buffers, 0.1).expect("kick");
     let result = snapshot_via_download(&buffers);
 
-    let dt = 0.1_f32;
-    let half_dt = dt * 0.5_f32;
+    let dt = 0.1;
+    let half_dt = dt * 0.5;
     for i in 0..3 {
         let f = state.forces_x[i];
         let m = state.masses[i];
@@ -391,7 +392,7 @@ fn block_non_aligned_particle_count_is_handled() {
     let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let n = 1000;
-    let positions_x: Vec<f32> = (0..n).map(|i| i as f32).collect();
+    let positions_x: Vec<Real> = (0..n).map(|i| i as Real).collect();
     let state = ParticleState::new(
         positions_x.clone(),
         vec![0.0; n],
@@ -400,7 +401,7 @@ fn block_non_aligned_particle_count_is_handled() {
         vec![0.0; n],
         vec![0.0; n],
         vec![1.0; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
@@ -415,7 +416,7 @@ fn block_non_aligned_particle_count_is_handled() {
     for i in 0..n {
         assert_eq!(
             result.positions_x[i],
-            positions_x[i] + 0.1_f32,
+            positions_x[i] + 0.1,
             "positions_x[{i}]"
         );
     }
@@ -512,13 +513,13 @@ fn nan_force_propagates_to_velocity_and_position() {
         vec![0.0],
         vec![0.0],
         vec![1.0],
-        vec![0.0_f32; vec![1.0].len()],
+        vec![0.0; vec![1.0].len()],
         vec![0u32; 1],
         None,
             None,
     )
     .unwrap();
-    state.forces_x = vec![f32::NAN];
+    state.forces_x = vec![Real::NAN];
     state.forces_y = vec![0.0];
     state.forces_z = vec![0.0];
     let mut buffers = ParticleBuffers::new(&gpu, &state).expect("buffers");
@@ -540,12 +541,12 @@ fn forward_then_negated_kick_drift_returns_free_particle_to_origin() {
     let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     // Free particles: F=0, m=1, arbitrary nonzero positions and velocities.
-    let positions_x = vec![1.0_f32, -2.0, 3.5, 0.25];
-    let positions_y = vec![0.5_f32, 1.25, -0.75, 2.0];
-    let positions_z = vec![-1.5_f32, 0.0, 0.5, -0.25];
-    let velocities_x = vec![0.1_f32, -0.2, 0.05, 0.3];
-    let velocities_y = vec![0.4_f32, 0.05, -0.15, 0.0];
-    let velocities_z = vec![-0.1_f32, 0.2, 0.1, -0.05];
+    let positions_x = vec![1.0, -2.0, 3.5, 0.25];
+    let positions_y = vec![0.5, 1.25, -0.75, 2.0];
+    let positions_z = vec![-1.5, 0.0, 0.5, -0.25];
+    let velocities_x = vec![0.1, -0.2, 0.05, 0.3];
+    let velocities_y = vec![0.4, 0.05, -0.15, 0.0];
+    let velocities_z = vec![-0.1, 0.2, 0.1, -0.05];
     let state = ParticleState::new(
         positions_x.clone(),
         positions_y.clone(),
@@ -554,7 +555,7 @@ fn forward_then_negated_kick_drift_returns_free_particle_to_origin() {
         velocities_y.clone(),
         velocities_z.clone(),
         vec![1.0; 4],
-        vec![0.0_f32; 4],
+        vec![0.0; 4],
         vec![0u32; 4],
         None,
             None,
@@ -566,7 +567,7 @@ fn forward_then_negated_kick_drift_returns_free_particle_to_origin() {
     vv_kick_drift(&mut buffers, &sim_box, -0.1).expect("reverse");
     let result = snapshot_via_download(&buffers);
 
-    let tol = 1e-6_f32;
+    let tol = 1e-6;
     for i in 0..4 {
         assert!((result.positions_x[i] - positions_x[i]).abs() <= tol);
         assert!((result.positions_y[i] - positions_y[i]).abs() <= tol);
@@ -585,14 +586,14 @@ fn vv_kick_drift_wraps_positions_back_into_primary_image() {
     let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let state = ParticleState::new(
-        vec![4.9_f32],
+        vec![4.9],
         vec![0.0],
         vec![0.0],
-        vec![2.0_f32],
+        vec![2.0],
         vec![0.0],
         vec![0.0],
         vec![1.0],
-        vec![0.0_f32; vec![1.0].len()],
+        vec![0.0; vec![1.0].len()],
         vec![0u32; 1],
         None,
         None,
@@ -601,7 +602,7 @@ fn vv_kick_drift_wraps_positions_back_into_primary_image() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     vv_kick_drift(&mut buffers, &sim_box, 0.1).unwrap();
     let r = snapshot_via_download(&buffers);
-    assert!((r.positions_x[0] - (-4.9_f32)).abs() < 1e-5);
+    assert!((r.positions_x[0] - (-4.9)).abs() < 1e-5);
     assert_eq!(r.images_x[0], 1);
     assert_eq!(r.images_y[0], 0);
     assert_eq!(r.images_z[0], 0);
@@ -613,14 +614,14 @@ fn vv_kick_drift_wraps_in_negative_x() {
     let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let state = ParticleState::new(
-        vec![-4.9_f32],
+        vec![-4.9],
         vec![0.0],
         vec![0.0],
-        vec![-2.0_f32],
+        vec![-2.0],
         vec![0.0],
         vec![0.0],
         vec![1.0],
-        vec![0.0_f32; vec![1.0].len()],
+        vec![0.0; vec![1.0].len()],
         vec![0u32; 1],
         None,
         None,
@@ -629,7 +630,7 @@ fn vv_kick_drift_wraps_in_negative_x() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     vv_kick_drift(&mut buffers, &sim_box, 0.1).unwrap();
     let r = snapshot_via_download(&buffers);
-    assert!((r.positions_x[0] - 4.9_f32).abs() < 1e-5);
+    assert!((r.positions_x[0] - 4.9).abs() < 1e-5);
     assert_eq!(r.images_x[0], -1);
 }
 
@@ -639,14 +640,14 @@ fn vv_kick_drift_handles_multi_period_crossings() {
     let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let state = ParticleState::new(
-        vec![0.0_f32],
         vec![0.0],
         vec![0.0],
-        vec![250.0_f32],
+        vec![0.0],
+        vec![250.0],
         vec![0.0],
         vec![0.0],
         vec![1.0],
-        vec![0.0_f32; vec![1.0].len()],
+        vec![0.0; vec![1.0].len()],
         vec![0u32; 1],
         None,
         Some((vec![7], vec![0], vec![0])),
@@ -660,8 +661,8 @@ fn vv_kick_drift_handles_multi_period_crossings() {
     // = 95. Wrap into [-5, 5): floor((25 + 5) / 10) = 3, so position = -5.0 and
     // image = 7 + 3 = 10.
     assert_eq!(r.images_x[0], 10);
-    let unwrapped = r.positions_x[0] + (r.images_x[0] as f32) * 10.0;
-    assert!((unwrapped - 95.0_f32).abs() < 1e-4);
+    let unwrapped = r.positions_x[0] + (r.images_x[0] as Real) * 10.0;
+    assert!((unwrapped - 95.0).abs() < 1e-4);
 }
 
 // rq-9cd01384
@@ -670,14 +671,14 @@ fn vv_kick_does_not_modify_image_flags() {
     let gpu = init_device().expect("init_device");
     let n = 4;
     let state = ParticleState::new(
-        vec![0.1_f32, 0.2, 0.3, 0.4],
+        vec![0.1, 0.2, 0.3, 0.4],
         vec![0.0; n],
         vec![0.0; n],
         vec![0.5; n],
         vec![0.0; n],
         vec![0.0; n],
         vec![1.0; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         Some((vec![1, -2, 3, 0], vec![0, 1, -1, 4], vec![2, 0, -3, 1])),

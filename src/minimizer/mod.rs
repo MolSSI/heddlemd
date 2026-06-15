@@ -13,6 +13,7 @@ use crate::io::config::{ConfigError, SlotConfig};
 use crate::kernels;
 use crate::pbc::SimulationBox;
 use crate::timings::{Timings, TimingsError};
+use crate::precision::Real;
 
 pub mod steepest_descent;
 
@@ -258,8 +259,8 @@ fn ceil_div_block(n: u32) -> u32 {
 
 pub(crate) fn sd_compute_step(
     buffers: &mut ParticleBuffers,
-    step_size: f32,
-    inv_f_max: f32,
+    step_size: Real,
+    inv_f_max: Real,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
@@ -295,9 +296,9 @@ pub(crate) fn sd_compute_step(
 
 pub(crate) fn sd_snapshot(
     buffers: &ParticleBuffers,
-    snapshot_x: &mut CudaSlice<f32>,
-    snapshot_y: &mut CudaSlice<f32>,
-    snapshot_z: &mut CudaSlice<f32>,
+    snapshot_x: &mut CudaSlice<Real>,
+    snapshot_y: &mut CudaSlice<Real>,
+    snapshot_z: &mut CudaSlice<Real>,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
@@ -331,9 +332,9 @@ pub(crate) fn sd_snapshot(
 
 pub(crate) fn sd_restore(
     buffers: &mut ParticleBuffers,
-    snapshot_x: &CudaSlice<f32>,
-    snapshot_y: &CudaSlice<f32>,
-    snapshot_z: &CudaSlice<f32>,
+    snapshot_x: &CudaSlice<Real>,
+    snapshot_y: &CudaSlice<Real>,
+    snapshot_z: &CudaSlice<Real>,
 ) -> Result<(), GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
@@ -367,11 +368,11 @@ pub(crate) fn sd_restore(
 
 pub(crate) fn sd_f_max_reduction(
     buffers: &ParticleBuffers,
-    scratch: &mut CudaSlice<f32>,
-) -> Result<f32, GpuError> {
+    scratch: &mut CudaSlice<Real>,
+) -> Result<Real, GpuError> {
     let n = buffers.particle_count();
     if n == 0 {
-        return Ok(0.0_f32);
+        return Ok(0.0);
     }
     debug_assert_eq!(scratch.len(), 1);
     let n_u32 = n as u32;
@@ -395,7 +396,7 @@ pub(crate) fn sd_f_max_reduction(
         )
         .map_err(GpuError::from)?;
     }
-    let mut out = [0.0_f32; 1];
+    let mut out = [0.0; 1];
     buffers
         .device
         .dtoh_sync_copy_into(scratch, &mut out)

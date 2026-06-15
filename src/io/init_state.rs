@@ -3,6 +3,7 @@ use std::path::Path;
 
 use crate::pbc::SimulationBox;
 use crate::units::{Dimension, UnitSystem};
+use crate::precision::Real;
 
 // rq-8df7fb0c
 #[derive(Debug, Clone)]
@@ -10,9 +11,9 @@ pub struct InitState {
     pub sim_box: SimulationBox,
     pub particle_count: usize,
     pub type_indices: Vec<u32>,
-    pub positions_x: Vec<f32>,
-    pub positions_y: Vec<f32>,
-    pub positions_z: Vec<f32>,
+    pub positions_x: Vec<Real>,
+    pub positions_y: Vec<Real>,
+    pub positions_z: Vec<Real>,
     pub velocities: Option<InitVelocities>,
     pub images: Option<InitImages>,
 }
@@ -20,9 +21,9 @@ pub struct InitState {
 // rq-abd761d4
 #[derive(Debug, Clone)]
 pub struct InitVelocities {
-    pub velocities_x: Vec<f32>,
-    pub velocities_y: Vec<f32>,
-    pub velocities_z: Vec<f32>,
+    pub velocities_x: Vec<Real>,
+    pub velocities_y: Vec<Real>,
+    pub velocities_z: Vec<Real>,
 }
 
 // rq-af0518f8
@@ -217,7 +218,7 @@ fn parse_lattice(raw: &str, len_factor: f64) -> Result<SimulationBox, InitStateE
         )));
     }
     let sim_box = SimulationBox::new(
-        lx as f32, ly as f32, lz as f32, xy as f32, xz as f32, yz as f32,
+        lx as Real, ly as Real, lz as Real, xy as Real, xz as Real, yz as Real,
     )
     .map_err(|e| InitStateError::InvalidLattice(format!("{e}")))?;
     Ok(sim_box)
@@ -288,12 +289,12 @@ pub(crate) fn parse_init_state(
     let image_offset = if has_velo { 7 } else { 4 };
 
     let mut type_indices: Vec<u32> = Vec::with_capacity(particle_count);
-    let mut positions_x: Vec<f32> = Vec::with_capacity(particle_count);
-    let mut positions_y: Vec<f32> = Vec::with_capacity(particle_count);
-    let mut positions_z: Vec<f32> = Vec::with_capacity(particle_count);
-    let mut velocities_x: Vec<f32> = Vec::with_capacity(particle_count);
-    let mut velocities_y: Vec<f32> = Vec::with_capacity(particle_count);
-    let mut velocities_z: Vec<f32> = Vec::with_capacity(particle_count);
+    let mut positions_x: Vec<Real> = Vec::with_capacity(particle_count);
+    let mut positions_y: Vec<Real> = Vec::with_capacity(particle_count);
+    let mut positions_z: Vec<Real> = Vec::with_capacity(particle_count);
+    let mut velocities_x: Vec<Real> = Vec::with_capacity(particle_count);
+    let mut velocities_y: Vec<Real> = Vec::with_capacity(particle_count);
+    let mut velocities_z: Vec<Real> = Vec::with_capacity(particle_count);
     let mut images_x: Vec<i32> = Vec::with_capacity(particle_count);
     let mut images_y: Vec<i32> = Vec::with_capacity(particle_count);
     let mut images_z: Vec<i32> = Vec::with_capacity(particle_count);
@@ -363,13 +364,13 @@ pub(crate) fn parse_init_state(
         };
 
         type_indices.push(type_index);
-        positions_x.push(px as f32);
-        positions_y.push(py as f32);
-        positions_z.push(pz as f32);
+        positions_x.push(px as Real);
+        positions_y.push(py as Real);
+        positions_z.push(pz as Real);
         if has_velo {
-            velocities_x.push(vx as f32);
-            velocities_y.push(vy as f32);
-            velocities_z.push(vz as f32);
+            velocities_x.push(vx as Real);
+            velocities_y.push(vy as Real);
+            velocities_z.push(vz as Real);
         }
         if has_images {
             images_x.push(ix);
@@ -465,7 +466,7 @@ fn check_in_primary_image(
     line_number: usize,
     sim_box: &SimulationBox,
 ) -> Result<(), InitStateError> {
-    let s = sim_box.fractional_coords([px as f32, py as f32, pz as f32]);
+    let s = sim_box.fractional_coords([px as Real, py as Real, pz as Real]);
     let direction_names: [&'static str; 3] = ["a", "b", "c"];
     for d in 0..3 {
         let frac = s[d] as f64;

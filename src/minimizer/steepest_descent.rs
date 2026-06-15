@@ -15,6 +15,7 @@ use super::{
     Minimizer, MinimizerBuilder, MinimizerConvergence, MinimizerError, MinimizerStepReport,
     sd_compute_step, sd_f_max_reduction, sd_restore, sd_snapshot,
 };
+use crate::precision::Real;
 
 // rq-0a2ca9ac — `[minimization.algorithm]` schema fields
 #[derive(Debug, Clone, Deserialize)]
@@ -68,22 +69,22 @@ fn deserialize_params(params: &toml::Value) -> Result<SteepestDescentParams, Con
 // rq-dc3b1bb5
 #[derive(Debug)]
 pub struct SteepestDescentMinimizer {
-    initial_step: f32,
-    max_step: f32,
-    step_increase: f32,
-    step_decrease: f32,
+    initial_step: Real,
+    max_step: Real,
+    step_increase: Real,
+    step_decrease: Real,
     force_tolerance: f64,
     energy_tolerance: f64,
     max_iterations: u64,
 
-    current_step: f32,
+    current_step: Real,
     last_accepted_energy: f64,
 
-    snapshot_x: CudaSlice<f32>,
-    snapshot_y: CudaSlice<f32>,
-    snapshot_z: CudaSlice<f32>,
-    f_max_scratch: CudaSlice<f32>,
-    pe_scratch: CudaSlice<f32>,
+    snapshot_x: CudaSlice<Real>,
+    snapshot_y: CudaSlice<Real>,
+    snapshot_z: CudaSlice<Real>,
+    f_max_scratch: CudaSlice<Real>,
+    pe_scratch: CudaSlice<Real>,
 }
 
 impl SteepestDescentMinimizer {
@@ -93,20 +94,20 @@ impl SteepestDescentMinimizer {
         params: &SteepestDescentParams,
     ) -> Result<Self, GpuError> {
         let snapshot_len = particle_count.max(1);
-        let snapshot_x = gpu.device.alloc_zeros::<f32>(snapshot_len)?;
-        let snapshot_y = gpu.device.alloc_zeros::<f32>(snapshot_len)?;
-        let snapshot_z = gpu.device.alloc_zeros::<f32>(snapshot_len)?;
-        let f_max_scratch = gpu.device.alloc_zeros::<f32>(1)?;
-        let pe_scratch = gpu.device.alloc_zeros::<f32>(1)?;
+        let snapshot_x = gpu.device.alloc_zeros::<Real>(snapshot_len)?;
+        let snapshot_y = gpu.device.alloc_zeros::<Real>(snapshot_len)?;
+        let snapshot_z = gpu.device.alloc_zeros::<Real>(snapshot_len)?;
+        let f_max_scratch = gpu.device.alloc_zeros::<Real>(1)?;
+        let pe_scratch = gpu.device.alloc_zeros::<Real>(1)?;
         Ok(SteepestDescentMinimizer {
-            initial_step: params.initial_step as f32,
-            max_step: params.max_step as f32,
-            step_increase: params.step_increase as f32,
-            step_decrease: params.step_decrease as f32,
+            initial_step: params.initial_step as Real,
+            max_step: params.max_step as Real,
+            step_increase: params.step_increase as Real,
+            step_decrease: params.step_decrease as Real,
             force_tolerance: params.force_tolerance,
             energy_tolerance: params.energy_tolerance,
             max_iterations: params.max_iterations,
-            current_step: params.initial_step as f32,
+            current_step: params.initial_step as Real,
             last_accepted_energy: 0.0,
             snapshot_x,
             snapshot_y,
@@ -197,7 +198,7 @@ impl Minimizer for SteepestDescentMinimizer {
         timings.kernel_stop(KernelStage::SD_SNAPSHOT)?;
 
         // Apply the trial step: x_trial = x + step · F / F_max.
-        let inv_f_max = 1.0_f32 / f_max;
+        let inv_f_max = 1.0 / f_max;
         timings.kernel_start(KernelStage::SD_COMPUTE_STEP)?;
         sd_compute_step(buffers, step_used, inv_f_max)?;
         timings.kernel_stop(KernelStage::SD_COMPUTE_STEP)?;

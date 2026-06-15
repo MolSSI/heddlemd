@@ -20,6 +20,7 @@ use super::{
     AggregateLevel, ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext,
     PotentialBuilder, SlotOutputView,
 };
+use crate::precision::Real;
 
 // CoulombParameters carries the runtime real-space parameters: the
 // cutoff and the inner switching radius. Per-particle charges live on
@@ -27,15 +28,15 @@ use super::{
 // rq-6bdfdd6d
 #[derive(Debug, Clone, Copy)]
 pub struct CoulombParameters {
-    pub cutoff: f32,
-    pub r_switch: f32,
+    pub cutoff: Real,
+    pub r_switch: Real,
 }
 
 impl From<&CoulombConfig> for CoulombParameters {
     fn from(c: &CoulombConfig) -> Self {
         CoulombParameters {
-            cutoff: c.cutoff as f32,
-            r_switch: c.r_switch as f32,
+            cutoff: c.cutoff as Real,
+            r_switch: c.r_switch as Real,
         }
     }
 }
@@ -81,7 +82,7 @@ impl Potential for CoulombState {
         "coulomb"
     }
 
-    fn max_cutoff(&self) -> Option<f32> {
+    fn max_cutoff(&self) -> Option<Real> {
         Some(self.params.cutoff)
     }
 

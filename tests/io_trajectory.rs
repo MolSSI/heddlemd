@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use heddle_md::io::{TrajectoryWriter, TrajectoryWriterError, load_init_state};
 use heddle_md::pbc::SimulationBox;
 use heddle_md::units::UnitSystem;
+use heddle_md::precision::Real;
 
 fn tmp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -73,9 +74,9 @@ fn write_single_frame_no_velocities() {
             1.0e-15,
             &sim_box(),
             &[0, 0],
-            &[0.0_f32, 3.4e-10_f32],
-            &[0.0_f32, 0.0_f32],
-            &[0.0_f32, 0.0_f32],
+            &[0.0, 3.4e-10],
+            &[0.0, 0.0],
+            &[0.0, 0.0],
             None,
             None,
         )
@@ -105,10 +106,10 @@ fn write_single_frame_with_velocities() {
             1.0e-15,
             &sim_box(),
             &[0],
-            &[0.0_f32],
-            &[0.0_f32],
-            &[0.0_f32],
-            Some((&[100.0_f32], &[0.0_f32], &[0.0_f32])),
+            &[0.0],
+            &[0.0],
+            &[0.0],
+            Some((&[100.0], &[0.0], &[0.0])),
             None,
         )
         .unwrap();
@@ -140,9 +141,9 @@ fn append_frames_in_order() {
                 1.0e-15,
                 &sim_box(),
                 &[0],
-                &[0.0_f32],
-                &[0.0_f32],
-                &[0.0_f32],
+                &[0.0],
+                &[0.0],
+                &[0.0],
                 None,
                 None,
             )
@@ -186,9 +187,9 @@ fn render_multiple_type_names() {
             1.0e-15,
             &sim_box(),
             &[0, 1, 1, 0],
-            &[0.0_f32; 4],
-            &[0.0_f32; 4],
-            &[0.0_f32; 4],
+            &[0.0; 4],
+            &[0.0; 4],
+            &[0.0; 4],
             None,
             None,
         )
@@ -217,16 +218,16 @@ fn si_mode_writer_multiplies_positions_lattice_and_velocities_by_factors() {
     let path = dir.join("traj.xyz");
 
     // Engine-side (atomic) values.
-    let l_au: f32 = 10.0;
-    let pos_x_au: f32 = 3.7;
-    let pos_y_au: f32 = -2.1;
-    let pos_z_au: f32 = 0.5;
-    let vx_au: f32 = 0.04;
-    let vy_au: f32 = -0.02;
-    let vz_au: f32 = 0.01;
+    let l_au: Real = 10.0;
+    let pos_x_au: Real = 3.7;
+    let pos_y_au: Real = -2.1;
+    let pos_z_au: Real = 0.5;
+    let vx_au: Real = 0.04;
+    let vy_au: Real = -0.02;
+    let vz_au: Real = 0.01;
 
-    let length_factor = UnitSystem::Si.factor(heddle_md::units::Dimension::Length) as f32;
-    let velocity_factor = UnitSystem::Si.factor(heddle_md::units::Dimension::Velocity) as f32;
+    let length_factor = UnitSystem::Si.factor(heddle_md::units::Dimension::Length) as Real;
+    let velocity_factor = UnitSystem::Si.factor(heddle_md::units::Dimension::Velocity) as Real;
 
     let sim_box = SimulationBox::new(l_au, l_au, l_au, 0.0, 0.0, 0.0).unwrap();
     let mut writer = TrajectoryWriter::open(
@@ -260,14 +261,14 @@ fn si_mode_writer_multiplies_positions_lattice_and_velocities_by_factors() {
     //              each component in metres. ---
     let lat_start = header.find("Lattice=\"").unwrap() + "Lattice=\"".len();
     let lat_end = lat_start + header[lat_start..].find('"').unwrap();
-    let lat_values: Vec<f32> = header[lat_start..lat_end]
+    let lat_values: Vec<Real> = header[lat_start..lat_end]
         .split_ascii_whitespace()
         .map(|s| s.parse().unwrap())
         .collect();
     assert_eq!(lat_values.len(), 9);
-    let rel = 1e-5_f32;
-    let approx = |a: f32, b: f32| {
-        (a - b).abs() <= rel * a.abs().max(b.abs()).max(f32::MIN_POSITIVE)
+    let rel = 1e-5;
+    let approx = |a: Real, b: Real| {
+        (a - b).abs() <= rel * a.abs().max(b.abs()).max(Real::MIN_POSITIVE)
     };
     assert!(
         approx(lat_values[0], l_au * length_factor),
@@ -282,12 +283,12 @@ fn si_mode_writer_multiplies_positions_lattice_and_velocities_by_factors() {
     let cols: Vec<&str> = lines[2].split_ascii_whitespace().collect();
     assert!(cols.len() >= 7, "expected 7+ columns, got {}: {:?}", cols.len(), cols);
     assert_eq!(cols[0], "Ar");
-    let px: f32 = cols[1].parse().unwrap();
-    let py: f32 = cols[2].parse().unwrap();
-    let pz: f32 = cols[3].parse().unwrap();
-    let vx: f32 = cols[4].parse().unwrap();
-    let vy: f32 = cols[5].parse().unwrap();
-    let vz: f32 = cols[6].parse().unwrap();
+    let px: Real = cols[1].parse().unwrap();
+    let py: Real = cols[2].parse().unwrap();
+    let pz: Real = cols[3].parse().unwrap();
+    let vx: Real = cols[4].parse().unwrap();
+    let vy: Real = cols[5].parse().unwrap();
+    let vz: Real = cols[6].parse().unwrap();
     assert!(approx(px, pos_x_au * length_factor), "px {} != pos_x_au * length_factor {}", px, pos_x_au * length_factor);
     assert!(approx(py, pos_y_au * length_factor));
     assert!(approx(pz, pos_z_au * length_factor));
@@ -301,12 +302,12 @@ fn si_mode_writer_multiplies_positions_lattice_and_velocities_by_factors() {
 fn round_trip_via_init_parser() {
     let dir = tmp_path("round_trip");
     let path = dir.join("traj.xyz");
-    let positions_x = [0.1_f32, -0.2_f32, 0.3_f32, -0.4_f32];
-    let positions_y = [0.05_f32, -0.05_f32, 0.15_f32, -0.15_f32];
-    let positions_z = [0.0_f32; 4];
-    let velocities_x = [1.0_f32, -1.0_f32, 2.0_f32, -2.0_f32];
-    let velocities_y = [0.0_f32; 4];
-    let velocities_z = [0.0_f32; 4];
+    let positions_x = [0.1, -0.2, 0.3, -0.4];
+    let positions_y = [0.05, -0.05, 0.15, -0.15];
+    let positions_z = [0.0; 4];
+    let velocities_x = [1.0, -1.0, 2.0, -2.0];
+    let velocities_y = [0.0; 4];
+    let velocities_z = [0.0; 4];
     let mut writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, true, false, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
@@ -341,7 +342,7 @@ fn f32_position_round_trip() {
     let dir = tmp_path("f32_round_trip");
     let path = dir.join("traj.xyz");
     // Arbitrary f32 value that's not exactly representable in decimal.
-    let p: f32 = 0.123456_f32;
+    let p: Real = 0.123456;
     let mut writer = TrajectoryWriter::open(&path, UnitSystem::Atomic, false, false, vec!["Ar".to_string()]).unwrap();
     writer
         .write_frame(
@@ -350,8 +351,8 @@ fn f32_position_round_trip() {
             &sim_box(),
             &[0],
             &[p],
-            &[0.0_f32],
-            &[0.0_f32],
+            &[0.0],
+            &[0.0],
             None,
             None,
         )
@@ -373,9 +374,9 @@ fn flush_is_idempotent() {
             1.0e-15,
             &sim_box(),
             &[0],
-            &[0.0_f32],
-            &[0.0_f32],
-            &[0.0_f32],
+            &[0.0],
+            &[0.0],
+            &[0.0],
             None,
             None,
         )
@@ -397,9 +398,9 @@ fn drop_flushes_best_effort() {
                 1.0e-15,
                 &sim_box(),
                 &[0],
-                &[0.0_f32],
-                &[0.0_f32],
-                &[0.0_f32],
+                &[0.0],
+                &[0.0],
+                &[0.0],
                 None,
                 None,
             )
@@ -426,9 +427,9 @@ fn frame_with_images_only_carries_image_property() {
             1.0e-15,
             &sim_box(),
             &[0, 0],
-            &[0.0_f32, 0.1_f32],
-            &[0.0_f32, 0.0_f32],
-            &[0.0_f32, 0.0_f32],
+            &[0.0, 0.1],
+            &[0.0, 0.0],
+            &[0.0, 0.0],
             None,
             Some((&[1_i32, -2], &[0_i32, 3], &[-4_i32, 0])),
         )
@@ -451,10 +452,10 @@ fn frame_with_velocities_and_images_carries_both_properties() {
             1.0e-15,
             &sim_box(),
             &[0],
-            &[0.1_f32],
-            &[0.2_f32],
-            &[0.3_f32],
-            Some((&[1.0_f32], &[2.0_f32], &[3.0_f32])),
+            &[0.1],
+            &[0.2],
+            &[0.3],
+            Some((&[1.0], &[2.0], &[3.0])),
             Some((&[4_i32], &[-5_i32], &[6_i32])),
         )
         .unwrap();
@@ -485,10 +486,10 @@ fn image_round_trip_via_init_parser() {
             1.0e-15,
             &sim_box(),
             &[0; 4],
-            &[0.0_f32; 4],
-            &[0.0_f32; 4],
-            &[0.0_f32; 4],
-            Some((&[1.0_f32; 4], &[0.0_f32; 4], &[0.0_f32; 4])),
+            &[0.0; 4],
+            &[0.0; 4],
+            &[0.0; 4],
+            Some((&[1.0; 4], &[0.0; 4], &[0.0; 4])),
             Some((&images_x, &images_y, &images_z)),
         )
         .unwrap();
@@ -514,9 +515,9 @@ fn round_trip_preserves_triclinic_lattice() {
             1.0e-15,
             &tri,
             &[0; 0],
-            &[0.0_f32; 0],
-            &[0.0_f32; 0],
-            &[0.0_f32; 0],
+            &[0.0; 0],
+            &[0.0; 0],
+            &[0.0; 0],
             None,
             None,
         )
@@ -550,9 +551,9 @@ fn si_mode_writer_multiplies_time_by_atomic_time_factor() {
             dt_au,
             &sim_box(),
             &[0],
-            &[0.0_f32],
-            &[0.0_f32],
-            &[0.0_f32],
+            &[0.0],
+            &[0.0],
+            &[0.0],
             None,
             None,
         )
@@ -585,8 +586,8 @@ fn si_mode_reader_divides_lattice_and_positions_by_length_factor() {
     use heddle_md::io::TrajectoryReader;
     let dir = tmp_path("si_reader_divides");
     let path = dir.join("traj.xyz");
-    let l_au: f32 = 10.0;
-    let pos_au: [f32; 3] = [3.7, -2.1, 0.5];
+    let l_au: Real = 10.0;
+    let pos_au: [Real; 3] = [3.7, -2.1, 0.5];
     let sim_box = SimulationBox::new(l_au, l_au, l_au, 0.0, 0.0, 0.0).unwrap();
     let mut writer =
         TrajectoryWriter::open(&path, UnitSystem::Si, false, false, vec!["Ar".to_string()]).unwrap();
@@ -608,9 +609,9 @@ fn si_mode_reader_divides_lattice_and_positions_by_length_factor() {
     // Read the same file back with the matching unit system.
     let mut reader = TrajectoryReader::open(&path, UnitSystem::Si, &["Ar"]).unwrap();
     let frame = reader.next_frame().unwrap().expect("at least one frame");
-    let rel = 1e-5_f32;
-    let approx = |a: f32, b: f32| {
-        (a - b).abs() <= rel * a.abs().max(b.abs()).max(f32::MIN_POSITIVE)
+    let rel = 1e-5;
+    let approx = |a: Real, b: Real| {
+        (a - b).abs() <= rel * a.abs().max(b.abs()).max(Real::MIN_POSITIVE)
     };
     assert!(approx(frame.sim_box.lx(), l_au));
     assert!(approx(frame.sim_box.ly(), l_au));
@@ -625,14 +626,14 @@ fn si_mode_reader_divides_lattice_and_positions_by_length_factor() {
 fn writer_emits_positions_inside_primary_cell() {
     let dir = tmp_path("positions_in_primary_cell");
     let path = dir.join("traj.xyz");
-    let l_au: f32 = 4.0;
+    let l_au: Real = 4.0;
     let sim_box = SimulationBox::new(l_au, l_au, l_au, 0.0, 0.0, 0.0).unwrap();
     // Caller's invariant: every position lies in [-L/2, L/2). The writer
     // is expected to emit exactly these values; the reader (atomic
     // round-trip) must read back values that still satisfy the bound.
-    let positions_x = [-1.999_f32, 0.0, 1.0];
-    let positions_y = [-1.0_f32, 0.5, 1.999];
-    let positions_z = [0.0_f32, -1.5, 1.5];
+    let positions_x = [-1.999, 0.0, 1.0];
+    let positions_y = [-1.0, 0.5, 1.999];
+    let positions_z = [0.0, -1.5, 1.5];
     let mut writer = TrajectoryWriter::open(
         &path,
         UnitSystem::Atomic,

@@ -18,6 +18,7 @@ use heddle_md::io::SlotConfig;
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::{KernelStage, Timings};
+use heddle_md::precision::Real;
 
 // k_B = 1 inside the engine (atomic units). The tests below operate
 // in atomic units throughout; this SI value of the Boltzmann constant
@@ -36,7 +37,7 @@ const TEMP_F: f64 = 315775.0248040668;
 
 fn box_small() -> SimulationBox {
     // 1 nm cubic box, expressed in atomic units (~18.9 Bohr per side).
-    let l = (1.0e-9 / LEN_F) as f32;
+    let l = (1.0e-9 / LEN_F) as Real;
     SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
@@ -98,13 +99,13 @@ fn unbox_c_rescale(boxed: Box<dyn Barostat>) -> CRescaleBarostat {
 }
 
 fn make_state(
-    positions_x: Vec<f32>,
-    velocities_x: Vec<f32>,
-    masses: Vec<f32>,
-    virials: Vec<f32>,
+    positions_x: Vec<Real>,
+    velocities_x: Vec<Real>,
+    masses: Vec<Real>,
+    virials: Vec<Real>,
 ) -> ParticleState {
     let n = positions_x.len();
-    let zero = vec![0.0_f32; n];
+    let zero = vec![0.0; n];
     let state = ParticleState::new(
         positions_x,
         zero.clone(),
@@ -113,7 +114,7 @@ fn make_state(
         zero.clone(),
         zero.clone(),
         masses,
-        vec![0.0_f32; n],
+        vec![0.0; n],
         (0..n as u32).collect(),
         None,
         None,
@@ -128,27 +129,27 @@ fn make_state(
 // pressure (matches the helper used in tests/barostats_berendsen.rs).
 fn system_with_pressure(
     target_pressure_pa: f64,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> (Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>) {
     // All quantities are expressed in atomic units, since the engine
     // operates in atomic units throughout. The SI target pressure
     // input is converted to atomic on the way in.
     let n = 8;
-    let mass: f32 = (1.66e-27 / MASS_F) as f32;
-    let v_mag: f32 = (500.0 / 2187691.2636411153_f64) as f32;
+    let mass: Real = (1.66e-27 / MASS_F) as Real;
+    let v_mag: Real = (500.0 / 2187691.2636411153_f64) as Real;
     let v_squared_sum = (n as f64) * (v_mag as f64).powi(2);
     let k = 0.5 * (mass as f64) * v_squared_sum;
     let box_edge_au = 1.0e-9 / LEN_F; // 1 nm cubic box, in Bohr
     let v = box_edge_au.powi(3);
     let target_pressure_au = target_pressure_pa / PRESSURE_F;
     let w_required = 3.0 * v * target_pressure_au - 2.0 * k;
-    let per_particle_virial = (w_required / n as f64) as f32;
-    let mut vx: Vec<f32> = Vec::with_capacity(n);
+    let per_particle_virial = (w_required / n as f64) as Real;
+    let mut vx: Vec<Real> = Vec::with_capacity(n);
     for _ in 0..n / 2 {
         vx.push(v_mag);
         vx.push(-v_mag);
     }
-    let px: Vec<f32> =
-        (0..n).map(|i| (1.0e-10 / LEN_F) as f32 * (i as f32 - 3.5)).collect();
+    let px: Vec<Real> =
+        (0..n).map(|i| (1.0e-10 / LEN_F) as Real * (i as Real - 3.5)).collect();
     (px, vx, vec![mass; n], vec![per_particle_virial; n])
 }
 
@@ -210,7 +211,7 @@ fn apply_launches_expected_kernel_set() {
     let mut sim_box = box_small();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1));
-    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
+    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     let count_for = |stage: KernelStage| -> u64 {
@@ -246,7 +247,7 @@ fn apply_on_empty_state_is_noop() {
     let g_before = sim_box.generation();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, 0, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1));
-    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
+    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
         .unwrap();
     assert_eq!(sim_box.generation(), g_before);
     // Underlying state's draw_counter should be unchanged when n == 0.
@@ -270,10 +271,10 @@ fn draw_counter_starts_at_zero_and_increments_per_apply() {
     let mut baro =
         unbox_c_rescale(build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1)));
     assert_eq!(baro.draw_counter, 0);
-    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
+    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
         .unwrap();
     assert_eq!(baro.draw_counter, 1);
-    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
+    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
         .unwrap();
     assert_eq!(baro.draw_counter, 2);
 }
@@ -294,10 +295,10 @@ fn two_barostats_at_same_seed_and_counter_produce_identical_outputs() {
     let mut baro_a = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 7));
     let mut baro_b = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 7));
     baro_a
-        .apply(&mut buffers_a, &mut sim_box_a, (1.0e-15 / TIME_F as f32), &mut timings_a)
+        .apply(&mut buffers_a, &mut sim_box_a, (1.0e-15 / TIME_F as Real), &mut timings_a)
         .unwrap();
     baro_b
-        .apply(&mut buffers_b, &mut sim_box_b, (1.0e-15 / TIME_F as f32), &mut timings_b)
+        .apply(&mut buffers_b, &mut sim_box_b, (1.0e-15 / TIME_F as Real), &mut timings_b)
         .unwrap();
     let px_a = gpu.device.dtoh_sync_copy(&buffers_a.positions_x).unwrap();
     let px_b = gpu.device.dtoh_sync_copy(&buffers_b.positions_x).unwrap();
@@ -323,7 +324,7 @@ fn mu_cubed_matches_analytical_formula_with_known_philox_draw() {
     let mut sim_box = box_small();
     let v_pre = sim_box.volume() as f64;
     let dt_si = 1.0e-13_f64;
-    let dt = (dt_si / TIME_F) as f32;
+    let dt = (dt_si / TIME_F) as Real;
     let tau = 1.0e-12_f64;
     let beta = 4.5e-10_f64;
     let temperature = 85.0_f64;
@@ -374,7 +375,7 @@ fn temperature_zero_limit_matches_berendsen_barostat() {
     let mut sim_box = box_small();
     let v_pre = sim_box.volume() as f64;
     let dt_si = 1.0e-13_f64;
-    let dt = (dt_si / TIME_F) as f32;
+    let dt = (dt_si / TIME_F) as Real;
     let tau = 1.0e-12_f64;
     let beta = 4.5e-10_f64;
     let mut timings = Timings::new(&gpu).unwrap();
@@ -410,7 +411,7 @@ fn fractional_coordinates_invariant_under_apply() {
     let lx_pre = sim_box.lx();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(p_target, 85.0, 1.0e-12, 4.5e-10, 1));
-    baro.apply(&mut buffers, &mut sim_box, (1.0e-13 / TIME_F as f32), &mut timings)
+    baro.apply(&mut buffers, &mut sim_box, (1.0e-13 / TIME_F as Real), &mut timings)
         .unwrap();
     let lx_post = sim_box.lx();
     let px_post = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
@@ -439,7 +440,7 @@ fn triclinic_shape_preserved_under_apply() {
     let r_yz_pre = (yz_pre / lx_pre) as f64;
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(p_target, 85.0, 1.0e-12, 4.5e-10, 1));
-    baro.apply(&mut buffers, &mut sim_box, (1.0e-13 / TIME_F as f32), &mut timings)
+    baro.apply(&mut buffers, &mut sim_box, (1.0e-13 / TIME_F as Real), &mut timings)
         .unwrap();
     let [lx_post, _, _, xy_post, xz_post, yz_post] = sim_box.lattice();
     let r_xy_post = (xy_post / lx_post) as f64;
@@ -464,7 +465,7 @@ fn generation_advances_after_apply() {
     let g_pre = sim_box.generation();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1));
-    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
+    baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
         .unwrap();
     assert_eq!(sim_box.generation(), g_pre + 1);
 }
@@ -513,18 +514,18 @@ fn log_column_values_combines_pressure_volume_and_cumulative_injection() {
 fn composes_with_velocity_verlet_and_csvr_thermostat() {
     let gpu = init_device().unwrap();
     let n = 8usize;
-    let mass: f32 = 1.66e-27;
-    let v_mag: f32 = 500.0;
-    let mut vx: Vec<f32> = Vec::with_capacity(n);
+    let mass: Real = 1.66e-27;
+    let v_mag: Real = 500.0;
+    let mut vx: Vec<Real> = Vec::with_capacity(n);
     for _ in 0..n / 2 {
         vx.push(v_mag);
         vx.push(-v_mag);
     }
     let state = make_state(
-        (0..n).map(|i| 1.0e-10 * (i as f32 - 3.5)).collect(),
+        (0..n).map(|i| 1.0e-10 * (i as Real - 3.5)).collect(),
         vx,
         vec![mass; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
     );
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_small();
@@ -554,12 +555,12 @@ fn composes_with_velocity_verlet_and_csvr_thermostat() {
         // Order: thermostat.apply_pre (trait default no-op for CSVR)
         // → integrator.step → thermostat.apply_post → barostat.apply
         integ
-            .step(&mut buffers, &mut sim_box, &mut ff, (1.0e-15 / TIME_F as f32), &mut timings)
+            .step(&mut buffers, &mut sim_box, &mut ff, (1.0e-15 / TIME_F as Real), &mut timings)
             .unwrap();
         therm
-            .apply_post(&mut buffers, (1.0e-15 / TIME_F as f32), &mut timings)
+            .apply_post(&mut buffers, (1.0e-15 / TIME_F as Real), &mut timings)
             .unwrap();
-        baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
+        baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
             .unwrap();
     }
     let v_final = sim_box.volume();
@@ -577,12 +578,12 @@ fn two_runs_with_same_seed_are_byte_identical() {
 
     fn run_once(
         gpu: &GpuContext,
-        px: &[f32],
-        vx: &[f32],
-        masses: &[f32],
-        virials: &[f32],
+        px: &[Real],
+        vx: &[Real],
+        masses: &[Real],
+        virials: &[Real],
         seed: u64,
-    ) -> (Vec<f32>, [f32; 6]) {
+    ) -> (Vec<Real>, [Real; 6]) {
         let n = px.len();
         let state = make_state(
             px.to_vec(),
@@ -595,7 +596,7 @@ fn two_runs_with_same_seed_are_byte_identical() {
         let mut timings = Timings::new(gpu).unwrap();
         let mut baro = build_c_rescale(gpu, n, &c_rescale_kind(1.0e6, 85.0, 1.0e-12, 4.5e-10, seed));
         for _ in 0..5 {
-            baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
+            baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
                 .unwrap();
         }
         let positions_x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
@@ -619,12 +620,12 @@ fn different_seeds_produce_different_trajectories() {
 
     fn run_once(
         gpu: &GpuContext,
-        px: &[f32],
-        vx: &[f32],
-        masses: &[f32],
-        virials: &[f32],
+        px: &[Real],
+        vx: &[Real],
+        masses: &[Real],
+        virials: &[Real],
         seed: u64,
-    ) -> Vec<f32> {
+    ) -> Vec<Real> {
         let n = px.len();
         let state = make_state(
             px.to_vec(),
@@ -637,7 +638,7 @@ fn different_seeds_produce_different_trajectories() {
         let mut timings = Timings::new(gpu).unwrap();
         let mut baro = build_c_rescale(gpu, n, &c_rescale_kind(1.0e6, 85.0, 1.0e-12, 4.5e-10, seed));
         for _ in 0..5 {
-            baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as f32), &mut timings)
+            baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
                 .unwrap();
         }
         gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap()

@@ -10,6 +10,7 @@ use heddle_md::io::config::{
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::Timings;
+use heddle_md::precision::Real;
 
 fn lj_pair_config() -> PairInteractionConfig {
     PairInteractionConfig {
@@ -25,16 +26,16 @@ fn box_10() -> SimulationBox {
 }
 
 fn state_n(n: usize) -> ParticleState {
-    let pos: Vec<f32> = (0..n).map(|i| i as f32 * 1.5).collect();
+    let pos: Vec<Real> = (0..n).map(|i| i as Real * 1.5).collect();
     ParticleState::new(
         pos,
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
@@ -241,7 +242,7 @@ impl Potential for LabelStub {
     fn label(&self) -> &'static str {
         self.0
     }
-    fn max_cutoff(&self) -> Option<f32> {
+    fn max_cutoff(&self) -> Option<Real> {
         None
     }
     fn contribute(
@@ -407,14 +408,14 @@ fn step_zero_slots_writes_zero_forces() {
     // Seed forces_* with non-zero junk so we can prove the combiner
     // overwrites them.
     let state = ParticleState::new(
-        vec![0.0_f32, 1.0, 2.0, 3.0],
-        vec![0.0_f32; 4],
-        vec![0.0_f32; 4],
-        vec![0.0_f32; 4],
-        vec![0.0_f32; 4],
-        vec![0.0_f32; 4],
-        vec![1.0_f32; 4],
-        vec![0.0_f32; 4],
+        vec![0.0, 1.0, 2.0, 3.0],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![1.0; 4],
+        vec![0.0; 4],
         vec![0u32; 4],
         None,
             None,
@@ -422,7 +423,7 @@ fn step_zero_slots_writes_zero_forces() {
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     // Stamp non-zero forces directly into the device buffer.
-    let nonzero = vec![7.0_f32; 4];
+    let nonzero = vec![7.0; 4];
     device
         .htod_sync_copy_into(&nonzero, &mut buffers.forces_x)
         .unwrap();
@@ -481,7 +482,7 @@ fn step_empty_launches_no_kernels() {
         Vec::new(),
         Vec::new(),
         Vec::new(),
-        vec![0.0_f32; 0],
+        vec![0.0; 0],
         Vec::new(),
         None,
             None,
@@ -607,9 +608,9 @@ fn each_slot_writes_its_own_row() {
 
 #[derive(Debug)]
 struct ConstStub {
-    value_x: f32,
-    value_y: f32,
-    value_z: f32,
+    value_x: Real,
+    value_y: Real,
+    value_z: Real,
     device: std::sync::Arc<cudarc::driver::CudaDevice>,
 }
 
@@ -617,7 +618,7 @@ impl Potential for ConstStub {
     fn label(&self) -> &'static str {
         "const_stub"
     }
-    fn max_cutoff(&self) -> Option<f32> {
+    fn max_cutoff(&self) -> Option<Real> {
         None
     }
     fn contribute(
@@ -661,9 +662,9 @@ impl Potential for ConstStub {
 // through the canonical `ForceField::new` path.
 #[derive(Debug, Clone)]
 struct ConstStubBuilder {
-    value_x: f32,
-    value_y: f32,
-    value_z: f32,
+    value_x: Real,
+    value_y: Real,
+    value_z: Real,
 }
 
 impl heddle_md::forces::PotentialBuilder for ConstStubBuilder {
@@ -817,7 +818,7 @@ impl Potential for ConstStubB {
     fn label(&self) -> &'static str {
         "const_stub_b"
     }
-    fn max_cutoff(&self) -> Option<f32> {
+    fn max_cutoff(&self) -> Option<Real> {
         None
     }
     fn contribute(
@@ -837,15 +838,15 @@ impl Potential for ConstStubB {
     _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
         let n = output.force_x.len();
-        let vx = vec![10.0_f32; n];
+        let vx = vec![10.0; n];
         self.device
             .htod_sync_copy_into(&vx, &mut output.force_x)
             .map_err(|e| ForceFieldError::Gpu(e.into()))?;
         self.device
-            .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.force_y)
+            .htod_sync_copy_into(&vec![0.0; n], &mut output.force_y)
             .map_err(|e| ForceFieldError::Gpu(e.into()))?;
         self.device
-            .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.force_z)
+            .htod_sync_copy_into(&vec![0.0; n], &mut output.force_z)
             .map_err(|e| ForceFieldError::Gpu(e.into()))?;
         Ok(())
     }
@@ -914,7 +915,7 @@ fn combiner_with_zero_slots_writes_zeros() {
     let state = state_n(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     // Pre-stamp non-zero forces.
-    let stamp = vec![42.0_f32; 4];
+    let stamp = vec![42.0; 4];
     device.htod_sync_copy_into(&stamp, &mut buffers.forces_x).unwrap();
     device.htod_sync_copy_into(&stamp, &mut buffers.forces_y).unwrap();
     device.htod_sync_copy_into(&stamp, &mut buffers.forces_z).unwrap();
@@ -1078,7 +1079,7 @@ impl Potential for ContextProbeStub {
     fn label(&self) -> &'static str {
         "context_probe"
     }
-    fn max_cutoff(&self) -> Option<f32> {
+    fn max_cutoff(&self) -> Option<Real> {
         None
     }
     fn contribute(
@@ -1166,14 +1167,14 @@ fn context_exposes_shared_neighbor_list_to_contribute() {
 #[derive(Debug)]
 #[allow(dead_code)]
 struct CutoffProbeStub {
-    cutoff: f32,
+    cutoff: Real,
 }
 
 impl Potential for CutoffProbeStub {
     fn label(&self) -> &'static str {
         "cutoff_probe"
     }
-    fn max_cutoff(&self) -> Option<f32> {
+    fn max_cutoff(&self) -> Option<Real> {
         Some(self.cutoff)
     }
     fn contribute(
@@ -1220,7 +1221,7 @@ fn max_cutoff_aggregation_determines_neighbor_list_radius() {
     .unwrap();
     let nl = ff.neighbor_list.as_ref().unwrap();
     let cl = nl.cell_list_data().unwrap();
-    let r_search = (5.0_f32 + r_skin as f32).powi(2);
+    let r_search = (5.0 + r_skin as Real).powi(2);
     assert!(
         (cl.r_search_sq - r_search).abs() < 1.0e-3,
         "r_search_sq = {}, expected ~{}",
@@ -1334,17 +1335,17 @@ fn combiner_sums_slot_energies_and_virials_in_slot_order() {
     .unwrap();
     // Pre-seed the Fast-class slot energy/virial rows with known values.
     device
-        .htod_sync_copy_into(&vec![1.0_f32, 2.0, 10.0, 20.0], &mut ff.fast_slot_energies)
+        .htod_sync_copy_into(&vec![1.0, 2.0, 10.0, 20.0], &mut ff.fast_slot_energies)
         .unwrap();
     device
-        .htod_sync_copy_into(&vec![0.5_f32, 1.0, 5.0, 10.0], &mut ff.fast_slot_virials)
+        .htod_sync_copy_into(&vec![0.5, 1.0, 5.0, 10.0], &mut ff.fast_slot_virials)
         .unwrap();
 
     ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let pe = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
-    assert_eq!(pe, vec![11.0_f32, 22.0]);
-    assert_eq!(vw, vec![5.5_f32, 11.0]);
+    assert_eq!(pe, vec![11.0, 22.0]);
+    assert_eq!(vw, vec![5.5, 11.0]);
 }
 
 #[test] // rq-c0f2daca
@@ -1355,10 +1356,10 @@ fn zero_slot_step_writes_zeros_to_energy_and_virial() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     // Pre-stamp non-zero junk into PE / virial.
     device
-        .htod_sync_copy_into(&vec![42.0_f32; 4], &mut buffers.potential_energies)
+        .htod_sync_copy_into(&vec![42.0; 4], &mut buffers.potential_energies)
         .unwrap();
     device
-        .htod_sync_copy_into(&vec![-7.0_f32; 4], &mut buffers.virials)
+        .htod_sync_copy_into(&vec![-7.0; 4], &mut buffers.virials)
         .unwrap();
 
     let mut timings = Timings::new(&gpu).unwrap();
@@ -1381,8 +1382,8 @@ fn zero_slot_step_writes_zeros_to_energy_and_virial() {
     ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let pe = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
-    assert_eq!(pe, vec![0.0_f32; 4]);
-    assert_eq!(vw, vec![0.0_f32; 4]);
+    assert_eq!(pe, vec![0.0; 4]);
+    assert_eq!(vw, vec![0.0; 4]);
 }
 
 #[test] // rq-db3b3d5e
@@ -1390,14 +1391,14 @@ fn system_total_potential_energy_equals_sum_of_particle_shares() {
     let gpu = init_device().unwrap();
     // Two particles at r=1.5 with σ=1, ε=1.
     let state = ParticleState::new(
-        vec![0.0_f32, 1.5],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![1.0_f32, 1.0],
-        vec![0.0_f32; vec![1.0_f32, 1.0].len()],
+        vec![0.0, 1.5],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![1.0, 1.0],
+        vec![0.0; vec![1.0, 1.0].len()],
         vec![0u32, 0],
         None,
             None,
@@ -1423,13 +1424,13 @@ fn system_total_potential_energy_equals_sum_of_particle_shares() {
     .unwrap();
     ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let pe = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let total: f32 = pe.iter().sum();
+    let total: Real = pe.iter().sum();
     // Closed-form LJ energy at r=1.5 with σ=1, ε=1.
-    let r = 1.5_f32;
-    let sr2 = (1.0_f32 / r).powi(2);
+    let r: Real = 1.5;
+    let sr2 = (1.0 / r).powi(2);
     let sr6 = sr2.powi(3);
     let sr12 = sr6 * sr6;
-    let expected = 4.0_f32 * 1.0 * (sr12 - sr6);
+    let expected = 4.0 * 1.0 * (sr12 - sr6);
     assert!((total - expected).abs() < 1.0e-5, "got {total} expected {expected}");
 }
 
@@ -1438,14 +1439,14 @@ fn system_total_virial_equals_sum_of_particle_shares() {
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
     let state = ParticleState::new(
-        vec![0.0_f32, 1.5],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![0.0_f32, 0.0],
-        vec![1.0_f32, 1.0],
-        vec![0.0_f32; vec![1.0_f32, 1.0].len()],
+        vec![0.0, 1.5],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![0.0, 0.0],
+        vec![1.0, 1.0],
+        vec![0.0; vec![1.0, 1.0].len()],
         vec![0u32, 0],
         None,
             None,
@@ -1472,10 +1473,10 @@ fn system_total_virial_equals_sum_of_particle_shares() {
     ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let vw = device.dtoh_sync_copy(&buffers.virials).unwrap();
     let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    let total_virial: f32 = vw.iter().sum();
+    let total_virial: Real = vw.iter().sum();
     // Single pair, r_ij = (-1.5, 0, 0) for i=0 → r · F = -1.5 * F_x_on_0.
     // F_x_on_0 = fx[0] (particle 0's net force comes entirely from particle 1).
-    let expected = -1.5_f32 * fx[0];
+    let expected = -1.5 * fx[0];
     assert!((total_virial - expected).abs() < 1.0e-5, "got {total_virial} expected {expected}");
 }
 
@@ -1702,7 +1703,7 @@ impl Potential for RegistryLabelStub {
     fn label(&self) -> &'static str {
         self.0
     }
-    fn max_cutoff(&self) -> Option<f32> {
+    fn max_cutoff(&self) -> Option<Real> {
         None
     }
     fn contribute(
@@ -1868,7 +1869,7 @@ fn build_context_exposes_every_parsed_config_input_by_reference() {
     let pair_interactions: Vec<PairInteractionConfig> = vec![];
     let bond_types: Vec<BondTypeConfig> = vec![];
     let angle_types: Vec<heddle_md::io::config::AngleTypeConfig> = vec![];
-    let charges: Vec<f32> = vec![0.0; n];
+    let charges: Vec<Real> = vec![0.0; n];
     let bond_list = BondList::empty(n);
     let angle_list = heddle_md::forces::AngleList::empty(0);
     let exclusion_list = ExclusionList::empty(n);
@@ -1950,14 +1951,14 @@ use heddle_md::forces::ForceClass;
 #[derive(Debug)]
 struct CountingSlowStub {
     device: std::sync::Arc<cudarc::driver::CudaDevice>,
-    counter: std::sync::Arc<std::sync::Mutex<f32>>,
+    counter: std::sync::Arc<std::sync::Mutex<Real>>,
 }
 
 impl Potential for CountingSlowStub {
     fn label(&self) -> &'static str {
         "counting_slow_stub"
     }
-    fn max_cutoff(&self) -> Option<f32> {
+    fn max_cutoff(&self) -> Option<Real> {
         None
     }
     fn frequency_class(&self) -> ForceClass {
@@ -1990,16 +1991,16 @@ impl Potential for CountingSlowStub {
             .htod_sync_copy_into(&v, &mut output.force_x)
             .map_err(|e| ForceFieldError::Gpu(e.into()))?;
         self.device
-            .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.force_y)
+            .htod_sync_copy_into(&vec![0.0; n], &mut output.force_y)
             .map_err(|e| ForceFieldError::Gpu(e.into()))?;
         self.device
-            .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.force_z)
+            .htod_sync_copy_into(&vec![0.0; n], &mut output.force_z)
             .map_err(|e| ForceFieldError::Gpu(e.into()))?;
         self.device
-            .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.energy)
+            .htod_sync_copy_into(&vec![0.0; n], &mut output.energy)
             .map_err(|e| ForceFieldError::Gpu(e.into()))?;
         self.device
-            .htod_sync_copy_into(&vec![0.0_f32; n], &mut output.virial)
+            .htod_sync_copy_into(&vec![0.0; n], &mut output.virial)
             .map_err(|e| ForceFieldError::Gpu(e.into()))?;
         Ok(())
     }
@@ -2007,7 +2008,7 @@ impl Potential for CountingSlowStub {
 
 #[derive(Debug, Clone)]
 struct CountingSlowStubBuilder {
-    counter: std::sync::Arc<std::sync::Mutex<f32>>,
+    counter: std::sync::Arc<std::sync::Mutex<Real>>,
 }
 
 impl heddle_md::forces::PotentialBuilder for CountingSlowStubBuilder {
@@ -2050,7 +2051,7 @@ fn builtin_potentials_report_canonical_class() {
         grid: [8, 8, 8],
         spline_order: 4,
     };
-    let charges = vec![0.0_f32; 4];
+    let charges = vec![0.0; 4];
     let ff = ForceField::new(
         &PotentialRegistry::with_builtins(),
         &gpu,
@@ -2090,7 +2091,7 @@ fn per_class_slot_output_buffers_have_length_num_class_slots_times_n() {
     // Custom registry with one Fast slot (LJ-equivalent stub) and one
     // Slow slot (CountingSlowStub). N = 8.
     let gpu = init_device().unwrap();
-    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0));
     let mut registry = PotentialRegistry::new();
     registry.register(Box::new(ConstStubBuilder {
         value_x: 0.0,
@@ -2131,7 +2132,7 @@ fn per_class_slot_output_buffers_are_zero_initialised() {
     // before any step_* call has touched them.
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
-    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0));
     let mut registry = PotentialRegistry::new();
     registry.register(Box::new(ConstStubBuilder {
         value_x: 0.0,
@@ -2237,7 +2238,7 @@ fn step_class_fast_with_no_fast_slots_is_noop() {
     let state = state_n(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0));
     let mut registry = PotentialRegistry::new();
     registry.register(Box::new(CountingSlowStubBuilder {
         counter: counter.clone(),
@@ -2285,7 +2286,7 @@ fn step_class_n0_launches_no_kernels() {
     let state = state_n(0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0));
     let mut registry = PotentialRegistry::new();
     registry.register(Box::new(ConstStubBuilder {
         value_x: 0.0,
@@ -2336,7 +2337,7 @@ fn step_evaluates_every_class_and_produces_total_in_particle_buffers() {
     let state = state_n(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0));
     let mut registry = PotentialRegistry::new();
     registry.register(Box::new(ConstStubBuilder {
         value_x: 1.0,
@@ -2367,7 +2368,7 @@ fn step_evaluates_every_class_and_produces_total_in_particle_buffers() {
     ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     // Fast contributes 1.0; Slow contributes counter=1.0 → total 2.0.
-    assert_eq!(fx, vec![2.0_f32, 2.0]);
+    assert_eq!(fx, vec![2.0, 2.0]);
 }
 
 // rq-1a996f5d
@@ -2382,7 +2383,7 @@ fn step_class_fast_refreshes_only_fast_slots_contributions() {
     let state = state_n(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0));
     let mut registry = PotentialRegistry::new();
     registry.register(Box::new(ConstStubBuilder {
         value_x: 1.0,
@@ -2417,7 +2418,7 @@ fn step_class_fast_refreshes_only_fast_slots_contributions() {
         .unwrap();
     assert_eq!(*counter.lock().unwrap(), 1.0); // Slow did NOT run again
     let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    assert_eq!(fx, vec![2.0_f32, 2.0]); // stale Slow=1.0 + fresh Fast=1.0
+    assert_eq!(fx, vec![2.0, 2.0]); // stale Slow=1.0 + fresh Fast=1.0
 }
 
 // rq-33cfb9fc
@@ -2431,7 +2432,7 @@ fn step_class_slow_refreshes_only_slow_slots_contributions() {
     let state = state_n(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let counter = std::sync::Arc::new(std::sync::Mutex::new(0.0));
     let mut registry = PotentialRegistry::new();
     registry.register(Box::new(ConstStubBuilder {
         value_x: 1.0,
@@ -2466,7 +2467,7 @@ fn step_class_slow_refreshes_only_slow_slots_contributions() {
         .unwrap();
     assert_eq!(*counter.lock().unwrap(), 2.0); // Slow advanced
     let fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-    assert_eq!(fx, vec![3.0_f32, 3.0]); // stale Fast=1.0 + fresh Slow=2.0
+    assert_eq!(fx, vec![3.0, 3.0]); // stale Fast=1.0 + fresh Slow=2.0
 }
 
 // rq-40f9d35a
@@ -2479,10 +2480,10 @@ fn respa_style_call_sequence_is_deterministic_across_two_runs() {
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
     let state = state_n(4);
-    let counter_a = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
-    let counter_b = std::sync::Arc::new(std::sync::Mutex::new(0.0_f32));
+    let counter_a = std::sync::Arc::new(std::sync::Mutex::new(0.0));
+    let counter_b = std::sync::Arc::new(std::sync::Mutex::new(0.0));
 
-    let build_ff = |counter: std::sync::Arc<std::sync::Mutex<f32>>| {
+    let build_ff = |counter: std::sync::Arc<std::sync::Mutex<Real>>| {
         let mut registry = PotentialRegistry::new();
         registry.register(Box::new(ConstStubBuilder {
             value_x: 1.0,
@@ -2611,25 +2612,25 @@ fn step_forces_only_updates_forces_and_leaves_energies_and_virials_stale() {
     let device = gpu.device.clone();
     let mut t = Timings::new(&gpu).unwrap();
     ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesAndScalars).unwrap();
-    let e0: Vec<f32> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let w0: Vec<f32> = device.dtoh_sync_copy(&buffers.virials).unwrap();
-    let slot_e0: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
-    let slot_w0: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
+    let e0: Vec<Real> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let w0: Vec<Real> = device.dtoh_sync_copy(&buffers.virials).unwrap();
+    let slot_e0: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
+    let slot_w0: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
     assert!(e0.iter().any(|&v| v != 0.0), "expected non-zero baseline energy");
 
     // Perturb positions so a refreshed force evaluation would change
     // forces, energies, and virials.
-    let new_x: Vec<f32> = (0..4).map(|i| i as f32 * 1.5 + 0.3).collect();
+    let new_x: Vec<Real> = (0..4).map(|i| i as Real * 1.5 + 0.3).collect();
     device.htod_sync_copy_into(&new_x, &mut buffers.positions_x).unwrap();
 
     let mut t2 = Timings::new(&gpu).unwrap();
     ff.step(&mut buffers, &box_10(), &mut t2, AggregateLevel::ForcesOnly).unwrap();
-    let fx: Vec<f32> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    let fx: Vec<Real> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     assert!(fx.iter().any(|&v| v != 0.0), "expected non-zero forces at new positions");
-    let e1: Vec<f32> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let w1: Vec<f32> = device.dtoh_sync_copy(&buffers.virials).unwrap();
-    let slot_e1: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
-    let slot_w1: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
+    let e1: Vec<Real> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let w1: Vec<Real> = device.dtoh_sync_copy(&buffers.virials).unwrap();
+    let slot_e1: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
+    let slot_w1: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
     assert_eq!(e1, e0, "ParticleBuffers.potential_energies must be unchanged under ForcesOnly");
     assert_eq!(w1, w0, "ParticleBuffers.virials must be unchanged under ForcesOnly");
     assert_eq!(slot_e1, slot_e0, "LJ slot's energy row must not be rewritten under ForcesOnly");
@@ -2643,16 +2644,16 @@ fn step_forces_and_scalars_refreshes_energies_and_virials() {
     let device = gpu.device.clone();
     let mut t = Timings::new(&gpu).unwrap();
     ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesAndScalars).unwrap();
-    let e0: Vec<f32> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let fx0: Vec<f32> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    let e0: Vec<Real> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let fx0: Vec<Real> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     assert!(e0.iter().any(|&v| v != 0.0));
 
-    let new_x: Vec<f32> = (0..4).map(|i| i as f32 * 1.5 + 0.3).collect();
+    let new_x: Vec<Real> = (0..4).map(|i| i as Real * 1.5 + 0.3).collect();
     device.htod_sync_copy_into(&new_x, &mut buffers.positions_x).unwrap();
 
     ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesAndScalars).unwrap();
-    let e1: Vec<f32> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let fx1: Vec<f32> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    let e1: Vec<Real> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let fx1: Vec<Real> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     assert_ne!(e1, e0, "potential_energies must refresh under ForcesAndScalars when positions change");
     assert_ne!(fx1, fx0, "forces_x must reflect the new positions");
 }
@@ -2667,9 +2668,9 @@ fn bonded_only_slot_reduces_all_five_quantities_regardless_of_level() {
     // reduction kernel writes all five output rows regardless of `level`,
     // so the combiner finds non-zero energy and virial entries.
     ff.step(&mut buffers, &box_10(), &mut t, AggregateLevel::ForcesOnly).unwrap();
-    let e: Vec<f32> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let w: Vec<f32> = device.dtoh_sync_copy(&buffers.virials).unwrap();
-    let fx: Vec<f32> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+    let e: Vec<Real> = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+    let w: Vec<Real> = device.dtoh_sync_copy(&buffers.virials).unwrap();
+    let fx: Vec<Real> = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     assert!(e.iter().any(|&v| v != 0.0), "Morse slot must have populated energy under ForcesOnly");
     assert!(w.iter().any(|&v| v != 0.0), "Morse slot must have populated virial under ForcesOnly");
     assert!(fx.iter().any(|&v| v != 0.0), "Morse slot must have populated forces under ForcesOnly");
@@ -2694,12 +2695,12 @@ fn pair_buffer_slot_honours_forces_only() {
         report.stages.iter().find(|s| s.name == name).map(|s| s.count).unwrap_or(0)
     };
     assert_eq!(count_of("reduce_pair_energy_virial"), 1, "baseline call must run energy/virial reduce");
-    let slot_e_baseline: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
-    let slot_w_baseline: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
-    let slot_fx_baseline: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
+    let slot_e_baseline: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
+    let slot_w_baseline: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
+    let slot_fx_baseline: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
     assert!(slot_e_baseline.iter().any(|&v| v != 0.0));
 
-    let new_x: Vec<f32> = (0..4).map(|i| i as f32 * 1.5 + 0.4).collect();
+    let new_x: Vec<Real> = (0..4).map(|i| i as Real * 1.5 + 0.4).collect();
     device.htod_sync_copy_into(&new_x, &mut buffers.positions_x).unwrap();
 
     let mut t2 = Timings::new(&gpu).unwrap();
@@ -2713,9 +2714,9 @@ fn pair_buffer_slot_honours_forces_only() {
         0,
         "ForcesOnly step must not run the energy/virial reduction kernel"
     );
-    let slot_e_after: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
-    let slot_w_after: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
-    let slot_fx_after: Vec<f32> = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
+    let slot_e_after: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
+    let slot_w_after: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
+    let slot_fx_after: Vec<Real> = device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
     assert_eq!(slot_e_after, slot_e_baseline, "LJ slot energy row must be untouched under ForcesOnly");
     assert_eq!(slot_w_after, slot_w_baseline, "LJ slot virial row must be untouched under ForcesOnly");
     assert_ne!(slot_fx_after, slot_fx_baseline, "LJ slot force row must be overwritten");

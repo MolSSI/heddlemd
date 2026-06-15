@@ -14,8 +14,9 @@ use heddle_md::io::config::{NeighborListConfig, ParticleTypeConfig, SpmeConfig};
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::Timings;
+use heddle_md::precision::Real;
 
-fn build_state(positions: &[[f32; 3]], charges: &[f32]) -> ParticleState {
+fn build_state(positions: &[[Real; 3]], charges: &[Real]) -> ParticleState {
     let n = positions.len();
     assert_eq!(charges.len(), n);
     let mut px = Vec::with_capacity(n);
@@ -30,10 +31,10 @@ fn build_state(positions: &[[f32; 3]], charges: &[f32]) -> ParticleState {
         px,
         py,
         pz,
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
         charges.to_vec(),
         vec![0u32; n],
         None,
@@ -52,7 +53,7 @@ fn default_spme_config() -> SpmeConfig {
 }
 
 fn nm_box() -> SimulationBox {
-    let l = 1.0e-9_f32;
+    let l = 1.0e-9;
     SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
@@ -66,7 +67,7 @@ fn force_field_registers_spme_slots_when_configured() {
         charge: 1.0,
     }];
     let spme = default_spme_config();
-    let charges = vec![1.0_f32];
+    let charges = vec![1.0];
     let ff = ForceField::new(
         &PotentialRegistry::with_builtins(),
         &gpu,
@@ -96,8 +97,8 @@ fn force_field_registers_spme_slots_when_configured() {
 fn spme_reciprocal_state_two_independent_constructs_produce_byte_identical_grids() {
     let gpu = init_device().unwrap();
     let sim_box = nm_box();
-    let e_charge = 1.602176634e-19_f32;
-    let positions = [[0.1e-9_f32, 0.0, 0.0], [-0.1e-9, 0.0, 0.0]];
+    let e_charge = 1.602176634e-19;
+    let positions = [[0.1e-9, 0.0, 0.0], [-0.1e-9, 0.0, 0.0]];
     let charges = [e_charge, -e_charge];
     let state = build_state(&positions, &charges);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -117,8 +118,8 @@ fn spme_reciprocal_state_two_independent_constructs_produce_byte_identical_grids
     s1.grid().sync_recip().unwrap();
     s2.grid().sync_recip().unwrap();
 
-    let v1: Vec<f32> = gpu.device.dtoh_sync_copy(&s1.grid().v).unwrap();
-    let v2: Vec<f32> = gpu.device.dtoh_sync_copy(&s2.grid().v).unwrap();
+    let v1: Vec<Real> = gpu.device.dtoh_sync_copy(&s1.grid().v).unwrap();
+    let v2: Vec<Real> = gpu.device.dtoh_sync_copy(&s2.grid().v).unwrap();
     assert_eq!(v1, v2, "two independent slots must produce bit-identical V");
 }
 
@@ -134,11 +135,11 @@ fn spme_reciprocal_state_two_independent_constructs_produce_byte_identical_grids
 fn spme_reciprocal_total_energy_equals_recip_minus_self() {
     let gpu = init_device().unwrap();
     let sim_box = nm_box();
-    let alpha: f32 = 4.0e9;
-    let e_charge: f32 = 1.602176634e-19;
+    let alpha: Real = 4.0e9;
+    let e_charge: Real = 1.602176634e-19;
     let charges = [e_charge, -e_charge, 2.0 * e_charge, -2.0 * e_charge];
     let positions = [
-        [0.1e-9_f32, 0.0, 0.0],
+        [0.1e-9, 0.0, 0.0],
         [-0.1e-9, 0.2e-9, 0.0],
         [0.0, -0.2e-9, 0.15e-9],
         [-0.15e-9, 0.1e-9, -0.1e-9],
@@ -165,8 +166,8 @@ fn spme_reciprocal_total_energy_equals_recip_minus_self() {
 
     // Independent U_recip from the pipeline-resident buffers.
     let device = gpu.device.clone();
-    let rho: Vec<f32> = device.dtoh_sync_copy(&slot.grid().rho).unwrap();
-    let v: Vec<f32> = device.dtoh_sync_copy(&slot.grid().v).unwrap();
+    let rho: Vec<Real> = device.dtoh_sync_copy(&slot.grid().rho).unwrap();
+    let v: Vec<Real> = device.dtoh_sync_copy(&slot.grid().v).unwrap();
     let u_recip: f64 = 0.5
         * rho
             .iter()
@@ -175,11 +176,11 @@ fn spme_reciprocal_total_energy_equals_recip_minus_self() {
             .sum::<f64>();
 
     // Run reduce() into a fresh output view.
-    let mut force_x = device.alloc_zeros::<f32>(n).unwrap();
-    let mut force_y = device.alloc_zeros::<f32>(n).unwrap();
-    let mut force_z = device.alloc_zeros::<f32>(n).unwrap();
-    let mut energy = device.alloc_zeros::<f32>(n).unwrap();
-    let mut virial = device.alloc_zeros::<f32>(n).unwrap();
+    let mut force_x = device.alloc_zeros::<Real>(n).unwrap();
+    let mut force_y = device.alloc_zeros::<Real>(n).unwrap();
+    let mut force_z = device.alloc_zeros::<Real>(n).unwrap();
+    let mut energy = device.alloc_zeros::<Real>(n).unwrap();
+    let mut virial = device.alloc_zeros::<Real>(n).unwrap();
     {
         let view = heddle_md::forces::SlotOutputView {
             force_x: force_x.slice_mut(0..n),
@@ -190,7 +191,7 @@ fn spme_reciprocal_total_energy_equals_recip_minus_self() {
         };
         slot.reduce(view, &cx, &mut t, heddle_md::forces::AggregateLevel::ForcesAndScalars).unwrap();
     }
-    let energies: Vec<f32> = device.dtoh_sync_copy(&energy).unwrap();
+    let energies: Vec<Real> = device.dtoh_sync_copy(&energy).unwrap();
     let total: f64 = energies.iter().map(|&e| e as f64).sum();
 
     let inv_sqrt_pi = 1.0_f64 / PI.sqrt();
@@ -220,9 +221,9 @@ fn spme_reciprocal_total_energy_equals_recip_minus_self() {
 fn spme_real_slot_zero_outside_r_cut() {
     let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new(2.0e-9, 2.0e-9, 2.0e-9, 0.0, 0.0, 0.0).unwrap();
-    let r_cut_real: f32 = 0.3e-9;
-    let positions = [[0.0_f32, 0.0, 0.0], [r_cut_real + 0.05e-9, 0.0, 0.0]];
-    let charges = [1.0e-19_f32, -1.0e-19];
+    let r_cut_real: Real = 0.3e-9;
+    let positions = [[0.0, 0.0, 0.0], [r_cut_real + 0.05e-9, 0.0, 0.0]];
+    let charges = [1.0e-19, -1.0e-19];
     let state = build_state(&positions, &charges);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
 
@@ -230,7 +231,7 @@ fn spme_real_slot_zero_outside_r_cut() {
     let mut slot = SpmeRealSpaceState::new(
         &gpu,
         2,
-        4.0e9_f32,
+        4.0e9,
         r_cut_real,
         2,
         &ExclusionList::empty(2),
@@ -246,11 +247,11 @@ fn spme_real_slot_zero_outside_r_cut() {
 
     let device = gpu.device.clone();
     let n = 2usize;
-    let mut force_x = device.alloc_zeros::<f32>(n).unwrap();
-    let mut force_y = device.alloc_zeros::<f32>(n).unwrap();
-    let mut force_z = device.alloc_zeros::<f32>(n).unwrap();
-    let mut energy = device.alloc_zeros::<f32>(n).unwrap();
-    let mut virial = device.alloc_zeros::<f32>(n).unwrap();
+    let mut force_x = device.alloc_zeros::<Real>(n).unwrap();
+    let mut force_y = device.alloc_zeros::<Real>(n).unwrap();
+    let mut force_z = device.alloc_zeros::<Real>(n).unwrap();
+    let mut energy = device.alloc_zeros::<Real>(n).unwrap();
+    let mut virial = device.alloc_zeros::<Real>(n).unwrap();
     {
         let view = heddle_md::forces::SlotOutputView {
             force_x: force_x.slice_mut(0..n),
@@ -261,7 +262,7 @@ fn spme_real_slot_zero_outside_r_cut() {
         };
         slot.reduce(view, &cx, &mut t, heddle_md::forces::AggregateLevel::ForcesAndScalars).unwrap();
     }
-    let fx: Vec<f32> = device.dtoh_sync_copy(&force_x).unwrap();
+    let fx: Vec<Real> = device.dtoh_sync_copy(&force_x).unwrap();
     assert!(
         fx.iter().all(|f| f.abs() < 1.0e-20),
         "expected zero forces beyond r_cut_real, got {:?}",
@@ -279,12 +280,12 @@ fn spme_real_slot_zero_outside_r_cut() {
 fn spme_real_slot_matches_closed_form_erfc_pair() {
     let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new(2.0e-9, 2.0e-9, 2.0e-9, 0.0, 0.0, 0.0).unwrap();
-    let alpha: f32 = 4.0e9;
-    let r_cut_real: f32 = 0.5e-9;
-    let r: f32 = 0.15e-9;
-    let positions = [[0.0_f32, 0.0, 0.0], [r, 0.0, 0.0]];
-    let q1: f32 = 1.0e-19;
-    let q2: f32 = -1.0e-19;
+    let alpha: Real = 4.0e9;
+    let r_cut_real: Real = 0.5e-9;
+    let r: Real = 0.15e-9;
+    let positions = [[0.0, 0.0, 0.0], [r, 0.0, 0.0]];
+    let q1: Real = 1.0e-19;
+    let q2: Real = -1.0e-19;
     let charges = [q1, q2];
     let state = build_state(&positions, &charges);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -309,11 +310,11 @@ fn spme_real_slot_matches_closed_form_erfc_pair() {
 
     let device = gpu.device.clone();
     let n = 2usize;
-    let mut force_x = device.alloc_zeros::<f32>(n).unwrap();
-    let mut force_y = device.alloc_zeros::<f32>(n).unwrap();
-    let mut force_z = device.alloc_zeros::<f32>(n).unwrap();
-    let mut energy = device.alloc_zeros::<f32>(n).unwrap();
-    let mut virial = device.alloc_zeros::<f32>(n).unwrap();
+    let mut force_x = device.alloc_zeros::<Real>(n).unwrap();
+    let mut force_y = device.alloc_zeros::<Real>(n).unwrap();
+    let mut force_z = device.alloc_zeros::<Real>(n).unwrap();
+    let mut energy = device.alloc_zeros::<Real>(n).unwrap();
+    let mut virial = device.alloc_zeros::<Real>(n).unwrap();
     {
         let view = heddle_md::forces::SlotOutputView {
             force_x: force_x.slice_mut(0..n),
@@ -324,7 +325,7 @@ fn spme_real_slot_matches_closed_form_erfc_pair() {
         };
         slot.reduce(view, &cx, &mut t, heddle_md::forces::AggregateLevel::ForcesAndScalars).unwrap();
     }
-    let fx: Vec<f32> = device.dtoh_sync_copy(&force_x).unwrap();
+    let fx: Vec<Real> = device.dtoh_sync_copy(&force_x).unwrap();
 
     // Closed-form prediction. q1 at origin, q2 at +x ⇒ force on q1 from
     // q2 points in -x for opposite charges (attractive). dx = pos[0] -
@@ -340,7 +341,7 @@ fn spme_real_slot_matches_closed_form_erfc_pair() {
     let factor = (K_COULOMB_F32 as f64) * qq / (r_f * r_f)
         * (erfc_ar / r_f + 2.0 * alpha_f * one_over_sqrt_pi * gauss);
     // dx for particle 0 = -r; for particle 1 = +r.
-    let fx0_expected = (factor * (-r_f)) as f32;
+    let fx0_expected = (factor * (-r_f)) as Real;
     let rel = (fx[0] - fx0_expected).abs() / fx0_expected.abs();
     assert!(
         rel < 5.0e-3,
@@ -482,7 +483,7 @@ fn spme_rejects_grid_below_2_times_spline_order_along_a() {
         grid: [7, 16, 16],
         spline_order: 4,
     };
-    let res = SpmeReciprocalState::new(&gpu, &sim_box, 1, &[1.0_f32], params);
+    let res = SpmeReciprocalState::new(&gpu, &sim_box, 1, &[1.0], params);
     assert!(matches!(
         res,
         Err(heddle_md::forces::SpmeError::InvalidGrid { axis: "a", n: 7, required: 8 })
@@ -500,7 +501,7 @@ fn spme_rejects_grid_below_2_times_spline_order_along_b() {
         grid: [16, 7, 16],
         spline_order: 4,
     };
-    let res = SpmeReciprocalState::new(&gpu, &sim_box, 1, &[1.0_f32], params);
+    let res = SpmeReciprocalState::new(&gpu, &sim_box, 1, &[1.0], params);
     assert!(matches!(
         res,
         Err(heddle_md::forces::SpmeError::InvalidGrid { axis: "b", n: 7, required: 8 })
@@ -516,7 +517,7 @@ fn spme_rejects_grid_below_2_times_spline_order_along_b() {
 fn doubling_charges_quadruples_reciprocal_energy() {
     let gpu = init_device().unwrap();
     let sim_box = nm_box();
-    let positions = [[0.1e-9_f32, 0.0, 0.0], [-0.1e-9, 0.0, 0.0]];
+    let positions = [[0.1e-9, 0.0, 0.0], [-0.1e-9, 0.0, 0.0]];
     let params = SpmeParameters::from(&default_spme_config());
 
     let n = positions.len();
@@ -536,8 +537,8 @@ fn doubling_charges_quadruples_reciprocal_energy() {
 fn run_spme_recip_energy(
     gpu: &GpuContext,
     sim_box: &SimulationBox,
-    positions: &[[f32; 3]],
-    charges: &[f32],
+    positions: &[[Real; 3]],
+    charges: &[Real],
     params: SpmeParameters,
 ) -> f64 {
     let n = positions.len();
@@ -552,11 +553,11 @@ fn run_spme_recip_energy(
     };
     slot.contribute(&buffers, sim_box, &cx, &mut t).unwrap();
     let device = gpu.device.clone();
-    let mut force_x = device.alloc_zeros::<f32>(n).unwrap();
-    let mut force_y = device.alloc_zeros::<f32>(n).unwrap();
-    let mut force_z = device.alloc_zeros::<f32>(n).unwrap();
-    let mut energy = device.alloc_zeros::<f32>(n).unwrap();
-    let mut virial = device.alloc_zeros::<f32>(n).unwrap();
+    let mut force_x = device.alloc_zeros::<Real>(n).unwrap();
+    let mut force_y = device.alloc_zeros::<Real>(n).unwrap();
+    let mut force_z = device.alloc_zeros::<Real>(n).unwrap();
+    let mut energy = device.alloc_zeros::<Real>(n).unwrap();
+    let mut virial = device.alloc_zeros::<Real>(n).unwrap();
     {
         let view = heddle_md::forces::SlotOutputView {
             force_x: force_x.slice_mut(0..n),
@@ -567,7 +568,7 @@ fn run_spme_recip_energy(
         };
         slot.reduce(view, &cx, &mut t, heddle_md::forces::AggregateLevel::ForcesAndScalars).unwrap();
     }
-    let energies: Vec<f32> = device.dtoh_sync_copy(&energy).unwrap();
+    let energies: Vec<Real> = device.dtoh_sync_copy(&energy).unwrap();
     energies.iter().map(|&e| e as f64).sum()
 }
 
@@ -575,12 +576,12 @@ fn run_spme_recip_energy(
 fn run_spme_real(
     gpu: &GpuContext,
     sim_box: &SimulationBox,
-    positions: &[[f32; 3]],
-    charges: &[f32],
-    alpha: f32,
-    r_cut_real: f32,
+    positions: &[[Real; 3]],
+    charges: &[Real],
+    alpha: Real,
+    r_cut_real: Real,
     exclusions: &ExclusionList,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> (Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>) {
     let n = positions.len();
     let state = build_state(positions, charges);
     let buffers = ParticleBuffers::new(gpu, &state).unwrap();
@@ -594,11 +595,11 @@ fn run_spme_real(
     };
     slot.contribute(&buffers, sim_box, &cx, &mut t).unwrap();
     let device = gpu.device.clone();
-    let mut force_x = device.alloc_zeros::<f32>(n).unwrap();
-    let mut force_y = device.alloc_zeros::<f32>(n).unwrap();
-    let mut force_z = device.alloc_zeros::<f32>(n).unwrap();
-    let mut energy = device.alloc_zeros::<f32>(n).unwrap();
-    let mut virial = device.alloc_zeros::<f32>(n).unwrap();
+    let mut force_x = device.alloc_zeros::<Real>(n).unwrap();
+    let mut force_y = device.alloc_zeros::<Real>(n).unwrap();
+    let mut force_z = device.alloc_zeros::<Real>(n).unwrap();
+    let mut energy = device.alloc_zeros::<Real>(n).unwrap();
+    let mut virial = device.alloc_zeros::<Real>(n).unwrap();
     {
         let view = heddle_md::forces::SlotOutputView {
             force_x: force_x.slice_mut(0..n),
@@ -625,8 +626,8 @@ fn real_space_slot_obeys_newtons_third_law_for_non_boundary_pair() {
     let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new(2.0e-9, 2.0e-9, 2.0e-9, 0.0, 0.0, 0.0).unwrap();
     // Isolated pair well inside r_cut_real and far from box faces.
-    let positions = [[0.05e-9_f32, 0.0, 0.0], [0.20e-9, 0.0, 0.0]];
-    let charges = [1.0e-19_f32, -1.0e-19];
+    let positions = [[0.05e-9, 0.0, 0.0], [0.20e-9, 0.0, 0.0]];
+    let charges = [1.0e-19, -1.0e-19];
     let _ = Exclusion {
         atom_i: 0,
         atom_j: 1,
@@ -655,8 +656,8 @@ fn real_space_slot_produces_zero_force_on_an_excluded_pair() {
     let sim_box = SimulationBox::new(2.0e-9, 2.0e-9, 2.0e-9, 0.0, 0.0, 0.0).unwrap();
     // Two oppositely charged particles within r_cut_real, but excluded
     // with scale_coul = 0. Expected output: all-zero force/energy/virial.
-    let positions = [[0.0_f32, 0.0, 0.0], [0.15e-9, 0.0, 0.0]];
-    let charges = [1.0e-19_f32, -1.0e-19];
+    let positions = [[0.0, 0.0, 0.0], [0.15e-9, 0.0, 0.0]];
+    let charges = [1.0e-19, -1.0e-19];
     let mut excl = ExclusionList::empty(2);
     excl.entries.push(Exclusion {
         atom_i: 0,
@@ -689,10 +690,10 @@ fn real_space_slot_produces_zero_force_on_an_excluded_pair() {
 fn reciprocal_space_virial_is_distributed_equally_per_particle() {
     let gpu = init_device().unwrap();
     let sim_box = nm_box();
-    let e_charge: f32 = 1.602176634e-19;
+    let e_charge: Real = 1.602176634e-19;
     let charges = [e_charge, -e_charge, 2.0 * e_charge, -2.0 * e_charge];
     let positions = [
-        [0.1e-9_f32, 0.0, 0.0],
+        [0.1e-9, 0.0, 0.0],
         [-0.1e-9, 0.2e-9, 0.0],
         [0.0, -0.2e-9, 0.15e-9],
         [-0.15e-9, 0.1e-9, -0.1e-9],
@@ -711,11 +712,11 @@ fn reciprocal_space_virial_is_distributed_equally_per_particle() {
     slot.contribute(&buffers, &sim_box, &cx, &mut t).unwrap();
 
     let device = gpu.device.clone();
-    let mut force_x = device.alloc_zeros::<f32>(n).unwrap();
-    let mut force_y = device.alloc_zeros::<f32>(n).unwrap();
-    let mut force_z = device.alloc_zeros::<f32>(n).unwrap();
-    let mut energy = device.alloc_zeros::<f32>(n).unwrap();
-    let mut virial = device.alloc_zeros::<f32>(n).unwrap();
+    let mut force_x = device.alloc_zeros::<Real>(n).unwrap();
+    let mut force_y = device.alloc_zeros::<Real>(n).unwrap();
+    let mut force_z = device.alloc_zeros::<Real>(n).unwrap();
+    let mut energy = device.alloc_zeros::<Real>(n).unwrap();
+    let mut virial = device.alloc_zeros::<Real>(n).unwrap();
     {
         let view = heddle_md::forces::SlotOutputView {
             force_x: force_x.slice_mut(0..n),
@@ -727,7 +728,7 @@ fn reciprocal_space_virial_is_distributed_equally_per_particle() {
         slot.reduce(view, &cx, &mut t, heddle_md::forces::AggregateLevel::ForcesAndScalars)
             .unwrap();
     }
-    let virials: Vec<f32> = device.dtoh_sync_copy(&virial).unwrap();
+    let virials: Vec<Real> = device.dtoh_sync_copy(&virial).unwrap();
     // Every per-particle virial entry equals W_recip / N (within f32 round-off).
     let expected = virials[0];
     assert!(expected.abs() > 0.0, "reciprocal virial must be non-zero");
@@ -749,13 +750,13 @@ fn reciprocal_space_virial_is_distributed_equally_per_particle() {
 #[test]
 fn spme_runs_on_a_triclinic_box_with_non_zero_tilts() {
     let gpu = init_device().unwrap();
-    let l = 1.0e-9_f32;
+    let l = 1.0e-9;
     let sim_box = SimulationBox::new(l, l, l, 0.10 * l, -0.08 * l, 0.05 * l).unwrap();
-    let alpha: f32 = 4.0e9;
-    let e_charge: f32 = 1.602176634e-19;
+    let alpha: Real = 4.0e9;
+    let e_charge: Real = 1.602176634e-19;
     let charges = [e_charge, -e_charge, 2.0 * e_charge, -2.0 * e_charge];
     let positions = [
-        [0.1e-9_f32, 0.0, 0.0],
+        [0.1e-9, 0.0, 0.0],
         [-0.1e-9, 0.15e-9, 0.0],
         [0.0, -0.15e-9, 0.10e-9],
         [-0.10e-9, 0.05e-9, -0.10e-9],
@@ -785,16 +786,16 @@ fn spme_runs_on_a_triclinic_box_with_non_zero_tilts() {
     // function (built from the reciprocal lattice H^(-T) of the
     // triclinic box) feeds a self-consistent pipeline.
     let device = gpu.device.clone();
-    let rho: Vec<f32> = device.dtoh_sync_copy(&slot.grid().rho).unwrap();
-    let v: Vec<f32> = device.dtoh_sync_copy(&slot.grid().v).unwrap();
+    let rho: Vec<Real> = device.dtoh_sync_copy(&slot.grid().rho).unwrap();
+    let v: Vec<Real> = device.dtoh_sync_copy(&slot.grid().v).unwrap();
     let u_recip: f64 = 0.5
         * rho.iter().zip(v.iter()).map(|(&r, &vg)| (r as f64) * (vg as f64)).sum::<f64>();
 
-    let mut force_x = device.alloc_zeros::<f32>(n).unwrap();
-    let mut force_y = device.alloc_zeros::<f32>(n).unwrap();
-    let mut force_z = device.alloc_zeros::<f32>(n).unwrap();
-    let mut energy = device.alloc_zeros::<f32>(n).unwrap();
-    let mut virial = device.alloc_zeros::<f32>(n).unwrap();
+    let mut force_x = device.alloc_zeros::<Real>(n).unwrap();
+    let mut force_y = device.alloc_zeros::<Real>(n).unwrap();
+    let mut force_z = device.alloc_zeros::<Real>(n).unwrap();
+    let mut energy = device.alloc_zeros::<Real>(n).unwrap();
+    let mut virial = device.alloc_zeros::<Real>(n).unwrap();
     {
         let view = heddle_md::forces::SlotOutputView {
             force_x: force_x.slice_mut(0..n),
@@ -806,7 +807,7 @@ fn spme_runs_on_a_triclinic_box_with_non_zero_tilts() {
         slot.reduce(view, &cx, &mut t, heddle_md::forces::AggregateLevel::ForcesAndScalars)
             .unwrap();
     }
-    let energies: Vec<f32> = device.dtoh_sync_copy(&energy).unwrap();
+    let energies: Vec<Real> = device.dtoh_sync_copy(&energy).unwrap();
     let total: f64 = energies.iter().map(|&e| e as f64).sum();
     let inv_sqrt_pi = 1.0_f64 / PI.sqrt();
     let prefactor = (K_COULOMB_F32 as f64) * (alpha as f64) * inv_sqrt_pi;
@@ -824,7 +825,7 @@ fn spme_runs_on_a_triclinic_box_with_non_zero_tilts() {
         rel
     );
 
-    let fx: Vec<f32> = device.dtoh_sync_copy(&force_x).unwrap();
+    let fx: Vec<Real> = device.dtoh_sync_copy(&force_x).unwrap();
     assert!(
         fx.iter().any(|&v| v.is_finite() && v != 0.0),
         "expected non-zero, finite forces on triclinic box"
@@ -857,17 +858,17 @@ fn box_compatibility_ignores_the_spme_reciprocal_grid() {
 fn two_stream_pipeline_preserves_bit_exact_reproducibility_across_runs() {
     let gpu = init_device().unwrap();
     let sim_box = nm_box();
-    let e_charge: f32 = 1.602176634e-19;
+    let e_charge: Real = 1.602176634e-19;
     let charges = [e_charge, -e_charge, 2.0 * e_charge, -2.0 * e_charge];
     let positions = [
-        [0.1e-9_f32, 0.0, 0.0],
+        [0.1e-9, 0.0, 0.0],
         [-0.1e-9, 0.2e-9, 0.0],
         [0.0, -0.2e-9, 0.15e-9],
         [-0.15e-9, 0.1e-9, -0.1e-9],
     ];
     let n = positions.len();
     let params = SpmeParameters::from(&default_spme_config());
-    let run = || -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+    let run = || -> (Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>) {
         let state = build_state(&positions, &charges);
         let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
         let mut slot = SpmeReciprocalState::new(&gpu, &sim_box, n, &charges, params).unwrap();
@@ -879,11 +880,11 @@ fn two_stream_pipeline_preserves_bit_exact_reproducibility_across_runs() {
         };
         slot.contribute(&buffers, &sim_box, &cx, &mut t).unwrap();
         let device = gpu.device.clone();
-        let mut fx = device.alloc_zeros::<f32>(n).unwrap();
-        let mut fy = device.alloc_zeros::<f32>(n).unwrap();
-        let mut fz = device.alloc_zeros::<f32>(n).unwrap();
-        let mut e = device.alloc_zeros::<f32>(n).unwrap();
-        let mut w = device.alloc_zeros::<f32>(n).unwrap();
+        let mut fx = device.alloc_zeros::<Real>(n).unwrap();
+        let mut fy = device.alloc_zeros::<Real>(n).unwrap();
+        let mut fz = device.alloc_zeros::<Real>(n).unwrap();
+        let mut e = device.alloc_zeros::<Real>(n).unwrap();
+        let mut w = device.alloc_zeros::<Real>(n).unwrap();
         {
             let view = heddle_md::forces::SlotOutputView {
                 force_x: fx.slice_mut(0..n),

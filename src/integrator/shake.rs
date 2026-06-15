@@ -19,6 +19,7 @@ use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
 
 use super::constraint::{Constraint, ConstraintBuilder, ConstraintError};
+use crate::precision::Real;
 
 pub const MAX_GROUP_ATOMS: u32 = 8;
 pub const MAX_GROUP_CONSTRAINTS: u32 = 12;
@@ -200,19 +201,19 @@ pub struct ShakeConstraintsState {
     pub group_constraint_count: CudaSlice<u32>,
     pub group_constraints_local_i: CudaSlice<u8>,
     pub group_constraints_local_j: CudaSlice<u8>,
-    pub group_constraints_r2: CudaSlice<f32>,
-    pub atom_mass: CudaSlice<f32>,
-    pub snapshot_x: CudaSlice<f32>,
-    pub snapshot_y: CudaSlice<f32>,
-    pub snapshot_z: CudaSlice<f32>,
-    pub constraint_virial: CudaSlice<f32>,
+    pub group_constraints_r2: CudaSlice<Real>,
+    pub atom_mass: CudaSlice<Real>,
+    pub snapshot_x: CudaSlice<Real>,
+    pub snapshot_y: CudaSlice<Real>,
+    pub snapshot_z: CudaSlice<Real>,
+    pub constraint_virial: CudaSlice<Real>,
 }
 
 impl ShakeConstraintsState {
     pub fn new(
         device: Arc<CudaDevice>,
         list: &ConstraintList,
-        masses: &[f32],
+        masses: &[Real],
         constraint_types: &[NamedSlotConfig],
     ) -> Result<Self, ShakeError> {
         // Per-type validation: deserialise and bound-check every shake
@@ -255,7 +256,7 @@ impl ShakeConstraintsState {
         let mut group_constraint_count_host: Vec<u32> = Vec::with_capacity(n_groups);
         let mut group_constraints_local_i_host: Vec<u8> = Vec::new();
         let mut group_constraints_local_j_host: Vec<u8> = Vec::new();
-        let mut group_constraints_r2_host: Vec<f32> = Vec::new();
+        let mut group_constraints_r2_host: Vec<Real> = Vec::new();
 
         for (gi, g) in list.groups.iter().enumerate() {
             let ct = &constraint_types[g.constraint_type_index as usize];
@@ -297,7 +298,7 @@ impl ShakeConstraintsState {
             for c in &params.constraints {
                 group_constraints_local_i_host.push(c.i as u8);
                 group_constraints_local_j_host.push(c.j as u8);
-                let d = c.d as f32;
+                let d = c.d as Real;
                 group_constraints_r2_host.push(d * d);
             }
 
@@ -312,7 +313,7 @@ impl ShakeConstraintsState {
         // Per-atom mass array of length particle_count. Atoms not
         // referenced by any group are populated harmlessly with their
         // mass; the kernels only ever index into it via group_atoms.
-        let atom_mass_host: Vec<f32> = masses.to_vec();
+        let atom_mass_host: Vec<Real> = masses.to_vec();
 
         let group_atoms = device
             .htod_sync_copy(&pad_min1(&group_atoms_host))
@@ -336,25 +337,25 @@ impl ShakeConstraintsState {
             .htod_sync_copy(&pad_min1_u8(&group_constraints_local_j_host))
             .map_err(GpuError::from)?;
         let group_constraints_r2 = device
-            .htod_sync_copy(&pad_min1_f32(&group_constraints_r2_host))
+            .htod_sync_copy(&pad_min1_real(&group_constraints_r2_host))
             .map_err(GpuError::from)?;
         let atom_mass = if atom_mass_host.is_empty() {
-            device.alloc_zeros::<f32>(1).map_err(GpuError::from)?
+            device.alloc_zeros::<Real>(1).map_err(GpuError::from)?
         } else {
             device.htod_sync_copy(&atom_mass_host).map_err(GpuError::from)?
         };
 
         let snapshot_x = device
-            .alloc_zeros::<f32>(atom_slot_count.max(1))
+            .alloc_zeros::<Real>(atom_slot_count.max(1))
             .map_err(GpuError::from)?;
         let snapshot_y = device
-            .alloc_zeros::<f32>(atom_slot_count.max(1))
+            .alloc_zeros::<Real>(atom_slot_count.max(1))
             .map_err(GpuError::from)?;
         let snapshot_z = device
-            .alloc_zeros::<f32>(atom_slot_count.max(1))
+            .alloc_zeros::<Real>(atom_slot_count.max(1))
             .map_err(GpuError::from)?;
         let constraint_virial = device
-            .alloc_zeros::<f32>(atom_slot_count.max(1))
+            .alloc_zeros::<Real>(atom_slot_count.max(1))
             .map_err(GpuError::from)?;
 
         Ok(ShakeConstraintsState {
@@ -385,8 +386,8 @@ fn pad_min1(v: &[u32]) -> Vec<u32> {
 fn pad_min1_u8(v: &[u8]) -> Vec<u8> {
     if v.is_empty() { vec![0u8] } else { v.to_vec() }
 }
-fn pad_min1_f32(v: &[f32]) -> Vec<f32> {
-    if v.is_empty() { vec![0.0f32] } else { v.to_vec() }
+fn pad_min1_real(v: &[Real]) -> Vec<Real> {
+    if v.is_empty() { vec![0.0] } else { v.to_vec() }
 }
 
 impl Constraint for ShakeConstraintsState {
@@ -395,7 +396,7 @@ impl Constraint for ShakeConstraintsState {
         &mut self,
         buffers: &mut ParticleBuffers,
         _sim_box: &SimulationBox,
-        _dt: f32,
+        _dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ConstraintError> {
         if self.group_count == 0 {
@@ -420,7 +421,7 @@ impl Constraint for ShakeConstraintsState {
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ConstraintError> {
         if self.group_count == 0 {
@@ -454,7 +455,7 @@ impl Constraint for ShakeConstraintsState {
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,
-        dt: f32,
+        dt: Real,
         timings: &mut Timings,
     ) -> Result<(), ConstraintError> {
         if self.group_count == 0 {
@@ -586,7 +587,7 @@ impl ConstraintBuilder for ShakeBuilder {
             .map(|c| GroupConstraint {
                 local_i: c.i as u8,
                 local_j: c.j as u8,
-                r0: c.d as f32,
+                r0: c.d as Real,
             })
             .collect())
     }
@@ -597,7 +598,7 @@ impl ConstraintBuilder for ShakeBuilder {
         atoms: &[u32],
         constraints: &[GroupConstraint],
         params: &toml::Value,
-        _masses: &[f32],
+        _masses: &[Real],
     ) -> Result<(), ConstraintError> {
         let p = deserialize_params(params).map_err(|e| ConstraintError::InvalidGroupShape {
             group_index,
@@ -650,7 +651,7 @@ impl ConstraintBuilder for ShakeBuilder {
         _gpu: &GpuContext,
         _particle_count: usize,
         list: &ConstraintList,
-        masses: &[f32],
+        masses: &[Real],
         constraint_types: &[NamedSlotConfig],
     ) -> Result<Box<dyn Constraint>, ConstraintError> {
         let state = ShakeConstraintsState::new(device, list, masses, constraint_types)?;

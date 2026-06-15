@@ -6,6 +6,7 @@ use cudarc::nvrtc::Ptx;
 use crate::gpu::device::get_func;
 use crate::gpu::{GpuContext, GpuError, Kernels};
 use crate::kernels;
+use crate::precision::Real;
 
 // rq-2093594f rq-56d8375d
 #[derive(Debug, Clone)]
@@ -37,11 +38,11 @@ impl ReduceKernels {
 pub struct PairBuffer {
     pub device: Arc<CudaDevice>,
     pub kernels: Arc<Kernels>,
-    pub pair_forces_x: CudaSlice<f32>,
-    pub pair_forces_y: CudaSlice<f32>,
-    pub pair_forces_z: CudaSlice<f32>,
-    pub pair_energies: CudaSlice<f32>,
-    pub pair_virials: CudaSlice<f32>,
+    pub pair_forces_x: CudaSlice<Real>,
+    pub pair_forces_y: CudaSlice<Real>,
+    pub pair_forces_z: CudaSlice<Real>,
+    pub pair_energies: CudaSlice<Real>,
+    pub pair_virials: CudaSlice<Real>,
     particle_count: usize,
     max_neighbors: u32,
 }
@@ -56,11 +57,11 @@ impl PairBuffer {
         let device = gpu.device.clone();
         let kernels = gpu.kernels.clone();
         let len = particle_count * max_neighbors as usize;
-        let pair_forces_x = device.alloc_zeros::<f32>(len).map_err(GpuError::from)?;
-        let pair_forces_y = device.alloc_zeros::<f32>(len).map_err(GpuError::from)?;
-        let pair_forces_z = device.alloc_zeros::<f32>(len).map_err(GpuError::from)?;
-        let pair_energies = device.alloc_zeros::<f32>(len).map_err(GpuError::from)?;
-        let pair_virials = device.alloc_zeros::<f32>(len).map_err(GpuError::from)?;
+        let pair_forces_x = device.alloc_zeros::<Real>(len).map_err(GpuError::from)?;
+        let pair_forces_y = device.alloc_zeros::<Real>(len).map_err(GpuError::from)?;
+        let pair_forces_z = device.alloc_zeros::<Real>(len).map_err(GpuError::from)?;
+        let pair_energies = device.alloc_zeros::<Real>(len).map_err(GpuError::from)?;
+        let pair_virials = device.alloc_zeros::<Real>(len).map_err(GpuError::from)?;
         Ok(PairBuffer {
             device,
             kernels,

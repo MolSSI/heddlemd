@@ -22,6 +22,7 @@ use crate::io::config::{
 };
 use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings, TimingsError};
+use crate::precision::Real;
 
 pub use angle::{HarmonicAngleBuilder, HarmonicAngleState};
 pub use coulomb::{CoulombBuilder, CoulombParameters, CoulombState};
@@ -67,7 +68,7 @@ impl AggregateLevel {
 pub trait Potential: std::fmt::Debug + Send {
     fn label(&self) -> &'static str;
 
-    fn max_cutoff(&self) -> Option<f32>;
+    fn max_cutoff(&self) -> Option<Real>;
 
     fn frequency_class(&self) -> ForceClass {
         ForceClass::Fast
@@ -92,11 +93,11 @@ pub trait Potential: std::fmt::Debug + Send {
 
 // rq-304b191b
 pub struct SlotOutputView<'a> {
-    pub force_x: CudaViewMut<'a, f32>,
-    pub force_y: CudaViewMut<'a, f32>,
-    pub force_z: CudaViewMut<'a, f32>,
-    pub energy: CudaViewMut<'a, f32>,
-    pub virial: CudaViewMut<'a, f32>,
+    pub force_x: CudaViewMut<'a, Real>,
+    pub force_y: CudaViewMut<'a, Real>,
+    pub force_z: CudaViewMut<'a, Real>,
+    pub energy: CudaViewMut<'a, Real>,
+    pub virial: CudaViewMut<'a, Real>,
 }
 
 // rq-559783fe
@@ -130,7 +131,7 @@ pub struct PotentialBuildContext<'a> {
     pub angle_types: &'a [AngleTypeConfig],
     pub coulomb_config: Option<&'a CoulombConfig>,
     pub spme_config: Option<&'a SpmeConfig>,
-    pub charges: &'a [f32],
+    pub charges: &'a [Real],
     pub bond_list: &'a BondList,
     pub angle_list: &'a AngleList,
     pub exclusion_list: &'a ExclusionList,
@@ -203,16 +204,16 @@ pub struct ForceField {
     pub device: Arc<CudaDevice>,
     pub kernels: Arc<Kernels>,
     pub slots: Vec<Box<dyn Potential>>,
-    pub fast_slot_forces_x: CudaSlice<f32>,
-    pub fast_slot_forces_y: CudaSlice<f32>,
-    pub fast_slot_forces_z: CudaSlice<f32>,
-    pub fast_slot_energies: CudaSlice<f32>,
-    pub fast_slot_virials: CudaSlice<f32>,
-    pub slow_slot_forces_x: CudaSlice<f32>,
-    pub slow_slot_forces_y: CudaSlice<f32>,
-    pub slow_slot_forces_z: CudaSlice<f32>,
-    pub slow_slot_energies: CudaSlice<f32>,
-    pub slow_slot_virials: CudaSlice<f32>,
+    pub fast_slot_forces_x: CudaSlice<Real>,
+    pub fast_slot_forces_y: CudaSlice<Real>,
+    pub fast_slot_forces_z: CudaSlice<Real>,
+    pub fast_slot_energies: CudaSlice<Real>,
+    pub fast_slot_virials: CudaSlice<Real>,
+    pub slow_slot_forces_x: CudaSlice<Real>,
+    pub slow_slot_forces_y: CudaSlice<Real>,
+    pub slow_slot_forces_z: CudaSlice<Real>,
+    pub slow_slot_energies: CudaSlice<Real>,
+    pub slow_slot_virials: CudaSlice<Real>,
     pub neighbor_list: Option<NeighborListState>,
     /// For each slot in `slots`, in canonical slot order, the row
     /// index of that slot within its class's slot-output buffers
@@ -238,7 +239,7 @@ impl ForceField {
         angle_types: &[AngleTypeConfig],
         coulomb_config: Option<&CoulombConfig>,
         spme_config: Option<&SpmeConfig>,
-        charges: &[f32],
+        charges: &[Real],
         bond_list: &BondList,
         angle_list: &AngleList,
         exclusion_list: &ExclusionList,
@@ -300,22 +301,22 @@ impl ForceField {
 
         let fast_len = num_fast_slots * particle_count;
         let slow_len = num_slow_slots * particle_count;
-        let fast_slot_forces_x = device.alloc_zeros::<f32>(fast_len).map_err(GpuError::from)?;
-        let fast_slot_forces_y = device.alloc_zeros::<f32>(fast_len).map_err(GpuError::from)?;
-        let fast_slot_forces_z = device.alloc_zeros::<f32>(fast_len).map_err(GpuError::from)?;
-        let fast_slot_energies = device.alloc_zeros::<f32>(fast_len).map_err(GpuError::from)?;
-        let fast_slot_virials = device.alloc_zeros::<f32>(fast_len).map_err(GpuError::from)?;
-        let slow_slot_forces_x = device.alloc_zeros::<f32>(slow_len).map_err(GpuError::from)?;
-        let slow_slot_forces_y = device.alloc_zeros::<f32>(slow_len).map_err(GpuError::from)?;
-        let slow_slot_forces_z = device.alloc_zeros::<f32>(slow_len).map_err(GpuError::from)?;
-        let slow_slot_energies = device.alloc_zeros::<f32>(slow_len).map_err(GpuError::from)?;
-        let slow_slot_virials = device.alloc_zeros::<f32>(slow_len).map_err(GpuError::from)?;
+        let fast_slot_forces_x = device.alloc_zeros::<Real>(fast_len).map_err(GpuError::from)?;
+        let fast_slot_forces_y = device.alloc_zeros::<Real>(fast_len).map_err(GpuError::from)?;
+        let fast_slot_forces_z = device.alloc_zeros::<Real>(fast_len).map_err(GpuError::from)?;
+        let fast_slot_energies = device.alloc_zeros::<Real>(fast_len).map_err(GpuError::from)?;
+        let fast_slot_virials = device.alloc_zeros::<Real>(fast_len).map_err(GpuError::from)?;
+        let slow_slot_forces_x = device.alloc_zeros::<Real>(slow_len).map_err(GpuError::from)?;
+        let slow_slot_forces_y = device.alloc_zeros::<Real>(slow_len).map_err(GpuError::from)?;
+        let slow_slot_forces_z = device.alloc_zeros::<Real>(slow_len).map_err(GpuError::from)?;
+        let slow_slot_energies = device.alloc_zeros::<Real>(slow_len).map_err(GpuError::from)?;
+        let slow_slot_virials = device.alloc_zeros::<Real>(slow_len).map_err(GpuError::from)?;
 
         // Build the shared NeighborListState when any slot reports a cutoff.
-        let aggregated_cutoff: Option<f32> = slots
+        let aggregated_cutoff: Option<Real> = slots
             .iter()
             .filter_map(|s| s.max_cutoff())
-            .fold(None::<f32>, |acc, c| Some(acc.map_or(c, |a| a.max(c))));
+            .fold(None::<Real>, |acc, c| Some(acc.map_or(c, |a| a.max(c))));
         let neighbor_list = if let Some(r_cut) = aggregated_cutoff {
             match neighbor_list_config {
                 NeighborListConfig::CellList { max_neighbors, r_skin } => Some(
@@ -325,7 +326,7 @@ impl ForceField {
                         particle_count,
                         r_cut,
                         *max_neighbors,
-                        *r_skin as f32,
+                        *r_skin as Real,
                     )?,
                 ),
                 NeighborListConfig::AllPairs => Some(NeighborListState::new_trivial(

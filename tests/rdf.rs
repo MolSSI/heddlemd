@@ -421,7 +421,7 @@ fn normalisation_formula_matches_analytical_value() {
     // 4 nm cubic box (f32 -> f64 round-off in `volume()` shows up; use
     // the same `f64` path the implementation does by constructing the
     // box via SimulationBox::volume() ourselves).
-    let box_edge = 4.0e-9_f32 as f64;
+    let box_edge = 4.0e-9 as f64;
     let v = box_edge * box_edge * box_edge;
     let n_a: f64 = 2.0;
     let n_pairs = n_a * (n_a - 1.0) / 2.0;

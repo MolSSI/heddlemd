@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use heddle_md::io::{InitStateError, load_init_state};
 use heddle_md::units::UnitSystem;
+use heddle_md::precision::Real;
 
 fn tmp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -35,12 +36,12 @@ fn load_two_particles_no_velocities() {
     let path = write_init(&dir, body);
     let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
     assert_eq!(state.particle_count, 2);
-    assert!((state.sim_box.lx() - 1.0e-9_f32).abs() < 1.0e-18);
-    assert!((state.sim_box.ly() - 1.0e-9_f32).abs() < 1.0e-18);
-    assert!((state.sim_box.lz() - 1.0e-9_f32).abs() < 1.0e-18);
+    assert!((state.sim_box.lx() - 1.0e-9).abs() < 1.0e-18);
+    assert!((state.sim_box.ly() - 1.0e-9).abs() < 1.0e-18);
+    assert!((state.sim_box.lz() - 1.0e-9).abs() < 1.0e-18);
     assert_eq!(state.type_indices, vec![0, 0]);
-    assert!((state.positions_x[0] - 0.0_f32).abs() < 1e-30);
-    assert!((state.positions_x[1] - 3.4e-10_f32).abs() < 1e-20);
+    assert!((state.positions_x[0] - 0.0).abs() < 1e-30);
+    assert!((state.positions_x[1] - 3.4e-10).abs() < 1e-20);
     assert!(state.velocities.is_none());
 }
 
@@ -52,8 +53,8 @@ fn load_with_velocities() {
     let path = write_init(&dir, body);
     let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
     let v = state.velocities.unwrap();
-    assert!((v.velocities_x[0] - 100.0_f32).abs() < 1e-3);
-    assert!((v.velocities_x[1] - (-100.0_f32)).abs() < 1e-3);
+    assert!((v.velocities_x[0] - 100.0).abs() < 1e-3);
+    assert!((v.velocities_x[1] - (-100.0)).abs() < 1e-3);
 }
 
 // rq-32fda118
@@ -528,8 +529,8 @@ fn implicit_ids_in_row_order() {
     // Positions correspond to row order; atomic mode passes the file
     // values through unchanged.
     assert!(state.positions_x[0].abs() < 1e-30);
-    assert!((state.positions_x[1] - 1.0e-10_f32).abs() < 1e-20);
-    assert!((state.positions_x[2] - 2.0e-10_f32).abs() < 1e-20);
+    assert!((state.positions_x[1] - 1.0e-10).abs() < 1e-20);
+    assert!((state.positions_x[2] - 2.0e-10).abs() < 1e-20);
 }
 
 // rq-ba380d56
@@ -656,13 +657,13 @@ fn accept_lower_triangular_triclinic_lattice() {
     );
     let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
     let lat = state.sim_box.lattice();
-    let eps = 1.0e-18_f32;
-    assert!((lat[0] - 1.0e-9_f32).abs() < eps);
-    assert!((lat[1] - 1.0e-9_f32).abs() < eps);
-    assert!((lat[2] - 1.0e-9_f32).abs() < eps);
-    assert!((lat[3] - 0.2e-9_f32).abs() < eps);
-    assert!((lat[4] - 0.1e-9_f32).abs() < eps);
-    assert!((lat[5] - (-0.3e-9_f32)).abs() < eps);
+    let eps = 1.0e-18;
+    assert!((lat[0] - 1.0e-9).abs() < eps);
+    assert!((lat[1] - 1.0e-9).abs() < eps);
+    assert!((lat[2] - 1.0e-9).abs() < eps);
+    assert!((lat[3] - 0.2e-9).abs() < eps);
+    assert!((lat[4] - 0.1e-9).abs() < eps);
+    assert!((lat[5] - (-0.3e-9)).abs() < eps);
 }
 
 #[test] // rq-cc4e9821
@@ -724,8 +725,8 @@ fn atomic_units_rescale_lattice_and_positions() {
     // f32 round-trip tolerance: position factor LOSES significant
     // digits when narrowing 5.29e-11 * num → f32. Allow ~1e-6 relative.
     let rel = 1e-5;
-    let approx = |a: f32, b: f32| {
-        (a - b).abs() <= rel * a.abs().max(b.abs()).max(f32::MIN_POSITIVE)
+    let approx = |a: Real, b: Real| {
+        (a - b).abs() <= rel * a.abs().max(b.abs()).max(Real::MIN_POSITIVE)
     };
     assert!(approx(state_au.positions_x[0], state_si.positions_x[0]));
     assert!(approx(state_au.positions_y[0], state_si.positions_y[0]));
@@ -767,7 +768,7 @@ fn atomic_units_rescale_velocities() {
     let vx_si = state_si.velocities.as_ref().unwrap().velocities_x[0];
     let vx_au = state_au.velocities.as_ref().unwrap().velocities_x[0];
     let rel = 1e-5;
-    assert!((vx_au - vx_si).abs() <= rel * vx_si.abs().max(f32::MIN_POSITIVE));
+    assert!((vx_au - vx_si).abs() <= rel * vx_si.abs().max(Real::MIN_POSITIVE));
 }
 
 // rq-6e1ba10f
@@ -799,8 +800,8 @@ fn position_in_box_check_runs_against_post_conversion_box() {
     let state_au = load_init_state(&path_au, &["Ar"], UnitSystem::Atomic).unwrap();
     // Box matches after the SI conversion lands at the atomic encoding.
     let rel = 1e-5;
-    let approx = |a: f32, b: f32| {
-        (a - b).abs() <= rel * a.abs().max(b.abs()).max(f32::MIN_POSITIVE)
+    let approx = |a: Real, b: Real| {
+        (a - b).abs() <= rel * a.abs().max(b.abs()).max(Real::MIN_POSITIVE)
     };
     assert!(approx(state_si.sim_box.lx(), state_au.sim_box.lx()));
     assert!(approx(state_si.positions_x[0], state_au.positions_x[0]));

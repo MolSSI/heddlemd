@@ -3617,6 +3617,9 @@ fn validate_constraint_compatibility_accepts_velocity_verlet_lossy() {
 }
 
 // rq-d370907d rq-58476106
+// Lossless mode is rejected at config load under f64, so this test
+// only runs in the default (f32) build.
+#[cfg(not(feature = "f64"))]
 #[test]
 fn validate_constraint_compatibility_rejects_lossless_with_constraints() {
     let dir = tmp_path("compat_vv_lossless");

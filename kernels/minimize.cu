@@ -5,22 +5,24 @@
 // One thread per particle. `step_size` is the current adaptive step
 // in metres; `inv_f_max = 1 / max_i ||F_i||` (computed by
 // `sd_f_max_reduction` and divided once on the host).
+#include "precision.cuh"
+
 extern "C" __global__ void sd_compute_step(
-    float *positions_x,
-    float *positions_y,
-    float *positions_z,
-    const float *forces_x,
-    const float *forces_y,
-    const float *forces_z,
-    float step_size,
-    float inv_f_max,
+    Real *positions_x,
+    Real *positions_y,
+    Real *positions_z,
+    const Real *forces_x,
+    const Real *forces_y,
+    const Real *forces_z,
+    Real step_size,
+    Real inv_f_max,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) {
     return;
   }
-  float scale = step_size * inv_f_max;
+  Real scale = step_size * inv_f_max;
   positions_x[i] = positions_x[i] + forces_x[i] * scale;
   positions_y[i] = positions_y[i] + forces_y[i] * scale;
   positions_z[i] = positions_z[i] + forces_z[i] * scale;
@@ -30,12 +32,12 @@ extern "C" __global__ void sd_compute_step(
 // particle. Used before each trial step so a rejected trial can
 // restore the previous accepted positions.
 extern "C" __global__ void sd_snapshot(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
-    float *snapshot_x,
-    float *snapshot_y,
-    float *snapshot_z,
+    const Real *positions_x,
+    const Real *positions_y,
+    const Real *positions_z,
+    Real *snapshot_x,
+    Real *snapshot_y,
+    Real *snapshot_z,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -49,12 +51,12 @@ extern "C" __global__ void sd_snapshot(
 
 // Restore positions from the snapshot. One thread per particle.
 extern "C" __global__ void sd_restore(
-    float *positions_x,
-    float *positions_y,
-    float *positions_z,
-    const float *snapshot_x,
-    const float *snapshot_y,
-    const float *snapshot_z,
+    Real *positions_x,
+    Real *positions_y,
+    Real *positions_z,
+    const Real *snapshot_x,
+    const Real *snapshot_y,
+    const Real *snapshot_z,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -74,21 +76,21 @@ extern "C" __global__ void sd_restore(
 // so the tree-shape is irrelevant for determinism — the result is
 // bit-identical regardless of thread schedule.
 extern "C" __global__ void sd_f_max_reduction(
-    const float *forces_x,
-    const float *forces_y,
-    const float *forces_z,
-    float *partial_out,
+    const Real *forces_x,
+    const Real *forces_y,
+    const Real *forces_z,
+    Real *partial_out,
     unsigned int n)
 {
-  __shared__ float partial[256];
+  __shared__ Real partial[256];
 
   unsigned int tid = threadIdx.x;
-  float local_max = 0.0f;
+  Real local_max = R(0.0);
   for (unsigned int i = tid; i < n; i += blockDim.x) {
-    float fx = forces_x[i];
-    float fy = forces_y[i];
-    float fz = forces_z[i];
-    float mag2 = fx * fx + fy * fy + fz * fz;
+    Real fx = forces_x[i];
+    Real fy = forces_y[i];
+    Real fz = forces_z[i];
+    Real mag2 = fx * fx + fy * fy + fz * fz;
     if (mag2 > local_max) {
       local_max = mag2;
     }
@@ -98,8 +100,8 @@ extern "C" __global__ void sd_f_max_reduction(
 
   for (unsigned int stride = 1; stride < blockDim.x; stride *= 2) {
     if ((tid % (2u * stride)) == 0u && (tid + stride) < blockDim.x) {
-      float a = partial[tid];
-      float b = partial[tid + stride];
+      Real a = partial[tid];
+      Real b = partial[tid + stride];
       partial[tid] = (a > b) ? a : b;
     }
     __syncthreads();
@@ -107,6 +109,6 @@ extern "C" __global__ void sd_f_max_reduction(
 
   if (tid == 0u) {
     // Take the sqrt once on the device; the host divides by it.
-    partial_out[0] = sqrtf(partial[0]);
+    partial_out[0] = Real_sqrt(partial[0]);
   }
 }

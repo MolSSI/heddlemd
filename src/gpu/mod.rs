@@ -27,7 +27,9 @@ pub use kernels::{
     sort_cells_by_particle_id, spme_charge_spread, spme_charge_spread_on_stream,
     spme_force_gather, spme_influence_multiply, spme_influence_multiply_on_stream,
     spme_real_pair_force, vv_kick,
-    vv_kick_drift, vv_kick_drift_lossless, vv_kick_lossless,
+    vv_kick_drift,
 };
+#[cfg(not(feature = "f64"))]
+pub use kernels::{vv_kick_drift_lossless, vv_kick_lossless};
 pub use lossless_buffers::LosslessBuffers;
 pub use pair_buffer::{PairBuffer, ReduceKernels};

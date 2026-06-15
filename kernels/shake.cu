@@ -6,6 +6,8 @@
 // caps keep the total state in line with contemporary GPUs' register
 // budgets. See rqm/integration/shake.md.
 
+#include "precision.cuh"
+
 #include "pbc.cuh"
 
 #define MAX_GROUP_ATOMS 8
@@ -28,14 +30,14 @@
 // `b` closest to `a`. Used to bring the atoms of a group into the
 // same lattice image before the rigid-body solve.
 __device__ static inline void min_image_to(
-    float ax, float ay, float az,
-    float &bx, float &by, float &bz,
-    float lx, float ly, float lz,
-    float xy, float xz, float yz)
+    Real ax, Real ay, Real az,
+    Real &bx, Real &by, Real &bz,
+    Real lx, Real ly, Real lz,
+    Real xy, Real xz, Real yz)
 {
-  float dx = bx - ax;
-  float dy = by - ay;
-  float dz = bz - az;
+  Real dx = bx - ax;
+  Real dy = by - ay;
+  Real dz = bz - az;
   triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
   bx = ax + dx;
   by = ay + dy;
@@ -46,15 +48,15 @@ __device__ static inline void min_image_to(
 // One thread per group; each thread writes group_atom_count[g] entries
 // into snapshot_* starting at group_atom_offset[g].
 extern "C" __global__ void shake_snapshot(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
+    const Real *positions_x,
+    const Real *positions_y,
+    const Real *positions_z,
     const unsigned int *group_atoms,
     const unsigned int *group_atom_offset,
     const unsigned int *group_atom_count,
-    float *snapshot_x,
-    float *snapshot_y,
-    float *snapshot_z,
+    Real *snapshot_x,
+    Real *snapshot_y,
+    Real *snapshot_z,
     unsigned int n_groups)
 {
   unsigned int g = blockIdx.x * blockDim.x + threadIdx.x;
@@ -75,22 +77,22 @@ extern "C" __global__ void shake_snapshot(
 // the constraint-virial computation to express per-atom positions in
 // COM-relative form (f32-stable arithmetic).
 __device__ static inline void weighted_com(
-    const float (&x)[MAX_GROUP_ATOMS],
-    const float (&y)[MAX_GROUP_ATOMS],
-    const float (&z)[MAX_GROUP_ATOMS],
-    const float (&m)[MAX_GROUP_ATOMS],
+    const Real (&x)[MAX_GROUP_ATOMS],
+    const Real (&y)[MAX_GROUP_ATOMS],
+    const Real (&z)[MAX_GROUP_ATOMS],
+    const Real (&m)[MAX_GROUP_ATOMS],
     unsigned int n,
-    float &cx, float &cy, float &cz)
+    Real &cx, Real &cy, Real &cz)
 {
-  float total = 0.0f;
-  float sx = 0.0f, sy = 0.0f, sz = 0.0f;
+  Real total = R(0.0);
+  Real sx = R(0.0), sy = R(0.0), sz = R(0.0);
   for (unsigned int a = 0; a < n; ++a) {
     sx += m[a] * x[a];
     sy += m[a] * y[a];
     sz += m[a] * z[a];
     total += m[a];
   }
-  float inv = (total > 0.0f) ? 1.0f / total : 0.0f;
+  Real inv = (total > R(0.0)) ? R(1.0) / total : R(0.0);
   cx = sx * inv;
   cy = sy * inv;
   cz = sz * inv;
@@ -101,19 +103,19 @@ __device__ static inline void weighted_com(
 // constraint-gradient direction fixed at the pre-drift snapshot.
 //
 // Per-thread state: MAX_GROUP_ATOMS × (3 floats unconstrained + 3
-// floats constrained + 3 floats snapshot + 1 float mass) +
-// MAX_GROUP_CONSTRAINTS × (2 bytes pair + 1 float r²). With caps 8/12
+// floats constrained + 3 floats snapshot + 1 Real mass) +
+// MAX_GROUP_CONSTRAINTS × (2 bytes pair + 1 Real r²). With caps 8/12
 // this is ~330 B per thread, comfortably in registers.
 extern "C" __global__ void shake_positions(
-    float *positions_x,
-    float *positions_y,
-    float *positions_z,
-    float *velocities_x,
-    float *velocities_y,
-    float *velocities_z,
-    const float *snapshot_x,
-    const float *snapshot_y,
-    const float *snapshot_z,
+    Real *positions_x,
+    Real *positions_y,
+    Real *positions_z,
+    Real *velocities_x,
+    Real *velocities_y,
+    Real *velocities_z,
+    const Real *snapshot_x,
+    const Real *snapshot_y,
+    const Real *snapshot_z,
     const unsigned int *group_atoms,
     const unsigned int *group_atom_offset,
     const unsigned int *group_atom_count,
@@ -121,11 +123,11 @@ extern "C" __global__ void shake_positions(
     const unsigned int *group_constraint_count,
     const unsigned char *group_constraints_local_i,
     const unsigned char *group_constraints_local_j,
-    const float *group_constraints_r2,
-    const float *atom_mass,
-    float lx, float ly, float lz, float xy, float xz, float yz,
-    float dt,
-    float *constraint_virial,
+    const Real *group_constraints_r2,
+    const Real *atom_mass,
+    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    Real dt,
+    Real *constraint_virial,
     unsigned int n_groups)
 {
   unsigned int g = blockIdx.x * blockDim.x + threadIdx.x;
@@ -140,16 +142,16 @@ extern "C" __global__ void shake_positions(
 
   // Zero the per-atom constraint-virial slots for this group up front.
   for (unsigned int a = 0; a < acnt; ++a) {
-    constraint_virial[aoff + a] = 0.0f;
+    constraint_virial[aoff + a] = R(0.0);
   }
 
   // Load atoms and per-atom inverse masses.
   unsigned int atom_idx[MAX_GROUP_ATOMS];
-  float x_u[MAX_GROUP_ATOMS], y_u[MAX_GROUP_ATOMS], z_u[MAX_GROUP_ATOMS];
-  float x_c[MAX_GROUP_ATOMS], y_c[MAX_GROUP_ATOMS], z_c[MAX_GROUP_ATOMS];
-  float x0[MAX_GROUP_ATOMS], y0[MAX_GROUP_ATOMS], z0[MAX_GROUP_ATOMS];
-  float m_atom[MAX_GROUP_ATOMS];
-  float inv_m[MAX_GROUP_ATOMS];
+  Real x_u[MAX_GROUP_ATOMS], y_u[MAX_GROUP_ATOMS], z_u[MAX_GROUP_ATOMS];
+  Real x_c[MAX_GROUP_ATOMS], y_c[MAX_GROUP_ATOMS], z_c[MAX_GROUP_ATOMS];
+  Real x0[MAX_GROUP_ATOMS], y0[MAX_GROUP_ATOMS], z0[MAX_GROUP_ATOMS];
+  Real m_atom[MAX_GROUP_ATOMS];
+  Real inv_m[MAX_GROUP_ATOMS];
   for (unsigned int a = 0; a < acnt; ++a) {
     unsigned int i = group_atoms[aoff + a];
     atom_idx[a] = i;
@@ -160,7 +162,7 @@ extern "C" __global__ void shake_positions(
     y0[a] = snapshot_y[aoff + a];
     z0[a] = snapshot_z[aoff + a];
     m_atom[a] = atom_mass[i];
-    inv_m[a] = (m_atom[a] > 0.0f) ? 1.0f / m_atom[a] : 0.0f;
+    inv_m[a] = (m_atom[a] > R(0.0)) ? R(1.0) / m_atom[a] : R(0.0);
   }
 
   // Bring every atom of the group into the same lattice image as
@@ -185,9 +187,9 @@ extern "C" __global__ void shake_positions(
 
   // Pre-drift constraint-gradient directions.
   unsigned char ci[MAX_GROUP_CONSTRAINTS], cj[MAX_GROUP_CONSTRAINTS];
-  float gx[MAX_GROUP_CONSTRAINTS], gy[MAX_GROUP_CONSTRAINTS], gz[MAX_GROUP_CONSTRAINTS];
-  float r2[MAX_GROUP_CONSTRAINTS];
-  float inv_pair[MAX_GROUP_CONSTRAINTS];
+  Real gx[MAX_GROUP_CONSTRAINTS], gy[MAX_GROUP_CONSTRAINTS], gz[MAX_GROUP_CONSTRAINTS];
+  Real r2[MAX_GROUP_CONSTRAINTS];
+  Real inv_pair[MAX_GROUP_CONSTRAINTS];
   for (unsigned int k = 0; k < ccnt; ++k) {
     unsigned char li = group_constraints_local_i[coff + k];
     unsigned char lj = group_constraints_local_j[coff + k];
@@ -205,7 +207,7 @@ extern "C" __global__ void shake_positions(
   // 1.0e-26 m² × (1 a_0 / 5.29177e-11 m)² ≈ 3.57e-6 a_0². The
   // engine's distances are in a_0, so σ has units a_0² and the
   // threshold is 3.57e-6 a_0². We use the constant directly.
-  const float SHAKE_TOL2 = 3.57e-6f;
+  const Real SHAKE_TOL2 = R(3.57e-6);
   const int SHAKE_MAX_ITER = 32;
 
   for (int iter = 0; iter < SHAKE_MAX_ITER; ++iter) {
@@ -213,21 +215,21 @@ extern "C" __global__ void shake_positions(
     for (unsigned int k = 0; k < ccnt; ++k) {
       unsigned char li = ci[k];
       unsigned char lj = cj[k];
-      float dx = x_c[li] - x_c[lj];
-      float dy = y_c[li] - y_c[lj];
-      float dz = z_c[li] - z_c[lj];
-      float dist2 = dx * dx + dy * dy + dz * dz;
-      float sigma = dist2 - r2[k];
-      if (fabsf(sigma) > SHAKE_TOL2) {
+      Real dx = x_c[li] - x_c[lj];
+      Real dy = y_c[li] - y_c[lj];
+      Real dz = z_c[li] - z_c[lj];
+      Real dist2 = dx * dx + dy * dy + dz * dz;
+      Real sigma = dist2 - r2[k];
+      if (Real_fabs(sigma) > SHAKE_TOL2) {
         converged = false;
-        float ddot = dx * gx[k] + dy * gy[k] + dz * gz[k];
-        float denom = 2.0f * ddot * inv_pair[k];
-        if (denom == 0.0f) {
+        Real ddot = dx * gx[k] + dy * gy[k] + dz * gz[k];
+        Real denom = R(2.0) * ddot * inv_pair[k];
+        if (denom == R(0.0)) {
           continue;
         }
-        float lambda = sigma / denom;
-        float ki = lambda * inv_m[li];
-        float kj = lambda * inv_m[lj];
+        Real lambda = sigma / denom;
+        Real ki = lambda * inv_m[li];
+        Real kj = lambda * inv_m[lj];
         x_c[li] -= ki * gx[k];
         y_c[li] -= ki * gy[k];
         z_c[li] -= ki * gz[k];
@@ -243,7 +245,7 @@ extern "C" __global__ void shake_positions(
 
   // Mass-weighted COM (preserved by SHAKE; computed from the
   // constrained configuration for the virial below).
-  float cxg, cyg, czg;
+  Real cxg, cyg, czg;
   weighted_com(x_c, y_c, z_c, m_atom, acnt, cxg, cyg, czg);
 
   // Update half-step velocities and write back constrained
@@ -251,13 +253,13 @@ extern "C" __global__ void shake_positions(
   // local copies; we re-apply the same delta to the original global
   // positions so the global image-flag bookkeeping (if any) stays
   // valid: x_global_new = x_global_old + (x_c_local - x_u_local).
-  float inv_dt = (dt != 0.0f) ? 1.0f / dt : 0.0f;
-  float inv_dt2 = (dt != 0.0f) ? 1.0f / (dt * dt) : 0.0f;
+  Real inv_dt = (dt != R(0.0)) ? R(1.0) / dt : R(0.0);
+  Real inv_dt2 = (dt != R(0.0)) ? R(1.0) / (dt * dt) : R(0.0);
   for (unsigned int a = 0; a < acnt; ++a) {
     unsigned int i = atom_idx[a];
-    float dxg = x_c[a] - x_u[a];
-    float dyg = y_c[a] - y_u[a];
-    float dzg = z_c[a] - z_u[a];
+    Real dxg = x_c[a] - x_u[a];
+    Real dyg = y_c[a] - y_u[a];
+    Real dzg = z_c[a] - z_u[a];
     velocities_x[i] += dxg * inv_dt;
     velocities_y[i] += dyg * inv_dt;
     velocities_z[i] += dzg * inv_dt;
@@ -277,10 +279,10 @@ extern "C" __global__ void shake_positions(
 
     // Constraint-virial position-level half: (m / dt²) · (Δr · r_COM).
     // Compute in COM-relative coordinates for f32 stability.
-    float rx = x_c[a] - cxg;
-    float ry = y_c[a] - cyg;
-    float rz = z_c[a] - czg;
-    float scale = m_atom[a] * inv_dt2;
+    Real rx = x_c[a] - cxg;
+    Real ry = y_c[a] - cyg;
+    Real rz = z_c[a] - czg;
+    Real scale = m_atom[a] * inv_dt2;
     constraint_virial[aoff + a] = scale * (dxg * rx + dyg * ry + dzg * rz);
   }
 }
@@ -291,12 +293,12 @@ extern "C" __global__ void shake_positions(
 // velocity-level constraint-virial contribution into the buffer that
 // shake_positions has already populated with the position-level half.
 extern "C" __global__ void rattle_velocities(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
-    float *velocities_x,
-    float *velocities_y,
-    float *velocities_z,
+    const Real *positions_x,
+    const Real *positions_y,
+    const Real *positions_z,
+    Real *velocities_x,
+    Real *velocities_y,
+    Real *velocities_z,
     const unsigned int *group_atoms,
     const unsigned int *group_atom_offset,
     const unsigned int *group_atom_count,
@@ -304,10 +306,10 @@ extern "C" __global__ void rattle_velocities(
     const unsigned int *group_constraint_count,
     const unsigned char *group_constraints_local_i,
     const unsigned char *group_constraints_local_j,
-    const float *atom_mass,
-    float lx, float ly, float lz, float xy, float xz, float yz,
-    float dt,
-    float *constraint_virial,
+    const Real *atom_mass,
+    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    Real dt,
+    Real *constraint_virial,
     unsigned int n_groups)
 {
   unsigned int g = blockIdx.x * blockDim.x + threadIdx.x;
@@ -321,14 +323,14 @@ extern "C" __global__ void rattle_velocities(
   unsigned int ccnt = group_constraint_count[g];
 
   unsigned int atom_idx[MAX_GROUP_ATOMS];
-  float px[MAX_GROUP_ATOMS], py[MAX_GROUP_ATOMS], pz[MAX_GROUP_ATOMS];
-  float vx[MAX_GROUP_ATOMS], vy[MAX_GROUP_ATOMS], vz[MAX_GROUP_ATOMS];
+  Real px[MAX_GROUP_ATOMS], py[MAX_GROUP_ATOMS], pz[MAX_GROUP_ATOMS];
+  Real vx[MAX_GROUP_ATOMS], vy[MAX_GROUP_ATOMS], vz[MAX_GROUP_ATOMS];
   // Cumulative velocity correction per atom (for virial).
-  float dvx[MAX_GROUP_ATOMS] = {0.0f};
-  float dvy[MAX_GROUP_ATOMS] = {0.0f};
-  float dvz[MAX_GROUP_ATOMS] = {0.0f};
-  float m_atom[MAX_GROUP_ATOMS];
-  float inv_m[MAX_GROUP_ATOMS];
+  Real dvx[MAX_GROUP_ATOMS] = {R(0.0)};
+  Real dvy[MAX_GROUP_ATOMS] = {R(0.0)};
+  Real dvz[MAX_GROUP_ATOMS] = {R(0.0)};
+  Real m_atom[MAX_GROUP_ATOMS];
+  Real inv_m[MAX_GROUP_ATOMS];
 
   for (unsigned int a = 0; a < acnt; ++a) {
     unsigned int i = group_atoms[aoff + a];
@@ -340,7 +342,7 @@ extern "C" __global__ void rattle_velocities(
     vy[a] = velocities_y[i];
     vz[a] = velocities_z[i];
     m_atom[a] = atom_mass[i];
-    inv_m[a] = (m_atom[a] > 0.0f) ? 1.0f / m_atom[a] : 0.0f;
+    inv_m[a] = (m_atom[a] > R(0.0)) ? R(1.0) / m_atom[a] : R(0.0);
   }
 
   // Same-image alignment as shake_positions.
@@ -351,9 +353,9 @@ extern "C" __global__ void rattle_velocities(
 
   // Constraint-gradient directions at the (now constrained) positions.
   unsigned char ci[MAX_GROUP_CONSTRAINTS], cj[MAX_GROUP_CONSTRAINTS];
-  float dx[MAX_GROUP_CONSTRAINTS], dy[MAX_GROUP_CONSTRAINTS], dz[MAX_GROUP_CONSTRAINTS];
-  float d2[MAX_GROUP_CONSTRAINTS];
-  float inv_pair[MAX_GROUP_CONSTRAINTS];
+  Real dx[MAX_GROUP_CONSTRAINTS], dy[MAX_GROUP_CONSTRAINTS], dz[MAX_GROUP_CONSTRAINTS];
+  Real d2[MAX_GROUP_CONSTRAINTS];
+  Real inv_pair[MAX_GROUP_CONSTRAINTS];
   for (unsigned int k = 0; k < ccnt; ++k) {
     unsigned char li = group_constraints_local_i[coff + k];
     unsigned char lj = group_constraints_local_j[coff + k];
@@ -370,7 +372,7 @@ extern "C" __global__ void rattle_velocities(
   // Converted to atomic units (a_0² / atu): 1.0e-20 × (1/5.29177e-11)²
   // × 2.4189e-17 ≈ 8.63e-17 a_0²/atu. The constant below is the
   // engine's atomic-unit equivalent.
-  const float RATTLE_TOL = 8.63e-17f;
+  const Real RATTLE_TOL = R(8.63e-17);
   const int RATTLE_MAX_ITER = 32;
 
   for (int iter = 0; iter < RATTLE_MAX_ITER; ++iter) {
@@ -378,19 +380,19 @@ extern "C" __global__ void rattle_velocities(
     for (unsigned int k = 0; k < ccnt; ++k) {
       unsigned char li = ci[k];
       unsigned char lj = cj[k];
-      float vxr = vx[li] - vx[lj];
-      float vyr = vy[li] - vy[lj];
-      float vzr = vz[li] - vz[lj];
-      float vrel = vxr * dx[k] + vyr * dy[k] + vzr * dz[k];
-      if (fabsf(vrel) > RATTLE_TOL) {
+      Real vxr = vx[li] - vx[lj];
+      Real vyr = vy[li] - vy[lj];
+      Real vzr = vz[li] - vz[lj];
+      Real vrel = vxr * dx[k] + vyr * dy[k] + vzr * dz[k];
+      if (Real_fabs(vrel) > RATTLE_TOL) {
         converged = false;
-        float denom = d2[k] * inv_pair[k];
-        if (denom == 0.0f) {
+        Real denom = d2[k] * inv_pair[k];
+        if (denom == R(0.0)) {
           continue;
         }
-        float mu = vrel / denom;
-        float ki = mu * inv_m[li];
-        float kj = mu * inv_m[lj];
+        Real mu = vrel / denom;
+        Real ki = mu * inv_m[li];
+        Real kj = mu * inv_m[lj];
         vx[li] -= ki * dx[k];
         vy[li] -= ki * dy[k];
         vz[li] -= ki * dz[k];
@@ -419,16 +421,16 @@ extern "C" __global__ void rattle_velocities(
   }
 
   // Velocity-level constraint-virial contribution.
-  if (dt > 0.0f) {
-    float inv_dt = 1.0f / dt;
-    float cx, cy, cz;
+  if (dt > R(0.0)) {
+    Real inv_dt = R(1.0) / dt;
+    Real cx, cy, cz;
     weighted_com(px, py, pz, m_atom, acnt, cx, cy, cz);
     for (unsigned int a = 0; a < acnt; ++a) {
-      float rx = px[a] - cx;
-      float ry = py[a] - cy;
-      float rz = pz[a] - cz;
-      float scale = m_atom[a] * inv_dt;
-      float w = scale * (dvx[a] * rx + dvy[a] * ry + dvz[a] * rz);
+      Real rx = px[a] - cx;
+      Real ry = py[a] - cy;
+      Real rz = pz[a] - cz;
+      Real scale = m_atom[a] * inv_dt;
+      Real w = scale * (dvx[a] * rx + dvy[a] * ry + dvz[a] * rz);
       constraint_virial[aoff + a] += w;
     }
   }
@@ -440,9 +442,9 @@ extern "C" __global__ void rattle_velocities(
 // Groups are disjoint by construction (v1 topology rule), so no
 // atomics are needed.
 extern "C" __global__ void constraint_virial_scatter(
-    const float *constraint_virial,
+    const Real *constraint_virial,
     const unsigned int *group_atoms,
-    float *particle_virials,
+    Real *particle_virials,
     unsigned int n_atom_slots)
 {
   unsigned int s = blockIdx.x * blockDim.x + threadIdx.x;
@@ -458,9 +460,9 @@ extern "C" __global__ void constraint_virial_scatter(
 // hook. The constraint-gradient direction is evaluated at the current
 // off-manifold positions rather than at a snapshot.
 extern "C" __global__ void shake_positions_no_velocity(
-    float *positions_x,
-    float *positions_y,
-    float *positions_z,
+    Real *positions_x,
+    Real *positions_y,
+    Real *positions_z,
     const unsigned int *group_atoms,
     const unsigned int *group_atom_offset,
     const unsigned int *group_atom_count,
@@ -468,9 +470,9 @@ extern "C" __global__ void shake_positions_no_velocity(
     const unsigned int *group_constraint_count,
     const unsigned char *group_constraints_local_i,
     const unsigned char *group_constraints_local_j,
-    const float *group_constraints_r2,
-    const float *atom_mass,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const Real *group_constraints_r2,
+    const Real *atom_mass,
+    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
     unsigned int n_groups)
 {
   unsigned int g = blockIdx.x * blockDim.x + threadIdx.x;
@@ -483,17 +485,17 @@ extern "C" __global__ void shake_positions_no_velocity(
   unsigned int ccnt = group_constraint_count[g];
 
   unsigned int atom_idx[MAX_GROUP_ATOMS];
-  float x_u[MAX_GROUP_ATOMS], y_u[MAX_GROUP_ATOMS], z_u[MAX_GROUP_ATOMS];
-  float x_c[MAX_GROUP_ATOMS], y_c[MAX_GROUP_ATOMS], z_c[MAX_GROUP_ATOMS];
-  float inv_m[MAX_GROUP_ATOMS];
+  Real x_u[MAX_GROUP_ATOMS], y_u[MAX_GROUP_ATOMS], z_u[MAX_GROUP_ATOMS];
+  Real x_c[MAX_GROUP_ATOMS], y_c[MAX_GROUP_ATOMS], z_c[MAX_GROUP_ATOMS];
+  Real inv_m[MAX_GROUP_ATOMS];
   for (unsigned int a = 0; a < acnt; ++a) {
     unsigned int i = group_atoms[aoff + a];
     atom_idx[a] = i;
     x_u[a] = positions_x[i];
     y_u[a] = positions_y[i];
     z_u[a] = positions_z[i];
-    float m = atom_mass[i];
-    inv_m[a] = (m > 0.0f) ? 1.0f / m : 0.0f;
+    Real m = atom_mass[i];
+    inv_m[a] = (m > R(0.0)) ? R(1.0) / m : R(0.0);
   }
   for (unsigned int a = 1; a < acnt; ++a) {
     min_image_to(x_u[0], y_u[0], z_u[0], x_u[a], y_u[a], z_u[a],
@@ -506,9 +508,9 @@ extern "C" __global__ void shake_positions_no_velocity(
   }
 
   unsigned char ci[MAX_GROUP_CONSTRAINTS], cj[MAX_GROUP_CONSTRAINTS];
-  float gx[MAX_GROUP_CONSTRAINTS], gy[MAX_GROUP_CONSTRAINTS], gz[MAX_GROUP_CONSTRAINTS];
-  float r2[MAX_GROUP_CONSTRAINTS];
-  float inv_pair[MAX_GROUP_CONSTRAINTS];
+  Real gx[MAX_GROUP_CONSTRAINTS], gy[MAX_GROUP_CONSTRAINTS], gz[MAX_GROUP_CONSTRAINTS];
+  Real r2[MAX_GROUP_CONSTRAINTS];
+  Real inv_pair[MAX_GROUP_CONSTRAINTS];
   for (unsigned int k = 0; k < ccnt; ++k) {
     unsigned char li = group_constraints_local_i[coff + k];
     unsigned char lj = group_constraints_local_j[coff + k];
@@ -521,28 +523,28 @@ extern "C" __global__ void shake_positions_no_velocity(
     inv_pair[k] = inv_m[li] + inv_m[lj];
   }
 
-  const float SHAKE_TOL2 = 3.57e-6f;
+  const Real SHAKE_TOL2 = R(3.57e-6);
   const int SHAKE_MAX_ITER = 32;
   for (int iter = 0; iter < SHAKE_MAX_ITER; ++iter) {
     bool converged = true;
     for (unsigned int k = 0; k < ccnt; ++k) {
       unsigned char li = ci[k];
       unsigned char lj = cj[k];
-      float dx = x_c[li] - x_c[lj];
-      float dy = y_c[li] - y_c[lj];
-      float dz = z_c[li] - z_c[lj];
-      float dist2 = dx * dx + dy * dy + dz * dz;
-      float sigma = dist2 - r2[k];
-      if (fabsf(sigma) > SHAKE_TOL2) {
+      Real dx = x_c[li] - x_c[lj];
+      Real dy = y_c[li] - y_c[lj];
+      Real dz = z_c[li] - z_c[lj];
+      Real dist2 = dx * dx + dy * dy + dz * dz;
+      Real sigma = dist2 - r2[k];
+      if (Real_fabs(sigma) > SHAKE_TOL2) {
         converged = false;
-        float ddot = dx * gx[k] + dy * gy[k] + dz * gz[k];
-        float denom = 2.0f * ddot * inv_pair[k];
-        if (denom == 0.0f) {
+        Real ddot = dx * gx[k] + dy * gy[k] + dz * gz[k];
+        Real denom = R(2.0) * ddot * inv_pair[k];
+        if (denom == R(0.0)) {
           continue;
         }
-        float lambda = sigma / denom;
-        float ki = lambda * inv_m[li];
-        float kj = lambda * inv_m[lj];
+        Real lambda = sigma / denom;
+        Real ki = lambda * inv_m[li];
+        Real kj = lambda * inv_m[lj];
         x_c[li] -= ki * gx[k];
         y_c[li] -= ki * gy[k];
         z_c[li] -= ki * gz[k];
@@ -558,9 +560,9 @@ extern "C" __global__ void shake_positions_no_velocity(
 
   for (unsigned int a = 0; a < acnt; ++a) {
     unsigned int i = atom_idx[a];
-    float dxg = x_c[a] - x_u[a];
-    float dyg = y_c[a] - y_u[a];
-    float dzg = z_c[a] - z_u[a];
+    Real dxg = x_c[a] - x_u[a];
+    Real dyg = y_c[a] - y_u[a];
+    Real dzg = z_c[a] - z_u[a];
     if (a == 0) {
       positions_x[i] = x_c[0];
       positions_y[i] = y_c[0];

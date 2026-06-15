@@ -10,24 +10,26 @@
 // registration, and writes the per-particle totals into
 // ParticleBuffers.forces_*, potential_energies, and virials.
 
+#include "precision.cuh"
+
 extern "C" __global__ void accumulate_forces(
-    const float *fast_slot_forces_x,
-    const float *fast_slot_forces_y,
-    const float *fast_slot_forces_z,
-    const float *fast_slot_energies,
-    const float *fast_slot_virials,
+    const Real *fast_slot_forces_x,
+    const Real *fast_slot_forces_y,
+    const Real *fast_slot_forces_z,
+    const Real *fast_slot_energies,
+    const Real *fast_slot_virials,
     unsigned int num_fast_slots,
-    const float *slow_slot_forces_x,
-    const float *slow_slot_forces_y,
-    const float *slow_slot_forces_z,
-    const float *slow_slot_energies,
-    const float *slow_slot_virials,
+    const Real *slow_slot_forces_x,
+    const Real *slow_slot_forces_y,
+    const Real *slow_slot_forces_z,
+    const Real *slow_slot_energies,
+    const Real *slow_slot_virials,
     unsigned int num_slow_slots,
-    float *forces_x,
-    float *forces_y,
-    float *forces_z,
-    float *potential_energies,
-    float *virials,
+    Real *forces_x,
+    Real *forces_y,
+    Real *forces_z,
+    Real *potential_energies,
+    Real *virials,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -35,11 +37,11 @@ extern "C" __global__ void accumulate_forces(
     return;
   }
 
-  float sx = 0.0f;
-  float sy = 0.0f;
-  float sz = 0.0f;
-  float se = 0.0f;
-  float sw = 0.0f;
+  Real sx = R(0.0);
+  Real sy = R(0.0);
+  Real sz = R(0.0);
+  Real se = R(0.0);
+  Real sw = R(0.0);
 
   for (unsigned int k = 0; k < num_fast_slots; ++k) {
     unsigned int idx = k * n + i;

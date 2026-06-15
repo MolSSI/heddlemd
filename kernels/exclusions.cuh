@@ -1,13 +1,15 @@
 // rq-b2f23140
 
+#include "precision.cuh"
+
 #pragma once
 
-__device__ static inline float exclusion_scale(
+__device__ static inline Real exclusion_scale(
     unsigned int i,
     unsigned int j,
     const unsigned int *atom_excl_offsets,
     const unsigned int *atom_excl_partners,
-    const float *atom_excl_scales)
+    const Real *atom_excl_scales)
 {
   unsigned int start = atom_excl_offsets[i];
   unsigned int end = atom_excl_offsets[i + 1];
@@ -16,5 +18,5 @@ __device__ static inline float exclusion_scale(
       return atom_excl_scales[m];
     }
   }
-  return 1.0f;
+  return R(1.0);
 }

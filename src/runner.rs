@@ -28,6 +28,7 @@ use crate::state::{ParticleState, ParticleStateError};
 use crate::timings::{
     HostStage, KernelStage, Timings, TimingsError, TimingsWriterError, write_timings_file,
 };
+use crate::precision::Real;
 
 // rq-8ee27e27 rq-e1ceb5c0 rq-6cf916af
 //
@@ -73,8 +74,8 @@ pub enum RunnerError {
     #[error("simulation box perpendicular width along lattice direction `{direction}` is {width}, below the required {required}")]
     CellListBoxTooSmall {
         direction: &'static str,
-        width: f32,
-        required: f32,
+        width: Real,
+        required: Real,
     },
     // rq-8ee27e27 rq-02f4d342
     #[error(
@@ -154,8 +155,8 @@ pub struct SimulationSetup {
     pub bond_list: BondList,
     pub angle_list: AngleList,
     pub exclusion_list: ExclusionList,
-    pub masses_f32: Vec<f32>,
-    pub charges_f32: Vec<f32>,
+    pub masses: Vec<Real>,
+    pub charges: Vec<Real>,
     pub type_indices: Vec<u32>,
     pub n_constraints: u32,
     pub n_thermal_dof: u32,
@@ -399,7 +400,7 @@ pub fn lint_simulation_with_registries(
         }
         NeighborListConfig::CellList { r_skin, .. } => {
             let cutoff_max = compute_cutoff_max(&config);
-            let required = (3.0 * (cutoff_max + r_skin)) as f32;
+            let required = (3.0 * (cutoff_max + r_skin)) as Real;
             match sim_box.check_min_perpendicular_width(required) {
                 Ok(()) => {
                     stages.push(LintStage {
@@ -648,7 +649,7 @@ fn lint_gpu_full_setup(
                         &setup.constraint_list,
                         &setup.gpu,
                         n,
-                        &setup.masses_f32,
+                        &setup.masses,
                         &setup.config.constraint_types,
                     )
                     .map_err(|e| (format!("{e}"), RunnerError::Constraint(e)))?;
@@ -666,7 +667,7 @@ fn lint_gpu_full_setup(
                         &setup.constraint_list,
                         &setup.gpu,
                         n,
-                        &setup.masses_f32,
+                        &setup.masses,
                         &setup.config.constraint_types,
                     )
                     .map_err(|e| (format!("{e}"), RunnerError::Constraint(e)))?;
@@ -787,7 +788,7 @@ fn simulation_setup_new_impl(
         if let Some(s) = config.spme.as_ref() {
             cutoff_max = cutoff_max.max(s.r_cut_real);
         }
-        let required = (3.0 * (cutoff_max + r_skin)) as f32;
+        let required = (3.0 * (cutoff_max + r_skin)) as Real;
         if let Err(e) = sim_box.check_min_perpendicular_width(required) {
             return Err(match e {
                 crate::pbc::SimulationBoxError::PerpendicularWidthTooSmall {
@@ -876,13 +877,13 @@ fn simulation_setup_finish_gpu(
 
     // Build masses and charges arrays from per-particle type_index lookup.
     let mut masses_f64: Vec<f64> = Vec::with_capacity(n);
-    let mut masses_f32: Vec<f32> = Vec::with_capacity(n);
-    let mut charges_f32: Vec<f32> = Vec::with_capacity(n);
+    let mut masses: Vec<Real> = Vec::with_capacity(n);
+    let mut charges: Vec<Real> = Vec::with_capacity(n);
     for &ti in &init.type_indices {
         let pt = &config.particle_types[ti as usize];
         masses_f64.push(pt.mass);
-        masses_f32.push(pt.mass as f32);
-        charges_f32.push(pt.charge as f32);
+        masses.push(pt.mass as Real);
+        charges.push(pt.charge as Real);
     }
 
     let n_constraints = constraint_list.total_constraint_count();
@@ -916,7 +917,7 @@ fn simulation_setup_finish_gpu(
         .images
         .as_ref()
         .map(|im| (im.images_x.clone(), im.images_y.clone(), im.images_z.clone()));
-    let charges_for_force_field = charges_f32.clone();
+    let charges_for_force_field = charges.clone();
     let state = ParticleState::new(
         init.positions_x.clone(),
         init.positions_y.clone(),
@@ -924,8 +925,8 @@ fn simulation_setup_finish_gpu(
         velocities_x,
         velocities_y,
         velocities_z,
-        masses_f32.clone(),
-        charges_f32.clone(),
+        masses.clone(),
+        charges.clone(),
         init.type_indices.clone(),
         None,
         images_arg,
@@ -958,7 +959,7 @@ fn simulation_setup_finish_gpu(
                 &constraint_list,
                 &gpu,
                 n,
-                &masses_f32,
+                &masses,
                 &config.constraint_types,
             )
             .map_err(RunnerError::Constraint)?;
@@ -968,7 +969,7 @@ fn simulation_setup_finish_gpu(
                 .map_err(RunnerError::Constraint)?;
             let mut ke_scratch = gpu
                 .device
-                .alloc_zeros::<f32>(1)
+                .alloc_zeros::<Real>(1)
                 .map_err(|e| RunnerError::Gpu(crate::gpu::GpuError::from(e)))?;
             let ke_after = crate::gpu::compute_kinetic_energy(&buffers, &mut ke_scratch)
                 .map_err(RunnerError::Gpu)? as f64;
@@ -976,7 +977,7 @@ fn simulation_setup_finish_gpu(
             // k_B = 1 in atomic units; simulation.temperature is k_B · T in Hartrees.
             let target_ke = 0.5 * n_thermal_dof_f64 * config.simulation.temperature;
             if ke_after > 0.0 && target_ke > 0.0 {
-                let factor = (target_ke / ke_after).sqrt() as f32;
+                let factor = (target_ke / ke_after).sqrt() as Real;
                 crate::gpu::rescale_velocities(&mut buffers, factor).map_err(RunnerError::Gpu)?;
             }
         }
@@ -1013,8 +1014,8 @@ fn simulation_setup_finish_gpu(
         bond_list,
         angle_list,
         exclusion_list,
-        masses_f32,
-        charges_f32,
+        masses,
+        charges,
         type_indices: init.type_indices,
         n_constraints: n_constraints as u32,
         n_thermal_dof,
@@ -1168,7 +1169,7 @@ pub(crate) fn run_md_phase_inner(
             &setup.constraint_list,
             &setup.gpu,
             n,
-            &setup.masses_f32,
+            &setup.masses,
             &setup.config.constraint_types,
         )
         .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
@@ -1204,8 +1205,8 @@ pub(crate) fn run_md_phase_inner(
     } else {
         None
     };
-    let mut pe_scratch: Option<cudarc::driver::CudaSlice<f32>> = if !log_extra_columns.is_empty() {
-        Some(setup.gpu.device.alloc_zeros::<f32>(1).map_err(|e| {
+    let mut pe_scratch: Option<cudarc::driver::CudaSlice<Real>> = if !log_extra_columns.is_empty() {
+        Some(setup.gpu.device.alloc_zeros::<Real>(1).map_err(|e| {
             (RunnerError::Gpu(crate::gpu::GpuError(e)), ExitPhase::Setup)
         })?)
     } else {
@@ -1214,7 +1215,7 @@ pub(crate) fn run_md_phase_inner(
 
     // Host-side frame buffer for download_from. Allocated fresh per
     // phase; the buffer is overwritten by each `download_from` call.
-    let mut frame = new_frame_buffer(n, &setup.masses_f32, &setup.charges_f32, &type_indices)
+    let mut frame = new_frame_buffer(n, &setup.masses, &setup.charges, &type_indices)
         .map_err(|e| (RunnerError::ParticleState(e), ExitPhase::Setup))?;
 
     let phase_started = Instant::now();
@@ -1290,7 +1291,7 @@ pub(crate) fn run_md_phase_inner(
 
     let n_steps = phase.n_steps;
     let progress_every = (n_steps / 100).max(1);
-    let dt_f32 = phase.dt as f32;
+    let dt = phase.dt as Real;
     let phase_name = phase.name.as_str();
 
     // Pre-fetch the supports_constraints bit before the per-step loop;
@@ -1304,7 +1305,7 @@ pub(crate) fn run_md_phase_inner(
 
     for step in 1..=n_steps {
         if let Some(t) = thermostat.as_mut() {
-            t.apply_pre(&mut setup.buffers, dt_f32, &mut timings)
+            t.apply_pre(&mut setup.buffers, dt, &mut timings)
                 .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
         }
         {
@@ -1324,7 +1325,7 @@ pub(crate) fn run_md_phase_inner(
                 &mut setup.force_field,
                 constraint_arg,
                 supports_constraints,
-                dt_f32,
+                dt,
                 &mut timings,
                 runner_needs_scalars,
             )
@@ -1341,11 +1342,11 @@ pub(crate) fn run_md_phase_inner(
             })?;
         }
         if let Some(t) = thermostat.as_mut() {
-            t.apply_post(&mut setup.buffers, dt_f32, &mut timings)
+            t.apply_post(&mut setup.buffers, dt, &mut timings)
                 .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
         }
         if let Some(b) = barostat.as_mut() {
-            b.apply(&mut setup.buffers, &mut setup.sim_box, dt_f32, &mut timings)
+            b.apply(&mut setup.buffers, &mut setup.sim_box, dt, &mut timings)
                 .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
         }
 
@@ -1454,19 +1455,19 @@ pub(crate) fn run_md_phase_inner(
 // overwrites them.
 fn new_frame_buffer(
     n: usize,
-    masses_f32: &[f32],
-    charges_f32: &[f32],
+    masses: &[Real],
+    charges: &[Real],
     type_indices: &[u32],
 ) -> Result<ParticleState, ParticleStateError> {
     ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        masses_f32.to_vec(),
-        charges_f32.to_vec(),
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        masses.to_vec(),
+        charges.to_vec(),
         type_indices.to_vec(),
         None,
         None,
@@ -1511,7 +1512,7 @@ pub(crate) fn run_minimization_phase_inner(
         .map(|t| t.name.clone())
         .collect();
     let type_indices: Vec<u32> = setup.type_indices.clone();
-    let mut frame = new_frame_buffer(n, &setup.masses_f32, &setup.charges_f32, &type_indices)
+    let mut frame = new_frame_buffer(n, &setup.masses, &setup.charges, &type_indices)
         .map_err(|e| (RunnerError::ParticleState(e), ExitPhase::Setup))?;
     let timings = &mut timings;
     let buffers = &mut setup.buffers;
@@ -1531,7 +1532,7 @@ pub(crate) fn run_minimization_phase_inner(
             &setup.constraint_list,
             gpu,
             n,
-            &setup.masses_f32,
+            &setup.masses,
             &setup.config.constraint_types,
         )
         .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
@@ -1884,10 +1885,10 @@ fn generate_velocities(
     temperature: f64,
     seed: u64,
     masses: &[f64],
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
-    let mut vx = vec![0.0_f32; n];
-    let mut vy = vec![0.0_f32; n];
-    let mut vz = vec![0.0_f32; n];
+) -> (Vec<Real>, Vec<Real>, Vec<Real>) {
+    let mut vx = vec![0.0; n];
+    let mut vy = vec![0.0; n];
+    let mut vz = vec![0.0; n];
     if temperature == 0.0 || n == 0 {
         return (vx, vy, vz);
     }
@@ -1899,7 +1900,7 @@ fn generate_velocities(
             let u1 = 1.0 - rng.r#gen::<f64>(); // (0, 1]
             let u2 = rng.r#gen::<f64>();        // [0, 1)
             let z = (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos();
-            let v = (z * sigma) as f32;
+            let v = (z * sigma) as Real;
             match axis {
                 0 => vx[i] = v,
                 1 => vy[i] = v,
@@ -1912,7 +1913,7 @@ fn generate_velocities(
     let total_mass: f64 = masses.iter().copied().sum();
     if total_mass > 0.0 {
         for axis in 0..3 {
-            let slice: &mut [f32] = match axis {
+            let slice: &mut [Real] = match axis {
                 0 => &mut vx,
                 1 => &mut vy,
                 _ => &mut vz,
@@ -1924,7 +1925,7 @@ fn generate_velocities(
                 .sum();
             let v_com = p / total_mass;
             for v in slice.iter_mut() {
-                *v = ((*v as f64) - v_com) as f32;
+                *v = ((*v as f64) - v_com) as Real;
             }
         }
     }
@@ -1960,9 +1961,9 @@ fn generate_velocities(
                 0.5 * (n_thermal_dof as f64) * temperature;
             let scale = (target_ke / ke).sqrt();
             for i in 0..n {
-                vx[i] = ((vx[i] as f64) * scale) as f32;
-                vy[i] = ((vy[i] as f64) * scale) as f32;
-                vz[i] = ((vz[i] as f64) * scale) as f32;
+                vx[i] = ((vx[i] as f64) * scale) as Real;
+                vy[i] = ((vy[i] as f64) * scale) as Real;
+                vz[i] = ((vz[i] as f64) * scale) as Real;
             }
         }
     }

@@ -5,15 +5,17 @@
 // strided per-thread accumulator, deterministic left-to-right pairwise
 // tree in shared memory. Two runs with byte-identical inputs on the
 // same GPU produce a byte-identical `partial_out[0]`.
+#include "precision.cuh"
+
 extern "C" __global__ void virial_sum_reduce(
-    const float *virials,
-    float *partial_out,    // length 1; only thread 0 writes
+    const Real *virials,
+    Real *partial_out,    // length 1; only thread 0 writes
     unsigned int n)
 {
-  __shared__ float partial[256];
+  __shared__ Real partial[256];
 
   unsigned int tid = threadIdx.x;
-  float sum = 0.0f;
+  Real sum = R(0.0);
   for (unsigned int i = tid; i < n; i += blockDim.x) {
     sum += virials[i];
   }
@@ -40,10 +42,10 @@ extern "C" __global__ void virial_sum_reduce(
 // and the neighbor list refreshes its reference positions on the next
 // `force_field.step` via the box-generation change-detection path.
 extern "C" __global__ void rescale_positions(
-    float *positions_x,
-    float *positions_y,
-    float *positions_z,
-    float factor,
+    Real *positions_x,
+    Real *positions_y,
+    Real *positions_z,
+    Real factor,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;

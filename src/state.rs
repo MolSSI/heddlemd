@@ -1,26 +1,27 @@
 use std::collections::HashSet;
 
 use crate::gpu::{GpuError, ParticleBuffers};
+use crate::precision::Real;
 
 // rq-3766be01
 #[derive(Debug, Clone)]
 pub struct ParticleState {
-    pub positions_x: Vec<f32>,
-    pub positions_y: Vec<f32>,
-    pub positions_z: Vec<f32>,
+    pub positions_x: Vec<Real>,
+    pub positions_y: Vec<Real>,
+    pub positions_z: Vec<Real>,
     pub images_x: Vec<i32>,
     pub images_y: Vec<i32>,
     pub images_z: Vec<i32>,
-    pub velocities_x: Vec<f32>,
-    pub velocities_y: Vec<f32>,
-    pub velocities_z: Vec<f32>,
-    pub forces_x: Vec<f32>,
-    pub forces_y: Vec<f32>,
-    pub forces_z: Vec<f32>,
-    pub potential_energies: Vec<f32>,
-    pub virials: Vec<f32>,
-    pub masses: Vec<f32>,
-    pub charges: Vec<f32>,
+    pub velocities_x: Vec<Real>,
+    pub velocities_y: Vec<Real>,
+    pub velocities_z: Vec<Real>,
+    pub forces_x: Vec<Real>,
+    pub forces_y: Vec<Real>,
+    pub forces_z: Vec<Real>,
+    pub potential_energies: Vec<Real>,
+    pub virials: Vec<Real>,
+    pub masses: Vec<Real>,
+    pub charges: Vec<Real>,
     pub type_indices: Vec<u32>,
     pub particle_ids: Vec<u32>,
 }
@@ -60,14 +61,14 @@ impl ParticleState {
     // rq-5e0598cb
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        positions_x: Vec<f32>,
-        positions_y: Vec<f32>,
-        positions_z: Vec<f32>,
-        velocities_x: Vec<f32>,
-        velocities_y: Vec<f32>,
-        velocities_z: Vec<f32>,
-        masses: Vec<f32>,
-        charges: Vec<f32>,
+        positions_x: Vec<Real>,
+        positions_y: Vec<Real>,
+        positions_z: Vec<Real>,
+        velocities_x: Vec<Real>,
+        velocities_y: Vec<Real>,
+        velocities_z: Vec<Real>,
+        masses: Vec<Real>,
+        charges: Vec<Real>,
         type_indices: Vec<u32>,
         ids: Option<Vec<u32>>,
         images: Option<(Vec<i32>, Vec<i32>, Vec<i32>)>,

@@ -19,6 +19,7 @@ use super::{
     AggregateLevel, ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext,
     PotentialBuilder, SlotOutputView,
 };
+use crate::precision::Real;
 
 // rq-af2d1628
 #[derive(Debug)]
@@ -29,7 +30,7 @@ pub struct LennardJonesState {
     pub(crate) params: LennardJonesParameterTable,
     pub(crate) exclusions: DeviceExclusionList,
     pub(crate) particle_count: usize,
-    pub(crate) max_cutoff: f32,
+    pub(crate) max_cutoff: Real,
 }
 
 impl LennardJonesState {
@@ -37,7 +38,7 @@ impl LennardJonesState {
         gpu: &GpuContext,
         particle_count: usize,
         params: LennardJonesParameterTable,
-        max_cutoff: f32,
+        max_cutoff: Real,
         max_neighbors: u32,
         exclusion_list: &ExclusionList,
     ) -> Result<Self, NeighborListError> {
@@ -64,7 +65,7 @@ impl Potential for LennardJonesState {
         "lennard_jones"
     }
 
-    fn max_cutoff(&self) -> Option<f32> {
+    fn max_cutoff(&self) -> Option<Real> {
         Some(self.max_cutoff)
     }
 
@@ -155,8 +156,8 @@ impl PotentialBuilder for LennardJonesBuilder {
         let max_cutoff = cx
             .pair_interactions
             .iter()
-            .map(|p| p.cutoff as f32)
-            .fold(0.0_f32, f32::max);
+            .map(|p| p.cutoff as Real)
+            .fold(0.0, Real::max);
         let max_neighbors = super::max_neighbors_from(cx.neighbor_list_config, cx.particle_count);
         let state = LennardJonesState::new(
             cx.gpu,

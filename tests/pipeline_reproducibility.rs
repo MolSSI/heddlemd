@@ -4,15 +4,16 @@ use common::*;
 use heddle_md::gpu::{GpuContext, PairBuffer, ParticleBuffers, init_device, vv_kick, vv_kick_drift};
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
+use heddle_md::precision::Real;
 
 const N: usize = 64;
-const BOX_L: f32 = 8.0;
-const LATTICE_SPACING: f32 = 2.0;
-const LATTICE_ORIGIN: f32 = -3.0;
-const DT: f32 = 0.001;
-const SIGMA: f32 = 1.0;
-const EPSILON: f32 = 1.0;
-const CUTOFF: f32 = 2.5;
+const BOX_L: Real = 8.0;
+const LATTICE_SPACING: Real = 2.0;
+const LATTICE_ORIGIN: Real = -3.0;
+const DT: Real = 0.001;
+const SIGMA: Real = 1.0;
+const EPSILON: Real = 1.0;
+const CUTOFF: Real = 2.5;
 
 // rq-8dfac0eb
 fn build_initial_state() -> ParticleState {
@@ -23,13 +24,13 @@ fn build_initial_state() -> ParticleState {
         for iy in 0..4 {
             for iz in 0..4 {
                 let i = ix * 16 + iy * 4 + iz;
-                let fi = i as f32;
+                let fi = i as Real;
                 let perturb_x = 0.2 * (fi * 0.7 + 0.0).sin();
                 let perturb_y = 0.2 * (fi * 0.7 + 1.1).sin();
                 let perturb_z = 0.2 * (fi * 0.7 + 2.3).sin();
-                positions_x.push(ix as f32 * LATTICE_SPACING + LATTICE_ORIGIN + perturb_x);
-                positions_y.push(iy as f32 * LATTICE_SPACING + LATTICE_ORIGIN + perturb_y);
-                positions_z.push(iz as f32 * LATTICE_SPACING + LATTICE_ORIGIN + perturb_z);
+                positions_x.push(ix as Real * LATTICE_SPACING + LATTICE_ORIGIN + perturb_x);
+                positions_y.push(iy as Real * LATTICE_SPACING + LATTICE_ORIGIN + perturb_y);
+                positions_z.push(iz as Real * LATTICE_SPACING + LATTICE_ORIGIN + perturb_z);
             }
         }
     }
@@ -41,7 +42,7 @@ fn build_initial_state() -> ParticleState {
         vec![0.0; N],
         vec![0.0; N],
         vec![1.0; N],
-        vec![0.0_f32; N],
+        vec![0.0; N],
         vec![0u32; N],
         None,
             None,
@@ -118,7 +119,7 @@ fn positions_visibly_evolve_over_100_step_run() {
             let dz = result.positions_z[i] - initial.positions_z[i];
             (dx * dx + dy * dy + dz * dz).sqrt()
         })
-        .fold(0.0_f32, f32::max);
+        .fold(0.0, Real::max);
     assert!(
         max_disp > 0.001,
         "max displacement after 100 steps was {max_disp} (should exceed 0.001)"
@@ -130,7 +131,7 @@ fn all_outputs_finite_after_100_step_run() {
     let gpu = init_device().expect("init_device");
     let result = run_pipeline(&gpu, 100);
 
-    let arrays: [&[f32]; 9] = [
+    let arrays: [&[Real]; 9] = [
         &result.positions_x,
         &result.positions_y,
         &result.positions_z,

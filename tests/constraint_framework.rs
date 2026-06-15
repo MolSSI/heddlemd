@@ -15,6 +15,7 @@ use heddle_md::io::config::{ConfigError, NamedSlotConfig};
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::Timings;
+use heddle_md::precision::Real;
 
 // --- ConstraintList::subset -----------------------------------------------
 
@@ -140,7 +141,7 @@ impl Constraint for RecordingConstraint {
         &mut self,
         _buffers: &mut ParticleBuffers,
         _sim_box: &SimulationBox,
-        _dt: f32,
+        _dt: Real,
         _timings: &mut Timings,
     ) -> Result<(), ConstraintError> {
         self.recorder
@@ -154,7 +155,7 @@ impl Constraint for RecordingConstraint {
         &mut self,
         _buffers: &mut ParticleBuffers,
         _sim_box: &SimulationBox,
-        _dt: f32,
+        _dt: Real,
         _timings: &mut Timings,
     ) -> Result<(), ConstraintError> {
         let mut r = self.recorder.lock().unwrap();
@@ -171,7 +172,7 @@ impl Constraint for RecordingConstraint {
         &mut self,
         _buffers: &mut ParticleBuffers,
         _sim_box: &SimulationBox,
-        _dt: f32,
+        _dt: Real,
         _timings: &mut Timings,
     ) -> Result<(), ConstraintError> {
         self.recorder
@@ -208,7 +209,7 @@ impl ConstraintBuilder for StubBuilder {
         _atoms: &[u32],
         _constraints: &[GroupConstraint],
         _params: &toml::Value,
-        _masses: &[f32],
+        _masses: &[Real],
     ) -> Result<(), ConstraintError> {
         Ok(())
     }
@@ -218,7 +219,7 @@ impl ConstraintBuilder for StubBuilder {
         _gpu: &GpuContext,
         _particle_count: usize,
         list: &ConstraintList,
-        _masses: &[f32],
+        _masses: &[Real],
         _constraint_types: &[NamedSlotConfig],
     ) -> Result<Box<dyn Constraint>, ConstraintError> {
         let group_count = list.groups.len();
@@ -523,6 +524,8 @@ fn velocity_verlet_lossless_false_accepts_constraints_now() {
 }
 
 // rq-ca6d04ca
+// Lossless mode is only available in the default (f32) build.
+#[cfg(not(feature = "f64"))]
 #[test]
 fn velocity_verlet_lossless_true_rejects_constraints_now() {
     use heddle_md::integrator::ConstraintCapableIntegrator;
@@ -591,6 +594,8 @@ fn integrator_step_ext_step_has_no_constraint_argument() {
 }
 
 // rq-e9706f76
+// Lossless mode is only available in the default (f32) build.
+#[cfg(not(feature = "f64"))]
 #[test]
 fn step_with_constraint_short_circuits_on_lossless_velocity_verlet() {
     use heddle_md::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
@@ -607,7 +612,7 @@ fn step_with_constraint_short_circuits_on_lossless_velocity_verlet() {
             &mut self,
             _b: &mut ParticleBuffers,
             _sb: &SimulationBox,
-            _dt: f32,
+            _dt: Real,
             _t: &mut Timings,
         ) -> Result<(), ConstraintError> {
             panic!("apply_before_drift should not fire for lossless VV");
@@ -616,7 +621,7 @@ fn step_with_constraint_short_circuits_on_lossless_velocity_verlet() {
             &mut self,
             _b: &mut ParticleBuffers,
             _sb: &SimulationBox,
-            _dt: f32,
+            _dt: Real,
             _t: &mut Timings,
         ) -> Result<(), ConstraintError> {
             panic!("apply_after_drift should not fire for lossless VV");
@@ -625,7 +630,7 @@ fn step_with_constraint_short_circuits_on_lossless_velocity_verlet() {
             &mut self,
             _b: &mut ParticleBuffers,
             _sb: &SimulationBox,
-            _dt: f32,
+            _dt: Real,
             _t: &mut Timings,
         ) -> Result<(), ConstraintError> {
             panic!("apply_after_kick should not fire for lossless VV");

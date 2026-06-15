@@ -9,8 +9,9 @@ use heddle_md::io::config::{
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::Timings;
+use heddle_md::precision::Real;
 
-fn two_particle_state(p0: [f32; 3], p1: [f32; 3]) -> ParticleState {
+fn two_particle_state(p0: [Real; 3], p1: [Real; 3]) -> ParticleState {
     ParticleState::new(
         vec![p0[0], p1[0]],
         vec![p0[1], p1[1]],
@@ -19,7 +20,7 @@ fn two_particle_state(p0: [f32; 3], p1: [f32; 3]) -> ParticleState {
         vec![0.0, 0.0],
         vec![0.0, 0.0],
         vec![1.0, 1.0],
-        vec![0.0_f32; vec![1.0, 1.0].len()],
+        vec![0.0; vec![1.0, 1.0].len()],
         vec![0u32; 2],
         None,
             None,
@@ -186,7 +187,7 @@ fn stretched_bond_attractive() {
 #[test]
 fn force_magnitude_matches_closed_form() {
     let gpu = init_device().unwrap();
-    let r = 1.2_f32;
+    let r = 1.2;
     let state = two_particle_state([0.0, 0.0, 0.0], [r, 0.0, 0.0]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let bl = single_bond_list(2);
@@ -213,7 +214,7 @@ fn force_magnitude_matches_closed_form() {
     let bx = gpu.device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
     let dr = (r as f64) - re;
     let e = (-a * dr).exp();
-    let expected_magnitude = (2.0 * de * a * (1.0 - e) * e) as f32;
+    let expected_magnitude = (2.0 * de * a * (1.0 - e) * e) as Real;
     assert!((bx[0].abs() - expected_magnitude.abs()).abs() < 1.0e-5);
 }
 
@@ -282,14 +283,14 @@ fn atom_with_two_bonds_sums_contributions() {
     let device = gpu.device.clone();
     // 3 atoms in a row at -1, 0, +1. Bonds 0-1 and 1-2; atom 1 receives forces from both.
     let state = ParticleState::new(
-        vec![-1.0_f32, 0.0_f32, 1.0_f32],
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![1.0_f32; 3],
-        vec![0.0_f32; 3],
+        vec![-1.0, 0.0, 1.0],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![1.0; 3],
+        vec![0.0; 3],
         vec![0u32; 3],
         None,
             None,
@@ -327,11 +328,11 @@ fn atom_with_two_bonds_sums_contributions() {
         2,
     )
     .unwrap();
-    let mut acc_x = device.alloc_zeros::<f32>(3).unwrap();
-    let mut acc_y = device.alloc_zeros::<f32>(3).unwrap();
-    let mut acc_z = device.alloc_zeros::<f32>(3).unwrap();
-    let mut acc_e = device.alloc_zeros::<f32>(3).unwrap();
-    let mut acc_w = device.alloc_zeros::<f32>(3).unwrap();
+    let mut acc_x = device.alloc_zeros::<Real>(3).unwrap();
+    let mut acc_y = device.alloc_zeros::<Real>(3).unwrap();
+    let mut acc_z = device.alloc_zeros::<Real>(3).unwrap();
+    let mut acc_e = device.alloc_zeros::<Real>(3).unwrap();
+    let mut acc_w = device.alloc_zeros::<Real>(3).unwrap();
     reduce_bond_forces(&gpu.kernels,
         &mb.bond_pair_x,
         &mb.bond_pair_y,
@@ -362,14 +363,14 @@ fn atom_with_no_bonds_gets_zero_accumulator() {
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
     let state = ParticleState::new(
-        vec![0.0_f32; 4],
-        vec![0.0_f32; 4],
-        vec![0.0_f32; 4],
-        vec![0.0_f32; 4],
-        vec![0.0_f32; 4],
-        vec![0.0_f32; 4],
-        vec![1.0_f32; 4],
-        vec![0.0_f32; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![1.0; 4],
+        vec![0.0; 4],
         vec![0u32; 4],
         None,
             None,
@@ -382,11 +383,11 @@ fn atom_with_no_bonds_gets_zero_accumulator() {
     let mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
     // Reduction without contribution kernel populating bond_pair_* leaves it
     // zeroed by allocation; accumulator should remain zero.
-    let mut acc_x = device.alloc_zeros::<f32>(4).unwrap();
-    let mut acc_y = device.alloc_zeros::<f32>(4).unwrap();
-    let mut acc_z = device.alloc_zeros::<f32>(4).unwrap();
-    let mut acc_e = device.alloc_zeros::<f32>(4).unwrap();
-    let mut acc_w = device.alloc_zeros::<f32>(4).unwrap();
+    let mut acc_x = device.alloc_zeros::<Real>(4).unwrap();
+    let mut acc_y = device.alloc_zeros::<Real>(4).unwrap();
+    let mut acc_z = device.alloc_zeros::<Real>(4).unwrap();
+    let mut acc_e = device.alloc_zeros::<Real>(4).unwrap();
+    let mut acc_w = device.alloc_zeros::<Real>(4).unwrap();
     reduce_bond_forces(&gpu.kernels,
         &mb.bond_pair_x,
         &mb.bond_pair_y,
@@ -415,11 +416,11 @@ fn reduce_bond_forces_zero_particles_noop() {
     let bl = BondList::empty(0);
     let bt: Vec<BondTypeConfig> = Vec::new();
     let mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    let mut acc_x = device.alloc_zeros::<f32>(0).unwrap();
-    let mut acc_y = device.alloc_zeros::<f32>(0).unwrap();
-    let mut acc_z = device.alloc_zeros::<f32>(0).unwrap();
-    let mut acc_e = device.alloc_zeros::<f32>(0).unwrap();
-    let mut acc_w = device.alloc_zeros::<f32>(0).unwrap();
+    let mut acc_x = device.alloc_zeros::<Real>(0).unwrap();
+    let mut acc_y = device.alloc_zeros::<Real>(0).unwrap();
+    let mut acc_z = device.alloc_zeros::<Real>(0).unwrap();
+    let mut acc_e = device.alloc_zeros::<Real>(0).unwrap();
+    let mut acc_w = device.alloc_zeros::<Real>(0).unwrap();
     reduce_bond_forces(&gpu.kernels,
         &mb.bond_pair_x,
         &mb.bond_pair_y,
@@ -527,7 +528,7 @@ fn newtons_third_law_holds_for_combined_force() {
 #[test] // rq-7ba4f321
 fn stretched_bond_energy_matches_closed_form() {
     let gpu = init_device().unwrap();
-    let r = 1.5_f32;
+    let r = 1.5;
     let state = two_particle_state([0.0, 0.0, 0.0], [r, 0.0, 0.0]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let bl = single_bond_list(2);
@@ -555,7 +556,7 @@ fn stretched_bond_energy_matches_closed_form() {
     let dr = (r as f64) - re;
     let e = (-a * dr).exp();
     let one_minus = 1.0 - e;
-    let expected = (de * one_minus * one_minus) as f32;
+    let expected = (de * one_minus * one_minus) as Real;
     assert!((be[0] + be[1] - expected).abs() < 1.0e-5, "got {} expected {}", be[0] + be[1], expected);
 }
 
@@ -563,7 +564,7 @@ fn stretched_bond_energy_matches_closed_form() {
 fn stretched_bond_virial_matches_r_dot_f() {
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
-    let r = 1.5_f32;
+    let r = 1.5;
     let state = two_particle_state([0.0, 0.0, 0.0], [r, 0.0, 0.0]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let bl = single_bond_list(2);
@@ -589,7 +590,7 @@ fn stretched_bond_virial_matches_r_dot_f() {
     // dx = r_0 - r_1 = -1.5 (atom 0 at origin, atom 1 at +x).
     // F on atom 0 due to atom 1 = bx[0] (along the dx direction times fmag).
     // r_ij · F_ij = dx * F_x = (-1.5) * bx[0].
-    let expected = -1.5_f32 * bx[0];
+    let expected = -1.5 * bx[0];
     let total = bv[0] + bv[1];
     assert!(
         (total - expected).abs() < 1.0e-5,
@@ -632,7 +633,7 @@ fn r_zero_produces_zero_energy_and_virial() {
 fn bond_reduction_sums_energy_and_virial_alongside_forces() {
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
-    let r = 1.5_f32;
+    let r = 1.5;
     let state = two_particle_state([0.0, 0.0, 0.0], [r, 0.0, 0.0]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let bl = single_bond_list(2);
@@ -653,11 +654,11 @@ fn bond_reduction_sums_energy_and_virial_alongside_forces() {
         1,
     )
     .unwrap();
-    let mut acc_x = device.alloc_zeros::<f32>(2).unwrap();
-    let mut acc_y = device.alloc_zeros::<f32>(2).unwrap();
-    let mut acc_z = device.alloc_zeros::<f32>(2).unwrap();
-    let mut acc_e = device.alloc_zeros::<f32>(2).unwrap();
-    let mut acc_w = device.alloc_zeros::<f32>(2).unwrap();
+    let mut acc_x = device.alloc_zeros::<Real>(2).unwrap();
+    let mut acc_y = device.alloc_zeros::<Real>(2).unwrap();
+    let mut acc_z = device.alloc_zeros::<Real>(2).unwrap();
+    let mut acc_e = device.alloc_zeros::<Real>(2).unwrap();
+    let mut acc_w = device.alloc_zeros::<Real>(2).unwrap();
     reduce_bond_forces(&gpu.kernels,
         &mb.bond_pair_x,
         &mb.bond_pair_y,
@@ -689,15 +690,15 @@ fn bond_reduction_sums_energy_and_virial_alongside_forces() {
 
 fn run_reduce_with_buffers(
     gpu: &heddle_md::gpu::GpuContext,
-    bond_pair_x: &[f32],
-    bond_pair_y: &[f32],
-    bond_pair_z: &[f32],
-    bond_pair_energy: &[f32],
-    bond_pair_virial: &[f32],
+    bond_pair_x: &[Real],
+    bond_pair_y: &[Real],
+    bond_pair_z: &[Real],
+    bond_pair_energy: &[Real],
+    bond_pair_virial: &[Real],
     atom_bond_offsets: &[u32],
     atom_bond_indices: &[u32],
     particle_count: usize,
-) -> Vec<f32> {
+) -> Vec<Real> {
     use cudarc::driver::DeviceSlice;
     let device = gpu.device.clone();
     let bx = device.htod_sync_copy(bond_pair_x).unwrap();
@@ -711,11 +712,11 @@ fn run_reduce_with_buffers(
     } else {
         device.htod_sync_copy(atom_bond_indices).unwrap()
     };
-    let mut acc_x = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
-    let mut acc_y = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
-    let mut acc_z = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
-    let mut acc_e = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
-    let mut acc_w = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
+    let mut acc_x = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
+    let mut acc_y = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
+    let mut acc_z = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
+    let mut acc_e = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
+    let mut acc_w = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
     let up_x = acc_x.len();
     let up_y = acc_y.len();
     let up_z = acc_z.len();
@@ -740,8 +741,8 @@ fn run_reduce_with_buffers(
 #[test]
 fn atom_with_one_bond_receives_the_bonds_force_directly() {
     let gpu = init_device().unwrap();
-    let bond_pair_x = vec![2.0_f32, -2.0];
-    let zeros = vec![0.0_f32; 2];
+    let bond_pair_x = vec![2.0, -2.0];
+    let zeros = vec![0.0; 2];
     let atom_bond_offsets = vec![0u32, 1, 2];
     let atom_bond_indices = vec![0u32, 1];
     let acc_x = run_reduce_with_buffers(
@@ -750,8 +751,8 @@ fn atom_with_one_bond_receives_the_bonds_force_directly() {
         &atom_bond_offsets, &atom_bond_indices,
         2,
     );
-    assert_eq!(acc_x[0], 2.0_f32);
-    assert_eq!(acc_x[1], -2.0_f32);
+    assert_eq!(acc_x[0], 2.0);
+    assert_eq!(acc_x[1], -2.0);
 }
 
 // rq-55f89976
@@ -761,8 +762,8 @@ fn reduction_summation_order_is_sorted_bond_index() {
     // Atom 0 receives contributions from bonds 0 and 1; slots [0, 2].
     // The reduction walks atom_bond_indices left-to-right, so accumulator
     // = bond_pair_x[0] + bond_pair_x[2].
-    let bond_pair_x = vec![1.5_f32, -7.0, 4.0, -0.5];
-    let zeros = vec![0.0_f32; 4];
+    let bond_pair_x = vec![1.5, -7.0, 4.0, -0.5];
+    let zeros = vec![0.0; 4];
     // 3 particles. atom 0 → [0, 2] (the two slots that name it); atom 1 → [1]; atom 2 → [3].
     let atom_bond_offsets = vec![0u32, 2, 3, 4];
     let atom_bond_indices = vec![0u32, 2, 1, 3];
@@ -772,7 +773,7 @@ fn reduction_summation_order_is_sorted_bond_index() {
         &atom_bond_offsets, &atom_bond_indices,
         3,
     );
-    assert_eq!(acc_x[0], 1.5_f32 + 4.0, "atom 0 must sum slots [0, 2] in left-to-right order");
+    assert_eq!(acc_x[0], 1.5 + 4.0, "atom 0 must sum slots [0, 2] in left-to-right order");
     assert_eq!(acc_x[1], -7.0);
     assert_eq!(acc_x[2], -0.5);
 }
@@ -832,7 +833,7 @@ fn two_independent_calls_produce_byte_identical_accumulators() {
     let bl = single_bond_list(2);
     let bt = vec![morse_type(1.0, 2.0, 1.0)];
 
-    let run = || -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>) {
+    let run = || -> (Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>) {
         let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
         morse_bond_force(
             &buffers,
@@ -849,11 +850,11 @@ fn two_independent_calls_produce_byte_identical_accumulators() {
             1,
         )
         .unwrap();
-        let mut acc_x = device.alloc_zeros::<f32>(2).unwrap();
-        let mut acc_y = device.alloc_zeros::<f32>(2).unwrap();
-        let mut acc_z = device.alloc_zeros::<f32>(2).unwrap();
-        let mut acc_e = device.alloc_zeros::<f32>(2).unwrap();
-        let mut acc_w = device.alloc_zeros::<f32>(2).unwrap();
+        let mut acc_x = device.alloc_zeros::<Real>(2).unwrap();
+        let mut acc_y = device.alloc_zeros::<Real>(2).unwrap();
+        let mut acc_z = device.alloc_zeros::<Real>(2).unwrap();
+        let mut acc_e = device.alloc_zeros::<Real>(2).unwrap();
+        let mut acc_w = device.alloc_zeros::<Real>(2).unwrap();
         let up_x = acc_x.len();
         let up_y = acc_y.len();
         let up_z = acc_z.len();

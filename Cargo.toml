@@ -7,6 +7,11 @@ edition = "2024"
 name = "heddlemd"
 path = "src/main.rs"
 
+# rq-3d83d0a4
+[features]
+default = []
+f64 = []
+
 [dependencies]
 cudarc = { version = "0.13.9", default-features = false, features = ["driver", "nvrtc", "std", "cuda-11080"] }
 toml = "0.8"

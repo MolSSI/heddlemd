@@ -7,6 +7,7 @@ use cudarc::driver::{CudaDevice, CudaSlice};
 use crate::gpu::GpuError;
 use crate::integrator::ConstraintRegistry;
 use crate::io::config::NamedSlotConfig;
+use crate::precision::Real;
 
 // rq-0a8831b1
 #[derive(Debug, Clone, Copy)]
@@ -30,8 +31,8 @@ pub struct Angle {
 pub struct Exclusion {
     pub atom_i: u32,
     pub atom_j: u32,
-    pub scale_lj: f32,
-    pub scale_coul: f32,
+    pub scale_lj: Real,
+    pub scale_coul: Real,
 }
 
 // rq-ddf51309
@@ -88,8 +89,8 @@ pub struct ExclusionList {
     pub entries: Vec<Exclusion>,
     pub atom_excl_offsets: Vec<u32>,
     pub atom_excl_partners: Vec<u32>,
-    pub atom_excl_lj_scales: Vec<f32>,
-    pub atom_excl_coul_scales: Vec<f32>,
+    pub atom_excl_lj_scales: Vec<Real>,
+    pub atom_excl_coul_scales: Vec<Real>,
     pub particle_count: usize,
 }
 
@@ -118,7 +119,7 @@ impl ExclusionList {
 pub struct GroupConstraint {
     pub local_i: u8,
     pub local_j: u8,
-    pub r0: f32,
+    pub r0: Real,
 }
 
 // rq-0faddd62
@@ -215,8 +216,8 @@ impl ConstraintList {
 pub struct DeviceExclusionList {
     pub atom_excl_offsets: CudaSlice<u32>,
     pub atom_excl_partners: CudaSlice<u32>,
-    pub atom_excl_lj_scales: CudaSlice<f32>,
-    pub atom_excl_coul_scales: CudaSlice<f32>,
+    pub atom_excl_lj_scales: CudaSlice<Real>,
+    pub atom_excl_coul_scales: CudaSlice<Real>,
     pub particle_count: usize,
 }
 
@@ -236,14 +237,14 @@ impl DeviceExclusionList {
                 .map_err(GpuError::from)?
         };
         let atom_excl_lj_scales = if list.atom_excl_lj_scales.is_empty() {
-            device.alloc_zeros::<f32>(0).map_err(GpuError::from)?
+            device.alloc_zeros::<Real>(0).map_err(GpuError::from)?
         } else {
             device
                 .htod_sync_copy(&list.atom_excl_lj_scales)
                 .map_err(GpuError::from)?
         };
         let atom_excl_coul_scales = if list.atom_excl_coul_scales.is_empty() {
-            device.alloc_zeros::<f32>(0).map_err(GpuError::from)?
+            device.alloc_zeros::<Real>(0).map_err(GpuError::from)?
         } else {
             device
                 .htod_sync_copy(&list.atom_excl_coul_scales)
@@ -303,7 +304,7 @@ pub enum TopologyFileError {
     #[error("line {line_number}: unknown angle type `{name}`")]
     UnknownAngleType { line_number: usize, name: String },
     #[error("line {line_number}: exclusion scale {scale} is out of the range [0, 1]")]
-    ScaleOutOfRange { line_number: usize, scale: f32 },
+    ScaleOutOfRange { line_number: usize, scale: Real },
     #[error("line {line_number}: invalid constraint row: {reason}")]
     InvalidConstraintRow { line_number: usize, reason: String },
     #[error("line {line_number}: atom {atom} appears more than once in this constraint row")]
@@ -364,7 +365,7 @@ pub(crate) fn parse_topology_file(
     let mut angles_seen = false;
     let mut constraints_seen = false;
     let mut raw_bonds: Vec<(usize, u32, u32, u32)> = Vec::new();
-    let mut raw_excl: Vec<(usize, u32, u32, f32, f32)> = Vec::new();
+    let mut raw_excl: Vec<(usize, u32, u32, Real, Real)> = Vec::new();
     let mut raw_angles: Vec<(usize, u32, u32, u32, u32)> = Vec::new();
     // (line_number, atom_indices_in_declared_order, constraint_type_index)
     let mut raw_constraint_rows: Vec<(usize, Vec<u32>, u32)> = Vec::new();
@@ -584,7 +585,7 @@ pub(crate) fn parse_topology_file(
                     });
                 }
                 let (scale_lj, scale_coul) = match cols.len() {
-                    2 => (0.0_f32, 0.0_f32),
+                    2 => (0.0, 0.0),
                     3 => {
                         let s = parse_scale(line_number, "scale", cols[2])?;
                         (s, s)
@@ -982,8 +983,8 @@ pub(crate) fn parse_topology_file(
     }
     let total_partner_entries = atom_excl_offsets[particle_count] as usize;
     let mut atom_excl_partners = vec![0u32; total_partner_entries];
-    let mut atom_excl_lj_scales = vec![0f32; total_partner_entries];
-    let mut atom_excl_coul_scales = vec![0f32; total_partner_entries];
+    let mut atom_excl_lj_scales: Vec<Real> = vec![0.0; total_partner_entries];
+    let mut atom_excl_coul_scales: Vec<Real> = vec![0.0; total_partner_entries];
     let mut cursor_e: Vec<u32> = atom_excl_offsets[..particle_count].to_vec();
     for e in &effective {
         let pi = e.atom_i as usize;
@@ -1031,8 +1032,8 @@ fn parse_scale(
     line_number: usize,
     column: &'static str,
     raw: &str,
-) -> Result<f32, TopologyFileError> {
-    let scale = raw.parse::<f32>().map_err(|_| {
+) -> Result<Real, TopologyFileError> {
+    let scale = raw.parse::<Real>().map_err(|_| {
         TopologyFileError::InvalidExclusionRow {
             line_number,
             reason: format!("{column} {:?} is not an f32", raw),

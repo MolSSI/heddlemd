@@ -1,5 +1,7 @@
 // rq-10cc8ddf rq-580fe6f7
 
+#include "precision.cuh"
+
 #include "pbc.cuh"
 
 // Wrap a position back into the primary image of the simulation box and
@@ -7,10 +9,10 @@
 // returned by the triclinic wrap. Matches the host-side
 // wrap_position_with_image_count formula on SimulationBox.
 __device__ static inline void wrap_and_count_triclinic(
-    float &px, float &py, float &pz,
+    Real &px, Real &py, Real &pz,
     int &nx, int &ny, int &nz,
-    float lx, float ly, float lz,
-    float xy, float xz, float yz)
+    Real lx, Real ly, Real lz,
+    Real xy, Real xz, Real yz)
 {
   int ka, kb, kc;
   triclinic_wrap_with_image(px, py, pz, ka, kb, kc, lx, ly, lz, xy, xz, yz);
@@ -22,21 +24,21 @@ __device__ static inline void wrap_and_count_triclinic(
 template <bool LOSSLESS>
 __device__ inline void vv_kick_drift_body(
     unsigned int i,
-    float *positions_x, float *positions_y, float *positions_z,
+    Real *positions_x, Real *positions_y, Real *positions_z,
     int *images_x, int *images_y, int *images_z,
-    float *velocities_x, float *velocities_y, float *velocities_z,
+    Real *velocities_x, Real *velocities_y, Real *velocities_z,
     double *positions_x_lo, double *positions_y_lo, double *positions_z_lo,
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
-    const float *forces_x, const float *forces_y, const float *forces_z,
-    const float *masses,
-    float lx, float ly, float lz, float xy, float xz, float yz,
-    float dt)
+    const Real *forces_x, const Real *forces_y, const Real *forces_z,
+    const Real *masses,
+    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    Real dt)
 {
-  float m = masses[i];
-  float ax = forces_x[i] / m;
-  float ay = forces_y[i] / m;
-  float az = forces_z[i] / m;
-  float half_dt = dt * 0.5f;
+  Real m = masses[i];
+  Real ax = forces_x[i] / m;
+  Real ay = forces_y[i] / m;
+  Real az = forces_z[i] / m;
+  Real half_dt = dt * R(0.5);
 
   if constexpr (LOSSLESS) {
     // Compensated kick: extended-precision (v + v_lo) <- (v + v_lo) + a * half_dt
@@ -48,9 +50,9 @@ __device__ inline void vv_kick_drift_body(
     double ext_vy = (double)velocities_y[i] + velocities_y_lo[i] + dvy;
     double ext_vz = (double)velocities_z[i] + velocities_z_lo[i] + dvz;
 
-    float new_vx = (float)ext_vx;
-    float new_vy = (float)ext_vy;
-    float new_vz = (float)ext_vz;
+    Real new_vx = (Real)ext_vx;
+    Real new_vy = (Real)ext_vy;
+    Real new_vz = (Real)ext_vz;
     double new_vx_lo = ext_vx - (double)new_vx;
     double new_vy_lo = ext_vy - (double)new_vy;
     double new_vz_lo = ext_vz - (double)new_vz;
@@ -72,9 +74,9 @@ __device__ inline void vv_kick_drift_body(
     double ext_y = (double)positions_y[i] + positions_y_lo[i] + dy;
     double ext_z = (double)positions_z[i] + positions_z_lo[i] + dz;
 
-    float new_x = (float)ext_x;
-    float new_y = (float)ext_y;
-    float new_z = (float)ext_z;
+    Real new_x = (Real)ext_x;
+    Real new_y = (Real)ext_y;
+    Real new_z = (Real)ext_z;
     positions_x_lo[i] = ext_x - (double)new_x;
     positions_y_lo[i] = ext_y - (double)new_y;
     positions_z_lo[i] = ext_z - (double)new_z;
@@ -92,16 +94,16 @@ __device__ inline void vv_kick_drift_body(
     images_y[i] = ny;
     images_z[i] = nz;
   } else {
-    float vx = velocities_x[i] + ax * half_dt;
-    float vy = velocities_y[i] + ay * half_dt;
-    float vz = velocities_z[i] + az * half_dt;
+    Real vx = velocities_x[i] + ax * half_dt;
+    Real vy = velocities_y[i] + ay * half_dt;
+    Real vz = velocities_z[i] + az * half_dt;
     velocities_x[i] = vx;
     velocities_y[i] = vy;
     velocities_z[i] = vz;
 
-    float px = positions_x[i] + vx * dt;
-    float py = positions_y[i] + vy * dt;
-    float pz = positions_z[i] + vz * dt;
+    Real px = positions_x[i] + vx * dt;
+    Real py = positions_y[i] + vy * dt;
+    Real pz = positions_z[i] + vz * dt;
 
     int nx = images_x[i];
     int ny = images_y[i];
@@ -121,17 +123,17 @@ __device__ inline void vv_kick_drift_body(
 template <bool LOSSLESS>
 __device__ inline void vv_kick_body(
     unsigned int i,
-    float *velocities_x, float *velocities_y, float *velocities_z,
+    Real *velocities_x, Real *velocities_y, Real *velocities_z,
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
-    const float *forces_x, const float *forces_y, const float *forces_z,
-    const float *masses,
-    float dt)
+    const Real *forces_x, const Real *forces_y, const Real *forces_z,
+    const Real *masses,
+    Real dt)
 {
-  float m = masses[i];
-  float ax = forces_x[i] / m;
-  float ay = forces_y[i] / m;
-  float az = forces_z[i] / m;
-  float half_dt = dt * 0.5f;
+  Real m = masses[i];
+  Real ax = forces_x[i] / m;
+  Real ay = forces_y[i] / m;
+  Real az = forces_z[i] / m;
+  Real half_dt = dt * R(0.5);
 
   if constexpr (LOSSLESS) {
     double dvx = (double)(ax * half_dt);
@@ -142,9 +144,9 @@ __device__ inline void vv_kick_body(
     double ext_vy = (double)velocities_y[i] + velocities_y_lo[i] + dvy;
     double ext_vz = (double)velocities_z[i] + velocities_z_lo[i] + dvz;
 
-    float new_vx = (float)ext_vx;
-    float new_vy = (float)ext_vy;
-    float new_vz = (float)ext_vz;
+    Real new_vx = (Real)ext_vx;
+    Real new_vy = (Real)ext_vy;
+    Real new_vz = (Real)ext_vz;
     velocities_x_lo[i] = ext_vx - (double)new_vx;
     velocities_y_lo[i] = ext_vy - (double)new_vy;
     velocities_z_lo[i] = ext_vz - (double)new_vz;
@@ -159,13 +161,13 @@ __device__ inline void vv_kick_body(
 }
 
 extern "C" __global__ void vv_kick_drift(
-    float *positions_x, float *positions_y, float *positions_z,
+    Real *positions_x, Real *positions_y, Real *positions_z,
     int *images_x, int *images_y, int *images_z,
-    float *velocities_x, float *velocities_y, float *velocities_z,
-    const float *forces_x, const float *forces_y, const float *forces_z,
-    const float *masses,
-    float lx, float ly, float lz, float xy, float xz, float yz,
-    float dt,
+    Real *velocities_x, Real *velocities_y, Real *velocities_z,
+    const Real *forces_x, const Real *forces_y, const Real *forces_z,
+    const Real *masses,
+    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    Real dt,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -184,10 +186,10 @@ extern "C" __global__ void vv_kick_drift(
 }
 
 extern "C" __global__ void vv_kick(
-    float *velocities_x, float *velocities_y, float *velocities_z,
-    const float *forces_x, const float *forces_y, const float *forces_z,
-    const float *masses,
-    float dt,
+    Real *velocities_x, Real *velocities_y, Real *velocities_z,
+    const Real *forces_x, const Real *forces_y, const Real *forces_z,
+    const Real *masses,
+    Real dt,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -203,15 +205,15 @@ extern "C" __global__ void vv_kick(
 }
 
 extern "C" __global__ void vv_kick_drift_lossless(
-    float *positions_x, float *positions_y, float *positions_z,
+    Real *positions_x, Real *positions_y, Real *positions_z,
     int *images_x, int *images_y, int *images_z,
-    float *velocities_x, float *velocities_y, float *velocities_z,
+    Real *velocities_x, Real *velocities_y, Real *velocities_z,
     double *positions_x_lo, double *positions_y_lo, double *positions_z_lo,
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
-    const float *forces_x, const float *forces_y, const float *forces_z,
-    const float *masses,
-    float lx, float ly, float lz, float xy, float xz, float yz,
-    float dt,
+    const Real *forces_x, const Real *forces_y, const Real *forces_z,
+    const Real *masses,
+    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    Real dt,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
@@ -230,11 +232,11 @@ extern "C" __global__ void vv_kick_drift_lossless(
 }
 
 extern "C" __global__ void vv_kick_lossless(
-    float *velocities_x, float *velocities_y, float *velocities_z,
+    Real *velocities_x, Real *velocities_y, Real *velocities_z,
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
-    const float *forces_x, const float *forces_y, const float *forces_z,
-    const float *masses,
-    float dt,
+    const Real *forces_x, const Real *forces_y, const Real *forces_z,
+    const Real *masses,
+    Real dt,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;

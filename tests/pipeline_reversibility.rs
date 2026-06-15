@@ -1,3 +1,7 @@
+// Reversibility relies on the lossless compensated-summation kernels,
+// which are only compiled into the default (f32) build.
+#![cfg(not(feature = "f64"))]
+
 mod common;
 use common::*;
 
@@ -10,15 +14,16 @@ use heddle_md::gpu::{
 };
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
+use heddle_md::precision::Real;
 
 const N: usize = 64;
-const BOX_L: f32 = 8.0;
-const LATTICE_SPACING: f32 = 2.0;
-const LATTICE_ORIGIN: f32 = -3.0;
-const DT: f32 = 0.001;
-const SIGMA: f32 = 1.0;
-const EPSILON: f32 = 1.0;
-const CUTOFF: f32 = 2.5;
+const BOX_L: Real = 8.0;
+const LATTICE_SPACING: Real = 2.0;
+const LATTICE_ORIGIN: Real = -3.0;
+const DT: Real = 0.001;
+const SIGMA: Real = 1.0;
+const EPSILON: Real = 1.0;
+const CUTOFF: Real = 2.5;
 const N_STEPS: usize = 100;
 const RESIDUAL_TOL: f64 = 1e-10;
 
@@ -31,13 +36,13 @@ fn build_initial_state() -> ParticleState {
         for iy in 0..4 {
             for iz in 0..4 {
                 let i = ix * 16 + iy * 4 + iz;
-                let fi = i as f32;
+                let fi = i as Real;
                 let perturb_x = 0.2 * (fi * 0.7 + 0.0).sin();
                 let perturb_y = 0.2 * (fi * 0.7 + 1.1).sin();
                 let perturb_z = 0.2 * (fi * 0.7 + 2.3).sin();
-                positions_x.push(ix as f32 * LATTICE_SPACING + LATTICE_ORIGIN + perturb_x);
-                positions_y.push(iy as f32 * LATTICE_SPACING + LATTICE_ORIGIN + perturb_y);
-                positions_z.push(iz as f32 * LATTICE_SPACING + LATTICE_ORIGIN + perturb_z);
+                positions_x.push(ix as Real * LATTICE_SPACING + LATTICE_ORIGIN + perturb_x);
+                positions_y.push(iy as Real * LATTICE_SPACING + LATTICE_ORIGIN + perturb_y);
+                positions_z.push(iz as Real * LATTICE_SPACING + LATTICE_ORIGIN + perturb_z);
             }
         }
     }
@@ -49,7 +54,7 @@ fn build_initial_state() -> ParticleState {
         vec![0.0; N],
         vec![0.0; N],
         vec![1.0; N],
-        vec![0.0_f32; N],
+        vec![0.0; N],
         vec![0u32; N],
         None,
             None,
@@ -59,16 +64,16 @@ fn build_initial_state() -> ParticleState {
 
 #[derive(Clone, Debug)]
 struct FullSnapshot {
-    positions_x: Vec<f32>,
-    positions_y: Vec<f32>,
-    positions_z: Vec<f32>,
-    velocities_x: Vec<f32>,
-    velocities_y: Vec<f32>,
-    velocities_z: Vec<f32>,
-    forces_x: Vec<f32>,
-    forces_y: Vec<f32>,
-    forces_z: Vec<f32>,
-    masses: Vec<f32>,
+    positions_x: Vec<Real>,
+    positions_y: Vec<Real>,
+    positions_z: Vec<Real>,
+    velocities_x: Vec<Real>,
+    velocities_y: Vec<Real>,
+    velocities_z: Vec<Real>,
+    forces_x: Vec<Real>,
+    forces_y: Vec<Real>,
+    forces_z: Vec<Real>,
+    masses: Vec<Real>,
     particle_ids: Vec<u32>,
     positions_x_lo: Vec<f64>,
     positions_y_lo: Vec<f64>,
@@ -101,9 +106,9 @@ fn capture_snapshot(buffers: &ParticleBuffers, lossless: &LosslessBuffers) -> Fu
     }
 }
 
-fn neg_in_place_f32(device: &Arc<CudaDevice>, slice: &mut CudaSlice<f32>) {
-    let host: Vec<f32> = device.dtoh_sync_copy(slice).unwrap();
-    let neg: Vec<f32> = host.into_iter().map(|x| -x).collect();
+fn neg_in_place(device: &Arc<CudaDevice>, slice: &mut CudaSlice<Real>) {
+    let host: Vec<Real> = device.dtoh_sync_copy(slice).unwrap();
+    let neg: Vec<Real> = host.into_iter().map(|x| -x).collect();
     device.htod_sync_copy_into(&neg, slice).unwrap();
 }
 
@@ -115,9 +120,9 @@ fn neg_in_place_f64(device: &Arc<CudaDevice>, slice: &mut CudaSlice<f64>) {
 
 fn negate_velocities_lossless(buffers: &mut ParticleBuffers, lossless: &mut LosslessBuffers) {
     let device = buffers.device.clone();
-    neg_in_place_f32(&device, &mut buffers.velocities_x);
-    neg_in_place_f32(&device, &mut buffers.velocities_y);
-    neg_in_place_f32(&device, &mut buffers.velocities_z);
+    neg_in_place(&device, &mut buffers.velocities_x);
+    neg_in_place(&device, &mut buffers.velocities_y);
+    neg_in_place(&device, &mut buffers.velocities_z);
     neg_in_place_f64(&device, &mut lossless.velocities_x_lo);
     neg_in_place_f64(&device, &mut lossless.velocities_y_lo);
     neg_in_place_f64(&device, &mut lossless.velocities_z_lo);
@@ -125,9 +130,9 @@ fn negate_velocities_lossless(buffers: &mut ParticleBuffers, lossless: &mut Loss
 
 fn negate_velocities_lossy(buffers: &mut ParticleBuffers) {
     let device = buffers.device.clone();
-    neg_in_place_f32(&device, &mut buffers.velocities_x);
-    neg_in_place_f32(&device, &mut buffers.velocities_y);
-    neg_in_place_f32(&device, &mut buffers.velocities_z);
+    neg_in_place(&device, &mut buffers.velocities_x);
+    neg_in_place(&device, &mut buffers.velocities_y);
+    neg_in_place(&device, &mut buffers.velocities_z);
 }
 
 struct PipelineFixture {
@@ -161,14 +166,14 @@ impl PipelineFixture {
 }
 
 // rq-7b5eef8c
-fn lossless_step(fixture: &mut PipelineFixture, lossless: &mut LosslessBuffers, dt: f32) {
+fn lossless_step(fixture: &mut PipelineFixture, lossless: &mut LosslessBuffers, dt: Real) {
     vv_kick_drift_lossless(&mut fixture.buffers, lossless, &fixture.sim_box, dt).unwrap();
     lj_pair_force_no_excl(&fixture.buffers, &mut fixture.pair, &fixture.sim_box, &fixture.params).unwrap();
     reduce_pair_forces_into_buffers(&fixture.pair, &fixture.counts, &mut fixture.buffers).unwrap();
     vv_kick_lossless(&mut fixture.buffers, lossless, dt).unwrap();
 }
 
-fn lossy_step(fixture: &mut PipelineFixture, dt: f32) {
+fn lossy_step(fixture: &mut PipelineFixture, dt: Real) {
     vv_kick_drift(&mut fixture.buffers, &fixture.sim_box, dt).unwrap();
     lj_pair_force_no_excl(&fixture.buffers, &mut fixture.pair, &fixture.sim_box, &fixture.params).unwrap();
     reduce_pair_forces_into_buffers(&fixture.pair, &fixture.counts, &mut fixture.buffers).unwrap();
@@ -271,7 +276,7 @@ fn positions_visibly_evolve_over_lossless_forward_run() {
             let dz = after.positions_z[i] - initial.positions_z[i];
             (dx * dx + dy * dy + dz * dz).sqrt()
         })
-        .fold(0.0_f32, f32::max);
+        .fold(0.0, Real::max);
     assert!(
         max_disp > 0.001,
         "max displacement after {N_STEPS} steps was {max_disp} (should exceed 0.001)"
@@ -291,7 +296,7 @@ fn all_observables_finite_after_lossless_forward_run() {
     }
 
     let after = capture_snapshot(&fixture.buffers, &lossless);
-    let arrays: [(&str, &[f32]); 9] = [
+    let arrays: [(&str, &[Real]); 9] = [
         ("positions_x", &after.positions_x),
         ("positions_y", &after.positions_y),
         ("positions_z", &after.positions_z),
@@ -317,12 +322,12 @@ fn lossy_round_trip_does_not_restore_observables() {
     let mut fixture = PipelineFixture::build(&gpu, &state);
 
     fixture.warm_up();
-    let before_positions_x: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.positions_x).unwrap();
-    let before_positions_y: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.positions_y).unwrap();
-    let before_positions_z: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.positions_z).unwrap();
-    let before_velocities_x: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.velocities_x).unwrap();
-    let before_velocities_y: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.velocities_y).unwrap();
-    let before_velocities_z: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.velocities_z).unwrap();
+    let before_positions_x: Vec<Real> = device.dtoh_sync_copy(&fixture.buffers.positions_x).unwrap();
+    let before_positions_y: Vec<Real> = device.dtoh_sync_copy(&fixture.buffers.positions_y).unwrap();
+    let before_positions_z: Vec<Real> = device.dtoh_sync_copy(&fixture.buffers.positions_z).unwrap();
+    let before_velocities_x: Vec<Real> = device.dtoh_sync_copy(&fixture.buffers.velocities_x).unwrap();
+    let before_velocities_y: Vec<Real> = device.dtoh_sync_copy(&fixture.buffers.velocities_y).unwrap();
+    let before_velocities_z: Vec<Real> = device.dtoh_sync_copy(&fixture.buffers.velocities_z).unwrap();
 
     for _ in 0..N_STEPS {
         lossy_step(&mut fixture, DT);
@@ -333,12 +338,12 @@ fn lossy_round_trip_does_not_restore_observables() {
     }
     negate_velocities_lossy(&mut fixture.buffers);
 
-    let after_positions_x: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.positions_x).unwrap();
-    let after_positions_y: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.positions_y).unwrap();
-    let after_positions_z: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.positions_z).unwrap();
-    let after_velocities_x: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.velocities_x).unwrap();
-    let after_velocities_y: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.velocities_y).unwrap();
-    let after_velocities_z: Vec<f32> = device.dtoh_sync_copy(&fixture.buffers.velocities_z).unwrap();
+    let after_positions_x: Vec<Real> = device.dtoh_sync_copy(&fixture.buffers.positions_x).unwrap();
+    let after_positions_y: Vec<Real> = device.dtoh_sync_copy(&fixture.buffers.positions_y).unwrap();
+    let after_positions_z: Vec<Real> = device.dtoh_sync_copy(&fixture.buffers.positions_z).unwrap();
+    let after_velocities_x: Vec<Real> = device.dtoh_sync_copy(&fixture.buffers.velocities_x).unwrap();
+    let after_velocities_y: Vec<Real> = device.dtoh_sync_copy(&fixture.buffers.velocities_y).unwrap();
+    let after_velocities_z: Vec<Real> = device.dtoh_sync_copy(&fixture.buffers.velocities_z).unwrap();
 
     let differs = before_positions_x != after_positions_x
         || before_positions_y != after_positions_y

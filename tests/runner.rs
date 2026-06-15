@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use heddle_md::io::load_config;
 use heddle_md::runner::{RunnerError, cli_main_u8, run_simulation};
+use heddle_md::precision::Real;
 
 // k_B = 1 in the engine's atomic units; this is the SI value used to
 // construct SI-mode test inputs and to verify converted output values.
@@ -367,12 +368,12 @@ fn temperature_zero_yields_zero_velocities() {
         if cols.len() < 7 {
             continue;
         }
-        let vx: f32 = cols[4].parse().unwrap();
-        let vy: f32 = cols[5].parse().unwrap();
-        let vz: f32 = cols[6].parse().unwrap();
-        assert_eq!(vx.to_bits(), 0.0_f32.to_bits());
-        assert_eq!(vy.to_bits(), 0.0_f32.to_bits());
-        assert_eq!(vz.to_bits(), 0.0_f32.to_bits());
+        let vx: Real = cols[4].parse().unwrap();
+        let vy: Real = cols[5].parse().unwrap();
+        let vz: Real = cols[6].parse().unwrap();
+        assert_eq!(vx.to_bits(), (0.0 as Real).to_bits());
+        assert_eq!(vy.to_bits(), (0.0 as Real).to_bits());
+        assert_eq!(vz.to_bits(), (0.0 as Real).to_bits());
     }
 }
 
@@ -888,7 +889,7 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
         plan_calls: Arc<AtomicU64>,
     }
     impl Integrator for CountingStubIntegrator {
-        fn plan(&self, _dt: f32) -> StepPlan {
+        fn plan(&self, _dt: Real) -> StepPlan {
             self.plan_calls.fetch_add(1, Ordering::SeqCst);
             StepPlan::empty()
         }
@@ -1092,7 +1093,7 @@ fn run_simulation_with_registries_dispatches_user_registered_potential() {
         fn label(&self) -> &'static str {
             "stub-potential"
         }
-        fn max_cutoff(&self) -> Option<f32> {
+        fn max_cutoff(&self) -> Option<Real> {
             None
         }
         fn contribute(

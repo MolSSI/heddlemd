@@ -5,6 +5,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
+use crate::precision::REAL_FMT_DIGITS;
 use crate::units::{Dimension, UnitSystem};
 
 // rq-dc140510
@@ -60,9 +61,11 @@ impl MinlogWriter {
         let energy_out = self.units.to_user(Dimension::Energy, energy);
         let force_out = self.units.to_user(Dimension::Force, max_force);
         let step_out = self.units.to_user(Dimension::Length, step);
+        let p = REAL_FMT_DIGITS;
         writeln!(
             self.writer,
-            "{iter},{energy_out:.9e},{force_out:.9e},{step_out:.9e},{acc}"
+            "{iter},{energy_out:.p$e},{force_out:.p$e},{step_out:.p$e},{acc}",
+            p = p,
         )
         .map_err(io_err)
     }

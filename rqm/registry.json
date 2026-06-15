@@ -369,6 +369,13 @@
     "title": "cuFFT smoke test fails-loud when consecutive transforms produce different output",
     "type": "scenario"
   },
+  "rq-02f5d756": {
+    "decl": "- `__device__ __forceinline__ Real Real_fma(Real x, Real y, Real z);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
+  },
   "rq-032b4b79": {
     "decl": "Scenario: Reject a config whose derived root is empty",
     "file": "io/config-schema",
@@ -433,6 +440,14 @@
     "title": "Feature: Simulation Box and Periodic Boundary Conditions",
     "type": "file"
   },
+  "rq-03c6490c": {
+    "decl": "### File format precision selection",
+    "file": "precision",
+    "level": 3,
+    "refs": [],
+    "title": "File format precision selection",
+    "type": "section"
+  },
   "rq-03d70e2d": {
     "decl": "## Per-Step Kernel Sequence",
     "file": "integration/berendsen-barostat",
@@ -460,6 +475,13 @@
     ],
     "title": "Drop best-effort flushes",
     "type": "scenario"
+  },
+  "rq-043796fa": {
+    "decl": "- `__device__ __forceinline__ Real Real_sin(Real x);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
   },
   "rq-0469400b": {
     "decl": "### CUDA Kernels",
@@ -749,6 +771,13 @@
     "title": "Reject explicit images_y of wrong length",
     "type": "scenario"
   },
+  "rq-0709c5ec": {
+    "decl": "Scenario: Philox uniform fills 53 bits in the f64 build",
+    "file": "precision",
+    "refs": [],
+    "title": "Philox uniform fills 53 bits in the f64 build",
+    "type": "scenario"
+  },
   "rq-071e19df": {
     "decl": "Scenario: Reject non-positive temperature",
     "file": "integration/mtk-npt",
@@ -912,6 +941,21 @@
     ],
     "title": "Unknown angle type name rejected",
     "type": "scenario"
+  },
+  "rq-0873d567": {
+    "decl": "Scenario: cuFFT execute dispatches to the precision-matched executor under f64",
+    "file": "precision",
+    "refs": [],
+    "title": "cuFFT execute dispatches to the precision-matched executor under f64",
+    "type": "scenario"
+  },
+  "rq-08887654": {
+    "decl": "## Reading Existing Requirements",
+    "file": "precision",
+    "level": 2,
+    "refs": [],
+    "title": "Reading Existing Requirements",
+    "type": "section"
   },
   "rq-0896c33a": {
     "decl": "Scenario: Pair beyond cutoff contributes zero",
@@ -1255,6 +1299,13 @@
     "title": "Langevin kick_half count is 2 N_steps; drift_half is 2 N_steps; ou_step is N_steps",
     "type": "scenario"
   },
+  "rq-0c285656": {
+    "decl": "Scenario: cuFFT execute dispatches to the precision-matched executor in the default build",
+    "file": "precision",
+    "refs": [],
+    "title": "cuFFT execute dispatches to the precision-matched executor in the default build",
+    "type": "scenario"
+  },
   "rq-0c318e64": {
     "decl": "## Force Accumulation",
     "file": "forces/morse-bonded",
@@ -1315,6 +1366,13 @@
     "title": "Reject extra fields (e.g. seed from CSVR/Andersen)",
     "type": "scenario"
   },
+  "rq-0c7e2ed1": {
+    "decl": "- `typedef float Real;` (default) or `typedef double Real;` (when nvcc",
+    "file": "precision",
+    "refs": [],
+    "title": "typedef",
+    "type": "api-item"
+  },
   "rq-0c9dc32b": {
     "decl": "Scenario: Reject NaN tilt",
     "file": "simulation-box",
@@ -1362,6 +1420,13 @@
     ],
     "title": "Coulomb cutoff participates in box-too-small check",
     "type": "scenario"
+  },
+  "rq-0d14734d": {
+    "decl": "- `__device__ __forceinline__ void philox_normal_real_pair(uint32 a, uint32 b, uint32 c, uint32 d, Real *n0, Real *n1);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
   },
   "rq-0d413b82": {
     "decl": "Scenario: mtk_velocity_half_kick with exp_minus_alpha=1.0, phi_v_dt_half=0.5 reduces to a half-VV kick",
@@ -1864,6 +1929,13 @@
     "title": "Pre-flight refuses to overwrite an existing timings file",
     "type": "scenario"
   },
+  "rq-1148ddc5": {
+    "decl": "Scenario: Bit-exact pipeline reproducibility in the default build",
+    "file": "precision",
+    "refs": [],
+    "title": "Bit-exact pipeline reproducibility in the default build",
+    "type": "scenario"
+  },
   "rq-1163481e": {
     "decl": "- `log_column_names() -> &'static [\"andersen_conserved\"]`.",
     "file": "integration/andersen",
@@ -2108,6 +2180,13 @@
     ],
     "title": "Construct with chain_length = 1 reduces to vanilla Nosé-Hoover",
     "type": "scenario"
+  },
+  "rq-13070c27": {
+    "decl": "- `__device__ __forceinline__ Real Real_fabs(Real x);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
   },
   "rq-135a6e30": {
     "decl": "Scenario: Two registered kinds on a mixed-kind topology fan out",
@@ -2632,6 +2711,18 @@
     ],
     "title": "Empty ConstraintRegistry on a non-empty list reports UnsupportedKind",
     "type": "scenario"
+  },
+  "rq-182dd348": {
+    "decl": "- `pub const REAL_BYTES: usize = std::mem::size_of::<Real>();`",
+    "file": "precision",
+    "refs": [
+      {
+        "file": "src/precision.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "pub",
+    "type": "api-item"
   },
   "rq-18411920": {
     "decl": "- `ParticleBuffers::particle_count(&self) -> usize`",
@@ -3484,12 +3575,7 @@
   "rq-1fde7f32": {
     "decl": "Scenario: Four-column form sets LJ and Coulomb scales independently",
     "file": "forces/topology",
-    "refs": [
-      {
-        "file": "tests/topology.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Four-column form sets LJ and Coulomb scales independently",
     "type": "scenario"
   },
@@ -3918,6 +4004,13 @@
     "title": "Explicit non-zero images are stored as-supplied",
     "type": "scenario"
   },
+  "rq-23398f89": {
+    "decl": "- `__device__ __forceinline__ Real Real_cos(Real x);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
+  },
   "rq-2344fcec": {
     "decl": "- `LogWriter` — handle to an open log file. Fields are private; the type",
     "file": "io/log-output",
@@ -4013,6 +4106,13 @@
     ],
     "title": "Mixed-type pair uses the off-diagonal parameter slot",
     "type": "scenario"
+  },
+  "rq-24048902": {
+    "decl": "- `__device__ __forceinline__ Real Real_rsqrt(Real x);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
   },
   "rq-24073418": {
     "decl": "Scenario: log_column_values returns the cached most-recent pressure and post-rescale volume",
@@ -4350,6 +4450,13 @@
     "title": "CUDA Kernels",
     "type": "section"
   },
+  "rq-26c02ccc": {
+    "decl": "Scenario: Time attribute is always 9-digit f64 regardless of build",
+    "file": "precision",
+    "refs": [],
+    "title": "Time attribute is always 9-digit f64 regardless of build",
+    "type": "scenario"
+  },
   "rq-26d8c08c": {
     "decl": "Scenario: fill kernel handles a non-block-aligned buffer size",
     "file": "build-pipeline",
@@ -4511,6 +4618,13 @@
     "title": "Rescale preserves COM momentum",
     "type": "scenario"
   },
+  "rq-28967c97": {
+    "decl": "Scenario: f64 build trajectory writer emits 17-digit columns",
+    "file": "precision",
+    "refs": [],
+    "title": "f64 build trajectory writer emits 17-digit columns",
+    "type": "scenario"
+  },
   "rq-289ab328": {
     "decl": "### Types",
     "file": "integration/constraint-framework",
@@ -4635,6 +4749,13 @@
     "title": "Two independent lossless runs produce byte-identical results",
     "type": "scenario"
   },
+  "rq-2a30cf81": {
+    "decl": "Scenario: Math shim dispatches to single-precision intrinsics in default build",
+    "file": "precision",
+    "refs": [],
+    "title": "Math shim dispatches to single-precision intrinsics in default build",
+    "type": "scenario"
+  },
   "rq-2a36b95f": {
     "decl": "Scenario: Missing CLI argument prints usage and exits 1",
     "file": "simulation-runner",
@@ -4698,6 +4819,13 @@
     "refs": [],
     "title": "Empty State and degenerate cases",
     "type": "section"
+  },
+  "rq-2a9e2342": {
+    "decl": "Scenario: Round-trip preserves a representative Real value in the default build",
+    "file": "precision",
+    "refs": [],
+    "title": "Round-trip preserves a representative Real value in the default build",
+    "type": "scenario"
   },
   "rq-2aadbec9": {
     "decl": "### CUDA Kernels",
@@ -4900,6 +5028,13 @@
     "title": "ParticleBuffers carries the image-flag device buffers",
     "type": "scenario"
   },
+  "rq-2c81a766": {
+    "decl": "- `f32` build (default): `{:.9e}` — matches the existing format described",
+    "file": "precision",
+    "refs": [],
+    "title": "f32",
+    "type": "api-item"
+  },
   "rq-2c834256": {
     "decl": "### CUDA kernels",
     "file": "integration/csvr",
@@ -5030,6 +5165,13 @@
       }
     ],
     "title": "MtkNpt owns its own barostat",
+    "type": "scenario"
+  },
+  "rq-2d46ce11": {
+    "decl": "Scenario: Math shim dispatches to double-precision intrinsics in f64 build",
+    "file": "precision",
+    "refs": [],
+    "title": "Math shim dispatches to double-precision intrinsics in f64 build",
     "type": "scenario"
   },
   "rq-2d4efead": {
@@ -5197,6 +5339,13 @@
       }
     ],
     "title": "BondTypeConfig",
+    "type": "api-item"
+  },
+  "rq-2f27efa4": {
+    "decl": "- `pub struct Plan3dR2C` — 3D real-to-complex forward FFT plan.",
+    "file": "precision",
+    "refs": [],
+    "title": "pub",
     "type": "api-item"
   },
   "rq-2f52c25e": {
@@ -6543,6 +6692,13 @@
     "title": "ConstraintRegistry",
     "type": "api-item"
   },
+  "rq-3ce546db": {
+    "decl": "Scenario: Cross-build outputs are not bit-exact (informational)",
+    "file": "precision",
+    "refs": [],
+    "title": "Cross-build outputs are not bit-exact (informational)",
+    "type": "scenario"
+  },
   "rq-3d3679d0": {
     "decl": "#### `Properties` (required)",
     "file": "io/init-state-file",
@@ -6594,6 +6750,14 @@
       }
     ],
     "title": "Host-side RNG utility",
+    "type": "section"
+  },
+  "rq-3d83d0a4": {
+    "decl": "### Cargo feature",
+    "file": "precision",
+    "level": 3,
+    "refs": [],
+    "title": "Cargo feature",
     "type": "section"
   },
   "rq-3db027c2": {
@@ -6796,6 +6960,13 @@
     ],
     "title": "All output values are finite after the 100-step run",
     "type": "scenario"
+  },
+  "rq-3f77dca9": {
+    "decl": "- `__device__ __forceinline__ Real Real_floor(Real x);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
   },
   "rq-3f889ad8": {
     "decl": "# The atom-listing order is preserved verbatim: algorithm-specific",
@@ -7296,6 +7467,14 @@
     "title": "LogWriterError",
     "type": "api-item"
   },
+  "rq-45ebbc76": {
+    "decl": "## Feature API",
+    "file": "precision",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-4617c285": {
     "decl": "## Constraint Virial",
     "file": "integration/shake",
@@ -7477,6 +7656,14 @@
     "title": "r=0 produces zero force, not NaN",
     "type": "scenario"
   },
+  "rq-483fc240": {
+    "decl": "## Gherkin Scenarios",
+    "file": "precision",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-484ef36b": {
     "decl": "### Empty file",
     "file": "io/init-state-file",
@@ -7528,6 +7715,13 @@
     ],
     "title": "SD step formula moves the largest-force atom by exactly `step`",
     "type": "scenario"
+  },
+  "rq-48e7115e": {
+    "decl": "- `__device__ __forceinline__ Real Real_exp(Real x);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
   },
   "rq-4901507f": {
     "decl": "- `IntegratorRegistry`, `ThermostatRegistry`, `BarostatRegistry` —",
@@ -7959,6 +8153,13 @@
     "title": "Coulomb prefactor is unity in pair-force evaluation",
     "type": "scenario"
   },
+  "rq-4d8894d3": {
+    "decl": "Scenario: f64 build rejects lossless = true at config load",
+    "file": "precision",
+    "refs": [],
+    "title": "f64 build rejects lossless = true at config load",
+    "type": "scenario"
+  },
   "rq-4dbe4a07": {
     "decl": "Scenario: μ clamped to μ_min when the formula yields a non-positive μ³",
     "file": "integration/berendsen-barostat",
@@ -7970,6 +8171,13 @@
     ],
     "title": "μ clamped to μ_min when the formula yields a non-positive μ³",
     "type": "scenario"
+  },
+  "rq-4dd1b9e3": {
+    "decl": "- `R(x)` — a function-style macro that casts a numeric literal to `Real`:",
+    "file": "precision",
+    "refs": [],
+    "title": "R",
+    "type": "api-item"
   },
   "rq-4dd5d2d0": {
     "decl": "Scenario: LangevinBaoab builder owns its thermostat but not its barostat",
@@ -8199,6 +8407,18 @@
     ],
     "title": "Empty bond_type name rejected",
     "type": "scenario"
+  },
+  "rq-507c40d1": {
+    "decl": "- `pub const REAL_IS_F64: bool;`",
+    "file": "precision",
+    "refs": [
+      {
+        "file": "src/precision.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "pub",
+    "type": "api-item"
   },
   "rq-508680c7": {
     "decl": "- `MtkNptIntegrator` — implements the `Integrator` trait declared",
@@ -9034,6 +9254,13 @@
     "title": "Duplicate section header",
     "type": "scenario"
   },
+  "rq-584542bb": {
+    "decl": "- `pub struct Plan3dC2R` — 3D complex-to-real inverse FFT plan.",
+    "file": "precision",
+    "refs": [],
+    "title": "pub",
+    "type": "api-item"
+  },
   "rq-58476106": {
     "decl": "Scenario: Reject [constraints] with lossless velocity-verlet",
     "file": "integration/constraint-framework",
@@ -9199,6 +9426,14 @@
     "title": "A symplectic integrator emits ForceEval with ForcesOnly by default",
     "type": "scenario"
   },
+  "rq-5a89475f": {
+    "decl": "### cuFFT precision selection",
+    "file": "precision",
+    "level": 3,
+    "refs": [],
+    "title": "cuFFT precision selection",
+    "type": "section"
+  },
   "rq-5aae9633": {
     "decl": "### `Thermostat` trait overrides",
     "file": "integration/csvr",
@@ -9252,6 +9487,13 @@
       }
     ],
     "title": "Comments and blank lines are tolerated",
+    "type": "scenario"
+  },
+  "rq-5b13a93d": {
+    "decl": "Scenario: f64 build resolves Real to f64",
+    "file": "precision",
+    "refs": [],
+    "title": "f64 build resolves Real to f64",
     "type": "scenario"
   },
   "rq-5b934ecd": {
@@ -9686,6 +9928,13 @@
     "title": "Registries::with_builtins() pre-populates every inner registry",
     "type": "scenario"
   },
+  "rq-5fa49fa5": {
+    "decl": "Scenario: Default build resolves Real to f32",
+    "file": "precision",
+    "refs": [],
+    "title": "Default build resolves Real to f32",
+    "type": "scenario"
+  },
   "rq-5fcdc437": {
     "decl": "Scenario: Atom with no angles gets zero accumulator",
     "file": "forces/harmonic-angle",
@@ -10087,6 +10336,13 @@
     "title": "Empty State and degenerate cases",
     "type": "section"
   },
+  "rq-64627cdb": {
+    "decl": "Scenario: Default build trajectory writer emits 9-digit columns",
+    "file": "precision",
+    "refs": [],
+    "title": "Default build trajectory writer emits 9-digit columns",
+    "type": "scenario"
+  },
   "rq-64700eb0": {
     "decl": "Scenario: ShakeConstraintsState::new with a single 3-atom water group succeeds",
     "file": "integration/shake",
@@ -10214,6 +10470,13 @@
     "refs": [],
     "title": "`[[analyses]]` array",
     "type": "section"
+  },
+  "rq-65d18162": {
+    "decl": "- `Config::integrator` rejects `lossless = true` at config-load time with",
+    "file": "precision",
+    "refs": [],
+    "title": "Config",
+    "type": "api-item"
   },
   "rq-6606584b": {
     "decl": "Scenario: Config rejected by load_config",
@@ -10343,6 +10606,13 @@
     "title": "Output CSV has exactly `n_bins` data rows",
     "type": "scenario"
   },
+  "rq-67279128": {
+    "decl": "Scenario: Default build does not pass -DREAL_F64 to nvcc",
+    "file": "precision",
+    "refs": [],
+    "title": "Default build does not pass -DREAL_F64 to nvcc",
+    "type": "scenario"
+  },
   "rq-6745e7c5": {
     "decl": "Scenario: Each subsystem's XKernels::load returns its kernel handle",
     "file": "build-pipeline",
@@ -10413,6 +10683,13 @@
       }
     ],
     "title": "Tilts may be negative",
+    "type": "scenario"
+  },
+  "rq-67e6c4fb": {
+    "decl": "Scenario: ParticleBuffers device allocations widen with the feature",
+    "file": "precision",
+    "refs": [],
+    "title": "ParticleBuffers device allocations widen with the feature",
     "type": "scenario"
   },
   "rq-67ebf3b1": {
@@ -10486,6 +10763,13 @@
     ],
     "title": "Accept positions strictly inside the primary cell (orthorhombic)",
     "type": "scenario"
+  },
+  "rq-688a5b6c": {
+    "decl": "- `__device__ __forceinline__ Real Real_rint(Real x);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
   },
   "rq-688fb553": {
     "decl": "#### `--with-gpu` stages",
@@ -10780,6 +11064,14 @@
     "title": "Two independent rebuilds with identical positions produce identical lists",
     "type": "scenario"
   },
+  "rq-6c3cddc1": {
+    "decl": "### Energy and virial widening",
+    "file": "precision",
+    "level": 3,
+    "refs": [],
+    "title": "Energy and virial widening",
+    "type": "section"
+  },
   "rq-6c52e57d": {
     "decl": "Scenario: Unwrap invariant holds across wrap_position_with_image_count",
     "file": "simulation-box",
@@ -10986,6 +11278,13 @@
     "title": "SI-mode writer multiplies the Lattice by the bohr -> meter factor",
     "type": "scenario"
   },
+  "rq-6dc17c20": {
+    "decl": "Scenario: SPME reciprocal stream uses double-precision cuFFT plans under f64",
+    "file": "precision",
+    "refs": [],
+    "title": "SPME reciprocal stream uses double-precision cuFFT plans under f64",
+    "type": "scenario"
+  },
   "rq-6dc8454d": {
     "decl": "Scenario: Reject yoshida_order outside {1, 3, 5, 7}",
     "file": "integration/nose-hoover-chain",
@@ -11068,6 +11367,13 @@
     ],
     "title": "compute_kinetic_energy",
     "type": "api-item"
+  },
+  "rq-6e828da5": {
+    "decl": "# Feature: f64 Precision Compile-Time Feature Flag",
+    "file": "precision",
+    "refs": [],
+    "title": "Feature: f64 Precision Compile-Time Feature Flag",
+    "type": "file"
   },
   "rq-6e98222c": {
     "decl": "Scenario: Plan walk on empty Langevin state is a no-op",
@@ -11173,6 +11479,13 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-6f99094a": {
+    "decl": "- `f64` build: `{:.17e}` — 17-fractional-digit exponent representation,",
+    "file": "precision",
+    "refs": [],
+    "title": "f64",
+    "type": "api-item"
   },
   "rq-6faf6fba": {
     "decl": "Scenario: Two independent composed runs with identical configs produce byte-identical outputs",
@@ -12072,6 +12385,13 @@
     "title": "Reject ParticleBuffers::new when a host array length is inconsistent",
     "type": "scenario"
   },
+  "rq-781ce8fc": {
+    "decl": "- `__device__ __forceinline__ Real Real_pow(Real x, Real y);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
+  },
   "rq-7822b88b": {
     "decl": "Scenario: 100-step lossless round trip restores observables bit-exactly",
     "file": "pipeline-reversibility",
@@ -12740,6 +13060,13 @@
     "title": "Parameter-table symmetry",
     "type": "section"
   },
+  "rq-7d9d35f7": {
+    "decl": "- `__device__ __forceinline__ void Real_sincos(Real x, Real *s, Real *c);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
+  },
   "rq-7d9f2da7": {
     "decl": "Scenario: Rescale is skipped when K_old = 0",
     "file": "integration/berendsen",
@@ -13321,6 +13648,13 @@
     "title": "Real-space slot matches the closed-form erfc force for an isolated pair",
     "type": "scenario"
   },
+  "rq-831fee6e": {
+    "decl": "Scenario: f64 build passes -DREAL_F64 to nvcc",
+    "file": "precision",
+    "refs": [],
+    "title": "f64 build passes -DREAL_F64 to nvcc",
+    "type": "scenario"
+  },
   "rq-8326d2d1": {
     "decl": "- `spme_influence_multiply(spme_state) -> Result<(), GpuError>`",
     "file": "forces/spme",
@@ -13577,6 +13911,13 @@
     "title": "Langevin BAOAB kind with valid parameters is accepted",
     "type": "scenario"
   },
+  "rq-86c31917": {
+    "decl": "Scenario: Philox uniform consumes two lanes per call in the f64 build",
+    "file": "precision",
+    "refs": [],
+    "title": "Philox uniform consumes two lanes per call in the f64 build",
+    "type": "scenario"
+  },
   "rq-86f01d20": {
     "decl": "- `AnalysisBuilder` — open-shaped builder trait. Mirrors",
     "file": "analysis/framework",
@@ -13709,6 +14050,20 @@
     "title": "Kernel failure mid-loop returns exit code 2",
     "type": "scenario"
   },
+  "rq-8893982c": {
+    "decl": "Scenario: Trajectory reader round-trips Real values byte-for-byte within a build",
+    "file": "precision",
+    "refs": [],
+    "title": "Trajectory reader round-trips Real values byte-for-byte within a build",
+    "type": "scenario"
+  },
+  "rq-88a10028": {
+    "decl": "Scenario: CUDA Real typedef matches the build precision",
+    "file": "precision",
+    "refs": [],
+    "title": "CUDA Real typedef matches the build precision",
+    "type": "scenario"
+  },
   "rq-88e3ac79": {
     "decl": "Scenario: Switching integrator.kind changes the trajectory",
     "file": "simulation-runner",
@@ -13797,6 +14152,19 @@
     ],
     "title": "step() launches the expected kernel set",
     "type": "scenario"
+  },
+  "rq-89c517aa": {
+    "decl": "### Rust precision module",
+    "file": "precision",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/precision.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Rust precision module",
+    "type": "section"
   },
   "rq-89c71321": {
     "decl": "Scenario: set_lattice rejects a non-positive diagonal without mutating the box",
@@ -13950,6 +14318,13 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-8b40b72e": {
+    "decl": "Scenario: CUDA Real typedef under f64 build",
+    "file": "precision",
+    "refs": [],
+    "title": "CUDA Real typedef under f64 build",
+    "type": "scenario"
+  },
   "rq-8b41bc4d": {
     "decl": "Scenario: Two `heddlemd analyze` runs on the same inputs produce byte-identical CSVs",
     "file": "analysis/rdf",
@@ -14018,6 +14393,14 @@
     ],
     "title": "Exclusion only applies to the listed pair",
     "type": "scenario"
+  },
+  "rq-8c83aff4": {
+    "decl": "## Out of Scope",
+    "file": "precision",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-8c96d3c7": {
     "decl": "Scenario: Coulomb and LJ exclusions are independent",
@@ -14640,6 +15023,13 @@
     "title": "LogWriter",
     "type": "api-item"
   },
+  "rq-928da8e4": {
+    "decl": "- `typedef float2 Real2;` / `typedef double2 Real2;` — used by SPME",
+    "file": "precision",
+    "refs": [],
+    "title": "typedef",
+    "type": "api-item"
+  },
   "rq-92cecd28": {
     "decl": "Scenario: apply launches the expected kernel set",
     "file": "integration/berendsen-barostat",
@@ -15242,6 +15632,14 @@
     "title": "Two identical calls produce byte-identical velocities",
     "type": "scenario"
   },
+  "rq-9922bfd1": {
+    "decl": "### CUDA precision header",
+    "file": "precision",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA precision header",
+    "type": "section"
+  },
   "rq-993ec182": {
     "decl": "Scenario: [integrator] section parses into a SlotConfig",
     "file": "io/config-schema",
@@ -15506,6 +15904,13 @@
       }
     ],
     "title": "Triatomic at equilibrium gives zero net force on all atoms",
+    "type": "scenario"
+  },
+  "rq-9bc38ffd": {
+    "decl": "Scenario: f64 build does not load lossless kernel handles",
+    "file": "precision",
+    "refs": [],
+    "title": "f64 build does not load lossless kernel handles",
     "type": "scenario"
   },
   "rq-9bd207b2": {
@@ -15937,6 +16342,18 @@
       }
     ],
     "title": "lint_simulation_with_registries",
+    "type": "api-item"
+  },
+  "rq-9edae17f": {
+    "decl": "- `pub type Real`",
+    "file": "precision",
+    "refs": [
+      {
+        "file": "src/precision.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "pub",
     "type": "api-item"
   },
   "rq-9f080e19": {
@@ -16679,6 +17096,13 @@
     "title": "ParticleTypeConfig",
     "type": "api-item"
   },
+  "rq-a6bc92a1": {
+    "decl": "Scenario: Philox uniform consumes one lane per call in the default build",
+    "file": "precision",
+    "refs": [],
+    "title": "Philox uniform consumes one lane per call in the default build",
+    "type": "scenario"
+  },
   "rq-a6cd03aa": {
     "decl": "Scenario: Construct CsvrThermostat via the registry (unconstrained system)",
     "file": "integration/csvr",
@@ -16726,6 +17150,14 @@
     ],
     "title": "log_column_values returns the cached pressure, post-step volume,",
     "type": "scenario"
+  },
+  "rq-a740c278": {
+    "decl": "### nvcc precision flag",
+    "file": "precision",
+    "level": 3,
+    "refs": [],
+    "title": "nvcc precision flag",
+    "type": "section"
   },
   "rq-a7677c61": {
     "decl": "- `UnitSystem::to_user(self, dim: Dimension, value: f64) -> f64`",
@@ -17166,6 +17598,20 @@
     ],
     "title": "ConstraintCapableIntegrator",
     "type": "api-item"
+  },
+  "rq-aba94795": {
+    "decl": "Scenario: Default build accepts lossless = true at config load",
+    "file": "precision",
+    "refs": [],
+    "title": "Default build accepts lossless = true at config load",
+    "type": "scenario"
+  },
+  "rq-abab7081": {
+    "decl": "Scenario: CPU-reference tolerance constant tightens in the f64 build",
+    "file": "precision",
+    "refs": [],
+    "title": "CPU-reference tolerance constant tightens in the f64 build",
+    "type": "scenario"
   },
   "rq-abcae430": {
     "decl": "Scenario: Construct with particle_count = 0",
@@ -17780,6 +18226,13 @@
     "title": "SpmeReciprocalState",
     "type": "api-item"
   },
+  "rq-b11e4631": {
+    "decl": "Scenario: Bit-exact pipeline reproducibility under f64",
+    "file": "precision",
+    "refs": [],
+    "title": "Bit-exact pipeline reproducibility under f64",
+    "type": "scenario"
+  },
   "rq-b13eba96": {
     "decl": "Scenario: Particles evolve independently with their own forces",
     "file": "integration/velocity-verlet",
@@ -18034,6 +18487,13 @@
       }
     ],
     "title": "C-rescale barostat missing seed is rejected",
+    "type": "scenario"
+  },
+  "rq-b376229c": {
+    "decl": "Scenario: f64 build accepts lossless = false at config load",
+    "file": "precision",
+    "refs": [],
+    "title": "f64 build accepts lossless = false at config load",
     "type": "scenario"
   },
   "rq-b39d3be7": {
@@ -18537,6 +18997,13 @@
     "title": "Non-finite check precedes non-positive check on a diagonal",
     "type": "scenario"
   },
+  "rq-ba281906": {
+    "decl": "Scenario: SPME reciprocal stream uses single-precision cuFFT plans in the default build",
+    "file": "precision",
+    "refs": [],
+    "title": "SPME reciprocal stream uses single-precision cuFFT plans in the default build",
+    "type": "scenario"
+  },
   "rq-ba2f07bd": {
     "decl": "Scenario: Reject `between` referencing an undeclared type",
     "file": "analysis/rdf",
@@ -18837,6 +19304,14 @@
     ],
     "title": "[barostat] missing kind is rejected",
     "type": "scenario"
+  },
+  "rq-bdbf6752": {
+    "decl": "### Reproducibility under the feature flag",
+    "file": "precision",
+    "level": 3,
+    "refs": [],
+    "title": "Reproducibility under the feature flag",
+    "type": "section"
   },
   "rq-bdd03f85": {
     "decl": "Scenario: langevin-baoab + [thermostat] is rejected",
@@ -19205,6 +19680,14 @@
     "title": "Lattice Convention",
     "type": "section"
   },
+  "rq-c15b187c": {
+    "decl": "## Test Targets",
+    "file": "precision",
+    "level": 2,
+    "refs": [],
+    "title": "Test Targets",
+    "type": "section"
+  },
   "rq-c1678fe1": {
     "decl": "## Launch Configuration",
     "file": "forces/morse-bonded",
@@ -19372,6 +19855,13 @@
     ],
     "title": "Custom sub-step alone fires no constraint hooks",
     "type": "scenario"
+  },
+  "rq-c3d3dc8e": {
+    "decl": "- `__device__ __forceinline__ Real Real_sqrt(Real x);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
   },
   "rq-c44b25af": {
     "decl": "- `ThermostatRegistry::lookup(&self, kind: &str) -> Option<&dyn ThermostatBuilder>`",
@@ -19666,6 +20156,13 @@
     "refs": [],
     "title": "Determinism",
     "type": "section"
+  },
+  "rq-c6364175": {
+    "decl": "- `__device__ __forceinline__ Real Real_log(Real x);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
   },
   "rq-c669b757": {
     "decl": "## Smoke Test",
@@ -20118,6 +20615,13 @@
     "title": "Atom appearing as the centre of one angle and a wing of",
     "type": "scenario"
   },
+  "rq-ca8f0ae5": {
+    "decl": "- `pub type RealComplex` — alias for `cufftComplex` in the f32 build and",
+    "file": "precision",
+    "refs": [],
+    "title": "pub",
+    "type": "api-item"
+  },
   "rq-cadfb824": {
     "decl": "- `mtk_velocity_half_kick(buffers: &mut ParticleBuffers, exp_minus_alpha: f32, phi_v_dt_half: f32) -> Result<(), GpuError>`",
     "file": "integration/mtk-npt",
@@ -20293,6 +20797,13 @@
     "refs": [],
     "title": "Slot Output Buffers",
     "type": "section"
+  },
+  "rq-cd3943e1": {
+    "decl": "Scenario: Toggling the f64 feature forces a kernel recompile",
+    "file": "precision",
+    "refs": [],
+    "title": "Toggling the f64 feature forces a kernel recompile",
+    "type": "scenario"
   },
   "rq-cd50d861": {
     "decl": "Scenario: cell_offsets contains the prefix sum of cell occupancies",
@@ -21023,6 +21534,18 @@
     "title": "Reject non-positive temperature",
     "type": "scenario"
   },
+  "rq-d4759a9a": {
+    "decl": "- `pub const REAL_NAME: &str;`",
+    "file": "precision",
+    "refs": [
+      {
+        "file": "src/precision.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "pub",
+    "type": "api-item"
+  },
   "rq-d47caa3d": {
     "decl": "- `NeighborListState::new_cell_list_only(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, n_cells_per_direction: [u32; 3]) -> Result<NeighborListState, NeighborListError>`",
     "file": "forces/neighbor-list",
@@ -21586,6 +22109,14 @@
     "title": "andersen_resample",
     "type": "api-item"
   },
+  "rq-da488e3a": {
+    "decl": "### Philox uniform-`Real` conversion",
+    "file": "precision",
+    "level": 3,
+    "refs": [],
+    "title": "Philox uniform-`Real` conversion",
+    "type": "section"
+  },
   "rq-daadfc1a": {
     "decl": "## Per-Step Interface",
     "file": "integration/framework",
@@ -21867,6 +22398,13 @@
     "title": "Construct AndersenThermostat via the registry",
     "type": "scenario"
   },
+  "rq-dc5041ea": {
+    "decl": "Scenario: ParticleState fields are Vec<Real> under f64",
+    "file": "precision",
+    "refs": [],
+    "title": "ParticleState fields are Vec<Real> under f64",
+    "type": "scenario"
+  },
   "rq-dc51e1c3": {
     "decl": "Scenario: Two independent composed runs with identical seeds produce byte-identical outputs",
     "file": "integration/csvr",
@@ -21958,6 +22496,13 @@
       }
     ],
     "title": "SPME slots present in the ForceField when [spme] is configured",
+    "type": "scenario"
+  },
+  "rq-dd417155": {
+    "decl": "Scenario: ParticleState fields are Vec<Real>",
+    "file": "precision",
+    "refs": [],
+    "title": "ParticleState fields are Vec<Real>",
     "type": "scenario"
   },
   "rq-dd6fe266": {
@@ -22722,6 +23267,13 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-e4c2141e": {
+    "decl": "Scenario: Kinetic energy reduction produces a Real in both builds",
+    "file": "precision",
+    "refs": [],
+    "title": "Kinetic energy reduction produces a Real in both builds",
+    "type": "scenario"
+  },
   "rq-e4f403e9": {
     "decl": "## Gherkin Scenarios",
     "file": "pipeline-reversibility",
@@ -23371,6 +23923,13 @@
     "title": "Column format: atom_1 atom_2 ... atom_k  constraint_type_name",
     "type": "file"
   },
+  "rq-eade13fb": {
+    "decl": "- `__device__ __forceinline__ Real philox_uniform_real(uint32 hi, uint32 lo);`",
+    "file": "precision",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
+  },
   "rq-eb0bc993": {
     "decl": "## Parameters",
     "file": "integration/andersen",
@@ -23389,6 +23948,13 @@
       }
     ],
     "title": "Reduction does not modify neighbor_counts",
+    "type": "scenario"
+  },
+  "rq-eb4b5952": {
+    "decl": "Scenario: Image flags do not widen under f64",
+    "file": "precision",
+    "refs": [],
+    "title": "Image flags do not widen under f64",
     "type": "scenario"
   },
   "rq-eb9e43e7": {
@@ -23618,6 +24184,13 @@
     ],
     "title": "MinimizationConfig",
     "type": "api-item"
+  },
+  "rq-ed8dcaee": {
+    "decl": "Scenario: Round-trip preserves a representative Real value under f64",
+    "file": "precision",
+    "refs": [],
+    "title": "Round-trip preserves a representative Real value under f64",
+    "type": "scenario"
   },
   "rq-ed997636": {
     "decl": "### Units",
@@ -24087,6 +24660,13 @@
     "title": "Reject last_frame less than first_frame",
     "type": "scenario"
   },
+  "rq-f0d29c33": {
+    "decl": "Scenario: potential_energies and virials follow Real in both builds",
+    "file": "precision",
+    "refs": [],
+    "title": "potential_energies and virials follow Real in both builds",
+    "type": "scenario"
+  },
   "rq-f0da71ea": {
     "decl": "- `SimulationBox::new(lx: f32, ly: f32, lz: f32, xy: f32, xz: f32, yz: f32) -> Result<SimulationBox, SimulationBoxError>`",
     "file": "simulation-box",
@@ -24456,6 +25036,13 @@
     "title": "Stages with count = 0 are absent",
     "type": "scenario"
   },
+  "rq-f4a44029": {
+    "decl": "Scenario: Particle IDs do not widen under f64",
+    "file": "precision",
+    "refs": [],
+    "title": "Particle IDs do not widen under f64",
+    "type": "scenario"
+  },
   "rq-f4a85dda": {
     "decl": "Scenario: RunSummary reflects what was actually written",
     "file": "simulation-runner",
@@ -24535,6 +25122,14 @@
     ],
     "title": "A run with one [[minimization]] phase executes the SD loop and proceeds to the next phase",
     "type": "scenario"
+  },
+  "rq-f5b9695a": {
+    "decl": "### Velocity-Verlet `lossless` mode interaction",
+    "file": "precision",
+    "level": 3,
+    "refs": [],
+    "title": "Velocity-Verlet `lossless` mode interaction",
+    "type": "section"
   },
   "rq-f5d16700": {
     "decl": "### Extended-system state",
@@ -24777,6 +25372,13 @@
     "title": "Missing sibling .in.toml under implicit pairing",
     "type": "scenario"
   },
+  "rq-f7853c49": {
+    "decl": "Scenario: Trajectory reader in the f32 build accepts an f64-built file with silent narrowing",
+    "file": "precision",
+    "refs": [],
+    "title": "Trajectory reader in the f32 build accepts an f64-built file with silent narrowing",
+    "type": "scenario"
+  },
   "rq-f7856bcc": {
     "decl": "Scenario: neighbor_list rejects non-positive r_skin",
     "file": "io/config-schema",
@@ -24979,6 +25581,18 @@
       }
     ],
     "title": "log_column_values",
+    "type": "api-item"
+  },
+  "rq-f969ffbb": {
+    "decl": "- `pub const REAL_FMT_DIGITS: usize;`",
+    "file": "precision",
+    "refs": [
+      {
+        "file": "src/precision.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "pub",
     "type": "api-item"
   },
   "rq-f9714477": {
@@ -25193,6 +25807,13 @@
     "title": "Minimum image is applied",
     "type": "scenario"
   },
+  "rq-fbe7ea38": {
+    "decl": "Scenario: Trajectory reader in the f32 build rejects an out-of-f32-range value",
+    "file": "precision",
+    "refs": [],
+    "title": "Trajectory reader in the f32 build rejects an out-of-f32-range value",
+    "type": "scenario"
+  },
   "rq-fc0de81b": {
     "decl": "## Gherkin Scenarios",
     "file": "error-handling",
@@ -25284,6 +25905,13 @@
       }
     ],
     "title": "step() on a ForceField with zero slots writes zeros to forces_*",
+    "type": "scenario"
+  },
+  "rq-fc912e57": {
+    "decl": "Scenario: Philox uniform fills 24 bits in the default build",
+    "file": "precision",
+    "refs": [],
+    "title": "Philox uniform fills 24 bits in the default build",
     "type": "scenario"
   },
   "rq-fcc5cea5": {

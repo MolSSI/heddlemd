@@ -20,6 +20,10 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=CUDA_PATH");
     println!("cargo:rerun-if-env-changed=CUDA_HOME");
+    // rq-a740c278
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_F64");
+
+    let real_f64 = env::var_os("CARGO_FEATURE_F64").is_some();
 
     // Link against cuFFT. cudarc 0.13 does not bundle cuFFT bindings;
     // SPME uses raw FFI through src/gpu/cufft.rs.
@@ -49,7 +53,7 @@ fn main() {
     kernels.sort_by(|a, b| a.0.cmp(&b.0));
 
     for (stem, source) in &kernels {
-        compile_to_ptx(source, &out_dir.join(format!("{stem}.ptx")));
+        compile_to_ptx(source, &out_dir.join(format!("{stem}.ptx")), real_f64);
     }
 
     let generated = out_dir.join("kernels.rs");
@@ -87,13 +91,16 @@ fn cuda_library_search_paths() -> Vec<PathBuf> {
     paths
 }
 
-fn compile_to_ptx(source: &Path, output: &Path) {
+fn compile_to_ptx(source: &Path, output: &Path, real_f64: bool) {
     let mut cmd = Command::new("nvcc");
     cmd.arg("--ptx")
         .arg("-std=c++17")
         .arg("-o")
         .arg(output)
         .arg(source);
+    if real_f64 {
+        cmd.arg("-DREAL_F64");
+    }
 
     let output_result = cmd.output();
     match output_result {

@@ -13,6 +13,7 @@ use heddle_md::integrator::IntegratorStepExt;
 use heddle_md::integrator::{
     Barostat, BarostatRegistry, BerendsenBarostat, IntegratorRegistry, ThermostatRegistry,
 };
+use heddle_md::precision::Real;
 #[allow(unused_imports)]
 use heddle_md::integrator::Thermostat; // needed for trait-method calls below
 use heddle_md::io::config::NeighborListConfig;
@@ -76,13 +77,13 @@ fn unbox_berendsen_barostat(boxed: Box<dyn Barostat>) -> BerendsenBarostat {
 
 // Build a state with prescribed positions, velocities, and virials.
 fn make_state(
-    positions_x: Vec<f32>,
-    velocities_x: Vec<f32>,
-    masses: Vec<f32>,
-    virials: Vec<f32>,
+    positions_x: Vec<Real>,
+    velocities_x: Vec<Real>,
+    masses: Vec<Real>,
+    virials: Vec<Real>,
 ) -> ParticleState {
     let n = positions_x.len();
-    let zero = vec![0.0_f32; n];
+    let zero = vec![0.0; n];
     let state = ParticleState::new(
         positions_x,
         zero.clone(),
@@ -91,7 +92,7 @@ fn make_state(
         zero.clone(),
         zero.clone(),
         masses,
-        vec![0.0_f32; n],
+        vec![0.0; n],
         (0..n as u32).collect(),
         None,
         None,
@@ -154,7 +155,7 @@ fn compute_total_virial_zero_virial_returns_zero() {
     let gpu = init_device().unwrap();
     let state = make_state(vec![0.0; 1], vec![0.0; 1], vec![1.0; 1], vec![0.0; 1]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
+    let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let w = compute_total_virial(&buffers, &mut scratch).unwrap();
     assert_eq!(w, 0.0);
 }
@@ -163,7 +164,7 @@ fn compute_total_virial_zero_virial_returns_zero() {
 #[test]
 fn compute_total_virial_matches_host_sum() {
     let gpu = init_device().unwrap();
-    let virials = vec![1.0_f32, -2.0, 3.0, -4.0];
+    let virials = vec![1.0, -2.0, 3.0, -4.0];
     let state = make_state(
         vec![0.0; 4],
         vec![0.0; 4],
@@ -171,9 +172,9 @@ fn compute_total_virial_matches_host_sum() {
         virials.clone(),
     );
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
+    let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let w = compute_total_virial(&buffers, &mut scratch).unwrap();
-    let expected: f32 = virials.iter().sum();
+    let expected: Real = virials.iter().sum();
     assert!((w - expected).abs() < 1.0e-5);
 }
 
@@ -182,13 +183,13 @@ fn compute_total_virial_matches_host_sum() {
 fn compute_total_virial_is_deterministic() {
     let gpu = init_device().unwrap();
     let n = 1000usize;
-    let virials: Vec<f32> = (0..n).map(|i| 0.5 - 0.001 * i as f32).collect();
-    let zero = vec![0.0_f32; n];
+    let virials: Vec<Real> = (0..n).map(|i| 0.5 - 0.001 * i as Real).collect();
+    let zero = vec![0.0; n];
     let state = make_state(zero.clone(), zero.clone(), vec![1.0; n], virials);
     let buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
     let buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut scratch_a = gpu.device.alloc_zeros::<f32>(1).unwrap();
-    let mut scratch_b = gpu.device.alloc_zeros::<f32>(1).unwrap();
+    let mut scratch_a = gpu.device.alloc_zeros::<Real>(1).unwrap();
+    let mut scratch_b = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let wa = compute_total_virial(&buffers_a, &mut scratch_a).unwrap();
     let wb = compute_total_virial(&buffers_b, &mut scratch_b).unwrap();
     assert_eq!(wa.to_bits(), wb.to_bits());
@@ -200,7 +201,7 @@ fn compute_total_virial_empty_state_returns_zero() {
     let gpu = init_device().unwrap();
     let state = make_state(Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut scratch = gpu.device.alloc_zeros::<f32>(1).unwrap();
+    let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let w = compute_total_virial(&buffers, &mut scratch).unwrap();
     assert_eq!(w, 0.0);
 }
@@ -212,14 +213,14 @@ fn compute_total_virial_empty_state_returns_zero() {
 fn rescale_positions_multiplies_components() {
     let gpu = init_device().unwrap();
     let state = ParticleState::new(
-        vec![1.0_f32, -4.0],
-        vec![2.0_f32, 5.0],
-        vec![3.0_f32, -6.0],
-        vec![0.0_f32; 2],
-        vec![0.0_f32; 2],
-        vec![0.0_f32; 2],
-        vec![1.0_f32; 2],
-        vec![0.0_f32; 2],
+        vec![1.0, -4.0],
+        vec![2.0, 5.0],
+        vec![3.0, -6.0],
+        vec![0.0; 2],
+        vec![0.0; 2],
+        vec![0.0; 2],
+        vec![1.0; 2],
+        vec![0.0; 2],
         vec![0u32; 2],
         None,
         None,
@@ -230,9 +231,9 @@ fn rescale_positions_multiplies_components() {
     let x = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     let y = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
     let z = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
-    assert_eq!(x, vec![0.5_f32, -2.0]);
-    assert_eq!(y, vec![1.0_f32, 2.5]);
-    assert_eq!(z, vec![1.5_f32, -3.0]);
+    assert_eq!(x, vec![0.5, -2.0]);
+    assert_eq!(y, vec![1.0, 2.5]);
+    assert_eq!(z, vec![1.5, -3.0]);
 }
 
 // rq-2fc35d61
@@ -240,18 +241,18 @@ fn rescale_positions_multiplies_components() {
 fn rescale_positions_factor_one_is_identity() {
     let gpu = init_device().unwrap();
     let n = 4usize;
-    let px: Vec<f32> = (0..n).map(|i| 0.5 - i as f32).collect();
-    let py: Vec<f32> = (0..n).map(|i| 1.0 + 0.3 * i as f32).collect();
-    let pz: Vec<f32> = (0..n).map(|i| -0.2 * i as f32).collect();
+    let px: Vec<Real> = (0..n).map(|i| 0.5 - i as Real).collect();
+    let py: Vec<Real> = (0..n).map(|i| 1.0 + 0.3 * i as Real).collect();
+    let pz: Vec<Real> = (0..n).map(|i| -0.2 * i as Real).collect();
     let state = ParticleState::new(
         px.clone(),
         py.clone(),
         pz.clone(),
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         None,
@@ -269,14 +270,14 @@ fn rescale_positions_does_not_touch_velocities_forces_masses_or_images() {
     let gpu = init_device().unwrap();
     let n = 4usize;
     let state = ParticleState::new(
-        vec![1.0_f32; n],
-        vec![2.0_f32; n],
-        vec![3.0_f32; n],
-        vec![0.5_f32; n],
-        vec![-0.5_f32; n],
-        vec![0.25_f32; n],
-        vec![1.0e-26_f32; n],
-        vec![0.0_f32; n],
+        vec![1.0; n],
+        vec![2.0; n],
+        vec![3.0; n],
+        vec![0.5; n],
+        vec![-0.5; n],
+        vec![0.25; n],
+        vec![1.0e-26; n],
+        vec![0.0; n],
         (0..n as u32).collect(),
         None,
         None,
@@ -341,7 +342,7 @@ fn rescale_isotropic_rejects_zero_factor() {
 #[test]
 fn rescale_isotropic_rejects_nan_factor() {
     let mut sim_box = SimulationBox::new(1.0, 1.0, 1.0, 0.0, 0.0, 0.0).unwrap();
-    let result = sim_box.rescale_isotropic(f32::NAN);
+    let result = sim_box.rescale_isotropic(Real::NAN);
     assert!(matches!(result, Err(SimulationBoxError::NonFiniteLatticeValue { .. })));
 }
 
@@ -353,10 +354,10 @@ fn apply_launches_expected_kernel_set() {
     let gpu = init_device().unwrap();
     let n = 4usize;
     let state = make_state(
-        (0..n).map(|i| 1.0e-10 * i as f32).collect(),
-        vec![500.0_f32; n],
-        vec![1.66e-27_f32; n],
-        vec![0.0_f32; n],
+        (0..n).map(|i| 1.0e-10 * i as Real).collect(),
+        vec![500.0; n],
+        vec![1.66e-27; n],
+        vec![0.0; n],
     );
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_small();
@@ -404,24 +405,24 @@ fn apply_on_empty_state_is_noop() {
 // Helper: build a tiny system whose K and W are exactly known, so we
 // can read the post-apply box volume and confirm μ³ matches the
 // analytical formula.
-fn system_with_pressure(target_pressure_pa: f64) -> (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, f64) {
+fn system_with_pressure(target_pressure_pa: f64) -> (Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>, f64) {
     // 8 particles at four ±v pairs, all on the x-axis to give COM=0.
     let n = 8;
-    let mass: f32 = 1.66e-27;
-    let v_mag: f32 = 500.0;
+    let mass: Real = 1.66e-27;
+    let v_mag: Real = 500.0;
     let v_squared_sum = (n as f64) * (v_mag as f64).powi(2);
     let k = 0.5 * (mass as f64) * v_squared_sum;
     // For a chosen target P, solve W = 3 V P - 2 K.
     let v = (1.0e-9_f64).powi(3); // box_small volume
     let w_required = 3.0 * v * target_pressure_pa - 2.0 * k;
     // Distribute W evenly across particles.
-    let per_particle_virial = (w_required / n as f64) as f32;
-    let mut vx: Vec<f32> = Vec::with_capacity(n);
+    let per_particle_virial = (w_required / n as f64) as Real;
+    let mut vx: Vec<Real> = Vec::with_capacity(n);
     for _ in 0..n / 2 {
         vx.push(v_mag);
         vx.push(-v_mag);
     }
-    let px: Vec<f32> = (0..n).map(|i| 1.0e-10 * (i as f32 - 3.5)).collect();
+    let px: Vec<Real> = (0..n).map(|i| 1.0e-10 * (i as Real - 3.5)).collect();
     let masses = vec![mass; n];
     let virials = vec![per_particle_virial; n];
     (px, vx, masses, virials, target_pressure_pa)
@@ -466,7 +467,7 @@ fn mu_less_than_one_when_pressure_below_target() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_small();
     let v_pre = sim_box.volume() as f64;
-    let dt = 1.0e-13_f32;
+    let dt = 1.0e-13;
     let tau = 1.0e-12_f64;
     let beta = 4.5e-10_f64;
     let mut timings = Timings::new(&gpu).unwrap();
@@ -493,7 +494,7 @@ fn mu_greater_than_one_when_pressure_above_target() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_small();
     let v_pre = sim_box.volume() as f64;
-    let dt = 1.0e-13_f32;
+    let dt = 1.0e-13;
     let tau = 1.0e-12_f64;
     let beta = 4.5e-10_f64;
     let mut timings = Timings::new(&gpu).unwrap();
@@ -521,7 +522,7 @@ fn mu_clamped_to_safety_floor() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_small();
     let v_pre = sim_box.volume() as f64;
-    let dt = 1.0e-12_f32;
+    let dt = 1.0e-12;
     let tau = 1.0e-12_f64;
     let beta = 1.0_f64; // also huge β
     let mut timings = Timings::new(&gpu).unwrap();
@@ -655,18 +656,18 @@ fn composes_with_velocity_verlet_and_berendsen_thermostat() {
     // completes without error for a few steps on a tiny LJ-free system.
     let gpu = init_device().unwrap();
     let n = 8usize;
-    let mass: f32 = 1.66e-27;
-    let v_mag: f32 = 500.0;
-    let mut vx: Vec<f32> = Vec::with_capacity(n);
+    let mass: Real = 1.66e-27;
+    let v_mag: Real = 500.0;
+    let mut vx: Vec<Real> = Vec::with_capacity(n);
     for _ in 0..n / 2 {
         vx.push(v_mag);
         vx.push(-v_mag);
     }
     let state = make_state(
-        (0..n).map(|i| 1.0e-10 * (i as f32 - 3.5)).collect(),
+        (0..n).map(|i| 1.0e-10 * (i as Real - 3.5)).collect(),
         vx,
         vec![mass; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
     );
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_small();
@@ -720,12 +721,12 @@ fn two_runs_byte_identical() {
 
     fn run_once(
         gpu: &GpuContext,
-        px: &[f32],
-        vx: &[f32],
-        masses: &[f32],
-        virials: &[f32],
+        px: &[Real],
+        vx: &[Real],
+        masses: &[Real],
+        virials: &[Real],
         p_target: f64,
-    ) -> (Vec<f32>, [f32; 6]) {
+    ) -> (Vec<Real>, [Real; 6]) {
         let n = px.len();
         let state = make_state(
             px.to_vec(),

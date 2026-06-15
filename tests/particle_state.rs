@@ -1,19 +1,20 @@
 use cudarc::driver::DeviceSlice;
 use heddle_md::gpu::{ParticleBuffers, init_device};
 use heddle_md::state::{ParticleState, ParticleStateError};
+use heddle_md::precision::Real;
 
 fn make_state_with_values(
     n: usize,
-    seed: f32,
+    seed: Real,
     ids: Option<Vec<u32>>,
 ) -> ParticleState {
-    let positions_x: Vec<f32> = (0..n).map(|i| seed + i as f32 + 0.10).collect();
-    let positions_y: Vec<f32> = (0..n).map(|i| seed + i as f32 + 0.20).collect();
-    let positions_z: Vec<f32> = (0..n).map(|i| seed + i as f32 + 0.30).collect();
-    let velocities_x: Vec<f32> = (0..n).map(|i| seed + i as f32 + 0.40).collect();
-    let velocities_y: Vec<f32> = (0..n).map(|i| seed + i as f32 + 0.50).collect();
-    let velocities_z: Vec<f32> = (0..n).map(|i| seed + i as f32 + 0.60).collect();
-    let masses: Vec<f32> = (0..n).map(|i| seed + i as f32 + 0.70).collect();
+    let positions_x: Vec<Real> = (0..n).map(|i| seed + i as Real + 0.10).collect();
+    let positions_y: Vec<Real> = (0..n).map(|i| seed + i as Real + 0.20).collect();
+    let positions_z: Vec<Real> = (0..n).map(|i| seed + i as Real + 0.30).collect();
+    let velocities_x: Vec<Real> = (0..n).map(|i| seed + i as Real + 0.40).collect();
+    let velocities_y: Vec<Real> = (0..n).map(|i| seed + i as Real + 0.50).collect();
+    let velocities_z: Vec<Real> = (0..n).map(|i| seed + i as Real + 0.60).collect();
+    let masses: Vec<Real> = (0..n).map(|i| seed + i as Real + 0.70).collect();
     ParticleState::new(
         positions_x,
         positions_y,
@@ -22,7 +23,7 @@ fn make_state_with_values(
         velocities_y,
         velocities_z,
         masses,
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         ids,
             None,
@@ -66,13 +67,13 @@ fn fill_with_garbage(state: &mut ParticleState) {
 #[test] // rq-81f4ec9d
 fn construct_with_matching_arrays_and_default_ids() {
     let n = 4;
-    let positions_x: Vec<f32> = vec![0.0; n];
-    let positions_y: Vec<f32> = vec![0.0; n];
-    let positions_z: Vec<f32> = vec![0.0; n];
-    let velocities_x: Vec<f32> = vec![0.0; n];
-    let velocities_y: Vec<f32> = vec![0.0; n];
-    let velocities_z: Vec<f32> = vec![0.0; n];
-    let masses: Vec<f32> = vec![0.0; n];
+    let positions_x: Vec<Real> = vec![0.0; n];
+    let positions_y: Vec<Real> = vec![0.0; n];
+    let positions_z: Vec<Real> = vec![0.0; n];
+    let velocities_x: Vec<Real> = vec![0.0; n];
+    let velocities_y: Vec<Real> = vec![0.0; n];
+    let velocities_z: Vec<Real> = vec![0.0; n];
+    let masses: Vec<Real> = vec![0.0; n];
 
     let state = ParticleState::new(
         positions_x,
@@ -82,7 +83,7 @@ fn construct_with_matching_arrays_and_default_ids() {
         velocities_y,
         velocities_z,
         masses,
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
@@ -91,9 +92,9 @@ fn construct_with_matching_arrays_and_default_ids() {
 
     assert_eq!(state.particle_count(), 4);
     assert_eq!(state.particle_ids, vec![0u32, 1, 2, 3]);
-    assert_eq!(state.forces_x, vec![0.0f32; 4]);
-    assert_eq!(state.forces_y, vec![0.0f32; 4]);
-    assert_eq!(state.forces_z, vec![0.0f32; 4]);
+    assert_eq!(state.forces_x, vec![0.0; 4]);
+    assert_eq!(state.forces_y, vec![0.0; 4]);
+    assert_eq!(state.forces_z, vec![0.0; 4]);
 }
 
 #[test] // rq-2bbc4121
@@ -107,7 +108,7 @@ fn construct_with_matching_arrays_and_explicit_unique_ids() {
         vec![0.0; n],
         vec![0.0; n],
         vec![0.0; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         Some(vec![10, 20, 30]),
             None,
@@ -175,7 +176,7 @@ fn reject_when_positions_y_has_wrong_length() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 4],
-        vec![0.0_f32; 4],
+        vec![0.0; 4],
         vec![0u32; 4],
         None,
             None,
@@ -205,7 +206,7 @@ fn reject_when_masses_has_wrong_length() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 5],
-        vec![0.0_f32; 5],
+        vec![0.0; 5],
         vec![0u32; 5],
         None,
             None,
@@ -235,7 +236,7 @@ fn reject_when_explicit_ids_have_wrong_length() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 4],
-        vec![0.0_f32; 4],
+        vec![0.0; 4],
         vec![0u32; 4],
         Some(vec![0, 1]),
             None,
@@ -265,7 +266,7 @@ fn reject_duplicate_explicit_ids() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 4],
-        vec![0.0_f32; 4],
+        vec![0.0; 4],
         vec![0u32; 4],
         Some(vec![7, 1, 7, 3]),
             None,
@@ -279,8 +280,8 @@ fn reject_duplicate_explicit_ids() {
 
 #[test] // rq-9447dfcf
 fn nan_values_accepted_at_construction() {
-    let mut positions_x = vec![0.0f32; 4];
-    positions_x[0] = f32::NAN;
+    let mut positions_x = vec![0.0; 4];
+    positions_x[0] = Real::NAN;
     let state = ParticleState::new(
         positions_x,
         vec![0.0; 4],
@@ -289,7 +290,7 @@ fn nan_values_accepted_at_construction() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![0.0; 4],
-        vec![0.0_f32; 4],
+        vec![0.0; 4],
         vec![0u32; 4],
         None,
             None,
@@ -395,7 +396,7 @@ fn re_upload_after_host_side_mutation() {
     let mut buffers = ParticleBuffers::new(&gpu, &state)
         .expect("ParticleBuffers::new");
 
-    let new_positions_x: Vec<f32> = vec![100.0, 101.0, 102.0, 103.0];
+    let new_positions_x: Vec<Real> = vec![100.0, 101.0, 102.0, 103.0];
     state.positions_x = new_positions_x.clone();
 
     buffers.upload(&state).expect("upload should succeed");
@@ -591,7 +592,7 @@ fn reject_when_type_indices_has_wrong_length() {
         vec![0.0; 4],
         vec![0.0; 4],
         vec![1.0; 4],
-        vec![0.0_f32; 4],
+        vec![0.0; 4],
         vec![0u32; 3],
         None,
             None,
@@ -615,14 +616,14 @@ fn reject_when_type_indices_has_wrong_length() {
 fn type_indices_round_trip_through_particle_buffers() {
     let gpu = init_device().expect("init_device");
     let state = ParticleState::new(
-        vec![0.0_f32, 1.0, 2.0],
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![1.0_f32; 3],
-        vec![0.0_f32; 3],
+        vec![0.0, 1.0, 2.0],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![1.0; 3],
+        vec![0.0; 3],
         vec![0u32, 2, 1],
         None,
             None,
@@ -633,14 +634,14 @@ fn type_indices_round_trip_through_particle_buffers() {
     assert_eq!(host, vec![0u32, 2, 1]);
     // Download path mirrors values back into a sink state.
     let mut sink = ParticleState::new(
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![1.0_f32; 3],
-        vec![0.0_f32; 3],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![1.0; 3],
+        vec![0.0; 3],
         vec![0u32; 3],
         None,
             None,
@@ -654,48 +655,48 @@ fn type_indices_round_trip_through_particle_buffers() {
 fn new_state_zero_inits_potential_energies_and_virials() {
     let n = 4;
     let state = ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
     )
     .unwrap();
-    assert_eq!(state.potential_energies, vec![0.0_f32; n]);
-    assert_eq!(state.virials, vec![0.0_f32; n]);
+    assert_eq!(state.potential_energies, vec![0.0; n]);
+    assert_eq!(state.virials, vec![0.0; n]);
 }
 
 #[test] // rq-9504346c
 fn potential_energies_and_virials_round_trip_through_buffers() {
     let gpu = init_device().expect("init_device");
     let mut state = ParticleState::new(
-        vec![0.0_f32, 1.0, 2.0, 3.0],
-        vec![0.0_f32; 4],
-        vec![0.0_f32; 4],
-        vec![0.0_f32; 4],
-        vec![0.0_f32; 4],
-        vec![0.0_f32; 4],
-        vec![1.0_f32; 4],
-        vec![0.0_f32; 4],
+        vec![0.0, 1.0, 2.0, 3.0],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![0.0; 4],
+        vec![1.0; 4],
+        vec![0.0; 4],
         vec![0u32; 4],
         None,
             None,
     )
     .unwrap();
-    state.potential_energies = vec![1.0_f32, -2.0, 3.5, 0.25];
-    state.virials = vec![10.0_f32, 20.0, -30.0, 40.0];
+    state.potential_energies = vec![1.0, -2.0, 3.5, 0.25];
+    state.virials = vec![10.0, 20.0, -30.0, 40.0];
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    state.potential_energies = vec![0.0_f32; 4];
-    state.virials = vec![0.0_f32; 4];
+    state.potential_energies = vec![0.0; 4];
+    state.virials = vec![0.0; 4];
     state.download_from(&buffers).unwrap();
-    assert_eq!(state.potential_energies, vec![1.0_f32, -2.0, 3.5, 0.25]);
-    assert_eq!(state.virials, vec![10.0_f32, 20.0, -30.0, 40.0]);
+    assert_eq!(state.potential_energies, vec![1.0, -2.0, 3.5, 0.25]);
+    assert_eq!(state.virials, vec![10.0, 20.0, -30.0, 40.0]);
 }
 
 // --- Image flags ---
@@ -704,14 +705,14 @@ fn potential_energies_and_virials_round_trip_through_buffers() {
 fn images_default_to_zero_when_none_passed() {
     let n = 4;
     let state = ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         None,
@@ -726,14 +727,14 @@ fn images_default_to_zero_when_none_passed() {
 fn explicit_nonzero_images_stored_as_supplied() {
     let n = 3;
     let state = ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         Some((vec![1, -2, 0], vec![0, 3, -1], vec![-4, 0, 5])),
@@ -748,14 +749,14 @@ fn explicit_nonzero_images_stored_as_supplied() {
 fn reject_explicit_images_y_wrong_length() {
     let n = 4;
     let err = ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         Some((vec![0; n], vec![0; 3], vec![0; n])),
@@ -784,14 +785,14 @@ fn particle_buffers_carry_image_buffers() {
     let images_y = vec![-7, 4, 0, 8];
     let images_z = vec![5, -3, 2, -1];
     let state = ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         Some((images_x.clone(), images_y.clone(), images_z.clone())),
@@ -814,14 +815,14 @@ fn reject_upload_when_images_x_has_wrong_length() {
     let gpu = init_device().expect("init_device");
     let n = 4;
     let state = ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
         None,
@@ -848,16 +849,16 @@ fn reject_upload_when_images_x_has_wrong_length() {
 #[test] // rq-7fd19f00
 fn reject_when_charges_has_wrong_length() {
     let n = 4;
-    let positions_x = vec![0.0_f32; n];
+    let positions_x = vec![0.0; n];
     let err = ParticleState::new(
         positions_x.clone(),
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
-        vec![0.0_f32; 5], // charges wrong length
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
+        vec![0.0; 5], // charges wrong length
         vec![0u32; n],
         None,
         None,
@@ -881,15 +882,15 @@ fn reject_when_charges_has_wrong_length() {
 fn charges_round_trip_through_particle_buffers() {
     let gpu = init_device().unwrap();
     let n = 4;
-    let charges = vec![1.602e-19_f32, -1.602e-19, 0.0, 3.2e-19];
+    let charges = vec![1.602e-19, -1.602e-19, 0.0, 3.2e-19];
     let mut state = ParticleState::new(
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![0.0_f32; n],
-        vec![1.0_f32; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![0.0; n],
+        vec![1.0; n],
         charges.clone(),
         vec![0u32; n],
         None,

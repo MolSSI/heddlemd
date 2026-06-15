@@ -11,17 +11,18 @@ use heddle_md::io::config::{
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::Timings;
+use heddle_md::precision::Real;
 
 fn box_10() -> SimulationBox {
     SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn box_nm() -> SimulationBox {
-    let l = 2.0e-9_f32;
+    let l = 2.0e-9;
     SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
-fn three_particle_state(positions: [[f32; 3]; 3], charges: [f32; 3]) -> ParticleState {
+fn three_particle_state(positions: [[Real; 3]; 3], charges: [Real; 3]) -> ParticleState {
     let mut px = Vec::with_capacity(3);
     let mut py = Vec::with_capacity(3);
     let mut pz = Vec::with_capacity(3);
@@ -34,10 +35,10 @@ fn three_particle_state(positions: [[f32; 3]; 3], charges: [f32; 3]) -> Particle
         px,
         py,
         pz,
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![0.0_f32; 3],
-        vec![1.0_f32; 3],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![0.0; 3],
+        vec![1.0; 3],
         charges.to_vec(),
         vec![0u32; 3],
         None,
@@ -108,16 +109,16 @@ fn construct_harmonic_angle_state() {
     let state = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
     assert_eq!(state.angle_count, 1);
     assert_eq!(state.particle_count, 3);
-    let k: Vec<f32> = gpu.device.dtoh_sync_copy(&state.angle_k_theta).unwrap();
-    let t0: Vec<f32> = gpu.device.dtoh_sync_copy(&state.angle_theta_0).unwrap();
+    let k: Vec<Real> = gpu.device.dtoh_sync_copy(&state.angle_k_theta).unwrap();
+    let t0: Vec<Real> = gpu.device.dtoh_sync_copy(&state.angle_theta_0).unwrap();
     assert_eq!(k.len(), 1);
-    assert!((k[0] - 383.0_f32).abs() < 1.0e-3);
-    assert!((t0[0] - 1.911_f32).abs() < 1.0e-6);
+    assert!((k[0] - 383.0).abs() < 1.0e-3);
+    assert!((t0[0] - 1.911).abs() < 1.0e-6);
 }
 
 // Place atom i and atom k symmetrically about atom j (the centre) so the
 // included angle at j equals `theta`. Edge length d_ij = d_kj = d.
-fn place_isoceles(d: f32, theta: f32) -> [[f32; 3]; 3] {
+fn place_isoceles(d: Real, theta: Real) -> [[Real; 3]; 3] {
     let half = 0.5 * theta;
     let dx = d * half.sin();
     let dy = d * half.cos();
@@ -153,7 +154,7 @@ fn launch_angle_force(
 #[test]
 fn equilibrium_angle_produces_zero_force() {
     let gpu = init_device().unwrap();
-    let theta_0 = 1.911_f32;
+    let theta_0 = 1.911;
     let positions = place_isoceles(1.0, theta_0);
     let state = three_particle_state(positions, [0.0; 3]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -161,13 +162,13 @@ fn equilibrium_angle_produces_zero_force() {
     let at = vec![harmonic_type(383.0, theta_0 as f64)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
     launch_angle_force(&gpu, &mut s, &buffers, &box_10());
-    let fx: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
-    let fy: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
-    let fz: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
+    let fx: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
+    let fy: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
+    let fz: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
     // f32 trig rounding gives δθ of order 1e-7 at equilibrium; with k=383
     // and a unit-magnitude geometric prefactor, the residual force is
     // ~k·δθ ≈ a few × 10⁻⁴. Use a tolerance scaled by k.
-    let tol = 383.0_f32 * 1.0e-6;
+    let tol = 383.0 * 1.0e-6;
     for slot in 0..3 {
         assert!(
             fx[slot].abs() < tol && fy[slot].abs() < tol && fz[slot].abs() < tol,
@@ -181,8 +182,8 @@ fn equilibrium_angle_produces_zero_force() {
 #[test]
 fn compressed_angle_pushes_wings_apart() {
     let gpu = init_device().unwrap();
-    let theta_0 = 1.911_f32;
-    let theta = theta_0 - 0.1_f32;
+    let theta_0 = 1.911;
+    let theta = theta_0 - 0.1;
     let positions = place_isoceles(1.0, theta);
     let state = three_particle_state(positions, [0.0; 3]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -190,9 +191,9 @@ fn compressed_angle_pushes_wings_apart() {
     let at = vec![harmonic_type(383.0, theta_0 as f64)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
     launch_angle_force(&gpu, &mut s, &buffers, &box_10());
-    let fx: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
-    let fy: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
-    let fz: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
+    let fx: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
+    let fy: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
+    let fz: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
     // Bisector along +y; compressed (θ < θ₀) means restoring torque opens
     // the angle, pushing each wing further along its outward x direction.
     // Slot 0 holds atom_i (left wing, dx negative); its fx should be more
@@ -212,8 +213,8 @@ fn compressed_angle_pushes_wings_apart() {
 #[test]
 fn stretched_angle_pulls_wings_together() {
     let gpu = init_device().unwrap();
-    let theta_0 = 1.911_f32;
-    let theta = theta_0 + 0.1_f32;
+    let theta_0 = 1.911;
+    let theta = theta_0 + 0.1;
     let positions = place_isoceles(1.0, theta);
     let state = three_particle_state(positions, [0.0; 3]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -221,7 +222,7 @@ fn stretched_angle_pulls_wings_together() {
     let at = vec![harmonic_type(383.0, theta_0 as f64)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
     launch_angle_force(&gpu, &mut s, &buffers, &box_10());
-    let fx: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
+    let fx: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
     // Stretched (θ > θ₀): restoring torque closes the angle, pulling each
     // wing inward. Slot 0 holds left wing → fx should be positive (toward
     // centre). Slot 2 holds right wing → fx should be negative.
@@ -233,8 +234,8 @@ fn stretched_angle_pulls_wings_together() {
 #[test]
 fn energy_matches_closed_form() {
     let gpu = init_device().unwrap();
-    let theta_0 = 1.911_f32;
-    let theta = theta_0 + 0.2_f32;
+    let theta_0 = 1.911;
+    let theta = theta_0 + 0.2;
     let positions = place_isoceles(1.0, theta);
     let state = three_particle_state(positions, [0.0; 3]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -243,7 +244,7 @@ fn energy_matches_closed_form() {
     let at = vec![harmonic_type(k, theta_0 as f64)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
     launch_angle_force(&gpu, &mut s, &buffers, &box_10());
-    let e: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_energy).unwrap();
+    let e: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_energy).unwrap();
     let total: f64 = e.iter().map(|&v| v as f64).sum();
     let dtheta = (theta - theta_0) as f64;
     let expected = 0.5 * k * dtheta * dtheta;
@@ -255,17 +256,17 @@ fn energy_matches_closed_form() {
 #[test]
 fn degenerate_geometry_produces_zero() {
     let gpu = init_device().unwrap();
-    let positions = [[0.0_f32, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+    let positions = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
     let state = three_particle_state(positions, [0.0; 3]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let al = single_angle_list(3, 0, 1, 2);
     let at = vec![harmonic_type(383.0, 1.911)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
     launch_angle_force(&gpu, &mut s, &buffers, &box_10());
-    let fx: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
-    let fy: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
-    let fz: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
-    let e: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_energy).unwrap();
+    let fx: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
+    let fy: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
+    let fz: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
+    let e: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_energy).unwrap();
     for slot in 0..3 {
         assert_eq!(fx[slot], 0.0, "slot {slot} fx not zero on degenerate input");
         assert_eq!(fy[slot], 0.0, "slot {slot} fy not zero on degenerate input");
@@ -280,7 +281,7 @@ fn near_collinear_geometry_safety_guard_zeros() {
     let gpu = init_device().unwrap();
     // theta very close to π — sin θ < 1e-7.
     let positions = [
-        [-1.0_f32, 1.0e-9, 0.0],
+        [-1.0, 1.0e-9, 0.0],
         [0.0, 0.0, 0.0],
         [1.0, 1.0e-9, 0.0],
     ];
@@ -290,9 +291,9 @@ fn near_collinear_geometry_safety_guard_zeros() {
     let at = vec![harmonic_type(383.0, 1.911)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
     launch_angle_force(&gpu, &mut s, &buffers, &box_10());
-    let fx: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
-    let fy: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
-    let fz: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
+    let fx: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
+    let fy: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
+    let fz: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
     for slot in 0..3 {
         assert!(fx[slot].is_finite() && fy[slot].is_finite() && fz[slot].is_finite());
         assert_eq!(fx[slot], 0.0, "slot {slot} should be zero near collinear");
@@ -317,7 +318,7 @@ fn harmonic_angle_force_zero_angles_is_noop() {
 #[test]
 fn two_independent_constructs_produce_byte_identical_outputs() {
     let gpu = init_device().unwrap();
-    let theta_0 = 1.911_f32;
+    let theta_0 = 1.911;
     let positions = place_isoceles(1.0, theta_0 + 0.05);
     let state = three_particle_state(positions, [0.0; 3]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -327,8 +328,8 @@ fn two_independent_constructs_produce_byte_identical_outputs() {
     let mut s2 = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
     launch_angle_force(&gpu, &mut s1, &buffers, &box_10());
     launch_angle_force(&gpu, &mut s2, &buffers, &box_10());
-    let a: Vec<f32> = gpu.device.dtoh_sync_copy(&s1.angle_triple_x).unwrap();
-    let b: Vec<f32> = gpu.device.dtoh_sync_copy(&s2.angle_triple_x).unwrap();
+    let a: Vec<Real> = gpu.device.dtoh_sync_copy(&s1.angle_triple_x).unwrap();
+    let b: Vec<Real> = gpu.device.dtoh_sync_copy(&s2.angle_triple_x).unwrap();
     assert_eq!(a, b, "two independent runs must agree byte-for-byte");
 }
 
@@ -361,12 +362,12 @@ fn spc_morse_tuned() -> BondTypeConfig {
 #[test]
 fn spc_single_step_satisfies_newtons_third_law() {
     let gpu = init_device().unwrap();
-    let theta_0 = 1.911_f32;
-    let theta = theta_0 + 0.05_f32; // small displacement so angle force is non-trivial
-    let d_oh = 1.0e-10_f32;
+    let theta_0 = 1.911;
+    let theta = theta_0 + 0.05; // small displacement so angle force is non-trivial
+    let d_oh = 1.0e-10;
     let positions = place_isoceles(d_oh, theta);
 
-    let e_charge: f32 = 1.602176634e-19;
+    let e_charge: Real = 1.602176634e-19;
     // Build an O-H-H state: atom 0 = H (i), 1 = O (j, centre), 2 = H (k).
     let mut state = three_particle_state(
         positions,
@@ -492,7 +493,7 @@ fn spc_single_step_satisfies_newtons_third_law() {
     let sx = fx[0] + fx[1] + fx[2];
     let sy = fy[0] + fy[1] + fy[2];
     let sz = fz[0] + fz[1] + fz[2];
-    let scale = fx.iter().chain(&fy).chain(&fz).map(|v| v.abs()).fold(0.0_f32, f32::max);
+    let scale = fx.iter().chain(&fy).chain(&fz).map(|v| v.abs()).fold(0.0, Real::max);
     let tol = (scale * 1.0e-4).max(1.0e-25);
     assert!(sx.abs() < tol, "Σfx = {sx}, scale = {scale}");
     assert!(sy.abs() < tol, "Σfy = {sy}, scale = {scale}");
@@ -502,7 +503,7 @@ fn spc_single_step_satisfies_newtons_third_law() {
     for atom in 0..3 {
         assert!(fx[atom].is_finite() && fy[atom].is_finite() && fz[atom].is_finite());
     }
-    let mag_total: f32 = (0..3)
+    let mag_total: Real = (0..3)
         .map(|i| (fx[i] * fx[i] + fy[i] * fy[i] + fz[i] * fz[i]).sqrt())
         .sum();
     assert!(mag_total > 0.0, "off-equilibrium system should produce non-zero net forces");
@@ -516,9 +517,9 @@ fn spc_single_step_satisfies_newtons_third_law() {
 #[test]
 fn force_magnitude_matches_closed_form_for_an_isolated_angle() {
     let gpu = init_device().unwrap();
-    let theta_0 = 1.911_f32;
-    let theta = theta_0 + 0.1_f32;
-    let d = 1.0e-10_f32;
+    let theta_0 = 1.911;
+    let theta = theta_0 + 0.1;
+    let d = 1.0e-10;
     let k_theta = 5.27e-19_f64;
     let positions = place_isoceles(d, theta);
     let state = three_particle_state(positions, [0.0; 3]);
@@ -527,9 +528,9 @@ fn force_magnitude_matches_closed_form_for_an_isolated_angle() {
     let at = vec![harmonic_type(k_theta, theta_0 as f64)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
     launch_angle_force(&gpu, &mut s, &buffers, &box_nm());
-    let fx: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
-    let fy: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
-    let fz: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
+    let fx: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
+    let fy: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
+    let fz: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
     let mag = |i: usize| -> f64 {
         let v = ((fx[i] as f64).powi(2) + (fy[i] as f64).powi(2) + (fz[i] as f64).powi(2)).sqrt();
         v
@@ -548,15 +549,15 @@ fn force_magnitude_matches_closed_form_for_an_isolated_angle() {
 #[test]
 fn minimum_image_is_applied_to_displacements() {
     let gpu = init_device().unwrap();
-    let l = 1.0e-9_f32;
+    let l = 1.0e-9;
     let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
-    let theta_0 = 1.911_f32;
+    let theta_0 = 1.911;
     let at = vec![harmonic_type(5.27e-19, theta_0 as f64)];
     let al = single_angle_list(3, 0, 1, 2);
 
     // Setup A: triangle near origin, no minimum-image wrap.
     let positions_a = [
-        [-0.15_f32 * l, 0.05 * l, 0.0],
+        [-0.15 * l, 0.05 * l, 0.0],
         [0.0, 0.0, 0.0],
         [0.10 * l, 0.05 * l, 0.0],
     ];
@@ -564,12 +565,12 @@ fn minimum_image_is_applied_to_displacements() {
     // r_ij raw = p_i - p_j = +0.85*l (> l/2) and must wrap to -0.15*l for
     // the kernel to recover the same geometry.
     let positions_b = [
-        [0.40_f32 * l, 0.05 * l, 0.0],
+        [0.40 * l, 0.05 * l, 0.0],
         [-0.45 * l, 0.0, 0.0],
         [-0.35 * l, 0.05 * l, 0.0],
     ];
 
-    let run = |positions: [[f32; 3]; 3]| -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+    let run = |positions: [[Real; 3]; 3]| -> (Vec<Real>, Vec<Real>, Vec<Real>) {
         let state = three_particle_state(positions, [0.0; 3]);
         let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
         let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
@@ -582,7 +583,7 @@ fn minimum_image_is_applied_to_displacements() {
     };
     let (ax, ay, az) = run(positions_a);
     let (bx, by, bz) = run(positions_b);
-    let scale = ax.iter().chain(&ay).chain(&az).map(|v| v.abs()).fold(0.0_f32, f32::max);
+    let scale = ax.iter().chain(&ay).chain(&az).map(|v| v.abs()).fold(0.0, Real::max);
     assert!(scale > 0.0, "expected non-zero forces in baseline run");
     let tol = scale * 1.0e-4;
     for slot in 0..3 {
@@ -605,7 +606,7 @@ fn angle_virial_equals_r_ij_dot_f_i_plus_r_kj_dot_f_k() {
     // pairwise scale |F_i|·|r_ij|.
     let gpu = init_device().unwrap();
     let positions = [
-        [-1.2_f32, 0.8, 0.0],
+        [-1.2, 0.8, 0.0],
         [0.0, 0.0, 0.0],
         [0.6, 1.4, 0.0],
     ];
@@ -615,10 +616,10 @@ fn angle_virial_equals_r_ij_dot_f_i_plus_r_kj_dot_f_k() {
     let at = vec![harmonic_type(383.0, 1.911)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
     launch_angle_force(&gpu, &mut s, &buffers, &box_10());
-    let fx: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
-    let fy: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
-    let fz: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
-    let virial: Vec<f32> = gpu.device.dtoh_sync_copy(&s.angle_triple_virial).unwrap();
+    let fx: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
+    let fy: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
+    let fz: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
+    let virial: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_virial).unwrap();
     let r_ij = [
         positions[0][0] - positions[1][0],
         positions[0][1] - positions[1][1],
@@ -639,7 +640,7 @@ fn angle_virial_equals_r_ij_dot_f_i_plus_r_kj_dot_f_k() {
     let scale = f_mag * r_mag;
     assert!(scale > 1.0, "expected a non-trivial r·F scale (got {scale})");
     // 32-bit cancellation noise sits well below 1e-3 * scale.
-    let tol = (scale * 1.0e-3) as f32;
+    let tol = (scale * 1.0e-3) as Real;
     assert!(summed_w.abs() < tol, "Σ virial slots {summed_w:e} exceeds noise tol {tol:e}");
     assert!(host_w.abs() < tol, "host r_ij·F_i + r_kj·F_k {host_w:e} exceeds noise tol {tol:e}");
 }
@@ -648,15 +649,15 @@ fn angle_virial_equals_r_ij_dot_f_i_plus_r_kj_dot_f_k() {
 
 fn alloc_and_run_reduce(
     gpu: &heddle_md::gpu::GpuContext,
-    angle_triple_x: &[f32],
-    angle_triple_y: &[f32],
-    angle_triple_z: &[f32],
-    angle_triple_energy: &[f32],
-    angle_triple_virial: &[f32],
+    angle_triple_x: &[Real],
+    angle_triple_y: &[Real],
+    angle_triple_z: &[Real],
+    angle_triple_energy: &[Real],
+    angle_triple_virial: &[Real],
     atom_angle_offsets: &[u32],
     atom_angle_indices: &[u32],
     particle_count: usize,
-) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
+) -> (Vec<Real>, Vec<Real>, Vec<Real>) {
     use cudarc::driver::DeviceSlice;
     let device = gpu.device.clone();
     let triple_x = device.htod_sync_copy(angle_triple_x).unwrap();
@@ -670,11 +671,11 @@ fn alloc_and_run_reduce(
     } else {
         device.htod_sync_copy(atom_angle_indices).unwrap()
     };
-    let mut sx = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
-    let mut sy = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
-    let mut sz = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
-    let mut se = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
-    let mut sv = device.alloc_zeros::<f32>(particle_count.max(1)).unwrap();
+    let mut sx = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
+    let mut sy = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
+    let mut sz = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
+    let mut se = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
+    let mut sv = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
     let upper_sx = sx.len();
     let upper_sy = sy.len();
     let upper_sz = sz.len();
@@ -711,8 +712,8 @@ fn alloc_and_run_reduce(
 fn atom_appearing_in_one_angle_receives_that_angles_force() {
     let gpu = init_device().unwrap();
     // One angle: slot 0 = atom_i contribution, slot 1 = atom_j, slot 2 = atom_k.
-    let triple_x = vec![0.5_f32, -1.0, 0.5];
-    let triple_zeros = vec![0.0_f32; 3];
+    let triple_x = vec![0.5, -1.0, 0.5];
+    let triple_zeros = vec![0.0; 3];
     let atom_angle_offsets = vec![0u32, 1, 2, 3];
     let atom_angle_indices = vec![0u32, 1, 2];
     let (sx, _, _) = alloc_and_run_reduce(
@@ -734,8 +735,8 @@ fn atom_in_centre_and_wing_receives_sum_in_sorted_angle_index_order() {
     // Two angles. Layout: 6 slots, [F_i0, F_j0, F_k0, F_i1, F_j1, F_k1].
     // Atom 0 is the centre of angle 0 (slot 1) and a wing of angle 1
     // (slot 3 — i of angle 1).
-    let triple_x = vec![2.5_f32, 7.0, -1.5, 13.0, -2.0, 4.0];
-    let triple_zeros = vec![0.0_f32; 6];
+    let triple_x = vec![2.5, 7.0, -1.5, 13.0, -2.0, 4.0];
+    let triple_zeros = vec![0.0; 6];
     // Particle layout: 5 atoms, only atom 0 carries two angle slots.
     // atom_angle_indices for atom 0 carries [1, 3] (its centre slot for
     // angle 0 then its wing slot for angle 1) — sorted by angle index.
@@ -750,7 +751,7 @@ fn atom_in_centre_and_wing_receives_sum_in_sorted_angle_index_order() {
     );
     // Reduction sums triple_x[1] + triple_x[3] = 7.0 + 13.0 = 20.0
     // left-to-right.
-    assert_eq!(sx[0], 7.0_f32 + 13.0);
+    assert_eq!(sx[0], 7.0 + 13.0);
 }
 
 // rq-5fcdc437
@@ -759,8 +760,8 @@ fn atom_with_no_angles_gets_zero_accumulator() {
     let gpu = init_device().unwrap();
     // Two angles touching atoms 0..3 only; atom 4 has no angle.
     // Layout: 6 angle-triple slots.
-    let triple_x = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
-    let triple_zeros = vec![0.0_f32; 6];
+    let triple_x = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let triple_zeros = vec![0.0; 6];
     // Angle 0: (i=0, j=1, k=2) → slots [0, 1, 2].
     // Angle 1: (i=1, j=2, k=3) → slots [3, 4, 5].
     // atom_angle_offsets (length 6): cumulative per-atom slot count.
@@ -774,16 +775,16 @@ fn atom_with_no_angles_gets_zero_accumulator() {
         &atom_angle_indices,
         5,
     );
-    assert_eq!(sx[4], 0.0_f32, "atom 4 has no angles → fx must be 0");
-    assert_eq!(sy[4], 0.0_f32);
-    assert_eq!(sz[4], 0.0_f32);
+    assert_eq!(sx[4], 0.0, "atom 4 has no angles → fx must be 0");
+    assert_eq!(sy[4], 0.0);
+    assert_eq!(sz[4], 0.0);
 }
 
 // rq-8d5a8d9c
 #[test]
 fn reduce_angle_forces_on_zero_particles_is_a_noop() {
     let gpu = init_device().unwrap();
-    let triple = Vec::<f32>::new();
+    let triple = Vec::<Real>::new();
     let offsets = vec![0u32];
     let indices = Vec::<u32>::new();
     // particle_count == 0 → reduce_angle_forces returns Ok(()) without

@@ -365,7 +365,7 @@ fn single_scale_form_sets_both_lj_and_coul_scales_equally() {
     assert_eq!(el.entries[0].scale_coul, 0.5);
 }
 
-// rq-1fde7f32
+// rq-1fde7
 #[test]
 fn four_column_form_sets_lj_and_coul_scales_independently() {
     let dir = tmp_path("four_col");
@@ -833,12 +833,12 @@ fn atom_excl_offsets_reflects_sorted_exclusion_list() {
     };
     let (s0, e0) = slice(0);
     assert_eq!(&el.atom_excl_partners[s0..e0], &[1u32, 2]);
-    assert_eq!(&el.atom_excl_lj_scales[s0..e0], &[0.0_f32, 0.5]);
-    assert_eq!(&el.atom_excl_coul_scales[s0..e0], &[0.0_f32, 0.5]);
+    assert_eq!(&el.atom_excl_lj_scales[s0..e0], &[0.0, 0.5]);
+    assert_eq!(&el.atom_excl_coul_scales[s0..e0], &[0.0, 0.5]);
 
     let (s1, e1) = slice(1);
     assert_eq!(&el.atom_excl_partners[s1..e1], &[0u32, 3]);
-    assert_eq!(&el.atom_excl_lj_scales[s1..e1], &[0.0_f32, 0.5]);
+    assert_eq!(&el.atom_excl_lj_scales[s1..e1], &[0.0, 0.5]);
     assert!((el.atom_excl_coul_scales[s1] - 0.0).abs() < 1.0e-6);
     assert!((el.atom_excl_coul_scales[e1 - 1] - 0.833).abs() < 1.0e-6);
 

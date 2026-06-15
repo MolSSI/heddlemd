@@ -31,12 +31,13 @@ use super::{
     AggregateLevel, ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext,
     PotentialBuilder, SlotOutputView,
 };
+use crate::precision::Real;
 
 // rq-7bd2d9ca
 #[derive(Debug, Clone, Copy)]
 pub struct SpmeParameters {
-    pub alpha: f32,
-    pub r_cut_real: f32,
+    pub alpha: Real,
+    pub r_cut_real: Real,
     pub grid: [u32; 3],
     pub spline_order: u32,
 }
@@ -44,8 +45,8 @@ pub struct SpmeParameters {
 impl From<&SpmeConfig> for SpmeParameters {
     fn from(c: &SpmeConfig) -> Self {
         SpmeParameters {
-            alpha: c.alpha as f32,
-            r_cut_real: c.r_cut_real as f32,
+            alpha: c.alpha as Real,
+            r_cut_real: c.r_cut_real as Real,
             grid: c.grid,
             spline_order: c.spline_order,
         }
@@ -83,18 +84,18 @@ pub struct SpmeReciprocalGrid {
     pub m: usize,           // n_a * n_b * n_c (real-grid size)
     pub m_complex: usize,   // n_a * n_b * (n_c/2 + 1)
     pub bin_list: NeighborListState,
-    pub rho: CudaSlice<f32>,
-    pub rho_hat_interleaved: CudaSlice<f32>,
-    pub v: CudaSlice<f32>,
-    pub influence_g: CudaSlice<f32>,
+    pub rho: CudaSlice<Real>,
+    pub rho_hat_interleaved: CudaSlice<Real>,
+    pub v: CudaSlice<Real>,
+    pub influence_g: CudaSlice<Real>,
     /// Per-cell factor `G[k] · (1 − K²/(2α²))`. Multiplied by
     /// `|rho_hat[k]|²` and the Hermitian weight by the kernel to produce
     /// `virial_per_cell`.
-    pub virial_factor: CudaSlice<f32>,
+    pub virial_factor: CudaSlice<Real>,
     /// Scratch buffer holding the per-cell virial contribution after
     /// `spme_influence_multiply`. Reduced host-side to the scalar
     /// W_recip during the gather/reduce step.
-    pub virial_per_cell: CudaSlice<f32>,
+    pub virial_per_cell: CudaSlice<Real>,
     /// Box generation the influence function was computed against.
     /// Refreshed when the sim_box generation changes.
     pub cached_box_generation: u64,
@@ -165,10 +166,10 @@ impl SpmeReciprocalGrid {
             params.grid,
         )?;
 
-        let rho = device.alloc_zeros::<f32>(m).map_err(GpuError::from)?;
-        let v = device.alloc_zeros::<f32>(m).map_err(GpuError::from)?;
+        let rho = device.alloc_zeros::<Real>(m).map_err(GpuError::from)?;
+        let v = device.alloc_zeros::<Real>(m).map_err(GpuError::from)?;
         let rho_hat_interleaved = device
-            .alloc_zeros::<f32>(2 * m_complex)
+            .alloc_zeros::<Real>(2 * m_complex)
             .map_err(GpuError::from)?;
 
         // Compute b-factors, influence function, and virial factor on
@@ -189,7 +190,7 @@ impl SpmeReciprocalGrid {
         let virial_factor =
             device.htod_sync_copy(&virial_host).map_err(GpuError::from)?;
         let virial_per_cell = device
-            .alloc_zeros::<f32>(m_complex)
+            .alloc_zeros::<Real>(m_complex)
             .map_err(GpuError::from)?;
 
         let forward_plan = Plan3dR2C::new(&device, n_a, n_b, n_c)?;
@@ -339,10 +340,10 @@ impl SpmeReciprocalGrid {
 // and B-spline order p, `b_factors[k] = |b(k)|²` where
 //   b(k) = exp(2π i (p-1) k / N) / Σ_{j=0..p-2} M_p(j+1) · exp(2π i j k / N)
 // and |b(k)|² = 1 / |denominator|².
-pub fn compute_b_factors(n: u32, p: u32) -> Vec<f32> {
+pub fn compute_b_factors(n: u32, p: u32) -> Vec<Real> {
     let n = n as usize;
     let p = p as usize;
-    let mut out = vec![0.0_f32; n];
+    let mut out = vec![0.0; n];
     let two_pi = 2.0 * std::f64::consts::PI;
     let m_p_samples: Vec<f64> = (1..p).map(|j| cardinal_bspline(p, j as f64)).collect();
     for k in 0..n {
@@ -356,7 +357,7 @@ pub fn compute_b_factors(n: u32, p: u32) -> Vec<f32> {
         }
         let denom2 = sum_re * sum_re + sum_im * sum_im;
         out[k] = if denom2 > 0.0 {
-            (1.0 / denom2) as f32
+            (1.0 / denom2) as Real
         } else {
             0.0
         };
@@ -382,17 +383,17 @@ pub fn compute_b_factors(n: u32, p: u32) -> Vec<f32> {
 pub fn compute_influence_and_virial(
     sim_box: &SimulationBox,
     params: SpmeParameters,
-    b_factors_a: &[f32],
-    b_factors_b: &[f32],
-    b_factors_c: &[f32],
-) -> (Vec<f32>, Vec<f32>) {
+    b_factors_a: &[Real],
+    b_factors_b: &[Real],
+    b_factors_c: &[Real],
+) -> (Vec<Real>, Vec<Real>) {
     let n_a = params.grid[0] as usize;
     let n_b = params.grid[1] as usize;
     let n_c = params.grid[2] as usize;
     let n_c_complex = n_c / 2 + 1;
     let m_complex = n_a * n_b * n_c_complex;
-    let mut out = vec![0.0_f32; m_complex];
-    let mut vf = vec![0.0_f32; m_complex];
+    let mut out = vec![0.0; m_complex];
+    let mut vf = vec![0.0; m_complex];
 
     let lx = sim_box.lx() as f64;
     let ly = sim_box.ly() as f64;
@@ -457,9 +458,9 @@ pub fn compute_influence_and_virial(
                         * b_a
                         * b_b
                         * b_c;
-                    out[idx] = g as f32;
+                    out[idx] = g as Real;
                     let factor = 1.0 - k2 / (2.0 * alpha * alpha);
-                    vf[idx] = (g * factor) as f32;
+                    vf[idx] = (g * factor) as Real;
                 }
             }
         }
@@ -503,8 +504,8 @@ pub struct SpmeRealSpaceState {
     device: Arc<CudaDevice>,
     pair_buffer: PairBuffer,
     exclusions: DeviceExclusionList,
-    alpha: f32,
-    r_cut_real: f32,
+    alpha: Real,
+    r_cut_real: Real,
     particle_count: usize,
 }
 
@@ -512,8 +513,8 @@ impl SpmeRealSpaceState {
     pub fn new(
         gpu: &GpuContext,
         particle_count: usize,
-        alpha: f32,
-        r_cut_real: f32,
+        alpha: Real,
+        r_cut_real: Real,
         max_neighbors: u32,
         exclusion_list: &ExclusionList,
     ) -> Result<Self, NeighborListError> {
@@ -536,7 +537,7 @@ impl Potential for SpmeRealSpaceState {
         "spme_real"
     }
 
-    fn max_cutoff(&self) -> Option<f32> {
+    fn max_cutoff(&self) -> Option<Real> {
         Some(self.r_cut_real)
     }
 
@@ -622,14 +623,14 @@ pub struct SpmeReciprocalState {
     grid: SpmeReciprocalGrid,
     // `u_self_per_particle[i] = k_C · (α/√π) · q_i²`. Subtracted from
     // the per-particle reciprocal energy inside the gather kernel.
-    u_self_per_particle: CudaSlice<f32>,
+    u_self_per_particle: CudaSlice<Real>,
     // Host scratch for the reciprocal-virial reduction. Reused across
     // steps to avoid per-step allocation.
-    virial_host_scratch: Vec<f32>,
+    virial_host_scratch: Vec<Real>,
     // Reduced per-particle reciprocal virial share, set by `contribute()`
     // from `virial_per_cell` and consumed by `reduce()` via the gather
     // kernel argument.
-    w_per_particle_virial: f32,
+    w_per_particle_virial: Real,
 }
 
 impl SpmeReciprocalState {
@@ -637,7 +638,7 @@ impl SpmeReciprocalState {
         gpu: &GpuContext,
         sim_box: &SimulationBox,
         particle_count: usize,
-        charges: &[f32],
+        charges: &[Real],
         params: SpmeParameters,
     ) -> Result<Self, SpmeError> {
         let grid = SpmeReciprocalGrid::new(gpu, sim_box, particle_count, params)?;
@@ -645,14 +646,14 @@ impl SpmeReciprocalState {
         //   u_self_i = k_C · (α/√π) · q_i²
         let inv_sqrt_pi = 1.0_f64 / std::f64::consts::PI.sqrt();
         let prefactor = (K_COULOMB_F32 as f64) * (params.alpha as f64) * inv_sqrt_pi;
-        let u_self_host: Vec<f32> = (0..particle_count)
+        let u_self_host: Vec<Real> = (0..particle_count)
             .map(|i| {
                 let q = charges.get(i).copied().unwrap_or(0.0);
-                (prefactor * (q as f64) * (q as f64)) as f32
+                (prefactor * (q as f64) * (q as f64)) as Real
             })
             .collect();
         let u_self_per_particle = if particle_count == 0 {
-            grid.device.alloc_zeros::<f32>(0).map_err(GpuError::from)?
+            grid.device.alloc_zeros::<Real>(0).map_err(GpuError::from)?
         } else {
             grid.device
                 .htod_sync_copy(&u_self_host)
@@ -661,7 +662,7 @@ impl SpmeReciprocalState {
         Ok(SpmeReciprocalState {
             grid,
             u_self_per_particle,
-            virial_host_scratch: vec![0.0_f32; grid_m_complex_or_zero(&params)],
+            virial_host_scratch: vec![0.0; grid_m_complex_or_zero(&params)],
             w_per_particle_virial: 0.0,
         })
     }
@@ -685,7 +686,7 @@ impl Potential for SpmeReciprocalState {
         "spme_reciprocal"
     }
 
-    fn max_cutoff(&self) -> Option<f32> {
+    fn max_cutoff(&self) -> Option<Real> {
         // The reciprocal-space slot does not consume the shared
         // neighbor list; it owns its own bin structure internally.
         None
@@ -762,7 +763,7 @@ impl Potential for SpmeReciprocalState {
         for &v in &self.virial_host_scratch {
             w_recip += v as f64;
         }
-        self.w_per_particle_virial = (0.5 * w_recip / n as f64) as f32;
+        self.w_per_particle_virial = (0.5 * w_recip / n as f64) as Real;
 
         timings.kernel_start(KernelStage::SPME_FORCE_GATHER)?;
         spme_force_gather(

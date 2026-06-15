@@ -5,12 +5,13 @@ use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::Timings;
+use heddle_md::precision::Real;
 
-fn box_n(l: f32) -> SimulationBox {
+fn box_n(l: Real) -> SimulationBox {
     SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
-fn state_from_positions(px: Vec<f32>, py: Vec<f32>, pz: Vec<f32>) -> ParticleState {
+fn state_from_positions(px: Vec<Real>, py: Vec<Real>, pz: Vec<Real>) -> ParticleState {
     let n = px.len();
     ParticleState::new(
         px,
@@ -20,7 +21,7 @@ fn state_from_positions(px: Vec<f32>, py: Vec<f32>, pz: Vec<f32>) -> ParticleSta
         vec![0.0; n],
         vec![0.0; n],
         vec![1.0; n],
-        vec![0.0_f32; n],
+        vec![0.0; n],
         vec![0u32; n],
         None,
             None,
@@ -96,8 +97,8 @@ fn neighbor_list_contains_all_within_search_radius_and_is_sorted() {
         vec![0.0, 0.0, 0.0, 0.0],
     );
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let r_cut = 1.0_f32;
-    let r_skin = 0.3_f32;
+    let r_cut = 1.0;
+    let r_skin = 0.3;
     let max_neighbors = 8u32;
     let sim_box = box_n(10.0);
     let mut nl =
@@ -159,10 +160,10 @@ fn build_signals_overflow() {
     let gpu = init_device().unwrap();
     // 6 particles tightly clustered within r_cut+r_skin; max_neighbors=2.
     // Each atom has 5 partners within range, exceeding the cap.
-    let positions: Vec<[f32; 3]> = (0..6).map(|i| [i as f32 * 0.1, 0.0, 0.0]).collect();
-    let px: Vec<f32> = positions.iter().map(|p| p[0]).collect();
-    let py: Vec<f32> = positions.iter().map(|p| p[1]).collect();
-    let pz: Vec<f32> = positions.iter().map(|p| p[2]).collect();
+    let positions: Vec<[Real; 3]> = (0..6).map(|i| [i as Real * 0.1, 0.0, 0.0]).collect();
+    let px: Vec<Real> = positions.iter().map(|p| p[0]).collect();
+    let py: Vec<Real> = positions.iter().map(|p| p[1]).collect();
+    let pz: Vec<Real> = positions.iter().map(|p| p[2]).collect();
     let state = state_from_positions(px, py, pz);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let sim_box = box_n(10.0);
@@ -792,9 +793,9 @@ fn prefix_scan_correct_beyond_single_block_totals_pass() {
     let mut py = Vec::with_capacity(100);
     let mut pz = Vec::with_capacity(100);
     for i in 0..100u32 {
-        px.push(-4.0 + (i % 10) as f32 * 0.8);
-        py.push(-4.0 + ((i / 10) % 10) as f32 * 0.8);
-        pz.push(-4.0 + (i % 7) as f32 * 0.5);
+        px.push(-4.0 + (i % 10) as Real * 0.8);
+        py.push(-4.0 + ((i / 10) % 10) as Real * 0.8);
+        pz.push(-4.0 + (i % 7) as Real * 0.5);
     }
     let state = state_from_positions(px, py, pz);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -888,7 +889,7 @@ fn reject_a_tilted_box_whose_perpendicular_width_drops_below_required() {
     match res {
         Err(NeighborListError::BoxTooSmallForCells { direction, width, required }) => {
             assert_eq!(direction, "b");
-            let expected_width = 169.0_f32 / (338.0_f32).sqrt();
+            let expected_width = 169.0 / (338.0 as Real).sqrt();
             assert!((width - expected_width).abs() < 1.0e-3, "got width {width}, expected {expected_width}");
             assert!((required - 12.0).abs() < 1.0e-4);
         }
@@ -902,14 +903,14 @@ fn reject_a_tilted_box_whose_perpendicular_width_drops_below_required() {
 #[test]
 fn cell_index_at_the_plus_half_boundary_clamps_inside_the_grid() {
     let gpu = init_device().unwrap();
-    let l: f32 = 10.0;
+    let l: Real = 10.0;
     let sim_box = box_n(l);
     // r_cut + r_skin = 1.3 → n_cells = 7 along each axis. A particle just
     // inside the +x boundary (fractional s_a just shy of +0.5) bins to
     // cell index n-1 = 6 along the a axis. f32 round-off near 1.0 can
     // round (s_a + 0.5) * n up to exactly n, and the kernel's clamp
     // returns the in-range index n-1.
-    let eps: f32 = 1.0e-5;
+    let eps: Real = 1.0e-5;
     let state = state_from_positions(
         vec![l * 0.5 - eps],
         vec![0.0],
@@ -933,7 +934,7 @@ fn cell_index_at_the_plus_half_boundary_clamps_inside_the_grid() {
 #[test]
 fn cell_index_of_a_position_outside_the_primary_cell_wraps_before_binning() {
     let gpu = init_device().unwrap();
-    let l: f32 = 10.0;
+    let l: Real = 10.0;
     let sim_box = box_n(l);
     // Two particles whose Cartesian positions differ by one full lattice
     // vector along a. After triclinic_wrap_with_image, both map to the
@@ -986,7 +987,7 @@ fn neighbor_list_is_not_globally_partner_id_sorted_across_cells() {
     // sort_cells_by_particle_id pass canonicalises that within each
     // cell, and the cell-sweep order interleaves them).
     let state = state_from_positions(
-        vec![-0.55_f32, -0.25, 0.55, 0.85, 0.0],
+        vec![-0.55, -0.25, 0.55, 0.85, 0.0],
         vec![0.0; 5],
         vec![0.0; 5],
     );
@@ -1104,10 +1105,10 @@ fn npt_style_barostat_ticks_rebuild_at_displacement_driven_rate() {
     // not force a rebuild beyond the displacement-driven cadence.
     let gpu = init_device().unwrap();
     let mut sim_box = box_n(10.0);
-    let r_skin: f32 = 1.0;
-    let drift_per_step: f32 = 0.1; // 5 steps to cross r_skin/2 = 0.5.
+    let r_skin: Real = 1.0;
+    let drift_per_step: Real = 0.1; // 5 steps to cross r_skin/2 = 0.5.
     let mut nl = NeighborListState::new_cell_list(&gpu, &sim_box, 2, 0.5, 8, r_skin).unwrap();
-    let mut x = 1.0_f32;
+    let mut x = 1.0;
     let state = state_from_positions(vec![0.0, x], vec![0.0, 0.0], vec![0.0, 0.0]);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
