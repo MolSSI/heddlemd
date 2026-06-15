@@ -24,6 +24,13 @@ const R_HH: f32 = 3.085_926_4;
 const M_O: f32 = 29_167.43;
 const M_H: f32 = 1_837.47;
 
+// 1 fs in atomic time units (ℏ/E_h ≈ 24.189 attoseconds → 1 fs ≈ 41.341 atu).
+const ATU_PER_FS: f32 = 41.341_374;
+// Production thermal MD timestep for rigid-water SHAKE: 2 fs.
+const PROD_DT: f32 = 2.0 * ATU_PER_FS;
+// Production thermal MD timestep for stiffer C–H constraints (methane): 1 fs.
+const PROD_DT_METHANE: f32 = ATU_PER_FS;
+
 fn spce_type() -> NamedSlotConfig {
     NamedSlotConfig::from_params_str(
         "SPCE",
@@ -309,11 +316,11 @@ fn shake_hooks_on_zero_group_slot_are_noops() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let sim_box = big_box();
     let mut timings = Timings::new(&gpu).unwrap();
-    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings)
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings)
         .unwrap();
-    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings)
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings)
         .unwrap();
-    slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings)
+    slot.apply_after_kick(&mut buffers, &sim_box, PROD_DT, &mut timings)
         .unwrap();
 }
 
@@ -334,7 +341,7 @@ fn shake_snapshot_copies_pre_drift_positions() {
         &[spce_type()],
     )
     .unwrap();
-    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings)
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings)
         .unwrap();
     let snap_x: Vec<f32> =
         gpu.device.dtoh_sync_copy(&slot.snapshot_x).unwrap();
@@ -371,7 +378,7 @@ fn shake_positions_restores_constraint_distances_after_bond_stretch() {
     .unwrap();
 
     // Snapshot pre-drift state.
-    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings)
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings)
         .unwrap();
 
     // Perturb post-drift positions: stretch O-H1 by 5% along the
@@ -389,7 +396,7 @@ fn shake_positions_restores_constraint_distances_after_bond_stretch() {
     gpu.device.htod_sync_copy_into(&pos_y, &mut buffers.positions_y).unwrap();
     gpu.device.htod_sync_copy_into(&pos_z, &mut buffers.positions_z).unwrap();
 
-    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings)
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings)
         .unwrap();
 
     let pos_x_c: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
@@ -430,7 +437,7 @@ fn shake_positions_preserves_centre_of_mass() {
     )
     .unwrap();
 
-    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings)
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings)
         .unwrap();
 
     // Apply an arbitrary perturbation to all three atoms.
@@ -459,7 +466,7 @@ fn shake_positions_preserves_centre_of_mass() {
         (m[0] * pos_z[0] + m[1] * pos_z[1] + m[2] * pos_z[2]) as f64 / total,
     );
 
-    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings)
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings)
         .unwrap();
 
     let pc_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
@@ -496,7 +503,7 @@ fn shake_positions_updates_half_step_velocities_consistently() {
     )
     .unwrap();
 
-    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings)
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings)
         .unwrap();
 
     // Stretch the O-H1 bond before SHAKE.
@@ -506,7 +513,7 @@ fn shake_positions_updates_half_step_velocities_consistently() {
     let u_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     let v_before: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
 
-    let dt: f32 = 1.0;
+    let dt: f32 = PROD_DT;
     slot.apply_after_drift(&mut buffers, &sim_box, dt, &mut timings)
         .unwrap();
 
@@ -520,6 +527,96 @@ fn shake_positions_updates_half_step_velocities_consistently() {
             v_after[i],
             expected
         );
+    }
+}
+
+// rq-a0174216
+#[test]
+fn shake_positions_converges_at_production_dt_with_thermal_amplitude_displacements() {
+    // At dt = 2 fs the unconstrained drift per step is ~80× larger than
+    // the 1-atu drift exercised by every other position-projection test
+    // in this file. Verify that SHAKE still pulls every constraint
+    // residual inside the kernel's SHAKE_TOL² convergence criterion and
+    // that the 1/dt half-step velocity update remains finite at the
+    // production dt magnitude.
+    let gpu = init_device().unwrap();
+    let list = sequential_shake_list(1);
+    let state = water_state(1, 10.0);
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let sim_box = big_box();
+    let mut timings = Timings::new(&gpu).unwrap();
+    let mut slot = ShakeConstraintsState::new(
+        gpu.device.clone(),
+        &list,
+        &state.masses,
+        &[spce_type()],
+    )
+    .unwrap();
+
+    // Thermal-amplitude velocities (T ≈ 300 K). At 300 K the
+    // Maxwell-Boltzmann v_rms is ≈ 1.24e-3 a₀/atu for H and ≈ 2.91e-4
+    // a₀/atu for O. Use mutually different per-component vectors so the
+    // drift breaks every constraint, not just one.
+    let vx = vec![ 2.0e-4_f32, -1.0e-3,  1.3e-3];
+    let vy = vec![-1.5e-4_f32,  1.2e-3, -0.6e-3];
+    let vz = vec![ 1.0e-4_f32, -0.8e-3,  1.1e-3];
+    gpu.device.htod_sync_copy_into(&vx, &mut buffers.velocities_x).unwrap();
+    gpu.device.htod_sync_copy_into(&vy, &mut buffers.velocities_y).unwrap();
+    gpu.device.htod_sync_copy_into(&vz, &mut buffers.velocities_z).unwrap();
+
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
+
+    // Unconstrained drift: r += v · dt.
+    let mut px: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let mut py: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
+    let mut pz: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+    for i in 0..3 {
+        px[i] += vx[i] * PROD_DT;
+        py[i] += vy[i] * PROD_DT;
+        pz[i] += vz[i] * PROD_DT;
+    }
+    gpu.device.htod_sync_copy_into(&px, &mut buffers.positions_x).unwrap();
+    gpu.device.htod_sync_copy_into(&py, &mut buffers.positions_y).unwrap();
+    gpu.device.htod_sync_copy_into(&pz, &mut buffers.positions_z).unwrap();
+
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
+
+    let qx: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
+    let qy: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
+    let qz: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
+    let vx_after: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    let vy_after: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
+    let vz_after: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
+
+    // Per-constraint residuals at exit. The kernel's SHAKE_TOL² is
+    // 3.57e-6 a₀² (≈ 1e-26 m²). Allow 4× slack for f32 round-off
+    // between the kernel's σ check and this host-side reconstruction.
+    const SHAKE_TOL2: f32 = 3.57e-6;
+    let r2 = |a: usize, b: usize| -> f32 {
+        let dx = qx[a] - qx[b];
+        let dy = qy[a] - qy[b];
+        let dz = qz[a] - qz[b];
+        dx * dx + dy * dy + dz * dz
+    };
+    let residuals = [
+        ("O-H1", r2(0, 1) - R_OH * R_OH),
+        ("O-H2", r2(0, 2) - R_OH * R_OH),
+        ("H1-H2", r2(1, 2) - R_HH * R_HH),
+    ];
+    let bound = 4.0 * SHAKE_TOL2;
+    for (name, sigma) in &residuals {
+        assert!(
+            sigma.abs() < bound,
+            "{name} residual σ = {sigma} exceeds 4·SHAKE_TOL² = {bound} \
+             — SHAKE did not converge inside SHAKE_MAX_ITER at production dt",
+        );
+    }
+
+    // 1/dt velocity update finite for every atom (no f32 overflow).
+    for i in 0..3 {
+        assert!(vx_after[i].is_finite(), "v_x[{i}] not finite: {}", vx_after[i]);
+        assert!(vy_after[i].is_finite(), "v_y[{i}] not finite: {}", vy_after[i]);
+        assert!(vz_after[i].is_finite(), "v_z[{i}] not finite: {}", vz_after[i]);
     }
 }
 
@@ -550,7 +647,7 @@ fn rattle_velocities_zeroes_constraint_derivatives() {
     gpu.device.htod_sync_copy_into(&vy, &mut buffers.velocities_y).unwrap();
     gpu.device.htod_sync_copy_into(&vz, &mut buffers.velocities_z).unwrap();
 
-    slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings)
+    slot.apply_after_kick(&mut buffers, &sim_box, PROD_DT, &mut timings)
         .unwrap();
 
     let px: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
@@ -613,7 +710,7 @@ fn rattle_velocities_preserves_centre_of_mass_velocity() {
         (m[0] * vz[0] + m[1] * vz[1] + m[2] * vz[2]) as f64 / total,
     );
 
-    slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings)
+    slot.apply_after_kick(&mut buffers, &sim_box, PROD_DT, &mut timings)
         .unwrap();
 
     let vx_c: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
@@ -651,14 +748,14 @@ fn shake_positions_writes_non_zero_position_level_constraint_virial() {
         &[spce_type()],
     )
     .unwrap();
-    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     // Perturb H1 along the O-H1 axis to force a position-level virial
     // contribution from every constraint.
     let mut pos_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     let dx = pos_x[1] - pos_x[0];
     pos_x[1] = pos_x[0] + dx * 1.05;
     gpu.device.htod_sync_copy_into(&pos_x, &mut buffers.positions_x).unwrap();
-    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     let virial: Vec<f32> = gpu.device.dtoh_sync_copy(&slot.constraint_virial).unwrap();
     // The three water atoms each carry a virial entry. At least two
     // must be non-zero (the O-H1 pair drives a position-level virial on
@@ -753,12 +850,12 @@ fn rattle_velocities_accumulates_velocity_level_constraint_virial_when_dt_positi
     .unwrap();
     // Drive a position-level virial first (snapshot + perturb +
     // after_drift).
-    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     let mut pos_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     let dx = pos_x[1] - pos_x[0];
     pos_x[1] = pos_x[0] + dx * 1.05;
     gpu.device.htod_sync_copy_into(&pos_x, &mut buffers.positions_x).unwrap();
-    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     let virial_after_pos: Vec<f32> = gpu.device.dtoh_sync_copy(&slot.constraint_virial).unwrap();
     // Inject off-manifold velocities so RATTLE has work to do.
     let vx = vec![1.0e-3_f32, -0.5e-3, 0.3e-3];
@@ -769,7 +866,7 @@ fn rattle_velocities_accumulates_velocity_level_constraint_virial_when_dt_positi
     gpu.device.htod_sync_copy_into(&vz, &mut buffers.velocities_z).unwrap();
     // dt > 0 → velocity-level virial accumulates on top of the
     // position-level virial already in the buffer.
-    slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_after_kick(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     let virial_after_kick: Vec<f32> = gpu.device.dtoh_sync_copy(&slot.constraint_virial).unwrap();
     // Note: apply_after_kick also calls constraint_virial_scatter which
     // doesn't modify constraint_virial. The velocity-level half is
@@ -842,19 +939,19 @@ fn constraint_virial_scatter_additively_writes_into_particle_virials() {
     )
     .unwrap();
     // Drive non-zero virial via the after_drift hook.
-    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     let mut pos_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     let dx = pos_x[1] - pos_x[0];
     pos_x[1] = pos_x[0] + dx * 1.05;
     gpu.device.htod_sync_copy_into(&pos_x, &mut buffers.positions_x).unwrap();
-    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     // Seed buffers.virials with a recognisable pattern, then snapshot
     // the per-atom constraint_virial values.
     let pre_virials = vec![10.0_f32, 20.0, 30.0];
     gpu.device.htod_sync_copy_into(&pre_virials, &mut buffers.virials).unwrap();
     let constraint_virial: Vec<f32> = gpu.device.dtoh_sync_copy(&slot.constraint_virial).unwrap();
     // apply_after_kick runs rattle + constraint_virial_scatter.
-    slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_after_kick(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     let post_virials: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
     // The post-kick constraint_virial includes both the position-level
     // half (already there) and the velocity-level half (added by
@@ -896,7 +993,7 @@ fn constraint_virial_scatter_handles_two_disjoint_groups() {
     )
     .unwrap();
     // Perturb both waters' H1.
-    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     let mut pos_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     for w in 0..2 {
         let i_o = 3 * w;
@@ -905,10 +1002,10 @@ fn constraint_virial_scatter_handles_two_disjoint_groups() {
         pos_x[i_h1] = pos_x[i_o] + dx * 1.05;
     }
     gpu.device.htod_sync_copy_into(&pos_x, &mut buffers.positions_x).unwrap();
-    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     let pre_virials = vec![0.0_f32; 6];
     gpu.device.htod_sync_copy_into(&pre_virials, &mut buffers.virials).unwrap();
-    slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_after_kick(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     let post_virials: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
     // Both groups' atoms received scatter contributions; in particular,
     // group 1's atom 3 (O of water 1) and atom 4 (H1 of water 1) have
@@ -1030,7 +1127,7 @@ fn methane_c_h_constraints_remain_within_tolerance_after_100_steps() {
     gpu.device.htod_sync_copy_into(&vy, &mut buffers.velocities_y).unwrap();
     gpu.device.htod_sync_copy_into(&vz, &mut buffers.velocities_z).unwrap();
     for _ in 0..100 {
-        slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+        slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT_METHANE, &mut timings).unwrap();
         // Simulate an unconstrained drift step: x += v · dt.
         let mut pos_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
         let mut pos_y: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
@@ -1039,15 +1136,15 @@ fn methane_c_h_constraints_remain_within_tolerance_after_100_steps() {
         let cur_vy: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
         let cur_vz: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
         for i in 0..5 {
-            pos_x[i] += cur_vx[i];
-            pos_y[i] += cur_vy[i];
-            pos_z[i] += cur_vz[i];
+            pos_x[i] += cur_vx[i] * PROD_DT_METHANE;
+            pos_y[i] += cur_vy[i] * PROD_DT_METHANE;
+            pos_z[i] += cur_vz[i] * PROD_DT_METHANE;
         }
         gpu.device.htod_sync_copy_into(&pos_x, &mut buffers.positions_x).unwrap();
         gpu.device.htod_sync_copy_into(&pos_y, &mut buffers.positions_y).unwrap();
         gpu.device.htod_sync_copy_into(&pos_z, &mut buffers.positions_z).unwrap();
-        slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
-        slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+        slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT_METHANE, &mut timings).unwrap();
+        slot.apply_after_kick(&mut buffers, &sim_box, PROD_DT_METHANE, &mut timings).unwrap();
     }
     // Constraint distances must still match r_CH.
     let px: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
@@ -1127,21 +1224,21 @@ fn full_velocity_verlet_step_with_one_rigid_spce_group_preserves_all_three_dista
     gpu.device.htod_sync_copy_into(&vx, &mut buffers.velocities_x).unwrap();
     gpu.device.htod_sync_copy_into(&vy, &mut buffers.velocities_y).unwrap();
     gpu.device.htod_sync_copy_into(&vz, &mut buffers.velocities_z).unwrap();
-    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     // Drift: x += v · dt (mimic the VV KickDrift sub-step's position update).
     let mut px: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     let mut py: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
     let mut pz: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
     for i in 0..3 {
-        px[i] += vx[i];
-        py[i] += vy[i];
-        pz[i] += vz[i];
+        px[i] += vx[i] * PROD_DT;
+        py[i] += vy[i] * PROD_DT;
+        pz[i] += vz[i] * PROD_DT;
     }
     gpu.device.htod_sync_copy_into(&px, &mut buffers.positions_x).unwrap();
     gpu.device.htod_sync_copy_into(&py, &mut buffers.positions_y).unwrap();
     gpu.device.htod_sync_copy_into(&pz, &mut buffers.positions_z).unwrap();
-    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
-    slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
+    slot.apply_after_kick(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     let qx: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     let qy: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
     let qz: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
@@ -1222,9 +1319,9 @@ fn shake_does_not_modify_atoms_outside_groups() {
     )
     .unwrap();
     // Run all three hooks.
-    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
-    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
-    slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
+    slot.apply_after_kick(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     let pos_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     let pos_y: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
     let pos_z: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
@@ -1261,9 +1358,9 @@ fn shake_does_not_modify_forces_masses_or_ids() {
         &[spce_type()],
     )
     .unwrap();
-    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
-    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
-    slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
+    slot.apply_after_kick(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     let fx: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     let fy: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.forces_y).unwrap();
     let fz: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.forces_z).unwrap();
@@ -1304,7 +1401,7 @@ fn multiple_water_groups_evolve_independently() {
         &[spce_type()],
     )
     .unwrap();
-    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
     // Stretch each water's O-H1 by a different amount.
     let mut pos_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     for w in 0..3 {
@@ -1315,7 +1412,7 @@ fn multiple_water_groups_evolve_independently() {
         pos_x[i_h1] = pos_x[i_o] + dx * stretch;
     }
     gpu.device.htod_sync_copy_into(&pos_x, &mut buffers.positions_x).unwrap();
-    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
 
     let px: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     let py: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
@@ -1409,7 +1506,7 @@ fn shake_positions_handles_water_straddling_periodic_boundary() {
     .unwrap();
 
     // Snapshot pre-drift state.
-    slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings)
+    slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings)
         .unwrap();
 
     // Snapshot the *global* positions for a "no spurious wrap" check
@@ -1464,7 +1561,7 @@ fn shake_positions_handles_water_straddling_periodic_boundary() {
         ]
     };
 
-    slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings)
+    slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings)
         .unwrap();
 
     let post_x: Vec<f32> = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
@@ -1571,9 +1668,9 @@ fn two_independent_shake_runs_produce_byte_identical_outputs() {
             vx[i] = ((seed as i32 + i as i32) as f32) * 1.0e-6;
         }
         gpu.device.htod_sync_copy_into(&vx, &mut buffers.velocities_x).unwrap();
-        slot.apply_before_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
-        slot.apply_after_drift(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
-        slot.apply_after_kick(&mut buffers, &sim_box, 1.0, &mut timings).unwrap();
+        slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
+        slot.apply_after_drift(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
+        slot.apply_after_kick(&mut buffers, &sim_box, PROD_DT, &mut timings).unwrap();
         let px = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
         let py = gpu.device.dtoh_sync_copy(&buffers.positions_y).unwrap();
         let pz = gpu.device.dtoh_sync_copy(&buffers.positions_z).unwrap();
@@ -1705,7 +1802,7 @@ fn integrator_step_dispatches_all_three_constraint_hooks() {
     let log = StdArc::new(Mutex::new(Vec::new()));
     let mut rec = RecordingConstraint { log: log.clone() };
     integrator
-        .step_with_constraint(&mut buffers, &mut sim_box, &mut ff, &mut rec, 1.0, &mut timings)
+        .step_with_constraint(&mut buffers, &mut sim_box, &mut ff, &mut rec, PROD_DT, &mut timings)
         .unwrap();
     let order = log.lock().unwrap().clone();
     assert_eq!(order, vec!["before_drift", "after_drift", "after_kick"]);
@@ -1748,7 +1845,7 @@ fn integrator_step_with_none_constraint_skips_all_hooks() {
     let mut integrator = registry.build(&vv, &gpu, 3, 0).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     integrator
-        .step(&mut buffers, &mut sim_box, &mut ff, 1.0, &mut timings)
+        .step(&mut buffers, &mut sim_box, &mut ff, PROD_DT, &mut timings)
         .unwrap();
     let report = timings.finalize().unwrap();
     for s in report.stages {

@@ -24,6 +24,7 @@ if grep -qi microsoft /proc/version 2>/dev/null; then
 fi
 
 podman run --rm -it \
+    --device nvidia.com/gpu=all \
     -v "${mount_pwd}:/work" \
     -v "${mount_claude_dir}:/root/.claude:cached" \
     -v "${mount_claude_json}:/root/.claude.json" \

@@ -16032,6 +16032,13 @@
     "title": "Reject non-positive tau_t",
     "type": "scenario"
   },
+  "rq-a0174216": {
+    "decl": "Scenario: shake_positions converges at production-scale dt with thermal-amplitude",
+    "file": "integration/shake",
+    "refs": [],
+    "title": "shake_positions converges at production-scale dt with thermal-amplitude",
+    "type": "scenario"
+  },
   "rq-a034083a": {
     "decl": "### PTX Module Loading",
     "file": "integration/berendsen-barostat",

@@ -636,7 +636,8 @@ Feature: SHAKE + RATTLE rigid constraints
       so that the molecule straddles the +x periodic boundary
     And unconstrained post-drift positions that perturb the O–H1 bond by ~1.0e-2 a₀
       along the O→H1 direction (computed under minimum-image)
-    When apply_after_drift is called with dt = 1.0 atu
+    When apply_after_drift is called with dt = 82.68 atu (≈ 2 fs, the production-scale
+      thermal MD timestep)
     Then every constraint distance (O–H1, O–H2, H1–H2), computed under minimum-image,
       equals its target r₀ to within 1.0e-4 a₀ relative
     And the per-atom global positions remain in the same lattice image they were in
@@ -645,6 +646,22 @@ Feature: SHAKE + RATTLE rigid constraints
       image, equals the same COM of the unconstrained post-drift positions to within
       1.0e-3 a₀
     And the per-group sum Σ_i constraint_virial[i] is finite
+
+  @rq-a0174216
+  Scenario: shake_positions converges at production-scale dt with thermal-amplitude
+    unconstrained displacements
+    Given a constructed ShakeConstraintsState with one SPC/E water group at equilibrium
+    And per-atom velocities sampled from a Maxwell–Boltzmann distribution at T = 300 K
+      (root-mean-square speeds ≈ 5 km/s for H, ≈ 1.3 km/s for O)
+    And the unconstrained post-drift positions are r_i^pre + v_i · dt
+    When apply_after_drift is called with dt = 2.0e-15 s
+    Then every constraint distance is within 1.0e-13 m of its target
+    And the SHAKE iteration reports convergence before reaching SHAKE_MAX_ITER = 32
+      sweeps
+    And every per-constraint residual |σ_k| at exit is at most SHAKE_TOL² = 1.0e-26 m²
+    And the half-step velocity update v_i ← v_i + (r_i^constrained − r_i^unconstrained) / dt
+      remains finite for every atom (no f32 overflow of the 1/dt division at the
+      production dt magnitude)
 
   # --- Velocity projection (RATTLE) ---
 
