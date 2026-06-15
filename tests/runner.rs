@@ -307,13 +307,20 @@ fn velocity_generation_deterministic_in_seed() {
 fn different_seeds_produce_different_velocities() {
     let dir_a = tmp_path("velocities_seed_1");
     let dir_b = tmp_path("velocities_seed_2");
-    let path_a = write_pair(&dir_a, 0, 0, 1, 300.0, false, false, 1, 8);
-    let path_b = write_pair(&dir_b, 0, 0, 1, 300.0, false, false, 2, 8);
+    // traj_every=1 writes the initial-state frame with per-particle
+    // velocities included; comparing the trajectories (rather than the
+    // log) detects per-particle differences regardless of whether the
+    // total kinetic energy differs (the post-sampling equipartition
+    // rescale fixes the total KE exactly under f64).
+    let path_a = write_pair(&dir_a, 0, 1, 0, 300.0, false, false, 1, 8);
+    let path_b = write_pair(&dir_b, 0, 1, 0, 300.0, false, false, 2, 8);
     run_simulation(&path_a).unwrap();
     run_simulation(&path_b).unwrap();
-    let a_log = std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.out.run.log")).unwrap();
-    let b_log = std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.out.run.log")).unwrap();
-    assert_ne!(a_log, b_log);
+    let a_traj =
+        std::fs::read(std::fs::canonicalize(&dir_a).unwrap().join("sim.out.run.xyz")).unwrap();
+    let b_traj =
+        std::fs::read(std::fs::canonicalize(&dir_b).unwrap().join("sim.out.run.xyz")).unwrap();
+    assert_ne!(a_traj, b_traj);
 }
 
 // rq-3c17477d
@@ -455,6 +462,8 @@ fn reproducibility_byte_for_byte() {
 }
 
 // rq-9eb167f0
+// Lossless mode is only available in the default (f32) build.
+#[cfg(not(feature = "f64"))]
 #[test]
 fn lossless_mode_completes() {
     let dir = tmp_path("lossless_mode");

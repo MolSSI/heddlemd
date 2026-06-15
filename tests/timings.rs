@@ -224,6 +224,8 @@ fn lossy_includes_lossy_kick_rows() {
 }
 
 // rq-b2fa4a1f
+// Lossless mode is only available in the default (f32) build.
+#[cfg(not(feature = "f64"))]
 #[test]
 fn lossless_includes_lossless_kick_rows() {
     let dir = tmp_path("lossless_kick");
