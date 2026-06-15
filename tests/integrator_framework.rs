@@ -127,7 +127,7 @@ fn registry_without_matching_builder_reports_unknown_kind() {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct StubBuilder;
 
 #[derive(Debug)]
@@ -151,6 +151,9 @@ impl IntegratorBuilder for StubBuilder {
         _params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
         Ok(Box::new(StubIntegrator))
+    }
+    fn box_clone(&self) -> Box<dyn IntegratorBuilder> {
+        Box::new(self.clone())
     }
 }
 

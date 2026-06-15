@@ -459,7 +459,7 @@ impl Integrator for MtkNptIntegrator {
 }
 
 // rq-0b7f7023
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MtkNptBuilder;
 
 impl IntegratorBuilder for MtkNptBuilder {
@@ -519,6 +519,10 @@ impl IntegratorBuilder for MtkNptBuilder {
             p.n_resp,
         )?;
         Ok(Box::new(state))
+    }
+
+    fn box_clone(&self) -> Box<dyn IntegratorBuilder> {
+        Box::new(self.clone())
     }
 }
 

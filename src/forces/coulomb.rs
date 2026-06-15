@@ -154,7 +154,7 @@ impl Potential for CoulombState {
 }
 
 // rq-e8550f96
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CoulombBuilder;
 
 impl PotentialBuilder for CoulombBuilder {
@@ -175,6 +175,10 @@ impl PotentialBuilder for CoulombBuilder {
             cx.exclusion_list,
         )?;
         Ok(Some(Box::new(state)))
+    }
+
+    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
+        Box::new(self.clone())
     }
 }
 

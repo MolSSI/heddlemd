@@ -197,7 +197,7 @@ impl Barostat for CRescaleBarostat {
 }
 
 // rq-d521381a
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CRescaleBarostatBuilder;
 
 impl BarostatBuilder for CRescaleBarostatBuilder {
@@ -234,5 +234,9 @@ impl BarostatBuilder for CRescaleBarostatBuilder {
             p.seed,
         )?;
         Ok(Box::new(state))
+    }
+
+    fn box_clone(&self) -> Box<dyn BarostatBuilder> {
+        Box::new(self.clone())
     }
 }

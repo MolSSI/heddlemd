@@ -204,7 +204,7 @@ fn htod_or_empty_f32(
 }
 
 // rq-e8550f96
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HarmonicAngleBuilder;
 
 impl PotentialBuilder for HarmonicAngleBuilder {
@@ -217,6 +217,10 @@ impl PotentialBuilder for HarmonicAngleBuilder {
         }
         let state = HarmonicAngleState::new(cx.gpu, cx.angle_list, cx.angle_types)?;
         Ok(Some(Box::new(state)))
+    }
+
+    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
+        Box::new(self.clone())
     }
 }
 

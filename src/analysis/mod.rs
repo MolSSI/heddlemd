@@ -152,6 +152,8 @@ pub trait AnalysisBuilder: std::fmt::Debug + Send + Sync {
         header: &TrajectoryFrameHeader,
         sim_config: &Config,
     ) -> Result<Box<dyn Analysis>, AnalysisRuntimeError>;
+
+    fn box_clone(&self) -> Box<dyn AnalysisBuilder>;
 }
 
 // rq-8464775b
@@ -173,6 +175,14 @@ pub trait Analysis: Send {
 #[derive(Debug)]
 pub struct AnalysisRegistry {
     pub builders: Vec<Box<dyn AnalysisBuilder>>,
+}
+
+impl Clone for AnalysisRegistry {
+    fn clone(&self) -> Self {
+        AnalysisRegistry {
+            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
+        }
+    }
 }
 
 impl AnalysisRegistry {

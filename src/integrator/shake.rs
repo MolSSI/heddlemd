@@ -551,7 +551,7 @@ impl Constraint for ShakeConstraintsState {
 }
 
 // rq-c623013e
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ShakeBuilder;
 
 impl ConstraintBuilder for ShakeBuilder {
@@ -655,6 +655,10 @@ impl ConstraintBuilder for ShakeBuilder {
     ) -> Result<Box<dyn Constraint>, ConstraintError> {
         let state = ShakeConstraintsState::new(device, list, masses, constraint_types)?;
         Ok(Box::new(state))
+    }
+
+    fn box_clone(&self) -> Box<dyn ConstraintBuilder> {
+        Box::new(self.clone())
     }
 }
 

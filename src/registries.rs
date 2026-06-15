@@ -22,7 +22,7 @@ use crate::integrator::{
 use crate::minimizer::{MinimizerBuilder, MinimizerRegistry};
 
 // rq-32308250 rq-a7211dfd
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Registries {
     pub integrators: IntegratorRegistry,
     pub thermostats: ThermostatRegistry,

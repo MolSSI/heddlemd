@@ -113,7 +113,7 @@ impl Integrator for LangevinBaoabState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LangevinBaoabBuilder;
 
 impl IntegratorBuilder for LangevinBaoabBuilder {
@@ -149,6 +149,10 @@ impl IntegratorBuilder for LangevinBaoabBuilder {
             seed: p.seed,
             draw_counter: 0,
         }))
+    }
+
+    fn box_clone(&self) -> Box<dyn IntegratorBuilder> {
+        Box::new(self.clone())
     }
 }
 

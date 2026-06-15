@@ -128,7 +128,7 @@ impl Thermostat for BerendsenThermostat {
 }
 
 // rq-6c9037a4
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BerendsenBuilder;
 
 impl ThermostatBuilder for BerendsenBuilder {
@@ -160,5 +160,9 @@ impl ThermostatBuilder for BerendsenBuilder {
             p.tau,
         )?;
         Ok(Box::new(state))
+    }
+
+    fn box_clone(&self) -> Box<dyn ThermostatBuilder> {
+        Box::new(self.clone())
     }
 }

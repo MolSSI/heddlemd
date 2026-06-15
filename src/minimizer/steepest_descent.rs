@@ -307,7 +307,7 @@ impl Minimizer for SteepestDescentMinimizer {
 }
 
 // rq-dddb8e7a — concrete MinimizerBuilder implementation for kind = "steepest-descent".
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SteepestDescentBuilder;
 
 impl MinimizerBuilder for SteepestDescentBuilder {
@@ -394,6 +394,10 @@ impl MinimizerBuilder for SteepestDescentBuilder {
         })?;
         let m = SteepestDescentMinimizer::new(gpu, particle_count, &p)?;
         Ok(Box::new(m))
+    }
+
+    fn box_clone(&self) -> Box<dyn MinimizerBuilder> {
+        Box::new(self.clone())
     }
 }
 

@@ -161,7 +161,7 @@ impl Barostat for BerendsenBarostat {
 }
 
 // rq-4ef89c50
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct BerendsenBarostatBuilder;
 
 impl BarostatBuilder for BerendsenBarostatBuilder {
@@ -195,5 +195,9 @@ impl BarostatBuilder for BerendsenBarostatBuilder {
             p.compressibility,
         )?;
         Ok(Box::new(state))
+    }
+
+    fn box_clone(&self) -> Box<dyn BarostatBuilder> {
+        Box::new(self.clone())
     }
 }

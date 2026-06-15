@@ -131,7 +131,7 @@ impl ConstraintCapableIntegrator for VelocityVerletState {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VelocityVerletBuilder;
 
 impl IntegratorBuilder for VelocityVerletBuilder {
@@ -166,6 +166,10 @@ impl IntegratorBuilder for VelocityVerletBuilder {
             None
         };
         Ok(Box::new(VelocityVerletState { lossless: buffers }))
+    }
+
+    fn box_clone(&self) -> Box<dyn IntegratorBuilder> {
+        Box::new(self.clone())
     }
 }
 

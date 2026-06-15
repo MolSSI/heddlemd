@@ -332,7 +332,7 @@ impl Thermostat for NoseHooverChainThermostat {
 }
 
 // rq-4bd6ff2b
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NoseHooverChainBuilder;
 
 impl ThermostatBuilder for NoseHooverChainBuilder {
@@ -386,6 +386,10 @@ impl ThermostatBuilder for NoseHooverChainBuilder {
             p.n_resp,
         )?;
         Ok(Box::new(state))
+    }
+
+    fn box_clone(&self) -> Box<dyn ThermostatBuilder> {
+        Box::new(self.clone())
     }
 }
 

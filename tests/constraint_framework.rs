@@ -186,7 +186,7 @@ impl Constraint for RecordingConstraint {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct StubBuilder {
     kind: &'static str,
     recorder: Arc<Mutex<Recorder>>,
@@ -232,6 +232,10 @@ impl ConstraintBuilder for StubBuilder {
             recorder: self.recorder.clone(),
             group_count,
         }))
+    }
+
+    fn box_clone(&self) -> Box<dyn ConstraintBuilder> {
+        Box::new(self.clone())
     }
 }
 

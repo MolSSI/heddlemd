@@ -124,8 +124,46 @@ pub struct RunSummary {
     pub total_elapsed_micros: u128,
 }
 
+// rq-b1a2d006 — host-stage durations captured during one-time setup.
+// Replayed into phase-0 `Timings` as static one-shot samples by
+// `run_md_phase` / `run_minimization_phase`.
+#[derive(Debug, Clone, Default)]
+pub struct PrePhaseDurations {
+    pub config_load: Duration,
+    pub init_load: Duration,
+    pub gpu_init: Duration,
+    pub velocity_generation: Duration,
+    pub upload: Duration,
+}
+
+// rq-b1a2d006 — cross-phase state owned for the duration of a run.
+//
+// Constructed once via `SimulationSetup::new`, then mutated by the
+// per-phase functions `run_md_phase` and `run_minimization_phase`.
+// Every field is `pub` so external scenario-driving binaries can
+// inspect or replace pieces between calls.
+#[derive(Debug)]
+pub struct SimulationSetup {
+    pub config: crate::io::Config,
+    pub registries: crate::Registries,
+    pub gpu: crate::gpu::GpuContext,
+    pub buffers: ParticleBuffers,
+    pub sim_box: crate::pbc::SimulationBox,
+    pub force_field: ForceField,
+    pub constraint_list: ConstraintList,
+    pub bond_list: BondList,
+    pub angle_list: AngleList,
+    pub exclusion_list: ExclusionList,
+    pub masses_f32: Vec<f32>,
+    pub charges_f32: Vec<f32>,
+    pub type_indices: Vec<u32>,
+    pub n_constraints: u32,
+    pub n_thermal_dof: u32,
+    pub pre_phase_durations: PrePhaseDurations,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ExitPhase {
+pub(crate) enum ExitPhase {
     Setup,
     Loop,
 }
@@ -479,7 +517,8 @@ pub fn lint_simulation_with_registries(
         };
     }
 
-    match lint_gpu_full_setup(&config, &init, &sim_box, n, topology, registries) {
+    let _ = n;
+    match lint_gpu_full_setup(config, init, sim_box, topology, registries) {
         Ok(()) => {
             stages.push(LintStage {
                 label: "gpu",
@@ -550,90 +589,21 @@ fn compute_cutoff_max(config: &crate::io::Config) -> f64 {
 // force field). Used by `lint_simulation_with_registries` when
 // `with_gpu = true`. Returns `(detail, error)` on failure, suitable
 // for embedding in a `LintStatus::Fail` on the `gpu` stage.
+//
+// The body delegates the steps 7-11 + 10a work to
+// `simulation_setup_finish_gpu`, the same helper `SimulationSetup::new`
+// uses, then walks `config.phases` to dry-run the per-phase slot
+// builders. Any change to the shared helper is observed by both code
+// paths by construction.
 fn lint_gpu_full_setup(
-    config: &crate::io::Config,
-    init: &InitState,
-    sim_box: &crate::pbc::SimulationBox,
-    n: usize,
+    config: crate::io::Config,
+    init: InitState,
+    sim_box: crate::pbc::SimulationBox,
     topology: Option<(BondList, AngleList, ExclusionList, ConstraintList)>,
     registries: &crate::Registries,
 ) -> Result<(), (String, RunnerError)> {
-    let gpu = init_device().map_err(|e| (format!("{e}"), RunnerError::Gpu(e)))?;
-
-    if config.spme.is_some() {
-        let differences = crate::gpu::cufft::cufft_determinism_smoke_test(&gpu.device)
-            .map_err(|e| {
-                let synthetic = crate::gpu::GpuError(cudarc::driver::DriverError(
-                    cudarc::driver::sys::CUresult::CUDA_ERROR_UNKNOWN,
-                ));
-                (format!("cuFFT smoke test errored: {e}"), RunnerError::Gpu(synthetic))
-            })?;
-        if differences != 0 {
-            return Err((
-                format!("cuFFT produced {differences} differing bytes between two R2C transforms of the same input"),
-                RunnerError::CuFftNonDeterministic { differences },
-            ));
-        }
-    }
-
-    let mut masses_f64: Vec<f64> = Vec::with_capacity(n);
-    let mut masses_f32: Vec<f32> = Vec::with_capacity(n);
-    let mut charges_f32: Vec<f32> = Vec::with_capacity(n);
-    for &ti in &init.type_indices {
-        let pt = &config.particle_types[ti as usize];
-        masses_f64.push(pt.mass);
-        masses_f32.push(pt.mass as f32);
-        charges_f32.push(pt.charge as f32);
-    }
-
-    let n_constraints_lint = topology
-        .as_ref()
-        .map(|(_, _, _, c)| c.total_constraint_count())
-        .unwrap_or(0);
-    let (vx, vy, vz) = match &init.velocities {
-        Some(v) => (
-            v.velocities_x.clone(),
-            v.velocities_y.clone(),
-            v.velocities_z.clone(),
-        ),
-        None => generate_velocities(
-            n,
-            n_constraints_lint,
-            config.simulation.temperature,
-            config.simulation.seed,
-            &masses_f64,
-        ),
-    };
-
-    let images_arg = init
-        .images
-        .as_ref()
-        .map(|im| (im.images_x.clone(), im.images_y.clone(), im.images_z.clone()));
-    let charges_for_ff = charges_f32.clone();
-    let state = ParticleState::new(
-        init.positions_x.clone(),
-        init.positions_y.clone(),
-        init.positions_z.clone(),
-        vx,
-        vy,
-        vz,
-        masses_f32.clone(),
-        charges_f32,
-        init.type_indices.clone(),
-        None,
-        images_arg,
-    )
-    .map_err(|e| (format!("{e}"), RunnerError::ParticleState(e)))?;
-
-    let _buffers = ParticleBuffers::new(&gpu, &state).map_err(|e| match e {
-        ParticleStateError::Gpu(g) => (format!("{g}"), RunnerError::Gpu(g)),
-        other => (format!("{other}"), RunnerError::ParticleState(other)),
-    })?;
-
-    // Per-phase: build integrator/thermostat/barostat/constraint slots
-    // for each phase so any per-phase builder geometric or allocation
-    // failure surfaces under lint.
-    let (bond_list, angle_list, exclusion_list, constraint_list) = topology.unwrap_or_else(|| {
+    let n = init.particle_count;
+    let topology = topology.unwrap_or_else(|| {
         (
             BondList::empty(n),
             AngleList::empty(n),
@@ -641,71 +611,68 @@ fn lint_gpu_full_setup(
             ConstraintList::empty(n),
         )
     });
+    let setup = simulation_setup_finish_gpu(
+        config,
+        registries.clone(),
+        init,
+        sim_box,
+        topology,
+        Duration::ZERO,
+        Duration::ZERO,
+    )
+    .map_err(|e| (format!("{e}"), e))?;
 
-    let n_constraints = constraint_list.total_constraint_count();
-    for phase in &config.phases {
+    let n_constraints = setup.constraint_list.total_constraint_count();
+    for phase in &setup.config.phases {
         match phase {
             crate::io::PhaseKind::Md(md) => {
-                let _integrator = registries
+                let _integrator = setup
+                    .registries
                     .integrators
-                    .build(&md.integrator, &gpu, n, n_constraints)
+                    .build(&md.integrator, &setup.gpu, n, n_constraints)
                     .map_err(|e| (format!("{e}"), RunnerError::Integrator(e)))?;
-                let _thermostat = registries
+                let _thermostat = setup
+                    .registries
                     .thermostats
-                    .build_optional(md.thermostat.as_ref(), &gpu, n, n_constraints)
+                    .build_optional(md.thermostat.as_ref(), &setup.gpu, n, n_constraints)
                     .map_err(|e| (format!("{e}"), RunnerError::Thermostat(e)))?;
-                let _barostat = registries
+                let _barostat = setup
+                    .registries
                     .barostats
-                    .build_optional(md.barostat.as_ref(), &gpu, n, n_constraints)
+                    .build_optional(md.barostat.as_ref(), &setup.gpu, n, n_constraints)
                     .map_err(|e| (format!("{e}"), RunnerError::Barostat(e)))?;
-                let _constraint = registries
+                let _constraint = setup
+                    .registries
                     .constraint_types
                     .build_optional(
-                        &constraint_list,
-                        &gpu,
+                        &setup.constraint_list,
+                        &setup.gpu,
                         n,
-                        &masses_f32,
-                        &config.constraint_types,
+                        &setup.masses_f32,
+                        &setup.config.constraint_types,
                     )
                     .map_err(|e| (format!("{e}"), RunnerError::Constraint(e)))?;
             }
             crate::io::PhaseKind::Minimization(min) => {
-                let _minimizer = registries
+                let _minimizer = setup
+                    .registries
                     .minimizers
-                    .build(&min.algorithm, &gpu, n, n_constraints)
+                    .build(&min.algorithm, &setup.gpu, n, n_constraints)
                     .map_err(|e| (format!("{e}"), RunnerError::Minimizer(e)))?;
-                let _constraint = registries
+                let _constraint = setup
+                    .registries
                     .constraint_types
                     .build_optional(
-                        &constraint_list,
-                        &gpu,
+                        &setup.constraint_list,
+                        &setup.gpu,
                         n,
-                        &masses_f32,
-                        &config.constraint_types,
+                        &setup.masses_f32,
+                        &setup.config.constraint_types,
                     )
                     .map_err(|e| (format!("{e}"), RunnerError::Constraint(e)))?;
             }
         }
     }
-
-    let _force_field = ForceField::new(
-        &registries.potentials,
-        &gpu,
-        n,
-        sim_box,
-        &config.particle_types,
-        &config.pair_interactions,
-        &config.bond_types,
-        &config.angle_types,
-        config.coulomb.as_ref(),
-        config.spme.as_ref(),
-        &charges_for_ff,
-        &bond_list,
-        &angle_list,
-        &exclusion_list,
-        &config.neighbor_list,
-    )
-    .map_err(|e| (format!("{e}"), RunnerError::ForceField(e)))?;
 
     Ok(())
 }
@@ -722,8 +689,18 @@ fn run_simulation_with_phase(
     config_path: &Path,
     registries: &crate::Registries,
 ) -> Result<RunSummary, (RunnerError, ExitPhase)> {
-    let total_started = Instant::now();
+    let mut setup = SimulationSetup::new(config_path, registries.clone())
+        .map_err(|e| (e, ExitPhase::Setup))?;
+    setup.run_all_phases_with_exit_phase()
+}
 
+// Implementation detail: the public `SimulationSetup::new` body. Kept as
+// a free function so the GPU-half can be shared with the lint flow via
+// `simulation_setup_finish_gpu`.
+fn simulation_setup_new_impl(
+    config_path: &Path,
+    registries: crate::Registries,
+) -> Result<SimulationSetup, RunnerError> {
     // Time config_load before any other instrumentation exists.
     // Parse the config without running the registry-dispatched
     // validation, then run that validation against the
@@ -732,10 +709,10 @@ fn run_simulation_with_phase(
     // registered.
     let mut config_load_duration = Duration::ZERO;
     let config = timed(&mut config_load_duration, || load_config_raw(config_path))
-        .map_err(|e| (RunnerError::Config(e), ExitPhase::Setup))?;
+        .map_err(RunnerError::Config)?;
     config
-        .validate_against(registries)
-        .map_err(|e| (RunnerError::Config(e), ExitPhase::Setup))?;
+        .validate_against(&registries)
+        .map_err(RunnerError::Config)?;
 
     // Pre-flight output existence checks across every phase.
     // Trajectory and log are gated by their per-phase `_every > 0`
@@ -744,54 +721,36 @@ fn run_simulation_with_phase(
         match phase {
             crate::io::PhaseKind::Md(p) => {
                 if p.output.trajectory_every > 0 && p.output.trajectory_path.exists() {
-                    return Err((
-                        RunnerError::OutputExists {
-                            path: p.output.trajectory_path.clone(),
-                        },
-                        ExitPhase::Setup,
-                    ));
+                    return Err(RunnerError::OutputExists {
+                        path: p.output.trajectory_path.clone(),
+                    });
                 }
                 if p.output.log_every > 0 && p.output.log_path.exists() {
-                    return Err((
-                        RunnerError::OutputExists {
-                            path: p.output.log_path.clone(),
-                        },
-                        ExitPhase::Setup,
-                    ));
+                    return Err(RunnerError::OutputExists {
+                        path: p.output.log_path.clone(),
+                    });
                 }
                 if p.output.timings_path.exists() {
-                    return Err((
-                        RunnerError::OutputExists {
-                            path: p.output.timings_path.clone(),
-                        },
-                        ExitPhase::Setup,
-                    ));
+                    return Err(RunnerError::OutputExists {
+                        path: p.output.timings_path.clone(),
+                    });
                 }
             }
             crate::io::PhaseKind::Minimization(m) => {
                 if m.output.minlog_every > 0 && m.output.minlog_path.exists() {
-                    return Err((
-                        RunnerError::OutputExists {
-                            path: m.output.minlog_path.clone(),
-                        },
-                        ExitPhase::Setup,
-                    ));
+                    return Err(RunnerError::OutputExists {
+                        path: m.output.minlog_path.clone(),
+                    });
                 }
                 if m.output.trajectory_every > 0 && m.output.trajectory_path.exists() {
-                    return Err((
-                        RunnerError::OutputExists {
-                            path: m.output.trajectory_path.clone(),
-                        },
-                        ExitPhase::Setup,
-                    ));
+                    return Err(RunnerError::OutputExists {
+                        path: m.output.trajectory_path.clone(),
+                    });
                 }
                 if m.output.timings_path.exists() {
-                    return Err((
-                        RunnerError::OutputExists {
-                            path: m.output.timings_path.clone(),
-                        },
-                        ExitPhase::Setup,
-                    ));
+                    return Err(RunnerError::OutputExists {
+                        path: m.output.timings_path.clone(),
+                    });
                 }
             }
         }
@@ -808,9 +767,9 @@ fn run_simulation_with_phase(
     let init = timed(&mut init_load_duration, || {
         load_init_state(&config.init, &type_name_refs, config.units)
     })
-    .map_err(|e| (RunnerError::InitState(e), ExitPhase::Setup))?;
+    .map_err(RunnerError::InitState)?;
 
-    let mut sim_box = init.sim_box;
+    let sim_box = init.sim_box.clone();
     let n = init.particle_count;
 
     // Cell-list box-compatibility check (uses the init file's box).
@@ -835,17 +794,11 @@ fn run_simulation_with_phase(
                     direction,
                     width,
                     required,
-                } => (
-                    RunnerError::CellListBoxTooSmall {
-                        direction,
-                        width,
-                        required,
-                    },
-                    ExitPhase::Setup,
-                ),
-                // The constructor / mutator variants are unreachable here:
-                // `check_min_perpendicular_width` only produces
-                // `PerpendicularWidthTooSmall`.
+                } => RunnerError::CellListBoxTooSmall {
+                    direction,
+                    width,
+                    required,
+                },
                 _ => unreachable!(
                     "check_min_perpendicular_width only produces PerpendicularWidthTooSmall"
                 ),
@@ -853,29 +806,71 @@ fn run_simulation_with_phase(
         }
     }
 
+    // Load the .topology file when supplied, otherwise build empty bond /
+    // angle / exclusion lists keyed to `n`.
+    let bond_type_names: Vec<&str> =
+        config.bond_types.iter().map(|bt| bt.name()).collect();
+    let angle_type_names: Vec<&str> =
+        config.angle_types.iter().map(|at| at.name()).collect();
+    let topology: (BondList, AngleList, ExclusionList, ConstraintList) =
+        match config.topology.as_ref() {
+            Some(path) => load_topology_file(
+                path,
+                n,
+                &bond_type_names,
+                &angle_type_names,
+                &config.constraint_types,
+                &registries.constraint_types,
+            )
+            .map_err(RunnerError::TopologyFile)?,
+            None => (
+                BondList::empty(n),
+                AngleList::empty(n),
+                ExclusionList::empty(n),
+                ConstraintList::empty(n),
+            ),
+        };
+
+    simulation_setup_finish_gpu(
+        config,
+        registries,
+        init,
+        sim_box,
+        topology,
+        config_load_duration,
+        init_load_duration,
+    )
+}
+
+// Runs steps 7-11 + 10a of `SimulationSetup::new`. Shared between
+// `SimulationSetup::new` (via `simulation_setup_new_impl`) and the
+// GPU-touching half of the lint pipeline. Takes ownership of the
+// inputs because the resulting `SimulationSetup` owns them.
+fn simulation_setup_finish_gpu(
+    config: crate::io::Config,
+    registries: crate::Registries,
+    init: InitState,
+    sim_box: crate::pbc::SimulationBox,
+    topology: (BondList, AngleList, ExclusionList, ConstraintList),
+    config_load_duration: Duration,
+    init_load_duration: Duration,
+) -> Result<SimulationSetup, RunnerError> {
+    let n = init.particle_count;
+    let (bond_list, angle_list, exclusion_list, constraint_list) = topology;
+
     let mut gpu_init_duration = Duration::ZERO;
-    let gpu = timed(&mut gpu_init_duration, init_device)
-        .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?;
+    let gpu = timed(&mut gpu_init_duration, init_device).map_err(RunnerError::Gpu)?;
 
     // rq-637cd1a5 rq-02f4d342 rq-ea4205ec
-    //
-    // SPME runs depend on cuFFT producing bit-identical output on
-    // repeated calls with identical input. cuFFT's plan selector is
-    // deterministic on a given GPU, but we verify this up front so a
-    // misconfigured environment fails loudly at setup rather than
-    // producing silently non-reproducible simulations.
     if config.spme.is_some() {
         let differences = crate::gpu::cufft::cufft_determinism_smoke_test(&gpu.device)
-            .map_err(|_| (RunnerError::Gpu(crate::gpu::GpuError(
-                cudarc::driver::DriverError(
+            .map_err(|_| {
+                RunnerError::Gpu(crate::gpu::GpuError(cudarc::driver::DriverError(
                     cudarc::driver::sys::CUresult::CUDA_ERROR_UNKNOWN,
-                ),
-            )), ExitPhase::Setup))?;
+                )))
+            })?;
         if differences != 0 {
-            return Err((
-                RunnerError::CuFftNonDeterministic { differences },
-                ExitPhase::Setup,
-            ));
+            return Err(RunnerError::CuFftNonDeterministic { differences });
         }
     }
 
@@ -890,43 +885,11 @@ fn run_simulation_with_phase(
         charges_f32.push(pt.charge as f32);
     }
 
-    // Load the .topology file when supplied, otherwise build empty bond /
-    // angle / exclusion lists keyed to `n`. Topology is global (one
-    // load per run, applies to every phase). Loaded before velocity
-    // generation so the constraint count can shape the equipartition
-    // target.
-    let bond_type_names: Vec<&str> =
-        config.bond_types.iter().map(|bt| bt.name()).collect();
-    let angle_type_names: Vec<&str> =
-        config.angle_types.iter().map(|at| at.name()).collect();
-    let (bond_list, angle_list, exclusion_list, constraint_list): (
-        BondList,
-        AngleList,
-        ExclusionList,
-        ConstraintList,
-    ) = match config.topology.as_ref() {
-        Some(path) => load_topology_file(
-            path,
-            n,
-            &bond_type_names,
-            &angle_type_names,
-            &config.constraint_types,
-            &registries.constraint_types,
-        )
-        .map_err(|e| (RunnerError::TopologyFile(e), ExitPhase::Setup))?,
-        None => (
-            BondList::empty(n),
-            AngleList::empty(n),
-            ExclusionList::empty(n),
-            ConstraintList::empty(n),
-        ),
-    };
     let n_constraints = constraint_list.total_constraint_count();
     // Thermal degrees of freedom used by `compute_temperature` and by
     // the initial-velocity equipartition rescale: constraint- and
     // COM-removed.
-    let n_thermal_dof: u32 =
-        ((3 * n as i64) - n_constraints as i64 - 3).max(0) as u32;
+    let n_thermal_dof: u32 = ((3 * n as i64) - n_constraints as i64 - 3).max(0) as u32;
 
     // Build velocities: either from the init state or sampled.
     // Velocity generation runs once at phase-0 entry; the duration is
@@ -949,9 +912,10 @@ fn run_simulation_with_phase(
         }),
     };
 
-    let images_arg = init.images.as_ref().map(|im| {
-        (im.images_x.clone(), im.images_y.clone(), im.images_z.clone())
-    });
+    let images_arg = init
+        .images
+        .as_ref()
+        .map(|im| (im.images_x.clone(), im.images_y.clone(), im.images_z.clone()));
     let charges_for_force_field = charges_f32.clone();
     let state = ParticleState::new(
         init.positions_x.clone(),
@@ -961,41 +925,32 @@ fn run_simulation_with_phase(
         velocities_y,
         velocities_z,
         masses_f32.clone(),
-        charges_f32,
+        charges_f32.clone(),
         init.type_indices.clone(),
         None,
         images_arg,
     )
-    .map_err(|e| (RunnerError::ParticleState(e), ExitPhase::Setup))?;
+    .map_err(RunnerError::ParticleState)?;
 
     // ParticleBuffers persist across phases; allocation happens once.
     let mut upload = Duration::ZERO;
-    let mut buffers = timed(&mut upload, || ParticleBuffers::new(&gpu, &state))
-        .map_err(|e| match e {
-            ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Setup),
-            other => (RunnerError::ParticleState(other), ExitPhase::Setup),
-        })?;
+    let mut buffers = timed(&mut upload, || ParticleBuffers::new(&gpu, &state)).map_err(|e| {
+        match e {
+            ParticleStateError::Gpu(g) => RunnerError::Gpu(g),
+            other => RunnerError::ParticleState(other),
+        }
+    })?;
     // rq-acfda5d4 — runner-side enforcement of the integrator/constraint
     // compatibility rule, applied to every phase. Cannot run during
     // `Config::validate_against` because the topology file is loaded
     // separately.
     config
-        .validate_constraint_compatibility(registries, !constraint_list.is_empty())
-        .map_err(|e| (RunnerError::Config(e), ExitPhase::Setup))?;
+        .validate_constraint_compatibility(&registries, !constraint_list.is_empty())
+        .map_err(RunnerError::Config)?;
 
     // Project the freshly-sampled initial velocities onto the
     // constraint velocity manifold and re-scale to match the target
-    // thermal kinetic energy. Without this step, the per-axis MB
-    // sample carries components along bond directions that the
-    // first SETTLE invocation strips off, leaving the system at
-    // ~ (n_thermal_dof / 3N) of the configured starting temperature
-    // until CSVR re-heats it over ~τ_T.
-    //
-    // The projection plus uniform rescale preserve both the
-    // zero-total-momentum property established by the COM
-    // subtraction in `generate_velocities` and the on-manifold
-    // velocity field, so the system starts the run at the
-    // configured temperature on the constraint manifold.
+    // thermal kinetic energy.
     if !constraint_list.is_empty() && config.simulation.temperature > 0.0 && n >= 2 {
         let mut init_constraint = registries
             .constraint_types
@@ -1006,40 +961,29 @@ fn run_simulation_with_phase(
                 &masses_f32,
                 &config.constraint_types,
             )
-            .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
+            .map_err(RunnerError::Constraint)?;
         if let Some(c) = init_constraint.as_mut() {
-            let mut init_timings = Timings::new(&gpu)
-                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
+            let mut init_timings = Timings::new(&gpu).map_err(RunnerError::Timings)?;
             c.apply_initial_velocity_projection(&mut buffers, &sim_box, &mut init_timings)
-                .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
-            // Compute the post-projection kinetic energy and rescale
-            // every velocity by a single scalar so the realised KE
-            // matches the equipartition target on the constraint
-            // manifold. Uniform rescale preserves the projection
-            // (`(α v_i − α v_j) · (r_i − r_j) = α · 0 = 0`).
+                .map_err(RunnerError::Constraint)?;
             let mut ke_scratch = gpu
                 .device
                 .alloc_zeros::<f32>(1)
-                .map_err(|e| (RunnerError::Gpu(crate::gpu::GpuError::from(e)), ExitPhase::Setup))?;
+                .map_err(|e| RunnerError::Gpu(crate::gpu::GpuError::from(e)))?;
             let ke_after = crate::gpu::compute_kinetic_energy(&buffers, &mut ke_scratch)
-                .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?
-                as f64;
+                .map_err(RunnerError::Gpu)? as f64;
             let n_thermal_dof_f64 = n_thermal_dof as f64;
             // k_B = 1 in atomic units; simulation.temperature is k_B · T in Hartrees.
-            let target_ke =
-                0.5 * n_thermal_dof_f64 * config.simulation.temperature;
+            let target_ke = 0.5 * n_thermal_dof_f64 * config.simulation.temperature;
             if ke_after > 0.0 && target_ke > 0.0 {
                 let factor = (target_ke / ke_after).sqrt() as f32;
-                crate::gpu::rescale_velocities(&mut buffers, factor)
-                    .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Setup))?;
+                crate::gpu::rescale_velocities(&mut buffers, factor).map_err(RunnerError::Gpu)?;
             }
         }
     }
 
-    // ForceField persists across phases: pair_interactions, coulomb,
-    // spme, bond/angle/exclusion lists, and neighbor_list are all
-    // global config fields.
-    let mut force_field = ForceField::new(
+    // ForceField persists across phases.
+    let force_field = ForceField::new(
         &registries.potentials,
         &gpu,
         n,
@@ -1056,163 +1000,378 @@ fn run_simulation_with_phase(
         &exclusion_list,
         &config.neighbor_list,
     )
-    .map_err(|e| (RunnerError::ForceField(e), ExitPhase::Setup))?;
+    .map_err(RunnerError::ForceField)?;
 
-    let progress_to_stdout = std::io::IsTerminal::is_terminal(&std::io::stdout());
-    let mut phase_summaries: Vec<PhaseSummary> = Vec::with_capacity(config.phases.len());
-    let mut total_n_steps: u64 = 0;
-    let mut frame: ParticleState = state.clone();
+    Ok(SimulationSetup {
+        config,
+        registries,
+        gpu,
+        buffers,
+        sim_box,
+        force_field,
+        constraint_list,
+        bond_list,
+        angle_list,
+        exclusion_list,
+        masses_f32,
+        charges_f32,
+        type_indices: init.type_indices,
+        n_constraints: n_constraints as u32,
+        n_thermal_dof,
+        pre_phase_durations: PrePhaseDurations {
+            config_load: config_load_duration,
+            init_load: init_load_duration,
+            gpu_init: gpu_init_duration,
+            velocity_generation: velocity_generation_duration,
+            upload,
+        },
+    })
+}
 
-    // ── Per-phase loop ────────────────────────────────────────────────
-    for (phase_index, phase_kind) in config.phases.iter().enumerate() {
-        // Per-phase Timings instance (fresh kernel-event pairs).
-        let mut timings = Timings::new(&gpu)
-            .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
-        // Phase 0 replays the pre-instrumented host stages.
-        if phase_index == 0 {
-            timings.record_host(HostStage::CONFIG_LOAD, config_load_duration);
-            timings.record_host(HostStage::INIT_LOAD, init_load_duration);
-            timings.record_host(HostStage::GPU_INIT, gpu_init_duration);
-            if velocity_generation_duration > Duration::ZERO {
-                timings.record_host(
-                    HostStage::VELOCITY_GENERATION,
-                    velocity_generation_duration,
-                );
-            }
-            timings.record_host(HostStage::HOST_TO_DEVICE_UPLOAD, upload);
-        }
+impl SimulationSetup {
+    // rq-b1a2d006 — constructor: runs steps 2-11 of *Once-only setup*.
+    pub fn new(
+        config_path: &Path,
+        registries: crate::Registries,
+    ) -> Result<SimulationSetup, RunnerError> {
+        simulation_setup_new_impl(config_path, registries)
+    }
 
-        match phase_kind {
-        crate::io::PhaseKind::Minimization(min) => {
-            run_minimization_phase(
-                min,
-                &mut buffers,
-                &mut sim_box,
-                &mut force_field,
-                &constraint_list,
-                &masses_f32,
-                &config,
-                registries,
-                &gpu,
-                &type_name_strings,
-                &init.type_indices,
-                &mut frame,
-                &mut timings,
-                n,
-                n_constraints,
-                progress_to_stdout,
-            )
-            .map(|s| { total_n_steps += s.n_steps; phase_summaries.push(s); })?;
-            continue;
-        }
-        crate::io::PhaseKind::Md(phase) => {
+    // rq-b1a2d006 — orchestrator: iterates `self.config.phases`,
+    // dispatches to `run_md_phase` or `run_minimization_phase`,
+    // aggregates a `RunSummary`.
+    pub fn run_all_phases(&mut self) -> Result<RunSummary, RunnerError> {
+        self.run_all_phases_with_exit_phase().map_err(|(e, _)| e)
+    }
 
-        // Build the four slot handles for this phase.
-        let mut integrator = registries
-            .integrators
-            .build(&phase.integrator, &gpu, n, n_constraints)
-            .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Setup))?;
-        let mut thermostat = registries
-            .thermostats
-            .build_optional(phase.thermostat.as_ref(), &gpu, n, n_constraints)
-            .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Setup))?;
-        let mut barostat = registries
-            .barostats
-            .build_optional(phase.barostat.as_ref(), &gpu, n, n_constraints)
-            .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
-        let mut constraint = registries
-            .constraint_types
-            .build_optional(
-                &constraint_list,
-                &gpu,
-                n,
-                &masses_f32,
-                &config.constraint_types,
-            )
-            .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
+    // Internal variant used by `run_simulation_with_phase` so the CLI
+    // can preserve the setup-vs-loop exit-code distinction.
+    pub(crate) fn run_all_phases_with_exit_phase(
+        &mut self,
+    ) -> Result<RunSummary, (RunnerError, ExitPhase)> {
+        let total_started = Instant::now();
+        let n_phases = self.config.phases.len();
+        let mut phase_summaries: Vec<PhaseSummary> = Vec::with_capacity(n_phases);
+        let mut total_n_steps: u64 = 0;
 
-        // Open per-phase output writers.
-        let mut traj_writer: Option<TrajectoryWriter> = if phase.output.trajectory_every > 0 {
-            Some(
-                TrajectoryWriter::open(
-                    &phase.output.trajectory_path,
-                    config.units,
-                    phase.output.include_velocities,
-                    phase.output.include_images,
-                    type_name_strings.clone(),
-                )
-                .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Setup))?,
-            )
-        } else {
-            None
-        };
-        let mut log_extra_columns: Vec<(&'static str, crate::units::Dimension)> =
-            integrator.log_column_names().to_vec();
-        if let Some(t) = thermostat.as_ref() {
-            log_extra_columns.extend_from_slice(t.log_column_names());
-        }
-        if let Some(b) = barostat.as_ref() {
-            log_extra_columns.extend_from_slice(b.log_column_names());
-        }
-        let mut log_writer: Option<LogWriter> = if phase.output.log_every > 0 {
-            Some(
-                LogWriter::open(&phase.output.log_path, config.units, &log_extra_columns)
-                    .map_err(|e| (RunnerError::Log(e), ExitPhase::Setup))?,
-            )
-        } else {
-            None
-        };
-        let mut pe_scratch: Option<cudarc::driver::CudaSlice<f32>> =
-            if !log_extra_columns.is_empty() {
-                Some(
-                    gpu.device
-                        .alloc_zeros::<f32>(1)
-                        .map_err(|e| {
-                            (RunnerError::Gpu(crate::gpu::GpuError(e)), ExitPhase::Setup)
-                        })?,
-                )
-            } else {
-                None
+        for phase_index in 0..n_phases {
+            // Dispatch by re-borrowing each iteration so we don't clash
+            // with the &mut self required by the per-phase functions.
+            let kind_tag = match &self.config.phases[phase_index] {
+                crate::io::PhaseKind::Md(_) => 0u8,
+                crate::io::PhaseKind::Minimization(_) => 1u8,
             };
+            let summary = if kind_tag == 0 {
+                // Clone the phase config so we can release the borrow on
+                // `self.config` before calling `run_md_phase`, which takes
+                // `&mut self`.
+                let phase = match &self.config.phases[phase_index] {
+                    crate::io::PhaseKind::Md(p) => p.clone(),
+                    _ => unreachable!(),
+                };
+                run_md_phase_inner(self, &phase, phase_index)?
+            } else {
+                let phase = match &self.config.phases[phase_index] {
+                    crate::io::PhaseKind::Minimization(p) => p.clone(),
+                    _ => unreachable!(),
+                };
+                run_minimization_phase_inner(self, &phase, phase_index)?
+            };
+            total_n_steps += summary.n_steps;
+            phase_summaries.push(summary);
+        }
 
-        let phase_started = Instant::now();
+        Ok(RunSummary {
+            phases: phase_summaries,
+            total_n_steps,
+            total_elapsed_micros: total_started.elapsed().as_micros(),
+        })
+    }
+}
 
-        // Warm-up: refresh forces to match current positions. Phase 0
-        // populates F(x_0); subsequent phases re-compute the carried-over
-        // force buffer, which is bit-identical to the previous phase's
-        // final F(x). Always uses ForcesAndScalars so the step-0
-        // logging path below sees fresh potential_energies and virials.
-        force_field
-            .step(
-                &mut buffers,
-                &sim_box,
-                &mut timings,
-                crate::forces::AggregateLevel::ForcesAndScalars,
+// rq-63d694e9 — per-MD-phase function. Public, takes `&mut SimulationSetup`.
+pub fn run_md_phase(
+    setup: &mut SimulationSetup,
+    phase: &crate::io::PhaseConfig,
+    phase_index: usize,
+) -> Result<PhaseSummary, RunnerError> {
+    run_md_phase_inner(setup, phase, phase_index).map_err(|(e, _)| e)
+}
+
+// rq-10903c8d — per-minimization-phase function. Public, takes
+// `&mut SimulationSetup`.
+pub fn run_minimization_phase(
+    setup: &mut SimulationSetup,
+    phase: &crate::io::MinimizationConfig,
+    phase_index: usize,
+) -> Result<PhaseSummary, RunnerError> {
+    run_minimization_phase_inner(setup, phase, phase_index).map_err(|(e, _)| e)
+}
+
+// rq-63d694e9 — per-MD-phase impl. Companion to `run_md_phase` that
+// preserves the `ExitPhase` tag so the CLI can distinguish setup-time
+// errors (exit 1) from loop-time errors (exit 2).
+pub(crate) fn run_md_phase_inner(
+    setup: &mut SimulationSetup,
+    phase: &crate::io::PhaseConfig,
+    phase_index: usize,
+) -> Result<PhaseSummary, (RunnerError, ExitPhase)> {
+    let progress_to_stdout = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    let n = setup.buffers.particle_count();
+    let n_constraints = setup.n_constraints as usize;
+    let n_thermal_dof = setup.n_thermal_dof;
+    let units = setup.config.units;
+
+    // Per-phase Timings instance (fresh kernel-event pairs).
+    let mut timings = Timings::new(&setup.gpu)
+        .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
+    // Phase 0 replays the pre-instrumented host stages.
+    if phase_index == 0 {
+        let pre = &setup.pre_phase_durations;
+        timings.record_host(HostStage::CONFIG_LOAD, pre.config_load);
+        timings.record_host(HostStage::INIT_LOAD, pre.init_load);
+        timings.record_host(HostStage::GPU_INIT, pre.gpu_init);
+        if pre.velocity_generation > Duration::ZERO {
+            timings.record_host(HostStage::VELOCITY_GENERATION, pre.velocity_generation);
+        }
+        timings.record_host(HostStage::HOST_TO_DEVICE_UPLOAD, pre.upload);
+    }
+
+    let type_name_strings: Vec<String> = setup
+        .config
+        .particle_types
+        .iter()
+        .map(|t| t.name.clone())
+        .collect();
+    let type_indices: Vec<u32> = setup.type_indices.clone();
+
+    // Build the four slot handles for this phase.
+    let mut integrator = setup
+        .registries
+        .integrators
+        .build(&phase.integrator, &setup.gpu, n, n_constraints)
+        .map_err(|e| (RunnerError::Integrator(e), ExitPhase::Setup))?;
+    let mut thermostat = setup
+        .registries
+        .thermostats
+        .build_optional(phase.thermostat.as_ref(), &setup.gpu, n, n_constraints)
+        .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Setup))?;
+    let mut barostat = setup
+        .registries
+        .barostats
+        .build_optional(phase.barostat.as_ref(), &setup.gpu, n, n_constraints)
+        .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
+    let mut constraint = setup
+        .registries
+        .constraint_types
+        .build_optional(
+            &setup.constraint_list,
+            &setup.gpu,
+            n,
+            &setup.masses_f32,
+            &setup.config.constraint_types,
+        )
+        .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
+
+    // Open per-phase output writers.
+    let mut traj_writer: Option<TrajectoryWriter> = if phase.output.trajectory_every > 0 {
+        Some(
+            TrajectoryWriter::open(
+                &phase.output.trajectory_path,
+                units,
+                phase.output.include_velocities,
+                phase.output.include_images,
+                type_name_strings.clone(),
             )
-            .map_err(|e| (RunnerError::ForceField(e), ExitPhase::Setup))?;
+            .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Setup))?,
+        )
+    } else {
+        None
+    };
+    let mut log_extra_columns: Vec<(&'static str, crate::units::Dimension)> =
+        integrator.log_column_names().to_vec();
+    if let Some(t) = thermostat.as_ref() {
+        log_extra_columns.extend_from_slice(t.log_column_names());
+    }
+    if let Some(b) = barostat.as_ref() {
+        log_extra_columns.extend_from_slice(b.log_column_names());
+    }
+    let mut log_writer: Option<LogWriter> = if phase.output.log_every > 0 {
+        Some(
+            LogWriter::open(&phase.output.log_path, units, &log_extra_columns)
+                .map_err(|e| (RunnerError::Log(e), ExitPhase::Setup))?,
+        )
+    } else {
+        None
+    };
+    let mut pe_scratch: Option<cudarc::driver::CudaSlice<f32>> = if !log_extra_columns.is_empty() {
+        Some(setup.gpu.device.alloc_zeros::<f32>(1).map_err(|e| {
+            (RunnerError::Gpu(crate::gpu::GpuError(e)), ExitPhase::Setup)
+        })?)
+    } else {
+        None
+    };
 
-        let mut frames_written: u64 = 0;
-        let mut log_rows_written: u64 = 0;
+    // Host-side frame buffer for download_from. Allocated fresh per
+    // phase; the buffer is overwritten by each `download_from` call.
+    let mut frame = new_frame_buffer(n, &setup.masses_f32, &setup.charges_f32, &type_indices)
+        .map_err(|e| (RunnerError::ParticleState(e), ExitPhase::Setup))?;
 
-        // Phase step-0 outputs.
-        if traj_writer.is_some() || log_writer.is_some() {
+    let phase_started = Instant::now();
+
+    // Warm-up: refresh forces to match current positions.
+    setup
+        .force_field
+        .step(
+            &mut setup.buffers,
+            &setup.sim_box,
+            &mut timings,
+            crate::forces::AggregateLevel::ForcesAndScalars,
+        )
+        .map_err(|e| (RunnerError::ForceField(e), ExitPhase::Setup))?;
+
+    let mut frames_written: u64 = 0;
+    let mut log_rows_written: u64 = 0;
+
+    // Phase step-0 outputs.
+    if traj_writer.is_some() || log_writer.is_some() {
+        let mut dl = Duration::ZERO;
+        timed(&mut dl, || frame.download_from(&setup.buffers)).map_err(|e| match e {
+            ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Setup),
+            other => (RunnerError::ParticleState(other), ExitPhase::Setup),
+        })?;
+        timings.record_host(HostStage::DEVICE_TO_HOST_DOWNLOAD, dl);
+    }
+    if let Some(writer) = traj_writer.as_mut() {
+        let mut tw = Duration::ZERO;
+        timed(&mut tw, || {
+            write_traj_frame(writer, 0, phase.dt, &setup.sim_box, &type_indices, &frame)
+        })
+        .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Setup))?;
+        timings.record_host(HostStage::TRAJECTORY_WRITE, tw);
+        frames_written += 1;
+    }
+    if let Some(writer) = log_writer.as_mut() {
+        let ke = compute_kinetic_energy(
+            &frame.masses,
+            &frame.velocities_x,
+            &frame.velocities_y,
+            &frame.velocities_z,
+        );
+        let t = compute_temperature(ke, n_thermal_dof);
+        let extras = if log_extra_columns.is_empty() {
+            Vec::new()
+        } else {
+            let scratch = pe_scratch
+                .as_mut()
+                .expect("pe_scratch allocated when log_extra_columns non-empty");
+            timings
+                .kernel_start(KernelStage::POTENTIAL_ENERGY_REDUCE)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
+            let pe = compute_total_potential_energy(&setup.buffers, scratch)
+                .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Setup))?;
+            timings
+                .kernel_stop(KernelStage::POTENTIAL_ENERGY_REDUCE)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
+            collect_log_extras(
+                integrator.as_ref(),
+                thermostat.as_deref(),
+                barostat.as_deref(),
+                ke,
+                pe as f64,
+            )
+        };
+        let mut lw = Duration::ZERO;
+        timed(&mut lw, || writer.write_row(0, 0.0, ke, t, &extras))
+            .map_err(|e| (RunnerError::Log(e), ExitPhase::Setup))?;
+        timings.record_host(HostStage::LOG_WRITE, lw);
+        log_rows_written += 1;
+    }
+
+    let n_steps = phase.n_steps;
+    let progress_every = (n_steps / 100).max(1);
+    let dt_f32 = phase.dt as f32;
+    let phase_name = phase.name.as_str();
+
+    // Pre-fetch the supports_constraints bit before the per-step loop;
+    // the registry borrow does not need to be held during the loop body.
+    let supports_constraints = setup
+        .registries
+        .integrators
+        .lookup(&phase.integrator.kind)
+        .map(|b| b.supports_constraints(&phase.integrator.params))
+        .unwrap_or(false);
+
+    for step in 1..=n_steps {
+        if let Some(t) = thermostat.as_mut() {
+            t.apply_pre(&mut setup.buffers, dt_f32, &mut timings)
+                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
+        }
+        {
+            let constraint_arg: Option<&mut dyn crate::integrator::Constraint> =
+                match constraint.as_mut() {
+                    Some(b) => Some(b.as_mut()),
+                    None => None,
+                };
+            let trajectory_due = phase.output.trajectory_every > 0
+                && step % phase.output.trajectory_every == 0;
+            let log_due = phase.output.log_every > 0 && step % phase.output.log_every == 0;
+            let runner_needs_scalars = trajectory_due || log_due || barostat.is_some();
+            crate::integrator::run_step(
+                integrator.as_mut(),
+                &mut setup.buffers,
+                &mut setup.sim_box,
+                &mut setup.force_field,
+                constraint_arg,
+                supports_constraints,
+                dt_f32,
+                &mut timings,
+                runner_needs_scalars,
+            )
+            .map_err(|e| {
+                let runner_err = match e {
+                    crate::integrator::StepError::Integrator(e) => RunnerError::Integrator(e),
+                    crate::integrator::StepError::ForceField(e) => RunnerError::ForceField(e),
+                    crate::integrator::StepError::Constraint(e) => RunnerError::Constraint(e),
+                    crate::integrator::StepError::IntegratorRejectsConstraint { reason } => {
+                        unreachable!("run_step returned IntegratorRejectsConstraint ({reason})")
+                    }
+                };
+                (runner_err, ExitPhase::Loop)
+            })?;
+        }
+        if let Some(t) = thermostat.as_mut() {
+            t.apply_post(&mut setup.buffers, dt_f32, &mut timings)
+                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
+        }
+        if let Some(b) = barostat.as_mut() {
+            b.apply(&mut setup.buffers, &mut setup.sim_box, dt_f32, &mut timings)
+                .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
+        }
+
+        let want_traj =
+            phase.output.trajectory_every > 0 && step % phase.output.trajectory_every == 0;
+        let want_log = phase.output.log_every > 0 && step % phase.output.log_every == 0;
+        if want_traj || want_log {
             let mut dl = Duration::ZERO;
-            timed(&mut dl, || frame.download_from(&buffers)).map_err(|e| match e {
-                ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Setup),
-                other => (RunnerError::ParticleState(other), ExitPhase::Setup),
+            timed(&mut dl, || frame.download_from(&setup.buffers)).map_err(|e| match e {
+                ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Loop),
+                other => (RunnerError::ParticleState(other), ExitPhase::Loop),
             })?;
             timings.record_host(HostStage::DEVICE_TO_HOST_DOWNLOAD, dl);
         }
-        if let Some(writer) = traj_writer.as_mut() {
+        if want_traj {
+            let writer = traj_writer.as_mut().expect("traj_writer enabled");
             let mut tw = Duration::ZERO;
             timed(&mut tw, || {
-                write_traj_frame(writer, 0, phase.dt, &sim_box, &init.type_indices, &frame)
+                write_traj_frame(writer, step, phase.dt, &setup.sim_box, &type_indices, &frame)
             })
-            .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Setup))?;
+            .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Loop))?;
             timings.record_host(HostStage::TRAJECTORY_WRITE, tw);
             frames_written += 1;
         }
-        if let Some(writer) = log_writer.as_mut() {
+        if want_log {
+            let writer = log_writer.as_mut().expect("log_writer enabled");
             let ke = compute_kinetic_energy(
                 &frame.masses,
                 &frame.velocities_x,
@@ -1220,6 +1379,7 @@ fn run_simulation_with_phase(
                 &frame.velocities_z,
             );
             let t = compute_temperature(ke, n_thermal_dof);
+            let time = (step as f64) * phase.dt;
             let extras = if log_extra_columns.is_empty() {
                 Vec::new()
             } else {
@@ -1228,13 +1388,12 @@ fn run_simulation_with_phase(
                     .expect("pe_scratch allocated when log_extra_columns non-empty");
                 timings
                     .kernel_start(KernelStage::POTENTIAL_ENERGY_REDUCE)
-                    .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
-                let pe = compute_total_potential_energy(&buffers, scratch).map_err(|g| {
-                    (RunnerError::Gpu(g), ExitPhase::Setup)
-                })?;
+                    .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+                let pe = compute_total_potential_energy(&setup.buffers, scratch)
+                    .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Loop))?;
                 timings
                     .kernel_stop(KernelStage::POTENTIAL_ENERGY_REDUCE)
-                    .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
+                    .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
                 collect_log_extras(
                     integrator.as_ref(),
                     thermostat.as_deref(),
@@ -1244,249 +1403,142 @@ fn run_simulation_with_phase(
                 )
             };
             let mut lw = Duration::ZERO;
-            timed(&mut lw, || writer.write_row(0, 0.0, ke, t, &extras))
-                .map_err(|e| (RunnerError::Log(e), ExitPhase::Setup))?;
+            timed(&mut lw, || writer.write_row(step, time, ke, t, &extras))
+                .map_err(|e| (RunnerError::Log(e), ExitPhase::Loop))?;
             timings.record_host(HostStage::LOG_WRITE, lw);
             log_rows_written += 1;
         }
 
-        let n_steps = phase.n_steps;
-        let progress_every = (n_steps / 100).max(1);
-        let dt_f32 = phase.dt as f32;
-        let phase_name = phase.name.as_str();
-
-        // Per-phase main loop. Step counter is phase-local.
-        for step in 1..=n_steps {
-            if let Some(t) = thermostat.as_mut() {
-                t.apply_pre(&mut buffers, dt_f32, &mut timings)
-                    .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
-            }
-            {
-                let constraint_arg: Option<&mut dyn crate::integrator::Constraint> =
-                    match constraint.as_mut() {
-                        Some(b) => Some(b.as_mut()),
-                        None => None,
-                    };
-                let supports_constraints = registries
-                    .integrators
-                    .lookup(&phase.integrator.kind)
-                    .map(|b| b.supports_constraints(&phase.integrator.params))
-                    .unwrap_or(false);
-                // Upgrade to ForcesAndScalars when the runner needs fresh
-                // energy / virial this step: an output frame, a log row,
-                // or any barostat that reads virial each step. The
-                // barostat case is handled by the integrator's own
-                // SubStep::ForceEval level (MTK-NPT emits ForcesAndScalars
-                // unconditionally); c-rescale barostats run as a separate
-                // post-step phase and require the integrator's most
-                // recent force evaluation to have produced virials.
-                let trajectory_due = phase.output.trajectory_every > 0
-                    && step % phase.output.trajectory_every == 0;
-                let log_due = phase.output.log_every > 0
-                    && step % phase.output.log_every == 0;
-                let runner_needs_scalars =
-                    trajectory_due || log_due || barostat.is_some();
-                crate::integrator::run_step(
-                    integrator.as_mut(),
-                    &mut buffers,
-                    &mut sim_box,
-                    &mut force_field,
-                    constraint_arg,
-                    supports_constraints,
-                    dt_f32,
-                    &mut timings,
-                    runner_needs_scalars,
-                )
-                .map_err(|e| {
-                    let runner_err = match e {
-                        crate::integrator::StepError::Integrator(e) => {
-                            RunnerError::Integrator(e)
-                        }
-                        crate::integrator::StepError::ForceField(e) => {
-                            RunnerError::ForceField(e)
-                        }
-                        crate::integrator::StepError::Constraint(e) => {
-                            RunnerError::Constraint(e)
-                        }
-                        // Produced only by
-                        // `IntegratorStepWithConstraintExt::step_with_constraint`;
-                        // the runner uses `run_step` directly, so this
-                        // variant cannot reach here.
-                        crate::integrator::StepError::IntegratorRejectsConstraint {
-                            reason,
-                        } => unreachable!(
-                            "run_step returned IntegratorRejectsConstraint ({reason})"
-                        ),
-                    };
-                    (runner_err, ExitPhase::Loop)
-                })?;
-            }
-            if let Some(t) = thermostat.as_mut() {
-                t.apply_post(&mut buffers, dt_f32, &mut timings)
-                    .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
-            }
-            if let Some(b) = barostat.as_mut() {
-                b.apply(&mut buffers, &mut sim_box, dt_f32, &mut timings)
-                    .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
-            }
-
-            let want_traj = phase.output.trajectory_every > 0
-                && step % phase.output.trajectory_every == 0;
-            let want_log =
-                phase.output.log_every > 0 && step % phase.output.log_every == 0;
-            if want_traj || want_log {
-                let mut dl = Duration::ZERO;
-                timed(&mut dl, || frame.download_from(&buffers)).map_err(|e| match e {
-                    ParticleStateError::Gpu(g) => (RunnerError::Gpu(g), ExitPhase::Loop),
-                    other => (RunnerError::ParticleState(other), ExitPhase::Loop),
-                })?;
-                timings.record_host(HostStage::DEVICE_TO_HOST_DOWNLOAD, dl);
-            }
-            if want_traj {
-                let writer = traj_writer.as_mut().expect("traj_writer enabled");
-                let mut tw = Duration::ZERO;
-                timed(&mut tw, || {
-                    write_traj_frame(writer, step, phase.dt, &sim_box, &init.type_indices, &frame)
-                })
-                .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Loop))?;
-                timings.record_host(HostStage::TRAJECTORY_WRITE, tw);
-                frames_written += 1;
-            }
-            if want_log {
-                let writer = log_writer.as_mut().expect("log_writer enabled");
-                let ke = compute_kinetic_energy(
-                    &frame.masses,
-                    &frame.velocities_x,
-                    &frame.velocities_y,
-                    &frame.velocities_z,
-                );
-                let t = compute_temperature(ke, n_thermal_dof);
-                let time = (step as f64) * phase.dt;
-                let extras = if log_extra_columns.is_empty() {
-                    Vec::new()
-                } else {
-                    let scratch = pe_scratch
-                        .as_mut()
-                        .expect("pe_scratch allocated when log_extra_columns non-empty");
-                    timings
-                        .kernel_start(KernelStage::POTENTIAL_ENERGY_REDUCE)
-                        .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-                    let pe = compute_total_potential_energy(&buffers, scratch)
-                        .map_err(|g| (RunnerError::Gpu(g), ExitPhase::Loop))?;
-                    timings
-                        .kernel_stop(KernelStage::POTENTIAL_ENERGY_REDUCE)
-                        .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-                    collect_log_extras(
-                        integrator.as_ref(),
-                        thermostat.as_deref(),
-                        barostat.as_deref(),
-                        ke,
-                        pe as f64,
-                    )
-                };
-                let mut lw = Duration::ZERO;
-                timed(&mut lw, || writer.write_row(step, time, ke, t, &extras))
-                    .map_err(|e| (RunnerError::Log(e), ExitPhase::Loop))?;
-                timings.record_host(HostStage::LOG_WRITE, lw);
-                log_rows_written += 1;
-            }
-
-            // rq-73fbb111
-            if progress_to_stdout && (step % progress_every == 0 || step == n_steps) {
-                let pct = 100.0 * step as f64 / n_steps.max(1) as f64;
-                let rate = step as f64 / phase_started.elapsed().as_secs_f64().max(1e-9);
-                println!(
-                    "[dynamics] phase `{phase_name}` step {step}/{n_steps} ({pct:.1}%) — {rate:.1e} steps/sec"
-                );
-            }
+        // rq-73fbb111
+        if progress_to_stdout && (step % progress_every == 0 || step == n_steps) {
+            let pct = 100.0 * step as f64 / n_steps.max(1) as f64;
+            let rate = step as f64 / phase_started.elapsed().as_secs_f64().max(1e-9);
+            println!(
+                "[dynamics] phase `{phase_name}` step {step}/{n_steps} ({pct:.1}%) — {rate:.1e} steps/sec"
+            );
         }
-
-        if let Some(writer) = traj_writer.as_mut() {
-            writer
-                .flush()
-                .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Loop))?;
-        }
-        if let Some(writer) = log_writer.as_mut() {
-            writer
-                .flush()
-                .map_err(|e| (RunnerError::Log(e), ExitPhase::Loop))?;
-        }
-
-        let phase_elapsed = phase_started.elapsed();
-        timings.record_host(HostStage::TOTAL_RUNTIME, phase_elapsed);
-        let report = timings
-            .finalize()
-            .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-        write_timings_file(&phase.output.timings_path, &report)
-            .map_err(|e| (RunnerError::TimingsWriter(e), ExitPhase::Loop))?;
-
-        total_n_steps += n_steps;
-        phase_summaries.push(PhaseSummary {
-            name: phase.name.clone(),
-            n_steps,
-            frames_written,
-            log_rows_written,
-            elapsed_micros: phase_elapsed.as_micros(),
-            kind: "md",
-            convergence: None,
-        });
-
-        // Slot handles drop here, freeing their per-phase GPU buffers.
-        } // close PhaseKind::Md(phase)
-        } // close match phase_kind
     }
 
-    Ok(RunSummary {
-        phases: phase_summaries,
-        total_n_steps,
-        total_elapsed_micros: total_started.elapsed().as_micros(),
+    if let Some(writer) = traj_writer.as_mut() {
+        writer
+            .flush()
+            .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Loop))?;
+    }
+    if let Some(writer) = log_writer.as_mut() {
+        writer
+            .flush()
+            .map_err(|e| (RunnerError::Log(e), ExitPhase::Loop))?;
+    }
+
+    let phase_elapsed = phase_started.elapsed();
+    timings.record_host(HostStage::TOTAL_RUNTIME, phase_elapsed);
+    let report = timings
+        .finalize()
+        .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+    write_timings_file(&phase.output.timings_path, &report)
+        .map_err(|e| (RunnerError::TimingsWriter(e), ExitPhase::Loop))?;
+
+    Ok(PhaseSummary {
+        name: phase.name.clone(),
+        n_steps,
+        frames_written,
+        log_rows_written,
+        elapsed_micros: phase_elapsed.as_micros(),
+        kind: "md",
+        convergence: None,
     })
 }
 
-// Run one minimization phase. Constructs the minimizer + (per-phase)
-// constraint slot, opens the .minlog and optional .xyz writers, runs
-// the SD outer loop documented in
-// `rqm/minimization/steepest-descent.md`, and returns a phase
-// summary on success. Non-convergence after `max_iterations` is a
-// hard error and exits the run with code 2.
-// rq-393a57e4
-#[allow(clippy::too_many_arguments)]
-fn run_minimization_phase(
-    min: &crate::io::MinimizationConfig,
-    buffers: &mut ParticleBuffers,
-    sim_box: &mut crate::pbc::SimulationBox,
-    force_field: &mut ForceField,
-    constraint_list: &ConstraintList,
-    masses_f32: &[f32],
-    config: &crate::io::Config,
-    registries: &crate::Registries,
-    gpu: &crate::gpu::GpuContext,
-    type_name_strings: &[String],
-    type_indices: &[u32],
-    frame: &mut ParticleState,
-    timings: &mut Timings,
+// Allocate a fresh host-side `ParticleState` buffer for the per-phase
+// download path. The arrays are zero-initialised; `download_from`
+// overwrites them.
+fn new_frame_buffer(
     n: usize,
-    n_constraints: usize,
-    progress_to_stdout: bool,
+    masses_f32: &[f32],
+    charges_f32: &[f32],
+    type_indices: &[u32],
+) -> Result<ParticleState, ParticleStateError> {
+    ParticleState::new(
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        vec![0.0_f32; n],
+        masses_f32.to_vec(),
+        charges_f32.to_vec(),
+        type_indices.to_vec(),
+        None,
+        None,
+    )
+}
+
+
+// rq-10903c8d — per-minimization-phase impl. Companion to
+// `run_minimization_phase` that preserves the `ExitPhase` tag so the
+// CLI can distinguish setup-time errors (exit 1) from loop-time errors
+// (exit 2).
+// rq-393a57e4
+pub(crate) fn run_minimization_phase_inner(
+    setup: &mut SimulationSetup,
+    min: &crate::io::MinimizationConfig,
+    phase_index: usize,
 ) -> Result<PhaseSummary, (RunnerError, ExitPhase)> {
-    let mut minimizer = registries
+    let progress_to_stdout = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    let n = setup.buffers.particle_count();
+    let n_constraints = setup.n_constraints as usize;
+    let units = setup.config.units;
+
+    let mut timings = Timings::new(&setup.gpu)
+        .map_err(|e| (RunnerError::Timings(e), ExitPhase::Setup))?;
+    // Phase 0 replays the pre-instrumented host stages, just like the
+    // MD branch.
+    if phase_index == 0 {
+        let pre = &setup.pre_phase_durations;
+        timings.record_host(HostStage::CONFIG_LOAD, pre.config_load);
+        timings.record_host(HostStage::INIT_LOAD, pre.init_load);
+        timings.record_host(HostStage::GPU_INIT, pre.gpu_init);
+        if pre.velocity_generation > Duration::ZERO {
+            timings.record_host(HostStage::VELOCITY_GENERATION, pre.velocity_generation);
+        }
+        timings.record_host(HostStage::HOST_TO_DEVICE_UPLOAD, pre.upload);
+    }
+
+    let type_name_strings: Vec<String> = setup
+        .config
+        .particle_types
+        .iter()
+        .map(|t| t.name.clone())
+        .collect();
+    let type_indices: Vec<u32> = setup.type_indices.clone();
+    let mut frame = new_frame_buffer(n, &setup.masses_f32, &setup.charges_f32, &type_indices)
+        .map_err(|e| (RunnerError::ParticleState(e), ExitPhase::Setup))?;
+    let timings = &mut timings;
+    let buffers = &mut setup.buffers;
+    let sim_box = &mut setup.sim_box;
+    let force_field = &mut setup.force_field;
+    let gpu = &setup.gpu;
+
+    let mut minimizer = setup
+        .registries
         .minimizers
         .build(&min.algorithm, gpu, n, n_constraints)
         .map_err(|e| (RunnerError::Minimizer(e), ExitPhase::Setup))?;
-    let mut constraint = registries
+    let mut constraint = setup
+        .registries
         .constraint_types
         .build_optional(
-            constraint_list,
+            &setup.constraint_list,
             gpu,
             n,
-            masses_f32,
-            &config.constraint_types,
+            &setup.masses_f32,
+            &setup.config.constraint_types,
         )
         .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
 
     let mut minlog_writer: Option<MinlogWriter> = if min.output.minlog_every > 0 {
         Some(
-            MinlogWriter::open(&min.output.minlog_path, config.units)
+            MinlogWriter::open(&min.output.minlog_path, units)
                 .map_err(|e| (RunnerError::Minlog(e), ExitPhase::Setup))?,
         )
     } else {
@@ -1496,10 +1548,10 @@ fn run_minimization_phase(
         Some(
             TrajectoryWriter::open(
                 &min.output.trajectory_path,
-                config.units,
+                units,
                 false, // never include velocities for minimization frames
                 min.output.include_images,
-                type_name_strings.to_vec(),
+                type_name_strings.clone(),
             )
             .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Setup))?,
         )
@@ -1560,7 +1612,7 @@ fn run_minimization_phase(
         let writer = traj_writer.as_mut().expect("traj writer is some");
         let mut tw = Duration::ZERO;
         timed(&mut tw, || {
-            write_traj_frame(writer, 0, 0.0, sim_box, type_indices, frame)
+            write_traj_frame(writer, 0, 0.0, sim_box, &type_indices, &frame)
         })
         .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Loop))?;
         timings.record_host(HostStage::TRAJECTORY_WRITE, tw);
@@ -1654,7 +1706,7 @@ fn run_minimization_phase(
                     timings.record_host(HostStage::DEVICE_TO_HOST_DOWNLOAD, dl);
                     let mut tw = Duration::ZERO;
                     timed(&mut tw, || {
-                        write_traj_frame(writer, iter, 0.0, sim_box, type_indices, frame)
+                        write_traj_frame(writer, iter, 0.0, sim_box, &type_indices, &frame)
                     })
                     .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Loop))?;
                     timings.record_host(HostStage::TRAJECTORY_WRITE, tw);
@@ -1723,7 +1775,7 @@ fn run_minimization_phase(
             timings.record_host(HostStage::DEVICE_TO_HOST_DOWNLOAD, dl);
             let mut tw = Duration::ZERO;
             timed(&mut tw, || {
-                write_traj_frame(writer, iter_taken, 0.0, sim_box, type_indices, frame)
+                write_traj_frame(writer, iter_taken, 0.0, sim_box, &type_indices, &frame)
             })
             .map_err(|e| (RunnerError::Trajectory(e), ExitPhase::Loop))?;
             timings.record_host(HostStage::TRAJECTORY_WRITE, tw);

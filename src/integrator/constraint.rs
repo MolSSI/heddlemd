@@ -184,12 +184,22 @@ pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
         masses: &[f32],
         constraint_types: &[NamedSlotConfig],
     ) -> Result<Box<dyn Constraint>, ConstraintError>;
+
+    fn box_clone(&self) -> Box<dyn ConstraintBuilder>;
 }
 
 // rq-3d5f2e98 rq-3cca2cb1
 #[derive(Debug)]
 pub struct ConstraintRegistry {
     pub builders: Vec<Box<dyn ConstraintBuilder>>,
+}
+
+impl Clone for ConstraintRegistry {
+    fn clone(&self) -> Self {
+        ConstraintRegistry {
+            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
+        }
+    }
 }
 
 impl ConstraintRegistry {

@@ -208,7 +208,7 @@ fn htod_or_empty_f32(
 }
 
 // rq-e8550f96
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MorseBondedBuilder;
 
 impl PotentialBuilder for MorseBondedBuilder {
@@ -221,6 +221,10 @@ impl PotentialBuilder for MorseBondedBuilder {
         }
         let state = MorseBondedState::new(cx.gpu, cx.bond_list, cx.bond_types)?;
         Ok(Some(Box::new(state)))
+    }
+
+    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
+        Box::new(self.clone())
     }
 }
 

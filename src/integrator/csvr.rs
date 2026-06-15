@@ -161,7 +161,7 @@ impl Thermostat for CsvrThermostat {
 }
 
 // rq-750b828f
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CsvrBuilder;
 
 impl ThermostatBuilder for CsvrBuilder {
@@ -188,5 +188,9 @@ impl ThermostatBuilder for CsvrBuilder {
         let state =
             CsvrThermostat::new(gpu, particle_count, n_constraints, p.temperature, p.tau, p.seed)?;
         Ok(Box::new(state))
+    }
+
+    fn box_clone(&self) -> Box<dyn ThermostatBuilder> {
+        Box::new(self.clone())
     }
 }

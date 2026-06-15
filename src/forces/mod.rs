@@ -143,12 +143,22 @@ pub trait PotentialBuilder: std::fmt::Debug + Send + Sync {
         &self,
         cx: &PotentialBuildContext<'_>,
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError>;
+
+    fn box_clone(&self) -> Box<dyn PotentialBuilder>;
 }
 
 // rq-50f0a96a
 #[derive(Debug)]
 pub struct PotentialRegistry {
     pub builders: Vec<Box<dyn PotentialBuilder>>,
+}
+
+impl Clone for PotentialRegistry {
+    fn clone(&self) -> Self {
+        PotentialRegistry {
+            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
+        }
+    }
 }
 
 impl PotentialRegistry {

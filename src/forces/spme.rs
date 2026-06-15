@@ -803,7 +803,7 @@ fn map_spme_err(e: SpmeError) -> ForceFieldError {
 }
 
 // rq-e8550f96
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SpmeRealBuilder;
 
 impl PotentialBuilder for SpmeRealBuilder {
@@ -826,10 +826,14 @@ impl PotentialBuilder for SpmeRealBuilder {
         )?;
         Ok(Some(Box::new(state)))
     }
+
+    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
+        Box::new(self.clone())
+    }
 }
 
 // rq-e8550f96
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SpmeReciprocalBuilder;
 
 impl PotentialBuilder for SpmeReciprocalBuilder {
@@ -850,6 +854,10 @@ impl PotentialBuilder for SpmeReciprocalBuilder {
         )
         .map_err(map_spme_err)?;
         Ok(Some(Box::new(state)))
+    }
+
+    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
+        Box::new(self.clone())
     }
 }
 

@@ -1776,6 +1776,18 @@
     "title": "KE of a single particle at rest is zero",
     "type": "scenario"
   },
+  "rq-10903c8d": {
+    "decl": "- `run_minimization_phase(setup: &mut SimulationSetup, phase: &MinimizationConfig, phase_index: usize) -> Result<PhaseSummary, RunnerError>`",
+    "file": "simulation-runner",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "run_minimization_phase",
+    "type": "api-item"
+  },
   "rq-10956a4e": {
     "decl": "# A single scale column (3-column form) sets both scale_lj and",
     "file": "forces/topology",
@@ -4095,6 +4107,13 @@
     "title": "Two builders producing slots with the same label fail construction",
     "type": "scenario"
   },
+  "rq-24cd0b9c": {
+    "decl": "Scenario: SimulationSetup::new short-circuits at the first failing step helper",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "SimulationSetup::new short-circuits at the first failing step helper",
+    "type": "scenario"
+  },
   "rq-24dc9578": {
     "decl": "Scenario: angle_types is optional and defaults to empty",
     "file": "io/config-schema",
@@ -5536,6 +5555,13 @@
     ],
     "title": "LintStage",
     "type": "api-item"
+  },
+  "rq-33751101": {
+    "decl": "Scenario: SimulationSetup::new returns a populated struct on a valid config",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "SimulationSetup::new returns a populated struct on a valid config",
+    "type": "scenario"
   },
   "rq-3396b95f": {
     "decl": "Scenario: Construct Andersen via the thermostat registry",
@@ -8695,6 +8721,13 @@
     "title": "Repeated kernel_start/kernel_stop pairs accumulate",
     "type": "scenario"
   },
+  "rq-560ce2e2": {
+    "decl": "Scenario: SimulationSetup::new and lint --with-gpu invoke the same step helpers",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "SimulationSetup::new and lint --with-gpu invoke the same step helpers",
+    "type": "scenario"
+  },
   "rq-560dffb8": {
     "decl": "Scenario: Reject duplicate type names",
     "file": "io/config-schema",
@@ -9193,6 +9226,13 @@
     "refs": [],
     "title": "Empty state",
     "type": "section"
+  },
+  "rq-5aeec526": {
+    "decl": "Scenario: run_minimization_phase from a constructed setup matches the orchestrator",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "run_minimization_phase from a constructed setup matches the orchestrator",
+    "type": "scenario"
   },
   "rq-5b004038": {
     "decl": "## Empty State and degenerate cases",
@@ -9994,6 +10034,18 @@
     ],
     "title": "Unknown constraint type name is rejected",
     "type": "scenario"
+  },
+  "rq-63d694e9": {
+    "decl": "- `run_md_phase(setup: &mut SimulationSetup, phase: &PhaseConfig, phase_index: usize) -> Result<PhaseSummary, RunnerError>`",
+    "file": "simulation-runner",
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "run_md_phase",
+    "type": "api-item"
   },
   "rq-63f3e0b9": {
     "decl": "## Feature API",
@@ -14724,6 +14776,13 @@
     "title": "NaN values are accepted at construction",
     "type": "scenario"
   },
+  "rq-948431cf": {
+    "decl": "Scenario: SimulationSetup::new skips the initial-velocity projection on",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "SimulationSetup::new skips the initial-velocity projection on",
+    "type": "scenario"
+  },
   "rq-94a43204": {
     "decl": "Scenario: Different seeds produce different trajectories",
     "file": "integration/csvr",
@@ -16035,7 +16094,12 @@
   "rq-a0174216": {
     "decl": "Scenario: shake_positions converges at production-scale dt with thermal-amplitude",
     "file": "integration/shake",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/shake.rs",
+        "kind": "code"
+      }
+    ],
     "title": "shake_positions converges at production-scale dt with thermal-amplitude",
     "type": "scenario"
   },
@@ -17763,6 +17827,22 @@
     ],
     "title": "ForceField::new iterates the registry in registration order",
     "type": "scenario"
+  },
+  "rq-b1a2d006": {
+    "decl": "- `SimulationSetup` — public struct owning every piece of cross-phase",
+    "file": "simulation-runner",
+    "refs": [
+      {
+        "file": "src/lib.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "SimulationSetup",
+    "type": "api-item"
   },
   "rq-b1a8a6ca": {
     "decl": "## Feature API",
@@ -21399,6 +21479,13 @@
     "title": "NeighborListError",
     "type": "api-item"
   },
+  "rq-d8ef1f64": {
+    "decl": "Scenario: SimulationSetup::new performs the initial-velocity constraint projection",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "SimulationSetup::new performs the initial-velocity constraint projection",
+    "type": "scenario"
+  },
   "rq-d920e446": {
     "decl": "Scenario: fill kernel does not write beyond the buffer",
     "file": "build-pipeline",
@@ -22011,6 +22098,13 @@
       }
     ],
     "title": "build.rs compiles a .cu file to PTX",
+    "type": "scenario"
+  },
+  "rq-deace09f": {
+    "decl": "Scenario: SimulationSetup::run_all_phases composes per-phase functions",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "SimulationSetup::run_all_phases composes per-phase functions",
     "type": "scenario"
   },
   "rq-deaf8b59": {
@@ -23563,6 +23657,13 @@
       }
     ],
     "title": "Reject yoshida_order outside {1, 3, 5, 7}",
+    "type": "scenario"
+  },
+  "rq-ee4bce7c": {
+    "decl": "Scenario: run_md_phase from a constructed setup matches run_simulation_with_registries",
+    "file": "simulation-runner",
+    "refs": [],
+    "title": "run_md_phase from a constructed setup matches run_simulation_with_registries",
     "type": "scenario"
   },
   "rq-ee4ebbda": {

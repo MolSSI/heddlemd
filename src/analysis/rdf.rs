@@ -22,7 +22,7 @@ struct RdfParams {
 }
 
 // rq-2dc76b67
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RdfBuilder;
 
 impl AnalysisBuilder for RdfBuilder {
@@ -163,6 +163,10 @@ impl AnalysisBuilder for RdfBuilder {
             histogram: vec![0u64; p.n_bins as usize],
             frames_consumed: 0,
         }))
+    }
+
+    fn box_clone(&self) -> Box<dyn AnalysisBuilder> {
+        Box::new(self.clone())
     }
 }
 

@@ -563,7 +563,7 @@ fn sd_with_no_projection_constraint_slot_rejected_at_config_load() {
     // Custom constraint builder whose supports_position_projection_only
     // returns false. The runner's minimization-compatibility check must
     // surface this as IncompatibleConstraint at config-load time.
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     struct NoProjectionBuilder;
     impl ConstraintBuilder for NoProjectionBuilder {
         fn kind_name(&self) -> &'static str { "fictional-cluster" }
@@ -588,6 +588,9 @@ fn sd_with_no_projection_constraint_slot_rejected_at_config_load() {
             _constraint_types: &[NamedSlotConfig],
         ) -> Result<Box<dyn Constraint>, ConstraintError> {
             unreachable!("rejected before construction")
+        }
+        fn box_clone(&self) -> Box<dyn ConstraintBuilder> {
+            Box::new(self.clone())
         }
     }
 
@@ -691,7 +694,7 @@ fn custom_minimizer_builder_is_selectable() {
         }
         fn max_iterations(&self) -> u64 { 0 }
     }
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     struct StubBuilder;
     impl MinimizerBuilder for StubBuilder {
         fn kind_name(&self) -> &'static str { "test-stub" }
@@ -706,6 +709,9 @@ fn custom_minimizer_builder_is_selectable() {
             _params: &toml::Value,
         ) -> Result<Box<dyn Minimizer>, MinimizerError> {
             Ok(Box::new(StubMinimizer))
+        }
+        fn box_clone(&self) -> Box<dyn MinimizerBuilder> {
+            Box::new(self.clone())
         }
     }
     let mut registry = MinimizerRegistry::with_builtins();

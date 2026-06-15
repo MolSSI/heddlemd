@@ -151,12 +151,22 @@ pub trait MinimizerBuilder: std::fmt::Debug + Send + Sync {
         n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Minimizer>, MinimizerError>;
+
+    fn box_clone(&self) -> Box<dyn MinimizerBuilder>;
 }
 
 // rq-d5b07d2a
 #[derive(Debug)]
 pub struct MinimizerRegistry {
     pub builders: Vec<Box<dyn MinimizerBuilder>>,
+}
+
+impl Clone for MinimizerRegistry {
+    fn clone(&self) -> Self {
+        MinimizerRegistry {
+            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
+        }
+    }
 }
 
 impl MinimizerRegistry {

@@ -13,6 +13,8 @@ pub mod units;
 
 // rq-74bb02cc
 pub use registries::Registries;
+// rq-b1a2d006
+pub use runner::SimulationSetup;
 
 pub mod kernels {
     include!(concat!(env!("OUT_DIR"), "/kernels.rs"));

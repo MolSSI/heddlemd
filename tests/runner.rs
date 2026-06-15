@@ -784,7 +784,7 @@ fn register_potential_appends_to_potentials() {
     use dynamics::forces::{
         ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder,
     };
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     struct NoopBuilder;
     impl PotentialBuilder for NoopBuilder {
         fn build(
@@ -792,6 +792,9 @@ fn register_potential_appends_to_potentials() {
             _cx: &PotentialBuildContext<'_>,
         ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
             Ok(None)
+        }
+        fn box_clone(&self) -> Box<dyn PotentialBuilder> {
+            Box::new(self.clone())
         }
     }
     let mut registries = Registries::with_builtins();
@@ -899,7 +902,7 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
             Ok(())
         }
     }
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     struct CountingStubBuilder {
         plan_calls: Arc<AtomicU64>,
     }
@@ -923,6 +926,9 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
             Ok(Box::new(CountingStubIntegrator {
                 plan_calls: self.plan_calls.clone(),
             }))
+        }
+        fn box_clone(&self) -> Box<dyn IntegratorBuilder> {
+            Box::new(self.clone())
         }
     }
 
@@ -1109,7 +1115,7 @@ fn run_simulation_with_registries_dispatches_user_registered_potential() {
             Ok(())
         }
     }
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     struct CountingStubPotentialBuilder {
         contribute_calls: Arc<AtomicU64>,
     }
@@ -1121,6 +1127,9 @@ fn run_simulation_with_registries_dispatches_user_registered_potential() {
             Ok(Some(Box::new(CountingStubPotential {
                 contribute_calls: self.contribute_calls.clone(),
             })))
+        }
+        fn box_clone(&self) -> Box<dyn PotentialBuilder> {
+            Box::new(self.clone())
         }
     }
 

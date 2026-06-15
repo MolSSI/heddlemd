@@ -532,12 +532,25 @@ pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
         n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError>;
+
+    /// Return a clone of `self` boxed as a trait object. Used to
+    /// implement `Clone` for `IntegratorRegistry` (which holds
+    /// `Vec<Box<dyn IntegratorBuilder>>`).
+    fn box_clone(&self) -> Box<dyn IntegratorBuilder>;
 }
 
 // rq-4901507f
 #[derive(Debug)]
 pub struct IntegratorRegistry {
     pub builders: Vec<Box<dyn IntegratorBuilder>>,
+}
+
+impl Clone for IntegratorRegistry {
+    fn clone(&self) -> Self {
+        IntegratorRegistry {
+            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
+        }
+    }
 }
 
 impl IntegratorRegistry {
@@ -643,12 +656,22 @@ pub trait ThermostatBuilder: std::fmt::Debug + Send + Sync {
         n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Thermostat>, ThermostatError>;
+
+    fn box_clone(&self) -> Box<dyn ThermostatBuilder>;
 }
 
 // rq-4901507f
 #[derive(Debug)]
 pub struct ThermostatRegistry {
     pub builders: Vec<Box<dyn ThermostatBuilder>>,
+}
+
+impl Clone for ThermostatRegistry {
+    fn clone(&self) -> Self {
+        ThermostatRegistry {
+            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
+        }
+    }
 }
 
 impl ThermostatRegistry {
@@ -745,12 +768,22 @@ pub trait BarostatBuilder: std::fmt::Debug + Send + Sync {
         n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Barostat>, BarostatError>;
+
+    fn box_clone(&self) -> Box<dyn BarostatBuilder>;
 }
 
 // rq-4901507f
 #[derive(Debug)]
 pub struct BarostatRegistry {
     pub builders: Vec<Box<dyn BarostatBuilder>>,
+}
+
+impl Clone for BarostatRegistry {
+    fn clone(&self) -> Self {
+        BarostatRegistry {
+            builders: self.builders.iter().map(|b| b.box_clone()).collect(),
+        }
+    }
 }
 
 impl BarostatRegistry {

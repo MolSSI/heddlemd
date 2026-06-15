@@ -136,7 +136,7 @@ impl Potential for LennardJonesState {
 }
 
 // rq-e8550f96
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LennardJonesBuilder;
 
 impl PotentialBuilder for LennardJonesBuilder {
@@ -167,6 +167,10 @@ impl PotentialBuilder for LennardJonesBuilder {
             cx.exclusion_list,
         )?;
         Ok(Some(Box::new(state)))
+    }
+
+    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
+        Box::new(self.clone())
     }
 }
 

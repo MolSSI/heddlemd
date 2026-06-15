@@ -832,7 +832,7 @@ fn a_custom_analysis_builder_composes_with_the_built_ins() {
     use dynamics::io::trajectory::{TrajectoryFrame, TrajectoryFrameHeader};
     use std::path::Path;
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     struct MyAnalysisBuilder;
     impl AnalysisBuilder for MyAnalysisBuilder {
         fn kind_name(&self) -> &'static str {
@@ -866,6 +866,9 @@ fn a_custom_analysis_builder_composes_with_the_built_ins() {
                 }
             }
             Ok(Box::new(MyAnalysis))
+        }
+        fn box_clone(&self) -> Box<dyn AnalysisBuilder> {
+            Box::new(self.clone())
         }
     }
 

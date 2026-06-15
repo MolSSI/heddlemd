@@ -138,6 +138,22 @@ config fields are consulted.
 
 ### Once-only setup <!-- rq-d734328e -->
 
+The cross-phase state of a run is owned by a `SimulationSetup` value
+(see *Feature API*) constructed once at the start of a run via
+`SimulationSetup::new(config_path: &Path, registries: Registries)`.
+That constructor executes steps 2–11 below in order. CLI parsing
+(step 1) runs in `src/main.rs`'s `cli_main_run` ahead of any
+`SimulationSetup` call.
+
+Every setup step is implemented as a step-helper function that is
+also consumed by the GPU lint pipeline (see *Lint flow*). The runner
+and the linter therefore exercise the same setup code by
+construction, not by parallel reimplementation; the only difference
+is that the linter records each helper's success or failure into a
+`LintStage` and continues to the next stage on failure, whereas
+`SimulationSetup::new` short-circuits at the first `Err` and
+returns it as a `RunnerError`.
+
 1. **Parse CLI.** Confirm the form `run <config-path>`. Capture
    `<config-path>`.
 2. **Load config.** Call `load_config(&config_path)`
@@ -207,6 +223,44 @@ config fields are consulted.
    - `forces_*` zero-initialised by the constructor.
 10. **Allocate `ParticleBuffers`.** Construct `ParticleBuffers` from
     the host state.
+10a. **Project initial velocities onto the constraint manifold.**
+    When `constraint_list.is_empty() == false`,
+    `config.simulation.temperature > 0.0`, and `N >= 2`, build a
+    transient `Constraint` slot via
+    `registries.constraint_types.build_optional(&constraint_list,
+    &gpu, N, &masses_f32, &config.constraint_types)`. When the
+    builder returns `Some(c)`:
+    - Call `c.apply_initial_velocity_projection(&mut buffers,
+      &sim_box, &mut init_timings)` to project the
+      Maxwell-Boltzmann–sampled velocities onto the constraint
+      velocity manifold (zeroing the bond-axis component of every
+      constraint).
+    - Allocate a length-1 `CudaSlice<f32>` scratch buffer; call
+      `compute_kinetic_energy(&buffers, &mut ke_scratch)` to read
+      the post-projection kinetic energy `ke_after`.
+    - When both `ke_after > 0.0` and `target_ke =
+      0.5 * n_thermal_dof * config.simulation.temperature` are
+      positive, compute `factor = sqrt(target_ke / ke_after)` and
+      call `rescale_velocities(&mut buffers, factor)`. The uniform
+      scalar rescale preserves both the zero-total-momentum
+      invariant established by *Momentum subtraction* and the
+      on-manifold velocity field, since for any constrained pair
+      `(α v_i − α v_j) · (r_i − r_j) = α · 0 = 0`.
+
+    The transient `Constraint` slot is dropped at the end of this
+    step; the per-phase loop builds its own slot from
+    `setup.constraint_list` at every phase boundary.
+
+    Without this projection, the per-axis MB sample carries
+    components along bond directions that the first SHAKE / SETTLE
+    invocation strips off, leaving the system at approximately
+    `n_thermal_dof / 3N` of the configured starting temperature
+    until a thermostat re-heats it over `~τ_T`.
+
+    Steps `init_constraint.build_optional`, the projection call,
+    and the post-projection rescale are skipped entirely on the
+    constraint-empty, zero-temperature, or `N < 2` branches.
+
 11. **Construct the force field.** Call
     `ForceField::new(&registries.potentials, device.clone(),
     N, &sim_box, &config.pair_interactions, &config.bond_types,
@@ -220,38 +274,46 @@ config fields are consulted.
 
 ### Per-phase loop <!-- rq-581dbfb8 -->
 
-For each phase `P` in `config.phases`, in declaration order, the
-runner performs the steps below. Particle state (`ParticleBuffers`,
-`SimulationBox`), the global `ForceField`, the global `Registries`,
-and the global `Constraint` slot (constructed once at runner
-startup) carry over between phases regardless of phase kind. The
-per-phase slot handles (`Integrator`, `Thermostat`, `Barostat` for
-MD phases; `Minimizer` for minimization phases), the output writers
-(`TrajectoryWriter`, `LogWriter`, `MinlogWriter`), and the per-phase
-`Timings` instance are built fresh at every phase boundary and
-dropped at every phase end. Slot internal state (chain variables,
-conserved-quantity counters, RNG counters, adaptive step sizes)
-starts from each phase's declared seeds and initial values.
-
-The runner dispatches on the phase kind:
+After `SimulationSetup::new` returns, the runner walks
+`setup.config.phases` in declaration order, dispatching each entry
+to one of two per-phase functions:
 
 ```text
-for phase in config.phases:
+for (phase_index, phase) in setup.config.phases.iter().enumerate():
     match phase:
         PhaseKind::Md(P) =>
-            run_md_phase(P, &mut buffers, &mut sim_box, &mut force_field,
-                         &constraint_list, &registries, &gpu, ...)
+            run_md_phase(&mut setup, P, phase_index) -> Result<PhaseSummary, RunnerError>
         PhaseKind::Minimization(P) =>
-            run_minimization_phase(P, &mut buffers, &mut sim_box, &mut force_field,
-                                   &constraint_list, &registries, &gpu, ...)
+            run_minimization_phase(&mut setup, P, phase_index) -> Result<PhaseSummary, RunnerError>
 ```
 
-Each phase function constructs its own slots (including a fresh
-`Constraint` slot from the global `ConstraintList`) at phase entry
-and drops them at phase exit, matching the per-phase slot lifecycle
-documented in the rest of this section.
+Both functions take `&mut SimulationSetup`. The cross-phase state
+they observe and mutate through that borrow is:
 
-The MD branch executes steps 12–20 below. The minimization branch
+- `setup.buffers: ParticleBuffers` — mutated by every step kernel,
+  by the integrator's drift/kick, and by trajectory downloads.
+- `setup.sim_box: SimulationBox` — mutated only by barostat phases.
+- `setup.force_field: ForceField` — mutated by neighbor-list
+  rebuilds; otherwise read-only.
+
+The cross-phase state they observe but never mutate is:
+
+- `setup.config`, `setup.registries`, `setup.gpu`,
+  `setup.constraint_list`, `setup.bond_list`, `setup.angle_list`,
+  `setup.exclusion_list`, `setup.masses_f32`,
+  `setup.n_constraints`, and `setup.n_thermal_dof`.
+
+The per-phase slot handles (`Integrator`, `Thermostat`, `Barostat`
+for MD phases; `Minimizer` for minimization phases), the per-phase
+`Constraint` slot (rebuilt from `setup.constraint_list`), the
+output writers (`TrajectoryWriter`, `LogWriter`, `MinlogWriter`),
+and the per-phase `Timings` instance are built fresh inside the
+per-phase function at every phase boundary and dropped at every
+phase end. Slot internal state (chain variables, conserved-quantity
+counters, RNG counters, adaptive step sizes) starts from each
+phase's declared seeds and initial values.
+
+`run_md_phase` executes steps 12–20 below. `run_minimization_phase`
 follows the corresponding workflow documented in
 `rqm/minimization/steepest-descent.md` (slot construction → writer
 opening → SD loop → writer flush → timings drain → slot drop); the
@@ -451,20 +513,29 @@ subsequent stage as **skipped (earlier check failed)**.
 
 #### `--with-gpu` stages <!-- rq-688fb553 -->
 
-6. **`gpu`** — when `with_gpu = true`, runs every remaining
-   setup-phase stage of *Runner flow* in order: `init_device()` (step
-   7, including the cuFFT determinism smoke test when SPME is
-   configured), velocity generation (step 8, when the init file
-   omits velocities), `ParticleState::new` (step 9), the
-   host-to-device upload via `ParticleBuffers::new` (step 10),
-   construction of the integrator / thermostat / barostat /
-   constraint slots (step 11), and `ForceField::new` (step 12). Stops
-   before step 13 (output writers). Any error from these stages —
-   `RunnerError::Gpu`, `RunnerError::CuFftNonDeterministic`,
+6. **`gpu`** — when `with_gpu = true`, exercises every GPU-touching
+   setup helper that `SimulationSetup::new` exercises, in the same
+   order: `init_device()` (step 7, including the cuFFT determinism
+   smoke test when SPME is configured), velocity generation (step 8,
+   when the init file omits velocities), `ParticleState::new`
+   (step 9), the host-to-device upload via `ParticleBuffers::new`
+   (step 10), the initial-velocity constraint projection and
+   rescale (step 10a), and `ForceField::new` (step 11). For each
+   phase in `config.phases`, additionally runs the per-kind slot
+   builders (integrator / thermostat / barostat / constraint for MD
+   phases; minimizer / constraint for minimization phases) so any
+   per-phase geometric or allocation failure surfaces under lint.
+   Stops before opening any per-phase output writer. Any error from
+   these helpers — `RunnerError::Gpu`,
+   `RunnerError::CuFftNonDeterministic`,
    `RunnerError::Integrator`, `RunnerError::Thermostat`,
    `RunnerError::Barostat`, `RunnerError::Constraint`,
-   `RunnerError::ForceField`, `RunnerError::ParticleState` — surfaces
-   as the stage failure.
+   `RunnerError::ForceField`, `RunnerError::ParticleState`,
+   `RunnerError::Minimizer` — surfaces as the stage failure.
+
+   The implementation invokes the same step-helper functions that
+   `SimulationSetup::new` invokes, so any change to a setup
+   helper's behaviour is observed by both code paths.
 
    When `with_gpu = false`, the stage is recorded as **not checked
    (re-run with `--with-gpu`)** unconditionally; no GPU device is
@@ -836,6 +907,76 @@ wrapper that dispatches between the two on the first CLI argument.
 - `LintOverall` — `enum { Ok, Fail }`. `LintReport::overall` is `Ok` <!-- rq-30c21c70 -->
   iff no stage has a `Fail` status.
 
+- `SimulationSetup` — public struct owning every piece of cross-phase <!-- rq-b1a2d006 -->
+  state that a run requires. Lives at `dynamics::runner::SimulationSetup`
+  and is also re-exported at `dynamics::SimulationSetup` alongside
+  `Registries`.
+
+  Fields (all `pub`; the rqm enumerates them so external callers can
+  rely on direct access for advanced setup-only tests and for
+  scenario-driving binaries):
+
+  - `config: Config` — the parsed and validated `Config` from
+    `load_config_raw` plus `validate_against` /
+    `validate_constraint_compatibility`.
+  - `registries: Registries` — the registries bundle the caller
+    supplied to `SimulationSetup::new`.
+  - `gpu: GpuContext` — the `init_device()` result; provides the
+    `Arc<CudaDevice>` carried into every kernel launch.
+  - `buffers: ParticleBuffers` — the device-resident particle state.
+  - `sim_box: SimulationBox` — the simulation cell.
+  - `force_field: ForceField` — the cross-phase force-field handle.
+  - `constraint_list: ConstraintList` — the topology's
+    constraint-group list, used per-phase to construct a fresh
+    `Constraint` slot.
+  - `bond_list: BondList`, `angle_list: AngleList`,
+    `exclusion_list: ExclusionList` — the topology's bonded / excluded
+    pair structure, captured once for diagnostic re-use by the
+    minimization phase's logging.
+  - `masses_f32: Vec<f32>`, `charges_f32: Vec<f32>` — per-particle
+    mass and charge arrays in `f32`, kept on the host for use by
+    per-phase constraint-slot construction.
+  - `type_indices: Vec<u32>` — per-particle type-index slice copied
+    from the init file. Kept on the host because the per-phase
+    trajectory writer consumes it for every frame; the original
+    `InitState` is released at the end of `SimulationSetup::new`.
+  - `n_constraints: u32`, `n_thermal_dof: u32` — the thermal
+    degrees-of-freedom decomposition used by every
+    `compute_temperature` call across phases.
+  - `pre_phase_durations: PrePhaseDurations` — the pre-instrumented
+    host-stage durations (`config_load`, `init_load`, `gpu_init`,
+    `velocity_generation`, `upload`) captured by step helpers during
+    setup. Replayed into phase-0 `Timings` as static one-shot samples
+    by `run_md_phase` / `run_minimization_phase` (only on
+    `phase_index == 0`).
+
+  Constructor:
+
+  - `SimulationSetup::new(config_path: &Path, registries: Registries) -> Result<SimulationSetup, RunnerError>`
+    - Runs steps 2–11 of *Once-only setup* in order, calling the
+      corresponding step helpers and threading their outputs into
+      the struct's fields.
+    - Short-circuits at the first `Err` from any step helper.
+      Returns the original `RunnerError` variant unchanged.
+    - Does not open per-phase output writers, does not construct any
+      per-phase slot handle, and does not modify any file on disk.
+
+  Method:
+
+  - `SimulationSetup::run_all_phases(&mut self) -> Result<RunSummary, RunnerError>`
+    - Iterates `self.config.phases` in declaration order, dispatching
+      `PhaseKind::Md(P)` to `run_md_phase(self, P, phase_index)` and
+      `PhaseKind::Minimization(P)` to
+      `run_minimization_phase(self, P, phase_index)`.
+    - Aggregates per-phase `PhaseSummary` values into a `RunSummary`
+      and returns it on success.
+    - Surfaces any `RunnerError` from a per-phase function unchanged
+      and stops at the first failing phase.
+
+  `Drop` releases the device buffers owned by `buffers` and
+  `force_field`, then drops the `gpu: GpuContext` (which closes the
+  CUDA context). No file handle is owned by `SimulationSetup`.
+
 ### Functions <!-- rq-e5e4b048 -->
 
 - `run_simulation(config_path: &Path) -> Result<RunSummary, RunnerError>` <!-- rq-1fc57c00 -->
@@ -860,6 +1001,46 @@ wrapper that dispatches between the two on the first CLI argument.
     `PotentialRegistry::with_builtins()` internally.
   - Returns a `RunSummary` carrying the step count, frame count, log
     row count, and elapsed time on success.
+  - Body is the two-line composition
+    `let mut setup = SimulationSetup::new(config_path, registries.clone())?;
+    setup.run_all_phases()`. The function exists for compatibility
+    with existing callers that pass a `&Path` and a `&Registries` and
+    want a `RunSummary` back; callers that want fine-grained per-phase
+    control construct `SimulationSetup` directly and walk phases via
+    the per-phase functions below.
+
+- `run_md_phase(setup: &mut SimulationSetup, phase: &PhaseConfig, phase_index: usize) -> Result<PhaseSummary, RunnerError>` <!-- rq-63d694e9 -->
+  - Executes steps 12–20 of *Per-phase loop* for one MD phase.
+  - Constructs the integrator, thermostat, barostat, and per-phase
+    `Constraint` slot inside the function; drops every slot handle
+    on return.
+  - Opens and flushes the per-phase `TrajectoryWriter`, `LogWriter`,
+    and `Timings`; writes the per-phase `.timings` file before
+    returning.
+  - Mutates `setup.buffers`, `setup.sim_box` (barostat phases only),
+    and `setup.force_field` (neighbor-list rebuilds). Every other
+    `setup.*` field is observed read-only.
+  - On `phase_index == 0`, replays the host-stage durations from
+    `setup.pre_phase_durations` into the per-phase `Timings`; later
+    phases skip the replay.
+  - Surfaces any underlying `RunnerError` unchanged.
+
+- `run_minimization_phase(setup: &mut SimulationSetup, phase: &MinimizationConfig, phase_index: usize) -> Result<PhaseSummary, RunnerError>` <!-- rq-10903c8d -->
+  - Executes the minimization workflow documented in
+    `rqm/minimization/steepest-descent.md` for one minimization
+    phase.
+  - Constructs the minimizer and the per-phase `Constraint` slot
+    inside the function; drops both on return.
+  - Opens and flushes the per-phase `MinlogWriter` and `Timings`;
+    writes the per-phase `.timings` file before returning.
+  - Never mutates `setup.sim_box` or velocities; positions and
+    forces in `setup.buffers` are mutated as the minimization
+    proceeds.
+  - On `phase_index == 0`, replays `setup.pre_phase_durations` into
+    the per-phase `Timings` exactly as `run_md_phase` does.
+  - Surfaces any underlying `RunnerError` (`Minimizer`,
+    `MinimizerNonConvergence`, `Constraint`, `Gpu`, `Timings`,
+    `TimingsWriter`, `MinlogWriter`) unchanged.
 
 - `RunSummary` fields: <!-- rq-5c1cfc93 -->
   - `phases: Vec<PhaseSummary>` — one entry per phase in declaration
@@ -1338,6 +1519,96 @@ Feature: dynamics run simulation runner
     When dynamics is invoked
     Then it exits with code 2
     And the partial trajectory and log files exist with frames/rows up to the last successful write
+
+  # --- SimulationSetup and per-phase functions ---
+
+  @rq-33751101
+  Scenario: SimulationSetup::new returns a populated struct on a valid config
+    Given a valid `.in.toml` config and matching `.in.xyz` init file
+    And a `Registries` bundle constructed via Registries::with_builtins()
+    When SimulationSetup::new(&config_path, registries) is called
+    Then it returns Ok(setup)
+    And setup.config equals the result of load_config_raw + validate_against
+    And setup.buffers, setup.sim_box, setup.force_field, setup.constraint_list,
+      setup.bond_list, setup.angle_list, and setup.exclusion_list are populated
+    And no per-phase output writer has been opened
+    And no per-phase slot handle (Integrator/Thermostat/Barostat/Minimizer)
+      is alive
+
+  @rq-24cd0b9c
+  Scenario: SimulationSetup::new short-circuits at the first failing step helper
+    Given a config whose init-state file does not exist on disk
+    When SimulationSetup::new(&config_path, registries) is called
+    Then it returns Err(RunnerError::InitState(InitStateError::Io { .. }))
+    And no GPU device was opened
+    And no ForceField was constructed
+
+  @rq-d8ef1f64
+  Scenario: SimulationSetup::new performs the initial-velocity constraint projection
+    Given a config with a non-empty `[constraints]` section, a positive
+      `simulation.temperature`, and `N >= 2`, with init velocities absent
+    When SimulationSetup::new(&config_path, registries) is called
+    Then it returns Ok(setup)
+    And every constraint pair (i, j) in setup.constraint_list satisfies
+      `(v_i − v_j) · (r_i − r_j) == 0` within the RATTLE convergence tolerance
+    And the kinetic energy computed from setup.buffers equals
+      `0.5 * setup.n_thermal_dof * config.simulation.temperature` within
+      f32 round-off
+
+  @rq-948431cf
+  Scenario: SimulationSetup::new skips the initial-velocity projection on
+    constraint-free configs
+    Given a config whose topology section has no `[constraints]` (or whose
+      `[constraints]` section is empty)
+    When SimulationSetup::new(&config_path, registries) is called
+    Then it returns Ok(setup)
+    And no transient `Constraint` slot was constructed during setup
+    And setup.buffers.velocities_* equal the output of `generate_velocities`
+      (momentum-subtracted, equipartition-rescaled) byte-for-byte
+
+  @rq-ee4bce7c
+  Scenario: run_md_phase from a constructed setup matches run_simulation_with_registries
+    Given a single-MD-phase config and a constructed SimulationSetup
+    When run_md_phase(&mut setup, &config.phases[0].as_md(), 0) is called
+    Then it returns Ok(phase_summary)
+    And the phase_summary equals the phase entry that
+      run_simulation_with_registries(&config_path, &registries) would
+      have produced for phase 0
+    And setup.buffers, setup.sim_box, and setup.force_field reflect the
+      post-phase state of an equivalent end-to-end run
+
+  @rq-5aeec526
+  Scenario: run_minimization_phase from a constructed setup matches the orchestrator
+    Given a single-minimization-phase config and a constructed SimulationSetup
+    When run_minimization_phase(&mut setup, &config.phases[0].as_min(), 0) is called
+    Then it returns Ok(phase_summary)
+    And the phase_summary equals the phase entry that
+      run_simulation_with_registries(&config_path, &registries) would
+      have produced for phase 0
+
+  @rq-deace09f
+  Scenario: SimulationSetup::run_all_phases composes per-phase functions
+    Given a two-phase config (one MD, one minimization, in declaration order)
+      and a constructed SimulationSetup
+    When setup.run_all_phases() is called
+    Then it returns Ok(summary)
+    And summary.phases[0] equals the result of
+      run_md_phase(&mut setup, &config.phases[0].as_md(), 0) on a fresh setup
+    And summary.phases[1] equals the result of
+      run_minimization_phase(&mut setup, &config.phases[1].as_min(), 1) on the
+      same setup after run_md_phase has run
+
+  @rq-560ce2e2
+  Scenario: SimulationSetup::new and lint --with-gpu invoke the same step helpers
+    Given a config that exercises every with-gpu setup step (SPME enabled,
+      constraints present, init velocities absent)
+    When SimulationSetup::new(&config_path, registries) and
+      lint_simulation_with_registries(&config_path, &registries, true) are
+      both called
+    Then the sequence of step-helper calls observed by a registered tracing
+      hook is identical between the two code paths
+    And every step helper is called from a single source-code site (no
+      parallel reimplementation in the lint pipeline)
 
   # --- User-registered builders ---
 

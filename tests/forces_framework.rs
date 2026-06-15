@@ -659,7 +659,7 @@ impl Potential for ConstStub {
 // Builder that emits a `ConstStub` slot writing per-particle constants.
 // Used by `third_potential_extensibility` to register a custom Fast slot
 // through the canonical `ForceField::new` path.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ConstStubBuilder {
     value_x: f32,
     value_y: f32,
@@ -677,6 +677,9 @@ impl dynamics::forces::PotentialBuilder for ConstStubBuilder {
             value_z: self.value_z,
             device: cx.gpu.device.clone(),
         })))
+    }
+    fn box_clone(&self) -> Box<dyn dynamics::forces::PotentialBuilder> {
+        Box::new(self.clone())
     }
 }
 
@@ -848,7 +851,7 @@ impl Potential for ConstStubB {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ConstStubBBuilder;
 
 impl dynamics::forces::PotentialBuilder for ConstStubBBuilder {
@@ -859,6 +862,9 @@ impl dynamics::forces::PotentialBuilder for ConstStubBBuilder {
         Ok(Some(Box::new(ConstStubB {
             device: cx.gpu.device.clone(),
         })))
+    }
+    fn box_clone(&self) -> Box<dyn dynamics::forces::PotentialBuilder> {
+        Box::new(self.clone())
     }
 }
 
@@ -1103,7 +1109,7 @@ impl Potential for ContextProbeStub {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ContextProbeStubBuilder {
     last_seen_nl_some: std::sync::Arc<std::sync::Mutex<Option<bool>>>,
 }
@@ -1116,6 +1122,9 @@ impl dynamics::forces::PotentialBuilder for ContextProbeStubBuilder {
         Ok(Some(Box::new(ContextProbeStub {
             last_seen_nl_some: self.last_seen_nl_some.clone(),
         })))
+    }
+    fn box_clone(&self) -> Box<dyn dynamics::forces::PotentialBuilder> {
+        Box::new(self.clone())
     }
 }
 
@@ -1563,7 +1572,7 @@ fn force_field_new_iterates_registry_in_registration_order() {
 /// PotentialBuilder that always returns Ok(None). Used by scenarios that
 /// need a no-op builder to exercise the skip path or to occupy a registry
 /// slot without producing a slot.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct SkipBuilder;
 
 impl PotentialBuilder for SkipBuilder {
@@ -1572,6 +1581,9 @@ impl PotentialBuilder for SkipBuilder {
         _cx: &PotentialBuildContext<'_>,
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
         Ok(None)
+    }
+    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
+        Box::new(self.clone())
     }
 }
 
@@ -1607,7 +1619,7 @@ use std::sync::Arc as StdArc;
 
 /// PotentialBuilder that always errors out. Used by the short-circuit
 /// scenario.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct ErrBuilder;
 
 impl PotentialBuilder for ErrBuilder {
@@ -1617,11 +1629,14 @@ impl PotentialBuilder for ErrBuilder {
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
         Err(ForceFieldError::DuplicateLabel("ErrBuilder-marker"))
     }
+    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
+        Box::new(self.clone())
+    }
 }
 
 /// Records whether `build` was invoked. The short-circuit scenario asserts
 /// that no builder downstream of an `Err`-returning one is called.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct RecordingBuilder {
     called: StdArc<AtomicBool>,
 }
@@ -1633,6 +1648,9 @@ impl PotentialBuilder for RecordingBuilder {
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
         self.called.store(true, Ordering::SeqCst);
         Ok(None)
+    }
+    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
+        Box::new(self.clone())
     }
 }
 
@@ -1707,7 +1725,7 @@ impl Potential for RegistryLabelStub {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct DuplicateLabelBuilder;
 
 impl PotentialBuilder for DuplicateLabelBuilder {
@@ -1716,6 +1734,9 @@ impl PotentialBuilder for DuplicateLabelBuilder {
         _cx: &PotentialBuildContext<'_>,
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
         Ok(Some(Box::new(RegistryLabelStub("duplicate"))))
+    }
+    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
+        Box::new(self.clone())
     }
 }
 
@@ -1779,7 +1800,7 @@ fn empty_registry_produces_zero_slot_force_field() {
 
 /// Captures the addresses of every borrowed field on the
 /// `PotentialBuildContext` for the rq-b75ce71a passthrough scenario.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct PassthroughCaptureBuilder {
     captured: StdArc<std::sync::Mutex<Option<CapturedAddresses>>>,
 }
@@ -1827,6 +1848,9 @@ impl PotentialBuilder for PassthroughCaptureBuilder {
         };
         *self.captured.lock().unwrap() = Some(addrs);
         Ok(None)
+    }
+    fn box_clone(&self) -> Box<dyn PotentialBuilder> {
+        Box::new(self.clone())
     }
 }
 
@@ -1981,7 +2005,7 @@ impl Potential for CountingSlowStub {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct CountingSlowStubBuilder {
     counter: std::sync::Arc<std::sync::Mutex<f32>>,
 }
@@ -1995,6 +2019,9 @@ impl dynamics::forces::PotentialBuilder for CountingSlowStubBuilder {
             device: cx.gpu.device.clone(),
             counter: self.counter.clone(),
         })))
+    }
+    fn box_clone(&self) -> Box<dyn dynamics::forces::PotentialBuilder> {
+        Box::new(self.clone())
     }
 }
 

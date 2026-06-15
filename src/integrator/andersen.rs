@@ -139,7 +139,7 @@ impl Thermostat for AndersenThermostat {
 }
 
 // rq-fd0cef60
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AndersenBuilder;
 
 impl ThermostatBuilder for AndersenBuilder {
@@ -171,6 +171,10 @@ impl ThermostatBuilder for AndersenBuilder {
             p.seed,
         )?;
         Ok(Box::new(state))
+    }
+
+    fn box_clone(&self) -> Box<dyn ThermostatBuilder> {
+        Box::new(self.clone())
     }
 }
 
