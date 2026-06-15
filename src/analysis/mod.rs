@@ -1,7 +1,7 @@
 // rq-fd8bb824
 //
 // The analysis framework — types, traits, registry, loader, runner,
-// and lint entry points for `dynamics analyze`. Concrete analysis
+// and lint entry points for `heddlemd analyze`. Concrete analysis
 // kinds live in their own submodules (currently: `rdf`).
 
 pub mod rdf;

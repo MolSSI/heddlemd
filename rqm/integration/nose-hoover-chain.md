@@ -760,7 +760,7 @@ Feature: Nosé-Hoover chain (NHC) thermostat
   Scenario: Two independent composed runs with identical configs produce byte-identical outputs
     Given two complete simulations composing velocity-Verlet + NHC with identical parameters,
       identical initial particle state, n_steps=10
-    When dynamics run is invoked on each
+    When heddlemd run is invoked on each
     Then the two trajectory files are byte-identical
     And the two log files are byte-identical, including the nhc_conserved column
 

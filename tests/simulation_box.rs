@@ -1,4 +1,4 @@
-use dynamics::pbc::{SimulationBox, SimulationBoxError};
+use heddle_md::pbc::{SimulationBox, SimulationBoxError};
 
 fn default_box() -> SimulationBox {
     SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect("default box")

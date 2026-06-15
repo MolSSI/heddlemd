@@ -1,7 +1,7 @@
 use cudarc::driver::DeviceSlice;
-use dynamics::gpu::{ParticleBuffers, init_device, vv_kick, vv_kick_drift};
-use dynamics::state::ParticleState;
-use dynamics::pbc::SimulationBox;
+use heddle_md::gpu::{ParticleBuffers, init_device, vv_kick, vv_kick_drift};
+use heddle_md::state::ParticleState;
+use heddle_md::pbc::SimulationBox;
 
 fn empty_state(n: usize) -> ParticleState {
     ParticleState::new(

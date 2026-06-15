@@ -249,7 +249,7 @@ runner emits one line of phase summary to stdout, parallel to the
 per-phase line MD phases emit:
 
 ```
-[dynamics] phase `min`: 87 iters in 412 ms (converged: force_tolerance, frames: 0, log rows: 88)
+[heddlemd] phase `min`: 87 iters in 412 ms (converged: force_tolerance, frames: 0, log rows: 88)
 ```
 
 Carries: phase name, accepted-iteration count (or `max_iterations`
@@ -898,7 +898,7 @@ Feature: Steepest-descent energy minimizer
   Scenario: A run with one [[minimization]] phase executes the SD loop and proceeds to the next phase
     Given a config with one [[minimization]] phase followed by one [[phase]] of n_steps=10
     And a 4-particle initial state with non-zero forces
-    When dynamics run <config> is invoked
+    When heddlemd run <config> is invoked
     Then the .minlog for the minimization phase exists and has at least the step-0 row
     And the subsequent MD phase's log exists and has the expected number of rows
     And the exit code is 0
@@ -984,7 +984,7 @@ Feature: Steepest-descent energy minimizer
   @rq-90a67daf
   Scenario: Non-convergence at max_iterations is a hard error
     Given a SD slot with max_iterations = 5 and a system whose forces never fall below force_tolerance
-    When dynamics run <config> is invoked
+    When heddlemd run <config> is invoked
     Then the process exits with code 2
     And stderr contains "MinimizerNonConvergence" with iterations = 5
 

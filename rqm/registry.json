@@ -5756,7 +5756,7 @@
     "type": "section"
   },
   "rq-357909e4": {
-    "decl": "# Feature: `dynamics run` Simulation Runner",
+    "decl": "# Feature: `heddlemd run` Simulation Runner",
     "file": "simulation-runner",
     "refs": [
       {
@@ -5764,7 +5764,7 @@
         "kind": "code"
       }
     ],
-    "title": "Feature: `dynamics run` Simulation Runner",
+    "title": "Feature: `heddlemd run` Simulation Runner",
     "type": "file"
   },
   "rq-3579df3b": {
@@ -13951,7 +13951,7 @@
     "type": "section"
   },
   "rq-8b41bc4d": {
-    "decl": "Scenario: Two `dynamics analyze` runs on the same inputs produce byte-identical CSVs",
+    "decl": "Scenario: Two `heddlemd analyze` runs on the same inputs produce byte-identical CSVs",
     "file": "analysis/rdf",
     "refs": [
       {
@@ -13959,7 +13959,7 @@
         "kind": "code"
       }
     ],
-    "title": "Two `dynamics analyze` runs on the same inputs produce byte-identical CSVs",
+    "title": "Two `heddlemd analyze` runs on the same inputs produce byte-identical CSVs",
     "type": "scenario"
   },
   "rq-8b4243e0": {
@@ -25034,7 +25034,7 @@
     "type": "scenario"
   },
   "rq-fa2fc3a9": {
-    "decl": "Scenario: `dynamics lint` on an .in.analysis path runs the analyze lint",
+    "decl": "Scenario: `heddlemd lint` on an .in.analysis path runs the analyze lint",
     "file": "analysis/framework",
     "refs": [
       {
@@ -25042,7 +25042,7 @@
         "kind": "code"
       }
     ],
-    "title": "`dynamics lint` on an .in.analysis path runs the analyze lint",
+    "title": "`heddlemd lint` on an .in.analysis path runs the analyze lint",
     "type": "scenario"
   },
   "rq-fa6f7414": {
@@ -25347,7 +25347,7 @@
     "type": "scenario"
   },
   "rq-fd8bb824": {
-    "decl": "# Feature: Analysis Framework and `dynamics analyze`",
+    "decl": "# Feature: Analysis Framework and `heddlemd analyze`",
     "file": "analysis/framework",
     "refs": [
       {
@@ -25363,7 +25363,7 @@
         "kind": "code"
       }
     ],
-    "title": "Feature: Analysis Framework and `dynamics analyze`",
+    "title": "Feature: Analysis Framework and `heddlemd analyze`",
     "type": "file"
   },
   "rq-fd90fab3": {

@@ -64,7 +64,7 @@ For each consumed trajectory frame:
 2. Resolve `between` to a pair of type indices
    `(t_a, t_b)` looked up in the simulation config's
    `[[particle_types]]` array (left-to-right declaration order, so
-   the index of `"Ar"` matches the index `dynamics run` assigns).
+   the index of `"Ar"` matches the index `heddlemd run` assigns).
 3. Build two index lists: `idx_a` containing every particle index
    `i` with `type_indices[i] == t_a`, and `idx_b` containing every
    index with `type_indices[i] == t_b`. Both lists are in
@@ -123,7 +123,7 @@ Scope*).
 
 ### Reproducibility <!-- rq-7479022f -->
 
-Two `dynamics analyze` runs on the same `.in.analysis`,
+Two `heddlemd analyze` runs on the same `.in.analysis`,
 `.in.toml`, and trajectory produce byte-identical RDF CSVs. The
 guarantee follows from:
 
@@ -264,7 +264,7 @@ Feature: Radial distribution function analysis
   Background:
     Given a temporary directory tmp
     And tmp/argon.in.toml is a valid one-type config declaring [[particle_types]] with name="Ar"
-    And tmp/argon.out.xyz is a valid trajectory written by `dynamics run` of that config
+    And tmp/argon.out.xyz is a valid trajectory written by `heddlemd run` of that config
 
   # --- Parameter validation ---
 
@@ -310,19 +310,19 @@ Feature: Radial distribution function analysis
   @rq-66f2679e
   Scenario: Output CSV has exactly `n_bins` data rows
     Given an RDF with n_bins=64
-    When dynamics analyze runs to completion
+    When heddlemd analyze runs to completion
     Then the output CSV has 65 lines total (header + 64 data rows)
 
   @rq-43567b30
   Scenario: First bin's `r` column equals 0.5 · Δr
     Given an RDF with r_max=1.0e-9 and n_bins=10
-    When dynamics analyze runs to completion
+    When heddlemd analyze runs to completion
     Then the first data row's `r` column equals 5.0e-11 within f64 round-off
 
   @rq-60c534f2
   Scenario: Last bin's `r` column equals (n_bins - 0.5) · Δr
     Given an RDF with r_max=1.0e-9 and n_bins=10
-    When dynamics analyze runs to completion
+    When heddlemd analyze runs to completion
     Then the last data row's `r` column equals 9.5e-10 within f64 round-off
 
   @rq-c505f34b
@@ -336,7 +336,7 @@ Feature: Radial distribution function analysis
   Scenario: Same-type RDF on a two-particle frame at exactly r_max - epsilon
     Given a one-frame trajectory with two Ar particles separated by 5.0e-10 m along x
     And an RDF with r_max=1.0e-9 and n_bins=10
-    When dynamics analyze runs to completion
+    When heddlemd analyze runs to completion
     Then the bin containing 5.0e-10 has count = 1
     And every other bin has count = 0
 
@@ -344,14 +344,14 @@ Feature: Radial distribution function analysis
   Scenario: Cross-type RDF on a two-particle frame
     Given a one-frame trajectory with one Ar and one Kr separated by 3.0e-10 m
     And an RDF with between=["Ar","Kr"], r_max=1.0e-9, n_bins=10
-    When dynamics analyze runs to completion
+    When heddlemd analyze runs to completion
     Then exactly one bin has count = 1 and every other bin has count = 0
 
   @rq-56306e1f
   Scenario: Frames at distances >= r_max do not contribute
     Given a one-frame trajectory with two Ar particles separated by 1.5e-9 m
     And an RDF with r_max=1.0e-9
-    When dynamics analyze runs to completion
+    When heddlemd analyze runs to completion
     Then every bin has count = 0
 
   @rq-17fd53d9
@@ -359,7 +359,7 @@ Feature: Radial distribution function analysis
     Given a three-frame trajectory with the same two Ar particles per frame
       and per-frame separations 3.0e-10, 4.0e-10, 5.0e-10
     And an RDF with r_max=1.0e-9 and n_bins=10
-    When dynamics analyze runs to completion
+    When heddlemd analyze runs to completion
     Then exactly three bins have count = 1 each (one per distance)
     And every other bin has count = 0
 
@@ -368,13 +368,13 @@ Feature: Radial distribution function analysis
   @rq-c70f6309
   Scenario: Empty-bin g_r is exactly 0.0
     Given an RDF whose histogram has count = 0 in some bin
-    When dynamics analyze runs to completion
+    When heddlemd analyze runs to completion
     Then the corresponding `g_r` column value is exactly 0.0e0
 
   @rq-36665dda
   Scenario: g_r normalisation matches the ideal-gas reference
     Given a two-particle Ar/Ar trajectory whose distances sum to ideal-gas expectations
-    When dynamics analyze runs to completion
+    When heddlemd analyze runs to completion
     Then the resulting g_r values agree with the analytical normalisation
       g_r = (V * count) / (frames * N_A * (N_A - 1) / 2 * shell_volume)
       to within f64 round-off
@@ -382,9 +382,9 @@ Feature: Radial distribution function analysis
   # --- Reproducibility ---
 
   @rq-8b41bc4d
-  Scenario: Two `dynamics analyze` runs on the same inputs produce byte-identical CSVs
+  Scenario: Two `heddlemd analyze` runs on the same inputs produce byte-identical CSVs
     Given a valid .in.analysis and trajectory
-    When dynamics analyze is invoked twice
+    When heddlemd analyze is invoked twice
     Then the two output CSVs are byte-identical for every analysis
 
   # --- Output overwrite ---
@@ -392,7 +392,7 @@ Feature: Radial distribution function analysis
   @rq-23678707
   Scenario: Refuse to overwrite an existing CSV at the resolved output path
     Given the resolved output_path already exists
-    When dynamics analyze runs
+    When heddlemd analyze runs
     Then it exits with code 1
     And stderr contains "OutputExists"
     And the existing file is unchanged
@@ -402,7 +402,7 @@ Feature: Radial distribution function analysis
   @rq-e2cbe4fd
   Scenario: Lint reports `r_max` greater than half-box under the analyses stage
     Given an RDF entry with r_max greater than half the trajectory box's min perpendicular width
-    When dynamics is invoked with arguments ["lint", "tmp/argon.in.analysis"]
+    When heddlemd is invoked with arguments ["lint", "tmp/argon.in.analysis"]
     Then it exits with code 1
     And stdout has an "analyses" stage line beginning with "FAIL —"
     And stderr contains "r_max"

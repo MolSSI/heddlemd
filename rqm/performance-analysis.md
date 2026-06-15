@@ -511,7 +511,7 @@ Feature: Performance analysis and timings output
   Scenario: Successful run writes a timings file
     Given a valid config with n_steps=5, trajectory_every=5, log_every=5
     And sim.in.xyz contains N=2 particles with explicit velocities
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then it exits with code 0
     And the file tmp/sim.out.timings exists
     And the first line of tmp/sim.out.timings begins with "stage" and contains "count", "total_ms", "mean_us", "min_us", "max_us"
@@ -519,27 +519,27 @@ Feature: Performance analysis and timings output
   @rq-86423766
   Scenario: Timings file is absent when run fails before the loop
     Given a config with a malformed init file
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then it exits with code 1
     And the file tmp/sim.out.timings does not exist
 
   @rq-afb80e25
   Scenario: Timings file uses the default path derived from <config-root>
     Given a valid config at tmp/sim.in.toml with no output.timings_path field
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then the timings file is written to tmp/sim.out.timings
 
   @rq-a2ebdaaf
   Scenario: Timings file path can be overridden in [output]
     Given a valid config with output.timings_path = "custom.timings"
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then the timings file is written to tmp/custom.timings
 
   @rq-11132169
   Scenario: Pre-flight refuses to overwrite an existing timings file
     Given a valid config
     And tmp/sim.out.timings already exists with arbitrary content
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then it exits with code 1
     And stderr contains "OutputExists" and "sim.out.timings"
     And tmp/sim.out.timings is unchanged
@@ -549,7 +549,7 @@ Feature: Performance analysis and timings output
   @rq-a7fdf81f
   Scenario: Lossy run includes lossy kick rows and excludes lossless rows
     Given a valid lossy config with n_steps=10
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then tmp/sim.out.timings has a row whose stage column equals "vv_kick_drift"
     And tmp/sim.out.timings has a row whose stage column equals "vv_kick"
     And tmp/sim.out.timings has no row whose stage column equals "vv_kick_drift_lossless"
@@ -558,7 +558,7 @@ Feature: Performance analysis and timings output
   @rq-b2fa4a1f
   Scenario: Lossless run includes lossless kick rows and excludes lossy rows
     Given a valid config with integrator.kind="velocity-verlet" and lossless=true and n_steps=10
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then tmp/sim.out.timings has a row whose stage column equals "vv_kick_drift_lossless"
     And tmp/sim.out.timings has a row whose stage column equals "vv_kick_lossless"
     And tmp/sim.out.timings has no row whose stage column equals "vv_kick_drift"
@@ -568,7 +568,7 @@ Feature: Performance analysis and timings output
   Scenario: Langevin run includes Langevin rows and excludes velocity-Verlet rows
     Given a valid config with integrator.kind="langevin-baoab",
       friction=1.0e12, temperature=300.0, seed=42, n_steps=10
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then tmp/sim.out.timings has a row whose stage column equals "langevin_kick_half"
     And tmp/sim.out.timings has a row whose stage column equals "langevin_drift_half"
     And tmp/sim.out.timings has a row whose stage column equals "langevin_ou_step"
@@ -577,7 +577,7 @@ Feature: Performance analysis and timings output
   @rq-0c2265eb
   Scenario: Langevin kick_half count is 2 N_steps; drift_half is 2 N_steps; ou_step is N_steps
     Given a valid Langevin config with n_steps=10
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then the row for langevin_kick_half has count = 20
     And the row for langevin_drift_half has count = 20
     And the row for langevin_ou_step has count = 10
@@ -586,7 +586,7 @@ Feature: Performance analysis and timings output
   Scenario: Morse-bonded run records morse_bond_force, reduce_bond_forces, accumulate_forces
     Given a valid config with `topology = "sim.topology"` and a non-empty bond list
     And n_steps = 10
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then tmp/sim.out.timings has rows whose stage columns equal
       "morse_bond_force", "reduce_bond_forces", and "accumulate_forces"
     And each row's count equals 11 (one warm-up plus ten loop iterations)
@@ -594,7 +594,7 @@ Feature: Performance analysis and timings output
   @rq-c7df5714
   Scenario: Bond-free run omits morse_bond_force and reduce_bond_forces
     Given a valid config without a `topology` field
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then tmp/sim.out.timings has no row whose stage column equals "morse_bond_force"
     And tmp/sim.out.timings has no row whose stage column equals "reduce_bond_forces"
     And tmp/sim.out.timings has a row whose stage column equals "accumulate_forces"
@@ -603,7 +603,7 @@ Feature: Performance analysis and timings output
   @rq-bde625cf
   Scenario: Empty (N=0) run omits all kernel rows but retains host rows
     Given a valid config with kind="velocity-verlet", N=0 particles, n_steps=5
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then tmp/sim.out.timings has no rows whose stage column begins with "vv_"
       or "langevin_" or "morse_" or "reduce_" or equals "lj_pair_force"
       or "accumulate_forces"
@@ -613,7 +613,7 @@ Feature: Performance analysis and timings output
   @rq-62300a18
   Scenario: All-pairs neighbor mode records lj_pair_force and omits neighbor-list rows
     Given a valid config with [neighbor_list] mode="all-pairs" and n_steps=5
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then tmp/sim.out.timings has a row whose stage column equals "lj_pair_force"
     And tmp/sim.out.timings has no row whose stage column equals "lj_pair_force_neighbor"
     And tmp/sim.out.timings has no row whose stage column equals "neighbor_displacement_squared"
@@ -624,7 +624,7 @@ Feature: Performance analysis and timings output
   @rq-ef918dc6
   Scenario: Cell-list neighbor mode records the neighbor-list host stages
     Given a valid config with [neighbor_list] mode="cell-list" and n_steps=10
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then tmp/sim.out.timings has a row whose stage column equals "lj_pair_force"
       (the single LJ pair-force KernelStage is used in both modes; the
       "_neighbor" suffix is not a separate stage)
@@ -636,14 +636,14 @@ Feature: Performance analysis and timings output
   @rq-75746f64
   Scenario: neighbor_displacement_squared count equals one warm-up plus per-step launches
     Given a valid cell-list config with n_steps=10
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then the row for neighbor_displacement_squared has count = 10
 
   @rq-7f2310ac
   Scenario: neighbor_list_build and copy_positions_into_reference counts match rebuilds
     Given a valid cell-list config with n_steps=10 and r_skin chosen so that exactly
       one rebuild fires after the initial build (i.e. two builds total: warm-up + one)
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then the row for neighbor_list_build has count = 2
     And the row for copy_positions_into_reference has count = 2
     And the row for neighbor_list_rebuild has count = 2
@@ -651,13 +651,13 @@ Feature: Performance analysis and timings output
   @rq-3bd5336c
   Scenario: Velocity generation row is absent when init supplies velocities
     Given a valid config with N=2 and an init file that provides explicit velocities
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then tmp/sim.out.timings has no row whose stage column equals "velocity_generation"
 
   @rq-a555a750
   Scenario: Velocity generation row is present when init lacks velocities
     Given a valid config with N=4 and temperature=300 and an init file without velocities
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then tmp/sim.out.timings has a row whose stage column equals "velocity_generation"
     And that row's count column equals 1
 
@@ -666,7 +666,7 @@ Feature: Performance analysis and timings output
   @rq-a9b511ea
   Scenario: Kernel-stage counts match the runner's launch counts
     Given a valid lossy config with n_steps=10
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then the row for lj_pair_force has count = 11 (one warm-up + ten loop)
     And the row for reduce_pair_forces has count = 11
     And the row for vv_kick_drift has count = 10
@@ -675,21 +675,21 @@ Feature: Performance analysis and timings output
   @rq-46c317ef
   Scenario: trajectory_write count equals frames written
     Given a valid config with n_steps=20, trajectory_every=5, log_every=0
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then the row for trajectory_write has count = 5
     And tmp/sim.out.timings has no row whose stage column equals "log_write"
 
   @rq-34bfc634
   Scenario: log_write count equals log rows written
     Given a valid config with n_steps=20, trajectory_every=0, log_every=10
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then the row for log_write has count = 3
     And tmp/sim.out.timings has no row whose stage column equals "trajectory_write"
 
   @rq-6fe2b058
   Scenario: device_to_host_download count equals snapshot points reached
     Given a valid config with n_steps=20, trajectory_every=5, log_every=10
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then the row for device_to_host_download has count equal to the number of distinct steps at which a snapshot or log row was requested (including step 0)
 
   @rq-44e5c930
@@ -725,7 +725,7 @@ Feature: Performance analysis and timings output
   @rq-ef7c2bb9
   Scenario: Rows appear in the documented order
     Given a valid lossy config with n_steps=10, trajectory_every=5, log_every=5
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then the stage column of consecutive data rows of tmp/sim.out.timings reads
       ["vv_kick_drift", "lj_pair_force", "reduce_pair_forces", "vv_kick",
        "host_to_device_upload", "device_to_host_download", "trajectory_write",
@@ -749,14 +749,14 @@ Feature: Performance analysis and timings output
   @rq-ad403fb6
   Scenario: Trajectory and log files remain bit-identical between two identical runs
     Given two identical valid configs with explicit init velocities
-    When dynamics run is invoked on each twice with the same files
+    When heddlemd run is invoked on each twice with the same files
     Then the two trajectory files are byte-identical
     And the two log files are byte-identical
 
   @rq-1b8fd2a0
   Scenario: Two identical runs produce timings files with the same stage rows and the same counts
     Given two identical valid configs
-    When dynamics run is invoked on each
+    When heddlemd run is invoked on each
     Then each row of timings file A has a matching row in timings file B with the same stage and the same count
     And numeric columns may differ between A and B
 
@@ -765,7 +765,7 @@ Feature: Performance analysis and timings output
   @rq-f84e4fa1
   Scenario: Timings path equal to trajectory path is rejected
     Given a config with output.trajectory_path = "out.dat" and output.timings_path = "out.dat"
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then it exits with code 1
     And stderr contains "PathCollision"
     And no timings file is written
@@ -773,14 +773,14 @@ Feature: Performance analysis and timings output
   @rq-ec5b6cf1
   Scenario: Timings path equal to log path is rejected
     Given a config with output.log_path = "out.log" and output.timings_path = "out.log"
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then it exits with code 1
     And stderr contains "PathCollision"
 
   @rq-2ebf81fd
   Scenario: Timings path equal to init path is rejected
     Given a config with init = "particles.dat" and output.timings_path = "particles.dat"
-    When dynamics run sim.in.toml is invoked
+    When heddlemd run sim.in.toml is invoked
     Then it exits with code 1
     And stderr contains "PathCollision"
 

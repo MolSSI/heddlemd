@@ -1,7 +1,7 @@
-# Analysis (`dynamics analyze`)
+# Analysis (`heddlemd analyze`)
 
-`dynamics analyze` runs post-processing analyses on a trajectory
-written by an earlier `dynamics run`. The work is declared in a
+`heddlemd analyze` runs post-processing analyses on a trajectory
+written by an earlier `heddlemd run`. The work is declared in a
 `<root>.in.analysis` TOML file alongside the simulation inputs; each
 analysis writes a CSV next to the input. v1 ships one built-in
 analysis kind — the radial distribution function (`rdf`) — and an
@@ -14,7 +14,7 @@ outputs are byte-identical across runs on identical inputs.
 ## Quick start
 
 In a directory containing the simulation outputs from a previous
-`dynamics run` (`argon.in.toml`, `argon.in.xyz`,
+`heddlemd run` (`argon.in.toml`, `argon.in.xyz`,
 `argon.out.run.xyz`), write a minimal `argon.in.analysis`:
 
 ```toml
@@ -31,13 +31,13 @@ n_bins = 200
 Then run:
 
 ```
-dynamics analyze argon.in.analysis
+heddlemd analyze argon.in.analysis
 ```
 
 A successful invocation prints
 
 ```
-[dynamics] analyze complete: 1 analyses over 11 frames in <T> ms
+[heddlemd] analyze complete: 1 analyses over 11 frames in <T> ms
 ```
 
 and writes `argon.out.ar-ar.csv` next to the analysis file.
@@ -46,7 +46,7 @@ and writes `argon.out.ar-ar.csv` next to the analysis file.
 
 ### Filename convention
 
-The path passed to `dynamics analyze` must end in `.in.analysis`. The
+The path passed to `heddlemd analyze` must end in `.in.analysis`. The
 derived root (filename with `.in.analysis` stripped) is used to
 default the sibling simulation config and every analysis's output
 path:
@@ -168,14 +168,14 @@ Exactly `n_bins` data rows after the one-line header.
 
 ## Linting an `.in.analysis` file
 
-`dynamics lint` dispatches on file extension: pointing it at a
+`heddlemd lint` dispatches on file extension: pointing it at a
 `.in.analysis` runs the *analyze lint pipeline*, which performs the
-same four setup-phase stages `dynamics analyze` would run but stops
+same four setup-phase stages `heddlemd analyze` would run but stops
 before the trajectory pass and writes no files:
 
 ```
-$ dynamics lint argon.in.analysis
-[dynamics lint] OK
+$ heddlemd lint argon.in.analysis
+[heddlemd lint] OK
   config       argon.in.analysis
   output paths none pre-exist
   trajectory   resolved, 10000 particles, box 8.0e-9 × 8.0e-9 × 1.0e-8 m
@@ -190,7 +190,7 @@ queueing the analysis job.
 
 ## Reproducibility
 
-Two `dynamics analyze` runs on the same `.in.analysis`,
+Two `heddlemd analyze` runs on the same `.in.analysis`,
 `.in.toml`, and trajectory produce byte-identical output CSVs. The
 guarantee is unconditional on hardware in v1 (CPU-only). It rests on
 deterministic pair enumeration order, integer histogram

@@ -169,9 +169,9 @@ pub(crate) enum ExitPhase {
 }
 
 const USAGE_LINE: &str = "\
-usage: dynamics run     <config-path>
-       dynamics lint    <config-path> [--with-gpu]
-       dynamics analyze <analysis-path>";
+usage: heddlemd run     <config-path>
+       heddlemd lint    <config-path> [--with-gpu]
+       heddlemd analyze <analysis-path>";
 
 // rq-30c21c70
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,8 +217,8 @@ impl LintReport {
 
     pub fn write_to(&self, w: &mut dyn std::io::Write) -> std::io::Result<()> {
         let header = match self.overall {
-            LintOverall::Ok => "[dynamics lint] OK",
-            LintOverall::Fail => "[dynamics lint] FAIL",
+            LintOverall::Ok => "[heddlemd lint] OK",
+            LintOverall::Fail => "[heddlemd lint] FAIL",
         };
         writeln!(w, "{header}")?;
         for stage in &self.stages {
@@ -1414,7 +1414,7 @@ pub(crate) fn run_md_phase_inner(
             let pct = 100.0 * step as f64 / n_steps.max(1) as f64;
             let rate = step as f64 / phase_started.elapsed().as_secs_f64().max(1e-9);
             println!(
-                "[dynamics] phase `{phase_name}` step {step}/{n_steps} ({pct:.1}%) — {rate:.1e} steps/sec"
+                "[heddlemd] phase `{phase_name}` step {step}/{n_steps} ({pct:.1}%) — {rate:.1e} steps/sec"
             );
         }
     }
@@ -1722,7 +1722,7 @@ pub(crate) fn run_minimization_phase_inner(
             if progress_to_stdout && (iter % progress_every == 0 || iter == max_iter) {
                 let rate = iter as f64 / phase_started.elapsed().as_secs_f64().max(1e-9);
                 println!(
-                    "[dynamics] minimization `{phase_name}` iter {iter}/{max_iter} \
+                    "[heddlemd] minimization `{phase_name}` iter {iter}/{max_iter} \
                      (E={:.6e} J, F_max={:.3e} N) — {rate:.1e} iters/sec",
                     report.energy, report.max_force,
                 );
@@ -2025,12 +2025,12 @@ fn cli_main_run(rest: Vec<String>) -> u8 {
                 if ps.kind == "minimization" {
                     let conv = ps.convergence.unwrap_or("unknown");
                     println!(
-                        "[dynamics] phase `{}`: {} iters in {} (converged: {}, frames: {}, log rows: {})",
+                        "[heddlemd] phase `{}`: {} iters in {} (converged: {}, frames: {}, log rows: {})",
                         ps.name, ps.n_steps, disp, conv, ps.frames_written, ps.log_rows_written
                     );
                 } else {
                     println!(
-                        "[dynamics] phase `{}`: {} steps in {} (frames: {}, log rows: {})",
+                        "[heddlemd] phase `{}`: {} steps in {} (frames: {}, log rows: {})",
                         ps.name, ps.n_steps, disp, ps.frames_written, ps.log_rows_written
                     );
                 }
@@ -2041,7 +2041,7 @@ fn cli_main_run(rest: Vec<String>) -> u8 {
                 format!("{} \u{00b5}s", summary.total_elapsed_micros)
             };
             println!(
-                "[dynamics] complete: {} phases, {} steps in {}",
+                "[heddlemd] complete: {} phases, {} steps in {}",
                 summary.phases.len(),
                 summary.total_n_steps,
                 total_disp,
@@ -2138,7 +2138,7 @@ fn cli_main_analyze(rest: Vec<String>) -> u8 {
                 format!("{elapsed} \u{00b5}s")
             };
             println!(
-                "[dynamics] analyze complete: {} analyses over {} frames in {}",
+                "[heddlemd] analyze complete: {} analyses over {} frames in {}",
                 summary.analyses_written, summary.frames_consumed, elapsed_disp
             );
             0

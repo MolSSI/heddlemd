@@ -452,7 +452,7 @@ Feature: Berendsen weak-coupling thermostat
   Scenario: Two independent composed runs with identical configs are byte-identical
     Given two complete simulations composing velocity-Verlet + Berendsen,
       identical parameters, identical initial state, n_steps=10
-    When dynamics run is invoked on each
+    When heddlemd run is invoked on each
     Then the trajectory files are byte-identical
     And the log files are byte-identical, including the berendsen_conserved column
 ```

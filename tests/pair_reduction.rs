@@ -4,8 +4,8 @@ use common::*;
 use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice, DeviceSlice};
-use dynamics::gpu::{GpuContext, PairBuffer, ParticleBuffers, init_device};
-use dynamics::state::ParticleState;
+use heddle_md::gpu::{GpuContext, PairBuffer, ParticleBuffers, init_device};
+use heddle_md::state::ParticleState;
 
 fn zero_state(n: usize) -> ParticleState {
     ParticleState::new(
@@ -750,7 +750,7 @@ fn reduce_pair_forces_does_not_touch_energy_or_virial_targets() {
     let mut vx = buffers.forces_x.slice_mut(..);
     let mut vy = buffers.forces_y.slice_mut(..);
     let mut vz = buffers.forces_z.slice_mut(..);
-    dynamics::gpu::reduce_pair_forces(&pair, &counts, &mut vx, &mut vy, &mut vz, n).unwrap();
+    heddle_md::gpu::reduce_pair_forces(&pair, &counts, &mut vx, &mut vy, &mut vz, n).unwrap();
 
     let read_e = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let read_v = device.dtoh_sync_copy(&buffers.virials).unwrap();
@@ -789,7 +789,7 @@ fn reduce_pair_energy_virial_does_not_touch_force_targets() {
     let counts = device.htod_sync_copy(&[2u32; 4]).unwrap();
     let mut ve = buffers.potential_energies.slice_mut(..);
     let mut vw = buffers.virials.slice_mut(..);
-    dynamics::gpu::reduce_pair_energy_virial(&pair, &counts, &mut ve, &mut vw, n).unwrap();
+    heddle_md::gpu::reduce_pair_energy_virial(&pair, &counts, &mut ve, &mut vw, n).unwrap();
 
     let read_fx = device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     let read_fy = device.dtoh_sync_copy(&buffers.forces_y).unwrap();
@@ -820,7 +820,7 @@ fn skipping_reduce_pair_energy_virial_leaves_stale_energy_targets() {
     {
         let mut ve = buffers.potential_energies.slice_mut(..);
         let mut vw = buffers.virials.slice_mut(..);
-        dynamics::gpu::reduce_pair_energy_virial(&pair, &counts, &mut ve, &mut vw, n).unwrap();
+        heddle_md::gpu::reduce_pair_energy_virial(&pair, &counts, &mut ve, &mut vw, n).unwrap();
     }
     let pre = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     assert_eq!(pre, vec![30.0_f32, 70.0]);
@@ -833,7 +833,7 @@ fn skipping_reduce_pair_energy_virial_leaves_stale_energy_targets() {
     let mut vx = buffers.forces_x.slice_mut(..);
     let mut vy = buffers.forces_y.slice_mut(..);
     let mut vz = buffers.forces_z.slice_mut(..);
-    dynamics::gpu::reduce_pair_forces(&pair, &counts, &mut vx, &mut vy, &mut vz, n).unwrap();
+    heddle_md::gpu::reduce_pair_forces(&pair, &counts, &mut vx, &mut vy, &mut vz, n).unwrap();
     let post = device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     assert_eq!(post, vec![30.0_f32, 70.0]);
 }
@@ -857,7 +857,7 @@ fn two_independent_runs_of_reduce_pair_energy_virial_produce_byte_identical_scal
         let counts_dev = device.htod_sync_copy(&counts).unwrap();
         let mut ve = buffers.potential_energies.slice_mut(..);
         let mut vw = buffers.virials.slice_mut(..);
-        dynamics::gpu::reduce_pair_energy_virial(&pair, &counts_dev, &mut ve, &mut vw, n).unwrap();
+        heddle_md::gpu::reduce_pair_energy_virial(&pair, &counts_dev, &mut ve, &mut vw, n).unwrap();
         drop(ve);
         drop(vw);
         (
@@ -881,5 +881,5 @@ fn reduce_pair_energy_virial_on_empty_state_is_noop() {
     let mut ve = buffers.potential_energies.slice_mut(..);
     let mut vw = buffers.virials.slice_mut(..);
     // particle_count=0 must early-return Ok without launching a kernel.
-    dynamics::gpu::reduce_pair_energy_virial(&pair, &counts, &mut ve, &mut vw, 0).unwrap();
+    heddle_md::gpu::reduce_pair_energy_virial(&pair, &counts, &mut ve, &mut vw, 0).unwrap();
 }

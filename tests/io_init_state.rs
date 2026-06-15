@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use dynamics::io::{InitStateError, load_init_state};
-use dynamics::units::UnitSystem;
+use heddle_md::io::{InitStateError, load_init_state};
+use heddle_md::units::UnitSystem;
 
 fn tmp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -10,7 +10,7 @@ fn tmp_path(name: &str) -> PathBuf {
         .as_nanos();
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "dynamics-init-{}-{}-{}",
+        "heddlemd-init-{}-{}-{}",
         std::process::id(),
         name,
         nanos

@@ -564,14 +564,14 @@ Feature: Andersen stochastic thermostat
   Scenario: Two independent composed runs with identical seeds produce byte-identical outputs
     Given two complete simulations composing velocity-Verlet + Andersen with identical parameters
       (including identical seed), identical initial state, n_steps=10
-    When dynamics run is invoked on each
+    When heddlemd run is invoked on each
     Then the trajectory files are byte-identical
     And the log files are byte-identical, including the andersen_conserved column
 
   @rq-20daf925
   Scenario: Different seeds produce different trajectories
     Given two composed runs identical except thermostat.seed = 1 and = 2
-    When dynamics run is invoked on each
+    When heddlemd run is invoked on each
     Then the trajectory files differ
 
   # --- Physical correctness ---

@@ -570,13 +570,13 @@ Feature: CSVR stochastic velocity-rescaling thermostat
   Scenario: Two independent composed runs with identical seeds produce byte-identical outputs
     Given two complete simulations composing velocity-Verlet + CSVR with identical parameters
       (including identical seed), identical initial state, n_steps=10
-    When dynamics run is invoked on each
+    When heddlemd run is invoked on each
     Then the trajectory files are byte-identical
     And the log files are byte-identical, including the csvr_conserved column
 
   @rq-94a43204
   Scenario: Different seeds produce different trajectories
     Given two composed runs identical except thermostat.seed = 1 and = 2
-    When dynamics run is invoked on each
+    When heddlemd run is invoked on each
     Then the trajectory files differ
 ```

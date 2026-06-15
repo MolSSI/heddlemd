@@ -8,12 +8,12 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use dynamics::io::PhaseKind;
-use dynamics::runner::{run_simulation, RunnerError};
+use heddle_md::io::PhaseKind;
+use heddle_md::runner::{run_simulation, RunnerError};
 
 fn tmp_dir(suffix: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
-        "dynamics-min-{}-{}",
+        "heddlemd-min-{}-{}",
         suffix,
         std::process::id()
     ));
@@ -132,7 +132,7 @@ fn config_loader_parses_minimization_block() {
     let cfg_path = dir.join("argon.in.toml");
     fs::write(&cfg_path, argon_min_config()).unwrap();
 
-    let cfg = dynamics::io::load_config(&cfg_path).unwrap();
+    let cfg = heddle_md::io::load_config(&cfg_path).unwrap();
     assert_eq!(cfg.phases.len(), 1);
     let min = match &cfg.phases[0] {
         PhaseKind::Minimization(m) => m,
@@ -197,7 +197,7 @@ mode = "all-pairs"
     let cfg_path = dir.join("argon.in.toml");
     fs::write(&cfg_path, body).unwrap();
 
-    let cfg = dynamics::io::load_config(&cfg_path).unwrap();
+    let cfg = heddle_md::io::load_config(&cfg_path).unwrap();
     assert_eq!(cfg.phases.len(), 3);
     assert!(matches!(&cfg.phases[0], PhaseKind::Md(p) if p.name == "equil"));
     assert!(matches!(&cfg.phases[1], PhaseKind::Minimization(m) if m.name == "min"));
@@ -247,11 +247,11 @@ mode = "all-pairs"
     let cfg_path = dir.join("argon.in.toml");
     fs::write(&cfg_path, body).unwrap();
 
-    let err = dynamics::io::load_config(&cfg_path).err().unwrap();
+    let err = heddle_md::io::load_config(&cfg_path).err().unwrap();
     assert!(
         matches!(
             err,
-            dynamics::io::ConfigError::DuplicatePhaseName { ref name }
+            heddle_md::io::ConfigError::DuplicatePhaseName { ref name }
                 if name == "step1"
         ),
         "got: {err:?}"
@@ -293,11 +293,11 @@ mode = "all-pairs"
     let cfg_path = dir.join("argon.in.toml");
     fs::write(&cfg_path, body).unwrap();
 
-    let err = dynamics::io::load_config(&cfg_path).err().unwrap();
+    let err = heddle_md::io::load_config(&cfg_path).err().unwrap();
     assert!(
         matches!(
             err,
-            dynamics::io::ConfigError::UnknownKind { slot: "minimization", ref kind }
+            heddle_md::io::ConfigError::UnknownKind { slot: "minimization", ref kind }
                 if kind == "quasi-newton"
         ),
         "got: {err:?}"
@@ -340,11 +340,11 @@ mode = "all-pairs"
     let cfg_path = dir.join("argon.in.toml");
     fs::write(&cfg_path, body).unwrap();
 
-    let err = dynamics::io::load_config(&cfg_path).err().unwrap();
+    let err = heddle_md::io::load_config(&cfg_path).err().unwrap();
     assert!(
         matches!(
             err,
-            dynamics::io::ConfigError::InvalidValue { ref field, .. }
+            heddle_md::io::ConfigError::InvalidValue { ref field, .. }
                 if field == "minimization.algorithm.step_decrease"
         ),
         "got: {err:?}"
@@ -443,7 +443,7 @@ mode = "all-pairs"
 "#;
     let cfg_path = dir.join("argon.in.toml");
     fs::write(&cfg_path, body).unwrap();
-    let err = dynamics::io::load_config(&cfg_path).err().unwrap();
+    let err = heddle_md::io::load_config(&cfg_path).err().unwrap();
     let s = format!("{err}");
     assert!(
         s.contains("junk_field") || s.contains("unknown field"),
@@ -487,11 +487,11 @@ mode = "all-pairs"
 "#;
     let cfg_path = dir.join("argon.in.toml");
     fs::write(&cfg_path, body).unwrap();
-    let err = dynamics::io::load_config(&cfg_path).err().unwrap();
+    let err = heddle_md::io::load_config(&cfg_path).err().unwrap();
     assert!(
         matches!(
             err,
-            dynamics::io::ConfigError::InvalidValue { ref field, .. }
+            heddle_md::io::ConfigError::InvalidValue { ref field, .. }
                 if field.contains("max_step") || field.contains("initial_step")
         ),
         "got: {err:?}"
@@ -538,7 +538,7 @@ mode = "all-pairs"
 "#;
     let cfg_path = dir.join("argon.in.toml");
     fs::write(&cfg_path, body).unwrap();
-    let err = dynamics::io::load_config(&cfg_path).err().unwrap();
+    let err = heddle_md::io::load_config(&cfg_path).err().unwrap();
     let s = format!("{err}");
     assert!(
         s.contains("thermostat") || s.contains("unknown field"),
@@ -551,14 +551,14 @@ mode = "all-pairs"
 fn sd_with_no_projection_constraint_slot_rejected_at_config_load() {
     use std::sync::Arc;
     use cudarc::driver::CudaDevice;
-    use dynamics::Registries;
-    use dynamics::forces::{ConstraintGroup as _ConstraintGroup, ConstraintList, GroupConstraint};
-    use dynamics::gpu::GpuContext;
-    use dynamics::integrator::{
+    use heddle_md::Registries;
+    use heddle_md::forces::{ConstraintGroup as _ConstraintGroup, ConstraintList, GroupConstraint};
+    use heddle_md::gpu::GpuContext;
+    use heddle_md::integrator::{
         Constraint, ConstraintBuilder, ConstraintError, ConstraintRegistry,
     };
-    use dynamics::io::config::{ConfigError, NamedSlotConfig};
-    use dynamics::io::load_config_raw;
+    use heddle_md::io::config::{ConfigError, NamedSlotConfig};
+    use heddle_md::io::load_config_raw;
 
     // Custom constraint builder whose supports_position_projection_only
     // returns false. The runner's minimization-compatibility check must
@@ -655,17 +655,17 @@ mode = "all-pairs"
 // rq-09c8a503
 #[test]
 fn custom_minimizer_builder_is_selectable() {
-    use dynamics::gpu::{GpuContext, ParticleBuffers};
-    use dynamics::minimizer::{
+    use heddle_md::gpu::{GpuContext, ParticleBuffers};
+    use heddle_md::minimizer::{
         Minimizer, MinimizerBuilder, MinimizerConvergence, MinimizerError,
         MinimizerRegistry, MinimizerStepReport,
     };
-    use dynamics::pbc::SimulationBox;
-    use dynamics::timings::Timings;
-    use dynamics::io::SlotConfig;
-    use dynamics::forces::ForceField;
+    use heddle_md::pbc::SimulationBox;
+    use heddle_md::timings::Timings;
+    use heddle_md::io::SlotConfig;
+    use heddle_md::forces::ForceField;
 
-    use dynamics::integrator::Constraint;
+    use heddle_md::integrator::Constraint;
     #[derive(Debug)]
     struct StubMinimizer;
     impl Minimizer for StubMinimizer {
@@ -698,7 +698,7 @@ fn custom_minimizer_builder_is_selectable() {
     struct StubBuilder;
     impl MinimizerBuilder for StubBuilder {
         fn kind_name(&self) -> &'static str { "test-stub" }
-        fn validate_params(&self, _p: &toml::Value) -> Result<(), dynamics::io::config::ConfigError> {
+        fn validate_params(&self, _p: &toml::Value) -> Result<(), heddle_md::io::config::ConfigError> {
             Ok(())
         }
         fn build(
@@ -723,7 +723,7 @@ fn custom_minimizer_builder_is_selectable() {
     // Unknown kind reports UnknownKind via lookup.
     assert!(registry.lookup("not-a-real-kind").is_none());
     // Build the stub via the registry's dispatch.
-    let gpu = dynamics::gpu::init_device().unwrap();
+    let gpu = heddle_md::gpu::init_device().unwrap();
     let slot = SlotConfig::from_params_str("test-stub", "");
     let _ = registry.build(&slot, &gpu, 0, 0).unwrap();
 }
@@ -966,21 +966,21 @@ fn build_sd_argon_pair(
     energy_tolerance_rel: f64,
     pair_separation_m: f64,
 ) -> (
-    dynamics::gpu::GpuContext,
-    Box<dyn dynamics::minimizer::Minimizer>,
-    dynamics::forces::ForceField,
-    dynamics::gpu::ParticleBuffers,
-    dynamics::pbc::SimulationBox,
-    dynamics::timings::Timings,
+    heddle_md::gpu::GpuContext,
+    Box<dyn heddle_md::minimizer::Minimizer>,
+    heddle_md::forces::ForceField,
+    heddle_md::gpu::ParticleBuffers,
+    heddle_md::pbc::SimulationBox,
+    heddle_md::timings::Timings,
 ) {
-    use dynamics::forces::{ForceField, PotentialRegistry, BondList, AngleList, ExclusionList};
-    use dynamics::gpu::{ParticleBuffers, init_device};
-    use dynamics::io::config::{NeighborListConfig, PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
-    use dynamics::minimizer::MinimizerRegistry;
-    use dynamics::pbc::SimulationBox;
-    use dynamics::state::ParticleState;
-    use dynamics::timings::Timings;
-    use dynamics::units::{Dimension, UnitSystem};
+    use heddle_md::forces::{ForceField, PotentialRegistry, BondList, AngleList, ExclusionList};
+    use heddle_md::gpu::{ParticleBuffers, init_device};
+    use heddle_md::io::config::{NeighborListConfig, PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
+    use heddle_md::minimizer::MinimizerRegistry;
+    use heddle_md::pbc::SimulationBox;
+    use heddle_md::state::ParticleState;
+    use heddle_md::timings::Timings;
+    use heddle_md::units::{Dimension, UnitSystem};
 
     let len_f = UnitSystem::Si.factor(Dimension::Length);
     let mass_f = UnitSystem::Si.factor(Dimension::Mass);
@@ -1048,7 +1048,7 @@ fn build_sd_argon_pair(
     .unwrap();
     let timings = Timings::new(&gpu).unwrap();
     let registry = MinimizerRegistry::with_builtins();
-    let slot = dynamics::io::SlotConfig::from_params_str(
+    let slot = heddle_md::io::SlotConfig::from_params_str(
         "steepest-descent",
         &format!(
             "initial_step = {initial_step_au:.16e}\n\
@@ -1068,16 +1068,16 @@ fn build_sd_argon_pair(
 // pre-loop warm-up). SD's initial_state and the per-iteration accept
 // check both consume these.
 fn warm_up_forces(
-    ff: &mut dynamics::forces::ForceField,
-    buffers: &mut dynamics::gpu::ParticleBuffers,
-    sim_box: &dynamics::pbc::SimulationBox,
-    timings: &mut dynamics::timings::Timings,
+    ff: &mut heddle_md::forces::ForceField,
+    buffers: &mut heddle_md::gpu::ParticleBuffers,
+    sim_box: &heddle_md::pbc::SimulationBox,
+    timings: &mut heddle_md::timings::Timings,
 ) {
     ff.step(
         buffers,
         sim_box,
         timings,
-        dynamics::forces::AggregateLevel::ForcesAndScalars,
+        heddle_md::forces::AggregateLevel::ForcesAndScalars,
     )
     .unwrap();
 }
@@ -1148,7 +1148,7 @@ fn sd_step_formula_moves_largest_force_atom_by_exactly_step() {
 // rq-265de297
 #[test]
 fn sd_step_doubles_on_accepted_iteration() {
-    use dynamics::units::{Dimension, UnitSystem};
+    use heddle_md::units::{Dimension, UnitSystem};
     let init = 1.0e-13_f64;
     let max = 1.0e-9_f64;
     let len_f = UnitSystem::Si.factor(Dimension::Length);
@@ -1178,7 +1178,7 @@ fn sd_step_doubles_on_accepted_iteration() {
 // rq-ba6d3eaa
 #[test]
 fn sd_step_caps_at_max_step() {
-    use dynamics::units::{Dimension, UnitSystem};
+    use heddle_md::units::{Dimension, UnitSystem};
     let init = 8.0e-12_f64;
     let max = 1.0e-11_f64;
     let len_f = UnitSystem::Si.factor(Dimension::Length);
@@ -1205,7 +1205,7 @@ fn sd_step_caps_at_max_step() {
 // rq-b10ed5ec
 #[test]
 fn sd_step_halves_and_restores_positions_on_rejection() {
-    use dynamics::units::{Dimension, UnitSystem};
+    use heddle_md::units::{Dimension, UnitSystem};
     let init = 1.0e-9_f64;
     let max = 1.0e-9_f64;
     let step_decrease = 0.5_f64;
@@ -1616,7 +1616,7 @@ fn sd_with_shake_projects_every_trial_onto_rigid_water_manifold() {
     // SD to iterate, the constraint slot's
     // apply_position_projection_only hook fires after each trial, and
     // the final positions must satisfy the rigid-water distances.
-    use dynamics::units::{Dimension, UnitSystem};
+    use heddle_md::units::{Dimension, UnitSystem};
     let dir = tmp_dir("sd_shake_water");
     let len_f = UnitSystem::Si.factor(Dimension::Length);
     let r_oh = 1.0e-10_f64;

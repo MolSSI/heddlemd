@@ -5,19 +5,19 @@
 // shared kinetic_energy_reduce / rescale_velocities helpers documented
 // in `nose-hoover-chain.md` are also exercised directly.
 
-use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
-use dynamics::gpu::{
+use heddle_md::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use heddle_md::gpu::{
     GpuContext, ParticleBuffers, compute_kinetic_energy, init_device, rescale_velocities,
 };
-use dynamics::integrator::IntegratorStepExt;
-use dynamics::integrator::{
+use heddle_md::integrator::IntegratorStepExt;
+use heddle_md::integrator::{
     NoseHooverChainThermostat, Thermostat, ThermostatRegistry,
 };
-use dynamics::io::SlotConfig;
-use dynamics::io::config::NeighborListConfig;
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::{KernelStage, Timings};
+use heddle_md::io::SlotConfig;
+use heddle_md::io::config::NeighborListConfig;
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::{KernelStage, Timings};
 
 #[allow(dead_code)]
 const KB: f64 = 1.380649e-23;
@@ -375,7 +375,7 @@ fn nhc_log_column_names_returns_nhc_conserved() {
 // rq-7909b92c rq-ded81a4a
 #[test]
 fn vv_and_langevin_log_column_names_are_empty() {
-    use dynamics::integrator::IntegratorRegistry;
+    use heddle_md::integrator::IntegratorRegistry;
     let gpu = init_device().unwrap();
     let vv = IntegratorRegistry::with_builtins()
         .build(
@@ -494,7 +494,7 @@ fn nhc_preserves_com_momentum_to_round_off() {
     let mut sim_box = box_large();
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut integ = dynamics::integrator::IntegratorRegistry::with_builtins()
+    let mut integ = heddle_md::integrator::IntegratorRegistry::with_builtins()
         .build(
             &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
             &gpu,
@@ -565,7 +565,7 @@ fn rescale_velocities_does_not_modify_positions_masses_or_forces() {
 // rq-1aa67999
 #[test]
 fn nhc_constructs_for_a_settled_water_system() {
-    use dynamics::integrator::ThermostatRegistry;
+    use heddle_md::integrator::ThermostatRegistry;
     let gpu = init_device().unwrap();
     let kind = nhc_kind(300.0, 1.0e-13, 3, 3, 1);
     // 24 particles (8 waters) with 24 constraints; g_dof = 45.

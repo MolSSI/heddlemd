@@ -6,12 +6,12 @@
 use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice};
-use dynamics::forces::{DeviceExclusionList, ExclusionList, NeighborListState};
-use dynamics::gpu::{
+use heddle_md::forces::{DeviceExclusionList, ExclusionList, NeighborListState};
+use heddle_md::gpu::{
     GpuContext, GpuError, LennardJonesParameterTable, PairBuffer, ParticleBuffers, lj_pair_force,
     reduce_pair_forces,
 };
-use dynamics::pbc::SimulationBox;
+use heddle_md::pbc::SimulationBox;
 
 /// Build a `DeviceExclusionList` representing zero exclusions on `n`
 /// particles. The LJ kernel reads the buffers and never finds a match,
@@ -111,6 +111,6 @@ pub fn reduce_pair_forces_into_buffers(
     let mut ve = particle_buffers.potential_energies.slice_mut(..);
     let mut vw = particle_buffers.virials.slice_mut(..);
     reduce_pair_forces(pair, counts, &mut vx, &mut vy, &mut vz, n)?;
-    dynamics::gpu::reduce_pair_energy_virial(pair, counts, &mut ve, &mut vw, n)
+    heddle_md::gpu::reduce_pair_energy_virial(pair, counts, &mut ve, &mut vw, n)
 }
 

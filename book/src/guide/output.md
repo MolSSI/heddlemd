@@ -227,9 +227,9 @@ minimization phases report an iteration count and the convergence
 reason:
 
 ```
-[dynamics] phase `min`: 87 iters in 412 ms (converged: force_tolerance, frames: 0, log rows: 88)
-[dynamics] phase `prod`: 10000 steps in 5234 ms (frames: 101, log rows: 101)
-[dynamics] complete: 2 phases, 10087 steps in 5646 ms
+[heddlemd] phase `min`: 87 iters in 412 ms (converged: force_tolerance, frames: 0, log rows: 88)
+[heddlemd] phase `prod`: 10000 steps in 5234 ms (frames: 101, log rows: 101)
+[heddlemd] complete: 2 phases, 10087 steps in 5646 ms
 ```
 
 Convergence reasons are `force_tolerance`, `energy_tolerance`,

@@ -711,7 +711,7 @@ successfully.
   - The three integrator-side registries (plus `ConstraintRegistry`
     from `constraint-framework.md` and `PotentialRegistry` from
     `forces/framework.md`) are also reachable as fields of the
-    runner-level `dynamics::Registries` bundle. See
+    runner-level `heddle_md::Registries` bundle. See
     `simulation-runner.md` for the bundle's constructors and
     convenience `register_*` methods. The inner registries can be
     constructed and composed independently of the bundle when

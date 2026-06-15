@@ -1,6 +1,6 @@
 # Long-Range Electrostatics (SPME)
 
-Dynamics computes electrostatic forces with the **smooth particle-mesh Ewald**
+HeddleMD computes electrostatic forces with the **smooth particle-mesh Ewald**
 (SPME) method. SPME splits the `1/r` Coulomb interaction into a short-range
 piece evaluated in real space (via the existing neighbor-list / pair-force
 machinery) and a long-range piece evaluated on a 3D grid via FFTs. The
@@ -147,7 +147,7 @@ is the FFT grid shape.
 **Iteration direction.** The natural iteration ("for each particle, scatter
 to its `p³` neighbouring grid points") requires atomic float adds when
 particles overlap, which violates the project's bit-exact reproducibility
-invariant. Dynamics inverts the iteration: **one thread per grid point**,
+invariant. HeddleMD inverts the iteration: **one thread per grid point**,
 each thread iterates over the `p³` adjacent cells of a spatial-hash bin
 structure and accumulates contributions from every particle in those cells
 in sorted particle-index order. Each grid point is therefore written by
@@ -186,7 +186,7 @@ real-to-complex 3D FFT produces `rho_hat`. cuFFT is the FFT backend:
 
 Determinism: cuFFT is documented as bit-exactly deterministic for fixed
 plan dimensions, fixed hardware, single-stream usage, and a single host
-process — the configuration Dynamics always uses. A smoke test at
+process — the configuration HeddleMD always uses. A smoke test at
 `init_device` time validates the documented contract on the host's
 specific cuFFT version.
 
@@ -293,7 +293,7 @@ when computing `k` magnitudes (a constant cost per grid cell).
 
 ## Reproducibility
 
-SPME on Dynamics is bit-exact GPU-vs-GPU. Five components carry the
+SPME on HeddleMD is bit-exact GPU-vs-GPU. Five components carry the
 reproducibility invariant:
 
 1. **Spatial-hash bin structure.** Inherits the existing service's

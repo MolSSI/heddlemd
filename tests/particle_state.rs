@@ -1,6 +1,6 @@
 use cudarc::driver::DeviceSlice;
-use dynamics::gpu::{ParticleBuffers, init_device};
-use dynamics::state::{ParticleState, ParticleStateError};
+use heddle_md::gpu::{ParticleBuffers, init_device};
+use heddle_md::state::{ParticleState, ParticleStateError};
 
 fn make_state_with_values(
     n: usize,
@@ -762,7 +762,7 @@ fn reject_explicit_images_y_wrong_length() {
     )
     .expect_err("expected LengthMismatch");
     match err {
-        dynamics::state::ParticleStateError::LengthMismatch {
+        heddle_md::state::ParticleStateError::LengthMismatch {
             array,
             expected,
             actual,
@@ -832,7 +832,7 @@ fn reject_upload_when_images_x_has_wrong_length() {
     bad.images_x.truncate(3);
     let err = buffers.upload(&bad).expect_err("expected LengthMismatch");
     match err {
-        dynamics::state::ParticleStateError::LengthMismatch {
+        heddle_md::state::ParticleStateError::LengthMismatch {
             array,
             expected,
             actual,

@@ -4,9 +4,9 @@ use common::*;
 use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice, DeviceSlice};
-use dynamics::gpu::{GpuContext, LennardJonesParameterTable, PairBuffer, ParticleBuffers, init_device};
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
+use heddle_md::gpu::{GpuContext, LennardJonesParameterTable, PairBuffer, ParticleBuffers, init_device};
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
 
 // --- Helpers ---
 
@@ -472,7 +472,7 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
     // Cell-list neighbor list with max_neighbors=8 (exceeding any plausible
     // per-particle neighbor count for N=4).
     let max_neighbors: u32 = 8;
-    let mut nl = dynamics::forces::NeighborListState::new_cell_list(&gpu,
+    let mut nl = heddle_md::forces::NeighborListState::new_cell_list(&gpu,
         &sim_box,
         n,
         params.cutoff,
@@ -480,14 +480,14 @@ fn slots_beyond_neighbor_counts_are_zeroed() {
         0.3,
     )
     .unwrap();
-    let mut timings = dynamics::timings::Timings::new(&gpu).unwrap();
+    let mut timings = heddle_md::timings::Timings::new(&gpu).unwrap();
     nl.rebuild(&sim_box, &particle_buffers, &mut timings).unwrap();
     let counts: Vec<u32> = device.dtoh_sync_copy(&nl.neighbor_counts).unwrap();
 
     let mut pair = PairBuffer::new(&gpu, n, max_neighbors).unwrap();
     fill_pair_forces_with(&mut pair, 13.5);
     let excl = empty_exclusions(&device, n);
-    dynamics::gpu::lj_pair_force(
+    heddle_md::gpu::lj_pair_force(
         &particle_buffers,
         &mut pair,
         &sim_box,
@@ -836,7 +836,7 @@ fn multi_type_three_type_dispatch() {
 
 #[test] // rq-75446ddd
 fn lj_param_table_from_config_builds_symmetric_table() {
-    use dynamics::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
+    use heddle_md::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
     let particle_types = vec![
@@ -882,8 +882,8 @@ fn lj_param_table_from_config_builds_symmetric_table() {
 #[test] // rq-9004fd7a
 fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
     // Build a ForceField with one LJ slot whose largest cutoff is 4.0.
-    use dynamics::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
-    use dynamics::io::config::{
+    use heddle_md::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
+    use heddle_md::io::config::{
         NeighborListConfig, PairInteractionConfig, PairPotentialParams, ParticleTypeConfig,
     };
     let gpu = init_device().unwrap();
@@ -906,7 +906,7 @@ fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -917,10 +917,10 @@ fn lennard_jones_state_reports_its_max_cutoff_to_framework() {
 
 #[test] // rq-e90c6feb rq-535c2b1e rq-4b40604b
 fn trivial_mode_and_cell_list_mode_forces_agree() {
-    use dynamics::forces::{
+    use heddle_md::forces::{
         BondList, ExclusionList, ForceField, PotentialRegistry,
     };
-    use dynamics::io::config::{
+    use heddle_md::io::config::{
         NeighborListConfig, PairInteractionConfig, PairPotentialParams, ParticleTypeConfig,
     };
     let gpu = init_device().unwrap();
@@ -944,8 +944,8 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
     let state_b = state_a.clone();
     let mut buffers_a = ParticleBuffers::new(&gpu, &state_a).unwrap();
     let mut buffers_b = ParticleBuffers::new(&gpu, &state_b).unwrap();
-    let mut t_a = dynamics::timings::Timings::new(&gpu).unwrap();
-    let mut t_b = dynamics::timings::Timings::new(&gpu).unwrap();
+    let mut t_a = heddle_md::timings::Timings::new(&gpu).unwrap();
+    let mut t_b = heddle_md::timings::Timings::new(&gpu).unwrap();
 
     let mut ff_trivial = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
@@ -958,7 +958,7 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -974,13 +974,13 @@ fn trivial_mode_and_cell_list_mode_forces_agree() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::CellList { max_neighbors: 32, r_skin: 0.4 },
     )
     .unwrap();
-    ff_trivial.step(&mut buffers_a, &sim_box, &mut t_a, dynamics::forces::AggregateLevel::ForcesAndScalars).unwrap();
-    ff_cell.step(&mut buffers_b, &sim_box, &mut t_b, dynamics::forces::AggregateLevel::ForcesAndScalars).unwrap();
+    ff_trivial.step(&mut buffers_a, &sim_box, &mut t_a, heddle_md::forces::AggregateLevel::ForcesAndScalars).unwrap();
+    ff_cell.step(&mut buffers_b, &sim_box, &mut t_b, heddle_md::forces::AggregateLevel::ForcesAndScalars).unwrap();
 
     let fx_a = device.dtoh_sync_copy(&buffers_a.forces_x).unwrap();
     let fx_b = device.dtoh_sync_copy(&buffers_b.forces_x).unwrap();
@@ -1105,7 +1105,7 @@ fn self_slots_carry_zero_energy_and_virial() {
 
 #[test] // rq-95c2f543 rq-31430003
 fn exclusion_scaling_applies_uniformly_to_force_energy_virial() {
-    use dynamics::forces::{DeviceExclusionList, ExclusionList, Exclusion};
+    use heddle_md::forces::{DeviceExclusionList, ExclusionList, Exclusion};
     let gpu = init_device().expect("init_device");
     let device = gpu.device.clone();
     let sim_box = default_box();
@@ -1136,7 +1136,7 @@ fn exclusion_scaling_applies_uniformly_to_force_energy_virial() {
     };
     let excl = DeviceExclusionList::from_host(&device, &host).unwrap();
     let mut pair_half = PairBuffer::new(&gpu, 2, 2).unwrap();
-    dynamics::gpu::lj_pair_force(
+    heddle_md::gpu::lj_pair_force(
         &particle_buffers,
         &mut pair_half,
         &sim_box,
@@ -1425,7 +1425,7 @@ fn switching_newtons_third_law_holds_bitwise_across_window() {
 
 #[test] // rq-fb55af77
 fn switching_exclusion_scaling_multiplies_switched_quantities() {
-    use dynamics::forces::{DeviceExclusionList, Exclusion, ExclusionList};
+    use heddle_md::forces::{DeviceExclusionList, Exclusion, ExclusionList};
     let gpu = init_device().expect("init_device");
     let device = gpu.device.clone();
     let sim_box = default_box();
@@ -1455,7 +1455,7 @@ fn switching_exclusion_scaling_multiplies_switched_quantities() {
     let excl = DeviceExclusionList::from_host(&device, &host).unwrap();
     let mut pair_half = PairBuffer::new(&gpu, 2, 2).unwrap();
     let nl = trivial_neighbor_list(&gpu, &sim_box, 2);
-    dynamics::gpu::lj_pair_force(
+    heddle_md::gpu::lj_pair_force(
         &particle_buffers,
         &mut pair_half,
         &sim_box,
@@ -1556,7 +1556,7 @@ fn switching_bit_exact_reproducibility_across_runs() {
 
 #[test] // rq-214639c9
 fn switching_from_config_populates_user_supplied_r_switch() {
-    use dynamics::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
+    use heddle_md::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
     let gpu = init_device().expect("init_device");
     let device = gpu.device.clone();
     let particle_types = vec![ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }];
@@ -1578,13 +1578,13 @@ fn switching_from_config_receives_default_r_switch_when_omitted() {
     // Round-trip through load_config so the default r_switch = 0.9 *
     // cutoff is exercised end-to-end, then assert the parameter table
     // built from that config carries the default value on every slot.
-    use dynamics::io::load_config;
+    use heddle_md::io::load_config;
     let gpu = init_device().expect("init_device");
     let device = gpu.device.clone();
     let dir = {
         let mut p = std::env::temp_dir();
         p.push(format!(
-            "dynamics-switching-default-{}-{}",
+            "heddlemd-switching-default-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -1663,20 +1663,20 @@ cutoff = 5.0
 // --- Per-pair exclusion semantics ----------------------------------------
 
 fn run_lj_with_exclusion(
-    gpu: &dynamics::gpu::GpuContext,
+    gpu: &heddle_md::gpu::GpuContext,
     sim_box: &SimulationBox,
     positions: &[[f32; 3]],
     table: &LennardJonesParameterTable,
-    excl: &dynamics::forces::ExclusionList,
+    excl: &heddle_md::forces::ExclusionList,
 ) -> (Vec<f32>, Vec<f32>, Vec<f32>) {
     let n = positions.len();
     let state = build_state_xyz(positions);
     let particle_buffers = ParticleBuffers::new(gpu, &state).unwrap();
     let max = n as u32;
     let mut pair = PairBuffer::new(gpu, n, max).unwrap();
-    let dev_excl = dynamics::forces::DeviceExclusionList::from_host(&gpu.device, excl).unwrap();
+    let dev_excl = heddle_md::forces::DeviceExclusionList::from_host(&gpu.device, excl).unwrap();
     let nl = trivial_neighbor_list(gpu, sim_box, n);
-    dynamics::gpu::lj_pair_force(
+    heddle_md::gpu::lj_pair_force(
         &particle_buffers,
         &mut pair,
         sim_box,
@@ -1694,7 +1694,7 @@ fn run_lj_with_exclusion(
 // rq-80dcfa97
 #[test]
 fn full_exclusion_zeros_the_lj_contribution_for_the_excluded_pair() {
-    use dynamics::forces::{Exclusion, ExclusionList};
+    use heddle_md::forces::{Exclusion, ExclusionList};
     let gpu = init_device().expect("init_device");
     let sim_box = default_box();
     let table = table_from_scalar(&gpu.device, default_params());
@@ -1721,7 +1721,7 @@ fn full_exclusion_zeros_the_lj_contribution_for_the_excluded_pair() {
 // rq-3a1eea58
 #[test]
 fn scale_one_exclusion_is_equivalent_to_no_exclusion() {
-    use dynamics::forces::{Exclusion, ExclusionList};
+    use heddle_md::forces::{Exclusion, ExclusionList};
     let gpu = init_device().expect("init_device");
     let sim_box = default_box();
     let params = default_params();
@@ -1749,7 +1749,7 @@ fn scale_one_exclusion_is_equivalent_to_no_exclusion() {
 // rq-8c786f79
 #[test]
 fn exclusion_only_applies_to_the_listed_pair() {
-    use dynamics::forces::{Exclusion, ExclusionList};
+    use heddle_md::forces::{Exclusion, ExclusionList};
     let gpu = init_device().expect("init_device");
     let sim_box = default_box();
     let table = table_from_scalar(&gpu.device, default_params());

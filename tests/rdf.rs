@@ -2,7 +2,7 @@
 //
 // Feature: Radial Distribution Function Analysis (`rdf`) <!-- rq-4d1082c4 -->
 //
-// These tests construct trajectories by hand and run `dynamics analyze`
+// These tests construct trajectories by hand and run `heddlemd analyze`
 // (or the library API directly), then inspect the resulting CSV to
 // verify pair-enumeration correctness, bin placement, normalisation,
 // reproducibility, and the empty/degenerate-case behaviour spelled out
@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use dynamics::analysis::{AnalyzeError, run_analyses};
+use heddle_md::analysis::{AnalyzeError, run_analyses};
 
 fn tmp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -19,7 +19,7 @@ fn tmp_path(name: &str) -> PathBuf {
         .as_nanos();
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "dynamics-rdf-{}-{}-{}",
+        "heddlemd-rdf-{}-{}-{}",
         std::process::id(),
         name,
         nanos

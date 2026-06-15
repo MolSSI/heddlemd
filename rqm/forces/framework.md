@@ -524,13 +524,13 @@ rows.)
     `HarmonicAngleBuilder`.
   - `register(&mut self, builder: Box<dyn PotentialBuilder>)` — appends
     a builder to the end of the registry. `ForceField::new` calls this
-    indirectly via `dynamics::Registries::register_potential` when the
+    indirectly via `heddle_md::Registries::register_potential` when the
     caller assembles a custom bundle, or directly via
     `PotentialRegistry::register` for one-registry-at-a-time
     composition.
 
   `PotentialRegistry` is also reachable as the `potentials` field of
-  the runner-level `dynamics::Registries` bundle (see
+  the runner-level `heddle_md::Registries` bundle (see
   `simulation-runner.md`). The runner's
   `run_simulation_with_registries` entry point reads the bundle's
   `potentials` field instead of constructing

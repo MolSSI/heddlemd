@@ -1,6 +1,6 @@
 [book]
-title = "Dynamics"
-description = "User guide for the Dynamics GPU-accelerated molecular dynamics engine."
+title = "HeddleMD"
+description = "User guide for the HeddleMD GPU-accelerated molecular dynamics engine."
 src = "src"
 language = "en"
 

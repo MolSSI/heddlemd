@@ -6,18 +6,18 @@
 // `SimulationBox::rescale_isotropic` convenience are covered in
 // `tests/barostats_berendsen.rs` and not re-tested here.
 
-use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
-use dynamics::gpu::{GpuContext, ParticleBuffers, init_device};
-use dynamics::integrator::IntegratorStepExt;
-use dynamics::integrator::{
+use heddle_md::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
+use heddle_md::integrator::IntegratorStepExt;
+use heddle_md::integrator::{
     Barostat, BarostatRegistry, CRescaleBarostat, IntegratorRegistry, ThermostatRegistry,
     philox_normal,
 };
-use dynamics::io::config::NeighborListConfig;
-use dynamics::io::SlotConfig;
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::{KernelStage, Timings};
+use heddle_md::io::config::NeighborListConfig;
+use heddle_md::io::SlotConfig;
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::{KernelStage, Timings};
 
 // k_B = 1 inside the engine (atomic units). The tests below operate
 // in atomic units throughout; this SI value of the Boltzmann constant

@@ -3,19 +3,19 @@
 // CSVR (Bussi-Donadio-Parrinello) thermostat tests. The thermostat is
 // exercised in isolation through its `apply_post` hook.
 
-use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
-use dynamics::gpu::{
+use heddle_md::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use heddle_md::gpu::{
     GpuContext, ParticleBuffers, compute_kinetic_energy, init_device, lan_ou_step,
 };
-use dynamics::integrator::IntegratorStepExt;
-use dynamics::integrator::{
+use heddle_md::integrator::IntegratorStepExt;
+use heddle_md::integrator::{
     CsvrThermostat, Thermostat, ThermostatRegistry, philox_4x32_10, philox_normal,
 };
-use dynamics::io::SlotConfig;
-use dynamics::io::config::NeighborListConfig;
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::{KernelStage, Timings};
+use heddle_md::io::SlotConfig;
+use heddle_md::io::config::NeighborListConfig;
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::{KernelStage, Timings};
 
 // k_B = 1 inside the engine; this SI value is retained as a reference
 // for converting human-readable SI inputs to atomic units.
@@ -459,7 +459,7 @@ fn csvr_time_averaged_ke_tracks_k_target() {
     let mut sim_box = box_large();
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut integ = dynamics::integrator::IntegratorRegistry::with_builtins()
+    let mut integ = heddle_md::integrator::IntegratorRegistry::with_builtins()
         .build(
             &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
             &gpu,
@@ -522,7 +522,7 @@ fn csvr_skips_rescale_when_k_zero() {
     let count = report
         .stages
         .iter()
-        .find(|r| r.name == dynamics::timings::KernelStage::CSVR_RESCALE_VELOCITIES.name())
+        .find(|r| r.name == heddle_md::timings::KernelStage::CSVR_RESCALE_VELOCITIES.name())
         .map(|r| r.count)
         .unwrap_or(0);
     assert_eq!(count, 0, "csvr should not launch rescale kernel when K=0");

@@ -1,12 +1,12 @@
-// rq-fd8bb824 — Integration tests for `dynamics analyze` and the analysis framework.
+// rq-fd8bb824 — Integration tests for `heddlemd analyze` and the analysis framework.
 
 use std::path::{Path, PathBuf};
 
-use dynamics::analysis::{
+use heddle_md::analysis::{
     AnalysisPathRole, AnalyzeError, AnalyzeSummary, lint_analyses, load_analysis_config,
     run_analyses,
 };
-use dynamics::runner::{LintOverall, LintStatus, cli_main_u8};
+use heddle_md::runner::{LintOverall, LintStatus, cli_main_u8};
 
 fn tmp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -15,7 +15,7 @@ fn tmp_path(name: &str) -> PathBuf {
         .as_nanos();
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "dynamics-analyze-{}-{}-{}",
+        "heddlemd-analyze-{}-{}-{}",
         std::process::id(),
         name,
         nanos
@@ -483,7 +483,7 @@ kind = "msd"
 
 // --- Lint dispatch ---
 
-fn lint_stage<'a>(report: &'a dynamics::runner::LintReport, label: &str) -> &'a LintStatus {
+fn lint_stage<'a>(report: &'a heddle_md::runner::LintReport, label: &str) -> &'a LintStatus {
     &report
         .stages
         .iter()
@@ -538,7 +538,7 @@ fn cli_lint_dispatches_in_analysis_to_analyze_lint() {
     let dir = tmp_path("cli_lint_dispatch");
     let path = write_bundle(&dir);
     let exit = cli_main_u8(vec![
-        "dynamics".to_string(),
+        "heddlemd".to_string(),
         "lint".to_string(),
         path.to_string_lossy().to_string(),
     ]);
@@ -551,7 +551,7 @@ fn cli_lint_with_gpu_on_in_analysis_is_rejected() {
     let dir = tmp_path("cli_lint_with_gpu_analysis");
     let path = write_bundle(&dir);
     let exit = cli_main_u8(vec![
-        "dynamics".to_string(),
+        "heddlemd".to_string(),
         "lint".to_string(),
         path.to_string_lossy().to_string(),
         "--with-gpu".to_string(),
@@ -565,7 +565,7 @@ fn cli_analyze_returns_zero_on_success() {
     let dir = tmp_path("cli_analyze_ok");
     let path = write_bundle(&dir);
     let exit = cli_main_u8(vec![
-        "dynamics".to_string(),
+        "heddlemd".to_string(),
         "analyze".to_string(),
         path.to_string_lossy().to_string(),
     ]);
@@ -579,7 +579,7 @@ fn cli_analyze_returns_nonzero_on_failure() {
     let path = write_bundle(&dir);
     std::fs::write(dir.join("sim.out.ar-ar.csv"), "existing").unwrap();
     let exit = cli_main_u8(vec![
-        "dynamics".to_string(),
+        "heddlemd".to_string(),
         "analyze".to_string(),
         path.to_string_lossy().to_string(),
     ]);
@@ -823,13 +823,13 @@ n_bins = 8
 // rq-ca13c67e
 #[test]
 fn a_custom_analysis_builder_composes_with_the_built_ins() {
-    use dynamics::Registries;
-    use dynamics::analysis::{
+    use heddle_md::Registries;
+    use heddle_md::analysis::{
         Analysis, AnalysisBuilder, AnalysisRuntimeError, AnalyzeError,
     };
-    use dynamics::io::Config;
-    use dynamics::pbc::SimulationBox;
-    use dynamics::io::trajectory::{TrajectoryFrame, TrajectoryFrameHeader};
+    use heddle_md::io::Config;
+    use heddle_md::pbc::SimulationBox;
+    use heddle_md::io::trajectory::{TrajectoryFrame, TrajectoryFrameHeader};
     use std::path::Path;
 
     #[derive(Debug, Clone)]

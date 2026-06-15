@@ -2,13 +2,13 @@
 use std::sync::Arc;
 
 use cudarc::driver::CudaDevice;
-use dynamics::forces::{DeviceExclusionList, Exclusion, ExclusionList, NeighborListState};
-use dynamics::gpu::{
+use heddle_md::forces::{DeviceExclusionList, Exclusion, ExclusionList, NeighborListState};
+use heddle_md::gpu::{
     GpuContext, GpuError, K_COULOMB_F32, PairBuffer, ParticleBuffers, coulomb_pair_force,
     init_device, lj_pair_force,
 };
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
 
 mod common;
 
@@ -491,7 +491,7 @@ fn pair_with_coul_exclusion_scale_half_contributes_half() {
 // rq-8c96d3c7
 #[test]
 fn coulomb_and_lj_exclusions_are_independent() {
-    use dynamics::gpu::LennardJonesParameterTable;
+    use heddle_md::gpu::LennardJonesParameterTable;
     let gpu = init_device().unwrap();
     let sim_box = default_box();
     let positions = [[0.0_f32, 0.0, 0.0], [3.0e-10, 0.0, 0.0]];

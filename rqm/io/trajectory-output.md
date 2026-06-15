@@ -212,7 +212,7 @@ without panicking; programs that need crash-safe trajectories call
 
 `TrajectoryReader` opens a trajectory file written by
 `TrajectoryWriter` and exposes a frame-at-a-time iterator. It is
-used by `dynamics analyze` (see `rqm/analysis/framework.md`) and
+used by `heddlemd analyze` (see `rqm/analysis/framework.md`) and
 by any other consumer that needs to walk every frame in
 declaration order without holding the whole file in memory.
 

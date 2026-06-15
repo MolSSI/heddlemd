@@ -792,7 +792,7 @@ Feature: MTK NPT integrator (isotropic)
   Scenario: Two independent runs with identical configs are byte-identical
     Given two complete simulations with kind="mtk-npt", identical parameters,
       identical initial particle state, n_steps = 10
-    When dynamics run is invoked on each
+    When heddlemd run is invoked on each
     Then the two trajectory files are byte-identical
     And the two log files are byte-identical, including the
       pressure, box_volume, and mtk_npt_conserved columns

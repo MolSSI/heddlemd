@@ -4,12 +4,12 @@ use std::time::Duration;
 mod common;
 use common::*;
 
-use dynamics::gpu::{PairBuffer, ParticleBuffers, init_device};
-use dynamics::io::{TrajectoryWriterError, load_init_state};
-use dynamics::pbc::SimulationBox;
-use dynamics::runner::{RunnerError, run_simulation};
-use dynamics::state::ParticleState;
-use dynamics::timings::{
+use heddle_md::gpu::{PairBuffer, ParticleBuffers, init_device};
+use heddle_md::io::{TrajectoryWriterError, load_init_state};
+use heddle_md::pbc::SimulationBox;
+use heddle_md::runner::{RunnerError, run_simulation};
+use heddle_md::state::ParticleState;
+use heddle_md::timings::{
     HostStage, KernelStage, StageStats, Timings, TimingsReport, TimingsWriterError,
     write_timings_file,
 };
@@ -21,7 +21,7 @@ fn tmp_path(name: &str) -> PathBuf {
         .as_nanos();
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "dynamics-timings-{}-{}-{}",
+        "heddlemd-timings-{}-{}-{}",
         std::process::id(),
         name,
         nanos

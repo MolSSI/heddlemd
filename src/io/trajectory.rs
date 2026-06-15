@@ -195,7 +195,7 @@ fn io_err(e: std::io::Error) -> TrajectoryWriterError {
 
 // =====================================================================
 // TrajectoryReader — companion to TrajectoryWriter, used by
-// `dynamics analyze` to walk every frame in declaration order.
+// `heddlemd analyze` to walk every frame in declaration order.
 // =====================================================================
 
 // rq-972e319b

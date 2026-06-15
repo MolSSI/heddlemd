@@ -32,7 +32,7 @@ From the repository root, with a release build available
 (`cargo build --release`):
 
 ```
-./target/release/dynamics run examples/lj-10000-argon/argon.in.toml
+./target/release/heddlemd run examples/lj-10000-argon/argon.in.toml
 ```
 
 `cargo run --release -- run examples/lj-10000-argon/argon.in.toml`
@@ -40,7 +40,7 @@ works the same way. On a recent NVIDIA GPU the run finishes in roughly
 a second and prints one line on stdout:
 
 ```
-[dynamics] complete: 100 steps in <N> ms (frames: 11, log rows: 21)
+[heddlemd] complete: 100 steps in <N> ms (frames: 11, log rows: 21)
 ```
 
 An exit code of `0` means every requested step ran and every requested
@@ -97,12 +97,12 @@ The runner refuses to overwrite existing outputs. Delete (or move)
 `argon.out.run.xyz`, `argon.out.run.log`, and `argon.out.run.timings` between runs,
 or set explicit `output.*_path` fields in `argon.in.toml`.
 
-## Validating without running (`dynamics lint`)
+## Validating without running (`heddlemd lint`)
 
 Before queueing a long job on shared GPU hardware, run
 
 ```
-dynamics lint examples/lj-10000-argon/argon.in.toml
+heddlemd lint examples/lj-10000-argon/argon.in.toml
 ```
 
 to check the config, init file, output-path collisions, and box-vs-cutoff

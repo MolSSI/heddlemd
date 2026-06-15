@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use dynamics::io::{
+use heddle_md::io::{
     LogWriter, LogWriterError, compute_kinetic_energy, compute_temperature,
 };
-use dynamics::units::{Dimension, UnitSystem};
+use heddle_md::units::{Dimension, UnitSystem};
 
 // k_B = 1 in the engine's atomic units. Tests still need an SI value
 // to set up SI-mode kinetic energies whose `compute_temperature` output
@@ -18,7 +18,7 @@ fn tmp_path(name: &str) -> PathBuf {
         .as_nanos();
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "dynamics-log-{}-{}-{}",
+        "heddlemd-log-{}-{}-{}",
         std::process::id(),
         name,
         nanos

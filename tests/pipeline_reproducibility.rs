@@ -1,9 +1,9 @@
 mod common;
 use common::*;
 
-use dynamics::gpu::{GpuContext, PairBuffer, ParticleBuffers, init_device, vv_kick, vv_kick_drift};
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
+use heddle_md::gpu::{GpuContext, PairBuffer, ParticleBuffers, init_device, vv_kick, vv_kick_drift};
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
 
 const N: usize = 64;
 const BOX_L: f32 = 8.0;

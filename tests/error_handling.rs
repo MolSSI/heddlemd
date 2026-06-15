@@ -2,14 +2,14 @@
 use std::error::Error;
 use std::path::PathBuf;
 
-use dynamics::forces::{TopologyFileError, ForceFieldError, NeighborListError};
-use dynamics::gpu::GpuError;
-use dynamics::integrator::IntegratorError;
-use dynamics::io::{ConfigError, InitStateError, LogWriterError, TrajectoryWriterError};
-use dynamics::pbc::SimulationBoxError;
-use dynamics::runner::RunnerError;
-use dynamics::state::ParticleStateError;
-use dynamics::timings::{TimingsError, TimingsWriterError};
+use heddle_md::forces::{TopologyFileError, ForceFieldError, NeighborListError};
+use heddle_md::gpu::GpuError;
+use heddle_md::integrator::IntegratorError;
+use heddle_md::io::{ConfigError, InitStateError, LogWriterError, TrajectoryWriterError};
+use heddle_md::pbc::SimulationBoxError;
+use heddle_md::runner::RunnerError;
+use heddle_md::state::ParticleStateError;
+use heddle_md::timings::{TimingsError, TimingsWriterError};
 
 #[test] // rq-fdf7a255
 fn thiserror_is_a_declared_dependency() {

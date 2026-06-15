@@ -6,14 +6,14 @@
 
 use std::f64::consts::PI;
 
-use dynamics::forces::neighbor_list::NeighborListState;
-use dynamics::forces::{ExclusionList, ForceField, ForceFieldContext, Potential, PotentialRegistry, SpmeParameters, SpmeRealSpaceState, SpmeReciprocalState};
-use dynamics::gpu::cufft::cufft_determinism_smoke_test;
-use dynamics::gpu::{GpuContext, K_COULOMB_F32, ParticleBuffers, init_device};
-use dynamics::io::config::{NeighborListConfig, ParticleTypeConfig, SpmeConfig};
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::Timings;
+use heddle_md::forces::neighbor_list::NeighborListState;
+use heddle_md::forces::{ExclusionList, ForceField, ForceFieldContext, Potential, PotentialRegistry, SpmeParameters, SpmeRealSpaceState, SpmeReciprocalState};
+use heddle_md::gpu::cufft::cufft_determinism_smoke_test;
+use heddle_md::gpu::{GpuContext, K_COULOMB_F32, ParticleBuffers, init_device};
+use heddle_md::io::config::{NeighborListConfig, ParticleTypeConfig, SpmeConfig};
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::Timings;
 
 fn build_state(positions: &[[f32; 3]], charges: &[f32]) -> ParticleState {
     let n = positions.len();
@@ -79,8 +79,8 @@ fn force_field_registers_spme_slots_when_configured() {
         None,
         Some(&spme),
         &charges,
-        &dynamics::forces::BondList::empty(1),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::BondList::empty(1),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(1),
         &NeighborListConfig::AllPairs,
     )
@@ -181,14 +181,14 @@ fn spme_reciprocal_total_energy_equals_recip_minus_self() {
     let mut energy = device.alloc_zeros::<f32>(n).unwrap();
     let mut virial = device.alloc_zeros::<f32>(n).unwrap();
     {
-        let view = dynamics::forces::SlotOutputView {
+        let view = heddle_md::forces::SlotOutputView {
             force_x: force_x.slice_mut(0..n),
             force_y: force_y.slice_mut(0..n),
             force_z: force_z.slice_mut(0..n),
             energy: energy.slice_mut(0..n),
             virial: virial.slice_mut(0..n),
         };
-        slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars).unwrap();
+        slot.reduce(view, &cx, &mut t, heddle_md::forces::AggregateLevel::ForcesAndScalars).unwrap();
     }
     let energies: Vec<f32> = device.dtoh_sync_copy(&energy).unwrap();
     let total: f64 = energies.iter().map(|&e| e as f64).sum();
@@ -252,14 +252,14 @@ fn spme_real_slot_zero_outside_r_cut() {
     let mut energy = device.alloc_zeros::<f32>(n).unwrap();
     let mut virial = device.alloc_zeros::<f32>(n).unwrap();
     {
-        let view = dynamics::forces::SlotOutputView {
+        let view = heddle_md::forces::SlotOutputView {
             force_x: force_x.slice_mut(0..n),
             force_y: force_y.slice_mut(0..n),
             force_z: force_z.slice_mut(0..n),
             energy: energy.slice_mut(0..n),
             virial: virial.slice_mut(0..n),
         };
-        slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars).unwrap();
+        slot.reduce(view, &cx, &mut t, heddle_md::forces::AggregateLevel::ForcesAndScalars).unwrap();
     }
     let fx: Vec<f32> = device.dtoh_sync_copy(&force_x).unwrap();
     assert!(
@@ -315,14 +315,14 @@ fn spme_real_slot_matches_closed_form_erfc_pair() {
     let mut energy = device.alloc_zeros::<f32>(n).unwrap();
     let mut virial = device.alloc_zeros::<f32>(n).unwrap();
     {
-        let view = dynamics::forces::SlotOutputView {
+        let view = heddle_md::forces::SlotOutputView {
             force_x: force_x.slice_mut(0..n),
             force_y: force_y.slice_mut(0..n),
             force_z: force_z.slice_mut(0..n),
             energy: energy.slice_mut(0..n),
             virial: virial.slice_mut(0..n),
         };
-        slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars).unwrap();
+        slot.reduce(view, &cx, &mut t, heddle_md::forces::AggregateLevel::ForcesAndScalars).unwrap();
     }
     let fx: Vec<f32> = device.dtoh_sync_copy(&force_x).unwrap();
 
@@ -459,12 +459,12 @@ log_every = 0
         std::process::id()
     ));
     std::fs::write(&path, toml).unwrap();
-    let result = dynamics::io::config::load_config(&path);
+    let result = heddle_md::io::config::load_config(&path);
     let _ = std::fs::remove_file(&path);
     assert!(
         matches!(
             result,
-            Err(dynamics::io::config::ConfigError::ConflictingElectrostatics)
+            Err(heddle_md::io::config::ConfigError::ConflictingElectrostatics)
         ),
         "expected ConflictingElectrostatics, got {:?}",
         result.as_ref().err()
@@ -485,7 +485,7 @@ fn spme_rejects_grid_below_2_times_spline_order_along_a() {
     let res = SpmeReciprocalState::new(&gpu, &sim_box, 1, &[1.0_f32], params);
     assert!(matches!(
         res,
-        Err(dynamics::forces::SpmeError::InvalidGrid { axis: "a", n: 7, required: 8 })
+        Err(heddle_md::forces::SpmeError::InvalidGrid { axis: "a", n: 7, required: 8 })
     ));
 }
 
@@ -503,7 +503,7 @@ fn spme_rejects_grid_below_2_times_spline_order_along_b() {
     let res = SpmeReciprocalState::new(&gpu, &sim_box, 1, &[1.0_f32], params);
     assert!(matches!(
         res,
-        Err(dynamics::forces::SpmeError::InvalidGrid { axis: "b", n: 7, required: 8 })
+        Err(heddle_md::forces::SpmeError::InvalidGrid { axis: "b", n: 7, required: 8 })
     ));
 }
 
@@ -558,14 +558,14 @@ fn run_spme_recip_energy(
     let mut energy = device.alloc_zeros::<f32>(n).unwrap();
     let mut virial = device.alloc_zeros::<f32>(n).unwrap();
     {
-        let view = dynamics::forces::SlotOutputView {
+        let view = heddle_md::forces::SlotOutputView {
             force_x: force_x.slice_mut(0..n),
             force_y: force_y.slice_mut(0..n),
             force_z: force_z.slice_mut(0..n),
             energy: energy.slice_mut(0..n),
             virial: virial.slice_mut(0..n),
         };
-        slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars).unwrap();
+        slot.reduce(view, &cx, &mut t, heddle_md::forces::AggregateLevel::ForcesAndScalars).unwrap();
     }
     let energies: Vec<f32> = device.dtoh_sync_copy(&energy).unwrap();
     energies.iter().map(|&e| e as f64).sum()
@@ -600,14 +600,14 @@ fn run_spme_real(
     let mut energy = device.alloc_zeros::<f32>(n).unwrap();
     let mut virial = device.alloc_zeros::<f32>(n).unwrap();
     {
-        let view = dynamics::forces::SlotOutputView {
+        let view = heddle_md::forces::SlotOutputView {
             force_x: force_x.slice_mut(0..n),
             force_y: force_y.slice_mut(0..n),
             force_z: force_z.slice_mut(0..n),
             energy: energy.slice_mut(0..n),
             virial: virial.slice_mut(0..n),
         };
-        slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars).unwrap();
+        slot.reduce(view, &cx, &mut t, heddle_md::forces::AggregateLevel::ForcesAndScalars).unwrap();
     }
     (
         device.dtoh_sync_copy(&force_x).unwrap(),
@@ -621,7 +621,7 @@ fn run_spme_real(
 // rq-0caebe37
 #[test]
 fn real_space_slot_obeys_newtons_third_law_for_non_boundary_pair() {
-    use dynamics::forces::Exclusion;
+    use heddle_md::forces::Exclusion;
     let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new(2.0e-9, 2.0e-9, 2.0e-9, 0.0, 0.0, 0.0).unwrap();
     // Isolated pair well inside r_cut_real and far from box faces.
@@ -650,7 +650,7 @@ fn real_space_slot_obeys_newtons_third_law_for_non_boundary_pair() {
 // rq-3726c0f1
 #[test]
 fn real_space_slot_produces_zero_force_on_an_excluded_pair() {
-    use dynamics::forces::Exclusion;
+    use heddle_md::forces::Exclusion;
     let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new(2.0e-9, 2.0e-9, 2.0e-9, 0.0, 0.0, 0.0).unwrap();
     // Two oppositely charged particles within r_cut_real, but excluded
@@ -717,14 +717,14 @@ fn reciprocal_space_virial_is_distributed_equally_per_particle() {
     let mut energy = device.alloc_zeros::<f32>(n).unwrap();
     let mut virial = device.alloc_zeros::<f32>(n).unwrap();
     {
-        let view = dynamics::forces::SlotOutputView {
+        let view = heddle_md::forces::SlotOutputView {
             force_x: force_x.slice_mut(0..n),
             force_y: force_y.slice_mut(0..n),
             force_z: force_z.slice_mut(0..n),
             energy: energy.slice_mut(0..n),
             virial: virial.slice_mut(0..n),
         };
-        slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars)
+        slot.reduce(view, &cx, &mut t, heddle_md::forces::AggregateLevel::ForcesAndScalars)
             .unwrap();
     }
     let virials: Vec<f32> = device.dtoh_sync_copy(&virial).unwrap();
@@ -796,14 +796,14 @@ fn spme_runs_on_a_triclinic_box_with_non_zero_tilts() {
     let mut energy = device.alloc_zeros::<f32>(n).unwrap();
     let mut virial = device.alloc_zeros::<f32>(n).unwrap();
     {
-        let view = dynamics::forces::SlotOutputView {
+        let view = heddle_md::forces::SlotOutputView {
             force_x: force_x.slice_mut(0..n),
             force_y: force_y.slice_mut(0..n),
             force_z: force_z.slice_mut(0..n),
             energy: energy.slice_mut(0..n),
             virial: virial.slice_mut(0..n),
         };
-        slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars)
+        slot.reduce(view, &cx, &mut t, heddle_md::forces::AggregateLevel::ForcesAndScalars)
             .unwrap();
     }
     let energies: Vec<f32> = device.dtoh_sync_copy(&energy).unwrap();
@@ -885,14 +885,14 @@ fn two_stream_pipeline_preserves_bit_exact_reproducibility_across_runs() {
         let mut e = device.alloc_zeros::<f32>(n).unwrap();
         let mut w = device.alloc_zeros::<f32>(n).unwrap();
         {
-            let view = dynamics::forces::SlotOutputView {
+            let view = heddle_md::forces::SlotOutputView {
                 force_x: fx.slice_mut(0..n),
                 force_y: fy.slice_mut(0..n),
                 force_z: fz.slice_mut(0..n),
                 energy: e.slice_mut(0..n),
                 virial: w.slice_mut(0..n),
             };
-            slot.reduce(view, &cx, &mut t, dynamics::forces::AggregateLevel::ForcesAndScalars)
+            slot.reduce(view, &cx, &mut t, heddle_md::forces::AggregateLevel::ForcesAndScalars)
                 .unwrap();
         }
         (

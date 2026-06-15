@@ -28,7 +28,7 @@ cargo run --release -- run spc.in.toml
 Or with the debug binary already built:
 
 ```
-../../target/debug/dynamics run spc.in.toml
+../../target/debug/heddlemd run spc.in.toml
 ```
 
 A run produces three files in this directory:

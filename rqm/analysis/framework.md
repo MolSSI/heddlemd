@@ -1,7 +1,7 @@
-# Feature: Analysis Framework and `dynamics analyze` <!-- rq-fd8bb824 -->
+# Feature: Analysis Framework and `heddlemd analyze` <!-- rq-fd8bb824 -->
 
-The `dynamics analyze` subcommand performs post-processing analyses
-on a trajectory written by an earlier `dynamics run`. The work is
+The `heddlemd analyze` subcommand performs post-processing analyses
+on a trajectory written by an earlier `heddlemd run`. The work is
 driven by a TOML input file — `<root>.in.analysis` — that declares
 one or more analyses to compute. Outputs are written next to the
 input as `<root>.out.<name>.csv` (one CSV per declared analysis).
@@ -15,7 +15,7 @@ under `rqm/analysis/` (currently: `rdf.md`).
 ## CLI <!-- rq-f2f2519f -->
 
 ```
-dynamics analyze <root>.in.analysis
+heddlemd analyze <root>.in.analysis
 ```
 
 - `<root>.in.analysis` is the path to a TOML analysis file (schema
@@ -37,16 +37,16 @@ dynamics analyze <root>.in.analysis
     malformed frame, a per-analysis runtime error, or a write
     failure on a `*.csv` output.
 - Errors are reported as a single `error: ...` line on stderr, in
-  the same shape as `dynamics run`.
+  the same shape as `heddlemd run`.
 - A successful run prints one final-summary line on stdout:
   ```
-  [dynamics] analyze complete: <K> analyses over <F> frames (...)
+  [heddlemd] analyze complete: <K> analyses over <F> frames (...)
   ```
   where `<K>` is the number of declared analyses and `<F>` is the
   number of frames consumed after `first_frame`, `last_frame`, and
   `stride` are applied (see *Frame selection* below).
 
-`dynamics lint` (see `simulation-runner.md`) dispatches on the
+`heddlemd lint` (see `simulation-runner.md`) dispatches on the
 config-path filename extension:
 - A path ending in `.in.toml` runs the simulation lint pipeline.
 - A path ending in `.in.analysis` runs the analysis lint pipeline
@@ -107,7 +107,7 @@ kind = "rdf"
   at load time, with `available` listing the phase names declared
   by the simulation config.
 - `trajectory: String` — optional. Path to the trajectory file
-  (`.out.<phase-name>.xyz` produced by `dynamics run`). Resolved
+  (`.out.<phase-name>.xyz` produced by `heddlemd run`). Resolved
   relative to the `.in.analysis` file's directory. Defaults to the
   resolved `output.trajectory_path` of the **selected phase** in
   the loaded simulation config (which itself defaults to
@@ -184,7 +184,7 @@ to inspect.
 
 ## Analyze flow <!-- rq-618864ce -->
 
-`dynamics analyze` proceeds through these stages in order. Any stage
+`heddlemd analyze` proceeds through these stages in order. Any stage
 that fails terminates the process with the appropriate exit code
 and stderr message.
 
@@ -226,7 +226,7 @@ Lint stops at stage 6 (no trajectory pass, no writes); see
 
 ## Analyze lint flow <!-- rq-5a6f582d -->
 
-`dynamics lint <path>.in.analysis` performs the setup-phase checks
+`heddlemd lint <path>.in.analysis` performs the setup-phase checks
 the analyze pipeline would perform, then exits. The pipeline
 reuses the same loaders as *Analyze flow*; no output files are
 created, and the trajectory is opened only to read its first frame
@@ -272,7 +272,7 @@ Skipped / not-checked semantics match the simulation-lint flow
 
 ## Reproducibility contract <!-- rq-175e5b45 -->
 
-Two `dynamics analyze` runs over the same `.in.analysis`, the same
+Two `heddlemd analyze` runs over the same `.in.analysis`, the same
 sibling `.in.toml`, the same trajectory file, and the same
 analysis-builder registry produce byte-identical `*.out.*.csv`
 output files. The guarantee is unconditional on hardware (the v1
@@ -282,7 +282,7 @@ pipeline is CPU-only and performs no GPU calls), but conditional on:
   enumeration order over pairs / triples / atoms, fixed reduction
   order, fixed numeric formatting).
 - The trajectory file itself being identical (which is already
-  guaranteed by `dynamics run`'s reproducibility contract on the
+  guaranteed by `heddlemd run`'s reproducibility contract on the
   same GPU).
 - The same set of registered builders being present.
 
@@ -482,7 +482,7 @@ Degenerate cases:
   - Runs every stage of *Analyze lint flow* against `registries`.
     Returns a `LintReport` whose `stages` field has length `4`
     (`config`, `output paths`, `trajectory`, `analyses`).
-  - Called by the `dynamics lint <path>.in.analysis` CLI dispatch.
+  - Called by the `heddlemd lint <path>.in.analysis` CLI dispatch.
 
 The CLI wrapper in `src/main.rs` selects between
 `run_simulation`, `lint_simulation`, `run_analyses`, and
@@ -503,7 +503,7 @@ file extension of the supplied path. See
   the cell is integrated end-to-end.
 - Cross-trajectory analysis (e.g. comparing two runs). A single
   `.in.analysis` consumes exactly one trajectory.
-- Restart / append mode. Each `dynamics analyze` invocation
+- Restart / append mode. Each `heddlemd analyze` invocation
   produces fresh output files; appending to an existing CSV is
   not supported.
 - Selecting frames by `Step=` value rather than by file position.
@@ -515,7 +515,7 @@ file extension of the supplied path. See
 ## Gherkin Scenarios <!-- rq-4a6d949d -->
 
 ```gherkin
-Feature: Analysis framework and `dynamics analyze`
+Feature: Analysis framework and `heddlemd analyze`
 
   Background:
     Given a temporary directory tmp
@@ -527,7 +527,7 @@ Feature: Analysis framework and `dynamics analyze`
   @rq-a1735ae4
   Scenario: Reject an analysis filename that does not end in `.in.analysis`
     Given a valid analysis body is written to tmp/argon.analysis (wrong suffix)
-    When dynamics is invoked with arguments ["analyze", "tmp/argon.analysis"]
+    When heddlemd is invoked with arguments ["analyze", "tmp/argon.analysis"]
     Then it exits with code 1
     And stderr contains "InvalidAnalysisFilename" and "argon.analysis"
     And the file was not opened
@@ -535,7 +535,7 @@ Feature: Analysis framework and `dynamics analyze`
   @rq-bf98584a
   Scenario: Reject an analysis filename whose derived root is empty
     Given a valid analysis body is written to tmp/.in.analysis
-    When dynamics is invoked with arguments ["analyze", "tmp/.in.analysis"]
+    When heddlemd is invoked with arguments ["analyze", "tmp/.in.analysis"]
     Then it exits with code 1
     And stderr contains "InvalidAnalysisFilename"
 
@@ -621,16 +621,16 @@ Feature: Analysis framework and `dynamics analyze`
   Scenario: Successful run over the full trajectory
     Given tmp/argon.in.analysis declares one RDF analysis with valid parameters
     And tmp/argon.out.ar-ar.csv does not exist
-    When dynamics is invoked with arguments ["analyze", "tmp/argon.in.analysis"]
+    When heddlemd is invoked with arguments ["analyze", "tmp/argon.in.analysis"]
     Then it exits with code 0
     And tmp/argon.out.ar-ar.csv exists
     And the file's last line is the maximum-r bin
-    And stdout matches "\[dynamics\] analyze complete: 1 analyses over 11 frames .*"
+    And stdout matches "\[heddlemd\] analyze complete: 1 analyses over 11 frames .*"
 
   @rq-270637dd
   Scenario: Pre-flight refuses to overwrite an existing output file
     Given tmp/argon.out.ar-ar.csv already exists with arbitrary content
-    When dynamics is invoked with arguments ["analyze", "tmp/argon.in.analysis"]
+    When heddlemd is invoked with arguments ["analyze", "tmp/argon.in.analysis"]
     Then it exits with code 1
     And stderr contains "OutputExists" and "argon.out.ar-ar.csv"
     And tmp/argon.out.ar-ar.csv is unchanged
@@ -638,7 +638,7 @@ Feature: Analysis framework and `dynamics analyze`
   @rq-36ec88d9
   Scenario: Missing trajectory file is reported before any analysis builds
     Given tmp/argon.out.xyz is deleted between writing the .in.analysis and invoking analyze
-    When dynamics is invoked with arguments ["analyze", "tmp/argon.in.analysis"]
+    When heddlemd is invoked with arguments ["analyze", "tmp/argon.in.analysis"]
     Then it exits with code 1
     And stderr contains "argon.out.xyz"
     And no analysis builder's `build` method was called
@@ -646,7 +646,7 @@ Feature: Analysis framework and `dynamics analyze`
   @rq-f76d0576
   Scenario: Missing sibling .in.toml under implicit pairing
     Given tmp/argon.in.analysis exists but tmp/argon.in.toml does not
-    When dynamics is invoked with arguments ["analyze", "tmp/argon.in.analysis"]
+    When heddlemd is invoked with arguments ["analyze", "tmp/argon.in.analysis"]
     Then it exits with code 1
     And stderr contains "argon.in.toml"
 
@@ -654,7 +654,7 @@ Feature: Analysis framework and `dynamics analyze`
   Scenario: Frame selection: stride > 1 reduces frames consumed
     Given tmp/argon.out.xyz has 11 frames (positions 0..10)
     And tmp/argon.in.analysis sets first_frame=0 last_frame=10 stride=2
-    When dynamics analyze runs
+    When heddlemd analyze runs
     Then each analysis's consume_frame is called exactly 6 times (positions 0, 2, 4, 6, 8, 10)
     And the final-summary line reports "6 frames"
 
@@ -662,14 +662,14 @@ Feature: Analysis framework and `dynamics analyze`
   Scenario: Frame selection: last_frame past end is rejected at trajectory-open time
     Given tmp/argon.out.xyz has 11 frames
     And tmp/argon.in.analysis sets last_frame=20
-    When dynamics analyze runs
+    When heddlemd analyze runs
     Then it exits with code 1
     And stderr contains "FrameOutOfRange" and "requested: 20" and "available: 11"
 
   @rq-5de7798b
   Scenario: Reproducibility across two analyze runs
     Given a valid .in.analysis, .in.toml, and trajectory
-    When dynamics analyze is invoked twice on the same files
+    When heddlemd analyze is invoked twice on the same files
     Then the two resulting output CSVs are byte-identical for every analysis
 
   # --- Open registry ---
@@ -678,7 +678,7 @@ Feature: Analysis framework and `dynamics analyze`
   Scenario: Unknown analysis kind is reported with UnknownKind
     Given tmp/argon.in.analysis declares an analysis with kind="msd"
       and the default Registries::with_builtins() is used
-    When dynamics analyze runs
+    When heddlemd analyze runs
     Then it exits with code 1
     And stderr contains "UnknownKind" and "msd"
 
@@ -693,17 +693,17 @@ Feature: Analysis framework and `dynamics analyze`
   # --- Lint dispatch ---
 
   @rq-fa2fc3a9
-  Scenario: `dynamics lint` on an .in.analysis path runs the analyze lint
+  Scenario: `heddlemd lint` on an .in.analysis path runs the analyze lint
     Given a valid tmp/argon.in.analysis
-    When dynamics is invoked with arguments ["lint", "tmp/argon.in.analysis"]
+    When heddlemd is invoked with arguments ["lint", "tmp/argon.in.analysis"]
     Then it exits with code 0
-    And stdout begins with "[dynamics lint] OK"
+    And stdout begins with "[heddlemd lint] OK"
     And the report has exactly the stages "config", "output paths", "trajectory", "analyses" in that order
 
   @rq-b306b357
   Scenario: Lint reports a trajectory open failure under the trajectory stage
     Given tmp/argon.out.xyz is missing
-    When dynamics is invoked with arguments ["lint", "tmp/argon.in.analysis"]
+    When heddlemd is invoked with arguments ["lint", "tmp/argon.in.analysis"]
     Then it exits with code 1
     And stdout has a "trajectory" stage line beginning with "FAIL —"
     And stderr contains "argon.out.xyz"
@@ -711,7 +711,7 @@ Feature: Analysis framework and `dynamics analyze`
   @rq-c67ad79e
   Scenario: Lint reports a builder geometric failure under the analyses stage
     Given tmp/argon.in.analysis declares an RDF analysis with r_max greater than half the box width
-    When dynamics is invoked with arguments ["lint", "tmp/argon.in.analysis"]
+    When heddlemd is invoked with arguments ["lint", "tmp/argon.in.analysis"]
     Then it exits with code 1
     And stdout has an "analyses" stage line beginning with "FAIL —"
     And stderr contains "r_max"

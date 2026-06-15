@@ -503,14 +503,14 @@ Feature: Langevin BAOAB integrator
   Scenario: Two end-to-end Langevin runs with identical configs produce byte-identical outputs
     Given two complete simulations with kind="langevin-baoab", identical friction, temperature, seed,
       identical initial particle state, n_steps=10
-    When dynamics run is invoked on each
+    When heddlemd run is invoked on each
     Then the two trajectory files are byte-identical
     And the two log files are byte-identical
 
   @rq-2a3f0e9b
   Scenario: Different seeds produce different trajectories
     Given two complete simulations identical except integrator.seed = 1 and integrator.seed = 2
-    When dynamics run is invoked on each
+    When heddlemd run is invoked on each
     Then the two trajectory files differ
 
   # --- Temperature target ---
@@ -535,7 +535,7 @@ Feature: Langevin BAOAB integrator
   @rq-1c729f15
   Scenario: Langevin runs through the runner with N=0
     Given a config with kind="langevin-baoab" and an init file with N=0
-    When dynamics run is invoked
+    When heddlemd run is invoked
     Then it exits with code 0
     And the timings file contains no Langevin kernel rows
 

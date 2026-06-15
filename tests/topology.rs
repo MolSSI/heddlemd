@@ -1,9 +1,9 @@
 // rq-9e1eee68
 use std::path::{Path, PathBuf};
 
-use dynamics::forces::{TopologyFileError, load_topology_file};
-use dynamics::integrator::ConstraintRegistry;
-use dynamics::io::config::NamedSlotConfig;
+use heddle_md::forces::{TopologyFileError, load_topology_file};
+use heddle_md::integrator::ConstraintRegistry;
+use heddle_md::io::config::NamedSlotConfig;
 
 fn registry() -> ConstraintRegistry {
     ConstraintRegistry::with_builtins()
@@ -16,7 +16,7 @@ fn tmp_path(name: &str) -> PathBuf {
         .as_nanos();
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "dynamics-bonds-{}-{}-{}",
+        "heddlemd-bonds-{}-{}-{}",
         std::process::id(),
         name,
         nanos

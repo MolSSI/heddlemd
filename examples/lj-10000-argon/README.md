@@ -24,7 +24,7 @@ cargo run --release -- run argon.in.toml
 Or with the debug binary already built:
 
 ```
-../../target/debug/dynamics run argon.in.toml
+../../target/debug/heddlemd run argon.in.toml
 ```
 
 A run produces three files in this directory:
@@ -35,7 +35,7 @@ A run produces three files in this directory:
 
 ## Analyze
 
-After `dynamics run` has written `argon.out.run.xyz`, post-process the
+After `heddlemd run` has written `argon.out.run.xyz`, post-process the
 trajectory with:
 
 ```

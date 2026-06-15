@@ -628,7 +628,7 @@ does not block on cuFFT or on the reciprocal kernels.
 
 ## Reproducibility <!-- rq-20530653 -->
 
-SPME on Dynamics is bit-exact GPU-vs-GPU when run on the same hardware
+SPME on HeddleMD is bit-exact GPU-vs-GPU when run on the same hardware
 with identical inputs. Six components carry the reproducibility
 invariant:
 

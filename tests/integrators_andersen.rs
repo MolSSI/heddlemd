@@ -4,19 +4,19 @@
 // through its `apply_post` hook; the `andersen_resample` kernel is
 // also exercised directly.
 
-use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
-use dynamics::gpu::{
+use heddle_md::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use heddle_md::gpu::{
     GpuContext, ParticleBuffers, andersen_resample, compute_kinetic_energy, init_device,
 };
-use dynamics::integrator::IntegratorStepExt;
-use dynamics::integrator::{
+use heddle_md::integrator::IntegratorStepExt;
+use heddle_md::integrator::{
     AndersenThermostat, Thermostat, ThermostatRegistry,
 };
-use dynamics::io::SlotConfig;
-use dynamics::io::config::NeighborListConfig;
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::{KernelStage, Timings};
+use heddle_md::io::SlotConfig;
+use heddle_md::io::config::NeighborListConfig;
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::{KernelStage, Timings};
 
 #[allow(dead_code)]
 const KB: f64 = 1.380649e-23;
@@ -509,7 +509,7 @@ fn andersen_time_averaged_ke_tracks_target() {
     let mut sim_box = box_large();
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut integ = dynamics::integrator::IntegratorRegistry::with_builtins()
+    let mut integ = heddle_md::integrator::IntegratorRegistry::with_builtins()
         .build(
             &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
             &gpu,

@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use dynamics::io::{TrajectoryWriter, TrajectoryWriterError, load_init_state};
-use dynamics::pbc::SimulationBox;
-use dynamics::units::UnitSystem;
+use heddle_md::io::{TrajectoryWriter, TrajectoryWriterError, load_init_state};
+use heddle_md::pbc::SimulationBox;
+use heddle_md::units::UnitSystem;
 
 fn tmp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -11,7 +11,7 @@ fn tmp_path(name: &str) -> PathBuf {
         .as_nanos();
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "dynamics-traj-{}-{}-{}",
+        "heddlemd-traj-{}-{}-{}",
         std::process::id(),
         name,
         nanos
@@ -225,8 +225,8 @@ fn si_mode_writer_multiplies_positions_lattice_and_velocities_by_factors() {
     let vy_au: f32 = -0.02;
     let vz_au: f32 = 0.01;
 
-    let length_factor = UnitSystem::Si.factor(dynamics::units::Dimension::Length) as f32;
-    let velocity_factor = UnitSystem::Si.factor(dynamics::units::Dimension::Velocity) as f32;
+    let length_factor = UnitSystem::Si.factor(heddle_md::units::Dimension::Length) as f32;
+    let velocity_factor = UnitSystem::Si.factor(heddle_md::units::Dimension::Velocity) as f32;
 
     let sim_box = SimulationBox::new(l_au, l_au, l_au, 0.0, 0.0, 0.0).unwrap();
     let mut writer = TrajectoryWriter::open(
@@ -565,7 +565,7 @@ fn si_mode_writer_multiplies_time_by_atomic_time_factor() {
     let trest = &header[tstart..];
     let tend = trest.find(' ').unwrap_or(trest.len());
     let time_written: f64 = trest[..tend].parse().unwrap();
-    let factor = UnitSystem::Si.factor(dynamics::units::Dimension::Time);
+    let factor = UnitSystem::Si.factor(heddle_md::units::Dimension::Time);
     let expected = dt_au * factor;
     // The header formats Time with `{:.9e}`, so the read-back value
     // matches the unrounded product only to ~1e-9 relative precision.
@@ -582,7 +582,7 @@ fn si_mode_writer_multiplies_time_by_atomic_time_factor() {
 // rq-c19d0ce4
 #[test]
 fn si_mode_reader_divides_lattice_and_positions_by_length_factor() {
-    use dynamics::io::TrajectoryReader;
+    use heddle_md::io::TrajectoryReader;
     let dir = tmp_path("si_reader_divides");
     let path = dir.join("traj.xyz");
     let l_au: f32 = 10.0;

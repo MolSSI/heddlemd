@@ -5,15 +5,15 @@
 
 use std::sync::Arc;
 
-use dynamics::integrator::IntegratorStepExt;
-use dynamics::forces::{ConstraintGroup, ConstraintList, GroupConstraint, PotentialRegistry};
-use dynamics::gpu::{ParticleBuffers, init_device};
-use dynamics::integrator::shake::{ShakeBuilder, ShakeConstraintsState, ShakeError};
-use dynamics::integrator::{Constraint, ConstraintError, ConstraintRegistry};
-use dynamics::io::config::NamedSlotConfig;
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::Timings;
+use heddle_md::integrator::IntegratorStepExt;
+use heddle_md::forces::{ConstraintGroup, ConstraintList, GroupConstraint, PotentialRegistry};
+use heddle_md::gpu::{ParticleBuffers, init_device};
+use heddle_md::integrator::shake::{ShakeBuilder, ShakeConstraintsState, ShakeError};
+use heddle_md::integrator::{Constraint, ConstraintError, ConstraintRegistry};
+use heddle_md::io::config::NamedSlotConfig;
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::Timings;
 
 // Atomic units. SPC/E geometry: r_OH = 1.0 Å = 1.88973 a₀;
 // r_HH = 1.633 Å = 3.08591 a₀.
@@ -1704,7 +1704,7 @@ fn init_device_exposes_shake_kernels() {
 #[test]
 fn shake_builder_kind_name_is_shake() {
     let b = ShakeBuilder;
-    use dynamics::integrator::ConstraintBuilder;
+    use heddle_md::integrator::ConstraintBuilder;
     assert_eq!(b.kind_name(), "shake");
 }
 
@@ -1719,8 +1719,8 @@ fn shake_builder_kind_name_is_shake() {
 // rq-047c1f4d rq-09a19014 rq-53237ec4
 #[test]
 fn lossless_velocity_verlet_kind_does_not_support_constraints() {
-    use dynamics::integrator::IntegratorRegistry;
-    use dynamics::io::SlotConfig;
+    use heddle_md::integrator::IntegratorRegistry;
+    use heddle_md::io::SlotConfig;
     let kind = SlotConfig::from_params_str("velocity-verlet", "lossless = true\n");
     let registry = IntegratorRegistry::with_builtins();
     let builder = registry.lookup(&kind.kind).unwrap();
@@ -1733,10 +1733,10 @@ fn lossless_velocity_verlet_kind_does_not_support_constraints() {
 #[test]
 fn integrator_step_dispatches_all_three_constraint_hooks() {
     use std::sync::{Arc as StdArc, Mutex};
-    use dynamics::forces::AngleList;
-    use dynamics::forces::ForceField;
-    use dynamics::integrator::{IntegratorStepWithConstraintExt, VelocityVerletState};
-    use dynamics::io::config::NeighborListConfig;
+    use heddle_md::forces::AngleList;
+    use heddle_md::forces::ForceField;
+    use heddle_md::integrator::{IntegratorStepWithConstraintExt, VelocityVerletState};
+    use heddle_md::io::config::NeighborListConfig;
 
     #[derive(Debug)]
     struct RecordingConstraint {
@@ -1791,9 +1791,9 @@ fn integrator_step_dispatches_all_three_constraint_hooks() {
         None,
         None,
         &[],
-        &dynamics::forces::BondList::empty(3),
+        &heddle_md::forces::BondList::empty(3),
         &AngleList::empty(0),
-        &dynamics::forces::ExclusionList::empty(3),
+        &heddle_md::forces::ExclusionList::empty(3),
         &NeighborListConfig::AllPairs,
     )
     .unwrap();
@@ -1813,11 +1813,11 @@ fn integrator_step_dispatches_all_three_constraint_hooks() {
 fn integrator_step_with_none_constraint_skips_all_hooks() {
     // Verify that step succeeds and produces no SHAKE/RATTLE timings
     // when no constraint is passed.
-    use dynamics::forces::AngleList;
-    use dynamics::forces::ForceField;
-    use dynamics::integrator::IntegratorRegistry;
-    use dynamics::io::SlotConfig;
-    use dynamics::io::config::NeighborListConfig;
+    use heddle_md::forces::AngleList;
+    use heddle_md::forces::ForceField;
+    use heddle_md::integrator::IntegratorRegistry;
+    use heddle_md::io::SlotConfig;
+    use heddle_md::io::config::NeighborListConfig;
     let gpu = init_device().unwrap();
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -1834,9 +1834,9 @@ fn integrator_step_with_none_constraint_skips_all_hooks() {
         None,
         None,
         &[],
-        &dynamics::forces::BondList::empty(3),
+        &heddle_md::forces::BondList::empty(3),
         &AngleList::empty(0),
-        &dynamics::forces::ExclusionList::empty(3),
+        &heddle_md::forces::ExclusionList::empty(3),
         &NeighborListConfig::AllPairs,
     )
     .unwrap();

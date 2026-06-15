@@ -1,6 +1,6 @@
 # Introduction
 
-Dynamics is a GPU-accelerated molecular dynamics engine written in Rust with
+HeddleMD is a GPU-accelerated molecular dynamics engine written in Rust with
 CUDA compute kernels. Its primary design goal is **bit-wise reproducibility**:
 identical inputs produce byte-identical trajectory and log files across runs
 on the same GPU.

@@ -1,10 +1,10 @@
 // rq-c4645fa6
 use cudarc::driver::DeviceSlice;
-use dynamics::forces::{NeighborListError, NeighborListState};
-use dynamics::gpu::{GpuContext, ParticleBuffers, init_device};
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::Timings;
+use heddle_md::forces::{NeighborListError, NeighborListState};
+use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::Timings;
 
 fn box_n(l: f32) -> SimulationBox {
     SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
@@ -356,7 +356,7 @@ fn trivial_mode_pre_step_does_no_work() {
 fn trivial_mode_has_no_cell_list_fields() {
     let gpu = init_device().unwrap();
     let nl = NeighborListState::new_trivial(&gpu, &box_n(10.0), 4).unwrap();
-    assert!(matches!(nl.mode, dynamics::forces::NeighborListMode::Trivial));
+    assert!(matches!(nl.mode, heddle_md::forces::NeighborListMode::Trivial));
     assert!(nl.cell_list_data().is_none());
 }
 

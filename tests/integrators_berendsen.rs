@@ -6,19 +6,19 @@
 // covered by the integrator framework tests in
 // `tests/integrator_framework.rs`.
 
-use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
-use dynamics::gpu::{
+use heddle_md::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use heddle_md::gpu::{
     GpuContext, ParticleBuffers, compute_kinetic_energy, init_device,
 };
-use dynamics::integrator::IntegratorStepExt;
-use dynamics::integrator::{
+use heddle_md::integrator::IntegratorStepExt;
+use heddle_md::integrator::{
     BerendsenThermostat, Thermostat, ThermostatRegistry,
 };
-use dynamics::io::SlotConfig;
-use dynamics::io::config::NeighborListConfig;
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::{KernelStage, Timings};
+use heddle_md::io::SlotConfig;
+use heddle_md::io::config::NeighborListConfig;
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::{KernelStage, Timings};
 
 #[allow(dead_code)]
 const KB: f64 = 1.380649e-23;
@@ -459,7 +459,7 @@ fn berendsen_temperature_relaxes_toward_target() {
     let dt = (1.0e-15 / TIME_F) as f32;
     let tau = 1.0e-13_f64;
 
-    let mut integrator = dynamics::integrator::IntegratorRegistry::with_builtins()
+    let mut integrator = heddle_md::integrator::IntegratorRegistry::with_builtins()
         .build(
             &SlotConfig::from_params_str("velocity-verlet", "lossless = false"),
             &gpu,
@@ -489,7 +489,7 @@ fn berendsen_temperature_relaxes_toward_target() {
 // rq-6136714b
 #[test]
 fn berendsen_constructs_for_a_settled_water_system() {
-    use dynamics::integrator::ThermostatRegistry;
+    use heddle_md::integrator::ThermostatRegistry;
     let gpu = init_device().unwrap();
     let kind = berendsen_kind(300.0, 1.0e-13);
     // 24 particles (8 waters) with 24 constraints; g_dof = 45.

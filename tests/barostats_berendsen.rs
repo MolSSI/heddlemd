@@ -5,21 +5,21 @@
 // and `rescale_positions` helpers are also exercised directly, and
 // `SimulationBox::rescale_isotropic` is unit-tested host-side.
 
-use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
-use dynamics::gpu::{
+use heddle_md::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use heddle_md::gpu::{
     GpuContext, ParticleBuffers, compute_total_virial, init_device, rescale_positions,
 };
-use dynamics::integrator::IntegratorStepExt;
-use dynamics::integrator::{
+use heddle_md::integrator::IntegratorStepExt;
+use heddle_md::integrator::{
     Barostat, BarostatRegistry, BerendsenBarostat, IntegratorRegistry, ThermostatRegistry,
 };
 #[allow(unused_imports)]
-use dynamics::integrator::Thermostat; // needed for trait-method calls below
-use dynamics::io::config::NeighborListConfig;
-use dynamics::io::SlotConfig;
-use dynamics::pbc::{SimulationBox, SimulationBoxError};
-use dynamics::state::ParticleState;
-use dynamics::timings::{KernelStage, Timings};
+use heddle_md::integrator::Thermostat; // needed for trait-method calls below
+use heddle_md::io::config::NeighborListConfig;
+use heddle_md::io::SlotConfig;
+use heddle_md::pbc::{SimulationBox, SimulationBoxError};
+use heddle_md::state::ParticleState;
+use heddle_md::timings::{KernelStage, Timings};
 
 const KB: f64 = 1.380649e-23;
 

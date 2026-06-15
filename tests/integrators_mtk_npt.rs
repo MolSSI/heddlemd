@@ -6,19 +6,19 @@
 // kernels (mtk_velocity_half_kick, mtk_position_drift) and the
 // shared nhc_chain_sub_step host helper are also exercised directly.
 
-use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
-use dynamics::gpu::{
+use heddle_md::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+use heddle_md::gpu::{
     GpuContext, ParticleBuffers, init_device, mtk_position_drift, mtk_velocity_half_kick,
 };
-use dynamics::integrator::IntegratorStepExt;
-use dynamics::integrator::{
+use heddle_md::integrator::IntegratorStepExt;
+use heddle_md::integrator::{
     Integrator, IntegratorRegistry, MtkNptIntegrator, nhc_chain_sub_step,
 };
-use dynamics::io::SlotConfig;
-use dynamics::io::config::NeighborListConfig;
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::{KernelStage, Timings};
+use heddle_md::io::SlotConfig;
+use heddle_md::io::config::NeighborListConfig;
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::{KernelStage, Timings};
 
 #[allow(dead_code)]
 const KB: f64 = 1.380649e-23;
@@ -186,7 +186,7 @@ fn registry_builds_mtk_npt_with_particle_count_zero() {
 // rq-fecc63ef rq-2d46cad5 rq-1b467c03 rq-6478b9c9
 #[test]
 fn mtk_npt_owns_thermostat_and_barostat() {
-    use dynamics::integrator::IntegratorRegistry;
+    use heddle_md::integrator::IntegratorRegistry;
     let kind = mtk_kind(85.0, 1.0e5, 1.0e-13, 1.0e-12, 3, 3, 1);
     let registry = IntegratorRegistry::with_builtins();
     let b = registry.lookup(&kind.kind).unwrap();

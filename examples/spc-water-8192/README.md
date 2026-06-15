@@ -3,7 +3,7 @@
 A larger, more realistic example that exercises rigid water (SHAKE),
 SPME electrostatics, multi-phase scheduling, energy minimization,
 NVT-then-NPT dynamics (CSVR thermostat + c-rescale barostat), and
-the `dynamics analyze` post-processing pipeline. 8192 SPC/E water
+the `heddlemd analyze` post-processing pipeline. 8192 SPC/E water
 molecules (24,576 atoms) relaxed by a steepest-descent minimization,
 then integrated for 5 ps of NVT equilibration followed by 2 ps of
 NPT production at 298.15 K, 1 atm, then analyzed for the O-O, O-H,
@@ -66,7 +66,7 @@ turn on `[phase.output].trajectory_every` to write frames):
 
 ## Analyze
 
-After `dynamics run` has produced `water.out.prod.xyz`, post-process
+After `heddlemd run` has produced `water.out.prod.xyz`, post-process
 with:
 
 ```
@@ -89,7 +89,7 @@ The analysis file also lints cleanly:
 cargo run --release -- lint water.in.analysis
 ```
 
-reports `[dynamics lint] OK` (after the trajectory exists).
+reports `[heddlemd lint] OK` (after the trajectory exists).
 
 ## Minimization phase
 

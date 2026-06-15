@@ -131,11 +131,11 @@ time. The constraint-supporting integrator is the standard
 Run the bundled example, save the outputs, delete and re-run:
 
 ```
-./target/release/dynamics run examples/lj-10000-argon/argon.in.toml
+./target/release/heddlemd run examples/lj-10000-argon/argon.in.toml
 mv examples/lj-10000-argon/argon.out.xyz     /tmp/traj.ref
 mv examples/lj-10000-argon/argon.out.log     /tmp/log.ref
 mv examples/lj-10000-argon/argon.out.timings /tmp/timings.ref
-./target/release/dynamics run examples/lj-10000-argon/argon.in.toml
+./target/release/heddlemd run examples/lj-10000-argon/argon.in.toml
 diff examples/lj-10000-argon/argon.out.xyz /tmp/traj.ref
 diff examples/lj-10000-argon/argon.out.log /tmp/log.ref
 ```

@@ -1,7 +1,11 @@
 [package]
-name = "dynamics"
+name = "heddle-md"
 version = "0.1.0"
 edition = "2024"
+
+[[bin]]
+name = "heddlemd"
+path = "src/main.rs"
 
 [dependencies]
 cudarc = { version = "0.13.9", default-features = false, features = ["driver", "nvrtc", "std", "cuda-11080"] }

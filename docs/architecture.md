@@ -1,6 +1,6 @@
 # Architecture
 
-Dynamics is a GPU-accelerated molecular dynamics engine written in Rust with
+HeddleMD is a GPU-accelerated molecular dynamics engine written in Rust with
 CUDA compute kernels. Its primary design goal is **bit-wise reproducibility**:
 given identical inputs, the simulation must produce identical outputs regardless
 of GPU thread scheduling.
@@ -12,7 +12,7 @@ many neighbor interactions into a per-particle sum, the thread execution order
 is non-deterministic, so naive atomic accumulation produces different bits on
 each run.
 
-Dynamics solves this with **deterministic reduction ordering**: every
+HeddleMD solves this with **deterministic reduction ordering**: every
 floating-point operation is performed on the same inputs in the same order on
 every run. No precision is sacrificed (there is no fixed-point quantization),
 and the approach requires no hardware features beyond standard 32/64-bit

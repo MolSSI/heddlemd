@@ -7,11 +7,11 @@
 
 use std::f64::consts::PI;
 
-use dynamics::forces::spme::{SpmeParameters, SpmeReciprocalGrid};
-use dynamics::gpu::{K_COULOMB_F32, ParticleBuffers, init_device};
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::Timings;
+use heddle_md::forces::spme::{SpmeParameters, SpmeReciprocalGrid};
+use heddle_md::gpu::{K_COULOMB_F32, ParticleBuffers, init_device};
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::Timings;
 
 fn build_state(positions: &[[f32; 3]], charges: &[f32]) -> ParticleState {
     let n = positions.len();
@@ -301,7 +301,7 @@ fn host_cardinal_bspline(p: usize, x: f64) -> f64 {
 }
 
 fn small_box_grid(spme: SpmeParameters, n: usize) -> (
-    dynamics::gpu::GpuContext,
+    heddle_md::gpu::GpuContext,
     SimulationBox,
     SpmeReciprocalGrid,
 ) {
@@ -524,7 +524,7 @@ fn spme_reciprocal_internal_cell_list_uses_one_bin_per_fft_grid_cell() {
 // rq-dd829afb
 #[test]
 fn bin_only_cell_list_rebuilds_every_step_regardless_of_displacement() {
-    use dynamics::timings::{HostStage, KernelStage};
+    use heddle_md::timings::{HostStage, KernelStage};
     let gpu = init_device().unwrap();
     let l = 1.0e-9_f32;
     let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();

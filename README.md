@@ -1,4 +1,4 @@
-# Dynamics
+# HeddleMD
 
 A GPU-accelerated molecular dynamics engine in Rust + CUDA, designed for
 **bit-wise reproducibility**: identical inputs produce byte-identical
@@ -37,8 +37,8 @@ cargo build --release
 ```
 
 The build script invokes `nvcc` for each `.cu` file under `kernels/`,
-embeds the resulting PTX, and produces the `dynamics` binary at
-`target/release/dynamics`.
+embeds the resulting PTX, and produces the `heddlemd` binary at
+`target/release/heddlemd`.
 
 ## Run the example
 
@@ -49,7 +49,7 @@ integration timesteps in roughly a second on a recent NVIDIA GPU.
 From the project root:
 
 ```
-./target/release/dynamics run examples/lj-10000-argon/argon.in.toml
+./target/release/heddlemd run examples/lj-10000-argon/argon.in.toml
 ```
 
 (Or `cargo run --release -- run examples/lj-10000-argon/argon.in.toml`.)
@@ -105,7 +105,7 @@ supports them.
 
 ## Validating without running
 
-`dynamics lint <config>` runs every input-validation check the runner
+`heddlemd lint <config>` runs every input-validation check the runner
 would perform — TOML parse, init-file load, topology load,
 output-path collisions, box-vs-cutoff geometry — without touching the
 GPU or writing any files. Designed for HPC contexts where a long

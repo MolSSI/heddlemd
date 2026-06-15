@@ -1,29 +1,29 @@
 # Command-Line Interface
 
-The `dynamics` binary has three subcommands: `run` (executes the
+The `heddlemd` binary has three subcommands: `run` (executes the
 simulation), `lint` (validates inputs without running), and `analyze`
 (post-processes a trajectory written by `run`).
 
 ## Usage
 
 ```
-dynamics run     <config-path>
-dynamics lint    <config-path> [--with-gpu]
-dynamics analyze <analysis-path>
+heddlemd run     <config-path>
+heddlemd lint    <config-path> [--with-gpu]
+heddlemd analyze <analysis-path>
 ```
 
-Invoking `dynamics` with no arguments, an unknown subcommand, or a
+Invoking `heddlemd` with no arguments, an unknown subcommand, or a
 subcommand without its required path argument prints
 
 ```
-usage: dynamics run     <config-path>
-       dynamics lint    <config-path> [--with-gpu]
-       dynamics analyze <analysis-path>
+usage: heddlemd run     <config-path>
+       heddlemd lint    <config-path> [--with-gpu]
+       heddlemd analyze <analysis-path>
 ```
 
 to stderr and exits with code `1`.
 
-## `dynamics run <config-path>`
+## `heddlemd run <config-path>`
 
 Loads the TOML config at `<config-path>` and runs the simulation it
 describes to completion.
@@ -63,10 +63,10 @@ and the convergence reason (`force_tolerance`, `energy_tolerance`,
 `force_zero`):
 
 ```
-[dynamics] phase `<name>`: <N> steps in <T> ms (frames: <F>, log rows: <R>)
-[dynamics] phase `<name>`: <N> iters in <T> ms (converged: <reason>, frames: <F>, log rows: <R>)
+[heddlemd] phase `<name>`: <N> steps in <T> ms (frames: <F>, log rows: <R>)
+[heddlemd] phase `<name>`: <N> iters in <T> ms (converged: <reason>, frames: <F>, log rows: <R>)
 ...
-[dynamics] complete: <total_phases> phases, <total_N> steps in <total_T> ms
+[heddlemd] complete: <total_phases> phases, <total_N> steps in <total_T> ms
 ```
 
 and exits with code `0`. For very short runs (`< 10 ms`) the elapsed
@@ -91,13 +91,13 @@ script to distinguish input mistakes (re-edit the config) from
 mid-flight failures (likely transient: re-run, check GPU health, or
 relax minimization tolerances).
 
-## `dynamics lint <config-path> [--with-gpu]`
+## `heddlemd lint <config-path> [--with-gpu]`
 
 Validates the config and its referenced inputs against every error the
 runner can detect without executing the integration loop, then exits
 without writing any output files. Designed for HPC contexts where a
 long submission queue makes trial-and-error iteration expensive: run
-`dynamics lint` on a login node before queueing a job, and fix any
+`heddlemd lint` on a login node before queueing a job, and fix any
 reported issues up front instead of after the queue eventually grants
 GPU time.
 
@@ -148,11 +148,11 @@ report.
 
 ### On success
 
-Prints the per-stage report on stdout (header `[dynamics lint] OK`)
+Prints the per-stage report on stdout (header `[heddlemd lint] OK`)
 and exits with code `0`:
 
 ```
-[dynamics lint] OK
+[heddlemd lint] OK
   config       /path/to/argon.in.toml
   output paths none pre-exist
   init         resolved, 10000 particles, box 8.0e-9 × 8.0e-9 × 1.0e-8 m
@@ -163,13 +163,13 @@ and exits with code `0`:
 
 ### On failure
 
-Prints the per-stage report on stdout (header `[dynamics lint] FAIL`),
+Prints the per-stage report on stdout (header `[heddlemd lint] FAIL`),
 followed by a single `error: <message>` line on stderr that matches
 what `run` would print for the same condition, and exits with code
 `1`:
 
 ```
-[dynamics lint] FAIL
+[heddlemd lint] FAIL
   config       /path/to/argon.in.toml
   output paths none pre-exist
   init         resolved, 10000 particles, box 2.0e-9 × 5.0e-9 × 5.0e-9 m
@@ -186,7 +186,7 @@ error: simulation box perpendicular width along lattice direction `a` is 2e-9, b
 | `0`  | Every check passed. |
 | `1`  | At least one check failed, or the CLI was invoked with bad arguments. |
 
-## `dynamics analyze <analysis-path>`
+## `heddlemd analyze <analysis-path>`
 
 Runs every analysis declared in `<analysis-path>` (a
 `<root>.in.analysis` file) against the trajectory it points at, and
@@ -214,7 +214,7 @@ selection knobs, and the built-in `rdf` kind.
 Prints one line on stdout:
 
 ```
-[dynamics] analyze complete: <K> analyses over <F> frames in <T> ms
+[heddlemd] analyze complete: <K> analyses over <F> frames in <T> ms
 ```
 
 where `<K>` is the number of analyses and `<F>` is the number of

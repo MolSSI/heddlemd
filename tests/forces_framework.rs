@@ -1,15 +1,15 @@
 mod common;
 
 use cudarc::driver::DeviceSlice;
-use dynamics::forces::{AggregateLevel, Bond, BondList, ExclusionList, ForceField, ForceFieldContext, ForceFieldError, Potential, PotentialRegistry, SlotOutputView};
-use dynamics::gpu::{ParticleBuffers, init_device};
-use dynamics::io::config::{
+use heddle_md::forces::{AggregateLevel, Bond, BondList, ExclusionList, ForceField, ForceFieldContext, ForceFieldError, Potential, PotentialRegistry, SlotOutputView};
+use heddle_md::gpu::{ParticleBuffers, init_device};
+use heddle_md::io::config::{
     BondTypeConfig, NeighborListConfig, PairInteractionConfig, PairPotentialParams,
     ParticleTypeConfig,
 };
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::Timings;
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::Timings;
 
 fn lj_pair_config() -> PairInteractionConfig {
     PairInteractionConfig {
@@ -77,7 +77,7 @@ fn force_field_lj_only() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -107,7 +107,7 @@ fn force_field_lj_and_morse() {
         None,
         &[],
         &bl,
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -137,7 +137,7 @@ fn bond_types_declared_no_bonds() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -160,7 +160,7 @@ fn force_field_zero_slots() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -192,7 +192,7 @@ fn slot_buffers_sized_num_slots_times_particle_count() {
         None,
         &[],
         &bl,
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(8),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -217,7 +217,7 @@ fn empty_force_field() {
         None,
         &[],
         &BondList::empty(0),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(0),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -300,7 +300,7 @@ fn step_lj_only_writes_lj_forces() {
         None,
         &[],
         &BondList::empty(2),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -342,7 +342,7 @@ fn step_both_slots_sums_lj_and_morse() {
         None,
         &[],
         &BondList::empty(2),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -367,7 +367,7 @@ fn step_both_slots_sums_lj_and_morse() {
         None,
         &[],
         &bl,
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -386,7 +386,7 @@ fn step_both_slots_sums_lj_and_morse() {
         None,
         &[],
         &bl,
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -445,7 +445,7 @@ fn step_zero_slots_writes_zero_forces() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -500,7 +500,7 @@ fn step_empty_launches_no_kernels() {
         None,
         &[],
         &BondList::empty(0),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(0),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -535,7 +535,7 @@ fn each_slot_writes_its_own_row() {
         None,
         &[],
         &bl,
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -555,7 +555,7 @@ fn each_slot_writes_its_own_row() {
         None,
         &[],
         &BondList::empty(3),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -582,7 +582,7 @@ fn each_slot_writes_its_own_row() {
         None,
         &[],
         &bl,
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -666,10 +666,10 @@ struct ConstStubBuilder {
     value_z: f32,
 }
 
-impl dynamics::forces::PotentialBuilder for ConstStubBuilder {
+impl heddle_md::forces::PotentialBuilder for ConstStubBuilder {
     fn build(
         &self,
-        cx: &dynamics::forces::PotentialBuildContext<'_>,
+        cx: &heddle_md::forces::PotentialBuildContext<'_>,
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
         Ok(Some(Box::new(ConstStub {
             value_x: self.value_x,
@@ -678,7 +678,7 @@ impl dynamics::forces::PotentialBuilder for ConstStubBuilder {
             device: cx.gpu.device.clone(),
         })))
     }
-    fn box_clone(&self) -> Box<dyn dynamics::forces::PotentialBuilder> {
+    fn box_clone(&self) -> Box<dyn heddle_md::forces::PotentialBuilder> {
         Box::new(self.clone())
     }
 }
@@ -709,7 +709,7 @@ fn third_potential_extensibility() {
         None,
         &[],
         &BondList::empty(3),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -731,7 +731,7 @@ fn third_potential_extensibility() {
         None,
         &[],
         &BondList::empty(3),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(3),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -776,7 +776,7 @@ fn two_independent_runs_byte_identical() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -791,7 +791,7 @@ fn two_independent_runs_byte_identical() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -854,16 +854,16 @@ impl Potential for ConstStubB {
 #[derive(Debug, Clone)]
 struct ConstStubBBuilder;
 
-impl dynamics::forces::PotentialBuilder for ConstStubBBuilder {
+impl heddle_md::forces::PotentialBuilder for ConstStubBBuilder {
     fn build(
         &self,
-        cx: &dynamics::forces::PotentialBuildContext<'_>,
+        cx: &heddle_md::forces::PotentialBuildContext<'_>,
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
         Ok(Some(Box::new(ConstStubB {
             device: cx.gpu.device.clone(),
         })))
     }
-    fn box_clone(&self) -> Box<dyn dynamics::forces::PotentialBuilder> {
+    fn box_clone(&self) -> Box<dyn heddle_md::forces::PotentialBuilder> {
         Box::new(self.clone())
     }
 }
@@ -896,7 +896,7 @@ fn combiner_sums_slot_rows_in_slot_order() {
         None,
         &[],
         &BondList::empty(2),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -931,7 +931,7 @@ fn combiner_with_zero_slots_writes_zeros() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -962,7 +962,7 @@ fn combiner_idempotent_across_two_calls() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -992,7 +992,7 @@ fn force_field_with_lj_owns_shared_neighbor_list() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::CellList { max_neighbors: 16, r_skin: 0.3 },
     )
@@ -1022,7 +1022,7 @@ fn force_field_with_only_bonded_owns_no_neighbor_list() {
         None,
         &[],
         &bl,
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -1056,7 +1056,7 @@ fn bonded_only_step_launches_no_neighbor_list_kernels() {
         None,
         &[],
         &bl,
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -1114,16 +1114,16 @@ struct ContextProbeStubBuilder {
     last_seen_nl_some: std::sync::Arc<std::sync::Mutex<Option<bool>>>,
 }
 
-impl dynamics::forces::PotentialBuilder for ContextProbeStubBuilder {
+impl heddle_md::forces::PotentialBuilder for ContextProbeStubBuilder {
     fn build(
         &self,
-        _cx: &dynamics::forces::PotentialBuildContext<'_>,
+        _cx: &heddle_md::forces::PotentialBuildContext<'_>,
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
         Ok(Some(Box::new(ContextProbeStub {
             last_seen_nl_some: self.last_seen_nl_some.clone(),
         })))
     }
-    fn box_clone(&self) -> Box<dyn dynamics::forces::PotentialBuilder> {
+    fn box_clone(&self) -> Box<dyn heddle_md::forces::PotentialBuilder> {
         Box::new(self.clone())
     }
 }
@@ -1152,7 +1152,7 @@ fn context_exposes_shared_neighbor_list_to_contribute() {
         None,
         &[],
         &BondList::empty(2),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -1213,7 +1213,7 @@ fn max_cutoff_aggregation_determines_neighbor_list_radius() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::CellList { max_neighbors: 32, r_skin },
     )
@@ -1249,7 +1249,7 @@ fn force_field_lj_only_populates_energy_and_virial() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -1284,7 +1284,7 @@ fn slot_output_buffers_have_five_flat_arrays() {
         None,
         &[],
         &bl,
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(8),
         &NeighborListConfig::AllPairs,
     )
@@ -1327,7 +1327,7 @@ fn combiner_sums_slot_energies_and_virials_in_slot_order() {
         None,
         &[],
         &BondList::empty(2),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -1373,7 +1373,7 @@ fn zero_slot_step_writes_zeros_to_energy_and_virial() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -1416,7 +1416,7 @@ fn system_total_potential_energy_equals_sum_of_particle_shares() {
         None,
         &[],
         &BondList::empty(2),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -1464,7 +1464,7 @@ fn system_total_virial_equals_sum_of_particle_shares() {
         None,
         &[],
         &BondList::empty(2),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -1485,11 +1485,11 @@ fn system_total_virial_equals_sum_of_particle_shares() {
 // rqm/forces/framework.md.
 // =====================================================================
 
-use dynamics::forces::{
+use heddle_md::forces::{
     CoulombBuilder, HarmonicAngleBuilder, LennardJonesBuilder, MorseBondedBuilder,
     PotentialBuildContext, PotentialBuilder, SpmeRealBuilder, SpmeReciprocalBuilder,
 };
-use dynamics::gpu::GpuContext;
+use heddle_md::gpu::GpuContext;
 
 // rq-053a026c
 #[test]
@@ -1560,7 +1560,7 @@ fn force_field_new_iterates_registry_in_registration_order() {
         None,
         &[],
         &single_bond_list(n),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
@@ -1606,7 +1606,7 @@ fn builder_returning_ok_none_is_skipped_without_erroring() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -1675,7 +1675,7 @@ fn builder_err_short_circuits_force_field_new() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -1760,7 +1760,7 @@ fn two_builders_producing_slots_with_same_label_fail_construction() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -1789,7 +1789,7 @@ fn empty_registry_produces_zero_slot_force_field() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -1842,7 +1842,7 @@ impl PotentialBuilder for PassthroughCaptureBuilder {
             spme_config: cx.spme_config.map(|s| s as *const _ as usize),
             charges: cx.charges.as_ptr() as usize,
             bond_list: cx.bond_list as *const BondList as usize,
-            angle_list: cx.angle_list as *const dynamics::forces::AngleList as usize,
+            angle_list: cx.angle_list as *const heddle_md::forces::AngleList as usize,
             exclusion_list: cx.exclusion_list as *const ExclusionList as usize,
             neighbor_list_config: cx.neighbor_list_config as *const NeighborListConfig as usize,
         };
@@ -1867,10 +1867,10 @@ fn build_context_exposes_every_parsed_config_input_by_reference() {
     }];
     let pair_interactions: Vec<PairInteractionConfig> = vec![];
     let bond_types: Vec<BondTypeConfig> = vec![];
-    let angle_types: Vec<dynamics::io::config::AngleTypeConfig> = vec![];
+    let angle_types: Vec<heddle_md::io::config::AngleTypeConfig> = vec![];
     let charges: Vec<f32> = vec![0.0; n];
     let bond_list = BondList::empty(n);
-    let angle_list = dynamics::forces::AngleList::empty(0);
+    let angle_list = heddle_md::forces::AngleList::empty(0);
     let exclusion_list = ExclusionList::empty(n);
     let nl_config = NeighborListConfig::AllPairs;
 
@@ -1911,7 +1911,7 @@ fn build_context_exposes_every_parsed_config_input_by_reference() {
     assert_eq!(addrs.bond_list, &bond_list as *const BondList as usize);
     assert_eq!(
         addrs.angle_list,
-        &angle_list as *const dynamics::forces::AngleList as usize
+        &angle_list as *const heddle_md::forces::AngleList as usize
     );
     assert_eq!(
         addrs.exclusion_list,
@@ -1941,7 +1941,7 @@ fn _builtin_builders_are_pub() {
 // and per-class evaluation" block in rqm/forces/framework.md.
 // =====================================================================
 
-use dynamics::forces::ForceClass;
+use heddle_md::forces::ForceClass;
 
 /// Slow-class stub Potential that writes a per-particle constant on
 /// each reduce call. The constant increments every time `reduce` runs,
@@ -2010,17 +2010,17 @@ struct CountingSlowStubBuilder {
     counter: std::sync::Arc<std::sync::Mutex<f32>>,
 }
 
-impl dynamics::forces::PotentialBuilder for CountingSlowStubBuilder {
+impl heddle_md::forces::PotentialBuilder for CountingSlowStubBuilder {
     fn build(
         &self,
-        cx: &dynamics::forces::PotentialBuildContext<'_>,
+        cx: &heddle_md::forces::PotentialBuildContext<'_>,
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError> {
         Ok(Some(Box::new(CountingSlowStub {
             device: cx.gpu.device.clone(),
             counter: self.counter.clone(),
         })))
     }
-    fn box_clone(&self) -> Box<dyn dynamics::forces::PotentialBuilder> {
+    fn box_clone(&self) -> Box<dyn heddle_md::forces::PotentialBuilder> {
         Box::new(self.clone())
     }
 }
@@ -2044,7 +2044,7 @@ fn potential_frequency_class_default_is_fast() {
 fn builtin_potentials_report_canonical_class() {
     let gpu = init_device().unwrap();
     let sim_box = SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap();
-    let spme = dynamics::io::config::SpmeConfig {
+    let spme = heddle_md::io::config::SpmeConfig {
         r_cut_real: 4.0,
         alpha: 0.5,
         grid: [8, 8, 8],
@@ -2064,7 +2064,7 @@ fn builtin_potentials_report_canonical_class() {
         Some(&spme),
         &charges,
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -2113,7 +2113,7 @@ fn per_class_slot_output_buffers_have_length_num_class_slots_times_n() {
         None,
         &[],
         &BondList::empty(8),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(8),
         &NeighborListConfig::AllPairs,
     )
@@ -2154,7 +2154,7 @@ fn per_class_slot_output_buffers_are_zero_initialised() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -2188,7 +2188,7 @@ fn step_class_slow_with_no_slow_slots_is_noop() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -2255,7 +2255,7 @@ fn step_class_fast_with_no_fast_slots_is_noop() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -2308,7 +2308,7 @@ fn step_class_n0_launches_no_kernels() {
         None,
         &[],
         &BondList::empty(0),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(0),
         &NeighborListConfig::AllPairs,
     )
@@ -2359,7 +2359,7 @@ fn step_evaluates_every_class_and_produces_total_in_particle_buffers() {
         None,
         &[],
         &BondList::empty(2),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -2405,7 +2405,7 @@ fn step_class_fast_refreshes_only_fast_slots_contributions() {
         None,
         &[],
         &BondList::empty(2),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -2454,7 +2454,7 @@ fn step_class_slow_refreshes_only_slow_slots_contributions() {
         None,
         &[],
         &BondList::empty(2),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -2503,7 +2503,7 @@ fn respa_style_call_sequence_is_deterministic_across_two_runs() {
             None,
             &[],
             &BondList::empty(4),
-            &dynamics::forces::AngleList::empty(0),
+            &heddle_md::forces::AngleList::empty(0),
             &ExclusionList::empty(4),
             &NeighborListConfig::AllPairs,
         )
@@ -2541,7 +2541,7 @@ fn respa_style_call_sequence_is_deterministic_across_two_runs() {
 // --- AggregateLevel-level effects ----------------------------------------
 
 fn lj_only_force_field(n: usize) -> (
-    dynamics::gpu::GpuContext,
+    heddle_md::gpu::GpuContext,
     ForceField,
     ParticleBuffers,
 ) {
@@ -2561,7 +2561,7 @@ fn lj_only_force_field(n: usize) -> (
         None,
         &[],
         &BondList::empty(n),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
@@ -2570,7 +2570,7 @@ fn lj_only_force_field(n: usize) -> (
 }
 
 fn morse_only_force_field(n: usize) -> (
-    dynamics::gpu::GpuContext,
+    heddle_md::gpu::GpuContext,
     ForceField,
     ParticleBuffers,
 ) {
@@ -2596,7 +2596,7 @@ fn morse_only_force_field(n: usize) -> (
         None,
         &[],
         &single_bond_list(n),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )

@@ -4,12 +4,12 @@ use common::*;
 use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice};
-use dynamics::gpu::{
+use heddle_md::gpu::{
     GpuContext, LennardJonesParameterTable, LosslessBuffers, PairBuffer, ParticleBuffers,
     init_device, vv_kick, vv_kick_drift, vv_kick_drift_lossless, vv_kick_lossless,
 };
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
 
 const N: usize = 64;
 const BOX_L: f32 = 8.0;

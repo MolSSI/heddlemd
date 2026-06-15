@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use dynamics::io::load_config;
-use dynamics::runner::{RunnerError, cli_main_u8, run_simulation};
+use heddle_md::io::load_config;
+use heddle_md::runner::{RunnerError, cli_main_u8, run_simulation};
 
 // k_B = 1 in the engine's atomic units; this is the SI value used to
 // construct SI-mode test inputs and to verify converted output values.
@@ -14,7 +14,7 @@ fn tmp_path(name: &str) -> PathBuf {
         .as_nanos();
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "dynamics-runner-{}-{}-{}",
+        "heddlemd-runner-{}-{}-{}",
         std::process::id(),
         name,
         nanos
@@ -124,14 +124,14 @@ fn run_valid_minimal() {
 // rq-2a36b95f
 #[test]
 fn missing_cli_arg() {
-    let code = cli_main_u8(vec!["dynamics".to_string()]);
+    let code = cli_main_u8(vec!["heddlemd".to_string()]);
     assert_eq!(code, 1);
 }
 
 // rq-2214f0a1
 #[test]
 fn unrecognised_subcommand() {
-    let code = cli_main_u8(vec!["dynamics".to_string(), "benchmark".to_string()]);
+    let code = cli_main_u8(vec!["heddlemd".to_string(), "benchmark".to_string()]);
     assert_eq!(code, 1);
 }
 
@@ -141,7 +141,7 @@ fn config_does_not_exist() {
     let dir = tmp_path("config_missing");
     let path = dir.join("nope.toml");
     let code = cli_main_u8(vec![
-        "dynamics".to_string(),
+        "heddlemd".to_string(),
         "run".to_string(),
         path.to_string_lossy().to_string(),
     ]);
@@ -155,7 +155,7 @@ fn config_rejected_by_load_config() {
     let path = dir.join("sim.in.toml");
     std::fs::write(&path, "schema_version = 2\n").unwrap();
     let code = cli_main_u8(vec![
-        "dynamics".to_string(),
+        "heddlemd".to_string(),
         "run".to_string(),
         path.to_string_lossy().to_string(),
     ]);
@@ -679,7 +679,7 @@ cutoff = 1.0
     std::fs::write(&path, body).unwrap();
     std::fs::write(dir.join("sim.in.xyz"), "0\nLattice=\"1 0 0 0 1 0 0 0 1\" Properties=species:S:1:pos:R:3\n").unwrap();
     let code = cli_main_u8(vec![
-        "dynamics".to_string(),
+        "heddlemd".to_string(),
         "run".to_string(),
         path.to_string_lossy().to_string(),
     ]);
@@ -744,7 +744,7 @@ fn kernel_failure_exit_code_mapping_smoke() {
     // The cli_main_u8 returns 1 on setup-phase errors. Verified by
     // missing_cli_arg and preflight tests. A genuine loop-phase failure
     // would return 2, but cannot be exercised here without fault injection.
-    let code = cli_main_u8(vec!["dynamics".to_string()]);
+    let code = cli_main_u8(vec!["heddlemd".to_string()]);
     assert_eq!(code, 1);
 }
 
@@ -753,8 +753,8 @@ fn kernel_failure_exit_code_mapping_smoke() {
 // in rqm/simulation-runner.md.
 // =====================================================================
 
-use dynamics::Registries;
-use dynamics::runner::run_simulation_with_registries;
+use heddle_md::Registries;
+use heddle_md::runner::run_simulation_with_registries;
 
 // rq-d9726854
 #[test]
@@ -781,7 +781,7 @@ fn registries_with_builtins_populates_every_inner_registry() {
 // rq-bbb25583
 #[test]
 fn register_potential_appends_to_potentials() {
-    use dynamics::forces::{
+    use heddle_md::forces::{
         ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder,
     };
     #[derive(Debug, Clone)]
@@ -861,7 +861,7 @@ cutoff = 1.0e-9
     write_init(&dir, 4, true);
     let err = run_simulation(&cfg_path).unwrap_err();
     match err {
-        RunnerError::Config(dynamics::io::ConfigError::UnknownKind { slot, kind }) => {
+        RunnerError::Config(heddle_md::io::ConfigError::UnknownKind { slot, kind }) => {
             assert_eq!(slot, "integrator");
             assert_eq!(kind, "custom-stub");
         }
@@ -876,12 +876,12 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
     // verify the runner dispatches the integrator slot to it.
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
-    use dynamics::gpu::{GpuContext, ParticleBuffers};
-    use dynamics::integrator::{
+    use heddle_md::gpu::{GpuContext, ParticleBuffers};
+    use heddle_md::integrator::{
         Integrator, IntegratorBuilder, IntegratorError, StepPlan, SubStep,
     };
-    use dynamics::pbc::SimulationBox;
-    use dynamics::timings::Timings;
+    use heddle_md::pbc::SimulationBox;
+    use heddle_md::timings::Timings;
 
     #[derive(Debug)]
     struct CountingStubIntegrator {
@@ -913,7 +913,7 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
         fn validate_params(
             &self,
             _params: &toml::Value,
-        ) -> Result<(), dynamics::io::ConfigError> {
+        ) -> Result<(), heddle_md::io::ConfigError> {
             Ok(())
         }
         fn build(
@@ -987,7 +987,7 @@ fn custom_kind_with_empty_registries_fails_with_unknown_kind() {
     let registries = Registries::new();
     let err = run_simulation_with_registries(&cfg_path, &registries).unwrap_err();
     match err {
-        RunnerError::Config(dynamics::io::ConfigError::UnknownKind { slot, kind }) => {
+        RunnerError::Config(heddle_md::io::ConfigError::UnknownKind { slot, kind }) => {
             assert_eq!(slot, "integrator");
             assert_eq!(kind, "velocity-verlet");
         }
@@ -1006,7 +1006,7 @@ fn run_simulation_rejects_invalid_config_filename() {
     std::fs::rename(&cfg_path, &bad).unwrap();
     let err = run_simulation(&bad).unwrap_err();
     match err {
-        RunnerError::Config(dynamics::io::ConfigError::InvalidConfigFilename { path }) => {
+        RunnerError::Config(heddle_md::io::ConfigError::InvalidConfigFilename { path }) => {
             assert_eq!(path, bad);
         }
         other => panic!("expected InvalidConfigFilename, got {other:?}"),
@@ -1076,13 +1076,13 @@ r_skin = 1.0e-10
 fn run_simulation_with_registries_dispatches_user_registered_potential() {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
-    use dynamics::forces::{
+    use heddle_md::forces::{
         AggregateLevel, ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext,
         PotentialBuilder, SlotOutputView,
     };
-    use dynamics::gpu::ParticleBuffers;
-    use dynamics::pbc::SimulationBox;
-    use dynamics::timings::Timings;
+    use heddle_md::gpu::ParticleBuffers;
+    use heddle_md::pbc::SimulationBox;
+    use heddle_md::timings::Timings;
 
     #[derive(Debug)]
     struct CountingStubPotential {

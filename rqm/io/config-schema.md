@@ -5,7 +5,7 @@ parameter required to predict the trajectory bit-exactly. It carries no
 positions or velocities; those live in a separate extended-XYZ initial-state
 file referenced from the config.
 
-The runner consumes the config via `dynamics run <path>` (see
+The runner consumes the config via `heddlemd run <path>` (see
 `simulation-runner.md`). Trajectory and log outputs are described in
 `trajectory-output.md` and `log-output.md` respectively.
 
@@ -985,7 +985,7 @@ runs the structural and topology-independent checks; the open registries
 do not need to be available for it. `Config::validate_against(&self,
 registries: &Registries)` runs the per-kind and cross-cutting checks
 that consult the registered builders. `Registries` lives at
-`dynamics::Registries` (see `simulation-runner.md`) and bundles the
+`heddle_md::Registries` (see `simulation-runner.md`) and bundles the
 five open registries the runner consults (integrators, thermostats,
 barostats, constraint_types, potentials).
 

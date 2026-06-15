@@ -172,13 +172,13 @@ this book or in `rqm/` where the feature is documented in full.
 - **Open registries.** Custom integrator, thermostat, barostat,
   constraint, potential, and **analysis** builders can be registered
   alongside the built-ins via `Registries::register_*`.
-- **Three CLI subcommands**: `dynamics run <config>` to execute,
-  `dynamics lint <config> [--with-gpu]` to validate inputs without
-  running, and `dynamics analyze <analysis-path>` to post-process a
+- **Three CLI subcommands**: `heddlemd run <config>` to execute,
+  `heddlemd lint <config> [--with-gpu]` to validate inputs without
+  running, and `heddlemd analyze <analysis-path>` to post-process a
   trajectory. See [CLI Reference](reference/cli.md). No environment
   variables — every parameter affecting the trajectory lives in the
   config.
-- **Input linter** for HPC contexts. `dynamics lint` runs the
+- **Input linter** for HPC contexts. `heddlemd lint` runs the
   setup-phase checks (TOML parse, filename convention, init-file
   load, topology load, pre-existing-output detection, box-vs-cutoff
   geometry) without touching the GPU; an optional `--with-gpu` flag
@@ -187,7 +187,7 @@ this book or in `rqm/` where the feature is documented in full.
   a long submission queue runs the job. Dispatches on file extension:
   `.in.toml` runs the simulation lint, `.in.analysis` runs the
   analyze lint.
-- **In-tree post-processing**: `dynamics analyze` reads a
+- **In-tree post-processing**: `heddlemd analyze` reads a
   `<root>.in.analysis` file, walks the trajectory frame-by-frame
   with `first_frame`/`last_frame`/`stride` selection, and writes one
   CSV per declared analysis. CPU-only in v1; outputs are byte-

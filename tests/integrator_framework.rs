@@ -1,15 +1,15 @@
-use dynamics::integrator::IntegratorStepExt;
-use dynamics::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
-use dynamics::gpu::{GpuContext, ParticleBuffers, init_device};
-use dynamics::integrator::{
+use heddle_md::integrator::IntegratorStepExt;
+use heddle_md::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
+use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
+use heddle_md::integrator::{
     Integrator, IntegratorBuilder, IntegratorError, IntegratorRegistry, LangevinBaoabBuilder,
     LangevinBaoabState, VelocityVerletBuilder,
 };
-use dynamics::io::SlotConfig;
-use dynamics::io::config::NeighborListConfig;
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::{KernelStage, Timings};
+use heddle_md::io::SlotConfig;
+use heddle_md::io::config::NeighborListConfig;
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::{KernelStage, Timings};
 
 fn small_state(n: usize) -> ParticleState {
     let pos: Vec<f32> = (0..n).map(|i| (i as f32) * 0.1).collect();
@@ -63,7 +63,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         None,
         &[],
         &BondList::empty(n),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(n),
         &NeighborListConfig::AllPairs,
     )
@@ -140,7 +140,7 @@ impl IntegratorBuilder for StubBuilder {
         // when the stub is first in the builders Vec.
         "velocity-verlet"
     }
-    fn validate_params(&self, _params: &toml::Value) -> Result<(), dynamics::io::ConfigError> {
+    fn validate_params(&self, _params: &toml::Value) -> Result<(), heddle_md::io::ConfigError> {
         Ok(())
     }
     fn build(
@@ -158,13 +158,13 @@ impl IntegratorBuilder for StubBuilder {
 }
 
 impl Integrator for StubIntegrator {
-    fn plan(&self, _dt: f32) -> dynamics::integrator::StepPlan {
-        dynamics::integrator::StepPlan::empty()
+    fn plan(&self, _dt: f32) -> heddle_md::integrator::StepPlan {
+        heddle_md::integrator::StepPlan::empty()
     }
 
     fn execute(
         &mut self,
-        _substep: &dynamics::integrator::SubStep,
+        _substep: &heddle_md::integrator::SubStep,
         _buffers: &mut ParticleBuffers,
         _sim_box: &mut SimulationBox,
         _timings: &mut Timings,
@@ -290,7 +290,7 @@ fn lossless_vv_step_uses_lossless_kernels() {
 fn integrator_owns_force_evaluation_inside_step() {
     // Wire up a real LJ slot so the force pipeline runs and we can confirm
     // KernelStage::LJ_PAIR_FORCE was triggered exactly once per step() call.
-    use dynamics::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
+    use heddle_md::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
     let gpu = init_device().unwrap();
     let state = small_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -311,7 +311,7 @@ fn integrator_owns_force_evaluation_inside_step() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -476,7 +476,7 @@ fn _imports_used() {
 // Orthogonal-slot framework (Thermostat + Barostat) coverage
 // =====================================================================
 
-use dynamics::integrator::{
+use heddle_md::integrator::{
     BarostatError, BarostatRegistry, ThermostatError, ThermostatRegistry,
 };
 // rq-5711d6ce
@@ -587,15 +587,15 @@ struct RecordingIntegrator {
 }
 
 impl Integrator for RecordingIntegrator {
-    fn plan(&self, dt: f32) -> dynamics::integrator::StepPlan {
-        dynamics::integrator::StepPlan {
-            steps: vec![dynamics::integrator::SubStep::KickDrift { dt, label: "rec" }],
+    fn plan(&self, dt: f32) -> heddle_md::integrator::StepPlan {
+        heddle_md::integrator::StepPlan {
+            steps: vec![heddle_md::integrator::SubStep::KickDrift { dt, label: "rec" }],
         }
     }
 
     fn execute(
         &mut self,
-        _substep: &dynamics::integrator::SubStep,
+        _substep: &heddle_md::integrator::SubStep,
         _b: &mut ParticleBuffers,
         _sb: &mut SimulationBox,
         _t: &mut Timings,
@@ -610,7 +610,7 @@ struct RecordingThermostat {
     log: CallLog,
 }
 
-impl dynamics::integrator::Thermostat for RecordingThermostat {
+impl heddle_md::integrator::Thermostat for RecordingThermostat {
     fn apply_pre(
         &mut self,
         _b: &mut ParticleBuffers,
@@ -644,7 +644,7 @@ fn dispatch_loop_orders_apply_pre_step_apply_post() {
     let log_clone_a = CallLog { events: log.events.clone() };
     let log_clone_b = CallLog { events: log.events.clone() };
     let mut integ: Box<dyn Integrator> = Box::new(RecordingIntegrator { log: log_clone_a });
-    let mut therm: Box<dyn dynamics::integrator::Thermostat> =
+    let mut therm: Box<dyn heddle_md::integrator::Thermostat> =
         Box::new(RecordingThermostat { log: log_clone_b });
 
     therm
@@ -670,7 +670,7 @@ fn dispatch_loop_orders_apply_pre_step_apply_post() {
 // refactor, see rqm/integration/framework.md).
 // =============================================================================
 
-use dynamics::integrator::{
+use heddle_md::integrator::{
     ConstraintError, run_step, run_step_no_constraint, StepPlan, SubStep,
 };
 
@@ -715,7 +715,7 @@ struct RecordingConstraint {
     log: CallLog,
 }
 
-impl dynamics::integrator::Constraint for RecordingConstraint {
+impl heddle_md::integrator::Constraint for RecordingConstraint {
     fn apply_before_drift(
         &mut self,
         _b: &mut ParticleBuffers,
@@ -824,10 +824,10 @@ fn plan_with_multiple_force_evals_dispatches_each() {
             steps: vec![
                 SubStep::KickHalf { dt: 0.1, label: "k1" },
                 SubStep::Drift { dt: 0.1, label: "d1" },
-                SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) },
+                SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::KickHalf { dt: 0.1, label: "k2" },
                 SubStep::Drift { dt: 0.1, label: "d2" },
-                SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) },
+                SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::KickHalf { dt: 0.1, label: "k3" },
             ],
         },
@@ -871,7 +871,7 @@ fn execute_with_force_eval_directly_returns_unexpected_substep() {
         log: CallLog { events: log.events.clone() },
     };
     let err = stub
-        .execute(&SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) }, &mut buffers, &mut sim_box, &mut timings)
+        .execute(&SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) }, &mut buffers, &mut sim_box, &mut timings)
         .unwrap_err();
     match err {
         IntegratorError::UnexpectedSubStep { variant } => {
@@ -891,7 +891,7 @@ fn plan_with_one_drift_fires_before_after_drift() {
         plan: StepPlan {
             steps: vec![
                 SubStep::Drift { dt: 0.1, label: "d" },
-                SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) },
+                SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::KickHalf { dt: 0.1, label: "k" },
             ],
         },
@@ -930,7 +930,7 @@ fn plan_with_two_drifts_fires_before_after_drift_twice() {
                 SubStep::Drift { dt: 0.1, label: "A_pre" },
                 SubStep::Custom { dt: 0.1, label: "O" },
                 SubStep::Drift { dt: 0.1, label: "A_post" },
-                SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) },
+                SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::KickHalf { dt: 0.1, label: "B" },
             ],
         },
@@ -975,7 +975,7 @@ fn plan_whose_final_substep_is_not_a_kick_does_not_fire_after_kick() {
         plan: StepPlan {
             steps: vec![
                 SubStep::KickHalf { dt: 0.1, label: "k" },
-                SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) },
+                SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::Custom { dt: 0.1, label: "post" },
             ],
         },
@@ -1043,7 +1043,7 @@ fn install_constraint_hooks_false_suppresses_all_hooks() {
         plan: StepPlan {
             steps: vec![
                 SubStep::KickDrift { dt: 0.1, label: "kd" },
-                SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) },
+                SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
                 SubStep::KickHalf { dt: 0.1, label: "k" },
             ],
         },
@@ -1168,7 +1168,7 @@ fn validate_params_rejects_out_of_domain_field() {
         "friction = -1.0\ntemperature = 300.0\nseed = 1\n",
     );
     match b.validate_params(&p.params).unwrap_err() {
-        dynamics::io::ConfigError::InvalidValue { field, .. } => {
+        heddle_md::io::ConfigError::InvalidValue { field, .. } => {
             assert_eq!(field, "integrator.friction");
         }
         other => panic!("expected InvalidValue, got {other:?}"),
@@ -1182,7 +1182,7 @@ fn validate_params_rejects_unknown_field() {
     let b = registry.lookup("velocity-verlet").unwrap();
     let p = SlotConfig::from_params_str("velocity-verlet", "lossless = false\njunk = true\n");
     match b.validate_params(&p.params).unwrap_err() {
-        dynamics::io::ConfigError::Parse { .. } => {}
+        heddle_md::io::ConfigError::Parse { .. } => {}
         other => panic!("expected Parse, got {other:?}"),
     }
 }
@@ -1194,7 +1194,7 @@ fn validate_params_rejects_unknown_field() {
 // rqm/integration/framework.md.
 // =====================================================================
 
-use dynamics::forces::ForceClass;
+use heddle_md::forces::ForceClass;
 
 // rq-751bbb3c
 #[test]
@@ -1208,7 +1208,7 @@ fn execute_with_force_eval_some_class_also_returns_unexpected_substep() {
     };
     let err = stub
         .execute(
-            &SubStep::ForceEval { class: Some(ForceClass::Fast), level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) },
+            &SubStep::ForceEval { class: Some(ForceClass::Fast), level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) },
             &mut buffers,
             &mut sim_box,
             &mut timings,
@@ -1233,20 +1233,20 @@ fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_10();
     let mut ff = ForceField::new(
-        &dynamics::forces::PotentialRegistry::with_builtins(),
+        &heddle_md::forces::PotentialRegistry::with_builtins(),
         &gpu,
         2,
         &sim_box,
-        &[dynamics::io::config::ParticleTypeConfig {
+        &[heddle_md::io::config::ParticleTypeConfig {
             name: "Ar".to_string(),
             mass: 1.0,
             charge: 0.0,
         }],
-        &[dynamics::io::config::PairInteractionConfig {
+        &[heddle_md::io::config::PairInteractionConfig {
             between: ("Ar".to_string(), "Ar".to_string()),
             cutoff: 1.0,
             r_switch: 1.0,
-            potential: dynamics::io::config::PairPotentialParams::LennardJones {
+            potential: heddle_md::io::config::PairPotentialParams::LennardJones {
                 sigma: 1.0,
                 epsilon: 1.0,
             },
@@ -1257,7 +1257,7 @@ fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
         None,
         &[],
         &BondList::empty(2),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -1266,7 +1266,7 @@ fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
     let log = CallLog::default();
     let mut stub = PlanStub {
         plan: StepPlan {
-            steps: vec![SubStep::ForceEval { class: Some(ForceClass::Fast), level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) }],
+            steps: vec![SubStep::ForceEval { class: Some(ForceClass::Fast), level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) }],
         },
         log: CallLog { events: log.events.clone() },
     };
@@ -1292,20 +1292,20 @@ fn force_eval_some_slow_class_on_fast_only_ff_is_noop() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_10();
     let mut ff = ForceField::new(
-        &dynamics::forces::PotentialRegistry::with_builtins(),
+        &heddle_md::forces::PotentialRegistry::with_builtins(),
         &gpu,
         2,
         &sim_box,
-        &[dynamics::io::config::ParticleTypeConfig {
+        &[heddle_md::io::config::ParticleTypeConfig {
             name: "Ar".to_string(),
             mass: 1.0,
             charge: 0.0,
         }],
-        &[dynamics::io::config::PairInteractionConfig {
+        &[heddle_md::io::config::PairInteractionConfig {
             between: ("Ar".to_string(), "Ar".to_string()),
             cutoff: 1.0,
             r_switch: 1.0,
-            potential: dynamics::io::config::PairPotentialParams::LennardJones {
+            potential: heddle_md::io::config::PairPotentialParams::LennardJones {
                 sigma: 1.0,
                 epsilon: 1.0,
             },
@@ -1316,7 +1316,7 @@ fn force_eval_some_slow_class_on_fast_only_ff_is_noop() {
         None,
         &[],
         &BondList::empty(2),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -1325,7 +1325,7 @@ fn force_eval_some_slow_class_on_fast_only_ff_is_noop() {
     let log = CallLog::default();
     let mut stub = PlanStub {
         plan: StepPlan {
-            steps: vec![SubStep::ForceEval { class: Some(ForceClass::Slow), level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) }],
+            steps: vec![SubStep::ForceEval { class: Some(ForceClass::Slow), level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) }],
         },
         log: CallLog { events: log.events.clone() },
     };
@@ -1350,20 +1350,20 @@ fn force_eval_none_class_continues_to_dispatch_to_step() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box = box_10();
     let mut ff = ForceField::new(
-        &dynamics::forces::PotentialRegistry::with_builtins(),
+        &heddle_md::forces::PotentialRegistry::with_builtins(),
         &gpu,
         2,
         &sim_box,
-        &[dynamics::io::config::ParticleTypeConfig {
+        &[heddle_md::io::config::ParticleTypeConfig {
             name: "Ar".to_string(),
             mass: 1.0,
             charge: 0.0,
         }],
-        &[dynamics::io::config::PairInteractionConfig {
+        &[heddle_md::io::config::PairInteractionConfig {
             between: ("Ar".to_string(), "Ar".to_string()),
             cutoff: 1.0,
             r_switch: 1.0,
-            potential: dynamics::io::config::PairPotentialParams::LennardJones {
+            potential: heddle_md::io::config::PairPotentialParams::LennardJones {
                 sigma: 1.0,
                 epsilon: 1.0,
             },
@@ -1374,7 +1374,7 @@ fn force_eval_none_class_continues_to_dispatch_to_step() {
         None,
         &[],
         &BondList::empty(2),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs,
     )
@@ -1383,7 +1383,7 @@ fn force_eval_none_class_continues_to_dispatch_to_step() {
     let log = CallLog::default();
     let mut stub = PlanStub {
         plan: StepPlan {
-            steps: vec![SubStep::ForceEval { class: None, level: Some(dynamics::forces::AggregateLevel::ForcesAndScalars) }],
+            steps: vec![SubStep::ForceEval { class: None, level: Some(heddle_md::forces::AggregateLevel::ForcesAndScalars) }],
         },
         log: CallLog { events: log.events.clone() },
     };
@@ -1402,8 +1402,8 @@ fn force_eval_none_class_continues_to_dispatch_to_step() {
 // rq-9f551521
 #[test]
 fn resolve_aggregate_level_upgrades_on_a_logging_step() {
-    use dynamics::forces::AggregateLevel;
-    use dynamics::integrator::resolve_aggregate_level;
+    use heddle_md::forces::AggregateLevel;
+    use heddle_md::integrator::resolve_aggregate_level;
     let resolved = resolve_aggregate_level(Some(AggregateLevel::ForcesOnly), true);
     assert!(matches!(resolved, AggregateLevel::ForcesAndScalars));
 }
@@ -1411,8 +1411,8 @@ fn resolve_aggregate_level_upgrades_on_a_logging_step() {
 // rq-1ee2ef41
 #[test]
 fn resolve_aggregate_level_upgrades_on_a_trajectory_frame() {
-    use dynamics::forces::AggregateLevel;
-    use dynamics::integrator::resolve_aggregate_level;
+    use heddle_md::forces::AggregateLevel;
+    use heddle_md::integrator::resolve_aggregate_level;
     // None sub-step level + runner_needs_scalars upgrades to ForcesAndScalars.
     let resolved = resolve_aggregate_level(None, true);
     assert!(matches!(resolved, AggregateLevel::ForcesAndScalars));
@@ -1421,8 +1421,8 @@ fn resolve_aggregate_level_upgrades_on_a_trajectory_frame() {
 // rq-75a19aca
 #[test]
 fn resolve_aggregate_level_keeps_forces_and_scalars_when_already_requested() {
-    use dynamics::forces::AggregateLevel;
-    use dynamics::integrator::resolve_aggregate_level;
+    use heddle_md::forces::AggregateLevel;
+    use heddle_md::integrator::resolve_aggregate_level;
     let resolved = resolve_aggregate_level(Some(AggregateLevel::ForcesAndScalars), false);
     assert!(matches!(resolved, AggregateLevel::ForcesAndScalars));
 }
@@ -1430,8 +1430,8 @@ fn resolve_aggregate_level_keeps_forces_and_scalars_when_already_requested() {
 // rq-5e5f48da
 #[test]
 fn resolve_aggregate_level_falls_through_to_forces_only_when_no_logging_or_traj() {
-    use dynamics::forces::AggregateLevel;
-    use dynamics::integrator::resolve_aggregate_level;
+    use heddle_md::forces::AggregateLevel;
+    use heddle_md::integrator::resolve_aggregate_level;
     let resolved = resolve_aggregate_level(Some(AggregateLevel::ForcesOnly), false);
     assert!(matches!(resolved, AggregateLevel::ForcesOnly));
     // None sub-step + no runner request → defaults to ForcesOnly.
@@ -1442,8 +1442,8 @@ fn resolve_aggregate_level_falls_through_to_forces_only_when_no_logging_or_traj(
 // rq-5a7e597e
 #[test]
 fn velocity_verlet_plan_requests_forces_only_by_default() {
-    use dynamics::forces::AggregateLevel;
-    use dynamics::integrator::SubStep;
+    use heddle_md::forces::AggregateLevel;
+    use heddle_md::integrator::SubStep;
     let gpu = init_device().unwrap();
     let kind = SlotConfig::from_params_str("velocity-verlet", "lossless = false\n");
     let integ = IntegratorRegistry::with_builtins()
@@ -1464,8 +1464,8 @@ fn velocity_verlet_plan_requests_forces_only_by_default() {
 // rq-3a9cb990
 #[test]
 fn mtk_npt_plan_requests_forces_and_scalars() {
-    use dynamics::forces::AggregateLevel;
-    use dynamics::integrator::SubStep;
+    use heddle_md::forces::AggregateLevel;
+    use heddle_md::integrator::SubStep;
     let gpu = init_device().unwrap();
     let kind = SlotConfig::from_params_str(
         "mtk-npt",

@@ -1,4 +1,4 @@
-# Feature: `dynamics run` Simulation Runner <!-- rq-357909e4 -->
+# Feature: `heddlemd run` Simulation Runner <!-- rq-357909e4 -->
 
 The simulation runner is the command-line entry point that turns a TOML
 configuration file into a complete simulation. It reads the config and the
@@ -14,12 +14,12 @@ subsystem; it is the integration point.
 
 ## CLI <!-- rq-82d0c34a -->
 
-The `dynamics` binary carries three subcommands:
+The `heddlemd` binary carries three subcommands:
 
 ```
-dynamics run     <config-path>
-dynamics lint    <config-path> [--with-gpu]
-dynamics analyze <analysis-path>
+heddlemd run     <config-path>
+heddlemd lint    <config-path> [--with-gpu]
+heddlemd analyze <analysis-path>
 ```
 
 `<config-path>` is the path to a TOML simulation config (see
@@ -65,7 +65,7 @@ extension:
   convention error variant for the inferred kind.
 
 Designed for HPC contexts where a long submission queue makes
-trial-and-error iteration expensive: `dynamics lint` runs cheaply
+trial-and-error iteration expensive: `heddlemd lint` runs cheaply
 on a login node and reports every issue that would cause a `run`
 or `analyze` to fail at setup time.
 
@@ -104,16 +104,16 @@ first built-in analysis kind is documented in
 
 ### Usage error messages <!-- rq-7e5cb9f8 -->
 
-`dynamics` with no arguments, an unrecognised subcommand, a
+`heddlemd` with no arguments, an unrecognised subcommand, a
 recognised subcommand without its required path argument,
 `lint --with-gpu` against an `.in.analysis` path, or `lint` with
 any other unrecognised flag prints the following usage block to
 stderr and exits with code `1`:
 
 ```
-usage: dynamics run     <config-path>
-       dynamics lint    <config-path> [--with-gpu]
-       dynamics analyze <analysis-path>
+usage: heddlemd run     <config-path>
+       heddlemd lint    <config-path> [--with-gpu]
+       heddlemd analyze <analysis-path>
 ```
 
 ## Runner flow <!-- rq-ef902cf6 -->
@@ -464,7 +464,7 @@ values throughout, in every phase.
 
 ## Lint flow <!-- rq-c02c6b45 -->
 
-`dynamics lint <config-path> [--with-gpu]` exercises every setup-phase
+`heddlemd lint <config-path> [--with-gpu]` exercises every setup-phase
 check `run` performs, but stops after the last setup check, writes no
 output files, and never enters the integration loop. The pipeline
 reuses the same loader functions, the same validators, and the same
@@ -551,7 +551,7 @@ single space, and a description.
 Successful CPU-only example:
 
 ```
-[dynamics lint] OK
+[heddlemd lint] OK
   config       /tmp/sim/argon.in.toml
   output paths none pre-exist
   init         resolved, 10000 particles, box 8.0e-9 × 8.0e-9 × 1.0e-8 m
@@ -563,7 +563,7 @@ Successful CPU-only example:
 Successful `--with-gpu` example:
 
 ```
-[dynamics lint] OK
+[heddlemd lint] OK
   config       /tmp/sim/argon.in.toml
   output paths none pre-exist
   init         resolved, 10000 particles, box 8.0e-9 × 8.0e-9 × 1.0e-8 m
@@ -575,7 +575,7 @@ Successful `--with-gpu` example:
 Failure at `box/cutoff` (CPU-only):
 
 ```
-[dynamics lint] FAIL
+[heddlemd lint] FAIL
   config       /tmp/sim/argon.in.toml
   output paths none pre-exist
   init         resolved, 10000 particles, box 2.0e-9 × 5.0e-9 × 5.0e-9 m
@@ -588,7 +588,7 @@ error: simulation box perpendicular width along lattice direction `a` is 2e-9, b
 Failure at `config` (filename-convention violation):
 
 ```
-[dynamics lint] FAIL
+[heddlemd lint] FAIL
   config       FAIL — /tmp/sim/argon.toml does not end in `.in.toml`
   output paths skipped (earlier check failed)
   init         skipped (earlier check failed)
@@ -621,7 +621,7 @@ identical constraint topology) produce byte-identical velocity arrays.
 The runner constructs `rand_chacha::ChaCha8Rng::seed_from_u64(seed)`. This
 yields a deterministic sequence across `rand_chacha 0.3` patch releases.
 The `rand_chacha` and `rand` crates are added as runtime dependencies of
-the `dynamics` crate.
+the `heddle-md` crate.
 
 ### Sampling order <!-- rq-2249f685 -->
 
@@ -750,7 +750,7 @@ approximately each 1% completion (i.e. every `max(1, n_steps / 100)` steps),
 and at completion. Each line has the form:
 
 ```
-[dynamics] step 1000/10000 (10.0%) — 3.2e4 steps/sec
+[heddlemd] step 1000/10000 (10.0%) — 3.2e4 steps/sec
 ```
 
 Step counts past `n_steps / 100` rounding always include the final step.
@@ -765,9 +765,9 @@ the runner emits one line per phase plus a final aggregate line to
 stdout. Example for a two-phase config:
 
 ```
-[dynamics] phase `equil`: 5000 steps in 96 ms (frames: 0, log rows: 51)
-[dynamics] phase `prod`: 10000 steps in 312 ms (frames: 101, log rows: 101)
-[dynamics] complete: 2 phases, 15000 steps in 410 ms
+[heddlemd] phase `equil`: 5000 steps in 96 ms (frames: 0, log rows: 51)
+[heddlemd] phase `prod`: 10000 steps in 312 ms (frames: 101, log rows: 101)
+[heddlemd] complete: 2 phases, 15000 steps in 410 ms
 ```
 
 Per-phase lines carry:
@@ -874,8 +874,8 @@ wrapper that dispatches between the two on the first CLI argument.
     `Fail`, or `None` when no stage failed.
   - `write_to(&self, w: &mut dyn std::io::Write) -> std::io::Result<()>`
     — emits the human-readable per-stage block documented in
-    *Lint flow*'s *Output format*: a `[dynamics lint] OK` or
-    `[dynamics lint] FAIL` header followed by one indented line per
+    *Lint flow*'s *Output format*: a `[heddlemd lint] OK` or
+    `[heddlemd lint] FAIL` header followed by one indented line per
     stage. Does **not** emit the trailing `error: ...` line; that
     line is written to stderr by the CLI wrapper using
     `first_failure().map(|e| format!("error: {e}"))`.
@@ -908,8 +908,8 @@ wrapper that dispatches between the two on the first CLI argument.
   iff no stage has a `Fail` status.
 
 - `SimulationSetup` — public struct owning every piece of cross-phase <!-- rq-b1a2d006 -->
-  state that a run requires. Lives at `dynamics::runner::SimulationSetup`
-  and is also re-exported at `dynamics::SimulationSetup` alongside
+  state that a run requires. Lives at `heddle_md::runner::SimulationSetup`
+  and is also re-exported at `heddle_md::SimulationSetup` alongside
   `Registries`.
 
   Fields (all `pub`; the rqm enumerates them so external callers can
@@ -1094,7 +1094,7 @@ wrapper that dispatches between the two on the first CLI argument.
     *Lint flow*'s *`--with-gpu` stages* and records the outcome.
 
 - `Registries` — bundled handle to every open builder registry the <!-- rq-74bb02cc -->
-  runner consults. Lives at `dynamics::Registries` (the crate root,
+  runner consults. Lives at `heddle_md::Registries` (the crate root,
   so it does not appear to belong to any single subsystem). Fields:
   - `integrators: IntegratorRegistry`
   - `thermostats: ThermostatRegistry`
@@ -1105,7 +1105,7 @@ wrapper that dispatches between the two on the first CLI argument.
     minimization branch of the per-phase loop; see
     `rqm/minimization/steepest-descent.md`.
   - `analyses: AnalysisRegistry` — registry consulted by
-    `dynamics analyze`; see `rqm/analysis/framework.md`.
+    `heddlemd analyze`; see `rqm/analysis/framework.md`.
 
   Constructors:
   - `Registries::with_builtins() -> Registries` — every inner
@@ -1146,8 +1146,8 @@ wrapper that dispatches between the two on the first CLI argument.
   ```
 
   The inner registry types remain accessible by their own paths
-  (`dynamics::integrator::IntegratorRegistry`,
-  `dynamics::forces::PotentialRegistry`, etc.) for callers that want
+  (`heddle_md::integrator::IntegratorRegistry`,
+  `heddle_md::forces::PotentialRegistry`, etc.) for callers that want
   to construct or compose a single registry without going through
   the bundle.
 
@@ -1167,7 +1167,7 @@ wrapper that dispatches between the two on the first CLI argument.
     *Usage error messages* and exits `1`.
   - The bundled CLI does not expose any mechanism for registering
     custom builders; a binary that wants custom builders is a Rust
-    program depending on `dynamics` that constructs its own
+    program depending on `heddle-md` that constructs its own
     `Registries` and calls `run_simulation_with_registries` or
     `lint_simulation_with_registries` directly.
 
@@ -1185,12 +1185,12 @@ The runner preserves the project's bit-wise reproducibility invariant:
 - The Maxwell-Boltzmann RNG is `ChaCha8Rng::seed_from_u64(seed)` and is
   consumed in the order specified in *Sampling order*.
 
-Two invocations of `dynamics run sim.toml` with identical inputs on the
+Two invocations of `heddlemd run sim.toml` with identical inputs on the
 same hardware produce trajectory files and log files that are byte-identical.
 
 ## Out of Scope <!-- rq-1bf226c9 -->
 
-- Restart files and `dynamics resume` (separate planned feature).
+- Restart files and `heddlemd resume` (separate planned feature).
 - Multi-GPU and multi-host execution.
 - Per-step force-field switching, time-varying parameters.
 - Thermostat / barostat composition logic. The runner chains the
@@ -1219,7 +1219,7 @@ same hardware produce trajectory files and log files that are byte-identical.
 ## Gherkin Scenarios <!-- rq-459d8e74 -->
 
 ```gherkin
-Feature: dynamics run simulation runner
+Feature: heddlemd run simulation runner
 
   Background:
     Given a CUDA-capable GPU available as device 0
@@ -1232,43 +1232,43 @@ Feature: dynamics run simulation runner
     Given tmp/sim.in.toml is a valid one-type config with n_steps=10, dt=1.0e-15,
       seed=42, temperature=0.0, trajectory_every=5, log_every=5
     And tmp/sim.in.xyz is a valid init file with N=2 particles inside the box, no velocities
-    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 0
     And tmp/sim.out.xyz exists and contains 3 frames (steps 0, 5, 10)
     And tmp/sim.out.log exists and contains a header plus 3 rows (steps 0, 5, 10)
-    And the final-summary line on stdout matches "[dynamics] complete: 10 steps in .* (frames: 3, log rows: 3)"
+    And the final-summary line on stdout matches "[heddlemd] complete: 10 steps in .* (frames: 3, log rows: 3)"
 
   @rq-2a36b95f
   Scenario: Missing CLI argument prints usage and exits 1
-    When dynamics is invoked with arguments []
+    When heddlemd is invoked with arguments []
     Then it exits with code 1
-    And stderr contains "usage: dynamics run <config-path>"
+    And stderr contains "usage: heddlemd run <config-path>"
 
   @rq-2214f0a1
   Scenario: Unrecognised subcommand prints usage and exits 1
-    When dynamics is invoked with arguments ["benchmark"]
+    When heddlemd is invoked with arguments ["benchmark"]
     Then it exits with code 1
-    And stderr contains "usage: dynamics run <config-path>"
+    And stderr contains "usage: heddlemd run <config-path>"
 
   # --- Config and init failures ---
 
   @rq-b746e796
   Scenario: Config does not exist
-    When dynamics is invoked with arguments ["run", "tmp/no-such.in.toml"]
+    When heddlemd is invoked with arguments ["run", "tmp/no-such.in.toml"]
     Then it exits with code 1
     And stderr contains "error: " and "no-such.in.toml"
 
   @rq-6606584b
   Scenario: Config rejected by load_config
     Given tmp/sim.in.toml has schema_version=2
-    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stderr contains "UnsupportedSchemaVersion"
 
   @rq-91f5f34e
   Scenario: Config rejected by the filename convention
     Given tmp/sim.toml is otherwise valid (but lacks the `.in.toml` suffix)
-    When dynamics is invoked with arguments ["run", "tmp/sim.toml"]
+    When heddlemd is invoked with arguments ["run", "tmp/sim.toml"]
     Then it exits with code 1
     And stderr contains "InvalidConfigFilename" and "sim.toml"
     And the file at tmp/sim.toml was not opened
@@ -1277,7 +1277,7 @@ Feature: dynamics run simulation runner
   Scenario: Init file rejected by load_init_state
     Given tmp/sim.in.toml references init="bad.xyz"
     And tmp/bad.xyz has a position outside the primary cell
-    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stderr contains "PositionOutsideBox"
 
@@ -1287,7 +1287,7 @@ Feature: dynamics run simulation runner
   Scenario: Pre-flight refuses to overwrite existing trajectory
     Given tmp/sim.in.toml is valid with trajectory_every=5
     And tmp/sim.out.xyz already exists
-    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stderr contains "OutputExists" and "sim.out.xyz"
     And the init file is not read (verified by check that load_init_state was not entered)
@@ -1296,7 +1296,7 @@ Feature: dynamics run simulation runner
   Scenario: Pre-flight refuses to overwrite existing log
     Given tmp/sim.in.toml is valid with log_every=5
     And tmp/sim.out.log already exists
-    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stderr contains "OutputExists" and "sim.out.log"
 
@@ -1305,7 +1305,7 @@ Feature: dynamics run simulation runner
     Given tmp/sim.in.toml has trajectory_every=0 and log_every=0
     And tmp/sim.out.xyz and tmp/sim.out.log both already exist with arbitrary content
     And tmp/sim.out.timings does not exist
-    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 0
     And tmp/sim.out.xyz is unchanged
     And tmp/sim.out.log is unchanged
@@ -1315,7 +1315,7 @@ Feature: dynamics run simulation runner
   Scenario: Pre-flight refuses to overwrite existing timings file
     Given tmp/sim.in.toml is valid
     And tmp/sim.out.timings already exists with arbitrary content
-    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stderr contains "OutputExists" and "sim.out.timings"
 
@@ -1325,7 +1325,7 @@ Feature: dynamics run simulation runner
   Scenario: Sampled velocities round-trip to the configured temperature
     Given tmp/sim.in.toml has seed=1, temperature=300.0, n_steps=0
     And tmp/sim.in.xyz has 100 particles with positions but no velocities
-    When dynamics is invoked
+    When heddlemd is invoked
     Then it exits with code 0
     And the step-0 log row's kinetic_energy is greater than 0
     And the step-0 log row's temperature equals 300.0 within a relative tolerance of 1e-4
@@ -1336,39 +1336,39 @@ Feature: dynamics run simulation runner
   Scenario: Explicit init velocities override sampled velocities
     Given tmp/sim.in.xyz declares velocities of (1.0, 0.0, 0.0) m/s for every particle
     And tmp/sim.in.toml has temperature=300.0 (would normally sample)
-    When dynamics is invoked
+    When heddlemd is invoked
     Then the step-0 log row's kinetic_energy equals 0.5 * sum(m_i) * 1.0^2 exactly (no RNG consumed)
 
   @rq-f8df9364
   Scenario: Velocity generation is deterministic in the seed
     Given two identical configs and init files, both with no velocities in the init
-    When dynamics is invoked on each
+    When heddlemd is invoked on each
     Then the two resulting log files are byte-identical
     And the two resulting trajectory files are byte-identical
 
   @rq-81b241e7
   Scenario: Different seeds produce different velocities
     Given two configs identical except seed=1 vs seed=2
-    When dynamics is invoked on each
+    When heddlemd is invoked on each
     Then the two resulting log files differ on the step-0 row's kinetic_energy
 
   @rq-3c17477d
   Scenario: Total momentum after generation is zero (within f32 round-off)
     Given a config with seed=42, temperature=300.0, N=64 particles, equal masses
-    When dynamics is invoked with n_steps=0
+    When heddlemd is invoked with n_steps=0
     And the per-axis momenta are computed from the step-0 frame velocities
     Then |p_x|, |p_y|, |p_z| are each less than 1e-3 times the typical thermal momentum
 
   @rq-f7e2d0f1
   Scenario: temperature=0 yields exactly zero velocities and skips momentum subtraction and rescaling
     Given a config with temperature=0.0 and N=4
-    When dynamics is invoked with n_steps=0
+    When heddlemd is invoked with n_steps=0
     Then every velocity component written to the step-0 frame is exactly 0.0_f32
 
   @rq-d82ce4aa
   Scenario: Single-particle generated velocities are zeroed for lack of thermal degrees of freedom
     Given a config with seed=1, temperature=300.0, and N=1, with no init velocities
-    When dynamics is invoked with n_steps=0
+    When heddlemd is invoked with n_steps=0
     Then the rescale step sets the single particle's velocity components to exactly zero
       (a centred one-particle system has no thermal degrees of freedom)
     And the step-0 log row's kinetic_energy is exactly 0.0 and temperature is exactly 0.0
@@ -1378,33 +1378,33 @@ Feature: dynamics run simulation runner
   @rq-985230a5
   Scenario: Loop executes exactly n_steps integration steps
     Given a config with n_steps=7 and trajectory_every=1 and log_every=1
-    When dynamics is invoked
+    When heddlemd is invoked
     Then the trajectory contains 8 frames (steps 0..=7)
     And the log contains 8 rows (steps 0..=7)
 
   @rq-18f7fce9
   Scenario: trajectory_every > n_steps writes only the step-0 frame
     Given a config with n_steps=5 and trajectory_every=100
-    When dynamics is invoked
+    When heddlemd is invoked
     Then the trajectory contains exactly 1 frame at step=0
 
   @rq-56ad97f1
   Scenario: log_every > n_steps writes only the step-0 row
     Given a config with n_steps=5 and log_every=100
-    When dynamics is invoked
+    When heddlemd is invoked
     Then the log contains the header plus exactly 1 row at step=0
 
   @rq-ff707382
   Scenario: n_steps = 0 writes only step-0 outputs
     Given a config with n_steps=0, trajectory_every=10, log_every=10
-    When dynamics is invoked
+    When heddlemd is invoked
     Then the trajectory contains exactly 1 frame at step=0
     And the log contains the header plus exactly 1 row at step=0
 
   @rq-fe1eaade
   Scenario: Reproducibility byte-for-byte across two identical runs
     Given a config with n_steps=200 and explicit init velocities
-    When dynamics is invoked twice on the same files
+    When heddlemd is invoked twice on the same files
     Then the two resulting trajectory files are byte-identical
     And the two resulting log files are byte-identical
 
@@ -1413,7 +1413,7 @@ Feature: dynamics run simulation runner
   @rq-9eb167f0
   Scenario: Lossless mode selects the lossless integrator kernels
     Given a config with integrator.kind="velocity-verlet" and lossless=true
-    When dynamics is invoked
+    When heddlemd is invoked
     Then it exits with code 0
     And the simulation completes without GPU error
 
@@ -1428,7 +1428,7 @@ Feature: dynamics run simulation runner
   Scenario: Langevin BAOAB runs end-to-end through the runner
     Given a valid config with [integrator] kind="langevin-baoab",
       friction=1.0e12, temperature=300.0, seed=42, n_steps=5
-    When dynamics is invoked
+    When heddlemd is invoked
     Then it exits with code 0
     And the trajectory and log files exist
     And the timings file contains rows for KernelStage::LangevinKickHalf,
@@ -1438,7 +1438,7 @@ Feature: dynamics run simulation runner
   Scenario: Switching integrator.kind changes the trajectory
     Given two configs identical except [integrator] kind="velocity-verlet" vs
       [integrator] kind="langevin-baoab" (with friction=1.0e12, temperature=300.0, seed=1)
-    When dynamics is invoked on each
+    When heddlemd is invoked on each
     Then the two trajectory files differ
 
   # --- Multi-type restriction ---
@@ -1446,7 +1446,7 @@ Feature: dynamics run simulation runner
   @rq-34db7b7b
   Scenario: Refuse to run with multiple types
     Given tmp/sim.in.toml declares particle_types ["Ar", "Kr"] and all three pair interactions
-    When dynamics is invoked
+    When heddlemd is invoked
     Then it exits with code 1
     And stderr contains "MultiTypeUnsupported"
 
@@ -1456,7 +1456,7 @@ Feature: dynamics run simulation runner
   Scenario: Run an empty (N=0) simulation
     Given tmp/sim.in.xyz declares N=0 with a valid Lattice
     And tmp/sim.in.toml is otherwise valid with n_steps=5, trajectory_every=1, log_every=1
-    When dynamics is invoked
+    When heddlemd is invoked
     Then it exits with code 0
     And the trajectory contains 6 frames each with N=0 data rows
     And every log row has kinetic_energy=0 and temperature=0
@@ -1468,7 +1468,7 @@ Feature: dynamics run simulation runner
     Given tmp/sim.in.toml has [neighbor_list] mode="cell-list" r_skin=1.0e-10
       and one [[pair_interactions]] with cutoff=1.0e-9
     And tmp/sim.in.xyz has an orthorhombic box with lx=2.0e-9, ly=lz=5.0e-9
-    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stderr contains "CellListBoxTooSmall" and "a" and "2"
 
@@ -1479,7 +1479,7 @@ Feature: dynamics run simulation runner
       and a [coulomb] table with cutoff=2.0e-9 (the larger of the two)
     And tmp/sim.in.xyz has an orthorhombic box with lx=ly=lz=5.0e-9
       (so 3*(2.0e-9 + 1.0e-10) = 6.3e-9 > 5.0e-9)
-    When dynamics is invoked with arguments ["run", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["run", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stderr contains "CellListBoxTooSmall"
 
@@ -1488,7 +1488,7 @@ Feature: dynamics run simulation runner
     Given tmp/sim.in.toml has [neighbor_list] mode="all-pairs"
       and one [[pair_interactions]] with cutoff=1.0e-9
     And tmp/sim.in.xyz has box edges (2.0e-9, 2.0e-9, 2.0e-9)
-    When dynamics is invoked
+    When heddlemd is invoked
     Then it exits with code 0
 
   # --- GPU initialisation failure ---
@@ -1496,7 +1496,7 @@ Feature: dynamics run simulation runner
   @rq-57c1b6a3
   Scenario: No GPU available
     Given no CUDA-capable GPU is present
-    When dynamics is invoked with a valid config
+    When heddlemd is invoked with a valid config
     Then it exits with code 1
     And stderr contains "Gpu" or "CUDA"
 
@@ -1516,7 +1516,7 @@ Feature: dynamics run simulation runner
   @rq-889076d5
   Scenario: Kernel failure mid-loop returns exit code 2
     Given a config with parameters that would cause a kernel launch failure on step 5
-    When dynamics is invoked
+    When heddlemd is invoked
     Then it exits with code 2
     And the partial trajectory and log files exist with frames/rows up to the last successful write
 
@@ -1690,9 +1690,9 @@ Feature: dynamics run simulation runner
     Given tmp/sim.in.toml is a valid one-type config (no `--with-gpu`)
     And tmp/sim.in.xyz is a valid init file matching the config
     And none of tmp/sim.out.xyz, tmp/sim.out.log, tmp/sim.out.timings exist
-    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["lint", "tmp/sim.in.toml"]
     Then it exits with code 0
-    And stdout begins with "[dynamics lint] OK"
+    And stdout begins with "[heddlemd lint] OK"
     And stdout contains a line whose label is "config" and whose description names tmp/sim.in.toml
     And stdout contains a line whose label is "output paths" and whose description is "none pre-exist"
     And stdout contains a line whose label is "init" and whose description names the particle count and box dimensions
@@ -1703,9 +1703,9 @@ Feature: dynamics run simulation runner
   @rq-b54d8111
   Scenario: Lint reports filename-convention violations under the config stage
     Given a valid config body is written to tmp/sim.toml (no `.in.toml` suffix)
-    When dynamics is invoked with arguments ["lint", "tmp/sim.toml"]
+    When heddlemd is invoked with arguments ["lint", "tmp/sim.toml"]
     Then it exits with code 1
-    And stdout begins with "[dynamics lint] FAIL"
+    And stdout begins with "[heddlemd lint] FAIL"
     And stdout contains a line whose label is "config" and whose description begins with "FAIL —"
     And stdout contains a line whose label is "init" and whose description is "skipped (earlier check failed)"
     And stderr contains "error: " and "InvalidConfigFilename" or "does not end in `.in.toml`"
@@ -1715,7 +1715,7 @@ Feature: dynamics run simulation runner
     Given tmp/sim.in.toml is valid with trajectory_every=5
     And tmp/sim.in.xyz is a valid init file
     And tmp/sim.out.xyz already exists with arbitrary content
-    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["lint", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stdout contains a line whose label is "output paths" and whose description begins with "FAIL —" and names tmp/sim.out.xyz
     And stdout contains a line whose label is "init" and whose description is "skipped (earlier check failed)"
@@ -1727,7 +1727,7 @@ Feature: dynamics run simulation runner
     Given tmp/sim.in.toml has [neighbor_list] mode="cell-list" r_skin=1.0e-10
       and one [[pair_interactions]] with cutoff=1.0e-9
     And tmp/sim.in.xyz has an orthorhombic box with lx=2.0e-9, ly=lz=5.0e-9
-    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["lint", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stdout contains a line whose label is "init" and whose description names the box dimensions
     And stdout contains a line whose label is "box/cutoff" and whose description begins with "FAIL —" and names direction `a`
@@ -1737,7 +1737,7 @@ Feature: dynamics run simulation runner
   Scenario: Lint marks box/cutoff as not applicable in all-pairs mode
     Given tmp/sim.in.toml has [neighbor_list] mode="all-pairs"
     And tmp/sim.in.xyz is a valid init file with an arbitrary box
-    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["lint", "tmp/sim.in.toml"]
     Then it exits with code 0
     And stdout contains a line whose label is "box/cutoff" and whose description contains "not applicable" and "all-pairs"
 
@@ -1745,7 +1745,7 @@ Feature: dynamics run simulation runner
   Scenario: Lint reports a topology-load failure under the topology stage
     Given tmp/sim.in.toml sets topology = "tmp/bad.in.topology"
     And tmp/bad.in.topology declares a bond with an atom index out of range
-    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["lint", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stdout contains a line whose label is "topology" and whose description begins with "FAIL —"
     And stderr contains "error: " and a description of the topology error
@@ -1755,9 +1755,9 @@ Feature: dynamics run simulation runner
     Given tmp/sim.in.toml is a valid one-type config
     And tmp/sim.in.xyz is a valid init file
     And a CUDA-capable GPU is available
-    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml", "--with-gpu"]
+    When heddlemd is invoked with arguments ["lint", "tmp/sim.in.toml", "--with-gpu"]
     Then it exits with code 0
-    And stdout begins with "[dynamics lint] OK"
+    And stdout begins with "[heddlemd lint] OK"
     And stdout contains a line whose label is "gpu" and whose description contains "init_device OK" and "ForceField"
 
   @rq-a4fbc3a4
@@ -1765,7 +1765,7 @@ Feature: dynamics run simulation runner
     Given tmp/sim.in.toml is valid and exists
     And tmp/sim.in.xyz is a valid init file
     And none of tmp/sim.out.xyz, tmp/sim.out.log, tmp/sim.out.timings exist
-    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["lint", "tmp/sim.in.toml"]
     Then it exits with code 0
     And tmp/sim.out.xyz still does not exist
     And tmp/sim.out.log still does not exist
@@ -1776,7 +1776,7 @@ Feature: dynamics run simulation runner
     Given tmp/sim.in.toml is valid
     And tmp/sim.in.xyz does NOT exist (init load will fail)
     And tmp/sim.out.timings does NOT exist (the output-paths stage would pass)
-    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["lint", "tmp/sim.in.toml"]
     Then it exits with code 1
     And stdout contains a line whose label is "config" and whose description does NOT begin with "FAIL"
     And stdout contains a line whose label is "init" and whose description begins with "FAIL —"
@@ -1788,7 +1788,7 @@ Feature: dynamics run simulation runner
   Scenario: Lint without --with-gpu does not open a GPU device
     Given a host with no CUDA-capable GPU
     And tmp/sim.in.toml and tmp/sim.in.xyz are otherwise valid
-    When dynamics is invoked with arguments ["lint", "tmp/sim.in.toml"]
+    When heddlemd is invoked with arguments ["lint", "tmp/sim.in.toml"]
     Then it exits with code 0
     And no CUDA driver call was made (verified by spy on the GpuContext constructor, or by lack of CUDA dynamic-library load)
 

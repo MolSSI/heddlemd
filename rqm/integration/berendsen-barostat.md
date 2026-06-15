@@ -717,7 +717,7 @@ Feature: Berendsen weak-coupling barostat
   Scenario: Two independent composed runs with identical configs are byte-identical
     Given two complete simulations composing velocity-Verlet + Berendsen barostat
       with identical parameters, identical initial state, n_steps = 10
-    When dynamics run is invoked on each
+    When heddlemd run is invoked on each
     Then the trajectory files are byte-identical
     And the log files are byte-identical, including the pressure and box_volume columns
     And the final SimulationBox lattices are byte-identical

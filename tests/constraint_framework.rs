@@ -6,15 +6,15 @@ use std::sync::{Arc, Mutex};
 
 use cudarc::driver::CudaDevice;
 
-use dynamics::forces::{ConstraintGroup, ConstraintList, GroupConstraint};
-use dynamics::gpu::{GpuContext, ParticleBuffers, init_device};
-use dynamics::integrator::{
+use heddle_md::forces::{ConstraintGroup, ConstraintList, GroupConstraint};
+use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
+use heddle_md::integrator::{
     Constraint, ConstraintBuilder, ConstraintError, ConstraintRegistry,
 };
-use dynamics::io::config::{ConfigError, NamedSlotConfig};
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::Timings;
+use heddle_md::io::config::{ConfigError, NamedSlotConfig};
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::Timings;
 
 // --- ConstraintList::subset -----------------------------------------------
 
@@ -494,8 +494,8 @@ fn composite_short_circuits_on_first_inner_error() {
 // it is *not* implemented by `LangevinBaoabState` or `MtkNptIntegrator`.
 // The non-impl is enforced statically: code like
 //
-//     fn accept<T: dynamics::integrator::ConstraintCapableIntegrator>(_: &T) {}
-//     let lan = dynamics::integrator::LangevinBaoabState::new(...);
+//     fn accept<T: heddle_md::integrator::ConstraintCapableIntegrator>(_: &T) {}
+//     let lan = heddle_md::integrator::LangevinBaoabState::new(...);
 //     accept(&lan);
 //
 // fails to compile with a trait-bound error. We exercise that compile
@@ -503,31 +503,31 @@ fn composite_short_circuits_on_first_inner_error() {
 // below, which is only ever called with a `VelocityVerletState`. Adding
 // a call with a non-VV state would not type-check.
 
-fn accept_constraint_capable<T: dynamics::integrator::ConstraintCapableIntegrator>(_: &T) {}
+fn accept_constraint_capable<T: heddle_md::integrator::ConstraintCapableIntegrator>(_: &T) {}
 
 // rq-2e028ba6
 #[test]
 fn velocity_verlet_state_implements_constraint_capable_integrator() {
     let gpu = init_device().unwrap();
-    let state = dynamics::integrator::VelocityVerletState::new(&gpu, 0, false).unwrap();
+    let state = heddle_md::integrator::VelocityVerletState::new(&gpu, 0, false).unwrap();
     accept_constraint_capable(&state);
 }
 
 // rq-a109cbb7
 #[test]
 fn velocity_verlet_lossless_false_accepts_constraints_now() {
-    use dynamics::integrator::ConstraintCapableIntegrator;
+    use heddle_md::integrator::ConstraintCapableIntegrator;
     let gpu = init_device().unwrap();
-    let state = dynamics::integrator::VelocityVerletState::new(&gpu, 0, false).unwrap();
+    let state = heddle_md::integrator::VelocityVerletState::new(&gpu, 0, false).unwrap();
     assert_eq!(state.check_accepts_constraints_now(), Ok(()));
 }
 
 // rq-ca6d04ca
 #[test]
 fn velocity_verlet_lossless_true_rejects_constraints_now() {
-    use dynamics::integrator::ConstraintCapableIntegrator;
+    use heddle_md::integrator::ConstraintCapableIntegrator;
     let gpu = init_device().unwrap();
-    let state = dynamics::integrator::VelocityVerletState::new(&gpu, 0, true).unwrap();
+    let state = heddle_md::integrator::VelocityVerletState::new(&gpu, 0, true).unwrap();
     assert_eq!(
         state.check_accepts_constraints_now(),
         Err("velocity-Verlet in lossless mode does not yet support constraints"),
@@ -541,10 +541,10 @@ fn integrator_step_ext_step_has_no_constraint_argument() {
     // arguments and walks the plan without any constraint hooks. We
     // verify by running step() on a lossless-true VV (which would
     // *reject* step_with_constraint) and confirming the call succeeds.
-    use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
-    use dynamics::integrator::IntegratorStepExt;
-    use dynamics::io::config::NeighborListConfig;
-    use dynamics::state::ParticleState;
+    use heddle_md::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+    use heddle_md::integrator::IntegratorStepExt;
+    use heddle_md::io::config::NeighborListConfig;
+    use heddle_md::state::ParticleState;
     let gpu = init_device().unwrap();
     let particle_state = ParticleState::new(
         vec![0.0],
@@ -584,7 +584,7 @@ fn integrator_step_ext_step_has_no_constraint_argument() {
     let mut timings = Timings::new(&gpu).unwrap();
     // Lossless VV — would reject step_with_constraint, but step()
     // has no constraint argument and runs cleanly.
-    let mut state = dynamics::integrator::VelocityVerletState::new(&gpu, 1, true).unwrap();
+    let mut state = heddle_md::integrator::VelocityVerletState::new(&gpu, 1, true).unwrap();
     state
         .step(&mut buffers, &mut sim_box, &mut ff, 1.0, &mut timings)
         .unwrap();
@@ -593,10 +593,10 @@ fn integrator_step_ext_step_has_no_constraint_argument() {
 // rq-e9706f76
 #[test]
 fn step_with_constraint_short_circuits_on_lossless_velocity_verlet() {
-    use dynamics::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
-    use dynamics::integrator::{IntegratorStepWithConstraintExt, StepError};
-    use dynamics::io::config::NeighborListConfig;
-    use dynamics::state::ParticleState;
+    use heddle_md::forces::{AngleList, BondList, ExclusionList, ForceField, PotentialRegistry};
+    use heddle_md::integrator::{IntegratorStepWithConstraintExt, StepError};
+    use heddle_md::io::config::NeighborListConfig;
+    use heddle_md::state::ParticleState;
 
     // A recording constraint that panics if any hook fires — proving
     // step_with_constraint short-circuited before the plan walk.
@@ -668,7 +668,7 @@ fn step_with_constraint_short_circuits_on_lossless_velocity_verlet() {
     )
     .unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut state = dynamics::integrator::VelocityVerletState::new(&gpu, 1, true).unwrap();
+    let mut state = heddle_md::integrator::VelocityVerletState::new(&gpu, 1, true).unwrap();
     let mut constraint = PanickingConstraint;
     let err = state
         .step_with_constraint(
@@ -702,8 +702,8 @@ fn empty_particle_state() -> ParticleState {
 
 fn empty_shake_slot(
     gpu: &GpuContext,
-) -> dynamics::integrator::shake::ShakeConstraintsState {
-    use dynamics::integrator::shake::ShakeConstraintsState;
+) -> heddle_md::integrator::shake::ShakeConstraintsState {
+    use heddle_md::integrator::shake::ShakeConstraintsState;
     ShakeConstraintsState::new(
         gpu.device.clone(),
         &ConstraintList::empty(0),
@@ -722,7 +722,7 @@ fn apply_before_drift_on_empty_state_is_a_noop() {
     let sb = big_box();
     let mut t = Timings::new(&gpu).unwrap();
     assert_eq!(buffers.particle_count(), 0);
-    use dynamics::integrator::Constraint;
+    use heddle_md::integrator::Constraint;
     slot.apply_before_drift(&mut buffers, &sb, 0.1, &mut t).unwrap();
     let report = t.finalize().unwrap();
     assert!(report.stages.is_empty(), "empty-state apply_before_drift launched: {:?}", report.stages);
@@ -736,7 +736,7 @@ fn apply_after_drift_on_empty_state_is_a_noop() {
     let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
     let sb = big_box();
     let mut t = Timings::new(&gpu).unwrap();
-    use dynamics::integrator::Constraint;
+    use heddle_md::integrator::Constraint;
     slot.apply_after_drift(&mut buffers, &sb, 0.1, &mut t).unwrap();
     let report = t.finalize().unwrap();
     assert!(report.stages.is_empty(), "empty-state apply_after_drift launched: {:?}", report.stages);
@@ -750,7 +750,7 @@ fn apply_after_kick_on_empty_state_is_a_noop() {
     let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
     let sb = big_box();
     let mut t = Timings::new(&gpu).unwrap();
-    use dynamics::integrator::Constraint;
+    use heddle_md::integrator::Constraint;
     slot.apply_after_kick(&mut buffers, &sb, 0.1, &mut t).unwrap();
     let report = t.finalize().unwrap();
     assert!(report.stages.is_empty(), "empty-state apply_after_kick launched: {:?}", report.stages);
@@ -764,7 +764,7 @@ fn apply_position_projection_only_on_empty_state_is_a_noop() {
     let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
     let sb = big_box();
     let mut t = Timings::new(&gpu).unwrap();
-    use dynamics::integrator::Constraint;
+    use heddle_md::integrator::Constraint;
     slot.apply_position_projection_only(&mut buffers, &sb, &mut t).unwrap();
     let report = t.finalize().unwrap();
     assert!(report.stages.is_empty(), "empty-state apply_position_projection_only launched: {:?}", report.stages);
@@ -775,7 +775,7 @@ fn apply_position_projection_only_on_empty_state_is_a_noop() {
 // rq-fd51fccb
 #[test]
 fn constraint_builder_default_supports_position_projection_only_returns_true() {
-    use dynamics::integrator::shake::ShakeBuilder;
+    use heddle_md::integrator::shake::ShakeBuilder;
     let b = ShakeBuilder;
     let mut tbl = toml::map::Map::new();
     tbl.insert(
@@ -835,10 +835,10 @@ fn two_independently_constructed_constraint_lists_are_byte_identical() {
 // rq-fe2cb7ee
 #[test]
 fn empty_constraints_with_non_supporting_integrator_is_permitted() {
-    use dynamics::io::load_config;
+    use heddle_md::io::load_config;
     use std::fs;
     let dir = std::env::temp_dir().join(format!(
-        "dynamics-empty-constraints-non-supporting-{}-{}",
+        "heddlemd-empty-constraints-non-supporting-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

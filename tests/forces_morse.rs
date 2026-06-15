@@ -1,14 +1,14 @@
-use dynamics::forces::{AggregateLevel, BondList, ExclusionList, ForceField, MorseBondedState, PotentialRegistry};
-use dynamics::gpu::{
+use heddle_md::forces::{AggregateLevel, BondList, ExclusionList, ForceField, MorseBondedState, PotentialRegistry};
+use heddle_md::gpu::{
     ParticleBuffers, init_device, morse_bond_force, reduce_bond_forces,
 };
-use dynamics::io::config::{
+use heddle_md::io::config::{
     BondTypeConfig, NeighborListConfig, PairInteractionConfig, PairPotentialParams,
     ParticleTypeConfig,
 };
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::Timings;
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::Timings;
 
 fn two_particle_state(p0: [f32; 3], p1: [f32; 3]) -> ParticleState {
     ParticleState::new(
@@ -41,7 +41,7 @@ fn morse_type(de: f64, a: f64, re: f64) -> BondTypeConfig {
 }
 
 fn single_bond_list(n: usize) -> BondList {
-    use dynamics::forces::Bond;
+    use heddle_md::forces::Bond;
     let bonds = vec![Bond {
         atom_i: 0,
         atom_j: 1,
@@ -276,7 +276,7 @@ fn morse_bond_force_zero_bonds_is_noop() {
 // rq-1ce4ce5a
 #[test]
 fn atom_with_two_bonds_sums_contributions() {
-    use dynamics::forces::Bond;
+    use heddle_md::forces::Bond;
 
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
@@ -466,7 +466,7 @@ fn diatomic_equilibrium_produces_zero_net_force() {
         None,
         &[],
         &bl,
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -504,7 +504,7 @@ fn newtons_third_law_holds_for_combined_force() {
         None,
         &[],
         &bl,
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
@@ -688,7 +688,7 @@ fn bond_reduction_sums_energy_and_virial_alongside_forces() {
 // --- Reduction kernel direct passthrough ----------------------------------
 
 fn run_reduce_with_buffers(
-    gpu: &dynamics::gpu::GpuContext,
+    gpu: &heddle_md::gpu::GpuContext,
     bond_pair_x: &[f32],
     bond_pair_y: &[f32],
     bond_pair_z: &[f32],

@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
-use dynamics::Registries;
-use dynamics::integrator::IntegratorRegistry;
-use dynamics::io::{ConfigError, NeighborListConfig, PathRole, SlotConfig, load_config};
+use heddle_md::Registries;
+use heddle_md::integrator::IntegratorRegistry;
+use heddle_md::io::{ConfigError, NeighborListConfig, PathRole, SlotConfig, load_config};
 
 fn param_f64(slot: &SlotConfig, key: &str) -> f64 {
     slot.params.get(key).and_then(|v| v.as_float()).unwrap()
@@ -37,7 +37,7 @@ fn tmp_path(name: &str) -> PathBuf {
         .as_nanos();
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "dynamics-cfg-{}-{}-{}",
+        "heddlemd-cfg-{}-{}-{}",
         std::process::id(),
         name,
         nanos
@@ -148,7 +148,7 @@ fn load_valid_minimal_config() {
     assert_eq!(cfg.pair_interactions[0].cutoff, 1.0e-9);
     assert!(matches!(
         cfg.pair_interactions[0].potential,
-        dynamics::io::PairPotentialParams::LennardJones { sigma, epsilon }
+        heddle_md::io::PairPotentialParams::LennardJones { sigma, epsilon }
             if sigma == 3.40e-10 && epsilon == 1.65e-21
     ));
     let canonical_dir = std::fs::canonicalize(&dir).unwrap();
@@ -1497,7 +1497,7 @@ fn valid_morse_bond_type_accepted() {
     let cfg = load_config(&path).unwrap();
     assert_eq!(cfg.bond_types.len(), 1);
     match &cfg.bond_types[0] {
-        dynamics::io::BondTypeConfig::Morse { name, de, a, re } => {
+        heddle_md::io::BondTypeConfig::Morse { name, de, a, re } => {
             assert_eq!(name, "ArAr");
             assert_eq!(*de, 1.65e-21);
             assert_eq!(*a, 1.9e10);
@@ -1846,7 +1846,7 @@ fn valid_harmonic_angle_type_accepted() {
     let cfg = load_config(&path).unwrap();
     assert_eq!(cfg.angle_types.len(), 1);
     match &cfg.angle_types[0] {
-        dynamics::io::config::AngleTypeConfig::Harmonic { name, k_theta, theta_0 } => {
+        heddle_md::io::config::AngleTypeConfig::Harmonic { name, k_theta, theta_0 } => {
             assert_eq!(name, "HOH");
             assert!((k_theta - 5.27e-19).abs() < 1.0e-28);
             assert!((theta_0 - 1.911).abs() < 1.0e-9);
@@ -3720,8 +3720,8 @@ fn filename_check_runs_before_io() {
 // Unit-system selector (`units = "si" | "atomic"`)
 // =====================================================================
 
-use dynamics::io::PairPotentialParams;
-use dynamics::units::{Dimension, UnitSystem};
+use heddle_md::io::PairPotentialParams;
+use heddle_md::units::{Dimension, UnitSystem};
 
 // Build a minimal SI-mode config (the test helper `minimal_config()`
 // is atomic-mode for round-trip ergonomics; these tests need SI to
@@ -4131,7 +4131,7 @@ fn si_units_rescale_steepest_descent_params() {
     // Pin the steepest-descent arm of slot_kind_field_dims: every one of
     // (initial_step, max_step, force_tolerance, energy_tolerance) is
     // rescaled by its declared dimension.
-    use dynamics::io::PhaseKind;
+    use heddle_md::io::PhaseKind;
     let dir = tmp_path("si_steepest_descent_params");
     let len_f = UnitSystem::Si.factor(Dimension::Length);
     let force_f = UnitSystem::Si.factor(Dimension::Force);

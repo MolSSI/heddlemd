@@ -1,17 +1,17 @@
 use std::path::{Path, PathBuf};
 
-use dynamics::gpu::{ParticleBuffers, init_device, lan_drift_half, lan_ou_step};
-use dynamics::integrator::IntegratorStepExt;
-use dynamics::integrator::{LangevinBaoabBuilder, IntegratorBuilder, IntegratorRegistry};
-use dynamics::io::SlotConfig;
-use dynamics::pbc::SimulationBox;
+use heddle_md::gpu::{ParticleBuffers, init_device, lan_drift_half, lan_ou_step};
+use heddle_md::integrator::IntegratorStepExt;
+use heddle_md::integrator::{LangevinBaoabBuilder, IntegratorBuilder, IntegratorRegistry};
+use heddle_md::io::SlotConfig;
+use heddle_md::pbc::SimulationBox;
 
 // k_B = 1 in the engine's atomic units; this is the SI value used by
 // SI-mode test inputs that get converted on load.
 const BOLTZMANN_J_PER_K: f64 = 1.380649e-23;
-use dynamics::runner::run_simulation;
-use dynamics::state::ParticleState;
-use dynamics::timings::Timings;
+use heddle_md::runner::run_simulation;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::Timings;
 
 fn tmp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -20,7 +20,7 @@ fn tmp_path(name: &str) -> PathBuf {
         .as_nanos();
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "dynamics-langevin-{}-{}-{}",
+        "heddlemd-langevin-{}-{}-{}",
         std::process::id(),
         name,
         nanos
@@ -312,8 +312,8 @@ fn ou_variance_scales_with_predicted_factor() {
 // rq-e1dd0625
 #[test]
 fn step_launches_all_six_expected_kernel_calls() {
-    use dynamics::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
-    use dynamics::io::config::NeighborListConfig;
+    use heddle_md::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
+    use heddle_md::io::config::NeighborListConfig;
     let gpu = init_device().unwrap();
     let state = n_particle_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -329,7 +329,7 @@ fn step_launches_all_six_expected_kernel_calls() {
         None,
         &[],
         &BondList::empty(4),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(4),
         &NeighborListConfig::AllPairs,
     )
@@ -364,8 +364,8 @@ fn step_launches_all_six_expected_kernel_calls() {
 // rq-6e98222c
 #[test]
 fn langevin_step_on_empty_is_noop() {
-    use dynamics::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
-    use dynamics::io::config::NeighborListConfig;
+    use heddle_md::forces::{BondList, ExclusionList, ForceField, PotentialRegistry};
+    use heddle_md::io::config::NeighborListConfig;
     let gpu = init_device().unwrap();
     let state = ParticleState::new(
         Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(),
@@ -387,7 +387,7 @@ fn langevin_step_on_empty_is_noop() {
         None,
         &[],
         &BondList::empty(0),
-        &dynamics::forces::AngleList::empty(0),
+        &heddle_md::forces::AngleList::empty(0),
         &ExclusionList::empty(0),
         &NeighborListConfig::AllPairs,
     )
@@ -623,7 +623,7 @@ mode = "all-pairs"
 fn lan_drift_half_wraps_across_plus_l_half() {
     let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
-    let state = dynamics::state::ParticleState::new(
+    let state = heddle_md::state::ParticleState::new(
         vec![4.95_f32],
         vec![0.0],
         vec![0.0],
@@ -650,7 +650,7 @@ fn lan_drift_half_wraps_across_plus_l_half() {
 fn lan_drift_half_preserves_image_flags_when_no_wrap() {
     let gpu = init_device().expect("init_device");
     let sim_box = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
-    let state = dynamics::state::ParticleState::new(
+    let state = heddle_md::state::ParticleState::new(
         vec![0.0_f32],
         vec![0.0],
         vec![0.0],

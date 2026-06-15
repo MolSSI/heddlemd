@@ -1,11 +1,11 @@
-// Integration tests for the `dynamics lint` subcommand.
+// Integration tests for the `heddlemd lint` subcommand.
 //
 // Mirrors the Gherkin scenarios under *Lint subcommand* in
 // rqm/simulation-runner.md.
 
 use std::path::{Path, PathBuf};
 
-use dynamics::runner::{
+use heddle_md::runner::{
     LintOverall, LintStatus, RunnerError, cli_main_u8, lint_simulation,
 };
 
@@ -16,7 +16,7 @@ fn tmp_path(name: &str) -> PathBuf {
         .as_nanos();
     let mut p = std::env::temp_dir();
     p.push(format!(
-        "dynamics-lint-{}-{}-{}",
+        "heddlemd-lint-{}-{}-{}",
         std::process::id(),
         name,
         nanos
@@ -90,7 +90,7 @@ fn write_valid_pair(dir: &Path) -> PathBuf {
     config
 }
 
-fn stage_status<'a>(report: &'a dynamics::runner::LintReport, label: &str) -> &'a LintStatus {
+fn stage_status<'a>(report: &'a heddle_md::runner::LintReport, label: &str) -> &'a LintStatus {
     &report
         .stages
         .iter()
@@ -147,7 +147,7 @@ fn lint_reports_filename_convention_violation() {
     assert!(!report.ok());
     match stage_status(&report, "config") {
         LintStatus::Fail { error, .. } => match error {
-            RunnerError::Config(dynamics::io::ConfigError::InvalidConfigFilename { path: p }) => {
+            RunnerError::Config(heddle_md::io::ConfigError::InvalidConfigFilename { path: p }) => {
                 assert_eq!(p, &path);
             }
             other => panic!("expected InvalidConfigFilename, got {other:?}"),
@@ -440,7 +440,7 @@ fn cli_lint_returns_zero_on_success() {
     let dir = tmp_path("cli_ok");
     let config = write_valid_pair(&dir);
     let exit = cli_main_u8(vec![
-        "dynamics".to_string(),
+        "heddlemd".to_string(),
         "lint".to_string(),
         config.to_string_lossy().to_string(),
     ]);
@@ -454,7 +454,7 @@ fn cli_lint_returns_one_on_failure() {
     let traj = dir.join("sim.out.run.xyz");
     std::fs::write(&traj, "existing").unwrap();
     let exit = cli_main_u8(vec![
-        "dynamics".to_string(),
+        "heddlemd".to_string(),
         "lint".to_string(),
         config.to_string_lossy().to_string(),
     ]);
@@ -466,7 +466,7 @@ fn cli_lint_rejects_unknown_flag() {
     let dir = tmp_path("cli_bad_flag");
     let config = write_valid_pair(&dir);
     let exit = cli_main_u8(vec![
-        "dynamics".to_string(),
+        "heddlemd".to_string(),
         "lint".to_string(),
         config.to_string_lossy().to_string(),
         "--bogus".to_string(),
@@ -476,7 +476,7 @@ fn cli_lint_rejects_unknown_flag() {
 
 #[test]
 fn cli_lint_rejects_missing_config_path() {
-    let exit = cli_main_u8(vec!["dynamics".to_string(), "lint".to_string()]);
+    let exit = cli_main_u8(vec!["heddlemd".to_string(), "lint".to_string()]);
     assert_eq!(exit, 1);
 }
 
@@ -487,7 +487,7 @@ fn cli_lint_with_gpu_flag_parses() {
     // We don't assert on success here because it requires a GPU; we only
     // confirm the CLI accepts the flag and reaches the `gpu` stage.
     let exit = cli_main_u8(vec![
-        "dynamics".to_string(),
+        "heddlemd".to_string(),
         "lint".to_string(),
         config.to_string_lossy().to_string(),
         "--with-gpu".to_string(),
@@ -501,7 +501,7 @@ fn cli_lint_flag_order_does_not_matter() {
     let dir = tmp_path("cli_flag_order");
     let config = write_valid_pair(&dir);
     let exit = cli_main_u8(vec![
-        "dynamics".to_string(),
+        "heddlemd".to_string(),
         "lint".to_string(),
         "--with-gpu".to_string(),
         config.to_string_lossy().to_string(),

@@ -6,7 +6,7 @@ velocities, box) lives in the [init file](init-files.md). Run a config
 with:
 
 ```
-dynamics run path/to/argon.in.toml
+heddlemd run path/to/argon.in.toml
 ```
 
 This chapter is the user-facing rendering of the field reference. The
@@ -16,7 +16,7 @@ and any field this chapter elides.
 
 ## Config filename convention
 
-The config-file path passed to `dynamics run` must end in `.in.toml`.
+The config-file path passed to `heddlemd run` must end in `.in.toml`.
 The loader rejects any other name (`InvalidConfigFilename`) before it
 opens the file. The convention has two purposes:
 

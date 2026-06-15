@@ -8,7 +8,7 @@ A simulation is fully specified by two files:
 - an **extended-XYZ init file** that carries the simulation box, the
   particles, and their starting positions (and optionally velocities).
 
-Run them with `dynamics run <config>`. The runner resolves the init
+Run them with `heddlemd run <config>`. The runner resolves the init
 path relative to the config's directory.
 
 This chapter walks through writing both files from scratch for a small
@@ -138,15 +138,15 @@ Why these particular values:
 
 ```
 cd my-run
-dynamics run argon.in.toml
+heddlemd run argon.in.toml
 ```
 
 On success the runner prints one line per phase plus a final
 aggregate:
 
 ```
-[dynamics] phase `run`: 500 steps in <T> ms (frames: 11, log rows: 51)
-[dynamics] complete: 500 steps in <T> ms
+[heddlemd] phase `run`: 500 steps in <T> ms (frames: 11, log rows: 51)
+[heddlemd] complete: 500 steps in <T> ms
 ```
 
 and writes `argon.out.run.xyz`, `argon.out.run.log`, and

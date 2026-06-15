@@ -1,16 +1,16 @@
 // rq-d9adc4cb Feature: Harmonic Angle Bonded Potential
 use std::f64::consts::PI;
 
-use dynamics::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, HarmonicAngleState, PotentialRegistry};
-use dynamics::forces::topology::Angle;
-use dynamics::gpu::{ParticleBuffers, harmonic_angle_force, init_device};
-use dynamics::io::config::{
+use heddle_md::forces::{AggregateLevel, AngleList, BondList, ExclusionList, ForceField, HarmonicAngleState, PotentialRegistry};
+use heddle_md::forces::topology::Angle;
+use heddle_md::gpu::{ParticleBuffers, harmonic_angle_force, init_device};
+use heddle_md::io::config::{
     AngleTypeConfig, BondTypeConfig, NeighborListConfig, PairInteractionConfig,
     PairPotentialParams, ParticleTypeConfig,
 };
-use dynamics::pbc::SimulationBox;
-use dynamics::state::ParticleState;
-use dynamics::timings::Timings;
+use heddle_md::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::timings::Timings;
 
 fn box_10() -> SimulationBox {
     SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
@@ -127,7 +127,7 @@ fn place_isoceles(d: f32, theta: f32) -> [[f32; 3]; 3] {
 }
 
 fn launch_angle_force(
-    gpu: &dynamics::gpu::GpuContext,
+    gpu: &heddle_md::gpu::GpuContext,
     state: &mut HarmonicAngleState,
     buffers: &ParticleBuffers,
     sim_box: &SimulationBox,
@@ -425,7 +425,7 @@ fn spc_single_step_satisfies_newtons_third_law() {
     let angle_types = vec![harmonic_type(5.27e-19, theta_0 as f64)];
 
     // Two OH bonds (H0-O1, H2-O1); one HOH angle at centre O1.
-    use dynamics::forces::topology::Bond;
+    use heddle_md::forces::topology::Bond;
     let bond_list = BondList {
         bonds: vec![
             Bond {
@@ -449,9 +449,9 @@ fn spc_single_step_satisfies_newtons_third_law() {
     // kernels see all three pairs as fully excluded.
     let exclusion_list = ExclusionList {
         entries: vec![
-            dynamics::forces::Exclusion { atom_i: 0, atom_j: 1, scale_lj: 0.0, scale_coul: 0.0 },
-            dynamics::forces::Exclusion { atom_i: 0, atom_j: 2, scale_lj: 0.0, scale_coul: 0.0 },
-            dynamics::forces::Exclusion { atom_i: 1, atom_j: 2, scale_lj: 0.0, scale_coul: 0.0 },
+            heddle_md::forces::Exclusion { atom_i: 0, atom_j: 1, scale_lj: 0.0, scale_coul: 0.0 },
+            heddle_md::forces::Exclusion { atom_i: 0, atom_j: 2, scale_lj: 0.0, scale_coul: 0.0 },
+            heddle_md::forces::Exclusion { atom_i: 1, atom_j: 2, scale_lj: 0.0, scale_coul: 0.0 },
         ],
         atom_excl_offsets: vec![0, 2, 4, 6],
         atom_excl_partners: vec![1, 2, 0, 2, 0, 1],
@@ -647,7 +647,7 @@ fn angle_virial_equals_r_ij_dot_f_i_plus_r_kj_dot_f_k() {
 // --- Reduction kernel (atom → angle-triple summation) -------------------
 
 fn alloc_and_run_reduce(
-    gpu: &dynamics::gpu::GpuContext,
+    gpu: &heddle_md::gpu::GpuContext,
     angle_triple_x: &[f32],
     angle_triple_y: &[f32],
     angle_triple_z: &[f32],
@@ -686,7 +686,7 @@ fn alloc_and_run_reduce(
         let mut vz = sz.slice_mut(0..upper_sz);
         let mut ve = se.slice_mut(0..upper_se);
         let mut vv = sv.slice_mut(0..upper_sv);
-        dynamics::gpu::reduce_angle_forces(
+        heddle_md::gpu::reduce_angle_forces(
             &gpu.kernels,
             &triple_x,
             &triple_y,

@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice, DeviceSlice};
-use dynamics::gpu::{
+use heddle_md::gpu::{
     LosslessBuffers, ParticleBuffers, init_device, vv_kick_drift_lossless, vv_kick_lossless,
 };
-use dynamics::state::ParticleState;
-use dynamics::pbc::SimulationBox;
+use heddle_md::state::ParticleState;
+use heddle_md::pbc::SimulationBox;
 
 // --- Helpers ---
 

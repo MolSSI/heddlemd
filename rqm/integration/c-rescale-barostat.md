@@ -656,7 +656,7 @@ Feature: Stochastic cell-rescaling (C-rescale) barostat
     Given two complete simulations composing velocity-Verlet + C-rescale
       with identical parameters (including identical barostat.seed),
       identical initial state, n_steps = 10
-    When dynamics run is invoked on each
+    When heddlemd run is invoked on each
     Then the trajectory files are byte-identical
     And the log files are byte-identical, including pressure, box_volume, and
       c_rescale_conserved
@@ -665,7 +665,7 @@ Feature: Stochastic cell-rescaling (C-rescale) barostat
   @rq-efc07f81
   Scenario: Different seeds produce different trajectories
     Given two complete simulations identical except barostat.seed = 1 and = 2
-    When dynamics run is invoked on each
+    When heddlemd run is invoked on each
     Then the trajectory files differ
 
 ```

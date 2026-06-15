@@ -1,5 +1,5 @@
 use cudarc::driver::{LaunchAsync, LaunchConfig};
-use dynamics::gpu::init_device;
+use heddle_md::gpu::init_device;
 
 const BLOCK_SIZE: u32 = 256;
 
@@ -25,7 +25,7 @@ fn init_device_returns_gpu_context_with_fill_kernel() {
     //   - rq-299c69c9: the Result return type itself carries Err on the
     //     no-GPU path (verified at compile time by the type signature
     //     below; runtime no-GPU check is impossible on GPU-equipped CI)
-    let _: Result<dynamics::gpu::GpuContext, dynamics::gpu::GpuError> = init_device();
+    let _: Result<heddle_md::gpu::GpuContext, heddle_md::gpu::GpuError> = init_device();
     let gpu = init_device().expect("init_device failed");
     // Referencing the field is a compile-time assertion that the `Kernels`
     // handle exposes `fill`; cloning the launchable function confirms it was
@@ -143,7 +143,7 @@ fn kernels_is_composed_of_per_subsystem_sub_structs() {
 // rq-6745e7c5
 #[test]
 fn xkernels_load_returns_populated_handle() {
-    use dynamics::forces::lj::LjKernels;
+    use heddle_md::forces::lj::LjKernels;
     let gpu = init_device().expect("init_device failed");
     // `Kernels::load` was already called during init_device; a second
     // `load_ptx` for the same module name is a no-op in cudarc (the
