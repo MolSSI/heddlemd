@@ -552,10 +552,10 @@ fn energy_and_virial_share_force_indexing() {
     assert_eq!(state.virials, vec![300.0, 700.0]);
 }
 
-// --- Block-tree reduction shape ---
+// --- Warp-tree reduction shape ---
 
 #[test] // rq-b2221a99
-fn reduction_with_count_larger_than_one_warp_uses_inter_warp_tree() {
+fn reduction_with_count_larger_than_warp_size_sweeps_multiple_iterations() {
     let gpu = init_device().expect("init_device");
     let device = gpu.device.clone();
     let mut pair = PairBuffer::new(&gpu, 1, 128).unwrap();
@@ -572,7 +572,7 @@ fn reduction_with_count_larger_than_one_warp_uses_inter_warp_tree() {
 }
 
 #[test] // rq-c009903e
-fn reduction_with_count_larger_than_one_block_sweep_accumulates_across_sweeps() {
+fn reduction_with_count_larger_than_one_warp_sweep_accumulates_across_sweeps() {
     let gpu = init_device().expect("init_device");
     let device = gpu.device.clone();
     let mut pair = PairBuffer::new(&gpu, 1, 1024).unwrap();
@@ -592,50 +592,25 @@ fn reduction_with_count_larger_than_one_block_sweep_accumulates_across_sweeps() 
     assert!(fx[0].is_finite());
 }
 
-/// Replicates the device-side block tree reduction shape so a CPU
+/// Replicates the device-side warp tree reduction shape so a CPU
 /// reference can be compared bit-for-bit with the GPU output. Matches
-/// the per-block algorithm documented in `rqm/pair-reduction.md`:
-/// per-thread strided sweep into a register accumulator, warp pairwise
-/// XOR reduction, then inter-warp reduction over the same tree shape.
-fn cpu_block_tree_sum(slots: &[Real], count: usize, max_neighbors: usize) -> Real {
-    const BLOCK_SIZE: usize = 256;
+/// the per-warp algorithm documented in `rqm/pair-reduction.md`:
+/// 32 lanes accumulate strided partial sums, then combine via a
+/// 5-step pairwise XOR butterfly. Lane 0's value is the result.
+fn cpu_warp_tree_sum(slots: &[Real], count: usize, max_neighbors: usize) -> Real {
     const WARP_SIZE: usize = 32;
-    const NUM_WARPS: usize = BLOCK_SIZE / WARP_SIZE;
-    // Phase 1: per-thread strided register accumulators.
-    let mut p_t = vec![0.0; BLOCK_SIZE];
-    let sweeps = (max_neighbors + BLOCK_SIZE - 1) / BLOCK_SIZE;
-    for s in 0..sweeps {
-        for t in 0..BLOCK_SIZE {
-            let k = s * BLOCK_SIZE + t;
-            let v = if k < count.min(max_neighbors) {
-                slots[k]
-            } else {
-                0.0
-            };
-            p_t[t] += v;
-        }
-    }
-    // Phase 2: warp pairwise XOR butterfly tree, 5 steps.
-    let mut warp_partials = [0.0; NUM_WARPS];
-    for w in 0..NUM_WARPS {
-        let mut lanes = [0.0; WARP_SIZE];
+    let mut lanes = [0.0 as Real; WARP_SIZE];
+    let count = count.min(max_neighbors);
+    let sweep_end = count.div_ceil(WARP_SIZE) * WARP_SIZE;
+    let mut s = 0;
+    while s < sweep_end {
         for lane in 0..WARP_SIZE {
-            lanes[lane] = p_t[w * WARP_SIZE + lane];
-        }
-        for &stride in &[16usize, 8, 4, 2, 1] {
-            let mut next = lanes;
-            for lane in 0..WARP_SIZE {
-                next[lane] = lanes[lane] + lanes[lane ^ stride];
+            let k = s + lane;
+            if k < count {
+                lanes[lane] += slots[k];
             }
-            lanes = next;
         }
-        warp_partials[w] = lanes[0];
-    }
-    // Phase 3: first warp pulls per-warp partials into 32 lanes (the
-    // upper 24 read 0.0f) and runs the same butterfly tree.
-    let mut lanes = [0.0; WARP_SIZE];
-    for w in 0..NUM_WARPS {
-        lanes[w] = warp_partials[w];
+        s += WARP_SIZE;
     }
     for &stride in &[16usize, 8, 4, 2, 1] {
         let mut next = lanes;
@@ -648,7 +623,7 @@ fn cpu_block_tree_sum(slots: &[Real], count: usize, max_neighbors: usize) -> Rea
 }
 
 #[test] // rq-aee2bfb2
-fn reduction_tree_result_agrees_with_cpu_block_tree_reference() {
+fn reduction_tree_result_agrees_with_cpu_warp_tree_reference() {
     let gpu = init_device().expect("init_device");
     let device = gpu.device.clone();
     let max_neighbors: u32 = 1024;
@@ -664,7 +639,7 @@ fn reduction_tree_result_agrees_with_cpu_block_tree_reference() {
     reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
     let (fx, _, _) = download_forces(&buffers);
 
-    let cpu_reference = cpu_block_tree_sum(&data, count, max_neighbors as usize);
+    let cpu_reference = cpu_warp_tree_sum(&data, count, max_neighbors as usize);
     assert_eq!(fx[0].to_bits(), cpu_reference.to_bits());
 
     // Sequential left-to-right f32 sum is close but not bit-exact.
@@ -679,7 +654,7 @@ fn reduction_tree_result_agrees_with_cpu_block_tree_reference() {
 }
 
 #[test] // rq-46d24bfb
-fn one_block_per_particle_blocks_are_independent() {
+fn one_warp_per_particle_warps_are_independent() {
     let gpu = init_device().expect("init_device");
     let device = gpu.device.clone();
     let n: usize = 512;
@@ -706,17 +681,75 @@ fn one_block_per_particle_blocks_are_independent() {
     for i in 0..n {
         let slot_base = i * max_neighbors as usize;
         let slots = &data[slot_base..slot_base + max_neighbors as usize];
-        let expected = cpu_block_tree_sum(slots, counts[i] as usize, max_neighbors as usize);
+        let expected = cpu_warp_tree_sum(slots, counts[i] as usize, max_neighbors as usize);
         assert_eq!(
             fx[i].to_bits(),
             expected.to_bits(),
-            "particle {i}: GPU {} (bits {:x}) != CPU block-tree {} (bits {:x})",
+            "particle {i}: GPU {} (bits {:x}) != CPU warp-tree {} (bits {:x})",
             fx[i],
             fx[i].to_bits(),
             expected,
             expected.to_bits()
         );
     }
+}
+
+// --- Warp-per-particle grid layout ---
+
+#[test]
+fn particle_count_not_multiple_of_warps_per_block_uses_ragged_final_block() {
+    // 10 particles, WARPS_PER_BLOCK = 8 → 2 blocks. Block 1's warps
+    // 2..8 carry no particle and must return without writing.
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let n: usize = 10;
+    let max_neighbors: u32 = 4;
+    let mut pair = PairBuffer::new(&gpu, n, max_neighbors).unwrap();
+    let mut data = vec![0.0 as Real; n * max_neighbors as usize];
+    for i in 0..n {
+        data[i * max_neighbors as usize] = 1.0;
+    }
+    upload_pair_x(&mut pair, &data);
+    let counts = device.htod_sync_copy(&vec![1u32; n]).unwrap();
+    let mut buffers = zero_particle_buffers(&gpu, n);
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
+    let (fx, _, _) = download_forces(&buffers);
+    for i in 0..n {
+        assert_eq!(fx[i], 1.0, "particle {i}");
+    }
+}
+
+#[test]
+fn particle_count_below_warps_per_block_uses_a_single_under_full_block() {
+    let gpu = init_device().expect("init_device");
+    let device = gpu.device.clone();
+    let n: usize = 3;
+    let max_neighbors: u32 = 4;
+    let mut pair = PairBuffer::new(&gpu, n, max_neighbors).unwrap();
+    let mut data = vec![0.0 as Real; n * max_neighbors as usize];
+    for i in 0..n {
+        data[i * max_neighbors as usize] = 2.0;
+    }
+    upload_pair_x(&mut pair, &data);
+    let counts = device.htod_sync_copy(&vec![1u32; n]).unwrap();
+    let mut buffers = zero_particle_buffers(&gpu, n);
+    reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
+    let (fx, _, _) = download_forces(&buffers);
+    for i in 0..n {
+        assert_eq!(fx[i], 2.0, "particle {i}");
+    }
+}
+
+#[test]
+fn reduce_kernels_declare_no_shared_memory() {
+    // The compiled reduce.cu PTX should contain no .shared directive.
+    // The warp-per-particle topology uses only register accumulators
+    // and __shfl_xor_sync within each warp.
+    let ptx = heddle_md::kernels::REDUCE;
+    assert!(
+        !ptx.contains(".shared"),
+        "reduce.cu PTX contains .shared directive (shared memory declared)"
+    );
 }
 
 // --- Split independence (force vs. energy-virial launcher) ---

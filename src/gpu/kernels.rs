@@ -13,6 +13,10 @@ use crate::precision::Real;
 
 const BLOCK_SIZE: u32 = 256;
 
+/// Warps per block in the reduce.cu warp-per-particle topology.
+/// Must match the `WARPS_PER_BLOCK` constant in kernels/reduce.cu.
+const REDUCE_WARPS_PER_BLOCK: u32 = 8;
+
 fn launch_config(n: u32) -> LaunchConfig {
     let grid = n.div_ceil(BLOCK_SIZE);
     LaunchConfig {
@@ -125,7 +129,7 @@ pub fn reduce_pair_forces(
     let n_u32 = n as u32;
     let func = pair_buffer.kernels.reduce.reduce_pair_forces.clone();
     let cfg = LaunchConfig {
-        grid_dim: (n_u32, 1, 1),
+        grid_dim: (n_u32.div_ceil(REDUCE_WARPS_PER_BLOCK), 1, 1),
         block_dim: (BLOCK_SIZE, 1, 1),
         shared_mem_bytes: 0,
     };
@@ -178,7 +182,7 @@ pub fn reduce_pair_energy_virial(
         .reduce_pair_energy_virial
         .clone();
     let cfg = LaunchConfig {
-        grid_dim: (n_u32, 1, 1),
+        grid_dim: (n_u32.div_ceil(REDUCE_WARPS_PER_BLOCK), 1, 1),
         block_dim: (BLOCK_SIZE, 1, 1),
         shared_mem_bytes: 0,
     };

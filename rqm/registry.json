@@ -7544,7 +7544,7 @@
     "type": "scenario"
   },
   "rq-46d24bfb": {
-    "decl": "Scenario: One block per particle, blocks are independent",
+    "decl": "Scenario: One warp per particle, warps are independent",
     "file": "pair-reduction",
     "refs": [
       {
@@ -7552,7 +7552,7 @@
         "kind": "code"
       }
     ],
-    "title": "One block per particle, blocks are independent",
+    "title": "One warp per particle, warps are independent",
     "type": "scenario"
   },
   "rq-46d980b2": {
@@ -17947,7 +17947,7 @@
     "type": "scenario"
   },
   "rq-aee2bfb2": {
-    "decl": "Scenario: Reduction tree result agrees with a CPU pairwise tree reference to within a small relative tolerance",
+    "decl": "Scenario: Reduction tree result agrees with a CPU warp-tree reference to within a small relative tolerance",
     "file": "pair-reduction",
     "refs": [
       {
@@ -17955,7 +17955,7 @@
         "kind": "code"
       }
     ],
-    "title": "Reduction tree result agrees with a CPU pairwise tree reference to within a small relative tolerance",
+    "title": "Reduction tree result agrees with a CPU warp-tree reference to within a small relative tolerance",
     "type": "scenario"
   },
   "rq-aeee8e44": {
@@ -18305,6 +18305,13 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-b1cea8cc": {
+    "decl": "Scenario: Reduce kernels declare no shared memory",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Reduce kernels declare no shared memory",
+    "type": "scenario"
+  },
   "rq-b1e87ce4": {
     "decl": "Scenario: cumulative_injection records K_new − K_old per invocation",
     "file": "integration/andersen",
@@ -18330,7 +18337,7 @@
     "type": "scenario"
   },
   "rq-b2221a99": {
-    "decl": "Scenario: Reduction with count_i larger than one warp uses the inter-warp tree",
+    "decl": "Scenario: Reduction with count larger than warp size sweeps multiple iterations",
     "file": "pair-reduction",
     "refs": [
       {
@@ -18338,7 +18345,7 @@
         "kind": "code"
       }
     ],
-    "title": "Reduction with count_i larger than one warp uses the inter-warp tree",
+    "title": "Reduction with count larger than warp size sweeps multiple iterations",
     "type": "scenario"
   },
   "rq-b2314952": {
@@ -19587,7 +19594,7 @@
     "type": "section"
   },
   "rq-c009903e": {
-    "decl": "Scenario: Reduction with count_i larger than one block sweep accumulates across sweeps",
+    "decl": "Scenario: Reduction with count larger than one warp sweep accumulates across sweeps",
     "file": "pair-reduction",
     "refs": [
       {
@@ -19595,7 +19602,7 @@
         "kind": "code"
       }
     ],
-    "title": "Reduction with count_i larger than one block sweep accumulates across sweeps",
+    "title": "Reduction with count larger than one warp sweep accumulates across sweeps",
     "type": "scenario"
   },
   "rq-c02c6b45": {
@@ -20080,6 +20087,13 @@
     ],
     "title": "`Lattice`",
     "type": "section"
+  },
+  "rq-c564ab37": {
+    "decl": "Scenario: Particle count below WARPS_PER_BLOCK uses a single under-full block",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Particle count below WARPS_PER_BLOCK uses a single under-full block",
+    "type": "scenario"
   },
   "rq-c5b42daa": {
     "decl": "Scenario: Missing seed rejected",
@@ -22007,6 +22021,13 @@
     "file": "simulation-runner",
     "refs": [],
     "title": "SimulationSetup::new performs the initial-velocity constraint projection",
+    "type": "scenario"
+  },
+  "rq-d902fbcb": {
+    "decl": "Scenario: Particle count that is not a multiple of WARPS_PER_BLOCK uses a ragged final block",
+    "file": "pair-reduction",
+    "refs": [],
+    "title": "Particle count that is not a multiple of WARPS_PER_BLOCK uses a ragged final block",
     "type": "scenario"
   },
   "rq-d920e446": {

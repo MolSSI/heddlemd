@@ -52,9 +52,13 @@ isolation.
 
 ## Reduction Algorithm <!-- rq-b0913965 -->
 
-Each particle `i` is reduced by one CUDA block of `BLOCK_SIZE = 256`
-threads. Two kernels share the same block-per-particle algorithm and
-the same fixed-shape reduction tree but operate on disjoint subsets of
+Each particle `i` is reduced by one CUDA warp — 32 lanes — running
+inside a 256-thread block. A block carries 8 warps, so 8 particles are
+reduced per block; with `n` particles, the grid is `ceil(n / 8)`
+blocks. Warps within a block reduce independent particles and do not
+exchange data — there is no inter-warp synchronization and no shared
+memory. Two kernels share this warp-per-particle algorithm and the
+same fixed-shape reduction tree but operate on disjoint subsets of
 the pair-buffer fields:
 
 - `reduce_pair_forces` reduces the three force components (`pair_forces_x`,
@@ -70,37 +74,45 @@ the pair-buffer fields:
 The algorithm is identical for every reduced quantity; the description
 below uses a single quantity `q` standing for any of `pair_forces_x`,
 `pair_forces_y`, `pair_forces_z`, `pair_energies`, `pair_virials`. The
-kernel that reduces forces issues three independent register accumulators
-through the same tree; the kernel that reduces energy and virial issues
-two.
+kernel that reduces forces issues three independent register
+accumulators through the same tree; the kernel that reduces energy and
+virial issues two.
+
+Per warp (handling one particle `i`):
 
 ```text
+warp_id_in_block = threadIdx.x / WARP_SIZE
+lane             = threadIdx.x & (WARP_SIZE - 1)
+i                = blockIdx.x * WARPS_PER_BLOCK + warp_id_in_block
+if i >= n: return                              // entire warp returns
+
 count = neighbor_counts[i]
-// Phase 1: strided sweep across the populated portion of the row.
-// Every thread accumulates a register-resident partial sum p_t.
-SWEEPS = (count + BLOCK_SIZE - 1) / BLOCK_SIZE
+
+// Phase 1: warp-strided sweep across the populated portion of the row.
+// Every lane accumulates a register-resident partial sum p_t.
+SWEEPS = (count + WARP_SIZE - 1) / WARP_SIZE
 p_t = 0.0f
 for s = 0 .. SWEEPS:
-    k = s * BLOCK_SIZE + threadIdx.x
+    k = s * WARP_SIZE + lane
     v = (k < count) ? q[i * max_neighbors + k] : 0.0f
     p_t = p_t + v
+
 // Phase 2: warp-level pairwise tree reduction.
-// Inside each 32-lane warp, the partial sums are combined by
-// pairwise butterfly shuffles in log2(32) = 5 steps:
+// The 32 partial sums are combined by pairwise butterfly shuffles in
+// log2(32) = 5 steps:
 for stride in [16, 8, 4, 2, 1]:
     p_t = p_t + __shfl_xor_sync(0xffffffff, p_t, stride)
-// Phase 3: inter-warp reduction.
-// Lane 0 of each warp writes its warp total to a shared-memory array
-// warp_q[warp_id]. After __syncthreads(), the first warp pulls its
-// eight per-warp partials back into registers (lanes >= NUM_WARPS
-// read 0.0f) and runs the same pairwise butterfly tree across them.
-// Thread (warp 0, lane 0) writes the block total.
+
+// Lane 0 writes the warp total.
+if lane == 0:
+    out[i] = p_t
 ```
 
-`BLOCK_SIZE = 256` and `NUM_WARPS = BLOCK_SIZE / 32 = 8` are kernel
+`WARPS_PER_BLOCK = 8`, `WARP_SIZE = 32`, and the resulting
+`BLOCK_SIZE = WARP_SIZE * WARPS_PER_BLOCK = 256` are kernel
 compile-time constants.
 
-The Phase 1 sweep loop runs `(count + BLOCK_SIZE - 1) / BLOCK_SIZE`
+The Phase 1 sweep loop runs `(count + WARP_SIZE - 1) / WARP_SIZE`
 sweeps, scaling with the populated row width rather than
 `max_neighbors`. For `count == 0` the loop runs zero sweeps. Within
 the final partial sweep, lanes whose `k >= count` contribute `0.0f`
@@ -110,30 +122,35 @@ contract `count <= max_neighbors` (see `forces/neighbor-list.md`) for
 its in-row bound — no separate `k < max_neighbors` guard is needed
 because the active mask `k < count` already covers it.
 
-Phase 2 and Phase 3 always execute their fixed warp- and inter-warp
-reduction trees regardless of `count`, so the reduction tree shape
-applied to the partial sums held by every block's 256 lanes is
-identical across every particle in a launch.
+Phase 2 always executes its fixed 5-step warp-pairwise tree regardless
+of `count`, so the reduction tree shape applied to the 32 lanes' partial
+sums is identical across every particle in a launch.
 
-The reduction is run-to-run bit-exact: every floating-point addition in
-Phases 1–3 takes the same operands in the same order on every launch, on
-the same GPU. Two runs of `reduce_pair_forces` with identical inputs
-produce byte-identical output buffers.
+The warp's early-return guard `i >= n` (lines 4–5 above) is evaluated
+on uniform inputs — `blockIdx.x`, `warp_id_in_block`, and `n` are the
+same for every lane in the warp — so either all 32 lanes return or
+all 32 lanes proceed. `__shfl_xor_sync` in Phase 2 therefore sees a
+full warp's worth of participating lanes, as the instruction requires.
+
+The reduction is run-to-run bit-exact: every floating-point addition
+in Phases 1 and 2 takes the same operands in the same order on every
+launch, on the same GPU. Two runs of `reduce_pair_forces` with
+identical inputs produce byte-identical output buffers.
 
 The sum is **not** the sequential left-to-right sum
-`((q[0] + q[1]) + q[2]) + ...`; it is the deterministic block tree-sum
-defined above. The two values agree to within a small relative tolerance
-governed by IEEE-754 round-off but generally differ in the low bits of
-the f32 mantissa. The architecture explicitly permits this in
-`docs/architecture.md` ("a fixed tree reduction with a deterministic
-topology … as long as the tree shape depends only on the neighbor
-count").
+`((q[0] + q[1]) + q[2]) + ...`; it is the deterministic warp
+tree-sum defined above. The two values agree to within a small
+relative tolerance governed by IEEE-754 round-off but generally
+differ in the low bits of the f32 mantissa. The architecture
+explicitly permits this in `docs/architecture.md` ("a fixed tree
+reduction with a deterministic topology … as long as the tree shape
+depends only on the neighbor count").
 
-When `count == 0`, every thread's `p_t` stays at `0.0f` through Phase 1,
-and the warp- and inter-warp trees propagate zero, so the five output
-slices receive `0.0_f32` at index `i`.
+When `count == 0`, every lane's `p_t` stays at `0.0f` through
+Phase 1, the warp tree propagates zero, and lane 0 writes `0.0_f32` to
+the output slice at index `i`.
 
-The final writes overwrite whatever was previously in the five output
+The final writes overwrite whatever was previously in the output
 slices — the reduction does not accumulate.
 
 ## Device-side Pair-Force Frame Helper <!-- rq-73c4d574 -->
@@ -344,7 +361,7 @@ zero in this case receive no writes.
 ### CUDA Kernels <!-- rq-31bd2eee -->
 
 `kernels/reduce.cu` declares two `extern "C"` kernels that share the
-same block-per-particle reduction topology:
+same warp-per-particle reduction topology:
 
 ```c
 extern "C" __global__ void reduce_pair_forces(
@@ -368,17 +385,15 @@ extern "C" __global__ void reduce_pair_energy_virial(
     unsigned int n);
 ```
 
-Each block reduces one particle: `i = blockIdx.x`. If `i >= n` every
-thread in the block returns without touching any buffer. Otherwise, the
-block's 256 threads cooperatively execute the reduction algorithm above
-for particle `i` — three accumulators in `reduce_pair_forces`, two in
-`reduce_pair_energy_virial`.
+Each warp reduces one particle: `i = blockIdx.x * WARPS_PER_BLOCK +
+threadIdx.x / WARP_SIZE`. If `i >= n` every lane in that warp returns
+without touching any buffer. Otherwise the warp's 32 lanes
+cooperatively execute the reduction algorithm above for particle `i`
+— three accumulators in `reduce_pair_forces`, two in
+`reduce_pair_energy_virial`. Warps within a block reduce independent
+particles and do not exchange data.
 
-Phase-3 inter-warp partial sums are exchanged through a static
-shared-memory buffer declared inside each kernel as
-`__shared__ float warp_partials[NUM_WARPS][K]` where `K = 3` for
-`reduce_pair_forces` and `K = 2` for `reduce_pair_energy_virial`
-(`NUM_WARPS = 8`). Neither kernel declares dynamic shared memory.
+Neither kernel declares static or dynamic shared memory.
 
 Each kernel reads only the pair-contribution arrays for the quantities
 it sums and writes only the corresponding output arrays. Neither
@@ -421,8 +436,10 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
   - Launches the `reduce_pair_forces` kernel against the three caller-
     supplied force-component target buffers. Overwrites them with the
     per-particle net force from the pair-buffer reduction.
-  - Block size is 256; grid size is `particle_count` blocks (one block
-    per particle).
+  - Block size is 256 (8 warps); grid size is
+    `ceil(particle_count / 8)` blocks (one warp per particle, 8 warps
+    per block). Trailing warps in the last block whose assigned
+    particle index lies past `particle_count` return early.
   - When `particle_count == 0`, returns `Ok(())` without launching a
     kernel.
   - Returns the underlying `GpuError` if the kernel launch fails.
@@ -459,15 +476,14 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
 
 ## Launch Configuration <!-- rq-9be271aa -->
 
-- Block size: 256 threads (8 warps of 32) for both kernels.
-- Grid size: `n` blocks in the x dimension — one block per particle —
-  for both kernels.
-- Shared memory: static, `NUM_WARPS * K * sizeof(f32)` bytes per block
-  for a `[NUM_WARPS][K]` array of per-warp partials, where
-  `NUM_WARPS = blockDim.x / 32 = 8` and `K` is the number of summed
-  quantities — `K = 3` for `reduce_pair_forces` (96 bytes per block),
-  `K = 2` for `reduce_pair_energy_virial` (64 bytes per block). Neither
-  kernel requests dynamic shared memory at launch.
+- Block size: 256 threads (8 warps × 32 lanes) for both kernels. Each
+  warp handles one particle; a block handles 8 particles.
+- Grid size: `ceil(n / 8)` blocks in the x dimension for both kernels.
+  Trailing warps in the last block whose assigned particle index lies
+  past `n` return early.
+- Shared memory: none. Neither kernel declares static or dynamic
+  shared memory; the warp-pairwise tree runs entirely through
+  `__shfl_xor_sync`.
 - Stream: the default stream carried by `pair_buffer.device` for both
   kernels.
 
@@ -484,11 +500,11 @@ Two free functions in `src/gpu/kernels.rs`, re-exported from
   pair-buffer reductions and their cost is small; they continue to
   reduce all five quantities on every call regardless of the requesting
   `AggregateLevel`.
-- Sub-block parallelism: multiple particles per block, multi-block
-  cooperative reductions over a single particle, persistent-kernel
-  schemes. One block reduces exactly one particle.
+- Multi-warp cooperation on a single particle, multi-block
+  cooperative reductions over a single particle, and persistent-kernel
+  schemes. One warp reduces exactly one particle.
 - Bit-exact equality with a sequential left-to-right CPU reference sum:
-  the kernel uses a deterministic block tree reduction whose f32 result
+  the kernel uses a deterministic warp tree reduction whose f32 result
   differs from the scalar serial sum in the low mantissa bits.
 - Numerical validation of pair contributions (NaN/Inf propagate).
 - The `f64` precision feature flag.
@@ -672,10 +688,10 @@ Feature: Pair buffer and deterministic segmented reduction
     And both forces_x, forces_y, forces_z are downloaded to the host
     Then run A and run B agree byte-for-byte on every f32
 
-  # --- Block tree reduction shape ---
+  # --- Warp tree reduction shape ---
 
   @rq-b2221a99
-  Scenario: Reduction with count_i larger than one warp uses the inter-warp tree
+  Scenario: Reduction with count larger than warp size sweeps multiple iterations
     Given a PairBuffer with particle_count=1 and max_neighbors=128
     And pair_forces_x[0..96] = [1.0; 96]
     And pair_forces_x[96..128] = [0.0; 32]
@@ -684,7 +700,7 @@ Feature: Pair buffer and deterministic segmented reduction
     Then forces_x[0] equals 96.0_f32
 
   @rq-c009903e
-  Scenario: Reduction with count_i larger than one block sweep accumulates across sweeps
+  Scenario: Reduction with count larger than one warp sweep accumulates across sweeps
     Given a PairBuffer with particle_count=1 and max_neighbors=1024
     And pair_forces_x[0..600] = [1.0; 600]
     And pair_forces_x[600..1024] = [99.0; 424]
@@ -694,23 +710,52 @@ Feature: Pair buffer and deterministic segmented reduction
     And forces_x[0] is finite
 
   @rq-aee2bfb2
-  Scenario: Reduction tree result agrees with a CPU pairwise tree reference to within a small relative tolerance
+  Scenario: Reduction tree result agrees with a CPU warp-tree reference to within a small relative tolerance
     Given a PairBuffer with particle_count=1 and max_neighbors=1024
     And pair_forces_x[k] = sin(k * 0.1) for k in 0..800
     And neighbor_counts is [800] on the device
     When reduce_pair_forces is called
-    And a CPU reference sum is computed using the same block tree reduction shape
+    And a CPU reference sum is computed using the same warp tree reduction shape (32 strided partial sums combined by a 5-step pairwise butterfly)
     Then forces_x[0] equals the CPU reference exactly
     And forces_x[0] is within 1e-5 relative tolerance of the sequential left-to-right f32 sum
 
   @rq-46d24bfb
-  Scenario: One block per particle, blocks are independent
+  Scenario: One warp per particle, warps are independent
     Given a PairBuffer with particle_count=512 and max_neighbors=64
     And neighbor_counts populated with a deterministic pseudo-random distribution in 0..=64
     And pair_forces_x populated with deterministic pseudo-random f32 in [-1.0, 1.0]
     When reduce_pair_forces is called
-    And the same reduction is performed independently on the host for each particle using the same block tree shape
+    And the same reduction is performed independently on the host for each particle using the same warp tree shape
     Then every forces_x[i] equals the host reference value exactly
+
+  # --- Warp-per-particle grid layout ---
+
+  @rq-d902fbcb
+  Scenario: Particle count that is not a multiple of WARPS_PER_BLOCK uses a ragged final block
+    Given a PairBuffer with particle_count=10 and max_neighbors=4
+    And neighbor_counts is [1; 10] on the device
+    And every populated pair_forces_x slot equals 1.0
+    When reduce_pair_forces is called
+    Then the launch uses ceil(10 / 8) = 2 blocks of 256 threads each
+    And forces_x[i] equals 1.0_f32 for every i in 0..10
+    And the warps 2..8 of the second block (with particle index >= 10) return without writing
+
+  @rq-c564ab37
+  Scenario: Particle count below WARPS_PER_BLOCK uses a single under-full block
+    Given a PairBuffer with particle_count=3 and max_neighbors=4
+    And neighbor_counts is [1, 1, 1] on the device
+    And every populated pair_forces_x slot equals 2.0
+    When reduce_pair_forces is called
+    Then the launch uses 1 block of 256 threads
+    And forces_x[i] equals 2.0_f32 for every i in 0..3
+    And warps 3..8 of the single block return without writing
+
+  @rq-b1cea8cc
+  Scenario: Reduce kernels declare no shared memory
+    Given a CUDA-capable GPU is available as device 0
+    When init_device() is called
+    Then the reduce_pair_forces kernel's `sharedSizeBytes` attribute is 0
+    And the reduce_pair_energy_virial kernel's `sharedSizeBytes` attribute is 0
 
   # --- Numerical edge cases ---
 
