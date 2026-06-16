@@ -307,24 +307,14 @@
   "rq-028f5f8e": {
     "decl": "Scenario: Empty registry produces a zero-slot ForceField",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Empty registry produces a zero-slot ForceField",
     "type": "scenario"
   },
   "rq-02a15197": {
     "decl": "Scenario: Mixed charge magnitudes scale linearly",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Mixed charge magnitudes scale linearly",
     "type": "scenario"
   },
@@ -579,12 +569,7 @@
   "rq-053a026c": {
     "decl": "Scenario: PotentialRegistry::with_builtins exposes the six built-in builders in evaluation order",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "PotentialRegistry::with_builtins exposes the six built-in builders in evaluation order",
     "type": "scenario"
   },
@@ -599,12 +584,7 @@
   "rq-05691d2f": {
     "decl": "Scenario: init_device succeeds on a machine with a CUDA GPU",
     "file": "build-pipeline",
-    "refs": [
-      {
-        "file": "tests/smoke_gpu.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "init_device succeeds on a machine with a CUDA GPU",
     "type": "scenario"
   },
@@ -662,12 +642,7 @@
   "rq-06058b71": {
     "decl": "Scenario: init_device exposes the LJ kernel on the Kernels handle",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "init_device exposes the LJ kernel on the Kernels handle",
     "type": "scenario"
   },
@@ -909,12 +884,7 @@
   "rq-0816969e": {
     "decl": "Scenario: Reciprocal-space virial is distributed equally per particle",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Reciprocal-space virial is distributed equally per particle",
     "type": "scenario"
   },
@@ -968,12 +938,7 @@
   "rq-0896c33a": {
     "decl": "Scenario: Pair beyond cutoff contributes zero",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair beyond cutoff contributes zero",
     "type": "scenario"
   },
@@ -1088,10 +1053,6 @@
     "refs": [
       {
         "file": "tests/spme_pipeline.rs",
-        "kind": "code"
-      },
-      {
-        "file": "tests/spme_slots.rs",
         "kind": "code"
       }
     ],
@@ -1266,12 +1227,7 @@
   "rq-0b71c50a": {
     "decl": "Scenario: Two-particle pair virial matches r_ij · F_ij",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two-particle pair virial matches r_ij · F_ij",
     "type": "scenario"
   },
@@ -1333,12 +1289,7 @@
   "rq-0c4f8da8": {
     "decl": "Scenario: Pair inside r_switch sees the unmodified Lennard-Jones force",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair inside r_switch sees the unmodified Lennard-Jones force",
     "type": "scenario"
   },
@@ -1396,12 +1347,7 @@
   "rq-0caebe37": {
     "decl": "Scenario: Real-space slot obeys Newton's third law for a non-boundary pair",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Real-space slot obeys Newton's third law for a non-boundary pair",
     "type": "scenario"
   },
@@ -1616,12 +1562,7 @@
   "rq-0f34d11b": {
     "decl": "Scenario: Construct a ForceField with bond_types declared but no bonds",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Construct a ForceField with bond_types declared but no bonds",
     "type": "scenario"
   },
@@ -2365,12 +2306,7 @@
   "rq-14d7a940": {
     "decl": "Scenario: Kernel does not modify positions, velocities, masses, or net forces",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Kernel does not modify positions, velocities, masses, or net forces",
     "type": "scenario"
   },
@@ -2851,12 +2787,7 @@
   "rq-1a0f3eef": {
     "decl": "Scenario: Identical inputs produce byte-identical pair-buffer outputs",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Identical inputs produce byte-identical pair-buffer outputs",
     "type": "scenario"
   },
@@ -2911,12 +2842,7 @@
   "rq-1a996f5d": {
     "decl": "Scenario: step_class(Fast) refreshes only Fast slots' contributions",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "step_class(Fast) refreshes only Fast slots' contributions",
     "type": "scenario"
   },
@@ -3393,12 +3319,7 @@
   "rq-1e7e6aa4": {
     "decl": "Scenario: Three-type table dispatches correctly per pair",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Three-type table dispatches correctly per pair",
     "type": "scenario"
   },
@@ -3612,10 +3533,6 @@
       {
         "file": "tests/spme_pipeline.rs",
         "kind": "code"
-      },
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
       }
     ],
     "title": "Feature: Smooth Particle-Mesh Ewald (SPME)",
@@ -3640,12 +3557,7 @@
   "rq-203ecf81": {
     "decl": "Scenario: Reject a config that declares both [spme] and [coulomb]",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Reject a config that declares both [spme] and [coulomb]",
     "type": "scenario"
   },
@@ -3723,10 +3635,6 @@
         "kind": "code"
       },
       {
-        "file": "src/gpu/pair_buffer.rs",
-        "kind": "code"
-      },
-      {
         "file": "src/integrator/andersen.rs",
         "kind": "code"
       },
@@ -3790,12 +3698,7 @@
   "rq-214639c9": {
     "decl": "Scenario: from_config populates r_switch from the parsed PairInteractionConfig",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "from_config populates r_switch from the parsed PairInteractionConfig",
     "type": "scenario"
   },
@@ -4096,12 +3999,7 @@
   "rq-23fc870b": {
     "decl": "Scenario: Mixed-type pair uses the off-diagonal parameter slot",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Mixed-type pair uses the off-diagonal parameter slot",
     "type": "scenario"
   },
@@ -4147,12 +4045,7 @@
   "rq-244fe033": {
     "decl": "Scenario: Per-pair-type cutoff zeroes only the pair whose cutoff it exceeds",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Per-pair-type cutoff zeroes only the pair whose cutoff it exceeds",
     "type": "scenario"
   },
@@ -4196,12 +4089,7 @@
   "rq-24c36f8d": {
     "decl": "Scenario: Two builders producing slots with the same label fail construction",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two builders producing slots with the same label fail construction",
     "type": "scenario"
   },
@@ -4458,12 +4346,7 @@
   "rq-26d8c08c": {
     "decl": "Scenario: fill kernel handles a non-block-aligned buffer size",
     "file": "build-pipeline",
-    "refs": [
-      {
-        "file": "tests/smoke_gpu.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "fill kernel handles a non-block-aligned buffer size",
     "type": "scenario"
   },
@@ -4482,12 +4365,7 @@
   "rq-26ffa053": {
     "decl": "Scenario: Doubling epsilon doubles the force at the same separation",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Doubling epsilon doubles the force at the same separation",
     "type": "scenario"
   },
@@ -4697,12 +4575,7 @@
   "rq-299c69c9": {
     "decl": "Scenario: init_device fails when no GPU is available",
     "file": "build-pipeline",
-    "refs": [
-      {
-        "file": "tests/smoke_gpu.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "init_device fails when no GPU is available",
     "type": "scenario"
   },
@@ -5201,12 +5074,7 @@
   "rq-2dbda7ec": {
     "decl": "Scenario: Built-in potentials report their canonical class",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Built-in potentials report their canonical class",
     "type": "scenario"
   },
@@ -5308,12 +5176,7 @@
   "rq-2ed643ad": {
     "decl": "Scenario: Two consumers share one neighbor list",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two consumers share one neighbor list",
     "type": "scenario"
   },
@@ -5535,12 +5398,7 @@
   "rq-31430003": {
     "decl": "Scenario: Half-strength exclusion (scale=0.5) halves the LJ contribution",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Half-strength exclusion (scale=0.5) halves the LJ contribution",
     "type": "scenario"
   },
@@ -5640,12 +5498,7 @@
   "rq-32e981cc": {
     "decl": "Scenario: step() on a ForceField with only LennardJones writes LJ forces to forces_*",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "step() on a ForceField with only LennardJones writes LJ forces to forces_*",
     "type": "scenario"
   },
@@ -5755,12 +5608,7 @@
   "rq-33cfb9fc": {
     "decl": "Scenario: step_class(Slow) refreshes only Slow slots' contributions",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "step_class(Slow) refreshes only Slow slots' contributions",
     "type": "scenario"
   },
@@ -6055,12 +5903,7 @@
   "rq-3726c0f1": {
     "decl": "Scenario: Real-space slot produces zero force on an excluded pair (scale_coul=0)",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Real-space slot produces zero force on an excluded pair (scale_coul=0)",
     "type": "scenario"
   },
@@ -6131,12 +5974,7 @@
   "rq-37f8c017": {
     "decl": "Scenario: Per-pair-type r_switch dispatches correctly",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Per-pair-type r_switch dispatches correctly",
     "type": "scenario"
   },
@@ -6182,12 +6020,7 @@
   "rq-38441c15": {
     "decl": "Scenario: Pair exactly at r_switch sees the unmodified Lennard-Jones force",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair exactly at r_switch sees the unmodified Lennard-Jones force",
     "type": "scenario"
   },
@@ -6402,12 +6235,7 @@
   "rq-3a1eea58": {
     "decl": "Scenario: Scale = 1.0 is equivalent to no exclusion",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Scale = 1.0 is equivalent to no exclusion",
     "type": "scenario"
   },
@@ -6534,24 +6362,14 @@
   "rq-3b7da473": {
     "decl": "Scenario: Zero charges produce zero force",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Zero charges produce zero force",
     "type": "scenario"
   },
   "rq-3b9611f2": {
     "decl": "Scenario: SPME runs on a triclinic box with non-zero tilts",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "SPME runs on a triclinic box with non-zero tilts",
     "type": "scenario"
   },
@@ -6594,12 +6412,7 @@
   "rq-3bc18e1a": {
     "decl": "Scenario: Max cutoff is the largest reported by any consumer",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Max cutoff is the largest reported by any consumer",
     "type": "scenario"
   },
@@ -6697,12 +6510,7 @@
   "rq-3d38868e": {
     "decl": "Scenario: Combiner sums slot energies and virials in slot order",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Combiner sums slot energies and virials in slot order",
     "type": "scenario"
   },
@@ -6758,12 +6566,7 @@
   "rq-3de16ce0": {
     "decl": "Scenario: Construct a ForceField with LennardJones and MorseBonded",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Construct a ForceField with LennardJones and MorseBonded",
     "type": "scenario"
   },
@@ -6782,12 +6585,7 @@
   "rq-3df3ed61": {
     "decl": "Scenario: Pair at exactly the cutoff contributes the smoothed (zero) value",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair at exactly the cutoff contributes the smoothed (zero) value",
     "type": "scenario"
   },
@@ -6858,12 +6656,7 @@
   "rq-3e9217e2": {
     "decl": "Scenario: Combiner with num_slots == 0 writes zeros",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Combiner with num_slots == 0 writes zeros",
     "type": "scenario"
   },
@@ -7052,12 +6845,7 @@
   "rq-40f9d35a": {
     "decl": "Scenario: Two RESPA-style call sequences with the same plan produce identical state",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two RESPA-style call sequences with the same plan produce identical state",
     "type": "scenario"
   },
@@ -7197,12 +6985,7 @@
   "rq-433c972f": {
     "decl": "Scenario: ForceField with only a bonded potential owns no neighbor list",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "ForceField with only a bonded potential owns no neighbor list",
     "type": "scenario"
   },
@@ -7249,6 +7032,13 @@
     "refs": [],
     "title": "Build Script",
     "type": "section"
+  },
+  "rq-43b88a11": {
+    "decl": "Scenario: init_device exposes both kernel variants on every pair-force Kernels field",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "init_device exposes both kernel variants on every pair-force Kernels field",
+    "type": "scenario"
   },
   "rq-43e44a28": {
     "decl": "## Diagnostic log columns",
@@ -7360,12 +7150,7 @@
   "rq-455db9c2": {
     "decl": "Scenario: Slot accumulator buffers are sized num_slots * particle_count",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Slot accumulator buffers are sized num_slots * particle_count",
     "type": "scenario"
   },
@@ -7536,12 +7321,7 @@
   "rq-47540d14": {
     "decl": "Scenario: A bonded-only ForceField step launches no neighbor-list kernels",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "A bonded-only ForceField step launches no neighbor-list kernels",
     "type": "scenario"
   },
@@ -7778,12 +7558,7 @@
   "rq-4a14aec3": {
     "decl": "Scenario: Same-type pair uses the diagonal parameter slot",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Same-type pair uses the diagonal parameter slot",
     "type": "scenario"
   },
@@ -7895,12 +7670,7 @@
   "rq-4b40604b": {
     "decl": "Scenario: Cell-list mode and trivial mode produce identical forces (within f32 tolerance)",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Cell-list mode and trivial mode produce identical forces (within f32 tolerance)",
     "type": "scenario"
   },
@@ -8104,12 +7874,7 @@
   "rq-4d3f63fb": {
     "decl": "Scenario: Coulomb prefactor is unity in pair-force evaluation",
     "file": "io/unit-system",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Coulomb prefactor is unity in pair-force evaluation",
     "type": "scenario"
   },
@@ -8222,12 +7987,7 @@
   "rq-4f23c656": {
     "decl": "Scenario: Opposite-sign charges attract",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Opposite-sign charges attract",
     "type": "scenario"
   },
@@ -8487,12 +8247,7 @@
   "rq-51af5f97": {
     "decl": "Scenario: register(...) appends a builder at the end",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "register(...) appends a builder at the end",
     "type": "scenario"
   },
@@ -8562,12 +8317,7 @@
   "rq-52d4b245": {
     "decl": "Scenario: Per-class slot-output buffers are zero-initialised",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Per-class slot-output buffers are zero-initialised",
     "type": "scenario"
   },
@@ -8622,24 +8372,14 @@
   "rq-531afe39": {
     "decl": "Scenario: Pair beyond r_cut yields zero independent of r_switch",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair beyond r_cut yields zero independent of r_switch",
     "type": "scenario"
   },
   "rq-531faea9": {
     "decl": "Scenario: ForceField with N=4 LJ-only step populates potential_energies and virials",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "ForceField with N=4 LJ-only step populates potential_energies and virials",
     "type": "scenario"
   },
@@ -8674,12 +8414,7 @@
   "rq-535c2b1e": {
     "decl": "Scenario: LJ kernel reads the shared neighbor list from ForceFieldContext",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "LJ kernel reads the shared neighbor list from ForceFieldContext",
     "type": "scenario"
   },
@@ -8747,12 +8482,7 @@
   "rq-5444c7ae": {
     "decl": "Scenario: pair_energies carries half the pair's potential energy",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "pair_energies carries half the pair's potential energy",
     "type": "scenario"
   },
@@ -8827,12 +8557,7 @@
   "rq-55640f03": {
     "decl": "Scenario: Different-type same-pair Newton's third law holds for symmetric tables",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Different-type same-pair Newton's third law holds for symmetric tables",
     "type": "scenario"
   },
@@ -8870,12 +8595,7 @@
   "rq-55d441ee": {
     "decl": "Scenario: Two runs with identical (call, level) sequences are byte-identical",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two runs with identical (call, level) sequences are byte-identical",
     "type": "scenario"
   },
@@ -8986,12 +8706,7 @@
   "rq-56c8a238": {
     "decl": "Scenario: Construct a ForceField with LennardJones only",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Construct a ForceField with LennardJones only",
     "type": "scenario"
   },
@@ -9138,12 +8853,7 @@
   "rq-57fd217e": {
     "decl": "Scenario: step() evaluates every class and produces the total in ParticleBuffers",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "step() evaluates every class and produces the total in ParticleBuffers",
     "type": "scenario"
   },
@@ -9313,12 +9023,7 @@
   "rq-5985846f": {
     "decl": "Scenario: step(ForcesOnly) updates forces and leaves potential_energies / virials stale",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "step(ForcesOnly) updates forces and leaves potential_energies / virials stale",
     "type": "scenario"
   },
@@ -10018,12 +9723,7 @@
   "rq-60f445b2": {
     "decl": "Scenario: Construct a ForceField with zero slots",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Construct a ForceField with zero slots",
     "type": "scenario"
   },
@@ -10122,12 +9822,7 @@
   "rq-6211a82f": {
     "decl": "Scenario: Kernels is composed of per-subsystem sub-structs",
     "file": "build-pipeline",
-    "refs": [
-      {
-        "file": "tests/smoke_gpu.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Kernels is composed of per-subsystem sub-structs",
     "type": "scenario"
   },
@@ -10212,6 +9907,13 @@
     "title": "NoseHooverChainThermostat",
     "type": "api-item"
   },
+  "rq-63608bb9": {
+    "decl": "Scenario: Sweep loop runs three full iterations when count is an exact multiple of WARP_SIZE",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Sweep loop runs three full iterations when count is an exact multiple of WARP_SIZE",
+    "type": "scenario"
+  },
   "rq-63726e30": {
     "decl": "## Launch Configuration",
     "file": "forces/pair-force-kernel",
@@ -10238,10 +9940,6 @@
       },
       {
         "file": "src/runner.rs",
-        "kind": "code"
-      },
-      {
-        "file": "tests/spme_slots.rs",
         "kind": "code"
       }
     ],
@@ -10580,36 +10278,21 @@
   "rq-6745e7c5": {
     "decl": "Scenario: Each subsystem's XKernels::load returns its kernel handle",
     "file": "build-pipeline",
-    "refs": [
-      {
-        "file": "tests/smoke_gpu.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Each subsystem's XKernels::load returns its kernel handle",
     "type": "scenario"
   },
   "rq-674cc467": {
     "decl": "Scenario: Box compatibility picks up SPME's real-space cutoff",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Box compatibility picks up SPME's real-space cutoff",
     "type": "scenario"
   },
   "rq-67678030": {
     "decl": "Scenario: Switching interval r_switch == cutoff selects hard-cutoff",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Switching interval r_switch == cutoff selects hard-cutoff",
     "type": "scenario"
   },
@@ -10683,12 +10366,7 @@
   "rq-681afa90": {
     "decl": "Scenario: Single-particle state produces only a zero self slot",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Single-particle state produces only a zero self slot",
     "type": "scenario"
   },
@@ -10901,12 +10579,7 @@
   "rq-6a542a0a": {
     "decl": "Scenario: from_config receives the default r_switch when the config omitted it",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "from_config receives the default r_switch when the config omitted it",
     "type": "scenario"
   },
@@ -11390,12 +11063,7 @@
   "rq-6ed7e318": {
     "decl": "Scenario: Builder Err short-circuits ForceField::new",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Builder Err short-circuits ForceField::new",
     "type": "scenario"
   },
@@ -11744,12 +11412,7 @@
   "rq-73efd4be": {
     "decl": "Scenario: Two-stream pipeline preserves bit-exact reproducibility across runs",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two-stream pipeline preserves bit-exact reproducibility across runs",
     "type": "scenario"
   },
@@ -11949,12 +11612,7 @@
   "rq-75446ddd": {
     "decl": "Scenario: from_config builds a symmetric parameter table from an unordered pair_interactions",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "from_config builds a symmetric parameter table from an unordered pair_interactions",
     "type": "scenario"
   },
@@ -12110,12 +11768,7 @@
   "rq-76a6be2f": {
     "decl": "Scenario: Zero particles is a no-op",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Zero particles is a no-op",
     "type": "scenario"
   },
@@ -12370,12 +12023,7 @@
   "rq-78ad9477": {
     "decl": "Scenario: PotentialRegistry::new starts empty",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "PotentialRegistry::new starts empty",
     "type": "scenario"
   },
@@ -12423,12 +12071,7 @@
   "rq-79068d4d": {
     "decl": "Scenario: Per-class slot-output buffers have length num_class_slots * N",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Per-class slot-output buffers have length num_class_slots * N",
     "type": "scenario"
   },
@@ -12737,12 +12380,7 @@
   "rq-7b651edb": {
     "decl": "Scenario: Cross-subsystem reads pull from the kernel's home sub-struct",
     "file": "build-pipeline",
-    "refs": [
-      {
-        "file": "tests/smoke_gpu.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Cross-subsystem reads pull from the kernel's home sub-struct",
     "type": "scenario"
   },
@@ -12937,12 +12575,7 @@
   "rq-7d8485b3": {
     "decl": "Scenario: Each slot writes into its own row of the slot-output buffers",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Each slot writes into its own row of the slot-output buffers",
     "type": "scenario"
   },
@@ -13220,12 +12853,7 @@
   "rq-7fe57a77": {
     "decl": "Scenario: System total scalar virial equals sum of particle shares",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "System total scalar virial equals sum of particle shares",
     "type": "scenario"
   },
@@ -13268,12 +12896,7 @@
   "rq-80dcfa97": {
     "decl": "Scenario: Full exclusion (scale=0) zeros the LJ contribution for the excluded pair",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Full exclusion (scale=0) zeros the LJ contribution for the excluded pair",
     "type": "scenario"
   },
@@ -13356,12 +12979,7 @@
   "rq-81e84c73": {
     "decl": "Scenario: ForceFieldContext exposes the shared neighbor list to compute",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "ForceFieldContext exposes the shared neighbor list to compute",
     "type": "scenario"
   },
@@ -13416,12 +13034,7 @@
   "rq-82822681": {
     "decl": "Scenario: Combiner always runs regardless of level",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Combiner always runs regardless of level",
     "type": "scenario"
   },
@@ -13436,12 +13049,7 @@
   "rq-82acb52f": {
     "decl": "Scenario: Combiner is a single-threaded write per output element",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Combiner is a single-threaded write per output element",
     "type": "scenario"
   },
@@ -13497,36 +13105,21 @@
   "rq-82e4f74e": {
     "decl": "Scenario: Same-sign charges repel",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Same-sign charges repel",
     "type": "scenario"
   },
   "rq-82f8d168": {
     "decl": "Scenario: Self slots carry zero energy and virial",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Self slots carry zero energy and virial",
     "type": "scenario"
   },
   "rq-83088c2f": {
     "decl": "Scenario: Real-space slot matches the closed-form erfc force for an isolated pair",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Real-space slot matches the closed-form erfc force for an isolated pair",
     "type": "scenario"
   },
@@ -13552,12 +13145,7 @@
   "rq-83312d09": {
     "decl": "Scenario: Bonded-only ForceField builds no neighbor list",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Bonded-only ForceField builds no neighbor list",
     "type": "scenario"
   },
@@ -13656,10 +13244,6 @@
       {
         "file": "src/io/config.rs",
         "kind": "code"
-      },
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
       }
     ],
     "title": "Feature: Truncated Coulomb Pair Force Kernel",
@@ -13708,12 +13292,7 @@
   "rq-85192a05": {
     "decl": "Scenario: At the LJ minimum r = sigma * 2^(1/6), the force is zero",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "At the LJ minimum r = sigma * 2^(1/6), the force is zero",
     "type": "scenario"
   },
@@ -13740,12 +13319,7 @@
   "rq-8626ec3c": {
     "decl": "Scenario: Two particles across the box boundary interact via the minimum image",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two particles across the box boundary interact via the minimum image",
     "type": "scenario"
   },
@@ -14267,12 +13841,7 @@
   "rq-8c786f79": {
     "decl": "Scenario: Exclusion only applies to the listed pair",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Exclusion only applies to the listed pair",
     "type": "scenario"
   },
@@ -14287,12 +13856,7 @@
   "rq-8c96d3c7": {
     "decl": "Scenario: Coulomb and LJ exclusions are independent",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Coulomb and LJ exclusions are independent",
     "type": "scenario"
   },
@@ -14457,12 +14021,7 @@
   "rq-8eb7a546": {
     "decl": "Scenario: step_class with N=0 launches no kernels",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "step_class with N=0 launches no kernels",
     "type": "scenario"
   },
@@ -14585,12 +14144,7 @@
   "rq-9004fd7a": {
     "decl": "Scenario: LennardJonesState reports its max cutoff to the framework",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "LennardJonesState reports its max cutoff to the framework",
     "type": "scenario"
   },
@@ -14737,12 +14291,7 @@
   "rq-916f99f3": {
     "decl": "Scenario: switch == cutoff reproduces the hard-cutoff behaviour everywhere inside the cutoff",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "switch == cutoff reproduces the hard-cutoff behaviour everywhere inside the cutoff",
     "type": "scenario"
   },
@@ -15164,12 +14713,7 @@
   "rq-95c2f543": {
     "decl": "Scenario: Exclusion scaling applies uniformly to force, energy, and virial",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Exclusion scaling applies uniformly to force, energy, and virial",
     "type": "scenario"
   },
@@ -15256,12 +14800,7 @@
   "rq-96fadc6f": {
     "decl": "Scenario: Slot for a pair beyond cutoff is zero",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Slot for a pair beyond cutoff is zero",
     "type": "scenario"
   },
@@ -15300,12 +14839,7 @@
   "rq-975b5ae0": {
     "decl": "Scenario: Newton's third law is bit-exact for non-boundary displacements",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Newton's third law is bit-exact for non-boundary displacements",
     "type": "scenario"
   },
@@ -15316,6 +14850,13 @@
     "refs": [],
     "title": "Types",
     "type": "section"
+  },
+  "rq-97db6cec": {
+    "decl": "Scenario: Sweep loop accumulates correctly when count is one more than WARP_SIZE",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Sweep loop accumulates correctly when count is one more than WARP_SIZE",
+    "type": "scenario"
   },
   "rq-97e525d8": {
     "decl": "Scenario: trajectory_every = 0 is accepted (disables trajectory output)",
@@ -15461,12 +15002,7 @@
   "rq-991b4695": {
     "decl": "Scenario: Box compatibility ignores SPME's reciprocal grid",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Box compatibility ignores SPME's reciprocal grid",
     "type": "scenario"
   },
@@ -15635,12 +15171,7 @@
   "rq-9af1f9dc": {
     "decl": "Scenario: Minimum-image works for a triclinic box",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Minimum-image works for a triclinic box",
     "type": "scenario"
   },
@@ -15867,10 +15398,6 @@
       {
         "file": "tests/spme_pipeline.rs",
         "kind": "code"
-      },
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
       }
     ],
     "title": "Reciprocal-space pipeline",
@@ -15903,12 +15430,7 @@
   "rq-9cf657ed": {
     "decl": "Scenario: fill kernel writes 1.0 to every element of a block-aligned buffer",
     "file": "build-pipeline",
-    "refs": [
-      {
-        "file": "tests/smoke_gpu.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "fill kernel writes 1.0 to every element of a block-aligned buffer",
     "type": "scenario"
   },
@@ -16753,12 +16275,7 @@
   "rq-a50cb6a1": {
     "decl": "Scenario: Pair beyond cutoff yields zero energy and virial slots",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair beyond cutoff yields zero energy and virial slots",
     "type": "scenario"
   },
@@ -16833,12 +16350,7 @@
   "rq-a5aa743e": {
     "decl": "Scenario: Combiner sums slot rows in slot order",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Combiner sums slot rows in slot order",
     "type": "scenario"
   },
@@ -17019,12 +16531,7 @@
   "rq-a85e8216": {
     "decl": "Scenario: Slot-output buffers have five flat arrays sized num_slots * N",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Slot-output buffers have five flat arrays sized num_slots * N",
     "type": "scenario"
   },
@@ -17120,12 +16627,7 @@
   "rq-a9642241": {
     "decl": "Scenario: Adding a new Potential implementation requires no edits to ForceField or accumulate_forces",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Adding a new Potential implementation requires no edits to ForceField or accumulate_forces",
     "type": "scenario"
   },
@@ -17355,13 +16857,15 @@
   "rq-ab74a666": {
     "decl": "Scenario: Reject grid dimension below 2*spline_order along b",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Reject grid dimension below 2*spline_order along b",
+    "type": "scenario"
+  },
+  "rq-ab8046b4": {
+    "decl": "Scenario: Self-pair (i == j) in a trivial-mode neighbour list contributes zero",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Self-pair (i == j) in a trivial-mode neighbour list contributes zero",
     "type": "scenario"
   },
   "rq-ab8c77bc": {
@@ -17649,12 +17153,7 @@
   "rq-ae20ddac": {
     "decl": "Scenario: Force is C¹ continuous at r_switch",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Force is C¹ continuous at r_switch",
     "type": "scenario"
   },
@@ -17721,12 +17220,7 @@
   "rq-aeb23925": {
     "decl": "Scenario: Reject grid dimension below 2*spline_order",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Reject grid dimension below 2*spline_order",
     "type": "scenario"
   },
@@ -17813,12 +17307,7 @@
   "rq-af7018c0": {
     "decl": "Scenario: Real-space slot produces zero outside r_cut_real",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Real-space slot produces zero outside r_cut_real",
     "type": "scenario"
   },
@@ -17921,12 +17410,7 @@
   "rq-b07abbd4": {
     "decl": "Scenario: Pair inside the inner plateau is unsmoothed",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair inside the inner plateau is unsmoothed",
     "type": "scenario"
   },
@@ -18036,12 +17520,7 @@
   "rq-b1a132b5": {
     "decl": "Scenario: ForceField::new iterates the registry in registration order",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "ForceField::new iterates the registry in registration order",
     "type": "scenario"
   },
@@ -18220,12 +17699,7 @@
   "rq-b33cf896": {
     "decl": "Scenario: ForceField with a short-range potential owns a shared neighbor list",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "ForceField with a short-range potential owns a shared neighbor list",
     "type": "scenario"
   },
@@ -18443,12 +17917,7 @@
   "rq-b68b3445": {
     "decl": "Scenario: Two-particle pair energy matches the closed-form Lennard-Jones expression",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two-particle pair energy matches the closed-form Lennard-Jones expression",
     "type": "scenario"
   },
@@ -18587,12 +18056,7 @@
   "rq-b75ce71a": {
     "decl": "Scenario: PotentialBuildContext exposes every parsed-config input by reference",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "PotentialBuildContext exposes every parsed-config input by reference",
     "type": "scenario"
   },
@@ -18635,12 +18099,7 @@
   "rq-b80f2ddb": {
     "decl": "Scenario: step_class(Fast) on a ForceField with no Fast slots is a no-op",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "step_class(Fast) on a ForceField with no Fast slots is a no-op",
     "type": "scenario"
   },
@@ -19194,12 +18653,7 @@
   "rq-beccac31": {
     "decl": "Scenario: step(ForcesAndScalars) refreshes potential_energies and virials",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "step(ForcesAndScalars) refreshes potential_energies and virials",
     "type": "scenario"
   },
@@ -19270,12 +18724,7 @@
   "rq-bf7dfc6d": {
     "decl": "Scenario: Self slot in trivial-mode neighbor list yields zero",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Self slot in trivial-mode neighbor list yields zero",
     "type": "scenario"
   },
@@ -19380,12 +18829,7 @@
   "rq-c0f2daca": {
     "decl": "Scenario: Zero-slot step writes zeros to potential_energies and virials",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Zero-slot step writes zeros to potential_energies and virials",
     "type": "scenario"
   },
@@ -19429,24 +18873,14 @@
   "rq-c170c0b7": {
     "decl": "Scenario: Reject construction when two slots share the same label",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Reject construction when two slots share the same label",
     "type": "scenario"
   },
   "rq-c17ef35f": {
     "decl": "Scenario: PTX is embedded in the Rust binary",
     "file": "build-pipeline",
-    "refs": [
-      {
-        "file": "tests/smoke_gpu.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "PTX is embedded in the Rust binary",
     "type": "scenario"
   },
@@ -19729,12 +19163,7 @@
   "rq-c4d4608f": {
     "decl": "Scenario: Pair with Coulomb exclusion scale 0.0 contributes nothing",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair with Coulomb exclusion scale 0.0 contributes nothing",
     "type": "scenario"
   },
@@ -19765,12 +19194,7 @@
   "rq-c525ee79": {
     "decl": "Scenario: Construct an empty (N=0) ForceField with potentials configured",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Construct an empty (N=0) ForceField with potentials configured",
     "type": "scenario"
   },
@@ -19789,12 +19213,7 @@
   "rq-c538b29d": {
     "decl": "Scenario: Two particles at a fixed separation produce the closed-form LJ force",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two particles at a fixed separation produce the closed-form LJ force",
     "type": "scenario"
   },
@@ -20077,12 +19496,7 @@
   "rq-c8e5b14e": {
     "decl": "Scenario: Two independent runs with identical inputs are byte-identical",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two independent runs with identical inputs are byte-identical",
     "type": "scenario"
   },
@@ -20355,12 +19769,7 @@
   "rq-cb85cf61": {
     "decl": "Scenario: Pair inside the switching window has force smaller than the unmodified value",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair inside the switching window has force smaller than the unmodified value",
     "type": "scenario"
   },
@@ -20422,12 +19831,7 @@
   "rq-cc66d208": {
     "decl": "Scenario: step_class(Slow) on a ForceField with no Slow slots is a no-op",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "step_class(Slow) on a ForceField with no Slow slots is a no-op",
     "type": "scenario"
   },
@@ -20442,12 +19846,7 @@
   "rq-cc87744c": {
     "decl": "Scenario: Self-interaction slots are zero",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Self-interaction slots are zero",
     "type": "scenario"
   },
@@ -20467,12 +19866,7 @@
   "rq-ccf4dc3f": {
     "decl": "Scenario: Builder returning Ok(None) is skipped without erroring",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Builder returning Ok(None) is skipped without erroring",
     "type": "scenario"
   },
@@ -20781,12 +20175,7 @@
   "rq-cfc89131": {
     "decl": "Scenario: A subsystem load that names a missing kernel surfaces as GpuError at init_device",
     "file": "build-pipeline",
-    "refs": [
-      {
-        "file": "tests/smoke_gpu.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "A subsystem load that names a missing kernel surfaces as GpuError at init_device",
     "type": "scenario"
   },
@@ -20817,12 +20206,7 @@
   "rq-d01b6fb0": {
     "decl": "Scenario: Slots beyond neighbor_counts[i] are explicitly zeroed",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Slots beyond neighbor_counts[i] are explicitly zeroed",
     "type": "scenario"
   },
@@ -20881,12 +20265,7 @@
   "rq-d0f489d7": {
     "decl": "Scenario: Pair virial inside the switching window equals factor_switched * r²",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair virial inside the switching window equals factor_switched * r²",
     "type": "scenario"
   },
@@ -20986,12 +20365,7 @@
   "rq-d1e7cb57": {
     "decl": "Scenario: Block-non-aligned particle count is handled by the bounds check",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Block-non-aligned particle count is handled by the bounds check",
     "type": "scenario"
   },
@@ -21034,12 +20408,7 @@
   "rq-d26e9f9c": {
     "decl": "Scenario: Pair with Coulomb exclusion scale 0.5 contributes half",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair with Coulomb exclusion scale 0.5 contributes half",
     "type": "scenario"
   },
@@ -21139,12 +20508,7 @@
   "rq-d2bf331b": {
     "decl": "Scenario: A pair-force slot honours ForcesOnly",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "A pair-force slot honours ForcesOnly",
     "type": "scenario"
   },
@@ -21348,12 +20712,7 @@
   "rq-d52bcc88": {
     "decl": "Scenario: Pair inside the switching interval is smoothed",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair inside the switching interval is smoothed",
     "type": "scenario"
   },
@@ -21472,12 +20831,7 @@
   "rq-d6bd915a": {
     "decl": "Scenario: Pair exactly at cutoff yields the hard-cutoff value when switch == cutoff",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair exactly at cutoff yields the hard-cutoff value when switch == cutoff",
     "type": "scenario"
   },
@@ -21590,6 +20944,13 @@
     "refs": [],
     "title": "Feature: Fused Pair-Force Kernel Pattern",
     "type": "file"
+  },
+  "rq-d7cf2ae0": {
+    "decl": "Scenario: Sweep handles the iteration boundary exactly at WARP_SIZE",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Sweep handles the iteration boundary exactly at WARP_SIZE",
+    "type": "scenario"
   },
   "rq-d801f67c": {
     "decl": "Scenario: compute_total_virial is deterministic",
@@ -21709,12 +21070,7 @@
   "rq-d920e446": {
     "decl": "Scenario: fill kernel does not write beyond the buffer",
     "file": "build-pipeline",
-    "refs": [
-      {
-        "file": "tests/smoke_gpu.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "fill kernel does not write beyond the buffer",
     "type": "scenario"
   },
@@ -21882,12 +21238,7 @@
   "rq-daf7550b": {
     "decl": "Scenario: NaN positions propagate to NaN pair forces",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "NaN positions propagate to NaN pair forces",
     "type": "scenario"
   },
@@ -21918,24 +21269,14 @@
   "rq-db2253db": {
     "decl": "Scenario: Potential::frequency_class default returns Fast",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Potential::frequency_class default returns Fast",
     "type": "scenario"
   },
   "rq-db3b3d5e": {
     "decl": "Scenario: System total potential energy equals sum of particle shares",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "System total potential energy equals sum of particle shares",
     "type": "scenario"
   },
@@ -22010,12 +21351,7 @@
   "rq-dbd3c689": {
     "decl": "Scenario: Bit-exact reproducibility across runs with switching active",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Bit-exact reproducibility across runs with switching active",
     "type": "scenario"
   },
@@ -22193,12 +21529,7 @@
   "rq-dd41209b": {
     "decl": "Scenario: SPME slots present in the ForceField when [spme] is configured",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "SPME slots present in the ForceField when [spme] is configured",
     "type": "scenario"
   },
@@ -22304,12 +21635,7 @@
   "rq-de47c1ac": {
     "decl": "Scenario: step() with N=0 launches no kernels",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "step() with N=0 launches no kernels",
     "type": "scenario"
   },
@@ -22340,12 +21666,7 @@
   "rq-de92101c": {
     "decl": "Scenario: build.rs compiles a .cu file to PTX",
     "file": "build-pipeline",
-    "refs": [
-      {
-        "file": "tests/smoke_gpu.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "build.rs compiles a .cu file to PTX",
     "type": "scenario"
   },
@@ -22420,12 +21741,7 @@
   "rq-df3a50f6": {
     "decl": "Scenario: step() on a ForceField with both slots sums LJ and Morse",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "step() on a ForceField with both slots sums LJ and Morse",
     "type": "scenario"
   },
@@ -22481,12 +21797,7 @@
   "rq-dfca62d2": {
     "decl": "Scenario: Two independent runs produce byte-identical pair-force buffers",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two independent runs produce byte-identical pair-force buffers",
     "type": "scenario"
   },
@@ -22845,12 +22156,7 @@
   "rq-e39d0ed8": {
     "decl": "Scenario: max_cutoff aggregation determines the neighbor-list radius",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "max_cutoff aggregation determines the neighbor-list radius",
     "type": "scenario"
   },
@@ -22905,12 +22211,7 @@
   "rq-e412e54a": {
     "decl": "Scenario: pair_virials carries half the pair's scalar virial",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "pair_virials carries half the pair's scalar virial",
     "type": "scenario"
   },
@@ -23032,12 +22333,7 @@
   "rq-e564f8e2": {
     "decl": "Scenario: Kernel does not write slots with k >= n",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Kernel does not write slots with k >= n",
     "type": "scenario"
   },
@@ -23096,12 +22392,7 @@
   "rq-e5e3443f": {
     "decl": "Scenario: Force is C¹ continuous at r_cut",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Force is C¹ continuous at r_cut",
     "type": "scenario"
   },
@@ -23282,12 +22573,7 @@
   "rq-e80653f1": {
     "decl": "Scenario: Empty exclusion list leaves all pair forces unchanged",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Empty exclusion list leaves all pair forces unchanged",
     "type": "scenario"
   },
@@ -23410,12 +22696,7 @@
   "rq-e90c6feb": {
     "decl": "Scenario: Trivial-mode and cell-list-mode forces agree within tolerance",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Trivial-mode and cell-list-mode forces agree within tolerance",
     "type": "scenario"
   },
@@ -23594,12 +22875,7 @@
   "rq-ea67c26b": {
     "decl": "Scenario: Doubling all charges quadruples the reciprocal-space energy and forces scale linearly",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Doubling all charges quadruples the reciprocal-space energy and forces scale linearly",
     "type": "scenario"
   },
@@ -23739,12 +23015,7 @@
   "rq-ec53799e": {
     "decl": "Scenario: lj_pair_force writes the correct per-particle net force directly into the slot output",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "lj_pair_force writes the correct per-particle net force directly into the slot output",
     "type": "scenario"
   },
@@ -23929,12 +23200,7 @@
   "rq-ee4ebbda": {
     "decl": "Scenario: A neutral system with [coulomb] present still launches and produces zeros",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "A neutral system with [coulomb] present still launches and produces zeros",
     "type": "scenario"
   },
@@ -24025,12 +23291,7 @@
   "rq-ef3083cd": {
     "decl": "Scenario: Pair across the periodic boundary uses minimum-image displacement",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair across the periodic boundary uses minimum-image displacement",
     "type": "scenario"
   },
@@ -24089,12 +23350,7 @@
   "rq-ef8013be": {
     "decl": "Scenario: Newton's third law holds bitwise across the switching window",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Newton's third law holds bitwise across the switching window",
     "type": "scenario"
   },
@@ -24113,12 +23369,7 @@
   "rq-ef8dee82": {
     "decl": "Scenario: Self-energy is subtracted per particle and totals -k_C·(α/√π)·Σ q²",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "tests/spme_slots.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Self-energy is subtracted per particle and totals -k_C·(α/√π)·Σ q²",
     "type": "scenario"
   },
@@ -24893,12 +24144,7 @@
   "rq-f652bf7c": {
     "decl": "Scenario: Forces on the two members of a non-boundary pair are equal and opposite",
     "file": "forces/coulomb-pair-force",
-    "refs": [
-      {
-        "file": "tests/coulomb_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Forces on the two members of a non-boundary pair are equal and opposite",
     "type": "scenario"
   },
@@ -24949,10 +24195,6 @@
       },
       {
         "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      },
-      {
-        "file": "tests/spme_slots.rs",
         "kind": "code"
       }
     ],
@@ -25233,12 +24475,7 @@
   "rq-f93d278e": {
     "decl": "Scenario: Pair exactly at r_cut yields zero force and zero energy when switch < cutoff",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Pair exactly at r_cut yields zero force and zero energy when switch < cutoff",
     "type": "scenario"
   },
@@ -25381,12 +24618,7 @@
   "rq-fb55af77": {
     "decl": "Scenario: Exclusion scaling multiplies the switched force, energy, and virial",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Exclusion scaling multiplies the switched force, energy, and virial",
     "type": "scenario"
   },
@@ -25513,12 +24745,7 @@
   "rq-fc220d87": {
     "decl": "Scenario: Empty state is a no-op",
     "file": "forces/lj-pair-force",
-    "refs": [
-      {
-        "file": "tests/lj_pair_force.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Empty state is a no-op",
     "type": "scenario"
   },
@@ -25581,12 +24808,7 @@
   "rq-fc7b1565": {
     "decl": "Scenario: step() on a ForceField with zero slots writes zeros to forces_*",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "step() on a ForceField with zero slots writes zeros to forces_*",
     "type": "scenario"
   },
@@ -25600,12 +24822,7 @@
   "rq-fcc5cea5": {
     "decl": "Scenario: A bonded-only slot writes all five quantities regardless of level",
     "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "A bonded-only slot writes all five quantities regardless of level",
     "type": "scenario"
   },

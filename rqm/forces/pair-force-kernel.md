@@ -342,6 +342,15 @@ variant selection. Per-potential functional-form scenarios (closed-
 form factor agreement, switching-function behaviour, exclusion-table
 attenuation) live in the per-potential files.
 
+Scenarios prefaced with "any pair-force potential P" are
+implementation-parameterised: every such scenario runs three times,
+once each with P = Lennard-Jones, P = truncated Coulomb, and
+P = SPME real-space. Each instantiation supplies the per-pair
+functional form, parameter table, and exclusion-scale array
+appropriate to that potential. The expected results are computed on
+the host using the same per-pair functional form so the assertion is
+the same shape across all three runs.
+
 ```gherkin
 Feature: Fused warp-per-particle pair-force kernel pattern
 
@@ -405,6 +414,17 @@ Feature: Fused warp-per-particle pair-force kernel pattern
     When the _f variant of P is launched
     Then slot_force_x[0], slot_force_y[0], slot_force_z[0] are all 0.0_f32
 
+  @rq-ab8046b4
+  Scenario: Self-pair (i == j) in a trivial-mode neighbour list contributes zero
+    Given any pair-force potential P
+    And a ParticleState with particle_count = 2 and positions p0 = (0, 0, 0), p1 = (1.5, 0, 0)
+    And neighbor_counts is [2, 2] on the device
+    And neighbor_list is [0, 1, 1, 0] — each particle's list contains itself plus the other particle
+    When the _f variant of P is launched
+    Then slot_force_x[0], slot_force_y[0], slot_force_z[0] are all finite
+    And slot_force_x[0] equals the closed-form per-pair x-force for the (0, 1) pair only
+    And slot_force_x[1] equals the closed-form per-pair x-force for the (1, 0) pair only
+
   # --- Reduction shape ---
 
   @rq-3982aff8
@@ -416,7 +436,46 @@ Feature: Fused warp-per-particle pair-force kernel pattern
     And a CPU reference sum is computed using the same warp tree reduction shape (32 strided partial sums combined by a 5-step pairwise butterfly)
     Then every slot_force_x[i], slot_force_y[i], slot_force_z[i] equals the CPU reference exactly
 
+  @rq-d7cf2ae0
+  Scenario: Sweep handles the iteration boundary exactly at WARP_SIZE
+    Given any pair-force potential P
+    And a ParticleState with particle_count = 2 placed so the per-pair force on particle 0 due to particle 1 is finite and nonzero
+    And neighbor_counts is [32, 0] on the device
+    And the first 32 slots of particle 0's neighbour list all hold the partner index 1 (the same partner 32 times)
+    When the _f variant of P is launched
+    Then slot_force_x[0] equals 32 times the closed-form per-pair x-force for the (0, 1) pair, summed via the warp tree
+    And the sweep loop executes exactly one full iteration (SWEEPS = ceil(32 / 32) = 1)
+
+  @rq-97db6cec
+  Scenario: Sweep loop accumulates correctly when count is one more than WARP_SIZE
+    Given any pair-force potential P
+    And a ParticleState with particle_count = 2 placed so the per-pair force on particle 0 due to particle 1 is finite and nonzero
+    And neighbor_counts is [33, 0] on the device
+    And the first 33 slots of particle 0's neighbour list all hold the partner index 1
+    When the _f variant of P is launched
+    Then slot_force_x[0] equals 33 times the closed-form per-pair x-force for the (0, 1) pair, summed via the warp tree (lane 0 of the second sweep iteration contributes the 33rd copy)
+
+  @rq-63608bb9
+  Scenario: Sweep loop runs three full iterations when count is an exact multiple of WARP_SIZE
+    Given any pair-force potential P
+    And a ParticleState with particle_count = 2 placed so the per-pair force on particle 0 due to particle 1 is finite and nonzero
+    And neighbor_counts is [96, 0] on the device
+    And the first 96 slots of particle 0's neighbour list all hold the partner index 1
+    When the _f variant of P is launched
+    Then slot_force_x[0] equals 96 times the closed-form per-pair x-force for the (0, 1) pair, summed via the warp tree (3 full sweep iterations, no partial fourth)
+
   # --- Variant selection ---
+
+  @rq-43b88a11
+  Scenario: init_device exposes both kernel variants on every pair-force Kernels field
+    Given a CUDA-capable GPU is available as device 0
+    When init_device() is called
+    Then gpu.kernels.lj.pair_force_f is a populated CudaFunction
+    And gpu.kernels.lj.pair_force_fev is a populated CudaFunction
+    And gpu.kernels.coulomb.coulomb_pair_force_f is a populated CudaFunction
+    And gpu.kernels.coulomb.coulomb_pair_force_fev is a populated CudaFunction
+    And gpu.kernels.spme_real.spme_real_pair_force_f is a populated CudaFunction
+    And gpu.kernels.spme_real.spme_real_pair_force_fev is a populated CudaFunction
 
   @rq-b6c1c681
   Scenario: _f variant does not write the energy or virial slot output rows
