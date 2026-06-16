@@ -1,8 +1,5 @@
 # Features
 
-A quick scan of what the engine supports. Each entry links the place in
-this book or in `rqm/` where the feature is documented in full.
-
 ## Core guarantees
 
 - **Bit-wise reproducibility on the same GPU.** Two runs of the same
