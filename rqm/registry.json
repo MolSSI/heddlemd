@@ -1289,7 +1289,12 @@
   "rq-0c4f8da8": {
     "decl": "Scenario: Pair inside r_switch sees the unmodified Lennard-Jones force",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Pair inside r_switch sees the unmodified Lennard-Jones force",
     "type": "scenario"
   },
@@ -2785,10 +2790,10 @@
     "type": "scenario"
   },
   "rq-1a0f3eef": {
-    "decl": "Scenario: Identical inputs produce byte-identical pair-buffer outputs",
+    "decl": "Scenario: Identical inputs produce byte-identical slot output",
     "file": "forces/coulomb-pair-force",
     "refs": [],
-    "title": "Identical inputs produce byte-identical pair-buffer outputs",
+    "title": "Identical inputs produce byte-identical slot output",
     "type": "scenario"
   },
   "rq-1a2f0ba9": {
@@ -4159,6 +4164,13 @@
     "refs": [],
     "title": "Construction and Lifetime",
     "type": "section"
+  },
+  "rq-25500ae7": {
+    "decl": "Scenario: Coulomb force is C¹ continuous at r_switch",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Coulomb force is C¹ continuous at r_switch",
+    "type": "scenario"
   },
   "rq-256287cb": {
     "decl": "Scenario: SubStep::ForceEval { class: Some(Fast) } dispatches to step_class(Fast)",
@@ -5612,6 +5624,13 @@
     "title": "step_class(Slow) refreshes only Slow slots' contributions",
     "type": "scenario"
   },
+  "rq-34329bda": {
+    "decl": "Scenario: A real-space exclusion entry on one pair does not attenuate other pairs",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "A real-space exclusion entry on one pair does not attenuate other pairs",
+    "type": "scenario"
+  },
   "rq-34446ef5": {
     "decl": "- `UnitSystem` — discriminated enum naming the two supported systems.",
     "file": "io/unit-system",
@@ -6020,7 +6039,12 @@
   "rq-38441c15": {
     "decl": "Scenario: Pair exactly at r_switch sees the unmodified Lennard-Jones force",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Pair exactly at r_switch sees the unmodified Lennard-Jones force",
     "type": "scenario"
   },
@@ -6171,7 +6195,12 @@
   "rq-3982aff8": {
     "decl": "Scenario: Result of any pair-force kernel agrees with a CPU warp-tree reference exactly",
     "file": "forces/pair-force-kernel",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/pair_force_kernel.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Result of any pair-force kernel agrees with a CPU warp-tree reference exactly",
     "type": "scenario"
   },
@@ -8372,7 +8401,12 @@
   "rq-531afe39": {
     "decl": "Scenario: Pair beyond r_cut yields zero independent of r_switch",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Pair beyond r_cut yields zero independent of r_switch",
     "type": "scenario"
   },
@@ -8480,10 +8514,10 @@
     "type": "api-item"
   },
   "rq-5444c7ae": {
-    "decl": "Scenario: pair_energies carries half the pair's potential energy",
+    "decl": "Scenario: Per-particle energy slot accumulates half the pair's potential energy",
     "file": "forces/coulomb-pair-force",
     "refs": [],
-    "title": "pair_energies carries half the pair's potential energy",
+    "title": "Per-particle energy slot accumulates half the pair's potential energy",
     "type": "scenario"
   },
   "rq-545c961a": {
@@ -9034,6 +9068,13 @@
     "refs": [],
     "title": "Fill Kernel",
     "type": "section"
+  },
+  "rq-59ea69fb": {
+    "decl": "Scenario: An exclusion entry on one pair does not attenuate other pairs",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "An exclusion entry on one pair does not attenuate other pairs",
+    "type": "scenario"
   },
   "rq-5a0f5c00": {
     "decl": "### Config filename convention",
@@ -10287,6 +10328,13 @@
     "file": "forces/spme",
     "refs": [],
     "title": "Box compatibility picks up SPME's real-space cutoff",
+    "type": "scenario"
+  },
+  "rq-675080c4": {
+    "decl": "Scenario: Real-space slot with scale_coul = 1.0 reproduces the un-excluded value",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Real-space slot with scale_coul = 1.0 reproduces the un-excluded value",
     "type": "scenario"
   },
   "rq-67678030": {
@@ -13110,10 +13158,10 @@
     "type": "scenario"
   },
   "rq-82f8d168": {
-    "decl": "Scenario: Self slots carry zero energy and virial",
+    "decl": "Scenario: A particle whose only listed neighbour is itself carries zero energy and virial",
     "file": "forces/lj-pair-force",
     "refs": [],
-    "title": "Self slots carry zero energy and virial",
+    "title": "A particle whose only listed neighbour is itself carries zero energy and virial",
     "type": "scenario"
   },
   "rq-83088c2f": {
@@ -14291,7 +14339,12 @@
   "rq-916f99f3": {
     "decl": "Scenario: switch == cutoff reproduces the hard-cutoff behaviour everywhere inside the cutoff",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "switch == cutoff reproduces the hard-cutoff behaviour everywhere inside the cutoff",
     "type": "scenario"
   },
@@ -14713,7 +14766,12 @@
   "rq-95c2f543": {
     "decl": "Scenario: Exclusion scaling applies uniformly to force, energy, and virial",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Exclusion scaling applies uniformly to force, energy, and virial",
     "type": "scenario"
   },
@@ -16273,10 +16331,10 @@
     "type": "scenario"
   },
   "rq-a50cb6a1": {
-    "decl": "Scenario: Pair beyond cutoff yields zero energy and virial slots",
+    "decl": "Scenario: Pair beyond cutoff yields zero per-particle energy and virial",
     "file": "forces/lj-pair-force",
     "refs": [],
-    "title": "Pair beyond cutoff yields zero energy and virial slots",
+    "title": "Pair beyond cutoff yields zero per-particle energy and virial",
     "type": "scenario"
   },
   "rq-a54cc657": {
@@ -17153,7 +17211,12 @@
   "rq-ae20ddac": {
     "decl": "Scenario: Force is C¹ continuous at r_switch",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Force is C¹ continuous at r_switch",
     "type": "scenario"
   },
@@ -18722,10 +18785,10 @@
     "type": "section"
   },
   "rq-bf7dfc6d": {
-    "decl": "Scenario: Self slot in trivial-mode neighbor list yields zero",
+    "decl": "Scenario: Self pair in trivial-mode neighbour list contributes nothing",
     "file": "forces/coulomb-pair-force",
     "refs": [],
-    "title": "Self slot in trivial-mode neighbor list yields zero",
+    "title": "Self pair in trivial-mode neighbour list contributes nothing",
     "type": "scenario"
   },
   "rq-bf98584a": {
@@ -19527,6 +19590,13 @@
     "title": "log_column_names",
     "type": "api-item"
   },
+  "rq-c95dd6c9": {
+    "decl": "Scenario: Exclusion scaling multiplies the switched force, energy, and virial",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Exclusion scaling multiplies the switched force, energy, and virial",
+    "type": "scenario"
+  },
   "rq-c9618bdd": {
     "decl": "Scenario: minimum_image is per-axis independent for an orthorhombic box",
     "file": "simulation-box",
@@ -19767,10 +19837,15 @@
     "type": "scenario"
   },
   "rq-cb85cf61": {
-    "decl": "Scenario: Pair inside the switching window has force smaller than the unmodified value",
+    "decl": "Scenario: Pair near r_cut inside the switching window has force smaller than the unmodified value",
     "file": "forces/lj-pair-force",
-    "refs": [],
-    "title": "Pair inside the switching window has force smaller than the unmodified value",
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Pair near r_cut inside the switching window has force smaller than the unmodified value",
     "type": "scenario"
   },
   "rq-cbeeea3c": {
@@ -20203,13 +20278,6 @@
     "title": "Reject an entry missing `between`",
     "type": "scenario"
   },
-  "rq-d01b6fb0": {
-    "decl": "Scenario: Slots beyond neighbor_counts[i] are explicitly zeroed",
-    "file": "forces/coulomb-pair-force",
-    "refs": [],
-    "title": "Slots beyond neighbor_counts[i] are explicitly zeroed",
-    "type": "scenario"
-  },
   "rq-d028bd1f": {
     "decl": "### Rust Launch Helpers",
     "file": "integration/nose-hoover-chain",
@@ -20265,7 +20333,12 @@
   "rq-d0f489d7": {
     "decl": "Scenario: Pair virial inside the switching window equals factor_switched * r²",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Pair virial inside the switching window equals factor_switched * r²",
     "type": "scenario"
   },
@@ -20299,6 +20372,13 @@
       }
     ],
     "title": "Explicit [output] values override defaults",
+    "type": "scenario"
+  },
+  "rq-d150a16b": {
+    "decl": "Scenario: Real-space slot scales contribution by 0.5 when scale_coul = 0.5",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Real-space slot scales contribution by 0.5 when scale_coul = 0.5",
     "type": "scenario"
   },
   "rq-d16be675": {
@@ -21882,6 +21962,13 @@
     "title": "LogWriter",
     "type": "api-item"
   },
+  "rq-e1204b7f": {
+    "decl": "Scenario: Coulomb force decays toward zero just inside r_cut",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Coulomb force decays toward zero just inside r_cut",
+    "type": "scenario"
+  },
   "rq-e1345339": {
     "decl": "## Feature API",
     "file": "forces/pair-force-kernel",
@@ -22209,10 +22296,10 @@
     "type": "api-item"
   },
   "rq-e412e54a": {
-    "decl": "Scenario: pair_virials carries half the pair's scalar virial",
+    "decl": "Scenario: Per-particle virial slot accumulates half the pair's scalar virial",
     "file": "forces/coulomb-pair-force",
     "refs": [],
-    "title": "pair_virials carries half the pair's scalar virial",
+    "title": "Per-particle virial slot accumulates half the pair's scalar virial",
     "type": "scenario"
   },
   "rq-e43528db": {
@@ -22392,7 +22479,12 @@
   "rq-e5e3443f": {
     "decl": "Scenario: Force is C¹ continuous at r_cut",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Force is C¹ continuous at r_cut",
     "type": "scenario"
   },
@@ -23350,7 +23442,12 @@
   "rq-ef8013be": {
     "decl": "Scenario: Newton's third law holds bitwise across the switching window",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Newton's third law holds bitwise across the switching window",
     "type": "scenario"
   },
@@ -23752,6 +23849,13 @@
     ],
     "title": "mtk_position_drift",
     "type": "api-item"
+  },
+  "rq-f1dffc21": {
+    "decl": "Scenario: Pair with Coulomb exclusion scale 1.0 reproduces the un-excluded value",
+    "file": "forces/coulomb-pair-force",
+    "refs": [],
+    "title": "Pair with Coulomb exclusion scale 1.0 reproduces the un-excluded value",
+    "type": "scenario"
   },
   "rq-f20e017d": {
     "decl": "Scenario: Open refuses to overwrite an existing file",
@@ -24475,7 +24579,12 @@
   "rq-f93d278e": {
     "decl": "Scenario: Pair exactly at r_cut yields zero force and zero energy when switch < cutoff",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Pair exactly at r_cut yields zero force and zero energy when switch < cutoff",
     "type": "scenario"
   },
@@ -24618,7 +24727,12 @@
   "rq-fb55af77": {
     "decl": "Scenario: Exclusion scaling multiplies the switched force, energy, and virial",
     "file": "forces/lj-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/lj_pair_force.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Exclusion scaling multiplies the switched force, energy, and virial",
     "type": "scenario"
   },

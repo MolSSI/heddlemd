@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use cudarc::driver::CudaDevice;
 use heddle_md::forces::{
-    AggregateLevel, DeviceExclusionList, ExclusionList, NeighborListState, SlotOutputView,
+    AggregateLevel, DeviceExclusionList, Exclusion, ExclusionList, NeighborListState,
+    SlotOutputView,
 };
 use heddle_md::gpu::{
     GpuContext, GpuError, LennardJonesParameterTable, ParticleBuffers, lj_pair_force,
@@ -21,6 +22,62 @@ use heddle_md::precision::Real;
 pub fn empty_exclusions(device: &Arc<CudaDevice>, n: usize) -> DeviceExclusionList {
     let host = ExclusionList::empty(n);
     DeviceExclusionList::from_host(device, &host).expect("empty exclusion buffers")
+}
+
+/// Build a host-side `ExclusionList` over `n` particles holding the
+/// given symmetric `(i, j, scale_lj, scale_coul)` entries. The
+/// per-atom offset / partner / scale arrays are populated for both
+/// directions of every entry.
+pub fn host_exclusions_from_entries(
+    n: usize,
+    entries: &[(u32, u32, Real, Real)],
+) -> ExclusionList {
+    let exclusion_entries: Vec<Exclusion> = entries
+        .iter()
+        .map(|&(i, j, lj, coul)| Exclusion {
+            atom_i: i,
+            atom_j: j,
+            scale_lj: lj,
+            scale_coul: coul,
+        })
+        .collect();
+    let mut per_atom: Vec<Vec<(u32, Real, Real)>> = vec![Vec::new(); n];
+    for &(i, j, lj, coul) in entries {
+        per_atom[i as usize].push((j, lj, coul));
+        per_atom[j as usize].push((i, lj, coul));
+    }
+    let mut atom_excl_offsets = Vec::with_capacity(n + 1);
+    let mut atom_excl_partners = Vec::new();
+    let mut atom_excl_lj_scales = Vec::new();
+    let mut atom_excl_coul_scales = Vec::new();
+    atom_excl_offsets.push(0u32);
+    for partners in &per_atom {
+        for &(partner, lj, coul) in partners {
+            atom_excl_partners.push(partner);
+            atom_excl_lj_scales.push(lj);
+            atom_excl_coul_scales.push(coul);
+        }
+        atom_excl_offsets.push(atom_excl_partners.len() as u32);
+    }
+    ExclusionList {
+        entries: exclusion_entries,
+        atom_excl_offsets,
+        atom_excl_partners,
+        atom_excl_lj_scales,
+        atom_excl_coul_scales,
+        particle_count: n,
+    }
+}
+
+/// Build a `DeviceExclusionList` from the given symmetric entries. Each
+/// tuple is `(atom_i, atom_j, scale_lj, scale_coul)`.
+pub fn exclusions_from_entries(
+    device: &Arc<CudaDevice>,
+    n: usize,
+    entries: &[(u32, u32, Real, Real)],
+) -> DeviceExclusionList {
+    let host = host_exclusions_from_entries(n, entries);
+    DeviceExclusionList::from_host(device, &host).expect("upload exclusion buffers")
 }
 
 /// Build a `LennardJonesParameterTable` for a single-type system using one

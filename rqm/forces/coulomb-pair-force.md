@@ -397,9 +397,10 @@ Feature: Truncated Coulomb pair force kernel
   Scenario: Pair at exactly the cutoff contributes the smoothed (zero) value
     Given a CoulombParameters with cutoff=3.0e-10 and r_switch=2.7e-10
     And two particles with charges (+1e, +1e) at separation exactly 3.0e-10
-    When the _f variant of coulomb_pair_force is called
+    When the _fev variant of coulomb_pair_force is called
     Then slot_energy[0] equals 0.0 (the switching function S(r_c²) = 0)
-    And slot_force_*[0] equals 0.0
+    And slot_force_x[0], slot_force_y[0], slot_force_z[0] are all 0.0
+    And slot_virial[0] equals 0.0
 
   # --- Switching function ---
 
@@ -407,9 +408,9 @@ Feature: Truncated Coulomb pair force kernel
   Scenario: Pair inside the inner plateau is unsmoothed
     Given a CoulombParameters with cutoff=5e-10 and r_switch=4e-10
     And two particles with charges (+1e, +1e) at separation 3.5e-10 (< r_switch)
-    When the _f variant of coulomb_pair_force is called
-    Then slot_energy[0] equals the unswitched Coulomb energy
-      0.5 · k_C · (1e)² / 3.5e-10
+    When the _fev variant of coulomb_pair_force is called
+    Then slot_energy[0] + slot_energy[1] equals the unswitched Coulomb energy
+      k_C · (1e)² / 3.5e-10 within f32 round-off
     And slot_force_x[0] equals the unswitched Coulomb force component
       along +x: k_C · (1e)² · 3.5e-10 / (3.5e-10)³
 
@@ -418,16 +419,50 @@ Feature: Truncated Coulomb pair force kernel
     Given a CoulombParameters with cutoff=5e-10 and r_switch=4e-10
     And two particles with charges (+1e, +1e) at separation 4.5e-10
       (between r_switch and cutoff)
-    When the _f variant of coulomb_pair_force is called
-    Then slot_energy[0] is strictly between 0 and the unswitched value
+    When the _fev variant of coulomb_pair_force is called
+    Then slot_energy[0] is strictly between 0 and the unswitched 0.5 · k_C · (1e)² / 4.5e-10
     And slot_force_x[0] is strictly between 0 and the unswitched x-component
 
   @rq-67678030
   Scenario: Switching interval r_switch == cutoff selects hard-cutoff
     Given a CoulombParameters with cutoff = r_switch = 4e-10
     And two particles with charges (+1e, +1e) at separation 3.9e-10
-    When the _f variant of coulomb_pair_force is called
-    Then slot_energy[0] equals the unswitched Coulomb energy (S = 1)
+    When the _fev variant of coulomb_pair_force is called
+    Then slot_energy[0] + slot_energy[1] equals the unswitched Coulomb energy (S = 1)
+
+  @rq-25500ae7
+  Scenario: Coulomb force is C¹ continuous at r_switch
+    Given a CoulombParameters with cutoff=5 a₀ and r_switch=4 a₀
+    And two particles with charges (+1 e, -1 e)
+    When the _f variant of coulomb_pair_force is called at r = 4 a₀ - 1e-3 a₀ to obtain f_below
+    And the _f variant is called at r = 4 a₀ + 1e-3 a₀ to obtain f_above
+    Then |f_below.slot_force_x[0] - f_above.slot_force_x[0]|
+      is bounded by 5e-2 * |f_below.slot_force_x[0]|
+      (the bound is looser than the 1% used for Lennard-Jones because the
+      Coulomb chain-rule correction term `chain_coeff * energy` carries
+      f32-precision noise near τ = 0 that is large relative to the small
+      step in r)
+
+  @rq-e1204b7f
+  Scenario: Coulomb force decays toward zero just inside r_cut
+    Given a CoulombParameters with cutoff=5 a₀ and r_switch=4 a₀
+    And two particles with charges (+1 e, -1 e)
+    When the _f variant of coulomb_pair_force is called at r = 5 a₀ - 1e-5 a₀ to obtain f_inside
+    Then |f_inside.slot_force_x[0]| is bounded by 1e-2 * |unswitched Coulomb force at r = r_switch|
+      (the assertion uses r very close to r_cut because the
+      CHARMM-style chain-rule correction `12 τ (1-τ)/Δ · U(r)` remains a
+      few percent of the unswitched force at r_switch until 1 - τ ≪ 1)
+
+  @rq-c95dd6c9
+  Scenario: Exclusion scaling multiplies the switched force, energy, and virial
+    Given a CoulombParameters with cutoff=5e-10 and r_switch=4e-10
+    And two particles with charges (+1e, -1e) at separation 4.5e-10 (in the switching window)
+    And an ExclusionList listing pair (0, 1) with scale_coul = 0.5
+    When the _fev variant of coulomb_pair_force is called to obtain (f_excluded, E_excluded, W_excluded)
+    And the _fev variant is called with the same setup but an empty exclusion list to obtain (f_unscaled, E_unscaled, W_unscaled)
+    Then f_excluded.slot_force_x[0] equals 0.5 * f_unscaled.slot_force_x[0] bit-for-bit
+    And f_excluded.slot_energy[0] equals 0.5 * f_unscaled.slot_energy[0] bit-for-bit
+    And f_excluded.slot_virial[0] equals 0.5 * f_unscaled.slot_virial[0] bit-for-bit
 
   # --- PBC ---
 
@@ -453,21 +488,21 @@ Feature: Truncated Coulomb pair force kernel
   # --- Self-pair handling ---
 
   @rq-bf7dfc6d
-  Scenario: Self slot in trivial-mode neighbor list yields zero
-    Given a 1-particle system with charge +1e in trivial mode
-    When the _f variant of coulomb_pair_force is called
-    Then slot_force_x[0] equals 0.0 (i == j short-circuit, no other neighbours in cutoff)
-    And pair_energies[0*1 + 0] equals 0.0
-    And pair_virials[0*1 + 0] equals 0.0
+  Scenario: Self pair in trivial-mode neighbour list contributes nothing
+    Given a 1-particle system with charge +1e in trivial mode (neighbor_list[0] = 0)
+    When the _fev variant of coulomb_pair_force is called
+    Then slot_force_x[0] equals 0.0 (i == j short-circuit)
+    And slot_energy[0] equals 0.0
+    And slot_virial[0] equals 0.0
 
   # --- Exclusions ---
 
   @rq-c4d4608f
   Scenario: Pair with Coulomb exclusion scale 0.0 contributes nothing
-    Given two particles with charges (+1e, -1e) at separation 3e-10
+    Given two particles with charges (+1e, -1e) at separation 3e-10 (inside cutoff)
     And an ExclusionList listing pair (0, 1) with scale_coul = 0.0
-    When the _f variant of coulomb_pair_force is called
-    Then slot_force_*[0] equals 0.0
+    When the _fev variant of coulomb_pair_force is called
+    Then slot_force_x[0], slot_force_y[0], slot_force_z[0] are all 0.0
     And slot_energy[0] equals 0.0
     And slot_virial[0] equals 0.0
 
@@ -475,44 +510,62 @@ Feature: Truncated Coulomb pair force kernel
   Scenario: Pair with Coulomb exclusion scale 0.5 contributes half
     Given two particles with charges (+1e, -1e) at separation 3e-10
     And an ExclusionList listing pair (0, 1) with scale_coul = 0.5
-    When the _f variant of coulomb_pair_force is called
-    Then slot_energy[0] equals 0.5 times the unscaled value
-    And slot_force_x[0] equals 0.5 times the unscaled x-component
+    When the _fev variant of coulomb_pair_force is called to obtain values_scaled
+    And the _fev variant of coulomb_pair_force is called with an empty exclusion list to obtain values_unscaled
+    Then values_scaled.slot_energy[0] equals 0.5 * values_unscaled.slot_energy[0] bit-for-bit
+    And values_scaled.slot_force_x[0] equals 0.5 * values_unscaled.slot_force_x[0] bit-for-bit
+    And values_scaled.slot_virial[0] equals 0.5 * values_unscaled.slot_virial[0] bit-for-bit
+
+  @rq-f1dffc21
+  Scenario: Pair with Coulomb exclusion scale 1.0 reproduces the un-excluded value
+    Given two particles with charges (+1e, -1e) at separation 3e-10
+    And an ExclusionList listing pair (0, 1) with scale_coul = 1.0
+    When the _fev variant of coulomb_pair_force is called to obtain values_explicit
+    And the _fev variant of coulomb_pair_force is called with an empty exclusion list to obtain values_implicit
+    Then values_explicit.slot_force_x[0] equals values_implicit.slot_force_x[0] bit-for-bit
+    And values_explicit.slot_energy[0] equals values_implicit.slot_energy[0] bit-for-bit
+    And values_explicit.slot_virial[0] equals values_implicit.slot_virial[0] bit-for-bit
+
+  @rq-59ea69fb
+  Scenario: An exclusion entry on one pair does not attenuate other pairs
+    Given a ParticleState of N=3 with positions p0=(0,0,0), p1=(2e-10,0,0), p2=(4e-10,0,0) and charges (+1e, -1e, +1e)
+    And an ExclusionList listing only pair (0, 1) with scale_coul = 0.0
+    When the _fev variant of coulomb_pair_force is called
+    Then slot_force_x[0] equals the Coulomb force on particle 0 due to particle 2 only
+      (the (0, 1) contribution is suppressed; the (0, 2) contribution is unscaled)
+    And slot_force_x[2] equals the Coulomb force on particle 2 due to particles 0 and 1
+      (no exclusion entry attenuates particle 2's contributions)
 
   @rq-8c96d3c7
   Scenario: Coulomb and LJ exclusions are independent
     Given two particles whose ExclusionList entry is scale_lj=0.5, scale_coul=0.833
-    When the _f variant of coulomb_pair_force is called
+    When the _fev variant of coulomb_pair_force is called
     Then the Coulomb contribution is scaled by 0.833
-    When lj_pair_force is called on the same pair
+    When the _fev variant of lj_pair_force is called on the same pair
     Then the LJ contribution is scaled by 0.5
 
   # --- Energy and virial conventions ---
 
   @rq-5444c7ae
-  Scenario: pair_energies carries half the pair's potential energy
-    Given a single pair (i, j) at finite distance with no exclusion
-    When the _f variant of coulomb_pair_force is called
-    Then pair_energies[i*max_neighbors + slot_for_j]
-        equals 0.5 * (k_C * q_i * q_j / r) * S(r²)
+  Scenario: Per-particle energy slot accumulates half the pair's potential energy
+    Given a single pair (0, 1) at finite distance with no exclusion
+    When the _fev variant of coulomb_pair_force is called
+    Then slot_energy[0] equals 0.5 * (k_C * q_0 * q_1 / r) * S(r²)
+    And slot_energy[0] + slot_energy[1] equals (k_C * q_0 * q_1 / r) * S(r²) within f32 round-off
+      (half-sum convention)
 
   @rq-e412e54a
-  Scenario: pair_virials carries half the pair's scalar virial
-    Given a single pair (i, j) at finite distance with no exclusion
-    When the _f variant of coulomb_pair_force is called
-    Then pair_virials[i*max_neighbors + slot_for_j] equals 0.5 * factor * r²
+  Scenario: Per-particle virial slot accumulates half the pair's scalar virial
+    Given a single pair (0, 1) at finite distance with no exclusion
+    When the _fev variant of coulomb_pair_force is called
+    Then slot_virial[0] equals 0.5 * factor * r²
       where factor is the post-switching radial scalar force prefactor
-
-  @rq-d01b6fb0
-  Scenario: Slots beyond neighbor_counts[i] are explicitly zeroed
-    Given particle i with neighbor_counts[i] = 3 and max_neighbors = 8
-    When the _f variant of coulomb_pair_force is called
-    Then slots i*8 + 3 through i*8 + 7 are all 0.0 in every output buffer
+    And slot_virial[0] + slot_virial[1] equals factor * r² within f32 round-off
 
   # --- Reproducibility ---
 
   @rq-1a0f3eef
-  Scenario: Identical inputs produce byte-identical pair-buffer outputs
+  Scenario: Identical inputs produce byte-identical slot output
     Given two launches of the same coulomb_pair_force variant with identical inputs on the same GPU
     When both kernels return
     Then their slot_force_x, slot_force_y, slot_force_z, slot_energy, and slot_virial slot outputs

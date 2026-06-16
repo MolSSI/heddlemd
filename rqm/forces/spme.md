@@ -803,20 +803,51 @@ Feature: Smooth particle-mesh Ewald (SPME)
   Scenario: Real-space slot produces zero force on an excluded pair (scale_coul=0)
     Given two oppositely charged particles within r_cut_real
     And an ExclusionList listing the pair with scale_coul=0.0
-    When the real-space slot's contribute() is called
+    When the _fev variant of spme_real_pair_force is called
     Then slot_force_x[0], slot_force_y[0], slot_force_z[0], slot_energy[0], slot_virial[0] are all 0.0
+
+  @rq-d150a16b
+  Scenario: Real-space slot scales contribution by 0.5 when scale_coul = 0.5
+    Given two oppositely charged particles at separation r = 3e-10 (< r_cut_real)
+    And an ExclusionList listing the pair with scale_coul = 0.5
+    When the _fev variant of spme_real_pair_force is called to obtain values_scaled
+    And the _fev variant of spme_real_pair_force is called with an empty exclusion list to obtain values_unscaled
+    Then values_scaled.slot_force_x[0] equals 0.5 * values_unscaled.slot_force_x[0] bit-for-bit
+    And values_scaled.slot_energy[0] equals 0.5 * values_unscaled.slot_energy[0] bit-for-bit
+    And values_scaled.slot_virial[0] equals 0.5 * values_unscaled.slot_virial[0] bit-for-bit
+
+  @rq-675080c4
+  Scenario: Real-space slot with scale_coul = 1.0 reproduces the un-excluded value
+    Given two oppositely charged particles at separation r = 3e-10
+    And an ExclusionList listing the pair with scale_coul = 1.0
+    When the _fev variant of spme_real_pair_force is called to obtain values_explicit
+    And the _fev variant of spme_real_pair_force is called with an empty exclusion list to obtain values_implicit
+    Then values_explicit.slot_force_x[0] equals values_implicit.slot_force_x[0] bit-for-bit
+    And values_explicit.slot_energy[0] equals values_implicit.slot_energy[0] bit-for-bit
+    And values_explicit.slot_virial[0] equals values_implicit.slot_virial[0] bit-for-bit
+
+  @rq-34329bda
+  Scenario: A real-space exclusion entry on one pair does not attenuate other pairs
+    Given a ParticleState of N=3 with positions p0=(0,0,0), p1=(2e-10,0,0), p2=(4e-10,0,0)
+      and charges (+1e, -1e, +1e)
+    And an ExclusionList listing only pair (0, 1) with scale_coul = 0.0
+    When the _fev variant of spme_real_pair_force is called
+    Then slot_force_x[0] equals the SPME real-space force on particle 0 due to particle 2 only
+      (the (0, 1) contribution is suppressed; the (0, 2) contribution is unscaled)
+    And slot_force_x[2] equals the SPME real-space force on particle 2 due to particles 0 and 1
+      (no exclusion entry attenuates particle 2's contributions)
 
   @rq-af7018c0
   Scenario: Real-space slot produces zero outside r_cut_real
     Given two particles at separation greater than r_cut_real
-    When the real-space slot's contribute() is called
+    When the _fev variant of spme_real_pair_force is called
     Then slot_force_x[0], slot_force_y[0], slot_force_z[0], slot_energy[0], slot_virial[0] are all 0.0
 
   @rq-83088c2f
   Scenario: Real-space slot matches the closed-form erfc force for an isolated pair
     Given two unit-charge particles at separation r = 4.0e-10 inside the cutoff
     And alpha = 2.0e10
-    When the real-space slot's contribute() is called
+    When the _f variant of spme_real_pair_force is called
     Then slot_force_x[0] equals the closed-form
       k_C · q_i · q_j · (erfc(α r) · inv_r2 + (2 α / √π) · exp(-α² r²) · inv_r2) · dx · inv_r
       to within 1e-5 relative
@@ -824,7 +855,7 @@ Feature: Smooth particle-mesh Ewald (SPME)
   @rq-0caebe37
   Scenario: Real-space slot obeys Newton's third law for a non-boundary pair
     Given two particles at non-boundary separation
-    When the real-space slot's contribute() is called
+    When the _f variant of spme_real_pair_force is called
     Then slot_force_x[0] equals -slot_force_x[1] bit-exactly (Newton's third law for an isolated pair)
 
   # --- Reciprocal-space pipeline: spread ---

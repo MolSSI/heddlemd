@@ -532,39 +532,41 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Pair inside r_switch sees the unmodified Lennard-Jones force
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5, 0, 0)
     And cutoff=5.0 and switch=4.0
-    When the _f variant of lj_pair_force is called
+    When the _fev variant of lj_pair_force is called
     Then slot_force_x[0] equals the closed-form LJ force at r=1.5
-    And pair_energies[0*2 + 1] + pair_energies[1*2 + 0]
-      equals 4.0 * ε * (sr12 - sr6) at r=1.5 within f32 round-off
+    And slot_energy[0] + slot_energy[1] equals 4.0 * ε * (sr12 - sr6) at r=1.5 within f32 round-off
+      (half-sum convention: each particle's slot carries 0.5 · U_ij; the sum recovers U_ij)
 
   @rq-38441c15
   Scenario: Pair exactly at r_switch sees the unmodified Lennard-Jones force
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.0, 0, 0)
     And cutoff=5.0 and switch=4.0
-    When the _f variant of lj_pair_force is called
+    When the _fev variant of lj_pair_force is called
     Then slot_force_x[0] equals the closed-form LJ force at r=4.0
-    And pair_energies[0*2 + 1] + pair_energies[1*2 + 0]
-      equals 4.0 * ε * (sr12 - sr6) at r=4.0 within f32 round-off
+    And slot_energy[0] + slot_energy[1] equals 4.0 * ε * (sr12 - sr6) at r=4.0 within f32 round-off
 
   @rq-f93d278e
   Scenario: Pair exactly at r_cut yields zero force and zero energy when switch < cutoff
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(5.0, 0, 0)
     And cutoff=5.0 and switch=4.0
-    When the _f variant of lj_pair_force is called
+    When the _fev variant of lj_pair_force is called
     Then slot_force_x[0], slot_force_y[0], slot_force_z[0] are all 0.0_f32
-    And pair_energies[0*2 + 1] and pair_virials[0*2 + 1] are both 0.0_f32
+    And slot_energy[0] and slot_virial[0] are both 0.0_f32
+    And slot_energy[1] and slot_virial[1] are both 0.0_f32
 
   @rq-cb85cf61
-  Scenario: Pair inside the switching window has force smaller than the unmodified value
-    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.5, 0, 0)
+  Scenario: Pair near r_cut inside the switching window has force smaller than the unmodified value
+    Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.95, 0, 0)
     And cutoff=5.0 and switch=4.0
-    When the _f variant of lj_pair_force is called to obtain f_switched
+    When the _fev variant of lj_pair_force is called to obtain f_switched (slot_force, slot_energy)
     And lj_pair_force is called with switch=cutoff to obtain f_unmodified
-    Then |f_switched.x| is strictly less than |f_unmodified.x|
-    And f_switched.x has the same sign as f_unmodified.x (or both are 0)
-    And the switched pair_energies[0*2 + 1] + pair_energies[1*2 + 0]
-      equals S(r²) * 4.0 * ε * (sr12 - sr6) at r=4.5 within f32 round-off,
-      where S(r²) = (r_c²-r²)²(r_c²+2r²-3r_s²)/(r_c²-r_s²)³
+    Then |f_switched.slot_force_x[0]| is strictly less than |f_unmodified.slot_force_x[0]|
+      (the switching function drives the force toward zero at r = r_cut, dominating the
+      chain-rule correction term once r is well inside the inner switching window)
+    And f_switched.slot_force_x[0] has the same sign as f_unmodified.slot_force_x[0] (or both are 0)
+    And f_switched.slot_energy[0] + f_switched.slot_energy[1]
+      equals S(r²) * 4.0 * ε * (sr12 - sr6) at r=4.95 within f32 round-off,
+      where S(r²) = (1−τ)²(1+2τ) with τ = (r²−r_s²)/(r_c²−r_s²)
 
   @rq-ae20ddac
   Scenario: Force is C¹ continuous at r_switch
@@ -585,25 +587,26 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: switch == cutoff reproduces the hard-cutoff behaviour everywhere inside the cutoff
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(r, 0, 0) for r in {1.5, 3.0, 4.5}
     And cutoff=5.0 and switch=5.0
-    When the _f variant of lj_pair_force is called for each r
+    When the _fev variant of lj_pair_force is called for each r
     Then slot_force_x[0] equals the closed-form LJ force at that r
-    And pair_energies[0*2 + 1] + pair_energies[1*2 + 0]
+    And slot_energy[0] + slot_energy[1]
       equals 4.0 * ε * (sr12 - sr6) at that r within f32 round-off
 
   @rq-531afe39
   Scenario: Pair beyond r_cut yields zero independent of r_switch
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(6.0, 0, 0)
     And cutoff=5.0 and switch=4.0
-    When the _f variant of lj_pair_force is called
+    When the _fev variant of lj_pair_force is called
     Then slot_force_x[0], slot_force_y[0], slot_force_z[0] are all 0.0_f32
-    And pair_energies[0*2 + 1] and pair_virials[0*2 + 1] are both 0.0_f32
+    And slot_energy[0] and slot_virial[0] are both 0.0_f32
+    And slot_energy[1] and slot_virial[1] are both 0.0_f32
 
   @rq-d0f489d7
   Scenario: Pair virial inside the switching window equals factor_switched * r²
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(4.5, 0, 0)
     And cutoff=5.0 and switch=4.0
-    When the _f variant of lj_pair_force is called
-    Then pair_virials[0*2 + 1] + pair_virials[1*2 + 0]
+    When the _fev variant of lj_pair_force is called
+    Then slot_virial[0] + slot_virial[1]
       equals factor_switched * r² at r=4.5 within f32 round-off,
       where factor_switched = S(r²) · factor_lj − 2 · dS/d(r²) · U_lj
 
@@ -896,8 +899,8 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Two-particle pair energy matches the closed-form Lennard-Jones expression
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5,0,0)
     And a LennardJonesParameterTable with σ=1.0, ε=1.0, cutoff=5.0
-    When the _f variant of lj_pair_force is called
-    Then pair_energies[0*2 + 1] + pair_energies[1*2 + 0]
+    When the _fev variant of lj_pair_force is called
+    Then slot_energy[0] + slot_energy[1]
       equals 4.0 * ε * (sr12 - sr6) within f32 round-off
       where sr2 = (σ/r)^2, sr6 = sr2^3, sr12 = sr6^2, r = 1.5
 
@@ -905,30 +908,32 @@ Feature: Lennard-Jones O(N²) pair force kernel
   Scenario: Two-particle pair virial matches r_ij · F_ij
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5,0,0)
     And a LennardJonesParameterTable with σ=1.0, ε=1.0, cutoff=5.0
-    When the _f variant of lj_pair_force is called
-    Then pair_virials[0*2 + 1] + pair_virials[1*2 + 0]
+    When the _fev variant of lj_pair_force is called
+    Then slot_virial[0] + slot_virial[1]
       equals r_ij · F_ij within f32 round-off
       where F_ij is the force on particle 0 due to particle 1
 
   @rq-a50cb6a1
-  Scenario: Pair beyond cutoff yields zero energy and virial slots
+  Scenario: Pair beyond cutoff yields zero per-particle energy and virial
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(6.0,0,0)
     And cutoff=5.0
-    When the _f variant of lj_pair_force is called
-    Then pair_energies[0*2 + 1] and pair_virials[0*2 + 1] are both 0.0_f32
-    And pair_energies[1*2 + 0] and pair_virials[1*2 + 0] are both 0.0_f32
+    When the _fev variant of lj_pair_force is called
+    Then slot_energy[0] and slot_virial[0] are both 0.0_f32
+    And slot_energy[1] and slot_virial[1] are both 0.0_f32
 
   @rq-82f8d168
-  Scenario: Self slots carry zero energy and virial
+  Scenario: A particle whose only listed neighbour is itself carries zero energy and virial
     Given a ParticleState of N=4 with arbitrary positions
-    When the _f variant of lj_pair_force is called with a trivial neighbor list
-    Then for every i in 0..4, pair_energies[i*4 + i] and pair_virials[i*4 + i] are both 0.0_f32
+    And the neighbour list for each particle i lists only itself (count=1, neighbor_list[i*4 + 0] = i)
+    When the _fev variant of lj_pair_force is called
+    Then for every i in 0..4, slot_energy[i] and slot_virial[i] are both 0.0_f32
 
   @rq-95c2f543
   Scenario: Exclusion scaling applies uniformly to force, energy, and virial
     Given a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5,0,0)
     And a DeviceExclusionList containing the entry (0, 1, 0.5)
-    When the _f variant of lj_pair_force is called
-    Then pair_energies[0*2 + 1] equals 0.5 * (un-excluded LJ energy / 2) within f32 round-off
-    And pair_virials[0*2 + 1] equals 0.5 * (un-excluded virial / 2) within f32 round-off
+    When the _fev variant of lj_pair_force is called
+    Then slot_energy[0] equals 0.5 * (un-excluded LJ energy / 2) within f32 round-off
+      (the 0.5 is the exclusion scale; the 1/2 is the half-sum convention; the slot accumulates one pair contribution)
+    And slot_virial[0] equals 0.5 * (un-excluded virial / 2) within f32 round-off
 ```
