@@ -76,9 +76,9 @@ two.
 
 ```text
 count = neighbor_counts[i]
-// Phase 1: strided sweep across the full row width.
+// Phase 1: strided sweep across the populated portion of the row.
 // Every thread accumulates a register-resident partial sum p_t.
-SWEEPS = (max_neighbors + BLOCK_SIZE - 1) / BLOCK_SIZE
+SWEEPS = (count + BLOCK_SIZE - 1) / BLOCK_SIZE
 p_t = 0.0f
 for s = 0 .. SWEEPS:
     k = s * BLOCK_SIZE + threadIdx.x
@@ -100,11 +100,20 @@ for stride in [16, 8, 4, 2, 1]:
 `BLOCK_SIZE = 256` and `NUM_WARPS = BLOCK_SIZE / 32 = 8` are kernel
 compile-time constants.
 
-The Phase 1 sweep width is `max_neighbors` for every particle regardless
-of `count`: lanes whose `k >= count` contribute `0.0f` to their partial
-sum but still issue the strided load (the load address is in range
-because the pair-buffer width is `max_neighbors`). This keeps the
-reduction tree shape identical across every particle in a launch.
+The Phase 1 sweep loop runs `(count + BLOCK_SIZE - 1) / BLOCK_SIZE`
+sweeps, scaling with the populated row width rather than
+`max_neighbors`. For `count == 0` the loop runs zero sweeps. Within
+the final partial sweep, lanes whose `k >= count` contribute `0.0f`
+to their partial sum and do not issue a load; lanes in any earlier
+full sweep load and add a single slot value. The kernel relies on the
+contract `count <= max_neighbors` (see `forces/neighbor-list.md`) for
+its in-row bound — no separate `k < max_neighbors` guard is needed
+because the active mask `k < count` already covers it.
+
+Phase 2 and Phase 3 always execute their fixed warp- and inter-warp
+reduction trees regardless of `count`, so the reduction tree shape
+applied to the partial sums held by every block's 256 lanes is
+identical across every particle in a launch.
 
 The reduction is run-to-run bit-exact: every floating-point addition in
 Phases 1–3 takes the same operands in the same order on every launch, on

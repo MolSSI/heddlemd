@@ -32,19 +32,20 @@ extern "C" __global__ void reduce_pair_forces(
 
   unsigned int count = neighbor_counts[i];
   unsigned int row_base = i * max_neighbors;
+  unsigned int sweep_end = ((count + BLOCK_SIZE - 1) / BLOCK_SIZE) * BLOCK_SIZE;
 
   Real p_x = R(0.0);
   Real p_y = R(0.0);
   Real p_z = R(0.0);
 
-  for (unsigned int s = 0; s < max_neighbors; s += BLOCK_SIZE) {
+  for (unsigned int s = 0; s < sweep_end; s += BLOCK_SIZE) {
     unsigned int k = s + threadIdx.x;
-    if (k < max_neighbors) {
+    bool active = (k < count);
+    if (active) {
       unsigned int idx = row_base + k;
-      bool active = (k < count);
-      p_x = p_x + (active ? pair_forces_x[idx] : R(0.0));
-      p_y = p_y + (active ? pair_forces_y[idx] : R(0.0));
-      p_z = p_z + (active ? pair_forces_z[idx] : R(0.0));
+      p_x = p_x + pair_forces_x[idx];
+      p_y = p_y + pair_forces_y[idx];
+      p_z = p_z + pair_forces_z[idx];
     }
   }
 
@@ -97,17 +98,18 @@ extern "C" __global__ void reduce_pair_energy_virial(
 
   unsigned int count = neighbor_counts[i];
   unsigned int row_base = i * max_neighbors;
+  unsigned int sweep_end = ((count + BLOCK_SIZE - 1) / BLOCK_SIZE) * BLOCK_SIZE;
 
   Real p_e = R(0.0);
   Real p_w = R(0.0);
 
-  for (unsigned int s = 0; s < max_neighbors; s += BLOCK_SIZE) {
+  for (unsigned int s = 0; s < sweep_end; s += BLOCK_SIZE) {
     unsigned int k = s + threadIdx.x;
-    if (k < max_neighbors) {
+    bool active = (k < count);
+    if (active) {
       unsigned int idx = row_base + k;
-      bool active = (k < count);
-      p_e = p_e + (active ? pair_energies[idx] : R(0.0));
-      p_w = p_w + (active ? pair_virials[idx] : R(0.0));
+      p_e = p_e + pair_energies[idx];
+      p_w = p_w + pair_virials[idx];
     }
   }
 
