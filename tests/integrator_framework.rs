@@ -338,7 +338,6 @@ fn integrator_owns_force_evaluation_inside_step() {
             .unwrap_or(0)
     };
     assert_eq!(count("lj_pair_force"), 1);
-    assert_eq!(count("reduce_pair_forces"), 1);
     assert_eq!(count("accumulate_forces"), 1);
 }
 
@@ -1281,9 +1280,8 @@ fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
     let count_of = |name: &str| {
         report.stages.iter().find(|s| s.name == name).map(|s| s.count).unwrap_or(0)
     };
-    // The Fast LJ slot's kernels fire; the accumulator fires once.
+    // The Fast LJ slot's kernel fires; the accumulator fires once.
     assert_eq!(count_of("lj_pair_force"), 1);
-    assert_eq!(count_of("reduce_pair_forces"), 1);
     assert_eq!(count_of("accumulate_forces"), 1);
 }
 

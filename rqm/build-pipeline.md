@@ -104,10 +104,9 @@ per-subsystem nested handle to every kernel function.
   | ---           | ---                  | ---                                            | ---             | ---                                                                                              |
   | `fill`        | `FillKernels`        | `src/gpu/fill.rs`                              | `fill`          | `fill`                                                                                            |
   | `integrate`   | `IntegrateKernels`   | `src/integrator/velocity_verlet.rs`            | `integrate`     | `vv_kick_drift`, `vv_kick`, `vv_kick_drift_lossless`, `vv_kick_lossless`                          |
-  | `reduce`      | `ReduceKernels`      | `src/gpu/pair_buffer.rs`                       | `reduce`        | `reduce_pair_forces`                                                                              |
-  | `lj`          | `LjKernels`          | `src/forces/lj.rs`                             | `pair_force`    | `lj_pair_force`                                                                                   |
-  | `coulomb`     | `CoulombKernels`     | `src/forces/coulomb.rs`                        | `coulomb`       | `coulomb_pair_force`                                                                              |
-  | `spme_real`   | `SpmeRealKernels`    | `src/forces/spme.rs`                           | `spme_real`     | `spme_real_pair_force`                                                                            |
+  | `lj`          | `LjKernels`          | `src/forces/lj.rs`                             | `pair_force`    | `lj_pair_force_f`, `lj_pair_force_fev`                                                            |
+  | `coulomb`     | `CoulombKernels`     | `src/forces/coulomb.rs`                        | `coulomb`       | `coulomb_pair_force_f`, `coulomb_pair_force_fev`                                                  |
+  | `spme_real`   | `SpmeRealKernels`    | `src/forces/spme.rs`                           | `spme_real`     | `spme_real_pair_force_f`, `spme_real_pair_force_fev`                                              |
   | `spme_recip`  | `SpmeRecipKernels`   | `src/forces/spme.rs`                           | `spme_recip`    | `spme_charge_spread`, `spme_influence_multiply`, `spme_force_gather`                              |
   | `langevin`    | `LangevinKernels`    | `src/integrator/langevin_baoab.rs`             | `langevin`      | `lan_drift_half`, `lan_ou_step`                                                                   |
   | `morse`       | `MorseKernels`       | `src/forces/morse.rs`                          | `morse`         | `morse_bond_force`, `reduce_bond_forces`                                                          |
@@ -129,9 +128,6 @@ per-subsystem nested handle to every kernel function.
   Cross-subsystem reads follow the home rule: a kernel lives in the
   sub-struct named after its `.cu` file, and consumers in other
   subsystems reach into that sub-struct directly. For example, the
-  pair-reduction kernel lives in `kernels.reduce.reduce_pair_forces`
-  and is consumed by `lj_pair_force`, `coulomb_pair_force`, and
-  `spme_real_pair_force` launch wrappers; the
   `kinetic_energy_reduce` and `rescale_velocities` kernels live in
   `kernels.nose_hoover.*` and are consumed by NHC, CSVR, and the MTK
   barostat substep. No kernel handle is duplicated across sub-structs.
@@ -258,9 +254,9 @@ Feature: CUDA build pipeline and smoke test kernel
   Scenario: Kernels is composed of per-subsystem sub-structs
     Given a GpuContext obtained from init_device()
     Then gpu_context.kernels has fields named after each subsystem
-      in the Types table: fill, integrate, reduce, lj, coulomb,
-      spme_real, spme_recip, langevin, morse, angle, nose_hoover,
-      andersen, barostat, mtk, settle, forces, neighbor
+      in the Types table: fill, integrate, lj, coulomb, spme_real,
+      spme_recip, langevin, morse, angle, nose_hoover, andersen,
+      barostat, mtk, settle, forces, neighbor
     And each field is the matching subsystem's typed kernel struct
 
   @rq-6745e7c5
@@ -283,12 +279,11 @@ Feature: CUDA build pipeline and smoke test kernel
   @rq-7b651edb
   Scenario: Cross-subsystem reads pull from the kernel's home sub-struct
     Given a GpuContext obtained from init_device()
-    Then the LJ pair-force launch wrapper reads
-      `particle_buffers.kernels.lj.pair_force` for its own kernel
-    And reads `particle_buffers.kernels.reduce.reduce_pair_forces` for
-      the shared pair-reduction kernel
-    And the same `reduce_pair_forces` handle is used by the Coulomb
-      and SPME-real launch wrappers
+    Then the Nose-Hoover launch wrapper reads
+      `particle_buffers.kernels.nose_hoover.kinetic_energy_reduce` for
+      the shared kinetic-energy reduction kernel
+    And the same `kinetic_energy_reduce` handle is used by the CSVR
+      thermostat launch wrapper
 
   # --- Fill kernel correctness ---
 

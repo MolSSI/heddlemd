@@ -54,7 +54,7 @@ number of bonds. Each slot carries five `f32` quantities: three force
 components, half-energy, and half-virial. Slot `2 * k` holds atom `i`'s
 share of bond `k`; slot `2 * k + 1` holds atom `j`'s share. The
 half-energy and half-virial conventions match the pair-buffer convention
-(see `pair-reduction.md`): each slot writes `U_k / 2` and `W_k / 2` so
+(see `pair-force-kernel.md`): each slot writes `U_k / 2` and `W_k / 2` so
 the system total sum over slots equals `Σ_k U_k` and `Σ_k W_k`
 respectively, counting each bond exactly once.
 

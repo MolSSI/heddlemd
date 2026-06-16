@@ -6,16 +6,18 @@ use cudarc::driver::{
 
 #[cfg(not(feature = "f64"))]
 use crate::gpu::LosslessBuffers;
-use crate::gpu::{GpuError, Kernels, PairBuffer, ParticleBuffers};
+use crate::gpu::{GpuError, Kernels, ParticleBuffers};
 use crate::io::config::{PairInteractionConfig, PairPotentialParams, ParticleTypeConfig};
 use crate::pbc::SimulationBox;
 use crate::precision::Real;
 
 const BLOCK_SIZE: u32 = 256;
 
-/// Warps per block in the reduce.cu warp-per-particle topology.
-/// Must match the `WARPS_PER_BLOCK` constant in kernels/reduce.cu.
-const REDUCE_WARPS_PER_BLOCK: u32 = 8;
+/// Warps per block in the fused pair-force warp-per-particle topology.
+/// Must match the `PAIR_FORCE_WARPS_PER_BLOCK` constant in
+/// `kernels/pair_compute.cuh`.
+pub const PAIR_FORCE_WARPS_PER_BLOCK: u32 = 8;
+pub const PAIR_FORCE_BLOCK_SIZE: u32 = 256;
 
 fn launch_config(n: u32) -> LaunchConfig {
     let grid = n.div_ceil(BLOCK_SIZE);
@@ -93,109 +95,6 @@ pub fn vv_kick(buffers: &mut ParticleBuffers, dt: Real) -> Result<(), GpuError> 
                 &buffers.forces_z,
                 &buffers.masses,
                 dt,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
-}
-
-// rq-6690fae9
-#[allow(clippy::too_many_arguments)]
-pub fn reduce_pair_forces(
-    pair_buffer: &PairBuffer,
-    neighbor_counts: &CudaSlice<u32>,
-    target_force_x: &mut CudaViewMut<'_, Real>,
-    target_force_y: &mut CudaViewMut<'_, Real>,
-    target_force_z: &mut CudaViewMut<'_, Real>,
-    particle_count: usize,
-) -> Result<(), GpuError> {
-    let n = particle_count;
-    if n == 0 {
-        return Ok(());
-    }
-    let max_neighbors = pair_buffer.max_neighbors();
-    debug_assert_eq!(pair_buffer.particle_count(), n);
-    debug_assert_eq!(neighbor_counts.len(), n);
-    debug_assert_eq!(target_force_x.len(), n);
-    debug_assert_eq!(target_force_y.len(), n);
-    debug_assert_eq!(target_force_z.len(), n);
-    debug_assert_eq!(
-        pair_buffer.pair_forces_x.len(),
-        n * max_neighbors as usize
-    );
-
-    let n_u32 = n as u32;
-    let func = pair_buffer.kernels.reduce.reduce_pair_forces.clone();
-    let cfg = LaunchConfig {
-        grid_dim: (n_u32.div_ceil(REDUCE_WARPS_PER_BLOCK), 1, 1),
-        block_dim: (BLOCK_SIZE, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &pair_buffer.pair_forces_x,
-                &pair_buffer.pair_forces_y,
-                &pair_buffer.pair_forces_z,
-                neighbor_counts,
-                max_neighbors,
-                target_force_x,
-                target_force_y,
-                target_force_z,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
-}
-
-// rq-c9240ed4
-pub fn reduce_pair_energy_virial(
-    pair_buffer: &PairBuffer,
-    neighbor_counts: &CudaSlice<u32>,
-    target_energy: &mut CudaViewMut<'_, Real>,
-    target_virial: &mut CudaViewMut<'_, Real>,
-    particle_count: usize,
-) -> Result<(), GpuError> {
-    let n = particle_count;
-    if n == 0 {
-        return Ok(());
-    }
-    let max_neighbors = pair_buffer.max_neighbors();
-    debug_assert_eq!(pair_buffer.particle_count(), n);
-    debug_assert_eq!(neighbor_counts.len(), n);
-    debug_assert_eq!(target_energy.len(), n);
-    debug_assert_eq!(target_virial.len(), n);
-    debug_assert_eq!(
-        pair_buffer.pair_energies.len(),
-        n * max_neighbors as usize
-    );
-
-    let n_u32 = n as u32;
-    let func = pair_buffer
-        .kernels
-        .reduce
-        .reduce_pair_energy_virial
-        .clone();
-    let cfg = LaunchConfig {
-        grid_dim: (n_u32.div_ceil(REDUCE_WARPS_PER_BLOCK), 1, 1),
-        block_dim: (BLOCK_SIZE, 1, 1),
-        shared_mem_bytes: 0,
-    };
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &pair_buffer.pair_energies,
-                &pair_buffer.pair_virials,
-                neighbor_counts,
-                max_neighbors,
-                target_energy,
-                target_virial,
                 n_u32,
             ),
         )
@@ -282,7 +181,7 @@ fn htod_or_empty(
 #[allow(clippy::too_many_arguments)]
 pub fn lj_pair_force(
     particle_buffers: &ParticleBuffers,
-    pair_buffer: &mut PairBuffer,
+    output: &mut crate::forces::SlotOutputView<'_>,
     sim_box: &SimulationBox,
     params: &LennardJonesParameterTable,
     atom_excl_offsets: &CudaSlice<u32>,
@@ -290,17 +189,20 @@ pub fn lj_pair_force(
     atom_excl_lj_scales: &CudaSlice<Real>,
     neighbor_list: &CudaSlice<u32>,
     neighbor_counts: &CudaSlice<u32>,
+    max_neighbors: u32,
+    level: crate::forces::AggregateLevel,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
         return Ok(());
     }
-    debug_assert_eq!(pair_buffer.particle_count(), n);
-    let max_neighbors = pair_buffer.max_neighbors();
     debug_assert_eq!(neighbor_list.len(), n * max_neighbors as usize);
     debug_assert_eq!(neighbor_counts.len(), n);
     debug_assert_eq!(atom_excl_offsets.len(), n + 1);
     debug_assert_eq!(atom_excl_partners.len(), atom_excl_lj_scales.len());
+    debug_assert_eq!(output.force_x.len(), n);
+    debug_assert_eq!(output.force_y.len(), n);
+    debug_assert_eq!(output.force_z.len(), n);
     let table_len = params.n_types as usize * params.n_types as usize;
     debug_assert_eq!(params.sigma.len(), table_len);
     debug_assert_eq!(params.epsilon.len(), table_len);
@@ -308,51 +210,76 @@ pub fn lj_pair_force(
     debug_assert_eq!(params.switch.len(), table_len);
 
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.lj.pair_force.clone();
-
-    let grid_y = n_u32.div_ceil(16);
-    let grid_x = max_neighbors.div_ceil(16).max(1);
     let cfg = LaunchConfig {
-        grid_dim: (grid_x, grid_y, 1),
-        block_dim: (16, 16, 1),
+        grid_dim: (n_u32.div_ceil(PAIR_FORCE_WARPS_PER_BLOCK), 1, 1),
+        block_dim: (PAIR_FORCE_BLOCK_SIZE, 1, 1),
         shared_mem_bytes: 0,
     };
 
     let lat = sim_box.lattice();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                &particle_buffers.type_indices,
-                &mut pair_buffer.pair_forces_x,
-                &mut pair_buffer.pair_forces_y,
-                &mut pair_buffer.pair_forces_z,
-                &mut pair_buffer.pair_energies,
-                &mut pair_buffer.pair_virials,
-                max_neighbors,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
-                params.n_types,
-                &params.sigma,
-                &params.epsilon,
-                &params.cutoff,
-                &params.switch,
-                atom_excl_offsets,
-                atom_excl_partners,
-                atom_excl_lj_scales,
-                neighbor_list,
-                neighbor_counts,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
+    match level {
+        crate::forces::AggregateLevel::ForcesOnly => unsafe {
+            let func = particle_buffers.kernels.lj.pair_force_f.clone();
+            func.launch(
+                cfg,
+                (
+                    &particle_buffers.positions_x,
+                    &particle_buffers.positions_y,
+                    &particle_buffers.positions_z,
+                    &particle_buffers.type_indices,
+                    max_neighbors,
+                    lat[0], lat[1], lat[2], lat[3], lat[4], lat[5],
+                    params.n_types,
+                    &params.sigma,
+                    &params.epsilon,
+                    &params.cutoff,
+                    &params.switch,
+                    atom_excl_offsets,
+                    atom_excl_partners,
+                    atom_excl_lj_scales,
+                    neighbor_list,
+                    neighbor_counts,
+                    &mut output.force_x,
+                    &mut output.force_y,
+                    &mut output.force_z,
+                    n_u32,
+                ),
+            ).map_err(GpuError::from)?;
+        },
+        crate::forces::AggregateLevel::ForcesAndScalars => {
+            debug_assert_eq!(output.energy.len(), n);
+            debug_assert_eq!(output.virial.len(), n);
+            unsafe {
+                let func = particle_buffers.kernels.lj.pair_force_fev.clone();
+                func.launch(
+                    cfg,
+                    (
+                        &particle_buffers.positions_x,
+                        &particle_buffers.positions_y,
+                        &particle_buffers.positions_z,
+                        &particle_buffers.type_indices,
+                        max_neighbors,
+                        lat[0], lat[1], lat[2], lat[3], lat[4], lat[5],
+                        params.n_types,
+                        &params.sigma,
+                        &params.epsilon,
+                        &params.cutoff,
+                        &params.switch,
+                        atom_excl_offsets,
+                        atom_excl_partners,
+                        atom_excl_lj_scales,
+                        neighbor_list,
+                        neighbor_counts,
+                        &mut output.force_x,
+                        &mut output.force_y,
+                        &mut output.force_z,
+                        &mut output.energy,
+                        &mut output.virial,
+                        n_u32,
+                    ),
+                ).map_err(GpuError::from)?;
+            }
+        }
     }
     Ok(())
 }
@@ -367,7 +294,7 @@ pub const K_COULOMB_F32: Real = 1.0;
 #[allow(clippy::too_many_arguments)]
 pub fn coulomb_pair_force(
     particle_buffers: &ParticleBuffers,
-    pair_buffer: &mut PairBuffer,
+    output: &mut crate::forces::SlotOutputView<'_>,
     sim_box: &SimulationBox,
     cutoff: Real,
     r_switch: Real,
@@ -376,63 +303,87 @@ pub fn coulomb_pair_force(
     atom_excl_coul_scales: &CudaSlice<Real>,
     neighbor_list: &CudaSlice<u32>,
     neighbor_counts: &CudaSlice<u32>,
+    max_neighbors: u32,
+    level: crate::forces::AggregateLevel,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
         return Ok(());
     }
-    debug_assert_eq!(pair_buffer.particle_count(), n);
-    let max_neighbors = pair_buffer.max_neighbors();
     debug_assert_eq!(neighbor_list.len(), n * max_neighbors as usize);
     debug_assert_eq!(neighbor_counts.len(), n);
     debug_assert_eq!(atom_excl_offsets.len(), n + 1);
     debug_assert_eq!(atom_excl_partners.len(), atom_excl_coul_scales.len());
     debug_assert_eq!(particle_buffers.charges.len(), n);
+    debug_assert_eq!(output.force_x.len(), n);
 
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.coulomb.coulomb_pair_force.clone();
-
-    let grid_y = n_u32.div_ceil(16);
-    let grid_x = max_neighbors.div_ceil(16).max(1);
     let cfg = LaunchConfig {
-        grid_dim: (grid_x, grid_y, 1),
-        block_dim: (16, 16, 1),
+        grid_dim: (n_u32.div_ceil(PAIR_FORCE_WARPS_PER_BLOCK), 1, 1),
+        block_dim: (PAIR_FORCE_BLOCK_SIZE, 1, 1),
         shared_mem_bytes: 0,
     };
 
     let lat = sim_box.lattice();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                &particle_buffers.charges,
-                &mut pair_buffer.pair_forces_x,
-                &mut pair_buffer.pair_forces_y,
-                &mut pair_buffer.pair_forces_z,
-                &mut pair_buffer.pair_energies,
-                &mut pair_buffer.pair_virials,
-                max_neighbors,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
-                K_COULOMB_F32,
-                cutoff,
-                r_switch,
-                atom_excl_offsets,
-                atom_excl_partners,
-                atom_excl_coul_scales,
-                neighbor_list,
-                neighbor_counts,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
+    match level {
+        crate::forces::AggregateLevel::ForcesOnly => unsafe {
+            let func = particle_buffers.kernels.coulomb.coulomb_pair_force_f.clone();
+            func.launch(
+                cfg,
+                (
+                    &particle_buffers.positions_x,
+                    &particle_buffers.positions_y,
+                    &particle_buffers.positions_z,
+                    &particle_buffers.charges,
+                    max_neighbors,
+                    lat[0], lat[1], lat[2], lat[3], lat[4], lat[5],
+                    K_COULOMB_F32,
+                    cutoff,
+                    r_switch,
+                    atom_excl_offsets,
+                    atom_excl_partners,
+                    atom_excl_coul_scales,
+                    neighbor_list,
+                    neighbor_counts,
+                    &mut output.force_x,
+                    &mut output.force_y,
+                    &mut output.force_z,
+                    n_u32,
+                ),
+            ).map_err(GpuError::from)?;
+        },
+        crate::forces::AggregateLevel::ForcesAndScalars => {
+            debug_assert_eq!(output.energy.len(), n);
+            debug_assert_eq!(output.virial.len(), n);
+            unsafe {
+                let func = particle_buffers.kernels.coulomb.coulomb_pair_force_fev.clone();
+                func.launch(
+                    cfg,
+                    (
+                        &particle_buffers.positions_x,
+                        &particle_buffers.positions_y,
+                        &particle_buffers.positions_z,
+                        &particle_buffers.charges,
+                        max_neighbors,
+                        lat[0], lat[1], lat[2], lat[3], lat[4], lat[5],
+                        K_COULOMB_F32,
+                        cutoff,
+                        r_switch,
+                        atom_excl_offsets,
+                        atom_excl_partners,
+                        atom_excl_coul_scales,
+                        neighbor_list,
+                        neighbor_counts,
+                        &mut output.force_x,
+                        &mut output.force_y,
+                        &mut output.force_z,
+                        &mut output.energy,
+                        &mut output.virial,
+                        n_u32,
+                    ),
+                ).map_err(GpuError::from)?;
+            }
+        }
     }
     Ok(())
 }
@@ -441,7 +392,7 @@ pub fn coulomb_pair_force(
 #[allow(clippy::too_many_arguments)]
 pub fn spme_real_pair_force(
     particle_buffers: &ParticleBuffers,
-    pair_buffer: &mut PairBuffer,
+    output: &mut crate::forces::SlotOutputView<'_>,
     sim_box: &SimulationBox,
     alpha: Real,
     r_cut_real: Real,
@@ -450,63 +401,87 @@ pub fn spme_real_pair_force(
     atom_excl_coul_scales: &CudaSlice<Real>,
     neighbor_list: &CudaSlice<u32>,
     neighbor_counts: &CudaSlice<u32>,
+    max_neighbors: u32,
+    level: crate::forces::AggregateLevel,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
         return Ok(());
     }
-    debug_assert_eq!(pair_buffer.particle_count(), n);
-    let max_neighbors = pair_buffer.max_neighbors();
     debug_assert_eq!(neighbor_list.len(), n * max_neighbors as usize);
     debug_assert_eq!(neighbor_counts.len(), n);
     debug_assert_eq!(atom_excl_offsets.len(), n + 1);
     debug_assert_eq!(atom_excl_partners.len(), atom_excl_coul_scales.len());
     debug_assert_eq!(particle_buffers.charges.len(), n);
+    debug_assert_eq!(output.force_x.len(), n);
 
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.spme_real.spme_real_pair_force.clone();
-
-    let grid_y = n_u32.div_ceil(16);
-    let grid_x = max_neighbors.div_ceil(16).max(1);
     let cfg = LaunchConfig {
-        grid_dim: (grid_x, grid_y, 1),
-        block_dim: (16, 16, 1),
+        grid_dim: (n_u32.div_ceil(PAIR_FORCE_WARPS_PER_BLOCK), 1, 1),
+        block_dim: (PAIR_FORCE_BLOCK_SIZE, 1, 1),
         shared_mem_bytes: 0,
     };
 
     let lat = sim_box.lattice();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                &particle_buffers.charges,
-                &mut pair_buffer.pair_forces_x,
-                &mut pair_buffer.pair_forces_y,
-                &mut pair_buffer.pair_forces_z,
-                &mut pair_buffer.pair_energies,
-                &mut pair_buffer.pair_virials,
-                max_neighbors,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
-                K_COULOMB_F32,
-                alpha,
-                r_cut_real,
-                atom_excl_offsets,
-                atom_excl_partners,
-                atom_excl_coul_scales,
-                neighbor_list,
-                neighbor_counts,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
+    match level {
+        crate::forces::AggregateLevel::ForcesOnly => unsafe {
+            let func = particle_buffers.kernels.spme_real.spme_real_pair_force_f.clone();
+            func.launch(
+                cfg,
+                (
+                    &particle_buffers.positions_x,
+                    &particle_buffers.positions_y,
+                    &particle_buffers.positions_z,
+                    &particle_buffers.charges,
+                    max_neighbors,
+                    lat[0], lat[1], lat[2], lat[3], lat[4], lat[5],
+                    K_COULOMB_F32,
+                    alpha,
+                    r_cut_real,
+                    atom_excl_offsets,
+                    atom_excl_partners,
+                    atom_excl_coul_scales,
+                    neighbor_list,
+                    neighbor_counts,
+                    &mut output.force_x,
+                    &mut output.force_y,
+                    &mut output.force_z,
+                    n_u32,
+                ),
+            ).map_err(GpuError::from)?;
+        },
+        crate::forces::AggregateLevel::ForcesAndScalars => {
+            debug_assert_eq!(output.energy.len(), n);
+            debug_assert_eq!(output.virial.len(), n);
+            unsafe {
+                let func = particle_buffers.kernels.spme_real.spme_real_pair_force_fev.clone();
+                func.launch(
+                    cfg,
+                    (
+                        &particle_buffers.positions_x,
+                        &particle_buffers.positions_y,
+                        &particle_buffers.positions_z,
+                        &particle_buffers.charges,
+                        max_neighbors,
+                        lat[0], lat[1], lat[2], lat[3], lat[4], lat[5],
+                        K_COULOMB_F32,
+                        alpha,
+                        r_cut_real,
+                        atom_excl_offsets,
+                        atom_excl_partners,
+                        atom_excl_coul_scales,
+                        neighbor_list,
+                        neighbor_counts,
+                        &mut output.force_x,
+                        &mut output.force_y,
+                        &mut output.force_z,
+                        &mut output.energy,
+                        &mut output.virial,
+                        n_u32,
+                    ),
+                ).map_err(GpuError::from)?;
+            }
+        }
     }
     Ok(())
 }

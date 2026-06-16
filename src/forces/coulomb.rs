@@ -6,8 +6,7 @@ use cudarc::nvrtc::Ptx;
 
 use crate::gpu::device::get_func;
 use crate::gpu::{
-    GpuContext, GpuError, PairBuffer, ParticleBuffers, coulomb_pair_force,
-    reduce_pair_energy_virial, reduce_pair_forces,
+    GpuContext, GpuError, ParticleBuffers, coulomb_pair_force,
 };
 use crate::kernels;
 use crate::io::config::CoulombConfig;
@@ -46,10 +45,10 @@ impl From<&CoulombConfig> for CoulombParameters {
 pub struct CoulombState {
     #[allow(dead_code)]
     pub(crate) device: Arc<CudaDevice>,
-    pub(crate) pair_buffer: PairBuffer,
     pub(crate) params: CoulombParameters,
     pub(crate) exclusions: DeviceExclusionList,
     pub(crate) particle_count: usize,
+    pub(crate) max_neighbors: u32,
 }
 
 impl CoulombState {
@@ -61,14 +60,13 @@ impl CoulombState {
         exclusion_list: &ExclusionList,
     ) -> Result<Self, NeighborListError> {
         let device = gpu.device.clone();
-        let pair_buffer = PairBuffer::new(gpu, particle_count, max_neighbors)?;
         let exclusions = DeviceExclusionList::from_host(&device, exclusion_list)?;
         Ok(CoulombState {
             device,
-            pair_buffer,
             params,
             exclusions,
             particle_count,
+            max_neighbors,
         })
     }
 
@@ -86,38 +84,10 @@ impl Potential for CoulombState {
         Some(self.params.cutoff)
     }
 
-    fn contribute(
+    fn compute(
         &mut self,
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
-        cx: &ForceFieldContext<'_>,
-        timings: &mut Timings,
-    ) -> Result<(), ForceFieldError> {
-        if self.particle_count == 0 {
-            return Ok(());
-        }
-        let nl = cx
-            .neighbor_list
-            .expect("CoulombState requires a shared neighbor list");
-        timings.kernel_start(KernelStage::COULOMB_PAIR_FORCE)?;
-        coulomb_pair_force(
-            buffers,
-            &mut self.pair_buffer,
-            sim_box,
-            self.params.cutoff,
-            self.params.r_switch,
-            &self.exclusions.atom_excl_offsets,
-            &self.exclusions.atom_excl_partners,
-            &self.exclusions.atom_excl_coul_scales,
-            &nl.neighbor_list,
-            &nl.neighbor_counts,
-        )?;
-        timings.kernel_stop(KernelStage::COULOMB_PAIR_FORCE)?;
-        Ok(())
-    }
-
-    fn reduce(
-        &mut self,
         mut output: SlotOutputView<'_>,
         cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
@@ -129,27 +99,22 @@ impl Potential for CoulombState {
         let nl = cx
             .neighbor_list
             .expect("CoulombState requires a shared neighbor list");
-        timings.kernel_start(KernelStage::REDUCE_PAIR_FORCES)?;
-        reduce_pair_forces(
-            &self.pair_buffer,
+        timings.kernel_start(KernelStage::COULOMB_PAIR_FORCE)?;
+        coulomb_pair_force(
+            buffers,
+            &mut output,
+            sim_box,
+            self.params.cutoff,
+            self.params.r_switch,
+            &self.exclusions.atom_excl_offsets,
+            &self.exclusions.atom_excl_partners,
+            &self.exclusions.atom_excl_coul_scales,
+            &nl.neighbor_list,
             &nl.neighbor_counts,
-            &mut output.force_x,
-            &mut output.force_y,
-            &mut output.force_z,
-            self.particle_count,
+            self.max_neighbors,
+            level,
         )?;
-        timings.kernel_stop(KernelStage::REDUCE_PAIR_FORCES)?;
-        if level.includes_scalars() {
-            timings.kernel_start(KernelStage::REDUCE_PAIR_ENERGY_VIRIAL)?;
-            reduce_pair_energy_virial(
-                &self.pair_buffer,
-                &nl.neighbor_counts,
-                &mut output.energy,
-                &mut output.virial,
-                self.particle_count,
-            )?;
-            timings.kernel_stop(KernelStage::REDUCE_PAIR_ENERGY_VIRIAL)?;
-        }
+        timings.kernel_stop(KernelStage::COULOMB_PAIR_FORCE)?;
         Ok(())
     }
 }
@@ -186,7 +151,8 @@ impl PotentialBuilder for CoulombBuilder {
 // rq-2093594f rq-846bdb8b
 #[derive(Debug, Clone)]
 pub struct CoulombKernels {
-    pub coulomb_pair_force: CudaFunction,
+    pub coulomb_pair_force_f: CudaFunction,
+    pub coulomb_pair_force_fev: CudaFunction,
 }
 
 impl CoulombKernels {
@@ -194,10 +160,11 @@ impl CoulombKernels {
         device.load_ptx(
             Ptx::from_src(kernels::COULOMB),
             "coulomb",
-            &["coulomb_pair_force"],
+            &["coulomb_pair_force_f", "coulomb_pair_force_fev"],
         )?;
         Ok(CoulombKernels {
-            coulomb_pair_force: get_func(device, "coulomb", "coulomb_pair_force")?,
+            coulomb_pair_force_f: get_func(device, "coulomb", "coulomb_pair_force_f")?,
+            coulomb_pair_force_fev: get_func(device, "coulomb", "coulomb_pair_force_fev")?,
         })
     }
 }

@@ -7,27 +7,33 @@ real-space cutoff and a single inner-switching radius; pair magnitudes are
 constructed at kernel time from the per-particle charges carried by
 `ParticleBuffers` (see `particle-state.md`).
 
-The slot evaluates pair forces with a single kernel that reads the shared
+The slot evaluates pair forces with two fused warp-per-particle kernels
+(forces only and forces + energy + virial) that read the shared
 `NeighborListState` owned by `ForceField` (see `neighbor-list.md`). Each
-`(i, k)` thread reads `neighbor_list[i * max_neighbors + k]` to find its
-partner `j`, applies the cutoff and switching function, applies the
-Coulomb-specific per-pair exclusion scale, and writes the pair force into
-the `PairBuffer` at slot `i * max_neighbors + k`. Work is O(N · average
-neighbour count) when the shared list is in cell-list mode and O(N²) when
-it is in trivial mode (every particle's list contains every particle).
-The kernel is the same in both cases; only the contents and size of the
-shared list differ.
+warp handles one particle: the warp walks the particle's neighbour list,
+accumulates the per-pair Coulomb contribution in register accumulators
+across all 32 lanes, and writes the per-particle net force directly
+into the slot output buffer through a warp-tree butterfly reduction.
+The common kernel pattern is specified in `pair-force-kernel.md`; this
+file specifies the truncated-Coulomb functional form, parameter inputs,
+and launcher.
 
-This slot is the smallest viable charge-carrying milestone in the project's
-electrostatics roadmap. It is intentionally short-range only: real-space
-truncation of `1/r` is known to introduce artefacts for charged systems
-larger than a few nanometres. A future smooth particle-mesh Ewald slot
-will replace the long-range contribution; the real-space and exclusion
-machinery exercised here carries over.
+Work is O(N · average neighbour count) when the shared list is in
+cell-list mode and O(N²) when it is in trivial mode (every particle's
+list contains every particle). The kernel is the same in both cases;
+only the contents and size of the shared list differ.
+
+This slot is the smallest viable charge-carrying milestone in the
+project's electrostatics roadmap. It is intentionally short-range only:
+real-space truncation of `1/r` is known to introduce artefacts for
+charged systems larger than a few nanometres. The SPME slot pair (see
+`spme.md`) supplies a smooth particle-mesh Ewald path for longer-range
+electrostatics; this slot and the SPME real-space slot are mutually
+exclusive.
 
 This file specifies `CoulombParameters` (the host-side parameter
-container), the `coulomb_pair_force` CUDA kernel in `kernels/coulomb.cu`,
-and the Rust launch helper that drives it.
+container), the two `coulomb_pair_force_*` CUDA kernels in
+`kernels/coulomb.cu`, and the Rust launch helper that drives them.
 
 Each pair contribution is multiplied by a CHARMM-style C¹ switching
 function `S(r²)` over the interval `[r_switch, cutoff]` so that both
@@ -53,27 +59,26 @@ coulombs, and `k_C = 1 / (4 π ε₀) ≈ 8.987 551 787 × 10⁹ N·m²/C²` is 
 Coulomb constant. The kernel stores `k_C` as an `f32` constant captured at
 kernel launch.
 
-For each ordered `(i, k)` with `0 <= i < N` and `0 <= k <
-neighbor_counts[i]`:
+The kernel topology, sweep loop, warp-tree reduction, exclusion-scale
+lookup, and per-particle output write all follow the common
+warp-per-particle pattern specified in `pair-force-kernel.md`. The
+Coulomb-specific contribution at each `(i, k)` pair is computed as
+follows.
 
-1. The pair-buffer slot is `slot = i * max_neighbors + k`.
-2. Read `j = neighbor_list[slot]`. If `i == j`, write `0.0_f32` to
-   `pair_forces_x[slot]`, `pair_forces_y[slot]`, `pair_forces_z[slot]`,
-   `pair_energies[slot]`, and `pair_virials[slot]` and stop. (The kernel
-   encounters `i == j` only when the shared neighbor list is in trivial
-   mode, which lists every particle including self.)
-3. Look up `q_i = charges[i]` and `q_j = charges[j]`.
-4. Compute the displacement `dx = positions_x[i] - positions_x[j]` (and
-   similarly `dy`, `dz`).
-5. Apply the triclinic minimum-image convention to `(dx, dy, dz)` using
-   the six lattice parameters `(lx, ly, lz, xy, xz, yz)` and the
-   fractional-coordinate wrap algorithm defined in `simulation-box.md`.
-   For an orthorhombic box (all tilts zero) this reduces to three
-   independent per-axis wraps.
-6. Compute `r2 = dx*dx + dy*dy + dz*dz`.
-7. If `r2 > cutoff * cutoff`, write `0.0_f32` to all five slots
-   (force x/y/z, energy, virial) and stop.
-8. Compute the unswitched Coulomb factor and energy in this order:
+For lane `lane` of the warp handling particle `i` at sweep step `s`,
+when `k = s * 32 + lane` satisfies `k < neighbor_counts[i]` and
+`j = neighbor_list[i * max_neighbors + k]` is not equal to `i`:
+
+1. Look up `q_i = charges[i]` and `q_j = charges[j]`.
+2. Compute the displacement `(dx, dy, dz) = positions[i] - positions[j]`
+   and apply the triclinic minimum-image convention using the six lattice
+   parameters `(lx, ly, lz, xy, xz, yz)` and the fractional-coordinate
+   wrap algorithm defined in `simulation-box.md`. For an orthorhombic
+   box (all tilts zero) this reduces to three independent per-axis wraps.
+3. Compute `r2 = dx*dx + dy*dy + dz*dz`. If `r2 > cutoff * cutoff`, the
+   pair contributes nothing; the lane skips to its next assigned
+   neighbour.
+4. Compute the unswitched Coulomb factor and energy in this order:
 
    ```text
    inv_r2  = 1.0f / r2
@@ -84,16 +89,16 @@ neighbor_counts[i]`:
    ```
 
    `factor * r_ij` is the Coulomb force on particle `i` due to `j`.
-9. Apply the CHARMM-style C¹ switching function `S(r²)` defined over
+5. Apply the CHARMM-style C¹ switching function `S(r²)` defined over
    `[r_switch², cutoff²]`. Let `r_s2 = r_switch * r_switch` and
-   `r_c2 = cutoff * cutoff`. The polynomial is evaluated in
-   normalised form so the only place the cutoff-width factor appears
-   explicitly is `1/delta` where `delta = r_c2 - r_s2`.
+   `r_c2 = cutoff * cutoff`. The polynomial is evaluated in normalised
+   form so the only place the cutoff-width factor appears explicitly
+   is `1/delta` where `delta = r_c2 - r_s2`.
 
    - If `r2 <= r_s2`, the inner plateau has `S = 1` and `dS/d(r²) = 0`,
      so `factor` and `energy` are unchanged.
-   - Otherwise `r_s2 < r2 <= r_c2` (the `r2 > r_c2` case was gated above)
-     and the polynomial branch runs.
+   - Otherwise `r_s2 < r2 <= r_c2` (the `r2 > r_c2` case was gated by
+     step 3) and the polynomial branch runs.
 
      With `tau = (r² − r_s2) / delta` the polynomial reduces to
      `S = (1 − tau)² (1 + 2 tau)` and
@@ -103,62 +108,60 @@ neighbor_counts[i]`:
      `factor`. The chain-rule correction adds `2 · energy · dS_dr2` to
      `factor` (matches the identical correction in `lj-pair-force.md`).
 
-   When `r_switch = cutoff` the switching interval is degenerate and the
-   polynomial branch is never entered; the kernel writes `factor` and
-   `energy` unchanged for any `r2 ≤ r_c2`, producing the hard-cutoff
-   case.
-10. Apply the per-pair Coulomb exclusion scale (see `topology.md`). The
-    kernel walks the per-atom exclusion slice
-    `atom_excl_partners[atom_excl_offsets[i] .. atom_excl_offsets[i+1]]`
-    looking for `j`; if present, the corresponding entry in
-    `atom_excl_coul_scales` multiplies both `factor` and `energy`. A
-    scale of `0.0` fully excludes the pair; a scale in `(0.0, 1.0)`
-    partially attenuates it. Pairs not listed in the exclusion table
-    are evaluated with scale `1.0` (no attenuation).
-11. Compute the scalar virial contribution from this pair as
-    `w = factor * r²` (which equals `r_ij · F_ij`). Apply the exclusion
-    scale to `w` along with `factor` and `energy`.
-12. Write the final values to the pair buffer:
+   When `r_switch = cutoff` the switching interval is degenerate and
+   the polynomial branch is never entered; the kernel uses the
+   unchanged `factor` and `energy` for any `r2 ≤ r_c2`, producing the
+   hard-cutoff case.
+6. Apply the per-pair Coulomb exclusion scale (see `topology.md`). The
+   kernel walks the per-atom exclusion slice
+   `atom_excl_partners[atom_excl_offsets[i] .. atom_excl_offsets[i+1]]`
+   looking for `j`; if present, the corresponding entry in
+   `atom_excl_coul_scales` multiplies both `factor` and `energy`. A
+   scale of `0.0` fully excludes the pair; a scale in `(0.0, 1.0)`
+   partially attenuates it. Pairs not listed in the exclusion table
+   are evaluated with scale `1.0` (no attenuation).
+7. Compute the scalar virial contribution from this pair as
+   `w = factor * r²` (which equals `r_ij · F_ij`). Apply the exclusion
+   scale to `w` along with `factor` and `energy`.
+8. Add `(factor * dx, factor * dy, factor * dz)` to the lane's
+   `(p_x, p_y, p_z)` register accumulators. The `_fev` variant
+   additionally adds `energy * 0.5f` to `p_e` and `w * 0.5f` to `p_w`.
+   The `0.5` factor distributes each unordered pair's energy and virial
+   across the two ordered contributions `(i, j)` and `(j, i)`.
 
-    ```text
-    pair_forces_x[slot] = factor * dx
-    pair_forces_y[slot] = factor * dy
-    pair_forces_z[slot] = factor * dz
-    pair_energies[slot] = 0.5 * energy
-    pair_virials[slot]  = 0.5 * w
-    ```
+After every lane has processed every assigned neighbour, the warp-tree
+butterfly reduction collapses the 32 lane accumulators to lane 0, which
+writes the particle's net force (and, in the `_fev` variant,
+energy/virial) into the corresponding slot output rows. See
+`pair-force-kernel.md` for the topology and reduction details.
 
-    The `0.5` factors implement the half-sum convention shared with
-    `lj-pair-force.md` and `morse-bonded.md` (see `pair-reduction.md`):
-    summing over every ordered pair `(i, j)` counts each unordered pair
-    exactly once when totalled.
-
-The kernel writes `0.0_f32` to every slot beyond `neighbor_counts[i]`
-(the kernel grid spans all `max_neighbors` slots per particle; the
-trailing slots are zeroed unconditionally).
+Slots beyond `neighbor_counts[i]` are not visited: the warp's sweep
+loop bounds on `count`, so unpopulated neighbour-list entries do not
+contribute to the per-particle accumulators.
 
 ## Reproducibility <!-- rq-03423870 -->
 
-The pair-buffer slot for `(i, k)` is written by exactly one thread; there
-are no atomics and no race conditions. Each contribution is a deterministic
+The per-particle output for particle `i` is the deterministic warp-tree
+sum of its per-pair contributions, accumulated in a fixed lane-strided
+order (see `pair-force-kernel.md`). Each contribution is a deterministic
 function of `q_i`, `q_j`, the wrapped displacement, the six lattice
 parameters, the cutoff and switching parameters, and the per-pair
-exclusion scale. The reduction kernel `reduce_pair_forces` sums the
-per-particle contributions in fixed slot order (see `pair-reduction.md`).
-Identical runs on the same GPU with identical inputs produce
-byte-identical `slot_force_*` outputs.
+exclusion scale. Identical runs on the same GPU with identical inputs
+produce byte-identical `slot_force_*` outputs.
 
 ## Newton's third law <!-- rq-e858417a -->
 
-Threads `(i, j)` and `(j, i)` independently compute `F_ij` and `F_ji`.
-The displacements differ only in sign, the wrap formula respects sign
-symmetry for displacements not exactly at the primary-image boundary,
-and the Coulomb factor depends only on `r²` and on the product `q_i · q_j`
-(commutative). The exclusion lookup table is constructed so the
-`(i, j)` and `(j, i)` scales are equal (see `topology.md`). The two
-threads' Cartesian forces therefore differ by a sign bit-for-bit for
-all displacements except the measure-zero exact-boundary case
-documented in `lj-pair-force.md`.
+Warps `W_i` and `W_j` independently compute the per-pair Coulomb
+contribution to particles `i` and `j`. The displacements differ only
+in sign, the wrap formula respects sign symmetry for displacements not
+exactly at the primary-image boundary, and the Coulomb factor depends
+only on `r²` and on the product `q_i · q_j` (commutative). The
+exclusion lookup table is constructed so the `(i, j)` and `(j, i)`
+scales are equal (see `topology.md`). Particle `i`'s net force from
+the pair `{i, j}` and particle `j`'s net force from the same pair
+therefore differ by a sign bit-for-bit for all displacements except
+the measure-zero exact-boundary case documented in
+`lj-pair-force.md`.
 
 ## Parameters <!-- rq-f9a9c569 -->
 
@@ -195,7 +198,7 @@ pair within the cutoff; the pair contributions are all zero (since
 all zero. This avoids a host-side scan of the charge array.
 
 When `particle_count == 0`, the kernel does not launch and the slot's
-reduced output buffers are length zero.
+output buffers are length zero.
 
 When no `[coulomb]` table is supplied in the config, the slot is absent
 from the `ForceField` and contributes nothing.
@@ -214,16 +217,16 @@ from the `ForceField` and contributes nothing.
   - `kernels: Arc<Kernels>`
   - `params: CoulombParameters`
   - `particle_count: usize`
-  - `pair_buffer: PairBuffer` — owned by the slot.
 
-  All fields private; the slot's public surface is the per-step methods
-  invoked by `ForceField::step` (see `framework.md`).
+  All fields private; the slot's public surface is `Potential::compute`,
+  invoked by `ForceField::step` (see `framework.md`). The slot does not
+  own a per-pair intermediate buffer; the fused kernels accumulate in
+  registers and write per-particle output directly to the slot's
+  SlotOutputView.
 
   Constructor:
 
-  - `CoulombState::new(device: Arc<CudaDevice>, kernels: Arc<Kernels>, params: CoulombParameters, particle_count: usize, max_neighbors: u32) -> Result<CoulombState, GpuError>`
-    - Allocates the slot's `PairBuffer` with `max_neighbors` matching
-      the shared neighbor list's value.
+  - `CoulombState::new(device: Arc<CudaDevice>, kernels: Arc<Kernels>, params: CoulombParameters, particle_count: usize) -> Result<CoulombState, GpuError>`
 
   The `Potential` implementation reports
   `max_cutoff() = Some(params.cutoff)` so the shared neighbor list
@@ -231,28 +234,32 @@ from the `ForceField` and contributes nothing.
 
 ### Functions <!-- rq-7bae4b69 -->
 
-- `coulomb_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &CoulombParameters, atom_excl_offsets: &CudaSlice<u32>, atom_excl_partners: &CudaSlice<u32>, atom_excl_coul_scales: &CudaSlice<f32>, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>` <!-- rq-38676211 -->
-  - Launches the `coulomb_pair_force` kernel with the layout described
-    in *Launch Configuration*.
+- `coulomb_pair_force(particle_buffers: &ParticleBuffers, output: &mut SlotOutputView<'_>, sim_box: &SimulationBox, params: &CoulombParameters, atom_excl_offsets: &CudaSlice<u32>, atom_excl_partners: &CudaSlice<u32>, atom_excl_coul_scales: &CudaSlice<f32>, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>, max_neighbors: u32, level: AggregateLevel) -> Result<(), GpuError>` <!-- rq-38676211 -->
+  - Selects the kernel variant based on `level`:
+    `AggregateLevel::ForcesOnly` dispatches to `coulomb_pair_force_f`
+    and writes only the three force-component slot output rows;
+    `AggregateLevel::ForcesAndScalars` dispatches to
+    `coulomb_pair_force_fev` and additionally writes the energy and
+    virial slot output rows.
+  - Launches with the warp-per-particle geometry documented in
+    `pair-force-kernel.md`: `block_dim = (256, 1, 1)`,
+    `grid_dim = (ceil(n / 8), 1, 1)`.
   - When `particle_buffers.particle_count() == 0`, returns `Ok(())`
     without launching.
   - Returns the underlying `GpuError` if the kernel launch fails.
 
 ### CUDA kernel <!-- rq-4a96b705 -->
 
-`kernels/coulomb.cu` declares the following `extern "C"` kernel:
+`kernels/coulomb.cu` declares two `extern "C"` kernels (forces-only
+and forces + energy + virial) that share the warp-per-particle pattern
+documented in `pair-force-kernel.md`:
 
 ```c
-extern "C" __global__ void coulomb_pair_force(
+extern "C" __global__ void coulomb_pair_force_f(
     const float *positions_x,
     const float *positions_y,
     const float *positions_z,
     const float *charges,
-    float *pair_forces_x,
-    float *pair_forces_y,
-    float *pair_forces_z,
-    float *pair_energies,
-    float *pair_virials,
     unsigned int max_neighbors,
     float lx, float ly, float lz, float xy, float xz, float yz,
     float k_coulomb,
@@ -263,12 +270,38 @@ extern "C" __global__ void coulomb_pair_force(
     const float *atom_excl_coul_scales,
     const unsigned int *neighbor_list,
     const unsigned int *neighbor_counts,
+    float *slot_force_x,
+    float *slot_force_y,
+    float *slot_force_z,
+    unsigned int n);
+
+extern "C" __global__ void coulomb_pair_force_fev(
+    const float *positions_x,
+    const float *positions_y,
+    const float *positions_z,
+    const float *charges,
+    unsigned int max_neighbors,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    float k_coulomb,
+    float cutoff,
+    float r_switch,
+    const unsigned int *atom_excl_offsets,
+    const unsigned int *atom_excl_partners,
+    const float *atom_excl_coul_scales,
+    const unsigned int *neighbor_list,
+    const unsigned int *neighbor_counts,
+    float *slot_force_x,
+    float *slot_force_y,
+    float *slot_force_z,
+    float *slot_energy,
+    float *slot_virial,
     unsigned int n);
 ```
 
 The launcher trusts the caller for shape consistency: in debug builds
-it asserts `pair_buffer.particle_count() == particle_buffers.particle_count()`,
-`neighbor_list.len() == particle_buffers.particle_count() * pair_buffer.max_neighbors() as usize`,
+it asserts `output.force_x.len() == particle_buffers.particle_count()`
+(and similarly for the other slot output rows it writes),
+`neighbor_list.len() == particle_buffers.particle_count() * max_neighbors as usize`,
 `neighbor_counts.len() == particle_buffers.particle_count()`,
 `atom_excl_offsets.len() == particle_buffers.particle_count() + 1`,
 `atom_excl_partners.len() == atom_excl_coul_scales.len()`, and
@@ -280,10 +313,12 @@ not check `cutoff` against `sim_box.min_perpendicular_width() / 2`
 
 ## Launch Configuration <!-- rq-84af056c -->
 
-- Block size: 16 × 16 × 1 = 256 threads per block.
-- Grid size: `(ceil(max_neighbors / 16), ceil(n / 16), 1)` blocks.
+- Block size: 256 threads (8 warps × 32 lanes) for both variants.
+- Grid size: `ceil(n / 8)` blocks in the x dimension.
 - Shared memory: zero bytes.
-- Stream: the default stream carried by `pair_buffer.device`.
+- Stream: the default stream carried by `ParticleBuffers.device`.
+
+Both numbers match the common pair-force pattern (`pair-force-kernel.md`).
 
 This matches the LJ kernel's launch configuration (`lj-pair-force.md`).
 
@@ -323,8 +358,8 @@ Feature: Truncated Coulomb pair force kernel
   Scenario: Opposite-sign charges attract
     Given two particles with charges (+1e, -1e) at positions
       (0, 0, 0) and (3e-10, 0, 0)
-    When coulomb_pair_force is called
-    Then pair_forces_x[0*2 + 1] equals the closed-form Coulomb force
+    When the _f variant of coulomb_pair_force is called
+    Then slot_force_x[0] equals the closed-form Coulomb force
       F_x = k_C · (+1e) · (-1e) · (-3e-10) / (3e-10)³
         = -k_C · e² · 3e-10 / (3e-10)³
       which is negative (atom 0 is pulled toward atom 1 along +x)
@@ -333,21 +368,21 @@ Feature: Truncated Coulomb pair force kernel
   Scenario: Same-sign charges repel
     Given two particles with charges (+1e, +1e) at positions
       (0, 0, 0) and (3e-10, 0, 0)
-    When coulomb_pair_force is called
-    Then pair_forces_x[0*2 + 1] is positive (atom 0 is pushed away from atom 1)
-    And pair_forces_x[1*2 + 0] equals -pair_forces_x[0*2 + 1] (Newton's third law)
+    When the _f variant of coulomb_pair_force is called
+    Then slot_force_x[0] is positive (atom 0 is pushed away from atom 1)
+    And slot_force_x[1] equals -slot_force_x[0] (Newton's third law)
 
   @rq-3b7da473
   Scenario: Zero charges produce zero force
     Given two neutral particles at positions (0, 0, 0) and (3e-10, 0, 0)
-    When coulomb_pair_force is called
-    Then all pair_forces_*, pair_energies, pair_virials slots equal 0.0
+    When the _f variant of coulomb_pair_force is called
+    Then slot_force_x[0], slot_force_y[0], slot_force_z[0], slot_energy[0], slot_virial[0] all equal 0.0
 
   @rq-02a15197
   Scenario: Mixed charge magnitudes scale linearly
     Given two particles with charges (q_i, q_j) at distance r
-    When coulomb_pair_force is called
-    Then pair_forces_x[0*2 + 1] is proportional to q_i · q_j
+    When the _f variant of coulomb_pair_force is called
+    Then slot_force_x[0] is proportional to q_i · q_j
 
   # --- Cutoff gating ---
 
@@ -355,16 +390,16 @@ Feature: Truncated Coulomb pair force kernel
   Scenario: Pair beyond cutoff contributes zero
     Given a CoulombParameters with cutoff=2.0e-10
     And two particles with charges (+1e, +1e) at separation 5e-10 (> cutoff)
-    When coulomb_pair_force is called
-    Then pair_forces_x[0*2 + 1], pair_energies[0*2 + 1], and pair_virials[0*2 + 1] equal 0.0
+    When the _f variant of coulomb_pair_force is called
+    Then slot_force_x[0], slot_energy[0], and slot_virial[0] equal 0.0
 
   @rq-3df3ed61
   Scenario: Pair at exactly the cutoff contributes the smoothed (zero) value
     Given a CoulombParameters with cutoff=3.0e-10 and r_switch=2.7e-10
     And two particles with charges (+1e, +1e) at separation exactly 3.0e-10
-    When coulomb_pair_force is called
-    Then pair_energies[0*2 + 1] equals 0.0 (the switching function S(r_c²) = 0)
-    And pair_forces_*[0*2 + 1] equals 0.0
+    When the _f variant of coulomb_pair_force is called
+    Then slot_energy[0] equals 0.0 (the switching function S(r_c²) = 0)
+    And slot_force_*[0] equals 0.0
 
   # --- Switching function ---
 
@@ -372,10 +407,10 @@ Feature: Truncated Coulomb pair force kernel
   Scenario: Pair inside the inner plateau is unsmoothed
     Given a CoulombParameters with cutoff=5e-10 and r_switch=4e-10
     And two particles with charges (+1e, +1e) at separation 3.5e-10 (< r_switch)
-    When coulomb_pair_force is called
-    Then pair_energies[0*2 + 1] equals the unswitched Coulomb energy
+    When the _f variant of coulomb_pair_force is called
+    Then slot_energy[0] equals the unswitched Coulomb energy
       0.5 · k_C · (1e)² / 3.5e-10
-    And pair_forces_x[0*2 + 1] equals the unswitched Coulomb force component
+    And slot_force_x[0] equals the unswitched Coulomb force component
       along +x: k_C · (1e)² · 3.5e-10 / (3.5e-10)³
 
   @rq-d52bcc88
@@ -383,16 +418,16 @@ Feature: Truncated Coulomb pair force kernel
     Given a CoulombParameters with cutoff=5e-10 and r_switch=4e-10
     And two particles with charges (+1e, +1e) at separation 4.5e-10
       (between r_switch and cutoff)
-    When coulomb_pair_force is called
-    Then pair_energies[0*2 + 1] is strictly between 0 and the unswitched value
-    And pair_forces_x[0*2 + 1] is strictly between 0 and the unswitched x-component
+    When the _f variant of coulomb_pair_force is called
+    Then slot_energy[0] is strictly between 0 and the unswitched value
+    And slot_force_x[0] is strictly between 0 and the unswitched x-component
 
   @rq-67678030
   Scenario: Switching interval r_switch == cutoff selects hard-cutoff
     Given a CoulombParameters with cutoff = r_switch = 4e-10
     And two particles with charges (+1e, +1e) at separation 3.9e-10
-    When coulomb_pair_force is called
-    Then pair_energies[0*2 + 1] equals the unswitched Coulomb energy (S = 1)
+    When the _f variant of coulomb_pair_force is called
+    Then slot_energy[0] equals the unswitched Coulomb energy (S = 1)
 
   # --- PBC ---
 
@@ -402,16 +437,16 @@ Feature: Truncated Coulomb pair force kernel
       (-lx/2 + 0.1e-10, 0, 0) and (+lx/2 - 0.1e-10, 0, 0)
       (which are 0.2e-10 apart across the periodic boundary)
     And a CoulombParameters with cutoff = 5e-10
-    When coulomb_pair_force is called
+    When the _f variant of coulomb_pair_force is called
     Then the closed-form force uses minimum-image dx = +0.2e-10, not lx - 0.2e-10
-    And pair_forces_x[0*2 + 1] is negative (attraction across the +x face)
+    And slot_force_x[0] is negative (attraction across the +x face)
 
   @rq-9af1f9dc
   Scenario: Minimum-image works for a triclinic box
     Given a SimulationBox with non-zero tilts (e.g. xy=2e-10, xz=1e-10, yz=-3e-10)
     And two particles at positions whose minimum-image separation crosses a
       tilted face of the primary parallelepiped
-    When coulomb_pair_force is called
+    When the _f variant of coulomb_pair_force is called
     Then the computed displacement matches the triclinic minimum-image
       result of sim_box.minimum_image(r_i - r_j)
 
@@ -420,8 +455,8 @@ Feature: Truncated Coulomb pair force kernel
   @rq-bf7dfc6d
   Scenario: Self slot in trivial-mode neighbor list yields zero
     Given a 1-particle system with charge +1e in trivial mode
-    When coulomb_pair_force is called
-    Then pair_forces_x[0*1 + 0] equals 0.0 (i == j short-circuit)
+    When the _f variant of coulomb_pair_force is called
+    Then slot_force_x[0] equals 0.0 (i == j short-circuit, no other neighbours in cutoff)
     And pair_energies[0*1 + 0] equals 0.0
     And pair_virials[0*1 + 0] equals 0.0
 
@@ -431,23 +466,23 @@ Feature: Truncated Coulomb pair force kernel
   Scenario: Pair with Coulomb exclusion scale 0.0 contributes nothing
     Given two particles with charges (+1e, -1e) at separation 3e-10
     And an ExclusionList listing pair (0, 1) with scale_coul = 0.0
-    When coulomb_pair_force is called
-    Then pair_forces_*[0*2 + 1] equals 0.0
-    And pair_energies[0*2 + 1] equals 0.0
-    And pair_virials[0*2 + 1] equals 0.0
+    When the _f variant of coulomb_pair_force is called
+    Then slot_force_*[0] equals 0.0
+    And slot_energy[0] equals 0.0
+    And slot_virial[0] equals 0.0
 
   @rq-d26e9f9c
   Scenario: Pair with Coulomb exclusion scale 0.5 contributes half
     Given two particles with charges (+1e, -1e) at separation 3e-10
     And an ExclusionList listing pair (0, 1) with scale_coul = 0.5
-    When coulomb_pair_force is called
-    Then pair_energies[0*2 + 1] equals 0.5 times the unscaled value
-    And pair_forces_x[0*2 + 1] equals 0.5 times the unscaled x-component
+    When the _f variant of coulomb_pair_force is called
+    Then slot_energy[0] equals 0.5 times the unscaled value
+    And slot_force_x[0] equals 0.5 times the unscaled x-component
 
   @rq-8c96d3c7
   Scenario: Coulomb and LJ exclusions are independent
     Given two particles whose ExclusionList entry is scale_lj=0.5, scale_coul=0.833
-    When coulomb_pair_force is called
+    When the _f variant of coulomb_pair_force is called
     Then the Coulomb contribution is scaled by 0.833
     When lj_pair_force is called on the same pair
     Then the LJ contribution is scaled by 0.5
@@ -457,30 +492,30 @@ Feature: Truncated Coulomb pair force kernel
   @rq-5444c7ae
   Scenario: pair_energies carries half the pair's potential energy
     Given a single pair (i, j) at finite distance with no exclusion
-    When coulomb_pair_force is called
+    When the _f variant of coulomb_pair_force is called
     Then pair_energies[i*max_neighbors + slot_for_j]
         equals 0.5 * (k_C * q_i * q_j / r) * S(r²)
 
   @rq-e412e54a
   Scenario: pair_virials carries half the pair's scalar virial
     Given a single pair (i, j) at finite distance with no exclusion
-    When coulomb_pair_force is called
+    When the _f variant of coulomb_pair_force is called
     Then pair_virials[i*max_neighbors + slot_for_j] equals 0.5 * factor * r²
       where factor is the post-switching radial scalar force prefactor
 
   @rq-d01b6fb0
   Scenario: Slots beyond neighbor_counts[i] are explicitly zeroed
     Given particle i with neighbor_counts[i] = 3 and max_neighbors = 8
-    When coulomb_pair_force is called
+    When the _f variant of coulomb_pair_force is called
     Then slots i*8 + 3 through i*8 + 7 are all 0.0 in every output buffer
 
   # --- Reproducibility ---
 
   @rq-1a0f3eef
   Scenario: Identical inputs produce byte-identical pair-buffer outputs
-    Given two coulomb_pair_force launches with identical inputs on the same GPU
+    Given two launches of the same coulomb_pair_force variant with identical inputs on the same GPU
     When both kernels return
-    Then their pair_forces_x/y/z, pair_energies, and pair_virials buffers
+    Then their slot_force_x, slot_force_y, slot_force_z, slot_energy, and slot_virial slot outputs
       are byte-identical
 
   # --- Empty state ---
@@ -488,14 +523,14 @@ Feature: Truncated Coulomb pair force kernel
   @rq-76a6be2f
   Scenario: Zero particles is a no-op
     Given particle_count == 0
-    When coulomb_pair_force is called
+    When the _f variant of coulomb_pair_force is called
     Then it returns Ok(()) without launching the kernel
 
   @rq-ee4ebbda
   Scenario: A neutral system with [coulomb] present still launches and produces zeros
     Given every particle has charge 0.0 and a [coulomb] table is present
-    When coulomb_pair_force is called
-    Then every pair-buffer slot equals 0.0
+    When the _f variant of coulomb_pair_force is called
+    Then every slot output entry equals 0.0
     And the slot's reduced per-particle outputs equal 0.0
 
   # --- Newton's third law (bit-exact for non-boundary displacements) ---
@@ -503,7 +538,7 @@ Feature: Truncated Coulomb pair force kernel
   @rq-f652bf7c
   Scenario: Forces on the two members of a non-boundary pair are equal and opposite
     Given two particles whose minimum-image displacement is not at the primary-image boundary
-    When coulomb_pair_force is called
-    Then pair_forces_x[i*max + slot_j] == -pair_forces_x[j*max + slot_i] (bit-exact)
+    When the _f variant of coulomb_pair_force is called
+    Then slot_force_x[i] equals -slot_force_x[j] bit-exact (for an isolated N=2 pair)
     And similarly for y and z
 ```

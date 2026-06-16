@@ -40,7 +40,6 @@ Lennard-Jones potential slot (always present in the `ForceField`):
   `NeighborListConfig::AllPairs` is selected.
 - `lj_pair_force_neighbor` — neighbor-list-driven kernel; recorded
   only when `NeighborListConfig::CellList` is selected.
-- `reduce_pair_forces`
 
 Neighbor list (present when `NeighborListConfig::CellList` is selected;
 see `forces/neighbor-list.md`):
@@ -233,7 +232,6 @@ Rows appear in this fixed order, with absent stages skipped:
 6. `copy_positions_into_reference`
 7. `neighbor_list_build`
 8. `lj_pair_force` or `lj_pair_force_neighbor` (whichever is present)
-9. `reduce_pair_forces`
 10. `morse_bond_force`
 11. `reduce_bond_forces`
 12. `accumulate_forces`
@@ -255,7 +253,6 @@ Rows appear in this fixed order, with absent stages skipped:
 stage                             count       total_ms       mean_us      min_us      max_us
 vv_kick_drift                       100         2.345          23.5        20.1        28.7
 lj_pair_force                       101        12.467         123.4        98.7       145.2
-reduce_pair_forces                  101         4.612          45.7        38.1        52.4
 vv_kick                             100         2.111          21.1        18.5        25.9
 host_to_device_upload                 1         1.890        1890.0      1890.0      1890.0
 device_to_host_download              20         8.910         445.5       420.3       482.1
@@ -296,7 +293,7 @@ partial timings are discarded).
   - `KernelStage::VV_KICK_DRIFT_LOSSLESS` → `"vv_kick_drift_lossless"`
   - `KernelStage::VV_KICK_LOSSLESS` → `"vv_kick_lossless"`
   - `KernelStage::LJ_PAIR_FORCE` → `"lj_pair_force"`
-  - `KernelStage::REDUCE_PAIR_FORCES` → `"reduce_pair_forces"`
+  - `KernelStage::LJ_PAIR_FORCE` → `"lj_pair_force"` (and per-potential analogues for Coulomb / SPME-real)
   - `KernelStage::LANGEVIN_KICK_HALF` → `"langevin_kick_half"`
   - `KernelStage::LANGEVIN_DRIFT_HALF` → `"langevin_drift_half"`
   - `KernelStage::LANGEVIN_OU_STEP` → `"langevin_ou_step"`
@@ -436,14 +433,13 @@ sequence of recorded stages within `run_simulation` is:
    `generate_velocities` call. Skipped when explicit velocities are read
    from the init file.
 3. Warm-up: `kernel_start(KernelStage::LJ_PAIR_FORCE)` / launch /
-   `kernel_stop(KernelStage::LJ_PAIR_FORCE)` then
-   `kernel_start(KernelStage::REDUCE_PAIR_FORCES)` / launch /
-   `kernel_stop(KernelStage::REDUCE_PAIR_FORCES)`.
+   `kernel_stop(KernelStage::LJ_PAIR_FORCE)`.
 4. For each timestep:
    - `kernel_start` / launch / `kernel_stop` for the active kick-drift
      variant.
-   - `kernel_start` / launch / `kernel_stop` for `LJ_PAIR_FORCE`.
-   - `kernel_start` / launch / `kernel_stop` for `REDUCE_PAIR_FORCES`.
+   - `kernel_start` / launch / `kernel_stop` for `LJ_PAIR_FORCE` (the
+     fused pair-force kernel writes per-particle output directly; there
+     is no separate reduction stage).
    - `kernel_start` / launch / `kernel_stop` for the active kick variant.
    - If a snapshot/log download is happening this step:
      - `Instant` measurement around `frame.download_from(&buffers)`.
@@ -668,7 +664,7 @@ Feature: Performance analysis and timings output
     Given a valid lossy config with n_steps=10
     When heddlemd run sim.in.toml is invoked
     Then the row for lj_pair_force has count = 11 (one warm-up + ten loop)
-    And the row for reduce_pair_forces has count = 11
+    And no row for reduce_pair_forces exists (the fused pair-force kernel writes per-particle output directly)
     And the row for vv_kick_drift has count = 10
     And the row for vv_kick has count = 10
 
@@ -727,7 +723,7 @@ Feature: Performance analysis and timings output
     Given a valid lossy config with n_steps=10, trajectory_every=5, log_every=5
     When heddlemd run sim.in.toml is invoked
     Then the stage column of consecutive data rows of tmp/sim.out.timings reads
-      ["vv_kick_drift", "lj_pair_force", "reduce_pair_forces", "vv_kick",
+      ["vv_kick_drift", "lj_pair_force", "vv_kick",
        "host_to_device_upload", "device_to_host_download", "trajectory_write",
        "log_write", "config_load", "init_load", "gpu_init", "total_runtime"]
       (omitting any absent stages; "velocity_generation" is absent because

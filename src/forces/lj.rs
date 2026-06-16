@@ -6,8 +6,7 @@ use cudarc::nvrtc::Ptx;
 
 use crate::gpu::device::get_func;
 use crate::gpu::{
-    GpuContext, GpuError, LennardJonesParameterTable, PairBuffer, ParticleBuffers, lj_pair_force,
-    reduce_pair_energy_virial, reduce_pair_forces,
+    GpuContext, GpuError, LennardJonesParameterTable, ParticleBuffers, lj_pair_force,
 };
 use crate::kernels;
 use crate::pbc::SimulationBox;
@@ -26,11 +25,11 @@ use crate::precision::Real;
 pub struct LennardJonesState {
     #[allow(dead_code)]
     pub(crate) device: Arc<CudaDevice>,
-    pub(crate) pair_buffer: PairBuffer,
     pub(crate) params: LennardJonesParameterTable,
     pub(crate) exclusions: DeviceExclusionList,
     pub(crate) particle_count: usize,
     pub(crate) max_cutoff: Real,
+    pub(crate) max_neighbors: u32,
 }
 
 impl LennardJonesState {
@@ -43,15 +42,14 @@ impl LennardJonesState {
         exclusion_list: &ExclusionList,
     ) -> Result<Self, NeighborListError> {
         let device = gpu.device.clone();
-        let pair_buffer = PairBuffer::new(gpu, particle_count, max_neighbors)?;
         let exclusions = DeviceExclusionList::from_host(&device, exclusion_list)?;
         Ok(LennardJonesState {
             device,
-            pair_buffer,
             params,
             exclusions,
             particle_count,
             max_cutoff,
+            max_neighbors,
         })
     }
 
@@ -69,37 +67,10 @@ impl Potential for LennardJonesState {
         Some(self.max_cutoff)
     }
 
-    fn contribute(
+    fn compute(
         &mut self,
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
-        cx: &ForceFieldContext<'_>,
-        timings: &mut Timings,
-    ) -> Result<(), ForceFieldError> {
-        if self.particle_count == 0 {
-            return Ok(());
-        }
-        let nl = cx
-            .neighbor_list
-            .expect("LennardJonesState requires a shared neighbor list");
-        timings.kernel_start(KernelStage::LJ_PAIR_FORCE)?;
-        lj_pair_force(
-            buffers,
-            &mut self.pair_buffer,
-            sim_box,
-            &self.params,
-            &self.exclusions.atom_excl_offsets,
-            &self.exclusions.atom_excl_partners,
-            &self.exclusions.atom_excl_lj_scales,
-            &nl.neighbor_list,
-            &nl.neighbor_counts,
-        )?;
-        timings.kernel_stop(KernelStage::LJ_PAIR_FORCE)?;
-        Ok(())
-    }
-
-    fn reduce(
-        &mut self,
         mut output: SlotOutputView<'_>,
         cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
@@ -111,27 +82,21 @@ impl Potential for LennardJonesState {
         let nl = cx
             .neighbor_list
             .expect("LennardJonesState requires a shared neighbor list");
-        timings.kernel_start(KernelStage::REDUCE_PAIR_FORCES)?;
-        reduce_pair_forces(
-            &self.pair_buffer,
+        timings.kernel_start(KernelStage::LJ_PAIR_FORCE)?;
+        lj_pair_force(
+            buffers,
+            &mut output,
+            sim_box,
+            &self.params,
+            &self.exclusions.atom_excl_offsets,
+            &self.exclusions.atom_excl_partners,
+            &self.exclusions.atom_excl_lj_scales,
+            &nl.neighbor_list,
             &nl.neighbor_counts,
-            &mut output.force_x,
-            &mut output.force_y,
-            &mut output.force_z,
-            self.particle_count,
+            self.max_neighbors,
+            level,
         )?;
-        timings.kernel_stop(KernelStage::REDUCE_PAIR_FORCES)?;
-        if level.includes_scalars() {
-            timings.kernel_start(KernelStage::REDUCE_PAIR_ENERGY_VIRIAL)?;
-            reduce_pair_energy_virial(
-                &self.pair_buffer,
-                &nl.neighbor_counts,
-                &mut output.energy,
-                &mut output.virial,
-                self.particle_count,
-            )?;
-            timings.kernel_stop(KernelStage::REDUCE_PAIR_ENERGY_VIRIAL)?;
-        }
+        timings.kernel_stop(KernelStage::LJ_PAIR_FORCE)?;
         Ok(())
     }
 }
@@ -178,7 +143,8 @@ impl PotentialBuilder for LennardJonesBuilder {
 // rq-2093594f rq-78d9fd1c
 #[derive(Debug, Clone)]
 pub struct LjKernels {
-    pub pair_force: CudaFunction,
+    pub pair_force_f: CudaFunction,
+    pub pair_force_fev: CudaFunction,
 }
 
 impl LjKernels {
@@ -186,10 +152,11 @@ impl LjKernels {
         device.load_ptx(
             Ptx::from_src(kernels::PAIR_FORCE),
             "pair_force",
-            &["lj_pair_force"],
+            &["lj_pair_force_f", "lj_pair_force_fev"],
         )?;
         Ok(LjKernels {
-            pair_force: get_func(device, "pair_force", "lj_pair_force")?,
+            pair_force_f: get_func(device, "pair_force", "lj_pair_force_f")?,
+            pair_force_fev: get_func(device, "pair_force", "lj_pair_force_fev")?,
         })
     }
 }

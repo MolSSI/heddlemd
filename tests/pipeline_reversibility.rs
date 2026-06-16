@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use cudarc::driver::{CudaDevice, CudaSlice};
 use heddle_md::gpu::{
-    GpuContext, LennardJonesParameterTable, LosslessBuffers, PairBuffer, ParticleBuffers,
+    GpuContext, LennardJonesParameterTable, LosslessBuffers, ParticleBuffers,
     init_device, vv_kick, vv_kick_drift, vv_kick_drift_lossless, vv_kick_lossless,
 };
 use heddle_md::pbc::SimulationBox;
@@ -137,8 +137,6 @@ fn negate_velocities_lossy(buffers: &mut ParticleBuffers) {
 
 struct PipelineFixture {
     buffers: ParticleBuffers,
-    pair: PairBuffer,
-    counts: CudaSlice<u32>,
     sim_box: SimulationBox,
     params: LennardJonesParameterTable,
 }
@@ -146,37 +144,30 @@ struct PipelineFixture {
 impl PipelineFixture {
     fn build(gpu: &GpuContext, state: &ParticleState) -> Self {
         let buffers = ParticleBuffers::new(gpu, state).unwrap();
-        let pair = PairBuffer::new(gpu, N, N as u32).unwrap();
-        let counts = gpu.device.htod_sync_copy(&vec![N as u32; N]).unwrap();
         let sim_box = SimulationBox::new(BOX_L, BOX_L, BOX_L, 0.0, 0.0, 0.0).unwrap();
         let params = single_type_lj_table(&gpu.device, SIGMA, EPSILON, CUTOFF);
         Self {
             buffers,
-            pair,
-            counts,
             sim_box,
             params,
         }
     }
 
     fn warm_up(&mut self) {
-        lj_pair_force_no_excl(&self.buffers, &mut self.pair, &self.sim_box, &self.params).unwrap();
-        reduce_pair_forces_into_buffers(&self.pair, &self.counts, &mut self.buffers).unwrap();
+        lj_pair_force_into_buffers(&mut self.buffers, &self.sim_box, &self.params).unwrap();
     }
 }
 
 // rq-7b5eef8c
 fn lossless_step(fixture: &mut PipelineFixture, lossless: &mut LosslessBuffers, dt: Real) {
     vv_kick_drift_lossless(&mut fixture.buffers, lossless, &fixture.sim_box, dt).unwrap();
-    lj_pair_force_no_excl(&fixture.buffers, &mut fixture.pair, &fixture.sim_box, &fixture.params).unwrap();
-    reduce_pair_forces_into_buffers(&fixture.pair, &fixture.counts, &mut fixture.buffers).unwrap();
+    lj_pair_force_into_buffers(&mut fixture.buffers, &fixture.sim_box, &fixture.params).unwrap();
     vv_kick_lossless(&mut fixture.buffers, lossless, dt).unwrap();
 }
 
 fn lossy_step(fixture: &mut PipelineFixture, dt: Real) {
     vv_kick_drift(&mut fixture.buffers, &fixture.sim_box, dt).unwrap();
-    lj_pair_force_no_excl(&fixture.buffers, &mut fixture.pair, &fixture.sim_box, &fixture.params).unwrap();
-    reduce_pair_forces_into_buffers(&fixture.pair, &fixture.counts, &mut fixture.buffers).unwrap();
+    lj_pair_force_into_buffers(&mut fixture.buffers, &fixture.sim_box, &fixture.params).unwrap();
     vv_kick(&mut fixture.buffers, dt).unwrap();
 }
 

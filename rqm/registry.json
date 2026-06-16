@@ -627,6 +627,14 @@
     "title": "Feature: Morse Bonded Potential",
     "type": "file"
   },
+  "rq-05e4b5da": {
+    "decl": "### CUDA Kernel Entry Points",
+    "file": "forces/pair-force-kernel",
+    "level": 3,
+    "refs": [],
+    "title": "CUDA Kernel Entry Points",
+    "type": "section"
+  },
   "rq-05e8f300": {
     "decl": "Scenario: build_optional with None returns Ok(None)",
     "file": "integration/berendsen-barostat",
@@ -2101,18 +2109,6 @@
     "title": "Reject non-positive tau",
     "type": "scenario"
   },
-  "rq-12657190": {
-    "decl": "- `PairBuffer::max_neighbors(&self) -> u32`",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "src/gpu/pair_buffer.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "PairBuffer",
-    "type": "api-item"
-  },
   "rq-127df3d6": {
     "decl": "- `spme_influence_multiply`: one thread per complex grid cell, block",
     "file": "forces/spme",
@@ -2471,18 +2467,6 @@
     "title": "Two constraint rows sharing an atom are rejected",
     "type": "scenario"
   },
-  "rq-15e1e995": {
-    "decl": "Scenario: PairBuffer::new with max_neighbors = 0",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "PairBuffer::new with max_neighbors = 0",
-    "type": "scenario"
-  },
   "rq-15e44a1b": {
     "decl": "Scenario: apply_pre is the trait default (no-op)",
     "file": "integration/andersen",
@@ -2571,6 +2555,13 @@
     ],
     "title": "spme_charge_spread",
     "type": "api-item"
+  },
+  "rq-1708fc0a": {
+    "decl": "Scenario: Pair-force kernels declare no shared memory",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Pair-force kernels declare no shared memory",
+    "type": "scenario"
   },
   "rq-1727d6bd": {
     "decl": "#### `kinetic_energy_reduce`",
@@ -3323,6 +3314,13 @@
     "refs": [],
     "title": "File Format",
     "type": "section"
+  },
+  "rq-1e135c50": {
+    "decl": "Scenario: Particle count that is not a multiple of WARPS_PER_BLOCK uses a ragged final block",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Particle count that is not a multiple of WARPS_PER_BLOCK uses a ragged final block",
+    "type": "scenario"
   },
   "rq-1e1b4e02": {
     "decl": "### Exclusion list",
@@ -4618,6 +4616,13 @@
     "title": "Rescale preserves COM momentum",
     "type": "scenario"
   },
+  "rq-28815c89": {
+    "decl": "- `coulomb_pair_force_f`, `coulomb_pair_force_fev` — see",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "coulomb_pair_force_f",
+    "type": "api-item"
+  },
   "rq-28967c97": {
     "decl": "Scenario: f64 build trajectory writer emits 17-digit columns",
     "file": "precision",
@@ -4847,6 +4852,14 @@
     "title": "TrajectoryWriter",
     "type": "api-item"
   },
+  "rq-2adca0ab": {
+    "decl": "## Device-side Pair Compute Helper",
+    "file": "forces/pair-force-kernel",
+    "level": 2,
+    "refs": [],
+    "title": "Device-side Pair Compute Helper",
+    "type": "section"
+  },
   "rq-2adf8b58": {
     "decl": "Scenario: Accept negative target pressure",
     "file": "integration/berendsen-barostat",
@@ -4942,14 +4955,6 @@
     ],
     "title": "Exclusion scale NaN rejected",
     "type": "scenario"
-  },
-  "rq-2b7cfbaf": {
-    "decl": "## Out of Scope",
-    "file": "pair-reduction",
-    "level": 2,
-    "refs": [],
-    "title": "Out of Scope",
-    "type": "section"
   },
   "rq-2bbc4121": {
     "decl": "Scenario: Construct with matching arrays and explicit unique IDs",
@@ -5111,18 +5116,6 @@
     "title": "IntegratorError",
     "type": "api-item"
   },
-  "rq-2d051b0c": {
-    "decl": "Scenario: Reduction with all zero neighbor counts produces zero net forces",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Reduction with all zero neighbor counts produces zero net forces",
-    "type": "scenario"
-  },
   "rq-2d107b4d": {
     "decl": "Scenario: Reject an empty `[[analyses]]` array",
     "file": "analysis/framework",
@@ -5145,6 +5138,13 @@
       }
     ],
     "title": "C-rescale composes with langevin-baoab",
+    "type": "scenario"
+  },
+  "rq-2d299ffa": {
+    "decl": "Scenario: NaN per-pair contribution propagates to NaN per-particle output",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "NaN per-pair contribution propagates to NaN per-particle output",
     "type": "scenario"
   },
   "rq-2d336703": {
@@ -5587,14 +5587,6 @@
     ],
     "title": "r_search_sq is preserved across a generation refresh",
     "type": "scenario"
-  },
-  "rq-31bd2eee": {
-    "decl": "### CUDA Kernels",
-    "file": "pair-reduction",
-    "level": 3,
-    "refs": [],
-    "title": "CUDA Kernels",
-    "type": "section"
   },
   "rq-321fe0d0": {
     "decl": "## Feature API",
@@ -6224,7 +6216,7 @@
     "type": "scenario"
   },
   "rq-38676211": {
-    "decl": "- `coulomb_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &CoulombParameters, atom_excl_offsets: &CudaSlice<u32>, atom_excl_partners: &CudaSlice<u32>, atom_excl_coul_scales: &CudaSlice<f32>, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>`",
+    "decl": "- `coulomb_pair_force(particle_buffers: &ParticleBuffers, output: &mut SlotOutputView<'_>, sim_box: &SimulationBox, params: &CoulombParameters, atom_excl_offsets: &CudaSlice<u32>, atom_excl_partners: &CudaSlice<u32>, atom_excl_coul_scales: &CudaSlice<f32>, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>, max_neighbors: u32, level: AggregateLevel) -> Result<(), GpuError>`",
     "file": "forces/coulomb-pair-force",
     "refs": [
       {
@@ -6341,6 +6333,13 @@
       }
     ],
     "title": "check_min_perpendicular_width flags direction \"a\" when w_a fails",
+    "type": "scenario"
+  },
+  "rq-3982aff8": {
+    "decl": "Scenario: Result of any pair-force kernel agrees with a CPU warp-tree reference exactly",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Result of any pair-force kernel agrees with a CPU warp-tree reference exactly",
     "type": "scenario"
   },
   "rq-39891001": {
@@ -6648,18 +6647,6 @@
     "title": "Total momentum after generation is zero (within f32 round-off)",
     "type": "scenario"
   },
-  "rq-3c42e6bd": {
-    "decl": "- `PairBuffer::particle_count(&self) -> usize`",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "src/gpu/pair_buffer.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "PairBuffer",
-    "type": "api-item"
-  },
   "rq-3c6753bc": {
     "decl": "Scenario: ConstraintList::subset preserves the supplied index order",
     "file": "integration/constraint-framework",
@@ -6924,6 +6911,13 @@
     "title": "Append rows in source order",
     "type": "scenario"
   },
+  "rq-3f01c5c9": {
+    "decl": "Scenario: _fev variant writes the energy and virial slot output rows",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "_fev variant writes the energy and virial slot output rows",
+    "type": "scenario"
+  },
   "rq-3f01c746": {
     "decl": "Scenario: bond_type unknown potential is rejected",
     "file": "io/config-schema",
@@ -7112,18 +7106,6 @@
     "title": "Explicit [exclusions] entry overrides constraint-derived default",
     "type": "scenario"
   },
-  "rq-41453204": {
-    "decl": "Scenario: reduce_pair_energy_virial on an empty state is a no-op",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "reduce_pair_energy_virial on an empty state is a no-op",
-    "type": "scenario"
-  },
   "rq-414ed5ef": {
     "decl": "Scenario: Missing compressibility rejected",
     "file": "integration/berendsen-barostat",
@@ -7158,18 +7140,6 @@
       }
     ],
     "title": "Reject topology = init",
-    "type": "scenario"
-  },
-  "rq-41d9e514": {
-    "decl": "Scenario: Force and energy-virial reductions share the same indexing",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Force and energy-virial reductions share the same indexing",
     "type": "scenario"
   },
   "rq-41eb5e02": {
@@ -7320,7 +7290,7 @@
     "type": "scenario"
   },
   "rq-44cce069": {
-    "decl": "- `spme_real_pair_force` and `spme_force_gather` run on the device's",
+    "decl": "- `spme_real_pair_force_*` and `spme_force_gather` run on the device's",
     "file": "forces/spme",
     "refs": [
       {
@@ -7328,7 +7298,7 @@
         "kind": "code"
       }
     ],
-    "title": "spme_real_pair_force",
+    "title": "spme_real_pair_force_",
     "type": "api-item"
   },
   "rq-44ce75ec": {
@@ -7543,18 +7513,6 @@
     "title": "trajectory_write count equals frames written",
     "type": "scenario"
   },
-  "rq-46d24bfb": {
-    "decl": "Scenario: One warp per particle, warps are independent",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "One warp per particle, warps are independent",
-    "type": "scenario"
-  },
   "rq-46d980b2": {
     "decl": "### `Thermostat` trait overrides",
     "file": "integration/berendsen",
@@ -7680,6 +7638,13 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-4864c156": {
+    "decl": "Scenario: Pair (i, j) and (j, i) contributions are opposite for non-boundary displacements",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Pair (i, j) and (j, i) contributions are opposite for non-boundary displacements",
+    "type": "scenario"
+  },
   "rq-4894ae09": {
     "decl": "Scenario: apply on empty state is a no-op",
     "file": "integration/c-rescale-barostat",
@@ -7747,18 +7712,6 @@
     "title": "minimum_image after set_lattice reflects new tilts",
     "type": "scenario"
   },
-  "rq-493caf32": {
-    "decl": "Scenario: reduce_pair_forces on an empty state is a no-op",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "reduce_pair_forces on an empty state is a no-op",
-    "type": "scenario"
-  },
   "rq-494626a0": {
     "decl": "Scenario: Every governed error type implements std::error::Error",
     "file": "error-handling",
@@ -7789,6 +7742,13 @@
       }
     ],
     "title": "Reject missing comment line",
+    "type": "scenario"
+  },
+  "rq-49cdbd88": {
+    "decl": "Scenario: Two independent runs of any pair-force kernel produce byte-identical output",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Two independent runs of any pair-force kernel produce byte-identical output",
     "type": "scenario"
   },
   "rq-49e26627": {
@@ -8544,6 +8504,13 @@
     "title": "Sub-step Execution",
     "type": "section"
   },
+  "rq-5241686b": {
+    "decl": "Scenario: Kernel does not modify positions, velocities, or masses",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Kernel does not modify positions, velocities, or masses",
+    "type": "scenario"
+  },
   "rq-5269221c": {
     "decl": "Scenario: wrap_position is idempotent for a triclinic box",
     "file": "simulation-box",
@@ -8869,6 +8836,13 @@
     "title": "Different-type same-pair Newton's third law holds for symmetric tables",
     "type": "scenario"
   },
+  "rq-5568bd21": {
+    "decl": "Scenario: count == 0 yields zero per-particle output",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "count == 0 yields zero per-particle output",
+    "type": "scenario"
+  },
   "rq-556b7c13": {
     "decl": "Scenario: Minimum image is applied",
     "file": "forces/morse-bonded",
@@ -9020,19 +8994,6 @@
     ],
     "title": "Construct a ForceField with LennardJones only",
     "type": "scenario"
-  },
-  "rq-56d8375d": {
-    "decl": "### PTX Module Loading",
-    "file": "pair-reduction",
-    "level": 3,
-    "refs": [
-      {
-        "file": "src/gpu/pair_buffer.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "PTX Module Loading",
-    "type": "section"
   },
   "rq-5711d6ce": {
     "decl": "Scenario: Empty integrator registry reports UnknownKind",
@@ -9321,18 +9282,6 @@
     "title": "vv_kick_drift_lossless on an empty state is a no-op",
     "type": "scenario"
   },
-  "rq-590dcd7e": {
-    "decl": "Scenario: Reduction at full max_neighbors capacity",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Reduction at full max_neighbors capacity",
-    "type": "scenario"
-  },
   "rq-5915b212": {
     "decl": "## Out of Scope",
     "file": "integration/c-rescale-barostat",
@@ -9352,6 +9301,14 @@
     ],
     "title": "Temperature for a 3-atom SETTLE'd water (one rigid molecule, COM removed)",
     "type": "scenario"
+  },
+  "rq-5946ee09": {
+    "decl": "## Launch Configuration Constants",
+    "file": "forces/pair-force-kernel",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration Constants",
+    "type": "section"
   },
   "rq-5985846f": {
     "decl": "Scenario: step(ForcesOnly) updates forces and leaves potential_energies / virials stale",
@@ -9540,6 +9497,14 @@
     "title": "LosslessBuffers::new allocates six zero-initialised residual buffers",
     "type": "scenario"
   },
+  "rq-5c12bfee": {
+    "decl": "## Gherkin Scenarios",
+    "file": "forces/pair-force-kernel",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-5c197a37": {
     "decl": "Scenario: kinetic_energy_reduce is deterministic",
     "file": "integration/nose-hoover-chain",
@@ -9610,18 +9575,6 @@
       }
     ],
     "title": "rescale_velocities does not modify positions, masses, or forces",
-    "type": "scenario"
-  },
-  "rq-5cb58365": {
-    "decl": "Scenario: NaN pair contributions propagate to NaN net forces",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "NaN pair contributions propagate to NaN net forces",
     "type": "scenario"
   },
   "rq-5cbab27f": {
@@ -9802,6 +9755,13 @@
       }
     ],
     "title": "SD with no constraint slot does not call any projection hook",
+    "type": "scenario"
+  },
+  "rq-5e2ee310": {
+    "decl": "Scenario: Sweep reads only slots [0, count) and ignores trailing junk",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Sweep reads only slots [0, count) and ignores trailing junk",
     "type": "scenario"
   },
   "rq-5e5f48da": {
@@ -9994,6 +9954,14 @@
     ],
     "title": "Lint reports a topology-load failure under the topology stage",
     "type": "scenario"
+  },
+  "rq-605f2b43": {
+    "decl": "## Out of Scope",
+    "file": "forces/pair-force-kernel",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-606197d5": {
     "decl": "### Cadence",
@@ -10243,6 +10211,14 @@
     ],
     "title": "NoseHooverChainThermostat",
     "type": "api-item"
+  },
+  "rq-63726e30": {
+    "decl": "## Launch Configuration",
+    "file": "forces/pair-force-kernel",
+    "level": 2,
+    "refs": [],
+    "title": "Launch Configuration",
+    "type": "section"
   },
   "rq-637c4fdd": {
     "decl": "### Rust Launch Helpers",
@@ -10534,18 +10510,6 @@
     "title": "init_device exposes the Langevin kernels on the Kernels handle",
     "type": "scenario"
   },
-  "rq-6690fae9": {
-    "decl": "- `reduce_pair_forces(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_force_x: &mut CudaViewMut<'_, f32>, target_force_y: &mut CudaViewMut<'_, f32>, target_force_z: &mut CudaViewMut<'_, f32>, particle_count: usize) -> Result<(), GpuError>`",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "reduce_pair_forces",
-    "type": "api-item"
-  },
   "rq-66bf31c6": {
     "decl": "Scenario: Missing [integrator] section is rejected",
     "file": "io/config-schema",
@@ -10704,18 +10668,6 @@
     "title": "Potential",
     "type": "api-item"
   },
-  "rq-6808532e": {
-    "decl": "Scenario: Per-particle reduction with varying counts",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Per-particle reduction with varying counts",
-    "type": "scenario"
-  },
   "rq-680ab854": {
     "decl": "Scenario: Reject reordered Properties columns",
     "file": "io/init-state-file",
@@ -10797,6 +10749,13 @@
       }
     ],
     "title": "Bond-force reduction sums energy and virial alongside forces",
+    "type": "scenario"
+  },
+  "rq-68b8b92a": {
+    "decl": "Scenario: Launcher with particle_count = 0 is a no-op",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Launcher with particle_count = 0 is a no-op",
     "type": "scenario"
   },
   "rq-69109415": {
@@ -11344,6 +11303,14 @@
     "title": "Dependencies",
     "type": "section"
   },
+  "rq-6e191fd0": {
+    "decl": "## Reproducibility",
+    "file": "forces/pair-force-kernel",
+    "level": 2,
+    "refs": [],
+    "title": "Reproducibility",
+    "type": "section"
+  },
   "rq-6e1ba10f": {
     "decl": "Scenario: Position-in-box check runs against the post-conversion box",
     "file": "io/init-state-file",
@@ -11432,14 +11399,6 @@
     "title": "Builder Err short-circuits ForceField::new",
     "type": "scenario"
   },
-  "rq-6f2452d1": {
-    "decl": "### Reduction Launchers",
-    "file": "pair-reduction",
-    "level": 3,
-    "refs": [],
-    "title": "Reduction Launchers",
-    "type": "section"
-  },
   "rq-6f4f5ece": {
     "decl": "Scenario: Default r_switch to 0.9 * cutoff when omitted",
     "file": "io/config-schema",
@@ -11525,18 +11484,6 @@
       }
     ],
     "title": "Configuration exceeding the u32 cell-addressing limit is rejected at construction",
-    "type": "scenario"
-  },
-  "rq-6fdefca0": {
-    "decl": "Scenario: PairBuffer::new allocates zero-initialised pair-contribution buffers",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "PairBuffer::new allocates zero-initialised pair-contribution buffers",
     "type": "scenario"
   },
   "rq-6fe2b058": {
@@ -11794,14 +11741,6 @@
     "title": "PTX Module Loading",
     "type": "section"
   },
-  "rq-73c4d574": {
-    "decl": "## Device-side Pair-Force Frame Helper",
-    "file": "pair-reduction",
-    "level": 2,
-    "refs": [],
-    "title": "Device-side Pair-Force Frame Helper",
-    "type": "section"
-  },
   "rq-73efd4be": {
     "decl": "Scenario: Two-stream pipeline preserves bit-exact reproducibility across runs",
     "file": "forces/spme",
@@ -11933,18 +11872,6 @@
       }
     ],
     "title": "kinetic_energy_reduce matches the host-side formula on small N",
-    "type": "scenario"
-  },
-  "rq-74e4bd02": {
-    "decl": "Scenario: PairBuffer::new with particle_count = 0",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "PairBuffer::new with particle_count = 0",
     "type": "scenario"
   },
   "rq-74f48855": {
@@ -12119,18 +12046,6 @@
     "title": "Constraint groups are sorted by minimum particle index",
     "type": "scenario"
   },
-  "rq-75ee70dd": {
-    "decl": "Scenario: reduce_pair_energy_virial does not touch force targets",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "reduce_pair_energy_virial does not touch force targets",
-    "type": "scenario"
-  },
   "rq-7600786b": {
     "decl": "## Test Fixture",
     "file": "pipeline-reversibility",
@@ -12299,18 +12214,6 @@
       }
     ],
     "title": "Convergence on force tolerance ends the phase",
-    "type": "scenario"
-  },
-  "rq-77e88745": {
-    "decl": "Scenario: Every particle is reduced exactly once across the full grid",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Every particle is reduced exactly once across the full grid",
     "type": "scenario"
   },
   "rq-77f42047": {
@@ -12516,30 +12419,6 @@
     "refs": [],
     "title": "Rust Launch Helpers",
     "type": "section"
-  },
-  "rq-78fc2fbb": {
-    "decl": "Scenario: Slots beyond neighbor_counts[i] are not summed",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Slots beyond neighbor_counts[i] are not summed",
-    "type": "scenario"
-  },
-  "rq-79048663": {
-    "decl": "- `PairBuffer::new(device: Arc<CudaDevice>, particle_count: usize, max_neighbors: u32) -> Result<PairBuffer, GpuError>`",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "src/gpu/pair_buffer.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "PairBuffer",
-    "type": "api-item"
   },
   "rq-79068d4d": {
     "decl": "Scenario: Per-class slot-output buffers have length num_class_slots * N",
@@ -12827,11 +12706,19 @@
     "type": "scenario"
   },
   "rq-7b13d9cf": {
-    "decl": "#### `lj_pair_force`",
+    "decl": "#### `lj_pair_force_f`, `lj_pair_force_fev`",
     "file": "forces/lj-pair-force",
     "level": 4,
     "refs": [],
-    "title": "`lj_pair_force`",
+    "title": "`lj_pair_force_f`, `lj_pair_force_fev`",
+    "type": "section"
+  },
+  "rq-7b27c75b": {
+    "decl": "## Kernel Variants",
+    "file": "forces/pair-force-kernel",
+    "level": 2,
+    "refs": [],
+    "title": "Kernel Variants",
     "type": "section"
   },
   "rq-7b5eef8c": {
@@ -12947,6 +12834,13 @@
     "refs": [],
     "title": "Counter packing",
     "type": "section"
+  },
+  "rq-7c59a571": {
+    "decl": "- `spme_real_pair_force_f`, `spme_real_pair_force_fev` — see",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "spme_real_pair_force_f",
+    "type": "api-item"
   },
   "rq-7c6012c7": {
     "decl": "### Rust Launch Helpers",
@@ -13335,18 +13229,6 @@
     "title": "System total scalar virial equals sum of particle shares",
     "type": "scenario"
   },
-  "rq-803ee7e5": {
-    "decl": "Scenario: Skipping reduce_pair_energy_virial leaves stale energy and virial targets",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Skipping reduce_pair_energy_virial leaves stale energy and virial targets",
-    "type": "scenario"
-  },
   "rq-8040ce8a": {
     "decl": "Scenario: Different draw_counters yield different post-call velocities",
     "file": "integration/andersen",
@@ -13472,7 +13354,7 @@
     "type": "section"
   },
   "rq-81e84c73": {
-    "decl": "Scenario: ForceFieldContext exposes the shared neighbor list to contribute",
+    "decl": "Scenario: ForceFieldContext exposes the shared neighbor list to compute",
     "file": "forces/framework",
     "refs": [
       {
@@ -13480,7 +13362,7 @@
         "kind": "code"
       }
     ],
-    "title": "ForceFieldContext exposes the shared neighbor list to contribute",
+    "title": "ForceFieldContext exposes the shared neighbor list to compute",
     "type": "scenario"
   },
   "rq-81f4ec9d": {
@@ -14528,6 +14410,14 @@
     "title": "NaN forces propagate to NaN velocities and positions",
     "type": "scenario"
   },
+  "rq-8e8eef43": {
+    "decl": "### Launchers",
+    "file": "forces/pair-force-kernel",
+    "level": 3,
+    "refs": [],
+    "title": "Launchers",
+    "type": "section"
+  },
   "rq-8ea6cf9c": {
     "decl": "Scenario: Pair appearing in both [bonds] and [constraints] is rejected",
     "file": "forces/topology",
@@ -14587,18 +14477,6 @@
     ],
     "title": "RunnerError",
     "type": "api-item"
-  },
-  "rq-8ee33aa0": {
-    "decl": "Scenario: Reduction with a single particle and a single neighbor",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Reduction with a single particle and a single neighbor",
-    "type": "scenario"
   },
   "rq-8ee58ec1": {
     "decl": "- `log_column_names() -> &'static [\"csvr_conserved\"]`.",
@@ -14867,14 +14745,6 @@
     ],
     "title": "switch == cutoff reproduces the hard-cutoff behaviour everywhere inside the cutoff",
     "type": "scenario"
-  },
-  "rq-9197d752": {
-    "decl": "### Types",
-    "file": "pair-reduction",
-    "level": 3,
-    "refs": [],
-    "title": "Types",
-    "type": "section"
   },
   "rq-9198cc8e": {
     "decl": "Scenario: Write a row at step 100 with non-trivial values",
@@ -15267,14 +15137,6 @@
     "title": "Atom indices are 0-based and refer to entries in the init file.",
     "type": "file"
   },
-  "rq-9561f753": {
-    "decl": "## Gherkin Scenarios",
-    "file": "pair-reduction",
-    "level": 2,
-    "refs": [],
-    "title": "Gherkin Scenarios",
-    "type": "section"
-  },
   "rq-9594de53": {
     "decl": "Scenario: Download overwrites in-place after host mutation",
     "file": "particle-state",
@@ -15309,18 +15171,6 @@
       }
     ],
     "title": "Exclusion scaling applies uniformly to force, energy, and virial",
-    "type": "scenario"
-  },
-  "rq-961c2ee6": {
-    "decl": "Scenario: Energy-virial reduction with zero count writes zero to its targets",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Energy-virial reduction with zero count writes zero to its targets",
     "type": "scenario"
   },
   "rq-963604a4": {
@@ -15697,7 +15547,7 @@
     "type": "scenario"
   },
   "rq-9a512ed1": {
-    "decl": "### Real-space CUDA kernel",
+    "decl": "### Real-space CUDA kernels",
     "file": "forces/spme",
     "level": 3,
     "refs": [
@@ -15710,7 +15560,7 @@
         "kind": "code"
       }
     ],
-    "title": "Real-space CUDA kernel",
+    "title": "Real-space CUDA kernels",
     "type": "section"
   },
   "rq-9a80c43c": {
@@ -15846,18 +15696,6 @@
     "title": "apply_post on empty NHC state is a no-op",
     "type": "scenario"
   },
-  "rq-9b794cff": {
-    "decl": "Scenario: Reduction does not modify the pair buffer",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Reduction does not modify the pair buffer",
-    "type": "scenario"
-  },
   "rq-9b85fa6c": {
     "decl": "- `write_timings_file(path: &Path, report: &TimingsReport) -> Result<(), TimingsWriterError>`",
     "file": "performance-analysis",
@@ -15894,6 +15732,13 @@
     "title": "Open fails when the parent directory does not exist",
     "type": "scenario"
   },
+  "rq-9bb18c44": {
+    "decl": "Scenario: _f and _fev variants agree on the force output for the same inputs",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "_f and _fev variants agree on the force output for the same inputs",
+    "type": "scenario"
+  },
   "rq-9bb3094c": {
     "decl": "Scenario: Triatomic at equilibrium gives zero net force on all atoms",
     "file": "forces/harmonic-angle",
@@ -15924,14 +15769,6 @@
     ],
     "title": "ShakeConstraintsState::new rejects constraints > MAX_GROUP_CONSTRAINTS",
     "type": "scenario"
-  },
-  "rq-9be271aa": {
-    "decl": "## Launch Configuration",
-    "file": "pair-reduction",
-    "level": 2,
-    "refs": [],
-    "title": "Launch Configuration",
-    "type": "section"
   },
   "rq-9be2f56a": {
     "decl": "## Slot Composition",
@@ -16260,18 +16097,6 @@
     "title": "SimulationBox",
     "type": "api-item"
   },
-  "rq-9e487c80": {
-    "decl": "Scenario: Energy and virial reduction sums slots 0..count",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Energy and virial reduction sums slots 0..count",
-    "type": "scenario"
-  },
   "rq-9e4d8944": {
     "decl": "Scenario: Reject duplicate pair under different orderings",
     "file": "io/config-schema",
@@ -16374,18 +16199,6 @@
       }
     ],
     "title": "Construct MorseBondedState",
-    "type": "scenario"
-  },
-  "rq-9f3a36aa": {
-    "decl": "Scenario: reduce_pair_forces does not touch energy or virial targets",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "reduce_pair_forces does not touch energy or virial targets",
     "type": "scenario"
   },
   "rq-9f551521": {
@@ -16573,18 +16386,6 @@
     "title": "log_column_names returns [\"berendsen_conserved\"]",
     "type": "scenario"
   },
-  "rq-a0c0992f": {
-    "decl": "- `PairBuffer` — host-side wrapper around the five device per-pair",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "src/gpu/pair_buffer.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "PairBuffer",
-    "type": "api-item"
-  },
   "rq-a0cb32bf": {
     "decl": "## Gherkin Scenarios",
     "file": "integration/constraint-framework",
@@ -16668,18 +16469,6 @@
     "refs": [],
     "title": "Reproducibility",
     "type": "section"
-  },
-  "rq-a1c567b3": {
-    "decl": "Scenario: Infinite pair contributions propagate to infinite net forces",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Infinite pair contributions propagate to infinite net forces",
-    "type": "scenario"
   },
   "rq-a1d80d47": {
     "decl": "Scenario: SI-mode writer multiplies Time by the atomic-time -> second factor",
@@ -16875,25 +16664,6 @@
       }
     ],
     "title": "Open creates a new trajectory file",
-    "type": "scenario"
-  },
-  "rq-a406a35b": {
-    "decl": "# Feature: Pair Buffer and Deterministic Segmented Reduction",
-    "file": "pair-reduction",
-    "refs": [],
-    "title": "Feature: Pair Buffer and Deterministic Segmented Reduction",
-    "type": "file"
-  },
-  "rq-a43552d5": {
-    "decl": "Scenario: init_device exposes both reduction kernels on the Kernels handle",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "init_device exposes both reduction kernels on the Kernels handle",
     "type": "scenario"
   },
   "rq-a479680a": {
@@ -17169,6 +16939,13 @@
       }
     ],
     "title": "UnitSystem",
+    "type": "api-item"
+  },
+  "rq-a783727a": {
+    "decl": "- `lj_pair_force_f`, `lj_pair_force_fev` — see `lj-pair-force.md`.",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "lj_pair_force_f",
     "type": "api-item"
   },
   "rq-a7aac794": {
@@ -17862,6 +17639,13 @@
     "title": "`[neighbor_list]` (optional table)",
     "type": "section"
   },
+  "rq-ae1b567a": {
+    "decl": "Scenario: Particle count below WARPS_PER_BLOCK uses a single under-full block",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Particle count below WARPS_PER_BLOCK uses a single under-full block",
+    "type": "scenario"
+  },
   "rq-ae20ddac": {
     "decl": "Scenario: Force is C¹ continuous at r_switch",
     "file": "forces/lj-pair-force",
@@ -17944,18 +17728,6 @@
       }
     ],
     "title": "Reject grid dimension below 2*spline_order",
-    "type": "scenario"
-  },
-  "rq-aee2bfb2": {
-    "decl": "Scenario: Reduction tree result agrees with a CPU warp-tree reference to within a small relative tolerance",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Reduction tree result agrees with a CPU warp-tree reference to within a small relative tolerance",
     "type": "scenario"
   },
   "rq-aeee8e44": {
@@ -18170,14 +17942,6 @@
     "title": "ParticleBuffers",
     "type": "api-item"
   },
-  "rq-b0913965": {
-    "decl": "## Reduction Algorithm",
-    "file": "pair-reduction",
-    "level": 2,
-    "refs": [],
-    "title": "Reduction Algorithm",
-    "type": "section"
-  },
   "rq-b0b4c220": {
     "decl": "Scenario: rescale_isotropic rejects zero factor",
     "file": "integration/berendsen-barostat",
@@ -18305,13 +18069,6 @@
     "title": "Feature API",
     "type": "section"
   },
-  "rq-b1cea8cc": {
-    "decl": "Scenario: Reduce kernels declare no shared memory",
-    "file": "pair-reduction",
-    "refs": [],
-    "title": "Reduce kernels declare no shared memory",
-    "type": "scenario"
-  },
   "rq-b1e87ce4": {
     "decl": "Scenario: cumulative_injection records K_new − K_old per invocation",
     "file": "integration/andersen",
@@ -18334,18 +18091,6 @@
       }
     ],
     "title": "neighbor_list cell-list with explicit parameters is accepted",
-    "type": "scenario"
-  },
-  "rq-b2221a99": {
-    "decl": "Scenario: Reduction with count larger than warp size sweeps multiple iterations",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Reduction with count larger than warp size sweeps multiple iterations",
     "type": "scenario"
   },
   "rq-b2314952": {
@@ -18579,18 +18324,6 @@
     "title": "Reject upload when one host array drifts in length",
     "type": "scenario"
   },
-  "rq-b4c772c9": {
-    "decl": "Scenario: Two independent runs of reduce_pair_energy_virial produce byte-identical scalars",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Two independent runs of reduce_pair_energy_virial produce byte-identical scalars",
-    "type": "scenario"
-  },
   "rq-b4d2ac96": {
     "decl": "Scenario: Missing tau rejected",
     "file": "integration/c-rescale-barostat",
@@ -18625,18 +18358,6 @@
       }
     ],
     "title": "minimum_image of a c-aligned displacement subtracts the c lattice vector",
-    "type": "scenario"
-  },
-  "rq-b4f18ea1": {
-    "decl": "Scenario: Two independent runs produce byte-identical net forces",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Two independent runs produce byte-identical net forces",
     "type": "scenario"
   },
   "rq-b5089af4": {
@@ -18731,6 +18452,13 @@
     "title": "Two-particle pair energy matches the closed-form Lennard-Jones expression",
     "type": "scenario"
   },
+  "rq-b6c1c681": {
+    "decl": "Scenario: _f variant does not write the energy or virial slot output rows",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "_f variant does not write the energy or virial slot output rows",
+    "type": "scenario"
+  },
   "rq-b6c8867f": {
     "decl": "Scenario: λ < 1 when K_old > K_target (system needs cooling)",
     "file": "integration/berendsen",
@@ -18810,6 +18538,14 @@
     "level": 2,
     "refs": [],
     "title": "Project Structure",
+    "type": "section"
+  },
+  "rq-b73c3b0b": {
+    "decl": "## Kernel Topology",
+    "file": "forces/pair-force-kernel",
+    "level": 2,
+    "refs": [],
+    "title": "Kernel Topology",
     "type": "section"
   },
   "rq-b746e796": {
@@ -19268,6 +19004,13 @@
     "title": "lint_analyses",
     "type": "api-item"
   },
+  "rq-bd067911": {
+    "decl": "Scenario: Per-particle forces sum to zero for an isolated system",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Per-particle forces sum to zero for an isolated system",
+    "type": "scenario"
+  },
   "rq-bd149f52": {
     "decl": "Scenario: Acceleration scales inversely with mass",
     "file": "integration/velocity-verlet",
@@ -19398,14 +19141,6 @@
     "level": 2,
     "refs": [],
     "title": "Constraint Data Layout",
-    "type": "section"
-  },
-  "rq-be5fe064": {
-    "decl": "### Constructor and Accessors",
-    "file": "pair-reduction",
-    "level": 3,
-    "refs": [],
-    "title": "Constructor and Accessors",
     "type": "section"
   },
   "rq-be7b9fe6": {
@@ -19592,18 +19327,6 @@
     ],
     "title": "Algorithm",
     "type": "section"
-  },
-  "rq-c009903e": {
-    "decl": "Scenario: Reduction with count larger than one warp sweep accumulates across sweeps",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Reduction with count larger than one warp sweep accumulates across sweeps",
-    "type": "scenario"
   },
   "rq-c02c6b45": {
     "decl": "## Lint flow",
@@ -20088,13 +19811,6 @@
     "title": "`Lattice`",
     "type": "section"
   },
-  "rq-c564ab37": {
-    "decl": "Scenario: Particle count below WARPS_PER_BLOCK uses a single under-full block",
-    "file": "pair-reduction",
-    "refs": [],
-    "title": "Particle count below WARPS_PER_BLOCK uses a single under-full block",
-    "type": "scenario"
-  },
   "rq-c5b42daa": {
     "decl": "Scenario: Missing seed rejected",
     "file": "integration/andersen",
@@ -20245,14 +19961,6 @@
     ],
     "title": "Empty-bin g_r is exactly 0.0",
     "type": "scenario"
-  },
-  "rq-c7420b98": {
-    "decl": "## Feature API",
-    "file": "pair-reduction",
-    "level": 2,
-    "refs": [],
-    "title": "Feature API",
-    "type": "section"
   },
   "rq-c79a1408": {
     "decl": "Scenario: bond_type missing potential field",
@@ -20405,18 +20113,6 @@
     "title": "log_column_names",
     "type": "api-item"
   },
-  "rq-c9240ed4": {
-    "decl": "- `reduce_pair_energy_virial(pair_buffer: &PairBuffer, neighbor_counts: &CudaSlice<u32>, target_energy: &mut CudaViewMut<'_, f32>, target_virial: &mut CudaViewMut<'_, f32>, particle_count: usize) -> Result<(), GpuError>`",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "reduce_pair_energy_virial",
-    "type": "api-item"
-  },
   "rq-c9618bdd": {
     "decl": "Scenario: minimum_image is per-axis independent for an orthorhombic box",
     "file": "simulation-box",
@@ -20472,18 +20168,6 @@
     "refs": [],
     "title": "Algorithm",
     "type": "section"
-  },
-  "rq-c9da25a7": {
-    "decl": "Scenario: Reduction does not modify positions, velocities, or masses",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Reduction does not modify positions, velocities, or masses",
-    "type": "scenario"
   },
   "rq-c9e83e73": {
     "decl": "Scenario: Blank trailing lines are tolerated",
@@ -21453,7 +21137,7 @@
     "type": "api-item"
   },
   "rq-d2bf331b": {
-    "decl": "Scenario: A pair-buffer slot honours ForcesOnly",
+    "decl": "Scenario: A pair-force slot honours ForcesOnly",
     "file": "forces/framework",
     "refs": [
       {
@@ -21461,7 +21145,7 @@
         "kind": "code"
       }
     ],
-    "title": "A pair-buffer slot honours ForcesOnly",
+    "title": "A pair-force slot honours ForcesOnly",
     "type": "scenario"
   },
   "rq-d2d0fb5f": {
@@ -21497,7 +21181,7 @@
     "type": "scenario"
   },
   "rq-d3a14184": {
-    "decl": "- `lj_pair_force(particle_buffers: &ParticleBuffers, pair_buffer: &mut PairBuffer, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>) -> Result<(), GpuError>`",
+    "decl": "- `lj_pair_force(particle_buffers: &ParticleBuffers, output: &mut SlotOutputView<'_>, sim_box: &SimulationBox, params: &LennardJonesParameterTable, exclusions: &DeviceExclusionList, neighbor_list: &CudaSlice<u32>, neighbor_counts: &CudaSlice<u32>, max_neighbors: u32, level: AggregateLevel) -> Result<(), GpuError>`",
     "file": "forces/lj-pair-force",
     "refs": [
       {
@@ -21900,6 +21584,13 @@
     "title": "AnalysisConfig",
     "type": "api-item"
   },
+  "rq-d7a35317": {
+    "decl": "# Feature: Fused Pair-Force Kernel Pattern",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Feature: Fused Pair-Force Kernel Pattern",
+    "type": "file"
+  },
   "rq-d801f67c": {
     "decl": "Scenario: compute_total_virial is deterministic",
     "file": "integration/berendsen-barostat",
@@ -21975,14 +21666,6 @@
     "title": "Barostat slot",
     "type": "section"
   },
-  "rq-d8a08c4a": {
-    "decl": "### Determinism",
-    "file": "pair-reduction",
-    "level": 3,
-    "refs": [],
-    "title": "Determinism",
-    "type": "section"
-  },
   "rq-d8a08c7a": {
     "decl": "### Data rows",
     "file": "io/init-state-file",
@@ -22021,13 +21704,6 @@
     "file": "simulation-runner",
     "refs": [],
     "title": "SimulationSetup::new performs the initial-velocity constraint projection",
-    "type": "scenario"
-  },
-  "rq-d902fbcb": {
-    "decl": "Scenario: Particle count that is not a multiple of WARPS_PER_BLOCK uses a ragged final block",
-    "file": "pair-reduction",
-    "refs": [],
-    "title": "Particle count that is not a multiple of WARPS_PER_BLOCK uses a ragged final block",
     "type": "scenario"
   },
   "rq-d920e446": {
@@ -22494,6 +22170,13 @@
     "title": "Implicit exclusion is added for a bond without explicit entry",
     "type": "scenario"
   },
+  "rq-dce96f48": {
+    "decl": "Scenario: Sweep loop runs zero iterations when count == 0",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Sweep loop runs zero iterations when count == 0",
+    "type": "scenario"
+  },
   "rq-dcfdb7c9": {
     "decl": "## Integration with the Runner",
     "file": "performance-analysis",
@@ -22746,6 +22429,13 @@
     "title": "step() on a ForceField with both slots sums LJ and Morse",
     "type": "scenario"
   },
+  "rq-df61d939": {
+    "decl": "Scenario: Kernel does not modify neighbor_counts or neighbor_list",
+    "file": "forces/pair-force-kernel",
+    "refs": [],
+    "title": "Kernel does not modify neighbor_counts or neighbor_list",
+    "type": "scenario"
+  },
   "rq-df6d79a1": {
     "decl": "## Force Classes",
     "file": "forces/framework",
@@ -22880,6 +22570,14 @@
     ],
     "title": "LogWriter",
     "type": "api-item"
+  },
+  "rq-e1345339": {
+    "decl": "## Feature API",
+    "file": "forces/pair-force-kernel",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-e15cc5ac": {
     "decl": "## Algorithm",
@@ -23222,14 +22920,6 @@
     "level": 2,
     "refs": [],
     "title": "Algorithm",
-    "type": "section"
-  },
-  "rq-e435f271": {
-    "decl": "## Data Layout",
-    "file": "pair-reduction",
-    "level": 2,
-    "refs": [],
-    "title": "Data Layout",
     "type": "section"
   },
   "rq-e4420955": {
@@ -23765,18 +23455,6 @@
     "title": "Timings::new allocates the documented event pairs",
     "type": "scenario"
   },
-  "rq-e950f4e6": {
-    "decl": "Scenario: Reduction sums slots 0..count and excludes slots beyond count",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Reduction sums slots 0..count and excludes slots beyond count",
-    "type": "scenario"
-  },
   "rq-e963f27a": {
     "decl": "- `MinlogWriter::open`, `MinlogWriter::write_row`,",
     "file": "minimization/steepest-descent",
@@ -23959,18 +23637,6 @@
     "title": "Parameters",
     "type": "section"
   },
-  "rq-eb3a65df": {
-    "decl": "Scenario: Reduction does not modify neighbor_counts",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Reduction does not modify neighbor_counts",
-    "type": "scenario"
-  },
   "rq-eb4b5952": {
     "decl": "Scenario: Image flags do not widen under f64",
     "file": "precision",
@@ -23991,7 +23657,7 @@
     "type": "scenario"
   },
   "rq-eb9e5cc3": {
-    "decl": "- `spme_real_pair_force`: 16×16×1 = 256 threads/block, grid",
+    "decl": "- `spme_real_pair_force_f` / `spme_real_pair_force_fev`: 256 threads",
     "file": "forces/spme",
     "refs": [
       {
@@ -23999,7 +23665,7 @@
         "kind": "code"
       }
     ],
-    "title": "spme_real_pair_force",
+    "title": "spme_real_pair_force_f",
     "type": "api-item"
   },
   "rq-eba43990": {
@@ -24071,7 +23737,7 @@
     "type": "scenario"
   },
   "rq-ec53799e": {
-    "decl": "Scenario: lj_pair_force followed by reduce_pair_forces produces the correct net force",
+    "decl": "Scenario: lj_pair_force writes the correct per-particle net force directly into the slot output",
     "file": "forces/lj-pair-force",
     "refs": [
       {
@@ -24079,7 +23745,7 @@
         "kind": "code"
       }
     ],
-    "title": "lj_pair_force followed by reduce_pair_forces produces the correct net force",
+    "title": "lj_pair_force writes the correct per-particle net force directly into the slot output",
     "type": "scenario"
   },
   "rq-ec5b6cf1": {
@@ -24493,14 +24159,6 @@
     "title": "Different seeds produce different trajectories",
     "type": "scenario"
   },
-  "rq-efc6f7f7": {
-    "decl": "### Empty state",
-    "file": "pair-reduction",
-    "level": 3,
-    "refs": [],
-    "title": "Empty state",
-    "type": "section"
-  },
   "rq-efea1b70": {
     "decl": "Scenario: Rescale skipped when K == 0",
     "file": "integration/csvr",
@@ -24643,6 +24301,14 @@
     ],
     "title": "Reject duplicate analysis names",
     "type": "scenario"
+  },
+  "rq-f0753132": {
+    "decl": "### PTX Module Loading",
+    "file": "forces/pair-force-kernel",
+    "level": 3,
+    "refs": [],
+    "title": "PTX Module Loading",
+    "type": "section"
   },
   "rq-f08d7a33": {
     "decl": "## Per-Step Interface",
@@ -25112,17 +24778,13 @@
     "title": "Load a valid minimal analysis file with implicit pairing",
     "type": "scenario"
   },
-  "rq-f5299d6e": {
-    "decl": "Scenario: Reduction overwrites prior net force values",
-    "file": "pair-reduction",
-    "refs": [
-      {
-        "file": "tests/pair_reduction.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Reduction overwrites prior net force values",
-    "type": "scenario"
+  "rq-f5522d5f": {
+    "decl": "## Newton's Third Law",
+    "file": "forces/pair-force-kernel",
+    "level": 2,
+    "refs": [],
+    "title": "Newton's Third Law",
+    "type": "section"
   },
   "rq-f5984310": {
     "decl": "## Feature API",
@@ -25346,7 +25008,7 @@
     "type": "scenario"
   },
   "rq-f735ea05": {
-    "decl": "- `spme_real_pair_force(particle_buffers, pair_buffer, sim_box, alpha, r_cut_real, atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales, neighbor_list, neighbor_counts) -> Result<(), GpuError>`",
+    "decl": "- `spme_real_pair_force(particle_buffers, output, sim_box, alpha, r_cut_real, atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales, neighbor_list, neighbor_counts, max_neighbors, level) -> Result<(), GpuError>`",
     "file": "forces/spme",
     "refs": [
       {
@@ -25936,7 +25598,7 @@
     "type": "scenario"
   },
   "rq-fcc5cea5": {
-    "decl": "Scenario: A bonded-only slot reduces all five quantities regardless of level",
+    "decl": "Scenario: A bonded-only slot writes all five quantities regardless of level",
     "file": "forces/framework",
     "refs": [
       {
@@ -25944,7 +25606,7 @@
         "kind": "code"
       }
     ],
-    "title": "A bonded-only slot reduces all five quantities regardless of level",
+    "title": "A bonded-only slot writes all five quantities regardless of level",
     "type": "scenario"
   },
   "rq-fd07b4dc": {

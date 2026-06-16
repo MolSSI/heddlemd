@@ -4,7 +4,7 @@ use std::time::Duration;
 mod common;
 use common::*;
 
-use heddle_md::gpu::{PairBuffer, ParticleBuffers, init_device};
+use heddle_md::gpu::{ParticleBuffers, init_device};
 use heddle_md::io::{TrajectoryWriterError, load_init_state};
 use heddle_md::pbc::SimulationBox;
 use heddle_md::runner::{RunnerError, run_simulation};
@@ -325,7 +325,6 @@ fn empty_n_zero_omits_kernel_rows() {
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
     assert!(stage_row(&body, "lj_pair_force").is_none());
-    assert!(stage_row(&body, "reduce_pair_forces").is_none());
     assert!(stage_row(&body, "vv_kick_drift").is_none());
     assert!(stage_row(&body, "vv_kick").is_none());
     assert!(stage_row(&body, "gpu_init").is_some());
@@ -363,7 +362,6 @@ fn kernel_counts_match_runner_launches() {
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
     assert_eq!(stage_count(&body, "lj_pair_force"), Some(11));
-    assert_eq!(stage_count(&body, "reduce_pair_forces"), Some(11));
     assert_eq!(stage_count(&body, "vv_kick_drift"), Some(10));
     assert_eq!(stage_count(&body, "vv_kick"), Some(10));
     // rq-62300a18: all-pairs records lj_pair_force and omits every
@@ -537,8 +535,6 @@ fn rows_appear_in_documented_order() {
     let expected = vec![
         "vv_kick_drift",
         "lj_pair_force",
-        "reduce_pair_forces",
-        "reduce_pair_energy_virial",
         "accumulate_forces",
         "vv_kick",
         "host_to_device_upload",
@@ -860,11 +856,17 @@ fn kernel_start_stop_and_finalize_records_one_sample() {
     )
     .unwrap();
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut pair_buffer = PairBuffer::new(&gpu, 2, 2).unwrap();
+    let mut slot_out = heddle_md::gpu::SlotOutputBuffers::new(&gpu.device, 2).unwrap();
     let params = single_type_lj_table(&gpu.device, 1.0e-10, 1.0, 1.0e-9);
     let sim_box = SimulationBox::new(1.0e-9, 1.0e-9, 1.0e-9, 0.0, 0.0, 0.0).unwrap();
     timings.kernel_start(KernelStage::LJ_PAIR_FORCE).unwrap();
-    lj_pair_force_no_excl(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
+    lj_pair_force_no_excl(
+        &buffers,
+        &mut slot_out,
+        &sim_box,
+        &params,
+        heddle_md::forces::AggregateLevel::ForcesOnly,
+    ).unwrap();
     timings.kernel_stop(KernelStage::LJ_PAIR_FORCE).unwrap();
     let report = timings.finalize().unwrap();
     let entry = report
@@ -895,12 +897,18 @@ fn repeated_kernel_starts_stops_accumulate() {
     )
     .unwrap();
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut pair_buffer = PairBuffer::new(&gpu, 2, 2).unwrap();
+    let mut slot_out = heddle_md::gpu::SlotOutputBuffers::new(&gpu.device, 2).unwrap();
     let params = single_type_lj_table(&gpu.device, 1.0e-10, 1.0, 1.0e-9);
     let sim_box = SimulationBox::new(1.0e-9, 1.0e-9, 1.0e-9, 0.0, 0.0, 0.0).unwrap();
     for _ in 0..10 {
         timings.kernel_start(KernelStage::LJ_PAIR_FORCE).unwrap();
-        lj_pair_force_no_excl(&buffers, &mut pair_buffer, &sim_box, &params).unwrap();
+        lj_pair_force_no_excl(
+            &buffers,
+            &mut slot_out,
+            &sim_box,
+            &params,
+            heddle_md::forces::AggregateLevel::ForcesOnly,
+        ).unwrap();
         timings.kernel_stop(KernelStage::LJ_PAIR_FORCE).unwrap();
     }
     let report = timings.finalize().unwrap();

@@ -181,7 +181,7 @@ order Sort 1 imposes on `sorted_particle_ids`). The neighbor list is
 not globally sorted by partner index. The order is bit-identical
 across runs given identical inputs on the same GPU and is the source
 of deterministic pair-buffer slot assignments in
-`pair-reduction.md`.
+`pair-force-kernel.md`.
 
 The neighbor list is stored as:
 
@@ -769,7 +769,7 @@ inputs on the same GPU.
 
 This ordering is **not** sorted by partner index globally — it is sorted
 by `(cell-sweep position, partner index within cell)`. Downstream
-consumers (pair-force kernels and `pair-reduction.md`) require a
+consumers (pair-force kernels and `pair-force-kernel.md`) require a
 deterministic slot assignment but are commutative with respect to
 neighbour order, so the change of ordering is invisible to physics and
 to bit-exact reproducibility.

@@ -74,16 +74,10 @@ pub trait Potential: std::fmt::Debug + Send {
         ForceClass::Fast
     }
 
-    fn contribute(
+    fn compute(
         &mut self,
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
-        cx: &ForceFieldContext<'_>,
-        timings: &mut Timings,
-    ) -> Result<(), ForceFieldError>;
-
-    fn reduce(
-        &mut self,
         output: SlotOutputView<'_>,
         cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
@@ -413,22 +407,9 @@ impl ForceField {
         }
 
         let nl_ref = self.neighbor_list.as_ref();
-        for slot in self.slots.iter_mut() {
-            if let Some(c) = class_filter {
-                if slot.frequency_class() != c {
-                    continue;
-                }
-            }
-            let cx = ForceFieldContext {
-                neighbor_list: nl_ref,
-                buffers: &*buffers,
-                sim_box,
-            };
-            slot.contribute(buffers, sim_box, &cx, timings)?;
-        }
-
-        // Per-slot reductions. Each slot writes into the row of its
-        // class's slot-output buffers indexed by class_row[slot_index].
+        // Per-slot compute. Each slot writes its per-particle output
+        // directly into the row of its class's slot-output buffers
+        // indexed by class_row[slot_index].
         let class_row = &self.class_row;
         let slots = &mut self.slots;
         let fast_x = &mut self.fast_slot_forces_x;
@@ -472,7 +453,7 @@ impl ForceField {
                 buffers: &*buffers,
                 sim_box,
             };
-            slot.reduce(view, &cx, timings, level)?;
+            slot.compute(buffers, sim_box, view, &cx, timings, level)?;
         }
 
         timings.kernel_start(KernelStage::ACCUMULATE_FORCES)?;

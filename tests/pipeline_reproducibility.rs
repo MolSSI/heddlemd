@@ -1,7 +1,7 @@
 mod common;
 use common::*;
 
-use heddle_md::gpu::{GpuContext, PairBuffer, ParticleBuffers, init_device, vv_kick, vv_kick_drift};
+use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device, vv_kick, vv_kick_drift};
 use heddle_md::pbc::SimulationBox;
 use heddle_md::state::ParticleState;
 use heddle_md::precision::Real;
@@ -54,19 +54,15 @@ fn build_initial_state() -> ParticleState {
 fn run_pipeline(gpu: &GpuContext, n_steps: usize) -> ParticleState {
     let state = build_initial_state();
     let mut buffers = ParticleBuffers::new(gpu, &state).unwrap();
-    let mut pair = PairBuffer::new(gpu, N, N as u32).unwrap();
-    let counts = gpu.device.htod_sync_copy(&vec![N as u32; N]).unwrap();
     let sim_box = SimulationBox::new(BOX_L, BOX_L, BOX_L, 0.0, 0.0, 0.0).unwrap();
     let params = single_type_lj_table(&gpu.device, SIGMA, EPSILON, CUTOFF);
 
     // Warm-up: populate forces with F(0) before the first kick_drift consumes them.
-    lj_pair_force_no_excl(&buffers, &mut pair, &sim_box, &params).unwrap();
-    reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
+    lj_pair_force_into_buffers(&mut buffers, &sim_box, &params).unwrap();
 
     for _ in 0..n_steps {
         vv_kick_drift(&mut buffers, &sim_box, DT).unwrap();
-        lj_pair_force_no_excl(&buffers, &mut pair, &sim_box, &params).unwrap();
-        reduce_pair_forces_into_buffers(&pair, &counts, &mut buffers).unwrap();
+        lj_pair_force_into_buffers(&mut buffers, &sim_box, &params).unwrap();
         vv_kick(&mut buffers, DT).unwrap();
     }
 

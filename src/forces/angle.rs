@@ -112,14 +112,24 @@ impl Potential for HarmonicAngleState {
         None
     }
 
-    fn contribute(
+    fn compute(
         &mut self,
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
+        mut output: SlotOutputView<'_>,
         _cx: &crate::forces::ForceFieldContext<'_>,
         timings: &mut Timings,
+        _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
+        if self.particle_count == 0 {
+            return Ok(());
+        }
         if self.angle_count == 0 {
+            self.device.memset_zeros(&mut output.force_x).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.force_y).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.force_z).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.energy).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.virial).map_err(GpuError::from)?;
             return Ok(());
         }
         timings.kernel_start(KernelStage::HARMONIC_ANGLE_FORCE)?;
@@ -137,29 +147,6 @@ impl Potential for HarmonicAngleState {
             self.angle_count,
         )?;
         timings.kernel_stop(KernelStage::HARMONIC_ANGLE_FORCE)?;
-        Ok(())
-    }
-
-    fn reduce(
-        &mut self,
-        mut output: SlotOutputView<'_>,
-        _cx: &crate::forces::ForceFieldContext<'_>,
-        timings: &mut Timings,
-        _level: AggregateLevel,
-    ) -> Result<(), ForceFieldError> {
-        // Harmonic-angle reduction is a small kernel; it writes all
-        // five output rows on every call regardless of `level`.
-        if self.particle_count == 0 {
-            return Ok(());
-        }
-        if self.angle_count == 0 {
-            self.device.memset_zeros(&mut output.force_x).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.force_y).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.force_z).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.energy).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.virial).map_err(GpuError::from)?;
-            return Ok(());
-        }
         timings.kernel_start(KernelStage::REDUCE_ANGLE_FORCES)?;
         reduce_angle_forces(
             &self.kernels,

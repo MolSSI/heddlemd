@@ -16,8 +16,8 @@ use cudarc::nvrtc::Ptx;
 use crate::gpu::cufft::{CuFftError, Plan3dC2R, Plan3dR2C};
 use crate::gpu::device::get_func;
 use crate::gpu::{
-    GpuContext, GpuError, K_COULOMB_F32, PairBuffer, ParticleBuffers,
-    reduce_pair_energy_virial, reduce_pair_forces, spme_charge_spread_on_stream,
+    GpuContext, GpuError, K_COULOMB_F32, ParticleBuffers,
+    spme_charge_spread_on_stream,
     spme_force_gather, spme_influence_multiply_on_stream, spme_real_pair_force,
 };
 use crate::kernels;
@@ -494,19 +494,19 @@ fn cardinal_bspline(p: usize, x: f64) -> f64 {
 // rq-f6d45062
 //
 // Real-space `erfc`-screened pair-force slot. Structurally analogous to
-// `LennardJonesState` and `CoulombState`: owns a `PairBuffer` and a
-// `DeviceExclusionList`, contributes via the `spme_real_pair_force`
-// kernel, and reduces via `reduce_pair_forces`.
+// Holds the per-pair-type parameters and exclusion list; the fused
+// pair-force kernel runs directly inside `compute()` and writes the
+// per-particle output to the SlotOutputView.
 // rq-22171569
 #[derive(Debug)]
 pub struct SpmeRealSpaceState {
     #[allow(dead_code)]
     device: Arc<CudaDevice>,
-    pair_buffer: PairBuffer,
     exclusions: DeviceExclusionList,
     alpha: Real,
     r_cut_real: Real,
     particle_count: usize,
+    max_neighbors: u32,
 }
 
 impl SpmeRealSpaceState {
@@ -519,15 +519,14 @@ impl SpmeRealSpaceState {
         exclusion_list: &ExclusionList,
     ) -> Result<Self, NeighborListError> {
         let device = gpu.device.clone();
-        let pair_buffer = PairBuffer::new(gpu, particle_count, max_neighbors)?;
         let exclusions = DeviceExclusionList::from_host(&device, exclusion_list)?;
         Ok(SpmeRealSpaceState {
             device,
-            pair_buffer,
             exclusions,
             alpha,
             r_cut_real,
             particle_count,
+            max_neighbors,
         })
     }
 }
@@ -541,38 +540,10 @@ impl Potential for SpmeRealSpaceState {
         Some(self.r_cut_real)
     }
 
-    fn contribute(
+    fn compute(
         &mut self,
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
-        cx: &ForceFieldContext<'_>,
-        timings: &mut Timings,
-    ) -> Result<(), ForceFieldError> {
-        if self.particle_count == 0 {
-            return Ok(());
-        }
-        let nl = cx
-            .neighbor_list
-            .expect("SpmeRealSpaceState requires a shared neighbor list");
-        timings.kernel_start(KernelStage::SPME_REAL_PAIR_FORCE)?;
-        spme_real_pair_force(
-            buffers,
-            &mut self.pair_buffer,
-            sim_box,
-            self.alpha,
-            self.r_cut_real,
-            &self.exclusions.atom_excl_offsets,
-            &self.exclusions.atom_excl_partners,
-            &self.exclusions.atom_excl_coul_scales,
-            &nl.neighbor_list,
-            &nl.neighbor_counts,
-        )?;
-        timings.kernel_stop(KernelStage::SPME_REAL_PAIR_FORCE)?;
-        Ok(())
-    }
-
-    fn reduce(
-        &mut self,
         mut output: SlotOutputView<'_>,
         cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
@@ -584,27 +555,22 @@ impl Potential for SpmeRealSpaceState {
         let nl = cx
             .neighbor_list
             .expect("SpmeRealSpaceState requires a shared neighbor list");
-        timings.kernel_start(KernelStage::REDUCE_PAIR_FORCES)?;
-        reduce_pair_forces(
-            &self.pair_buffer,
+        timings.kernel_start(KernelStage::SPME_REAL_PAIR_FORCE)?;
+        spme_real_pair_force(
+            buffers,
+            &mut output,
+            sim_box,
+            self.alpha,
+            self.r_cut_real,
+            &self.exclusions.atom_excl_offsets,
+            &self.exclusions.atom_excl_partners,
+            &self.exclusions.atom_excl_coul_scales,
+            &nl.neighbor_list,
             &nl.neighbor_counts,
-            &mut output.force_x,
-            &mut output.force_y,
-            &mut output.force_z,
-            self.particle_count,
+            self.max_neighbors,
+            level,
         )?;
-        timings.kernel_stop(KernelStage::REDUCE_PAIR_FORCES)?;
-        if level.includes_scalars() {
-            timings.kernel_start(KernelStage::REDUCE_PAIR_ENERGY_VIRIAL)?;
-            reduce_pair_energy_virial(
-                &self.pair_buffer,
-                &nl.neighbor_counts,
-                &mut output.energy,
-                &mut output.virial,
-                self.particle_count,
-            )?;
-            timings.kernel_stop(KernelStage::REDUCE_PAIR_ENERGY_VIRIAL)?;
-        }
+        timings.kernel_stop(KernelStage::SPME_REAL_PAIR_FORCE)?;
         Ok(())
     }
 }
@@ -697,52 +663,30 @@ impl Potential for SpmeReciprocalState {
         super::ForceClass::Slow
     }
 
-    fn contribute(
+    fn compute(
         &mut self,
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
+        mut output: SlotOutputView<'_>,
         _cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
+        _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
         let n = self.grid.particle_count;
         if n == 0 {
             self.w_per_particle_virial = 0.0;
             return Ok(());
         }
-        // Launch-only: queues the 4 reciprocal kernels onto
-        // grid.recip_stream and returns. The host does not block on
-        // cuFFT or on virial_per_cell here; the join with the default
-        // stream and the virial dtoh+sum run at the start of reduce().
+        // Launch the 4 reciprocal kernels on recip_stream.
         timings.kernel_start(KernelStage::SPME_RECIP_PIPELINE)?;
         self.grid
             .compute(sim_box, buffers, timings)
             .map_err(map_spme_err)?;
         timings.kernel_stop(KernelStage::SPME_RECIP_PIPELINE)?;
-        Ok(())
-    }
-
-    fn reduce(
-        &mut self,
-        mut output: SlotOutputView<'_>,
-        cx: &ForceFieldContext<'_>,
-        timings: &mut Timings,
-        _level: AggregateLevel,
-    ) -> Result<(), ForceFieldError> {
-        let n = self.grid.particle_count;
-        if n == 0 {
-            return Ok(());
-        }
-
-        // SpmeReciprocalState uses spme_force_gather, which writes
-        // forces, energy, and virial in a single kernel call. The
-        // gather cost is small relative to the recip pipeline and
-        // splitting it would yield no measurable saving, so this slot
-        // ignores `level` and always writes all five output rows.
 
         // Join the default stream with recip_stream so the dtoh below
         // and the force_gather launch that follows both see finalized
-        // virial_per_cell and V buffers. wait_for records an event on
-        // recip_stream and makes the default stream wait on it.
+        // virial_per_cell and V buffers.
         // rq-0d5e76ec
         self.grid
             .device
@@ -767,8 +711,8 @@ impl Potential for SpmeReciprocalState {
 
         timings.kernel_start(KernelStage::SPME_FORCE_GATHER)?;
         spme_force_gather(
-            cx.buffers,
-            cx.sim_box,
+            buffers,
+            sim_box,
             &self.grid.v,
             &self.u_self_per_particle,
             self.w_per_particle_virial,
@@ -865,7 +809,8 @@ impl PotentialBuilder for SpmeReciprocalBuilder {
 // rq-2093594f rq-9a512ed1
 #[derive(Debug, Clone)]
 pub struct SpmeRealKernels {
-    pub spme_real_pair_force: CudaFunction,
+    pub spme_real_pair_force_f: CudaFunction,
+    pub spme_real_pair_force_fev: CudaFunction,
 }
 
 impl SpmeRealKernels {
@@ -873,10 +818,11 @@ impl SpmeRealKernels {
         device.load_ptx(
             Ptx::from_src(kernels::SPME_REAL),
             "spme_real",
-            &["spme_real_pair_force"],
+            &["spme_real_pair_force_f", "spme_real_pair_force_fev"],
         )?;
         Ok(SpmeRealKernels {
-            spme_real_pair_force: get_func(device, "spme_real", "spme_real_pair_force")?,
+            spme_real_pair_force_f: get_func(device, "spme_real", "spme_real_pair_force_f")?,
+            spme_real_pair_force_fev: get_func(device, "spme_real", "spme_real_pair_force_fev")?,
         })
     }
 }

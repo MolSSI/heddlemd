@@ -3,7 +3,7 @@
 The simulation runner is the command-line entry point that turns a TOML
 configuration file into a complete simulation. It reads the config and the
 referenced initial-state file, allocates the GPU pipeline described by
-`build-pipeline.md`, `particle-state.md`, `pair-reduction.md`,
+`build-pipeline.md`, `particle-state.md`, `pair-force-kernel.md`,
 `lj-pair-force.md`, and the integrator slots in `integration/`, drives the
 timestep loop for `simulation.n_steps` iterations, and writes snapshots
 and diagnostics at the declared cadences using `trajectory-output.md` and

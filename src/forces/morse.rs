@@ -115,14 +115,24 @@ impl Potential for MorseBondedState {
         None
     }
 
-    fn contribute(
+    fn compute(
         &mut self,
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
+        mut output: SlotOutputView<'_>,
         _cx: &crate::forces::ForceFieldContext<'_>,
         timings: &mut Timings,
+        _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
+        if self.particle_count == 0 {
+            return Ok(());
+        }
         if self.bond_count == 0 {
+            self.device.memset_zeros(&mut output.force_x).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.force_y).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.force_z).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.energy).map_err(GpuError::from)?;
+            self.device.memset_zeros(&mut output.virial).map_err(GpuError::from)?;
             return Ok(());
         }
         timings.kernel_start(KernelStage::MORSE_BOND_FORCE)?;
@@ -141,29 +151,6 @@ impl Potential for MorseBondedState {
             self.bond_count,
         )?;
         timings.kernel_stop(KernelStage::MORSE_BOND_FORCE)?;
-        Ok(())
-    }
-
-    fn reduce(
-        &mut self,
-        mut output: SlotOutputView<'_>,
-        _cx: &crate::forces::ForceFieldContext<'_>,
-        timings: &mut Timings,
-        _level: AggregateLevel,
-    ) -> Result<(), ForceFieldError> {
-        // Morse bonded reduction is a small kernel; it writes all five
-        // output rows on every call regardless of `level`.
-        if self.particle_count == 0 {
-            return Ok(());
-        }
-        if self.bond_count == 0 {
-            self.device.memset_zeros(&mut output.force_x).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.force_y).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.force_z).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.energy).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.virial).map_err(GpuError::from)?;
-            return Ok(());
-        }
         timings.kernel_start(KernelStage::REDUCE_BOND_FORCES)?;
         reduce_bond_forces(
             &self.kernels,

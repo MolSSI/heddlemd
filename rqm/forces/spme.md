@@ -79,19 +79,21 @@ shared `NeighborListState` owned by `ForceField`, the per-particle
 
 ### Algorithm <!-- rq-39b05bc9 -->
 
-For each ordered `(i, k)` with `0 <= i < N` and `0 <= k <
-neighbor_counts[i]`:
+The kernel topology, sweep loop, warp-tree reduction, and per-particle
+output write follow the common warp-per-particle pattern specified in
+`pair-force-kernel.md`. The real-space-SPME contribution at each
+`(i, k)` pair is computed as follows.
 
-1. The pair-buffer slot is `slot = i * max_neighbors + k`.
-2. Read `j = neighbor_list[slot]`. If `i == j` or
-   `k >= neighbor_counts[i]`, write `0.0_f32` to all five pair-buffer
-   slots and stop.
-3. Compute the displacement `(dx, dy, dz) = positions[i] − positions[j]`
+For lane `lane` of the warp handling particle `i` at sweep step `s`,
+when `k = s * 32 + lane` satisfies `k < neighbor_counts[i]` and
+`j = neighbor_list[i * max_neighbors + k]` is not equal to `i`:
+
+1. Compute the displacement `(dx, dy, dz) = positions[i] − positions[j]`
    and apply the triclinic minimum-image algorithm of `simulation-box.md`.
-4. Compute `r² = dx² + dy² + dz²`. If `r² > r_cut_real²`, write zeros to
-   all five slots and stop.
-5. Read `q_i = charges[i]`, `q_j = charges[j]`.
-6. Compute the screened Coulomb factor and energy:
+2. Compute `r² = dx² + dy² + dz²`. If `r² > r_cut_real²`, the pair
+   contributes nothing; the lane skips to its next assigned neighbour.
+3. Read `q_i = charges[i]`, `q_j = charges[j]`.
+4. Compute the screened Coulomb factor and energy:
 
    ```text
    inv_r2  = 1.0f / r2
@@ -107,44 +109,42 @@ neighbor_counts[i]`:
    ```
 
    `factor · r_ij` is the screened-Coulomb force on particle `i` due to
-   `j`. The derivative form combines the `1/r²` decay of `erfc(αr)/r` with
-   the Gaussian term from `d(erfc)/dr = −(2α/√π) · exp(−α²r²)`.
+   `j`. The derivative form combines the `1/r²` decay of `erfc(αr)/r`
+   with the Gaussian term from `d(erfc)/dr = −(2α/√π) · exp(−α²r²)`.
 
-7. Apply the per-pair Coulomb exclusion scale (see `topology.md`):
+5. Apply the per-pair Coulomb exclusion scale (see `topology.md`):
    `scale = exclusion_scale(i, j, atom_excl_offsets, atom_excl_partners,
-   atom_excl_coul_scales)`. Multiply `factor`, `energy`, and the scalar
-   virial `w = factor · r²` by `scale`.
-8. Write the final values to the pair buffer using the half-sum
-   convention:
+   atom_excl_coul_scales)`. Multiply `factor` and `energy` by `scale`,
+   and compute the scalar virial `w = factor · r²`.
+6. Add `(factor * dx, factor * dy, factor * dz)` to the lane's
+   `(p_x, p_y, p_z)` register accumulators. The `_fev` variant
+   additionally adds `energy * 0.5f` to `p_e` and `w * 0.5f` to `p_w`.
+   The `0.5` factor distributes each unordered pair's energy and virial
+   across the two ordered contributions `(i, j)` and `(j, i)`.
 
-   ```text
-   pair_forces_x[slot] = factor * dx
-   pair_forces_y[slot] = factor * dy
-   pair_forces_z[slot] = factor * dz
-   pair_energies[slot] = 0.5 * energy
-   pair_virials[slot]  = 0.5 * w
-   ```
+After every lane has processed every assigned neighbour, the warp-tree
+butterfly reduction collapses the 32 lane accumulators to lane 0, which
+writes the particle's net force (and, in the `_fev` variant,
+energy/virial) into the corresponding slot output rows. See
+`pair-force-kernel.md` for the topology and reduction details.
 
 The real-space slot does not apply a switching function. The `erfc`
 factor decays rapidly enough that a hard cutoff is acceptable when
 `α · r_cut_real >= 3.5` (the loader does not enforce this; it is a
 user-tuning concern documented in `io/config-schema.md`).
 
-### Real-space CUDA kernel <!-- rq-9a512ed1 -->
+### Real-space CUDA kernels <!-- rq-9a512ed1 -->
 
-`kernels/spme_real.cu` declares one `extern "C"` kernel:
+`kernels/spme_real.cu` declares two `extern "C"` kernels (forces-only
+and forces + energy + virial) that share the warp-per-particle pattern
+documented in `pair-force-kernel.md`:
 
 ```c
-extern "C" __global__ void spme_real_pair_force(
+extern "C" __global__ void spme_real_pair_force_f(
     const float *positions_x,
     const float *positions_y,
     const float *positions_z,
     const float *charges,
-    float *pair_forces_x,
-    float *pair_forces_y,
-    float *pair_forces_z,
-    float *pair_energies,
-    float *pair_virials,
     unsigned int max_neighbors,
     float lx, float ly, float lz, float xy, float xz, float yz,
     float k_coulomb,
@@ -155,18 +155,45 @@ extern "C" __global__ void spme_real_pair_force(
     const float *atom_excl_coul_scales,
     const unsigned int *neighbor_list,
     const unsigned int *neighbor_counts,
+    float *slot_force_x,
+    float *slot_force_y,
+    float *slot_force_z,
+    unsigned int n);
+
+extern "C" __global__ void spme_real_pair_force_fev(
+    const float *positions_x,
+    const float *positions_y,
+    const float *positions_z,
+    const float *charges,
+    unsigned int max_neighbors,
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    float k_coulomb,
+    float alpha,
+    float r_cut_real,
+    const unsigned int *atom_excl_offsets,
+    const unsigned int *atom_excl_partners,
+    const float *atom_excl_coul_scales,
+    const unsigned int *neighbor_list,
+    const unsigned int *neighbor_counts,
+    float *slot_force_x,
+    float *slot_force_y,
+    float *slot_force_z,
+    float *slot_energy,
+    float *slot_virial,
     unsigned int n);
 ```
 
-Launch configuration: `(grid_x, grid_y, 1) = (ceil(max_neighbors/16),
-ceil(n/16), 1)` blocks of `(16, 16, 1) = 256` threads, matching the LJ
-and truncated-Coulomb kernels.
+Launch configuration: `block_dim = (256, 1, 1)`,
+`grid_dim = (ceil(n / 8), 1, 1)`, matching the LJ and truncated-Coulomb
+kernels (see `pair-force-kernel.md`).
 
 ### Real-space reproducibility <!-- rq-cf6116b8 -->
 
-Same as the truncated Coulomb pair force: each pair-buffer slot is written
-by exactly one thread; no atomics; reduction is the existing
-`reduce_pair_forces` kernel in deterministic slot order.
+Same as the truncated Coulomb pair force: the per-particle output is
+the deterministic warp-tree sum of its per-pair contributions,
+accumulated in the fixed lane-strided order specified by
+`pair-force-kernel.md`. Identical runs on the same GPU with identical
+inputs produce byte-identical `slot_force_*` outputs.
 
 ## Reciprocal-space pipeline <!-- rq-9ca00d25 -->
 
@@ -381,8 +408,10 @@ all particles yields the system total `W_recip`. The per-particle
 attribution has no individual physical meaning; the convention exists
 only so the SoA `virials: Vec<f32>` layout sums correctly.
 
-The real-space slot writes the per-pair virial contribution in the
-standard pair-buffer pattern (`pair_virials[slot] = 0.5 · scale · factor · r²`).
+The real-space slot accumulates the per-pair virial contribution
+`0.5 · scale · factor · r²` into the warp's `p_w` register
+accumulator, summed and written to `slot_virial[i]` by the
+warp-tree reduction (see `pair-force-kernel.md`).
 
 ### Self-energy <!-- rq-29bdf2b2 -->
 
@@ -488,8 +517,12 @@ only inside the `SpmeReciprocalState` construction path.
 
 ### Functions <!-- rq-cf82e422 -->
 
-- `spme_real_pair_force(particle_buffers, pair_buffer, sim_box, alpha, r_cut_real, atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales, neighbor_list, neighbor_counts) -> Result<(), GpuError>` <!-- rq-f735ea05 -->
-  Launches the `spme_real_pair_force` kernel.
+- `spme_real_pair_force(particle_buffers, output, sim_box, alpha, r_cut_real, atom_excl_offsets, atom_excl_partners, atom_excl_coul_scales, neighbor_list, neighbor_counts, max_neighbors, level) -> Result<(), GpuError>` <!-- rq-f735ea05 -->
+  Selects the kernel variant based on `level`:
+  `AggregateLevel::ForcesOnly` dispatches to `spme_real_pair_force_f`;
+  `AggregateLevel::ForcesAndScalars` dispatches to
+  `spme_real_pair_force_fev`. Writes per-particle output directly into
+  `output`'s slot rows.
 
 - `spme_charge_spread(particle_buffers, spme_state) -> Result<(), GpuError>` <!-- rq-f69698b8 -->
   Launches the charge-spread kernel. Writes `spme_state.rho`.
@@ -521,11 +554,12 @@ only inside the `SpmeReciprocalState` construction path.
 
 ### CUDA kernels <!-- rq-7225b86f -->
 
-`kernels/spme_real.cu` declares:
+`kernels/spme_real.cu` declares two `extern "C"` kernels (signatures
+shown in the *Real-space CUDA kernels* section above):
 
 ```c
-extern "C" __global__ void spme_real_pair_force(
-    /* signature shown in the Real-space CUDA kernel section above */);
+extern "C" __global__ void spme_real_pair_force_f(/* ... */);
+extern "C" __global__ void spme_real_pair_force_fev(/* ... */);
 ```
 
 `kernels/spme_recip.cu` declares:
@@ -572,14 +606,14 @@ extern "C" __global__ void spme_force_gather(
 ```
 
 Plus a deterministic reduction kernel for the per-cell virial buffer
-(can reuse the existing `reduce_pair_forces` machinery or implement a
-new fixed-topology tree reduction; the kernel signature is left to the
+(a fixed-topology tree reduction; the kernel signature is left to the
 implementation).
 
 ### Launch configuration <!-- rq-03d9869d -->
 
-- `spme_real_pair_force`: 16×16×1 = 256 threads/block, grid <!-- rq-eb9e5cc3 -->
-  `(ceil(max_neighbors/16), ceil(N/16), 1)`. Matches the LJ kernel.
+- `spme_real_pair_force_f` / `spme_real_pair_force_fev`: 256 threads <!-- rq-eb9e5cc3 -->
+  per block (8 warps × 32 lanes), grid `ceil(N / 8)`. Matches the
+  common pair-force pattern (see `pair-force-kernel.md`).
 - `spme_charge_spread`: one thread per real grid cell, block size 256, <!-- rq-16f6c7dc -->
   grid `ceil(M / 256)` where `M = n_a · n_b · n_c`.
 - `spme_influence_multiply`: one thread per complex grid cell, block <!-- rq-127df3d6 -->
@@ -589,7 +623,7 @@ implementation).
 
 Stream assignment:
 
-- `spme_real_pair_force` and `spme_force_gather` run on the device's <!-- rq-44cce069 -->
+- `spme_real_pair_force_*` and `spme_force_gather` run on the device's <!-- rq-44cce069 -->
   default stream carried by `particle_buffers.device`.
 - The four reciprocal-pipeline kernels — `spme_charge_spread`, the
   cuFFT R2C transform, `spme_influence_multiply`, and the cuFFT C2R
@@ -648,7 +682,7 @@ invariant:
 5. **Force gather.** One thread per particle; each thread reads `p³`
    grid points in fixed `(d_a, d_b, d_c)` lexicographic order. No
    atomics. The per-particle virial uses the equal-division attribution
-   `W_recip / N` (the slot's `reduce()` distributes the scalar
+   `W_recip / N` (the slot's `compute()` distributes the scalar
    identically to every particle, so the SoA convention is preserved
    regardless of summation order).
 6. **Two-stream model.** The reciprocal pipeline runs on
@@ -656,8 +690,8 @@ invariant:
    every non-SPME slot's kernel run on the default stream. The two
    streams write to disjoint device buffers — `recip_stream` writes
    `rho`, `rho_hat`, `V`, and `virial_per_cell`; the default stream
-   writes the real-space `PairBuffer`, the slot-output buffers, and
-   `forces_*`. Cross-stream ordering is enforced by the two events
+   writes the slot-output buffers and `forces_*`. Cross-stream ordering
+   is enforced by the two events
    `default_ready_event` and `recip_ready_event` recorded at
    deterministic points in `contribute()` and waited on at
    deterministic points in `contribute()` / `reduce()`; the
@@ -770,20 +804,20 @@ Feature: Smooth particle-mesh Ewald (SPME)
     Given two oppositely charged particles within r_cut_real
     And an ExclusionList listing the pair with scale_coul=0.0
     When the real-space slot's contribute() is called
-    Then the pair-buffer slot for (0, 1) has zero force, zero energy, zero virial
+    Then slot_force_x[0], slot_force_y[0], slot_force_z[0], slot_energy[0], slot_virial[0] are all 0.0
 
   @rq-af7018c0
   Scenario: Real-space slot produces zero outside r_cut_real
     Given two particles at separation greater than r_cut_real
     When the real-space slot's contribute() is called
-    Then the pair-buffer slot has zero force, zero energy, zero virial
+    Then slot_force_x[0], slot_force_y[0], slot_force_z[0], slot_energy[0], slot_virial[0] are all 0.0
 
   @rq-83088c2f
   Scenario: Real-space slot matches the closed-form erfc force for an isolated pair
     Given two unit-charge particles at separation r = 4.0e-10 inside the cutoff
     And alpha = 2.0e10
     When the real-space slot's contribute() is called
-    Then pair_forces_x[0*max + 1] equals the closed-form
+    Then slot_force_x[0] equals the closed-form
       k_C · q_i · q_j · (erfc(α r) · inv_r2 + (2 α / √π) · exp(-α² r²) · inv_r2) · dx · inv_r
       to within 1e-5 relative
 
@@ -791,7 +825,7 @@ Feature: Smooth particle-mesh Ewald (SPME)
   Scenario: Real-space slot obeys Newton's third law for a non-boundary pair
     Given two particles at non-boundary separation
     When the real-space slot's contribute() is called
-    Then pair_forces_x[0*max + slot_j] equals −pair_forces_x[1*max + slot_i] bit-exactly
+    Then slot_force_x[0] equals -slot_force_x[1] bit-exactly (Newton's third law for an isolated pair)
 
   # --- Reciprocal-space pipeline: spread ---
 

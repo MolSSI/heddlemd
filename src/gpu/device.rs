@@ -35,7 +35,6 @@ pub(crate) fn get_func(
 pub struct Kernels {
     pub fill: crate::gpu::fill::FillKernels,
     pub integrate: crate::integrator::velocity_verlet::IntegrateKernels,
-    pub reduce: crate::gpu::pair_buffer::ReduceKernels,
     pub lj: crate::forces::lj::LjKernels,
     pub coulomb: crate::forces::coulomb::CoulombKernels,
     pub spme_real: crate::forces::spme::SpmeRealKernels,
@@ -61,7 +60,6 @@ impl Kernels {
         Ok(Kernels {
             fill: crate::gpu::fill::FillKernels::load(device)?,
             integrate: crate::integrator::velocity_verlet::IntegrateKernels::load(device)?,
-            reduce: crate::gpu::pair_buffer::ReduceKernels::load(device)?,
             lj: crate::forces::lj::LjKernels::load(device)?,
             coulomb: crate::forces::coulomb::CoulombKernels::load(device)?,
             spme_real: crate::forces::spme::SpmeRealKernels::load(device)?,

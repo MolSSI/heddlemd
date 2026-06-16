@@ -1105,23 +1105,16 @@ fn run_simulation_with_registries_dispatches_user_registered_potential() {
         fn max_cutoff(&self) -> Option<Real> {
             None
         }
-        fn contribute(
+        fn compute(
             &mut self,
             _buffers: &ParticleBuffers,
             _sim_box: &SimulationBox,
-            _cx: &ForceFieldContext<'_>,
-            _timings: &mut Timings,
-        ) -> Result<(), ForceFieldError> {
-            self.contribute_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-        fn reduce(
-            &mut self,
             _output: SlotOutputView<'_>,
             _cx: &ForceFieldContext<'_>,
             _timings: &mut Timings,
             _level: AggregateLevel,
         ) -> Result<(), ForceFieldError> {
+            self.contribute_calls.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
     }

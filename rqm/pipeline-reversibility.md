@@ -12,7 +12,7 @@ pair-force kernel and the segmented reduction.
 
 The test lives in `tests/pipeline_reversibility.rs`. It introduces no new
 public types or functions; it composes the existing `lj_pair_force`,
-`reduce_pair_forces`, `vv_kick_drift_lossless`, and `vv_kick_lossless`
+`lj_pair_force_f`, `vv_kick_drift_lossless`, and `vv_kick_lossless`
 launchers around the existing `LosslessBuffers`.
 
 A negative companion test in the same file confirms that the lossy
@@ -40,7 +40,7 @@ under nontrivial forces during the forward run.
 - Lennard-Jones parameters: `sigma = 1.0`, `epsilon = 1.0`,
   `cutoff = 2.5`.
 - Timestep: `dt = 0.001`.
-- `PairBuffer` shape: `particle_count = 64`, `max_neighbors = 64`.
+- particle_count = 64; max_neighbors = 64 (the shared neighbour list is sized to this).
 - `neighbor_counts`: every entry equals `64`.
 - `LosslessBuffers`: freshly allocated, all six residual buffers
   zero-initialised at the start of every run.
@@ -53,12 +53,11 @@ pattern:
 
 ```
 vv_kick_drift_lossless(particle_buffers, lossless, dt)
-lj_pair_force(particle_buffers, pair_buffer, sim_box, params)
-reduce_pair_forces(pair_buffer, neighbor_counts, particle_buffers)
+lj_pair_force_f(particle_buffers, output, sim_box, params, ...)
 vv_kick_lossless(particle_buffers, lossless, dt)
 ```
 
-Before the first timestep, `lj_pair_force` and `reduce_pair_forces` are
+Before the first timestep, `lj_pair_force_f` are
 invoked once to populate `forces_*` with `F(x_0)`. This warm-up is
 required because `vv_kick_drift_lossless` consumes the current force
 state.
@@ -74,7 +73,7 @@ The standard reversal protocol from `integration.md` applies in full:
 2. Run the lossless velocity-Verlet loop forward for `N_steps`
    iterations. After the loop the device holds positions `x_N`,
    velocities `v_N`, and a forces buffer holding `F(x_N)` from the
-   final iteration's `lj_pair_force` / `reduce_pair_forces` pass.
+   final iteration's `lj_pair_force` / `lj_pair_force_f` pass.
 3. Negate every velocity component, both the `f32` high half and the
    `f64` low half: `v ← -v`, `v_lo ← -v_lo`. Forces are not negated;
    they are deterministic functions of positions and remain valid for
@@ -83,7 +82,7 @@ The standard reversal protocol from `integration.md` applies in full:
    iterations. No second warm-up is required: the forces buffer
    already holds `F(x_N)`, which is what the next `vv_kick_drift_lossless`
    consumes. Each step recomputes the force via `lj_pair_force` and
-   `reduce_pair_forces` at the new intermediate position, exactly as
+   `lj_pair_force_f` at the new intermediate position, exactly as
    in the forward direction.
 5. Negate every velocity component again to restore direction.
 
@@ -141,13 +140,13 @@ Feature: End-to-end pipeline reversibility
 
   Background:
     Given the test fixture defined above (N=64 LJ fluid, 4×4×4 perturbed lattice, dt=0.001)
-    And a fresh ParticleBuffers, fresh PairBuffer, fresh LosslessBuffers, and fresh neighbor_counts CudaSlice constructed from the fixture
-    And the warm-up pass (lj_pair_force followed by reduce_pair_forces) has populated forces with F(x_0)
+    And a fresh ParticleBuffers, fresh SlotOutputView, fresh LosslessBuffers, and fresh neighbor_counts CudaSlice constructed from the fixture
+    And the warm-up pass (lj_pair_force_f) has populated forces with F(x_0)
     And a snapshot of all eleven ParticleBuffers arrays and all six LosslessBuffers residual arrays has been captured immediately after warm-up
 
   @rq-0099ef65
   Scenario: Single-step lossless round trip restores observables bit-exactly
-    When one full lossless step (vv_kick_drift_lossless, lj_pair_force, reduce_pair_forces, vv_kick_lossless) is executed with dt=0.001
+    When one full lossless step (vv_kick_drift_lossless, lj_pair_force_f, vv_kick_lossless) is executed with dt=0.001
     And every velocity component (high and low) is negated on the device
     And one full lossless step is executed with dt=0.001
     And every velocity component (high and low) is negated on the device
@@ -192,10 +191,10 @@ Feature: End-to-end pipeline reversibility
 
   @rq-1b44b5da
   Scenario: Lossy 100-step round trip does NOT restore observables
-    Given a fresh ParticleBuffers, fresh PairBuffer, and fresh neighbor_counts built from the fixture
+    Given a fresh ParticleBuffers, fresh SlotOutputView, and fresh neighbor_counts built from the fixture
     And the warm-up pass has populated forces with F(x_0)
     And a snapshot of positions_x, positions_y, positions_z, velocities_x, velocities_y, velocities_z immediately after warm-up
-    When 100 full lossy steps (vv_kick_drift, lj_pair_force, reduce_pair_forces, vv_kick) are executed with dt=0.001
+    When 100 full lossy steps (vv_kick_drift, lj_pair_force_f, vv_kick) are executed with dt=0.001
     And every velocity component is negated on the device
     And 100 full lossy steps are executed with dt=0.001
     And every velocity component is negated on the device
