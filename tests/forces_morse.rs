@@ -347,6 +347,7 @@ fn atom_with_two_bonds_sums_contributions() {
         &mut acc_e.slice_mut(..),
         &mut acc_w.slice_mut(..),
         3,
+        true,
     )
     .unwrap();
     let ax = device.dtoh_sync_copy(&acc_x).unwrap();
@@ -402,6 +403,7 @@ fn atom_with_no_bonds_gets_zero_accumulator() {
         &mut acc_e.slice_mut(..),
         &mut acc_w.slice_mut(..),
         4,
+        true,
     )
     .unwrap();
     let ax = device.dtoh_sync_copy(&acc_x).unwrap();
@@ -435,6 +437,7 @@ fn reduce_bond_forces_zero_particles_noop() {
         &mut acc_e.slice_mut(..),
         &mut acc_w.slice_mut(..),
         0,
+        true,
     )
     .unwrap();
 }
@@ -673,6 +676,7 @@ fn bond_reduction_sums_energy_and_virial_alongside_forces() {
         &mut acc_e.slice_mut(..),
         &mut acc_w.slice_mut(..),
         2,
+        true,
     )
     .unwrap();
     let acc_e_host = device.dtoh_sync_copy(&acc_e).unwrap();
@@ -732,6 +736,7 @@ fn run_reduce_with_buffers(
         &mut acc_e.slice_mut(0..up_e),
         &mut acc_w.slice_mut(0..up_w),
         particle_count,
+        true,
     )
     .unwrap();
     device.dtoh_sync_copy(&acc_x).unwrap()
@@ -871,6 +876,7 @@ fn two_independent_calls_produce_byte_identical_accumulators() {
             &mut acc_e.slice_mut(0..up_e),
             &mut acc_w.slice_mut(0..up_w),
             2,
+            true,
         )
         .unwrap();
         (

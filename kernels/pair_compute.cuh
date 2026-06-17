@@ -126,9 +126,9 @@ __device__ static inline void pair_compute_f(
   p_z = pair_force_warp_reduce_sum(p_z);
 
   if (lane == 0) {
-    slot_force_x[i] = p_x;
-    slot_force_y[i] = p_y;
-    slot_force_z[i] = p_z;
+    slot_force_x[i] += p_x;
+    slot_force_y[i] += p_y;
+    slot_force_z[i] += p_z;
   }
 }
 
@@ -214,10 +214,10 @@ __device__ static inline void pair_compute_fev(
   p_w = pair_force_warp_reduce_sum(p_w);
 
   if (lane == 0) {
-    slot_force_x[i] = p_x;
-    slot_force_y[i] = p_y;
-    slot_force_z[i] = p_z;
-    slot_energy[i] = p_e;
-    slot_virial[i] = p_w;
+    slot_force_x[i] += p_x;
+    slot_force_y[i] += p_y;
+    slot_force_z[i] += p_z;
+    slot_energy[i] += p_e;
+    slot_virial[i] += p_w;
   }
 }

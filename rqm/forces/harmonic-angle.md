@@ -186,9 +186,10 @@ not constructed.
       and `angle_list.atom_angle_indices` to device memory.
     - Allocates the five per-angle `angle_triple_*` buffers (force
       x/y/z, third-energy, third-virial), each of length `3 · A`.
-      Per-atom output is written into the framework-supplied
-      `SlotOutputView` during `reduce()`; the slot owns no per-atom
-      accumulator buffers of its own.
+      Per-atom output is added into the framework-supplied
+      `SlotOutputView` (a view onto the slot's class accumulator; see
+      `framework.md`'s *Class Output Accumulators*) during `reduce()`;
+      the slot owns no per-atom accumulator buffers of its own.
     - When `angle_list.is_empty()`, this method is not called by the
       `ForceField` — see *Empty State*.
 

@@ -12,8 +12,10 @@ The slot evaluates pair forces with two fused warp-per-particle kernels
 `NeighborListState` owned by `ForceField` (see `neighbor-list.md`). Each
 warp handles one particle: the warp walks the particle's neighbour list,
 accumulates the per-pair Coulomb contribution in register accumulators
-across all 32 lanes, and writes the per-particle net force directly
-into the slot output buffer through a warp-tree butterfly reduction.
+across all 32 lanes, and adds the per-particle net force into its
+class accumulator through a warp-tree butterfly reduction followed by
+a lane-0 read-modify-write add (see `framework.md`'s *Class Output
+Accumulators*).
 The common kernel pattern is specified in `pair-force-kernel.md`; this
 file specifies the truncated-Coulomb functional form, parameter inputs,
 and launcher.

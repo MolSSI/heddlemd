@@ -244,11 +244,15 @@ topology … as long as the tree shape depends only on the neighbor
 count").
 
 When `count == 0`, every lane's accumulators stay at `0.0f` through
-the sweep, the warp tree propagates zero, and lane 0 writes `0.0_f32`
-to every output slice at index `i`.
+the sweep, the warp tree propagates zero, and lane 0 adds `0.0_f32`
+to every output slice at index `i` (a no-op load-store).
 
-The final writes overwrite whatever was previously in the slot
-output slices — the kernel does not accumulate across launches.
+The final writes are read-modify-writes into class-accumulator slices
+(see `framework.md`'s *Class Output Accumulators*): lane 0 loads the
+current value at index `i`, adds the warp's per-particle reduced
+contribution, and stores the sum. Each `(class, particle)`
+accumulator cell is written by exactly one warp per slot per launch,
+so no atomics are needed.
 
 ## Newton's Third Law <!-- rq-f5522d5f -->
 

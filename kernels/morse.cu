@@ -95,7 +95,8 @@ extern "C" __global__ void reduce_bond_forces(
     Real *slot_force_z,
     Real *slot_energy,
     Real *slot_virial,
-    unsigned int n)
+    unsigned int n,
+    unsigned int write_scalars)
 {
   unsigned int a = blockIdx.x * blockDim.x + threadIdx.x;
   if (a >= n) {
@@ -116,13 +117,17 @@ extern "C" __global__ void reduce_bond_forces(
     sum_x += bond_pair_x[slot];
     sum_y += bond_pair_y[slot];
     sum_z += bond_pair_z[slot];
-    sum_e += bond_pair_energy[slot];
-    sum_w += bond_pair_virial[slot];
+    if (write_scalars) {
+      sum_e += bond_pair_energy[slot];
+      sum_w += bond_pair_virial[slot];
+    }
   }
 
-  slot_force_x[a] = sum_x;
-  slot_force_y[a] = sum_y;
-  slot_force_z[a] = sum_z;
-  slot_energy[a] = sum_e;
-  slot_virial[a] = sum_w;
+  slot_force_x[a] += sum_x;
+  slot_force_y[a] += sum_y;
+  slot_force_z[a] += sum_z;
+  if (write_scalars) {
+    slot_energy[a] += sum_e;
+    slot_virial[a] += sum_w;
+  }
 }

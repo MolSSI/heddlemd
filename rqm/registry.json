@@ -4494,6 +4494,13 @@
     "title": "SI-mode .xyz velocities are converted to atomic-unit velocity",
     "type": "scenario"
   },
+  "rq-27c19b67": {
+    "decl": "Scenario: ForcesOnly call preserves the energy and virial accumulator entries from the previous ForcesAndScalars call",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "ForcesOnly call preserves the energy and virial accumulator entries from the previous ForcesAndScalars call",
+    "type": "scenario"
+  },
   "rq-27efd6a0": {
     "decl": "Scenario: Atom appearing in one angle receives that angle's force",
     "file": "forces/harmonic-angle",
@@ -5405,7 +5412,7 @@
     "type": "api-item"
   },
   "rq-304b191b": {
-    "decl": "- `SlotOutputView<'a>` — five exclusive references to per-particle output",
+    "decl": "- `SlotOutputView<'a>` — five exclusive references to per-particle",
     "file": "forces/framework",
     "refs": [
       {
@@ -6685,10 +6692,10 @@
     "type": "section"
   },
   "rq-3d38868e": {
-    "decl": "Scenario: Combiner sums slot energies and virials in slot order",
+    "decl": "Scenario: combine_class_totals sums fast + slow energies and virials",
     "file": "forces/framework",
     "refs": [],
-    "title": "Combiner sums slot energies and virials in slot order",
+    "title": "combine_class_totals sums fast + slow energies and virials",
     "type": "scenario"
   },
   "rq-3d5f2e98": {
@@ -6836,10 +6843,10 @@
     "type": "scenario"
   },
   "rq-3e9217e2": {
-    "decl": "Scenario: Combiner with num_slots == 0 writes zeros",
+    "decl": "Scenario: combine_class_totals with zero-initialised accumulators writes zeros",
     "file": "forces/framework",
     "refs": [],
-    "title": "Combiner with num_slots == 0 writes zeros",
+    "title": "combine_class_totals with zero-initialised accumulators writes zeros",
     "type": "scenario"
   },
   "rq-3ea7fedd": {
@@ -7335,18 +7342,6 @@
     ],
     "title": "HarmonicAngleState",
     "type": "api-item"
-  },
-  "rq-455db9c2": {
-    "decl": "Scenario: Slot accumulator buffers are sized num_slots * particle_count",
-    "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Slot accumulator buffers are sized num_slots * particle_count",
-    "type": "scenario"
   },
   "rq-457b5271": {
     "decl": "Scenario: Construct LangevinBaoabState",
@@ -8556,10 +8551,10 @@
     "type": "scenario"
   },
   "rq-52d4b245": {
-    "decl": "Scenario: Per-class slot-output buffers are zero-initialised",
+    "decl": "Scenario: Per-class accumulator buffers are zero-initialised",
     "file": "forces/framework",
     "refs": [],
-    "title": "Per-class slot-output buffers are zero-initialised",
+    "title": "Per-class accumulator buffers are zero-initialised",
     "type": "scenario"
   },
   "rq-52e52d7b": {
@@ -9299,6 +9294,13 @@
     "refs": [],
     "title": "Fill Kernel",
     "type": "section"
+  },
+  "rq-59e60e89": {
+    "decl": "Scenario: Per-class accumulator buffers are sized particle_count regardless of slot count",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Per-class accumulator buffers are sized particle_count regardless of slot count",
+    "type": "scenario"
   },
   "rq-59ea69fb": {
     "decl": "Scenario: An exclusion entry on one pair does not attenuate other pairs",
@@ -10690,7 +10692,7 @@
     "type": "scenario"
   },
   "rq-684a29f1": {
-    "decl": "- `ForceField` — handle owning the slot collection, the per-class flat slot-output buffers, and the shared neighbor list.",
+    "decl": "- `ForceField` — handle owning the slot collection, the per-class accumulator buffers, and the shared neighbor list.",
     "file": "forces/framework",
     "refs": [
       {
@@ -12496,10 +12498,10 @@
     "type": "section"
   },
   "rq-79068d4d": {
-    "decl": "Scenario: Per-class slot-output buffers have length num_class_slots * N",
+    "decl": "Scenario: Per-class accumulator buffers have length particle_count regardless of slot count",
     "file": "forces/framework",
     "refs": [],
-    "title": "Per-class slot-output buffers have length num_class_slots * N",
+    "title": "Per-class accumulator buffers have length particle_count regardless of slot count",
     "type": "scenario"
   },
   "rq-7909b92c": {
@@ -12818,6 +12820,13 @@
     "title": "Cross-subsystem reads pull from the kernel's home sub-struct",
     "type": "scenario"
   },
+  "rq-7b99234a": {
+    "decl": "Scenario: Framework zeros the class accumulator before the first slot adds",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Framework zeros the class accumulator before the first slot adds",
+    "type": "scenario"
+  },
   "rq-7ba4f321": {
     "decl": "Scenario: A stretched bond's energy matches the closed-form Morse expression",
     "file": "forces/morse-bonded",
@@ -13011,18 +13020,6 @@
       }
     ],
     "title": "Temperature uses k_B = 1 and N_thermal_dof as divisor",
-    "type": "scenario"
-  },
-  "rq-7d8485b3": {
-    "decl": "Scenario: Each slot writes into its own row of the slot-output buffers",
-    "file": "forces/framework",
-    "refs": [
-      {
-        "file": "tests/forces_framework.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Each slot writes into its own row of the slot-output buffers",
     "type": "scenario"
   },
   "rq-7d92b551": {
@@ -13485,10 +13482,10 @@
     "type": "api-item"
   },
   "rq-82822681": {
-    "decl": "Scenario: Combiner always runs regardless of level",
+    "decl": "Scenario: combine_class_totals always runs regardless of level",
     "file": "forces/framework",
     "refs": [],
-    "title": "Combiner always runs regardless of level",
+    "title": "combine_class_totals always runs regardless of level",
     "type": "scenario"
   },
   "rq-828c169c": {
@@ -13500,10 +13497,10 @@
     "type": "section"
   },
   "rq-82acb52f": {
-    "decl": "Scenario: Combiner is a single-threaded write per output element",
+    "decl": "Scenario: combine_class_totals is a single-threaded write per output element",
     "file": "forces/framework",
     "refs": [],
-    "title": "Combiner is a single-threaded write per output element",
+    "title": "combine_class_totals is a single-threaded write per output element",
     "type": "scenario"
   },
   "rq-82baba1a": {
@@ -13814,6 +13811,13 @@
     "refs": [],
     "title": "ConstraintCapableIntegrator marker",
     "type": "section"
+  },
+  "rq-86741731": {
+    "decl": "Scenario: Each slot's contribution is reflected in its class accumulator after step()",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Each slot's contribution is reflected in its class accumulator after step()",
+    "type": "scenario"
   },
   "rq-86aa2be7": {
     "decl": "Scenario: Langevin BAOAB kind with valid parameters is accepted",
@@ -15228,6 +15232,13 @@
       }
     ],
     "title": "Exclusion scaling applies uniformly to force, energy, and virial",
+    "type": "scenario"
+  },
+  "rq-95cc1d55": {
+    "decl": "Scenario: step_class(Fast, ForcesAndScalars) does not touch slow_total_* accumulators",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "step_class(Fast, ForcesAndScalars) does not touch slow_total_* accumulators",
     "type": "scenario"
   },
   "rq-963604a4": {
@@ -16904,10 +16915,10 @@
     "type": "section"
   },
   "rq-a5aa743e": {
-    "decl": "Scenario: Combiner sums slot rows in slot order",
+    "decl": "Scenario: combine_class_totals sums fast + slow into ParticleBuffers",
     "file": "forces/framework",
     "refs": [],
-    "title": "Combiner sums slot rows in slot order",
+    "title": "combine_class_totals sums fast + slow into ParticleBuffers",
     "type": "scenario"
   },
   "rq-a5c86770": {
@@ -17085,10 +17096,10 @@
     "type": "section"
   },
   "rq-a85e8216": {
-    "decl": "Scenario: Slot-output buffers have five flat arrays sized num_slots * N",
+    "decl": "Scenario: ForceField owns ten per-class accumulator buffers each of length particle_count",
     "file": "forces/framework",
     "refs": [],
-    "title": "Slot-output buffers have five flat arrays sized num_slots * N",
+    "title": "ForceField owns ten per-class accumulator buffers each of length particle_count",
     "type": "scenario"
   },
   "rq-a8971153": {
@@ -17188,7 +17199,7 @@
     "type": "section"
   },
   "rq-a9642241": {
-    "decl": "Scenario: Adding a new Potential implementation requires no edits to ForceField or accumulate_forces",
+    "decl": "Scenario: Adding a new Potential implementation requires no edits to ForceField or combine_class_totals",
     "file": "forces/framework",
     "refs": [
       {
@@ -17196,7 +17207,7 @@
         "kind": "code"
       }
     ],
-    "title": "Adding a new Potential implementation requires no edits to ForceField or accumulate_forces",
+    "title": "Adding a new Potential implementation requires no edits to ForceField or combine_class_totals",
     "type": "scenario"
   },
   "rq-a97789e6": {
@@ -18725,6 +18736,13 @@
     "title": "Frame Properties carries image:I:3 when include_images=true and include_velocities=false",
     "type": "scenario"
   },
+  "rq-b850b5be": {
+    "decl": "Scenario: Per-class accumulator buffers are zero-initialised at construction",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Per-class accumulator buffers are zero-initialised at construction",
+    "type": "scenario"
+  },
   "rq-b87fd5e8": {
     "decl": "Scenario: Positions visibly evolve over the 100-step lossless forward run",
     "file": "pipeline-reversibility",
@@ -19459,7 +19477,7 @@
     "type": "scenario"
   },
   "rq-c0f98145": {
-    "decl": "### Combiner Kernel",
+    "decl": "### Class-Combine Kernel",
     "file": "forces/framework",
     "level": 3,
     "refs": [
@@ -19468,7 +19486,7 @@
         "kind": "code"
       }
     ],
-    "title": "Combiner Kernel",
+    "title": "Class-Combine Kernel",
     "type": "section"
   },
   "rq-c1308495": {
@@ -20556,11 +20574,11 @@
     "type": "scenario"
   },
   "rq-cd28340e": {
-    "decl": "## Slot Output Buffers",
+    "decl": "## Class Output Accumulators",
     "file": "forces/framework",
     "level": 2,
     "refs": [],
-    "title": "Slot Output Buffers",
+    "title": "Class Output Accumulators",
     "type": "section"
   },
   "rq-cd3943e1": {
@@ -21778,6 +21796,13 @@
     "file": "build-pipeline",
     "refs": [],
     "title": "fill kernel does not write beyond the buffer",
+    "type": "scenario"
+  },
+  "rq-d93afc32": {
+    "decl": "Scenario: First slot in class adds into a zeroed accumulator, subsequent slots add on top",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "First slot in class adds into a zeroed accumulator, subsequent slots add on top",
     "type": "scenario"
   },
   "rq-d93dc6af": {
@@ -25638,10 +25663,10 @@
     "type": "scenario"
   },
   "rq-fcc5cea5": {
-    "decl": "Scenario: A bonded-only slot writes all five quantities regardless of level",
+    "decl": "Scenario: A bonded slot honours ForcesOnly via its level parameter",
     "file": "forces/framework",
     "refs": [],
-    "title": "A bonded-only slot writes all five quantities regardless of level",
+    "title": "A bonded slot honours ForcesOnly via its level parameter",
     "type": "scenario"
   },
   "rq-fd07b4dc": {

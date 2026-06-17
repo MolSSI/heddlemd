@@ -177,7 +177,8 @@ extern "C" __global__ void reduce_angle_forces(
     Real *slot_force_z,
     Real *slot_energy,
     Real *slot_virial,
-    unsigned int n)
+    unsigned int n,
+    unsigned int write_scalars)
 {
   unsigned int a = blockIdx.x * blockDim.x + threadIdx.x;
   if (a >= n) {
@@ -198,13 +199,17 @@ extern "C" __global__ void reduce_angle_forces(
     sum_x += angle_triple_x[slot];
     sum_y += angle_triple_y[slot];
     sum_z += angle_triple_z[slot];
-    sum_e += angle_triple_energy[slot];
-    sum_w += angle_triple_virial[slot];
+    if (write_scalars) {
+      sum_e += angle_triple_energy[slot];
+      sum_w += angle_triple_virial[slot];
+    }
   }
 
-  slot_force_x[a] = sum_x;
-  slot_force_y[a] = sum_y;
-  slot_force_z[a] = sum_z;
-  slot_energy[a] = sum_e;
-  slot_virial[a] = sum_w;
+  slot_force_x[a] += sum_x;
+  slot_force_y[a] += sum_y;
+  slot_force_z[a] += sum_z;
+  if (write_scalars) {
+    slot_energy[a] += sum_e;
+    slot_virial[a] += sum_w;
+  }
 }

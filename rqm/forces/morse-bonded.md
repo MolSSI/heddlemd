@@ -149,9 +149,10 @@ constructed.
       `bond_list.atom_bond_indices` to device memory.
     - Allocates the five per-bond `bond_pair_*` buffers (force x/y/z,
       half-energy, half-virial), each of length `2 * B`. Per-atom
-      output is written into the framework-supplied `SlotOutputView`
-      during `reduce()`; the slot owns no per-atom accumulator buffers
-      of its own.
+      output is added into the framework-supplied `SlotOutputView`
+      (a view onto the slot's class accumulator; see `framework.md`'s
+      *Class Output Accumulators*) during `reduce()`; the slot owns no
+      per-atom accumulator buffers of its own.
     - When `bond_list.is_empty()`, this method is not called by the
       `ForceField` — see *Empty State*.
 

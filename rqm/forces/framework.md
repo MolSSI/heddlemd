@@ -2,13 +2,15 @@
 
 The runner evaluates inter-particle forces through an ordered collection of
 *potential slots* assembled into a `ForceField`. Each slot implements the
-`Potential` trait, which exposes a single `compute` method and a
-per-axis output destination of length `particle_count`. The
-`ForceField`'s `step()` method runs every slot's `compute` in slot
-order and combines their outputs into the particle state's `forces_*` arrays
-via a deterministic combiner kernel. The runner's force-evaluation step
-calls `force_field.step(...)` once; it has no visibility into which
-potentials participated.
+`Potential` trait, which exposes a single `compute` method that adds the
+slot's per-particle contribution into its `ForceClass`'s accumulator
+buffers (length `particle_count` per quantity). The `ForceField`'s
+`step()` method runs every slot's `compute` in slot order and combines
+the two class accumulators into the particle state's `forces_*`,
+`potential_energies`, and `virials` arrays via a deterministic
+class-combine kernel. The runner's force-evaluation step calls
+`force_field.step(...)` once; it has no visibility into which potentials
+participated.
 
 A `PotentialRegistry` of `PotentialBuilder`s drives slot construction.
 Each builder is an open-extensible factory that decides, from a parsed-config
@@ -17,15 +19,16 @@ one. `ForceField::new` is a fixed loop over the registry: it iterates the
 builders in registration order, calls each builder's `build(cx)`, and
 appends the returned slot when `Some(_)`. Adding a new built-in potential
 is a one-line edit to `PotentialRegistry::with_builtins()`. Implementing
-a new `Potential` requires no edits to `ForceField::new`, to the combiner
-kernel, or to any other potential's code.
+a new `Potential` requires no edits to `ForceField::new`, to the
+class-combine kernel, or to any other potential's code.
 
 Every slot belongs to one *frequency class* (`ForceClass::Fast` or
 `ForceClass::Slow`) reported by its `Potential::frequency_class()`
 method. The framework exposes two force-evaluation entry points:
 `ForceField::step(...)` re-evaluates every slot regardless of class, and
 `ForceField::step_class(class, ...)` re-evaluates only slots whose class
-matches. Both entry points re-run the combiner across every class so
+matches. Both entry points re-run the class-combine kernel across both
+class accumulators so
 `ParticleBuffers.forces_*`, `potential_energies`, and `virials` always
 hold the most recent total. The class system carries the framework's
 support for multi-time-step (RESPA-style) integrators that want to
@@ -94,23 +97,26 @@ user-defined `Potential` that does not override `frequency_class()` is
 treated as `Fast`, which is the right default for short-range / bonded /
 intramolecular contributions.
 
-A `ForceField` populates a per-class slot-output buffer set when its
+A `ForceField` refreshes a per-class accumulator buffer set when its
 matching evaluation entry point runs:
 
 - `ForceField::step(...)` re-evaluates every slot in slot order,
-  refreshing every per-class buffer, then runs the combiner.
+  refreshing every class's accumulator, then runs the class-combine
+  kernel.
 - `ForceField::step_class(class, ...)` re-evaluates only slots whose
-  class matches, refreshing that class's buffer, then runs the combiner.
-  Non-matching slots' buffers retain their last-written contents.
+  class matches, refreshing that class's accumulator, then runs the
+  class-combine kernel. The non-matching class's accumulator retains
+  its last-written contents.
 
-In both cases the combiner sums per-particle contributions across every
-class into `ParticleBuffers.forces_*`, `potential_energies`, and
-`virials`. Single-step integrators emit a `SubStep::ForceEval` with
-`class: None` and consume the total; multi-step (RESPA) integrators emit
-`class: Some(Fast)` many times and `class: Some(Slow)` once per outer
-step, and the per-particle total visible at each kick reflects the most
-recent evaluation of every class — Slow contributions are stale by up to
-`n − 1` inner steps, exactly the RESPA approximation.
+In both cases the class-combine kernel sums the two per-class
+accumulators into `ParticleBuffers.forces_*`, `potential_energies`,
+and `virials`. Single-step integrators emit a `SubStep::ForceEval`
+with `class: None` and consume the total; multi-step (RESPA)
+integrators emit `class: Some(Fast)` many times and `class:
+Some(Slow)` once per outer step, and the per-particle total visible at
+each kick reflects the most recent evaluation of every class — Slow
+contributions are stale by up to `n − 1` inner steps, exactly the
+RESPA approximation.
 
 The two SPME builders contribute slots in different classes (Real → Fast,
 Reciprocal → Slow). The Ewald split remains exact only when both classes
@@ -137,39 +143,48 @@ call performs the following, in order:
      default) iterate every slot.
    - `step_class(class, ...)` iterates only slots whose
      `frequency_class() == class`.
-3. **Per-slot compute.** For each selected slot, in canonical slot
+3. **Per-class accumulator reset.** For each class `C` being evaluated
+   in this call, zero the buffers in `C`'s accumulator that this call
+   will refresh:
+   - When `level == AggregateLevel::ForcesAndScalars`: zero all five
+     buffers (`{C}_total_forces_x/y/z`, `{C}_total_potential_energies`,
+     `{C}_total_virials`).
+   - When `level == AggregateLevel::ForcesOnly`: zero only the three
+     force buffers (`{C}_total_forces_x/y/z`). The class's energy and
+     virial accumulators retain whatever the most recent
+     `ForcesAndScalars` evaluation of class `C` wrote into them.
+
+   The non-evaluated class's accumulator buffers are not touched: a
+   `step_class(Fast, ...)` call leaves the `slow_total_*` buffers
+   unchanged.
+4. **Per-slot compute.** For each selected slot, in canonical slot
    order, invoke `Potential::compute`, passing a `ForceFieldContext`
    that carries a reference to the shared `NeighborListState` (when
    present) and any other shared services, a `SlotOutputView` that
-   points to the slot's assigned row of its class's flat slot-output
-   buffers, and the call's `AggregateLevel`. The implementation runs
-   whatever kernel(s) it needs to evaluate its contribution and writes
-   directly into the SlotOutputView: it overwrites the three
-   force-component rows on every call regardless of level, and
-   additionally overwrites the energy and virial rows when
-   `level == AggregateLevel::ForcesAndScalars`. When
-   `level == AggregateLevel::ForcesOnly`, the energy and virial rows
-   for the just-computed slot retain whatever values the most recent
-   `ForcesAndScalars` call wrote into them. Slots whose internal
-   kernels cannot cheaply split along the force / energy-virial
-   boundary (today: every bonded slot, e.g. `MorseBondedState`,
-   `HarmonicAngleState`) write all five quantities on every call
-   regardless of level.
-4. **Combiner.** Run `accumulate_forces` once. The combiner reads
-   every class's slot-output buffers and writes, for each per-particle
-   quantity `Q` in `{force_x, force_y, force_z, potential_energy,
-   virial}`:
-   `particle_buffers.Q[i] = sum over all (class, k) in canonical class+slot order of class_slot_Q[k * n + i]`.
-   The summation is left-to-right with classes ordered Fast, then Slow,
-   and within each class by registration order; each thread handles
-   one `i`. Unselected slots' rows and rows whose energy / virial
-   contents were not refreshed by step 3 (`ForcesOnly` runs) still
-   contribute their last-written values, so the aggregated
-   `potential_energies` and `virials` on `ParticleBuffers` reflect the
-   most recent `ForcesAndScalars` evaluation across every class. The
-   combiner runs on every `step` / `step_class` call regardless of
-   level; the level only affects which slot-output rows step 3
-   refreshes.
+   points to its class's accumulator buffers (force-x, force-y,
+   force-z, energy, virial — each a slice of length `particle_count`),
+   and the call's `AggregateLevel`. The implementation runs whatever
+   kernel(s) it needs to evaluate its contribution and **adds** to
+   the `SlotOutputView`: it adds the per-particle force-component
+   contributions on every call regardless of level, and additionally
+   adds the per-particle energy and virial contributions when
+   `level == AggregateLevel::ForcesAndScalars`. When `level ==
+   AggregateLevel::ForcesOnly` no slot kernel writes to the energy or
+   virial slices; the class's energy / virial accumulator retains the
+   value from the most recent `ForcesAndScalars` evaluation.
+   Determinism of the per-class total is preserved because the slot
+   dispatch order is fixed and each slot's add to a given particle is
+   performed by exactly one warp per particle on the default stream,
+   so the sequence of adds into each `(class, axis, particle)`
+   accumulator cell matches across runs.
+5. **Class combine.** Run `combine_class_totals` once. The kernel
+   writes, for each per-particle quantity `Q` in `{force_x, force_y,
+   force_z, potential_energy, virial}`:
+   `particle_buffers.Q[i] = fast_total_Q[i] + slow_total_Q[i]`. One
+   thread per particle; each thread reads ten floats, performs five
+   additions, and writes five floats. The kernel runs on every
+   `step` / `step_class` call regardless of level; the level only
+   affects which class-accumulator buffers steps 3 and 4 refreshed.
 
 Identical runs on the same GPU with the same config and the same
 sequence of `step` / `step_class` calls — including the same
@@ -182,62 +197,69 @@ same sequence of (call kind, level) pairs are reproducible; two runs
 that differ in that sequence produce different `potential_energies`
 and `virials` at the steps where they diverge, exactly as expected.
 
-## Slot Output Buffers <!-- rq-cd28340e -->
+## Class Output Accumulators <!-- rq-cd28340e -->
 
-`ForceField` owns five contiguous device buffers per force class —
-`fast_slot_forces_x`, `fast_slot_forces_y`, `fast_slot_forces_z`,
-`fast_slot_energies`, `fast_slot_virials` for `Fast`, and the matching
-`slow_*` set for `Slow`. Each class's buffer has length
-`num_slots_in_class * particle_count`. Within a class, the row for the
-`k`-th slot of that class (in canonical registration order, filtered to
-that class) is the half-open range
-`[k * particle_count, (k + 1) * particle_count)`.
+`ForceField` owns five per-class accumulator buffers per `ForceClass`:
 
-After slot `k`'s `compute()` returns, row `k` of its class's buffers
-contains that slot's per-particle reduced contribution along that axis
-or scalar quantity: three force components, one potential-energy share,
-and one scalar-virial share. The combiner reads every class's rows in
-canonical class+slot order (`Fast` first, then `Slow`; within each
-class, registration order) and sums them, producing the five
-per-particle aggregates on `ParticleBuffers`.
+- `Fast`: `fast_total_forces_x`, `fast_total_forces_y`,
+  `fast_total_forces_z`, `fast_total_potential_energies`,
+  `fast_total_virials` — each a `CudaSlice<f32>` of length
+  `particle_count`.
+- `Slow`: `slow_total_forces_x`, `slow_total_forces_y`,
+  `slow_total_forces_z`, `slow_total_potential_energies`,
+  `slow_total_virials` — each a `CudaSlice<f32>` of length
+  `particle_count`.
 
-Memory cost: `5 * (num_fast_slots + num_slow_slots) * particle_count * 4
-bytes`, which equals the single-buffer cost from before the class split
-because `num_fast_slots + num_slow_slots == slots.len()`. For
-`particle_count = 10⁴` and four slots, this is ~800 KB — negligible.
-For `particle_count = 10⁵` and four slots, ~8 MB.
+Each accumulator holds the per-particle sum across every slot in its
+class, as written by the most recent evaluation entry point that
+refreshed it. Slots in a class don't have private per-slot rows; they
+add their per-particle contribution directly into their class's
+accumulator. The `SlotOutputView` passed to a slot's `compute(...)`
+points to the slot's class's accumulator buffers (the
+`{class}_total_forces_x/y/z` slices, plus `potential_energies` and
+`virials` slices). The slot kernel reads the existing value at each
+particle, adds its own contribution, and writes the sum back.
 
-When a class has zero slots its five buffers have length zero. When
-`particle_count == 0` every class's buffers have length zero regardless
-of slot counts. Class-output buffers are zero-initialised at
-construction so that the combiner reads valid zero contributions for
-any class that has not yet been evaluated.
+The framework zeroes the accumulator buffers being refreshed before
+the first slot in a class adds to them (see step 3 of the *Force
+Evaluation Pipeline*), so the per-class accumulator after step 4
+contains exactly the sum of just-evaluated slot contributions for
+that class, in canonical slot order.
+
+Memory cost: `10 * particle_count * 4` bytes, independent of slot
+count. For `particle_count = 10⁴` this is ~400 KB; for
+`particle_count = 10⁵`, ~4 MB.
+
+When `particle_count == 0` every accumulator buffer has length zero.
+Accumulator buffers are zero-initialised at construction so that the
+class-combine kernel reads valid zero contributions for any class
+that has not yet been evaluated.
 
 ## Empty State <!-- rq-aa52268c -->
 
 When `particle_count == 0`, every slot's `compute` method
-early-returns without launching, and the combiner returns without
-launching. `ForceField::step` and `ForceField::step_class` return
-`Ok(())` having done no GPU work.
+early-returns without launching, and the class-combine kernel returns
+without launching. `ForceField::step` and `ForceField::step_class`
+return `Ok(())` having done no GPU work.
 
-When the slot list is empty (across every class), the combiner kernel
-still launches (with all class counts equal to zero) and writes zeros
-to every entry of `particle_buffers.forces_*`, `potential_energies`,
-and `virials`. The compute phase launches no kernels. `ForceField::step`
-returns `Ok(())`.
+When the slot list is empty (across every class), the framework's
+accumulator-zeroing memsets and the `combine_class_totals` kernel
+still run: the memsets zero both classes' accumulators, and the
+class-combine kernel sums the two zero buffers and writes zeros to
+every entry of `particle_buffers.forces_*`, `potential_energies`,
+and `virials`. `ForceField::step` returns `Ok(())`.
 
 When `step_class(class, ...)` is called and the `ForceField` contains
 zero slots in that class, the call is a no-op: it launches no kernels
-(no compute, no combiner) and leaves `ParticleBuffers.forces_*`
-untouched. The semantics are correct because nothing to recompute
-means the existing total is already current.
+(no accumulator memset, no slot compute, no class combine) and leaves
+`ParticleBuffers.forces_*` untouched. The semantics are correct
+because nothing to recompute means the existing total is already
+current.
 
 When a slot's *input list* is empty (e.g. a `MorseBonded` slot
-constructed with `bonds.is_empty()`), the slot's `compute` writes
-zeros into its assigned rows of its class's slot-output buffers
-without launching any other kernel, and the rest of the pipeline runs
-normally. (The combiner reads every row unconditionally; empty-input
-slots must carry valid zeros in their rows.)
+constructed with `bonds.is_empty()`), the slot's `compute` returns
+without launching any kernel — its add to the class accumulator is
+the additive identity. The rest of the pipeline runs normally.
 
 ## Feature API <!-- rq-0da87ca1 -->
 
@@ -276,8 +298,8 @@ slots must carry valid zeros in their rows.)
 
   - `ForcesOnly` (the cheap case, ~3/5 of the per-call reduction work)
     runs only the force-component reductions. The energy and virial
-    rows of every slot-output buffer retain whatever values the most
-    recent `ForcesAndScalars` call wrote into them.
+    entries of every per-class accumulator retain whatever values the
+    most recent `ForcesAndScalars` call wrote into them.
   - `ForcesAndScalars` runs both the force-component reductions and
     the scalar (energy + virial) reductions.
   - The variant set is closed. Adding a third level requires editing
@@ -332,17 +354,25 @@ slots must carry valid zeros in their rows.)
     `cx.neighbor_list` (it may be `None` or `Some` depending on whether
     any other slot needs the list).
 
-    `compute` writes exactly `buffers.particle_count()` floats into
-    each of the three force-component slices referenced by `output` on
-    every call regardless of `level`. When `level == AggregateLevel::ForcesAndScalars`
-    the implementation additionally writes `buffers.particle_count()`
-    floats into the energy and virial slices. When `level == AggregateLevel::ForcesOnly`
-    the energy and virial slices are not written. Slot implementations
-    that cannot cheaply split along the force / scalar boundary
-    (today: every bonded slot, e.g. `MorseBondedState`,
-    `HarmonicAngleState`) write all five quantities on every call
-    regardless of `level` — the cost is small and the behaviour is
-    indistinguishable from `ForcesAndScalars` for that slot.
+    `compute` **adds** its per-particle contribution into the slices
+    referenced by `output`. The framework has already zeroed the
+    relevant slices for the first slot of each class to add to (see
+    *Force Evaluation Pipeline* step 3), so the slot kernel may treat
+    its add as a read-existing-add-write of one per-particle value
+    per slice. The slot kernel adds to all three force-component
+    slices on every call regardless of `level`; it additionally adds
+    to the energy and virial slices only when `level ==
+    AggregateLevel::ForcesAndScalars`. When `level ==
+    AggregateLevel::ForcesOnly` the slot's compute must not write to
+    the energy or virial slices — those slices hold the class's
+    accumulated value from the most recent `ForcesAndScalars`
+    evaluation and must be preserved across the `ForcesOnly` call.
+    Slots whose underlying kernel cannot cheaply split along the
+    force / scalar boundary (every bonded slot, e.g. `MorseBondedState`,
+    `HarmonicAngleState`) take an explicit `level` parameter into
+    their kernel and gate the energy / virial writes on it; the
+    force-and-virial computation in registers is the same in both
+    paths, only the device store is gated.
 
   Implementations are responsible for emitting their own
   `KernelStage` start/stop events through `timings`.
@@ -362,10 +392,12 @@ slots must carry valid zeros in their rows.)
     shared services land here as additional fields without changing the
     `Potential::compute` signature.
 
-- `SlotOutputView<'a>` — five exclusive references to per-particle output <!-- rq-304b191b -->
-  slices, each of length `particle_count`. Constructed by `ForceField`
-  and passed into `Potential::compute`. Implementations must treat the
-  slices as write-only output buffers.
+- `SlotOutputView<'a>` — five exclusive references to per-particle <!-- rq-304b191b -->
+  accumulator slices, each of length `particle_count`. Constructed by
+  `ForceField` and passed into `Potential::compute`. Implementations
+  treat the slices as read-modify-write accumulators: the slot's
+  kernel adds its per-particle contribution to the current value
+  rather than overwriting it.
 
   ```rust
   pub struct SlotOutputView<'a> {
@@ -378,10 +410,11 @@ slots must carry valid zeros in their rows.)
   ```
 
   Each field is a `CudaViewMut` of length `particle_count` onto the
-  corresponding row of one of the framework's per-class flat
-  slot-output buffers (the class is determined by the slot's
-  `frequency_class()`). The view borrows the framework's storage for
-  the duration of the `compute` call.
+  corresponding per-class accumulator buffer of the framework — the
+  class is determined by the slot's `frequency_class()`. Fast-class
+  slots receive views onto `fast_total_*`; Slow-class slots receive
+  views onto `slow_total_*`. The view borrows the framework's storage
+  for the duration of the `compute` call.
 
 - `LennardJonesState` — implements `Potential` with `label() == "lennard_jones"` and `frequency_class() == ForceClass::Fast` (the trait default). <!-- rq-af2d1628 -->
   Owns the slot's `LennardJonesParameters` and the
@@ -418,36 +451,36 @@ slots must carry valid zeros in their rows.)
   and writes its per-particle output into the `SlotOutputView` it
   receives.
 
-- `ForceField` — handle owning the slot collection, the per-class flat slot-output buffers, and the shared neighbor list. <!-- rq-684a29f1 -->
+- `ForceField` — handle owning the slot collection, the per-class accumulator buffers, and the shared neighbor list. <!-- rq-684a29f1 -->
 
   Fields:
   - `device: Arc<CudaDevice>`
   - `slots: Vec<Box<dyn Potential>>` — in canonical evaluation order
     (the order produced by `PotentialRegistry::with_builtins()`). May
     be empty.
-  - `fast_slot_forces_x: CudaSlice<f32>` — length `num_fast_slots * N`.
-  - `fast_slot_forces_y: CudaSlice<f32>` — length `num_fast_slots * N`.
-  - `fast_slot_forces_z: CudaSlice<f32>` — length `num_fast_slots * N`.
-  - `fast_slot_energies: CudaSlice<f32>` — length `num_fast_slots * N`.
-  - `fast_slot_virials: CudaSlice<f32>` — length `num_fast_slots * N`.
-  - `slow_slot_forces_x: CudaSlice<f32>` — length `num_slow_slots * N`.
-  - `slow_slot_forces_y: CudaSlice<f32>` — length `num_slow_slots * N`.
-  - `slow_slot_forces_z: CudaSlice<f32>` — length `num_slow_slots * N`.
-  - `slow_slot_energies: CudaSlice<f32>` — length `num_slow_slots * N`.
-  - `slow_slot_virials: CudaSlice<f32>` — length `num_slow_slots * N`.
+  - `fast_total_forces_x: CudaSlice<f32>` — length `N`.
+  - `fast_total_forces_y: CudaSlice<f32>` — length `N`.
+  - `fast_total_forces_z: CudaSlice<f32>` — length `N`.
+  - `fast_total_potential_energies: CudaSlice<f32>` — length `N`.
+  - `fast_total_virials: CudaSlice<f32>` — length `N`.
+  - `slow_total_forces_x: CudaSlice<f32>` — length `N`.
+  - `slow_total_forces_y: CudaSlice<f32>` — length `N`.
+  - `slow_total_forces_z: CudaSlice<f32>` — length `N`.
+  - `slow_total_potential_energies: CudaSlice<f32>` — length `N`.
+  - `slow_total_virials: CudaSlice<f32>` — length `N`.
   - `neighbor_list: Option<NeighborListState>` — `Some(_)` when at
     least one slot returns `max_cutoff() == Some(_)`, `None`
     otherwise (bonded-only and zero-slot configurations).
 
-  Within each class, the row index of a slot is its position among
-  same-class slots in the canonical slot order (e.g. with `Fast` slots
-  `LennardJones`, `Coulomb`, `SpmeReal`, `MorseBonded`, `HarmonicAngle`
-  and `Slow` slot `SpmeReciprocal`, the LJ slot's row is 0 within
-  `fast_*` and the SPME-reciprocal slot's row is 0 within `slow_*`).
+  Buffers are of length `N` regardless of how many slots populate
+  them: every slot in a class adds into the same accumulator. The
+  canonical slot order within a class determines the order in which
+  adds happen, which fixes the float-summation order and preserves
+  byte-reproducibility.
 
 - `ForceFieldError` — error type. Variants: <!-- rq-a2e20b02 -->
   - `Gpu(GpuError)` — CUDA driver / kernel-launch failure from any
-    slot's kernel or the combiner.
+    slot's kernel, an accumulator memset, or the class-combine kernel.
   - `Timings(TimingsError)` — CUDA event recording failure.
   - `NeighborList(NeighborListError)` — surfaces failures from the
     cell-list pipeline (see `neighbor-list.md`), including the
@@ -546,10 +579,13 @@ slots must carry valid zeros in their rows.)
     Any `Err(_)` short-circuits and is returned unchanged.
   - When no builder produces a slot, returns a `ForceField` with
     `slots.len() == 0`.
-  - Allocates the five flat slot-output buffers (`slot_forces_x/y/z`,
-    `slot_energies`, `slot_virials`) of length
-    `slots.len() * particle_count` on `gpu.device`. When either factor
-    is zero, the allocations are length-zero.
+  - Allocates the ten per-class accumulator buffers
+    (`fast_total_forces_x/y/z`, `fast_total_potential_energies`,
+    `fast_total_virials`, and the matching `slow_total_*` set) of
+    length `particle_count` on `gpu.device`. Each is zero-initialised
+    so the class-combine kernel reads valid zero contributions for
+    any class that has not yet been evaluated. When
+    `particle_count == 0`, the allocations are length-zero.
   - Builds the shared `NeighborListState`:
     - Computes `r_cut = max(slot.max_cutoff() for slot in slots if
       slot.max_cutoff().is_some())`. If no slot reports a cutoff,
@@ -569,7 +605,8 @@ slots must carry valid zeros in their rows.)
 - `ForceField::step(&mut self, buffers: &mut ParticleBuffers, sim_box: &SimulationBox, timings: &mut Timings, level: AggregateLevel) -> Result<(), ForceFieldError>` <!-- rq-3579df3b -->
   - Evaluates every slot regardless of class. Equivalent to invoking
     `step_class` once for each class present, except that the
-    neighbor-list update and combiner each run exactly once.
+    neighbor-list update and the class-combine kernel each run
+    exactly once.
   - When `self.neighbor_list` is `Some(nl)`, calls `nl.pre_step(sim_box,
     buffers, timings)` to run the generation-cache check, the
     displacement check, and the rebuild as needed. When `None`, this
@@ -577,25 +614,35 @@ slots must carry valid zeros in their rows.)
   - Constructs a `ForceFieldContext { neighbor_list:
     self.neighbor_list.as_ref() }` valid for the duration of the
     compute phase.
-  - For each slot in `self.slots`, in canonical slot order, calls
-    `slot.compute(buffers, sim_box, view, &cx, timings, level)`, where
-    `view` is a `SlotOutputView` whose five fields point into the row
-    `class_local_index * particle_count .. (class_local_index + 1) *
-    particle_count` of the slot's class's flat slot-output buffers.
-    The slot writes into the force-component fields of `view` on every
-    call and into the energy and virial fields only when
-    `level == AggregateLevel::ForcesAndScalars`.
-  - Launches `accumulate_forces` once (with
-    `KernelStage::AccumulateForces`). The combiner runs regardless of
-    `level`. When the slot list is empty across every class,
-    `accumulate_forces` still launches and writes zeros to
+  - For each class `C` in `{Fast, Slow}` that has at least one slot,
+    in that order:
+    1. Zeros the relevant accumulator buffers for class `C` (the
+       three force buffers always; additionally the energy and
+       virial buffers when `level == AggregateLevel::ForcesAndScalars`)
+       via async memsets on the default stream.
+    2. For each slot in `self.slots` whose class is `C`, in canonical
+       slot order, calls `slot.compute(buffers, sim_box, view, &cx,
+       timings, level)`, where `view` is a `SlotOutputView` whose
+       five fields are length-`N` slices onto class `C`'s
+       accumulator buffers. The slot adds into the force-component
+       fields on every call and into the energy and virial fields
+       only when `level == AggregateLevel::ForcesAndScalars`.
+  - Launches `combine_class_totals` once (with
+    `KernelStage::CombineClassTotals`). The kernel writes
+    `particle_buffers.{forces_*, potential_energies, virials}[i] =
+    fast_total_{forces_*, potential_energies, virials}[i] +
+    slow_total_{forces_*, potential_energies, virials}[i]` for each
+    `i`. The kernel runs regardless of `level`. When the slot list is
+    empty across every class, the per-class memsets and the
+    class-combine kernel still run, producing zeros in every entry of
     `buffers.forces_*`, `buffers.potential_energies`, and
     `buffers.virials`. When `level == AggregateLevel::ForcesOnly`,
-    `buffers.potential_energies` and `buffers.virials` aggregate
-    whatever slot-output values the most recent `ForcesAndScalars`
-    call wrote — they are *not* refreshed by a `ForcesOnly` call. The
-    caller is responsible for issuing a `ForcesAndScalars` call before
-    reading those fields (see *Force Evaluation Pipeline* above).
+    `buffers.potential_energies` and `buffers.virials` reflect the
+    sum of each class's accumulator energy / virial as left by the
+    most recent `ForcesAndScalars` evaluation of that class — they
+    are *not* refreshed by a `ForcesOnly` call. The caller is
+    responsible for issuing a `ForcesAndScalars` call before reading
+    those fields (see *Force Evaluation Pipeline* above).
   - Returns `Ok(())` on success.
   - Empty-state contract per *Empty State* above.
 
@@ -605,88 +652,88 @@ slots must carry valid zeros in their rows.)
     immediately, launching no kernels and leaving
     `ParticleBuffers.forces_*` untouched (no-op semantics; see
     *Empty State*).
-  - Otherwise, performs the same neighbor-list-update / compute /
-    combiner sequence as `step`, but restricted to slots in `class`,
-    and propagates `level` to each selected slot's `compute` call with
-    the same semantics as `step` above. The combiner still reads every
-    class's slot-output buffers (not just `class`'s) so that
-    `ParticleBuffers.forces_*` reflects the most recent total across
-    both classes.
+  - Otherwise, performs the same neighbor-list-update sequence as
+    `step`, then zeros and re-adds only the `class` accumulator (the
+    same per-class memset + per-slot add sequence from `step`,
+    restricted to slots in `class`). The other class's accumulator is
+    not touched. Finally launches `combine_class_totals`, which sums
+    both classes' accumulators into `ParticleBuffers.forces_*` so
+    that the result reflects the just-evaluated class plus the
+    other class's last-evaluated state.
   - Returns `Ok(())` when `particle_count == 0`, launching no kernels.
 
-### Combiner Kernel <!-- rq-c0f98145 -->
+### Class-Combine Kernel <!-- rq-c0f98145 -->
 
 `kernels/forces.cu` declares one `extern "C"` kernel:
 
 ```c
-extern "C" __global__ void accumulate_forces(
-    const float *fast_slot_forces_x,   // shape [num_fast_slots * n]
-    const float *fast_slot_forces_y,
-    const float *fast_slot_forces_z,
-    const float *fast_slot_energies,
-    const float *fast_slot_virials,
-    unsigned int num_fast_slots,
-    const float *slow_slot_forces_x,   // shape [num_slow_slots * n]
-    const float *slow_slot_forces_y,
-    const float *slow_slot_forces_z,
-    const float *slow_slot_energies,
-    const float *slow_slot_virials,
-    unsigned int num_slow_slots,
-    float *forces_x,
-    float *forces_y,
-    float *forces_z,
-    float *potential_energies,
-    float *virials,
+extern "C" __global__ void combine_class_totals(
+    const float *fast_total_forces_x,             // length n
+    const float *fast_total_forces_y,             // length n
+    const float *fast_total_forces_z,             // length n
+    const float *fast_total_potential_energies,   // length n
+    const float *fast_total_virials,              // length n
+    const float *slow_total_forces_x,             // length n
+    const float *slow_total_forces_y,             // length n
+    const float *slow_total_forces_z,             // length n
+    const float *slow_total_potential_energies,   // length n
+    const float *slow_total_virials,              // length n
+    float *forces_x,                              // length n
+    float *forces_y,                              // length n
+    float *forces_z,                              // length n
+    float *potential_energies,                    // length n
+    float *virials,                               // length n
     unsigned int n);
 ```
 
 Each thread maps to one particle index
 `i = blockIdx.x * blockDim.x + threadIdx.x` (block size 256, grid
 `ceil(n / 256)`, no shared memory, default stream of
-`particle_buffers.device`). The thread computes, for each output quantity
-`Q` in `{forces_x, forces_y, forces_z, potential_energies, virials}`:
+`particle_buffers.device`). The thread reads ten floats, performs five
+additions, and writes five floats:
 
 ```text
-sum_Q = 0
-for k in 0..num_fast_slots:
-    sum_Q += fast_slot_Q[k * n + i]
-for k in 0..num_slow_slots:
-    sum_Q += slow_slot_Q[k * n + i]
-Q[i] = sum_Q
+forces_x[i]           = fast_total_forces_x[i]           + slow_total_forces_x[i]
+forces_y[i]           = fast_total_forces_y[i]           + slow_total_forces_y[i]
+forces_z[i]           = fast_total_forces_z[i]           + slow_total_forces_z[i]
+potential_energies[i] = fast_total_potential_energies[i] + slow_total_potential_energies[i]
+virials[i]            = fast_total_virials[i]            + slow_total_virials[i]
 ```
 
-The sums are performed left-to-right with classes ordered Fast then
-Slow, and within each class in registration order; the order is fixed
-across runs so identical inputs yield byte-identical outputs.
+Per-class accumulator buffers are zero-initialised at construction and
+are zeroed by the framework before the first slot in a class adds to
+them (see *Force Evaluation Pipeline* step 3), so the kernel sees
+valid contributions from every class regardless of which classes were
+re-evaluated this step. Two runs with byte-identical accumulator
+inputs produce byte-identical outputs.
 
-When `num_fast_slots + num_slow_slots == 0`, neither loop executes and
-the five output slices are set to zero at index `i`. When one class
-has zero slots, only the other class's loop contributes.
-
-The kernel does not branch on slot identity and does not read pointers
-beyond each class's `[num_{class}_slots * n - 1]`. Adding a new slot
-in either class does not change the kernel's signature.
+When `n == 0` the kernel does not launch. The kernel does not branch
+on slot count and its signature does not change as slots are added or
+removed.
 
 ## Determinism Guarantees <!-- rq-76cb9922 -->
 
-- The combiner and every slot's `compute` launches run on the default
-  stream of the same `Arc<CudaDevice>` carried by `ParticleBuffers`.
-  CUDA's implicit per-stream ordering guarantees that any buffer
-  written by a slot's `compute` is visible to subsequent default-stream
-  launches without explicit synchronisation, and that the combiner —
-  which reads only the slot-output buffers — sees a consistent state.
-  A slot that introduces a secondary CUDA stream must guarantee that,
-  by the time its `compute` returns, every device buffer it has written
-  is visible to subsequent default-stream launches, and that every
-  device buffer it reads has been written by a preceding default-stream
-  launch the slot waited on. No in-tree slot uses a secondary stream.
+- The per-class memsets, every slot's `compute`, and the
+  class-combine kernel run on the default stream of the same
+  `Arc<CudaDevice>` carried by `ParticleBuffers`. CUDA's implicit
+  per-stream ordering guarantees that any buffer written by an
+  earlier launch is visible to later launches without explicit
+  synchronisation; the class-combine kernel sees the accumulators in
+  their post-add state. A slot that introduces a secondary CUDA
+  stream must guarantee that, by the time its `compute` returns, every
+  device buffer it has written is visible to subsequent default-stream
+  launches, and that every device buffer it reads has been written by
+  a preceding default-stream launch the slot waited on. No in-tree
+  slot uses a secondary stream.
 - The slot order produced by `ForceField::new` is deterministic and
   identical across runs with the same config.
-- Each slot writes into its assigned row of its class's flat
-  slot-output buffers; rows are disjoint and written by exactly one
-  slot.
-- The combiner's summation orders classes Fast-then-Slow and orders
-  slots within each class by registration. The order is fixed across
+- Within each class, slots in canonical slot order each add their
+  per-particle contribution into the class accumulator via a
+  read-modify-write performed by a single warp per particle. The
+  sequence of adds into each `(class, axis, particle)` accumulator
+  cell is fixed across runs.
+- The class-combine kernel adds Fast and then Slow into the
+  per-particle output in a fixed order. The order is fixed across
   runs, so per-atom force, potential-energy, and virial values are
   byte-reproducible.
 - Two runs that issue the same sequence of `step` / `step_class` calls
@@ -782,16 +829,20 @@ Feature: Pluggable potential slot framework
     When ForceField::new(device, 4, sim_box, &[], &[], &empty_bonds, &empty_excl, &nl_config) is called
     Then it returns Ok(force_field)
     And force_field.slots is empty
-    And force_field.slot_forces_x, slot_forces_y, slot_forces_z have length 0
+    And every fast_total_* and slow_total_* accumulator has length 4
 
-  @rq-455db9c2
-  Scenario: Slot accumulator buffers are sized num_slots * particle_count
+  @rq-59e60e89
+  Scenario: Per-class accumulator buffers are sized particle_count regardless of slot count
     Given a particle_count of 8
-    And a config producing 2 slots
+    And a config producing 4 Fast slots and 1 Slow slot
     When ForceField::new(...) is called
-    Then force_field.slot_forces_x has length 16
-    And force_field.slot_forces_y has length 16
-    And force_field.slot_forces_z has length 16
+    Then force_field.fast_total_forces_x has length 8
+    And force_field.fast_total_forces_y has length 8
+    And force_field.fast_total_forces_z has length 8
+    And force_field.fast_total_potential_energies has length 8
+    And force_field.fast_total_virials has length 8
+    And force_field.slow_total_forces_x has length 8
+    And force_field.slow_total_potential_energies has length 8
 
   @rq-c525ee79
   Scenario: Construct an empty (N=0) ForceField with potentials configured
@@ -799,7 +850,17 @@ Feature: Pluggable potential slot framework
     And a config producing 2 slots
     When ForceField::new(...) is called
     Then it returns Ok(force_field)
-    And force_field.slot_forces_x, slot_forces_y, slot_forces_z have length 0
+    And every per-class accumulator buffer has length 0
+
+  @rq-b850b5be
+  Scenario: Per-class accumulator buffers are zero-initialised at construction
+    Given a particle_count of 4 and a config producing 1 Fast and 1 Slow slot
+    When ForceField::new(...) is called
+    And the accumulator buffers are downloaded
+    Then every entry of fast_total_forces_x, fast_total_forces_y, fast_total_forces_z,
+      fast_total_potential_energies, fast_total_virials,
+      slow_total_forces_x, slow_total_forces_y, slow_total_forces_z,
+      slow_total_potential_energies, slow_total_virials is exactly 0.0
 
   @rq-c170c0b7
   Scenario: Reject construction when two slots share the same label
@@ -819,7 +880,7 @@ Feature: Pluggable potential slot framework
     Then forces_x is non-zero in the expected pattern
     And forces_y, forces_z are consistent with the closed-form LJ result
     And timings reports counts for KernelStage::LjPairForce, ReducePairForces,
-      and AccumulateForces
+      and CombineClassTotals
 
   @rq-df3a50f6
   Scenario: step() on a ForceField with both slots sums LJ and Morse
@@ -837,7 +898,7 @@ Feature: Pluggable potential slot framework
     When force_field.step(&mut buffers, &sim_box, &mut timings) is called
     And particle_buffers is downloaded
     Then forces_x, forces_y, forces_z are all zero
-    And timings reports count==1 for KernelStage::AccumulateForces
+    And timings reports count==1 for KernelStage::CombineClassTotals
     And timings reports count==0 for every slot-specific KernelStage
 
   @rq-de47c1ac
@@ -847,24 +908,43 @@ Feature: Pluggable potential slot framework
     Then it returns Ok(())
     And timings.finalize() reports zero samples for every KernelStage
 
-  @rq-7d8485b3
-  Scenario: Each slot writes into its own row of the slot-output buffers
-    Given a constructed ForceField with two slots and particle_count == 3
-    When force_field.step(...) is called
-    And slot_forces_x is downloaded
-    Then entries [0, 1, 2] equal slot 0's per-particle force_x output
-    And entries [3, 4, 5] equal slot 1's per-particle force_x output
+  @rq-86741731
+  Scenario: Each slot's contribution is reflected in its class accumulator after step()
+    Given a constructed ForceField with two Fast slots `LJ` and `Morse` and particle_count == 3
+    And a configuration where `LJ` and `Morse` each contribute known per-particle force_x values
+    When force_field.step(...) is called with ForcesAndScalars
+    And fast_total_forces_x is downloaded
+    Then fast_total_forces_x[i] equals lj_force_x[i] + morse_force_x[i] for every i in 0..3
+      within f32 round-off
+
+  @rq-d93afc32
+  Scenario: First slot in class adds into a zeroed accumulator, subsequent slots add on top
+    Given a constructed ForceField with three Fast slots in canonical order LJ, Coulomb, Morse
+    And a particle_count of 1 with a known per-particle force_x contribution per slot
+    When force_field.step(...) is called with ForcesAndScalars
+    And fast_total_forces_x is downloaded
+    Then fast_total_forces_x[0] equals lj_force_x + coulomb_force_x + morse_force_x
+      within f32 round-off, in that addition order
+
+  @rq-7b99234a
+  Scenario: Framework zeros the class accumulator before the first slot adds
+    Given a constructed ForceField with one Fast slot and particle_count == 4
+    And the first step has run with ForcesAndScalars, leaving non-zero values in fast_total_forces_x
+    When force_field.step(...) is called a second time with ForcesAndScalars
+    And fast_total_forces_x is downloaded
+    Then fast_total_forces_x[i] equals the slot's per-particle force_x contribution
+      from the second call only (not the sum of both calls), for every i in 0..4
 
   # --- Trait dispatch ---
 
   @rq-a9642241
-  Scenario: Adding a new Potential implementation requires no edits to ForceField or accumulate_forces
-    Given a third Potential implementation `Buckingham` with label() == "buckingham"
+  Scenario: Adding a new Potential implementation requires no edits to ForceField or combine_class_totals
+    Given a third Potential implementation `Buckingham` with label() == "buckingham" and frequency_class() == Fast
     And a `BuckinghamBuilder` registered after `MorseBondedBuilder` in `PotentialRegistry::with_builtins()`
     When ForceField::new(...) is called with a config that activates all three slots
     Then force_field.slots has length 3
-    And the accumulate_forces kernel binary is unchanged
-    And the SlotOutputView passed to Buckingham's compute points at row 2 of the slot-output buffers
+    And the combine_class_totals kernel binary is unchanged
+    And the SlotOutputView passed to Buckingham's compute points at the fast_total_* accumulators
 
   # --- PotentialRegistry-driven construction ---
 
@@ -1017,23 +1097,23 @@ Feature: Pluggable potential slot framework
     And  timings.finalize() reports zero samples for every KernelStage
 
   @rq-79068d4d
-  Scenario: Per-class slot-output buffers have length num_class_slots * N
+  Scenario: Per-class accumulator buffers have length particle_count regardless of slot count
     Given a ForceField with particle_count = 8 and a registry whose
       with_builtins() registers all six builders, with config that activates
-      LennardJones (Fast) and SpmeReal+SpmeReciprocal (Fast, Slow)
-    Then force_field.fast_slot_forces_x.len() == 2 * 8
-    And  force_field.slow_slot_forces_x.len() == 1 * 8
-    And  force_field.fast_slot_energies.len() == 2 * 8
-    And  force_field.slow_slot_virials.len()  == 1 * 8
+      LennardJones, SpmeReal (Fast) and SpmeReciprocal (Slow)
+    Then force_field.fast_total_forces_x.len() == 8
+    And  force_field.slow_total_forces_x.len() == 8
+    And  force_field.fast_total_potential_energies.len() == 8
+    And  force_field.slow_total_virials.len()  == 8
 
   @rq-52d4b245
-  Scenario: Per-class slot-output buffers are zero-initialised
-    Given a freshly-constructed ForceField with at least one Slow slot
+  Scenario: Per-class accumulator buffers are zero-initialised
+    Given a freshly-constructed ForceField with at least one Fast and one Slow slot
     When ParticleBuffers.forces_* is downloaded immediately after construction
       (no step_* call yet)
     Then every entry is 0.0
-    And  force_field.slow_slot_forces_x downloads to all zeros
-    And  force_field.fast_slot_forces_x downloads to all zeros
+    And  force_field.slow_total_forces_x downloads to all zeros
+    And  force_field.fast_total_forces_x downloads to all zeros
 
   @rq-40f9d35a
   Scenario: Two RESPA-style call sequences with the same plan produce identical state
@@ -1070,26 +1150,26 @@ Feature: Pluggable potential slot framework
     And the two ParticleBuffers are downloaded
     Then run A's forces_x, forces_y, forces_z agree byte-for-byte with run B's
 
-  # --- Combiner correctness ---
+  # --- Class-combine kernel correctness ---
 
   @rq-a5aa743e
-  Scenario: Combiner sums slot rows in slot order
-    Given a ForceField with two slots whose slot_forces_x rows are
-      row 0 = [1.0, 2.0] and row 1 = [10.0, 20.0]
-    When the combiner runs with num_slots = 2 and n = 2
-    Then forces_x equals [11.0, 22.0]
+  Scenario: combine_class_totals sums fast + slow into ParticleBuffers
+    Given a ForceField where fast_total_forces_x = [1.0, 2.0] and slow_total_forces_x = [10.0, 20.0]
+    When combine_class_totals runs with n = 2
+    Then particle_buffers.forces_x equals [11.0, 22.0]
 
   @rq-3e9217e2
-  Scenario: Combiner with num_slots == 0 writes zeros
-    Given a ForceField with zero slots and particle_count == 4
-    When the combiner runs with num_slots = 0 and n = 4
-    Then forces_x, forces_y, forces_z are all zero
+  Scenario: combine_class_totals with zero-initialised accumulators writes zeros
+    Given a freshly-constructed ForceField with zero slots and particle_count == 4
+    When force_field.step(...) is called
+    Then particle_buffers.forces_x, forces_y, forces_z are all zero
+    And  particle_buffers.potential_energies, virials are all zero
 
   @rq-82acb52f
-  Scenario: Combiner is a single-threaded write per output element
-    Given a ForceField with two slots whose slot_forces_* rows are known
+  Scenario: combine_class_totals is a single-threaded write per output element
+    Given a ForceField with known accumulator contents
     When force_field.step(...) is called twice on identical inputs
-    Then the resulting forces_* agree byte-for-byte across the two calls
+    Then the resulting particle_buffers.forces_* agree byte-for-byte across the two calls
 
   # --- Shared neighbor list ---
 
@@ -1139,19 +1219,37 @@ Feature: Pluggable potential slot framework
     And virials is finite and non-zero in the expected pattern
 
   @rq-a85e8216
-  Scenario: Slot-output buffers have five flat arrays sized num_slots * N
-    Given a ForceField with two slots and particle_count = 8
-    Then ForceField::slot_forces_x, slot_forces_y, slot_forces_z,
-      slot_energies, and slot_virials each have length 16
+  Scenario: ForceField owns ten per-class accumulator buffers each of length particle_count
+    Given a ForceField with mixed Fast and Slow slots and particle_count = 8
+    Then force_field.fast_total_forces_x, fast_total_forces_y, fast_total_forces_z,
+      fast_total_potential_energies, fast_total_virials each have length 8
+    And force_field.slow_total_forces_x, slow_total_forces_y, slow_total_forces_z,
+      slow_total_potential_energies, slow_total_virials each have length 8
 
   @rq-3d38868e
-  Scenario: Combiner sums slot energies and virials in slot order
-    Given a ForceField with two slots whose slot_energies rows are
-      row 0 = [1.0, 2.0] and row 1 = [10.0, 20.0]
-    And whose slot_virials rows are row 0 = [0.5, 1.0] and row 1 = [5.0, 10.0]
-    When the combiner runs with num_slots = 2 and n = 2
+  Scenario: combine_class_totals sums fast + slow energies and virials
+    Given a ForceField where fast_total_potential_energies = [1.0, 2.0] and slow_total_potential_energies = [10.0, 20.0]
+    And where fast_total_virials = [0.5, 1.0] and slow_total_virials = [5.0, 10.0]
+    When combine_class_totals runs with n = 2
     Then particle_buffers.potential_energies equals [11.0, 22.0]
     And particle_buffers.virials equals [5.5, 11.0]
+
+  @rq-27c19b67
+  Scenario: ForcesOnly call preserves the energy and virial accumulator entries from the previous ForcesAndScalars call
+    Given a ForceField with one Fast slot and particle_count == 2
+    And a first call to force_field.step(ForcesAndScalars) leaving
+      fast_total_potential_energies = [u0, u1] and fast_total_virials = [w0, w1]
+    When force_field.step(ForcesOnly) is called next
+    And fast_total_potential_energies and fast_total_virials are downloaded
+    Then they still equal [u0, u1] and [w0, w1] respectively (byte-identical)
+
+  @rq-95cc1d55
+  Scenario: step_class(Fast, ForcesAndScalars) does not touch slow_total_* accumulators
+    Given a ForceField with one Fast slot and one Slow slot and particle_count == 4
+    And a first call to force_field.step(ForcesAndScalars) populating both accumulators
+    When force_field.step_class(ForceClass::Fast, ForcesAndScalars) is called next
+    And slow_total_forces_x, slow_total_potential_energies, slow_total_virials are downloaded
+    Then they hold the same byte values as after the first call
 
   @rq-c0f2daca
   Scenario: Zero-slot step writes zeros to potential_energies and virials
@@ -1188,8 +1286,8 @@ Feature: Pluggable potential slot framework
     Then forces_x, forces_y, forces_z reflect the LJ contribution at the new positions
     And potential_energies on the device is byte-identical to E_0
     And virials on the device is byte-identical to W_0
-    And per-slot LJ energy and virial slot-output rows are byte-identical to the
-      rows the prior ForcesAndScalars call wrote
+    And fast_total_potential_energies and fast_total_virials are byte-identical to
+      what the prior ForcesAndScalars call left there
 
   @rq-beccac31
   Scenario: step(ForcesAndScalars) refreshes potential_energies and virials
@@ -1212,28 +1310,32 @@ Feature: Pluggable potential slot framework
       device agree byte-for-byte between A and B
 
   @rq-fcc5cea5
-  Scenario: A bonded-only slot writes all five quantities regardless of level
-    Given a constructed ForceField with one MorseBonded slot (a bonded
-      slot whose internal compute kernel is not split)
-    When ForceField::step is called with AggregateLevel::ForcesOnly
-    Then the MorseBonded slot-output row's energy and virial entries are written
-      by the call (the slot's compute ignores level)
+  Scenario: A bonded slot honours ForcesOnly via its level parameter
+    Given a constructed ForceField with one MorseBonded slot and particle_count == 2
+    And a first call to force_field.step(ForcesAndScalars) leaving the slot's
+      class accumulator fast_total_potential_energies = [u0, u1] and
+      fast_total_virials = [w0, w1]
+    When force_field.step(ForcesOnly) is called next
+    And fast_total_potential_energies and fast_total_virials are downloaded
+    Then they still equal [u0, u1] and [w0, w1] respectively
     And forces_x, forces_y, forces_z on the device reflect the bonded contribution
 
   @rq-d2bf331b
   Scenario: A pair-force slot honours ForcesOnly
     Given a constructed ForceField with one LennardJones slot
-    And the LJ slot's slot-output energy and virial rows initialised to known
-      nonzero patterns E_slot and W_slot
-    When ForceField::step is called with AggregateLevel::ForcesOnly
-    Then the LJ slot's slot-output energy and virial rows are byte-identical to
-      E_slot and W_slot (the pair-force slot's compute skipped them)
-    And the LJ slot's slot-output force rows are overwritten
+    And a first call to force_field.step(ForcesAndScalars) leaving the slot's
+      class accumulator fast_total_potential_energies = E_class and
+      fast_total_virials = W_class
+    When force_field.step(ForcesOnly) is called next
+    Then fast_total_potential_energies and fast_total_virials are byte-identical
+      to E_class and W_class (the pair-force slot's compute skipped them)
+    And fast_total_forces_x, fast_total_forces_y, fast_total_forces_z reflect the
+      LJ contribution at the new positions
 
   @rq-82822681
-  Scenario: Combiner always runs regardless of level
+  Scenario: combine_class_totals always runs regardless of level
     Given a constructed ForceField with at least one slot
     When ForceField::step is called with AggregateLevel::ForcesOnly
-    Then accumulate_forces is launched exactly once
-    And the timings record a single AccumulateForces stage tick for this call
+    Then combine_class_totals is launched exactly once
+    And the timings record a single CombineClassTotals stage tick for this call
 ```

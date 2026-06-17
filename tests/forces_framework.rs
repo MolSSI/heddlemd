@@ -248,29 +248,21 @@ impl Potential for StubPotential {
         _timings: &mut Timings,
         level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
-        let n = buffers.particle_count();
-        let payload = vec![self.marker; n];
-        buffers
-            .device
-            .htod_sync_copy_into(&payload, &mut output.force_x)
-            .unwrap();
-        buffers
-            .device
-            .htod_sync_copy_into(&payload, &mut output.force_y)
-            .unwrap();
-        buffers
-            .device
-            .htod_sync_copy_into(&payload, &mut output.force_z)
-            .unwrap();
+        let dev = &buffers.device;
+        let marker = self.marker;
+        let add_into = |slice: &mut cudarc::driver::CudaViewMut<Real>| {
+            let mut host = dev.dtoh_sync_copy(&*slice).unwrap();
+            for v in host.iter_mut() {
+                *v += marker;
+            }
+            dev.htod_sync_copy_into(&host, slice).unwrap();
+        };
+        add_into(&mut output.force_x);
+        add_into(&mut output.force_y);
+        add_into(&mut output.force_z);
         if level == AggregateLevel::ForcesAndScalars {
-            buffers
-                .device
-                .htod_sync_copy_into(&payload, &mut output.energy)
-                .unwrap();
-            buffers
-                .device
-                .htod_sync_copy_into(&payload, &mut output.virial)
-                .unwrap();
+            add_into(&mut output.energy);
+            add_into(&mut output.virial);
         }
         self.call_count.fetch_add(1, Ordering::SeqCst);
         Ok(())
@@ -405,29 +397,33 @@ fn bond_types_declared_with_no_bonds_omits_morse_slot() {
 
 // rq-60f445b2
 #[test]
-fn zero_slots_force_field_has_zero_length_slot_buffers() {
+fn empty_force_field_class_accumulators_have_length_n_zeroed() {
     let gpu = init_device().unwrap();
-    let ff = empty_force_field(&gpu, 4);
+    let n = 4;
+    let ff = empty_force_field(&gpu, n);
     assert_eq!(ff.slots.len(), 0);
-    assert_eq!(ff.fast_slot_forces_x.len(), 0);
-    assert_eq!(ff.fast_slot_forces_y.len(), 0);
-    assert_eq!(ff.fast_slot_forces_z.len(), 0);
-    assert_eq!(ff.slow_slot_forces_x.len(), 0);
+    assert_eq!(ff.fast_total_forces_x.len(), n);
+    assert_eq!(ff.fast_total_forces_y.len(), n);
+    assert_eq!(ff.fast_total_forces_z.len(), n);
+    assert_eq!(ff.slow_total_forces_x.len(), n);
+    let host = gpu.device.dtoh_sync_copy(&ff.fast_total_forces_x).unwrap();
+    assert!(host.iter().all(|&v| v == 0.0));
 }
 
 // rq-455db9c2
 #[test]
-fn slot_accumulator_buffers_sized_num_slots_times_particle_count() {
+fn class_accumulator_buffers_have_length_particle_count() {
     let gpu = init_device().unwrap();
     let n = 8;
     let ff = lj_and_morse_force_field(&gpu, n);
-    // Both LJ and Morse are Fast → fast buffers = 2 * n.
-    assert_eq!(ff.fast_slot_forces_x.len(), 2 * n);
-    assert_eq!(ff.fast_slot_forces_y.len(), 2 * n);
-    assert_eq!(ff.fast_slot_forces_z.len(), 2 * n);
-    assert_eq!(ff.fast_slot_energies.len(), 2 * n);
-    assert_eq!(ff.fast_slot_virials.len(), 2 * n);
-    assert_eq!(ff.slow_slot_forces_x.len(), 0);
+    // Per-class accumulator buffers are always length N (one entry per
+    // particle), regardless of how many slots populate the class.
+    assert_eq!(ff.fast_total_forces_x.len(), n);
+    assert_eq!(ff.fast_total_forces_y.len(), n);
+    assert_eq!(ff.fast_total_forces_z.len(), n);
+    assert_eq!(ff.fast_total_potential_energies.len(), n);
+    assert_eq!(ff.fast_total_virials.len(), n);
+    assert_eq!(ff.slow_total_forces_x.len(), n);
 }
 
 // rq-c525ee79
@@ -441,11 +437,11 @@ fn construct_empty_n0_force_field_with_potentials_configured() {
     registry.register(Box::new(StubBuilder::new("b")));
     let ff = build_with(&gpu, 0, &registry).unwrap();
     assert_eq!(ff.slots.len(), 2);
-    assert_eq!(ff.fast_slot_forces_x.len(), 0);
-    assert_eq!(ff.fast_slot_forces_y.len(), 0);
-    assert_eq!(ff.fast_slot_forces_z.len(), 0);
-    assert_eq!(ff.fast_slot_energies.len(), 0);
-    assert_eq!(ff.fast_slot_virials.len(), 0);
+    assert_eq!(ff.fast_total_forces_x.len(), 0);
+    assert_eq!(ff.fast_total_forces_y.len(), 0);
+    assert_eq!(ff.fast_total_forces_z.len(), 0);
+    assert_eq!(ff.fast_total_potential_energies.len(), 0);
+    assert_eq!(ff.fast_total_virials.len(), 0);
 }
 
 // rq-c170c0b7
@@ -479,7 +475,7 @@ fn step_lennardjones_only_writes_nonzero_forces() {
     assert!(downloaded.forces_x[0].abs() > 0.0);
     assert!((downloaded.forces_x[0] + downloaded.forces_x[1]).abs() < 1e-5);
     assert!(stage_count(&report, "lj_pair_force") >= 1);
-    assert_eq!(stage_count(&report, KernelStage::ACCUMULATE_FORCES.name()), 1);
+    assert_eq!(stage_count(&report, KernelStage::COMBINE_CLASS_TOTALS.name()), 1);
 }
 
 // rq-df3a50f6
@@ -534,7 +530,7 @@ fn step_with_zero_slots_writes_zeros_to_forces() {
     assert!(downloaded.forces_x.iter().all(|&v| v == 0.0));
     assert!(downloaded.forces_y.iter().all(|&v| v == 0.0));
     assert!(downloaded.forces_z.iter().all(|&v| v == 0.0));
-    assert_eq!(stage_count(&report, KernelStage::ACCUMULATE_FORCES.name()), 1);
+    assert_eq!(stage_count(&report, KernelStage::COMBINE_CLASS_TOTALS.name()), 1);
     assert_eq!(stage_count(&report, "lj_pair_force"), 0);
     assert_eq!(stage_count(&report, "morse_bond_force"), 0);
 }
@@ -557,7 +553,7 @@ fn step_with_n0_launches_no_kernels() {
 
 // rq-7d8485b3
 #[test]
-fn each_slot_writes_its_own_row_of_slot_output_buffers() {
+fn slot_contributions_sum_into_the_class_accumulator() {
     let gpu = init_device().unwrap();
     let n = 3;
     let mut registry = PotentialRegistry::new();
@@ -575,10 +571,11 @@ fn each_slot_writes_its_own_row_of_slot_output_buffers() {
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let fast_x = gpu.device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
-    assert_eq!(fast_x.len(), 2 * n);
-    assert!(fast_x[0..n].iter().all(|&v| v == 1.0));
-    assert!(fast_x[n..2 * n].iter().all(|&v| v == 2.0));
+    let fast_x = gpu.device.dtoh_sync_copy(&ff.fast_total_forces_x).unwrap();
+    assert_eq!(fast_x.len(), n);
+    // Both slots add their marker into the same length-N accumulator,
+    // so every entry is the sum of the markers.
+    assert!(fast_x.iter().all(|&v| v == 3.0));
 }
 
 // =================================================================
@@ -625,10 +622,36 @@ fn adding_a_new_potential_implementation_does_not_require_framework_edits() {
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    // The custom slot wrote 42.0 into its row.
-    let fast_x = gpu.device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
-    let row_len = n;
-    assert!(fast_x[2 * row_len..3 * row_len].iter().all(|&v| v == 42.0));
+    // The custom slot adds 42.0 into the Fast-class accumulator alongside
+    // the LJ and Morse contributions, so every entry is at least 42.0 once
+    // the stub's contribution has been folded in.
+    let fast_x = gpu.device.dtoh_sync_copy(&ff.fast_total_forces_x).unwrap();
+    assert_eq!(fast_x.len(), n);
+    let mut ff_no_stub = ForceField::new(
+        &PotentialRegistry::with_builtins(),
+        &gpu,
+        n,
+        &box_10(&gpu),
+        &[ar_type()],
+        &[lj_pair_config()],
+        &[morse_bond_type()],
+        &[],
+        None,
+        None,
+        &[],
+        &single_bond_list(n),
+        &AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    let mut buffers_b = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
+    let mut timings_b = Timings::new(&gpu).unwrap();
+    ff_no_stub.step(&mut buffers_b, &box_10(&gpu), &mut timings_b, AggregateLevel::ForcesAndScalars).unwrap();
+    let baseline = gpu.device.dtoh_sync_copy(&ff_no_stub.fast_total_forces_x).unwrap();
+    for i in 0..n {
+        assert!((fast_x[i] - baseline[i] - 42.0).abs() < 1e-4);
+    }
 }
 
 // =================================================================
@@ -939,7 +962,7 @@ fn step_class_fast_on_force_field_with_no_fast_slots_is_noop() {
     ff.step_class(ForceClass::Fast, &mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     assert_eq!(slow_count.load(Ordering::SeqCst), 0);
     let report = timings.finalize().unwrap();
-    assert_eq!(stage_count(&report, KernelStage::ACCUMULATE_FORCES.name()), 0);
+    assert_eq!(stage_count(&report, KernelStage::COMBINE_CLASS_TOTALS.name()), 0);
 }
 
 #[test]
@@ -959,7 +982,7 @@ fn step_class_with_n0_launches_no_kernels() {
 }
 
 #[test]
-fn per_class_slot_output_buffers_have_length_num_class_slots_times_n() {
+fn per_class_accumulator_buffers_have_length_n_per_class() {
     let gpu = init_device().unwrap();
     let n = 5;
     let mut registry = PotentialRegistry::new();
@@ -969,16 +992,16 @@ fn per_class_slot_output_buffers_have_length_num_class_slots_times_n() {
         ..StubBuilder::new("b")
     }));
     let ff = build_with(&gpu, n, &registry).unwrap();
-    assert_eq!(ff.fast_slot_forces_x.len(), n);
-    assert_eq!(ff.fast_slot_energies.len(), n);
-    assert_eq!(ff.fast_slot_virials.len(), n);
-    assert_eq!(ff.slow_slot_forces_x.len(), n);
-    assert_eq!(ff.slow_slot_energies.len(), n);
-    assert_eq!(ff.slow_slot_virials.len(), n);
+    assert_eq!(ff.fast_total_forces_x.len(), n);
+    assert_eq!(ff.fast_total_potential_energies.len(), n);
+    assert_eq!(ff.fast_total_virials.len(), n);
+    assert_eq!(ff.slow_total_forces_x.len(), n);
+    assert_eq!(ff.slow_total_potential_energies.len(), n);
+    assert_eq!(ff.slow_total_virials.len(), n);
 }
 
 #[test]
-fn per_class_slot_output_buffers_are_zero_initialised() {
+fn per_class_accumulator_buffers_are_zero_initialised() {
     let gpu = init_device().unwrap();
     let n = 5;
     let mut registry = PotentialRegistry::new();
@@ -988,8 +1011,8 @@ fn per_class_slot_output_buffers_are_zero_initialised() {
         ..StubBuilder::new("b")
     }));
     let ff = build_with(&gpu, n, &registry).unwrap();
-    let fast = gpu.device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
-    let slow = gpu.device.dtoh_sync_copy(&ff.slow_slot_forces_x).unwrap();
+    let fast = gpu.device.dtoh_sync_copy(&ff.fast_total_forces_x).unwrap();
+    let slow = gpu.device.dtoh_sync_copy(&ff.slow_total_forces_x).unwrap();
     assert!(fast.iter().all(|&v| v == 0.0));
     assert!(slow.iter().all(|&v| v == 0.0));
 }
@@ -1306,15 +1329,15 @@ fn force_field_lj_only_populates_energy_and_virial() {
 }
 
 #[test]
-fn slot_output_buffers_have_five_flat_arrays() {
+fn each_class_has_five_flat_accumulator_arrays_of_length_n() {
     let gpu = init_device().unwrap();
     let n = 4;
     let ff = lj_and_morse_force_field(&gpu, n);
-    assert_eq!(ff.fast_slot_forces_x.len(), 2 * n);
-    assert_eq!(ff.fast_slot_forces_y.len(), 2 * n);
-    assert_eq!(ff.fast_slot_forces_z.len(), 2 * n);
-    assert_eq!(ff.fast_slot_energies.len(), 2 * n);
-    assert_eq!(ff.fast_slot_virials.len(), 2 * n);
+    assert_eq!(ff.fast_total_forces_x.len(), n);
+    assert_eq!(ff.fast_total_forces_y.len(), n);
+    assert_eq!(ff.fast_total_forces_z.len(), n);
+    assert_eq!(ff.fast_total_potential_energies.len(), n);
+    assert_eq!(ff.fast_total_virials.len(), n);
 }
 
 #[test]
@@ -1477,10 +1500,12 @@ fn two_runs_with_identical_call_level_sequences_are_byte_identical() {
 }
 
 #[test]
-fn bonded_only_slot_writes_all_five_quantities_regardless_of_level() {
-    // A Morse-only ForceField step(ForcesOnly) should still populate
-    // energy / virial because the bonded slot's compute writes them
-    // unconditionally.
+fn bonded_slot_honours_forces_only_via_the_level_parameter() {
+    // A Morse-only ForceField step(ForcesOnly) following a step(ForcesAndScalars)
+    // preserves the energy and virial values produced by the prior
+    // ForcesAndScalars call: the bonded slot's compute reads `level` and
+    // skips the scalar writes when ForcesOnly, and the class accumulator's
+    // energy / virial entries are not zeroed for a ForcesOnly call.
     let gpu = init_device().unwrap();
     let n = 2;
     let state = ParticleState::new(
@@ -1500,14 +1525,22 @@ fn bonded_only_slot_writes_all_five_quantities_regardless_of_level() {
     let mut ff = morse_only_force_field(&gpu, n);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    let e_seed = gpu.device.dtoh_sync_copy(&ff.fast_total_potential_energies).unwrap();
+    let w_seed = gpu.device.dtoh_sync_copy(&ff.fast_total_virials).unwrap();
+    // Morse bond is stretched (r=1.2 vs r_e=1.0) so the seeded values
+    // are non-zero.
+    assert!(e_seed.iter().any(|&x| x.abs() > 1e-6));
+    assert!(w_seed.iter().any(|&x| x.abs() > 1e-6));
     ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesOnly).unwrap();
-    let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-    let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
-    // Morse bond is stretched (r=1.2 vs r_e=1.0) so energy / virial are non-zero.
-    let any_e = e.iter().any(|&x| x.abs() > 1e-6);
-    let any_v = v.iter().any(|&x| x.abs() > 1e-6);
-    assert!(any_e, "bonded-only ForcesOnly must still populate energy: {:?}", e);
-    assert!(any_v, "bonded-only ForcesOnly must still populate virial: {:?}", v);
+    let e_after = gpu.device.dtoh_sync_copy(&ff.fast_total_potential_energies).unwrap();
+    let w_after = gpu.device.dtoh_sync_copy(&ff.fast_total_virials).unwrap();
+    for i in 0..n {
+        assert_eq!(e_seed[i].to_bits(), e_after[i].to_bits(),
+            "energy[{}] changed across ForcesOnly call: {} -> {}", i, e_seed[i], e_after[i]);
+        assert_eq!(w_seed[i].to_bits(), w_after[i].to_bits(),
+            "virial[{}] changed across ForcesOnly call: {} -> {}", i, w_seed[i], w_after[i]);
+    }
 }
 
 #[test]
@@ -1521,11 +1554,11 @@ fn a_pair_force_slot_honours_forces_only_for_the_slot_energy_virial() {
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let e_seed = gpu.device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
-    let v_seed = gpu.device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
+    let e_seed = gpu.device.dtoh_sync_copy(&ff.fast_total_potential_energies).unwrap();
+    let v_seed = gpu.device.dtoh_sync_copy(&ff.fast_total_virials).unwrap();
     ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesOnly).unwrap();
-    let e_after = gpu.device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
-    let v_after = gpu.device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
+    let e_after = gpu.device.dtoh_sync_copy(&ff.fast_total_potential_energies).unwrap();
+    let v_after = gpu.device.dtoh_sync_copy(&ff.fast_total_virials).unwrap();
     for i in 0..n {
         assert_eq!(e_seed[i].to_bits(), e_after[i].to_bits());
         assert_eq!(v_seed[i].to_bits(), v_after[i].to_bits());
@@ -1541,5 +1574,5 @@ fn combiner_always_runs_regardless_of_level() {
     let mut timings = Timings::new(&gpu).unwrap();
     ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesOnly).unwrap();
     let report = timings.finalize().unwrap();
-    assert_eq!(stage_count(&report, KernelStage::ACCUMULATE_FORCES.name()), 1);
+    assert_eq!(stage_count(&report, KernelStage::COMBINE_CLASS_TOTALS.name()), 1);
 }

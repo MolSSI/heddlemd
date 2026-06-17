@@ -380,7 +380,7 @@ fn pair_force_kernels_declare_no_shared_memory() {
 // Sweep semantics.
 // =================================================================
 
-fn count_zero_yields_zero_output_impl(kind: PotentialKind) {
+fn count_zero_preserves_seeded_accumulator_impl(kind: PotentialKind) {
     let gpu = init_device().unwrap();
     let n = 4;
     let positions = (0..n)
@@ -396,8 +396,10 @@ fn count_zero_yields_zero_output_impl(kind: PotentialKind) {
     let neighbor_counts = upload_neighbor_counts(&gpu.device, &counts);
 
     let mut output = SlotOutputBuffers::new(&gpu.device, n).unwrap();
-    // Seed slot output with known nonzero values to verify the kernel
-    // writes zero (it overwrites; an uncalled write would leave 7.0).
+    // Seed the accumulator with a known nonzero value. The kernel adds
+    // each particle's per-pair contributions into the seeded slot; with
+    // count == 0 no contribution is added, so the seed is preserved
+    // unchanged.
     let device = gpu.device.clone();
     let seed = vec![7.0 as Real; n];
     device.htod_sync_copy_into(&seed, &mut output.force_x).unwrap();
@@ -419,14 +421,14 @@ fn count_zero_yields_zero_output_impl(kind: PotentialKind) {
     let fy = download_force_y(&output, &gpu.device);
     let fz = download_force_z(&output, &gpu.device);
     for i in 0..n {
-        assert_eq!(fx[i], 0.0, "{}: fx[{i}] = {}", kind.name(), fx[i]);
-        assert_eq!(fy[i], 0.0, "{}: fy[{i}] = {}", kind.name(), fy[i]);
-        assert_eq!(fz[i], 0.0, "{}: fz[{i}] = {}", kind.name(), fz[i]);
+        assert_eq!(fx[i], 7.0, "{}: fx[{i}] = {}", kind.name(), fx[i]);
+        assert_eq!(fy[i], 7.0, "{}: fy[{i}] = {}", kind.name(), fy[i]);
+        assert_eq!(fz[i], 7.0, "{}: fz[{i}] = {}", kind.name(), fz[i]);
     }
 }
-#[test] fn count_zero_yields_zero_output_lj() { count_zero_yields_zero_output_impl(PotentialKind::Lj); }
-#[test] fn count_zero_yields_zero_output_coulomb() { count_zero_yields_zero_output_impl(PotentialKind::Coulomb); }
-#[test] fn count_zero_yields_zero_output_spme() { count_zero_yields_zero_output_impl(PotentialKind::Spme); }
+#[test] fn count_zero_preserves_seeded_accumulator_lj() { count_zero_preserves_seeded_accumulator_impl(PotentialKind::Lj); }
+#[test] fn count_zero_preserves_seeded_accumulator_coulomb() { count_zero_preserves_seeded_accumulator_impl(PotentialKind::Coulomb); }
+#[test] fn count_zero_preserves_seeded_accumulator_spme() { count_zero_preserves_seeded_accumulator_impl(PotentialKind::Spme); }
 
 #[test]
 fn sweep_reads_only_slots_up_to_count() {

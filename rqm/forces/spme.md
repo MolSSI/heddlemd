@@ -124,9 +124,12 @@ when `k = s * 32 + lane` satisfies `k < neighbor_counts[i]` and
 
 After every lane has processed every assigned neighbour, the warp-tree
 butterfly reduction collapses the 32 lane accumulators to lane 0, which
-writes the particle's net force (and, in the `_fev` variant,
-energy/virial) into the corresponding slot output rows. See
-`pair-force-kernel.md` for the topology and reduction details.
+adds the particle's net force (and, in the `_fev` variant,
+energy/virial) into its class accumulator via a read-modify-write at
+the per-particle slot of the `SlotOutputView` it received. See
+`pair-force-kernel.md` for the topology and reduction details, and
+`framework.md`'s *Class Output Accumulators* for the accumulator
+layout.
 
 The real-space slot does not apply a switching function. The `erfc`
 factor decays rapidly enough that a hard cutoff is acceptable when

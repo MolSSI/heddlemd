@@ -784,6 +784,7 @@ pub fn reduce_bond_forces(
     slot_energy: &mut CudaViewMut<'_, Real>,
     slot_virial: &mut CudaViewMut<'_, Real>,
     particle_count: usize,
+    write_scalars: bool,
 ) -> Result<(), GpuError> {
     if particle_count == 0 {
         return Ok(());
@@ -791,6 +792,7 @@ pub fn reduce_bond_forces(
     let n_u32 = particle_count as u32;
     let func = kernels.morse.reduce_bond_forces.clone();
     let cfg = launch_config(n_u32);
+    let write_scalars_u32: u32 = if write_scalars { 1 } else { 0 };
     unsafe {
         func.launch(
             cfg,
@@ -808,6 +810,7 @@ pub fn reduce_bond_forces(
                 slot_energy,
                 slot_virial,
                 n_u32,
+                write_scalars_u32,
             ),
         )
         .map_err(GpuError::from)?;
@@ -880,6 +883,7 @@ pub fn reduce_angle_forces(
     slot_energy: &mut CudaViewMut<'_, Real>,
     slot_virial: &mut CudaViewMut<'_, Real>,
     particle_count: usize,
+    write_scalars: bool,
 ) -> Result<(), GpuError> {
     if particle_count == 0 {
         return Ok(());
@@ -887,6 +891,7 @@ pub fn reduce_angle_forces(
     let n_u32 = particle_count as u32;
     let func = kernels.angle.reduce_angle_forces.clone();
     let cfg = launch_config(n_u32);
+    let write_scalars_u32: u32 = if write_scalars { 1 } else { 0 };
     unsafe {
         func.launch(
             cfg,
@@ -904,6 +909,7 @@ pub fn reduce_angle_forces(
                 slot_energy,
                 slot_virial,
                 n_u32,
+                write_scalars_u32,
             ),
         )
         .map_err(GpuError::from)?;
@@ -1567,56 +1573,52 @@ pub fn mtk_position_drift(
 
 // rq-c0f98145
 #[allow(clippy::too_many_arguments)]
-pub fn accumulate_forces(
+pub fn combine_class_totals(
     particle_buffers: &mut ParticleBuffers,
-    fast_slot_forces_x: &CudaSlice<Real>,
-    fast_slot_forces_y: &CudaSlice<Real>,
-    fast_slot_forces_z: &CudaSlice<Real>,
-    fast_slot_energies: &CudaSlice<Real>,
-    fast_slot_virials: &CudaSlice<Real>,
-    num_fast_slots: u32,
-    slow_slot_forces_x: &CudaSlice<Real>,
-    slow_slot_forces_y: &CudaSlice<Real>,
-    slow_slot_forces_z: &CudaSlice<Real>,
-    slow_slot_energies: &CudaSlice<Real>,
-    slow_slot_virials: &CudaSlice<Real>,
-    num_slow_slots: u32,
+    fast_total_forces_x: &CudaSlice<Real>,
+    fast_total_forces_y: &CudaSlice<Real>,
+    fast_total_forces_z: &CudaSlice<Real>,
+    fast_total_potential_energies: &CudaSlice<Real>,
+    fast_total_virials: &CudaSlice<Real>,
+    slow_total_forces_x: &CudaSlice<Real>,
+    slow_total_forces_y: &CudaSlice<Real>,
+    slow_total_forces_z: &CudaSlice<Real>,
+    slow_total_potential_energies: &CudaSlice<Real>,
+    slow_total_virials: &CudaSlice<Real>,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
         return Ok(());
     }
     let n_u32 = n as u32;
-    debug_assert_eq!(fast_slot_forces_x.len(), num_fast_slots as usize * n);
-    debug_assert_eq!(fast_slot_forces_y.len(), num_fast_slots as usize * n);
-    debug_assert_eq!(fast_slot_forces_z.len(), num_fast_slots as usize * n);
-    debug_assert_eq!(fast_slot_energies.len(), num_fast_slots as usize * n);
-    debug_assert_eq!(fast_slot_virials.len(), num_fast_slots as usize * n);
-    debug_assert_eq!(slow_slot_forces_x.len(), num_slow_slots as usize * n);
-    debug_assert_eq!(slow_slot_forces_y.len(), num_slow_slots as usize * n);
-    debug_assert_eq!(slow_slot_forces_z.len(), num_slow_slots as usize * n);
-    debug_assert_eq!(slow_slot_energies.len(), num_slow_slots as usize * n);
-    debug_assert_eq!(slow_slot_virials.len(), num_slow_slots as usize * n);
+    debug_assert_eq!(fast_total_forces_x.len(), n);
+    debug_assert_eq!(fast_total_forces_y.len(), n);
+    debug_assert_eq!(fast_total_forces_z.len(), n);
+    debug_assert_eq!(fast_total_potential_energies.len(), n);
+    debug_assert_eq!(fast_total_virials.len(), n);
+    debug_assert_eq!(slow_total_forces_x.len(), n);
+    debug_assert_eq!(slow_total_forces_y.len(), n);
+    debug_assert_eq!(slow_total_forces_z.len(), n);
+    debug_assert_eq!(slow_total_potential_energies.len(), n);
+    debug_assert_eq!(slow_total_virials.len(), n);
 
-    let func = particle_buffers.kernels.forces.accumulate_forces.clone();
+    let func = particle_buffers.kernels.forces.combine_class_totals.clone();
     let cfg = launch_config(n_u32);
 
     unsafe {
         func.launch(
             cfg,
             (
-                fast_slot_forces_x,
-                fast_slot_forces_y,
-                fast_slot_forces_z,
-                fast_slot_energies,
-                fast_slot_virials,
-                num_fast_slots,
-                slow_slot_forces_x,
-                slow_slot_forces_y,
-                slow_slot_forces_z,
-                slow_slot_energies,
-                slow_slot_virials,
-                num_slow_slots,
+                fast_total_forces_x,
+                fast_total_forces_y,
+                fast_total_forces_z,
+                fast_total_potential_energies,
+                fast_total_virials,
+                slow_total_forces_x,
+                slow_total_forces_y,
+                slow_total_forces_z,
+                slow_total_potential_energies,
+                slow_total_virials,
                 &mut particle_buffers.forces_x,
                 &mut particle_buffers.forces_y,
                 &mut particle_buffers.forces_z,

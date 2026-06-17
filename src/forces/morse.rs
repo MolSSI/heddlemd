@@ -122,17 +122,12 @@ impl Potential for MorseBondedState {
         mut output: SlotOutputView<'_>,
         _cx: &crate::forces::ForceFieldContext<'_>,
         timings: &mut Timings,
-        _level: AggregateLevel,
+        level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
-        if self.particle_count == 0 {
-            return Ok(());
-        }
-        if self.bond_count == 0 {
-            self.device.memset_zeros(&mut output.force_x).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.force_y).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.force_z).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.energy).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.virial).map_err(GpuError::from)?;
+        if self.particle_count == 0 || self.bond_count == 0 {
+            // No bonds → no contribution to add. The framework has
+            // already zeroed (or preserved) the class accumulator
+            // appropriately; an empty slot is the additive identity.
             return Ok(());
         }
         timings.kernel_start(KernelStage::MORSE_BOND_FORCE)?;
@@ -151,6 +146,7 @@ impl Potential for MorseBondedState {
             self.bond_count,
         )?;
         timings.kernel_stop(KernelStage::MORSE_BOND_FORCE)?;
+        let write_scalars = matches!(level, AggregateLevel::ForcesAndScalars);
         timings.kernel_start(KernelStage::REDUCE_BOND_FORCES)?;
         reduce_bond_forces(
             &self.kernels,
@@ -167,6 +163,7 @@ impl Potential for MorseBondedState {
             &mut output.energy,
             &mut output.virial,
             self.particle_count,
+            write_scalars,
         )?;
         timings.kernel_stop(KernelStage::REDUCE_BOND_FORCES)?;
         Ok(())

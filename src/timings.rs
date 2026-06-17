@@ -87,7 +87,9 @@ impl KernelStage {
     pub const SD_COMPUTE_STEP: KernelStage = KernelStage::new("sd_compute_step");
     pub const SD_SNAPSHOT: KernelStage = KernelStage::new("sd_snapshot");
     pub const SD_RESTORE: KernelStage = KernelStage::new("sd_restore");
-    pub const ACCUMULATE_FORCES: KernelStage = KernelStage::new("accumulate_forces");
+    pub const COMBINE_CLASS_TOTALS: KernelStage = KernelStage::new("combine_class_totals");
+    pub const CLASS_ACCUMULATOR_MEMSET: KernelStage =
+        KernelStage::new("class_accumulator_memset");
     pub const NEIGHBOR_DISPLACEMENT_SQUARED: KernelStage =
         KernelStage::new("neighbor_displacement_squared");
     pub const NEIGHBOR_LIST_BUILD: KernelStage = KernelStage::new("neighbor_list_build");
@@ -103,6 +105,7 @@ impl KernelStage {
         Self::NEIGHBOR_DISPLACEMENT_SQUARED,
         Self::COPY_POSITIONS_INTO_REFERENCE,
         Self::NEIGHBOR_LIST_BUILD,
+        Self::CLASS_ACCUMULATOR_MEMSET,
         Self::LJ_PAIR_FORCE,
         Self::COULOMB_PAIR_FORCE,
         Self::SPME_REAL_PAIR_FORCE,
@@ -133,7 +136,7 @@ impl KernelStage {
         Self::SD_COMPUTE_STEP,
         Self::SD_SNAPSHOT,
         Self::SD_RESTORE,
-        Self::ACCUMULATE_FORCES,
+        Self::COMBINE_CLASS_TOTALS,
         Self::VV_KICK,
         Self::VV_KICK_LOSSLESS,
     ];

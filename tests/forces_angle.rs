@@ -698,6 +698,7 @@ fn alloc_and_run_reduce(
             &indices,
             &mut vx, &mut vy, &mut vz, &mut ve, &mut vv,
             particle_count,
+            true,
         ).unwrap();
     }
     (

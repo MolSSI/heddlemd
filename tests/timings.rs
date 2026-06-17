@@ -378,7 +378,7 @@ fn kernel_counts_match_runner_launches() {
     // present.
     assert!(stage_row(&body, "morse_bond_force").is_none());
     assert!(stage_row(&body, "reduce_bond_forces").is_none());
-    assert!(stage_row(&body, "accumulate_forces").is_some());
+    assert!(stage_row(&body, "combine_class_totals").is_some());
 }
 
 // rq-46c317ef
@@ -551,8 +551,9 @@ fn rows_appear_in_documented_order() {
         .collect();
     let expected = vec![
         "vv_kick_drift",
+        "class_accumulator_memset",
         "lj_pair_force",
-        "accumulate_forces",
+        "combine_class_totals",
         "vv_kick",
         "host_to_device_upload",
         "device_to_host_download",
@@ -1177,7 +1178,7 @@ fn morse_bonded_records_bond_force_and_reduction_rows() {
     // One warm-up + ten loop iterations = 11.
     assert_eq!(stage_count(&body, "morse_bond_force"), Some(11));
     assert_eq!(stage_count(&body, "reduce_bond_forces"), Some(11));
-    assert_eq!(stage_count(&body, "accumulate_forces"), Some(11));
+    assert_eq!(stage_count(&body, "combine_class_totals"), Some(11));
 }
 
 // Silence unused-import warning when individual tests don't reference these.

@@ -481,9 +481,9 @@ extern "C" __global__ void spme_force_gather(
   Real fy = -qi * (ga * b_a_y + gb * b_b_y + gc * b_c_y);
   Real fz = -qi * (ga * b_a_z + gb * b_b_z + gc * b_c_z);
 
-  slot_force_x[i] = fx;
-  slot_force_y[i] = fy;
-  slot_force_z[i] = fz;
-  slot_energy[i]  = R(0.5) * qi * accum_phi - u_self_per_particle[i];
-  slot_virial[i]  = w_per_particle_virial_val;
+  slot_force_x[i] += fx;
+  slot_force_y[i] += fy;
+  slot_force_z[i] += fz;
+  slot_energy[i]  += R(0.5) * qi * accum_phi - u_self_per_particle[i];
+  slot_virial[i]  += w_per_particle_virial_val;
 }

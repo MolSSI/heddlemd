@@ -12,10 +12,11 @@ shared `NeighborListState` owned by `ForceField` (see
 `neighbor-list.md`). Each warp handles one particle: the warp walks
 the particle's neighbour list, accumulates the per-pair LJ
 contribution in register accumulators across all 32 lanes, and writes
-the per-particle net force directly into the slot output buffer
-through a warp-tree butterfly reduction. The common kernel pattern is
-specified in `pair-force-kernel.md`; this file specifies the LJ
-functional form, parameter tables, and launcher.
+the per-particle net force into its class accumulator (see
+`framework.md`'s *Class Output Accumulators*) via a warp-tree butterfly
+reduction followed by a lane-0 read-modify-write add. The common
+kernel pattern is specified in `pair-force-kernel.md`; this file
+specifies the LJ functional form, parameter tables, and launcher.
 
 Work is O(N · average neighbour count) when the shared list is in
 cell-list mode and O(N²) when it is in trivial mode (every particle's
@@ -24,10 +25,10 @@ only the contents and size of the shared list differ.
 
 The kernel reads the per-particle `type_indices` buffer (see
 `particle-state.md`) and the per-pair-type parameter arrays, applies
-the `ExclusionList` (see `topology.md`) per-pair scaling, and writes
-directly into the slot output buffer handed to it through
-`Potential::compute` — no per-pair intermediate buffer is materialised
-on the device.
+the `ExclusionList` (see `topology.md`) per-pair scaling, and adds
+into the `SlotOutputView` (a view onto the slot's class accumulator)
+handed to it through `Potential::compute` — no per-pair intermediate
+buffer is materialised on the device.
 
 This file specifies `LennardJonesParameterTable` (the device-resident
 per-pair-type parameter table), the two `lj_pair_force_*` CUDA kernels

@@ -119,17 +119,11 @@ impl Potential for HarmonicAngleState {
         mut output: SlotOutputView<'_>,
         _cx: &crate::forces::ForceFieldContext<'_>,
         timings: &mut Timings,
-        _level: AggregateLevel,
+        level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
-        if self.particle_count == 0 {
-            return Ok(());
-        }
-        if self.angle_count == 0 {
-            self.device.memset_zeros(&mut output.force_x).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.force_y).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.force_z).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.energy).map_err(GpuError::from)?;
-            self.device.memset_zeros(&mut output.virial).map_err(GpuError::from)?;
+        if self.particle_count == 0 || self.angle_count == 0 {
+            // Empty slot is the additive identity; the framework has
+            // already prepared the class accumulator.
             return Ok(());
         }
         timings.kernel_start(KernelStage::HARMONIC_ANGLE_FORCE)?;
@@ -147,6 +141,7 @@ impl Potential for HarmonicAngleState {
             self.angle_count,
         )?;
         timings.kernel_stop(KernelStage::HARMONIC_ANGLE_FORCE)?;
+        let write_scalars = matches!(level, AggregateLevel::ForcesAndScalars);
         timings.kernel_start(KernelStage::REDUCE_ANGLE_FORCES)?;
         reduce_angle_forces(
             &self.kernels,
@@ -163,6 +158,7 @@ impl Potential for HarmonicAngleState {
             &mut output.energy,
             &mut output.virial,
             self.particle_count,
+            write_scalars,
         )?;
         timings.kernel_stop(KernelStage::REDUCE_ANGLE_FORCES)?;
         Ok(())
