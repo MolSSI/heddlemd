@@ -141,6 +141,17 @@ pub trait ConstraintBuilder: std::fmt::Debug + Send + Sync {
         true
     }
 
+    /// `true` iff every constraint hook entry point
+    /// (`apply_before_drift`, `apply_after_drift`, `apply_after_kick`,
+    /// `apply_initial_velocity_projection`,
+    /// `apply_position_projection_only`) consists of pure CUDA kernel
+    /// launches with no host-side state mutation between launches.
+    /// Determines whether phases using this constraint algorithm run
+    /// under CUDA graph mode. Default `true`.
+    fn graph_compatible(&self, _params: &toml::Value) -> bool {
+        true
+    }
+
     /// Number of atoms a single `[constraints]` topology row of this
     /// kind must declare. The topology parser uses this value to
     /// validate row column counts. Pure function of the parameters.

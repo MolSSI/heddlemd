@@ -69,6 +69,13 @@ pub struct CsvrThermostat {
     /// `f64` to preserve precision across many steps before a host
     /// download. Reset to zero after every flush.
     cumulative_injection_delta: CudaSlice<f64>,
+    /// Single-element device buffer holding the current Philox draw
+    /// counter. `csvr_sample_and_factor` reads the value at entry and
+    /// writes back `counter + 1` at exit. Living on the device makes
+    /// the kernel safe to capture in a CUDA graph: every replay
+    /// observes the post-increment counter from the previous replay
+    /// and draws a distinct Philox sequence.
+    draw_counter_device: CudaSlice<u64>,
 }
 
 impl CsvrThermostat {
@@ -89,6 +96,8 @@ impl CsvrThermostat {
         let factor_device = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         let cumulative_injection_delta =
             gpu.device.alloc_zeros::<f64>(1).map_err(GpuError::from)?;
+        let draw_counter_device =
+            gpu.device.alloc_zeros::<u64>(1).map_err(GpuError::from)?;
         Ok(CsvrThermostat {
             temperature,
             tau,
@@ -100,6 +109,7 @@ impl CsvrThermostat {
             ke_scratch,
             factor_device,
             cumulative_injection_delta,
+            draw_counter_device,
         })
     }
 
@@ -118,11 +128,17 @@ impl CsvrThermostat {
             .dtoh_sync_copy_into(&self.cumulative_injection_delta, &mut host_delta)
             .map_err(GpuError::from)?;
         self.cumulative_injection += host_delta[0];
-        // Zero the device buffer so the next flush sees only fresh deltas.
+        // Zero the device delta so the next flush sees only fresh injection.
         let zero = [0.0_f64; 1];
         device
             .htod_sync_copy_into(&zero, &mut self.cumulative_injection_delta)
             .map_err(GpuError::from)?;
+        // Refresh the host-side draw_counter cache for diagnostics.
+        let mut host_counter = [0_u64; 1];
+        device
+            .dtoh_sync_copy_into(&self.draw_counter_device, &mut host_counter)
+            .map_err(GpuError::from)?;
+        self.draw_counter = host_counter[0];
         Ok(())
     }
 }
@@ -145,12 +161,13 @@ impl Thermostat for CsvrThermostat {
         compute_kinetic_energy_on_device(buffers, &mut self.ke_scratch)?;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
 
-        self.draw_counter += 1;
-
         // 2. CSVR chain math on device: reads `k_old` from
         //    `ke_scratch`, samples Philox in parallel, writes the
         //    rescale factor to `factor_device`, and accumulates
-        //    `(k_new - k_old)` into `cumulative_injection_delta`.
+        //    `(k_new - k_old)` into `cumulative_injection_delta`. The
+        //    kernel reads + increments `draw_counter_device` in place
+        //    so every launch — including graph replays — uses a fresh
+        //    Philox counter.
         let c = (-(dt as f64) / self.tau).exp();
         let one_minus_c = 1.0 - c;
         let nf = self.g_dof as f64;
@@ -161,8 +178,8 @@ impl Thermostat for CsvrThermostat {
             &self.ke_scratch,
             &mut self.factor_device,
             &mut self.cumulative_injection_delta,
+            &mut self.draw_counter_device,
             self.seed,
-            self.draw_counter,
             self.g_dof,
             c,
             one_minus_c,

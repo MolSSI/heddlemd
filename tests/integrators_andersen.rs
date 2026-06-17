@@ -27,6 +27,17 @@ const TIME_F: f64 = 2.4188843265857195e-17;
 const TEMP_F: f64 = 315775.0248040668;
 const VEL_F: f64 = 2187691.2636411153;
 
+/// Builds a 1-element u64 device buffer initialized to `value`. Used
+/// by tests that exercise `andersen_resample` directly: the kernel
+/// reads the counter from device memory and the launcher follows with
+/// a counter-increment kernel, so callers can no longer pass a scalar.
+fn counter_device(gpu: &heddle_md::gpu::GpuContext, value: u64) -> cudarc::driver::CudaSlice<u64> {
+    use cudarc::driver::CudaSlice;
+    let mut buf: CudaSlice<u64> = gpu.device.alloc_zeros::<u64>(1).unwrap();
+    gpu.device.htod_sync_copy_into(&[value], &mut buf).unwrap();
+    buf
+}
+
 fn box_large(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
     let l = (1.0e6 / LEN_F) as Real;
     SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap()
@@ -146,7 +157,8 @@ fn andersen_resample_p_zero_is_identity() {
     let snap_vy: Vec<Real> = state.velocities_y.clone();
     let snap_vz: Vec<Real> = state.velocities_z.clone();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    andersen_resample(&mut buffers, 1, 1, 0.0, ((300.0 / TEMP_F)) as Real).unwrap();
+    let mut counter = counter_device(&gpu, 1);
+    andersen_resample(&mut buffers, &mut counter, 1, 0.0, ((300.0 / TEMP_F)) as Real).unwrap();
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     let vy = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
     let vz = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
@@ -180,7 +192,8 @@ fn andersen_resample_p_one_replaces_every_particle() {
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let kt = (300.0 / TEMP_F);
-    andersen_resample(&mut buffers, 42, 1, 1.0, kt as Real).unwrap();
+    let mut counter = counter_device(&gpu, 1);
+    andersen_resample(&mut buffers, &mut counter, 42, 1.0, kt as Real).unwrap();
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     let vy = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
     let vz = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
@@ -207,7 +220,8 @@ fn andersen_resample_empty_state_is_noop() {
     let gpu = init_device().unwrap();
     let state = atomic_state(0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    andersen_resample(&mut buffers, 1, 1, 0.5, 1.0).unwrap();
+    let mut counter = counter_device(&gpu, 1);
+    andersen_resample(&mut buffers, &mut counter, 1, 0.5, 1.0).unwrap();
 }
 
 // rq-bacbf7d2
@@ -219,8 +233,10 @@ fn andersen_resample_deterministic_across_runs() {
     let mut a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut b = ParticleBuffers::new(&gpu, &state).unwrap();
     let kt = ((300.0 / TEMP_F)) as Real;
-    andersen_resample(&mut a, 7, 3, 1.0, kt).unwrap();
-    andersen_resample(&mut b, 7, 3, 1.0, kt).unwrap();
+    let mut ca = counter_device(&gpu, 3);
+    let mut cb = counter_device(&gpu, 3);
+    andersen_resample(&mut a, &mut ca, 7, 1.0, kt).unwrap();
+    andersen_resample(&mut b, &mut cb, 7, 1.0, kt).unwrap();
     let va = gpu.device.dtoh_sync_copy(&a.velocities_x).unwrap();
     let vb = gpu.device.dtoh_sync_copy(&b.velocities_x).unwrap();
     assert_eq!(va, vb);
@@ -235,8 +251,10 @@ fn andersen_resample_different_seeds_differ() {
     let mut a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut b = ParticleBuffers::new(&gpu, &state).unwrap();
     let kt = ((300.0 / TEMP_F)) as Real;
-    andersen_resample(&mut a, 1, 1, 1.0, kt).unwrap();
-    andersen_resample(&mut b, 2, 1, 1.0, kt).unwrap();
+    let mut ca = counter_device(&gpu, 1);
+    let mut cb = counter_device(&gpu, 1);
+    andersen_resample(&mut a, &mut ca, 1, 1.0, kt).unwrap();
+    andersen_resample(&mut b, &mut cb, 2, 1.0, kt).unwrap();
     let va = gpu.device.dtoh_sync_copy(&a.velocities_x).unwrap();
     let vb = gpu.device.dtoh_sync_copy(&b.velocities_x).unwrap();
     let differs = va.iter().zip(vb.iter()).filter(|(x, y)| x != y).count();
@@ -252,8 +270,10 @@ fn andersen_resample_different_draw_counters_differ() {
     let mut a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut b = ParticleBuffers::new(&gpu, &state).unwrap();
     let kt = ((300.0 / TEMP_F)) as Real;
-    andersen_resample(&mut a, 1, 1, 1.0, kt).unwrap();
-    andersen_resample(&mut b, 1, 2, 1.0, kt).unwrap();
+    let mut ca = counter_device(&gpu, 1);
+    let mut cb = counter_device(&gpu, 2);
+    andersen_resample(&mut a, &mut ca, 1, 1.0, kt).unwrap();
+    andersen_resample(&mut b, &mut cb, 1, 1.0, kt).unwrap();
     let va = gpu.device.dtoh_sync_copy(&a.velocities_x).unwrap();
     let vb = gpu.device.dtoh_sync_copy(&b.velocities_x).unwrap();
     let differs = va.iter().zip(vb.iter()).filter(|(x, y)| x != y).count();

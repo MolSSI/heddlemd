@@ -341,6 +341,15 @@ impl ThermostatBuilder for NoseHooverChainBuilder {
         "nose-hoover-chain"
     }
 
+    fn graph_compatible(&self, _params: &toml::Value) -> bool {
+        // NHC iterates a Yoshida chain integration over `xi` / `p_xi`
+        // host scalars between sub-step kernel launches and uses
+        // `compute_kinetic_energy` which performs a per-step dtoh of
+        // the kinetic-energy scalar. Neither can be captured in a CUDA
+        // graph.
+        false
+    }
+
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
         require_finite_positive("thermostat.temperature", p.temperature)?;
@@ -401,6 +410,7 @@ pub struct NoseHooverKernels {
     pub rescale_velocities: CudaFunction,
     pub rescale_velocities_device_factor: CudaFunction,
     pub csvr_sample_and_factor: CudaFunction,
+    pub increment_u64: CudaFunction,
 }
 
 impl NoseHooverKernels {
@@ -413,6 +423,7 @@ impl NoseHooverKernels {
                 "rescale_velocities",
                 "rescale_velocities_device_factor",
                 "csvr_sample_and_factor",
+                "increment_u64",
             ],
         )?;
         Ok(NoseHooverKernels {
@@ -424,6 +435,7 @@ impl NoseHooverKernels {
                 "rescale_velocities_device_factor",
             )?,
             csvr_sample_and_factor: get_func(device, "nose_hoover", "csvr_sample_and_factor")?,
+            increment_u64: get_func(device, "nose_hoover", "increment_u64")?,
         })
     }
 }

@@ -133,18 +133,26 @@ extern "C" __global__ void csvr_sample_and_factor(
     const Real *k_old,                       // length 1; Real (matches kinetic_energy_reduce output)
     Real *factor_out,                        // length 1
     double *cumulative_injection_delta,      // length 1; atomic-not-required (only lane 0 writes)
+    unsigned long long *draw_counter,        // length 1; read at entry, incremented by 1 at exit
     unsigned int seed_lo,
     unsigned int seed_hi,
-    unsigned int draw_counter_lo,
-    unsigned int draw_counter_hi,
     unsigned int g_dof,
     double c,                                // exp(-dt / tau)
     double one_minus_c,                      // 1 - c
     double k_target_over_nf)                 // k_target / nf  where  k_target = (nf/2) · kt_target
 {
   __shared__ double partial[256];
+  __shared__ unsigned long long counter_shared;
 
   unsigned int tid = threadIdx.x;
+
+  if (tid == 0u) {
+    counter_shared = *draw_counter;
+  }
+  __syncthreads();
+  unsigned long long counter = counter_shared;
+  unsigned int draw_counter_lo = (unsigned int)(counter & 0xFFFFFFFFULL);
+  unsigned int draw_counter_hi = (unsigned int)(counter >> 32);
 
   // Accumulate s = Σ_{i=1..g_dof - 1} xi_i² in parallel.
   double s = 0.0;
@@ -192,5 +200,18 @@ extern "C" __global__ void csvr_sample_and_factor(
     }
     factor_out[0] = (Real)f;
     cumulative_injection_delta[0] += (k_new - k_old_val);
+    *draw_counter = counter + 1ULL;
+  }
+}
+
+// Increments a single u64 device counter by 1. Used by multi-block
+// Philox kernels (where read+increment cannot safely happen in the
+// same kernel because blocks have no synchronisation order) — the
+// launcher follows the RNG kernel with this one so that every launch
+// advances the counter by exactly one. Captured as a graph node so a
+// replayed graph advances the counter on each replay.
+extern "C" __global__ void increment_u64(unsigned long long *value) {
+  if (threadIdx.x == 0u && blockIdx.x == 0u) {
+    *value += 1ULL;
   }
 }

@@ -64,6 +64,11 @@ pub struct AndersenThermostat {
     pub cumulative_injection: f64,
     ke_scratch: CudaSlice<Real>,
     most_recent_ke: f64,
+    /// Device-resident Philox counter. The kernel reads from it; the
+    /// launcher follows with `increment_u64_device` so every launch
+    /// advances the counter by one. Captured as graph nodes when the
+    /// slot runs in graph mode.
+    draw_counter_device: CudaSlice<u64>,
 }
 
 impl AndersenThermostat {
@@ -77,6 +82,8 @@ impl AndersenThermostat {
         // k_B = 1 in atomic units; temperature is already k_B · T.
         let kt = temperature;
         let ke_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
+        let draw_counter_device =
+            gpu.device.alloc_zeros::<u64>(1).map_err(GpuError::from)?;
         Ok(AndersenThermostat {
             temperature,
             collision_rate,
@@ -86,6 +93,7 @@ impl AndersenThermostat {
             cumulative_injection: 0.0,
             ke_scratch,
             most_recent_ke: 0.0,
+            draw_counter_device,
         })
     }
 }
@@ -106,13 +114,19 @@ impl Thermostat for AndersenThermostat {
         let k_old = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
 
-        self.draw_counter += 1;
         let p_collision = ((self.collision_rate as f64) * (dt as f64))
             .clamp(0.0, 1.0) as Real;
         let kt = self.kt as Real;
         timings.kernel_start(KernelStage::ANDERSEN_RESAMPLE)?;
-        andersen_resample(buffers, self.seed, self.draw_counter, p_collision, kt)?;
+        andersen_resample(
+            buffers,
+            &mut self.draw_counter_device,
+            self.seed,
+            p_collision,
+            kt,
+        )?;
         timings.kernel_stop(KernelStage::ANDERSEN_RESAMPLE)?;
+        self.draw_counter += 1;
 
         timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
         let k_new = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
@@ -146,6 +160,15 @@ pub struct AndersenBuilder;
 impl ThermostatBuilder for AndersenBuilder {
     fn kind_name(&self) -> &'static str {
         "andersen"
+    }
+
+    fn graph_compatible(&self, _params: &toml::Value) -> bool {
+        // Andersen's `apply_post` runs `compute_kinetic_energy` before
+        // and after the resample kernel; both calls perform a host
+        // dtoh of the kinetic-energy scalar to update the
+        // `cumulative_injection` log column. Until that bookkeeping
+        // moves to device, Andersen runs on the per-step launch path.
+        false
     }
 
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {

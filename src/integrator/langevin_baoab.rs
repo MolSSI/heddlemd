@@ -6,6 +6,8 @@ use cudarc::driver::{CudaDevice, CudaFunction};
 use cudarc::nvrtc::Ptx;
 use serde::Deserialize;
 
+use cudarc::driver::CudaSlice;
+
 use crate::gpu::device::get_func;
 use crate::gpu::{GpuContext, GpuError, ParticleBuffers, lan_drift_half, lan_ou_step, vv_kick};
 use crate::kernels;
@@ -51,6 +53,37 @@ pub struct LangevinBaoabState {
     pub temperature: f64,
     pub seed: u64,
     pub draw_counter: u64,
+    /// Device-resident Philox counter. `lan_ou_step` reads from it; the
+    /// launcher follows with `increment_u64_device`. Allows the
+    /// integrator's O-step to be safely captured in a CUDA graph.
+    draw_counter_device: CudaSlice<u64>,
+}
+
+impl LangevinBaoabState {
+    /// Construct a `LangevinBaoabState` with the given parameters and a
+    /// fresh device-resident draw counter pre-initialised to
+    /// `draw_counter`. Used by tests that exercise the integrator
+    /// directly.
+    pub fn new(
+        gpu: &GpuContext,
+        friction: f64,
+        temperature: f64,
+        seed: u64,
+        draw_counter: u64,
+    ) -> Result<Self, GpuError> {
+        let mut draw_counter_device = gpu.device.alloc_zeros::<u64>(1)?;
+        if draw_counter != 0 {
+            gpu.device
+                .htod_sync_copy_into(&[draw_counter], &mut draw_counter_device)?;
+        }
+        Ok(LangevinBaoabState {
+            friction,
+            temperature,
+            seed,
+            draw_counter,
+            draw_counter_device,
+        })
+    }
 }
 
 impl Integrator for LangevinBaoabState {
@@ -101,10 +134,10 @@ impl Integrator for LangevinBaoabState {
                 let alpha = (-(self.friction as Real) * *dt).exp();
                 // k_B = 1 in atomic units; temperature is already k_B · T.
                 let kt = self.temperature as Real;
-                self.draw_counter += 1;
                 timings.kernel_start(KernelStage::LANGEVIN_OU_STEP)?;
-                lan_ou_step(buffers, self.seed, self.draw_counter, alpha, kt)?;
+                lan_ou_step(buffers, &mut self.draw_counter_device, self.seed, alpha, kt)?;
                 timings.kernel_stop(KernelStage::LANGEVIN_OU_STEP)?;
+                self.draw_counter += 1;
                 Ok(())
             }
             other => Err(IntegratorError::UnexpectedSubStep {
@@ -140,15 +173,19 @@ impl IntegratorBuilder for LangevinBaoabBuilder {
         _n_constraints: usize,
         params: &toml::Value,
     ) -> Result<Box<dyn Integrator>, IntegratorError> {
-        let _ = gpu;
         let _ = particle_count;
         let p = deserialize_params(params)
             .map_err(|_| IntegratorError::UnknownKind("langevin-baoab (malformed params)".into()))?;
+        let draw_counter_device = gpu
+            .device
+            .alloc_zeros::<u64>(1)
+            .map_err(|e| IntegratorError::Gpu(GpuError::from(e)))?;
         Ok(Box::new(LangevinBaoabState {
             friction: p.friction,
             temperature: p.temperature,
             seed: p.seed,
             draw_counter: 0,
+            draw_counter_device,
         }))
     }
 

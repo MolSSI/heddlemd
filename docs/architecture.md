@@ -235,14 +235,12 @@ management (`CudaDevice`), and kernel launches (`LaunchAsync`). The wrapper
 layer in `gpu/kernels.rs` keeps kernel-specific details (function names, grid
 dimensions, parameter ordering) out of the simulation loop.
 
-Most kernel launches go through the device's default `CudaStream`. The SPME
+All kernel launches go through the device's default `CudaStream`. The SPME
 reciprocal pipeline (charge spread, R2C FFT, influence-function multiply,
-C2R FFT) runs on a dedicated stream owned by `SpmeReciprocalState` so it can
-overlap with default-stream work in the same timestep; the two streams write
-to disjoint device buffers and synchronise at deterministic event-based
-boundaries at the entry and exit of the slot's `contribute` / `reduce`
-calls. See `rqm/forces/spme.md` for the topology. Adding further streams
-beyond this requires the same disjoint-buffer + event-boundary contract.
+C2R FFT, virial finalize) shares this default stream with the rest of the
+per-step kernel sequence and relies on CUDA's implicit per-stream ordering
+for producer-consumer correctness. See `rqm/forces/spme.md` for the slot's
+internal topology.
 
 ## Build
 

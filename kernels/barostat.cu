@@ -130,10 +130,9 @@ extern "C" __global__ void c_rescale_compute_mu(
     Real *lattice,                              // length 6, mutated in place
     Real *mu_out,                               // length 1
     double *diagnostics,                        // length 3: [P, V_post, injection_delta]
+    unsigned long long *draw_counter,           // length 1; read at entry, ++ at exit
     unsigned int seed_lo,
     unsigned int seed_hi,
-    unsigned int draw_counter_lo,
-    unsigned int draw_counter_hi,
     double pressure_target,
     double tau,
     double compressibility,
@@ -144,6 +143,10 @@ extern "C" __global__ void c_rescale_compute_mu(
   if (threadIdx.x != 0u || blockIdx.x != 0u) {
     return;
   }
+  unsigned long long counter = *draw_counter;
+  unsigned int draw_counter_lo = (unsigned int)(counter & 0xFFFFFFFFULL);
+  unsigned int draw_counter_hi = (unsigned int)(counter >> 32);
+
   double lx_d = (double)lattice[0];
   double ly_d = (double)lattice[1];
   double lz_d = (double)lattice[2];
@@ -177,6 +180,7 @@ extern "C" __global__ void c_rescale_compute_mu(
   diagnostics[0] = pressure;
   diagnostics[1] = v_post;
   diagnostics[2] += injection_delta;
+  *draw_counter = counter + 1ULL;
 }
 
 // Berendsen barostat: deterministic isotropic rescale.

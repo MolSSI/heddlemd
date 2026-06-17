@@ -164,7 +164,10 @@ fn host_philox_matches_device_philox() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    lan_ou_step(&mut buffers, seed, draw, 0.0, kt).unwrap();
+    let mut counter: cudarc::driver::CudaSlice<u64> =
+        gpu.device.alloc_zeros::<u64>(1).unwrap();
+    gpu.device.htod_sync_copy_into(&[draw], &mut counter).unwrap();
+    lan_ou_step(&mut buffers, &mut counter, seed, 0.0, kt).unwrap();
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     let vy = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
     let vz = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
@@ -288,10 +291,12 @@ fn csvr_draw_counter_increments_per_apply_post() {
     therm
         .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
+    therm.flush_pending_injection(&gpu.device).unwrap();
     assert_eq!(therm.draw_counter, 1);
     therm
         .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
+    therm.flush_pending_injection(&gpu.device).unwrap();
     assert_eq!(therm.draw_counter, 2);
 }
 

@@ -597,6 +597,17 @@ successfully.
       /// `false`.
       fn supports_constraints(&self, _params: &toml::Value) -> bool { false }
 
+      /// `true` iff every per-step entry point (`step`, `execute`,
+      /// and any sub-step hook surfaced through `Plan`) consists of
+      /// pure CUDA kernel launches with no host-side state mutation
+      /// between launches and no `dtoh_sync_copy` / `htod_sync_copy`
+      /// calls. Determines whether phases driven by this integrator
+      /// run under CUDA graph mode; see `cuda-graphs.md`. Default
+      /// `true`; integrators that read device scalars into host
+      /// fields between sub-steps (e.g. `mtk-npt`) override to
+      /// `false`.
+      fn graph_compatible(&self, _params: &toml::Value) -> bool { true }
+
       /// Construct the integrator. The caller has already invoked
       /// `validate_params(&params)`, so the builder may unwrap
       /// trusted fields; any failure inside `build` surfaces as
@@ -621,6 +632,10 @@ successfully.
       fn validate_params(&self, params: &toml::Value)
           -> Result<(), ConfigError>;
 
+      /// Same contract as `IntegratorBuilder::graph_compatible`.
+      /// Default `true`. `nose-hoover-chain` overrides to `false`.
+      fn graph_compatible(&self, _params: &toml::Value) -> bool { true }
+
       /// `n_constraints` is the total holonomic constraint count of
       /// the run (sum of every constraint group's `constraint_count`,
       /// zero when the topology has no `[constraints]` section).
@@ -640,6 +655,10 @@ successfully.
       fn kind_name(&self) -> &'static str;
       fn validate_params(&self, params: &toml::Value)
           -> Result<(), ConfigError>;
+
+      /// Same contract as `IntegratorBuilder::graph_compatible`.
+      /// Default `true`.
+      fn graph_compatible(&self, _params: &toml::Value) -> bool { true }
 
       /// `n_constraints` is the total holonomic constraint count of
       /// the run (sum of every constraint group's `constraint_count`,

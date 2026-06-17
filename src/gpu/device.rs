@@ -93,7 +93,7 @@ pub struct GpuContext {
 
 // rq-c38c8f3b
 pub fn init_device() -> Result<GpuContext, GpuError> {
-    let device = CudaDevice::new(0)?;
+    let device = CudaDevice::new_with_stream(0)?;
     let kernels = Kernels::load(&device)?;
     Ok(GpuContext {
         device,

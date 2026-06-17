@@ -10,15 +10,15 @@
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice, CudaStream};
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice, DevicePtrMut};
 use cudarc::nvrtc::Ptx;
 
 use crate::gpu::cufft::{CuFftError, Plan3dC2R, Plan3dR2C};
 use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, K_COULOMB_F32, ParticleBuffers,
-    spme_charge_spread_on_stream,
-    spme_force_gather, spme_influence_multiply_on_stream, spme_real_pair_force,
+    spme_charge_spread,
+    spme_force_gather, spme_influence_multiply, spme_real_pair_force,
 };
 use crate::kernels;
 use crate::io::config::SpmeConfig;
@@ -109,35 +109,12 @@ pub struct SpmeReciprocalGrid {
     pub cached_box_generation: u64,
     pub forward_plan: Plan3dR2C,
     pub inverse_plan: Plan3dC2R,
-    /// Dedicated stream for the 4-kernel reciprocal pipeline. The cuFFT
-    /// plans above are bound to this stream at construction; the
-    /// charge-spread and influence-multiply kernels are launched via
-    /// `*_on_stream` variants that target it. Cross-stream sync with
-    /// the default stream is handled in `compute` and in
-    /// `SpmeReciprocalState::reduce` via cudarc's
-    /// `CudaStream::wait_for_default` / `CudaDevice::wait_for`.
-    pub recip_stream: SendableStream,
-}
-
-/// `CudaStream` wraps a raw `CUstream` pointer and cudarc 0.13 does not
-/// mark it `Send`/`Sync`, but CUDA streams are safe to share across
-/// threads as long as the using thread has called
-/// `CudaDevice::bind_to_thread` (which `init_device` and every kernel
-/// launch path ensures). Every other CUDA handle this slot holds
-/// (`CudaSlice`, `CudaFunction`, `Arc<CudaDevice>`) is explicitly
-/// `Send`/`Sync` in cudarc; this wrapper closes the gap so
-/// `SpmeReciprocalState` satisfies the `Potential: Send` bound.
-#[derive(Debug)]
-pub struct SendableStream(pub CudaStream);
-
-unsafe impl Send for SendableStream {}
-unsafe impl Sync for SendableStream {}
-
-impl std::ops::Deref for SendableStream {
-    type Target = CudaStream;
-    fn deref(&self) -> &CudaStream {
-        &self.0
-    }
+    /// Device-resident work area shared by the R2C and C2R cuFFT plans.
+    /// Sized to the larger of the two plans' `work_size()` requests;
+    /// both plans bind to this pointer at construction via
+    /// `cufftSetWorkArea`. The fixed pointer makes captured
+    /// `cufftExec*` calls safe to replay inside a CUDA graph.
+    pub workspace: CudaSlice<u8>,
 }
 
 impl SpmeReciprocalGrid {
@@ -204,18 +181,38 @@ impl SpmeReciprocalGrid {
             .alloc_zeros::<Real>(m_complex)
             .map_err(GpuError::from)?;
 
-        let forward_plan = Plan3dR2C::new(&device, n_a, n_b, n_c)?;
-        let inverse_plan = Plan3dC2R::new(&device, n_a, n_b, n_c)?;
+        let forward_plan = Plan3dR2C::new_unallocated(&device, n_a, n_b, n_c)?;
+        let inverse_plan = Plan3dC2R::new_unallocated(&device, n_a, n_b, n_c)?;
 
-        let recip_stream = device.fork_default_stream().map_err(GpuError::from)?;
-        forward_plan.set_stream(recip_stream.stream)?;
-        inverse_plan.set_stream(recip_stream.stream)?;
-        let recip_stream = SendableStream(recip_stream);
+        // Bind both cuFFT plans to the device's default stream. Without
+        // this, cuFFT runs on the legacy NULL stream — but when
+        // `init_device` uses `CudaDevice::new_with_stream` the device's
+        // default stream is non-NULL, and kernels launching on it
+        // would not be visible to cuFFT (and vice versa).
+        let dev_stream = *device.cu_stream();
+        forward_plan.set_stream(dev_stream)?;
+        inverse_plan.set_stream(dev_stream)?;
+
+        // Allocate a single device-resident work area sized to the
+        // larger of the two plans' requested sizes; bind both plans to
+        // it. The plans share the buffer because their executions are
+        // strictly serialised on the default stream. The pinned
+        // pointer is a prerequisite for the captured `cufftExec*`
+        // calls to be safe across CUDA graph replays.
+        let work_size = forward_plan.work_size()?.max(inverse_plan.work_size()?);
+        let workspace_len = work_size.max(1);
+        let mut workspace = device
+            .alloc_zeros::<u8>(workspace_len)
+            .map_err(GpuError::from)?;
+        let work_ptr = (*workspace.device_ptr_mut()) as *mut std::ffi::c_void;
+        forward_plan.set_work_area(work_ptr)?;
+        inverse_plan.set_work_area(work_ptr)?;
 
         // Populate `influence_g` and `virial_factor` for the initial
-        // box. The launch is async on `recip_stream`; downstream
-        // consumers in `compute()` issue their own waits.
-        crate::gpu::spme_recip_compute_influence_on_stream(
+        // box. The launch is async on the default stream; downstream
+        // consumers in `compute()` read from the same stream and
+        // observe the writes without additional synchronisation.
+        crate::gpu::spme_recip_compute_influence(
             &gpu.kernels,
             &b_factors_a,
             &b_factors_b,
@@ -227,7 +224,6 @@ impl SpmeReciprocalGrid {
             K_COULOMB_F32,
             params.alpha,
             m_complex as u32,
-            &recip_stream,
         )?;
 
         Ok(SpmeReciprocalGrid {
@@ -249,7 +245,7 @@ impl SpmeReciprocalGrid {
             cached_box_generation: sim_box.generation(),
             forward_plan,
             inverse_plan,
-            recip_stream,
+            workspace,
         })
     }
 
@@ -265,12 +261,11 @@ impl SpmeReciprocalGrid {
         timings: &mut Timings,
     ) -> Result<(), SpmeError> {
         // Refresh influence function (and the virial factor that
-        // tracks it) on device when the box has changed. The launch
-        // runs on `recip_stream`; downstream consumers
-        // (`spme_influence_multiply`) on the same stream see the
-        // refreshed buffers without additional synchronization.
+        // tracks it) on device when the box has changed. All recip
+        // launches share the default stream, so downstream consumers
+        // see the refreshed buffers without additional synchronisation.
         if sim_box.generation() != self.cached_box_generation {
-            crate::gpu::spme_recip_compute_influence_on_stream(
+            crate::gpu::spme_recip_compute_influence(
                 &particle_buffers.kernels,
                 &self.b_factors_a,
                 &self.b_factors_b,
@@ -282,22 +277,17 @@ impl SpmeReciprocalGrid {
                 K_COULOMB_F32,
                 self.params.alpha,
                 self.m_complex as u32,
-                &self.recip_stream,
             )?;
             self.cached_box_generation = sim_box.generation();
         }
 
         self.bin_list.pre_step(sim_box, particle_buffers, timings)?;
 
-        self.recip_stream
-            .wait_for_default()
-            .map_err(GpuError::from)?;
-
         let cl = self
             .bin_list
             .cell_list_data()
             .expect("SpmeReciprocalGrid bin list must be in cell-list-only mode");
-        spme_charge_spread_on_stream(
+        spme_charge_spread(
             particle_buffers,
             sim_box,
             &cl.sorted_particle_ids,
@@ -305,7 +295,6 @@ impl SpmeReciprocalGrid {
             self.params.grid,
             self.params.spline_order,
             &mut self.rho,
-            &self.recip_stream,
         )?;
 
         self.forward_plan
@@ -313,7 +302,7 @@ impl SpmeReciprocalGrid {
 
         let n_c = self.params.grid[2];
         let n_c_complex = (n_c / 2 + 1) as u32;
-        spme_influence_multiply_on_stream(
+        spme_influence_multiply(
             &particle_buffers.kernels,
             &self.influence_g,
             &self.virial_factor,
@@ -322,29 +311,23 @@ impl SpmeReciprocalGrid {
             n_c,
             n_c_complex,
             self.m_complex as u32,
-            &self.recip_stream,
         )?;
 
         self.inverse_plan
             .execute(&self.rho_hat_interleaved, &mut self.v)?;
 
-        // Host returns immediately. The default stream's join with
-        // recip_stream happens at the start of SpmeReciprocalState::reduce
-        // via CudaDevice::wait_for(&recip_stream) before any dtoh of
-        // virial_per_cell or any read of V by spme_force_gather.
         Ok(())
     }
 
-    /// Block the device's default stream until the reciprocal pipeline
-    /// queued on `recip_stream` has finished. Production paths call this
-    /// implicitly at the start of `SpmeReciprocalState::reduce`. Tests
-    /// and other direct consumers that read `rho` / `v` / `virial_per_cell`
-    /// straight after `compute` must call this first so the dtoh sees
-    /// finalized buffers.
+    /// Synchronises the device. Production paths do not need to call
+    /// this — the per-stream ordering of the default stream makes
+    /// `rho` / `v` / `virial_per_cell` visible to any subsequent
+    /// kernel or dtoh on the same stream. Tests that read these
+    /// buffers via the host call this for clarity (a subsequent
+    /// `dtoh_sync_copy` already synchronises, so the call is logically
+    /// redundant but kept as a no-cost diagnostic).
     pub fn sync_recip(&self) -> Result<(), GpuError> {
-        self.device
-            .wait_for(&self.recip_stream.0)
-            .map_err(GpuError::from)
+        self.device.synchronize().map_err(GpuError::from)
     }
 }
 
@@ -583,20 +566,14 @@ impl Potential for SpmeReciprocalState {
         self.grid
             .compute(sim_box, buffers, timings)
             .map_err(map_spme_err)?;
-        crate::gpu::spme_recip_virial_finalize_on_stream(
+        crate::gpu::spme_recip_virial_finalize(
             &buffers.kernels,
             &self.grid.virial_per_cell,
             &mut self.w_per_particle_virial,
             self.grid.m_complex as u32,
             n as u32,
-            &self.grid.recip_stream,
         )?;
         timings.kernel_stop(KernelStage::SPME_RECIP_PIPELINE)?;
-
-        self.grid
-            .device
-            .wait_for(&self.grid.recip_stream)
-            .map_err(GpuError::from)?;
 
         timings.kernel_start(KernelStage::SPME_FORCE_GATHER)?;
         spme_force_gather(

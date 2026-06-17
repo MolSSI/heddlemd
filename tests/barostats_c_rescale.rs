@@ -341,7 +341,10 @@ fn mu_cubed_matches_analytical_formula_with_known_philox_draw() {
     // `c_rescale_kind` already converts the SI inputs above; the
     // expected formula must therefore use the matching atomic-unit
     // values, and the Boltzmann constant collapses to 1 (kt = T).
-    let r = philox_normal(seed as u32, (seed >> 32) as u32, 1, 0, 0, 0);
+    // The device-resident draw counter starts at 0; the kernel reads
+    // it, draws Philox, then increments. The first kernel call therefore
+    // uses counter = 0.
+    let r = philox_normal(seed as u32, (seed >> 32) as u32, 0, 0, 0, 0);
     let temperature_au = temperature / TEMP_F;
     let p_target_au = p_target / PRESSURE_F;
     let p_current_au = (p_target / 2.0) / PRESSURE_F;

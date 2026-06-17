@@ -87,6 +87,15 @@ A kernel-launch helper that early-returns (e.g. when `particle_count == 0`)
 does not record any sample. The CUDA event pair for that stage may still
 exist in the runner's `Timings` instance with zero accumulated samples.
 
+When a phase runs under CUDA graph mode (`cuda-graphs.md`), per-kernel
+event records are produced only by the dry capture iteration; every
+subsequent replay step contributes nothing further. Each per-kernel
+`KernelStage` row in such a phase's `.timings` file therefore shows
+exactly one sample regardless of `n_steps`. The per-phase
+`total_runtime` row and the host stages are populated as in non-graph
+mode. To obtain a full per-kernel breakdown across all steps, run with
+`[simulation].cuda_graphs_disable = true`.
+
 ### Host stages (Instant-timed) <!-- rq-36105526 -->
 
 One host timer per stage. Each is recorded as a single elapsed `Duration`

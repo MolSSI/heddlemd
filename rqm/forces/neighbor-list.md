@@ -222,6 +222,15 @@ small for v1; the per-step download is one f32 per particle (40 KB at
 N = 10000, ~4 µs over PCIe), well below the rebuild interval cost the
 displacement check is amortising.
 
+When a phase runs under CUDA graph mode (`cuda-graphs.md`), the runner
+moves the `NeighborListState::pre_step` call out of `ForceField::step`
+and into the batched-replay outer loop. The displacement check is then
+invoked once per `graph_batch_size` physical steps rather than every
+step; the skin-distance contract holds as long as
+`graph_batch_size * max_step_displacement < r_skin / 2`. See
+`cuda-graphs.md`'s *Skin-distance contract under batched replay* for
+the analysis.
+
 ## Box Generation Tracking <!-- rq-282af621 -->
 
 In `CellList` mode the cell layout (`n_cells`, `n_cells_total`, and the

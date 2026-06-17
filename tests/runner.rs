@@ -41,6 +41,7 @@ fn write_pair(
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = {seed}
 temperature = {temperature}
 
@@ -480,6 +481,7 @@ fn lossy_is_default() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 0.0
 
@@ -525,6 +527,7 @@ fn langevin_runs_end_to_end() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 300.0
 
@@ -583,6 +586,7 @@ fn switching_integrator_kind_changes_trajectory() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 300.0
 
@@ -644,6 +648,7 @@ fn refuse_multi_type() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 0.0
 
@@ -844,6 +849,7 @@ fn custom_kind_with_run_simulation_fails_with_unknown_kind() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 300.0
 
@@ -947,6 +953,7 @@ fn custom_kind_with_registered_builder_dispatches_through_bundle() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 300.0
 
@@ -1036,6 +1043,7 @@ fn coulomb_cutoff_participates_in_box_too_small_check() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 0.0
 

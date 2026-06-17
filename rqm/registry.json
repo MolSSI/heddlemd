@@ -47,6 +47,14 @@
     "title": "A custom-kind integrator with an empty Registries fails with UnknownKind",
     "type": "scenario"
   },
+  "rq-006bc38c": {
+    "decl": "## Configuration",
+    "file": "cuda-graphs",
+    "level": 2,
+    "refs": [],
+    "title": "Configuration",
+    "type": "section"
+  },
   "rq-0076e6b4": {
     "decl": "## Out of Scope",
     "file": "integration/berendsen",
@@ -147,6 +155,14 @@
     ],
     "title": "rescale_positions does not modify velocities, forces, masses, or images",
     "type": "scenario"
+  },
+  "rq-011b7cea": {
+    "decl": "## Neighbor-List Pre-Step Decomposition",
+    "file": "cuda-graphs",
+    "level": 2,
+    "refs": [],
+    "title": "Neighbor-List Pre-Step Decomposition",
+    "type": "section"
   },
   "rq-0132d7a5": {
     "decl": "#### `[[minimization]]` (array of tables)",
@@ -1416,13 +1432,6 @@
     "title": "Dimension",
     "type": "api-item"
   },
-  "rq-0d5e76ec": {
-    "decl": "- A \"recip_stream → default\" join at the start of",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "- A \"recip_stream → default\" join at the start of",
-    "type": "anchor"
-  },
   "rq-0d7ebeb6": {
     "decl": "Scenario: Custom integrator builder is selectable",
     "file": "integration/framework",
@@ -2059,6 +2068,14 @@
     ],
     "title": "Reject non-positive tau",
     "type": "scenario"
+  },
+  "rq-126eba00": {
+    "decl": "### Functions",
+    "file": "cuda-graphs",
+    "level": 3,
+    "refs": [],
+    "title": "Functions",
+    "type": "section"
   },
   "rq-127df3d6": {
     "decl": "- `spme_influence_multiply`: one thread per complex grid cell, block",
@@ -2885,6 +2902,13 @@
     "title": "SimulationBox",
     "type": "api-item"
   },
+  "rq-1a85bb52": {
+    "decl": "Scenario: Captured iteration counts as physical step 1",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Captured iteration counts as physical step 1",
+    "type": "scenario"
+  },
   "rq-1a996f5d": {
     "decl": "Scenario: step_class(Fast) refreshes only Fast slots' contributions",
     "file": "forces/framework",
@@ -2903,6 +2927,13 @@
     ],
     "title": "Construct for a SETTLE'd water system",
     "type": "scenario"
+  },
+  "rq-1aa94cd6": {
+    "decl": "- `ThermostatBuilder::graph_compatible(&self, params: &toml::Value)",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "ThermostatBuilder",
+    "type": "api-item"
   },
   "rq-1ac78590": {
     "decl": "- `IntegratorStepExt` — blanket convenience trait implemented for",
@@ -3205,6 +3236,13 @@
     ],
     "title": "UnitSystem",
     "type": "api-item"
+  },
+  "rq-1c8a6d37": {
+    "decl": "Scenario: nl.pre_step is called once per batch boundary",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "nl.pre_step is called once per batch boundary",
+    "type": "scenario"
   },
   "rq-1ca90a29": {
     "decl": "Scenario: Atom with no bonds gets zero accumulator",
@@ -3951,6 +3989,13 @@
     "title": "Explicit non-zero images are stored as-supplied",
     "type": "scenario"
   },
+  "rq-2333f6af": {
+    "decl": "Scenario: cuda_graphs_disable overrides slot eligibility",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "cuda_graphs_disable overrides slot eligibility",
+    "type": "scenario"
+  },
   "rq-23398f89": {
     "decl": "- `__device__ __forceinline__ Real Real_cos(Real x);`",
     "file": "precision",
@@ -4391,6 +4436,14 @@
     "title": "Time attribute is always 9-digit f64 regardless of build",
     "type": "scenario"
   },
+  "rq-26c9b8cb": {
+    "decl": "### Slot eligibility",
+    "file": "cuda-graphs",
+    "level": 3,
+    "refs": [],
+    "title": "Slot eligibility",
+    "type": "section"
+  },
   "rq-26d8c08c": {
     "decl": "Scenario: fill kernel handles a non-block-aligned buffer size",
     "file": "build-pipeline",
@@ -4440,13 +4493,6 @@
     ],
     "title": "SI-mode .xyz velocities are converted to atomic-unit velocity",
     "type": "scenario"
-  },
-  "rq-274db88b": {
-    "decl": "- A \"default → recip_stream\" handoff at the start of",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "- A \"default → recip_stream\" handoff at the start of",
-    "type": "anchor"
   },
   "rq-27efd6a0": {
     "decl": "Scenario: Atom appearing in one angle receives that angle's force",
@@ -4925,6 +4971,13 @@
     "title": "Functions",
     "type": "section"
   },
+  "rq-2c1b569c": {
+    "decl": "- `CudaGraph` — RAII wrapper around `cudarc::driver::sys::CUgraph`.",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "CudaGraph",
+    "type": "api-item"
+  },
   "rq-2c1bb918": {
     "decl": "Scenario: log_column_names returns [\"csvr_conserved\"]",
     "file": "integration/csvr",
@@ -4949,6 +5002,13 @@
     "title": "ParticleBuffers carries the image-flag device buffers",
     "type": "scenario"
   },
+  "rq-2c6de27d": {
+    "decl": "- `AndersenThermostat::draw_counter_device: CudaSlice<u64>`",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "AndersenThermostat",
+    "type": "api-item"
+  },
   "rq-2c81a766": {
     "decl": "- `f32` build (default): `{:.9e}` — matches the existing format described",
     "file": "precision",
@@ -4963,6 +5023,13 @@
     "refs": [],
     "title": "CUDA kernels",
     "type": "section"
+  },
+  "rq-2c941abf": {
+    "decl": "Scenario: Conserved-quantity log columns match across modes",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Conserved-quantity log columns match across modes",
+    "type": "scenario"
   },
   "rq-2caa4efb": {
     "decl": "## Feature API",
@@ -5184,6 +5251,13 @@
     ],
     "title": "Two atoms at equilibrium distance produce zero force",
     "type": "scenario"
+  },
+  "rq-2e53772f": {
+    "decl": "- `ForceField::step_no_neighbor_check(buffers: &mut ParticleBuffers,",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "ForceField",
+    "type": "api-item"
   },
   "rq-2e98a75d": {
     "decl": "# ignored.",
@@ -6159,6 +6233,14 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-38ce8ffa": {
+    "decl": "### Types",
+    "file": "cuda-graphs",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-38d5e7a8": {
     "decl": "## Schema",
     "file": "minimization/steepest-descent",
@@ -6178,6 +6260,14 @@
     ],
     "title": "Load a two-particle file with no velocities",
     "type": "scenario"
+  },
+  "rq-391a7d23": {
+    "decl": "## Feature API",
+    "file": "cuda-graphs",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-391cb266": {
     "decl": "Scenario: Reject when explicit IDs have the wrong length",
@@ -6532,6 +6622,13 @@
     "title": "Total momentum after generation is zero (within f32 round-off)",
     "type": "scenario"
   },
+  "rq-3c62b49b": {
+    "decl": "Scenario: graph_batch_size = 1 is valid and runs every step under graph mode",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "graph_batch_size = 1 is valid and runs every step under graph mode",
+    "type": "scenario"
+  },
   "rq-3c6753bc": {
     "decl": "Scenario: ConstraintList::subset preserves the supplied index order",
     "file": "integration/constraint-framework",
@@ -6543,6 +6640,14 @@
     ],
     "title": "ConstraintList::subset preserves the supplied index order",
     "type": "scenario"
+  },
+  "rq-3c78ea7d": {
+    "decl": "## Activation Policy",
+    "file": "cuda-graphs",
+    "level": 2,
+    "refs": [],
+    "title": "Activation Policy",
+    "type": "section"
   },
   "rq-3c98d7a9": {
     "decl": "## Gherkin Scenarios",
@@ -7164,7 +7269,7 @@
     "type": "scenario"
   },
   "rq-44cce069": {
-    "decl": "- `spme_real_pair_force_*` and `spme_force_gather` run on the device's",
+    "decl": "- Every SPME kernel and cuFFT call dispatched by either SPME slot —",
     "file": "forces/spme",
     "refs": [
       {
@@ -7172,8 +7277,8 @@
         "kind": "code"
       }
     ],
-    "title": "spme_real_pair_force_",
-    "type": "api-item"
+    "title": "- Every SPME kernel and cuFFT call dispatched by either SPME slot —",
+    "type": "anchor"
   },
   "rq-44ce75ec": {
     "decl": "## Governed Error Types",
@@ -7395,6 +7500,13 @@
     "title": "`Thermostat` trait overrides",
     "type": "section"
   },
+  "rq-46e415c0": {
+    "decl": "- `CudaDevice::end_stream_capture() -> Result<CudaGraph, GraphError>`",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "CudaDevice",
+    "type": "api-item"
+  },
   "rq-470019c7": {
     "decl": "Scenario: Construct with particle_count = 1 (N_f = 1)",
     "file": "integration/berendsen",
@@ -7446,6 +7558,13 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
+  },
+  "rq-47b7bed9": {
+    "decl": "- `LangevinBaoabIntegrator::draw_counter_device: CudaSlice<u64>`",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "LangevinBaoabIntegrator",
+    "type": "api-item"
   },
   "rq-47d91c7d": {
     "decl": "- `CsvrThermostat` — implements the `Thermostat` trait declared in",
@@ -7854,6 +7973,13 @@
     "title": "NoseHooverChainBuilder",
     "type": "api-item"
   },
+  "rq-4c0ddae3": {
+    "decl": "Scenario: Two graph-mode runs are byte-identical",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Two graph-mode runs are byte-identical",
+    "type": "scenario"
+  },
   "rq-4c21c386": {
     "decl": "- `execute(sub, buffers, sim_box, timings)` — dispatches each",
     "file": "integration/mtk-npt",
@@ -8212,6 +8338,13 @@
     "title": "Single-step force evaluation on one SPC water molecule",
     "type": "scenario"
   },
+  "rq-5026f499": {
+    "decl": "- `GraphError` — error type for graph capture / instantiate / launch.",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "GraphError",
+    "type": "api-item"
+  },
   "rq-50521f04": {
     "decl": "Scenario: Empty bond_type name rejected",
     "file": "io/config-schema",
@@ -8531,6 +8664,13 @@
     "title": "LJ kernel reads the shared neighbor list from ForceFieldContext",
     "type": "scenario"
   },
+  "rq-53620d2c": {
+    "decl": "- `CRescaleBarostat::draw_counter_device: CudaSlice<u64>`",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "CRescaleBarostat",
+    "type": "api-item"
+  },
   "rq-536457be": {
     "decl": "Scenario: Time-averaged kinetic energy tracks (3 N − n_constraints) / 2 · k_B · T",
     "file": "integration/andersen",
@@ -8591,6 +8731,13 @@
     ],
     "title": "Minimizer",
     "type": "api-item"
+  },
+  "rq-53db82b9": {
+    "decl": "Scenario: Custom external slot defaults to graph_compatible = true",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Custom external slot defaults to graph_compatible = true",
+    "type": "scenario"
   },
   "rq-5444c7ae": {
     "decl": "Scenario: Per-particle energy slot accumulates half the pair's potential energy",
@@ -9455,10 +9602,10 @@
     "type": "section"
   },
   "rq-5d30456e": {
-    "decl": "- `spme_recip_virial_finalize_on_stream(kernels, virial_per_cell, w_per_particle_virial, m_complex, n_particles, stream) -> Result<(), GpuError>`",
+    "decl": "- `spme_recip_virial_finalize(kernels, virial_per_cell, w_per_particle_virial, m_complex, n_particles) -> Result<(), GpuError>`",
     "file": "forces/spme",
     "refs": [],
-    "title": "spme_recip_virial_finalize_on_stream",
+    "title": "spme_recip_virial_finalize",
     "type": "api-item"
   },
   "rq-5d6085ba": {
@@ -9711,6 +9858,13 @@
     "title": "Prefix scan is correct for cell counts beyond a single block-totals pass",
     "type": "scenario"
   },
+  "rq-5f4fc894": {
+    "decl": "Scenario: Custom external slot that does host arithmetic disables itself",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Custom external slot that does host arithmetic disables itself",
+    "type": "scenario"
+  },
   "rq-5f59fa80": {
     "decl": "## Per-Step Kernel Sequence",
     "file": "integration/csvr",
@@ -9853,6 +10007,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-60c3085f": {
+    "decl": "Scenario: RNG draw counter is device-resident",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "RNG draw counter is device-resident",
+    "type": "scenario"
   },
   "rq-60c534f2": {
     "decl": "Scenario: Last bin's `r` column equals (n_bins - 0.5) · Δr",
@@ -10552,6 +10713,13 @@
     "title": "Accept positions strictly inside the primary cell (orthorhombic)",
     "type": "scenario"
   },
+  "rq-6887c76d": {
+    "decl": "- `GraphLoop` — phase-owned executable graph + replay state. Carries:",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "GraphLoop",
+    "type": "api-item"
+  },
   "rq-688a5b6c": {
     "decl": "- `__device__ __forceinline__ Real Real_rint(Real x);`",
     "file": "precision",
@@ -10592,6 +10760,13 @@
     "file": "forces/pair-force-kernel",
     "refs": [],
     "title": "Launcher with particle_count = 0 is a no-op",
+    "type": "scenario"
+  },
+  "rq-68bdda7c": {
+    "decl": "Scenario: Per-step launch loop unaffected by Phase 3 plumbing",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Per-step launch loop unaffected by Phase 3 plumbing",
     "type": "scenario"
   },
   "rq-69109415": {
@@ -10789,6 +10964,13 @@
     "title": "bond_types is optional and defaults to empty",
     "type": "scenario"
   },
+  "rq-6ae261b5": {
+    "decl": "Scenario: mtk-npt phase falls back to per-step launches",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "mtk-npt phase falls back to per-step launches",
+    "type": "scenario"
+  },
   "rq-6aeb039a": {
     "decl": "## Gherkin Scenarios",
     "file": "io/config-schema",
@@ -10828,6 +11010,13 @@
     ],
     "title": "Atomic-mode .xyz lattice and positions pass through unchanged",
     "type": "scenario"
+  },
+  "rq-6bbf6545": {
+    "decl": "- `ConstraintBuilder::graph_compatible(&self, params: &toml::Value)",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "ConstraintBuilder",
+    "type": "api-item"
   },
   "rq-6bd0b42f": {
     "decl": "## NHC conserved Hamiltonian",
@@ -10901,6 +11090,13 @@
     ],
     "title": "Types",
     "type": "section"
+  },
+  "rq-6c5b63e6": {
+    "decl": "- `CsvrThermostat::draw_counter_device: CudaSlice<u64>`",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "CsvrThermostat",
+    "type": "api-item"
   },
   "rq-6c7779ef": {
     "decl": "Scenario: Atomic-mode physical scalars pass through unchanged",
@@ -11188,6 +11384,14 @@
     "title": "Feature: f64 Precision Compile-Time Feature Flag",
     "type": "file"
   },
+  "rq-6e82b441": {
+    "decl": "### `ForceField`",
+    "file": "cuda-graphs",
+    "level": 3,
+    "refs": [],
+    "title": "`ForceField`",
+    "type": "section"
+  },
   "rq-6e98222c": {
     "decl": "Scenario: Plan walk on empty Langevin state is a no-op",
     "file": "integration/langevin-baoab",
@@ -11238,6 +11442,13 @@
     "file": "forces/framework",
     "refs": [],
     "title": "Builder Err short-circuits ForceField::new",
+    "type": "scenario"
+  },
+  "rq-6f09d7e3": {
+    "decl": "Scenario: nose-hoover-chain phase falls back to per-step launches",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "nose-hoover-chain phase falls back to per-step launches",
     "type": "scenario"
   },
   "rq-6f4f5ece": {
@@ -11777,6 +11988,14 @@
     "title": "Log file header includes pressure and box_volume when the Berendsen barostat is the configured barostat",
     "type": "scenario"
   },
+  "rq-753cce64": {
+    "decl": "### Per-slot device counters",
+    "file": "cuda-graphs",
+    "level": 3,
+    "refs": [],
+    "title": "Per-slot device counters",
+    "type": "section"
+  },
   "rq-7541fd8a": {
     "decl": "Scenario: Validation order is lx, ly, lz, xy, xz, yz",
     "file": "simulation-box",
@@ -11945,6 +12164,14 @@
     "title": "Reject trajectory_path = log_path",
     "type": "scenario"
   },
+  "rq-766c88fb": {
+    "decl": "## Capture Lifecycle",
+    "file": "cuda-graphs",
+    "level": 2,
+    "refs": [],
+    "title": "Capture Lifecycle",
+    "type": "section"
+  },
   "rq-76a6be2f": {
     "decl": "Scenario: Zero particles is a no-op",
     "file": "forces/coulomb-pair-force",
@@ -11966,6 +12193,14 @@
     "level": 2,
     "refs": [],
     "title": "`<root>.in.analysis` file",
+    "type": "section"
+  },
+  "rq-76db55bb": {
+    "decl": "## Batched Replay Loop",
+    "file": "cuda-graphs",
+    "level": 2,
+    "refs": [],
+    "title": "Batched Replay Loop",
     "type": "section"
   },
   "rq-77292dee": {
@@ -12338,6 +12573,13 @@
     ],
     "title": "CoulombConfig",
     "type": "api-item"
+  },
+  "rq-794e4d2e": {
+    "decl": "Scenario: Trajectory cadence shrinks the effective batch",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Trajectory cadence shrinks the effective batch",
+    "type": "scenario"
   },
   "rq-79609285": {
     "decl": "## Feature API",
@@ -13140,6 +13382,13 @@
     "title": "Force evaluation is dispatched by the runner, not the integrator",
     "type": "scenario"
   },
+  "rq-813b7e0f": {
+    "decl": "Scenario: Rebuild without buffer reallocation does not invalidate the graph",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Rebuild without buffer reallocation does not invalidate the graph",
+    "type": "scenario"
+  },
   "rq-81659783": {
     "decl": "## Feature API",
     "file": "forces/topology",
@@ -13621,6 +13870,13 @@
     "title": "wrap_position_with_image_count returns the image triple together with the wrapped position",
     "type": "scenario"
   },
+  "rq-871ebfef": {
+    "decl": "Scenario: Per-slot RNG matches between graph and non-graph modes",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Per-slot RNG matches between graph and non-graph modes",
+    "type": "scenario"
+  },
   "rq-871f0292": {
     "decl": "Scenario: Reject non-finite r_switch",
     "file": "io/config-schema",
@@ -13643,6 +13899,13 @@
       }
     ],
     "title": "Two end-to-end Langevin runs with identical configs produce byte-identical outputs",
+    "type": "scenario"
+  },
+  "rq-879395e8": {
+    "decl": "Scenario: Replays advance the device counter once per step",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Replays advance the device counter once per step",
     "type": "scenario"
   },
   "rq-880349c0": {
@@ -13691,6 +13954,13 @@
       }
     ],
     "title": "cached_generation initialised from a non-zero construction-time generation",
+    "type": "scenario"
+  },
+  "rq-882db733": {
+    "decl": "Scenario: Full per-kernel timings on cuda_graphs_disable",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Full per-kernel timings on cuda_graphs_disable",
     "type": "scenario"
   },
   "rq-884b5cd6": {
@@ -14672,6 +14942,13 @@
     "title": "typedef",
     "type": "api-item"
   },
+  "rq-9298b4b5": {
+    "decl": "- `CudaGraphExec` — RAII wrapper around",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "CudaGraphExec",
+    "type": "api-item"
+  },
   "rq-92cecd28": {
     "decl": "Scenario: apply launches the expected kernel set",
     "file": "integration/berendsen-barostat",
@@ -14739,6 +15016,14 @@
     ],
     "title": "neighbor_list all-pairs mode is accepted",
     "type": "scenario"
+  },
+  "rq-9320c9d4": {
+    "decl": "## Gherkin Scenarios",
+    "file": "cuda-graphs",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
   },
   "rq-9331ede2": {
     "decl": "- `IntegratorBuilder::supports_constraints(&self, params: &toml::Value) -> bool`",
@@ -15287,10 +15572,10 @@
     "type": "section"
   },
   "rq-99d3d796": {
-    "decl": "- `spme_recip_compute_influence_on_stream(kernels, b_factors_a, b_factors_b, b_factors_c, influence_g, virial_factor, sim_box, grid, alpha, k_coulomb, m_complex, stream) -> Result<(), GpuError>`",
+    "decl": "- `spme_recip_compute_influence(kernels, b_factors_a, b_factors_b, b_factors_c, influence_g, virial_factor, sim_box, grid, alpha, k_coulomb, m_complex) -> Result<(), GpuError>`",
     "file": "forces/spme",
     "refs": [],
-    "title": "spme_recip_compute_influence_on_stream",
+    "title": "spme_recip_compute_influence",
     "type": "api-item"
   },
   "rq-9a19bfa3": {
@@ -15923,6 +16208,14 @@
     "title": "Lossless mode selects the lossless integrator kernels",
     "type": "scenario"
   },
+  "rq-9ec19227": {
+    "decl": "## `Timings` Interaction",
+    "file": "cuda-graphs",
+    "level": 2,
+    "refs": [],
+    "title": "`Timings` Interaction",
+    "type": "section"
+  },
   "rq-9ecf5a3a": {
     "decl": "Scenario: Filename-convention check runs before schema_version check",
     "file": "io/config-schema",
@@ -16247,6 +16540,13 @@
     "refs": [],
     "title": "Reproducibility",
     "type": "section"
+  },
+  "rq-a1d555ec": {
+    "decl": "- `CudaDevice::begin_stream_capture(mode: StreamCaptureMode) ->",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "CudaDevice",
+    "type": "api-item"
   },
   "rq-a1d80d47": {
     "decl": "Scenario: SI-mode writer multiplies Time by the atomic-time -> second factor",
@@ -17297,6 +17597,20 @@
     "title": "Disabled trajectory and log outputs are not checked, but timings is",
     "type": "scenario"
   },
+  "rq-acc595b8": {
+    "decl": "Scenario: Eligible phase captures a graph at phase start",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Eligible phase captures a graph at phase start",
+    "type": "scenario"
+  },
+  "rq-accf1a4b": {
+    "decl": "Scenario: Per-kernel timings empty in graph mode",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Per-kernel timings empty in graph mode",
+    "type": "scenario"
+  },
   "rq-acfda5d4": {
     "decl": "## Compatibility Rules",
     "file": "integration/constraint-framework",
@@ -17921,6 +18235,14 @@
     "title": "NeighborListState",
     "type": "api-item"
   },
+  "rq-b2e5e90c": {
+    "decl": "### Slot Eligibility Hooks",
+    "file": "cuda-graphs",
+    "level": 3,
+    "refs": [],
+    "title": "Slot Eligibility Hooks",
+    "type": "section"
+  },
   "rq-b2f23140": {
     "decl": "## Device-side Exclusion Helper",
     "file": "forces/topology",
@@ -18107,6 +18429,13 @@
     "title": "minimum_image of a c-aligned displacement subtracts the c lattice vector",
     "type": "scenario"
   },
+  "rq-b4f36b2a": {
+    "decl": "Scenario: Log cadence shrinks the effective batch",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Log cadence shrinks the effective batch",
+    "type": "scenario"
+  },
   "rq-b5089af4": {
     "decl": "Scenario: Construct with particle_count = 0",
     "file": "integration/csvr",
@@ -18142,6 +18471,14 @@
     ],
     "title": "Lint reports filename-convention violations under the config stage",
     "type": "scenario"
+  },
+  "rq-b57700e0": {
+    "decl": "### Skin-distance contract under batched replay",
+    "file": "cuda-graphs",
+    "level": 3,
+    "refs": [],
+    "title": "Skin-distance contract under batched replay",
+    "type": "section"
   },
   "rq-b5e263e1": {
     "decl": "Scenario: run_simulation defers to run_simulation_with_registries with built-ins",
@@ -18400,6 +18737,14 @@
     "title": "Positions visibly evolve over the 100-step lossless forward run",
     "type": "scenario"
   },
+  "rq-b8a61f12": {
+    "decl": "## RNG Counter Contract",
+    "file": "cuda-graphs",
+    "level": 2,
+    "refs": [],
+    "title": "RNG Counter Contract",
+    "type": "section"
+  },
   "rq-b8aa57c6": {
     "decl": "Scenario: Reject non-positive temperature",
     "file": "integration/andersen",
@@ -18537,6 +18882,13 @@
       }
     ],
     "title": "SD caps step at max_step",
+    "type": "scenario"
+  },
+  "rq-bac7d92d": {
+    "decl": "Scenario: graph_batch_size = 0 rejected at config load",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "graph_batch_size = 0 rejected at config load",
     "type": "scenario"
   },
   "rq-bacbf7d2": {
@@ -20416,6 +20768,13 @@
     "title": "Column format: atom_i  atom_j  bond_type_name",
     "type": "file"
   },
+  "rq-cf4a2e05": {
+    "decl": "- `BarostatBuilder::graph_compatible(&self, params: &toml::Value) ->",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "BarostatBuilder",
+    "type": "api-item"
+  },
   "rq-cf4d6ab4": {
     "decl": "Scenario: compute_total_virial of a single particle with virials[0]=0 is zero",
     "file": "integration/berendsen-barostat",
@@ -20447,6 +20806,13 @@
     "refs": [],
     "title": "Real-space reproducibility",
     "type": "section"
+  },
+  "rq-cf7e5025": {
+    "decl": "# Feature: CUDA Graph Per-Step Loop",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Feature: CUDA Graph Per-Step Loop",
+    "type": "file"
   },
   "rq-cf82e422": {
     "decl": "### Functions",
@@ -21562,6 +21928,13 @@
     "title": "Reject missing particle-count line",
     "type": "scenario"
   },
+  "rq-dadec448": {
+    "decl": "Scenario: Capture-time CUDA driver error falls back gracefully",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Capture-time CUDA driver error falls back gracefully",
+    "type": "scenario"
+  },
   "rq-dae150d9": {
     "decl": "### Functions and methods",
     "file": "performance-analysis",
@@ -22465,6 +22838,13 @@
     "title": "Parameters",
     "type": "section"
   },
+  "rq-e35fa835": {
+    "decl": "- `capture_phase_graph(setup: &mut SimulationSetup, phase: &Phase,",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "capture_phase_graph",
+    "type": "api-item"
+  },
   "rq-e367855a": {
     "decl": "### Field reference",
     "file": "io/config-schema",
@@ -23103,6 +23483,13 @@
       }
     ],
     "title": "Timings::new allocates the documented event pairs",
+    "type": "scenario"
+  },
+  "rq-e954f09e": {
+    "decl": "Scenario: Graph-mode and non-graph-mode runs are byte-identical (GPU)",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Graph-mode and non-graph-mode runs are byte-identical (GPU)",
     "type": "scenario"
   },
   "rq-e963f27a": {
@@ -24816,6 +25203,13 @@
       }
     ],
     "title": "ExclusionList",
+    "type": "api-item"
+  },
+  "rq-f84229ac": {
+    "decl": "- `IntegratorBuilder::graph_compatible(&self, params: &toml::Value)",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "IntegratorBuilder",
     "type": "api-item"
   },
   "rq-f84e4fa1": {

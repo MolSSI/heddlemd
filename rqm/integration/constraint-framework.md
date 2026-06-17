@@ -526,6 +526,15 @@ second receives an empty index set and contributes no slot.
           _params: &toml::Value,
       ) -> bool { true }
 
+      /// `true` iff every constraint hook entry point
+      /// (`apply_before_drift`, `apply_after_drift`,
+      /// `apply_after_kick`) consists of pure CUDA kernel launches
+      /// with no host-side state mutation between launches and no
+      /// `dtoh_sync_copy` / `htod_sync_copy`. Determines whether
+      /// phases using this constraint algorithm run under CUDA graph
+      /// mode; see `cuda-graphs.md`. Default `true`.
+      fn graph_compatible(&self, _params: &toml::Value) -> bool { true }
+
       /// Number of atoms a single `[constraints]` topology row of
       /// this kind must declare. The topology parser uses this value
       /// to validate row column counts.

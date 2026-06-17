@@ -3,6 +3,7 @@ pub mod buffers;
 pub mod cufft;
 pub mod device;
 pub mod fill;
+pub mod graph;
 pub mod kernels;
 pub mod lossless_buffers;
 
@@ -10,6 +11,10 @@ pub use barostat_kernels::BarostatKernels;
 pub use buffers::ParticleBuffers;
 pub use device::{GpuContext, GpuError, Kernels, init_device};
 pub use fill::FillKernels;
+pub use graph::{
+    CaptureMode, CudaGraph, CudaGraphExec, GraphError, GraphNodeSummary, begin_stream_capture,
+    end_stream_capture,
+};
 pub use kernels::{
     K_COULOMB_F32, LennardJonesParameterTable, SPATIAL_HASH_SCAN_BLOCK_SIZE,
     accumulate_forces, andersen_resample, berendsen_compute_mu, c_rescale_compute_mu,
@@ -25,12 +30,12 @@ pub use kernels::{
     prefix_scan_cell_counts, reduce_angle_forces, reduce_bond_forces,
     rescale_positions, rescale_positions_device_factor, rescale_velocities,
     rescale_velocities_device_factor,
-    constraint_virial_scatter, rattle_velocities, scatter_atoms_into_cells,
+    constraint_virial_scatter, increment_u64_device, rattle_velocities, scatter_atoms_into_cells,
     shake_positions, shake_positions_no_velocity, shake_snapshot,
-    sort_cells_by_particle_id, spme_charge_spread, spme_charge_spread_on_stream,
-    spme_force_gather, spme_influence_multiply, spme_influence_multiply_on_stream,
-    spme_real_pair_force, spme_recip_compute_influence_on_stream,
-    spme_recip_virial_finalize_on_stream, vv_kick,
+    sort_cells_by_particle_id, spme_charge_spread,
+    spme_force_gather, spme_influence_multiply,
+    spme_real_pair_force, spme_recip_compute_influence,
+    spme_recip_virial_finalize, vv_kick,
     vv_kick_drift,
 };
 #[cfg(not(feature = "f64"))]

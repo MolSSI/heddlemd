@@ -125,6 +125,24 @@ pub enum ConfigError {
 pub struct SimulationConfig {
     pub seed: u64,
     pub temperature: f64,
+    /// Number of step replays between displacement checks and
+    /// output-cadence re-evaluations when an MD phase runs under CUDA
+    /// graph mode. Default 5. Must be `>= 1`. See `cuda-graphs.md`.
+    #[serde(default = "default_graph_batch_size")]
+    pub graph_batch_size: u32,
+    /// When `true`, every MD phase runs the per-step launch loop with
+    /// full per-kernel `Timings`. Default `true` — Phase 3's CUDA
+    /// graph capture is currently incompatible with the SPME
+    /// reciprocal pipeline's multi-stream + cuFFT topology. Opt in
+    /// with `cuda_graphs_disable = false` only for configurations
+    /// whose force field does not include SPME (or once SPME's
+    /// graph-capture compatibility is in place).
+    #[serde(default)]
+    pub cuda_graphs_disable: bool,
+}
+
+fn default_graph_batch_size() -> u32 {
+    5
 }
 
 // rq-18441e33 — parsed `[[phase]]` entry. The runner walks
@@ -1203,6 +1221,8 @@ fn build_config(
     let simulation = SimulationConfig {
         seed: raw.simulation.seed,
         temperature: to_au_temperature(raw.simulation.temperature),
+        graph_batch_size: raw.simulation.graph_batch_size,
+        cuda_graphs_disable: raw.simulation.cuda_graphs_disable,
     };
 
     let particle_types: Vec<ParticleTypeConfig> = raw
@@ -1482,6 +1502,12 @@ fn require_finite(field: &str, value: f64) -> Result<(), ConfigError> {
 
 fn validate_simulation(s: &SimulationConfig) -> Result<(), ConfigError> {
     require_finite_non_negative("simulation.temperature", s.temperature)?;
+    if s.graph_batch_size < 1 {
+        return Err(invalid(
+            "simulation.graph_batch_size",
+            format!("value must be >= 1, got {}", s.graph_batch_size),
+        ));
+    }
     Ok(())
 }
 

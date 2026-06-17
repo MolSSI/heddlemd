@@ -14,14 +14,18 @@ extern "C" __global__ void andersen_resample(
     Real *velocities_x, Real *velocities_y, Real *velocities_z,
     const Real *masses,
     const unsigned int *particle_ids,
+    const unsigned long long *draw_counter,
     unsigned int seed_lo, unsigned int seed_hi,
-    unsigned int draw_counter_lo, unsigned int draw_counter_hi,
     Real p_collision,
     Real kt,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) return;
+
+  unsigned long long counter = *draw_counter;
+  unsigned int draw_counter_lo = (unsigned int)(counter & 0xFFFFFFFFULL);
+  unsigned int draw_counter_hi = (unsigned int)(counter >> 32);
 
   unsigned int pid = particle_ids[i];
 

@@ -74,6 +74,19 @@ pub trait Potential: std::fmt::Debug + Send {
         ForceClass::Fast
     }
 
+    /// `true` iff `compute` consists of pure CUDA kernel launches on
+    /// the device's default stream with no host-side state mutation
+    /// and no use of secondary streams. Determines whether phases
+    /// using this potential run under CUDA graph mode; see
+    /// `cuda-graphs.md`. Default `true`. Potentials that launch
+    /// kernels on streams other than the default (e.g. SPME
+    /// reciprocal's `recip_stream`) override to `false`: work on
+    /// uncaptured streams executes immediately and is not part of the
+    /// captured graph, so replays would produce stale forces.
+    fn graph_compatible(&self) -> bool {
+        true
+    }
+
     fn compute(
         &mut self,
         buffers: &ParticleBuffers,
@@ -363,7 +376,46 @@ impl ForceField {
         timings: &mut Timings,
         level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
-        self.run(None, buffers, sim_box, timings, level)
+        self.run(None, buffers, sim_box, timings, level, true)
+    }
+
+    /// Same per-slot compute path as `step`, but skips the internal
+    /// `NeighborListState::pre_step` call. Used inside CUDA graph
+    /// capture and inside the batched-replay loop, where the runner
+    /// calls `nl.pre_step` at every batch boundary instead. See
+    /// `cuda-graphs.md`.
+    pub fn step_no_neighbor_check(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        timings: &mut Timings,
+        level: AggregateLevel,
+    ) -> Result<(), ForceFieldError> {
+        self.run(None, buffers, sim_box, timings, level, false)
+    }
+
+    /// Runs `NeighborListState::pre_step` standalone — used by the
+    /// CUDA graph batched-replay loop, which moves the per-step
+    /// displacement check / rebuild out of `force_field.step` and
+    /// into the host loop between graph launches.
+    pub fn run_neighbor_pre_step(
+        &mut self,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        timings: &mut Timings,
+    ) -> Result<(), ForceFieldError> {
+        if let Some(nl) = self.neighbor_list.as_mut() {
+            nl.pre_step(sim_box, buffers, timings)?;
+        }
+        Ok(())
+    }
+
+    /// `true` iff every potential slot configured in this force
+    /// field reports `Potential::graph_compatible == true`. Used by
+    /// the runner to decide whether a phase is eligible for CUDA
+    /// graph capture; see `cuda-graphs.md`.
+    pub fn graph_compatible(&self) -> bool {
+        self.slots.iter().all(|slot| slot.graph_compatible())
     }
 
     // rq-be1eb548
@@ -385,7 +437,26 @@ impl ForceField {
         if class_count == 0 {
             return Ok(());
         }
-        self.run(Some(class), buffers, sim_box, timings, level)
+        self.run(Some(class), buffers, sim_box, timings, level, true)
+    }
+
+    /// Per-class variant of `step_no_neighbor_check`.
+    pub fn step_class_no_neighbor_check(
+        &mut self,
+        class: ForceClass,
+        buffers: &mut ParticleBuffers,
+        sim_box: &SimulationBox,
+        timings: &mut Timings,
+        level: AggregateLevel,
+    ) -> Result<(), ForceFieldError> {
+        let class_count = match class {
+            ForceClass::Fast => self.num_fast_slots,
+            ForceClass::Slow => self.num_slow_slots,
+        };
+        if class_count == 0 {
+            return Ok(());
+        }
+        self.run(Some(class), buffers, sim_box, timings, level, false)
     }
 
     fn run(
@@ -395,6 +466,7 @@ impl ForceField {
         sim_box: &SimulationBox,
         timings: &mut Timings,
         level: AggregateLevel,
+        run_neighbor_pre_step: bool,
     ) -> Result<(), ForceFieldError> {
         let n = self.particle_count;
         if n == 0 {
@@ -402,8 +474,10 @@ impl ForceField {
         }
 
         // Shared neighbor-list update (no-op in Trivial mode and when absent).
-        if let Some(nl) = self.neighbor_list.as_mut() {
-            nl.pre_step(sim_box, buffers, timings)?;
+        if run_neighbor_pre_step {
+            if let Some(nl) = self.neighbor_list.as_mut() {
+                nl.pre_step(sim_box, buffers, timings)?;
+            }
         }
 
         let nl_ref = self.neighbor_list.as_ref();

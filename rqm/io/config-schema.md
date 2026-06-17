@@ -282,11 +282,11 @@ and ordering invariants hold regardless of the chosen unit system.
 
 #### `[simulation]` <!-- rq-a84e1c76 -->
 
-The `[simulation]` table carries the two settings that apply to the
-**initial-velocity sampling** performed once at phase-0 entry, before
-any integration starts. Per-step settings (timestep, step count,
-integrator/thermostat/barostat composition, output cadences) live in
-the `[[phase]]` array.
+The `[simulation]` table carries the settings that apply to the
+**initial-velocity sampling** performed once at phase-0 entry plus the
+run-wide CUDA graph execution knobs. Per-step settings (timestep, step
+count, integrator/thermostat/barostat composition, output cadences)
+live in the `[[phase]]` array.
 
 - `seed: u64` — RNG seed used for Maxwell-Boltzmann velocity
   generation. Required even when the init file supplies explicit
@@ -301,6 +301,17 @@ the `[[phase]]` array.
   validated) when the init file supplies velocities. Must be finite
   and `>= 0.0`. The thermostat's bath temperature is a separate
   per-phase field under `[phase.thermostat]`.
+- `graph_batch_size: u32` — optional. Number of step replays between
+  displacement checks and output-cadence re-evaluations when an MD
+  phase runs under CUDA graph mode. Default `5`. Must be `>= 1`; the
+  loader rejects `0` with
+  `ConfigError::InvalidValue { field: "simulation.graph_batch_size",
+  reason: "value must be >= 1, got 0" }`. See `cuda-graphs.md` for
+  the activation policy and the skin-distance tuning constraint.
+- `cuda_graphs_disable: bool` — optional. When `true`, every MD
+  phase runs the per-step launch loop with full per-kernel
+  `Timings`. Default `false`. Provided as a diagnostic escape hatch;
+  see `cuda-graphs.md`.
 
 #### `[[phase]]` (array of tables, >= 1 entry) <!-- rq-18441e33 -->
 

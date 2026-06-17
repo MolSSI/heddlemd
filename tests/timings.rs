@@ -47,6 +47,7 @@ fn write_pair(
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = {seed}
 temperature = {temperature}
 
@@ -244,6 +245,7 @@ fn write_langevin_config(dir: &Path, n_steps: u64) -> PathBuf {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 300.0
 
@@ -647,6 +649,7 @@ fn timings_path_eq_trajectory_rejected() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 0.0
 
@@ -695,6 +698,7 @@ fn timings_path_eq_log_rejected() {
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 0.0
 
@@ -743,6 +747,7 @@ fn timings_path_eq_init_rejected() {
 init = "particles.dat"
 
 [simulation]
+cuda_graphs_disable = true
 seed = 1
 temperature = 0.0
 
@@ -976,6 +981,7 @@ fn write_cell_list_pair(
 init = "sim.in.xyz"
 
 [simulation]
+cuda_graphs_disable = true
 seed = {seed}
 temperature = 0.0
 
@@ -1094,6 +1100,7 @@ init = "sim.in.xyz"
 topology = "sim.in.topology"
 
 [simulation]
+cuda_graphs_disable = true
 seed = {seed}
 temperature = 0.0
 

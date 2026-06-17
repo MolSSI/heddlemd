@@ -90,6 +90,11 @@ pub struct CRescaleBarostat {
     /// `flush_pending_injection`. `f64` for precision across many
     /// steps before a host download.
     diagnostics_device: CudaSlice<f64>,
+    /// Single-element device buffer holding the Philox draw counter.
+    /// `c_rescale_compute_mu` reads it at entry and writes back
+    /// `counter + 1` at exit; safe to capture in a CUDA graph because
+    /// the kernel runs on a single thread.
+    draw_counter_device: CudaSlice<u64>,
 }
 
 impl CRescaleBarostat {
@@ -107,6 +112,7 @@ impl CRescaleBarostat {
         let virial_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         let mu_device = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         let diagnostics_device = gpu.device.alloc_zeros::<f64>(3).map_err(GpuError::from)?;
+        let draw_counter_device = gpu.device.alloc_zeros::<u64>(1).map_err(GpuError::from)?;
         Ok(CRescaleBarostat {
             pressure,
             temperature,
@@ -121,6 +127,7 @@ impl CRescaleBarostat {
             virial_scratch,
             mu_device,
             diagnostics_device,
+            draw_counter_device,
         })
     }
 
@@ -148,6 +155,12 @@ impl CRescaleBarostat {
         device
             .htod_sync_copy_into(&zeroed, &mut self.diagnostics_device)
             .map_err(GpuError::from)?;
+        // Refresh the host-side draw_counter cache for diagnostics.
+        let mut host_counter = [0_u64; 1];
+        device
+            .dtoh_sync_copy_into(&self.draw_counter_device, &mut host_counter)
+            .map_err(GpuError::from)?;
+        self.draw_counter = host_counter[0];
         Ok(())
     }
 }
@@ -175,13 +188,12 @@ impl Barostat for CRescaleBarostat {
         timings.kernel_stop(KernelStage::VIRIAL_SUM_REDUCE)?;
 
         // 2. Combined compute_mu + lattice mutation + diagnostics
-        //    write. No per-step dtoh; the µ and diagnostics live on
-        //    device, the lattice is mutated in place through
-        //    `sim_box.lattice_device_mut()` (which bumps the box
-        //    generation counter). Host fields on the SimulationBox
-        //    become stale until the runner calls `flush_from_device`
-        //    at log cadence.
-        self.draw_counter += 1;
+        //    write. No per-step dtoh; the µ, diagnostics, and Philox
+        //    counter all live on device; the lattice is mutated in
+        //    place through `sim_box.lattice_device_mut()` (which
+        //    bumps the box generation counter). The kernel reads and
+        //    increments `draw_counter_device` in place, so safely
+        //    captured by a CUDA graph.
         let kt = self.temperature;
         let dt_f64 = dt as f64;
         c_rescale_compute_mu(
@@ -191,8 +203,8 @@ impl Barostat for CRescaleBarostat {
             sim_box.lattice_device_mut(),
             &mut self.mu_device,
             &mut self.diagnostics_device,
+            &mut self.draw_counter_device,
             self.seed,
-            self.draw_counter,
             self.pressure,
             self.tau,
             self.compressibility,
@@ -200,6 +212,7 @@ impl Barostat for CRescaleBarostat {
             dt_f64,
             MU_MIN * MU_MIN * MU_MIN,
         )?;
+        self.draw_counter += 1;
 
         // 3. Apply the position rescale. The kernel reads µ from
         //    `mu_device[0]`; no scalar dtoh path.

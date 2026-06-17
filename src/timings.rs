@@ -264,6 +264,11 @@ struct KernelStageState {
     stop: CUevent,
     outstanding_stop: bool,
     acc: Accumulator,
+    /// Number of `kernel_stop` calls observed during the active
+    /// capture iteration. `Timings::record_graph_replays` multiplies
+    /// this by the replay count to advance `acc.count` without
+    /// re-firing any events.
+    captured_stops_per_replay: u32,
 }
 
 // rq-baf03449
@@ -271,6 +276,12 @@ pub struct Timings {
     device: Arc<CudaDevice>,
     kernel_states: HashMap<KernelStage, KernelStageState>,
     host_acc: HashMap<HostStage, Accumulator>,
+    /// When `true`, the runner is currently in the dry capture
+    /// iteration of a graph-eligible MD phase. `kernel_start` skips
+    /// the prior-stop synchronise, and `kernel_stop` increments each
+    /// stage's `captured_stops_per_replay` instead of setting
+    /// `outstanding_stop`. See `cuda-graphs.md`.
+    in_capture: bool,
 }
 
 impl std::fmt::Debug for Timings {
@@ -298,6 +309,7 @@ impl Timings {
                     stop,
                     outstanding_stop: false,
                     acc: Accumulator::default(),
+                    captured_stops_per_replay: 0,
                 },
             );
         }
@@ -310,20 +322,57 @@ impl Timings {
             device,
             kernel_states,
             host_acc,
+            in_capture: false,
         })
+    }
+
+    /// Enter capture mode. `kernel_start` skips the prior-stop
+    /// synchronise; `kernel_stop` accumulates per-stage replay counts
+    /// instead of marking `outstanding_stop`. Per-replay counts reset
+    /// at the start of every capture.
+    pub fn begin_capture(&mut self) {
+        self.in_capture = true;
+        for state in self.kernel_states.values_mut() {
+            state.captured_stops_per_replay = 0;
+        }
+    }
+
+    /// Leave capture mode. The per-stage capture counts remain set
+    /// until the next `begin_capture` and are consumed by
+    /// `record_graph_replays`.
+    pub fn end_capture(&mut self) {
+        self.in_capture = false;
+    }
+
+    /// Bumps each `KernelStage`'s accumulator sample count by
+    /// `captured_stops_per_replay × n_launches`, recording zero
+    /// durations. Used by the runner's batched graph-replay loop to
+    /// keep the `.timings` file's sample counts consistent with the
+    /// per-step launch path; per-kernel elapsed durations are not
+    /// collected under graph mode (see `cuda-graphs.md`).
+    pub fn record_graph_replays(&mut self, n_launches: u32) {
+        for state in self.kernel_states.values_mut() {
+            let total = state.captured_stops_per_replay as u64 * n_launches as u64;
+            for _ in 0..total {
+                state.acc.record_ns(0);
+            }
+        }
     }
 
     // rq-58981e16
     pub fn kernel_start(&mut self, stage: KernelStage) -> Result<(), TimingsError> {
+        let in_capture = self.in_capture;
         let state = self
             .kernel_states
             .get_mut(&stage)
             .unwrap_or_else(|| panic!("unknown KernelStage: {:?}", stage.name()));
-        if state.outstanding_stop {
+        let stream = *self.device.cu_stream();
+        if !in_capture && state.outstanding_stop {
+            // Resolving the prior sample requires synchronising on
+            // `stop`. When the runner is capturing this is forbidden;
+            // we skip the resolve path entirely (see `in_capture`).
             let start = state.start;
             let stop = state.stop;
-            // Synchronize on the stop event so cuEventElapsedTime won't return
-            // CUDA_ERROR_NOT_READY.
             unsafe { event::synchronize(stop)? };
             let elapsed_ms = unsafe { event::elapsed(start, stop)? };
             let ns = if elapsed_ms.is_finite() && elapsed_ms > 0.0 {
@@ -334,20 +383,24 @@ impl Timings {
             state.acc.record_ns(ns);
             state.outstanding_stop = false;
         }
-        let stream = *self.device.cu_stream();
         unsafe { event::record(state.start, stream)? };
         Ok(())
     }
 
     // rq-b17e6de6
     pub fn kernel_stop(&mut self, stage: KernelStage) -> Result<(), TimingsError> {
+        let in_capture = self.in_capture;
         let state = self
             .kernel_states
             .get_mut(&stage)
             .unwrap_or_else(|| panic!("unknown KernelStage: {:?}", stage.name()));
         let stream = *self.device.cu_stream();
         unsafe { event::record(state.stop, stream)? };
-        state.outstanding_stop = true;
+        if in_capture {
+            state.captured_stops_per_replay += 1;
+        } else {
+            state.outstanding_stop = true;
+        }
         Ok(())
     }
 
@@ -362,6 +415,45 @@ impl Timings {
             .get_mut(&stage)
             .unwrap_or_else(|| panic!("unknown HostStage: {:?}", stage.name()));
         acc.record_ns(ns_u64);
+    }
+
+    /// Marks every stage's outstanding stop event as already drained
+    /// without synchronising. Used by the CUDA graph capture path to
+    /// invalidate event-record-node references left over from the
+    /// captured iteration; those events fired inside graph execution
+    /// and cannot be measured by the host's `event::elapsed` after
+    /// the graph instance is destroyed.
+    pub fn forget_outstanding(&mut self) {
+        for stage in KernelStage::ORDER {
+            let state = self.kernel_states.get_mut(stage).expect("stage present");
+            state.outstanding_stop = false;
+        }
+    }
+
+    /// Drains every stage's outstanding start/stop event pair into its
+    /// accumulator. Used by the CUDA graph capture path to flush all
+    /// outstanding events before `cuStreamBeginCapture_v2` — the per-
+    /// stage `event::synchronize` call inside `kernel_start` is not
+    /// permitted inside a captured region, so we settle everything
+    /// before capture begins.
+    pub fn drain_outstanding(&mut self) -> Result<(), TimingsError> {
+        for stage in KernelStage::ORDER {
+            let state = self.kernel_states.get_mut(stage).expect("stage present");
+            if state.outstanding_stop {
+                let start = state.start;
+                let stop = state.stop;
+                unsafe { event::synchronize(stop)? };
+                let elapsed_ms = unsafe { event::elapsed(start, stop)? };
+                let ns = if elapsed_ms.is_finite() && elapsed_ms > 0.0 {
+                    (elapsed_ms as f64 * 1_000_000.0).round() as u64
+                } else {
+                    0
+                };
+                state.acc.record_ns(ns);
+                state.outstanding_stop = false;
+            }
+        }
+        Ok(())
     }
 
     // rq-c4845f90

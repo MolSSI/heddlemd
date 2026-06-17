@@ -51,14 +51,18 @@ extern "C" __global__ void lan_ou_step(
     Real *velocities_x, Real *velocities_y, Real *velocities_z,
     const Real *masses,
     const unsigned int *particle_ids,
+    const unsigned long long *draw_counter,
     unsigned int seed_lo, unsigned int seed_hi,
-    unsigned int draw_counter_lo, unsigned int draw_counter_hi,
     Real alpha,
     Real kt,
     unsigned int n)
 {
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) return;
+
+  unsigned long long counter = *draw_counter;
+  unsigned int draw_counter_lo = (unsigned int)(counter & 0xFFFFFFFFULL);
+  unsigned int draw_counter_hi = (unsigned int)(counter >> 32);
 
   Real m = masses[i];
   Real sigma_factor = Real_sqrt((R(1.0) - alpha * alpha) * kt / m);

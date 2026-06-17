@@ -239,11 +239,68 @@ pub fn run_step(
     buffers: &mut ParticleBuffers,
     sim_box: &mut SimulationBox,
     force_field: &mut ForceField,
+    constraint: Option<&mut dyn Constraint>,
+    install_constraint_hooks: bool,
+    dt: Real,
+    timings: &mut Timings,
+    runner_needs_scalars: bool,
+) -> Result<(), StepError> {
+    run_step_inner(
+        integrator,
+        buffers,
+        sim_box,
+        force_field,
+        constraint,
+        install_constraint_hooks,
+        dt,
+        timings,
+        runner_needs_scalars,
+        true,
+    )
+}
+
+/// Per-step plan walker variant used by the CUDA graph capture path
+/// and the batched-replay loop. Identical to `run_step` except that
+/// every `force_field` call uses the `*_no_neighbor_check` variant —
+/// the runner runs `NeighborListState::pre_step` at batch boundaries
+/// instead of inside the captured kernel sequence. See
+/// `cuda-graphs.md`.
+pub fn run_step_no_neighbor_check(
+    integrator: &mut dyn Integrator,
+    buffers: &mut ParticleBuffers,
+    sim_box: &mut SimulationBox,
+    force_field: &mut ForceField,
+    constraint: Option<&mut dyn Constraint>,
+    install_constraint_hooks: bool,
+    dt: Real,
+    timings: &mut Timings,
+    runner_needs_scalars: bool,
+) -> Result<(), StepError> {
+    run_step_inner(
+        integrator,
+        buffers,
+        sim_box,
+        force_field,
+        constraint,
+        install_constraint_hooks,
+        dt,
+        timings,
+        runner_needs_scalars,
+        false,
+    )
+}
+
+fn run_step_inner(
+    integrator: &mut dyn Integrator,
+    buffers: &mut ParticleBuffers,
+    sim_box: &mut SimulationBox,
+    force_field: &mut ForceField,
     mut constraint: Option<&mut dyn Constraint>,
     install_constraint_hooks: bool,
     dt: Real,
     timings: &mut Timings,
     runner_needs_scalars: bool,
+    run_neighbor_pre_step: bool,
 ) -> Result<(), StepError> {
     let plan = integrator.plan(dt);
     let install = install_constraint_hooks && constraint.is_some();
@@ -257,14 +314,26 @@ pub fn run_step(
         match sub {
             SubStep::ForceEval { class: None, level } => {
                 let resolved = resolve_aggregate_level(*level, runner_needs_scalars);
-                force_field.step(buffers, sim_box, timings, resolved)?;
+                if run_neighbor_pre_step {
+                    force_field.step(buffers, sim_box, timings, resolved)?;
+                } else {
+                    force_field.step_no_neighbor_check(
+                        buffers, sim_box, timings, resolved,
+                    )?;
+                }
             }
             SubStep::ForceEval {
                 class: Some(c),
                 level,
             } => {
                 let resolved = resolve_aggregate_level(*level, runner_needs_scalars);
-                force_field.step_class(*c, buffers, sim_box, timings, resolved)?;
+                if run_neighbor_pre_step {
+                    force_field.step_class(*c, buffers, sim_box, timings, resolved)?;
+                } else {
+                    force_field.step_class_no_neighbor_check(
+                        *c, buffers, sim_box, timings, resolved,
+                    )?;
+                }
             }
             other => {
                 integrator.execute(other, buffers, sim_box, timings)?;
@@ -526,6 +595,18 @@ pub trait IntegratorBuilder: std::fmt::Debug + Send + Sync {
         false
     }
 
+    /// `true` iff every per-step entry point (`step`, `execute`, and
+    /// any sub-step surfaced through `Plan`) consists of pure CUDA
+    /// kernel launches with no host-side state mutation between
+    /// launches and no `dtoh_sync_copy` / `htod_sync_copy` calls.
+    /// Determines whether phases driven by this integrator run under
+    /// CUDA graph mode. Default `true`; integrators with host-side
+    /// scalar arithmetic inside the plan executor override to
+    /// `false`.
+    fn graph_compatible(&self, _params: &toml::Value) -> bool {
+        true
+    }
+
     fn build(
         &self,
         gpu: &GpuContext,
@@ -663,6 +744,15 @@ pub trait ThermostatBuilder: std::fmt::Debug + Send + Sync {
     /// section at config-load time.
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError>;
 
+    /// `true` iff every thermostat entry point (`apply_pre`,
+    /// `apply_post`) consists of pure CUDA kernel launches with no
+    /// host-side state mutation between launches. Determines whether
+    /// phases using this thermostat run under CUDA graph mode. Default
+    /// `true`.
+    fn graph_compatible(&self, _params: &toml::Value) -> bool {
+        true
+    }
+
     fn build(
         &self,
         gpu: &GpuContext,
@@ -787,6 +877,14 @@ pub trait BarostatBuilder: std::fmt::Debug + Send + Sync {
     /// Validate the kind-specific parameters of a `[barostat]`
     /// section at config-load time.
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError>;
+
+    /// `true` iff `Barostat::apply` consists of pure CUDA kernel
+    /// launches with no host-side state mutation between launches.
+    /// Determines whether phases using this barostat run under CUDA
+    /// graph mode. Default `true`.
+    fn graph_compatible(&self, _params: &toml::Value) -> bool {
+        true
+    }
 
     fn build(
         &self,

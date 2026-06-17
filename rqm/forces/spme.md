@@ -231,15 +231,15 @@ The reciprocal-space slot owns:
   written by `spme_influence_multiply` and consumed by
   `spme_recip_virial_finalize`.
 - A cuFFT plan handle for the `(n_a, n_b, n_c)` R2C / C2R transforms.
-  Both plans are bound to the slot's `recip_stream` via `cufftSetStream`
-  at construction and are never rebound.
-- A dedicated CUDA stream `recip_stream` on which the reciprocal-pipeline
-  kernels (influence recompute, charge spread, both FFTs, influence
-  multiply, virial finalize) execute concurrently with the default
-  stream's work for the same timestep.
-- Two CUDA events `default_ready_event` and `recip_ready_event` used to
-  synchronize `recip_stream` with the device's default stream at the
-  entry and exit of the reciprocal pipeline (see *Launch configuration*).
+  Both plans are bound to the device's default `CudaStream` via
+  `cufftSetStream` at construction and are never rebound.
+- A device-resident `workspace: CudaSlice<u8>` buffer of size
+  `max(cufftGetSize(forward_plan), cufftGetSize(inverse_plan))`,
+  allocated at slot construction. Both cuFFT plans run with
+  `cufftSetAutoAllocation(plan, 0)` and have their work-area pointer
+  bound to this buffer via `cufftSetWorkArea(plan, workspace)` at
+  construction. The two plans share the buffer because their
+  executions are strictly serialised on the default stream.
 
 ### Bin structure <!-- rq-618bc65e -->
 
@@ -378,10 +378,10 @@ The cadence of recompute therefore tracks the C-rescale and other
 barostats' box updates: NVT runs recompute exactly once (at
 construction); NPT runs recompute every step the barostat fires.
 
-When the kernel runs, the `recip_stream → default` join at the end of
-`SpmeReciprocalState::compute()` (and the cross-stream waits in
-*Launch configuration*) ensure that downstream consumers see the
-updated buffers before reading them.
+When the kernel runs, the strict default-stream ordering (the
+influence recompute is dispatched before any later reciprocal kernel
+on the same stream; see *Launch configuration*) ensures that
+downstream consumers see the updated buffers before reading them.
 
 ### Influence-function multiply and inverse FFT <!-- rq-95385a9d -->
 
@@ -449,7 +449,7 @@ The per-cell contributions `virial_factor[k] · |rho_hat[k]|²` are
 written to a device buffer `virial_per_cell` by the influence-multiply
 kernel (one thread per complex grid cell; no atomics). The scalar
 `W_recip / N` is then computed on device by the
-`spme_recip_virial_finalize` kernel, which runs on `recip_stream`
+`spme_recip_virial_finalize` kernel, dispatched on the default stream
 immediately after the influence multiply. A single 256-thread block
 sums `virial_per_cell[0 .. M_complex − 1]` with a strided per-thread
 accumulator followed by a deterministic left-to-right pairwise tree in
@@ -549,11 +549,11 @@ only inside the `SpmeReciprocalState` construction path.
   `label() == "spme_reciprocal"`. Reports `max_cutoff() = None` (it does
   not contribute to the shared neighbor list's search radius). Fields
   private. The slot owns its own bin-only `NeighborListState` for the
-  spread / gather kernels, plus the dedicated `recip_stream` and the
-  two cross-stream events used by the reciprocal pipeline (see
-  *Reciprocal-space pipeline*). `recip_stream` and the two events are
-  allocated by `SpmeReciprocalState::new` and released in the slot's
-  `Drop` impl.
+  spread / gather kernels and the device-resident cuFFT workspace
+  buffer used by both transforms (see *Reciprocal-space pipeline*).
+  Every kernel and cuFFT call the slot dispatches runs on the device's
+  default stream; the slot owns no secondary streams or cross-stream
+  events.
 
   Constructor:
   - `SpmeReciprocalState::new(gpu: &GpuContext, sim_box: &SimulationBox, particle_count: usize, charges: &[f32], alpha: f32, grid: [u32; 3], spline_order: u32) -> Result<SpmeReciprocalState, SpmeError>`
@@ -583,28 +583,32 @@ only inside the `SpmeReciprocalState` construction path.
   `spme_real_pair_force_fev`. Writes per-particle output directly into
   `output`'s slot rows.
 
-- `spme_recip_compute_influence_on_stream(kernels, b_factors_a, b_factors_b, b_factors_c, influence_g, virial_factor, sim_box, grid, alpha, k_coulomb, m_complex, stream) -> Result<(), GpuError>` <!-- rq-99d3d796 -->
-  Launches `spme_recip_compute_influence` on the supplied stream. Writes
-  `influence_g` and `virial_factor`. The host call returns as soon as
-  the launch has been enqueued; no host-side computation of the
-  influence function is performed.
+- `spme_recip_compute_influence(kernels, b_factors_a, b_factors_b, b_factors_c, influence_g, virial_factor, sim_box, grid, alpha, k_coulomb, m_complex) -> Result<(), GpuError>` <!-- rq-99d3d796 -->
+  Launches `spme_recip_compute_influence` on the device's default
+  stream. Writes `influence_g` and `virial_factor`. The host call
+  returns as soon as the launch has been enqueued; no host-side
+  computation of the influence function is performed.
 
 - `spme_charge_spread(particle_buffers, spme_state) -> Result<(), GpuError>` <!-- rq-f69698b8 -->
-  Launches the charge-spread kernel. Writes `spme_state.rho`.
+  Launches the charge-spread kernel on the default stream. Writes
+  `spme_state.rho`.
 
 - The R2C forward transform `rho → rho_hat` is invoked via <!-- rq-24e36eba -->
   `SpmeReciprocalGrid::forward_plan.execute(&rho, &mut rho_hat)`, where
   `forward_plan: Plan3dR2C` is constructed in
-  `SpmeReciprocalGrid::new` and pre-bound to `recip_stream` via
-  `set_stream`. The call returns `Result<(), CuFftError>`.
+  `SpmeReciprocalGrid::new`, has its work-area pre-bound to the slot's
+  device-resident workspace via `cufftSetWorkArea`, and is pre-bound
+  to the default stream via `cufftSetStream`. The call returns
+  `Result<(), CuFftError>`.
 
 - `spme_influence_multiply(spme_state) -> Result<(), GpuError>` <!-- rq-8326d2d1 -->
-  Multiplies `rho_hat[k] *= G[k]` in place, also writing the per-cell
-  virial contribution `virial_factor[k] · |rho_hat[k]|²` to
-  `virial_per_cell` for the subsequent reduction.
+  Multiplies `rho_hat[k] *= G[k]` in place on the default stream, also
+  writing the per-cell virial contribution
+  `virial_factor[k] · |rho_hat[k]|²` to `virial_per_cell` for the
+  subsequent reduction.
 
-- `spme_recip_virial_finalize_on_stream(kernels, virial_per_cell, w_per_particle_virial, m_complex, n_particles, stream) -> Result<(), GpuError>` <!-- rq-5d30456e -->
-  Launches `spme_recip_virial_finalize` on the supplied stream. Writes
+- `spme_recip_virial_finalize(kernels, virial_per_cell, w_per_particle_virial, m_complex, n_particles) -> Result<(), GpuError>` <!-- rq-5d30456e -->
+  Launches `spme_recip_virial_finalize` on the default stream. Writes
   `w_per_particle_virial[0] = (0.5 / N) · Σ virial_per_cell[k]` via the
   single-block deterministic pairwise tree described in
   *Reciprocal-space virial*. No host download.
@@ -612,8 +616,10 @@ only inside the `SpmeReciprocalState` construction path.
 - The C2R inverse transform `rho_hat → V` is invoked via <!-- rq-a98abc35 -->
   `SpmeReciprocalGrid::inverse_plan.execute(&rho_hat, &mut V)`, where
   `inverse_plan: Plan3dC2R` is constructed in
-  `SpmeReciprocalGrid::new` and pre-bound to `recip_stream` via
-  `set_stream`. The call returns `Result<(), CuFftError>`.
+  `SpmeReciprocalGrid::new`, has its work-area pre-bound to the slot's
+  device-resident workspace via `cufftSetWorkArea`, and is pre-bound
+  to the default stream via `cufftSetStream`. The call returns
+  `Result<(), CuFftError>`.
 
 - `spme_force_gather(particle_buffers, spme_state, slot_output) -> Result<(), GpuError>` <!-- rq-c6f6a13c -->
   Launches the force-gather kernel. Writes per-particle force,
@@ -719,44 +725,23 @@ implementation).
 
 Stream assignment:
 
-- `spme_real_pair_force_*` and `spme_force_gather` run on the device's <!-- rq-44cce069 -->
-  default stream carried by `particle_buffers.device`.
-- The reciprocal-pipeline kernels — `spme_recip_compute_influence`
-  (when triggered by a box-generation change), `spme_charge_spread`,
-  the cuFFT R2C transform, `spme_influence_multiply`, the cuFFT C2R
-  transform, and `spme_recip_virial_finalize` — run on a dedicated CUDA
-  stream `recip_stream` owned by `SpmeReciprocalState`. The R2C and C2R
-  plans are bound to `recip_stream` via `cufftSetStream` once at slot
-  construction and are never rebound.
+- Every SPME kernel and cuFFT call dispatched by either SPME slot — <!-- rq-44cce069 -->
+  `spme_real_pair_force_*`, `spme_force_gather`,
+  `spme_recip_compute_influence` (when triggered by a box-generation
+  change), `spme_charge_spread`, the cuFFT R2C transform,
+  `spme_influence_multiply`, the cuFFT C2R transform, and
+  `spme_recip_virial_finalize` — runs on the device's default stream
+  carried by `particle_buffers.device`. Both cuFFT plans are bound to
+  the default stream via `cufftSetStream` once at slot construction
+  and are never rebound.
 
-Cross-stream synchronization uses two CUDA events owned by
-`SpmeReciprocalState`:
-
-- A "default → recip_stream" handoff at the start of <!-- rq-274db88b -->
-  `SpmeReciprocalState::contribute()` is implemented via
-  `recip_stream.wait_for_default()`. cudarc records an event on the
-  default stream that captures every prior default-stream launch
-  (integrator updates, bin-list rebuild, any other default-stream
-  slot launches that already returned to host) and makes
-  `recip_stream` wait on it. This guarantees that the integrator's
-  writes to `positions_x/y/z` and the construction-time writes to
-  `charges` are visible before the first reciprocal kernel enqueues.
-- A "recip_stream → default" join at the start of <!-- rq-0d5e76ec -->
-  `SpmeReciprocalState::reduce()` is implemented via
-  `device.wait_for(&recip_stream)`. cudarc records an event on
-  `recip_stream` that captures `spme_recip_virial_finalize`, the
-  inverse FFT, and every prior recip-stream launch (including any
-  `spme_recip_compute_influence` that fired this step), and makes the
-  default stream wait on it. This guarantees that `V` and
-  `w_per_particle_virial` are finalized before the default stream's
-  `spme_force_gather` launch reads them.
-
-Both event handles are managed internally by cudarc on each
-`wait_for_default` / `wait_for` invocation; `SpmeReciprocalState` holds
-no explicit `CudaEvent` fields. The
-host call to `SpmeReciprocalState::contribute()` returns as soon as the
-four reciprocal kernels have been enqueued on `recip_stream`; the host
-does not block on cuFFT or on the reciprocal kernels.
+The slot owns no secondary CUDA streams and no CUDA events. The
+ordering of writes and reads within a step's reciprocal pipeline
+(spread → R2C → influence-multiply → virial-finalize → C2R →
+force-gather) is the natural launch order on the default stream:
+every later kernel reads only buffers written by an earlier kernel
+on the same stream, so CUDA's implicit per-stream ordering supplies
+the producer-consumer guarantee with no explicit synchronisation.
 
 ## Reproducibility <!-- rq-20530653 -->
 
@@ -772,7 +757,11 @@ invariant:
 3. **cuFFT.** Deterministic for fixed plan dimensions, single-stream
    usage, and the same hardware. "Single-stream usage" is satisfied
    because both cuFFT plans are bound once at slot construction to
-   `recip_stream` via `cufftSetStream` and are never rebound. The
+   the device's default stream via `cufftSetStream` and are never
+   rebound, and because their work-area pointer is fixed at
+   construction via `cufftSetAutoAllocation(plan, 0)` +
+   `cufftSetWorkArea(plan, workspace)` so cuFFT does not
+   transparently reallocate scratch memory at execution time. The
    `cufft_determinism_smoke_test` run at `init_device` time validates
    the contract on the host's specific cuFFT version.
 4. **Influence function recompute.** `spme_recip_compute_influence`

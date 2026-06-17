@@ -476,6 +476,14 @@ impl IntegratorBuilder for MtkNptBuilder {
         "mtk-npt"
     }
 
+    fn graph_compatible(&self, _params: &toml::Value) -> bool {
+        // MTK-NPT's sub-step executor mutates `self.eps` between
+        // sub-steps and reads `sim_box.volume()` post-drift — both are
+        // host-side scalar operations that a CUDA graph cannot
+        // capture.
+        false
+    }
+
     fn validate_params(&self, params: &toml::Value) -> Result<(), ConfigError> {
         let p = deserialize_params(params)?;
         require_finite_positive("integrator.temperature", p.temperature)?;

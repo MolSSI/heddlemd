@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use cudarc::driver::{
-    CudaDevice, CudaSlice, CudaStream, CudaViewMut, DeviceSlice, LaunchAsync, LaunchConfig,
+    CudaDevice, CudaSlice, CudaViewMut, DeviceSlice, LaunchAsync, LaunchConfig,
 };
 
 #[cfg(not(feature = "f64"))]
@@ -492,53 +492,6 @@ pub fn spme_charge_spread(
     spline_order: u32,
     rho: &mut CudaSlice<Real>,
 ) -> Result<(), GpuError> {
-    spme_charge_spread_impl(
-        particle_buffers,
-        sim_box,
-        sorted_particle_ids,
-        cell_offsets,
-        grid,
-        spline_order,
-        rho,
-        None,
-    )
-}
-
-// rq-9ca00d25
-#[allow(clippy::too_many_arguments)]
-pub fn spme_charge_spread_on_stream(
-    particle_buffers: &ParticleBuffers,
-    sim_box: &SimulationBox,
-    sorted_particle_ids: &CudaSlice<u32>,
-    cell_offsets: &CudaSlice<u32>,
-    grid: [u32; 3],
-    spline_order: u32,
-    rho: &mut CudaSlice<Real>,
-    stream: &CudaStream,
-) -> Result<(), GpuError> {
-    spme_charge_spread_impl(
-        particle_buffers,
-        sim_box,
-        sorted_particle_ids,
-        cell_offsets,
-        grid,
-        spline_order,
-        rho,
-        Some(stream),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn spme_charge_spread_impl(
-    particle_buffers: &ParticleBuffers,
-    sim_box: &SimulationBox,
-    sorted_particle_ids: &CudaSlice<u32>,
-    cell_offsets: &CudaSlice<u32>,
-    grid: [u32; 3],
-    spline_order: u32,
-    rho: &mut CudaSlice<Real>,
-    stream: Option<&CudaStream>,
-) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     let n_a = grid[0];
     let n_b = grid[1];
@@ -570,10 +523,7 @@ fn spme_charge_spread_impl(
         n_u32,
     );
     unsafe {
-        match stream {
-            Some(s) => func.launch_on_stream(s, cfg, args).map_err(GpuError::from)?,
-            None => func.launch(cfg, args).map_err(GpuError::from)?,
-        }
+        func.launch(cfg, args).map_err(GpuError::from)?;
     }
     Ok(())
 }
@@ -589,57 +539,6 @@ pub fn spme_influence_multiply(
     n_c: u32,
     n_c_complex: u32,
     n_complex: u32,
-) -> Result<(), GpuError> {
-    spme_influence_multiply_impl(
-        kernels,
-        influence_g,
-        virial_factor,
-        rho_hat_interleaved,
-        virial_per_cell,
-        n_c,
-        n_c_complex,
-        n_complex,
-        None,
-    )
-}
-
-// rq-9ca00d25
-#[allow(clippy::too_many_arguments)]
-pub fn spme_influence_multiply_on_stream(
-    kernels: &Kernels,
-    influence_g: &CudaSlice<Real>,
-    virial_factor: &CudaSlice<Real>,
-    rho_hat_interleaved: &mut CudaSlice<Real>,
-    virial_per_cell: &mut CudaSlice<Real>,
-    n_c: u32,
-    n_c_complex: u32,
-    n_complex: u32,
-    stream: &CudaStream,
-) -> Result<(), GpuError> {
-    spme_influence_multiply_impl(
-        kernels,
-        influence_g,
-        virial_factor,
-        rho_hat_interleaved,
-        virial_per_cell,
-        n_c,
-        n_c_complex,
-        n_complex,
-        Some(stream),
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn spme_influence_multiply_impl(
-    kernels: &Kernels,
-    influence_g: &CudaSlice<Real>,
-    virial_factor: &CudaSlice<Real>,
-    rho_hat_interleaved: &mut CudaSlice<Real>,
-    virial_per_cell: &mut CudaSlice<Real>,
-    n_c: u32,
-    n_c_complex: u32,
-    n_complex: u32,
-    stream: Option<&CudaStream>,
 ) -> Result<(), GpuError> {
     if n_complex == 0 {
         return Ok(());
@@ -660,10 +559,7 @@ fn spme_influence_multiply_impl(
         n_complex,
     );
     unsafe {
-        match stream {
-            Some(s) => func.launch_on_stream(s, cfg, args).map_err(GpuError::from)?,
-            None => func.launch(cfg, args).map_err(GpuError::from)?,
-        }
+        func.launch(cfg, args).map_err(GpuError::from)?;
     }
     Ok(())
 }
@@ -680,7 +576,7 @@ fn spme_influence_multiply_impl(
 /// `spme_influence_multiply`) on the same stream so the writes are
 /// visible without additional synchronization.
 #[allow(clippy::too_many_arguments)]
-pub fn spme_recip_compute_influence_on_stream(
+pub fn spme_recip_compute_influence(
     kernels: &Kernels,
     b_factors_a: &CudaSlice<Real>,
     b_factors_b: &CudaSlice<Real>,
@@ -692,7 +588,6 @@ pub fn spme_recip_compute_influence_on_stream(
     k_coulomb: Real,
     alpha: Real,
     m_complex: u32,
-    stream: &CudaStream,
 ) -> Result<(), GpuError> {
     if m_complex == 0 {
         return Ok(());
@@ -720,8 +615,7 @@ pub fn spme_recip_compute_influence_on_stream(
         m_complex,
     );
     unsafe {
-        func.launch_on_stream(stream, cfg, args)
-            .map_err(GpuError::from)?;
+        func.launch(cfg, args).map_err(GpuError::from)?;
     }
     Ok(())
 }
@@ -732,13 +626,12 @@ pub fn spme_recip_compute_influence_on_stream(
 ///   w_per_particle_virial[0] = (0.5 / n) * Σ virial_per_cell[i]
 /// on the supplied stream. Block size 256 (matches the kernel's
 /// `__shared__ Real partial[256]`).
-pub fn spme_recip_virial_finalize_on_stream(
+pub fn spme_recip_virial_finalize(
     kernels: &Kernels,
     virial_per_cell: &CudaSlice<Real>,
     w_per_particle_virial: &mut CudaSlice<Real>,
     m_complex: u32,
     n_particles: u32,
-    stream: &CudaStream,
 ) -> Result<(), GpuError> {
     if m_complex == 0 || n_particles == 0 {
         return Ok(());
@@ -754,8 +647,7 @@ pub fn spme_recip_virial_finalize_on_stream(
     let scale: Real = 0.5 / (n_particles as Real);
     let args = (virial_per_cell, w_per_particle_virial, m_complex, scale);
     unsafe {
-        func.launch_on_stream(stream, cfg, args)
-            .map_err(GpuError::from)?;
+        func.launch(cfg, args).map_err(GpuError::from)?;
     }
     Ok(())
 }
@@ -1177,8 +1069,8 @@ pub fn csvr_sample_and_factor(
     k_old: &CudaSlice<Real>,
     factor_out: &mut CudaSlice<Real>,
     cumulative_injection_delta: &mut CudaSlice<f64>,
+    draw_counter_device: &mut CudaSlice<u64>,
     seed: u64,
-    draw_counter: u64,
     g_dof: u32,
     c: f64,
     one_minus_c: f64,
@@ -1190,6 +1082,7 @@ pub fn csvr_sample_and_factor(
     debug_assert_eq!(k_old.len(), 1);
     debug_assert_eq!(factor_out.len(), 1);
     debug_assert_eq!(cumulative_injection_delta.len(), 1);
+    debug_assert_eq!(draw_counter_device.len(), 1);
     let func = particle_buffers
         .kernels
         .nose_hoover
@@ -1202,8 +1095,6 @@ pub fn csvr_sample_and_factor(
     };
     let seed_lo = seed as u32;
     let seed_hi = (seed >> 32) as u32;
-    let draw_lo = draw_counter as u32;
-    let draw_hi = (draw_counter >> 32) as u32;
     unsafe {
         func.launch(
             cfg,
@@ -1211,10 +1102,9 @@ pub fn csvr_sample_and_factor(
                 k_old,
                 &mut *factor_out,
                 &mut *cumulative_injection_delta,
+                &mut *draw_counter_device,
                 seed_lo,
                 seed_hi,
-                draw_lo,
-                draw_hi,
                 g_dof,
                 c,
                 one_minus_c,
@@ -1233,8 +1123,8 @@ pub fn csvr_sample_and_factor(
 #[allow(clippy::too_many_arguments)]
 pub fn andersen_resample(
     buffers: &mut ParticleBuffers,
+    draw_counter_device: &mut CudaSlice<u64>,
     seed: u64,
-    draw_counter: u64,
     p_collision: Real,
     kt: Real,
 ) -> Result<(), GpuError> {
@@ -1243,13 +1133,12 @@ pub fn andersen_resample(
         return Ok(());
     }
     debug_assert!((0.0..=1.0).contains(&p_collision));
+    debug_assert_eq!(draw_counter_device.len(), 1);
     let n_u32 = n as u32;
     let func = buffers.kernels.andersen.andersen_resample.clone();
     let cfg = launch_config(n_u32);
     let seed_lo = seed as u32;
     let seed_hi = (seed >> 32) as u32;
-    let draw_lo = draw_counter as u32;
-    let draw_hi = (draw_counter >> 32) as u32;
     unsafe {
         func.launch(
             cfg,
@@ -1259,16 +1148,41 @@ pub fn andersen_resample(
                 &mut buffers.velocities_z,
                 &buffers.masses,
                 &buffers.particle_ids,
+                &*draw_counter_device,
                 seed_lo,
                 seed_hi,
-                draw_lo,
-                draw_hi,
                 p_collision,
                 kt,
                 n_u32,
             ),
         )
         .map_err(GpuError::from)?;
+    }
+    // Bump the counter on device for the next launch.
+    increment_u64_device(buffers, draw_counter_device)?;
+    Ok(())
+}
+
+/// Launches the trivial `increment_u64` kernel, which adds 1 to a
+/// single u64 device counter. Used after multi-block Philox kernels
+/// (where reading and writing the counter inside the same kernel is
+/// not safe across blocks) to advance the counter by exactly one per
+/// graph node. Captured as a graph node so a replayed graph advances
+/// the counter on each replay.
+pub fn increment_u64_device(
+    buffers: &ParticleBuffers,
+    counter: &mut CudaSlice<u64>,
+) -> Result<(), GpuError> {
+    debug_assert_eq!(counter.len(), 1);
+    let func = buffers.kernels.nose_hoover.increment_u64.clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (1, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    unsafe {
+        func.launch(cfg, (&mut *counter,))
+            .map_err(GpuError::from)?;
     }
     Ok(())
 }
@@ -1361,8 +1275,8 @@ pub fn c_rescale_compute_mu(
     lattice: &mut CudaSlice<Real>,
     mu_out: &mut CudaSlice<Real>,
     diagnostics: &mut CudaSlice<f64>,
+    draw_counter_device: &mut CudaSlice<u64>,
     seed: u64,
-    draw_counter: u64,
     pressure_target: f64,
     tau: f64,
     compressibility: f64,
@@ -1375,6 +1289,7 @@ pub fn c_rescale_compute_mu(
     debug_assert_eq!(lattice.len(), 6);
     debug_assert_eq!(mu_out.len(), 1);
     debug_assert_eq!(diagnostics.len(), 3);
+    debug_assert_eq!(draw_counter_device.len(), 1);
     let func = particle_buffers
         .kernels
         .barostat
@@ -1387,8 +1302,6 @@ pub fn c_rescale_compute_mu(
     };
     let seed_lo = seed as u32;
     let seed_hi = (seed >> 32) as u32;
-    let draw_lo = draw_counter as u32;
-    let draw_hi = (draw_counter >> 32) as u32;
     unsafe {
         func.launch(
             cfg,
@@ -1398,10 +1311,9 @@ pub fn c_rescale_compute_mu(
                 &mut *lattice,
                 &mut *mu_out,
                 &mut *diagnostics,
+                &mut *draw_counter_device,
                 seed_lo,
                 seed_hi,
-                draw_lo,
-                draw_hi,
                 pressure_target,
                 tau,
                 compressibility,
@@ -2162,8 +2074,8 @@ pub fn lan_drift_half(
 // rq-6435723d
 pub fn lan_ou_step(
     buffers: &mut ParticleBuffers,
+    draw_counter_device: &mut CudaSlice<u64>,
     seed: u64,
-    draw_counter: u64,
     alpha: Real,
     kt: Real,
 ) -> Result<(), GpuError> {
@@ -2171,13 +2083,12 @@ pub fn lan_ou_step(
     if n == 0 {
         return Ok(());
     }
+    debug_assert_eq!(draw_counter_device.len(), 1);
     let n_u32 = n as u32;
     let func = buffers.kernels.langevin.lan_ou_step.clone();
     let cfg = launch_config(n_u32);
     let seed_lo = (seed & 0xFFFF_FFFF) as u32;
     let seed_hi = (seed >> 32) as u32;
-    let draw_lo = (draw_counter & 0xFFFF_FFFF) as u32;
-    let draw_hi = (draw_counter >> 32) as u32;
     unsafe {
         func.launch(
             cfg,
@@ -2187,10 +2098,9 @@ pub fn lan_ou_step(
                 &mut buffers.velocities_z,
                 &buffers.masses,
                 &buffers.particle_ids,
+                &*draw_counter_device,
                 seed_lo,
                 seed_hi,
-                draw_lo,
-                draw_hi,
                 alpha,
                 kt,
                 n_u32,
@@ -2198,6 +2108,7 @@ pub fn lan_ou_step(
         )
         .map_err(GpuError::from)?;
     }
+    increment_u64_device(buffers, draw_counter_device)?;
     Ok(())
 }
 

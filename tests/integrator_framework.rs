@@ -413,12 +413,7 @@ fn langevin_draw_counter_starts_at_zero_and_increments_per_step() {
     let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 2);
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut integrator = LangevinBaoabState {
-        friction: 1.0e12,
-        temperature: 300.0,
-        seed: 42,
-        draw_counter: 0,
-    };
+    let mut integrator = LangevinBaoabState::new(&gpu, 1.0e12, 300.0, 42, 0).unwrap();
     assert_eq!(integrator.draw_counter, 0);
     integrator
         .step(&mut buffers, &mut sim_box, &mut ff, 1.0e-15, &mut timings)
@@ -443,18 +438,8 @@ fn langevin_states_at_same_draw_counter_and_seed_produce_identical_draws() {
     let mut ff_b = empty_force_field(&gpu, 4);
     let mut timings_a = Timings::new(&gpu).unwrap();
     let mut timings_b = Timings::new(&gpu).unwrap();
-    let mut a = LangevinBaoabState {
-        friction: 1.0e12,
-        temperature: 300.0,
-        seed: 7,
-        draw_counter: 5,
-    };
-    let mut b = LangevinBaoabState {
-        friction: 1.0e12,
-        temperature: 300.0,
-        seed: 7,
-        draw_counter: 5,
-    };
+    let mut a = LangevinBaoabState::new(&gpu, 1.0e12, 300.0, 7, 5).unwrap();
+    let mut b = LangevinBaoabState::new(&gpu, 1.0e12, 300.0, 7, 5).unwrap();
     a.step(&mut buffers_a, &mut sim_box_a, &mut ff_a, 1.0e-15, &mut timings_a)
         .unwrap();
     b.step(&mut buffers_b, &mut sim_box_b, &mut ff_b, 1.0e-15, &mut timings_b)
