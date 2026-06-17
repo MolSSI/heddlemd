@@ -358,6 +358,10 @@ fn csvr_cumulative_injection_tracks_kinetic_energy_changes() {
     therm
         .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
+    // Device-side `(k_new - k_old)` accumulator is updated by
+    // `apply_post`. Drain it into `therm.cumulative_injection` before
+    // reading; the runner does the same before each log row.
+    therm.flush_pending_injection(&gpu.device).unwrap();
     let k_after = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
     let expected = k_after - k_before;
     let rel = (therm.cumulative_injection - expected).abs() / expected.abs().max(1.0e-30);
@@ -510,7 +514,7 @@ fn csvr_time_averaged_ke_tracks_k_target() {
 
 // rq-efea1b70
 #[test]
-fn csvr_skips_rescale_when_k_zero() {
+fn csvr_leaves_velocities_unchanged_when_k_zero() {
     let gpu = init_device().unwrap();
     let n = 4usize;
     // All-zero velocities → K = 0.
@@ -534,14 +538,17 @@ fn csvr_skips_rescale_when_k_zero() {
     therm
         .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
         .unwrap();
-    let report = timings.finalize().unwrap();
-    let count = report
-        .stages
-        .iter()
-        .find(|r| r.name == heddle_md::timings::KernelStage::CSVR_RESCALE_VELOCITIES.name())
-        .map(|r| r.count)
-        .unwrap_or(0);
-    assert_eq!(count, 0, "csvr should not launch rescale kernel when K=0");
+    // The GPU-side `csvr_sample_and_factor` kernel writes factor = 1.0
+    // when k_old == 0 (the k_old > 0 guard suppresses the cross term and
+    // the rescale-factor computation), so the rescale kernel runs but
+    // leaves velocities at zero. The host can no longer skip the kernel
+    // launch because k_old is never downloaded.
+    let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
+    let vy = gpu.device.dtoh_sync_copy(&buffers.velocities_y).unwrap();
+    let vz = gpu.device.dtoh_sync_copy(&buffers.velocities_z).unwrap();
+    assert!(vx.iter().all(|&v| v == 0.0));
+    assert!(vy.iter().all(|&v| v == 0.0));
+    assert!(vz.iter().all(|&v| v == 0.0));
 }
 
 // rq-70a46202

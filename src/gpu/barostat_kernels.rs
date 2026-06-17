@@ -18,6 +18,7 @@ use crate::kernels;
 pub struct BarostatKernels {
     pub virial_sum_reduce: CudaFunction,
     pub rescale_positions: CudaFunction,
+    pub c_rescale_compute_mu: CudaFunction,
 }
 
 impl BarostatKernels {
@@ -26,11 +27,12 @@ impl BarostatKernels {
         device.load_ptx(
             Ptx::from_src(kernels::BAROSTAT),
             "barostat",
-            &["virial_sum_reduce", "rescale_positions"],
+            &["virial_sum_reduce", "rescale_positions", "c_rescale_compute_mu"],
         )?;
         Ok(BarostatKernels {
             virial_sum_reduce: get_func(device, "barostat", "virial_sum_reduce")?,
             rescale_positions: get_func(device, "barostat", "rescale_positions")?,
+            c_rescale_compute_mu: get_func(device, "barostat", "c_rescale_compute_mu")?,
         })
     }
 }

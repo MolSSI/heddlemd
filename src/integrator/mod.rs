@@ -629,6 +629,19 @@ pub trait Thermostat: std::fmt::Debug + Send {
         timings: &mut Timings,
     ) -> Result<(), ThermostatError>;
 
+    /// Drain any device-side accumulators the thermostat maintains
+    /// (e.g. CSVR's `(k_new - k_old)` delta) into host state so that
+    /// `log_column_values` reflects every step since the last flush.
+    /// Default implementation is a no-op for thermostats that maintain
+    /// no device-side accumulator. The runner calls this once before
+    /// each log row is emitted.
+    fn flush_pending_injection(
+        &mut self,
+        _device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    ) -> Result<(), ThermostatError> {
+        Ok(())
+    }
+
     fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
         &[]
     }
@@ -740,6 +753,19 @@ pub trait Barostat: std::fmt::Debug + Send {
         dt: Real,
         timings: &mut Timings,
     ) -> Result<(), BarostatError>;
+
+    /// Drain any device-side accumulators the barostat maintains
+    /// (e.g. C-rescale's `P_target · (v_post - v_pre)` delta) into host
+    /// state so that `log_column_values` reflects every step since the
+    /// last flush. Default implementation is a no-op for barostats that
+    /// maintain no device-side accumulator. The runner calls this once
+    /// before each log row is emitted.
+    fn flush_pending_injection(
+        &mut self,
+        _device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    ) -> Result<(), BarostatError> {
+        Ok(())
+    }
 
     fn log_column_names(&self) -> &'static [(&'static str, crate::units::Dimension)] {
         &[]

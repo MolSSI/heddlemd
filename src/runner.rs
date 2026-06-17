@@ -1253,6 +1253,14 @@ pub(crate) fn run_md_phase_inner(
         frames_written += 1;
     }
     if let Some(writer) = log_writer.as_mut() {
+        if let Some(t) = thermostat.as_mut() {
+            t.flush_pending_injection(&setup.gpu.device)
+                .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Setup))?;
+        }
+        if let Some(b) = barostat.as_mut() {
+            b.flush_pending_injection(&setup.gpu.device)
+                .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Setup))?;
+        }
         let ke = compute_kinetic_energy(
             &frame.masses,
             &frame.velocities_x,
@@ -1373,6 +1381,17 @@ pub(crate) fn run_md_phase_inner(
         }
         if want_log {
             let writer = log_writer.as_mut().expect("log_writer enabled");
+            // Drain any per-step device-side accumulators the
+            // thermostat / barostat maintain so the conserved-quantity
+            // log columns reflect every step since the last log row.
+            if let Some(t) = thermostat.as_mut() {
+                t.flush_pending_injection(&setup.gpu.device)
+                    .map_err(|e| (RunnerError::Thermostat(e), ExitPhase::Loop))?;
+            }
+            if let Some(b) = barostat.as_mut() {
+                b.flush_pending_injection(&setup.gpu.device)
+                    .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
+            }
             let ke = compute_kinetic_energy(
                 &frame.masses,
                 &frame.velocities_x,

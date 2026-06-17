@@ -1059,6 +1059,140 @@ pub fn rescale_velocities(
     Ok(())
 }
 
+/// Launches `kinetic_energy_reduce` and leaves the scalar result in
+/// `scratch[0]` on device — no dtoh. Same kernel as
+/// `compute_kinetic_energy`, just without the blocking host transfer;
+/// the caller is expected to consume the value either via another
+/// device-side kernel (e.g. `csvr_sample_and_factor`) or via a later
+/// host dtoh when one is unavoidable.
+pub fn compute_kinetic_energy_on_device(
+    particle_buffers: &ParticleBuffers,
+    scratch: &mut CudaSlice<Real>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(scratch.len(), 1);
+    let n_u32 = n as u32;
+    let func = particle_buffers.kernels.nose_hoover.kinetic_energy_reduce.clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.velocities_x,
+                &particle_buffers.velocities_y,
+                &particle_buffers.velocities_z,
+                &particle_buffers.masses,
+                &mut *scratch,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+/// Launches `rescale_velocities_device_factor`: applies a velocity
+/// rescale `v_i ← factor[0] · v_i` where `factor` is a single-element
+/// device buffer (typically the output of `csvr_sample_and_factor`).
+pub fn rescale_velocities_device_factor(
+    particle_buffers: &mut ParticleBuffers,
+    factor: &CudaSlice<Real>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(factor.len(), 1);
+    let n_u32 = n as u32;
+    let func = particle_buffers
+        .kernels
+        .nose_hoover
+        .rescale_velocities_device_factor
+        .clone();
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut particle_buffers.velocities_x,
+                &mut particle_buffers.velocities_y,
+                &mut particle_buffers.velocities_z,
+                factor,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+/// Launches `csvr_sample_and_factor`: reads `k_old` from device,
+/// generates `g_dof` Philox samples in parallel, evaluates the CSVR
+/// chain, and writes `factor_out[0] = sqrt(k_new/k_old)` plus accumulates
+/// `(k_new - k_old)` into `cumulative_injection_delta[0]`. Single
+/// 256-thread block; no host sync required.
+#[allow(clippy::too_many_arguments)]
+pub fn csvr_sample_and_factor(
+    particle_buffers: &ParticleBuffers,
+    k_old: &CudaSlice<Real>,
+    factor_out: &mut CudaSlice<Real>,
+    cumulative_injection_delta: &mut CudaSlice<f64>,
+    seed: u64,
+    draw_counter: u64,
+    g_dof: u32,
+    c: f64,
+    one_minus_c: f64,
+    k_target_over_nf: f64,
+) -> Result<(), GpuError> {
+    if g_dof == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(k_old.len(), 1);
+    debug_assert_eq!(factor_out.len(), 1);
+    debug_assert_eq!(cumulative_injection_delta.len(), 1);
+    let func = particle_buffers
+        .kernels
+        .nose_hoover
+        .csvr_sample_and_factor
+        .clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let seed_lo = seed as u32;
+    let seed_hi = (seed >> 32) as u32;
+    let draw_lo = draw_counter as u32;
+    let draw_hi = (draw_counter >> 32) as u32;
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                k_old,
+                &mut *factor_out,
+                &mut *cumulative_injection_delta,
+                seed_lo,
+                seed_hi,
+                draw_lo,
+                draw_hi,
+                g_dof,
+                c,
+                one_minus_c,
+                k_target_over_nf,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 // Launch helper for the Andersen per-particle resample kernel. Block
 // size 256, grid `ceil(n / 256)`. When `n == 0` returns Ok(()) without
 // launching. Debug-asserts `p_collision ∈ [0, 1]` (caller clamps).
@@ -1145,6 +1279,105 @@ pub fn compute_total_virial(
         .dtoh_sync_copy_into(scratch, &mut out)
         .map_err(GpuError::from)?;
     Ok(out[0])
+}
+
+/// Same as `compute_total_virial` but leaves the result in `scratch[0]`
+/// on device — no host download. Used by the c-rescale barostat's
+/// device-resident pipeline.
+pub fn compute_total_virial_on_device(
+    particle_buffers: &ParticleBuffers,
+    scratch: &mut CudaSlice<Real>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(scratch.len(), 1);
+    let n_u32 = n as u32;
+    let func = particle_buffers.kernels.barostat.virial_sum_reduce.clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.virials,
+                &mut *scratch,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+/// Launches `c_rescale_compute_mu`: reads `k`, `w` from device, samples
+/// one Philox normal, computes µ + diagnostic pressure in double
+/// precision, accumulates the conserved-quantity injection delta.
+/// Single thread (one-element output, no parallelism needed beyond
+/// the inputs being device-resident).
+#[allow(clippy::too_many_arguments)]
+pub fn c_rescale_compute_mu(
+    particle_buffers: &ParticleBuffers,
+    k: &CudaSlice<Real>,
+    w: &CudaSlice<Real>,
+    mu_pressure_out: &mut CudaSlice<Real>,
+    cumulative_injection_delta: &mut CudaSlice<f64>,
+    seed: u64,
+    draw_counter: u64,
+    v_pre: f64,
+    pressure_target: f64,
+    tau: f64,
+    compressibility: f64,
+    kt: f64,
+    dt: f64,
+    mu_cubed_min: f64,
+) -> Result<(), GpuError> {
+    debug_assert_eq!(k.len(), 1);
+    debug_assert_eq!(w.len(), 1);
+    debug_assert_eq!(mu_pressure_out.len(), 2);
+    debug_assert_eq!(cumulative_injection_delta.len(), 1);
+    let func = particle_buffers
+        .kernels
+        .barostat
+        .c_rescale_compute_mu
+        .clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (1, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let seed_lo = seed as u32;
+    let seed_hi = (seed >> 32) as u32;
+    let draw_lo = draw_counter as u32;
+    let draw_hi = (draw_counter >> 32) as u32;
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                k,
+                w,
+                &mut *mu_pressure_out,
+                &mut *cumulative_injection_delta,
+                seed_lo,
+                seed_hi,
+                draw_lo,
+                draw_hi,
+                v_pre,
+                pressure_target,
+                tau,
+                compressibility,
+                kt,
+                dt,
+                mu_cubed_min,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
 }
 
 // rq-fc6859df
