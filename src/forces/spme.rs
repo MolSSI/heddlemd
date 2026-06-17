@@ -590,13 +590,11 @@ pub struct SpmeReciprocalState {
     // `u_self_per_particle[i] = k_C · (α/√π) · q_i²`. Subtracted from
     // the per-particle reciprocal energy inside the gather kernel.
     u_self_per_particle: CudaSlice<Real>,
-    // Host scratch for the reciprocal-virial reduction. Reused across
-    // steps to avoid per-step allocation.
-    virial_host_scratch: Vec<Real>,
-    // Reduced per-particle reciprocal virial share, set by `contribute()`
-    // from `virial_per_cell` and consumed by `reduce()` via the gather
-    // kernel argument.
-    w_per_particle_virial: Real,
+    // Reduced per-particle reciprocal virial share, computed on
+    // `recip_stream` by `spme_recip_virial_finalize` from
+    // `virial_per_cell` and consumed by the gather kernel on the
+    // default stream after the recip stream is joined back.
+    w_per_particle_virial: CudaSlice<Real>,
 }
 
 impl SpmeReciprocalState {
@@ -625,11 +623,12 @@ impl SpmeReciprocalState {
                 .htod_sync_copy(&u_self_host)
                 .map_err(GpuError::from)?
         };
+        let w_per_particle_virial =
+            grid.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         Ok(SpmeReciprocalState {
             grid,
             u_self_per_particle,
-            virial_host_scratch: vec![0.0; grid_m_complex_or_zero(&params)],
-            w_per_particle_virial: 0.0,
+            w_per_particle_virial,
         })
     }
 
@@ -638,13 +637,6 @@ impl SpmeReciprocalState {
     pub fn grid(&self) -> &SpmeReciprocalGrid {
         &self.grid
     }
-}
-
-fn grid_m_complex_or_zero(params: &SpmeParameters) -> usize {
-    let n_a = params.grid[0] as usize;
-    let n_b = params.grid[1] as usize;
-    let n_c = params.grid[2] as usize;
-    n_a * n_b * (n_c / 2 + 1)
 }
 
 impl Potential for SpmeReciprocalState {
@@ -674,7 +666,6 @@ impl Potential for SpmeReciprocalState {
     ) -> Result<(), ForceFieldError> {
         let n = self.grid.particle_count;
         if n == 0 {
-            self.w_per_particle_virial = 0.0;
             return Ok(());
         }
         // Launch the 4 reciprocal kernels on recip_stream.
@@ -682,32 +673,33 @@ impl Potential for SpmeReciprocalState {
         self.grid
             .compute(sim_box, buffers, timings)
             .map_err(map_spme_err)?;
+        // Reduce virial_per_cell into a single device scalar
+        // `w_per_particle_virial` on the same recip_stream as the
+        // pipeline kernels. The reduction is deterministic
+        // (single-block left-to-right tree, same as
+        // `barostat::virial_sum_reduce`) and the scale = 0.5 / n
+        // matches the Ewald half-sum that defines U_recip in
+        // `docs/long-range-electrostatics.md`. Keeping the reduction
+        // on-device eliminates a per-step ~450 KB dtoh sync that
+        // previously dominated step wall time.
+        crate::gpu::spme_recip_virial_finalize_on_stream(
+            &buffers.kernels,
+            &self.grid.virial_per_cell,
+            &mut self.w_per_particle_virial,
+            self.grid.m_complex as u32,
+            n as u32,
+            &self.grid.recip_stream,
+        )?;
         timings.kernel_stop(KernelStage::SPME_RECIP_PIPELINE)?;
 
-        // Join the default stream with recip_stream so the dtoh below
-        // and the force_gather launch that follows both see finalized
-        // virial_per_cell and V buffers.
+        // Join the default stream with recip_stream so the force_gather
+        // launch that follows sees finalized `V` and
+        // `w_per_particle_virial`.
         // rq-0d5e76ec
         self.grid
             .device
             .wait_for(&self.grid.recip_stream)
             .map_err(GpuError::from)?;
-
-        // Reduce virial_per_cell host-side. The 0.5 factor matches the
-        // Ewald half-sum that defines U_recip in
-        // `docs/long-range-electrostatics.md`.
-        if self.virial_host_scratch.len() != self.grid.m_complex {
-            self.virial_host_scratch.resize(self.grid.m_complex, 0.0);
-        }
-        self.grid
-            .device
-            .dtoh_sync_copy_into(&self.grid.virial_per_cell, &mut self.virial_host_scratch)
-            .map_err(GpuError::from)?;
-        let mut w_recip = 0.0_f64;
-        for &v in &self.virial_host_scratch {
-            w_recip += v as f64;
-        }
-        self.w_per_particle_virial = (0.5 * w_recip / n as f64) as Real;
 
         timings.kernel_start(KernelStage::SPME_FORCE_GATHER)?;
         spme_force_gather(
@@ -715,7 +707,7 @@ impl Potential for SpmeReciprocalState {
             sim_box,
             &self.grid.v,
             &self.u_self_per_particle,
-            self.w_per_particle_virial,
+            &self.w_per_particle_virial,
             self.grid.params.grid,
             self.grid.params.spline_order,
             &mut output.force_x,
@@ -832,6 +824,7 @@ impl SpmeRealKernels {
 pub struct SpmeRecipKernels {
     pub spme_charge_spread: CudaFunction,
     pub spme_influence_multiply: CudaFunction,
+    pub spme_recip_virial_finalize: CudaFunction,
     pub spme_force_gather: CudaFunction,
 }
 
@@ -840,11 +833,21 @@ impl SpmeRecipKernels {
         device.load_ptx(
             Ptx::from_src(kernels::SPME_RECIP),
             "spme_recip",
-            &["spme_charge_spread", "spme_influence_multiply", "spme_force_gather"],
+            &[
+                "spme_charge_spread",
+                "spme_influence_multiply",
+                "spme_recip_virial_finalize",
+                "spme_force_gather",
+            ],
         )?;
         Ok(SpmeRecipKernels {
             spme_charge_spread: get_func(device, "spme_recip", "spme_charge_spread")?,
             spme_influence_multiply: get_func(device, "spme_recip", "spme_influence_multiply")?,
+            spme_recip_virial_finalize: get_func(
+                device,
+                "spme_recip",
+                "spme_recip_virial_finalize",
+            )?,
             spme_force_gather: get_func(device, "spme_recip", "spme_force_gather")?,
         })
     }

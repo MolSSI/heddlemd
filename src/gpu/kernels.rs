@@ -678,6 +678,40 @@ fn spme_influence_multiply_impl(
     Ok(())
 }
 
+/// Launches the single-block deterministic reduction of
+/// `virial_per_cell` followed by the Ewald half-sum / per-particle
+/// scale. Writes
+///   w_per_particle_virial[0] = (0.5 / n) * Σ virial_per_cell[i]
+/// on the supplied stream. Block size 256 (matches the kernel's
+/// `__shared__ Real partial[256]`).
+pub fn spme_recip_virial_finalize_on_stream(
+    kernels: &Kernels,
+    virial_per_cell: &CudaSlice<Real>,
+    w_per_particle_virial: &mut CudaSlice<Real>,
+    m_complex: u32,
+    n_particles: u32,
+    stream: &CudaStream,
+) -> Result<(), GpuError> {
+    if m_complex == 0 || n_particles == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(virial_per_cell.len(), m_complex as usize);
+    debug_assert_eq!(w_per_particle_virial.len(), 1);
+    let func = kernels.spme_recip.spme_recip_virial_finalize.clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let scale: Real = 0.5 / (n_particles as Real);
+    let args = (virial_per_cell, w_per_particle_virial, m_complex, scale);
+    unsafe {
+        func.launch_on_stream(stream, cfg, args)
+            .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 // rq-9ca00d25 rq-35b76155 rq-c6f6a13c
 #[allow(clippy::too_many_arguments)]
 pub fn spme_force_gather(
@@ -685,7 +719,7 @@ pub fn spme_force_gather(
     sim_box: &SimulationBox,
     v: &CudaSlice<Real>,
     u_self_per_particle: &CudaSlice<Real>,
-    w_per_particle_virial: Real,
+    w_per_particle_virial: &CudaSlice<Real>,
     grid: [u32; 3],
     spline_order: u32,
     slot_force_x: &mut CudaViewMut<'_, Real>,
@@ -701,6 +735,7 @@ pub fn spme_force_gather(
     let m =
         grid[0] as usize * grid[1] as usize * grid[2] as usize;
     debug_assert_eq!(v.len(), m);
+    debug_assert_eq!(w_per_particle_virial.len(), 1);
     debug_assert_eq!(particle_buffers.charges.len(), n);
     debug_assert_eq!(u_self_per_particle.len(), n);
     debug_assert_eq!(slot_force_x.len(), n);

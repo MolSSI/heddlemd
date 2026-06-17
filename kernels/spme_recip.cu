@@ -233,6 +233,42 @@ __device__ static inline void reciprocal_lattice_rows(
 // The reciprocal-space scalar virial `W_recip` is reduced host-side
 // from `virial_per_cell`; this kernel writes the uniform per-particle
 // share `w_per_particle_virial = W_recip / N` into `slot_virial[i]`.
+// Single-block deterministic reduction of `virial_per_cell` followed by
+// the Ewald half-sum / per-particle scale: writes
+//   w_per_particle_virial[0] = scale * Σ virial_per_cell[i]
+// with `scale = 0.5 / n`. Same shape as `barostat::virial_sum_reduce`:
+// one block of 256 threads, strided per-thread accumulator, deterministic
+// left-to-right pairwise tree in shared memory. Two runs with
+// byte-identical inputs on the same GPU produce a byte-identical
+// `w_per_particle_virial[0]`.
+extern "C" __global__ void spme_recip_virial_finalize(
+    const Real *virial_per_cell,
+    Real *w_per_particle_virial,   // length 1; only thread 0 writes
+    unsigned int m_complex,
+    Real scale)
+{
+  __shared__ Real partial[256];
+
+  unsigned int tid = threadIdx.x;
+  Real sum = R(0.0);
+  for (unsigned int i = tid; i < m_complex; i += blockDim.x) {
+    sum += virial_per_cell[i];
+  }
+  partial[tid] = sum;
+  __syncthreads();
+
+  for (unsigned int stride = 1; stride < blockDim.x; stride *= 2) {
+    if ((tid % (2u * stride)) == 0u && (tid + stride) < blockDim.x) {
+      partial[tid] += partial[tid + stride];
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0u) {
+    w_per_particle_virial[0] = partial[0] * scale;
+  }
+}
+
 extern "C" __global__ void spme_force_gather(
     const Real *positions_x,
     const Real *positions_y,
@@ -240,7 +276,7 @@ extern "C" __global__ void spme_force_gather(
     const Real *charges,
     const Real *V,
     const Real *u_self_per_particle,
-    Real w_per_particle_virial,
+    const Real *w_per_particle_virial,   // length 1
     Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
     unsigned int spline_order,
@@ -251,6 +287,7 @@ extern "C" __global__ void spme_force_gather(
     Real *slot_virial,
     unsigned int n)
 {
+  Real w_per_particle_virial_val = w_per_particle_virial[0];
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) {
     return;
@@ -335,5 +372,5 @@ extern "C" __global__ void spme_force_gather(
   slot_force_y[i] = fy;
   slot_force_z[i] = fz;
   slot_energy[i]  = R(0.5) * qi * accum_phi - u_self_per_particle[i];
-  slot_virial[i]  = w_per_particle_virial;
+  slot_virial[i]  = w_per_particle_virial_val;
 }
