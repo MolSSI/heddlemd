@@ -2823,6 +2823,13 @@
     "title": "Reject NaN diagonal",
     "type": "scenario"
   },
+  "rq-1a050856": {
+    "decl": "Scenario: multiply_lattice_isotropic multiplies every device lattice component by the factor",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "multiply_lattice_isotropic multiplies every device lattice component by the factor",
+    "type": "scenario"
+  },
   "rq-1a0f3eef": {
     "decl": "Scenario: Identical inputs produce byte-identical slot output",
     "file": "forces/coulomb-pair-force",
@@ -5480,6 +5487,13 @@
       }
     ],
     "title": "r_search_sq is preserved across a generation refresh",
+    "type": "scenario"
+  },
+  "rq-3201765a": {
+    "decl": "Scenario: A kernel mutates the device lattice through lattice_device_mut",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "A kernel mutates the device lattice through lattice_device_mut",
     "type": "scenario"
   },
   "rq-321fe0d0": {
@@ -8234,6 +8248,13 @@
     "title": "MtkNptIntegrator",
     "type": "api-item"
   },
+  "rq-50b50f8d": {
+    "decl": "Scenario: flush_from_device refreshes host fields from the device buffer",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "flush_from_device refreshes host fields from the device buffer",
+    "type": "scenario"
+  },
   "rq-50baca8c": {
     "decl": "Scenario: Variance scales with sqrt((1 - alpha^2) * kt / m)",
     "file": "integration/langevin-baoab",
@@ -10776,6 +10797,13 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-6b4dda1b": {
+    "decl": "Scenario: flush_from_device is idempotent",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "flush_from_device is idempotent",
+    "type": "scenario"
+  },
   "rq-6b6180af": {
     "decl": "## Velocity-Verlet Loop",
     "file": "pipeline-reproducibility",
@@ -11026,6 +11054,14 @@
     ],
     "title": "log_column_values",
     "type": "api-item"
+  },
+  "rq-6d65f104": {
+    "decl": "## Host / device synchronisation <!-- new -->",
+    "file": "simulation-box",
+    "level": 2,
+    "refs": [],
+    "title": "Host / device synchronisation <!-- new -->",
+    "type": "section"
   },
   "rq-6d99f9c8": {
     "decl": "### Path resolution and overwrite policy",
@@ -11646,6 +11682,13 @@
     "title": "Cadence",
     "type": "section"
   },
+  "rq-74baa5d1": {
+    "decl": "Scenario: multiply_lattice_isotropic rejects a non-positive factor",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "multiply_lattice_isotropic rejects a non-positive factor",
+    "type": "scenario"
+  },
   "rq-74bb02cc": {
     "decl": "- `Registries` — bundled handle to every open builder registry the",
     "file": "simulation-runner",
@@ -12120,6 +12163,13 @@
     "refs": [],
     "title": "Per-Step Kernel Sequence",
     "type": "section"
+  },
+  "rq-7893a07f": {
+    "decl": "Scenario: volume() returns the stale host value between device-side mutation and flush",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "volume() returns the stale host value between device-side mutation and flush",
+    "type": "scenario"
   },
   "rq-7896e33a": {
     "decl": "- `ConstraintBuilder` — trait describing a registered constraint",
@@ -12629,6 +12679,13 @@
     "refs": [],
     "title": "Rust Launch Helpers",
     "type": "section"
+  },
+  "rq-7cc7e568": {
+    "decl": "Scenario: flush_from_device does not bump the generation",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "flush_from_device does not bump the generation",
+    "type": "scenario"
   },
   "rq-7cd5fae2": {
     "decl": "Scenario: lan_drift_half wraps positions across the +L/2 boundary",
@@ -16777,6 +16834,13 @@
     ],
     "title": "Plan whose final sub-step is not a Kick does not fire after_kick",
     "type": "scenario"
+  },
+  "rq-a91f1e58": {
+    "decl": "- `SimulationBox::multiply_lattice_isotropic(&mut self, factor: f32) -> Result<(), SimulationBoxError>`",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "SimulationBox",
+    "type": "api-item"
   },
   "rq-a93a5b14": {
     "decl": "Scenario: Block-non-aligned particle counts are handled by the bounds check",
@@ -21350,6 +21414,13 @@
     "title": "fill kernel does not write beyond the buffer",
     "type": "scenario"
   },
+  "rq-d93dc6af": {
+    "decl": "- `SimulationBox::lattice_device_mut(&mut self) -> &mut CudaSlice<f32>`",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "SimulationBox",
+    "type": "api-item"
+  },
   "rq-d93f05a5": {
     "decl": "### Equations of motion",
     "file": "integration/mtk-npt",
@@ -23456,6 +23527,13 @@
     "title": "Units",
     "type": "section"
   },
+  "rq-ede17d32": {
+    "decl": "- `SimulationBox::flush_from_device(&mut self) -> Result<(), SimulationBoxError>`",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "SimulationBox",
+    "type": "api-item"
+  },
   "rq-ede87154": {
     "decl": "Scenario: spme_recip_virial_finalize writes (0.5 / N) · Σ virial_per_cell on device",
     "file": "forces/spme",
@@ -24104,6 +24182,13 @@
       }
     ],
     "title": "Langevin BAOAB missing temperature is rejected",
+    "type": "scenario"
+  },
+  "rq-f257d735": {
+    "decl": "Scenario: lattice_device_mut bumps generation without updating host fields",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "lattice_device_mut bumps generation without updating host fields",
     "type": "scenario"
   },
   "rq-f2673343": {
@@ -25249,6 +25334,13 @@
     "title": "Implicit Exclusions from Constraint Groups",
     "type": "section"
   },
+  "rq-fdb54f47": {
+    "decl": "Scenario: multiply_lattice_isotropic rejects a non-finite factor",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "multiply_lattice_isotropic rejects a non-finite factor",
+    "type": "scenario"
+  },
   "rq-fdbb902d": {
     "decl": "## Timing Methodology",
     "file": "performance-analysis",
@@ -25344,6 +25436,13 @@
     ],
     "title": "Load a topology file with one rigid-water constraint",
     "type": "scenario"
+  },
+  "rq-fe7f35cd": {
+    "decl": "- `flush_pending_injection(device)` — downloads `diagnostics_device`",
+    "file": "integration/c-rescale-barostat",
+    "refs": [],
+    "title": "flush_pending_injection",
+    "type": "api-item"
   },
   "rq-fe95ff5f": {
     "decl": "Scenario: Angle virial equals r_ij · F_i + r_kj · F_k",

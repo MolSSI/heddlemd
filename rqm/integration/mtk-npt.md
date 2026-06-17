@@ -123,7 +123,12 @@ The five operators:
   applies. Simultaneously: `ε ← ε + (p_ε / W) · dt`, i.e.
   `V_new = V_old · exp(3 · (p_ε / W) · dt)` and the box is
   rescaled by `μ_box = (V_new / V_old)^(1/3) = exp((p_ε / W) · dt)`
-  via `sim_box.rescale_isotropic(μ_box)`.
+  via `sim_box.multiply_lattice_isotropic(μ_box)` (see
+  `simulation-box.md`). The call bumps the box generation counter
+  by 1 and mutates the device-resident lattice in place; the
+  `sim_box`'s host fields become stale until the next
+  `sim_box.flush_from_device()` issued by the runner (typically at
+  log-write cadence).
 - `L_force_eval`: `force_field.step(...)` recomputes `F` and the
   virials at the new positions and new box.
 
@@ -169,7 +174,7 @@ sub-step to the appropriate kernel sequence:
 | 4     | `Custom`             | `particle_chain_pre` | `rescale_velocities` × N_sub   | `MtkNptRescaleVelocities`     |
 | 5     | `Custom`             | `baro_kick_pre`      | host arithmetic on `p_ε`       | —                             |
 | 6     | `KickHalf`           | `vel_kick_pre`       | `mtk_velocity_half_kick`       | `MtkNptVelocityHalfKick`      |
-| 7     | `Drift`              | `drift_box`          | `mtk_position_drift` + `sim_box.rescale_isotropic` | `MtkNptPositionDrift` |
+| 7     | `Drift`              | `drift_box`          | `mtk_position_drift` + `sim_box.multiply_lattice_isotropic` | `MtkNptPositionDrift` |
 | 8     | (`ForceEval`)        |                      | force pipeline (runner)        | (force-pipeline stages)       |
 | 9     | `Custom`             | `ke_reduce_post`     | `kinetic_energy_reduce`        | `KineticEnergyReduce`         |
 | 10    | `Custom`             | `vir_reduce_post`    | `virial_sum_reduce`            | `VirialSumReduce`             |

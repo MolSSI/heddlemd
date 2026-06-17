@@ -167,6 +167,67 @@ impl SimulationBox {
         &self.lattice_device
     }
 
+    /// Mutable access to the device-resident lattice mirror. Bumps the
+    /// generation counter; host fields become stale until the next
+    /// `flush_from_device` call. Used by barostat kernels that compute
+    /// the new lattice on device.
+    pub fn lattice_device_mut(&mut self) -> &mut CudaSlice<Real> {
+        self.generation = self.generation.wrapping_add(1);
+        &mut self.lattice_device
+    }
+
+    /// Multiplies every component of the device-resident lattice mirror
+    /// by `factor` via the `multiply_lattice_isotropic` kernel. Bumps
+    /// the generation counter on success. Host fields are not updated.
+    ///
+    /// Returns `NonFiniteLatticeValue { name: "factor" }` if `factor`
+    /// is non-finite or `NonPositiveDiagonal { name: "factor" }` if
+    /// `factor <= 0`. On any error the device buffer and generation
+    /// counter are left unchanged.
+    pub fn multiply_lattice_isotropic(
+        &mut self,
+        factor: Real,
+    ) -> Result<(), SimulationBoxError> {
+        check_diagonal("factor", factor)?;
+        let func = self
+            .device
+            .get_func("barostat", "multiply_lattice_isotropic")
+            .ok_or_else(|| {
+                GpuError(cudarc::driver::DriverError(
+                    cudarc::driver::sys::CUresult::CUDA_ERROR_NOT_FOUND,
+                ))
+            })?;
+        let cfg = cudarc::driver::LaunchConfig {
+            grid_dim: (1, 1, 1),
+            block_dim: (1, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        use cudarc::driver::LaunchAsync;
+        unsafe {
+            func.launch(cfg, (&mut self.lattice_device, factor))
+                .map_err(GpuError::from)?;
+        }
+        self.generation = self.generation.wrapping_add(1);
+        Ok(())
+    }
+
+    /// Downloads the device-resident lattice into the host fields. The
+    /// generation counter is left unchanged. After a successful return,
+    /// every host accessor reflects the latest device state.
+    pub fn flush_from_device(&mut self) -> Result<(), SimulationBoxError> {
+        let mut host = [0.0 as Real; 6];
+        self.device
+            .dtoh_sync_copy_into(&self.lattice_device, &mut host)
+            .map_err(GpuError::from)?;
+        self.lx = host[0];
+        self.ly = host[1];
+        self.lz = host[2];
+        self.xy = host[3];
+        self.xz = host[4];
+        self.yz = host[5];
+        Ok(())
+    }
+
     /// The `Arc<CudaDevice>` the box was constructed against. Kernel
     /// launchers needing a device handle (for buffer allocation or
     /// stream management) read it from here when no other handle is in

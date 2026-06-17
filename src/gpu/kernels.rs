@@ -1347,21 +1347,22 @@ pub fn compute_total_virial_on_device(
     Ok(())
 }
 
-/// Launches `c_rescale_compute_mu`: reads `k`, `w` from device, samples
-/// one Philox normal, computes µ + diagnostic pressure in double
-/// precision, accumulates the conserved-quantity injection delta.
-/// Single thread (one-element output, no parallelism needed beyond
-/// the inputs being device-resident).
+/// Launches `c_rescale_compute_mu`: reads `k`, `w`, and the device
+/// lattice (mutated in place by this kernel), samples one Philox normal,
+/// computes µ + pressure + post-rescale volume in double precision,
+/// mutates the lattice by µ, writes µ to `mu_out`, and writes
+/// `[pressure, v_post, injection_delta]` into `diagnostics`. Single
+/// thread.
 #[allow(clippy::too_many_arguments)]
 pub fn c_rescale_compute_mu(
     particle_buffers: &ParticleBuffers,
     k: &CudaSlice<Real>,
     w: &CudaSlice<Real>,
-    mu_pressure_out: &mut CudaSlice<Real>,
-    cumulative_injection_delta: &mut CudaSlice<f64>,
+    lattice: &mut CudaSlice<Real>,
+    mu_out: &mut CudaSlice<Real>,
+    diagnostics: &mut CudaSlice<f64>,
     seed: u64,
     draw_counter: u64,
-    v_pre: f64,
     pressure_target: f64,
     tau: f64,
     compressibility: f64,
@@ -1371,8 +1372,9 @@ pub fn c_rescale_compute_mu(
 ) -> Result<(), GpuError> {
     debug_assert_eq!(k.len(), 1);
     debug_assert_eq!(w.len(), 1);
-    debug_assert_eq!(mu_pressure_out.len(), 2);
-    debug_assert_eq!(cumulative_injection_delta.len(), 1);
+    debug_assert_eq!(lattice.len(), 6);
+    debug_assert_eq!(mu_out.len(), 1);
+    debug_assert_eq!(diagnostics.len(), 3);
     let func = particle_buffers
         .kernels
         .barostat
@@ -1393,19 +1395,109 @@ pub fn c_rescale_compute_mu(
             (
                 k,
                 w,
-                &mut *mu_pressure_out,
-                &mut *cumulative_injection_delta,
+                &mut *lattice,
+                &mut *mu_out,
+                &mut *diagnostics,
                 seed_lo,
                 seed_hi,
                 draw_lo,
                 draw_hi,
-                v_pre,
                 pressure_target,
                 tau,
                 compressibility,
                 kt,
                 dt,
                 mu_cubed_min,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+/// Launches `berendsen_compute_mu`: deterministic isotropic rescale
+/// variant of `c_rescale_compute_mu` (no Philox). Mutates the lattice
+/// in place by µ; writes µ to `mu_out`; writes `[pressure, v_post]`
+/// to `diagnostics` (length 2).
+#[allow(clippy::too_many_arguments)]
+pub fn berendsen_compute_mu(
+    particle_buffers: &ParticleBuffers,
+    k: &CudaSlice<Real>,
+    w: &CudaSlice<Real>,
+    lattice: &mut CudaSlice<Real>,
+    mu_out: &mut CudaSlice<Real>,
+    diagnostics: &mut CudaSlice<f64>,
+    pressure_target: f64,
+    tau: f64,
+    compressibility: f64,
+    dt: f64,
+    mu_cubed_min: f64,
+) -> Result<(), GpuError> {
+    debug_assert_eq!(k.len(), 1);
+    debug_assert_eq!(w.len(), 1);
+    debug_assert_eq!(lattice.len(), 6);
+    debug_assert_eq!(mu_out.len(), 1);
+    debug_assert_eq!(diagnostics.len(), 2);
+    let func = particle_buffers
+        .kernels
+        .barostat
+        .berendsen_compute_mu
+        .clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (1, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                k,
+                w,
+                &mut *lattice,
+                &mut *mu_out,
+                &mut *diagnostics,
+                pressure_target,
+                tau,
+                compressibility,
+                dt,
+                mu_cubed_min,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+/// Launches `rescale_positions_device_factor`: applies a uniform
+/// per-particle position rescale `x_i ← factor[0] · x_i` reading the
+/// rescale factor from a 1-element device buffer instead of taking it
+/// as a host scalar.
+pub fn rescale_positions_device_factor(
+    particle_buffers: &mut ParticleBuffers,
+    factor: &CudaSlice<Real>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(factor.len(), 1);
+    let n_u32 = n as u32;
+    let func = particle_buffers
+        .kernels
+        .barostat
+        .rescale_positions_device_factor
+        .clone();
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut particle_buffers.positions_x,
+                &mut particle_buffers.positions_y,
+                &mut particle_buffers.positions_z,
+                factor,
+                n_u32,
             ),
         )
         .map_err(GpuError::from)?;

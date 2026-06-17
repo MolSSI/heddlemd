@@ -447,6 +447,7 @@ fn mu_equals_one_when_pressure_equals_target() {
     let mut baro = build_berendsen_barostat(&gpu, n, &berendsen_kind(p_target, 1.0e-12, 4.5e-10));
     baro.apply(&mut buffers, &mut sim_box, 1.0e-15, &mut timings)
         .unwrap();
+    sim_box.flush_from_device().unwrap();
     // μ should be 1.0 to within f32 round-off, so the box stays the same size.
     let v_post = sim_box.volume();
     let rel = ((v_post - v_pre) / v_pre).abs() as f64;
@@ -478,6 +479,7 @@ fn mu_less_than_one_when_pressure_below_target() {
     let mut baro = build_berendsen_barostat(&gpu, n, &berendsen_kind(p_target, tau, beta));
     baro.apply(&mut buffers, &mut sim_box, dt, &mut timings)
         .unwrap();
+    sim_box.flush_from_device().unwrap();
     let v_post = sim_box.volume() as f64;
     let mu_cubed_actual = v_post / v_pre;
     let expected_mu_cubed = 1.0 - beta * ((dt as f64) / tau) * (p_target - p_target / 2.0);
@@ -505,6 +507,7 @@ fn mu_greater_than_one_when_pressure_above_target() {
     let mut baro = build_berendsen_barostat(&gpu, n, &berendsen_kind(p_target, tau, beta));
     baro.apply(&mut buffers, &mut sim_box, dt, &mut timings)
         .unwrap();
+    sim_box.flush_from_device().unwrap();
     let v_post = sim_box.volume() as f64;
     let mu_cubed_actual = v_post / v_pre;
     let expected_mu_cubed = 1.0 - beta * ((dt as f64) / tau) * (p_target - 2.0 * p_target);
@@ -533,6 +536,7 @@ fn mu_clamped_to_safety_floor() {
     let mut baro = build_berendsen_barostat(&gpu, n, &berendsen_kind(p_target, tau, beta));
     baro.apply(&mut buffers, &mut sim_box, dt, &mut timings)
         .unwrap();
+    sim_box.flush_from_device().unwrap();
     let v_post = sim_box.volume() as f64;
     let mu_cubed_actual = v_post / v_pre;
     // μ_min^3 = 1e-18; in f32 the cbrt(1e-18) round-trip can be off by
@@ -564,6 +568,7 @@ fn fractional_coordinates_invariant_under_apply() {
     let mut baro = build_berendsen_barostat(&gpu, n, &berendsen_kind(p_target, 1.0e-12, 4.5e-10));
     baro.apply(&mut buffers, &mut sim_box, 1.0e-13, &mut timings)
         .unwrap();
+    sim_box.flush_from_device().unwrap();
     let lx_post = sim_box.lx();
     let px_post = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     // Fractional coord (x / lx) must be invariant under uniform scaling.
@@ -710,6 +715,7 @@ fn composes_with_velocity_verlet_and_berendsen_thermostat() {
         baro.apply(&mut buffers, &mut sim_box, 1.0e-15, &mut timings)
             .unwrap();
     }
+    sim_box.flush_from_device().unwrap();
     let v_final = sim_box.volume();
     assert!(v_final.is_finite() && v_final > 0.0);
 }

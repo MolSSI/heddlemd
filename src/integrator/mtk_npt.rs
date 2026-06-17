@@ -384,7 +384,7 @@ impl Integrator for MtkNptIntegrator {
                 timings.kernel_stop(KernelStage::MTK_NPT_POSITION_DRIFT)?;
                 self.eps += beta * dt_f64;
                 let mu_box = exp_b_dt as Real;
-                sim_box.rescale_isotropic(mu_box).map_err(|_| {
+                sim_box.multiply_lattice_isotropic(mu_box).map_err(|_| {
                     IntegratorError::Gpu(GpuError(cudarc::driver::DriverError(
                         cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,
                     )))
@@ -401,6 +401,14 @@ impl Integrator for MtkNptIntegrator {
                 timings.kernel_start(KernelStage::VIRIAL_SUM_REDUCE)?;
                 let w_vir = compute_total_virial(buffers, &mut self.virial_scratch)? as f64;
                 timings.kernel_stop(KernelStage::VIRIAL_SUM_REDUCE)?;
+                // Host volume is stale after drift_box's
+                // `multiply_lattice_isotropic`; refresh from device
+                // so `scratch_volume` reflects the post-drift box.
+                sim_box.flush_from_device().map_err(|_| {
+                    IntegratorError::Gpu(GpuError(cudarc::driver::DriverError(
+                        cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,
+                    )))
+                })?;
                 self.scratch_volume = sim_box.volume() as f64;
                 self.scratch_pressure =
                     (2.0 * self.scratch_k + w_vir) / (3.0 * self.scratch_volume);

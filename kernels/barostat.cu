@@ -42,6 +42,47 @@ extern "C" __global__ void virial_sum_reduce(
 // invariant under uniform scaling so image flags carry over unchanged,
 // and the neighbor list refreshes its reference positions on the next
 // `force_field.step` via the box-generation change-detection path.
+// Reads `factor` from a 1-element device buffer and applies a uniform
+// per-particle position rescale. Same shape as `rescale_positions` but
+// with no host scalar argument: used when the rescale factor is
+// computed on device (e.g. by `c_rescale_compute_mu_and_rescale_lattice`
+// or `berendsen_compute_mu_and_rescale_lattice`) and never copied to
+// the host.
+extern "C" __global__ void rescale_positions_device_factor(
+    Real *positions_x,
+    Real *positions_y,
+    Real *positions_z,
+    const Real *factor,
+    unsigned int n)
+{
+  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= n) {
+    return;
+  }
+  Real f = factor[0];
+  positions_x[i] *= f;
+  positions_y[i] *= f;
+  positions_z[i] *= f;
+}
+
+// Multiply every component of the six-element device-resident lattice
+// buffer by a host-supplied scalar `factor`. Single-thread kernel
+// (six in-place scalar multiplies); the host validates `factor`
+// before launch. Bumps the box's generation counter on the host side
+// (`SimulationBox::multiply_lattice_isotropic`); the kernel itself
+// only mutates the lattice buffer.
+extern "C" __global__ void multiply_lattice_isotropic(
+    Real *lattice,
+    Real factor)
+{
+  if (threadIdx.x != 0u || blockIdx.x != 0u) {
+    return;
+  }
+  for (int i = 0; i < 6; ++i) {
+    lattice[i] *= factor;
+  }
+}
+
 extern "C" __global__ void rescale_positions(
     Real *positions_x,
     Real *positions_y,
@@ -86,13 +127,13 @@ extern "C" __global__ void rescale_positions(
 extern "C" __global__ void c_rescale_compute_mu(
     const Real *k,                              // length 1
     const Real *w,                              // length 1
-    Real *mu_pressure_out,                      // length 2: [mu, pressure]
-    double *cumulative_injection_delta,         // length 1
+    Real *lattice,                              // length 6, mutated in place
+    Real *mu_out,                               // length 1
+    double *diagnostics,                        // length 3: [P, V_post, injection_delta]
     unsigned int seed_lo,
     unsigned int seed_hi,
     unsigned int draw_counter_lo,
     unsigned int draw_counter_hi,
-    double v_pre,
     double pressure_target,
     double tau,
     double compressibility,
@@ -103,6 +144,11 @@ extern "C" __global__ void c_rescale_compute_mu(
   if (threadIdx.x != 0u || blockIdx.x != 0u) {
     return;
   }
+  double lx_d = (double)lattice[0];
+  double ly_d = (double)lattice[1];
+  double lz_d = (double)lattice[2];
+  double v_pre = lx_d * ly_d * lz_d;
+
   double k_val = (double)k[0];
   double w_val = (double)w[0];
   double pressure = (2.0 * k_val + w_val) / (3.0 * v_pre);
@@ -120,7 +166,67 @@ extern "C" __global__ void c_rescale_compute_mu(
   double v_post = v_pre * mu_cubed_clamped;
   double injection_delta = pressure_target * (v_post - v_pre);
 
-  mu_pressure_out[0] = (Real)mu;
-  mu_pressure_out[1] = (Real)pressure;
-  cumulative_injection_delta[0] += injection_delta;
+  mu_out[0] = (Real)mu;
+
+  // Mutate the device lattice in place: every component scales by µ.
+  Real mu_real = (Real)mu;
+  for (int i = 0; i < 6; ++i) {
+    lattice[i] *= mu_real;
+  }
+
+  diagnostics[0] = pressure;
+  diagnostics[1] = v_post;
+  diagnostics[2] += injection_delta;
+}
+
+// Berendsen barostat: deterministic isotropic rescale.
+//
+// Mirrors the c_rescale kernel shape (single thread, reads K/W and the
+// device lattice, mutates lattice + writes µ + diagnostics) but drops
+// the stochastic noise term. Used by the Berendsen barostat slot.
+//
+// `diagnostics` has length 2: [pressure, v_post]; Berendsen publishes
+// no conserved-quantity column so there's no cumulative-injection
+// delta slot.
+extern "C" __global__ void berendsen_compute_mu(
+    const Real *k,                              // length 1
+    const Real *w,                              // length 1
+    Real *lattice,                              // length 6, mutated in place
+    Real *mu_out,                               // length 1
+    double *diagnostics,                        // length 2: [P, V_post]
+    double pressure_target,
+    double tau,
+    double compressibility,
+    double dt,
+    double mu_cubed_min)
+{
+  if (threadIdx.x != 0u || blockIdx.x != 0u) {
+    return;
+  }
+  double lx_d = (double)lattice[0];
+  double ly_d = (double)lattice[1];
+  double lz_d = (double)lattice[2];
+  double v_pre = lx_d * ly_d * lz_d;
+
+  double k_val = (double)k[0];
+  double w_val = (double)w[0];
+  double pressure = (2.0 * k_val + w_val) / (3.0 * v_pre);
+
+  double deterministic =
+      -compressibility * (dt / tau) * (pressure_target - pressure);
+  double mu_cubed = 1.0 + deterministic;
+  double mu_cubed_clamped = mu_cubed > mu_cubed_min ? mu_cubed : mu_cubed_min;
+  double mu = cbrt(mu_cubed_clamped);
+
+  double v_post = v_pre * mu_cubed_clamped;
+
+  mu_out[0] = (Real)mu;
+
+  Real mu_real = (Real)mu;
+  for (int i = 0; i < 6; ++i) {
+    lattice[i] *= mu_real;
+  }
+
+  diagnostics[0] = pressure;
+  diagnostics[1] = v_post;
 }

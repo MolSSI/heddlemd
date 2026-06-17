@@ -333,6 +333,7 @@ fn mu_cubed_matches_analytical_formula_with_known_philox_draw() {
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(p_target, temperature, tau, beta, seed));
     baro.apply(&mut buffers, &mut sim_box, dt, &mut timings)
         .unwrap();
+    sim_box.flush_from_device().unwrap();
     let v_post = sim_box.volume() as f64;
     let mu_cubed_actual = v_post / v_pre;
 
@@ -382,6 +383,7 @@ fn temperature_zero_limit_matches_berendsen_barostat() {
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(p_target, 1.0e-30, tau, beta, 1));
     baro.apply(&mut buffers, &mut sim_box, dt, &mut timings)
         .unwrap();
+    sim_box.flush_from_device().unwrap();
     let v_post = sim_box.volume() as f64;
     let mu_cubed_actual = v_post / v_pre;
     // Expected Berendsen μ³ = 1 − β·(dt/τ)·(P_target − P) in atomic units
@@ -413,6 +415,7 @@ fn fractional_coordinates_invariant_under_apply() {
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(p_target, 85.0, 1.0e-12, 4.5e-10, 1));
     baro.apply(&mut buffers, &mut sim_box, (1.0e-13 / TIME_F as Real), &mut timings)
         .unwrap();
+    sim_box.flush_from_device().unwrap();
     let lx_post = sim_box.lx();
     let px_post = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
     for (i, (a, b)) in px_post.iter().zip(px.iter()).enumerate() {
@@ -563,6 +566,7 @@ fn composes_with_velocity_verlet_and_csvr_thermostat() {
         baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
             .unwrap();
     }
+    sim_box.flush_from_device().unwrap();
     let v_final = sim_box.volume();
     assert!(v_final.is_finite() && v_final > 0.0);
 }

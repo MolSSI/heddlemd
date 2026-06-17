@@ -5,8 +5,9 @@ use cudarc::driver::CudaSlice;
 use serde::Deserialize;
 
 use crate::gpu::{
-    GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy, compute_total_virial,
-    rescale_positions,
+    GpuContext, GpuError, ParticleBuffers, berendsen_compute_mu,
+    compute_kinetic_energy_on_device, compute_total_virial_on_device,
+    rescale_positions_device_factor,
 };
 use crate::io::config::ConfigError;
 use crate::pbc::SimulationBox;
@@ -61,6 +62,14 @@ pub struct BerendsenBarostat {
     pub most_recent_volume: f64,
     ke_scratch: CudaSlice<Real>,
     virial_scratch: CudaSlice<Real>,
+    /// Single-element device buffer holding the latest rescale factor
+    /// µ. Written by `berendsen_compute_mu` and consumed by
+    /// `rescale_positions_device_factor` on the same stream.
+    mu_device: CudaSlice<Real>,
+    /// Two-element device diagnostic buffer
+    /// `[pressure_latest, volume_latest]`. Overwritten every step;
+    /// drained into host fields by `flush_pending_injection`.
+    diagnostics_device: CudaSlice<f64>,
 }
 
 impl BerendsenBarostat {
@@ -73,6 +82,8 @@ impl BerendsenBarostat {
     ) -> Result<Self, GpuError> {
         let ke_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         let virial_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
+        let mu_device = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
+        let diagnostics_device = gpu.device.alloc_zeros::<f64>(2).map_err(GpuError::from)?;
         Ok(BerendsenBarostat {
             pressure,
             tau,
@@ -81,7 +92,25 @@ impl BerendsenBarostat {
             most_recent_volume: 0.0,
             ke_scratch,
             virial_scratch,
+            mu_device,
+            diagnostics_device,
         })
+    }
+
+    /// Drains the device-side `[pressure, volume]` diagnostic into
+    /// `most_recent_pressure` and `most_recent_volume`. Idempotent.
+    /// The runner calls this once before each log row.
+    pub fn flush_pending_injection(
+        &mut self,
+        device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    ) -> Result<(), GpuError> {
+        let mut host = [0.0_f64; 2];
+        device
+            .dtoh_sync_copy_into(&self.diagnostics_device, &mut host)
+            .map_err(GpuError::from)?;
+        self.most_recent_pressure = host[0];
+        self.most_recent_volume = host[1];
+        Ok(())
     }
 }
 
@@ -100,46 +129,47 @@ impl Barostat for BerendsenBarostat {
         timings: &mut Timings,
     ) -> Result<(), BarostatError> {
         if buffers.particle_count() == 0 {
-            // Pre-populate the diagnostic fields so log_column_values
-            // still returns finite numbers for an empty run.
-            self.most_recent_pressure = 0.0;
-            self.most_recent_volume = sim_box.volume() as f64;
             return Ok(());
         }
 
         timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        let k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+        compute_kinetic_energy_on_device(buffers, &mut self.ke_scratch)?;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
 
         timings.kernel_start(KernelStage::VIRIAL_SUM_REDUCE)?;
-        let w = compute_total_virial(buffers, &mut self.virial_scratch)? as f64;
+        compute_total_virial_on_device(buffers, &mut self.virial_scratch)?;
         timings.kernel_stop(KernelStage::VIRIAL_SUM_REDUCE)?;
 
-        let v_pre = sim_box.volume() as f64;
-        let pressure = (2.0 * k + w) / (3.0 * v_pre);
-
-        let mu_cubed = 1.0
-            - self.compressibility * ((dt as f64) / self.tau) * (self.pressure - pressure);
-        let mu_cubed_clamped = mu_cubed.max(MU_MIN * MU_MIN * MU_MIN);
-        let mu = mu_cubed_clamped.cbrt();
-        let mu = mu as Real;
+        // Combined µ + lattice mutation + diagnostics write. No
+        // per-step dtoh; lattice mutated in place via
+        // `sim_box.lattice_device_mut()`.
+        let dt_f64 = dt as f64;
+        berendsen_compute_mu(
+            buffers,
+            &self.ke_scratch,
+            &self.virial_scratch,
+            sim_box.lattice_device_mut(),
+            &mut self.mu_device,
+            &mut self.diagnostics_device,
+            self.pressure,
+            self.tau,
+            self.compressibility,
+            dt_f64,
+            MU_MIN * MU_MIN * MU_MIN,
+        )?;
 
         timings.kernel_start(KernelStage::BERENDSEN_BAROSTAT_RESCALE_POSITIONS)?;
-        rescale_positions(buffers, mu)?;
+        rescale_positions_device_factor(buffers, &self.mu_device)?;
         timings.kernel_stop(KernelStage::BERENDSEN_BAROSTAT_RESCALE_POSITIONS)?;
 
-        // Bumps generation; downstream consumers refresh on next force step.
-        sim_box
-            .rescale_isotropic(mu)
-            .map_err(|_| BarostatError::Gpu(GpuError(
-                cudarc::driver::DriverError(
-                    cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,
-                ),
-            )))?;
-
-        self.most_recent_pressure = pressure;
-        self.most_recent_volume = sim_box.volume() as f64;
         Ok(())
+    }
+
+    fn flush_pending_injection(
+        &mut self,
+        device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    ) -> Result<(), BarostatError> {
+        BerendsenBarostat::flush_pending_injection(self, device).map_err(BarostatError::from)
     }
 
     // rq-62b44dc9 rq-b6728f3c

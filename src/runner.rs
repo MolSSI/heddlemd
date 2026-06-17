@@ -54,6 +54,8 @@ pub enum RunnerError {
     #[error("{0}")]
     Barostat(#[source] BarostatError),
     #[error("{0}")]
+    SimulationBox(#[source] crate::pbc::SimulationBoxError),
+    #[error("{0}")]
     Constraint(#[source] ConstraintError),
     #[error("{0}")]
     TopologyFile(#[source] TopologyFileError),
@@ -1395,6 +1397,17 @@ pub(crate) fn run_md_phase_inner(
                 other => (RunnerError::ParticleState(other), ExitPhase::Loop),
             })?;
             timings.record_host(HostStage::DEVICE_TO_HOST_DOWNLOAD, dl);
+            // Sync host lattice fields from the device buffer. The
+            // barostat (if present) mutates the device lattice in
+            // place every step without refreshing host fields; this
+            // flush makes `setup.sim_box.l{x,y,z}()` reflect the
+            // current state before either output reads it.
+            if barostat.is_some() {
+                setup
+                    .sim_box
+                    .flush_from_device()
+                    .map_err(|e| (RunnerError::SimulationBox(e), ExitPhase::Loop))?;
+            }
         }
         if want_traj {
             let writer = traj_writer.as_mut().expect("traj_writer enabled");

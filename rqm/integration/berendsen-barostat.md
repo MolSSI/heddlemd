@@ -41,87 +41,103 @@ hook.
 
 For each invocation with timestep `dt`:
 
-1. Compute the instantaneous kinetic energy `K = (1/2) Σ_i m_i |v_i|²`
-   via the shared `compute_kinetic_energy` helper
-   (`nose-hoover-chain.md`).
+1. Launch `kinetic_energy_reduce` to write the instantaneous kinetic
+   energy `K = (1/2) Σ_i m_i |v_i|²` into the slot-owned
+   `ke_scratch: CudaSlice<f32>` (length 1).
 
-2. Compute the instantaneous total scalar virial
-   `W = Σ_i buffers.virials[i]` via the shared
-   `compute_total_virial` helper introduced by this slot. The
-   per-particle virials buffer carries every contribution that
-   enters the pressure estimator: force-field pair / bonded / angle
-   / SPME (real + reciprocal) terms populated by `force_field.step`,
+2. Launch `virial_sum_reduce` to write the instantaneous total
+   scalar virial `W = Σ_i buffers.virials[i]` into the slot-owned
+   `virial_scratch: CudaSlice<f32>` (length 1). The per-particle
+   virials buffer carries every contribution that enters the
+   pressure estimator: force-field pair / bonded / angle / SPME
+   (real + reciprocal) terms populated by `force_field.step`,
    plus any constraint contribution added by the `Constraint`
    slot's `apply_after_kick` hook (see `constraint-framework.md`;
    for SETTLE the contribution is documented in `settle.md`).
 
-3. Read the current box volume `V = sim_box.volume()`.
-
-4. Compute the instantaneous pressure
+3. Launch the `berendsen_compute_mu_and_rescale_lattice` kernel
+   (described under *CUDA Kernels* below). The kernel reads `K`
+   and `W` from device buffers, reads the current box lattice from
+   `sim_box.lattice_device_mut()`, computes
+   `V_pre = lx · ly · lz`, the instantaneous pressure
 
    ```text
-   P = (2 K + W) / (3 V)
+   P = (2 K + W) / (3 V_pre)
    ```
 
-   in `E_h / a_0^3` (the engine's atomic pressure unit). `K` and `V`
-   are positive; `W` may be negative (e.g.
-   purely repulsive systems above the LJ minimum produce positive
-   `W`, attractive systems produce negative `W`).
-
-5. Compute the isotropic Berendsen scale factor `μ`:
+   in `E_h / a_0^3`, and the Berendsen scale factor
 
    ```text
    μ³ = 1 − β · (dt / τ) · (P_target − P)
    μ  = max(μ_min, μ³)^(1/3)
    ```
 
-   where `β` is the user-supplied isothermal compressibility in
-   `a_0^3 / E_h` (the inverse atomic pressure unit), `τ` is the
-   user-supplied pressure-coupling time constant in atomic time units
-   (`hbar / E_h`), `P_target` is the user-supplied target pressure in
-   `E_h / a_0^3`,
-   and `μ_min = 1.0e-6` is a host-side safety floor that prevents
-   pathological collapse when `μ³` is non-positive (e.g. extreme
-   parameter combinations early in equilibration). Sensible
-   parameters (`β · (P_target − P) · dt/τ ≤ 0.1`) never approach the
-   floor.
+   in `double` precision with parameters (`β`, `τ`, `P_target`)
+   passed as scalar kernel arguments and `μ_min = 1.0e-6` the
+   device-side safety floor. The kernel then mutates the device
+   lattice in place (`lattice[i] ← μ · lattice[i]`), writes the
+   device-side rescale factor `mu_device: CudaSlice<f32>` (length 1)
+   for the position-rescale kernel in step 4, and writes the
+   two-element diagnostic buffer
+   `diagnostics_device: CudaSlice<f64>` (length 2):
+
+   ```text
+   diagnostics_device[0] = P                    // most_recent_pressure
+   diagnostics_device[1] = V_post = μ³ · V_pre  // most_recent_volume
+   ```
 
    Sign convention: when `P < P_target` the system is under-pressured,
    `(P_target − P) > 0`, `μ³ < 1`, and the box contracts. When
    `P > P_target` the system is over-pressured, `μ³ > 1`, and the
    box expands.
 
-6. Launch the shared `rescale_positions` kernel to update particle
-   positions: `x_i ← μ · x_i` for every particle. The rescale is
-   applied about the box origin; fractional coordinates relative to
-   the new box are unchanged.
+   The host's `sim_box` generation counter is incremented by 1
+   inside the call (via `lattice_device_mut`); the host fields
+   become stale until the next `sim_box.flush_from_device()`.
 
-7. Rescale the simulation box: call
-   `sim_box.rescale_isotropic(μ)`, which multiplies all six lattice
-   parameters `(lx, ly, lz, xy, xz, yz)` by `μ` and bumps the box
-   generation counter. The bumped generation triggers the existing
-   refresh paths in `forces/neighbor-list.md` and `forces/spme.md`
-   on the next iteration's `force_field.step`.
+4. Launch `rescale_positions_device_factor` (shared with C-rescale
+   — see `c-rescale-barostat.md`) to update particle positions by
+   reading `mu_device[0]` and scaling each position component by it.
+   The rescale is applied about the box origin; fractional
+   coordinates relative to the new box are unchanged. No host
+   involvement; no per-step dtoh of `μ`.
 
 When `buffers.particle_count() == 0`, the entire hook is a no-op:
-no kernel launches occur and the box is not mutated.
+no kernel launches occur, the box is not mutated, and the
+diagnostic buffer is unchanged.
+
+Berendsen's diagnostic state has no analogue to C-rescale's
+`cumulative_injection_delta` — the deterministic Berendsen path
+does no detailed-balance correction, so no conserved-quantity
+column is published.
 
 ## Per-Step Kernel Sequence <!-- rq-03d70e2d -->
 
 Per timestep, the Berendsen barostat's `apply` runs the following
 in fixed order:
 
-| Order | Step           | Kernel / call             | Operation                                              | Stage label                            |
-| ----- | -------------- | ------------------------- | ------------------------------------------------------ | -------------------------------------- |
-| 1     | KE reduce      | `kinetic_energy_reduce`   | one f32 scalar of `K`                                  | `KineticEnergyReduce`                  |
-| 2     | Virial reduce  | `virial_sum_reduce`       | one f32 scalar of `W = Σ_i buffers.virials[i]`         | `VirialSumReduce`                      |
-| 3     | Position rescale | `rescale_positions`     | host computes μ, scale positions by μ                  | `BerendsenBarostatRescalePositions`    |
+| Order | Step              | Kernel / call                              | Operation                                                                                                          | Stage label                            |
+| ----- | ----------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | -------------------------------------- |
+| 1     | KE reduce         | `kinetic_energy_reduce`                    | f32 scalar of `K` into `ke_scratch`                                                                                | `KineticEnergyReduce`                  |
+| 2     | Virial reduce     | `virial_sum_reduce`                        | f32 scalar of `W` into `virial_scratch`                                                                            | `VirialSumReduce`                      |
+| 3     | µ + lattice + diag | `berendsen_compute_mu_and_rescale_lattice` | reads `K`, `W`, lattice; computes µ + P in f64; mutates lattice; writes µ + diagnostics device buffers              | `BerendsenComputeMuAndRescaleLattice`  |
+| 4     | Position rescale  | `rescale_positions_device_factor`          | reads `mu_device[0]`, scales every particle position by it                                                          | `BerendsenBarostatRescalePositions`    |
 
-After step 3 the barostat calls `sim_box.rescale_isotropic(μ)` on
-the host (no kernel launch). The shared `compute_kinetic_energy`
-helper is reused from `nose-hoover-chain.md`; `compute_total_virial`
-and `rescale_positions` are the two new shared helpers introduced
-by this slot and described under *Feature API* below.
+No per-step host download occurs. The host `sim_box`'s lattice
+mirror, `most_recent_pressure`, and `most_recent_volume` host
+fields are stale between log rows. The runner refreshes them at
+log-write cadence by calling `sim_box.flush_from_device()` and
+`barostat.flush_pending_injection(device)` (the diagnostic flush
+method; see `framework.md`).
+
+The `kinetic_energy_reduce` and `virial_sum_reduce` kernels are
+launched through the on-device helpers
+`compute_kinetic_energy_on_device` (`nose-hoover-chain.md`) and
+`compute_total_virial_on_device` (this slot — see *Feature API*
+below); the `_on_device` variants leave the result in the supplied
+scratch buffer without downloading it. The
+`rescale_positions_device_factor` and lattice-rescale kernels are
+described under *Feature API* below.
 
 The integrator's own kernels (`vv_kick_drift`, `vv_kick`, the force
 pipeline) and the thermostat's kernels are launched separately by

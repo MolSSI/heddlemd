@@ -6,7 +6,8 @@ use serde::Deserialize;
 
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, c_rescale_compute_mu,
-    compute_kinetic_energy_on_device, compute_total_virial_on_device, rescale_positions,
+    compute_kinetic_energy_on_device, compute_total_virial_on_device,
+    rescale_positions_device_factor,
 };
 use crate::io::config::ConfigError;
 use crate::pbc::SimulationBox;
@@ -77,15 +78,18 @@ pub struct CRescaleBarostat {
     pub most_recent_volume: f64,
     ke_scratch: CudaSlice<Real>,
     virial_scratch: CudaSlice<Real>,
-    /// Two-element device buffer: `[mu, pressure]`. Written by
-    /// `c_rescale_compute_mu`, downloaded by the host to update the
-    /// simulation box and emit the diagnostic pressure column.
-    mu_pressure_device: CudaSlice<Real>,
-    /// Single-element device accumulator for
-    /// `P_target · (v_post - v_pre)` across steps since the last flush.
-    /// `f64` to preserve precision across many steps before a host
-    /// download. Reset to zero after every flush.
-    cumulative_injection_delta: CudaSlice<f64>,
+    /// Single-element device buffer holding the latest rescale factor
+    /// µ. Written by `c_rescale_compute_mu` and consumed by
+    /// `rescale_positions_device_factor` on the same stream; never
+    /// downloaded to the host on the per-step path.
+    mu_device: CudaSlice<Real>,
+    /// Three-element device buffer laid out as
+    /// `[pressure_latest, volume_latest, injection_delta]`. Slots 0 and
+    /// 1 are overwritten every step; slot 2 accumulates
+    /// `P_target · (v_post - v_pre)` and is drained / zeroed by
+    /// `flush_pending_injection`. `f64` for precision across many
+    /// steps before a host download.
+    diagnostics_device: CudaSlice<f64>,
 }
 
 impl CRescaleBarostat {
@@ -101,10 +105,8 @@ impl CRescaleBarostat {
     ) -> Result<Self, GpuError> {
         let ke_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         let virial_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
-        let mu_pressure_device =
-            gpu.device.alloc_zeros::<Real>(2).map_err(GpuError::from)?;
-        let cumulative_injection_delta =
-            gpu.device.alloc_zeros::<f64>(1).map_err(GpuError::from)?;
+        let mu_device = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
+        let diagnostics_device = gpu.device.alloc_zeros::<f64>(3).map_err(GpuError::from)?;
         Ok(CRescaleBarostat {
             pressure,
             temperature,
@@ -117,27 +119,34 @@ impl CRescaleBarostat {
             most_recent_volume: 0.0,
             ke_scratch,
             virial_scratch,
-            mu_pressure_device,
-            cumulative_injection_delta,
+            mu_device,
+            diagnostics_device,
         })
     }
 
-    /// Drains the device-side `P_target · (v_post - v_pre)` accumulator
-    /// into `cumulative_barostat_injection`, then zeroes the device
-    /// buffer. Idempotent across consecutive calls. The runner calls
-    /// this once before each log row.
+    /// Drains the device-side diagnostic buffer
+    /// `[pressure_latest, volume_latest, injection_delta]` into the
+    /// host fields `most_recent_pressure`, `most_recent_volume`, and
+    /// `cumulative_barostat_injection` (the delta is added, then the
+    /// device slot is zeroed). Idempotent across consecutive calls:
+    /// a second call immediately after the first finds delta = 0 and
+    /// reads the same pressure / volume values.
     pub fn flush_pending_injection(
         &mut self,
         device: &std::sync::Arc<cudarc::driver::CudaDevice>,
     ) -> Result<(), GpuError> {
-        let mut host_delta = [0.0_f64; 1];
+        let mut host = [0.0_f64; 3];
         device
-            .dtoh_sync_copy_into(&self.cumulative_injection_delta, &mut host_delta)
+            .dtoh_sync_copy_into(&self.diagnostics_device, &mut host)
             .map_err(GpuError::from)?;
-        self.cumulative_barostat_injection += host_delta[0];
-        let zero = [0.0_f64; 1];
+        self.most_recent_pressure = host[0];
+        self.most_recent_volume = host[1];
+        self.cumulative_barostat_injection += host[2];
+        // Zero only the injection delta; pressure / volume slots can
+        // remain — they'll be overwritten by the next apply.
+        let zeroed = [host[0], host[1], 0.0_f64];
         device
-            .htod_sync_copy_into(&zero, &mut self.cumulative_injection_delta)
+            .htod_sync_copy_into(&zeroed, &mut self.diagnostics_device)
             .map_err(GpuError::from)?;
         Ok(())
     }
@@ -153,14 +162,10 @@ impl Barostat for CRescaleBarostat {
         timings: &mut Timings,
     ) -> Result<(), BarostatError> {
         if buffers.particle_count() == 0 {
-            self.most_recent_pressure = 0.0;
-            self.most_recent_volume = sim_box.volume() as f64;
             return Ok(());
         }
 
-        // 1. Reduce KE and total virial into device buffers — no
-        //    blocking dtoh. The pipeline stays GPU-side from here
-        //    through the mu computation.
+        // 1. KE + virial reduce into device scratch buffers (no dtoh).
         timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
         compute_kinetic_energy_on_device(buffers, &mut self.ke_scratch)?;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
@@ -169,22 +174,25 @@ impl Barostat for CRescaleBarostat {
         compute_total_virial_on_device(buffers, &mut self.virial_scratch)?;
         timings.kernel_stop(KernelStage::VIRIAL_SUM_REDUCE)?;
 
-        // 2. Compute mu and pressure on device. The conserved-quantity
-        //    injection delta is accumulated into
-        //    `cumulative_injection_delta` for later flush at log time.
+        // 2. Combined compute_mu + lattice mutation + diagnostics
+        //    write. No per-step dtoh; the µ and diagnostics live on
+        //    device, the lattice is mutated in place through
+        //    `sim_box.lattice_device_mut()` (which bumps the box
+        //    generation counter). Host fields on the SimulationBox
+        //    become stale until the runner calls `flush_from_device`
+        //    at log cadence.
         self.draw_counter += 1;
-        let v_pre = sim_box.volume() as f64;
         let kt = self.temperature;
         let dt_f64 = dt as f64;
         c_rescale_compute_mu(
             buffers,
             &self.ke_scratch,
             &self.virial_scratch,
-            &mut self.mu_pressure_device,
-            &mut self.cumulative_injection_delta,
+            sim_box.lattice_device_mut(),
+            &mut self.mu_device,
+            &mut self.diagnostics_device,
             self.seed,
             self.draw_counter,
-            v_pre,
             self.pressure,
             self.tau,
             self.compressibility,
@@ -193,35 +201,12 @@ impl Barostat for CRescaleBarostat {
             MU_MIN * MU_MIN * MU_MIN,
         )?;
 
-        // 3. Download [mu, pressure]. This is the *only* per-step
-        //    barostat sync; mu is needed host-side to update the
-        //    simulation box, and the diagnostic pressure feeds the
-        //    log column.
-        let mut mu_pressure_host = [0.0 as Real; 2];
-        buffers
-            .device
-            .dtoh_sync_copy_into(&self.mu_pressure_device, &mut mu_pressure_host)
-            .map_err(GpuError::from)?;
-        let mu = mu_pressure_host[0];
-        let pressure = mu_pressure_host[1] as f64;
-
-        // 4. Apply the rescale. Positions go through the existing
-        //    kernel (scalar mu arg), box is updated host-side.
+        // 3. Apply the position rescale. The kernel reads µ from
+        //    `mu_device[0]`; no scalar dtoh path.
         timings.kernel_start(KernelStage::C_RESCALE_BAROSTAT_RESCALE_POSITIONS)?;
-        rescale_positions(buffers, mu)?;
+        rescale_positions_device_factor(buffers, &self.mu_device)?;
         timings.kernel_stop(KernelStage::C_RESCALE_BAROSTAT_RESCALE_POSITIONS)?;
 
-        sim_box
-            .rescale_isotropic(mu)
-            .map_err(|_| BarostatError::Gpu(GpuError(
-                cudarc::driver::DriverError(
-                    cudarc::driver::sys::CUresult::CUDA_ERROR_INVALID_VALUE,
-                ),
-            )))?;
-
-        let v_post = sim_box.volume() as f64;
-        self.most_recent_pressure = pressure;
-        self.most_recent_volume = v_post;
         Ok(())
     }
 

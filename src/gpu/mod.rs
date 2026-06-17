@@ -12,7 +12,7 @@ pub use device::{GpuContext, GpuError, Kernels, init_device};
 pub use fill::FillKernels;
 pub use kernels::{
     K_COULOMB_F32, LennardJonesParameterTable, SPATIAL_HASH_SCAN_BLOCK_SIZE,
-    accumulate_forces, andersen_resample, c_rescale_compute_mu,
+    accumulate_forces, andersen_resample, berendsen_compute_mu, c_rescale_compute_mu,
     compute_cell_indices_and_histogram,
     compute_kinetic_energy, compute_kinetic_energy_on_device,
     compute_total_potential_energy, compute_total_virial,
@@ -23,7 +23,8 @@ pub use kernels::{
     morse_bond_force, mtk_position_drift, mtk_velocity_half_kick,
     neighbor_displacement_squared, neighbor_list_build,
     prefix_scan_cell_counts, reduce_angle_forces, reduce_bond_forces,
-    rescale_positions, rescale_velocities, rescale_velocities_device_factor,
+    rescale_positions, rescale_positions_device_factor, rescale_velocities,
+    rescale_velocities_device_factor,
     constraint_virial_scatter, rattle_velocities, scatter_atoms_into_cells,
     shake_positions, shake_positions_no_velocity, shake_snapshot,
     sort_cells_by_particle_id, spme_charge_spread, spme_charge_spread_on_stream,

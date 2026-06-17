@@ -176,30 +176,81 @@ width.
 `SimulationBox` owns a `CudaSlice<f32>` of length 6 holding the lattice
 in the order `[lx, ly, lz, xy, xz, yz]` — the same ordering the host-
 side `lattice()` accessor returns. The buffer is allocated by the
-constructor and re-uploaded by every successful `set_lattice` call.
+constructor and may be mutated from either the host or a kernel.
 
 Kernels that need lattice geometry receive a `const float *lattice`
 pointer to this buffer rather than six scalar kernel arguments. Each
 kernel thread reads from the pointer the components it needs; for
 pair-force kernels that is all six (used by the minimum-image
 helper); for kernels that only scale per-axis (e.g. `rescale_positions`)
-that is just `lx`, `ly`, and `lz`. The lattice buffer is read-only from
-every consuming kernel; only `SimulationBox::new` and `SimulationBox::set_lattice`
-write it.
+that is just `lx`, `ly`, and `lz`. The lattice buffer is shared with
+every consuming kernel through the read-only `lattice_device()`
+accessor; mutating kernels receive it through `lattice_device_mut()`.
 
-The device buffer and the host `[f32; 6]` lattice never disagree
-mid-step: `set_lattice` writes the device buffer synchronously
-(via `htod_sync_copy_into`) and the host fields atomically together,
-inside `set_lattice`'s own scope. Kernel launches that follow
-observe both updates.
+## Host / device synchronisation <!-- new --> <!-- rq-6d65f104 -->
 
-The sole consumer that updates the lattice mid-run is the C-rescale
-barostat (see `integration/c-rescale-barostat.md`): on every step it
-samples a scale factor `µ`, downloads it to the host, and calls
-`SimulationBox::set_lattice` with the rescaled lattice. The neighbor
-list and the SPME reciprocal slot observe the resulting generation
-change and refresh their caches at the start of the next force
-evaluation.
+The host `[f32; 6]` lattice fields and the device-resident
+`CudaSlice<f32>` are kept consistent at well-defined points:
+
+- **Host-initiated write.** `SimulationBox::new` and
+  `SimulationBox::set_lattice` write both the host fields and the
+  device buffer in the same call, via `htod_sync_copy_into`. The
+  generation counter is bumped exactly once. After either call returns
+  `Ok`, the host fields and the device buffer hold identical values
+  bit-for-bit.
+
+- **Device-initiated write.** `SimulationBox::lattice_device_mut`
+  returns a `&mut CudaSlice<f32>` and bumps the generation counter
+  immediately. The host fields are *not* updated. Until
+  `flush_from_device` is called, host accessors (`lx()`, `ly()`,
+  `lz()`, `xy()`, `xz()`, `yz()`, `lattice()`, `volume()`,
+  `perpendicular_widths()`, `min_perpendicular_width()`,
+  `check_min_perpendicular_width()`, `minimum_image`,
+  `wrap_position`, `wrap_position_with_image_count`,
+  `fractional_coords`, `cartesian_coords`) read stale values that
+  reflect the last host-initiated write.
+
+  The convenience helper `multiply_lattice_isotropic(factor)` launches
+  a small device-side kernel that multiplies every lattice component
+  by `factor` and bumps the generation counter — used by the MTK NPT
+  integrator's box-drift sub-step (see
+  `integration/mtk-npt.md`).
+
+- **Device-to-host refresh.** `SimulationBox::flush_from_device`
+  downloads the device buffer into the six host fields via
+  `dtoh_sync_copy_into`. The generation counter is *not* bumped (the
+  values were already current on device; the host is catching up).
+  After `flush_from_device` returns `Ok`, every host accessor reflects
+  the latest device-side state. Callers that need host-accurate
+  geometry (the log/trajectory writer reading `volume()`, the cell-list
+  rebuild gate reading `min_perpendicular_width()`) call
+  `flush_from_device` at their appropriate cadence — typically once
+  per log row, not once per timestep.
+
+  The generation counter tracks every change to the lattice — both
+  host-initiated writes (`set_lattice`, `rescale_isotropic`) and
+  device-initiated writes (`lattice_device_mut`,
+  `multiply_lattice_isotropic`). Downstream slots (the neighbor list's
+  cached cell layout, the SPME reciprocal slot's cached influence
+  function) refresh when the generation differs from their cached
+  value; they never query the host lattice fields directly.
+
+Kernels that *read* the lattice (LJ, Coulomb, SPME real, SPME force
+gather, SPME influence recompute, neighbor-list build, position drift,
+etc.) receive the device pointer via `lattice_device()` and always see
+the latest value.
+
+The barostats (C-rescale, Berendsen, MTK NPT — see
+`integration/c-rescale-barostat.md`, `integration/berendsen-barostat.md`,
+and `integration/mtk-npt.md`) are the only mid-run mutators. C-rescale
+and Berendsen mutate the lattice via dedicated GPU kernels that read
+KE and virial from device buffers, compute the rescale factor on
+device, and mutate the lattice in place; MTK mutates via
+`multiply_lattice_isotropic` after host-side chain math. All three
+bump the generation through `lattice_device_mut` (directly or via
+`multiply_lattice_isotropic`). The neighbor list and the SPME
+reciprocal slot observe the resulting generation change and refresh
+their caches at the start of the next force evaluation.
 
 The device handle held by `SimulationBox` is an `Arc<CudaDevice>`;
 two `SimulationBox` instances cloned from the same construction share
@@ -325,6 +376,18 @@ allocates a fresh buffer with the same contents).
     order. Kernel launchers pass the slice to CUDA kernels as a
     `const float *lattice` argument.
 
+- `SimulationBox::lattice_device_mut(&mut self) -> &mut CudaSlice<f32>` <!-- rq-d93dc6af -->
+  - Returns a mutable borrow of the device-resident lattice mirror and
+    increments the generation counter by 1 (wrapping at `u64::MAX`).
+    The host fields are *not* updated; subsequent calls to host
+    accessors (`lx()` through `yz()`, `lattice()`, `volume()`,
+    `perpendicular_widths()`, `min_perpendicular_width()`,
+    `check_min_perpendicular_width()`, `minimum_image`,
+    `wrap_position`, `wrap_position_with_image_count`,
+    `fractional_coords`, `cartesian_coords`) read stale values until
+    `flush_from_device` is called. Used by barostat kernels that
+    compute the new lattice on device.
+
 - `SimulationBox::device(&self) -> &Arc<CudaDevice>` <!-- rq-857ccf63 -->
   - Returns the device handle the box was constructed against. Kernel
     launchers that need a `CudaDevice` for buffer allocation (or
@@ -351,6 +414,37 @@ allocates a fresh buffer with the same contents).
     unchanged (the upload writes a temporary host buffer to device,
     and the host fields are mutated only after the upload returns
     `Ok`).
+
+- `SimulationBox::multiply_lattice_isotropic(&mut self, factor: f32) -> Result<(), SimulationBoxError>` <!-- rq-a91f1e58 -->
+  - Validates `factor` against the same finiteness-and-strict-positivity
+    rules a diagonal lattice parameter uses; returns
+    `Err(SimulationBoxError::NonFiniteLatticeValue { name: "factor", value: factor })`
+    on NaN or infinity, or
+    `Err(SimulationBoxError::NonPositiveDiagonal { name: "factor", value: factor })`
+    when `factor <= 0.0`. On validation failure the device buffer and
+    generation counter are left unchanged.
+  - On success, launches a single-thread kernel on the device's default
+    stream that reads each of the six device-resident lattice values,
+    multiplies by `factor`, and writes the product back to the same
+    slot. Increments the generation counter by 1 (wrapping at
+    `u64::MAX`). The host fields are *not* updated; subsequent host
+    accessors return stale values until `flush_from_device` is called.
+  - On GPU launch failure: returns `SimulationBoxError::Gpu(_)`; the
+    device buffer and generation counter are left unchanged.
+
+- `SimulationBox::flush_from_device(&mut self) -> Result<(), SimulationBoxError>` <!-- rq-ede17d32 -->
+  - Downloads the six device-resident lattice values into the host
+    fields via `dtoh_sync_copy_into`. After a successful return, every
+    host accessor reflects the latest device state.
+  - The generation counter is *not* incremented (the value at the
+    device side is what the counter already reflects).
+  - Idempotent across consecutive calls: a second `flush_from_device`
+    immediately after the first finds the device buffer unchanged and
+    writes the same six values back into the host fields.
+  - On GPU download failure: returns `SimulationBoxError::Gpu(_)`; the
+    host fields and generation counter are left at their pre-call
+    values (the host scratch is written to a temporary array and only
+    then committed to the host fields after the dtoh returns `Ok`).
 
 ### Periodic-boundary operations <!-- rq-fb632dfc -->
 
@@ -930,4 +1024,90 @@ Feature: Simulation box and periodic boundary conditions
     Given an Arc<CudaDevice> `dev` obtained via init_device()
     When SimulationBox::new(&dev, 10.0, 8.0, 6.0, 0.0, 0.0, 0.0) returns Ok(box)
     Then Arc::ptr_eq(box.device(), &dev) is true
+
+  # --- Host / device synchronisation: lattice_device_mut ---
+
+  @rq-f257d735
+  Scenario: lattice_device_mut bumps generation without updating host fields
+    Given an existing SimulationBox at lattice [10.0, 8.0, 6.0, 0.0, 0.0, 0.0]
+      with generation g
+    When box.lattice_device_mut() is taken
+    Then box.generation() == g + 1
+    And box.lx() still equals 10.0 (host fields are stale)
+    And box.ly() still equals 8.0
+    And box.lz() still equals 6.0
+
+  @rq-3201765a
+  Scenario: A kernel mutates the device lattice through lattice_device_mut
+    Given an existing SimulationBox at lattice [10.0, 8.0, 6.0, 0.0, 0.0, 0.0]
+    When a kernel writes [12.0, 12.0, 12.0, 0.0, 0.0, 0.0] into box.lattice_device_mut()
+    Then dtoh(box.lattice_device()) equals [12.0, 12.0, 12.0, 0.0, 0.0, 0.0]
+    And box.lx() still equals 10.0 (host stale until flush)
+
+  # --- multiply_lattice_isotropic ---
+
+  @rq-1a050856
+  Scenario: multiply_lattice_isotropic multiplies every device lattice component by the factor
+    Given an existing SimulationBox at lattice [10.0, 8.0, 6.0, 1.0, -2.0, 3.0]
+    When box.multiply_lattice_isotropic(0.5) returns Ok(())
+    Then dtoh(box.lattice_device()) equals [5.0, 4.0, 3.0, 0.5, -1.0, 1.5] bit-for-bit
+    And box.generation() has incremented by exactly 1
+    And box.lx() still equals 10.0 (host fields stale until flush)
+
+  @rq-74baa5d1
+  Scenario: multiply_lattice_isotropic rejects a non-positive factor
+    Given an existing SimulationBox at any lattice
+    When box.multiply_lattice_isotropic(0.0) is called
+    Then it returns Err(SimulationBoxError::NonPositiveDiagonal { name: "factor", value: 0.0 })
+    And dtoh(box.lattice_device()) is unchanged
+    And box.generation() is unchanged
+
+  @rq-fdb54f47
+  Scenario: multiply_lattice_isotropic rejects a non-finite factor
+    Given an existing SimulationBox at any lattice
+    When box.multiply_lattice_isotropic(f32::NAN) is called
+    Then it returns Err(SimulationBoxError::NonFiniteLatticeValue { name: "factor", value: v })
+      where v is NaN
+    And dtoh(box.lattice_device()) is unchanged
+    And box.generation() is unchanged
+
+  # --- flush_from_device ---
+
+  @rq-50b50f8d
+  Scenario: flush_from_device refreshes host fields from the device buffer
+    Given a SimulationBox whose host lattice is [10.0, 8.0, 6.0, 0.0, 0.0, 0.0]
+    And whose device buffer has been mutated (via lattice_device_mut) to
+      [12.0, 9.0, 7.5, 0.5, -1.0, 0.25]
+    When box.flush_from_device() returns Ok(())
+    Then box.lx() equals 12.0
+    And box.ly() equals 9.0
+    And box.lz() equals 7.5
+    And box.xy() equals 0.5
+    And box.xz() equals -1.0
+    And box.yz() equals 0.25
+    And box.lattice() equals [12.0, 9.0, 7.5, 0.5, -1.0, 0.25]
+
+  @rq-7cc7e568
+  Scenario: flush_from_device does not bump the generation
+    Given a SimulationBox at generation g whose host fields are stale
+    When box.flush_from_device() returns Ok(())
+    Then box.generation() still equals g
+
+  @rq-6b4dda1b
+  Scenario: flush_from_device is idempotent
+    Given a SimulationBox whose host and device are out of sync
+    When box.flush_from_device() returns Ok(())
+    And box.flush_from_device() is called a second time
+    Then the second call returns Ok(())
+    And box.lattice() is unchanged between the two calls
+
+  @rq-7893a07f
+  Scenario: volume() returns the stale host value between device-side mutation and flush
+    Given a SimulationBox at host lattice [10.0, 10.0, 10.0, 0.0, 0.0, 0.0]
+      (host volume = 1000.0)
+    When box.multiply_lattice_isotropic(0.9) returns Ok(())
+    Then box.volume() still equals 1000.0 (host fields stale)
+    And dtoh(box.lattice_device())[0] equals 9.0
+    When box.flush_from_device() then returns Ok(())
+    Then box.volume() equals 729.0
 ```
