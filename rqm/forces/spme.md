@@ -208,22 +208,38 @@ The reciprocal-space slot owns:
 - A complex-valued grid `rho_hat: [c32; M_complex]` where
   `M_complex = n_a · n_b · (n_c/2 + 1)`. cuFFT stores real-to-complex
   output in Hermitian symmetry format.
-- A precomputed influence function `influence_G: [f32; M_complex]`
-  rebuilt whenever the simulation box's `generation` counter changes.
-- Per-axis B-spline correction factor arrays
-  `b_factors_a: [f32; n_a]`, `b_factors_b: [f32; n_b]`,
-  `b_factors_c: [f32; n_c]` precomputed once at slot construction.
+- A device-resident influence function `influence_G: CudaSlice<f32>` of
+  length `M_complex`, rebuilt whenever the simulation box's `generation`
+  counter changes.
+- A device-resident virial-factor table
+  `virial_factor: CudaSlice<f32>` of length `M_complex` holding the
+  per-cell multiplier `G[k] · (1 - K² / (2 α²))` used by the
+  influence-multiply kernel to produce `virial_per_cell`. Rebuilt
+  alongside `influence_G` on the same box-generation trigger.
+- Per-axis B-spline correction factor arrays held as device buffers
+  `b_factors_a: CudaSlice<f32>`, `b_factors_b: CudaSlice<f32>`, and
+  `b_factors_c: CudaSlice<f32>` of length `n_a`, `n_b`, and `n_c`
+  respectively. Populated once at slot construction from the host-side
+  Cox-de Boor recursion and never re-uploaded; they depend only on
+  `(grid, spline_order)`, not on the simulation box.
+- A device-resident single-element scalar
+  `w_per_particle_virial: CudaSlice<f32>` holding the per-particle
+  reciprocal-virial share `W_recip / N` written by
+  `spme_recip_virial_finalize` and read by `spme_force_gather`.
+- A device-resident single-element accumulator
+  `virial_per_cell: CudaSlice<f32>`-staging buffer of length `M_complex`
+  written by `spme_influence_multiply` and consumed by
+  `spme_recip_virial_finalize`.
 - A cuFFT plan handle for the `(n_a, n_b, n_c)` R2C / C2R transforms.
   Both plans are bound to the slot's `recip_stream` via `cufftSetStream`
   at construction and are never rebound.
-- A dedicated CUDA stream `recip_stream` on which the four reciprocal
-  kernels execute concurrently with the default stream's work for the
-  same timestep.
+- A dedicated CUDA stream `recip_stream` on which the reciprocal-pipeline
+  kernels (influence recompute, charge spread, both FFTs, influence
+  multiply, virial finalize) execute concurrently with the default
+  stream's work for the same timestep.
 - Two CUDA events `default_ready_event` and `recip_ready_event` used to
   synchronize `recip_stream` with the device's default stream at the
   entry and exit of the reciprocal pipeline (see *Launch configuration*).
-- A host-side scratch `Vec<f32>` of length `M_complex` for the
-  `virial_per_cell` dtoh that runs at the start of `reduce()`.
 
 ### Bin structure <!-- rq-618bc65e -->
 
@@ -297,41 +313,75 @@ entries; the kernel reads this directly without rearrangement.
 
 ### Influence function <!-- rq-e7b74f7a -->
 
-The precomputed influence function for grid index
+The precomputed influence function for complex grid index
 `k = (k_a, k_b, k_c)` (with `k_c < n_c/2 + 1`) is
 
 ```text
-m_a = (k_a < n_a / 2) ? k_a : k_a − n_a
-m_b = (k_b < n_b / 2) ? k_b : k_b − n_b
-m_c = (k_c < n_c / 2) ? k_c : k_c − n_c    # always k_c since k_c < n_c/2 + 1
+m_a = (k_a ≤ n_a / 2) ? k_a : k_a − n_a
+m_b = (k_b ≤ n_b / 2) ? k_b : k_b − n_b
+m_c = (k_c ≤ n_c / 2) ? k_c : k_c − n_c    # always k_c since k_c < n_c/2 + 1
 
 K = 2π · (m_a · b_a + m_b · b_b + m_c · b_c)
 K2 = |K|²
 
-G[k] = (4π / K²) · exp(−K² / (4 α²))
+G[k] = (k_C / V_box) · (4π / K²) · exp(−K² / (4 α²))
        · b_factors_a[k_a] · b_factors_b[k_b] · b_factors_c[k_c]
+
+virial_factor[k] = G[k] · (1 − K² / (2 α²))
 ```
 
 where `b_a`, `b_b`, `b_c` are the rows of the reciprocal lattice matrix
-`H^(-T)` (computed once from the simulation box) and the `b_factors_*`
-are the SPME B-spline correction terms:
+`H^(-T)` (derived from the current simulation box), `V_box = lx · ly · lz`
+is the box volume, `k_C` is the Coulomb prefactor (1 in atomic units),
+and the `b_factors_*` are the SPME B-spline correction terms:
 
 ```text
 b_factors_d[k] = |Σ_{j=0..p-1} M_p(j + 1) · exp(2π i · k · j / n_d)|⁻²
 ```
 
-The `k = (0, 0, 0)` slot is set to zero, implementing tinfoil boundary
-conditions and removing the (unphysical) infinite background-charge
-contribution.
-
-`influence_G` is rebuilt whenever the slot observes a different
-`sim_box.generation()` from the value captured at last rebuild (the same
-box-generation tracking pattern as `NeighborListState`). When the box has
-not changed, the precomputed values are reused.
+The `k = (0, 0, 0)` slot is set to zero in both `influence_G` and
+`virial_factor`, implementing tinfoil boundary conditions and removing
+the (unphysical) infinite background-charge contribution.
 
 `b_factors_*` are independent of the box and depend only on the grid
-dimensions and spline order; they are computed once at slot construction
-and never rebuilt.
+dimensions and spline order; they are computed once on the host at slot
+construction via the Cox-de Boor B-spline recursion, uploaded to the
+slot's device buffers, and never rebuilt.
+
+`influence_G` and `virial_factor` are populated on device by a
+`spme_recip_compute_influence` kernel that runs on `recip_stream`. The
+kernel takes the current box lattice as scalar kernel arguments
+(`lx, ly, lz, xy, xz, yz`), the precomputed device-resident
+`b_factors_*` buffers, the grid dimensions, and `α`. One thread per
+complex grid cell evaluates the formulae above; threads do not
+communicate. All inner arithmetic uses `double` precision (the
+reciprocal-lattice inversion, the K-vector dot product, the exponential,
+and the B-spline-correction product) and the final value is cast to the
+storage `Real` at the device-store site, matching the precision policy
+of every other f32 kernel that performs accuracy-sensitive transcendental
+arithmetic on device.
+
+`spme_recip_compute_influence` runs:
+
+1. **At slot construction**, after the `b_factors_*` buffers have been
+   uploaded, to populate `influence_G` and `virial_factor` for the
+   initial box. The slot's `cached_box_generation` is set to
+   `sim_box.generation()` at this point.
+2. **At the start of every `SpmeReciprocalState::compute()` call where
+   `sim_box.generation() != self.cached_box_generation`**, before
+   the bin-list pre-step and before the recip-stream's wait for the
+   default stream. The launch updates `cached_box_generation`. When
+   the generations match, the call is skipped and the prior
+   `influence_G` / `virial_factor` are reused.
+
+The cadence of recompute therefore tracks the C-rescale and other
+barostats' box updates: NVT runs recompute exactly once (at
+construction); NPT runs recompute every step the barostat fires.
+
+When the kernel runs, the `recip_stream → default` join at the end of
+`SpmeReciprocalState::compute()` (and the cross-stream waits in
+*Launch configuration*) ensure that downstream consumers see the
+updated buffers before reading them.
 
 ### Influence-function multiply and inverse FFT <!-- rq-95385a9d -->
 
@@ -386,24 +436,33 @@ The reciprocal-space slot computes the scalar virial trace from the
 reciprocal grid:
 
 ```text
-W_recip = (k_C / 2) · Σ_{k ≠ 0} G[k] · |rho_hat[k]|² · (1 − K² / (2 α²))
+W_recip = 0.5 · Σ_{k ≠ 0} virial_factor[k] · |rho_hat[k]|²
 ```
 
-The contribution per complex-grid cell is computed by the same kernel
-that does the influence-function multiply (or a separate kernel that
-runs alongside; the implementation is free to fuse or split). The cell
-values are summed into a single scalar `W_recip` by host-side
-accumulation of the `virial_per_cell` buffer: at the start of
-`SpmeReciprocalState::reduce()`, the default stream issues
-`cudaStreamWaitEvent(default_stream, recip_ready_event)` so the
-subsequent `dtoh_sync_copy_into(virial_per_cell, host_scratch)` sees
-finalized values, the host walks the scratch in `0..M_complex` order
-and accumulates into an `f64`, and the result is scaled to
-`W_recip / N`. The host `f64` accumulation order is fixed across runs;
-the scalar is therefore byte-identical on the same hardware.
+where `virial_factor[k] = G[k] · (1 − K² / (2 α²))` is precomputed in
+the device-resident `virial_factor` buffer alongside `influence_G` (see
+*Influence function*). The Coulomb prefactor `k_C` and the `(4π/K²)`
+Greens-function term are already folded into `G[k]`; the `0.5` outside
+the sum is the Ewald half-sum convention.
 
-The scalar is distributed per particle by equal division: each particle
-receives `W_recip / N` in its `virials[i]` slot. Summing `virials` over
+The per-cell contributions `virial_factor[k] · |rho_hat[k]|²` are
+written to a device buffer `virial_per_cell` by the influence-multiply
+kernel (one thread per complex grid cell; no atomics). The scalar
+`W_recip / N` is then computed on device by the
+`spme_recip_virial_finalize` kernel, which runs on `recip_stream`
+immediately after the influence multiply. A single 256-thread block
+sums `virial_per_cell[0 .. M_complex − 1]` with a strided per-thread
+accumulator followed by a deterministic left-to-right pairwise tree in
+shared memory (the same shape as `barostat::virial_sum_reduce` and
+`nose_hoover::kinetic_energy_reduce`). Lane 0 of the block multiplies
+the reduced sum by `0.5 / N` and writes the result to the device-resident
+single-element scalar `w_per_particle_virial`. Two runs on the same
+GPU with byte-identical inputs produce a byte-identical
+`w_per_particle_virial[0]`.
+
+The scalar is distributed per particle by equal division inside
+`spme_force_gather`: each particle reads `w_per_particle_virial[0]`
+once and writes it to its own `virials[i]` slot. Summing `virials` over
 all particles yields the system total `W_recip`. The per-particle
 attribution has no individual physical meaning; the convention exists
 only so the SoA `virials: Vec<f32>` layout sums correctly.
@@ -524,6 +583,12 @@ only inside the `SpmeReciprocalState` construction path.
   `spme_real_pair_force_fev`. Writes per-particle output directly into
   `output`'s slot rows.
 
+- `spme_recip_compute_influence_on_stream(kernels, b_factors_a, b_factors_b, b_factors_c, influence_g, virial_factor, sim_box, grid, alpha, k_coulomb, m_complex, stream) -> Result<(), GpuError>` <!-- rq-99d3d796 -->
+  Launches `spme_recip_compute_influence` on the supplied stream. Writes
+  `influence_g` and `virial_factor`. The host call returns as soon as
+  the launch has been enqueued; no host-side computation of the
+  influence function is performed.
+
 - `spme_charge_spread(particle_buffers, spme_state) -> Result<(), GpuError>` <!-- rq-f69698b8 -->
   Launches the charge-spread kernel. Writes `spme_state.rho`.
 
@@ -535,7 +600,14 @@ only inside the `SpmeReciprocalState` construction path.
 
 - `spme_influence_multiply(spme_state) -> Result<(), GpuError>` <!-- rq-8326d2d1 -->
   Multiplies `rho_hat[k] *= G[k]` in place, also writing the per-cell
-  virial contribution to a scratch buffer for the subsequent reduction.
+  virial contribution `virial_factor[k] · |rho_hat[k]|²` to
+  `virial_per_cell` for the subsequent reduction.
+
+- `spme_recip_virial_finalize_on_stream(kernels, virial_per_cell, w_per_particle_virial, m_complex, n_particles, stream) -> Result<(), GpuError>` <!-- rq-5d30456e -->
+  Launches `spme_recip_virial_finalize` on the supplied stream. Writes
+  `w_per_particle_virial[0] = (0.5 / N) · Σ virial_per_cell[k]` via the
+  single-block deterministic pairwise tree described in
+  *Reciprocal-space virial*. No host download.
 
 - The C2R inverse transform `rho_hat → V` is invoked via <!-- rq-a98abc35 -->
   `SpmeReciprocalGrid::inverse_plan.execute(&rho_hat, &mut V)`, where
@@ -565,6 +637,24 @@ extern "C" __global__ void spme_real_pair_force_fev(/* ... */);
 `kernels/spme_recip.cu` declares:
 
 ```c
+extern "C" __global__ void spme_recip_compute_influence(
+    const float *b_factors_a,           // length n_a
+    const float *b_factors_b,           // length n_b
+    const float *b_factors_c,           // length n_c
+    float *influence_G,                 // length M_complex
+    float *virial_factor,               // length M_complex
+    float lx, float ly, float lz, float xy, float xz, float yz,
+    unsigned int n_a, unsigned int n_b, unsigned int n_c,
+    float k_coulomb,
+    float alpha,
+    unsigned int m_complex);
+
+extern "C" __global__ void spme_recip_virial_finalize(
+    const float *virial_per_cell,       // length M_complex
+    float *w_per_particle_virial,       // length 1
+    unsigned int m_complex,
+    float scale);                       // 0.5 / N
+
 extern "C" __global__ void spme_charge_spread(
     const float *positions_x,
     const float *positions_y,
@@ -614,10 +704,16 @@ implementation).
 - `spme_real_pair_force_f` / `spme_real_pair_force_fev`: 256 threads <!-- rq-eb9e5cc3 -->
   per block (8 warps × 32 lanes), grid `ceil(N / 8)`. Matches the
   common pair-force pattern (see `pair-force-kernel.md`).
+- `spme_recip_compute_influence`: one thread per complex grid cell, <!-- rq-17b52850 -->
+  block size 256, grid `ceil(M_complex / 256)`. No shared memory.
 - `spme_charge_spread`: one thread per real grid cell, block size 256, <!-- rq-16f6c7dc -->
   grid `ceil(M / 256)` where `M = n_a · n_b · n_c`.
 - `spme_influence_multiply`: one thread per complex grid cell, block <!-- rq-127df3d6 -->
   size 256, grid `ceil(M_complex / 256)`.
+- `spme_recip_virial_finalize`: single block of 256 threads, <!-- rq-9e2d2f1a -->
+  `__shared__ Real partial[256]`. Strided per-thread accumulator
+  followed by deterministic left-to-right pairwise tree. Only lane 0
+  writes the output.
 - `spme_force_gather`: one thread per particle, block size 256, grid <!-- rq-35b76155 -->
   `ceil(N / 256)`.
 
@@ -625,12 +721,13 @@ Stream assignment:
 
 - `spme_real_pair_force_*` and `spme_force_gather` run on the device's <!-- rq-44cce069 -->
   default stream carried by `particle_buffers.device`.
-- The four reciprocal-pipeline kernels — `spme_charge_spread`, the
-  cuFFT R2C transform, `spme_influence_multiply`, and the cuFFT C2R
-  transform — run on a dedicated CUDA stream `recip_stream` owned by
-  `SpmeReciprocalState`. The R2C and C2R plans are bound to
-  `recip_stream` via `cufftSetStream` once at slot construction and
-  are never rebound.
+- The reciprocal-pipeline kernels — `spme_recip_compute_influence`
+  (when triggered by a box-generation change), `spme_charge_spread`,
+  the cuFFT R2C transform, `spme_influence_multiply`, the cuFFT C2R
+  transform, and `spme_recip_virial_finalize` — run on a dedicated CUDA
+  stream `recip_stream` owned by `SpmeReciprocalState`. The R2C and C2R
+  plans are bound to `recip_stream` via `cufftSetStream` once at slot
+  construction and are never rebound.
 
 Cross-stream synchronization uses two CUDA events owned by
 `SpmeReciprocalState`:
@@ -647,11 +744,12 @@ Cross-stream synchronization uses two CUDA events owned by
 - A "recip_stream → default" join at the start of <!-- rq-0d5e76ec -->
   `SpmeReciprocalState::reduce()` is implemented via
   `device.wait_for(&recip_stream)`. cudarc records an event on
-  `recip_stream` that captures the inverse FFT and every prior
-  recip-stream launch, and makes the default stream wait on it.
-  This guarantees that `V` and `virial_per_cell` are finalized
-  before the default stream's `virial_per_cell` dtoh and the
-  `spme_force_gather` launch.
+  `recip_stream` that captures `spme_recip_virial_finalize`, the
+  inverse FFT, and every prior recip-stream launch (including any
+  `spme_recip_compute_influence` that fired this step), and makes the
+  default stream wait on it. This guarantees that `V` and
+  `w_per_particle_virial` are finalized before the default stream's
+  `spme_force_gather` launch reads them.
 
 Both event handles are managed internally by cudarc on each
 `wait_for_default` / `wait_for` invocation; `SpmeReciprocalState` holds
@@ -677,8 +775,19 @@ invariant:
    `recip_stream` via `cufftSetStream` and are never rebound. The
    `cufft_determinism_smoke_test` run at `init_device` time validates
    the contract on the host's specific cuFFT version.
-4. **Influence-function multiply and virial-per-cell write.** One
+4. **Influence function recompute.** `spme_recip_compute_influence`
+   runs one thread per complex grid cell with no inter-thread
+   communication. Inner arithmetic in `double` precision. The kernel
+   fires whenever the slot observes a changed `sim_box.generation()`,
+   producing byte-identical `influence_G` and `virial_factor` for
+   byte-identical box lattices on the same GPU.
+5. **Influence-function multiply and virial-per-cell write.** One
    thread per complex grid cell; no atomics; no inter-thread reads.
+6. **Per-cell virial reduction.** `spme_recip_virial_finalize` runs a
+   single block of 256 threads with a strided per-thread accumulator
+   and a deterministic left-to-right pairwise tree in shared memory.
+   Two runs with byte-identical `virial_per_cell` produce a
+   byte-identical `w_per_particle_virial[0]`.
 5. **Force gather.** One thread per particle; each thread reads `p³`
    grid points in fixed `(d_a, d_b, d_c)` lexicographic order. No
    atomics. The per-particle virial uses the equal-division attribution
@@ -905,6 +1014,68 @@ Feature: Smooth particle-mesh Ewald (SPME)
     Then the round-trip output equals the input scaled by the FFT normalisation factor
       (cuFFT convention: forward+inverse = N · identity)
 
+  # --- Reciprocal-space pipeline: influence function recompute ---
+
+  @rq-9cee9bfd
+  Scenario: Influence buffers are populated at slot construction
+    Given an SpmeReciprocalState constructed with a sim_box B0 and parameters (alpha, grid, p)
+    When the slot's construction finishes
+    Then influence_G and virial_factor are device buffers of length M_complex
+    And dtoh(influence_G) and dtoh(virial_factor) agree cell-by-cell with the
+      analytical formula for B0 to within f32 round-off
+    And the slot's cached_box_generation equals B0.generation()
+
+  @rq-c8954d3e
+  Scenario: Influence buffers are rebuilt when sim_box generation changes
+    Given an SpmeReciprocalState whose cached_box_generation matches the current sim_box
+    And a new sim_box B1 with a different generation counter
+    When SpmeReciprocalState::compute() is called with B1
+    Then spme_recip_compute_influence launches exactly once on recip_stream
+      during this call
+    And after the call, dtoh(influence_G) agrees with the analytical formula for B1
+    And the slot's cached_box_generation equals B1.generation()
+
+  @rq-c4d04411
+  Scenario: Influence buffers are reused when sim_box generation is unchanged
+    Given an SpmeReciprocalState whose cached_box_generation matches the current sim_box
+    When SpmeReciprocalState::compute() is called with the same sim_box twice in succession
+    Then spme_recip_compute_influence launches zero times during the second call
+    And influence_G and virial_factor are byte-identical to their pre-second-call contents
+
+  @rq-ff16a2c9
+  Scenario: k=0 cell is zero in both influence_G and virial_factor after recompute
+    Given any sim_box and any SpmeReciprocalState
+    When spme_recip_compute_influence runs (at construction or on generation change)
+    Then influence_G[grid_index(0, 0, 0)] equals 0.0
+    And virial_factor[grid_index(0, 0, 0)] equals 0.0
+
+  @rq-f8a66553
+  Scenario: virial_factor[k] = G[k] · (1 - K² / (2 α²)) cell-by-cell
+    Given an SpmeReciprocalState with parameters (alpha, grid, p) and a sim_box B
+    When spme_recip_compute_influence has run for B
+    Then for every cell k with k ≠ (0, 0, 0),
+      virial_factor[k] equals influence_G[k] · (1 - K(k)² / (2 α²))
+      to within f32 round-off
+
+  @rq-4bd0b129
+  Scenario: Influence recompute is deterministic across two independent slots
+    Given two SpmeReciprocalState instances with identical (alpha, grid, p) and identical sim_box
+    When spme_recip_compute_influence runs on each
+    Then dtoh(influence_G) and dtoh(virial_factor) are byte-identical between the two slots
+
+  @rq-ce68c21a
+  Scenario: Influence recompute under a C-rescale barostat fires every step
+    Given a 100-step NPT run with the C-rescale barostat enabled
+    When the run completes
+    Then spme_recip_compute_influence has launched 100 + 1 times
+      (one at slot construction plus one per step's box update)
+
+  @rq-8e6a1933
+  Scenario: Influence recompute under NVT fires once
+    Given a 100-step NVT run with no barostat
+    When the run completes
+    Then spme_recip_compute_influence has launched exactly once (at slot construction)
+
   # --- Reciprocal-space pipeline: multiply ---
 
   @rq-e5bf6fea
@@ -941,6 +1112,20 @@ Feature: Smooth particle-mesh Ewald (SPME)
     When the reciprocal slot's reduce() runs
     Then every particle's virials[i] entry equals W_recip / N (to within f32 round-off)
     And summing virials over all particles recovers W_recip
+
+  @rq-ede87154
+  Scenario: spme_recip_virial_finalize writes (0.5 / N) · Σ virial_per_cell on device
+    Given a virial_per_cell device buffer of length M_complex with known per-cell values
+    When spme_recip_virial_finalize is launched with scale = 0.5 / N
+    Then dtoh(w_per_particle_virial)[0] equals 0.5 / N · Σ_k virial_per_cell[k]
+      to within f32 round-off
+    And no host download of virial_per_cell occurs
+
+  @rq-9d344eb9
+  Scenario: Two runs of spme_recip_virial_finalize on identical inputs are byte-identical
+    Given two device-resident copies of an identical virial_per_cell buffer
+    When spme_recip_virial_finalize runs on each
+    Then dtoh(w_per_particle_virial) produces byte-identical scalars between the two runs
 
   # --- Reproducibility ---
 

@@ -678,6 +678,69 @@ fn spme_influence_multiply_impl(
     Ok(())
 }
 
+/// Launches `spme_recip_compute_influence` on the supplied stream:
+/// recomputes both `influence_G` and `virial_factor` cell-by-cell from
+/// the current lattice. One thread per complex grid cell, block size
+/// 256, grid `ceil(M_complex / 256)`. Inner arithmetic is `double`
+/// precision; the device store casts to the storage `Real`.
+///
+/// Returns `Ok(())` immediately (no host wait); the launch is
+/// asynchronous on the supplied stream. The caller is expected to
+/// schedule downstream consumers (`spme_charge_spread`,
+/// `spme_influence_multiply`) on the same stream so the writes are
+/// visible without additional synchronization.
+#[allow(clippy::too_many_arguments)]
+pub fn spme_recip_compute_influence_on_stream(
+    kernels: &Kernels,
+    b_factors_a: &CudaSlice<Real>,
+    b_factors_b: &CudaSlice<Real>,
+    b_factors_c: &CudaSlice<Real>,
+    influence_g: &mut CudaSlice<Real>,
+    virial_factor: &mut CudaSlice<Real>,
+    sim_box: &SimulationBox,
+    grid: [u32; 3],
+    k_coulomb: Real,
+    alpha: Real,
+    m_complex: u32,
+    stream: &CudaStream,
+) -> Result<(), GpuError> {
+    if m_complex == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(b_factors_a.len(), grid[0] as usize);
+    debug_assert_eq!(b_factors_b.len(), grid[1] as usize);
+    debug_assert_eq!(b_factors_c.len(), grid[2] as usize);
+    debug_assert_eq!(influence_g.len(), m_complex as usize);
+    debug_assert_eq!(virial_factor.len(), m_complex as usize);
+    let func = kernels.spme_recip.spme_recip_compute_influence.clone();
+    let cfg = launch_config(m_complex);
+    let lat = sim_box.lattice();
+    let args = (
+        b_factors_a,
+        b_factors_b,
+        b_factors_c,
+        &mut *influence_g,
+        &mut *virial_factor,
+        lat[0],
+        lat[1],
+        lat[2],
+        lat[3],
+        lat[4],
+        lat[5],
+        grid[0],
+        grid[1],
+        grid[2],
+        k_coulomb,
+        alpha,
+        m_complex,
+    );
+    unsafe {
+        func.launch_on_stream(stream, cfg, args)
+            .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 /// Launches the single-block deterministic reduction of
 /// `virial_per_cell` followed by the Ewald half-sum / per-particle
 /// scale. Writes

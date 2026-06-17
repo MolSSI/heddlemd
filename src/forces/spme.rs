@@ -93,9 +93,17 @@ pub struct SpmeReciprocalGrid {
     /// `virial_per_cell`.
     pub virial_factor: CudaSlice<Real>,
     /// Scratch buffer holding the per-cell virial contribution after
-    /// `spme_influence_multiply`. Reduced host-side to the scalar
-    /// W_recip during the gather/reduce step.
+    /// `spme_influence_multiply`. Reduced on device to the scalar
+    /// `w_per_particle_virial = W_recip / N` by
+    /// `spme_recip_virial_finalize` on `recip_stream`; never copied to
+    /// host on the per-step path.
     pub virial_per_cell: CudaSlice<Real>,
+    /// Per-axis B-spline correction factors. Depend only on
+    /// `(grid, spline_order)`, populated once at construction from the
+    /// host-side Cox-de Boor recursion, never re-uploaded.
+    pub b_factors_a: CudaSlice<Real>,
+    pub b_factors_b: CudaSlice<Real>,
+    pub b_factors_c: CudaSlice<Real>,
     /// Box generation the influence function was computed against.
     /// Refreshed when the sim_box generation changes.
     pub cached_box_generation: u64,
@@ -172,23 +180,26 @@ impl SpmeReciprocalGrid {
             .alloc_zeros::<Real>(2 * m_complex)
             .map_err(GpuError::from)?;
 
-        // Compute b-factors, influence function, and virial factor on
-        // the host, then upload.
-        let b_factors_a = compute_b_factors(n_a, p);
-        let b_factors_b = compute_b_factors(n_b, p);
-        let b_factors_c = compute_b_factors(n_c, p);
-        let (influence_host, virial_host) = compute_influence_and_virial(
-            sim_box,
-            params,
-            &b_factors_a,
-            &b_factors_b,
-            &b_factors_c,
-        );
-        debug_assert_eq!(influence_host.len(), m_complex);
-        debug_assert_eq!(virial_host.len(), m_complex);
-        let influence_g = device.htod_sync_copy(&influence_host).map_err(GpuError::from)?;
-        let virial_factor =
-            device.htod_sync_copy(&virial_host).map_err(GpuError::from)?;
+        // B-spline correction factors depend only on (grid, spline_order)
+        // — compute on host, upload once, never refresh.
+        let b_factors_a_host = compute_b_factors(n_a, p);
+        let b_factors_b_host = compute_b_factors(n_b, p);
+        let b_factors_c_host = compute_b_factors(n_c, p);
+        let b_factors_a = device
+            .htod_sync_copy(&b_factors_a_host)
+            .map_err(GpuError::from)?;
+        let b_factors_b = device
+            .htod_sync_copy(&b_factors_b_host)
+            .map_err(GpuError::from)?;
+        let b_factors_c = device
+            .htod_sync_copy(&b_factors_c_host)
+            .map_err(GpuError::from)?;
+        let mut influence_g = device
+            .alloc_zeros::<Real>(m_complex)
+            .map_err(GpuError::from)?;
+        let mut virial_factor = device
+            .alloc_zeros::<Real>(m_complex)
+            .map_err(GpuError::from)?;
         let virial_per_cell = device
             .alloc_zeros::<Real>(m_complex)
             .map_err(GpuError::from)?;
@@ -200,6 +211,24 @@ impl SpmeReciprocalGrid {
         forward_plan.set_stream(recip_stream.stream)?;
         inverse_plan.set_stream(recip_stream.stream)?;
         let recip_stream = SendableStream(recip_stream);
+
+        // Populate `influence_g` and `virial_factor` for the initial
+        // box. The launch is async on `recip_stream`; downstream
+        // consumers in `compute()` issue their own waits.
+        crate::gpu::spme_recip_compute_influence_on_stream(
+            &gpu.kernels,
+            &b_factors_a,
+            &b_factors_b,
+            &b_factors_c,
+            &mut influence_g,
+            &mut virial_factor,
+            sim_box,
+            params.grid,
+            K_COULOMB_F32,
+            params.alpha,
+            m_complex as u32,
+            &recip_stream,
+        )?;
 
         Ok(SpmeReciprocalGrid {
             device,
@@ -214,6 +243,9 @@ impl SpmeReciprocalGrid {
             influence_g,
             virial_factor,
             virial_per_cell,
+            b_factors_a,
+            b_factors_b,
+            b_factors_c,
             cached_box_generation: sim_box.generation(),
             forward_plan,
             inverse_plan,
@@ -233,45 +265,34 @@ impl SpmeReciprocalGrid {
         timings: &mut Timings,
     ) -> Result<(), SpmeError> {
         // Refresh influence function (and the virial factor that
-        // tracks it) if the box has changed.
+        // tracks it) on device when the box has changed. The launch
+        // runs on `recip_stream`; downstream consumers
+        // (`spme_influence_multiply`) on the same stream see the
+        // refreshed buffers without additional synchronization.
         if sim_box.generation() != self.cached_box_generation {
-            let n_a = self.params.grid[0];
-            let n_b = self.params.grid[1];
-            let n_c = self.params.grid[2];
-            let p = self.params.spline_order;
-            let b_factors_a = compute_b_factors(n_a, p);
-            let b_factors_b = compute_b_factors(n_b, p);
-            let b_factors_c = compute_b_factors(n_c, p);
-            let (g_host, vf_host) = compute_influence_and_virial(
+            crate::gpu::spme_recip_compute_influence_on_stream(
+                &particle_buffers.kernels,
+                &self.b_factors_a,
+                &self.b_factors_b,
+                &self.b_factors_c,
+                &mut self.influence_g,
+                &mut self.virial_factor,
                 sim_box,
-                self.params,
-                &b_factors_a,
-                &b_factors_b,
-                &b_factors_c,
-            );
-            self.device
-                .htod_sync_copy_into(&g_host, &mut self.influence_g)
-                .map_err(GpuError::from)?;
-            self.device
-                .htod_sync_copy_into(&vf_host, &mut self.virial_factor)
-                .map_err(GpuError::from)?;
+                self.params.grid,
+                K_COULOMB_F32,
+                self.params.alpha,
+                self.m_complex as u32,
+                &self.recip_stream,
+            )?;
             self.cached_box_generation = sim_box.generation();
         }
 
-        // 1. Rebuild bin structure (default stream).
         self.bin_list.pre_step(sim_box, particle_buffers, timings)?;
 
-        // 2. Hand off to the dedicated recip stream. wait_for_default
-        // records an event on the default stream capturing all work
-        // queued so far (integrator + bin_list rebuild + any other
-        // default-stream slot launches that already returned to host)
-        // and makes recip_stream wait on that event.
-        // rq-274db88b
         self.recip_stream
             .wait_for_default()
             .map_err(GpuError::from)?;
 
-        // 3. Charge spreading on recip_stream (writes rho).
         let cl = self
             .bin_list
             .cell_list_data()
@@ -287,14 +308,9 @@ impl SpmeReciprocalGrid {
             &self.recip_stream,
         )?;
 
-        // 4. Forward FFT (rho → rho_hat). cuFFT plan bound to recip_stream
-        // at slot construction.
-        // rq-24e36eba
         self.forward_plan
             .execute(&self.rho, &mut self.rho_hat_interleaved)?;
 
-        // 5. Influence multiply on recip_stream (rho_hat *= G; also
-        //    writes per-cell virial).
         let n_c = self.params.grid[2];
         let n_c_complex = (n_c / 2 + 1) as u32;
         spme_influence_multiply_on_stream(
@@ -309,8 +325,6 @@ impl SpmeReciprocalGrid {
             &self.recip_stream,
         )?;
 
-        // 6. Inverse FFT (rho_hat → V) on recip_stream.
-        // rq-a98abc35
         self.inverse_plan
             .execute(&self.rho_hat_interleaved, &mut self.v)?;
 
@@ -363,109 +377,6 @@ pub fn compute_b_factors(n: u32, p: u32) -> Vec<Real> {
         };
     }
     out
-}
-
-// rq-9ca00d25
-//
-// Influence function G[k] for the SPME reciprocal pipeline, computed
-// on the host and uploaded once per box-generation refresh. The
-// formula is
-//   G[k] = (k_C / V_box) · (4π / |K|²) · exp(-|K|²/(4α²))
-//          · b_factors_a[k_a] · b_factors_b[k_b] · b_factors_c[k_c]
-// with G[0] = 0 (tinfoil boundary conditions). The reciprocal-lattice
-// wave vector K = 2π · (m_a · b_a_vec + m_b · b_b_vec + m_c · b_c_vec)
-// where b_*_vec are the rows of H^{-T} (the inverse-transpose of the
-// lattice matrix; see `simulation-box.md`).
-//
-// The companion `virial_factor[k] = G[k] · (1 − K²/(2α²))` is
-// precomputed alongside G to support the reciprocal-space scalar
-// virial reduction. virial_factor[0] = 0.
-pub fn compute_influence_and_virial(
-    sim_box: &SimulationBox,
-    params: SpmeParameters,
-    b_factors_a: &[Real],
-    b_factors_b: &[Real],
-    b_factors_c: &[Real],
-) -> (Vec<Real>, Vec<Real>) {
-    let n_a = params.grid[0] as usize;
-    let n_b = params.grid[1] as usize;
-    let n_c = params.grid[2] as usize;
-    let n_c_complex = n_c / 2 + 1;
-    let m_complex = n_a * n_b * n_c_complex;
-    let mut out = vec![0.0; m_complex];
-    let mut vf = vec![0.0; m_complex];
-
-    let lx = sim_box.lx() as f64;
-    let ly = sim_box.ly() as f64;
-    let lz = sim_box.lz() as f64;
-    let xy = sim_box.xy() as f64;
-    let xz = sim_box.xz() as f64;
-    let yz = sim_box.yz() as f64;
-    let v_box = (lx * ly * lz) as f64;
-    let alpha = params.alpha as f64;
-    let four_alpha2 = 4.0 * alpha * alpha;
-    let four_pi = 4.0 * std::f64::consts::PI;
-    let two_pi = 2.0 * std::f64::consts::PI;
-    let k_c = K_COULOMB_F32 as f64;
-    let prefactor = k_c / v_box;
-
-    // Rows of H^{-T} (the reciprocal lattice).
-    // For our lower-triangular H with rows = (a, b, c), the transpose is
-    // upper triangular with the same elements; its inverse is again
-    // upper triangular and has closed-form entries below.
-    let recip_a = [
-        1.0 / lx,
-        -xy / (lx * ly),
-        (xy * yz - xz * ly) / (lx * ly * lz),
-    ];
-    let recip_b = [0.0, 1.0 / ly, -yz / (ly * lz)];
-    let recip_c = [0.0, 0.0, 1.0 / lz];
-
-    for ka in 0..n_a {
-        let ma: f64 = if ka <= n_a / 2 {
-            ka as f64
-        } else {
-            ka as f64 - n_a as f64
-        };
-        let b_a = b_factors_a[ka] as f64;
-        for kb in 0..n_b {
-            let mb: f64 = if kb <= n_b / 2 {
-                kb as f64
-            } else {
-                kb as f64 - n_b as f64
-            };
-            let b_b = b_factors_b[kb] as f64;
-            for kc in 0..n_c_complex {
-                let mc: f64 = if kc <= n_c / 2 {
-                    kc as f64
-                } else {
-                    kc as f64 - n_c as f64
-                };
-                let b_c = b_factors_c[kc] as f64;
-                let kx = two_pi
-                    * (ma * recip_a[0] + mb * recip_b[0] + mc * recip_c[0]);
-                let ky = two_pi
-                    * (ma * recip_a[1] + mb * recip_b[1] + mc * recip_c[1]);
-                let kz = two_pi
-                    * (ma * recip_a[2] + mb * recip_b[2] + mc * recip_c[2]);
-                let k2 = kx * kx + ky * ky + kz * kz;
-                let idx = (ka * n_b + kb) * n_c_complex + kc;
-                if k2 == 0.0 {
-                    out[idx] = 0.0;
-                    vf[idx] = 0.0;
-                } else {
-                    let g = prefactor * (four_pi / k2) * (-k2 / four_alpha2).exp()
-                        * b_a
-                        * b_b
-                        * b_c;
-                    out[idx] = g as Real;
-                    let factor = 1.0 - k2 / (2.0 * alpha * alpha);
-                    vf[idx] = (g * factor) as Real;
-                }
-            }
-        }
-    }
-    (out, vf)
 }
 
 // Cardinal B-spline M_p(x) via the Cox-de Boor recursion, host-side.
@@ -668,20 +579,10 @@ impl Potential for SpmeReciprocalState {
         if n == 0 {
             return Ok(());
         }
-        // Launch the 4 reciprocal kernels on recip_stream.
         timings.kernel_start(KernelStage::SPME_RECIP_PIPELINE)?;
         self.grid
             .compute(sim_box, buffers, timings)
             .map_err(map_spme_err)?;
-        // Reduce virial_per_cell into a single device scalar
-        // `w_per_particle_virial` on the same recip_stream as the
-        // pipeline kernels. The reduction is deterministic
-        // (single-block left-to-right tree, same as
-        // `barostat::virial_sum_reduce`) and the scale = 0.5 / n
-        // matches the Ewald half-sum that defines U_recip in
-        // `docs/long-range-electrostatics.md`. Keeping the reduction
-        // on-device eliminates a per-step ~450 KB dtoh sync that
-        // previously dominated step wall time.
         crate::gpu::spme_recip_virial_finalize_on_stream(
             &buffers.kernels,
             &self.grid.virial_per_cell,
@@ -692,10 +593,6 @@ impl Potential for SpmeReciprocalState {
         )?;
         timings.kernel_stop(KernelStage::SPME_RECIP_PIPELINE)?;
 
-        // Join the default stream with recip_stream so the force_gather
-        // launch that follows sees finalized `V` and
-        // `w_per_particle_virial`.
-        // rq-0d5e76ec
         self.grid
             .device
             .wait_for(&self.grid.recip_stream)
@@ -822,6 +719,7 @@ impl SpmeRealKernels {
 // rq-2093594f rq-9ca00d25
 #[derive(Debug, Clone)]
 pub struct SpmeRecipKernels {
+    pub spme_recip_compute_influence: CudaFunction,
     pub spme_charge_spread: CudaFunction,
     pub spme_influence_multiply: CudaFunction,
     pub spme_recip_virial_finalize: CudaFunction,
@@ -834,6 +732,7 @@ impl SpmeRecipKernels {
             Ptx::from_src(kernels::SPME_RECIP),
             "spme_recip",
             &[
+                "spme_recip_compute_influence",
                 "spme_charge_spread",
                 "spme_influence_multiply",
                 "spme_recip_virial_finalize",
@@ -841,6 +740,11 @@ impl SpmeRecipKernels {
             ],
         )?;
         Ok(SpmeRecipKernels {
+            spme_recip_compute_influence: get_func(
+                device,
+                "spme_recip",
+                "spme_recip_compute_influence",
+            )?,
             spme_charge_spread: get_func(device, "spme_recip", "spme_charge_spread")?,
             spme_influence_multiply: get_func(device, "spme_recip", "spme_influence_multiply")?,
             spme_recip_virial_finalize: get_func(

@@ -59,6 +59,111 @@ __device__ static inline void bspline_weight_and_deriv(
   }
 }
 
+// SPME reciprocal-space influence-function recompute. One thread per
+// complex grid cell `k = (k_a, k_b, k_c)` with `k_c < n_c / 2 + 1`.
+// Each thread writes a single entry of `influence_G` and `virial_factor`
+// per
+//
+//   m_a = (k_a <= n_a / 2) ? k_a : k_a − n_a       (similar for b, c)
+//   K   = 2π · (m_a · b_a + m_b · b_b + m_c · b_c)
+//   K²  = |K|²
+//   G[k]            = (k_C / V_box) · (4π / K²) · exp(-K² / (4 α²))
+//                     · b_factors_a[k_a] · b_factors_b[k_b]
+//                     · b_factors_c[k_c]
+//   virial_factor[k] = G[k] · (1 − K² / (2 α²))
+//
+// where (b_a, b_b, b_c) are rows of the reciprocal lattice H^(-T)
+// derived from the lower-triangular lattice parameters
+// (lx, ly, lz, xy, xz, yz), `V_box = lx · ly · lz`, and `k_C` is the
+// Coulomb prefactor (1 in atomic units). The `k = (0, 0, 0)` cell is
+// set to zero for both buffers, implementing tinfoil boundary
+// conditions.
+//
+// Determinism: one thread per cell with no inter-thread communication
+// and no atomics. All inner arithmetic is `double` precision; the
+// final value is cast to `Real` at the device-store site. Two runs on
+// the same GPU with byte-identical inputs produce byte-identical
+// `influence_G` and `virial_factor`.
+extern "C" __global__ void spme_recip_compute_influence(
+    const Real *b_factors_a,           // length n_a
+    const Real *b_factors_b,           // length n_b
+    const Real *b_factors_c,           // length n_c
+    Real *influence_G,                 // length m_complex
+    Real *virial_factor,               // length m_complex
+    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    unsigned int n_a, unsigned int n_b, unsigned int n_c,
+    Real k_coulomb,
+    Real alpha,
+    unsigned int m_complex)
+{
+  unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx >= m_complex) {
+    return;
+  }
+
+  unsigned int n_c_complex = (n_c / 2u) + 1u;
+  unsigned int kc = idx % n_c_complex;
+  unsigned int kab = idx / n_c_complex;
+  unsigned int kb = kab % n_b;
+  unsigned int ka = kab / n_b;
+
+  // f64 internal arithmetic.
+  double lx_d = (double) lx;
+  double ly_d = (double) ly;
+  double lz_d = (double) lz;
+  double xy_d = (double) xy;
+  double xz_d = (double) xz;
+  double yz_d = (double) yz;
+  double alpha_d = (double) alpha;
+  double v_box = lx_d * ly_d * lz_d;
+  double four_alpha2 = 4.0 * alpha_d * alpha_d;
+  const double pi_d = 3.141592653589793238;
+  double four_pi = 4.0 * pi_d;
+  double two_pi = 2.0 * pi_d;
+  double prefactor = (double) k_coulomb / v_box;
+
+  double m_a = (ka <= n_a / 2u) ? (double) ka : (double) ka - (double) n_a;
+  double m_b = (kb <= n_b / 2u) ? (double) kb : (double) kb - (double) n_b;
+  double m_c = (kc <= n_c / 2u) ? (double) kc : (double) kc - (double) n_c;
+
+  // Reciprocal lattice rows of H^(-T) in f64. Matches the host-side
+  // closed form for lower-triangular H.
+  double inv_lx = 1.0 / lx_d;
+  double inv_ly = 1.0 / ly_d;
+  double inv_lz = 1.0 / lz_d;
+  double recip_a_x = inv_lx;
+  double recip_a_y = -xy_d * inv_lx * inv_ly;
+  double recip_a_z = (xy_d * yz_d - xz_d * ly_d) * inv_lx * inv_ly * inv_lz;
+  double recip_b_y = inv_ly;
+  double recip_b_z = -yz_d * inv_ly * inv_lz;
+  double recip_c_z = inv_lz;
+
+  double kx = two_pi * (m_a * recip_a_x);
+  double ky = two_pi * (m_a * recip_a_y + m_b * recip_b_y);
+  double kz = two_pi
+              * (m_a * recip_a_z + m_b * recip_b_z + m_c * recip_c_z);
+  double k2 = kx * kx + ky * ky + kz * kz;
+
+  Real g_out;
+  Real vf_out;
+  if (k2 == 0.0) {
+    g_out = R(0.0);
+    vf_out = R(0.0);
+  } else {
+    double b_a = (double) b_factors_a[ka];
+    double b_b = (double) b_factors_b[kb];
+    double b_c = (double) b_factors_c[kc];
+    double g = prefactor * (four_pi / k2)
+               * exp(-k2 / four_alpha2)
+               * b_a * b_b * b_c;
+    double virial_term = 1.0 - k2 / (2.0 * alpha_d * alpha_d);
+    g_out = (Real) g;
+    vf_out = (Real)(g * virial_term);
+  }
+  influence_G[idx] = g_out;
+  virial_factor[idx] = vf_out;
+}
+
 // rq-9ca00d25
 //
 // Charge spreading kernel: one thread per real grid cell. Walks the p^3

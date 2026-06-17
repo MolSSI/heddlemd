@@ -28,7 +28,8 @@ pub use kernels::{
     shake_positions, shake_positions_no_velocity, shake_snapshot,
     sort_cells_by_particle_id, spme_charge_spread, spme_charge_spread_on_stream,
     spme_force_gather, spme_influence_multiply, spme_influence_multiply_on_stream,
-    spme_real_pair_force, spme_recip_virial_finalize_on_stream, vv_kick,
+    spme_real_pair_force, spme_recip_compute_influence_on_stream,
+    spme_recip_virial_finalize_on_stream, vv_kick,
     vv_kick_drift,
 };
 #[cfg(not(feature = "f64"))]

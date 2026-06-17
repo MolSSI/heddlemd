@@ -569,7 +569,12 @@
   "rq-053a026c": {
     "decl": "Scenario: PotentialRegistry::with_builtins exposes the six built-in builders in evaluation order",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PotentialRegistry::with_builtins exposes the six built-in builders in evaluation order",
     "type": "scenario"
   },
@@ -1414,12 +1419,7 @@
   "rq-0d5e76ec": {
     "decl": "- A \"recip_stream → default\" join at the start of",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "src/forces/spme.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "- A \"recip_stream → default\" join at the start of",
     "type": "anchor"
   },
@@ -1567,7 +1567,12 @@
   "rq-0f34d11b": {
     "decl": "Scenario: Construct a ForceField with bond_types declared but no bonds",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct a ForceField with bond_types declared but no bonds",
     "type": "scenario"
   },
@@ -2583,6 +2588,13 @@
     ],
     "title": "rattle_velocities zeroes the constraint-distance time-derivative",
     "type": "scenario"
+  },
+  "rq-17b52850": {
+    "decl": "- `spme_recip_compute_influence`: one thread per complex grid cell,",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_recip_compute_influence",
+    "type": "api-item"
   },
   "rq-17d3ddfe": {
     "decl": "Scenario: log_column_names returns [\"nhc_conserved\"] for NHC",
@@ -4120,12 +4132,7 @@
   "rq-24e36eba": {
     "decl": "- The R2C forward transform `rho → rho_hat` is invoked via",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "src/forces/spme.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "- The R2C forward transform `rho → rho_hat` is invoked via",
     "type": "anchor"
   },
@@ -4408,12 +4415,7 @@
   "rq-274db88b": {
     "decl": "- A \"default → recip_stream\" handoff at the start of",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "src/forces/spme.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "- A \"default → recip_stream\" handoff at the start of",
     "type": "anchor"
   },
@@ -5510,7 +5512,12 @@
   "rq-32e981cc": {
     "decl": "Scenario: step() on a ForceField with only LennardJones writes LJ forces to forces_*",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "step() on a ForceField with only LennardJones writes LJ forces to forces_*",
     "type": "scenario"
   },
@@ -6595,7 +6602,12 @@
   "rq-3de16ce0": {
     "decl": "Scenario: Construct a ForceField with LennardJones and MorseBonded",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct a ForceField with LennardJones and MorseBonded",
     "type": "scenario"
   },
@@ -7179,7 +7191,12 @@
   "rq-455db9c2": {
     "decl": "Scenario: Slot accumulator buffers are sized num_slots * particle_count",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Slot accumulator buffers are sized num_slots * particle_count",
     "type": "scenario"
   },
@@ -7775,6 +7792,13 @@
     "title": "NeighborListState with particle_count = 0 builds successfully",
     "type": "scenario"
   },
+  "rq-4bd0b129": {
+    "decl": "Scenario: Influence recompute is deterministic across two independent slots",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Influence recompute is deterministic across two independent slots",
+    "type": "scenario"
+  },
   "rq-4bd6ff2b": {
     "decl": "- `NoseHooverChainBuilder` — implements `ThermostatBuilder` with",
     "file": "integration/nose-hoover-chain",
@@ -8276,7 +8300,12 @@
   "rq-51af5f97": {
     "decl": "Scenario: register(...) appends a builder at the end",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "register(...) appends a builder at the end",
     "type": "scenario"
   },
@@ -8740,7 +8769,12 @@
   "rq-56c8a238": {
     "decl": "Scenario: Construct a ForceField with LennardJones only",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct a ForceField with LennardJones only",
     "type": "scenario"
   },
@@ -9363,6 +9397,13 @@
     "title": "Host wall-clock",
     "type": "section"
   },
+  "rq-5d30456e": {
+    "decl": "- `spme_recip_virial_finalize_on_stream(kernels, virial_per_cell, w_per_particle_virial, m_complex, n_particles, stream) -> Result<(), GpuError>`",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_recip_virial_finalize_on_stream",
+    "type": "api-item"
+  },
   "rq-5d6085ba": {
     "decl": "Scenario: A direct error-to-error conversion is generated by #[from]",
     "file": "error-handling",
@@ -9764,7 +9805,12 @@
   "rq-60f445b2": {
     "decl": "Scenario: Construct a ForceField with zero slots",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct a ForceField with zero slots",
     "type": "scenario"
   },
@@ -12071,7 +12117,12 @@
   "rq-78ad9477": {
     "decl": "Scenario: PotentialRegistry::new starts empty",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "PotentialRegistry::new starts empty",
     "type": "scenario"
   },
@@ -12623,7 +12674,12 @@
   "rq-7d8485b3": {
     "decl": "Scenario: Each slot writes into its own row of the slot-output buffers",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Each slot writes into its own row of the slot-output buffers",
     "type": "scenario"
   },
@@ -14022,6 +14078,13 @@
     "title": "NaN forces propagate to NaN velocities and positions",
     "type": "scenario"
   },
+  "rq-8e6a1933": {
+    "decl": "Scenario: Influence recompute under NVT fires once",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Influence recompute under NVT fires once",
+    "type": "scenario"
+  },
   "rq-8e8eef43": {
     "decl": "### Launchers",
     "file": "forces/pair-force-kernel",
@@ -15116,6 +15179,13 @@
     "title": "Reproducibility",
     "type": "section"
   },
+  "rq-99d3d796": {
+    "decl": "- `spme_recip_compute_influence_on_stream(kernels, b_factors_a, b_factors_b, b_factors_c, influence_g, virial_factor, sim_box, grid, alpha, k_coulomb, m_complex, stream) -> Result<(), GpuError>`",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_recip_compute_influence_on_stream",
+    "type": "api-item"
+  },
   "rq-9a19bfa3": {
     "decl": "- `ParticleState::download_from(&mut self, buffers: &ParticleBuffers) -> Result<(), ParticleStateError>`",
     "file": "particle-state",
@@ -15485,6 +15555,13 @@
     "title": "validate_against accepts a well-formed config",
     "type": "scenario"
   },
+  "rq-9cee9bfd": {
+    "decl": "Scenario: Influence buffers are populated at slot construction",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Influence buffers are populated at slot construction",
+    "type": "scenario"
+  },
   "rq-9cf657ed": {
     "decl": "Scenario: fill kernel writes 1.0 to every element of a block-aligned buffer",
     "file": "build-pipeline",
@@ -15538,6 +15615,13 @@
       }
     ],
     "title": "sim_box.generation() advances after apply",
+    "type": "scenario"
+  },
+  "rq-9d344eb9": {
+    "decl": "Scenario: Two runs of spme_recip_virial_finalize on identical inputs are byte-identical",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Two runs of spme_recip_virial_finalize on identical inputs are byte-identical",
     "type": "scenario"
   },
   "rq-9d523d38": {
@@ -15664,6 +15748,13 @@
     ],
     "title": "Feature: Topology File, Bond List, Angle List, Exclusion List, and Constraint List",
     "type": "file"
+  },
+  "rq-9e2d2f1a": {
+    "decl": "- `spme_recip_virial_finalize`: single block of 256 threads,",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_recip_virial_finalize",
+    "type": "api-item"
   },
   "rq-9e2e9d4e": {
     "decl": "- `SimulationBox::rescale_isotropic(&mut self, factor: f32) ->",
@@ -16685,7 +16776,12 @@
   "rq-a9642241": {
     "decl": "Scenario: Adding a new Potential implementation requires no edits to ForceField or accumulate_forces",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Adding a new Potential implementation requires no edits to ForceField or accumulate_forces",
     "type": "scenario"
   },
@@ -16704,12 +16800,7 @@
   "rq-a98abc35": {
     "decl": "- The C2R inverse transform `rho_hat → V` is invoked via",
     "file": "forces/spme",
-    "refs": [
-      {
-        "file": "src/forces/spme.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "- The C2R inverse transform `rho_hat → V` is invoked via",
     "type": "anchor"
   },
@@ -17583,7 +17674,12 @@
   "rq-b1a132b5": {
     "decl": "Scenario: ForceField::new iterates the registry in registration order",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "ForceField::new iterates the registry in registration order",
     "type": "scenario"
   },
@@ -18936,7 +19032,12 @@
   "rq-c170c0b7": {
     "decl": "Scenario: Reject construction when two slots share the same label",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Reject construction when two slots share the same label",
     "type": "scenario"
   },
@@ -19223,6 +19324,13 @@
     "title": ".minlog reports accepted=0 for rejected iterations",
     "type": "scenario"
   },
+  "rq-c4d04411": {
+    "decl": "Scenario: Influence buffers are reused when sim_box generation is unchanged",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Influence buffers are reused when sim_box generation is unchanged",
+    "type": "scenario"
+  },
   "rq-c4d4608f": {
     "decl": "Scenario: Pair with Coulomb exclusion scale 0.0 contributes nothing",
     "file": "forces/coulomb-pair-force",
@@ -19257,7 +19365,12 @@
   "rq-c525ee79": {
     "decl": "Scenario: Construct an empty (N=0) ForceField with potentials configured",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Construct an empty (N=0) ForceField with potentials configured",
     "type": "scenario"
   },
@@ -19542,6 +19655,13 @@
       }
     ],
     "title": "Reject too many data rows",
+    "type": "scenario"
+  },
+  "rq-c8954d3e": {
+    "decl": "Scenario: Influence buffers are rebuilt when sim_box generation changes",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Influence buffers are rebuilt when sim_box generation changes",
     "type": "scenario"
   },
   "rq-c8aa7417": {
@@ -19941,7 +20061,12 @@
   "rq-ccf4dc3f": {
     "decl": "Scenario: Builder returning Ok(None) is skipped without erroring",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Builder returning Ok(None) is skipped without erroring",
     "type": "scenario"
   },
@@ -20063,6 +20188,13 @@
     "refs": [],
     "title": "Reciprocal-space virial",
     "type": "section"
+  },
+  "rq-ce68c21a": {
+    "decl": "Scenario: Influence recompute under a C-rescale barostat fires every step",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Influence recompute under a C-rescale barostat fires every step",
+    "type": "scenario"
   },
   "rq-ce89d4a4": {
     "decl": "Scenario: Reject when masses has the wrong length",
@@ -21715,7 +21847,12 @@
   "rq-de47c1ac": {
     "decl": "Scenario: step() with N=0 launches no kernels",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "step() with N=0 launches no kernels",
     "type": "scenario"
   },
@@ -21821,7 +21958,12 @@
   "rq-df3a50f6": {
     "decl": "Scenario: step() on a ForceField with both slots sums LJ and Morse",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "step() on a ForceField with both slots sums LJ and Morse",
     "type": "scenario"
   },
@@ -23250,6 +23392,13 @@
     "title": "Units",
     "type": "section"
   },
+  "rq-ede87154": {
+    "decl": "Scenario: spme_recip_virial_finalize writes (0.5 / N) · Σ virial_per_cell on device",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_recip_virial_finalize writes (0.5 / N) · Σ virial_per_cell on device",
+    "type": "scenario"
+  },
   "rq-ede9a68f": {
     "decl": "Scenario: Reject stride = 0",
     "file": "analysis/framework",
@@ -24544,6 +24693,13 @@
     "title": "BerendsenThermostat",
     "type": "api-item"
   },
+  "rq-f8a66553": {
+    "decl": "Scenario: virial_factor[k] = G[k] · (1 - K² / (2 α²)) cell-by-cell",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "virial_factor[k] = G[k] · (1 - K² / (2 α²)) cell-by-cell",
+    "type": "scenario"
+  },
   "rq-f8ad62d4": {
     "decl": "Scenario: cell_offsets is the exclusive prefix sum and ends at particle_count",
     "file": "forces/neighbor-list",
@@ -24922,7 +25078,12 @@
   "rq-fc7b1565": {
     "decl": "Scenario: step() on a ForceField with zero slots writes zeros to forces_*",
     "file": "forces/framework",
-    "refs": [],
+    "refs": [
+      {
+        "file": "tests/forces_framework.rs",
+        "kind": "code"
+      }
+    ],
     "title": "step() on a ForceField with zero slots writes zeros to forces_*",
     "type": "scenario"
   },
@@ -25230,6 +25391,13 @@
       }
     ],
     "title": "compute_temperature uses k_B = 1 internally",
+    "type": "scenario"
+  },
+  "rq-ff16a2c9": {
+    "decl": "Scenario: k=0 cell is zero in both influence_G and virial_factor after recompute",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "k=0 cell is zero in both influence_G and virial_factor after recompute",
     "type": "scenario"
   },
   "rq-ff235ded": {
