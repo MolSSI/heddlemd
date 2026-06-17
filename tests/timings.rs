@@ -491,9 +491,24 @@ fn total_runtime_dominates_other_rows() {
         .unwrap()
         .parse()
         .unwrap();
+    // Pre-phase-0 setup stages (`config_load`, `init_load`, `gpu_init`,
+    // `velocity_generation`, `host_to_device_upload`) are replayed once
+    // into phase 0's Timings but happen *before* the phase's elapsed
+    // clock starts, so they legitimately can exceed `total_runtime` on
+    // short configs. Skip them here.
+    const PRE_PHASE_SETUP_STAGES: &[&str] = &[
+        "config_load",
+        "init_load",
+        "gpu_init",
+        "velocity_generation",
+        "host_to_device_upload",
+    ];
     for line in body.lines().skip(1) {
         let cols: Vec<&str> = line.split_whitespace().collect();
         if cols[0] == "total_runtime" {
+            continue;
+        }
+        if PRE_PHASE_SETUP_STAGES.contains(&cols[0]) {
             continue;
         }
         let row_total_ms: f64 = cols[2].parse().unwrap();
