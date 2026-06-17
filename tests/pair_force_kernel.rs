@@ -262,8 +262,8 @@ fn download_virial(buffers: &SlotOutputBuffers, device: &Arc<CudaDevice>) -> Vec
     device.dtoh_sync_copy(&buffers.virial).unwrap()
 }
 
-fn default_box() -> SimulationBox {
-    SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap()
+fn default_box(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
+    SimulationBox::new(&gpu.device, 20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap()
 }
 
 // =================================================================
@@ -290,7 +290,7 @@ fn particle_count_not_multiple_of_warps_per_block_uses_ragged_grid() {
         .collect::<Vec<_>>();
     let state = build_state(n, positions);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
 
     let mut nl_flat = Vec::with_capacity(n);
     let counts = vec![1u32; n];
@@ -335,7 +335,7 @@ fn particle_count_below_warps_per_block_uses_under_full_block() {
     let positions = vec![(0.0, 0.0, 0.0), (1.5, 0.0, 0.0), (3.0, 0.0, 0.0)];
     let state = build_state(n, positions);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
     let counts = vec![2u32; n];
     let nl_flat = vec![1u32, 2, 0, 2, 0, 1];
     let neighbor_list = upload_neighbor_list(&gpu.device, &nl_flat);
@@ -388,7 +388,7 @@ fn count_zero_yields_zero_output_impl(kind: PotentialKind) {
         .collect::<Vec<_>>();
     let state = build_state(n, positions);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
     let counts = vec![0u32; n];
     // 4 slots × max_neighbors=4 = 16, all unused.
     let nl_flat = vec![0u32; n * 4];
@@ -440,7 +440,7 @@ fn sweep_reads_only_slots_up_to_count() {
     let positions = vec![(0.0, 0.0, 0.0), (1.5, 0.0, 0.0)];
     let state = build_state(n, positions);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
     let max_neighbors = 8;
     // Particle 0: visit partner 1 three times; junk in slots 3..8.
     // Junk values picked to be in-range valid indices (so the test
@@ -480,7 +480,7 @@ fn self_pair_skipped_in_trivial_neighbour_list_impl(kind: PotentialKind) {
     let positions = vec![(0.0, 0.0, 0.0), (dx as Real, 0.0, 0.0)];
     let state = build_state(2, positions);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
     let counts = vec![2u32, 2];
     let nl_flat = vec![0u32, 1, 1, 0];
     let neighbor_list = upload_neighbor_list(&gpu.device, &nl_flat);
@@ -531,7 +531,7 @@ fn sweep_boundary_impl(kind: PotentialKind, count: usize) {
     let positions = vec![(0.0, 0.0, 0.0), (dx as Real, 0.0, 0.0)];
     let state = build_state(2, positions);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
     let max_neighbors = count as u32;
     let counts = vec![count as u32, 0u32];
     let mut row0 = vec![1u32; count];
@@ -593,7 +593,7 @@ fn warp_tree_reduction_agrees_with_cpu_reference_lj() {
     let positions = vec![(0.0, 0.0, 0.0)];
     let state = build_state(n, positions);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
 
     // Single particle with a synthetic neighbour list of 80 valid
     // partner indices — but particle_count = 1, so partner IDs must
@@ -690,7 +690,7 @@ fn f_variant_does_not_write_energy_or_virial_lj() {
     let positions = vec![(0.0, 0.0, 0.0), (1.5 as Real, 0.0, 0.0)];
     let state = build_state(n, positions);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
     let counts = vec![1u32, 1u32];
     let nl_flat = vec![1u32, 0u32];
     let neighbor_list = upload_neighbor_list(&gpu.device, &nl_flat);
@@ -727,7 +727,7 @@ fn fev_variant_writes_energy_and_virial_lj() {
     let positions = vec![(0.0, 0.0, 0.0), (1.5 as Real, 0.0, 0.0)];
     let state = build_state(n, positions);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
     let counts = vec![1u32, 1u32];
     let nl_flat = vec![1u32, 0u32];
     let neighbor_list = upload_neighbor_list(&gpu.device, &nl_flat);
@@ -766,7 +766,7 @@ fn f_and_fev_agree_on_force_impl(kind: PotentialKind) {
         .collect::<Vec<_>>();
     let state = build_state(n, positions);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
     // Each particle has n-1 neighbours (the other particles).
     let mut counts = vec![0u32; n];
     let mut nl_flat = Vec::new();
@@ -842,7 +842,7 @@ fn two_runs_byte_identical_impl(kind: PotentialKind) {
     let state = build_state(n, positions);
     let buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
     let buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
     let max_neighbors = (n - 1) as u32;
     let mut counts = vec![0u32; n];
     let mut nl_flat = Vec::new();
@@ -921,7 +921,7 @@ fn newton_third_law_pair_impl(kind: PotentialKind) {
     let positions = vec![(0.0, 0.0, 0.0), (1.3 as Real, 0.4, -0.2)];
     let state = build_state(2, positions);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
     let counts = vec![1u32, 1u32];
     let nl_flat = vec![1u32, 0u32];
     let neighbor_list = upload_neighbor_list(&gpu.device, &nl_flat);
@@ -958,7 +958,7 @@ fn per_particle_forces_sum_to_zero_impl(kind: PotentialKind) {
         .collect::<Vec<_>>();
     let state = build_state(n, positions);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
     let max_neighbors = (n - 1) as u32;
     let mut counts = vec![0u32; n];
     let mut nl_flat = Vec::new();
@@ -1020,7 +1020,7 @@ fn launcher_particle_count_zero_is_noop_impl(kind: PotentialKind) {
         vec![], None, None,
     ).unwrap();
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
     let nl_flat: Vec<u32> = vec![];
     let counts: Vec<u32> = vec![];
     let neighbor_list = upload_neighbor_list(&gpu.device, &nl_flat);
@@ -1055,7 +1055,7 @@ fn kernel_does_not_modify_positions_velocities_masses_charges_lj() {
     let positions = (0..n).map(|i| (i as Real * 1.5, 0.0, 0.0)).collect();
     let state = build_state(n, positions);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
     let max_neighbors = (n - 1) as u32;
     let mut counts = vec![0u32; n];
     let mut nl_flat = Vec::new();
@@ -1130,7 +1130,7 @@ fn nan_pair_contribution_propagates_to_per_particle_output_lj() {
     let positions = vec![(0.0, 0.0, 0.0), (0.0, 0.0, 0.0)];
     let state = build_state(n, positions);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = default_box();
+    let sim_box = default_box(&gpu);
     let counts = vec![1u32, 1u32];
     let nl_flat = vec![1u32, 0u32];
     let neighbor_list = upload_neighbor_list(&gpu.device, &nl_flat);

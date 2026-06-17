@@ -28,8 +28,8 @@ fn two_particle_state(p0: [Real; 3], p1: [Real; 3]) -> ParticleState {
     .unwrap()
 }
 
-fn box_10() -> SimulationBox {
-    SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
+fn box_10(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
+    SimulationBox::new(&gpu.device, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn morse_type(de: f64, a: f64, re: f64) -> BondTypeConfig {
@@ -101,7 +101,7 @@ fn equilibrium_distance_produces_zero_force() {
         &mb.bond_de,
         &mb.bond_a,
         &mb.bond_re,
-        &box_10(),
+        &box_10(&gpu),
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
@@ -135,7 +135,7 @@ fn compressed_bond_repulsive() {
         &mb.bond_de,
         &mb.bond_a,
         &mb.bond_re,
-        &box_10(),
+        &box_10(&gpu),
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
@@ -167,7 +167,7 @@ fn stretched_bond_attractive() {
         &mb.bond_de,
         &mb.bond_a,
         &mb.bond_re,
-        &box_10(),
+        &box_10(&gpu),
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
@@ -202,7 +202,7 @@ fn force_magnitude_matches_closed_form() {
         &mb.bond_de,
         &mb.bond_a,
         &mb.bond_re,
-        &box_10(),
+        &box_10(&gpu),
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
@@ -233,7 +233,7 @@ fn r_zero_produces_zero_force() {
         &mb.bond_de,
         &mb.bond_a,
         &mb.bond_re,
-        &box_10(),
+        &box_10(&gpu),
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
@@ -263,7 +263,7 @@ fn morse_bond_force_zero_bonds_is_noop() {
         &mb.bond_de,
         &mb.bond_a,
         &mb.bond_re,
-        &box_10(),
+        &box_10(&gpu),
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
@@ -319,7 +319,7 @@ fn atom_with_two_bonds_sums_contributions() {
         &mb.bond_de,
         &mb.bond_a,
         &mb.bond_re,
-        &box_10(),
+        &box_10(&gpu),
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
@@ -458,7 +458,7 @@ fn diatomic_equilibrium_produces_zero_net_force() {
     };
     let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         2,
-        &box_10(),
+        &box_10(&gpu),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[pair],
         &bt,
@@ -471,7 +471,7 @@ fn diatomic_equilibrium_produces_zero_net_force() {
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
     assert!(downloaded.forces_x[0].abs() < 1.0e-6);
@@ -496,7 +496,7 @@ fn newtons_third_law_holds_for_combined_force() {
     };
     let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         2,
-        &box_10(),
+        &box_10(&gpu),
         &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
         &[pair],
         &bt,
@@ -509,7 +509,7 @@ fn newtons_third_law_holds_for_combined_force() {
         &ExclusionList::empty(2),
         &NeighborListConfig::AllPairs)
     .unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
     let sum_x = downloaded.forces_x[0] + downloaded.forces_x[1];
@@ -543,7 +543,7 @@ fn stretched_bond_energy_matches_closed_form() {
         &mb.bond_de,
         &mb.bond_a,
         &mb.bond_re,
-        &box_10(),
+        &box_10(&gpu),
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
@@ -576,7 +576,7 @@ fn stretched_bond_virial_matches_r_dot_f() {
         &mb.bond_de,
         &mb.bond_a,
         &mb.bond_re,
-        &box_10(),
+        &box_10(&gpu),
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
@@ -613,7 +613,7 @@ fn r_zero_produces_zero_energy_and_virial() {
         &mb.bond_de,
         &mb.bond_a,
         &mb.bond_re,
-        &box_10(),
+        &box_10(&gpu),
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
@@ -645,7 +645,7 @@ fn bond_reduction_sums_energy_and_virial_alongside_forces() {
         &mb.bond_de,
         &mb.bond_a,
         &mb.bond_re,
-        &box_10(),
+        &box_10(&gpu),
         &mut mb.bond_pair_x,
         &mut mb.bond_pair_y,
         &mut mb.bond_pair_z,
@@ -783,7 +783,7 @@ fn reduction_summation_order_is_sorted_bond_index() {
 fn minimum_image_is_applied_to_bond_displacement() {
     use cudarc::driver::DeviceSlice;
     let gpu = init_device().unwrap();
-    let sim_box = box_10(); // L=10
+    let sim_box = box_10(&gpu); // L=10
     // p0 = (-4.5, 0, 0), p1 = (4.5, 0, 0). Naive r_ij = -9.0, wraps to +1.0
     // (the periodic image). The bond is at r=1.0 = re for the type
     // re=1.0, so the morse force is exactly zero — confirming the kernel
@@ -841,7 +841,7 @@ fn two_independent_calls_produce_byte_identical_accumulators() {
             &mb.bond_de,
             &mb.bond_a,
             &mb.bond_re,
-            &box_10(),
+            &box_10(&gpu),
             &mut mb.bond_pair_x,
             &mut mb.bond_pair_y,
             &mut mb.bond_pair_z,

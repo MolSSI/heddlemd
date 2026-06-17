@@ -64,7 +64,7 @@ extern "C" __global__ void lj_pair_force_f(
     const Real *positions_z,
     const unsigned int *type_indices,
     unsigned int max_neighbors,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     unsigned int n_types,
     const Real *type_sigma,
     const Real *type_epsilon,
@@ -80,6 +80,8 @@ extern "C" __global__ void lj_pair_force_f(
     Real *slot_force_z,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   LjPairFunc f { type_indices, n_types, type_sigma, type_epsilon,
                  type_cutoff, type_switch };
   pair_compute_f(
@@ -97,7 +99,7 @@ extern "C" __global__ void lj_pair_force_fev(
     const Real *positions_z,
     const unsigned int *type_indices,
     unsigned int max_neighbors,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     unsigned int n_types,
     const Real *type_sigma,
     const Real *type_epsilon,
@@ -115,6 +117,8 @@ extern "C" __global__ void lj_pair_force_fev(
     Real *slot_virial,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   LjPairFunc f { type_indices, n_types, type_sigma, type_epsilon,
                  type_cutoff, type_switch };
   pair_compute_fev(

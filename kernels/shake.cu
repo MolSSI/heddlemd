@@ -125,11 +125,13 @@ extern "C" __global__ void shake_positions(
     const unsigned char *group_constraints_local_j,
     const Real *group_constraints_r2,
     const Real *atom_mass,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real dt,
     Real *constraint_virial,
     unsigned int n_groups)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int g = blockIdx.x * blockDim.x + threadIdx.x;
   if (g >= n_groups) {
     return;
@@ -307,11 +309,13 @@ extern "C" __global__ void rattle_velocities(
     const unsigned char *group_constraints_local_i,
     const unsigned char *group_constraints_local_j,
     const Real *atom_mass,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real dt,
     Real *constraint_virial,
     unsigned int n_groups)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int g = blockIdx.x * blockDim.x + threadIdx.x;
   if (g >= n_groups) {
     return;
@@ -472,9 +476,11 @@ extern "C" __global__ void shake_positions_no_velocity(
     const unsigned char *group_constraints_local_j,
     const Real *group_constraints_r2,
     const Real *atom_mass,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     unsigned int n_groups)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int g = blockIdx.x * blockDim.x + threadIdx.x;
   if (g >= n_groups) {
     return;

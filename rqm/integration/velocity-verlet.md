@@ -158,7 +158,7 @@ extern "C" __global__ void vv_kick_drift(
     float *velocities_x, float *velocities_y, float *velocities_z,
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float dt,
     unsigned int n);
 
@@ -177,7 +177,7 @@ extern "C" __global__ void vv_kick_drift_lossless(
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float dt,
     unsigned int n);
 

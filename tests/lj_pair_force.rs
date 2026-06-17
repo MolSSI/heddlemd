@@ -29,8 +29,8 @@ use common::{empty_exclusions, exclusions_from_entries, single_type_lj_table_wit
 const SIGMA: Real = 1.0;
 const EPSILON: Real = 1.0;
 
-fn box_20() -> SimulationBox {
-    SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap()
+fn box_20(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
+    SimulationBox::new(&gpu.device, 20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn two_particles_at(separation: Real) -> ParticleState {
@@ -102,7 +102,7 @@ fn run_pair(
     let gpu = init_device().unwrap();
     let state = two_particles_at(separation);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = box_20();
+    let sim_box = box_20(&gpu);
     let params = single_type_lj_table_with_switch(&gpu.device, SIGMA, EPSILON, cutoff, r_switch);
     let excl = match exclusions_input {
         None => empty_exclusions(&gpu.device, 2),
@@ -304,7 +304,7 @@ fn newton_third_law_holds_bitwise_across_switching_window() {
     )
     .unwrap();
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = box_20();
+    let sim_box = box_20(&gpu);
     let params = single_type_lj_table_with_switch(&gpu.device, SIGMA, EPSILON, 5.0, 4.0);
     let excl = empty_exclusions(&gpu.device, 2);
     let mut output = SlotOutputBuffers::new(&gpu.device, 2).unwrap();
@@ -440,7 +440,7 @@ fn exclusion_only_applies_to_listed_pair() {
     )
     .unwrap();
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = box_20();
+    let sim_box = box_20(&gpu);
     let params = single_type_lj_table_with_switch(&gpu.device, SIGMA, EPSILON, 5.0, 5.0);
     let excl_full = exclusions_from_entries(&gpu.device, 3, &[(0, 1, 0.0, 1.0)]);
     let excl_empty = empty_exclusions(&gpu.device, 3);

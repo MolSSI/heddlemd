@@ -24,10 +24,10 @@ use heddle_md::timings::{KernelStage, Timings};
 
 const KB: f64 = 1.380649e-23;
 
-fn box_small() -> SimulationBox {
+fn box_small(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
     // A box big enough that the position rescale never wraps anything
     // out of the primary image even after small μ deviations.
-    SimulationBox::new(1.0e-9, 1.0e-9, 1.0e-9, 0.0, 0.0, 0.0).unwrap()
+    SimulationBox::new(&gpu.device, 1.0e-9, 1.0e-9, 1.0e-9, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
@@ -35,7 +35,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &PotentialRegistry::with_builtins(),
         gpu,
         n,
-        &box_small(),
+        &box_small(&gpu),
         &[],
         &[],
         &[],
@@ -310,7 +310,8 @@ fn rescale_positions_empty_state_is_noop() {
 // rq-af9257bb
 #[test]
 fn rescale_isotropic_multiplies_all_six_lattice_parameters() {
-    let mut sim_box = SimulationBox::new(1.0, 2.0, 3.0, 0.1, 0.2, 0.3).unwrap();
+    let gpu = init_device().unwrap();
+    let mut sim_box = SimulationBox::new(&gpu.device, 1.0, 2.0, 3.0, 0.1, 0.2, 0.3).unwrap();
     sim_box.rescale_isotropic(0.5).unwrap();
     let [lx, ly, lz, xy, xz, yz] = sim_box.lattice();
     assert!((lx - 0.5).abs() < 1.0e-6);
@@ -324,7 +325,8 @@ fn rescale_isotropic_multiplies_all_six_lattice_parameters() {
 // rq-911d9120
 #[test]
 fn rescale_isotropic_bumps_generation() {
-    let mut sim_box = SimulationBox::new(1.0, 1.0, 1.0, 0.0, 0.0, 0.0).unwrap();
+    let gpu = init_device().unwrap();
+    let mut sim_box = SimulationBox::new(&gpu.device, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0).unwrap();
     let g = sim_box.generation();
     sim_box.rescale_isotropic(1.01).unwrap();
     assert_eq!(sim_box.generation(), g + 1);
@@ -333,7 +335,8 @@ fn rescale_isotropic_bumps_generation() {
 // rq-b0b4c220
 #[test]
 fn rescale_isotropic_rejects_zero_factor() {
-    let mut sim_box = SimulationBox::new(1.0, 1.0, 1.0, 0.0, 0.0, 0.0).unwrap();
+    let gpu = init_device().unwrap();
+    let mut sim_box = SimulationBox::new(&gpu.device, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0).unwrap();
     let result = sim_box.rescale_isotropic(0.0);
     assert!(matches!(result, Err(SimulationBoxError::NonPositiveDiagonal { .. })));
 }
@@ -341,7 +344,8 @@ fn rescale_isotropic_rejects_zero_factor() {
 // rq-9ba11e1e
 #[test]
 fn rescale_isotropic_rejects_nan_factor() {
-    let mut sim_box = SimulationBox::new(1.0, 1.0, 1.0, 0.0, 0.0, 0.0).unwrap();
+    let gpu = init_device().unwrap();
+    let mut sim_box = SimulationBox::new(&gpu.device, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0).unwrap();
     let result = sim_box.rescale_isotropic(Real::NAN);
     assert!(matches!(result, Err(SimulationBoxError::NonFiniteLatticeValue { .. })));
 }
@@ -360,7 +364,7 @@ fn apply_launches_expected_kernel_set() {
         vec![0.0; n],
     );
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_berendsen_barostat(&gpu, n, &berendsen_kind(1.0e5, 1.0e-12, 4.5e-10));
     baro.apply(&mut buffers, &mut sim_box, 1.0e-15, &mut timings)
@@ -391,7 +395,7 @@ fn apply_on_empty_state_is_noop() {
     let gpu = init_device().unwrap();
     let state = make_state(Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let g_before = sim_box.generation();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_berendsen_barostat(&gpu, 0, &berendsen_kind(1.0e5, 1.0e-12, 4.5e-10));
@@ -437,7 +441,7 @@ fn mu_equals_one_when_pressure_equals_target() {
     let n = px.len();
     let state = make_state(px.clone(), vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let v_pre = sim_box.volume();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_berendsen_barostat(&gpu, n, &berendsen_kind(p_target, 1.0e-12, 4.5e-10));
@@ -465,7 +469,7 @@ fn mu_less_than_one_when_pressure_below_target() {
     let n = px.len();
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let v_pre = sim_box.volume() as f64;
     let dt = 1.0e-13;
     let tau = 1.0e-12_f64;
@@ -492,7 +496,7 @@ fn mu_greater_than_one_when_pressure_above_target() {
     let n = px.len();
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let v_pre = sim_box.volume() as f64;
     let dt = 1.0e-13;
     let tau = 1.0e-12_f64;
@@ -520,7 +524,7 @@ fn mu_clamped_to_safety_floor() {
     let n = px.len();
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let v_pre = sim_box.volume() as f64;
     let dt = 1.0e-12;
     let tau = 1.0e-12_f64;
@@ -554,7 +558,7 @@ fn fractional_coordinates_invariant_under_apply() {
     let n = px.len();
     let state = make_state(px.clone(), vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let lx_pre = sim_box.lx();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_berendsen_barostat(&gpu, n, &berendsen_kind(p_target, 1.0e-12, 4.5e-10));
@@ -582,7 +586,7 @@ fn triclinic_shape_preserved_under_apply() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     // Triclinic box.
     let mut sim_box =
-        SimulationBox::new(1.0e-9, 1.0e-9, 1.0e-9, 0.1e-9, 0.2e-9, 0.3e-9).unwrap();
+        SimulationBox::new(&gpu.device, 1.0e-9, 1.0e-9, 1.0e-9, 0.1e-9, 0.2e-9, 0.3e-9).unwrap();
     let [lx_pre, _ly_pre, _lz_pre, xy_pre, xz_pre, yz_pre] = sim_box.lattice();
     let r_xy_pre = (xy_pre / lx_pre) as f64;
     let r_xz_pre = (xz_pre / lx_pre) as f64;
@@ -614,7 +618,7 @@ fn generation_advances_after_apply() {
     let n = px.len();
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let g_pre = sim_box.generation();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_berendsen_barostat(&gpu, n, &berendsen_kind(p_target, 1.0e-12, 4.5e-10));
@@ -670,7 +674,7 @@ fn composes_with_velocity_verlet_and_berendsen_thermostat() {
         vec![0.0; n],
     );
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = IntegratorRegistry::with_builtins()
@@ -735,7 +739,7 @@ fn two_runs_byte_identical() {
             virials.to_vec(),
         );
         let mut buffers = ParticleBuffers::new(gpu, &state).unwrap();
-        let mut sim_box = box_small();
+        let mut sim_box = box_small(&gpu);
         let mut timings = Timings::new(gpu).unwrap();
         let mut baro =
             build_berendsen_barostat(gpu, n, &berendsen_kind(p_target, 1.0e-12, 4.5e-10));

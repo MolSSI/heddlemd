@@ -175,7 +175,11 @@ fn parse_attribute_line(line: &str) -> Vec<(String, String)> {
 // become the six SimulationBox lattice parameters:
 //   vals[0] = lx (a_x), vals[3] = xy (b_x), vals[4] = ly (b_y),
 //   vals[6] = xz (c_x), vals[7] = yz (c_y), vals[8] = lz (c_z).
-fn parse_lattice(raw: &str, len_factor: f64) -> Result<SimulationBox, InitStateError> {
+fn parse_lattice(
+    device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    raw: &str,
+    len_factor: f64,
+) -> Result<SimulationBox, InitStateError> {
     let parts: Vec<&str> = raw.split_ascii_whitespace().collect();
     if parts.len() != 9 {
         return Err(InitStateError::InvalidLattice(format!(
@@ -218,7 +222,13 @@ fn parse_lattice(raw: &str, len_factor: f64) -> Result<SimulationBox, InitStateE
         )));
     }
     let sim_box = SimulationBox::new(
-        lx as Real, ly as Real, lz as Real, xy as Real, xz as Real, yz as Real,
+        device,
+        lx as Real,
+        ly as Real,
+        lz as Real,
+        xy as Real,
+        xz as Real,
+        yz as Real,
     )
     .map_err(|e| InitStateError::InvalidLattice(format!("{e}")))?;
     Ok(sim_box)
@@ -238,16 +248,18 @@ fn parse_properties(raw: &str) -> Result<PropertiesShape, InitStateError> {
 
 // rq-5711e6b2 rq-dad38fdd
 pub fn load_init_state(
+    device: &std::sync::Arc<cudarc::driver::CudaDevice>,
     path: &Path,
     type_names: &[&str],
     units: UnitSystem,
 ) -> Result<InitState, InitStateError> {
     let raw = std::fs::read_to_string(path)
         .map_err(|e| InitStateError::Io(format!("{}: {}", path.display(), e)))?;
-    parse_init_state(&raw, type_names, units)
+    parse_init_state(device, &raw, type_names, units)
 }
 
 pub(crate) fn parse_init_state(
+    device: &std::sync::Arc<cudarc::driver::CudaDevice>,
     raw: &str,
     type_names: &[&str],
     units: UnitSystem,
@@ -275,7 +287,7 @@ pub(crate) fn parse_init_state(
         .find(|(k, _)| k == "Lattice")
         .map(|(_, v)| v.as_str())
         .ok_or(InitStateError::MissingAttribute { name: "Lattice" })?;
-    let sim_box = parse_lattice(lattice_value, len_factor)?;
+    let sim_box = parse_lattice(device, lattice_value, len_factor)?;
 
     let properties_value = attrs
         .iter()

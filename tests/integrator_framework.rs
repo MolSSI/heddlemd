@@ -46,8 +46,8 @@ fn langevin_kind(seed: u64) -> SlotConfig {
     )
 }
 
-fn box_10() -> SimulationBox {
-    SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
+fn box_10(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
+    SimulationBox::new(&gpu.device, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
@@ -55,7 +55,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &PotentialRegistry::with_builtins(),
         gpu,
         n,
-        &box_10(),
+        &box_10(&gpu),
         &[],
         &[],
         &[],
@@ -88,7 +88,7 @@ fn construct_vv_lossless_via_registry() {
     let registry = IntegratorRegistry::with_builtins();
     let state = small_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 4);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = registry.build(&vv_kind(true), &gpu, 4, 0).unwrap();
@@ -187,7 +187,7 @@ fn custom_builder_registered_takes_priority_over_builtin() {
     // Stub appears first, so velocity-verlet routes to it.
     let state = small_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 4);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = registry.build(&vv_kind(false), &gpu, 4, 0).unwrap();
@@ -214,7 +214,7 @@ fn step_on_empty_state_is_noop() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 0);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
@@ -237,7 +237,7 @@ fn vv_step_launches_kick_drift_force_and_kick() {
     let mut state = small_state(n);
     state.velocities_x = (0..n).map(|i| 0.5 + i as Real * 0.1).collect();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
@@ -273,7 +273,7 @@ fn lossless_vv_step_uses_lossless_kernels() {
     let gpu = init_device().unwrap();
     let state = small_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 4);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
@@ -299,7 +299,7 @@ fn integrator_owns_force_evaluation_inside_step() {
     let gpu = init_device().unwrap();
     let state = small_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
         4,
         &sim_box,
@@ -347,7 +347,7 @@ fn two_consecutive_langevin_steps_produce_different_velocities() {
     let gpu = init_device().unwrap();
     let state = small_state(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 2);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = IntegratorRegistry::with_builtins()
@@ -374,8 +374,8 @@ fn two_independent_runs_byte_identical() {
 
     let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box_a = box_10();
-    let mut sim_box_b = box_10();
+    let mut sim_box_a = box_10(&gpu);
+    let mut sim_box_b = box_10(&gpu);
     let mut ff_a = empty_force_field(&gpu, 4);
     let mut ff_b = empty_force_field(&gpu, 4);
     let mut timings_a = Timings::new(&gpu).unwrap();
@@ -410,7 +410,7 @@ fn langevin_draw_counter_starts_at_zero_and_increments_per_step() {
     let gpu = init_device().unwrap();
     let state = small_state(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 2);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integrator = LangevinBaoabState {
@@ -437,8 +437,8 @@ fn langevin_states_at_same_draw_counter_and_seed_produce_identical_draws() {
     let state = small_state(4);
     let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box_a = box_10();
-    let mut sim_box_b = box_10();
+    let mut sim_box_a = box_10(&gpu);
+    let mut sim_box_b = box_10(&gpu);
     let mut ff_a = empty_force_field(&gpu, 4);
     let mut ff_b = empty_force_field(&gpu, 4);
     let mut timings_a = Timings::new(&gpu).unwrap();
@@ -641,7 +641,7 @@ fn dispatch_loop_orders_apply_pre_step_apply_post() {
     let gpu = init_device().unwrap();
     let state = small_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = empty_force_field(&gpu, 4);
     let mut timings = Timings::new(&gpu).unwrap();
     let log = CallLog::default();
@@ -762,7 +762,7 @@ fn fixture() -> (
     let gpu = init_device().unwrap();
     let state = small_state(4);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = box_10();
+    let sim_box = box_10(&gpu);
     let ff = empty_force_field(&gpu, 4);
     let timings = Timings::new(&gpu).unwrap();
     (gpu, buffers, sim_box, ff, timings)
@@ -1235,7 +1235,7 @@ fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
     let gpu = init_device().unwrap();
     let state = small_state(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = ForceField::new(
         &heddle_md::forces::PotentialRegistry::with_builtins(),
         &gpu,
@@ -1293,7 +1293,7 @@ fn force_eval_some_slow_class_on_fast_only_ff_is_noop() {
     let gpu = init_device().unwrap();
     let state = small_state(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = ForceField::new(
         &heddle_md::forces::PotentialRegistry::with_builtins(),
         &gpu,
@@ -1351,7 +1351,7 @@ fn force_eval_none_class_continues_to_dispatch_to_step() {
     let gpu = init_device().unwrap();
     let state = small_state(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_10();
+    let mut sim_box = box_10(&gpu);
     let mut ff = ForceField::new(
         &heddle_md::forces::PotentialRegistry::with_builtins(),
         &gpu,

@@ -28,9 +28,9 @@ const TIME_F: f64 = 2.4188843265857195e-17;
 const TEMP_F: f64 = 315775.0248040668;
 const VEL_F: f64 = 2187691.2636411153;
 
-fn box_large() -> SimulationBox {
+fn box_large(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
     let l = (1.0e6 / LEN_F) as Real;
-    SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
+    SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
@@ -38,7 +38,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &PotentialRegistry::with_builtins(),
         gpu,
         n,
-        &box_large(),
+        &box_large(&gpu),
         &[],
         &[],
         &[],
@@ -476,7 +476,7 @@ fn csvr_time_averaged_ke_tracks_k_target() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_large();
+    let mut sim_box = box_large(&gpu);
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = heddle_md::integrator::IntegratorRegistry::with_builtins()

@@ -47,9 +47,9 @@ fn small_state(n: usize, mass: Real) -> ParticleState {
     .unwrap()
 }
 
-fn box_large() -> SimulationBox {
+fn box_large(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
     let l = (1.0e6 / LEN_F) as Real;
-    SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
+    SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
@@ -57,7 +57,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &PotentialRegistry::with_builtins(),
         gpu,
         n,
-        &box_large(),
+        &box_large(&gpu),
         &[],
         &[],
         &[],
@@ -492,7 +492,7 @@ fn nhc_preserves_com_momentum_to_round_off() {
     let state = atomic_state(n);
     let mass = 1.66e-27;
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_large();
+    let mut sim_box = box_large(&gpu);
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = heddle_md::integrator::IntegratorRegistry::with_builtins()

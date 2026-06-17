@@ -261,7 +261,7 @@ extern "C" __global__ void lj_pair_force_f(
     const float *positions_z,
     const unsigned int *type_indices,
     unsigned int max_neighbors,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     unsigned int n_types,
     const float *type_sigma,
     const float *type_epsilon,
@@ -283,7 +283,7 @@ extern "C" __global__ void lj_pair_force_fev(
     const float *positions_z,
     const unsigned int *type_indices,
     unsigned int max_neighbors,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     unsigned int n_types,
     const float *type_sigma,
     const float *type_epsilon,

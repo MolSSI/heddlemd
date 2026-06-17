@@ -41,7 +41,7 @@ pub fn vv_kick_drift(
     let n_u32 = n as u32;
     let func = buffers.kernels.integrate.vv_kick_drift.clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
@@ -59,12 +59,7 @@ pub fn vv_kick_drift(
                 &buffers.forces_y,
                 &buffers.forces_z,
                 &buffers.masses,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 dt,
                 n_u32,
             ),
@@ -216,7 +211,7 @@ pub fn lj_pair_force(
         shared_mem_bytes: 0,
     };
 
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     match level {
         crate::forces::AggregateLevel::ForcesOnly => unsafe {
             let func = particle_buffers.kernels.lj.pair_force_f.clone();
@@ -228,7 +223,7 @@ pub fn lj_pair_force(
                     &particle_buffers.positions_z,
                     &particle_buffers.type_indices,
                     max_neighbors,
-                    lat[0], lat[1], lat[2], lat[3], lat[4], lat[5],
+                    lattice,
                     params.n_types,
                     &params.sigma,
                     &params.epsilon,
@@ -259,7 +254,7 @@ pub fn lj_pair_force(
                         &particle_buffers.positions_z,
                         &particle_buffers.type_indices,
                         max_neighbors,
-                        lat[0], lat[1], lat[2], lat[3], lat[4], lat[5],
+                        lattice,
                         params.n_types,
                         &params.sigma,
                         &params.epsilon,
@@ -324,7 +319,7 @@ pub fn coulomb_pair_force(
         shared_mem_bytes: 0,
     };
 
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     match level {
         crate::forces::AggregateLevel::ForcesOnly => unsafe {
             let func = particle_buffers.kernels.coulomb.coulomb_pair_force_f.clone();
@@ -336,7 +331,7 @@ pub fn coulomb_pair_force(
                     &particle_buffers.positions_z,
                     &particle_buffers.charges,
                     max_neighbors,
-                    lat[0], lat[1], lat[2], lat[3], lat[4], lat[5],
+                    lattice,
                     K_COULOMB_F32,
                     cutoff,
                     r_switch,
@@ -365,7 +360,7 @@ pub fn coulomb_pair_force(
                         &particle_buffers.positions_z,
                         &particle_buffers.charges,
                         max_neighbors,
-                        lat[0], lat[1], lat[2], lat[3], lat[4], lat[5],
+                        lattice,
                         K_COULOMB_F32,
                         cutoff,
                         r_switch,
@@ -422,7 +417,7 @@ pub fn spme_real_pair_force(
         shared_mem_bytes: 0,
     };
 
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     match level {
         crate::forces::AggregateLevel::ForcesOnly => unsafe {
             let func = particle_buffers.kernels.spme_real.spme_real_pair_force_f.clone();
@@ -434,7 +429,7 @@ pub fn spme_real_pair_force(
                     &particle_buffers.positions_z,
                     &particle_buffers.charges,
                     max_neighbors,
-                    lat[0], lat[1], lat[2], lat[3], lat[4], lat[5],
+                    lattice,
                     K_COULOMB_F32,
                     alpha,
                     r_cut_real,
@@ -463,7 +458,7 @@ pub fn spme_real_pair_force(
                         &particle_buffers.positions_z,
                         &particle_buffers.charges,
                         max_neighbors,
-                        lat[0], lat[1], lat[2], lat[3], lat[4], lat[5],
+                        lattice,
                         K_COULOMB_F32,
                         alpha,
                         r_cut_real,
@@ -557,7 +552,7 @@ fn spme_charge_spread_impl(
     let m_u32 = m as u32;
     let func = particle_buffers.kernels.spme_recip.spme_charge_spread.clone();
     let cfg = launch_config(m_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     let n_u32 = n as u32;
     let args = (
         &particle_buffers.positions_x,
@@ -566,12 +561,7 @@ fn spme_charge_spread_impl(
         &particle_buffers.charges,
         sorted_particle_ids,
         cell_offsets,
-        lat[0],
-        lat[1],
-        lat[2],
-        lat[3],
-        lat[4],
-        lat[5],
+        lattice,
         n_a,
         n_b,
         n_c,
@@ -714,19 +704,14 @@ pub fn spme_recip_compute_influence_on_stream(
     debug_assert_eq!(virial_factor.len(), m_complex as usize);
     let func = kernels.spme_recip.spme_recip_compute_influence.clone();
     let cfg = launch_config(m_complex);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     let args = (
         b_factors_a,
         b_factors_b,
         b_factors_c,
         &mut *influence_g,
         &mut *virial_factor,
-        lat[0],
-        lat[1],
-        lat[2],
-        lat[3],
-        lat[4],
-        lat[5],
+        lattice,
         grid[0],
         grid[1],
         grid[2],
@@ -810,7 +795,7 @@ pub fn spme_force_gather(
     let n_u32 = n as u32;
     let func = particle_buffers.kernels.spme_recip.spme_force_gather.clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
@@ -822,12 +807,7 @@ pub fn spme_force_gather(
                 v,
                 u_self_per_particle,
                 w_per_particle_virial,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 grid[0],
                 grid[1],
                 grid[2],
@@ -867,7 +847,7 @@ pub fn morse_bond_force(
     let n_u32 = n_bonds as u32;
     let func = particle_buffers.kernels.morse.morse_bond_force.clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
@@ -879,12 +859,7 @@ pub fn morse_bond_force(
                 bond_de,
                 bond_a,
                 bond_re,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 bond_pair_x,
                 bond_pair_y,
                 bond_pair_z,
@@ -970,7 +945,7 @@ pub fn harmonic_angle_force(
     let n_u32 = n_angles as u32;
     let func = particle_buffers.kernels.angle.harmonic_angle_force.clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
@@ -981,12 +956,7 @@ pub fn harmonic_angle_force(
                 angles,
                 angle_k_theta,
                 angle_theta_0,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 angle_triple_x,
                 angle_triple_y,
                 angle_triple_z,
@@ -1676,7 +1646,7 @@ pub fn neighbor_displacement_squared(
     let n_u32 = n as u32;
     let func = particle_buffers.kernels.neighbor.neighbor_displacement_squared.clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
@@ -1687,12 +1657,7 @@ pub fn neighbor_displacement_squared(
                 reference_x,
                 reference_y,
                 reference_z,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 disp_sq,
                 n_u32,
             ),
@@ -1745,7 +1710,7 @@ pub fn neighbor_list_build(
         block_dim: (BLOCK_SIZE, 1, 1),
         shared_mem_bytes: BLOCK_SIZE * per_elem_bytes,
     };
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
@@ -1755,12 +1720,7 @@ pub fn neighbor_list_build(
                 &particle_buffers.positions_z,
                 sorted_particle_ids,
                 cell_offsets,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 n_cells[0],
                 n_cells[1],
                 n_cells[2],
@@ -1841,7 +1801,7 @@ pub fn compute_cell_indices_and_histogram(
         .compute_cell_indices_and_histogram
         .clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
@@ -1849,12 +1809,7 @@ pub fn compute_cell_indices_and_histogram(
                 &particle_buffers.positions_x,
                 &particle_buffers.positions_y,
                 &particle_buffers.positions_z,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 n_cells[0],
                 n_cells[1],
                 n_cells[2],
@@ -2041,7 +1996,7 @@ pub fn vv_kick_drift_lossless(
     let n_u32 = n as u32;
     let func = buffers.kernels.integrate.vv_kick_drift_lossless.clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
@@ -2065,12 +2020,7 @@ pub fn vv_kick_drift_lossless(
                 &buffers.forces_y,
                 &buffers.forces_z,
                 &buffers.masses,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 dt,
                 n_u32,
             ),
@@ -2093,7 +2043,7 @@ pub fn lan_drift_half(
     let n_u32 = n as u32;
     let func = buffers.kernels.langevin.lan_drift_half.clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
@@ -2107,12 +2057,7 @@ pub fn lan_drift_half(
                 &buffers.velocities_x,
                 &buffers.velocities_y,
                 &buffers.velocities_z,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 dt,
                 n_u32,
             ),
@@ -2268,7 +2213,7 @@ pub fn shake_positions(
     let n_u32 = n_groups as u32;
     let func = particle_buffers.kernels.shake.shake_positions.clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
@@ -2291,12 +2236,7 @@ pub fn shake_positions(
                 group_constraints_local_j,
                 group_constraints_r2,
                 atom_mass,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 dt,
                 &mut *constraint_virial,
                 n_u32,
@@ -2364,7 +2304,7 @@ pub fn shake_positions_no_velocity(
         .shake_positions_no_velocity
         .clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
@@ -2381,12 +2321,7 @@ pub fn shake_positions_no_velocity(
                 group_constraints_local_j,
                 group_constraints_r2,
                 atom_mass,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 n_u32,
             ),
         )
@@ -2417,7 +2352,7 @@ pub fn rattle_velocities(
     let n_u32 = n_groups as u32;
     let func = particle_buffers.kernels.shake.rattle_velocities.clone();
     let cfg = launch_config(n_u32);
-    let lat = sim_box.lattice();
+    let lattice = sim_box.lattice_device();
     unsafe {
         func.launch(
             cfg,
@@ -2436,12 +2371,7 @@ pub fn rattle_velocities(
                 group_constraints_local_i,
                 group_constraints_local_j,
                 atom_mass,
-                lat[0],
-                lat[1],
-                lat[2],
-                lat[3],
-                lat[4],
-                lat[5],
+                lattice,
                 dt,
                 &mut *constraint_virial,
                 n_u32,

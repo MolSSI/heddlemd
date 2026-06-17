@@ -129,7 +129,7 @@ __device__ static inline void pair_compute_f(
     const unsigned int *neighbor_list,
     const unsigned int *neighbor_counts,
     unsigned int max_neighbors,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,            // length 6: [lx, ly, lz, xy, xz, yz]
     const unsigned int *atom_excl_offsets,
     const unsigned int *atom_excl_partners,
     const Real *atom_excl_scales,

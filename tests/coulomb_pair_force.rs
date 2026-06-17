@@ -18,8 +18,8 @@ use heddle_md::state::ParticleState;
 
 use common::{empty_exclusions, exclusions_from_entries};
 
-fn box_20() -> SimulationBox {
-    SimulationBox::new(20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap()
+fn box_20(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
+    SimulationBox::new(&gpu.device, 20.0, 20.0, 20.0, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn two_particles_charged(separation: Real, q0: Real, q1: Real) -> ParticleState {
@@ -95,7 +95,7 @@ fn run_pair(
     let gpu = init_device().unwrap();
     let state = two_particles_charged(separation, q0, q1);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = box_20();
+    let sim_box = box_20(&gpu);
     let excl = match exclusions_input {
         None => empty_exclusions(&gpu.device, 2),
         Some(entries) => exclusions_from_entries(&gpu.device, 2, entries),
@@ -340,7 +340,7 @@ fn coulomb_exclusion_only_applies_to_listed_pair() {
     )
     .unwrap();
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = box_20();
+    let sim_box = box_20(&gpu);
     let excl_partial = exclusions_from_entries(&gpu.device, 3, &[(0, 1, 1.0, 0.0)]);
     let excl_empty = empty_exclusions(&gpu.device, 3);
 

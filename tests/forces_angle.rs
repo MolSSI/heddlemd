@@ -13,13 +13,13 @@ use heddle_md::state::ParticleState;
 use heddle_md::timings::Timings;
 use heddle_md::precision::Real;
 
-fn box_10() -> SimulationBox {
-    SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
+fn box_10(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
+    SimulationBox::new(&gpu.device, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
 }
 
-fn box_nm() -> SimulationBox {
+fn box_nm(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
     let l = 2.0e-9;
-    SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
+    SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn three_particle_state(positions: [[Real; 3]; 3], charges: [Real; 3]) -> ParticleState {
@@ -161,7 +161,7 @@ fn equilibrium_angle_produces_zero_force() {
     let al = single_angle_list(3, 0, 1, 2);
     let at = vec![harmonic_type(383.0, theta_0 as f64)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
-    launch_angle_force(&gpu, &mut s, &buffers, &box_10());
+    launch_angle_force(&gpu, &mut s, &buffers, &box_10(&gpu));
     let fx: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
     let fy: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
     let fz: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
@@ -190,7 +190,7 @@ fn compressed_angle_pushes_wings_apart() {
     let al = single_angle_list(3, 0, 1, 2);
     let at = vec![harmonic_type(383.0, theta_0 as f64)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
-    launch_angle_force(&gpu, &mut s, &buffers, &box_10());
+    launch_angle_force(&gpu, &mut s, &buffers, &box_10(&gpu));
     let fx: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
     let fy: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
     let fz: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
@@ -221,7 +221,7 @@ fn stretched_angle_pulls_wings_together() {
     let al = single_angle_list(3, 0, 1, 2);
     let at = vec![harmonic_type(383.0, theta_0 as f64)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
-    launch_angle_force(&gpu, &mut s, &buffers, &box_10());
+    launch_angle_force(&gpu, &mut s, &buffers, &box_10(&gpu));
     let fx: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
     // Stretched (θ > θ₀): restoring torque closes the angle, pulling each
     // wing inward. Slot 0 holds left wing → fx should be positive (toward
@@ -243,7 +243,7 @@ fn energy_matches_closed_form() {
     let k = 383.0_f64;
     let at = vec![harmonic_type(k, theta_0 as f64)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
-    launch_angle_force(&gpu, &mut s, &buffers, &box_10());
+    launch_angle_force(&gpu, &mut s, &buffers, &box_10(&gpu));
     let e: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_energy).unwrap();
     let total: f64 = e.iter().map(|&v| v as f64).sum();
     let dtheta = (theta - theta_0) as f64;
@@ -262,7 +262,7 @@ fn degenerate_geometry_produces_zero() {
     let al = single_angle_list(3, 0, 1, 2);
     let at = vec![harmonic_type(383.0, 1.911)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
-    launch_angle_force(&gpu, &mut s, &buffers, &box_10());
+    launch_angle_force(&gpu, &mut s, &buffers, &box_10(&gpu));
     let fx: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
     let fy: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
     let fz: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
@@ -290,7 +290,7 @@ fn near_collinear_geometry_safety_guard_zeros() {
     let al = single_angle_list(3, 0, 1, 2);
     let at = vec![harmonic_type(383.0, 1.911)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
-    launch_angle_force(&gpu, &mut s, &buffers, &box_10());
+    launch_angle_force(&gpu, &mut s, &buffers, &box_10(&gpu));
     let fx: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
     let fy: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
     let fz: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
@@ -311,7 +311,7 @@ fn harmonic_angle_force_zero_angles_is_noop() {
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
     let state = three_particle_state([[0.0; 3]; 3], [0.0; 3]);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    launch_angle_force(&gpu, &mut s, &buffers, &box_10());
+    launch_angle_force(&gpu, &mut s, &buffers, &box_10(&gpu));
 }
 
 // rq-9120ab3c
@@ -326,8 +326,8 @@ fn two_independent_constructs_produce_byte_identical_outputs() {
     let at = vec![harmonic_type(383.0, theta_0 as f64)];
     let mut s1 = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
     let mut s2 = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
-    launch_angle_force(&gpu, &mut s1, &buffers, &box_10());
-    launch_angle_force(&gpu, &mut s2, &buffers, &box_10());
+    launch_angle_force(&gpu, &mut s1, &buffers, &box_10(&gpu));
+    launch_angle_force(&gpu, &mut s2, &buffers, &box_10(&gpu));
     let a: Vec<Real> = gpu.device.dtoh_sync_copy(&s1.angle_triple_x).unwrap();
     let b: Vec<Real> = gpu.device.dtoh_sync_copy(&s2.angle_triple_x).unwrap();
     assert_eq!(a, b, "two independent runs must agree byte-for-byte");
@@ -376,7 +376,7 @@ fn spc_single_step_satisfies_newtons_third_law() {
     state.type_indices = vec![1, 0, 1]; // H, O, H
     state.masses = vec![1.6735e-27, 2.6566e-26, 1.6735e-27];
 
-    let sim_box = box_nm();
+    let sim_box = box_nm(&gpu);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
 
     let particle_types = vec![
@@ -527,7 +527,7 @@ fn force_magnitude_matches_closed_form_for_an_isolated_angle() {
     let al = single_angle_list(3, 0, 1, 2);
     let at = vec![harmonic_type(k_theta, theta_0 as f64)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
-    launch_angle_force(&gpu, &mut s, &buffers, &box_nm());
+    launch_angle_force(&gpu, &mut s, &buffers, &box_nm(&gpu));
     let fx: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
     let fy: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
     let fz: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();
@@ -550,7 +550,7 @@ fn force_magnitude_matches_closed_form_for_an_isolated_angle() {
 fn minimum_image_is_applied_to_displacements() {
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
-    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
     let theta_0 = 1.911;
     let at = vec![harmonic_type(5.27e-19, theta_0 as f64)];
     let al = single_angle_list(3, 0, 1, 2);
@@ -615,7 +615,7 @@ fn angle_virial_equals_r_ij_dot_f_i_plus_r_kj_dot_f_k() {
     let al = single_angle_list(3, 0, 1, 2);
     let at = vec![harmonic_type(383.0, 1.911)];
     let mut s = HarmonicAngleState::new(&gpu, &al, &at).unwrap();
-    launch_angle_force(&gpu, &mut s, &buffers, &box_10());
+    launch_angle_force(&gpu, &mut s, &buffers, &box_10(&gpu));
     let fx: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_x).unwrap();
     let fy: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_y).unwrap();
     let fz: Vec<Real> = gpu.device.dtoh_sync_copy(&s.angle_triple_z).unwrap();

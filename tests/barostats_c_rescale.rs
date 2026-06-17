@@ -35,10 +35,10 @@ const TIME_F: f64 = 2.4188843265857195e-17;
 const PRESSURE_F: f64 = 29421015696522.1;
 const TEMP_F: f64 = 315775.0248040668;
 
-fn box_small() -> SimulationBox {
+fn box_small(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
     // 1 nm cubic box, expressed in atomic units (~18.9 Bohr per side).
     let l = (1.0e-9 / LEN_F) as Real;
-    SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
+    SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
@@ -46,7 +46,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &PotentialRegistry::with_builtins(),
         gpu,
         n,
-        &box_small(),
+        &box_small(&gpu),
         &[],
         &[],
         &[],
@@ -208,7 +208,7 @@ fn apply_launches_expected_kernel_set() {
     let n = px.len();
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1));
     baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
@@ -243,7 +243,7 @@ fn apply_on_empty_state_is_noop() {
     let gpu = init_device().unwrap();
     let state = make_state(Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let g_before = sim_box.generation();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, 0, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1));
@@ -266,7 +266,7 @@ fn draw_counter_starts_at_zero_and_increments_per_apply() {
     let n = px.len();
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro =
         unbox_c_rescale(build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1)));
@@ -288,8 +288,8 @@ fn two_barostats_at_same_seed_and_counter_produce_identical_outputs() {
     let state = make_state(px, vx, masses, virials);
     let mut buffers_a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut buffers_b = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box_a = box_small();
-    let mut sim_box_b = box_small();
+    let mut sim_box_a = box_small(&gpu);
+    let mut sim_box_b = box_small(&gpu);
     let mut timings_a = Timings::new(&gpu).unwrap();
     let mut timings_b = Timings::new(&gpu).unwrap();
     let mut baro_a = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 7));
@@ -321,7 +321,7 @@ fn mu_cubed_matches_analytical_formula_with_known_philox_draw() {
     let n = px.len();
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let v_pre = sim_box.volume() as f64;
     let dt_si = 1.0e-13_f64;
     let dt = (dt_si / TIME_F) as Real;
@@ -372,7 +372,7 @@ fn temperature_zero_limit_matches_berendsen_barostat() {
     let n = px.len();
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let v_pre = sim_box.volume() as f64;
     let dt_si = 1.0e-13_f64;
     let dt = (dt_si / TIME_F) as Real;
@@ -407,7 +407,7 @@ fn fractional_coordinates_invariant_under_apply() {
     let n = px.len();
     let state = make_state(px.clone(), vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let lx_pre = sim_box.lx();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(p_target, 85.0, 1.0e-12, 4.5e-10, 1));
@@ -433,7 +433,7 @@ fn triclinic_shape_preserved_under_apply() {
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut sim_box =
-        SimulationBox::new(1.0e-9, 1.0e-9, 1.0e-9, 0.1e-9, 0.2e-9, 0.3e-9).unwrap();
+        SimulationBox::new(&gpu.device, 1.0e-9, 1.0e-9, 1.0e-9, 0.1e-9, 0.2e-9, 0.3e-9).unwrap();
     let [lx_pre, _, _, xy_pre, xz_pre, yz_pre] = sim_box.lattice();
     let r_xy_pre = (xy_pre / lx_pre) as f64;
     let r_xz_pre = (xz_pre / lx_pre) as f64;
@@ -461,7 +461,7 @@ fn generation_advances_after_apply() {
     let n = px.len();
     let state = make_state(px, vx, masses, virials);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let g_pre = sim_box.generation();
     let mut timings = Timings::new(&gpu).unwrap();
     let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(1.0e5, 85.0, 1.0e-12, 4.5e-10, 1));
@@ -528,7 +528,7 @@ fn composes_with_velocity_verlet_and_csvr_thermostat() {
         vec![0.0; n],
     );
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = IntegratorRegistry::with_builtins()
@@ -592,7 +592,7 @@ fn two_runs_with_same_seed_are_byte_identical() {
             virials.to_vec(),
         );
         let mut buffers = ParticleBuffers::new(gpu, &state).unwrap();
-        let mut sim_box = box_small();
+        let mut sim_box = box_small(&gpu);
         let mut timings = Timings::new(gpu).unwrap();
         let mut baro = build_c_rescale(gpu, n, &c_rescale_kind(1.0e6, 85.0, 1.0e-12, 4.5e-10, seed));
         for _ in 0..5 {
@@ -634,7 +634,7 @@ fn different_seeds_produce_different_trajectories() {
             virials.to_vec(),
         );
         let mut buffers = ParticleBuffers::new(gpu, &state).unwrap();
-        let mut sim_box = box_small();
+        let mut sim_box = box_small(&gpu);
         let mut timings = Timings::new(gpu).unwrap();
         let mut baro = build_c_rescale(gpu, n, &c_rescale_kind(1.0e6, 85.0, 1.0e-12, 4.5e-10, seed));
         for _ in 0..5 {

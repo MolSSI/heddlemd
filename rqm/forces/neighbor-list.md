@@ -586,7 +586,7 @@ Neighbor-list-build pipeline:
 extern "C" __global__ void neighbor_displacement_squared(
     const float *positions_x, const float *positions_y, const float *positions_z,
     const float *reference_x, const float *reference_y, const float *reference_z,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float *disp_sq,
     unsigned int n);
 
@@ -594,7 +594,7 @@ extern "C" __global__ void neighbor_list_build(
     const float *positions_x, const float *positions_y, const float *positions_z,
     const unsigned int *sorted_particle_ids,
     const unsigned int *cell_offsets,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
     float r_search_sq,
     unsigned int max_neighbors,
@@ -623,7 +623,7 @@ Spatial-hash pipeline (cell-list construction):
 ```c
 extern "C" __global__ void compute_cell_indices_and_histogram(
     const float *positions_x, const float *positions_y, const float *positions_z,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
     unsigned int *cell_indices,
     unsigned int *cell_counts,

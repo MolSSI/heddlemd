@@ -201,7 +201,7 @@ extern "C" __global__ void harmonic_angle_force(
     const float *positions_x, const float *positions_y, const float *positions_z,
     const unsigned int *angles,
     const float *angle_k_theta, const float *angle_theta_0,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float *angle_triple_x, float *angle_triple_y, float *angle_triple_z,
     float *angle_triple_energy, float *angle_triple_virial,
     unsigned int n_angles);

@@ -261,7 +261,7 @@ extern "C" __global__ void coulomb_pair_force_f(
     const float *positions_z,
     const float *charges,
     unsigned int max_neighbors,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float k_coulomb,
     float cutoff,
     float r_switch,
@@ -281,7 +281,7 @@ extern "C" __global__ void coulomb_pair_force_fev(
     const float *positions_z,
     const float *charges,
     unsigned int max_neighbors,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float k_coulomb,
     float cutoff,
     float r_switch,

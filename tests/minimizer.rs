@@ -1001,7 +1001,7 @@ fn build_sd_argon_pair(
 
     let gpu = init_device().unwrap();
     let box_au = 1.0e-7 / len_f;
-    let sim_box = SimulationBox::new(box_au as Real, box_au as Real, box_au as Real, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, box_au as Real, box_au as Real, box_au as Real, 0.0, 0.0, 0.0).unwrap();
     let particle_state = ParticleState::new(
         vec![0.0, r_au as Real],
         vec![0.0, 0.0],

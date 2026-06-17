@@ -233,7 +233,7 @@ extern "C" __global__ void lan_drift_half(
     float *positions_x, float *positions_y, float *positions_z,
     int *images_x, int *images_y, int *images_z,
     const float *velocities_x, const float *velocities_y, const float *velocities_z,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float dt,
     unsigned int n);
 

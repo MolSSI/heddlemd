@@ -120,10 +120,10 @@ fn water_state(n_waters: usize, spacing: Real) -> ParticleState {
     .unwrap()
 }
 
-fn big_box() -> SimulationBox {
+fn big_box(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
     // A box much larger than any inter-molecular spacing exercised in
     // these tests.
-    SimulationBox::new(1.0e4, 1.0e4, 1.0e4, 0.0, 0.0, 0.0).unwrap()
+    SimulationBox::new(&gpu.device, 1.0e4, 1.0e4, 1.0e4, 0.0, 0.0, 0.0).unwrap()
 }
 
 // --- Construction tests --------------------------------------------------
@@ -315,7 +315,7 @@ fn shake_hooks_on_zero_group_slot_are_noops() {
     assert_eq!(slot.group_count, 0);
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     slot.apply_before_drift(&mut buffers, &sim_box, PROD_DT, &mut timings)
         .unwrap();
@@ -333,7 +333,7 @@ fn shake_snapshot_copies_pre_drift_positions() {
     let list = sequential_shake_list(1);
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -368,7 +368,7 @@ fn shake_positions_restores_constraint_distances_after_bond_stretch() {
     let list = sequential_shake_list(1);
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -428,7 +428,7 @@ fn shake_positions_preserves_centre_of_mass() {
     let list = sequential_shake_list(1);
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -494,7 +494,7 @@ fn shake_positions_updates_half_step_velocities_consistently() {
     let list = sequential_shake_list(1);
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -544,7 +544,7 @@ fn shake_positions_converges_at_production_dt_with_thermal_amplitude_displacemen
     let list = sequential_shake_list(1);
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -630,7 +630,7 @@ fn rattle_velocities_zeroes_constraint_derivatives() {
     let list = sequential_shake_list(1);
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -686,7 +686,7 @@ fn rattle_velocities_preserves_centre_of_mass_velocity() {
     let list = sequential_shake_list(1);
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -740,7 +740,7 @@ fn shake_positions_writes_non_zero_position_level_constraint_virial() {
     let list = sequential_shake_list(1);
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -775,7 +775,7 @@ fn shake_positions_no_velocity_restores_constraint_distances_from_off_manifold_p
     let list = sequential_shake_list(1);
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -840,7 +840,7 @@ fn rattle_velocities_accumulates_velocity_level_constraint_virial_when_dt_positi
     let list = sequential_shake_list(1);
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -891,7 +891,7 @@ fn rattle_velocities_skips_velocity_level_virial_when_dt_zero() {
     let list = sequential_shake_list(1);
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -930,7 +930,7 @@ fn constraint_virial_scatter_additively_writes_into_particle_virials() {
     let list = sequential_shake_list(1);
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -984,7 +984,7 @@ fn constraint_virial_scatter_handles_two_disjoint_groups() {
     let list = sequential_shake_list(2);
     let state = water_state(2, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -1108,7 +1108,7 @@ fn methane_c_h_constraints_remain_within_tolerance_after_100_steps() {
     let list = methane_list();
     let state = methane_state();
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -1209,7 +1209,7 @@ fn full_velocity_verlet_step_with_one_rigid_spce_group_preserves_all_three_dista
     let list = sequential_shake_list(1);
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -1310,7 +1310,7 @@ fn shake_does_not_modify_atoms_outside_groups() {
     state.images_y.extend([0; 2]);
     state.images_z.extend([0; 2]);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -1350,7 +1350,7 @@ fn shake_does_not_modify_forces_masses_or_ids() {
     state.potential_energies = vec![10.0, 20.0, 30.0];
     state.virials = vec![100.0, 200.0, 300.0];
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -1393,7 +1393,7 @@ fn multiple_water_groups_evolve_independently() {
     let list = sequential_shake_list(3);
     let state = water_state(3, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let sim_box = big_box();
+    let sim_box = big_box(&gpu);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut slot = ShakeConstraintsState::new(
         gpu.device.clone(),
@@ -1448,7 +1448,7 @@ fn shake_positions_handles_water_straddling_periodic_boundary() {
 
     // Small orthorhombic box; the primary cell is [-5, +5)^3.
     let box_l: Real = 10.0;
-    let sim_box = SimulationBox::new(box_l, box_l, box_l, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, box_l, box_l, box_l, 0.0, 0.0, 0.0).unwrap();
 
     // Equilibrium-geometry water centred at x = +4.5 in the +x edge of
     // the primary cell. With d_OH = sqrt(R_OH^2 - (R_HH/2)^2) ≈ 1.09:
@@ -1654,7 +1654,7 @@ fn two_independent_shake_runs_produce_byte_identical_outputs() {
 
     let run = |seed: u32| -> (Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>) {
         let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-        let sim_box = big_box();
+        let sim_box = big_box(&gpu);
         let mut timings = Timings::new(&gpu).unwrap();
         let mut slot = ShakeConstraintsState::new(
             gpu.device.clone(),
@@ -1779,7 +1779,7 @@ fn integrator_step_dispatches_all_three_constraint_hooks() {
     let gpu = init_device().unwrap();
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = big_box();
+    let mut sim_box = big_box(&gpu);
     let mut ff = ForceField::new(
         &PotentialRegistry::with_builtins(),
         &gpu,
@@ -1822,7 +1822,7 @@ fn integrator_step_with_none_constraint_skips_all_hooks() {
     let gpu = init_device().unwrap();
     let state = water_state(1, 10.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = big_box();
+    let mut sim_box = big_box(&gpu);
     let mut ff = ForceField::new(
         &PotentialRegistry::with_builtins(),
         &gpu,

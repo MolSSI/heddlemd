@@ -373,7 +373,7 @@ extern "C" __global__ void shake_positions(
     const unsigned char *group_constraints_local_j,
     const float *group_constraints_r2,
     const float *atom_inv_mass,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float dt,
     float *constraint_virial,
     unsigned int n_groups);
@@ -393,7 +393,7 @@ extern "C" __global__ void rattle_velocities(
     const unsigned char *group_constraints_local_i,
     const unsigned char *group_constraints_local_j,
     const float *atom_inv_mass,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float dt,
     float *constraint_virial,
     unsigned int n_groups);
@@ -417,7 +417,7 @@ extern "C" __global__ void shake_positions_no_velocity(
     const unsigned char *group_constraints_local_j,
     const float *group_constraints_r2,
     const float *atom_inv_mass,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     unsigned int n_groups);
 ```
 

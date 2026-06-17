@@ -1,15 +1,20 @@
+use heddle_md::gpu::init_device;
 use heddle_md::pbc::{SimulationBox, SimulationBoxError};
 use heddle_md::precision::Real;
 
+fn dev() -> std::sync::Arc<cudarc::driver::CudaDevice> {
+    init_device().expect("init_device").device
+}
+
 fn default_box() -> SimulationBox {
-    SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect("default box")
+    SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect("default box")
 }
 
 // --- Construction: orthorhombic ---
 
 #[test] // rq-27ffd3f4
 fn construct_orthorhombic_box() {
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect("ok");
     assert_eq!(b.lattice(), [10.0, 8.0, 6.0, 0.0, 0.0, 0.0]);
     assert_eq!(b.lx(), 10.0);
     assert_eq!(b.ly(), 8.0);
@@ -22,7 +27,7 @@ fn construct_orthorhombic_box() {
 
 #[test] // rq-e1b51bd9
 fn volume_returns_lx_ly_lz_regardless_of_tilts() {
-    let b = SimulationBox::new(2.0, 3.0, 5.0, 7.0, -9.0, 11.0).expect("ok");
+    let b = SimulationBox::new(&dev(), 2.0, 3.0, 5.0, 7.0, -9.0, 11.0).expect("ok");
     assert_eq!(b.volume(), 30.0);
 }
 
@@ -30,13 +35,13 @@ fn volume_returns_lx_ly_lz_regardless_of_tilts() {
 
 #[test] // rq-7a1c24be
 fn construct_triclinic_box_with_non_zero_tilts() {
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.5, -2.0, 0.5).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 1.5, -2.0, 0.5).expect("ok");
     assert_eq!(b.lattice(), [10.0, 8.0, 6.0, 1.5, -2.0, 0.5]);
 }
 
 #[test] // rq-67c5a863
 fn tilts_may_be_negative() {
-    let b = SimulationBox::new(10.0, 8.0, 6.0, -3.0, -5.0, -1.5).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, -3.0, -5.0, -1.5).expect("ok");
     assert_eq!(b.xy(), -3.0);
     assert_eq!(b.xz(), -5.0);
     assert_eq!(b.yz(), -1.5);
@@ -46,7 +51,7 @@ fn tilts_may_be_negative() {
 fn tilts_may_exceed_the_corresponding_diagonals() {
     // No reduced-tilt enforcement; geometric infeasibility is the
     // neighbor list's problem (caught via min_perpendicular_width).
-    let b = SimulationBox::new(2.0, 3.0, 4.0, 50.0, 50.0, 50.0).expect("ok");
+    let b = SimulationBox::new(&dev(), 2.0, 3.0, 4.0, 50.0, 50.0, 50.0).expect("ok");
     assert_eq!(b.xy(), 50.0);
 }
 
@@ -54,7 +59,7 @@ fn tilts_may_exceed_the_corresponding_diagonals() {
 
 #[test] // rq-8259c9ca
 fn reject_zero_lx() {
-    let err = SimulationBox::new(0.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect_err("err");
+    let err = SimulationBox::new(&dev(), 0.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect_err("err");
     match err {
         SimulationBoxError::NonPositiveDiagonal { name, value } => {
             assert_eq!(name, "lx");
@@ -66,7 +71,7 @@ fn reject_zero_lx() {
 
 #[test] // rq-05eb9fbb
 fn reject_zero_ly() {
-    let err = SimulationBox::new(10.0, 0.0, 6.0, 0.0, 0.0, 0.0).expect_err("err");
+    let err = SimulationBox::new(&dev(), 10.0, 0.0, 6.0, 0.0, 0.0, 0.0).expect_err("err");
     match err {
         SimulationBoxError::NonPositiveDiagonal { name, value } => {
             assert_eq!(name, "ly");
@@ -78,7 +83,7 @@ fn reject_zero_ly() {
 
 #[test] // rq-74aa3a99
 fn reject_zero_lz() {
-    let err = SimulationBox::new(10.0, 8.0, 0.0, 0.0, 0.0, 0.0).expect_err("err");
+    let err = SimulationBox::new(&dev(), 10.0, 8.0, 0.0, 0.0, 0.0, 0.0).expect_err("err");
     match err {
         SimulationBoxError::NonPositiveDiagonal { name, value } => {
             assert_eq!(name, "lz");
@@ -90,7 +95,7 @@ fn reject_zero_lz() {
 
 #[test] // rq-9b1f8a7c
 fn reject_negative_diagonal() {
-    let err = SimulationBox::new(-1.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect_err("err");
+    let err = SimulationBox::new(&dev(), -1.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect_err("err");
     match err {
         SimulationBoxError::NonPositiveDiagonal { name, value } => {
             assert_eq!(name, "lx");
@@ -102,7 +107,7 @@ fn reject_negative_diagonal() {
 
 #[test] // rq-19fe4806
 fn reject_nan_diagonal() {
-    let err = SimulationBox::new(Real::NAN, 8.0, 6.0, 0.0, 0.0, 0.0).expect_err("err");
+    let err = SimulationBox::new(&dev(), Real::NAN, 8.0, 6.0, 0.0, 0.0, 0.0).expect_err("err");
     match err {
         SimulationBoxError::NonFiniteLatticeValue { name, value } => {
             assert_eq!(name, "lx");
@@ -114,7 +119,7 @@ fn reject_nan_diagonal() {
 
 #[test] // rq-7f867e37
 fn reject_infinite_diagonal() {
-    let err = SimulationBox::new(10.0, Real::INFINITY, 6.0, 0.0, 0.0, 0.0).expect_err("err");
+    let err = SimulationBox::new(&dev(), 10.0, Real::INFINITY, 6.0, 0.0, 0.0, 0.0).expect_err("err");
     match err {
         SimulationBoxError::NonFiniteLatticeValue { name, value } => {
             assert_eq!(name, "ly");
@@ -126,7 +131,7 @@ fn reject_infinite_diagonal() {
 
 #[test] // rq-0c9dc32b
 fn reject_nan_tilt() {
-    let err = SimulationBox::new(10.0, 8.0, 6.0, Real::NAN, 0.0, 0.0).expect_err("err");
+    let err = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, Real::NAN, 0.0, 0.0).expect_err("err");
     match err {
         SimulationBoxError::NonFiniteLatticeValue { name, value } => {
             assert_eq!(name, "xy");
@@ -138,7 +143,7 @@ fn reject_nan_tilt() {
 
 #[test] // rq-5318db55
 fn reject_infinite_tilt() {
-    let err = SimulationBox::new(10.0, 8.0, 6.0, 0.0, Real::INFINITY, 0.0).expect_err("err");
+    let err = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 0.0, Real::INFINITY, 0.0).expect_err("err");
     match err {
         SimulationBoxError::NonFiniteLatticeValue { name, value } => {
             assert_eq!(name, "xz");
@@ -150,7 +155,7 @@ fn reject_infinite_tilt() {
 
 #[test] // rq-7541fd8a
 fn validation_order_is_lx_ly_lz_xy_xz_yz() {
-    let err = SimulationBox::new(0.0, -1.0, 0.0, Real::NAN, 0.0, 0.0).expect_err("err");
+    let err = SimulationBox::new(&dev(), 0.0, -1.0, 0.0, Real::NAN, 0.0, 0.0).expect_err("err");
     match err {
         SimulationBoxError::NonPositiveDiagonal { name, value } => {
             assert_eq!(name, "lx");
@@ -162,7 +167,7 @@ fn validation_order_is_lx_ly_lz_xy_xz_yz() {
 
 #[test] // rq-b9a4e3de
 fn non_finite_check_precedes_non_positive_check_on_diagonal() {
-    let err = SimulationBox::new(Real::NAN, 8.0, 6.0, 0.0, 0.0, 0.0).expect_err("err");
+    let err = SimulationBox::new(&dev(), Real::NAN, 8.0, 6.0, 0.0, 0.0, 0.0).expect_err("err");
     match err {
         SimulationBoxError::NonFiniteLatticeValue { name, value } => {
             assert_eq!(name, "lx");
@@ -239,7 +244,7 @@ fn minimum_image_is_per_axis_independent_for_orthorhombic() {
 fn minimum_image_of_c_aligned_displacement_subtracts_c_vector() {
     // box with xz=2.0, yz=3.0; the wrap of v_z = 4.0 picks k_c = 1
     // and propagates k_c * (xz, yz) = (2, 3) into x and y.
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 2.0, 3.0).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 0.0, 2.0, 3.0).expect("ok");
     let result = b.minimum_image([2.0, 3.0, 4.0]);
     // v_z: 4.0 - 6.0 = -2.0
     // v_y: 3.0 - 3.0 = 0.0; k_b wrap leaves it at 0.0
@@ -250,7 +255,7 @@ fn minimum_image_of_c_aligned_displacement_subtracts_c_vector() {
 #[test] // rq-261fde88
 fn minimum_image_requires_both_c_and_b_wrapping() {
     // box with xy=1.0 only.
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 0.0, 0.0).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 1.0, 0.0, 0.0).expect("ok");
     let result = b.minimum_image([0.0, 5.0, 0.0]);
     // v_z = 0 stays; k_c = 0
     // v_y = 5.0; k_b = floor((5.0 + 4.0) / 8.0) = 1; v_y -= 8.0 -> -3.0
@@ -261,7 +266,7 @@ fn minimum_image_requires_both_c_and_b_wrapping() {
 
 #[test] // rq-a9ab33a8
 fn wrap_result_lies_inside_primary_parallelepiped() {
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 4.0, -3.0, 1.5).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 4.0, -3.0, 1.5).expect("ok");
     for v in [
         [0.0, 0.0, 0.0],
         [12.0, -9.0, 7.5],
@@ -311,7 +316,7 @@ fn wrap_position_is_idempotent_orthorhombic() {
 
 #[test] // rq-5269221c
 fn wrap_position_is_idempotent_for_triclinic_box() {
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.5, -2.0, 0.5).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 1.5, -2.0, 0.5).expect("ok");
     let position = [200.0, -150.0, 75.5];
     let once = b.wrap_position(position);
     let twice = b.wrap_position(once);
@@ -337,7 +342,7 @@ fn wrap_position_with_image_count_returns_image_triple() {
 
 #[test] // rq-5355f3f0
 fn wrap_position_with_image_count_for_triclinic() {
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
     // pos_z = 20.0 wraps via k_c = floor((20 + 3)/6) = 3
     let (wrapped, image) = b.wrap_position_with_image_count([0.0, 0.0, 20.0]);
     assert_eq!(image[2], 3);
@@ -350,7 +355,7 @@ fn wrap_position_with_image_count_for_triclinic() {
 
 #[test] // rq-6c52e57d
 fn wrap_position_with_image_count_unwrap_invariant() {
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
     let p = [37.5, -41.0, 22.5];
     let (wrapped, image) = b.wrap_position_with_image_count(p);
     // wrapped + image[0] * a + image[1] * b + image[2] * c == p
@@ -373,7 +378,7 @@ fn wrap_position_with_image_count_unwrap_invariant() {
 
 #[test] // rq-545c961a
 fn fractional_coords_inverts_cartesian_coords() {
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
     let s = [0.1, -0.2, 0.3];
     let v = b.cartesian_coords(s);
     let s_back = b.fractional_coords(v);
@@ -389,7 +394,7 @@ fn fractional_coords_inverts_cartesian_coords() {
 
 #[test] // rq-7f018040
 fn cartesian_coords_of_unit_fractional_triples_yields_lattice_vectors() {
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
     let a = b.cartesian_coords([1.0, 0.0, 0.0]);
     assert_eq!(a, [10.0, 0.0, 0.0]);
     let bv = b.cartesian_coords([0.0, 1.0, 0.0]);
@@ -402,14 +407,14 @@ fn cartesian_coords_of_unit_fractional_triples_yields_lattice_vectors() {
 
 #[test] // rq-ef6ae25a
 fn min_perpendicular_width_equals_min_lx_ly_lz_for_orthorhombic() {
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect("ok");
     assert_eq!(b.min_perpendicular_width(), 6.0);
 }
 
 #[test] // rq-47e800e0
 fn min_perpendicular_width_of_c_tilted_box() {
     // yz=10, so w_b = ly*lz / sqrt(lz² + yz²) = 100 / sqrt(200) ≈ 7.07
-    let b = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 10.0).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 10.0, 10.0, 0.0, 0.0, 10.0).expect("ok");
     let w = b.min_perpendicular_width();
     let expected = 100.0 / (200.0 as Real).sqrt();
     assert!(
@@ -424,7 +429,7 @@ fn min_perpendicular_width_of_xy_tilted_box() {
     // xy=5, so w_a = (lx*ly*lz) / sqrt((ly*lz)² + (xy*lz)²)
     //              = 1000 / sqrt(10000 + 2500)
     //              = 1000 / sqrt(12500)
-    let b = SimulationBox::new(10.0, 10.0, 10.0, 5.0, 0.0, 0.0).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 10.0, 10.0, 5.0, 0.0, 0.0).expect("ok");
     let w = b.min_perpendicular_width();
     let expected = 1000.0 / (12500.0 as Real).sqrt();
     assert!(
@@ -449,7 +454,7 @@ fn nan_displacement_propagates_to_nan_output() {
 fn nan_z_displacement_propagates_through_tilt_coupling() {
     // For a triclinic box with non-zero xz and yz, a NaN z-displacement
     // propagates into the x and y channels via the tilt-subtraction.
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 2.0, 3.0).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 0.0, 2.0, 3.0).expect("ok");
     let result = b.minimum_image([0.0, 0.0, Real::NAN]);
     assert!(result[0].is_nan());
     assert!(result[1].is_nan());
@@ -460,7 +465,7 @@ fn nan_z_displacement_propagates_through_tilt_coupling() {
 
 #[test] // rq-2cb82d44
 fn newly_constructed_box_reports_generation_zero() {
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 1.0, 2.0, 3.0).expect("ok");
     assert_eq!(b.generation(), 0);
 }
 
@@ -598,7 +603,7 @@ fn copy_of_simulation_box_carries_originals_generation() {
 #[test] // rq-22fb3b0e
 fn mutating_a_copy_does_not_affect_the_original() {
     let b = default_box();
-    let mut copy = b;
+    let mut copy = b.clone();
     copy.set_lattice(20.0, 8.0, 6.0, 0.0, 0.0, 0.0).expect("ok");
     assert_eq!(copy.lattice(), [20.0, 8.0, 6.0, 0.0, 0.0, 0.0]);
     assert_eq!(copy.generation(), 1);
@@ -610,20 +615,20 @@ fn mutating_a_copy_does_not_affect_the_original() {
 
 #[test] // rq-0fa3b49f
 fn check_min_perpendicular_width_ok_when_every_width_meets_threshold() {
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).unwrap();
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 0.0, 0.0, 0.0).unwrap();
     assert!(b.check_min_perpendicular_width(5.0).is_ok());
 }
 
 #[test] // rq-0061906c
 fn check_min_perpendicular_width_ok_at_exact_equality() {
     // Smallest width is lz = 6.0; threshold of 6.0 must still pass.
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).unwrap();
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 0.0, 0.0, 0.0).unwrap();
     assert!(b.check_min_perpendicular_width(6.0).is_ok());
 }
 
 #[test] // rq-394a4bb1
 fn check_min_perpendicular_width_flags_direction_a_when_only_w_a_fails() {
-    let b = SimulationBox::new(4.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
+    let b = SimulationBox::new(&dev(), 4.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let err = b.check_min_perpendicular_width(5.0).unwrap_err();
     match err {
         SimulationBoxError::PerpendicularWidthTooSmall {
@@ -641,7 +646,7 @@ fn check_min_perpendicular_width_flags_direction_a_when_only_w_a_fails() {
 
 #[test] // rq-7600d28c
 fn check_min_perpendicular_width_flags_direction_b_when_only_w_b_fails() {
-    let b = SimulationBox::new(10.0, 4.0, 10.0, 0.0, 0.0, 0.0).unwrap();
+    let b = SimulationBox::new(&dev(), 10.0, 4.0, 10.0, 0.0, 0.0, 0.0).unwrap();
     let err = b.check_min_perpendicular_width(5.0).unwrap_err();
     match err {
         SimulationBoxError::PerpendicularWidthTooSmall {
@@ -659,7 +664,7 @@ fn check_min_perpendicular_width_flags_direction_b_when_only_w_b_fails() {
 
 #[test] // rq-5ffa0551
 fn check_min_perpendicular_width_flags_direction_c_when_only_w_c_fails() {
-    let b = SimulationBox::new(10.0, 10.0, 4.0, 0.0, 0.0, 0.0).unwrap();
+    let b = SimulationBox::new(&dev(), 10.0, 10.0, 4.0, 0.0, 0.0, 0.0).unwrap();
     let err = b.check_min_perpendicular_width(5.0).unwrap_err();
     match err {
         SimulationBoxError::PerpendicularWidthTooSmall {
@@ -678,7 +683,7 @@ fn check_min_perpendicular_width_flags_direction_c_when_only_w_c_fails() {
 #[test] // rq-743ae35c
 fn check_min_perpendicular_width_reports_first_failing_direction_when_multiple_fail() {
     // All three widths fail; only direction "a" should be reported.
-    let b = SimulationBox::new(4.0, 4.0, 4.0, 0.0, 0.0, 0.0).unwrap();
+    let b = SimulationBox::new(&dev(), 4.0, 4.0, 4.0, 0.0, 0.0, 0.0).unwrap();
     let err = b.check_min_perpendicular_width(5.0).unwrap_err();
     match err {
         SimulationBoxError::PerpendicularWidthTooSmall {
@@ -696,7 +701,7 @@ fn check_min_perpendicular_width_on_triclinic_uses_perpendicular_width_not_edge(
     // A box with yz tilt: w_b = (ly * lz) / sqrt(lz^2 + yz^2) =
     // 100 / sqrt(200) ≈ 7.071. Edge length ly = 10.0 would pass an 8.0
     // threshold; the perpendicular width fails.
-    let b = SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 10.0).unwrap();
+    let b = SimulationBox::new(&dev(), 10.0, 10.0, 10.0, 0.0, 0.0, 10.0).unwrap();
     let err = b.check_min_perpendicular_width(8.0).unwrap_err();
     match err {
         SimulationBoxError::PerpendicularWidthTooSmall {
@@ -715,15 +720,15 @@ fn check_min_perpendicular_width_on_triclinic_uses_perpendicular_width_not_edge(
 
 #[test] // rq-98ac1915
 fn check_min_perpendicular_width_with_non_positive_threshold_always_ok() {
-    let b = SimulationBox::new(10.0, 8.0, 6.0, 0.0, 0.0, 0.0).unwrap();
+    let b = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 0.0, 0.0, 0.0).unwrap();
     assert!(b.check_min_perpendicular_width(-1.0).is_ok());
     assert!(b.check_min_perpendicular_width(0.0).is_ok());
 }
 
 #[test] // rq-3eaf65b6
 fn check_min_perpendicular_width_is_deterministic() {
-    let b1 = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).unwrap();
-    let b2 = SimulationBox::new(10.0, 8.0, 6.0, 1.0, 2.0, 3.0).unwrap();
+    let b1 = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 1.0, 2.0, 3.0).unwrap();
+    let b2 = SimulationBox::new(&dev(), 10.0, 8.0, 6.0, 1.0, 2.0, 3.0).unwrap();
     let r1 = b1.check_min_perpendicular_width(7.0);
     let r2 = b2.check_min_perpendicular_width(7.0);
     match (r1, r2) {

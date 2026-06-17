@@ -858,7 +858,7 @@ fn kernel_start_stop_and_finalize_records_one_sample() {
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut slot_out = heddle_md::gpu::SlotOutputBuffers::new(&gpu.device, 2).unwrap();
     let params = single_type_lj_table(&gpu.device, 1.0e-10, 1.0, 1.0e-9);
-    let sim_box = SimulationBox::new(1.0e-9, 1.0e-9, 1.0e-9, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e-9, 1.0e-9, 1.0e-9, 0.0, 0.0, 0.0).unwrap();
     timings.kernel_start(KernelStage::LJ_PAIR_FORCE).unwrap();
     lj_pair_force_no_excl(
         &buffers,
@@ -899,7 +899,7 @@ fn repeated_kernel_starts_stops_accumulate() {
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut slot_out = heddle_md::gpu::SlotOutputBuffers::new(&gpu.device, 2).unwrap();
     let params = single_type_lj_table(&gpu.device, 1.0e-10, 1.0, 1.0e-9);
-    let sim_box = SimulationBox::new(1.0e-9, 1.0e-9, 1.0e-9, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e-9, 1.0e-9, 1.0e-9, 0.0, 0.0, 0.0).unwrap();
     for _ in 0..10 {
         timings.kernel_start(KernelStage::LJ_PAIR_FORCE).unwrap();
         lj_pair_force_no_excl(

@@ -146,7 +146,7 @@ extern "C" __global__ void spme_real_pair_force_f(
     const float *positions_z,
     const float *charges,
     unsigned int max_neighbors,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float k_coulomb,
     float alpha,
     float r_cut_real,
@@ -166,7 +166,7 @@ extern "C" __global__ void spme_real_pair_force_fev(
     const float *positions_z,
     const float *charges,
     unsigned int max_neighbors,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float k_coulomb,
     float alpha,
     float r_cut_real,
@@ -643,7 +643,7 @@ extern "C" __global__ void spme_recip_compute_influence(
     const float *b_factors_c,           // length n_c
     float *influence_G,                 // length M_complex
     float *virial_factor,               // length M_complex
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
     float k_coulomb,
     float alpha,
@@ -662,7 +662,7 @@ extern "C" __global__ void spme_charge_spread(
     const float *charges,
     const unsigned int *sorted_particle_ids,
     const unsigned int *cell_offsets,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
     unsigned int spline_order,
     float *rho,
@@ -673,7 +673,7 @@ extern "C" __global__ void spme_influence_multiply(
     float *rho_hat_real,   // interleaved real and imag parts
     float *rho_hat_imag,
     float *virial_per_cell,  // scratch for reciprocal-virial reduction
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
     float alpha,
     unsigned int n_complex);
@@ -684,7 +684,7 @@ extern "C" __global__ void spme_force_gather(
     const float *positions_z,
     const float *charges,
     const float *V,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
     unsigned int spline_order,
     float k_coulomb,

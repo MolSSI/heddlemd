@@ -54,7 +54,7 @@ fn build_initial_state() -> ParticleState {
 fn run_pipeline(gpu: &GpuContext, n_steps: usize) -> ParticleState {
     let state = build_initial_state();
     let mut buffers = ParticleBuffers::new(gpu, &state).unwrap();
-    let sim_box = SimulationBox::new(BOX_L, BOX_L, BOX_L, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, BOX_L, BOX_L, BOX_L, 0.0, 0.0, 0.0).unwrap();
     let params = single_type_lj_table(&gpu.device, SIGMA, EPSILON, CUTOFF);
 
     // Warm-up: populate forces with F(0) before the first kick_drift consumes them.

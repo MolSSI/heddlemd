@@ -10,10 +10,12 @@
 // (clamping handles the +0.5 boundary case).
 __device__ static inline void parallelepiped_cell_indices(
     Real x, Real y, Real z,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
     unsigned int &ca, unsigned int &cb, unsigned int &cc)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   int dummy_a, dummy_b, dummy_c;
   triclinic_wrap_with_image(x, y, z, dummy_a, dummy_b, dummy_c,
                             lx, ly, lz, xy, xz, yz);
@@ -37,10 +39,12 @@ __device__ static inline void parallelepiped_cell_indices(
 extern "C" __global__ void neighbor_displacement_squared(
     const Real *positions_x, const Real *positions_y, const Real *positions_z,
     const Real *reference_x, const Real *reference_y, const Real *reference_z,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real *disp_sq,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) {
     return;
@@ -73,7 +77,7 @@ extern "C" __global__ void neighbor_list_build(
     const Real *positions_x, const Real *positions_y, const Real *positions_z,
     const unsigned int *sorted_particle_ids,
     const unsigned int *cell_offsets,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
     Real r_search_sq,
     unsigned int max_neighbors,
@@ -82,6 +86,8 @@ extern "C" __global__ void neighbor_list_build(
     unsigned int *overflow_flag,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   (void) n;
 
   extern __shared__ unsigned char smem[];
@@ -233,19 +239,21 @@ extern "C" __global__ void copy_positions_into_reference(
 
 extern "C" __global__ void compute_cell_indices_and_histogram(
     const Real *positions_x, const Real *positions_y, const Real *positions_z,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     unsigned int n_cells_a, unsigned int n_cells_b, unsigned int n_cells_c,
     unsigned int *cell_indices,
     unsigned int *cell_counts,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) {
     return;
   }
   unsigned int ca, cb, cc;
   parallelepiped_cell_indices(positions_x[i], positions_y[i], positions_z[i],
-                              lx, ly, lz, xy, xz, yz,
+                              lattice,
                               n_cells_a, n_cells_b, n_cells_c,
                               ca, cb, cc);
   unsigned int c = (ca * n_cells_b + cb) * n_cells_c + cc;

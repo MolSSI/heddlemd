@@ -20,7 +20,7 @@ extern "C" __global__ void harmonic_angle_force(
     const unsigned int *angles,
     const Real *angle_k_theta,
     const Real *angle_theta_0,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real *angle_triple_x,
     Real *angle_triple_y,
     Real *angle_triple_z,
@@ -28,6 +28,8 @@ extern "C" __global__ void harmonic_angle_force(
     Real *angle_triple_virial,
     unsigned int n_angles)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int m = blockIdx.x * blockDim.x + threadIdx.x;
   if (m >= n_angles) {
     return;

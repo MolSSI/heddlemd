@@ -90,12 +90,14 @@ extern "C" __global__ void spme_recip_compute_influence(
     const Real *b_factors_c,           // length n_c
     Real *influence_G,                 // length m_complex
     Real *virial_factor,               // length m_complex
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
     Real k_coulomb,
     Real alpha,
     unsigned int m_complex)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx >= m_complex) {
     return;
@@ -179,12 +181,14 @@ extern "C" __global__ void spme_charge_spread(
     const Real *charges,
     const unsigned int *sorted_particle_ids,
     const unsigned int *cell_offsets,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
     unsigned int spline_order,
     Real *rho,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
   unsigned int M = n_a * n_b * n_c;
   if (idx >= M) {
@@ -298,11 +302,13 @@ extern "C" __global__ void spme_influence_multiply(
 // lower-triangular lattice parameters. Returns them in column-major
 // triples (b_*_x, b_*_y, b_*_z).
 __device__ static inline void reciprocal_lattice_rows(
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real &b_a_x, Real &b_a_y, Real &b_a_z,
     Real &b_b_x, Real &b_b_y, Real &b_b_z,
     Real &b_c_x, Real &b_c_y, Real &b_c_z)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   Real inv_lx = R(1.0) / lx;
   Real inv_ly = R(1.0) / ly;
   Real inv_lz = R(1.0) / lz;
@@ -382,7 +388,7 @@ extern "C" __global__ void spme_force_gather(
     const Real *V,
     const Real *u_self_per_particle,
     const Real *w_per_particle_virial,   // length 1
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
     unsigned int spline_order,
     Real *slot_force_x,
@@ -392,6 +398,8 @@ extern "C" __global__ void spme_force_gather(
     Real *slot_virial,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   Real w_per_particle_virial_val = w_per_particle_virial[0];
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) {
@@ -462,7 +470,7 @@ extern "C" __global__ void spme_force_gather(
   // where (b_a, b_b, b_c) are rows of H^{-T}. For our lower-triangular
   // lattice, b_a / b_b / b_c are given by `reciprocal_lattice_rows`.
   Real b_a_x, b_a_y, b_a_z, b_b_x, b_b_y, b_b_z, b_c_x, b_c_y, b_c_z;
-  reciprocal_lattice_rows(lx, ly, lz, xy, xz, yz,
+  reciprocal_lattice_rows(lattice,
                           b_a_x, b_a_y, b_a_z,
                           b_b_x, b_b_y, b_b_z,
                           b_c_x, b_c_y, b_c_z);

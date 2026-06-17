@@ -28,8 +28,8 @@ use heddle_md::timings::{KernelStage, Timings, TimingsReport};
 // Helpers
 // =================================================================
 
-fn box_10() -> SimulationBox {
-    SimulationBox::new(10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
+fn box_10(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
+    SimulationBox::new(&gpu.device, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn ar_type() -> ParticleTypeConfig {
@@ -107,7 +107,7 @@ fn lj_only_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &PotentialRegistry::with_builtins(),
         gpu,
         n,
-        &box_10(),
+        &box_10(&gpu),
         &[ar_type()],
         &[lj_pair_config()],
         &[],
@@ -129,7 +129,7 @@ fn lj_and_morse_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &PotentialRegistry::with_builtins(),
         gpu,
         n,
-        &box_10(),
+        &box_10(&gpu),
         &[ar_type()],
         &[lj_pair_config()],
         &[morse_bond_type()],
@@ -151,7 +151,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &PotentialRegistry::with_builtins(),
         gpu,
         n,
-        &box_10(),
+        &box_10(&gpu),
         &[ar_type()],
         &[],
         &[],
@@ -172,7 +172,7 @@ fn morse_only_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &PotentialRegistry::with_builtins(),
         gpu,
         n,
-        &box_10(),
+        &box_10(&gpu),
         &[ar_type()],
         &[],
         &[morse_bond_type()],
@@ -338,7 +338,7 @@ fn build_with(
         registry,
         gpu,
         n,
-        &box_10(),
+        &box_10(&gpu),
         &[ar_type()],
         &[],
         &[],
@@ -385,7 +385,7 @@ fn bond_types_declared_with_no_bonds_omits_morse_slot() {
         &PotentialRegistry::with_builtins(),
         &gpu,
         n,
-        &box_10(),
+        &box_10(&gpu),
         &[ar_type()],
         &[lj_pair_config()],
         &[morse_bond_type()],
@@ -473,7 +473,7 @@ fn step_lennardjones_only_writes_nonzero_forces() {
     let state = state_n(2);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut ff = lj_only_force_field(&gpu, 2);
-    let report = step_and_finalize(&mut ff, &mut buffers, &box_10(), &gpu, AggregateLevel::ForcesAndScalars);
+    let report = step_and_finalize(&mut ff, &mut buffers, &box_10(&gpu), &gpu, AggregateLevel::ForcesAndScalars);
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
     assert!(downloaded.forces_x[0].abs() > 0.0);
@@ -504,7 +504,7 @@ fn step_with_both_slots_sums_lj_and_morse() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut ff = lj_and_morse_force_field(&gpu, 2);
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
     // Sum of forces == 0 because both LJ and Morse obey Newton's third law.
@@ -528,7 +528,7 @@ fn step_with_zero_slots_writes_zeros_to_forces() {
     state.forces_z = vec![3.0 as Real; n];
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut ff = empty_force_field(&gpu, n);
-    let report = step_and_finalize(&mut ff, &mut buffers, &box_10(), &gpu, AggregateLevel::ForcesAndScalars);
+    let report = step_and_finalize(&mut ff, &mut buffers, &box_10(&gpu), &gpu, AggregateLevel::ForcesAndScalars);
     let mut downloaded = state.clone();
     downloaded.download_from(&buffers).unwrap();
     assert!(downloaded.forces_x.iter().all(|&v| v == 0.0));
@@ -549,7 +549,7 @@ fn step_with_n0_launches_no_kernels() {
     registry.register(Box::new(StubBuilder::new("a")));
     registry.register(Box::new(StubBuilder::new("b")));
     let mut ff = build_with(&gpu, 0, &registry).unwrap();
-    let report = step_and_finalize(&mut ff, &mut buffers, &box_10(), &gpu, AggregateLevel::ForcesAndScalars);
+    let report = step_and_finalize(&mut ff, &mut buffers, &box_10(&gpu), &gpu, AggregateLevel::ForcesAndScalars);
     for s in &report.stages {
         assert_eq!(s.count, 0, "stage {} expected count 0, got {}", s.name, s.count);
     }
@@ -574,7 +574,7 @@ fn each_slot_writes_its_own_row_of_slot_output_buffers() {
     let mut ff = build_with(&gpu, n, &registry).unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let fast_x = gpu.device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
     assert_eq!(fast_x.len(), 2 * n);
     assert!(fast_x[0..n].iter().all(|&v| v == 1.0));
@@ -602,7 +602,7 @@ fn adding_a_new_potential_implementation_does_not_require_framework_edits() {
         &registry,
         &gpu,
         n,
-        &box_10(),
+        &box_10(&gpu),
         &[ar_type()],
         &[lj_pair_config()],
         &[morse_bond_type()],
@@ -624,7 +624,7 @@ fn adding_a_new_potential_implementation_does_not_require_framework_edits() {
 
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     // The custom slot wrote 42.0 into its row.
     let fast_x = gpu.device.dtoh_sync_copy(&ff.fast_slot_forces_x).unwrap();
     let row_len = n;
@@ -832,7 +832,7 @@ fn step_evaluates_every_class_and_produces_total_in_particle_buffers() {
     let state = state_n(n);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     assert_eq!(fast_count.load(Ordering::SeqCst), 1);
     assert_eq!(slow_count.load(Ordering::SeqCst), 1);
     let mut downloaded = state.clone();
@@ -863,11 +863,11 @@ fn step_class_fast_refreshes_only_fast_slots_contributions() {
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     // Prime both classes' buffers via a full step first.
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     fast_count.store(0, Ordering::SeqCst);
     slow_count.store(0, Ordering::SeqCst);
     // Now step_class(Fast).
-    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     assert_eq!(fast_count.load(Ordering::SeqCst), 1);
     assert_eq!(slow_count.load(Ordering::SeqCst), 0);
 }
@@ -893,10 +893,10 @@ fn step_class_slow_refreshes_only_slow_slots_contributions() {
     let mut ff = build_with(&gpu, n, &registry).unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     fast_count.store(0, Ordering::SeqCst);
     slow_count.store(0, Ordering::SeqCst);
-    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     assert_eq!(fast_count.load(Ordering::SeqCst), 0);
     assert_eq!(slow_count.load(Ordering::SeqCst), 1);
 }
@@ -910,7 +910,7 @@ fn step_class_slow_on_force_field_with_no_slow_slots_is_noop() {
     state.forces_x = vec![99.0; n];
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step_class(ForceClass::Slow, &mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let report = timings.finalize().unwrap();
     for s in &report.stages {
         assert_eq!(s.count, 0, "step_class(Slow) on no-slow-slots ForceField launched {} ({}× )", s.name, s.count);
@@ -936,7 +936,7 @@ fn step_class_fast_on_force_field_with_no_fast_slots_is_noop() {
     let mut ff = build_with(&gpu, n, &registry).unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     assert_eq!(slow_count.load(Ordering::SeqCst), 0);
     let report = timings.finalize().unwrap();
     assert_eq!(stage_count(&report, KernelStage::ACCUMULATE_FORCES.name()), 0);
@@ -951,7 +951,7 @@ fn step_class_with_n0_launches_no_kernels() {
     let mut ff = build_with(&gpu, 0, &registry).unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(0)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step_class(ForceClass::Fast, &mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let report = timings.finalize().unwrap();
     for s in &report.stages {
         assert_eq!(s.count, 0);
@@ -1014,9 +1014,9 @@ fn two_respa_call_sequences_with_the_same_plan_produce_identical_state() {
     }));
 
     let run_plan = |ff: &mut ForceField, buffers: &mut ParticleBuffers, timings: &mut Timings| {
-        ff.step_class(ForceClass::Slow, buffers, &box_10(), timings, AggregateLevel::ForcesAndScalars).unwrap();
+        ff.step_class(ForceClass::Slow, buffers, &box_10(&gpu), timings, AggregateLevel::ForcesAndScalars).unwrap();
         for _ in 0..3 {
-            ff.step_class(ForceClass::Fast, buffers, &box_10(), timings, AggregateLevel::ForcesAndScalars).unwrap();
+            ff.step_class(ForceClass::Fast, buffers, &box_10(&gpu), timings, AggregateLevel::ForcesAndScalars).unwrap();
         }
     };
 
@@ -1052,11 +1052,11 @@ fn two_independent_runs_byte_identical() {
     let mut ff_a = lj_and_morse_force_field(&gpu, n);
     let mut buf_a = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut tim_a = Timings::new(&gpu).unwrap();
-    ff_a.step(&mut buf_a, &box_10(), &mut tim_a, AggregateLevel::ForcesAndScalars).unwrap();
+    ff_a.step(&mut buf_a, &box_10(&gpu), &mut tim_a, AggregateLevel::ForcesAndScalars).unwrap();
     let mut ff_b = lj_and_morse_force_field(&gpu, n);
     let mut buf_b = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut tim_b = Timings::new(&gpu).unwrap();
-    ff_b.step(&mut buf_b, &box_10(), &mut tim_b, AggregateLevel::ForcesAndScalars).unwrap();
+    ff_b.step(&mut buf_b, &box_10(&gpu), &mut tim_b, AggregateLevel::ForcesAndScalars).unwrap();
     let fx_a = gpu.device.dtoh_sync_copy(&buf_a.forces_x).unwrap();
     let fx_b = gpu.device.dtoh_sync_copy(&buf_b.forces_x).unwrap();
     let e_a = gpu.device.dtoh_sync_copy(&buf_a.potential_energies).unwrap();
@@ -1091,7 +1091,7 @@ fn combiner_sums_slot_rows_in_slot_order() {
     let mut ff = build_with(&gpu, n, &registry).unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     for v in &fx {
         assert_eq!(*v, 7.0);
@@ -1107,7 +1107,7 @@ fn combiner_with_num_slots_zero_writes_zeros() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     assert!(fx.iter().all(|&v| v == 0.0));
 }
@@ -1126,8 +1126,8 @@ fn combiner_is_a_single_write_per_output_element() {
     let mut ff = build_with(&gpu, n, &registry).unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
     for v in &fx {
         assert_eq!(*v, 5.0);
@@ -1225,7 +1225,7 @@ fn force_field_context_exposes_shared_neighbor_list_to_compute() {
     let mut ff = build_with(&gpu, 4, &registry).unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(4)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     assert_eq!(saw.load(Ordering::SeqCst), 1);
 }
 
@@ -1250,7 +1250,7 @@ fn max_cutoff_aggregation_determines_neighbor_list_radius() {
         &registry,
         &gpu,
         n,
-        &box_10(),
+        &box_10(&gpu),
         &[ar_type()],
         &[],
         &[],
@@ -1279,7 +1279,7 @@ fn bonded_only_step_launches_no_neighbor_list_kernels() {
     let mut ff = morse_only_force_field(&gpu, n);
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let report = timings.finalize().unwrap();
     assert_eq!(stage_count(&report, "neighbor_displacement_squared"), 0);
     assert_eq!(stage_count(&report, "neighbor_list_build"), 0);
@@ -1296,7 +1296,7 @@ fn force_field_lj_only_populates_energy_and_virial() {
     let mut ff = lj_only_force_field(&gpu, n);
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
     let total_e: Real = e.iter().sum();
@@ -1333,7 +1333,7 @@ fn combiner_sums_slot_energies_and_virials_in_slot_order() {
     let mut ff = build_with(&gpu, n, &registry).unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
     for x in &e {
@@ -1354,7 +1354,7 @@ fn zero_slot_step_writes_zeros_to_energy_and_virial() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
     assert!(e.iter().all(|&x| x == 0.0));
@@ -1373,7 +1373,7 @@ fn system_total_potential_energy_equals_sum_of_particle_shares() {
     let mut ff = build_with(&gpu, n, &registry).unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let total: Real = e.iter().sum();
     assert!((total - 1.5).abs() < 1e-6, "expected total 1.5, got {}", total);
@@ -1391,7 +1391,7 @@ fn system_total_scalar_virial_equals_sum_of_particle_shares() {
     let mut ff = build_with(&gpu, n, &registry).unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
     let total: Real = v.iter().sum();
     assert!((total - 0.75).abs() < 1e-6, "expected total 0.75, got {}", total);
@@ -1414,11 +1414,11 @@ fn step_forces_only_updates_forces_and_leaves_energies_and_virials_stale() {
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     // First, ForcesAndScalars to seed the energy/virial rows.
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let e1 = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let v1 = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
     // Now ForcesOnly; energy/virial rows must remain bit-identical.
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesOnly).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesOnly).unwrap();
     let e2 = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let v2 = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
     for i in 0..n {
@@ -1439,7 +1439,7 @@ fn step_forces_and_scalars_refreshes_energies_and_virials() {
     let mut ff = build_with(&gpu, n, &registry).unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
     assert!(e.iter().all(|&x| x == 1.0));
@@ -1460,7 +1460,7 @@ fn two_runs_with_identical_call_level_sequences_are_byte_identical() {
         let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
         let mut timings = Timings::new(&gpu).unwrap();
         for &lvl in &sequence {
-            ff.step(&mut buffers, &box_10(), &mut timings, lvl).unwrap();
+            ff.step(&mut buffers, &box_10(&gpu), &mut timings, lvl).unwrap();
         }
         let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
         let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
@@ -1500,7 +1500,7 @@ fn bonded_only_slot_writes_all_five_quantities_regardless_of_level() {
     let mut ff = morse_only_force_field(&gpu, n);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesOnly).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesOnly).unwrap();
     let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
     let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
     // Morse bond is stretched (r=1.2 vs r_e=1.0) so energy / virial are non-zero.
@@ -1520,10 +1520,10 @@ fn a_pair_force_slot_honours_forces_only_for_the_slot_energy_virial() {
     let mut ff = lj_only_force_field(&gpu, n);
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let e_seed = gpu.device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
     let v_seed = gpu.device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesOnly).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesOnly).unwrap();
     let e_after = gpu.device.dtoh_sync_copy(&ff.fast_slot_energies).unwrap();
     let v_after = gpu.device.dtoh_sync_copy(&ff.fast_slot_virials).unwrap();
     for i in 0..n {
@@ -1539,7 +1539,7 @@ fn combiner_always_runs_regardless_of_level() {
     let mut ff = lj_only_force_field(&gpu, n);
     let mut buffers = ParticleBuffers::new(&gpu, &state_n(n)).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(), &mut timings, AggregateLevel::ForcesOnly).unwrap();
+    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesOnly).unwrap();
     let report = timings.finalize().unwrap();
     assert_eq!(stage_count(&report, KernelStage::ACCUMULATE_FORCES.name()), 1);
 }

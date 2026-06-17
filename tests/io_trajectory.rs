@@ -1,9 +1,14 @@
 use std::path::{Path, PathBuf};
 
+use heddle_md::gpu::init_device;
 use heddle_md::io::{TrajectoryWriter, TrajectoryWriterError, load_init_state};
 use heddle_md::pbc::SimulationBox;
 use heddle_md::units::UnitSystem;
 use heddle_md::precision::Real;
+
+fn dev() -> std::sync::Arc<cudarc::driver::CudaDevice> {
+    init_device().expect("init_device").device
+}
 
 fn tmp_path(name: &str) -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -26,7 +31,7 @@ fn read(path: &Path) -> String {
 }
 
 fn sim_box() -> SimulationBox {
-    SimulationBox::new(1.0, 1.0, 1.0, 0.0, 0.0, 0.0).unwrap()
+    SimulationBox::new(&dev(), 1.0, 1.0, 1.0, 0.0, 0.0, 0.0).unwrap()
 }
 
 // rq-a403f778
@@ -229,7 +234,7 @@ fn si_mode_writer_multiplies_positions_lattice_and_velocities_by_factors() {
     let length_factor = UnitSystem::Si.factor(heddle_md::units::Dimension::Length) as Real;
     let velocity_factor = UnitSystem::Si.factor(heddle_md::units::Dimension::Velocity) as Real;
 
-    let sim_box = SimulationBox::new(l_au, l_au, l_au, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&dev(), l_au, l_au, l_au, 0.0, 0.0, 0.0).unwrap();
     let mut writer = TrajectoryWriter::open(
         &path,
         UnitSystem::Si,
@@ -325,7 +330,7 @@ fn round_trip_via_init_parser() {
     writer.flush().unwrap();
     // Reader uses the same UnitSystem the writer was opened with so the
     // numerical round-trip is the identity.
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Atomic).unwrap();
     assert_eq!(state.particle_count, 4);
     assert_eq!(state.positions_x.as_slice(), &positions_x);
     assert_eq!(state.positions_y.as_slice(), &positions_y);
@@ -358,7 +363,7 @@ fn f32_position_round_trip() {
         )
         .unwrap();
     writer.flush().unwrap();
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Atomic).unwrap();
     assert_eq!(state.positions_x[0].to_bits(), p.to_bits());
 }
 
@@ -494,7 +499,7 @@ fn image_round_trip_via_init_parser() {
         )
         .unwrap();
     writer.flush().unwrap();
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Si).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Si).unwrap();
     assert_eq!(state.particle_count, 4);
     let imgs = state.images.unwrap();
     assert_eq!(imgs.images_x, images_x);
@@ -506,7 +511,7 @@ fn image_round_trip_via_init_parser() {
 fn round_trip_preserves_triclinic_lattice() {
     let dir = tmp_path("triclinic_roundtrip");
     let path = dir.join("traj.xyz");
-    let tri = SimulationBox::new(1.0, 1.0, 1.0, 0.2, 0.1, -0.3).unwrap();
+    let tri = SimulationBox::new(&dev(), 1.0, 1.0, 1.0, 0.2, 0.1, -0.3).unwrap();
     let mut writer =
         TrajectoryWriter::open(&path, UnitSystem::Atomic, false, false, vec!["Ar".to_string()]).unwrap();
     writer
@@ -523,7 +528,7 @@ fn round_trip_preserves_triclinic_lattice() {
         )
         .unwrap();
     writer.flush().unwrap();
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Atomic).unwrap();
     let parsed = state.sim_box.lattice();
     let original = tri.lattice();
     for d in 0..6 {
@@ -588,7 +593,7 @@ fn si_mode_reader_divides_lattice_and_positions_by_length_factor() {
     let path = dir.join("traj.xyz");
     let l_au: Real = 10.0;
     let pos_au: [Real; 3] = [3.7, -2.1, 0.5];
-    let sim_box = SimulationBox::new(l_au, l_au, l_au, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&dev(), l_au, l_au, l_au, 0.0, 0.0, 0.0).unwrap();
     let mut writer =
         TrajectoryWriter::open(&path, UnitSystem::Si, false, false, vec!["Ar".to_string()]).unwrap();
     writer
@@ -607,7 +612,7 @@ fn si_mode_reader_divides_lattice_and_positions_by_length_factor() {
     writer.flush().unwrap();
 
     // Read the same file back with the matching unit system.
-    let mut reader = TrajectoryReader::open(&path, UnitSystem::Si, &["Ar"]).unwrap();
+    let mut reader = TrajectoryReader::open(&dev(), &path, UnitSystem::Si, &["Ar"]).unwrap();
     let frame = reader.next_frame().unwrap().expect("at least one frame");
     let rel = 1e-5;
     let approx = |a: Real, b: Real| {
@@ -627,7 +632,7 @@ fn writer_emits_positions_inside_primary_cell() {
     let dir = tmp_path("positions_in_primary_cell");
     let path = dir.join("traj.xyz");
     let l_au: Real = 4.0;
-    let sim_box = SimulationBox::new(l_au, l_au, l_au, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&dev(), l_au, l_au, l_au, 0.0, 0.0, 0.0).unwrap();
     // Caller's invariant: every position lies in [-L/2, L/2). The writer
     // is expected to emit exactly these values; the reader (atomic
     // round-trip) must read back values that still satisfy the bound.
@@ -656,7 +661,7 @@ fn writer_emits_positions_inside_primary_cell() {
         )
         .unwrap();
     writer.flush().unwrap();
-    let state = load_init_state(&path, &["Ar"], UnitSystem::Atomic).unwrap();
+    let state = load_init_state(&dev(), &path, &["Ar"], UnitSystem::Atomic).unwrap();
     let half = l_au / 2.0;
     for (i, (&x, (&y, &z))) in state
         .positions_x

@@ -31,9 +31,11 @@ __device__ inline void vv_kick_drift_body(
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
     const Real *forces_x, const Real *forces_y, const Real *forces_z,
     const Real *masses,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real dt)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   Real m = masses[i];
   Real ax = forces_x[i] / m;
   Real ay = forces_y[i] / m;
@@ -166,10 +168,12 @@ extern "C" __global__ void vv_kick_drift(
     Real *velocities_x, Real *velocities_y, Real *velocities_z,
     const Real *forces_x, const Real *forces_y, const Real *forces_z,
     const Real *masses,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real dt,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) {
     return;
@@ -182,7 +186,7 @@ extern "C" __global__ void vv_kick_drift(
       nullptr, nullptr, nullptr,
       nullptr, nullptr, nullptr,
       forces_x, forces_y, forces_z,
-      masses, lx, ly, lz, xy, xz, yz, dt);
+      masses, lattice, dt);
 }
 
 extern "C" __global__ void vv_kick(
@@ -212,10 +216,12 @@ extern "C" __global__ void vv_kick_drift_lossless(
     double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
     const Real *forces_x, const Real *forces_y, const Real *forces_z,
     const Real *masses,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real dt,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) {
     return;
@@ -228,7 +234,7 @@ extern "C" __global__ void vv_kick_drift_lossless(
       positions_x_lo, positions_y_lo, positions_z_lo,
       velocities_x_lo, velocities_y_lo, velocities_z_lo,
       forces_x, forces_y, forces_z,
-      masses, lx, ly, lz, xy, xz, yz, dt);
+      masses, lattice, dt);
 }
 
 extern "C" __global__ void vv_kick_lossless(

@@ -14,10 +14,12 @@ extern "C" __global__ void lan_drift_half(
     Real *positions_x, Real *positions_y, Real *positions_z,
     int *images_x, int *images_y, int *images_z,
     const Real *velocities_x, const Real *velocities_y, const Real *velocities_z,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real dt,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= n) return;
 

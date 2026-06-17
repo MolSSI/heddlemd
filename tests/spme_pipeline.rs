@@ -102,7 +102,7 @@ fn spme_energy_from_pipeline(grid: &SpmeReciprocalGrid) -> f64 {
 fn spme_pipeline_matches_explicit_ewald_two_charge_pair() {
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
-    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
     let positions = [[0.2e-9, 0.0, 0.0], [-0.2e-9, 0.0, 0.0]];
     let e_charge = 1.602176634e-19;
     let charges = [e_charge, -e_charge];
@@ -143,7 +143,7 @@ fn spme_pipeline_matches_explicit_ewald_two_charge_pair() {
 fn spme_pipeline_matches_explicit_ewald_four_charges() {
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
-    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
     let positions = [
         [0.1e-9, 0.0, 0.0],
         [-0.1e-9, 0.2e-9, 0.0],
@@ -190,7 +190,7 @@ fn spme_pipeline_matches_explicit_ewald_four_charges() {
 fn spread_conserves_total_charge() {
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
-    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
     let positions = [
         [0.1e-9, 0.05e-9, -0.2e-9],
         [-0.1e-9, 0.2e-9, 0.15e-9],
@@ -232,7 +232,7 @@ fn spread_conserves_total_charge() {
 fn k_zero_entry_of_influence_function_is_zero() {
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
-    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
     let state = build_state(&[[0.0, 0.0, 0.0]], &[1.0]);
     let _buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let params = SpmeParameters {
@@ -251,7 +251,7 @@ fn k_zero_entry_of_influence_function_is_zero() {
 fn identical_inputs_produce_byte_identical_grids() {
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
-    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
     let positions = [[0.1e-9, 0.0, 0.0], [-0.1e-9, 0.0, 0.0]];
     let e = 1.602176634e-19;
     let charges = [e, -e];
@@ -308,7 +308,7 @@ fn small_box_grid(spme: SpmeParameters, n: usize) -> (
 ) {
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
-    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
     let grid = SpmeReciprocalGrid::new(&gpu, &sim_box, n, spme).unwrap();
     (gpu, sim_box, grid)
 }
@@ -318,7 +318,7 @@ fn small_box_grid(spme: SpmeParameters, n: usize) -> (
 fn spread_for_one_isolated_particle_matches_b_spline_weights() {
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
-    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
     let p_u = 4u32;
     let n_grid = 16u32;
     // Fractional position in [-0.5, 0.5) (box is centred at origin).
@@ -383,7 +383,7 @@ fn spread_for_one_isolated_particle_matches_b_spline_weights() {
 fn spread_is_zero_at_a_grid_point_with_no_particle_support() {
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
-    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
     // Particle at fractional s = (0.2, 0.2, 0.2); with the kernel's
     // centring shift s + 0.5 → 0.7 and grid size 16, the spline bins are
     // {8, 9, 10, 11} on each axis (p = 4). Grid point (0, 0, 0) sits
@@ -410,7 +410,7 @@ fn spread_is_zero_at_a_grid_point_with_no_particle_support() {
 fn spread_is_byte_identical_under_two_input_orderings_in_same_bin() {
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
-    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
     // Two particles in the same primary bin (close in fractional coords)
     // submitted in two different orderings.
     let p0 = [0.31 * l, 0.42 * l, 0.57 * l];
@@ -503,7 +503,7 @@ fn spme_reciprocal_internal_cell_list_uses_one_bin_per_fft_grid_cell() {
     use cudarc::driver::DeviceSlice;
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
-    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
     let params = SpmeParameters {
         alpha: 4.0e9,
         r_cut_real: 0.3e-9,
@@ -528,7 +528,7 @@ fn bin_only_cell_list_rebuilds_every_step_regardless_of_displacement() {
     use heddle_md::timings::{HostStage, KernelStage};
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
-    let sim_box = SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
     let positions = [[0.1e-9, 0.0, 0.0], [-0.1e-9, 0.0, 0.0]];
     let charges = [1.0, -1.0];
     let state = build_state(&positions, &charges);

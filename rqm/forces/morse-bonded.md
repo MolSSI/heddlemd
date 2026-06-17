@@ -164,7 +164,7 @@ extern "C" __global__ void morse_bond_force(
     const float *positions_x, const float *positions_y, const float *positions_z,
     const unsigned int *bonds,
     const float *bond_de, const float *bond_a, const float *bond_re,
-    float lx, float ly, float lz, float xy, float xz, float yz,
+    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float *bond_pair_x, float *bond_pair_y, float *bond_pair_z,
     float *bond_pair_energy, float *bond_pair_virial,
     unsigned int n_bonds);

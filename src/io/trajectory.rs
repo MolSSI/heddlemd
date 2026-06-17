@@ -256,6 +256,9 @@ pub enum TrajectoryReaderError {
 
 // rq-d1814271
 pub struct TrajectoryReader {
+    /// Device handle held so frames can build the per-frame
+    /// `SimulationBox` against the same device.
+    device: std::sync::Arc<cudarc::driver::CudaDevice>,
     reader: BufReader<File>,
     // rq-2456a906
     pub first_frame_header: TrajectoryFrameHeader,
@@ -295,6 +298,7 @@ impl std::fmt::Debug for TrajectoryReader {
 impl TrajectoryReader {
     // rq-af1c88ae
     pub fn open(
+        device: &std::sync::Arc<cudarc::driver::CudaDevice>,
         path: &Path,
         units: UnitSystem,
         type_names: &[&str],
@@ -311,6 +315,7 @@ impl TrajectoryReader {
         let mut line_number: usize = 0;
         let mut line_buf = String::new();
         let first_frame = read_one_frame(
+            device,
             &mut reader,
             &owned_type_names,
             &mut line_number,
@@ -337,6 +342,7 @@ impl TrajectoryReader {
             first_frame_header: header,
             line_number,
             next_frame_index: 0,
+            device: device.clone(),
             path: path.to_path_buf(),
             type_names: owned_type_names,
             line_buf,
@@ -352,6 +358,7 @@ impl TrajectoryReader {
             return Ok(Some(frame));
         }
         let frame = read_one_frame(
+            &self.device,
             &mut self.reader,
             &self.type_names,
             &mut self.line_number,
@@ -392,6 +399,7 @@ impl<'a> Iterator for TrajectoryFrameIter<'a> {
 /// reading the first frame and `Some(&header)` afterward so the reader
 /// can detect mid-trajectory header changes.
 fn read_one_frame<R: BufRead>(
+    device: &std::sync::Arc<cudarc::driver::CudaDevice>,
     reader: &mut R,
     type_names: &[String],
     line_number: &mut usize,
@@ -438,7 +446,7 @@ fn read_one_frame<R: BufRead>(
             line_number: comment_line_number,
             reason: "missing `Lattice` attribute".to_string(),
         })?;
-    let sim_box = parse_lattice(lattice_value, len_f).map_err(|e| {
+    let sim_box = parse_lattice(device, lattice_value, len_f).map_err(|e| {
         TrajectoryReaderError::MalformedHeader {
             line_number: comment_line_number,
             reason: e,
@@ -679,7 +687,11 @@ fn parse_attribute_line(line: &str) -> Vec<(String, String)> {
     out
 }
 
-fn parse_lattice(raw: &str, len_f: Real) -> Result<SimulationBox, String> {
+fn parse_lattice(
+    device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    raw: &str,
+    len_f: Real,
+) -> Result<SimulationBox, String> {
     let parts: Vec<&str> = raw.split_ascii_whitespace().collect();
     if parts.len() != 9 {
         return Err(format!(
@@ -716,7 +728,7 @@ fn parse_lattice(raw: &str, len_f: Real) -> Result<SimulationBox, String> {
     let xz = vals[6] as Real / len_f;
     let yz = vals[7] as Real / len_f;
     let lz = vals[8] as Real / len_f;
-    SimulationBox::new(lx, ly, lz, xy, xz, yz)
+    SimulationBox::new(device, lx, ly, lz, xy, xz, yz)
         .map_err(|e| format!("`Lattice` produced an invalid SimulationBox: {e}"))
 }
 

@@ -350,14 +350,30 @@ pub fn lint_simulation_with_registries(
         });
     }
 
-    // Stage 3: init.
+    // Stage 3: init. Lint always initialises the GPU here because
+    // `SimulationBox` is device-resident; the `--with-gpu` flag now
+    // only gates the heavier GPU stages (cuFFT smoke test, ForceField
+    // allocation).
     let type_name_strings: Vec<String> = config
         .particle_types
         .iter()
         .map(|t| t.name.clone())
         .collect();
     let type_name_refs: Vec<&str> = type_name_strings.iter().map(|s| s.as_str()).collect();
-    let init = match load_init_state(&config.init, &type_name_refs, config.units) {
+    let lint_gpu = match init_device() {
+        Ok(g) => g,
+        Err(e) => {
+            stages.push(LintStage {
+                label: "init",
+                status: LintStatus::Fail {
+                    detail: format!("init_device failed: {e}"),
+                    error: RunnerError::Gpu(e),
+                },
+            });
+            return finalize_with_skips(stages, &["box/cutoff", "topology", "gpu"]);
+        }
+    };
+    let init = match load_init_state(&lint_gpu.device, &config.init, &type_name_refs, config.units) {
         Ok(i) => {
             stages.push(LintStage {
                 label: "init",
@@ -519,7 +535,7 @@ pub fn lint_simulation_with_registries(
     }
 
     let _ = n;
-    match lint_gpu_full_setup(config, init, sim_box, topology, registries) {
+    match lint_gpu_full_setup(config, init, sim_box, topology, registries, lint_gpu) {
         Ok(()) => {
             stages.push(LintStage {
                 label: "gpu",
@@ -602,6 +618,7 @@ fn lint_gpu_full_setup(
     sim_box: crate::pbc::SimulationBox,
     topology: Option<(BondList, AngleList, ExclusionList, ConstraintList)>,
     registries: &crate::Registries,
+    gpu: crate::gpu::GpuContext,
 ) -> Result<(), (String, RunnerError)> {
     let n = init.particle_count;
     let topology = topology.unwrap_or_else(|| {
@@ -619,6 +636,8 @@ fn lint_gpu_full_setup(
         sim_box,
         topology,
         Duration::ZERO,
+        Duration::ZERO,
+        gpu,
         Duration::ZERO,
     )
     .map_err(|e| (format!("{e}"), e))?;
@@ -764,9 +783,15 @@ fn simulation_setup_new_impl(
         .collect();
     let type_name_refs: Vec<&str> = type_name_strings.iter().map(|s| s.as_str()).collect();
 
+    // `SimulationBox` is device-resident, so we need a CudaDevice to
+    // load the init state. `init_device` initialises the singleton
+    // device + module-cache; downstream stages reuse the same handle.
+    let mut gpu_init_duration = Duration::ZERO;
+    let gpu = timed(&mut gpu_init_duration, init_device).map_err(RunnerError::Gpu)?;
+
     let mut init_load_duration = Duration::ZERO;
     let init = timed(&mut init_load_duration, || {
-        load_init_state(&config.init, &type_name_refs, config.units)
+        load_init_state(&gpu.device, &config.init, &type_name_refs, config.units)
     })
     .map_err(RunnerError::InitState)?;
 
@@ -840,6 +865,8 @@ fn simulation_setup_new_impl(
         topology,
         config_load_duration,
         init_load_duration,
+        gpu,
+        gpu_init_duration,
     )
 }
 
@@ -847,6 +874,7 @@ fn simulation_setup_new_impl(
 // `SimulationSetup::new` (via `simulation_setup_new_impl`) and the
 // GPU-touching half of the lint pipeline. Takes ownership of the
 // inputs because the resulting `SimulationSetup` owns them.
+#[allow(clippy::too_many_arguments)]
 fn simulation_setup_finish_gpu(
     config: crate::io::Config,
     registries: crate::Registries,
@@ -855,12 +883,11 @@ fn simulation_setup_finish_gpu(
     topology: (BondList, AngleList, ExclusionList, ConstraintList),
     config_load_duration: Duration,
     init_load_duration: Duration,
+    gpu: crate::gpu::GpuContext,
+    gpu_init_duration: Duration,
 ) -> Result<SimulationSetup, RunnerError> {
     let n = init.particle_count;
     let (bond_list, angle_list, exclusion_list, constraint_list) = topology;
-
-    let mut gpu_init_duration = Duration::ZERO;
-    let gpu = timed(&mut gpu_init_duration, init_device).map_err(RunnerError::Gpu)?;
 
     // rq-637cd1a5 rq-02f4d342 rq-ea4205ec
     if config.spme.is_some() {

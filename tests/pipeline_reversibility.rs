@@ -144,7 +144,7 @@ struct PipelineFixture {
 impl PipelineFixture {
     fn build(gpu: &GpuContext, state: &ParticleState) -> Self {
         let buffers = ParticleBuffers::new(gpu, state).unwrap();
-        let sim_box = SimulationBox::new(BOX_L, BOX_L, BOX_L, 0.0, 0.0, 0.0).unwrap();
+        let sim_box = SimulationBox::new(&gpu.device, BOX_L, BOX_L, BOX_L, 0.0, 0.0, 0.0).unwrap();
         let params = single_type_lj_table(&gpu.device, SIGMA, EPSILON, CUTOFF);
         Self {
             buffers,

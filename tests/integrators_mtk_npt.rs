@@ -28,9 +28,9 @@ const TIME_F: f64 = 2.4188843265857195e-17;
 const PRESSURE_F: f64 = 29421015696522.1;
 const TEMP_F: f64 = 315775.0248040668;
 
-fn box_small() -> SimulationBox {
+fn box_small(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
     let l = (1.0e-9 / LEN_F) as Real;
-    SimulationBox::new(l, l, l, 0.0, 0.0, 0.0).unwrap()
+    SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
@@ -38,7 +38,7 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
         &PotentialRegistry::with_builtins(),
         gpu,
         n,
-        &box_small(),
+        &box_small(&gpu),
         &[],
         &[],
         &[],
@@ -205,7 +205,7 @@ fn step_launches_expected_kernel_set() {
     let mass: Real = 1.66e-27;
     let state = symmetric_state(n, mass, 500.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = build_mtk(&gpu, n, &mtk_kind(85.0, 1.0e5, 1.0e-13, 1.0e-12, 3, 3, 1));
@@ -245,7 +245,7 @@ fn step_on_empty_state_is_noop() {
     let gpu = init_device().unwrap();
     let state = make_state(Vec::new(), Vec::new(), Vec::new(), Vec::new());
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let mut ff = empty_force_field(&gpu, 0);
     let mut timings = Timings::new(&gpu).unwrap();
     let g_pre = sim_box.generation();
@@ -402,7 +402,7 @@ fn generation_advances_every_step() {
     let n = 4usize;
     let state = symmetric_state(n, 1.66e-27, 500.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = build_mtk(&gpu, n, &mtk_kind(85.0, 1.0e5, 1.0e-13, 1.0e-12, 3, 3, 1));
@@ -484,7 +484,7 @@ fn two_runs_with_identical_configs_are_byte_identical() {
     fn run_once(gpu: &GpuContext, n: usize) -> (Vec<Real>, [Real; 6]) {
         let state = symmetric_state(n, 1.66e-27, 500.0);
         let mut buffers = ParticleBuffers::new(gpu, &state).unwrap();
-        let mut sim_box = box_small();
+        let mut sim_box = box_small(&gpu);
         let mut ff = empty_force_field(gpu, n);
         let mut timings = Timings::new(gpu).unwrap();
         let mut integ = build_mtk(gpu, n, &mtk_kind(85.0, 1.0e5, 1.0e-13, 1.0e-12, 3, 3, 1));
@@ -539,10 +539,10 @@ fn mtk_approximate_time_reversibility_smoke() {
     // Snapshot the initial state (positions, velocities, lattice).
     let snap_px = state.positions_x.clone();
     let snap_vx = state.velocities_x.clone();
-    let snap_lattice = box_small().lattice();
+    let snap_lattice = box_small(&gpu).lattice();
 
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
 
@@ -665,7 +665,7 @@ fn finite_step_keeps_velocities_and_positions_finite() {
     let n = 16usize;
     let state = symmetric_state(n, 1.66e-27, 500.0);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut sim_box = box_small();
+    let mut sim_box = box_small(&gpu);
     let mut ff = empty_force_field(&gpu, n);
     let mut timings = Timings::new(&gpu).unwrap();
     let mut integ = build_mtk(&gpu, n, &mtk_kind(85.0, 1.0e5, 1.0e-13, 1.0e-12, 3, 3, 1));

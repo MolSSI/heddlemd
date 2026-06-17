@@ -263,8 +263,8 @@ fn one_atom_state() -> ParticleState {
     .unwrap()
 }
 
-fn big_box() -> SimulationBox {
-    SimulationBox::new(1.0e4, 1.0e4, 1.0e4, 0.0, 0.0, 0.0).unwrap()
+fn big_box(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
+    SimulationBox::new(&gpu.device, 1.0e4, 1.0e4, 1.0e4, 0.0, 0.0, 0.0).unwrap()
 }
 
 fn list_of_kinds(kinds: &[(usize, &str)], constraint_types: &[NamedSlotConfig]) -> ConstraintList {
@@ -359,7 +359,7 @@ fn two_registered_kinds_on_mixed_topology_fan_out() {
     drop(r);
     // Composite forwards hooks to every inner slot.
     let mut buffers = ParticleBuffers::new(&gpu, &one_atom_state()).unwrap();
-    let sb = big_box();
+    let sb = big_box(&gpu);
     let mut t = Timings::new(&gpu).unwrap();
     slot.apply_before_drift(&mut buffers, &sb, 1.0, &mut t).unwrap();
     let r2 = recorder.lock().unwrap();
@@ -405,7 +405,7 @@ fn slot_firing_order_matches_registration_order_and_reverses_when_registration_r
             .unwrap()
             .unwrap();
         let mut buffers = ParticleBuffers::new(&gpu, &one_atom_state()).unwrap();
-        let sb = big_box();
+        let sb = big_box(&gpu);
         let mut t = Timings::new(&gpu).unwrap();
         slot.apply_after_drift(&mut buffers, &sb, 1.0, &mut t).unwrap();
         recorder
@@ -470,7 +470,7 @@ fn composite_short_circuits_on_first_inner_error() {
         .unwrap()
         .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &one_atom_state()).unwrap();
-    let sb = big_box();
+    let sb = big_box(&gpu);
     let mut t = Timings::new(&gpu).unwrap();
     let err = slot
         .apply_after_drift(&mut buffers, &sb, 1.0, &mut t)
@@ -564,7 +564,7 @@ fn integrator_step_ext_step_has_no_constraint_argument() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &particle_state).unwrap();
-    let sim_box = SimulationBox::new(1.0e4, 1.0e4, 1.0e4, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e4, 1.0e4, 1.0e4, 0.0, 0.0, 0.0).unwrap();
     let mut sim_box = sim_box;
     let mut ff = ForceField::new(
         &PotentialRegistry::with_builtins(),
@@ -653,7 +653,7 @@ fn step_with_constraint_short_circuits_on_lossless_velocity_verlet() {
     )
     .unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &particle_state).unwrap();
-    let mut sim_box = SimulationBox::new(1.0e4, 1.0e4, 1.0e4, 0.0, 0.0, 0.0).unwrap();
+    let mut sim_box = SimulationBox::new(&gpu.device, 1.0e4, 1.0e4, 1.0e4, 0.0, 0.0, 0.0).unwrap();
     let mut ff = ForceField::new(
         &PotentialRegistry::with_builtins(),
         &gpu,
@@ -724,7 +724,7 @@ fn apply_before_drift_on_empty_state_is_a_noop() {
     let gpu = init_device().unwrap();
     let mut slot = empty_shake_slot(&gpu);
     let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
-    let sb = big_box();
+    let sb = big_box(&gpu);
     let mut t = Timings::new(&gpu).unwrap();
     assert_eq!(buffers.particle_count(), 0);
     use heddle_md::integrator::Constraint;
@@ -739,7 +739,7 @@ fn apply_after_drift_on_empty_state_is_a_noop() {
     let gpu = init_device().unwrap();
     let mut slot = empty_shake_slot(&gpu);
     let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
-    let sb = big_box();
+    let sb = big_box(&gpu);
     let mut t = Timings::new(&gpu).unwrap();
     use heddle_md::integrator::Constraint;
     slot.apply_after_drift(&mut buffers, &sb, 0.1, &mut t).unwrap();
@@ -753,7 +753,7 @@ fn apply_after_kick_on_empty_state_is_a_noop() {
     let gpu = init_device().unwrap();
     let mut slot = empty_shake_slot(&gpu);
     let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
-    let sb = big_box();
+    let sb = big_box(&gpu);
     let mut t = Timings::new(&gpu).unwrap();
     use heddle_md::integrator::Constraint;
     slot.apply_after_kick(&mut buffers, &sb, 0.1, &mut t).unwrap();
@@ -767,7 +767,7 @@ fn apply_position_projection_only_on_empty_state_is_a_noop() {
     let gpu = init_device().unwrap();
     let mut slot = empty_shake_slot(&gpu);
     let mut buffers = ParticleBuffers::new(&gpu, &empty_particle_state()).unwrap();
-    let sb = big_box();
+    let sb = big_box(&gpu);
     let mut t = Timings::new(&gpu).unwrap();
     use heddle_md::integrator::Constraint;
     slot.apply_position_projection_only(&mut buffers, &sb, &mut t).unwrap();

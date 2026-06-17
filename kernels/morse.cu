@@ -12,7 +12,7 @@ extern "C" __global__ void morse_bond_force(
     const Real *bond_de,
     const Real *bond_a,
     const Real *bond_re,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real *bond_pair_x,
     Real *bond_pair_y,
     Real *bond_pair_z,
@@ -20,6 +20,8 @@ extern "C" __global__ void morse_bond_force(
     Real *bond_pair_virial,
     unsigned int n_bonds)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   unsigned int k = blockIdx.x * blockDim.x + threadIdx.x;
   if (k >= n_bonds) {
     return;

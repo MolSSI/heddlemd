@@ -2104,6 +2104,13 @@
     "title": "MtkNpt + [thermostat] is rejected (owns its thermostat)",
     "type": "scenario"
   },
+  "rq-12a0c828": {
+    "decl": "Scenario: Constructor uploads the initial lattice to the device buffer",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Constructor uploads the initial lattice to the device buffer",
+    "type": "scenario"
+  },
   "rq-12b7dcb6": {
     "decl": "- `load_topology_file(path: &Path, particle_count: usize, bond_type_names: &[&str], angle_type_names: &[&str], constraint_types: &[NamedSlotConfig], constraint_registry: &ConstraintRegistry) -> Result<(BondList, AngleList, ExclusionList, ConstraintList), TopologyFileError>`",
     "file": "forces/topology",
@@ -2300,6 +2307,13 @@
     ],
     "title": "log_column_names",
     "type": "api-item"
+  },
+  "rq-14aaad34": {
+    "decl": "Scenario: device() returns the Arc<CudaDevice> the box was constructed against",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "device() returns the Arc<CudaDevice> the box was constructed against",
+    "type": "scenario"
   },
   "rq-14b8e042": {
     "decl": "Scenario: Morse-bonded run records morse_bond_force, reduce_bond_forces, accumulate_forces",
@@ -2743,6 +2757,14 @@
     "level": 3,
     "refs": [],
     "title": "Shared `nhc_chain_sub_step` host-side helper",
+    "type": "section"
+  },
+  "rq-1979ae5a": {
+    "decl": "## Device-resident lattice mirror",
+    "file": "simulation-box",
+    "level": 2,
+    "refs": [],
+    "title": "Device-resident lattice mirror",
     "type": "section"
   },
   "rq-19916fb0": {
@@ -6733,6 +6755,13 @@
     "title": "atom_bond_offsets reflects sorted bond list",
     "type": "scenario"
   },
+  "rq-3ee1ab17": {
+    "decl": "Scenario: Cloned SimulationBox has its own device buffer",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Cloned SimulationBox has its own device buffer",
+    "type": "scenario"
+  },
   "rq-3ef10542": {
     "decl": "Scenario: Append rows in source order",
     "file": "io/log-output",
@@ -9321,6 +9350,13 @@
     "title": "[thermostat] kind = \"csvr\" requires a seed",
     "type": "scenario"
   },
+  "rq-5c407914": {
+    "decl": "Scenario: set_lattice uploads the new lattice to the device buffer on success",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "set_lattice uploads the new lattice to the device buffer on success",
+    "type": "scenario"
+  },
   "rq-5c716d48": {
     "decl": "Scenario: write_timings_file with an empty report writes only the header",
     "file": "performance-analysis",
@@ -9543,6 +9579,13 @@
     ],
     "title": "SD with no constraint slot does not call any projection hook",
     "type": "scenario"
+  },
+  "rq-5e08a8f0": {
+    "decl": "- `SimulationBox::lattice_device(&self) -> &CudaSlice<f32>`",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "SimulationBox",
+    "type": "api-item"
   },
   "rq-5e2ee310": {
     "decl": "Scenario: Sweep reads only slots [0, count) and ignores trailing junk",
@@ -13399,6 +13442,13 @@
     "refs": [],
     "title": "At the LJ minimum r = sigma * 2^(1/6), the force is zero",
     "type": "scenario"
+  },
+  "rq-857ccf63": {
+    "decl": "- `SimulationBox::device(&self) -> &Arc<CudaDevice>`",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "SimulationBox",
+    "type": "api-item"
   },
   "rq-8586776f": {
     "decl": "### PTX Module Loading",
@@ -18201,7 +18251,7 @@
     "type": "scenario"
   },
   "rq-b75afb31": {
-    "decl": "- `SimulationBox` — host-side, `Copy`. Carries six `f32` lattice",
+    "decl": "- `SimulationBox` — `Send + Sync`. Carries six `f32` lattice",
     "file": "simulation-box",
     "refs": [
       {
@@ -19968,6 +20018,13 @@
     "title": "Pair near r_cut inside the switching window has force smaller than the unmodified value",
     "type": "scenario"
   },
+  "rq-cbe60abb": {
+    "decl": "Scenario: Two SimulationBoxes constructed from identical inputs produce byte-identical device buffers",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "Two SimulationBoxes constructed from identical inputs produce byte-identical device buffers",
+    "type": "scenario"
+  },
   "rq-cbeeea3c": {
     "decl": "## Algorithm",
     "file": "forces/morse-bonded",
@@ -20771,6 +20828,13 @@
     ],
     "title": "lj_pair_force",
     "type": "api-item"
+  },
+  "rq-d3aeaa23": {
+    "decl": "Scenario: set_lattice leaves the device buffer unchanged on validation failure",
+    "file": "simulation-box",
+    "refs": [],
+    "title": "set_lattice leaves the device buffer unchanged on validation failure",
+    "type": "scenario"
   },
   "rq-d3bd619e": {
     "decl": "Scenario: Velocity-Verlet plan walk launches vv_kick_drift, force pipeline, and vv_kick",
@@ -23852,7 +23916,7 @@
     "type": "scenario"
   },
   "rq-f0da71ea": {
-    "decl": "- `SimulationBox::new(lx: f32, ly: f32, lz: f32, xy: f32, xz: f32, yz: f32) -> Result<SimulationBox, SimulationBoxError>`",
+    "decl": "- `SimulationBox::new(device: &Arc<CudaDevice>, lx: f32, ly: f32, lz: f32, xy: f32, xz: f32, yz: f32) -> Result<SimulationBox, SimulationBoxError>`",
     "file": "simulation-box",
     "refs": [
       {

@@ -51,7 +51,7 @@ extern "C" __global__ void coulomb_pair_force_f(
     const Real *positions_z,
     const Real *charges,
     unsigned int max_neighbors,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real k_coulomb,
     Real cutoff,
     Real r_switch,
@@ -65,6 +65,8 @@ extern "C" __global__ void coulomb_pair_force_f(
     Real *slot_force_z,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   CoulombPairFunc f { charges, k_coulomb, cutoff, r_switch };
   pair_compute_f(
       f, n, max_neighbors,
@@ -81,7 +83,7 @@ extern "C" __global__ void coulomb_pair_force_fev(
     const Real *positions_z,
     const Real *charges,
     unsigned int max_neighbors,
-    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    const Real *lattice,
     Real k_coulomb,
     Real cutoff,
     Real r_switch,
@@ -97,6 +99,8 @@ extern "C" __global__ void coulomb_pair_force_fev(
     Real *slot_virial,
     unsigned int n)
 {
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   CoulombPairFunc f { charges, k_coulomb, cutoff, r_switch };
   pair_compute_fev(
       f, n, max_neighbors,

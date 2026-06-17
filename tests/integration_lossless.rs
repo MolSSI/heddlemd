@@ -178,7 +178,7 @@ fn lossless_buffers_new_with_zero_particle_count() {
 #[test] // rq-58cac735
 fn vv_kick_drift_lossless_empty_noop() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let mut buffers = ParticleBuffers::new(&gpu, &empty_state(0)).unwrap();
     let mut lossless = LosslessBuffers::new(&gpu, 0).unwrap();
     vv_kick_drift_lossless(&mut buffers, &mut lossless, &sim_box, 0.1).expect("kick_drift_lossless");
@@ -198,7 +198,7 @@ fn vv_kick_lossless_empty_noop() {
 fn vv_kick_drift_lossless_block_non_aligned() {
     let gpu = init_device().expect("init_device");
     let device = gpu.device.clone();
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let n = 1000;
     let mut state = empty_state(n);
     state.velocities_x = vec![1.0; n];
@@ -225,7 +225,7 @@ fn vv_kick_drift_lossless_block_non_aligned() {
 #[test] // rq-bb075030
 fn vv_kick_drift_lossless_does_not_modify_forces_masses_ids() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let state = diverse_state(4);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut lossless = LosslessBuffers::new(&gpu, 4).unwrap();
@@ -302,7 +302,7 @@ fn assert_residuals_close(a: &FullSnapshot, b: &FullSnapshot, tol: f64) {
 #[test] // rq-1a504311
 fn single_step_round_trip_zero_force() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let n = 8;
     let positions_x: Vec<Real> = (0..n).map(|i| 0.5 + i as Real * 0.3).collect();
     let positions_y: Vec<Real> = (0..n).map(|i| -1.0 + i as Real * 0.2).collect();
@@ -343,7 +343,7 @@ fn single_step_round_trip_zero_force() {
 #[test] // rq-b73316ed
 fn multi_step_round_trip_constant_force() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let n = 16;
     let state = diverse_state(n);
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
@@ -373,7 +373,7 @@ fn multi_step_round_trip_constant_force() {
 #[test] // rq-2a0e97f5
 fn two_independent_lossless_runs_byte_identical() {
     let gpu = init_device().expect("init_device");
-    let sim_box = SimulationBox::new(1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
+    let sim_box = SimulationBox::new(&gpu.device, 1.0e6, 1.0e6, 1.0e6, 0.0, 0.0, 0.0).unwrap();
     let n = 64;
     let state = diverse_state(n);
     let dt = 0.001;
