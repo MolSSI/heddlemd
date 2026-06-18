@@ -222,8 +222,9 @@ The reciprocal-space slot owns:
   counter changes.
 - A device-resident virial-factor table
   `virial_factor: CudaSlice<f32>` of length `M_complex` holding the
-  per-cell multiplier `G[k] · (1 - K² / (2 α²))` used by the
-  influence-multiply kernel to produce `virial_per_cell`. Rebuilt
+  per-cell multiplier `G[k] · (1 - K² / (2 α²))` read by
+  `spme_recip_apply_influence` to compute the per-thread virial
+  contribution it feeds into the per-block reduction. Rebuilt
   alongside `influence_G` on the same box-generation trigger.
 - Per-axis B-spline correction factor arrays held as device buffers
   `b_factors_a: CudaSlice<f32>`, `b_factors_b: CudaSlice<f32>`, and
@@ -234,11 +235,16 @@ The reciprocal-space slot owns:
 - A device-resident single-element scalar
   `w_per_particle_virial: CudaSlice<f32>` holding the per-particle
   reciprocal-virial share `W_recip / N` written by
-  `spme_recip_virial_finalize` and read by `spme_force_gather`.
-- A device-resident single-element accumulator
-  `virial_per_cell: CudaSlice<f32>`-staging buffer of length `M_complex`
-  written by `spme_influence_multiply` and consumed by
-  `spme_recip_virial_finalize`.
+  `spme_recip_reduce_partials` and read by `spme_force_gather`.
+- A device-resident scratch buffer
+  `virial_partials: CudaSlice<f32>` of length
+  `ceil(M_complex / 256)` (the number of 256-thread blocks that
+  cover the complex grid). Each block of `spme_recip_apply_influence`
+  reduces its assigned slice of the complex grid into a single
+  partial sum and writes it to its slot of `virial_partials`.
+  `spme_recip_reduce_partials` then sums these partials into
+  `w_per_particle_virial`. The two-stage shape avoids materialising
+  a length-`M_complex` per-cell virial buffer in global memory.
 - A cuFFT plan handle for the `(n_a, n_b, n_c)` R2C / C2R transforms.
   Both plans are bound to the device's default `CudaStream` via
   `cufftSetStream` at construction and are never rebound.
@@ -392,11 +398,35 @@ influence recompute is dispatched before any later reciprocal kernel
 on the same stream; see *Launch configuration*) ensures that
 downstream consumers see the updated buffers before reading them.
 
-### Influence-function multiply and inverse FFT <!-- rq-95385a9d -->
+### Influence-function multiply, virial partial reduction, and inverse FFT <!-- rq-95385a9d -->
 
-A per-cell multiply kernel applies `V_hat[k] = G[k] · rho_hat[k]` for
-every `k`, including writing zero for `k = (0, 0, 0)`. One thread per
-complex grid cell; no atomics.
+`spme_recip_apply_influence` is a fused per-cell kernel that, in one
+pass over the complex grid, both produces the smoothed reciprocal
+potential `V_hat` and accumulates the per-cell virial contribution
+into a small per-block partial-sums buffer.
+
+Per thread (one thread per complex cell, `k = (k_a, k_b, k_c)`):
+
+1. Read `rho_hat[k]`, `influence_G[k]`, `virial_factor[k]`.
+2. Compute `V_hat[k] = influence_G[k] · rho_hat[k]`, including a
+   write of zero for `k = (0, 0, 0)` (the `k = 0` slots of both
+   `influence_G` and `virial_factor` are pre-zeroed by
+   `spme_recip_compute_influence`).
+3. Compute the per-thread virial contribution
+   `v_t = virial_factor[k] · |rho_hat[k]|²` (zero at `k = 0`).
+4. Hold `v_t` in a per-thread register accumulator and participate
+   in the block-level deterministic shared-memory pairwise tree
+   that reduces all 256 lane contributions to a single block partial.
+5. Lane 0 of each block writes the block partial to
+   `virial_partials[block_id]`.
+
+The kernel uses one 256-thread block per `ceil(M_complex / 256)`
+blocks of the complex grid and reads / writes only `rho_hat`,
+`influence_G`, `virial_factor`, `V_hat`, and `virial_partials`. No
+atomics, no inter-block synchronisation. The block partial-sum tree
+shape depends only on the fixed block size (256), so two runs on
+the same GPU produce byte-identical `V_hat` and byte-identical
+`virial_partials`.
 
 A cuFFT C2R plan transforms `V_hat` back into `V`:
 
@@ -455,19 +485,23 @@ Greens-function term are already folded into `G[k]`; the `0.5` outside
 the sum is the Ewald half-sum convention.
 
 The per-cell contributions `virial_factor[k] · |rho_hat[k]|²` are
-written to a device buffer `virial_per_cell` by the influence-multiply
-kernel (one thread per complex grid cell; no atomics). The scalar
-`W_recip / N` is then computed on device by the
-`spme_recip_virial_finalize` kernel, dispatched on the default stream
-immediately after the influence multiply. A single 256-thread block
-sums `virial_per_cell[0 .. M_complex − 1]` with a strided per-thread
-accumulator followed by a deterministic left-to-right pairwise tree in
-shared memory (the same shape as `barostat::virial_sum_reduce` and
-`nose_hoover::kinetic_energy_reduce`). Lane 0 of the block multiplies
-the reduced sum by `0.5 / N` and writes the result to the device-resident
-single-element scalar `w_per_particle_virial`. Two runs on the same
-GPU with byte-identical inputs produce a byte-identical
-`w_per_particle_virial[0]`.
+folded into the per-block partial sums in
+`virial_partials` directly inside the fused
+`spme_recip_apply_influence` kernel; no length-`M_complex` per-cell
+virial buffer is materialised in global memory (see
+*Influence-function multiply, virial partial reduction, and inverse
+FFT* above). The scalar `W_recip / N` is computed on device by the
+`spme_recip_reduce_partials` kernel, dispatched on the default
+stream immediately after the influence-multiply pass. A single
+256-thread block sums `virial_partials[0 .. num_blocks − 1]` with
+a strided per-thread accumulator followed by a deterministic
+left-to-right pairwise tree in shared memory (the same shape as
+`barostat::virial_sum_reduce` and
+`nose_hoover::kinetic_energy_reduce`). Lane 0 of the block
+multiplies the reduced sum by `0.5 / N` and writes the result to
+the device-resident single-element scalar `w_per_particle_virial`.
+Two runs on the same GPU with byte-identical inputs produce a
+byte-identical `w_per_particle_virial[0]`.
 
 The scalar is distributed per particle by equal division inside
 `spme_force_gather`: each particle reads `w_per_particle_virial[0]`
@@ -610,16 +644,19 @@ only inside the `SpmeReciprocalState` construction path.
   to the default stream via `cufftSetStream`. The call returns
   `Result<(), CuFftError>`.
 
-- `spme_influence_multiply(spme_state) -> Result<(), GpuError>` <!-- rq-8326d2d1 -->
-  Multiplies `rho_hat[k] *= G[k]` in place on the default stream, also
-  writing the per-cell virial contribution
-  `virial_factor[k] · |rho_hat[k]|²` to `virial_per_cell` for the
-  subsequent reduction.
+- `spme_recip_apply_influence(spme_state) -> Result<(), GpuError>` <!-- rq-5ec02591 -->
+  Multiplies `rho_hat[k] *= G[k]` in place on the default stream,
+  computes the per-thread virial contribution
+  `virial_factor[k] · |rho_hat[k]|²`, reduces those contributions
+  block-by-block via a deterministic shared-memory pairwise tree, and
+  writes the per-block partial sums to `virial_partials`. Operates
+  in a single kernel pass over the complex grid; no length-`M_complex`
+  per-cell virial buffer is materialised in global memory.
 
-- `spme_recip_virial_finalize(kernels, virial_per_cell, w_per_particle_virial, m_complex, n_particles) -> Result<(), GpuError>` <!-- rq-5d30456e -->
-  Launches `spme_recip_virial_finalize` on the default stream. Writes
-  `w_per_particle_virial[0] = (0.5 / N) · Σ virial_per_cell[k]` via the
-  single-block deterministic pairwise tree described in
+- `spme_recip_reduce_partials(kernels, virial_partials, w_per_particle_virial, num_blocks, n_particles) -> Result<(), GpuError>` <!-- rq-e0d010c0 -->
+  Launches `spme_recip_reduce_partials` on the default stream. Writes
+  `w_per_particle_virial[0] = (0.5 / N) · Σ virial_partials[b]` via
+  the single-block deterministic pairwise tree described in
   *Reciprocal-space virial*. No host download.
 
 - The C2R inverse transform `rho_hat → V` is invoked via <!-- rq-a98abc35 -->
@@ -664,10 +701,10 @@ extern "C" __global__ void spme_recip_compute_influence(
     float alpha,
     unsigned int m_complex);
 
-extern "C" __global__ void spme_recip_virial_finalize(
-    const float *virial_per_cell,       // length M_complex
+extern "C" __global__ void spme_recip_reduce_partials(
+    const float *virial_partials,       // length num_blocks
     float *w_per_particle_virial,       // length 1
-    unsigned int m_complex,
+    unsigned int num_blocks,
     float scale);                       // 0.5 / N
 
 extern "C" __global__ void spme_charge_spread(
@@ -683,15 +720,13 @@ extern "C" __global__ void spme_charge_spread(
     float *rho,
     unsigned int n);
 
-extern "C" __global__ void spme_influence_multiply(
-    const float *influence_G,
+extern "C" __global__ void spme_recip_apply_influence(
+    const float *influence_G,           // length M_complex
+    const float *virial_factor,         // length M_complex
     float *rho_hat_real,   // interleaved real and imag parts
     float *rho_hat_imag,
-    float *virial_per_cell,  // scratch for reciprocal-virial reduction
-    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
-    unsigned int n_a, unsigned int n_b, unsigned int n_c,
-    float alpha,
-    unsigned int n_complex);
+    float *virial_partials,             // length num_blocks
+    unsigned int m_complex);
 
 extern "C" __global__ void spme_force_gather(
     const float *positions_x,
@@ -710,9 +745,11 @@ extern "C" __global__ void spme_force_gather(
     unsigned int n);
 ```
 
-Plus a deterministic reduction kernel for the per-cell virial buffer
-(a fixed-topology tree reduction; the kernel signature is left to the
-implementation).
+No length-`M_complex` per-cell virial buffer exists; the per-block
+partial sums produced by `spme_recip_apply_influence` flow directly
+into `spme_recip_reduce_partials`. Both reductions use deterministic
+fixed-topology shared-memory pairwise trees whose shape depends only
+on the launch block size (256), not on thread scheduling.
 
 ### Launch configuration <!-- rq-03d9869d -->
 
@@ -723,12 +760,17 @@ implementation).
   block size 256, grid `ceil(M_complex / 256)`. No shared memory.
 - `spme_charge_spread`: one thread per real grid cell, block size 256, <!-- rq-16f6c7dc -->
   grid `ceil(M / 256)` where `M = n_a · n_b · n_c`.
-- `spme_influence_multiply`: one thread per complex grid cell, block <!-- rq-127df3d6 -->
-  size 256, grid `ceil(M_complex / 256)`.
-- `spme_recip_virial_finalize`: single block of 256 threads, <!-- rq-9e2d2f1a -->
+- `spme_recip_apply_influence`: one thread per complex grid cell, <!-- rq-b82694ec -->
+  block size 256, grid `ceil(M_complex / 256)`,
+  `__shared__ Real partial[256]` for the per-block virial reduction.
+  Per thread: read `rho_hat[k]`, `influence_G[k]`, `virial_factor[k]`,
+  write `V_hat[k]`, accumulate the per-thread virial contribution into
+  shared memory, participate in the deterministic pairwise tree.
+  Lane 0 of each block writes one entry of `virial_partials`.
+- `spme_recip_reduce_partials`: single block of 256 threads, <!-- rq-3a41a142 -->
   `__shared__ Real partial[256]`. Strided per-thread accumulator
   followed by deterministic left-to-right pairwise tree. Only lane 0
-  writes the output.
+  writes the output (one scalar to `w_per_particle_virial`).
 - `spme_force_gather`: one thread per particle, block size 256, grid <!-- rq-35b76155 -->
   `ceil(N / 256)`.
 
@@ -738,8 +780,8 @@ Stream assignment:
   `spme_real_pair_force_*`, `spme_force_gather`,
   `spme_recip_compute_influence` (when triggered by a box-generation
   change), `spme_charge_spread`, the cuFFT R2C transform,
-  `spme_influence_multiply`, the cuFFT C2R transform, and
-  `spme_recip_virial_finalize` — runs on the device's default stream
+  `spme_recip_apply_influence`, the cuFFT C2R transform, and
+  `spme_recip_reduce_partials` — runs on the device's default stream
   carried by `particle_buffers.device`. Both cuFFT plans are bound to
   the default stream via `cufftSetStream` once at slot construction
   and are never rebound.
@@ -779,13 +821,19 @@ invariant:
    fires whenever the slot observes a changed `sim_box.generation()`,
    producing byte-identical `influence_G` and `virial_factor` for
    byte-identical box lattices on the same GPU.
-5. **Influence-function multiply and virial-per-cell write.** One
-   thread per complex grid cell; no atomics; no inter-thread reads.
-6. **Per-cell virial reduction.** `spme_recip_virial_finalize` runs a
-   single block of 256 threads with a strided per-thread accumulator
-   and a deterministic left-to-right pairwise tree in shared memory.
-   Two runs with byte-identical `virial_per_cell` produce a
-   byte-identical `w_per_particle_virial[0]`.
+5. **Influence-function multiply and virial partial reduction.**
+   `spme_recip_apply_influence` runs one thread per complex grid
+   cell; no atomics; no inter-thread reads on the multiply portion.
+   The per-block partial-sum reduction over the per-thread virial
+   contributions uses a deterministic fixed-topology shared-memory
+   pairwise tree whose shape depends only on the launch block size
+   (256), so two runs on the same GPU produce byte-identical
+   `V_hat` and byte-identical `virial_partials`.
+6. **Virial partial-sums reduction.** `spme_recip_reduce_partials`
+   runs a single block of 256 threads with a strided per-thread
+   accumulator and a deterministic left-to-right pairwise tree in
+   shared memory. Two runs with byte-identical `virial_partials`
+   produce a byte-identical `w_per_particle_virial[0]`.
 5. **Force gather.** One thread per particle; each thread reads `p³`
    grid points in fixed `(d_a, d_b, d_c)` lexicographic order. No
    atomics. The per-particle virial uses the equal-division attribution
@@ -806,10 +854,11 @@ invariant:
    identical inputs on the same GPU therefore observe byte-identical
    writes from both streams.
 
-The reciprocal-virial scalar reduction sums `virial_per_cell` on the
-host in `f64` in fixed index order at the start of `reduce()`; the
-implementation must not use unordered atomic-add or any
-non-deterministic device-side reduction.
+The reciprocal-virial scalar reduction must use deterministic
+fixed-topology tree reductions (`spme_recip_apply_influence`'s
+per-block tree plus `spme_recip_reduce_partials`' final-block tree
+in shared memory). The implementation must not use unordered
+atomic-add or any non-deterministic device-side reduction.
 
 ## Out of Scope <!-- rq-f0038583 -->
 
@@ -824,6 +873,22 @@ non-deterministic device-side reduction.
   manually.
 - Per-frame charge updates. Charges are fixed for the lifetime of a
   run; `u_self_per_particle` is computed once.
+- Softening the bit-exact GPU-vs-GPU determinism guarantee on the
+  reciprocal-space pipeline in exchange for additional wall-clock
+  savings. The spread and gather kernels run one thread per grid
+  point (spread) and one thread per particle (gather) with no
+  atomics, in fixed iteration order over their per-thread input
+  ranges, and the per-block reduction trees in
+  `spme_recip_apply_influence` and `spme_recip_reduce_partials`
+  use fixed shared-memory shapes. A faster implementation that
+  relaxed any of these properties — for example one-thread-per-particle
+  spread with `atomicAdd` into `rho`, or a non-deterministic
+  reduction shape that depends on block-completion order — could
+  reach materially lower wall-clock per step, at the cost of breaking
+  the run-to-run byte-equality contract that `architecture.md`
+  guarantees for the engine. That tradeoff is intentionally not
+  taken here; the determinism guarantee is treated as load-bearing
+  for the long-running production runs the engine is designed for.
 - Excluded-pair real-space correction. The 1-2 and 1-3 bonded pairs are
   zero-scaled in `atom_excl_coul_scales` (the standard convention for
   excluded pairs in PME). Codes that retain a portion of the bonded
@@ -1074,14 +1139,44 @@ Feature: Smooth particle-mesh Ewald (SPME)
     When the run completes
     Then spme_recip_compute_influence has launched exactly once (at slot construction)
 
-  # --- Reciprocal-space pipeline: multiply ---
+  # --- Reciprocal-space pipeline: fused apply-influence ---
 
   @rq-e5bf6fea
-  Scenario: The k=0 entry is zeroed by the influence-function multiply
+  Scenario: The k=0 entry is zeroed by the fused apply-influence kernel
     Given any non-zero rho_hat
-    When spme_influence_multiply is called
-    Then rho_hat[k=0] equals 0.0 + 0.0i after the multiply
+    When spme_recip_apply_influence is called
+    Then rho_hat[k=0] equals 0.0 + 0.0i after the kernel
       (tinfoil boundary condition)
+
+  @rq-35af4d98
+  Scenario: apply_influence produces V_hat[k] = G[k] * rho_hat[k] for k != 0
+    Given a complex grid of known rho_hat values and a known influence_G
+    When spme_recip_apply_influence runs
+    Then for every k != 0, V_hat[k] equals influence_G[k] * rho_hat[k]
+      to within f32 round-off
+
+  @rq-d4d54057
+  Scenario: apply_influence writes one virial partial per block
+    Given a complex grid of M_complex cells and block size 256
+    And num_blocks = ceil(M_complex / 256)
+    When spme_recip_apply_influence runs
+    Then exactly num_blocks entries of virial_partials are written
+    And each entry equals the sum of virial_factor[k] * |rho_hat[k]|² over the cells assigned to its block,
+      reduced via the deterministic shared-memory pairwise tree
+
+  @rq-191d86df
+  Scenario: apply_influence does not materialise a length-M_complex virial buffer
+    Given the SpmeReciprocalState is constructed
+    When the slot's owned device allocations are enumerated
+    Then no allocation of length M_complex is reserved for per-cell virial staging
+    And virial_partials has length ceil(M_complex / 256)
+
+  @rq-70442b56
+  Scenario: Two runs of apply_influence on identical inputs are byte-identical
+    Given two device-resident copies of identical rho_hat, influence_G, virial_factor inputs
+    When spme_recip_apply_influence runs on each
+    Then dtoh(V_hat) is byte-identical between the two runs
+    And dtoh(virial_partials) is byte-identical between the two runs
 
   # --- Force gather ---
 
@@ -1112,18 +1207,25 @@ Feature: Smooth particle-mesh Ewald (SPME)
     And summing virials over all particles recovers W_recip
 
   @rq-ede87154
-  Scenario: spme_recip_virial_finalize writes (0.5 / N) · Σ virial_per_cell on device
-    Given a virial_per_cell device buffer of length M_complex with known per-cell values
-    When spme_recip_virial_finalize is launched with scale = 0.5 / N
-    Then dtoh(w_per_particle_virial)[0] equals 0.5 / N · Σ_k virial_per_cell[k]
+  Scenario: spme_recip_reduce_partials writes (0.5 / N) · Σ virial_partials on device
+    Given a virial_partials device buffer of length num_blocks with known per-block values
+    When spme_recip_reduce_partials is launched with scale = 0.5 / N
+    Then dtoh(w_per_particle_virial)[0] equals 0.5 / N · Σ_b virial_partials[b]
       to within f32 round-off
-    And no host download of virial_per_cell occurs
+    And no host download of virial_partials occurs
 
   @rq-9d344eb9
-  Scenario: Two runs of spme_recip_virial_finalize on identical inputs are byte-identical
-    Given two device-resident copies of an identical virial_per_cell buffer
-    When spme_recip_virial_finalize runs on each
+  Scenario: Two runs of spme_recip_reduce_partials on identical inputs are byte-identical
+    Given two device-resident copies of an identical virial_partials buffer
+    When spme_recip_reduce_partials runs on each
     Then dtoh(w_per_particle_virial) produces byte-identical scalars between the two runs
+
+  @rq-65ba517f
+  Scenario: End-to-end recip-virial reduction equals (0.5 / N) · Σ_k virial_factor[k] · |rho_hat[k]|²
+    Given a known rho_hat, influence_G, and virial_factor on device
+    And reference total W = Σ_k virial_factor[k] · |rho_hat[k]|² computed on host in f64
+    When spme_recip_apply_influence followed by spme_recip_reduce_partials runs
+    Then dtoh(w_per_particle_virial)[0] equals (0.5 / N) · W to within f32 round-off
 
   # --- Reproducibility ---
 

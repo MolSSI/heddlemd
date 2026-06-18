@@ -655,14 +655,22 @@ pub fn spme_charge_spread(
     Ok(())
 }
 
-// rq-9ca00d25 rq-127df3d6 rq-8326d2d1
+// rq-9ca00d25 rq-95385a9d
+//
+// Launches the fused `spme_recip_apply_influence` kernel:
+// one thread per complex grid cell writes V_hat = G * rho_hat in place
+// and accumulates the per-thread virial contribution into a per-block
+// partial sum written to `virial_partials`.
+//
+// `virial_partials.len()` must equal the launch's grid size
+// (`ceil(n_complex / 256)`); each block writes exactly one entry.
 #[allow(clippy::too_many_arguments)]
-pub fn spme_influence_multiply(
+pub fn spme_recip_apply_influence(
     kernels: &Kernels,
     influence_g: &CudaSlice<Real>,
     virial_factor: &CudaSlice<Real>,
     rho_hat_interleaved: &mut CudaSlice<Real>,
-    virial_per_cell: &mut CudaSlice<Real>,
+    virial_partials: &mut CudaSlice<Real>,
     n_c: u32,
     n_c_complex: u32,
     n_complex: u32,
@@ -673,14 +681,14 @@ pub fn spme_influence_multiply(
     debug_assert_eq!(influence_g.len(), n_complex as usize);
     debug_assert_eq!(virial_factor.len(), n_complex as usize);
     debug_assert_eq!(rho_hat_interleaved.len(), 2 * n_complex as usize);
-    debug_assert_eq!(virial_per_cell.len(), n_complex as usize);
-    let func = kernels.spme_recip.spme_influence_multiply.clone();
     let cfg = launch_config(n_complex);
+    debug_assert_eq!(virial_partials.len(), cfg.grid_dim.0 as usize);
+    let func = kernels.spme_recip.spme_recip_apply_influence.clone();
     let args = (
         influence_g,
         virial_factor,
         rho_hat_interleaved,
-        virial_per_cell,
+        virial_partials,
         n_c,
         n_c_complex,
         n_complex,
@@ -700,7 +708,7 @@ pub fn spme_influence_multiply(
 /// Returns `Ok(())` immediately (no host wait); the launch is
 /// asynchronous on the supplied stream. The caller is expected to
 /// schedule downstream consumers (`spme_charge_spread`,
-/// `spme_influence_multiply`) on the same stream so the writes are
+/// `spme_recip_apply_influence`) on the same stream so the writes are
 /// visible without additional synchronization.
 #[allow(clippy::too_many_arguments)]
 pub fn spme_recip_compute_influence(
@@ -748,31 +756,31 @@ pub fn spme_recip_compute_influence(
 }
 
 /// Launches the single-block deterministic reduction of
-/// `virial_per_cell` followed by the Ewald half-sum / per-particle
+/// `virial_partials` followed by the Ewald half-sum / per-particle
 /// scale. Writes
-///   w_per_particle_virial[0] = (0.5 / n) * Σ virial_per_cell[i]
+///   w_per_particle_virial[0] = (0.5 / n) * Σ virial_partials[b]
 /// on the supplied stream. Block size 256 (matches the kernel's
 /// `__shared__ Real partial[256]`).
-pub fn spme_recip_virial_finalize(
+pub fn spme_recip_reduce_partials(
     kernels: &Kernels,
-    virial_per_cell: &CudaSlice<Real>,
+    virial_partials: &CudaSlice<Real>,
     w_per_particle_virial: &mut CudaSlice<Real>,
-    m_complex: u32,
+    num_blocks: u32,
     n_particles: u32,
 ) -> Result<(), GpuError> {
-    if m_complex == 0 || n_particles == 0 {
+    if num_blocks == 0 || n_particles == 0 {
         return Ok(());
     }
-    debug_assert_eq!(virial_per_cell.len(), m_complex as usize);
+    debug_assert_eq!(virial_partials.len(), num_blocks as usize);
     debug_assert_eq!(w_per_particle_virial.len(), 1);
-    let func = kernels.spme_recip.spme_recip_virial_finalize.clone();
+    let func = kernels.spme_recip.spme_recip_reduce_partials.clone();
     let cfg = LaunchConfig {
         grid_dim: (1, 1, 1),
         block_dim: (256, 1, 1),
         shared_mem_bytes: 0,
     };
     let scale: Real = 0.5 / (n_particles as Real);
-    let args = (virial_per_cell, w_per_particle_virial, m_complex, scale);
+    let args = (virial_partials, w_per_particle_virial, num_blocks, scale);
     unsafe {
         func.launch(cfg, args).map_err(GpuError::from)?;
     }

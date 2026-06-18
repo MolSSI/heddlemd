@@ -10,7 +10,7 @@
 
 use std::sync::Arc;
 
-use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice, DevicePtrMut};
+use cudarc::driver::{CudaDevice, CudaFunction, CudaSlice, DevicePtrMut, DeviceSlice};
 use cudarc::nvrtc::Ptx;
 
 use crate::gpu::cufft::{CuFftError, Plan3dC2R, Plan3dR2C};
@@ -18,7 +18,7 @@ use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, K_COULOMB_F32, ParticleBuffers,
     spme_charge_spread,
-    spme_force_gather, spme_influence_multiply, spme_real_pair_force,
+    spme_force_gather, spme_real_pair_force,
 };
 use crate::kernels;
 use crate::io::config::SpmeConfig;
@@ -88,16 +88,19 @@ pub struct SpmeReciprocalGrid {
     pub rho_hat_interleaved: CudaSlice<Real>,
     pub v: CudaSlice<Real>,
     pub influence_g: CudaSlice<Real>,
-    /// Per-cell factor `G[k] · (1 − K²/(2α²))`. Multiplied by
-    /// `|rho_hat[k]|²` and the Hermitian weight by the kernel to produce
-    /// `virial_per_cell`.
+    /// Per-cell factor `G[k] · (1 − K²/(2α²))`. Read per-thread by
+    /// `spme_recip_apply_influence`, multiplied by `|rho_hat[k]|²` and
+    /// the Hermitian weight, and fed into the per-block reduction that
+    /// writes `virial_partials`.
     pub virial_factor: CudaSlice<Real>,
-    /// Scratch buffer holding the per-cell virial contribution after
-    /// `spme_influence_multiply`. Reduced on device to the scalar
+    /// Per-block partial sums of the reciprocal-space virial
+    /// contribution, written one entry per launch block of
+    /// `spme_recip_apply_influence`. Length equals the launch's grid
+    /// size (`ceil(m_complex / 256)`). Reduced on device to the scalar
     /// `w_per_particle_virial = W_recip / N` by
-    /// `spme_recip_virial_finalize` on `recip_stream`; never copied to
-    /// host on the per-step path.
-    pub virial_per_cell: CudaSlice<Real>,
+    /// `spme_recip_reduce_partials`; never copied to host on the
+    /// per-step path.
+    pub virial_partials: CudaSlice<Real>,
     /// Per-axis B-spline correction factors. Depend only on
     /// `(grid, spline_order)`, populated once at construction from the
     /// host-side Cox-de Boor recursion, never re-uploaded.
@@ -177,8 +180,12 @@ impl SpmeReciprocalGrid {
         let mut virial_factor = device
             .alloc_zeros::<Real>(m_complex)
             .map_err(GpuError::from)?;
-        let virial_per_cell = device
-            .alloc_zeros::<Real>(m_complex)
+        // Sized to the per-step `spme_recip_apply_influence` grid: one
+        // partial per launch block. Block size 256 matches the
+        // shared-memory tree shape inside the kernel.
+        let num_partial_blocks = m_complex.div_ceil(256);
+        let virial_partials = device
+            .alloc_zeros::<Real>(num_partial_blocks)
             .map_err(GpuError::from)?;
 
         let forward_plan = Plan3dR2C::new_unallocated(&device, n_a, n_b, n_c)?;
@@ -238,7 +245,7 @@ impl SpmeReciprocalGrid {
             v,
             influence_g,
             virial_factor,
-            virial_per_cell,
+            virial_partials,
             b_factors_a,
             b_factors_b,
             b_factors_c,
@@ -302,12 +309,12 @@ impl SpmeReciprocalGrid {
 
         let n_c = self.params.grid[2];
         let n_c_complex = (n_c / 2 + 1) as u32;
-        spme_influence_multiply(
+        crate::gpu::spme_recip_apply_influence(
             &particle_buffers.kernels,
             &self.influence_g,
             &self.virial_factor,
             &mut self.rho_hat_interleaved,
-            &mut self.virial_per_cell,
+            &mut self.virial_partials,
             n_c,
             n_c_complex,
             self.m_complex as u32,
@@ -321,7 +328,7 @@ impl SpmeReciprocalGrid {
 
     /// Synchronises the device. Production paths do not need to call
     /// this — the per-stream ordering of the default stream makes
-    /// `rho` / `v` / `virial_per_cell` visible to any subsequent
+    /// `rho` / `v` / `virial_partials` visible to any subsequent
     /// kernel or dtoh on the same stream. Tests that read these
     /// buffers via the host call this for clarity (a subsequent
     /// `dtoh_sync_copy` already synchronises, so the call is logically
@@ -484,10 +491,9 @@ pub struct SpmeReciprocalState {
     // `u_self_per_particle[i] = k_C · (α/√π) · q_i²`. Subtracted from
     // the per-particle reciprocal energy inside the gather kernel.
     u_self_per_particle: CudaSlice<Real>,
-    // Reduced per-particle reciprocal virial share, computed on
-    // `recip_stream` by `spme_recip_virial_finalize` from
-    // `virial_per_cell` and consumed by the gather kernel on the
-    // default stream after the recip stream is joined back.
+    // Reduced per-particle reciprocal virial share, computed by
+    // `spme_recip_reduce_partials` from `SpmeReciprocalGrid::virial_partials`
+    // and read by the force-gather kernel on the same stream.
     w_per_particle_virial: CudaSlice<Real>,
 }
 
@@ -566,11 +572,11 @@ impl Potential for SpmeReciprocalState {
         self.grid
             .compute(sim_box, buffers, timings)
             .map_err(map_spme_err)?;
-        crate::gpu::spme_recip_virial_finalize(
+        crate::gpu::spme_recip_reduce_partials(
             &buffers.kernels,
-            &self.grid.virial_per_cell,
+            &self.grid.virial_partials,
             &mut self.w_per_particle_virial,
-            self.grid.m_complex as u32,
+            self.grid.virial_partials.len() as u32,
             n as u32,
         )?;
         timings.kernel_stop(KernelStage::SPME_RECIP_PIPELINE)?;
@@ -698,8 +704,8 @@ impl SpmeRealKernels {
 pub struct SpmeRecipKernels {
     pub spme_recip_compute_influence: CudaFunction,
     pub spme_charge_spread: CudaFunction,
-    pub spme_influence_multiply: CudaFunction,
-    pub spme_recip_virial_finalize: CudaFunction,
+    pub spme_recip_apply_influence: CudaFunction,
+    pub spme_recip_reduce_partials: CudaFunction,
     pub spme_force_gather: CudaFunction,
 }
 
@@ -711,8 +717,8 @@ impl SpmeRecipKernels {
             &[
                 "spme_recip_compute_influence",
                 "spme_charge_spread",
-                "spme_influence_multiply",
-                "spme_recip_virial_finalize",
+                "spme_recip_apply_influence",
+                "spme_recip_reduce_partials",
                 "spme_force_gather",
             ],
         )?;
@@ -723,11 +729,15 @@ impl SpmeRecipKernels {
                 "spme_recip_compute_influence",
             )?,
             spme_charge_spread: get_func(device, "spme_recip", "spme_charge_spread")?,
-            spme_influence_multiply: get_func(device, "spme_recip", "spme_influence_multiply")?,
-            spme_recip_virial_finalize: get_func(
+            spme_recip_apply_influence: get_func(
                 device,
                 "spme_recip",
-                "spme_recip_virial_finalize",
+                "spme_recip_apply_influence",
+            )?,
+            spme_recip_reduce_partials: get_func(
+                device,
+                "spme_recip",
+                "spme_recip_reduce_partials",
             )?,
             spme_force_gather: get_func(device, "spme_recip", "spme_force_gather")?,
         })

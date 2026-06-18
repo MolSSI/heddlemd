@@ -267,35 +267,73 @@ extern "C" __global__ void spme_charge_spread(
 // Operates in place on `rho_hat_interleaved`. The k=0 cell is
 // identified by its flat index 0 (since (0, 0, 0) has row-major
 // index 0).
-extern "C" __global__ void spme_influence_multiply(
+// rq-95385a9d
+//
+// Fused influence-multiply + per-block virial partial-sum reduction.
+//
+// One thread per complex grid cell:
+//   - Reads rho_hat[k], influence_G[k], virial_factor[k].
+//   - Writes V_hat[k] = influence_G[k] * rho_hat[k] in place into
+//     rho_hat_interleaved (including a zero write at k = 0 by virtue of
+//     influence_G[0] == 0, enforced by spme_recip_compute_influence).
+//   - Computes the per-thread Hermitian-weighted virial contribution
+//     c_k = hw[k] * virial_factor[k] * |rho_hat[k]|² and accumulates
+//     it into shared memory.
+//
+// The block-level reduction uses the same deterministic shape as
+// spme_recip_reduce_partials / barostat::virial_sum_reduce: a left-to-
+// right pairwise tree in shared memory. The tree shape depends only on
+// the launch block size (256 = blockDim.x), so two runs with byte-
+// identical inputs on the same GPU produce byte-identical V_hat and
+// byte-identical virial_partials.
+//
+// Lanes with idx >= n_complex contribute 0 to the reduction.
+extern "C" __global__ void spme_recip_apply_influence(
     const Real *influence_G,
     const Real *virial_factor,
     Real *rho_hat_interleaved,
-    Real *virial_per_cell,
+    Real *virial_partials,            // length = ceil(n_complex / 256)
     unsigned int n_c,
     unsigned int n_c_complex,
     unsigned int n_complex)
 {
-  unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx >= n_complex) {
-    return;
-  }
-  Real g = influence_G[idx];
-  Real vf = virial_factor[idx];
-  unsigned int base = idx * 2u;
-  Real re = rho_hat_interleaved[base];
-  Real im = rho_hat_interleaved[base + 1u];
-  Real rho_sq = re * re + im * im;
-  unsigned int kc = idx % n_c_complex;
-  // Hermitian weight: count modes paired across complex conjugation.
-  // Modes at kc == 0 and (for even n_c) at kc == n_c/2 are self-paired
-  // and contribute once; all other kc contribute twice.
-  unsigned int hw =
-      (kc == 0u || (n_c % 2u == 0u && 2u * kc == n_c)) ? 1u : 2u;
-  virial_per_cell[idx] = (Real) hw * vf * rho_sq;
+  __shared__ Real partial[256];
 
-  rho_hat_interleaved[base]      = g * re;
-  rho_hat_interleaved[base + 1u] = g * im;
+  unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  unsigned int tid = threadIdx.x;
+
+  Real c = R(0.0);
+  if (idx < n_complex) {
+    Real g = influence_G[idx];
+    Real vf = virial_factor[idx];
+    unsigned int base = idx * 2u;
+    Real re = rho_hat_interleaved[base];
+    Real im = rho_hat_interleaved[base + 1u];
+    Real rho_sq = re * re + im * im;
+    unsigned int kc = idx % n_c_complex;
+    // Hermitian weight: count modes paired across complex conjugation.
+    // Modes at kc == 0 and (for even n_c) at kc == n_c/2 are self-paired
+    // and contribute once; all other kc contribute twice.
+    unsigned int hw =
+        (kc == 0u || (n_c % 2u == 0u && 2u * kc == n_c)) ? 1u : 2u;
+    c = (Real) hw * vf * rho_sq;
+
+    rho_hat_interleaved[base]      = g * re;
+    rho_hat_interleaved[base + 1u] = g * im;
+  }
+  partial[tid] = c;
+  __syncthreads();
+
+  for (unsigned int stride = 1u; stride < blockDim.x; stride *= 2u) {
+    if ((tid % (2u * stride)) == 0u && (tid + stride) < blockDim.x) {
+      partial[tid] += partial[tid + stride];
+    }
+    __syncthreads();
+  }
+
+  if (tid == 0u) {
+    virial_partials[blockIdx.x] = partial[0];
+  }
 }
 
 // Compute the reciprocal-lattice rows (b_a, b_b, b_c) from the six
@@ -341,29 +379,31 @@ __device__ static inline void reciprocal_lattice_rows(
 // per-particle energy share so that summing `slot_energy[i]` yields
 // `U_recip − U_self` exactly.
 //
-// The reciprocal-space scalar virial `W_recip` is reduced host-side
-// from `virial_per_cell`; this kernel writes the uniform per-particle
-// share `w_per_particle_virial = W_recip / N` into `slot_virial[i]`.
-// Single-block deterministic reduction of `virial_per_cell` followed by
+// The reciprocal-space scalar virial `W_recip` is reduced on device from
+// `virial_partials` (the per-block partial sums written by
+// spme_recip_apply_influence); this kernel writes the uniform per-particle
+// share `w_per_particle_virial = W_recip / N` into the device-resident
+// single-element scalar that `spme_force_gather` reads.
+// Single-block deterministic reduction of `virial_partials` followed by
 // the Ewald half-sum / per-particle scale: writes
-//   w_per_particle_virial[0] = scale * Σ virial_per_cell[i]
+//   w_per_particle_virial[0] = scale * Σ virial_partials[b]
 // with `scale = 0.5 / n`. Same shape as `barostat::virial_sum_reduce`:
 // one block of 256 threads, strided per-thread accumulator, deterministic
 // left-to-right pairwise tree in shared memory. Two runs with
 // byte-identical inputs on the same GPU produce a byte-identical
 // `w_per_particle_virial[0]`.
-extern "C" __global__ void spme_recip_virial_finalize(
-    const Real *virial_per_cell,
+extern "C" __global__ void spme_recip_reduce_partials(
+    const Real *virial_partials,
     Real *w_per_particle_virial,   // length 1; only thread 0 writes
-    unsigned int m_complex,
+    unsigned int num_blocks,
     Real scale)
 {
   __shared__ Real partial[256];
 
   unsigned int tid = threadIdx.x;
   Real sum = R(0.0);
-  for (unsigned int i = tid; i < m_complex; i += blockDim.x) {
-    sum += virial_per_cell[i];
+  for (unsigned int i = tid; i < num_blocks; i += blockDim.x) {
+    sum += virial_partials[i];
   }
   partial[tid] = sum;
   __syncthreads();

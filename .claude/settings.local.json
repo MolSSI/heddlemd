@@ -7,7 +7,8 @@
       "Bash(rm -f examples/spc-water-8192/water.out.*)",
       "Bash(time target/release/heddlemd run examples/spc-water-8192/water.in.toml)",
       "Bash(target/release/heddlemd run *)",
-      "Bash(grep \"phase \\\\`prod\\\\`\")"
+      "Bash(grep \"phase \\\\`prod\\\\`\")",
+      "Bash(python3 run.py)"
     ]
   }
 }
