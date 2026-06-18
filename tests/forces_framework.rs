@@ -17,7 +17,7 @@ use heddle_md::forces::{
 use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
 use heddle_md::io::config::{
     BondTypeConfig, NeighborListConfig, PairInteractionConfig, PairPotentialParams,
-    ParticleTypeConfig,
+    ParticleTypeConfig, SpmeConfig,
 };
 use heddle_md::pbc::SimulationBox;
 use heddle_md::precision::Real;
@@ -280,6 +280,9 @@ struct StubBuilder {
     active: bool,
     /// When `Some(_)`, `build` returns that error instead.
     force_error: Option<&'static str>,
+    /// Labels this stub claims to displace. Surfaced through
+    /// `PotentialBuilder::displaces()`.
+    displaces: &'static [&'static str],
 }
 
 impl StubBuilder {
@@ -292,6 +295,7 @@ impl StubBuilder {
             call_count: Arc::new(AtomicU32::new(0)),
             active: true,
             force_error: None,
+            displaces: &[],
         }
     }
 }
@@ -318,6 +322,10 @@ impl PotentialBuilder for StubBuilder {
 
     fn box_clone(&self) -> Box<dyn PotentialBuilder> {
         Box::new(self.clone())
+    }
+
+    fn displaces(&self) -> &'static [&'static str] {
+        self.displaces
     }
 }
 
@@ -660,16 +668,19 @@ fn adding_a_new_potential_implementation_does_not_require_framework_edits() {
 
 // rq-053a026c
 #[test]
-fn registry_with_builtins_exposes_six_builders_in_evaluation_order() {
+fn registry_with_builtins_exposes_seven_builders_in_evaluation_order() {
     let r = PotentialRegistry::with_builtins();
-    assert_eq!(r.builders.len(), 6);
+    assert_eq!(r.builders.len(), 7);
     let names: Vec<String> = r.builders.iter().map(|b| format!("{:?}", b)).collect();
-    assert!(names[0].contains("LennardJones"), "builder 0 = {}", names[0]);
+    assert!(names[0].contains("LennardJones") && !names[0].contains("Fused"),
+        "builder 0 = {}", names[0]);
     assert!(names[1].contains("Coulomb"), "builder 1 = {}", names[1]);
-    assert!(names[2].contains("SpmeReal"), "builder 2 = {}", names[2]);
-    assert!(names[3].contains("SpmeReciprocal"), "builder 3 = {}", names[3]);
-    assert!(names[4].contains("MorseBonded"), "builder 4 = {}", names[4]);
-    assert!(names[5].contains("HarmonicAngle"), "builder 5 = {}", names[5]);
+    assert!(names[2].contains("SpmeReal") && !names[2].contains("Fused"),
+        "builder 2 = {}", names[2]);
+    assert!(names[3].contains("LjSpmeRealFused"), "builder 3 = {}", names[3]);
+    assert!(names[4].contains("SpmeReciprocal"), "builder 4 = {}", names[4]);
+    assert!(names[5].contains("MorseBonded"), "builder 5 = {}", names[5]);
+    assert!(names[6].contains("HarmonicAngle"), "builder 6 = {}", names[6]);
 }
 
 // rq-78ad9477
@@ -684,8 +695,8 @@ fn registry_new_starts_empty() {
 fn register_appends_a_builder_at_the_end() {
     let mut r = PotentialRegistry::with_builtins();
     r.register(Box::new(StubBuilder::new("custom")));
-    assert_eq!(r.builders.len(), 7);
-    let last = format!("{:?}", r.builders[6]);
+    assert_eq!(r.builders.len(), 8);
+    let last = format!("{:?}", r.builders[7]);
     assert!(last.contains("custom"), "last builder = {}", last);
 }
 
@@ -1575,4 +1586,361 @@ fn combiner_always_runs_regardless_of_level() {
     ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesOnly).unwrap();
     let report = timings.finalize().unwrap();
     assert_eq!(stage_count(&report, KernelStage::COMBINE_CLASS_TOTALS.name()), 1);
+}
+
+// =================================================================
+// Section: composite slot displacement
+// =================================================================
+
+fn spme_config_default() -> SpmeConfig {
+    SpmeConfig {
+        alpha: 0.3,
+        r_cut_real: 5.0,
+        grid: [16, 16, 16],
+        spline_order: 5,
+    }
+}
+
+fn ar_type_with_charge(charge: Real) -> ParticleTypeConfig {
+    ParticleTypeConfig {
+        name: "Ar".to_string(),
+        mass: 1.0,
+        charge: charge as f64,
+    }
+}
+
+// Build helper that supports passing an SpmeConfig + charges.
+fn build_with_spme(
+    gpu: &GpuContext,
+    n: usize,
+    registry: &PotentialRegistry,
+    pair_interactions: &[PairInteractionConfig],
+    spme_config: Option<&SpmeConfig>,
+    charges: &[Real],
+) -> Result<ForceField, ForceFieldError> {
+    ForceField::new(
+        registry,
+        gpu,
+        n,
+        &box_10(&gpu),
+        &[ar_type_with_charge(charges.first().copied().unwrap_or(0.0))],
+        pair_interactions,
+        &[],
+        &[],
+        None,
+        spme_config,
+        charges,
+        &BondList::empty(n),
+        &AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+}
+
+#[test]
+fn potential_builder_displaces_default_returns_empty_slice() {
+    let b = StubBuilder::new("default_stub");
+    let d = b.displaces();
+    assert!(d.is_empty());
+}
+
+#[test]
+fn composite_activates_and_displaces_constituents_when_both_lj_and_spme_configured() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
+    let ff = build_with_spme(
+        &gpu,
+        n,
+        &PotentialRegistry::with_builtins(),
+        &[lj_pair_config()],
+        Some(&spme_config_default()),
+        &charges,
+    )
+    .unwrap();
+    let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
+    assert!(labels.contains(&"lj_spme_real_fused"), "labels = {labels:?}");
+    assert!(!labels.contains(&"lennard_jones"), "labels = {labels:?}");
+    assert!(!labels.contains(&"spme_real"), "labels = {labels:?}");
+    // Reciprocal slot is unaffected by displacement.
+    assert!(labels.contains(&"spme_reciprocal"), "labels = {labels:?}");
+}
+
+#[test]
+fn composite_inactive_when_only_lj_configured() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let ff = build_with_spme(
+        &gpu,
+        n,
+        &PotentialRegistry::with_builtins(),
+        &[lj_pair_config()],
+        None,
+        &[],
+    )
+    .unwrap();
+    let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
+    assert!(labels.contains(&"lennard_jones"), "labels = {labels:?}");
+    assert!(!labels.contains(&"lj_spme_real_fused"), "labels = {labels:?}");
+}
+
+#[test]
+fn composite_inactive_when_only_spme_configured() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
+    let ff = build_with_spme(
+        &gpu,
+        n,
+        &PotentialRegistry::with_builtins(),
+        &[],
+        Some(&spme_config_default()),
+        &charges,
+    )
+    .unwrap();
+    let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
+    assert!(labels.contains(&"spme_real"), "labels = {labels:?}");
+    assert!(!labels.contains(&"lj_spme_real_fused"), "labels = {labels:?}");
+}
+
+#[test]
+fn displacement_claim_against_unbuilt_label_is_a_no_op() {
+    let gpu = init_device().unwrap();
+    let mut registry = PotentialRegistry::new();
+    let phantom_displacer = StubBuilder {
+        displaces: &["never_built"],
+        ..StubBuilder::new("phantom_displacer")
+    };
+    registry.register(Box::new(phantom_displacer));
+    let ff = build_with(&gpu, 4, &registry).unwrap();
+    assert_eq!(ff.slots.len(), 1);
+    assert_eq!(ff.slots[0].label(), "phantom_displacer");
+}
+
+#[test]
+fn two_builders_claiming_the_same_built_constituent_errors_at_construction() {
+    let gpu = init_device().unwrap();
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder::new("target")));
+    registry.register(Box::new(StubBuilder {
+        displaces: &["target"],
+        ..StubBuilder::new("first_claimer")
+    }));
+    registry.register(Box::new(StubBuilder {
+        displaces: &["target"],
+        ..StubBuilder::new("second_claimer")
+    }));
+    let err = build_with(&gpu, 4, &registry).unwrap_err();
+    match err {
+        ForceFieldError::DisplaceConflict { label, by } => {
+            assert_eq!(label, "target");
+            assert!(by.contains(&"first_claimer"));
+            assert!(by.contains(&"second_claimer"));
+        }
+        other => panic!("expected DisplaceConflict, got {other:?}"),
+    }
+}
+
+#[test]
+fn two_builders_both_claiming_unbuilt_label_do_not_error() {
+    let gpu = init_device().unwrap();
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(StubBuilder {
+        displaces: &["nobody_built_this"],
+        ..StubBuilder::new("a")
+    }));
+    registry.register(Box::new(StubBuilder {
+        displaces: &["nobody_built_this"],
+        ..StubBuilder::new("b")
+    }));
+    let ff = build_with(&gpu, 4, &registry).unwrap();
+    let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
+    assert!(labels.contains(&"a"));
+    assert!(labels.contains(&"b"));
+}
+
+#[test]
+fn composite_slot_appears_at_its_own_registration_position() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
+    let ff = build_with_spme(
+        &gpu,
+        n,
+        &PotentialRegistry::with_builtins(),
+        &[lj_pair_config()],
+        Some(&spme_config_default()),
+        &charges,
+    )
+    .unwrap();
+    // The composite sits at registry position 4 (0-indexed: LJ=0,
+    // Coulomb=1, SpmeReal=2, LjSpmeRealFused=3, SpmeRecip=4, ...). With
+    // LJ and SpmeReal displaced, the surviving slot order is
+    // [LjSpmeRealFused, SpmeReciprocal].
+    let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
+    assert_eq!(labels, vec!["lj_spme_real_fused", "spme_reciprocal"]);
+}
+
+#[test]
+fn composite_max_cutoff_is_max_of_constituents() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
+    let mut spme_cfg = spme_config_default();
+    spme_cfg.r_cut_real = 7.0;
+    let lj_cfg = lj_pair_config();
+    // lj_pair_config's cutoff is 5.0 (see helper); spme r_cut_real now 7.0.
+    let ff = build_with_spme(
+        &gpu,
+        n,
+        &PotentialRegistry::with_builtins(),
+        &[lj_cfg],
+        Some(&spme_cfg),
+        &charges,
+    )
+    .unwrap();
+    let fused = ff
+        .slots
+        .iter()
+        .find(|s| s.label() == "lj_spme_real_fused")
+        .expect("composite present");
+    let mc = fused.max_cutoff().expect("composite reports a cutoff");
+    assert!((mc - 7.0 as Real).abs() < 1e-6, "max_cutoff = {mc}");
+}
+
+#[test]
+fn fused_configuration_step_byte_identical_run_to_run() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
+    let run = || -> (Vec<Real>, Vec<Real>) {
+        let mut ff = build_with_spme(
+            &gpu,
+            n,
+            &PotentialRegistry::with_builtins(),
+            &[lj_pair_config()],
+            Some(&spme_config_default()),
+            &charges,
+        )
+        .unwrap();
+        let mut state = state_n(n);
+        state.charges = charges.clone();
+        let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+        let mut timings = Timings::new(&gpu).unwrap();
+        ff.step(
+            &mut buffers,
+            &box_10(&gpu),
+            &mut timings,
+            AggregateLevel::ForcesAndScalars,
+        )
+        .unwrap();
+        let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+        let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+        (fx, e)
+    };
+    let a = run();
+    let b = run();
+    assert_eq!(a.0, b.0, "fused forces_x not byte-identical run-to-run");
+    assert_eq!(a.1, b.1, "fused energies not byte-identical run-to-run");
+}
+
+#[test]
+fn fused_and_standalone_agree_within_relative_tolerance() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
+
+    // Standalone configuration: empty registry plus only LJ and SPME-real
+    // builders. The composite is absent so it cannot displace them. The
+    // SPME-reciprocal builder is also omitted to isolate the short-range
+    // contribution — both configurations evaluate identical short-range
+    // physics, only the kernel-decomposition shape differs.
+    let mut standalone_registry = PotentialRegistry::new();
+    standalone_registry.register(Box::new(heddle_md::forces::LennardJonesBuilder));
+    standalone_registry.register(Box::new(heddle_md::forces::SpmeRealBuilder));
+
+    // Fused configuration: only the composite builder is registered, so
+    // it does not need displacement resolution (nothing to displace).
+    let mut fused_registry = PotentialRegistry::new();
+    fused_registry.register(Box::new(heddle_md::forces::LjSpmeRealFusedBuilder));
+
+    let run_with = |reg: &PotentialRegistry| -> (Vec<Real>, Vec<Real>, Vec<Real>) {
+        let mut ff = build_with_spme(
+            &gpu,
+            n,
+            reg,
+            &[lj_pair_config()],
+            Some(&spme_config_default()),
+            &charges,
+        )
+        .unwrap();
+        let mut state = state_n(n);
+        state.charges = charges.clone();
+        let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+        let mut timings = Timings::new(&gpu).unwrap();
+        ff.step(
+            &mut buffers,
+            &box_10(&gpu),
+            &mut timings,
+            AggregateLevel::ForcesAndScalars,
+        )
+        .unwrap();
+        let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
+        let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
+        let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
+        (fx, e, v)
+    };
+    let (fx_std, e_std, v_std) = run_with(&standalone_registry);
+    let (fx_fus, e_fus, v_fus) = run_with(&fused_registry);
+
+    let rel_eq = |a: Real, b: Real, tol: Real| -> bool {
+        let denom = a.abs().max(b.abs()).max(1e-6 as Real);
+        ((a - b).abs() / denom) < tol
+    };
+    let tol: Real = 1.0e-4;
+    for i in 0..n {
+        assert!(rel_eq(fx_std[i], fx_fus[i], tol),
+            "forces_x[{i}]: standalone={} fused={}", fx_std[i], fx_fus[i]);
+        assert!(rel_eq(e_std[i], e_fus[i], tol),
+            "energy[{i}]: standalone={} fused={}", e_std[i], e_fus[i]);
+        assert!(rel_eq(v_std[i], v_fus[i], tol),
+            "virial[{i}]: standalone={} fused={}", v_std[i], v_fus[i]);
+    }
+}
+
+#[test]
+fn fused_configuration_emits_fused_timings_stage_and_omits_constituents() {
+    let gpu = init_device().unwrap();
+    let n = 4;
+    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
+    let mut ff = build_with_spme(
+        &gpu,
+        n,
+        &PotentialRegistry::with_builtins(),
+        &[lj_pair_config()],
+        Some(&spme_config_default()),
+        &charges,
+    )
+    .unwrap();
+    let mut state = state_n(n);
+    state.charges = charges.clone();
+    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let mut timings = Timings::new(&gpu).unwrap();
+    ff.step(
+        &mut buffers,
+        &box_10(&gpu),
+        &mut timings,
+        AggregateLevel::ForcesAndScalars,
+    )
+    .unwrap();
+    let report = timings.finalize().unwrap();
+    assert_eq!(
+        stage_count(&report, KernelStage::LJ_SPME_REAL_FUSED_PAIR_FORCE.name()),
+        1
+    );
+    assert_eq!(stage_count(&report, KernelStage::LJ_PAIR_FORCE.name()), 0);
+    assert_eq!(
+        stage_count(&report, KernelStage::SPME_REAL_PAIR_FORCE.name()),
+        0
+    );
 }

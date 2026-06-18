@@ -909,6 +909,13 @@
     "title": "Reciprocal-space virial is distributed equally per particle",
     "type": "scenario"
   },
+  "rq-082659a0": {
+    "decl": "Scenario: _fev variant adds to all five slices",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "_fev variant adds to all five slices",
+    "type": "scenario"
+  },
   "rq-084ba25b": {
     "decl": "Scenario: Builder validate_params accepts a well-formed params object",
     "file": "integration/framework",
@@ -1271,6 +1278,13 @@
     "refs": [],
     "title": "Empty State",
     "type": "section"
+  },
+  "rq-0bda299c": {
+    "decl": "- `LjSpmeRealFusedState` — implements `Potential` with",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "LjSpmeRealFusedState",
+    "type": "api-item"
   },
   "rq-0c2265eb": {
     "decl": "Scenario: Langevin kick_half count is 2 N_steps; drift_half is 2 N_steps; ou_step is N_steps",
@@ -3063,6 +3077,13 @@
     "title": "Parameters",
     "type": "section"
   },
+  "rq-1b6985ab": {
+    "decl": "Scenario: PotentialBuilder::displaces default returns an empty list",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "PotentialBuilder::displaces default returns an empty list",
+    "type": "scenario"
+  },
   "rq-1b742a37": {
     "decl": "Scenario: cached_generation initialised from the construction-time box",
     "file": "forces/neighbor-list",
@@ -3582,6 +3603,13 @@
     "title": "Four-column form sets LJ and Coulomb scales independently",
     "type": "scenario"
   },
+  "rq-1fe9fd90": {
+    "decl": "Scenario: _f variant adds to force slices only",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "_f variant adds to force slices only",
+    "type": "scenario"
+  },
   "rq-1feec66c": {
     "decl": "Scenario: KE is bit-identical across two host runs with identical f32 inputs",
     "file": "io/log-output",
@@ -4015,6 +4043,13 @@
     "title": "LogWriter",
     "type": "api-item"
   },
+  "rq-2351322d": {
+    "decl": "Scenario: Pair inside both cutoffs receives sum of LJ and SPME-real contributions",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Pair inside both cutoffs receives sum of LJ and SPME-real contributions",
+    "type": "scenario"
+  },
   "rq-2361f2b8": {
     "decl": "- `MorseBondedState` — implements `Potential` with `label() == \"morse_bonded\"` and `frequency_class() == ForceClass::Fast` (the trait default).",
     "file": "forces/framework",
@@ -4251,6 +4286,13 @@
     "file": "forces/coulomb-pair-force",
     "refs": [],
     "title": "Coulomb force is C¹ continuous at r_switch",
+    "type": "scenario"
+  },
+  "rq-2557e549": {
+    "decl": "Scenario: Standalone-LJ-only configuration emits the LJ stage as before",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Standalone-LJ-only configuration emits the LJ stage as before",
     "type": "scenario"
   },
   "rq-256287cb": {
@@ -4501,6 +4543,13 @@
     "title": "ForcesOnly call preserves the energy and virial accumulator entries from the previous ForcesAndScalars call",
     "type": "scenario"
   },
+  "rq-27d93a8f": {
+    "decl": "Scenario: Inactive composite leaves both constituents in place when only SPME configured",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Inactive composite leaves both constituents in place when only SPME configured",
+    "type": "scenario"
+  },
   "rq-27efd6a0": {
     "decl": "Scenario: Atom appearing in one angle receives that angle's force",
     "file": "forces/harmonic-angle",
@@ -4612,6 +4661,13 @@
     "title": "Types",
     "type": "section"
   },
+  "rq-28b7ed1d": {
+    "decl": "Scenario: LJ exclusion scales the LJ contribution but not the SPME contribution",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "LJ exclusion scales the LJ contribution but not the SPME contribution",
+    "type": "scenario"
+  },
   "rq-28d519b5": {
     "decl": "#### `[coulomb]` (optional table)",
     "file": "io/config-schema",
@@ -4706,6 +4762,14 @@
     ],
     "title": "IntegratorBuilder",
     "type": "api-item"
+  },
+  "rq-29e21686": {
+    "decl": "## Feature API",
+    "file": "forces/lj-spme-real-fused",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-2a0e97f5": {
     "decl": "Scenario: Two independent lossless runs produce byte-identical results",
@@ -5754,6 +5818,13 @@
     "refs": [],
     "title": "A real-space exclusion entry on one pair does not attenuate other pairs",
     "type": "scenario"
+  },
+  "rq-343f9e75": {
+    "decl": "- `gpu::lj_spme_real_fused_pair_force_f(...)` — Rust launcher around",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "gpu",
+    "type": "api-item"
   },
   "rq-34446ef5": {
     "decl": "- `UnitSystem` — discriminated enum naming the two supported systems.",
@@ -7164,6 +7235,13 @@
       }
     ],
     "title": "andersen_resample with p_collision = 1 resamples every particle",
+    "type": "scenario"
+  },
+  "rq-4255cb6e": {
+    "decl": "Scenario: Fused kernel and standalone kernels agree within f32 round-off",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Fused kernel and standalone kernels agree within f32 round-off",
     "type": "scenario"
   },
   "rq-4300cafc": {
@@ -9252,6 +9330,13 @@
     "title": "vv_kick_drift_lossless on an empty state is a no-op",
     "type": "scenario"
   },
+  "rq-58e9adff": {
+    "decl": "Scenario: Composite builder declines when only SPME is configured",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Composite builder declines when only SPME is configured",
+    "type": "scenario"
+  },
   "rq-5915b212": {
     "decl": "## Out of Scope",
     "file": "integration/c-rescale-barostat",
@@ -9411,6 +9496,14 @@
     "level": 2,
     "refs": [],
     "title": "Empty State and degenerate cases",
+    "type": "section"
+  },
+  "rq-5b048e60": {
+    "decl": "## Determinism",
+    "file": "forces/lj-spme-real-fused",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
     "type": "section"
   },
   "rq-5b097ec0": {
@@ -10899,6 +10992,13 @@
     "title": "Determinism",
     "type": "section"
   },
+  "rq-6a16d777": {
+    "decl": "Scenario: Composite builder declines when only LJ is configured",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Composite builder declines when only LJ is configured",
+    "type": "scenario"
+  },
   "rq-6a4016ac": {
     "decl": "Scenario: COM momentum is preserved under NHC velocity rescaling",
     "file": "integration/nose-hoover-chain",
@@ -11405,6 +11505,13 @@
     ],
     "title": "Plan walk on empty Langevin state is a no-op",
     "type": "scenario"
+  },
+  "rq-6ea9e020": {
+    "decl": "- `gpu::lj_spme_real_fused_pair_force_fev(...)` — Rust launcher",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "gpu",
+    "type": "api-item"
   },
   "rq-6eb18608": {
     "decl": "- `lint_analyses_with_registries(config_path: &Path, registries: &Registries) -> LintReport`",
@@ -12528,6 +12635,14 @@
     "title": "Reject when type_indices has the wrong length",
     "type": "scenario"
   },
+  "rq-790e0c6c": {
+    "decl": "## max_cutoff",
+    "file": "forces/lj-spme-real-fused",
+    "level": 2,
+    "refs": [],
+    "title": "max_cutoff",
+    "type": "section"
+  },
   "rq-7921e537": {
     "decl": "Scenario: Construct a constraint slot for a non-empty constraint list",
     "file": "integration/constraint-framework",
@@ -12539,6 +12654,13 @@
     ],
     "title": "Construct a constraint slot for a non-empty constraint list",
     "type": "scenario"
+  },
+  "rq-79282483": {
+    "decl": "# Feature: Fused LJ + SPME Real-Space Pair-Force Slot",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Feature: Fused LJ + SPME Real-Space Pair-Force Slot",
+    "type": "file"
   },
   "rq-79291197": {
     "decl": "Scenario: kernel_start followed by kernel_stop and finalize records one sample",
@@ -13269,6 +13391,14 @@
     "title": "Angle list",
     "type": "section"
   },
+  "rq-7f96174d": {
+    "decl": "## Gherkin Scenarios",
+    "file": "forces/lj-spme-real-fused",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-7fcfceac": {
     "decl": "Scenario: Construct with particle_count = 0",
     "file": "integration/mtk-npt",
@@ -13591,6 +13721,13 @@
     ],
     "title": "spme_influence_multiply",
     "type": "api-item"
+  },
+  "rq-83298c86": {
+    "decl": "Scenario: Composite displacement claim against unbuilt label is a no-op",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Composite displacement claim against unbuilt label is a no-op",
+    "type": "scenario"
   },
   "rq-83312d09": {
     "decl": "Scenario: Bonded-only ForceField builds no neighbor list",
@@ -15061,6 +15198,13 @@
     "title": "Constraint row with repeated atom is rejected",
     "type": "scenario"
   },
+  "rq-93609d86": {
+    "decl": "Scenario: Two runs of the fused kernel are byte-identical",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Two runs of the fused kernel are byte-identical",
+    "type": "scenario"
+  },
   "rq-93be622c": {
     "decl": "Scenario: Unknown attributes in the comment line are ignored",
     "file": "io/init-state-file",
@@ -15095,6 +15239,13 @@
       }
     ],
     "title": "NaN values are accepted at construction",
+    "type": "scenario"
+  },
+  "rq-9468f67a": {
+    "decl": "Scenario: Composite frequency_class is Fast",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Composite frequency_class is Fast",
     "type": "scenario"
   },
   "rq-948431cf": {
@@ -15548,6 +15699,14 @@
     "level": 3,
     "refs": [],
     "title": "CUDA precision header",
+    "type": "section"
+  },
+  "rq-9938e4d6": {
+    "decl": "### Functions",
+    "file": "forces/lj-spme-real-fused",
+    "level": 3,
+    "refs": [],
+    "title": "Functions",
     "type": "section"
   },
   "rq-993ec182": {
@@ -16124,6 +16283,13 @@
     "title": "Bond row with wrong column count",
     "type": "scenario"
   },
+  "rq-9dfa7b39": {
+    "decl": "Scenario: Composite builder reports max_cutoff = max(r_cut_lj, r_cut_spme_real)",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Composite builder reports max_cutoff = max(r_cut_lj, r_cut_spme_real)",
+    "type": "scenario"
+  },
   "rq-9e09673b": {
     "decl": "Scenario: Successive successful set_lattice calls increment generation monotonically",
     "file": "simulation-box",
@@ -16205,6 +16371,13 @@
       }
     ],
     "title": "type_indices reflects the order of type_names",
+    "type": "scenario"
+  },
+  "rq-9e6a7b7e": {
+    "decl": "Scenario: Active composite slot suppresses both constituent slots",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Active composite slot suppresses both constituent slots",
     "type": "scenario"
   },
   "rq-9eb167f0": {
@@ -16508,6 +16681,13 @@
     "title": "neighbor_list_build",
     "type": "api-item"
   },
+  "rq-a12e8fa8": {
+    "decl": "Scenario: Fused configuration's timings output omits the standalone stages",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Fused configuration's timings output omits the standalone stages",
+    "type": "scenario"
+  },
   "rq-a16c37bd": {
     "decl": "Scenario: Log file header includes nhc_conserved when NHC is the thermostat",
     "file": "integration/nose-hoover-chain",
@@ -16601,6 +16781,14 @@
     "level": 4,
     "refs": [],
     "title": "`rescale_velocities`",
+    "type": "section"
+  },
+  "rq-a242e878": {
+    "decl": "## Algorithm",
+    "file": "forces/lj-spme-real-fused",
+    "level": 2,
+    "refs": [],
+    "title": "Algorithm",
     "type": "section"
   },
   "rq-a2454a72": {
@@ -17313,6 +17501,13 @@
     "title": "Reject non-positive sigma",
     "type": "scenario"
   },
+  "rq-aa33e39f": {
+    "decl": "Scenario: Two builders both claiming a label nobody built do not error",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Two builders both claiming a label nobody built do not error",
+    "type": "scenario"
+  },
   "rq-aa36ee0b": {
     "decl": "### PTX Module Loading",
     "file": "forces/morse-bonded",
@@ -17360,6 +17555,14 @@
     ],
     "title": "Integrator",
     "type": "api-item"
+  },
+  "rq-aa7fd772": {
+    "decl": "### Types",
+    "file": "forces/lj-spme-real-fused",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
   },
   "rq-aa91623d": {
     "decl": "- `AnalysisConfig` — parsed `<root>.in.analysis`. All fields are",
@@ -18190,6 +18393,13 @@
     "title": "`reduce_bond_forces`",
     "type": "section"
   },
+  "rq-b264fa75": {
+    "decl": "Scenario: Coulomb exclusion scales the SPME contribution but not the LJ contribution",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Coulomb exclusion scales the SPME contribution but not the LJ contribution",
+    "type": "scenario"
+  },
   "rq-b296ab12": {
     "decl": "Scenario: apply_post on empty state is a no-op",
     "file": "integration/berendsen",
@@ -18985,6 +19195,14 @@
     "title": "Load a file with velocities",
     "type": "scenario"
   },
+  "rq-bb874433": {
+    "decl": "### Timings stage",
+    "file": "forces/lj-spme-real-fused",
+    "level": 3,
+    "refs": [],
+    "title": "Timings stage",
+    "type": "section"
+  },
   "rq-bb96fc2f": {
     "decl": "Scenario: Reject two analyses sharing the same explicit output_path",
     "file": "analysis/framework",
@@ -19092,6 +19310,13 @@
       }
     ],
     "title": "Reject an unknown field under [minimization.algorithm]",
+    "type": "scenario"
+  },
+  "rq-bce6480f": {
+    "decl": "Scenario: Pair outside both cutoffs contributes nothing",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Pair outside both cutoffs contributes nothing",
     "type": "scenario"
   },
   "rq-bcf7e0eb": {
@@ -19469,6 +19694,13 @@
     "title": "Cell counts are floor(w / (r_cut + r_skin)) for an orthorhombic box",
     "type": "scenario"
   },
+  "rq-c0e835ce": {
+    "decl": "Scenario: Pair inside SPME cutoff but outside LJ cutoff contributes SPME only",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Pair inside SPME cutoff but outside LJ cutoff contributes SPME only",
+    "type": "scenario"
+  },
   "rq-c0f2daca": {
     "decl": "Scenario: Zero-slot step writes zeros to potential_energies and virials",
     "file": "forces/framework",
@@ -19556,6 +19788,13 @@
     "title": "SI-mode reader divides Lattice and positions by the bohr -> meter factor",
     "type": "scenario"
   },
+  "rq-c19ea1ca": {
+    "decl": "Scenario: Two runs of the displaced-LJ composite configuration agree byte-for-byte",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Two runs of the displaced-LJ composite configuration agree byte-for-byte",
+    "type": "scenario"
+  },
   "rq-c1c9fe3a": {
     "decl": "Scenario: Langevin run includes Langevin rows and excludes velocity-Verlet rows",
     "file": "performance-analysis",
@@ -19622,6 +19861,13 @@
     ],
     "title": "Construct an empty state",
     "type": "scenario"
+  },
+  "rq-c2a28bda": {
+    "decl": "- `LjSpmeRealFusedBuilder` — implements `PotentialBuilder`.",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "LjSpmeRealFusedBuilder",
+    "type": "api-item"
   },
   "rq-c2bc2592": {
     "decl": "## Out of Scope",
@@ -21464,6 +21710,14 @@
     "title": "MtkNpt missing tau_p is rejected",
     "type": "scenario"
   },
+  "rq-d58ba7f6": {
+    "decl": "## Out of Scope",
+    "file": "forces/lj-spme-real-fused",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
+  },
   "rq-d5a4f220": {
     "decl": "# Feature: Langevin BAOAB Integrator",
     "file": "integration/langevin-baoab",
@@ -22401,6 +22655,14 @@
     "title": "write_timings_file refuses to overwrite an existing file",
     "type": "scenario"
   },
+  "rq-de5f642d": {
+    "decl": "### Kernels",
+    "file": "forces/lj-spme-real-fused",
+    "level": 3,
+    "refs": [],
+    "title": "Kernels",
+    "type": "section"
+  },
   "rq-de8b9cd5": {
     "decl": "Scenario: Reject non-positive compressibility",
     "file": "integration/c-rescale-barostat",
@@ -22438,6 +22700,13 @@
     ],
     "title": "load_config_raw",
     "type": "api-item"
+  },
+  "rq-dec77ff5": {
+    "decl": "Scenario: Composite builder activates when both LJ and SPME are configured",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Composite builder activates when both LJ and SPME are configured",
+    "type": "scenario"
   },
   "rq-ded81a4a": {
     "decl": "Scenario: Log file header omits nhc_conserved when no thermostat is configured",
@@ -23097,6 +23366,13 @@
       }
     ],
     "title": "Reject init = trajectory_path",
+    "type": "scenario"
+  },
+  "rq-e55779e2": {
+    "decl": "Scenario: Composite slot evaluates at its own registration position",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Composite slot evaluates at its own registration position",
     "type": "scenario"
   },
   "rq-e564f8e2": {
@@ -23868,6 +24144,13 @@
     "title": "Morse bond_type rejects non-positive de",
     "type": "scenario"
   },
+  "rq-ecf4def9": {
+    "decl": "Scenario: Newton's third law per pair",
+    "file": "forces/lj-spme-real-fused",
+    "refs": [],
+    "title": "Newton's third law per pair",
+    "type": "scenario"
+  },
   "rq-ed048159": {
     "decl": "Scenario: All observables are finite after the 100-step lossless forward run",
     "file": "pipeline-reversibility",
@@ -24427,6 +24710,13 @@
       }
     ],
     "title": "Missing init field",
+    "type": "scenario"
+  },
+  "rq-f10530c8": {
+    "decl": "Scenario: Two built composites claiming the same constituent error at construction",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Two built composites claiming the same constituent error at construction",
     "type": "scenario"
   },
   "rq-f114c560": {
@@ -25885,6 +26175,13 @@
       }
     ],
     "title": "r == 0 produces zero energy and virial in addition to zero force",
+    "type": "scenario"
+  },
+  "rq-fea21f61": {
+    "decl": "Scenario: Inactive composite leaves both constituents in place when only LJ configured",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "Inactive composite leaves both constituents in place when only LJ configured",
     "type": "scenario"
   },
   "rq-feb0501c": {

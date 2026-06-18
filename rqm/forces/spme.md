@@ -33,10 +33,16 @@ SPME contributes two `Potential` slots to the `ForceField`:
 - `SpmeRealSpaceState` — a pair-force slot using `erfc(α · r) / r`
   screening over the shared neighbor list. Structurally similar to the
   truncated Coulomb slot (`coulomb-pair-force.md`); differs only in the
-  functional form of the pair force.
+  functional form of the pair force. This slot runs only when the
+  LJ + SPME-real fused composite (`lj-spme-real-fused.md`) is inactive
+  — i.e. when no `[[pair_interactions]]` are configured. When LJ is
+  also configured, the composite displaces this slot through the
+  framework's displacement mechanism, and the standalone SPME-real
+  kernel does not run for the lifetime of that `ForceField`.
 - `SpmeReciprocalState` — owns the FFT grid buffers, the cuFFT plan, the
   precomputed influence function, and a dedicated bin-only cell-list
-  used by the spread and gather kernels.
+  used by the spread and gather kernels. Unaffected by displacement;
+  the reciprocal-space pipeline always runs separately.
 
 Both slots share the per-particle `charges` buffer on `ParticleBuffers`
 (see `particle-state.md`) and the shared `DeviceExclusionList` (see

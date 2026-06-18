@@ -1,6 +1,7 @@
 pub mod angle;
 pub mod coulomb;
 pub mod lj;
+pub mod lj_spme_real_fused;
 pub mod morse;
 pub mod neighbor_list;
 pub mod spme;
@@ -31,6 +32,7 @@ pub use spme::{
     SpmeRealBuilder, SpmeReciprocalBuilder,
 };
 pub use lj::{LennardJonesBuilder, LennardJonesState};
+pub use lj_spme_real_fused::{LjSpmeRealFusedBuilder, LjSpmeRealFusedState};
 pub use morse::{MorseBondedBuilder, MorseBondedState};
 pub use topology::{
     Angle, AngleList, Bond, BondList, ConstraintGroup, ConstraintList,
@@ -125,6 +127,11 @@ pub enum ForceFieldError {
     NeighborList(#[from] NeighborListError),
     #[error("duplicate potential slot label `{0}`")]
     DuplicateLabel(&'static str),
+    #[error("multiple built slots claim to displace `{label}`: {by:?}")]
+    DisplaceConflict {
+        label: &'static str,
+        by: Vec<&'static str>,
+    },
 }
 
 // rq-d116af5f
@@ -153,6 +160,10 @@ pub trait PotentialBuilder: std::fmt::Debug + Send + Sync {
     ) -> Result<Option<Box<dyn Potential>>, ForceFieldError>;
 
     fn box_clone(&self) -> Box<dyn PotentialBuilder>;
+
+    fn displaces(&self) -> &'static [&'static str] {
+        &[]
+    }
 }
 
 // rq-50f0a96a
@@ -180,6 +191,7 @@ impl PotentialRegistry {
                 Box::new(LennardJonesBuilder),
                 Box::new(CoulombBuilder),
                 Box::new(SpmeRealBuilder),
+                Box::new(LjSpmeRealFusedBuilder),
                 Box::new(SpmeReciprocalBuilder),
                 Box::new(MorseBondedBuilder),
                 Box::new(HarmonicAngleBuilder),
@@ -267,20 +279,58 @@ impl ForceField {
             neighbor_list_config,
         };
 
-        let mut slots: Vec<Box<dyn Potential>> = Vec::new();
+        let mut built: Vec<(Box<dyn Potential>, &'static [&'static str])> = Vec::new();
         for builder in &registry.builders {
             if let Some(slot) = builder.build(&cx)? {
-                slots.push(slot);
+                built.push((slot, builder.displaces()));
             }
         }
 
-        for i in 0..slots.len() {
-            for j in (i + 1)..slots.len() {
-                if slots[i].label() == slots[j].label() {
-                    return Err(ForceFieldError::DuplicateLabel(slots[i].label()));
+        for i in 0..built.len() {
+            for j in (i + 1)..built.len() {
+                if built[i].0.label() == built[j].0.label() {
+                    return Err(ForceFieldError::DuplicateLabel(built[i].0.label()));
                 }
             }
         }
+
+        // Displacement resolution: collect every claim against a label that
+        // some other built slot carries, error on multi-claim conflicts,
+        // and drop displaced constituents.
+        let built_labels: Vec<&'static str> =
+            built.iter().map(|(slot, _)| slot.label()).collect();
+        let mut claimers_per_label: std::collections::HashMap<&'static str, Vec<&'static str>> =
+            std::collections::HashMap::new();
+        for (slot, displaces) in &built {
+            for &target in *displaces {
+                if built_labels.contains(&target) {
+                    claimers_per_label
+                        .entry(target)
+                        .or_default()
+                        .push(slot.label());
+                }
+            }
+        }
+        for (label, claimers) in &claimers_per_label {
+            if claimers.len() > 1 {
+                return Err(ForceFieldError::DisplaceConflict {
+                    label,
+                    by: claimers.clone(),
+                });
+            }
+        }
+        let displaced: std::collections::HashSet<&'static str> =
+            claimers_per_label.keys().copied().collect();
+        let slots: Vec<Box<dyn Potential>> = built
+            .into_iter()
+            .filter_map(|(slot, _)| {
+                if displaced.contains(slot.label()) {
+                    None
+                } else {
+                    Some(slot)
+                }
+            })
+            .collect();
 
         // Count slots per class; each class's accumulators are sized
         // particle_count regardless of slot count.

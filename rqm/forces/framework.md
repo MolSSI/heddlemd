@@ -37,20 +37,21 @@ forces (e.g. short-range pair).
 
 ## Slots <!-- rq-cc73f184 -->
 
-`PotentialRegistry::with_builtins()` registers six built-in `PotentialBuilder`s,
-each of which contributes one slot to the `ForceField` when its activation
+`PotentialRegistry::with_builtins()` registers seven built-in `PotentialBuilder`s,
+each of which contributes at most one slot to the `ForceField` when its activation
 condition is met. The registry's registration order is the slot evaluation
 order; the registry is the single canonical source of slot ordering, and
 `ForceField::new` reads from it without making its own decisions.
 
-| Builder | `label()` of the slot it builds | Activation condition (`build(cx)` returns `Some(_)` iff …) | `frequency_class()` | Implementation file |
-| --- | --- | --- | --- | --- |
-| `LennardJonesBuilder` | `"lennard_jones"` | `cx.pair_interactions` is non-empty | `Fast` | `lj-pair-force.md` |
-| `CoulombBuilder` | `"coulomb"` | `cx.coulomb_config.is_some()` | `Fast` | `coulomb-pair-force.md` |
-| `SpmeRealBuilder` | `"spme_real"` | `cx.spme_config.is_some()` | `Fast` | `spme.md` |
-| `SpmeReciprocalBuilder` | `"spme_reciprocal"` | `cx.spme_config.is_some()` | `Slow` | `spme.md` |
-| `MorseBondedBuilder` | `"morse_bonded"` | `!cx.bond_list.is_empty()` | `Fast` | `morse-bonded.md` |
-| `HarmonicAngleBuilder` | `"harmonic_angle"` | `!cx.angle_list.is_empty()` | `Fast` | `harmonic-angle.md` |
+| Builder | `label()` of the slot it builds | Activation condition (`build(cx)` returns `Some(_)` iff …) | `frequency_class()` | `displaces()` | Implementation file |
+| --- | --- | --- | --- | --- | --- |
+| `LennardJonesBuilder` | `"lennard_jones"` | `cx.pair_interactions` is non-empty | `Fast` | `&[]` | `lj-pair-force.md` |
+| `CoulombBuilder` | `"coulomb"` | `cx.coulomb_config.is_some()` | `Fast` | `&[]` | `coulomb-pair-force.md` |
+| `SpmeRealBuilder` | `"spme_real"` | `cx.spme_config.is_some()` | `Fast` | `&[]` | `spme.md` |
+| `LjSpmeRealFusedBuilder` | `"lj_spme_real_fused"` | `cx.pair_interactions` is non-empty AND `cx.spme_config.is_some()` | `Fast` | `&["lennard_jones", "spme_real"]` | `lj-spme-real-fused.md` |
+| `SpmeReciprocalBuilder` | `"spme_reciprocal"` | `cx.spme_config.is_some()` | `Slow` | `&[]` | `spme.md` |
+| `MorseBondedBuilder` | `"morse_bonded"` | `!cx.bond_list.is_empty()` | `Fast` | `&[]` | `morse-bonded.md` |
+| `HarmonicAngleBuilder` | `"harmonic_angle"` | `!cx.angle_list.is_empty()` | `Fast` | `&[]` | `harmonic-angle.md` |
 
 The two SPME builders share the same activation condition; they always
 appear together because the Ewald split is exact only when both halves
@@ -58,24 +59,55 @@ are evaluated. The `[coulomb]` and `[spme]` tables are mutually exclusive
 at config load (see `io/config-schema.md`); a `ForceField` therefore
 contains at most one electrostatics path.
 
+`LjSpmeRealFusedBuilder` is a composite slot that walks the shared
+neighbour list once and computes both the Lennard-Jones 12-6 and the
+SPME real-space Coulomb contribution per pair visit. Its `displaces()`
+list names the two single-potential slots whose work it absorbs; when
+the composite builds, `ForceField::new`'s resolution pass (see
+*Feature API*) suppresses those constituent slots so neither runs at
+evaluation time. When either constituent's activation condition is
+not met, the composite returns `Ok(None)` and the lone constituent's
+standalone slot runs unchanged.
+
 A `ForceField` with zero slots is a valid configuration. `step()` writes
 zeros into `particle_buffers.forces_*` and returns without launching any
 slot kernels.
 
 When multiple slots are present, they appear in the `ForceField`'s slot
-list in the order their builders are registered. The canonical built-in
-order is the order of the six rows above:
+list in the order their builders are registered (after displacement
+resolution removes any constituents claimed by an active composite).
+The canonical built-in order is the order of the seven rows above:
 
 1. `LennardJones`
 2. `Coulomb`
 3. `SpmeRealSpace`
-4. `SpmeReciprocal`
-5. `MorseBonded`
-6. `HarmonicAngle`
+4. `LjSpmeRealFused`
+5. `SpmeReciprocal`
+6. `MorseBonded`
+7. `HarmonicAngle`
+
+In a configuration where `LjSpmeRealFused` is active, the surviving
+slot list is `[Coulomb (only if separately configured),
+LjSpmeRealFused, SpmeReciprocal, MorseBonded, HarmonicAngle]` — the
+`LennardJones` and `SpmeRealSpace` entries are absent. Because the
+composite's position in the registry differs from the standalone
+slots it replaces, the fused configuration's accumulation order
+differs from the standalone configuration's. Two runs in *one*
+configuration agree bit-for-bit; runs across the two configurations
+agree only within f32 round-off.
 
 A built-in potential is added by writing a `PotentialBuilder` and inserting
 it at the appropriate position in `PotentialRegistry::with_builtins()`.
 The `ForceField::new` body does not change.
+
+A composite slot is added the same way, additionally overriding
+`PotentialBuilder::displaces()` to name the constituent slot labels it
+replaces. The registry resolution pass (see *Feature API*) suppresses
+the named slots when the composite has built. The composite's
+`build()` must inspect the same activation inputs as each constituent
+and return `Ok(None)` whenever any constituent's own activation
+condition is not met; the constituents' standalone slots then run
+unchanged, as if no composite were registered.
 
 ## Force Classes <!-- rq-df6d79a1 -->
 
@@ -487,6 +519,12 @@ the additive identity. The rest of the pipeline runs normally.
     `NeighborListOverflow` and `BoxTooSmallForCells` cases.
   - `DuplicateLabel(&'static str)` — two slots constructed with the
     same `label()`. Reported from `ForceField::new`.
+  - `DisplaceConflict { label: &'static str, by: Vec<&'static str> }`
+    — two or more built slots' `displaces()` lists both claim the same
+    constituent `label`, and that constituent label is itself present
+    among the built slots. `by` names the labels of the claimers (in
+    registration order). Reported from `ForceField::new`'s
+    displacement-resolution pass.
 
 - `PotentialBuildContext<'a>` — bundle of borrowed references to every <!-- rq-d116af5f -->
   parsed-config and topology input a built-in `PotentialBuilder` might
@@ -517,7 +555,7 @@ the additive identity. The rest of the pipeline runs normally.
   `Potential::compute`.
 
 - `PotentialBuilder` — object-safe trait implemented by every potential's <!-- rq-e8550f96 -->
-  factory. Each builder is responsible for one slot.
+  factory. Each builder is responsible for at most one slot.
 
   ```rust
   pub trait PotentialBuilder: std::fmt::Debug + Send + Sync {
@@ -525,6 +563,10 @@ the additive identity. The rest of the pipeline runs normally.
           &self,
           cx: &PotentialBuildContext<'_>,
       ) -> Result<Option<Box<dyn Potential>>, ForceFieldError>;
+
+      fn displaces(&self) -> &'static [&'static str] {
+          &[]
+      }
   }
   ```
 
@@ -535,6 +577,21 @@ the additive identity. The rest of the pipeline runs normally.
   - Two distinct builders may not produce slots with the same
     `Potential::label()`. The framework enforces this in
     `ForceField::new`; builders themselves do not need to check.
+  - `displaces` returns a list of constituent slot labels whose work
+    this builder absorbs. The default implementation returns `&[]`,
+    meaning the builder is a standalone potential that does not
+    displace anything. A composite builder overrides this to name the
+    constituent labels it replaces (for example,
+    `LjSpmeRealFusedBuilder::displaces()` returns
+    `&["lennard_jones", "spme_real"]`). The names are matched against
+    `Potential::label()` of every built slot. Naming a label that no
+    builder ends up producing is harmless — the displacement claim
+    has no effect. Naming a label that *is* produced suppresses the
+    constituent slot from the final slot list. The composite is
+    responsible for inspecting `cx` and returning `Ok(None)` whenever
+    any of its constituents' activation conditions are not met, so
+    the lone constituent's standalone slot continues to run; the
+    framework does not silently fall back on the composite's behalf.
 
 - `PotentialRegistry` — open-extensible registry of `PotentialBuilder`s. <!-- rq-50f0a96a -->
   The registry's iteration order is the slot evaluation order. Fields:
@@ -548,10 +605,10 @@ the additive identity. The rest of the pipeline runs normally.
   Methods:
   - `PotentialRegistry::new() -> Self` — constructs an empty registry.
   - `PotentialRegistry::with_builtins() -> Self` — constructs a registry
-    pre-populated with the six built-in `PotentialBuilder`s in the
+    pre-populated with the seven built-in `PotentialBuilder`s in the
     canonical evaluation order: `LennardJonesBuilder`, `CoulombBuilder`,
-    `SpmeRealBuilder`, `SpmeReciprocalBuilder`, `MorseBondedBuilder`,
-    `HarmonicAngleBuilder`.
+    `SpmeRealBuilder`, `LjSpmeRealFusedBuilder`,
+    `SpmeReciprocalBuilder`, `MorseBondedBuilder`, `HarmonicAngleBuilder`.
   - `register(&mut self, builder: Box<dyn PotentialBuilder>)` — appends
     a builder to the end of the registry. `ForceField::new` calls this
     indirectly via `heddle_md::Registries::register_potential` when the
@@ -574,9 +631,33 @@ the additive identity. The rest of the pipeline runs normally.
     listed above (apart from `registry`).
   - Iterates `registry.builders` in registration order. For each builder,
     calls `builder.build(&cx)`. When the call returns `Ok(Some(slot))`,
-    appends the slot to the `ForceField`'s slot list. `Ok(None)` is the
-    no-op skip path (this builder's activation condition was not met).
-    Any `Err(_)` short-circuits and is returned unchanged.
+    records the slot together with the builder's `displaces()` list
+    and the builder's registration index. `Ok(None)` is the no-op skip
+    path (this builder's activation condition was not met). Any
+    `Err(_)` short-circuits and is returned unchanged.
+  - After every builder has been consulted, runs the displacement
+    resolution pass:
+    1. Collects the set of constituent labels claimed by at least one
+       built slot's `displaces()` list. For each such label, also
+       records the list of *built* slot labels whose builders claimed
+       it.
+    2. For every claimed label whose set of claimers has size > 1
+       *and* whose label is itself present among the built slots,
+       returns
+       `ForceFieldError::DisplaceConflict { label, by: <claimer
+       labels> }`. A claim against a label that no built slot carries
+       does not count toward the conflict — the displacement is
+       informational and harmless.
+    3. Filters the built slot list, removing any slot whose label
+       appears in the claimed set produced by step 1. Slots that are
+       suppressed this way are dropped permanently for this
+       `ForceField`; the framework launches no kernels on their behalf
+       and allocates no per-slot state for them.
+  - Appends the surviving slots to the `ForceField`'s slot list in
+    their registration order. A composite slot whose constituents
+    have all been suppressed appears at the position determined by its
+    own builder's registration index, *not* at any constituent's
+    position.
   - When no builder produces a slot, returns a `ForceField` with
     `slots.len() == 0`.
   - Allocates the ten per-class accumulator buffers
@@ -742,6 +823,19 @@ removed.
   every step. The class system does not introduce non-determinism;
   RESPA's staleness of Slow contributions between Slow-class
   evaluations is deterministic.
+- Two `ForceField` configurations that differ only in *which
+  built-in builders are registered* — for example, one with
+  `LennardJonesBuilder` and `SpmeRealBuilder` standalone and another
+  with the same two builders plus `LjSpmeRealFusedBuilder` so that
+  the composite displaces them — produce per-particle results that
+  agree only within f32 round-off, not bit-for-bit. The composite
+  visits each pair once and accumulates LJ and SPME-real
+  contributions into the same register pair before the warp-tree
+  reduction, while the standalone configuration visits each pair
+  twice (one per slot kernel) and combines the two slots' per-particle
+  totals through the class accumulator. Both configurations
+  individually preserve run-to-run byte reproducibility on the same
+  GPU; only cross-configuration equality is sacrificed.
 
 ## Out of Scope <!-- rq-e448909a -->
 
@@ -1021,6 +1115,81 @@ Feature: Pluggable potential slot framework
       coul, spme, charges, bonds, angles, excl, nl_config) is called
     Then the recorded pointers match the addresses of the function arguments
       passed in by the caller
+
+  # --- Composite slot displacement ---
+
+  @rq-1b6985ab
+  Scenario: PotentialBuilder::displaces default returns an empty list
+    Given a custom PotentialBuilder implementation that does not override displaces()
+    Then builder.displaces() returns &[]
+
+  @rq-9e6a7b7e
+  Scenario: Active composite slot suppresses both constituent slots
+    Given a ForceField config that activates both LennardJones and SpmeReal
+      (one [[pair_interactions]] entry plus [spme] configured with non-zero charges)
+    And PotentialRegistry::with_builtins() (which includes LjSpmeRealFusedBuilder)
+    When ForceField::new(...) is called
+    Then no slot in force_field.slots has label() == "lennard_jones"
+    And no slot in force_field.slots has label() == "spme_real"
+    And exactly one slot has label() == "lj_spme_real_fused"
+
+  @rq-fea21f61
+  Scenario: Inactive composite leaves both constituents in place when only LJ configured
+    Given a ForceField config with one [[pair_interactions]] entry and no [spme]
+    And PotentialRegistry::with_builtins()
+    When ForceField::new(...) is called
+    Then force_field.slots contains a slot with label() == "lennard_jones"
+    And force_field.slots contains no slot with label() == "lj_spme_real_fused"
+
+  @rq-27d93a8f
+  Scenario: Inactive composite leaves both constituents in place when only SPME configured
+    Given a ForceField config with [spme] configured and no [[pair_interactions]] entries
+    And PotentialRegistry::with_builtins()
+    When ForceField::new(...) is called
+    Then force_field.slots contains a slot with label() == "spme_real"
+    And force_field.slots contains no slot with label() == "lj_spme_real_fused"
+
+  @rq-83298c86
+  Scenario: Composite displacement claim against unbuilt label is a no-op
+    Given a registry containing a custom composite whose displaces() == &["never_built"]
+    And whose build(cx) returns Ok(Some(slot)) labelled "custom_composite"
+    And a config in which no built-in builder produces a "never_built" slot
+    When ForceField::new(...) is called
+    Then it returns Ok(force_field)
+    And force_field.slots contains exactly one slot with label() == "custom_composite"
+
+  @rq-f10530c8
+  Scenario: Two built composites claiming the same constituent error at construction
+    Given a custom builder A that builds successfully and displaces() == &["lennard_jones"]
+    And a custom builder B that builds successfully and displaces() == &["lennard_jones"]
+    And a config that also activates LennardJonesBuilder
+    When ForceField::new(...) is called
+    Then it returns Err(ForceFieldError::DisplaceConflict { label: "lennard_jones", by: <both labels> })
+
+  @rq-aa33e39f
+  Scenario: Two builders both claiming a label nobody built do not error
+    Given two custom builders A and B that each build successfully and each have
+      displaces() == &["nobody_built_this"]
+    And no other builder produces a slot with that label
+    When ForceField::new(...) is called
+    Then it returns Ok(force_field)
+    And force_field.slots contains both A's and B's slots
+
+  @rq-e55779e2
+  Scenario: Composite slot evaluates at its own registration position
+    Given PotentialRegistry::with_builtins() and a config activating LJ + SPME + Morse
+    When ForceField::new(...) is called
+    Then force_field.slots in order is:
+      [coulomb? (only if separately configured), lj_spme_real_fused, spme_reciprocal,
+       morse_bonded]
+
+  @rq-c19ea1ca
+  Scenario: Two runs of the displaced-LJ composite configuration agree byte-for-byte
+    Given two independently-constructed ForceFields, each built from a config that
+      activates LJ and SPME so the composite displaces both constituents
+    And two ParticleBuffers built from byte-identical ParticleStates of N=64
+    When force_field.step(...) is called on each
+    Then run A's forces_x, forces_y, forces_z agree byte-for-byte with run B's
 
   # --- Force classes and per-class evaluation ---
 

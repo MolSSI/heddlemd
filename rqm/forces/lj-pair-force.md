@@ -2,8 +2,12 @@
 
 Lennard-Jones is the non-bonded pairwise potential slot in the pluggable
 potential framework (`framework.md`). The slot is present when the config
-declares at least one `[[pair_interactions]]` entry. Its parameters come
-from the per-pair-type table built from the full
+declares at least one `[[pair_interactions]]` entry *and* the LJ +
+SPME-real fused composite slot (`lj-spme-real-fused.md`) is inactive.
+When SPME is also configured, the fused composite displaces this slot
+through the framework's displacement mechanism, and the standalone LJ
+kernel does not run for the lifetime of that `ForceField`. Its
+parameters come from the per-pair-type table built from the full
 `[[pair_interactions]]` array (see `io/config-schema.md`).
 
 The slot evaluates pair forces with two fused warp-per-particle
