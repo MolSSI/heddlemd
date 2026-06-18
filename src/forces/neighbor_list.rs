@@ -659,7 +659,7 @@ fn check_n_cells_total(n_cells_total: usize) -> Result<(), NeighborListError> {
 // the stack ends with the first level of length 1. Every
 // `prefix_scan_local_blocks` call needs a block-totals output buffer,
 // including the terminal single-block one, so the last length is 1.
-fn scan_stack_lengths(n_cells_total: usize) -> Vec<usize> {
+pub(crate) fn scan_stack_lengths(n_cells_total: usize) -> Vec<usize> {
     let block = SPATIAL_HASH_SCAN_BLOCK_SIZE as usize;
     let mut lengths = Vec::new();
     let mut len = n_cells_total;
@@ -674,7 +674,7 @@ fn scan_stack_lengths(n_cells_total: usize) -> Vec<usize> {
     lengths
 }
 
-fn alloc_scan_block_totals(
+pub(crate) fn alloc_scan_block_totals(
     device: &Arc<CudaDevice>,
     n_cells_total: usize,
 ) -> Result<Vec<CudaSlice<u32>>, NeighborListError> {

@@ -608,46 +608,162 @@ pub fn lj_spme_real_fused_pair_force(
     Ok(())
 }
 
-// rq-9ca00d25 rq-202493a5 rq-16f6c7dc rq-f69698b8
+// rq-9ca00d25 rq-037dd2f3
+//
+// Stage 1 of the scatter-then-gather charge-spread pipeline. One warp
+// per particle (8 warps per 256-thread block, grid ceil(N / 8)). Emits
+// N * p^3 entries into the scatter arrays and atomically increments
+// `spread_cell_counts`.
 #[allow(clippy::too_many_arguments)]
-pub fn spme_charge_spread(
+pub fn spme_spread_scatter(
     particle_buffers: &ParticleBuffers,
     sim_box: &SimulationBox,
-    sorted_particle_ids: &CudaSlice<u32>,
-    cell_offsets: &CudaSlice<u32>,
     grid: [u32; 3],
     spline_order: u32,
-    rho: &mut CudaSlice<Real>,
+    scatter_grid_index: &mut CudaSlice<u32>,
+    scatter_value: &mut CudaSlice<Real>,
+    scatter_particle_id: &mut CudaSlice<u32>,
+    spread_cell_counts: &mut CudaSlice<u32>,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
     let n_a = grid[0];
     let n_b = grid[1];
     let n_c = grid[2];
     let m = n_a as usize * n_b as usize * n_c as usize;
-    debug_assert_eq!(rho.len(), m);
-    debug_assert_eq!(cell_offsets.len(), m + 1);
-    debug_assert_eq!(sorted_particle_ids.len(), n.max(1));
+    let p3 = (spline_order as usize).pow(3);
+    debug_assert_eq!(scatter_grid_index.len(), n * p3);
+    debug_assert_eq!(scatter_value.len(), n * p3);
+    debug_assert_eq!(scatter_particle_id.len(), n * p3);
+    debug_assert_eq!(spread_cell_counts.len(), m);
     debug_assert_eq!(particle_buffers.charges.len(), n);
 
-    let m_u32 = m as u32;
-    let func = particle_buffers.kernels.spme_recip.spme_charge_spread.clone();
-    let cfg = launch_config(m_u32);
-    let lattice = sim_box.lattice_device();
     let n_u32 = n as u32;
+    let cfg = LaunchConfig {
+        grid_dim: (n_u32.div_ceil(8), 1, 1),
+        block_dim: (256, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let lattice = sim_box.lattice_device();
+    let func = particle_buffers.kernels.spme_recip.spme_spread_scatter.clone();
     let args = (
         &particle_buffers.positions_x,
         &particle_buffers.positions_y,
         &particle_buffers.positions_z,
         &particle_buffers.charges,
-        sorted_particle_ids,
-        cell_offsets,
         lattice,
         n_a,
         n_b,
         n_c,
         spline_order,
-        rho,
+        scatter_grid_index,
+        scatter_value,
+        scatter_particle_id,
+        spread_cell_counts,
         n_u32,
+    );
+    unsafe {
+        func.launch(cfg, args).map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-037dd2f3
+//
+// Stage 3 of the spread pipeline. One thread per scatter entry; places
+// each (g, value, particle_id) entry into its grid cell's slice of the
+// binned arrays via `atomicInc(&spread_cell_cursor[g])`.
+#[allow(clippy::too_many_arguments)]
+pub fn spme_spread_bin_scatter(
+    kernels: &Kernels,
+    scatter_grid_index: &CudaSlice<u32>,
+    scatter_value: &CudaSlice<Real>,
+    scatter_particle_id: &CudaSlice<u32>,
+    spread_cell_offsets: &CudaSlice<u32>,
+    spread_cell_cursor: &mut CudaSlice<u32>,
+    binned_particle_id: &mut CudaSlice<u32>,
+    binned_value: &mut CudaSlice<Real>,
+    n_entries: u32,
+) -> Result<(), GpuError> {
+    if n_entries == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(scatter_grid_index.len(), n_entries as usize);
+    debug_assert_eq!(scatter_value.len(), n_entries as usize);
+    debug_assert_eq!(scatter_particle_id.len(), n_entries as usize);
+    debug_assert_eq!(binned_particle_id.len(), n_entries as usize);
+    debug_assert_eq!(binned_value.len(), n_entries as usize);
+    let func = kernels.spme_recip.spme_spread_bin_scatter.clone();
+    let cfg = launch_config(n_entries);
+    let args = (
+        scatter_grid_index,
+        scatter_value,
+        scatter_particle_id,
+        spread_cell_offsets,
+        spread_cell_cursor,
+        binned_particle_id,
+        binned_value,
+        n_entries,
+    );
+    unsafe {
+        func.launch(cfg, args).map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-037dd2f3
+//
+// Stage 4 of the spread pipeline. One thread per grid cell; insertion-
+// sorts the cell's slice of `binned_particle_id`, moving `binned_value`
+// alongside, so the subsequent gather sums in a deterministic order.
+pub fn spme_spread_sort_cell(
+    kernels: &Kernels,
+    spread_cell_offsets: &CudaSlice<u32>,
+    binned_particle_id: &mut CudaSlice<u32>,
+    binned_value: &mut CudaSlice<Real>,
+    m: u32,
+) -> Result<(), GpuError> {
+    if m == 0 {
+        return Ok(());
+    }
+    let func = kernels.spme_recip.spme_spread_sort_cell.clone();
+    let cfg = launch_config(m);
+    let args = (
+        spread_cell_offsets,
+        binned_particle_id,
+        binned_value,
+        m,
+    );
+    unsafe {
+        func.launch(cfg, args).map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-037dd2f3
+//
+// Stage 5 of the spread pipeline. One thread per grid cell; sums the
+// cell's slice of binned (now particle-ID-sorted) values into `rho[c]`.
+pub fn spme_spread_gather_to_rho(
+    kernels: &Kernels,
+    spread_cell_offsets: &CudaSlice<u32>,
+    binned_value: &CudaSlice<Real>,
+    rho: &mut CudaSlice<Real>,
+    m: u32,
+) -> Result<(), GpuError> {
+    if m == 0 {
+        return Ok(());
+    }
+    debug_assert_eq!(rho.len(), m as usize);
+    let func = kernels.spme_recip.spme_spread_gather_to_rho.clone();
+    let cfg = launch_config(m);
+    let args = (
+        spread_cell_offsets,
+        binned_value,
+        rho,
+        m,
     );
     unsafe {
         func.launch(cfg, args).map_err(GpuError::from)?;

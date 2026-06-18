@@ -499,7 +499,7 @@ fn inverse_fft_round_trips_forward_fft_up_to_scale_factor() {
 
 // rq-2ae37ac3
 #[test]
-fn spme_reciprocal_internal_cell_list_uses_one_bin_per_fft_grid_cell() {
+fn spme_reciprocal_spread_scratch_buffers_are_sized_to_n_times_p_cubed_and_M() {
     use cudarc::driver::DeviceSlice;
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
@@ -510,22 +510,26 @@ fn spme_reciprocal_internal_cell_list_uses_one_bin_per_fft_grid_cell() {
         grid: [16, 16, 16],
         spline_order: 4,
     };
-    let grid = SpmeReciprocalGrid::new(&gpu, &sim_box, 1, params).unwrap();
-    assert!(grid.bin_list.is_bin_only());
-    let cl = grid
-        .bin_list
-        .cell_list_data()
-        .expect("CellListOnly should expose cell-list data");
-    assert_eq!(cl.n_cells, [16, 16, 16]);
-    assert_eq!(grid.bin_list.max_neighbors, 0);
-    assert_eq!(grid.bin_list.neighbor_list.len(), 0);
-    assert_eq!(grid.bin_list.neighbor_counts.len(), 0);
+    let n = 1usize;
+    let grid = SpmeReciprocalGrid::new(&gpu, &sim_box, n, params).unwrap();
+    let m = 16usize * 16 * 16;
+    let p3 = (params.spline_order as usize).pow(3);
+    let expected_entries = n * p3;
+    assert_eq!(grid.m, m);
+    assert_eq!(grid.scatter_grid_index.len(), expected_entries);
+    assert_eq!(grid.scatter_value.len(), expected_entries);
+    assert_eq!(grid.scatter_particle_id.len(), expected_entries);
+    assert_eq!(grid.spread_cell_counts.len(), m);
+    assert_eq!(grid.spread_cell_offsets.len(), m + 1);
+    assert_eq!(grid.spread_cell_cursor.len(), m);
+    assert_eq!(grid.binned_particle_id.len(), expected_entries);
+    assert_eq!(grid.binned_value.len(), expected_entries);
 }
 
 // rq-dd829afb
 #[test]
-fn bin_only_cell_list_rebuilds_every_step_regardless_of_displacement() {
-    use heddle_md::timings::{HostStage, KernelStage};
+fn spread_pipeline_does_not_launch_neighbor_list_kernels() {
+    use heddle_md::timings::KernelStage;
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
     let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
@@ -541,29 +545,24 @@ fn bin_only_cell_list_rebuilds_every_step_regardless_of_displacement() {
     };
     let mut grid = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
     let mut t = Timings::new(&gpu).unwrap();
-    // Two back-to-back pipeline runs with no position change.
     grid.compute(&sim_box, &buffers, &mut t).unwrap();
     grid.compute(&sim_box, &buffers, &mut t).unwrap();
     grid.sync_recip().unwrap();
     let report = t.finalize().unwrap();
-    // The displacement-check + neighbor_list_build kernels must never
-    // fire (they are absent in CellListOnly mode); each pre_step call
-    // must perform a fresh rebuild (host-side stage).
+    // SpmeReciprocalGrid no longer owns a NeighborListState; the four
+    // pre-step bin-list kernels (displacement check, copy-positions,
+    // neighbor-list build, neighbor-list rebuild) must never appear in
+    // the report when only the recip slot has been driven.
     for forbidden in [
         KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED.name(),
+        KernelStage::COPY_POSITIONS_INTO_REFERENCE.name(),
         KernelStage::NEIGHBOR_LIST_BUILD.name(),
     ] {
         assert!(
             !report.stages.iter().any(|s| s.name == forbidden),
-            "{forbidden} kernel must not run in bin-only mode"
+            "{forbidden} kernel must not run for the recip-only spread pipeline"
         );
     }
-    let rebuild = report
-        .stages
-        .iter()
-        .find(|s| s.name == HostStage::NEIGHBOR_LIST_REBUILD.name())
-        .expect("neighbor_list_rebuild host stage should be present");
-    assert_eq!(rebuild.count, 2, "expected one rebuild per pipeline call");
 }
 
 // =====================================================================
@@ -639,10 +638,11 @@ fn apply_influence_two_runs_byte_identical_v_hat_and_virial_partials() {
 
 #[test]
 fn apply_influence_writes_zero_to_k_zero_component_of_v_hat() {
-    // Run apply_influence directly (without the C2R FFT that follows in
-    // SpmeReciprocalGrid::compute) so the post-multiply rho_hat is
-    // observable. The C2R inverse transform may overwrite its input
-    // in place, so rho_hat_interleaved is undefined after compute().
+    // Run apply_influence directly on a hand-poked rho_hat: this avoids
+    // having to interleave the spread pipeline (which would overwrite
+    // rho_hat with V_hat anyway). We verify that the k=0 slot is zero
+    // after the multiply, regardless of the rho_hat[0] input, because
+    // influence_G[0] == 0 (tinfoil boundary).
     let (gpu, buffers, sim_box, mut grid) = small_charged_pair_grid();
     // Refresh influence_G + virial_factor for this box.
     heddle_md::gpu::spme_recip_compute_influence(
@@ -659,23 +659,14 @@ fn apply_influence_writes_zero_to_k_zero_component_of_v_hat() {
         grid.m_complex as u32,
     )
     .unwrap();
-    let mut t = Timings::new(&gpu).unwrap();
-    // Run the per-step pre_step to build the bin list, then spread,
-    // then forward FFT, then apply_influence — stop there.
-    grid.bin_list.pre_step(&sim_box, &buffers, &mut t).unwrap();
-    let cl = grid.bin_list.cell_list_data().unwrap();
-    heddle_md::gpu::spme_charge_spread(
-        &buffers,
-        &sim_box,
-        &cl.sorted_particle_ids,
-        &cl.cell_offsets,
-        grid.params.grid,
-        grid.params.spline_order,
-        &mut grid.rho,
-    )
-    .unwrap();
-    grid.forward_plan
-        .execute(&grid.rho, &mut grid.rho_hat_interleaved)
+    // Poke rho_hat[k=0] to a non-zero (re, im) and the rest to known
+    // non-zero values so we can also assert that the multiply is
+    // active for the other cells.
+    let mut rho_hat_host = vec![1.5 as Real; 2 * grid.m_complex];
+    rho_hat_host[0] = 2.5;
+    rho_hat_host[1] = -3.0;
+    gpu.device
+        .htod_sync_copy_into(&rho_hat_host, &mut grid.rho_hat_interleaved)
         .unwrap();
     let n_c = grid.params.grid[2];
     let n_c_complex = (n_c / 2 + 1) as u32;

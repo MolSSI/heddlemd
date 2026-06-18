@@ -17,7 +17,6 @@ use crate::gpu::cufft::{CuFftError, Plan3dC2R, Plan3dR2C};
 use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, K_COULOMB_F32, ParticleBuffers,
-    spme_charge_spread,
     spme_force_gather, spme_real_pair_force,
 };
 use crate::kernels;
@@ -26,7 +25,7 @@ use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::topology::{DeviceExclusionList, ExclusionList};
-use super::neighbor_list::{NeighborListError, NeighborListState};
+use super::neighbor_list::NeighborListError;
 use super::{
     AggregateLevel, ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext,
     PotentialBuilder, SlotOutputView,
@@ -83,7 +82,23 @@ pub struct SpmeReciprocalGrid {
     pub particle_count: usize,
     pub m: usize,           // n_a * n_b * n_c (real-grid size)
     pub m_complex: usize,   // n_a * n_b * (n_c/2 + 1)
-    pub bin_list: NeighborListState,
+    /// Per-entry scratch buffers populated by `spme_spread_scatter`:
+    /// one entry per (particle, d_a, d_b, d_c) tuple.
+    pub scatter_grid_index: CudaSlice<u32>,
+    pub scatter_value: CudaSlice<Real>,
+    pub scatter_particle_id: CudaSlice<u32>,
+    /// Per-grid-cell histogram of scatter entries, prefix-scanned each
+    /// step into `spread_cell_offsets`.
+    pub spread_cell_counts: CudaSlice<u32>,
+    pub spread_cell_offsets: CudaSlice<u32>,
+    pub spread_cell_cursor: CudaSlice<u32>,
+    /// Per-cell binned scatter entries, post-`spme_spread_bin_scatter`
+    /// and (after `spme_spread_sort_cell`) sorted by particle ID.
+    pub binned_particle_id: CudaSlice<u32>,
+    pub binned_value: CudaSlice<Real>,
+    /// Multi-level scan-stack buffers consumed by the shared
+    /// `prefix_scan_cell_counts` launcher.
+    pub spread_scan_block_totals: Vec<CudaSlice<u32>>,
     pub rho: CudaSlice<Real>,
     pub rho_hat_interleaved: CudaSlice<Real>,
     pub v: CudaSlice<Real>,
@@ -147,12 +162,37 @@ impl SpmeReciprocalGrid {
         let m_complex = n_a as usize * n_b as usize * (n_c as usize / 2 + 1);
         let device = gpu.device.clone();
 
-        let bin_list = NeighborListState::new_cell_list_only(
-            gpu,
-            sim_box,
-            particle_count,
-            params.grid,
-        )?;
+        // Scatter-then-gather spread scratch. Lengths derive from the
+        // particle count and spline order; zero-length when no particles.
+        let p_us = p as usize;
+        let p3 = p_us * p_us * p_us;
+        let n_entries = particle_count * p3;
+        let scatter_grid_index = device
+            .alloc_zeros::<u32>(n_entries)
+            .map_err(GpuError::from)?;
+        let scatter_value = device
+            .alloc_zeros::<Real>(n_entries)
+            .map_err(GpuError::from)?;
+        let scatter_particle_id = device
+            .alloc_zeros::<u32>(n_entries)
+            .map_err(GpuError::from)?;
+        let spread_cell_counts = device
+            .alloc_zeros::<u32>(m)
+            .map_err(GpuError::from)?;
+        let spread_cell_offsets = device
+            .alloc_zeros::<u32>(m + 1)
+            .map_err(GpuError::from)?;
+        let spread_cell_cursor = device
+            .alloc_zeros::<u32>(m)
+            .map_err(GpuError::from)?;
+        let binned_particle_id = device
+            .alloc_zeros::<u32>(n_entries)
+            .map_err(GpuError::from)?;
+        let binned_value = device
+            .alloc_zeros::<Real>(n_entries)
+            .map_err(GpuError::from)?;
+        let spread_scan_block_totals =
+            super::neighbor_list::alloc_scan_block_totals(&device, m)?;
 
         let rho = device.alloc_zeros::<Real>(m).map_err(GpuError::from)?;
         let v = device.alloc_zeros::<Real>(m).map_err(GpuError::from)?;
@@ -239,7 +279,15 @@ impl SpmeReciprocalGrid {
             particle_count,
             m,
             m_complex,
-            bin_list,
+            scatter_grid_index,
+            scatter_value,
+            scatter_particle_id,
+            spread_cell_counts,
+            spread_cell_offsets,
+            spread_cell_cursor,
+            binned_particle_id,
+            binned_value,
+            spread_scan_block_totals,
             rho,
             rho_hat_interleaved,
             v,
@@ -288,21 +336,76 @@ impl SpmeReciprocalGrid {
             self.cached_box_generation = sim_box.generation();
         }
 
-        self.bin_list.pre_step(sim_box, particle_buffers, timings)?;
-
-        let cl = self
-            .bin_list
-            .cell_list_data()
-            .expect("SpmeReciprocalGrid bin list must be in cell-list-only mode");
-        spme_charge_spread(
-            particle_buffers,
-            sim_box,
-            &cl.sorted_particle_ids,
-            &cl.cell_offsets,
-            self.params.grid,
-            self.params.spline_order,
-            &mut self.rho,
-        )?;
+        // Charge spread (five-stage scatter-then-gather pipeline).
+        // Per-step state reset:
+        //   spread_cell_counts and spread_cell_cursor accumulate via
+        //   atomicAdd inside spme_spread_scatter / spme_spread_bin_scatter,
+        //   so they must be zeroed every step. The scatter / binned arrays
+        //   are overwritten every entry every step, so they need no reset.
+        let _ = timings;
+        if self.particle_count > 0 {
+            self.device
+                .memset_zeros(&mut self.spread_cell_counts)
+                .map_err(GpuError::from)?;
+            self.device
+                .memset_zeros(&mut self.spread_cell_cursor)
+                .map_err(GpuError::from)?;
+            // Stage 1: warp-per-particle scatter emit.
+            crate::gpu::spme_spread_scatter(
+                particle_buffers,
+                sim_box,
+                self.params.grid,
+                self.params.spline_order,
+                &mut self.scatter_grid_index,
+                &mut self.scatter_value,
+                &mut self.scatter_particle_id,
+                &mut self.spread_cell_counts,
+            )?;
+            // Stage 2: prefix scan cell counts → cell offsets.
+            let n_entries = self.scatter_grid_index.len();
+            crate::gpu::prefix_scan_cell_counts(
+                &particle_buffers.kernels,
+                &self.spread_cell_counts,
+                &mut self.spread_cell_offsets,
+                &mut self.spread_scan_block_totals,
+                self.m,
+                n_entries,
+            )?;
+            // Stage 3: bin-scatter into per-cell slices.
+            crate::gpu::spme_spread_bin_scatter(
+                &particle_buffers.kernels,
+                &self.scatter_grid_index,
+                &self.scatter_value,
+                &self.scatter_particle_id,
+                &self.spread_cell_offsets,
+                &mut self.spread_cell_cursor,
+                &mut self.binned_particle_id,
+                &mut self.binned_value,
+                n_entries as u32,
+            )?;
+            // Stage 4: per-cell insertion sort by particle ID.
+            crate::gpu::spme_spread_sort_cell(
+                &particle_buffers.kernels,
+                &self.spread_cell_offsets,
+                &mut self.binned_particle_id,
+                &mut self.binned_value,
+                self.m as u32,
+            )?;
+            // Stage 5: gather binned values into rho.
+            crate::gpu::spme_spread_gather_to_rho(
+                &particle_buffers.kernels,
+                &self.spread_cell_offsets,
+                &self.binned_value,
+                &mut self.rho,
+                self.m as u32,
+            )?;
+        } else {
+            // Empty particle list: zero rho so downstream FFT sees a
+            // valid (all-zero) input.
+            self.device
+                .memset_zeros(&mut self.rho)
+                .map_err(GpuError::from)?;
+        }
 
         self.forward_plan
             .execute(&self.rho, &mut self.rho_hat_interleaved)?;
@@ -703,7 +806,10 @@ impl SpmeRealKernels {
 #[derive(Debug, Clone)]
 pub struct SpmeRecipKernels {
     pub spme_recip_compute_influence: CudaFunction,
-    pub spme_charge_spread: CudaFunction,
+    pub spme_spread_scatter: CudaFunction,
+    pub spme_spread_bin_scatter: CudaFunction,
+    pub spme_spread_sort_cell: CudaFunction,
+    pub spme_spread_gather_to_rho: CudaFunction,
     pub spme_recip_apply_influence: CudaFunction,
     pub spme_recip_reduce_partials: CudaFunction,
     pub spme_force_gather: CudaFunction,
@@ -716,7 +822,10 @@ impl SpmeRecipKernels {
             "spme_recip",
             &[
                 "spme_recip_compute_influence",
-                "spme_charge_spread",
+                "spme_spread_scatter",
+                "spme_spread_bin_scatter",
+                "spme_spread_sort_cell",
+                "spme_spread_gather_to_rho",
                 "spme_recip_apply_influence",
                 "spme_recip_reduce_partials",
                 "spme_force_gather",
@@ -728,7 +837,14 @@ impl SpmeRecipKernels {
                 "spme_recip",
                 "spme_recip_compute_influence",
             )?,
-            spme_charge_spread: get_func(device, "spme_recip", "spme_charge_spread")?,
+            spme_spread_scatter: get_func(device, "spme_recip", "spme_spread_scatter")?,
+            spme_spread_bin_scatter: get_func(device, "spme_recip", "spme_spread_bin_scatter")?,
+            spme_spread_sort_cell: get_func(device, "spme_recip", "spme_spread_sort_cell")?,
+            spme_spread_gather_to_rho: get_func(
+                device,
+                "spme_recip",
+                "spme_spread_gather_to_rho",
+            )?,
             spme_recip_apply_influence: get_func(
                 device,
                 "spme_recip",

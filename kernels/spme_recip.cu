@@ -174,77 +174,237 @@ extern "C" __global__ void spme_recip_compute_influence(
 // particle whose primary bin is offset by (d_a, d_b, d_c) ∈ [0, p)^3
 // from the thread's grid point. Each grid cell is written by exactly
 // one thread; no atomics.
-extern "C" __global__ void spme_charge_spread(
+// rq-037dd2f3
+//
+// E2 scatter-then-gather charge-spread pipeline. Five kernels:
+//   1. spme_spread_scatter         — one warp per particle, emits N*p^3
+//                                    scatter entries plus per-cell counts.
+//   2. (prefix_scan_cell_counts)   — reused from neighbor-list.md.
+//   3. spme_spread_bin_scatter     — one thread per scatter entry,
+//                                    places into per-cell bin slices via
+//                                    atomicInc cursors.
+//   4. spme_spread_sort_cell       — one thread per grid cell, insertion-
+//                                    sorts the bin slice by particle ID.
+//   5. spme_spread_gather_to_rho   — one thread per grid cell, sums the
+//                                    sorted bin slice into rho[c].
+//
+// Determinism: stages 1 and 3 use atomics on `spread_cell_counts` and
+// `spread_cell_cursor`, but the intermediate placement order is not
+// observed downstream. Stage 4 canonicalises the in-cell entry order
+// by ascending particle ID, and stage 5 sums in that fixed order. Two
+// runs on the same GPU with identical positions therefore produce a
+// byte-identical `rho`.
+
+// Compute fractional offsets t_a, t_b, t_c and primary bin
+// (g_a, g_b, g_c) for one particle. Replicates the geometry of the
+// original spme_charge_spread kernel so the per-particle weights are
+// computed identically.
+__device__ static inline void spread_per_particle_setup(
+    Real px, Real py, Real pz,
+    unsigned int n_a, unsigned int n_b, unsigned int n_c,
+    Real lx, Real ly, Real lz, Real xy, Real xz, Real yz,
+    Real &ta, Real &tb, Real &tc,
+    unsigned int &g_a, unsigned int &g_b, unsigned int &g_c)
+{
+  int wrap_a, wrap_b, wrap_c;
+  triclinic_wrap_with_image(px, py, pz, wrap_a, wrap_b, wrap_c,
+                            lx, ly, lz, xy, xz, yz);
+  Real sa, sb, sc;
+  triclinic_cart_to_frac(px, py, pz, lx, ly, lz, xy, xz, yz, sa, sb, sc);
+  Real sa_p = sa + R(0.5);
+  Real sb_p = sb + R(0.5);
+  Real sc_p = sc + R(0.5);
+  Real ua = sa_p * (Real) n_a;
+  Real ub = sb_p * (Real) n_b;
+  Real uc = sc_p * (Real) n_c;
+  Real fa = Real_floor(ua);
+  Real fb = Real_floor(ub);
+  Real fc = Real_floor(uc);
+  ta = ua - fa;
+  tb = ub - fb;
+  tc = uc - fc;
+  // The primary bin (lowest-(d_a, d_b, d_c) corner) of the p^3 support
+  // is one to the left of floor(u_d) so the offsets (d_a, d_b, d_c) in
+  // {0, 1, ..., p-1} place the particle correctly inside the box of
+  // p^3 grid cells. This matches the original spme_charge_spread
+  // kernel's geometry: each grid cell (g) thread iterated d in [0, p)
+  // and read from bin (g + d) mod n_d, so the inverse mapping (which
+  // particle contributions hit grid cell g) is exactly (primary + d)
+  // mod n_d with the same primary bin.
+  long fa_l = (long) fa;
+  long fb_l = (long) fb;
+  long fc_l = (long) fc;
+  // Wrap into [0, n_d).
+  long n_a_l = (long) n_a;
+  long n_b_l = (long) n_b;
+  long n_c_l = (long) n_c;
+  long ga_l = ((fa_l % n_a_l) + n_a_l) % n_a_l;
+  long gb_l = ((fb_l % n_b_l) + n_b_l) % n_b_l;
+  long gc_l = ((fc_l % n_c_l) + n_c_l) % n_c_l;
+  g_a = (unsigned int) ga_l;
+  g_b = (unsigned int) gb_l;
+  g_c = (unsigned int) gc_l;
+}
+
+// Stage 1. One warp per particle. Lane 0 computes the per-particle
+// weights and primary bin, broadcasts via __shfl_sync, then each lane
+// emits ceil(p^3 / 32) of the contributions.
+extern "C" __global__ void spme_spread_scatter(
     const Real *positions_x,
     const Real *positions_y,
     const Real *positions_z,
     const Real *charges,
-    const unsigned int *sorted_particle_ids,
-    const unsigned int *cell_offsets,
     const Real *lattice,
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
     unsigned int spline_order,
-    Real *rho,
+    unsigned int *scatter_grid_index,    // length n * p^3
+    Real         *scatter_value,         // length n * p^3
+    unsigned int *scatter_particle_id,   // length n * p^3
+    unsigned int *spread_cell_counts,    // length M
     unsigned int n)
 {
-  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
-  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
-  unsigned int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  unsigned int M = n_a * n_b * n_c;
-  if (idx >= M) {
+  // 8 warps per block, 32 lanes per warp.
+  unsigned int warp_id_in_block = threadIdx.x >> 5;
+  unsigned int lane = threadIdx.x & 31u;
+  unsigned int i = blockIdx.x * 8u + warp_id_in_block;
+  if (i >= n) {
     return;
   }
-  // Decompose idx into (g_a, g_b, g_c) under row-major ordering.
-  unsigned int g_a = idx / (n_b * n_c);
-  unsigned int rem = idx - g_a * (n_b * n_c);
-  unsigned int g_b = rem / n_c;
-  unsigned int g_c = rem - g_b * n_c;
 
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   int p = (int) spline_order;
-  Real accum = R(0.0);
+  unsigned int p_u = (unsigned int) p;
+  unsigned int p2 = p_u * p_u;
+  unsigned int p3 = p2 * p_u;
 
-  for (int da = 0; da < p; ++da) {
-    int ba = ((int) g_a + da) % (int) n_a;
-    for (int db = 0; db < p; ++db) {
-      int bb = ((int) g_b + db) % (int) n_b;
-      for (int dc = 0; dc < p; ++dc) {
-        int bc = ((int) g_c + dc) % (int) n_c;
-        unsigned int bin =
-            ((unsigned int) ba * n_b + (unsigned int) bb) * n_c
-            + (unsigned int) bc;
-        unsigned int start = cell_offsets[bin];
-        unsigned int end = cell_offsets[bin + 1];
-        for (unsigned int s = start; s < end; ++s) {
-          unsigned int i = sorted_particle_ids[s];
-          Real px = positions_x[i];
-          Real py = positions_y[i];
-          Real pz = positions_z[i];
-          // Re-wrap defensively (the integrator already wraps, but f32
-          // round-off can leave fractional coords just outside [-0.5, 0.5)).
-          int wrap_a, wrap_b, wrap_c;
-          triclinic_wrap_with_image(px, py, pz, wrap_a, wrap_b, wrap_c,
-                                    lx, ly, lz, xy, xz, yz);
-          Real sa, sb, sc;
-          triclinic_cart_to_frac(px, py, pz, lx, ly, lz, xy, xz, yz,
-                                 sa, sb, sc);
-          Real sa_p = sa + R(0.5);
-          Real sb_p = sb + R(0.5);
-          Real sc_p = sc + R(0.5);
-          Real ua = sa_p * (Real) n_a;
-          Real ub = sb_p * (Real) n_b;
-          Real uc = sc_p * (Real) n_c;
-          Real ta = ua - Real_floor(ua);
-          Real tb = ub - Real_floor(ub);
-          Real tc = uc - Real_floor(uc);
-          Real wa = bspline_weight(p, (Real) da + ta);
-          Real wb = bspline_weight(p, (Real) db + tb);
-          Real wc = bspline_weight(p, (Real) dc + tc);
-          accum += charges[i] * wa * wb * wc;
-        }
-      }
-    }
+  // Lane 0 computes the per-particle weights and primary bin; the
+  // values are then broadcast to every lane via warp shuffles.
+  Real ta = R(0.0), tb = R(0.0), tc = R(0.0);
+  unsigned int g_a = 0u, g_b = 0u, g_c = 0u;
+  Real qi = R(0.0);
+  if (lane == 0u) {
+    Real px = positions_x[i];
+    Real py = positions_y[i];
+    Real pz = positions_z[i];
+    spread_per_particle_setup(
+        px, py, pz, n_a, n_b, n_c, lx, ly, lz, xy, xz, yz,
+        ta, tb, tc, g_a, g_b, g_c);
+    qi = charges[i];
   }
-  rho[idx] = accum;
+  ta = __shfl_sync(0xffffffffu, ta, 0);
+  tb = __shfl_sync(0xffffffffu, tb, 0);
+  tc = __shfl_sync(0xffffffffu, tc, 0);
+  g_a = __shfl_sync(0xffffffffu, g_a, 0);
+  g_b = __shfl_sync(0xffffffffu, g_b, 0);
+  g_c = __shfl_sync(0xffffffffu, g_c, 0);
+  qi = __shfl_sync(0xffffffffu, qi, 0);
+
+  // Per-axis 1D B-spline weights wa[d], wb[d], wc[d] for d in [0, p).
+  // Each lane computes them all (cheap, ~p evaluations per axis = 12
+  // for p=4) so register pressure stays bounded.
+  Real wa[8], wb[8], wc[8];
+  for (int d = 0; d < p; ++d) {
+    wa[d] = bspline_weight(p, (Real) d + ta);
+    wb[d] = bspline_weight(p, (Real) d + tb);
+    wc[d] = bspline_weight(p, (Real) d + tc);
+  }
+
+  // Each lane handles ceil(p^3 / 32) entries. For p=4 -> 64 entries
+  // -> 2 per lane; for p=5 -> 125 entries -> 4 per lane (p<=8).
+  // Inverse mapping: the original one-thread-per-grid-cell kernel
+  // summed over contributing bins (g + d) % n; so a particle in bin
+  // b contributes to grid cells (b - d) % n for d in [0, p).
+  unsigned int row_base = i * p3;
+  for (unsigned int k = lane; k < p3; k += 32u) {
+    unsigned int da = k / p2;
+    unsigned int rem = k - da * p2;
+    unsigned int db = rem / p_u;
+    unsigned int dc = rem - db * p_u;
+    unsigned int ga = (g_a + n_a - da) % n_a;
+    unsigned int gb = (g_b + n_b - db) % n_b;
+    unsigned int gc = (g_c + n_c - dc) % n_c;
+    unsigned int g = (ga * n_b + gb) * n_c + gc;
+    Real v = qi * wa[da] * wb[db] * wc[dc];
+    unsigned int t = row_base + k;
+    scatter_grid_index[t] = g;
+    scatter_value[t] = v;
+    scatter_particle_id[t] = i;
+    atomicAdd(&spread_cell_counts[g], 1u);
+  }
+}
+
+// Stage 3. One thread per scatter entry. Reads (g, v, particle_id) and
+// places into the cell's slice of binned arrays via atomicInc cursor.
+extern "C" __global__ void spme_spread_bin_scatter(
+    const unsigned int *scatter_grid_index,
+    const Real         *scatter_value,
+    const unsigned int *scatter_particle_id,
+    const unsigned int *spread_cell_offsets,
+    unsigned int       *spread_cell_cursor,
+    unsigned int       *binned_particle_id,
+    Real               *binned_value,
+    unsigned int n_entries)
+{
+  unsigned int t = blockIdx.x * blockDim.x + threadIdx.x;
+  if (t >= n_entries) {
+    return;
+  }
+  unsigned int g = scatter_grid_index[t];
+  Real v = scatter_value[t];
+  unsigned int i = scatter_particle_id[t];
+  unsigned int local = atomicAdd(&spread_cell_cursor[g], 1u);
+  unsigned int pos = spread_cell_offsets[g] + local;
+  binned_particle_id[pos] = i;
+  binned_value[pos] = v;
+}
+
+// Stage 4. One thread per grid cell. Insertion-sort the cell's slice
+// of binned_particle_id (carrying binned_value alongside).
+extern "C" __global__ void spme_spread_sort_cell(
+    const unsigned int *spread_cell_offsets,
+    unsigned int       *binned_particle_id,
+    Real               *binned_value,
+    unsigned int M)
+{
+  unsigned int c = blockIdx.x * blockDim.x + threadIdx.x;
+  if (c >= M) {
+    return;
+  }
+  unsigned int start = spread_cell_offsets[c];
+  unsigned int end = spread_cell_offsets[c + 1u];
+  for (unsigned int k = start + 1u; k < end; ++k) {
+    unsigned int key = binned_particle_id[k];
+    Real val = binned_value[k];
+    int pos = (int) k - 1;
+    while (pos >= (int) start && binned_particle_id[pos] > key) {
+      binned_particle_id[pos + 1] = binned_particle_id[pos];
+      binned_value[pos + 1] = binned_value[pos];
+      pos -= 1;
+    }
+    binned_particle_id[pos + 1] = key;
+    binned_value[pos + 1] = val;
+  }
+}
+
+// Stage 5. One thread per grid cell. Sum the sorted bin into rho[c].
+extern "C" __global__ void spme_spread_gather_to_rho(
+    const unsigned int *spread_cell_offsets,
+    const Real         *binned_value,
+    Real               *rho,
+    unsigned int M)
+{
+  unsigned int c = blockIdx.x * blockDim.x + threadIdx.x;
+  if (c >= M) {
+    return;
+  }
+  unsigned int start = spread_cell_offsets[c];
+  unsigned int end = spread_cell_offsets[c + 1u];
+  Real accum = R(0.0);
+  for (unsigned int k = start; k < end; ++k) {
+    accum += binned_value[k];
+  }
+  rho[c] = accum;
 }
 
 // rq-9ca00d25

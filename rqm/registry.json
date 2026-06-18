@@ -426,14 +426,6 @@
     "title": "Timings",
     "type": "api-item"
   },
-  "rq-037dd2f3": {
-    "decl": "### Charge spreading",
-    "file": "forces/spme",
-    "level": 3,
-    "refs": [],
-    "title": "Charge spreading",
-    "type": "section"
-  },
   "rq-03830444": {
     "decl": "# Feature: Simulation Box and Periodic Boundary Conditions",
     "file": "simulation-box",
@@ -795,7 +787,7 @@
     "type": "scenario"
   },
   "rq-07297467": {
-    "decl": "Scenario: Spread is independent of particle order in the bin",
+    "decl": "Scenario: Spread is byte-identical regardless of input particle ordering",
     "file": "forces/spme",
     "refs": [
       {
@@ -803,7 +795,7 @@
         "kind": "code"
       }
     ],
-    "title": "Spread is independent of particle order in the bin",
+    "title": "Spread is byte-identical regardless of input particle ordering",
     "type": "scenario"
   },
   "rq-07375d3f": {
@@ -2527,18 +2519,6 @@
     "refs": [],
     "title": "SimulationBox API",
     "type": "section"
-  },
-  "rq-16f6c7dc": {
-    "decl": "- `spme_charge_spread`: one thread per real grid cell, block size 256,",
-    "file": "forces/spme",
-    "refs": [
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "spme_charge_spread",
-    "type": "api-item"
   },
   "rq-1708fc0a": {
     "decl": "Scenario: Pair-force kernels declare no shared memory",
@@ -4775,6 +4755,13 @@
     "title": "Feature API",
     "type": "section"
   },
+  "rq-29f4f67a": {
+    "decl": "Scenario: Scatter emits exactly N · p³ entries",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Scatter emits exactly N · p³ entries",
+    "type": "scenario"
+  },
   "rq-2a0e97f5": {
     "decl": "Scenario: Two independent lossless runs produce byte-identical results",
     "file": "integration/velocity-verlet",
@@ -6241,6 +6228,14 @@
     "refs": [],
     "title": "Comments start with '#' and run to end of line. Blank lines are",
     "type": "file"
+  },
+  "rq-382a6e66": {
+    "decl": "### Charge spreading",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "Charge spreading",
+    "type": "section"
   },
   "rq-38441c15": {
     "decl": "Scenario: Pair exactly at r_switch sees the unmodified Lennard-Jones force",
@@ -9363,6 +9358,13 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-5918e7a9": {
+    "decl": "- `spme_spread_bin_scatter`: one thread per scatter entry, block size",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_spread_bin_scatter",
+    "type": "api-item"
+  },
   "rq-5939f04a": {
     "decl": "Scenario: Temperature for a 3-atom SETTLE'd water (one rigid molecule, COM removed)",
     "file": "io/log-output",
@@ -10216,14 +10218,6 @@
     "title": "SpmeConfig",
     "type": "api-item"
   },
-  "rq-618bc65e": {
-    "decl": "### Bin structure",
-    "file": "forces/spme",
-    "level": 3,
-    "refs": [],
-    "title": "Bin structure",
-    "type": "section"
-  },
   "rq-61a19da3": {
     "decl": "Scenario: Missing temperature is rejected",
     "file": "integration/berendsen",
@@ -10583,6 +10577,13 @@
     "refs": [],
     "title": "Config",
     "type": "api-item"
+  },
+  "rq-65fd09cd": {
+    "decl": "Scenario: Cell offsets are the exclusive prefix scan of cell counts",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Cell offsets are the exclusive prefix scan of cell counts",
+    "type": "scenario"
   },
   "rq-6606584b": {
     "decl": "Scenario: Config rejected by load_config",
@@ -11853,6 +11854,13 @@
     "refs": [],
     "title": "CUDA kernels",
     "type": "section"
+  },
+  "rq-723b40a0": {
+    "decl": "Scenario: Two runs of the full spread pipeline produce byte-identical rho",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Two runs of the full spread pipeline produce byte-identical rho",
+    "type": "scenario"
   },
   "rq-723d202b": {
     "decl": "- `Config::validate_constraint_compatibility(&self, registries: &Registries, has_constraints: bool) -> Result<(), ConfigError>`",
@@ -15002,6 +15010,13 @@
     "title": "Error Handling Convention",
     "type": "file"
   },
+  "rq-91b90d11": {
+    "decl": "Scenario: Bin scatter places each entry inside its cell's slice",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Bin scatter places each entry inside its cell's slice",
+    "type": "scenario"
+  },
   "rq-91bf10ec": {
     "decl": "Scenario: Valid harmonic angle_type is accepted",
     "file": "io/config-schema",
@@ -15355,7 +15370,12 @@
     "decl": "### Influence-function multiply, virial partial reduction, and inverse FFT",
     "file": "forces/spme",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Influence-function multiply, virial partial reduction, and inverse FFT",
     "type": "section"
   },
@@ -15749,6 +15769,13 @@
     ],
     "title": "[integrator] section parses into a SlotConfig",
     "type": "scenario"
+  },
+  "rq-996edcaf": {
+    "decl": "- `spme_spread_scatter`: one warp per particle, block size 256",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_spread_scatter",
+    "type": "api-item"
   },
   "rq-999eddbb": {
     "decl": "Scenario: SI-mode velocity columns are converted to Bohr per atomic time",
@@ -16754,6 +16781,13 @@
     "title": "Reproducibility",
     "type": "section"
   },
+  "rq-a1b761fa": {
+    "decl": "- `spme_spread_charges(particle_buffers, spme_state) -> Result<(), GpuError>`",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_spread_charges",
+    "type": "api-item"
+  },
   "rq-a1d555ec": {
     "decl": "- `CudaDevice::begin_stream_capture(mode: StreamCaptureMode) ->",
     "file": "cuda-graphs",
@@ -17296,6 +17330,13 @@
     ],
     "title": "NeighborListConfig",
     "type": "api-item"
+  },
+  "rq-a848b183": {
+    "decl": "Scenario: Gather sums bin contents into rho",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Gather sums bin contents into rho",
+    "type": "scenario"
   },
   "rq-a84e1c76": {
     "decl": "#### `[simulation]`",
@@ -20409,6 +20450,13 @@
     "title": "Functions and methods",
     "type": "section"
   },
+  "rq-c88b8090": {
+    "decl": "Scenario: Cell counts equal the number of entries landing in each cell",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Cell counts equal the number of entries landing in each cell",
+    "type": "scenario"
+  },
   "rq-c88dde28": {
     "decl": "Scenario: Reject too many data rows",
     "file": "io/init-state-file",
@@ -20899,6 +20947,13 @@
     "refs": [],
     "title": "File Format",
     "type": "section"
+  },
+  "rq-cdde3d5a": {
+    "decl": "Scenario: Bin entries are sorted by particle ID after sort_cell",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Bin entries are sorted by particle ID after sort_cell",
+    "type": "scenario"
   },
   "rq-cde6e114": {
     "decl": "Scenario: neighbor_list cell-list mode omitting r_skin uses 0.3 * max cutoff",
@@ -22114,6 +22169,13 @@
     "refs": [],
     "title": "Equations of motion",
     "type": "section"
+  },
+  "rq-d9403350": {
+    "decl": "- `spme_spread_gather_to_rho`: one thread per grid cell, block size",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_spread_gather_to_rho",
+    "type": "api-item"
   },
   "rq-d940ac6c": {
     "decl": "## Empty State",
@@ -24609,6 +24671,13 @@
     "title": "lan_drift_half",
     "type": "api-item"
   },
+  "rq-f02115f3": {
+    "decl": "- `spme_spread_sort_cell`: one thread per grid cell, block size 256,",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_spread_sort_cell",
+    "type": "api-item"
+  },
   "rq-f02e9e0e": {
     "decl": "Scenario: Inverse FFT round-trips the forward FFT",
     "file": "forces/spme",
@@ -25322,18 +25391,6 @@
       }
     ],
     "title": "Minimizer",
-    "type": "api-item"
-  },
-  "rq-f69698b8": {
-    "decl": "- `spme_charge_spread(particle_buffers, spme_state) -> Result<(), GpuError>`",
-    "file": "forces/spme",
-    "refs": [
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "spme_charge_spread",
     "type": "api-item"
   },
   "rq-f6d45062": {
