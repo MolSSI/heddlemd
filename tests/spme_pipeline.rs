@@ -104,8 +104,10 @@ fn spme_pipeline_matches_explicit_ewald_two_charge_pair() {
     let l = 1.0e-9;
     let sim_box = SimulationBox::new(&gpu.device, l, l, l, 0.0, 0.0, 0.0).unwrap();
     let positions = [[0.2e-9, 0.0, 0.0], [-0.2e-9, 0.0, 0.0]];
-    let e_charge = 1.602176634e-19;
-    let charges = [e_charge, -e_charge];
+    // Charges in elementary-charge units to match the engine's atomic-unit
+    // pipeline; the reference energy uses the same charges, so the
+    // relative-error assertion is unit-invariant.
+    let charges = [1.0 as Real, -1.0];
     let state = build_state(&positions, &charges);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
 
@@ -150,8 +152,9 @@ fn spme_pipeline_matches_explicit_ewald_four_charges() {
         [0.0, -0.2e-9, 0.15e-9],
         [-0.15e-9, 0.1e-9, -0.1e-9],
     ];
-    let e_charge = 1.602176634e-19;
-    let charges = [e_charge, -e_charge, 2.0 * e_charge, -2.0 * e_charge];
+    // Charges in elementary-charge units to match the engine's atomic-unit
+    // pipeline.
+    let charges = [1.0 as Real, -1.0, 2.0, -2.0];
     let state = build_state(&positions, &charges);
     let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
 
@@ -499,7 +502,7 @@ fn inverse_fft_round_trips_forward_fft_up_to_scale_factor() {
 
 // rq-2ae37ac3
 #[test]
-fn spme_reciprocal_spread_scratch_buffers_are_sized_to_n_times_p_cubed_and_M() {
+fn spme_reciprocal_state_owns_a_length_M_fixed_point_grid() {
     use cudarc::driver::DeviceSlice;
     let gpu = init_device().unwrap();
     let l = 1.0e-9;
@@ -513,17 +516,8 @@ fn spme_reciprocal_spread_scratch_buffers_are_sized_to_n_times_p_cubed_and_M() {
     let n = 1usize;
     let grid = SpmeReciprocalGrid::new(&gpu, &sim_box, n, params).unwrap();
     let m = 16usize * 16 * 16;
-    let p3 = (params.spline_order as usize).pow(3);
-    let expected_entries = n * p3;
     assert_eq!(grid.m, m);
-    assert_eq!(grid.scatter_grid_index.len(), expected_entries);
-    assert_eq!(grid.scatter_value.len(), expected_entries);
-    assert_eq!(grid.scatter_particle_id.len(), expected_entries);
-    assert_eq!(grid.spread_cell_counts.len(), m);
-    assert_eq!(grid.spread_cell_offsets.len(), m + 1);
-    assert_eq!(grid.spread_cell_cursor.len(), m);
-    assert_eq!(grid.binned_particle_id.len(), expected_entries);
-    assert_eq!(grid.binned_value.len(), expected_entries);
+    assert_eq!(grid.rho_fixed.len(), m);
 }
 
 // rq-dd829afb

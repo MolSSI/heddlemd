@@ -1055,6 +1055,13 @@
     "title": "Feature: Velocity Verlet Time Integration",
     "type": "file"
   },
+  "rq-09b6b539": {
+    "decl": "Scenario: spme_spread_finish converts rho_fixed to rho via the inverse scale",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_spread_finish converts rho_fixed to rho via the inverse scale",
+    "type": "scenario"
+  },
   "rq-09c8a503": {
     "decl": "Scenario: Custom minimizer builder is selectable",
     "file": "minimization/steepest-descent",
@@ -3615,10 +3622,6 @@
         "kind": "code"
       },
       {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      },
-      {
         "file": "src/io/config.rs",
         "kind": "code"
       },
@@ -4754,13 +4757,6 @@
     "refs": [],
     "title": "Feature API",
     "type": "section"
-  },
-  "rq-29f4f67a": {
-    "decl": "Scenario: Scatter emits exactly N · p³ entries",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "Scatter emits exactly N · p³ entries",
-    "type": "scenario"
   },
   "rq-2a0e97f5": {
     "decl": "Scenario: Two independent lossless runs produce byte-identical results",
@@ -6830,6 +6826,13 @@
     "refs": [],
     "title": "Parameters",
     "type": "section"
+  },
+  "rq-3dc94856": {
+    "decl": "Scenario: spme_spread_fixed_point issues exactly N · p³ atomicAdd<i64> operations",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "spme_spread_fixed_point issues exactly N · p³ atomicAdd<i64> operations",
+    "type": "scenario"
   },
   "rq-3de16ce0": {
     "decl": "Scenario: Construct a ForceField with LennardJones and MorseBonded",
@@ -9358,13 +9361,6 @@
     "title": "Out of Scope",
     "type": "section"
   },
-  "rq-5918e7a9": {
-    "decl": "- `spme_spread_bin_scatter`: one thread per scatter entry, block size",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "spme_spread_bin_scatter",
-    "type": "api-item"
-  },
   "rq-5939f04a": {
     "decl": "Scenario: Temperature for a 3-atom SETTLE'd water (one rigid molecule, COM removed)",
     "file": "io/log-output",
@@ -9543,6 +9539,13 @@
     "file": "precision",
     "refs": [],
     "title": "f64 build resolves Real to f64",
+    "type": "scenario"
+  },
+  "rq-5b4519e9": {
+    "decl": "Scenario: rho_fixed is zeroed at the start of every step",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "rho_fixed is zeroed at the start of every step",
     "type": "scenario"
   },
   "rq-5b934ecd": {
@@ -10103,6 +10106,13 @@
     "title": "Config",
     "type": "api-item"
   },
+  "rq-6098e0c1": {
+    "decl": "Scenario: One particle's contribution at a single cell matches the fixed-point B-spline value",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "One particle's contribution at a single cell matches the fixed-point B-spline value",
+    "type": "scenario"
+  },
   "rq-60b19852": {
     "decl": "Scenario: Two phases of different kinds may share a numerical seed",
     "file": "io/config-schema",
@@ -10577,13 +10587,6 @@
     "refs": [],
     "title": "Config",
     "type": "api-item"
-  },
-  "rq-65fd09cd": {
-    "decl": "Scenario: Cell offsets are the exclusive prefix scan of cell counts",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "Cell offsets are the exclusive prefix scan of cell counts",
-    "type": "scenario"
   },
   "rq-6606584b": {
     "decl": "Scenario: Config rejected by load_config",
@@ -11856,10 +11859,10 @@
     "type": "section"
   },
   "rq-723b40a0": {
-    "decl": "Scenario: Two runs of the full spread pipeline produce byte-identical rho",
+    "decl": "Scenario: Two runs of the full spread pipeline produce byte-identical rho_fixed and rho",
     "file": "forces/spme",
     "refs": [],
-    "title": "Two runs of the full spread pipeline produce byte-identical rho",
+    "title": "Two runs of the full spread pipeline produce byte-identical rho_fixed and rho",
     "type": "scenario"
   },
   "rq-723d202b": {
@@ -15010,13 +15013,6 @@
     "title": "Error Handling Convention",
     "type": "file"
   },
-  "rq-91b90d11": {
-    "decl": "Scenario: Bin scatter places each entry inside its cell's slice",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "Bin scatter places each entry inside its cell's slice",
-    "type": "scenario"
-  },
   "rq-91bf10ec": {
     "decl": "Scenario: Valid harmonic angle_type is accepted",
     "file": "io/config-schema",
@@ -15771,10 +15767,10 @@
     "type": "scenario"
   },
   "rq-996edcaf": {
-    "decl": "- `spme_spread_scatter`: one warp per particle, block size 256",
+    "decl": "- `spme_spread_fixed_point`: one warp per particle, block size 256",
     "file": "forces/spme",
     "refs": [],
-    "title": "spme_spread_scatter",
+    "title": "spme_spread_fixed_point",
     "type": "api-item"
   },
   "rq-999eddbb": {
@@ -17330,13 +17326,6 @@
     ],
     "title": "NeighborListConfig",
     "type": "api-item"
-  },
-  "rq-a848b183": {
-    "decl": "Scenario: Gather sums bin contents into rho",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "Gather sums bin contents into rho",
-    "type": "scenario"
   },
   "rq-a84e1c76": {
     "decl": "#### `[simulation]`",
@@ -20450,13 +20439,6 @@
     "title": "Functions and methods",
     "type": "section"
   },
-  "rq-c88b8090": {
-    "decl": "Scenario: Cell counts equal the number of entries landing in each cell",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "Cell counts equal the number of entries landing in each cell",
-    "type": "scenario"
-  },
   "rq-c88dde28": {
     "decl": "Scenario: Reject too many data rows",
     "file": "io/init-state-file",
@@ -20947,13 +20929,6 @@
     "refs": [],
     "title": "File Format",
     "type": "section"
-  },
-  "rq-cdde3d5a": {
-    "decl": "Scenario: Bin entries are sorted by particle ID after sort_cell",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "Bin entries are sorted by particle ID after sort_cell",
-    "type": "scenario"
   },
   "rq-cde6e114": {
     "decl": "Scenario: neighbor_list cell-list mode omitting r_skin uses 0.3 * max cutoff",
@@ -22171,10 +22146,10 @@
     "type": "section"
   },
   "rq-d9403350": {
-    "decl": "- `spme_spread_gather_to_rho`: one thread per grid cell, block size",
+    "decl": "- `spme_spread_finish`: one thread per grid cell, block size 256,",
     "file": "forces/spme",
     "refs": [],
-    "title": "spme_spread_gather_to_rho",
+    "title": "spme_spread_finish",
     "type": "api-item"
   },
   "rq-d940ac6c": {
@@ -24669,13 +24644,6 @@
       }
     ],
     "title": "lan_drift_half",
-    "type": "api-item"
-  },
-  "rq-f02115f3": {
-    "decl": "- `spme_spread_sort_cell`: one thread per grid cell, block size 256,",
-    "file": "forces/spme",
-    "refs": [],
-    "title": "spme_spread_sort_cell",
     "type": "api-item"
   },
   "rq-f02e9e0e": {

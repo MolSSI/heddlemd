@@ -166,34 +166,26 @@ extern "C" __global__ void spme_recip_compute_influence(
   virial_factor[idx] = vf_out;
 }
 
-// rq-9ca00d25
+// rq-9ca00d25 rq-382a6e66 rq-a1b761fa
 //
-// Charge spreading kernel: one thread per real grid cell. Walks the p^3
-// neighbouring bins (cells of the FFT-grid-aligned spatial hash) and
-// accumulates B-spline-weighted charge contributions from every
-// particle whose primary bin is offset by (d_a, d_b, d_c) ∈ [0, p)^3
-// from the thread's grid point. Each grid cell is written by exactly
-// one thread; no atomics.
-// rq-037dd2f3
+// Fixed-point atomic-add charge-spread pipeline. Two kernels:
+//   1. spme_spread_fixed_point — one warp per particle. Each lane
+//                                computes its assigned (d_a, d_b, d_c)
+//                                contribution and issues
+//                                atomicAdd<i64>(&rho_fixed[g], v_fixed)
+//                                where v_fixed = (i64) rintf(q · w_a ·
+//                                w_b · w_c · 2^32). Total N · p^3 atomic
+//                                adds per step.
+//   2. spme_spread_finish      — one thread per real grid cell. Reads
+//                                rho_fixed[c] and writes
+//                                rho[c] = (f32) rho_fixed[c] · 2^-32.
 //
-// E2 scatter-then-gather charge-spread pipeline. Five kernels:
-//   1. spme_spread_scatter         — one warp per particle, emits N*p^3
-//                                    scatter entries plus per-cell counts.
-//   2. (prefix_scan_cell_counts)   — reused from neighbor-list.md.
-//   3. spme_spread_bin_scatter     — one thread per scatter entry,
-//                                    places into per-cell bin slices via
-//                                    atomicInc cursors.
-//   4. spme_spread_sort_cell       — one thread per grid cell, insertion-
-//                                    sorts the bin slice by particle ID.
-//   5. spme_spread_gather_to_rho   — one thread per grid cell, sums the
-//                                    sorted bin slice into rho[c].
-//
-// Determinism: stages 1 and 3 use atomics on `spread_cell_counts` and
-// `spread_cell_cursor`, but the intermediate placement order is not
-// observed downstream. Stage 4 canonicalises the in-cell entry order
-// by ascending particle ID, and stage 5 sums in that fixed order. Two
-// runs on the same GPU with identical positions therefore produce a
-// byte-identical `rho`.
+// Determinism: i64 atomic addition is exactly associative on the same
+// GPU regardless of atomic-completion order, so the accumulated
+// rho_fixed grid is byte-identical across runs with byte-identical
+// inputs. The f32 conversion is per-cell with no inter-thread
+// communication, also deterministic. The scale factor 2^32 matches
+// OpenMM's gridSpreadCharge convention.
 
 // Compute fractional offsets t_a, t_b, t_c and primary bin
 // (g_a, g_b, g_c) for one particle. Replicates the geometry of the
@@ -246,22 +238,28 @@ __device__ static inline void spread_per_particle_setup(
   g_c = (unsigned int) gc_l;
 }
 
-// Stage 1. One warp per particle. Lane 0 computes the per-particle
-// weights and primary bin, broadcasts via __shfl_sync, then each lane
-// emits ceil(p^3 / 32) of the contributions.
-extern "C" __global__ void spme_spread_scatter(
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
-    const Real *charges,
-    const Real *lattice,
-    unsigned int n_a, unsigned int n_b, unsigned int n_c,
-    unsigned int spline_order,
-    unsigned int *scatter_grid_index,    // length n * p^3
-    Real         *scatter_value,         // length n * p^3
-    unsigned int *scatter_particle_id,   // length n * p^3
-    unsigned int *spread_cell_counts,    // length M
-    unsigned int n)
+// Fixed-point scale factor: maps a real value `v` to the i64 integer
+// (i64) rintf(v * SPREAD_FIXED_POINT_SCALE). Matches OpenMM's
+// `gridSpreadCharge` convention. With charges bounded by O(1 e) and
+// B-spline weights bounded by 1, a single contribution maps to a
+// value of magnitude <= a few * 10^9; the worst-case accumulated
+// cell sum stays well under i64::MAX ~ 9.2 * 10^18.
+#define SPREAD_FIXED_POINT_SCALE 4294967296.0f  // 2^32 as f32
+
+// Per-particle fixed-point spread. One warp per particle. Lane 0
+// computes the per-particle setup, broadcasts it via __shfl_sync,
+// and each lane handles ceil(p^3 / 32) of the p^3 contributions,
+// issuing atomicAdd<i64> into the fixed-point grid.
+extern "C" __global__ void spme_spread_fixed_point(
+    const Real   *positions_x,
+    const Real   *positions_y,
+    const Real   *positions_z,
+    const Real   *charges,
+    const Real   *lattice,
+    unsigned int  n_a, unsigned int n_b, unsigned int n_c,
+    unsigned int  spline_order,
+    long long    *rho_fixed,            // length M (i64)
+    unsigned int  n)
 {
   // 8 warps per block, 32 lanes per warp.
   unsigned int warp_id_in_block = threadIdx.x >> 5;
@@ -315,7 +313,6 @@ extern "C" __global__ void spme_spread_scatter(
   // Inverse mapping: the original one-thread-per-grid-cell kernel
   // summed over contributing bins (g + d) % n; so a particle in bin
   // b contributes to grid cells (b - d) % n for d in [0, p).
-  unsigned int row_base = i * p3;
   for (unsigned int k = lane; k < p3; k += 32u) {
     unsigned int da = k / p2;
     unsigned int rem = k - da * p2;
@@ -326,85 +323,30 @@ extern "C" __global__ void spme_spread_scatter(
     unsigned int gc = (g_c + n_c - dc) % n_c;
     unsigned int g = (ga * n_b + gb) * n_c + gc;
     Real v = qi * wa[da] * wb[db] * wc[dc];
-    unsigned int t = row_base + k;
-    scatter_grid_index[t] = g;
-    scatter_value[t] = v;
-    scatter_particle_id[t] = i;
-    atomicAdd(&spread_cell_counts[g], 1u);
+    long long v_fixed = (long long) __float2ll_rn(
+        (float) v * SPREAD_FIXED_POINT_SCALE);
+    atomicAdd((unsigned long long *) &rho_fixed[g],
+              (unsigned long long) v_fixed);
   }
 }
 
-// Stage 3. One thread per scatter entry. Reads (g, v, particle_id) and
-// places into the cell's slice of binned arrays via atomicInc cursor.
-extern "C" __global__ void spme_spread_bin_scatter(
-    const unsigned int *scatter_grid_index,
-    const Real         *scatter_value,
-    const unsigned int *scatter_particle_id,
-    const unsigned int *spread_cell_offsets,
-    unsigned int       *spread_cell_cursor,
-    unsigned int       *binned_particle_id,
-    Real               *binned_value,
-    unsigned int n_entries)
-{
-  unsigned int t = blockIdx.x * blockDim.x + threadIdx.x;
-  if (t >= n_entries) {
-    return;
-  }
-  unsigned int g = scatter_grid_index[t];
-  Real v = scatter_value[t];
-  unsigned int i = scatter_particle_id[t];
-  unsigned int local = atomicAdd(&spread_cell_cursor[g], 1u);
-  unsigned int pos = spread_cell_offsets[g] + local;
-  binned_particle_id[pos] = i;
-  binned_value[pos] = v;
-}
-
-// Stage 4. One thread per grid cell. Insertion-sort the cell's slice
-// of binned_particle_id (carrying binned_value alongside).
-extern "C" __global__ void spme_spread_sort_cell(
-    const unsigned int *spread_cell_offsets,
-    unsigned int       *binned_particle_id,
-    Real               *binned_value,
-    unsigned int M)
+// Fixed-point -> f32 conversion. One thread per real grid cell.
+extern "C" __global__ void spme_spread_finish(
+    const long long *rho_fixed,         // length M (i64)
+    Real            *rho,               // length M (f32 or f64)
+    unsigned int     M)
 {
   unsigned int c = blockIdx.x * blockDim.x + threadIdx.x;
   if (c >= M) {
     return;
   }
-  unsigned int start = spread_cell_offsets[c];
-  unsigned int end = spread_cell_offsets[c + 1u];
-  for (unsigned int k = start + 1u; k < end; ++k) {
-    unsigned int key = binned_particle_id[k];
-    Real val = binned_value[k];
-    int pos = (int) k - 1;
-    while (pos >= (int) start && binned_particle_id[pos] > key) {
-      binned_particle_id[pos + 1] = binned_particle_id[pos];
-      binned_value[pos + 1] = binned_value[pos];
-      pos -= 1;
-    }
-    binned_particle_id[pos + 1] = key;
-    binned_value[pos + 1] = val;
-  }
-}
-
-// Stage 5. One thread per grid cell. Sum the sorted bin into rho[c].
-extern "C" __global__ void spme_spread_gather_to_rho(
-    const unsigned int *spread_cell_offsets,
-    const Real         *binned_value,
-    Real               *rho,
-    unsigned int M)
-{
-  unsigned int c = blockIdx.x * blockDim.x + threadIdx.x;
-  if (c >= M) {
-    return;
-  }
-  unsigned int start = spread_cell_offsets[c];
-  unsigned int end = spread_cell_offsets[c + 1u];
-  Real accum = R(0.0);
-  for (unsigned int k = start; k < end; ++k) {
-    accum += binned_value[k];
-  }
-  rho[c] = accum;
+  // Reinterpret the unsigned bit pattern as signed i64. atomicAdd on
+  // unsigned long long wraps modulo 2^64 the same way two's-complement
+  // i64 addition wraps, so the bit pattern of every accumulated cell
+  // is the correct i64 sum regardless of intermediate sign changes.
+  long long fp = rho_fixed[c];
+  Real inv_scale = R(1.0) / (Real) SPREAD_FIXED_POINT_SCALE;
+  rho[c] = (Real) fp * inv_scale;
 }
 
 // rq-9ca00d25

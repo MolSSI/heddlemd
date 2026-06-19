@@ -208,21 +208,20 @@ inputs produce byte-identical `slot_force_*` outputs.
 
 The reciprocal-space slot owns:
 
-- The scatter-then-gather charge-spread scratch (see *Charge spreading*
-  for the per-step pipeline that consumes these):
-  - `scatter_grid_index: CudaSlice<u32>` of length `N · p³`.
-  - `scatter_value: CudaSlice<f32>` of length `N · p³`.
-  - `scatter_particle_id: CudaSlice<u32>` of length `N · p³`.
-  - `spread_cell_counts: CudaSlice<u32>` of length `M`.
-  - `spread_cell_offsets: CudaSlice<u32>` of length `M + 1`.
-  - `spread_cell_cursor: CudaSlice<u32>` of length `M`.
-  - `binned_particle_id: CudaSlice<u32>` of length `N · p³`.
-  - `binned_value: CudaSlice<f32>` of length `N · p³`.
+- A fixed-point charge-density grid `rho_fixed: CudaSlice<i64>` of
+  length `M`. Each cell holds the per-particle contributions
+  `q_i · w_a · w_b · w_c` accumulated via `atomicAdd<i64>` and
+  represented as the fixed-point integer
+  `(i64)(value × 2^32)`. The grid is zeroed before each step's
+  spread and converted to f32 `rho` by `spme_spread_finish` after
+  the spread completes. The fixed-point representation makes the
+  per-step accumulation exactly associative across threads (integer
+  atomicAdd is associative), so two runs on the same GPU with
+  byte-identical inputs produce a byte-identical `rho_fixed`
+  regardless of atomic-completion order.
 
-  When `particle_count == 0`, every length-`N · p³` scratch slice has
-  length 0 and the charge-spread pipeline performs no kernel launches.
-
-- Real-valued grid buffers `rho: [f32; M]` (charge density) and
+- Real-valued grid buffers `rho: [f32; M]` (charge density,
+  populated by `spme_spread_finish` from `rho_fixed`) and
   `V: [f32; M]` (smoothed potential) where `M = n_a · n_b · n_c`.
 - A complex-valued grid `rho_hat: [c32; M_complex]` where
   `M_complex = n_a · n_b · (n_c/2 + 1)`. cuFFT stores real-to-complex
@@ -282,108 +281,68 @@ the sum runs over every particle whose support intersects `g` —
 equivalently, every particle whose primary bin lies within the box of
 `p × p × p` bins centred on `g`.
 
-The slot computes this via a five-stage **scatter-then-gather**
-pipeline that runs every step. Each stage launches one or more CUDA
-kernels on the default stream; all operations are deterministic
-under the same-GPU run-to-run contract.
+The slot computes this via a two-stage **fixed-point atomic-add**
+pipeline that runs every step. Both stages execute on the default
+stream and are deterministic under the same-GPU run-to-run contract.
 
-The pipeline owns three scratch arrays (see *Reciprocal-space
-pipeline* for full ownership):
+The fixed-point representation maps a real value `v` to the integer
+`v_fixed = (i64)(v × 2^32)`. With charges bounded by O(1 e) and 
+B-spline weights bounded by 1, a single contribution maps to a value
+of magnitude at most a few × 10⁹, and the worst-case accumulated cell
+sum stays well under `i64::MAX ≈ 9.2 × 10¹⁸`. Integer atomic addition
+on i64 is exactly associative on the same GPU regardless of
+atomic-completion order, so the accumulated fixed-point grid is
+byte-identical across runs with byte-identical inputs.
 
-- `scatter_grid_index: CudaSlice<u32>` — length `N · p³`. Entry `t`
-  holds the row-major grid-cell index that contribution `t` lands on.
-- `scatter_value: CudaSlice<f32>` — length `N · p³`. Entry `t` holds
-  the contribution value `q_i · w_a · w_b · w_c` for the same `t`.
-- `scatter_particle_id: CudaSlice<u32>` — length `N · p³`. Entry `t`
-  holds the originating particle index for `t`. Used as the sort key
-  in the bin-sort stage so the in-cell summation order is determined
-  by particle identity rather than by atomic-completion order.
+The two stages:
 
-Plus three bin-structure arrays:
+1. **Per-step state reset.** `rho_fixed` is zeroed via the device's
+   `memset_zeros` before the spread launches. The reset and every
+   later kernel run on the same default stream, so the per-stream
+   ordering supplies the read-after-write guarantee with no explicit
+   synchronisation.
 
-- `spread_cell_counts: CudaSlice<u32>` — length `M`. Counts how many
-  scatter entries fall on each grid cell.
-- `spread_cell_offsets: CudaSlice<u32>` — length `M + 1`. Exclusive
-  prefix scan of `spread_cell_counts`. Cell `c` occupies binned-buffer
-  positions `[spread_cell_offsets[c], spread_cell_offsets[c + 1])`.
-- `spread_cell_cursor: CudaSlice<u32>` — length `M`. Per-cell atomic
-  write cursor used during the bin-sort stage.
+2. **Per-particle fixed-point scatter.** `spme_spread_fixed_point`
+   runs one warp per particle with 8 warps per block (256 threads)
+   and grid `ceil(N / 8)`. Lane 0 of each warp reads particle `i`'s
+   wrapped position and charge `q_i`, computes the fractional
+   coordinates `(s_a, s_b, s_c)`, the primary bin `(g_a, g_b, g_c)`,
+   the fractional offsets `(t_a, t_b, t_c)`, and the per-axis 1D
+   B-spline weights `wa[0..p]`, `wb[0..p]`, `wc[0..p]`; the per-axis
+   weights, primary bin, and `q_i` are broadcast to every lane via
+   `__shfl_sync`.
 
-And two binned-output arrays:
-
-- `binned_particle_id: CudaSlice<u32>` — length `N · p³`. Bin-sorted
-  particle IDs.
-- `binned_value: CudaSlice<f32>` — length `N · p³`. Bin-sorted
-  contributions, addressed identically to `binned_particle_id`.
-
-The five stages:
-
-1. **Per-particle scatter emit.** `spme_spread_scatter` runs one
-   warp per particle. Lane 0 of each warp computes
-   `(s_a, s_b, s_c)`, the primary bin `(g_a, g_b, g_c)`, the
-   fractional offsets `(t_a, t_b, t_c)`, and the per-axis 1D
-   B-spline weights `wa[0..p]`, `wb[0..p]`, `wc[0..p]`. The per-axis
-   weights are broadcast to every lane via warp shuffles. Each of
-   the 32 lanes then handles `⌈p³ / 32⌉` of the `p³` contributions
-   in lexicographic `(d_a, d_b, d_c)` order. For its assigned
-   contribution index `k = d_a · p² + d_b · p + d_c`, lane `l`:
-   - Computes the target grid cell index
+   Each of the 32 lanes handles `⌈p³ / 32⌉` of the `p³` grid
+   contributions. Lane `l` iterates the contribution index
+   `k = l, l + 32, l + 64, …` while `k < p³`. For its assigned
+   `k = d_a · p² + d_b · p + d_c`, the lane:
+   - Computes the wrapped grid-cell index
      `g = ((g_a + d_a) mod n_a · n_b + (g_b + d_b) mod n_b) · n_c
           + (g_c + d_c) mod n_c`.
-   - Computes the value
+   - Computes the f32 contribution value
      `v = q_i · wa[d_a] · wb[d_b] · wc[d_c]`.
-   - Writes the entry at the fixed scratch index
-     `t = i · p³ + k`:
-     - `scatter_grid_index[t] = g`
-     - `scatter_value[t] = v`
-     - `scatter_particle_id[t] = i`
-   - Issues `atomicAdd(&spread_cell_counts[g], 1)`.
+   - Converts to fixed-point
+     `v_fixed = (i64) rintf(v · 2^32)` and issues
+     `atomicAdd(&rho_fixed[g], v_fixed)`.
 
-   No host-visible ordering depends on the order in which the
-   atomic adds land; only the final per-cell count is observed
-   downstream, and the count is the deterministic outcome of
-   `N · p³` adds of `1` regardless of order.
+   Round-to-nearest in the f32 → i64 conversion (CUDA's
+   `__float2ll_rn` or `rintf` + cast) keeps the per-contribution
+   rounding direction deterministic. The atomic-completion order of
+   the `N · p³` adds is non-deterministic, but i64 addition is
+   associative, so the final `rho_fixed` is byte-identical across
+   runs.
 
-2. **Prefix-scan cell counts.** The shared
-   `prefix_scan_cell_counts` kernel family (see `neighbor-list.md`)
-   runs on `spread_cell_counts` of length `M` to produce
-   `spread_cell_offsets` of length `M + 1`.
+3. **Fixed-point → f32 conversion.** `spme_spread_finish` runs one
+   thread per grid cell with block size 256 and grid `ceil(M / 256)`.
+   Thread `c` reads `rho_fixed[c]` and writes
+   `rho[c] = (f32) rho_fixed[c] × FIXED_POINT_SCALE_INV` where
+   `FIXED_POINT_SCALE_INV = 1.0f / (float)(1ULL << 32)`. Each cell is
+   written by exactly one thread; no atomics, no inter-thread
+   communication.
 
-3. **Bin-scatter into per-cell slices.** `spme_spread_bin_scatter`
-   runs one thread per scatter entry (`N · p³` threads). Thread
-   `t` reads `(g, v, i) = (scatter_grid_index[t], scatter_value[t],
-   scatter_particle_id[t])`, computes
-   `pos = spread_cell_offsets[g] + atomicAdd(&spread_cell_cursor[g], 1)`,
-   and writes
-   - `binned_particle_id[pos] = i`
-   - `binned_value[pos] = v`.
-
-   The intermediate placement within a cell's slice depends on the
-   atomic-completion order and is not observed downstream; the
-   in-cell sort stage canonicalises the order before the gather
-   reads it.
-
-4. **In-cell sort by particle ID.** `spme_spread_sort_cell` runs
-   one thread per grid cell `c`. The thread runs an insertion sort
-   on `binned_particle_id[spread_cell_offsets[c] .. spread_cell_offsets[c + 1])`,
-   moving the corresponding entries of `binned_value` alongside.
-   After this stage, the two binned arrays' contents per cell are
-   in strictly ascending particle-ID order. Distinct particles
-   never land at the same `(cell, particle_id)` position, so the
-   sort key is unique within each cell.
-
-5. **Per-cell gather.** `spme_spread_gather_to_rho` runs one
-   thread per grid cell. The thread accumulates
-   `rho[c] = Σ_{k = spread_cell_offsets[c]}^{spread_cell_offsets[c + 1] − 1}
-                  binned_value[k]`
-   in left-to-right order over the bin's already-particle-ID-sorted
-   entries and writes the result to `rho[c]`.
-
-Each grid point is written by exactly one thread in stage 5; no
-atomics are used in the summation into `rho`. The per-cell
-contribution order is fixed by stage 4's sort, so two runs on the
-same GPU with byte-identical positions produce a byte-identical
-`rho` buffer.
+When `particle_count == 0`, the spread kernel launch is skipped, the
+fixed-point grid stays at its post-`memset_zeros` zero state, and
+`spme_spread_finish` produces an all-zero `rho`.
 
 The grid index uses the standard row-major mapping
 `grid_index(g_a, g_b, g_c) = (g_a · n_b + g_b) · n_c + g_c`.
@@ -710,27 +669,21 @@ only inside the `SpmeReciprocalState` construction path.
   computation of the influence function is performed.
 
 - `spme_spread_charges(particle_buffers, spme_state) -> Result<(), GpuError>` <!-- rq-a1b761fa -->
-  Launches the five-stage scatter-then-gather charge-spread pipeline on
-  the default stream:
-  1. `spme_spread_scatter` — one warp per particle; emits `N · p³`
-     scatter entries and increments `spread_cell_counts`.
-  2. The `prefix_scan_cell_counts` kernel family (see
-     `neighbor-list.md`) — computes `spread_cell_offsets` from
-     `spread_cell_counts`.
-  3. `spme_spread_bin_scatter` — one thread per scatter entry;
-     places each entry into its grid cell's slice of `binned_value`
-     and `binned_particle_id` via `atomicInc(&spread_cell_cursor[g])`.
-  4. `spme_spread_sort_cell` — one thread per grid cell; insertion-
-     sorts the cell's slice of `binned_particle_id`, moving
-     `binned_value` alongside.
-  5. `spme_spread_gather_to_rho` — one thread per grid cell; sums
-     the cell's binned values into `rho[c]`.
+  Launches the two-stage fixed-point charge-spread pipeline on the
+  default stream:
+  1. Device-side `memset_zeros` on `spme_state.rho_fixed` (length
+     `M`, i64) to clear the previous step's accumulation.
+  2. `spme_spread_fixed_point` — one warp per particle; each lane
+     issues `⌈p³ / 32⌉` `atomicAdd<i64>` operations into
+     `rho_fixed`, totalling `N · p³` atomic adds per step.
+  3. `spme_spread_finish` — one thread per grid cell; converts
+     `rho_fixed[c]` to `rho[c] = (f32) rho_fixed[c] · 2^-32`.
 
   Writes `spme_state.rho`. Returns `Ok(())` immediately once every
   kernel has been enqueued; no host-side computation is performed.
-  When `particle_count == 0`, no kernels are launched and `rho` is
-  left at its prior contents (it must have been zero-initialised at
-  slot construction).
+  When `particle_count == 0`, the fixed-point spread kernel is
+  skipped (the `memset_zeros` and `spme_spread_finish` still run),
+  so `rho` is produced as all zeros.
 
 - The R2C forward transform `rho → rho_hat` is invoked via <!-- rq-24e36eba -->
   `SpmeReciprocalGrid::forward_plan.execute(&rho, &mut rho_hat)`, where
@@ -803,7 +756,7 @@ extern "C" __global__ void spme_recip_reduce_partials(
     unsigned int num_blocks,
     float scale);                       // 0.5 / N
 
-extern "C" __global__ void spme_spread_scatter(
+extern "C" __global__ void spme_spread_fixed_point(
     const float *positions_x,
     const float *positions_y,
     const float *positions_z,
@@ -811,32 +764,12 @@ extern "C" __global__ void spme_spread_scatter(
     const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
     unsigned int spline_order,
-    unsigned int *scatter_grid_index,    // length n * p^3
-    float        *scatter_value,         // length n * p^3
-    unsigned int *scatter_particle_id,   // length n * p^3
-    unsigned int *spread_cell_counts,    // length M
+    long long   *rho_fixed,         // length M (i64 fixed-point grid)
     unsigned int n);
 
-extern "C" __global__ void spme_spread_bin_scatter(
-    const unsigned int *scatter_grid_index,
-    const float        *scatter_value,
-    const unsigned int *scatter_particle_id,
-    const unsigned int *spread_cell_offsets,
-    unsigned int       *spread_cell_cursor,
-    unsigned int       *binned_particle_id,
-    float              *binned_value,
-    unsigned int n_entries);
-
-extern "C" __global__ void spme_spread_sort_cell(
-    const unsigned int *spread_cell_offsets,
-    unsigned int       *binned_particle_id,
-    float              *binned_value,
-    unsigned int M);
-
-extern "C" __global__ void spme_spread_gather_to_rho(
-    const unsigned int *spread_cell_offsets,
-    const float        *binned_value,
-    float              *rho,
+extern "C" __global__ void spme_spread_finish(
+    const long long *rho_fixed,     // length M
+    float           *rho,           // length M
     unsigned int M);
 
 extern "C" __global__ void spme_recip_apply_influence(
@@ -877,16 +810,14 @@ on the launch block size (256), not on thread scheduling.
   common pair-force pattern (see `pair-force-kernel.md`).
 - `spme_recip_compute_influence`: one thread per complex grid cell, <!-- rq-17b52850 -->
   block size 256, grid `ceil(M_complex / 256)`. No shared memory.
-- `spme_spread_scatter`: one warp per particle, block size 256 <!-- rq-996edcaf -->
+- `spme_spread_fixed_point`: one warp per particle, block size 256 <!-- rq-996edcaf -->
   (8 warps × 32 lanes), grid `ceil(N / 8)`. No static shared memory
-  (per-axis B-spline weights are broadcast lane-to-lane via
-  `__shfl_sync`).
-- `spme_spread_bin_scatter`: one thread per scatter entry, block size <!-- rq-5918e7a9 -->
-  256, grid `ceil((N · p³) / 256)`. No shared memory.
-- `spme_spread_sort_cell`: one thread per grid cell, block size 256, <!-- rq-f02115f3 -->
-  grid `ceil(M / 256)`. No shared memory. Per-cell insertion sort.
-- `spme_spread_gather_to_rho`: one thread per grid cell, block size <!-- rq-d9403350 -->
-  256, grid `ceil(M / 256)`. No shared memory.
+  (per-axis B-spline weights, primary bin, and `q_i` are broadcast
+  lane-to-lane via `__shfl_sync`). Each of the 32 lanes performs
+  `⌈p³ / 32⌉` `atomicAdd<i64>` operations into `rho_fixed`.
+- `spme_spread_finish`: one thread per grid cell, block size 256, <!-- rq-d9403350 -->
+  grid `ceil(M / 256)`. No shared memory. Reads `rho_fixed[c]`,
+  writes `rho[c] = (f32) rho_fixed[c] · 2^-32`.
 - `spme_recip_apply_influence`: one thread per complex grid cell, <!-- rq-b82694ec -->
   block size 256, grid `ceil(M_complex / 256)`,
   `__shared__ Real partial[256]` for the per-block virial reduction.
@@ -906,15 +837,13 @@ Stream assignment:
 - Every SPME kernel and cuFFT call dispatched by either SPME slot — <!-- rq-44cce069 -->
   `spme_real_pair_force_*`, `spme_force_gather`,
   `spme_recip_compute_influence` (when triggered by a box-generation
-  change), the `spme_spread_*` pipeline kernels
-  (`spme_spread_scatter`, the prefix-scan family,
-  `spme_spread_bin_scatter`, `spme_spread_sort_cell`,
-  `spme_spread_gather_to_rho`), the cuFFT R2C transform,
-  `spme_recip_apply_influence`, the cuFFT C2R transform, and
-  `spme_recip_reduce_partials` — runs on the device's default stream
-  carried by `particle_buffers.device`. Both cuFFT plans are bound to
-  the default stream via `cufftSetStream` once at slot construction
-  and are never rebound.
+  change), the `spme_spread_fixed_point` and `spme_spread_finish`
+  kernels (plus the device-side `memset_zeros` on `rho_fixed`),
+  the cuFFT R2C transform, `spme_recip_apply_influence`, the cuFFT
+  C2R transform, and `spme_recip_reduce_partials` — runs on the
+  device's default stream carried by `particle_buffers.device`.
+  Both cuFFT plans are bound to the default stream via
+  `cufftSetStream` once at slot construction and are never rebound.
 
 The slot owns no secondary CUDA streams and no CUDA events. The
 ordering of writes and reads within a step's reciprocal pipeline
@@ -930,27 +859,20 @@ SPME on HeddleMD is bit-exact GPU-vs-GPU when run on the same hardware
 with identical inputs. Six components carry the reproducibility
 invariant:
 
-1. **Charge spread.** The scatter-then-gather pipeline determinises
-   the per-cell summation in two ways:
-   - The scatter-emit stage writes each contribution at the fixed
-     scratch index `t = i · p³ + (d_a · p² + d_b · p + d_c)`, so the
-     `(scatter_grid_index, scatter_value, scatter_particle_id)`
-     arrays' contents depend only on the inputs, not on thread
-     scheduling.
-   - The bin-scatter stage uses non-deterministic `atomicInc` cursors
-     to place entries into per-cell slices, but the subsequent
-     `spme_spread_sort_cell` insertion sort canonicalises the order
-     within each cell to strictly ascending particle ID. The
-     `spme_spread_gather_to_rho` stage then sums each cell's entries
-     in left-to-right order, producing a byte-identical `rho` buffer
-     across runs with identical positions on the same GPU.
-2. **Scatter-stage histogram.** `spme_spread_scatter` atomically
-   increments `spread_cell_counts[g]` for every emitted entry. The
-   final counts depend only on the number of `+1` operations per
-   cell, not on the order in which they occur; the prefix scan over
-   `spread_cell_counts` produces byte-identical `spread_cell_offsets`
-   across runs.
-3. **cuFFT.** Deterministic for fixed plan dimensions, single-stream
+1. **Charge spread.** The per-particle B-spline weight computation
+   inside `spme_spread_fixed_point` is fully per-lane and
+   deterministic — lane 0 computes once and broadcasts via
+   `__shfl_sync`, every lane evaluates the same expression for its
+   assigned `(d_a, d_b, d_c)`, and the f32 → i64 conversion uses
+   round-to-nearest. The atomic adds into `rho_fixed` are on i64,
+   which is an exactly associative operation: the final cell value
+   `rho_fixed[g] = Σ v_fixed` is independent of the order in which
+   the `atomicAdd<i64>` operations complete. Two runs on the same
+   GPU with byte-identical inputs therefore produce a byte-identical
+   `rho_fixed`. The `spme_spread_finish` pass writes
+   `rho[c] = (f32) rho_fixed[c] · 2^-32` per cell with no
+   inter-thread communication, so `rho` is byte-identical too.
+2. **cuFFT.** Deterministic for fixed plan dimensions, single-stream
    usage, and the same hardware. "Single-stream usage" is satisfied
    because both cuFFT plans are bound once at slot construction to
    the device's default stream via `cufftSetStream` and are never
@@ -960,13 +882,13 @@ invariant:
    transparently reallocate scratch memory at execution time. The
    `cufft_determinism_smoke_test` run at `init_device` time validates
    the contract on the host's specific cuFFT version.
-4. **Influence function recompute.** `spme_recip_compute_influence`
+3. **Influence function recompute.** `spme_recip_compute_influence`
    runs one thread per complex grid cell with no inter-thread
    communication. Inner arithmetic in `double` precision. The kernel
    fires whenever the slot observes a changed `sim_box.generation()`,
    producing byte-identical `influence_G` and `virial_factor` for
    byte-identical box lattices on the same GPU.
-5. **Influence-function multiply and virial partial reduction.**
+4. **Influence-function multiply and virial partial reduction.**
    `spme_recip_apply_influence` runs one thread per complex grid
    cell; no atomics; no inter-thread reads on the multiply portion.
    The per-block partial-sum reduction over the per-thread virial
@@ -974,18 +896,18 @@ invariant:
    pairwise tree whose shape depends only on the launch block size
    (256), so two runs on the same GPU produce byte-identical
    `V_hat` and byte-identical `virial_partials`.
-6. **Virial partial-sums reduction.** `spme_recip_reduce_partials`
+5. **Virial partial-sums reduction.** `spme_recip_reduce_partials`
    runs a single block of 256 threads with a strided per-thread
    accumulator and a deterministic left-to-right pairwise tree in
    shared memory. Two runs with byte-identical `virial_partials`
    produce a byte-identical `w_per_particle_virial[0]`.
-5. **Force gather.** One thread per particle; each thread reads `p³`
+6. **Force gather.** One thread per particle; each thread reads `p³`
    grid points in fixed `(d_a, d_b, d_c)` lexicographic order. No
    atomics. The per-particle virial uses the equal-division attribution
    `W_recip / N` (the slot's `compute()` distributes the scalar
    identically to every particle, so the SoA convention is preserved
    regardless of summation order).
-6. **Two-stream model.** The reciprocal pipeline runs on
+7. **Two-stream model.** The reciprocal pipeline runs on
    `recip_stream`; the real-space slot, the force-gather kernel, and
    every non-SPME slot's kernel run on the default stream. The two
    streams write to disjoint device buffers — `recip_stream` writes
@@ -1175,7 +1097,7 @@ Feature: Smooth particle-mesh Ewald (SPME)
     When the _f variant of spme_real_pair_force is called
     Then slot_force_x[0] equals -slot_force_x[1] bit-exactly (Newton's third law for an isolated pair)
 
-  # --- Reciprocal-space pipeline: spread (scatter-then-gather) ---
+  # --- Reciprocal-space pipeline: spread (fixed-point atomic-add) ---
 
   @rq-881559bd
   Scenario: Spread produces zero charge density at a grid point with no particle support
@@ -1196,70 +1118,59 @@ Feature: Smooth particle-mesh Ewald (SPME)
     Given two particles within each other's p-bin support, presented in two
       different input orderings (e.g. swapped IDs)
     When the spread pipeline runs
-    Then the resulting rho is byte-identical between the two runs
-      (`spme_spread_sort_cell` canonicalises the in-cell entry order by
-      particle ID before the gather sums them)
+    Then the resulting `rho` is byte-identical between the two runs
+      (`atomicAdd<i64>` is exactly associative, so the order in which
+      atomic adds complete does not affect the final fixed-point grid)
 
   @rq-3c0beda9
   Scenario: Spread reduces to a single B-spline weight for one isolated particle
     Given exactly one particle with charge q at fractional position s
     When the spread pipeline runs
     Then rho[g] equals q · M_p(s_a·n_a - g_a) · M_p(s_b·n_b - g_b) · M_p(s_c·n_c - g_c)
-      for every grid point g
+      for every grid point g to within f32 round-off of the
+      `rho_fixed[g] · 2^-32` conversion
 
-  @rq-29f4f67a
-  Scenario: Scatter emits exactly N · p³ entries
-    Given N particles and spline order p
-    When `spme_spread_scatter` runs
-    Then for every i in 0..N and every k in 0..p³, the scratch entry
-      at index t = i · p³ + k has `scatter_particle_id[t] == i`
+  @rq-5b4519e9
+  Scenario: rho_fixed is zeroed at the start of every step
+    Given an SpmeReciprocalState whose `rho_fixed` holds non-zero values
+      from a prior step
+    When `spme_spread_charges` runs
+    Then `rho_fixed` is observed to be zeroed by the device's
+      `memset_zeros` before `spme_spread_fixed_point` issues any
+      `atomicAdd<i64>`
 
-  @rq-c88b8090
-  Scenario: Cell counts equal the number of entries landing in each cell
-    Given N particles and spline order p
-    When `spme_spread_scatter` runs
-    Then Σ_g spread_cell_counts[g] equals N · p³
-    And for every cell g, spread_cell_counts[g] equals the count of scatter
-      entries whose grid index equals g
+  @rq-3dc94856
+  Scenario: spme_spread_fixed_point issues exactly N · p³ atomicAdd<i64> operations
+    Given N particles, spline order p, and an instrumented atomic counter
+    When `spme_spread_fixed_point` runs
+    Then the device-side counter records exactly `N · p³` `atomicAdd<i64>`
+      invocations on `rho_fixed`
 
-  @rq-65fd09cd
-  Scenario: Cell offsets are the exclusive prefix scan of cell counts
-    Given a populated `spread_cell_counts`
-    When the prefix-scan kernel family runs
-    Then spread_cell_offsets[0] equals 0
-    And spread_cell_offsets[g + 1] equals spread_cell_offsets[g] + spread_cell_counts[g] for every g
-    And spread_cell_offsets[M] equals N · p³
+  @rq-6098e0c1
+  Scenario: One particle's contribution at a single cell matches the fixed-point B-spline value
+    Given exactly one particle with charge q at fractional position s,
+      whose support uniquely covers grid cell g (no other particle
+      contributes to g)
+    When `spme_spread_fixed_point` runs
+    Then `rho_fixed[g]` equals `(i64) rintf(q · w_a · w_b · w_c · 2^32)`
+      bit-exactly, where `(w_a, w_b, w_c)` are the per-axis B-spline
+      weights for the offset of g from the particle's primary bin
 
-  @rq-91b90d11
-  Scenario: Bin scatter places each entry inside its cell's slice
-    Given populated scatter arrays and a prefix-scanned `spread_cell_offsets`
-    When `spme_spread_bin_scatter` runs
-    Then for every cell g, the entries of `binned_particle_id[spread_cell_offsets[g]
-      .. spread_cell_offsets[g + 1])` form a multiset equal to the set of
-      `scatter_particle_id[t]` over all t with `scatter_grid_index[t] == g`
-
-  @rq-cdde3d5a
-  Scenario: Bin entries are sorted by particle ID after sort_cell
-    Given populated bin arrays
-    When `spme_spread_sort_cell` runs
-    Then for every cell g, `binned_particle_id[spread_cell_offsets[g]
-      .. spread_cell_offsets[g + 1])` is strictly ascending
-    And `binned_value` is permuted alongside `binned_particle_id` (same swap pattern)
-
-  @rq-a848b183
-  Scenario: Gather sums bin contents into rho
-    Given populated and particle-ID-sorted bin arrays
-    When `spme_spread_gather_to_rho` runs
-    Then for every cell g,
-      rho[g] equals Σ_{k = spread_cell_offsets[g]}^{spread_cell_offsets[g + 1] − 1} binned_value[k]
-      (summation in left-to-right order over the bin's already-sorted entries)
+  @rq-09b6b539
+  Scenario: spme_spread_finish converts rho_fixed to rho via the inverse scale
+    Given a `rho_fixed[c]` populated with a known i64 value X
+    When `spme_spread_finish` runs
+    Then `rho[c]` equals `(f32)((double)X * 2^-32)` to within f32
+      round-off, with no inter-thread communication during the
+      conversion
 
   @rq-723b40a0
-  Scenario: Two runs of the full spread pipeline produce byte-identical rho
+  Scenario: Two runs of the full spread pipeline produce byte-identical rho_fixed and rho
     Given two independently-constructed SpmeReciprocalState instances with
       identical configurations and identical particle positions and charges
     When the spread pipeline runs on each
-    Then dtoh(rho) is byte-identical between the two runs
+    Then dtoh(rho_fixed) is byte-identical between the two runs
+    And dtoh(rho) is byte-identical between the two runs
 
   # --- Reciprocal-space pipeline: FFT ---
 
