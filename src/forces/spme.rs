@@ -17,7 +17,7 @@ use crate::gpu::cufft::{CuFftError, Plan3dC2R, Plan3dR2C};
 use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, K_COULOMB_F32, ParticleBuffers,
-    spme_force_gather, spme_real_pair_force,
+    spme_atom_sort, spme_force_gather, spme_real_pair_force,
 };
 use crate::kernels;
 use crate::io::config::SpmeConfig;
@@ -25,7 +25,7 @@ use crate::pbc::SimulationBox;
 use crate::timings::{KernelStage, Timings};
 
 use super::topology::{DeviceExclusionList, ExclusionList};
-use super::neighbor_list::NeighborListError;
+use super::neighbor_list::{alloc_scan_block_totals, NeighborListError};
 use super::{
     AggregateLevel, ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext,
     PotentialBuilder, SlotOutputView,
@@ -122,6 +122,32 @@ pub struct SpmeReciprocalGrid {
     /// `cufftSetWorkArea`. The fixed pointer makes captured
     /// `cufftExec*` calls safe to replay inside a CUDA graph.
     pub workspace: CudaSlice<u8>,
+    /// SPME primary-bin index per atom; written by
+    /// `spme_compute_bin_key` and consumed by the scatter stage.
+    pub atom_bin_key: CudaSlice<u32>,
+    /// Per-bin atom histogram. Zeroed before each sort, accumulated
+    /// via `atomicAdd` inside `spme_compute_bin_key`.
+    pub bin_atom_counts: CudaSlice<u32>,
+    /// Exclusive prefix scan of `bin_atom_counts`; bin `b` occupies
+    /// sorted-index positions `[bin_atom_offsets[b], bin_atom_offsets[b + 1])`.
+    pub bin_atom_offsets: CudaSlice<u32>,
+    /// Per-bin scatter cursor. Zeroed before each sort, incremented
+    /// atomically inside `scatter_atoms_into_cells` (reused).
+    pub bin_atom_cursor: CudaSlice<u32>,
+    /// The sorted permutation. Entry `t` names the original atom index
+    /// processed at sorted slot `t`. Consumed by
+    /// `spme_spread_fixed_point` and `spme_force_gather`. Initialised
+    /// to the identity permutation at construction so the very first
+    /// `compute()` works even before the first sort runs.
+    pub sorted_atom_index: CudaSlice<u32>,
+    /// Multi-level scan-stack buffers consumed by
+    /// `prefix_scan_cell_counts` when operating on a histogram of
+    /// length `M`.
+    pub sort_scan_block_totals: Vec<CudaSlice<u32>>,
+    /// The neighbour-list rebuild generation observed at the last
+    /// sort. The slot re-runs the sort pipeline when the framework
+    /// reports a generation strictly greater than this value.
+    pub cached_neighbor_list_generation: u64,
 }
 
 impl SpmeReciprocalGrid {
@@ -189,6 +215,23 @@ impl SpmeReciprocalGrid {
             .alloc_zeros::<Real>(num_partial_blocks)
             .map_err(GpuError::from)?;
 
+        // Atom spatial pre-sort scratch. `sorted_atom_index` is
+        // initialised to the identity permutation so the very first
+        // `compute()` call can run the spread / gather kernels even
+        // before the first sort completes.
+        let n = particle_count;
+        let atom_bin_key = device.alloc_zeros::<u32>(n.max(1)).map_err(GpuError::from)?;
+        let bin_atom_counts = device.alloc_zeros::<u32>(m).map_err(GpuError::from)?;
+        let bin_atom_offsets = device.alloc_zeros::<u32>(m + 1).map_err(GpuError::from)?;
+        let bin_atom_cursor = device.alloc_zeros::<u32>(m).map_err(GpuError::from)?;
+        let sorted_atom_index = if n == 0 {
+            device.alloc_zeros::<u32>(0).map_err(GpuError::from)?
+        } else {
+            let identity: Vec<u32> = (0..n as u32).collect();
+            device.htod_sync_copy(&identity).map_err(GpuError::from)?
+        };
+        let sort_scan_block_totals = alloc_scan_block_totals(&device, m)?;
+
         let forward_plan = Plan3dR2C::new_unallocated(&device, n_a, n_b, n_c)?;
         let inverse_plan = Plan3dC2R::new_unallocated(&device, n_a, n_b, n_c)?;
 
@@ -254,18 +297,33 @@ impl SpmeReciprocalGrid {
             forward_plan,
             inverse_plan,
             workspace,
+            atom_bin_key,
+            bin_atom_counts,
+            bin_atom_offsets,
+            bin_atom_cursor,
+            sorted_atom_index,
+            sort_scan_block_totals,
+            cached_neighbor_list_generation: 0,
         })
     }
 
     /// Run the per-step reciprocal-space pipeline:
-    ///   spread → forward FFT → influence multiply → inverse FFT.
+    ///   sort (when triggered) → spread → forward FFT → influence
+    ///   multiply → inverse FFT.
     /// On return, `self.v` holds the smoothed potential V[g] (with
     /// `k_C/V_box` and `|b|²` baked in via the influence function);
     /// `self.rho` holds the charge density rho[g].
+    ///
+    /// `neighbor_list_generation` is the framework's monotonic
+    /// rebuild-counter value (`NeighborListState::rebuild_generation()`).
+    /// The slot re-runs the atom spatial pre-sort when this value
+    /// strictly exceeds the slot's cached generation; otherwise the
+    /// prior sort permutation is reused.
     pub fn compute(
         &mut self,
         sim_box: &SimulationBox,
         particle_buffers: &ParticleBuffers,
+        neighbor_list_generation: u64,
         timings: &mut Timings,
     ) -> Result<(), SpmeError> {
         // Refresh influence function (and the virial factor that
@@ -289,6 +347,27 @@ impl SpmeReciprocalGrid {
             self.cached_box_generation = sim_box.generation();
         }
 
+        // Atom spatial pre-sort. Triggered when the framework's
+        // neighbour-list rebuild generation advances past the slot's
+        // cached value. Concentrates the spread's atomicAdd writes and
+        // the gather's V[g] reads on neighbouring cache lines.
+        if neighbor_list_generation > self.cached_neighbor_list_generation
+            && self.particle_count > 0
+        {
+            spme_atom_sort(
+                particle_buffers,
+                sim_box,
+                self.params.grid,
+                &mut self.atom_bin_key,
+                &mut self.bin_atom_counts,
+                &mut self.bin_atom_offsets,
+                &mut self.bin_atom_cursor,
+                &mut self.sorted_atom_index,
+                &mut self.sort_scan_block_totals,
+            )?;
+            self.cached_neighbor_list_generation = neighbor_list_generation;
+        }
+
         // Charge spread (fixed-point atomic-add pipeline).
         let _ = timings;
         // Always zero rho_fixed so the per-step atomicAdd<i64> accumulates
@@ -300,6 +379,7 @@ impl SpmeReciprocalGrid {
         if self.particle_count > 0 {
             crate::gpu::spme_spread_fixed_point(
                 particle_buffers,
+                &self.sorted_atom_index,
                 sim_box,
                 self.params.grid,
                 self.params.spline_order,
@@ -568,7 +648,7 @@ impl Potential for SpmeReciprocalState {
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
         mut output: SlotOutputView<'_>,
-        _cx: &ForceFieldContext<'_>,
+        cx: &ForceFieldContext<'_>,
         timings: &mut Timings,
         _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
@@ -576,9 +656,19 @@ impl Potential for SpmeReciprocalState {
         if n == 0 {
             return Ok(());
         }
+        // When the framework has a shared neighbour list (the common
+        // case — SPME requires the real-space slot whose r_cut sizes
+        // it), use its rebuild generation as the sort trigger. When
+        // no neighbour list exists, keep the construction-time
+        // identity permutation forever (correct, but no cache-locality
+        // benefit).
+        let neighbor_list_generation = cx
+            .neighbor_list
+            .map(|nl| nl.rebuild_generation())
+            .unwrap_or(0);
         timings.kernel_start(KernelStage::SPME_RECIP_PIPELINE)?;
         self.grid
-            .compute(sim_box, buffers, timings)
+            .compute(sim_box, buffers, neighbor_list_generation, timings)
             .map_err(map_spme_err)?;
         crate::gpu::spme_recip_reduce_partials(
             &buffers.kernels,
@@ -592,6 +682,7 @@ impl Potential for SpmeReciprocalState {
         timings.kernel_start(KernelStage::SPME_FORCE_GATHER)?;
         spme_force_gather(
             buffers,
+            &self.grid.sorted_atom_index,
             sim_box,
             &self.grid.v,
             &self.u_self_per_particle,
@@ -711,6 +802,7 @@ impl SpmeRealKernels {
 #[derive(Debug, Clone)]
 pub struct SpmeRecipKernels {
     pub spme_recip_compute_influence: CudaFunction,
+    pub spme_compute_bin_key: CudaFunction,
     pub spme_spread_fixed_point: CudaFunction,
     pub spme_spread_finish: CudaFunction,
     pub spme_recip_apply_influence: CudaFunction,
@@ -725,6 +817,7 @@ impl SpmeRecipKernels {
             "spme_recip",
             &[
                 "spme_recip_compute_influence",
+                "spme_compute_bin_key",
                 "spme_spread_fixed_point",
                 "spme_spread_finish",
                 "spme_recip_apply_influence",
@@ -738,6 +831,7 @@ impl SpmeRecipKernels {
                 "spme_recip",
                 "spme_recip_compute_influence",
             )?,
+            spme_compute_bin_key: get_func(device, "spme_recip", "spme_compute_bin_key")?,
             spme_spread_fixed_point: get_func(device, "spme_recip", "spme_spread_fixed_point")?,
             spme_spread_finish: get_func(device, "spme_recip", "spme_spread_finish")?,
             spme_recip_apply_influence: get_func(

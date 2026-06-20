@@ -81,6 +81,12 @@ pub struct NeighborListState {
     pub neighbor_list: CudaSlice<u32>,
     pub neighbor_counts: CudaSlice<u32>,
     pub mode: NeighborListMode,
+    // Monotonically-increasing counter incremented at the end of every
+    // successful `rebuild_impl`. Downstream consumers (e.g. the SPME
+    // reciprocal-space slot's atom spatial pre-sort) cache the last
+    // observed value and re-run their per-rebuild work when the
+    // generation advances.
+    rebuild_generation: u64,
 }
 
 impl NeighborListState {
@@ -106,6 +112,13 @@ impl NeighborListState {
     /// no neighbor list).
     pub fn is_bin_only(&self) -> bool {
         matches!(self.mode, NeighborListMode::CellListOnly(_))
+    }
+
+    /// Monotonically-increasing rebuild counter. Bumped once every time
+    /// `rebuild` completes successfully. Downstream consumers cache the
+    /// observed value to detect when a rebuild has occurred.
+    pub fn rebuild_generation(&self) -> u64 {
+        self.rebuild_generation
     }
 
     // rq-14033af1
@@ -193,6 +206,7 @@ impl NeighborListState {
                 overflow_flag,
                 needs_rebuild: true,
             }),
+            rebuild_generation: 0,
         })
     }
 
@@ -282,6 +296,7 @@ impl NeighborListState {
                 overflow_flag,
                 needs_rebuild: true,
             }),
+            rebuild_generation: 0,
         })
     }
 
@@ -327,6 +342,7 @@ impl NeighborListState {
             neighbor_list,
             neighbor_counts,
             mode: NeighborListMode::Trivial,
+            rebuild_generation: 0,
         })
     }
 
@@ -506,6 +522,7 @@ impl NeighborListState {
 
         if bin_only {
             cl.needs_rebuild = false;
+            self.rebuild_generation = self.rebuild_generation.wrapping_add(1);
             return Ok(());
         }
 
@@ -556,6 +573,7 @@ impl NeighborListState {
             .map_err(map_timings_err)?;
 
         cl.needs_rebuild = false;
+        self.rebuild_generation = self.rebuild_generation.wrapping_add(1);
         Ok(())
     }
 

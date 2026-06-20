@@ -265,6 +265,105 @@ The reciprocal-space slot owns:
   construction. The two plans share the buffer because their
   executions are strictly serialised on the default stream.
 
+- The atom spatial pre-sort scratch (see *Atom spatial pre-sort* for
+  the per-rebuild pipeline that consumes these):
+  - `atom_bin_key: CudaSlice<u32>` of length `N`. Entry `i` holds
+    the SPME primary bin index `g_a · n_b · n_c + g_b · n_c + g_c`
+    of atom `i`.
+  - `bin_atom_counts: CudaSlice<u32>` of length `M`. Per-bin atom
+    histogram, zeroed before each sort.
+  - `bin_atom_offsets: CudaSlice<u32>` of length `M + 1`. Exclusive
+    prefix scan of `bin_atom_counts`; bin `b` occupies sorted-index
+    positions `[bin_atom_offsets[b], bin_atom_offsets[b + 1])`.
+  - `bin_atom_cursor: CudaSlice<u32>` of length `M`. Per-bin atomic
+    cursor used during the scatter stage; zeroed before each sort.
+  - `sorted_atom_index: CudaSlice<u32>` of length `N`. The result
+    of the sort: `sorted_atom_index[t] = i` means the atom processed
+    at sorted slot `t` was originally atom `i`. Consumed by
+    `spme_spread_fixed_point` and `spme_force_gather` to walk atoms
+    in spatial-bin order. Initialised at slot construction to the
+    identity permutation `sorted_atom_index[t] = t`, so the first
+    `compute()` call works even before the first sort runs.
+  - `sort_scan_block_totals: Vec<CudaSlice<u32>>` — the multi-level
+    scan-stack buffers consumed by the shared
+    `prefix_scan_cell_counts` family (see `neighbor-list.md`) when
+    it operates on a histogram of length `M`.
+- `cached_neighbor_list_generation: u64`. The neighbour-list rebuild
+  generation observed at the last sort. The slot re-runs the sort
+  pipeline when the framework reports a generation strictly greater
+  than this value (see *Atom spatial pre-sort* for the trigger
+  protocol).
+
+### Atom spatial pre-sort <!-- rq-06f1edf2 -->
+
+The reciprocal-space slot walks atoms in spatial-bin order during
+spread and gather. Sorting concentrates each warp's atomic writes
+(spread) and grid reads (gather) on neighbouring grid cells, so the
+hot grid cells stay in L1/L2 across consecutive warps.
+
+The sorted order is materialised as a permutation
+`sorted_atom_index: CudaSlice<u32>` of length `N`. Each entry
+`sorted_atom_index[t] = i` names the original atom index `i` to be
+processed at sorted slot `t`. Spread and gather kernels read this
+permutation with their block-id and use `i` to address
+`positions[i]`, `charges[i]`, and (for gather) the per-particle
+slot-output cells `slot_force_*[i]` / `slot_energy[i]` /
+`slot_virial[i]`.
+
+**Trigger protocol.** The sort runs at the start of every
+`SpmeReciprocalState::compute()` call where the framework's
+neighbour-list rebuild generation is strictly greater than the
+slot's `cached_neighbor_list_generation`. The slot updates
+`cached_neighbor_list_generation` to the current value when the
+sort completes. The first `compute()` call after slot construction
+sees a generation > 0 (every neighbour-list build advances the
+counter, including the initial build), so the first sort always
+fires.
+
+**Sort algorithm.** A count-sort over the SPME primary-bin key:
+
+1. `spme_compute_bin_key` — one thread per atom. Reads particle
+   `i`'s wrapped position, computes the primary bin
+   `(g_a, g_b, g_c)` via the same `spread_per_particle_setup`
+   helper the spread kernel uses, and writes
+   `atom_bin_key[i] = (g_a · n_b + g_b) · n_c + g_c`. Atomically
+   increments `bin_atom_counts[atom_bin_key[i]]` (each atom emits
+   exactly one `+1`, so the final per-bin count is independent of
+   atomic-completion order).
+
+2. `prefix_scan_cell_counts` (the family in `neighbor-list.md`) —
+   produces `bin_atom_offsets` of length `M + 1` from
+   `bin_atom_counts` of length `M`.
+
+3. `scatter_atoms_into_cells` (reused from `neighbor-list.md`) — one
+   thread per atom. Thread `i` reads `b = atom_bin_key[i]`, computes
+   `t = bin_atom_offsets[b] + atomicAdd(&bin_atom_cursor[b], 1)`,
+   and writes `sorted_atom_index[t] = i`. The atomic-completion
+   order of cursor increments within a bin is non-deterministic,
+   so the in-bin order of `sorted_atom_index` is non-deterministic
+   on a single sort run.
+
+   **In-bin determinism.** A follow-up canonicalising pass
+   (`sort_cells_by_particle_id`, reused from `neighbor-list.md`,
+   one thread per bin) sorts each bin's `sorted_atom_index` slice
+   in strictly ascending atom-index order. After this pass, two runs
+   with byte-identical inputs produce a byte-identical
+   `sorted_atom_index` regardless of the non-deterministic scatter
+   order.
+
+**Determinism.** Combined with the i64 atomic-add associativity of
+the spread (see *Reproducibility*), the canonicalised
+`sorted_atom_index` guarantees byte-identical `rho_fixed` and
+`slot_force_*` across runs on the same GPU regardless of warp /
+atomic completion order.
+
+**Per-step state reset.** `bin_atom_counts` and `bin_atom_cursor`
+accumulate via `atomicAdd` inside the bin-key and scatter kernels,
+so they are zeroed via `memset_zeros` at the start of every sort.
+`atom_bin_key`, `bin_atom_offsets`, `sorted_atom_index`, and the
+scan-stack buffers are overwritten every entry, so they need no
+explicit reset.
+
 ### Charge spreading <!-- rq-382a6e66 -->
 
 The charge density on the FFT grid is the same quantity for every
@@ -303,14 +402,19 @@ The two stages:
    synchronisation.
 
 2. **Per-particle fixed-point scatter.** `spme_spread_fixed_point`
-   runs one warp per particle with 8 warps per block (256 threads)
-   and grid `ceil(N / 8)`. Lane 0 of each warp reads particle `i`'s
-   wrapped position and charge `q_i`, computes the fractional
-   coordinates `(s_a, s_b, s_c)`, the primary bin `(g_a, g_b, g_c)`,
-   the fractional offsets `(t_a, t_b, t_c)`, and the per-axis 1D
-   B-spline weights `wa[0..p]`, `wb[0..p]`, `wc[0..p]`; the per-axis
-   weights, primary bin, and `q_i` are broadcast to every lane via
-   `__shfl_sync`.
+   runs one warp per sorted slot with 8 warps per block (256 threads)
+   and grid `ceil(N / 8)`. Lane 0 of each warp reads
+   `i = sorted_atom_index[t]` where `t` is the sorted slot for this
+   warp (`t = blockIdx.x · 8 + warp_id_in_block`), then reads
+   particle `i`'s wrapped position and charge `q_i`, computes the
+   fractional coordinates `(s_a, s_b, s_c)`, the primary bin
+   `(g_a, g_b, g_c)`, the fractional offsets `(t_a, t_b, t_c)`, and
+   the per-axis 1D B-spline weights `wa[0..p]`, `wb[0..p]`,
+   `wc[0..p]`; the per-axis weights, primary bin, and `q_i` are
+   broadcast to every lane via `__shfl_sync`. Consecutive sorted
+   slots address atoms with nearby primary bins, so the lane-stride
+   `atomicAdd<i64>` writes from consecutive warps cluster on
+   neighbouring `rho_fixed` cache lines.
 
    Each of the 32 lanes handles `⌈p³ / 32⌉` of the `p³` grid
    contributions. Lane `l` iterates the contribution index
@@ -484,7 +588,10 @@ F_i_recip = −q_i · ∇_r ( Σ_g V[g] · M_p(s_a · n_a − g_a)
                                   · M_p(s_c · n_c − g_c) )
 ```
 
-Operationally: one thread per particle. Each thread:
+Operationally: one thread per sorted slot. Each thread reads its
+sorted-slot index `t = blockIdx.x · blockDim.x + threadIdx.x`,
+resolves the original atom index `i = sorted_atom_index[t]`, and
+then:
 
 1. Reads particle `i`'s wrapped position and computes the fractional
    coordinates `(s_a, s_b, s_c)`.
@@ -499,11 +606,22 @@ Operationally: one thread per particle. Each thread:
    grid map).
 5. Accumulates the per-particle reciprocal energy
    `0.5 · q_i · Σ_g V[g] · w_a · w_b · w_c`.
+6. Writes the per-particle force and energy contributions to
+   `slot_force_*[i]`, `slot_energy[i]`, and (after the
+   deterministic virial reduction) `slot_virial[i]` — the output
+   addresses are by the *original* atom index `i`, not the sorted
+   slot `t`, so the slot-output layout remains in canonical
+   particle-index order regardless of how the sort permutes the
+   processing order.
 
 Each particle is written by exactly one thread; no atomics, no race
 conditions. Summation order over the `p³` grid points within a particle
 is fixed in `(d_a, d_b, d_c)` lexicographic order, so the contribution
 ordering is deterministic.
+
+Consecutive sorted slots address atoms with nearby primary bins, so
+the grid reads from `V[g]` across consecutive threads cluster on
+neighbouring cache lines.
 
 ### Reciprocal-space virial <!-- rq-ce4590c1 -->
 
@@ -668,12 +786,40 @@ only inside the `SpmeReciprocalState` construction path.
   returns as soon as the launch has been enqueued; no host-side
   computation of the influence function is performed.
 
+- `spme_atom_sort(particle_buffers, sim_box, spme_state) -> Result<(), GpuError>` <!-- rq-a1b761fc -->
+  Rebuilds `spme_state.sorted_atom_index` on the default stream when
+  the framework's neighbour-list rebuild generation is strictly
+  greater than `spme_state.cached_neighbor_list_generation`. The
+  pipeline is:
+  1. Device-side `memset_zeros` on `bin_atom_counts` and
+     `bin_atom_cursor`.
+  2. `spme_compute_bin_key` — one thread per particle; writes
+     `atom_bin_key[i]` and atomically increments
+     `bin_atom_counts[bin]`.
+  3. The `prefix_scan_cell_counts` family (see `neighbor-list.md`) —
+     produces `bin_atom_offsets` from `bin_atom_counts`.
+  4. `scatter_atoms_into_cells` (reused from `neighbor-list.md`) —
+     one thread per particle; writes `sorted_atom_index[t]` for the
+     slot
+     `t = bin_atom_offsets[bin] + atomicAdd(&bin_atom_cursor[bin], 1)`.
+  5. `sort_cells_by_particle_id` (reused from `neighbor-list.md`) —
+     one thread per bin; insertion-sorts the bin's slice of
+     `sorted_atom_index` in strictly ascending atom-index order.
+
+  Updates `spme_state.cached_neighbor_list_generation` to the
+  framework's current value on success. Returns `Ok(())` immediately
+  once every kernel has been enqueued. When the generation has not
+  advanced, the function returns `Ok(())` without launching any
+  kernels.
+
 - `spme_spread_charges(particle_buffers, spme_state) -> Result<(), GpuError>` <!-- rq-a1b761fa -->
   Launches the two-stage fixed-point charge-spread pipeline on the
   default stream:
   1. Device-side `memset_zeros` on `spme_state.rho_fixed` (length
      `M`, i64) to clear the previous step's accumulation.
-  2. `spme_spread_fixed_point` — one warp per particle; each lane
+  2. `spme_spread_fixed_point` — one warp per sorted slot. Lane 0
+     reads `i = sorted_atom_index[t]` to resolve the atom index
+     before reading the atom's position and charge; each lane
      issues `⌈p³ / 32⌉` `atomicAdd<i64>` operations into
      `rho_fixed`, totalling `N · p³` atomic adds per step.
   3. `spme_spread_finish` — one thread per grid cell; converts
@@ -717,9 +863,13 @@ only inside the `SpmeReciprocalState` construction path.
   `Result<(), CuFftError>`.
 
 - `spme_force_gather(particle_buffers, spme_state, slot_output) -> Result<(), GpuError>` <!-- rq-c6f6a13c -->
-  Launches the force-gather kernel. Writes per-particle force,
-  reciprocal energy, and (after the deterministic virial reduction)
-  per-particle virial.
+  Launches the force-gather kernel. Threads address atoms via
+  `i = sorted_atom_index[t]` for `t = blockIdx.x · blockDim.x +
+  threadIdx.x` so consecutive threads work on spatially-clustered
+  atoms; per-atom output is written to the canonical particle-index
+  positions `slot_force_*[i]`, `slot_energy[i]`, `slot_virial[i]`.
+  Writes per-particle force, reciprocal energy, and (after the
+  deterministic virial reduction) per-particle virial.
 
 - `cufft_determinism_smoke_test(device: &Arc<CudaDevice>) -> Result<(), CuFftError>` <!-- rq-d880c228 -->
   Used by `init_device` when SPME is enabled. Returns `Err` on a
@@ -757,20 +907,39 @@ extern "C" __global__ void spme_recip_reduce_partials(
     float scale);                       // 0.5 / N
 
 extern "C" __global__ void spme_spread_fixed_point(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
-    const float *charges,
-    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
+    const float        *positions_x,
+    const float        *positions_y,
+    const float        *positions_z,
+    const float        *charges,
+    const unsigned int *sorted_atom_index,  // length n
+    const float        *lattice,            // length 6
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
     unsigned int spline_order,
-    long long   *rho_fixed,         // length M (i64 fixed-point grid)
+    long long   *rho_fixed,                 // length M (i64)
     unsigned int n);
 
 extern "C" __global__ void spme_spread_finish(
     const long long *rho_fixed,     // length M
     float           *rho,           // length M
     unsigned int M);
+
+extern "C" __global__ void spme_compute_bin_key(
+    const float  *positions_x,
+    const float  *positions_y,
+    const float  *positions_z,
+    const float  *lattice,           // length 6
+    unsigned int  n_a, unsigned int n_b, unsigned int n_c,
+    unsigned int *atom_bin_key,      // length n
+    unsigned int *bin_atom_counts,   // length M (atomicAdd)
+    unsigned int  n);
+
+// The bin-key scatter (step 3) reuses `scatter_atoms_into_cells` from
+// `kernels/neighbor.cu`: thread `i` reads its bin index, atomically
+// increments the per-bin write cursor, and writes the resulting sorted
+// slot. The in-bin canonicalisation pass (step 4) reuses
+// `sort_cells_by_particle_id`: one thread per bin runs an insertion
+// sort over its slice in strictly ascending atom-index order. See
+// `rqm/forces/neighbor-list.md` for both kernel signatures.
 
 extern "C" __global__ void spme_recip_apply_influence(
     const float *influence_G,           // length M_complex
@@ -781,12 +950,13 @@ extern "C" __global__ void spme_recip_apply_influence(
     unsigned int m_complex);
 
 extern "C" __global__ void spme_force_gather(
-    const float *positions_x,
-    const float *positions_y,
-    const float *positions_z,
-    const float *charges,
-    const float *V,
-    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
+    const float        *positions_x,
+    const float        *positions_y,
+    const float        *positions_z,
+    const float        *charges,
+    const float        *V,
+    const unsigned int *sorted_atom_index,  // length n
+    const float        *lattice,            // length 6
     unsigned int n_a, unsigned int n_b, unsigned int n_c,
     unsigned int spline_order,
     float k_coulomb,
@@ -810,14 +980,29 @@ on the launch block size (256), not on thread scheduling.
   common pair-force pattern (see `pair-force-kernel.md`).
 - `spme_recip_compute_influence`: one thread per complex grid cell, <!-- rq-17b52850 -->
   block size 256, grid `ceil(M_complex / 256)`. No shared memory.
-- `spme_spread_fixed_point`: one warp per particle, block size 256 <!-- rq-996edcaf -->
+- `spme_spread_fixed_point`: one warp per sorted slot, block size 256 <!-- rq-996edcaf -->
   (8 warps × 32 lanes), grid `ceil(N / 8)`. No static shared memory
   (per-axis B-spline weights, primary bin, and `q_i` are broadcast
-  lane-to-lane via `__shfl_sync`). Each of the 32 lanes performs
-  `⌈p³ / 32⌉` `atomicAdd<i64>` operations into `rho_fixed`.
+  lane-to-lane via `__shfl_sync`). Lane 0 reads
+  `i = sorted_atom_index[t]` before reading the atom's position and
+  charge. Each of the 32 lanes performs `⌈p³ / 32⌉` `atomicAdd<i64>`
+  operations into `rho_fixed`.
 - `spme_spread_finish`: one thread per grid cell, block size 256, <!-- rq-d9403350 -->
   grid `ceil(M / 256)`. No shared memory. Reads `rho_fixed[c]`,
   writes `rho[c] = (f32) rho_fixed[c] · 2^-32`.
+- `spme_compute_bin_key`: one thread per particle, block size 256, <!-- rq-7594b1fc -->
+  grid `ceil(N / 256)`. No shared memory. Computes the SPME primary
+  bin index per atom and atomically increments `bin_atom_counts`.
+- `scatter_atoms_into_cells` (reused): one thread per particle, block <!-- rq-ab1063b3 -->
+  size 256, grid `ceil(N / 256)`. No shared memory. Atomic cursor
+  increment into `bin_atom_cursor` to determine the sorted slot.
+- `sort_cells_by_particle_id` (reused): one thread per bin, block size <!-- rq-1b747c20 -->
+  256, grid `ceil(M / 256)`. No shared memory. Per-bin insertion sort
+  over the bin's slice of `sorted_atom_index` in strictly ascending
+  atom-index order; the slot's per-bin slice length is bounded by the
+  worst-case number of atoms whose primary bin coincides with any
+  given grid cell, which is small under SPME's grid-density convention
+  (~ a few atoms per cell).
 - `spme_recip_apply_influence`: one thread per complex grid cell, <!-- rq-b82694ec -->
   block size 256, grid `ceil(M_complex / 256)`,
   `__shared__ Real partial[256]` for the per-block virial reduction.
@@ -837,7 +1022,12 @@ Stream assignment:
 - Every SPME kernel and cuFFT call dispatched by either SPME slot — <!-- rq-44cce069 -->
   `spme_real_pair_force_*`, `spme_force_gather`,
   `spme_recip_compute_influence` (when triggered by a box-generation
-  change), the `spme_spread_fixed_point` and `spme_spread_finish`
+  change), the atom-sort pipeline (`spme_compute_bin_key`,
+  the prefix-scan family, `scatter_atoms_into_cells`,
+  `sort_cells_by_particle_id`, plus the device-side `memset_zeros`
+  on `bin_atom_counts` and `bin_atom_cursor` — fired when triggered
+  by a neighbour-list rebuild generation change),
+  the `spme_spread_fixed_point` and `spme_spread_finish`
   kernels (plus the device-side `memset_zeros` on `rho_fixed`),
   the cuFFT R2C transform, `spme_recip_apply_influence`, the cuFFT
   C2R transform, and `spme_recip_reduce_partials` — runs on the
@@ -856,12 +1046,24 @@ the producer-consumer guarantee with no explicit synchronisation.
 ## Reproducibility <!-- rq-20530653 -->
 
 SPME on HeddleMD is bit-exact GPU-vs-GPU when run on the same hardware
-with identical inputs. Six components carry the reproducibility
+with identical inputs. Eight components carry the reproducibility
 invariant:
 
-1. **Charge spread.** The per-particle B-spline weight computation
+1. **Atom spatial pre-sort.** `spme_compute_bin_key` evaluates the
+   primary bin per atom from positions alone — no atomics in the
+   key computation, no inter-thread communication. The histogram
+   atomicAdd on `bin_atom_counts` reduces to integer addition of
+   `+1`s, whose result is independent of completion order. The
+   `scatter_atoms_into_cells` stage uses non-deterministic
+   `atomicAdd` cursors into `bin_atom_cursor`, but the subsequent
+   `sort_cells_by_particle_id` insertion sort fixes each bin's slice
+   of `sorted_atom_index` to strictly ascending atom-index order.
+   Two runs on the same GPU with byte-identical positions therefore
+   produce a byte-identical `sorted_atom_index`.
+2. **Charge spread.** The per-particle B-spline weight computation
    inside `spme_spread_fixed_point` is fully per-lane and
-   deterministic — lane 0 computes once and broadcasts via
+   deterministic — lane 0 reads `i = sorted_atom_index[t]` and
+   broadcasts the resolved atom index and per-axis weights via
    `__shfl_sync`, every lane evaluates the same expression for its
    assigned `(d_a, d_b, d_c)`, and the f32 → i64 conversion uses
    round-to-nearest. The atomic adds into `rho_fixed` are on i64,
@@ -872,7 +1074,7 @@ invariant:
    `rho_fixed`. The `spme_spread_finish` pass writes
    `rho[c] = (f32) rho_fixed[c] · 2^-32` per cell with no
    inter-thread communication, so `rho` is byte-identical too.
-2. **cuFFT.** Deterministic for fixed plan dimensions, single-stream
+3. **cuFFT.** Deterministic for fixed plan dimensions, single-stream
    usage, and the same hardware. "Single-stream usage" is satisfied
    because both cuFFT plans are bound once at slot construction to
    the device's default stream via `cufftSetStream` and are never
@@ -882,13 +1084,13 @@ invariant:
    transparently reallocate scratch memory at execution time. The
    `cufft_determinism_smoke_test` run at `init_device` time validates
    the contract on the host's specific cuFFT version.
-3. **Influence function recompute.** `spme_recip_compute_influence`
+4. **Influence function recompute.** `spme_recip_compute_influence`
    runs one thread per complex grid cell with no inter-thread
    communication. Inner arithmetic in `double` precision. The kernel
    fires whenever the slot observes a changed `sim_box.generation()`,
    producing byte-identical `influence_G` and `virial_factor` for
    byte-identical box lattices on the same GPU.
-4. **Influence-function multiply and virial partial reduction.**
+5. **Influence-function multiply and virial partial reduction.**
    `spme_recip_apply_influence` runs one thread per complex grid
    cell; no atomics; no inter-thread reads on the multiply portion.
    The per-block partial-sum reduction over the per-thread virial
@@ -896,18 +1098,18 @@ invariant:
    pairwise tree whose shape depends only on the launch block size
    (256), so two runs on the same GPU produce byte-identical
    `V_hat` and byte-identical `virial_partials`.
-5. **Virial partial-sums reduction.** `spme_recip_reduce_partials`
+6. **Virial partial-sums reduction.** `spme_recip_reduce_partials`
    runs a single block of 256 threads with a strided per-thread
    accumulator and a deterministic left-to-right pairwise tree in
    shared memory. Two runs with byte-identical `virial_partials`
    produce a byte-identical `w_per_particle_virial[0]`.
-6. **Force gather.** One thread per particle; each thread reads `p³`
+7. **Force gather.** One thread per sorted slot; each thread reads `p³`
    grid points in fixed `(d_a, d_b, d_c)` lexicographic order. No
    atomics. The per-particle virial uses the equal-division attribution
    `W_recip / N` (the slot's `compute()` distributes the scalar
    identically to every particle, so the SoA convention is preserved
    regardless of summation order).
-7. **Two-stream model.** The reciprocal pipeline runs on
+8. **Two-stream model.** The reciprocal pipeline runs on
    `recip_stream`; the real-space slot, the force-gather kernel, and
    every non-SPME slot's kernel run on the default stream. The two
    streams write to disjoint device buffers — `recip_stream` writes
@@ -1097,6 +1299,77 @@ Feature: Smooth particle-mesh Ewald (SPME)
     When the _f variant of spme_real_pair_force is called
     Then slot_force_x[0] equals -slot_force_x[1] bit-exactly (Newton's third law for an isolated pair)
 
+  # --- Reciprocal-space pipeline: atom spatial pre-sort ---
+
+  @rq-0f592ab6
+  Scenario: Sort fires on the first compute() call
+    Given an SpmeReciprocalState immediately after construction
+      with cached_neighbor_list_generation == 0
+    And the framework's neighbour-list rebuild generation is 1 (or any value > 0)
+    When SpmeReciprocalState::compute() is called
+    Then the five-stage sort pipeline (memset_zeros, spme_compute_bin_key,
+      prefix_scan_cell_counts family, scatter_atoms_into_cells, sort_cells_by_particle_id)
+      launches exactly once on the default stream
+    And the slot's cached_neighbor_list_generation equals the framework's
+      generation after the call
+
+  @rq-9ffb2eb3
+  Scenario: Sort fires when the neighbour-list rebuild generation advances
+    Given an SpmeReciprocalState whose cached_neighbor_list_generation matches
+      the framework's current generation
+    When the framework rebuilds the neighbour list (advancing its rebuild generation)
+    And SpmeReciprocalState::compute() is called
+    Then the sort pipeline launches exactly once during this call
+    And the slot's cached_neighbor_list_generation equals the new value
+
+  @rq-be54d0f6
+  Scenario: Sort does not fire when generation is unchanged
+    Given an SpmeReciprocalState whose cached_neighbor_list_generation matches
+      the framework's current generation
+    When SpmeReciprocalState::compute() is called twice in succession with
+      no intervening neighbour-list rebuild
+    Then the sort pipeline launches zero times during the second call
+    And sorted_atom_index is byte-identical to its pre-second-call contents
+
+  @rq-03cbd438
+  Scenario: sorted_atom_index is a permutation of [0, N)
+    Given an SpmeReciprocalState with N particles
+    When the sort pipeline runs
+    Then sorted_atom_index has length N
+    And the set of values in sorted_atom_index is exactly {0, 1, ..., N - 1}
+      (every original atom index appears exactly once)
+
+  @rq-e59ee965
+  Scenario: sorted_atom_index orders atoms by primary bin
+    Given N atoms with known fractional positions
+    When the sort pipeline runs
+    Then for every t in 0..N - 1, atom_bin_key[sorted_atom_index[t]] is
+      less than or equal to atom_bin_key[sorted_atom_index[t + 1]]
+      (consecutive sorted slots have monotonically non-decreasing primary bin)
+
+  @rq-c88ec28e
+  Scenario: In-bin order is canonical (strictly ascending atom index)
+    Given N atoms with at least one primary bin holding multiple atoms
+    When the sort pipeline runs
+    Then within each bin's slice of sorted_atom_index, the entries are in
+      strictly ascending atom-index order (the canonicalising pass has
+      fixed the order regardless of the non-deterministic scatter cursor)
+
+  @rq-99cb2bd3
+  Scenario: Two runs of the sort pipeline produce byte-identical sorted_atom_index
+    Given two SpmeReciprocalState instances with identical configuration,
+      identical particle positions, and identical particle charges
+    When the sort pipeline runs on each
+    Then dtoh(sorted_atom_index) is byte-identical between the two runs
+
+  @rq-d4d66d02
+  Scenario: Initial sorted_atom_index is the identity permutation
+    Given an SpmeReciprocalState immediately after construction
+    When sorted_atom_index is read before any compute() call
+    Then sorted_atom_index[t] == t for every t in [0, N)
+      (so the very first compute() call can run the spread / gather kernels
+      even before the first sort completes, processing atoms in particle-index order)
+
   # --- Reciprocal-space pipeline: spread (fixed-point atomic-add) ---
 
   @rq-881559bd
@@ -1171,6 +1444,19 @@ Feature: Smooth particle-mesh Ewald (SPME)
     When the spread pipeline runs on each
     Then dtoh(rho_fixed) is byte-identical between the two runs
     And dtoh(rho) is byte-identical between the two runs
+
+  @rq-c60c1d5f
+  Scenario: Spread output is independent of sorted_atom_index permutation
+    Given two SpmeReciprocalState instances A and B with identical
+      configuration, positions, and charges
+    And A's sorted_atom_index is the identity permutation
+      (the slot's construction default before any sort runs)
+    And B's sorted_atom_index is the canonical bin-sorted permutation
+      (the post-sort permutation)
+    When spread runs on each instance
+    Then dtoh(rho_fixed) is byte-identical between the two runs
+      (i64 atomic-add associativity guarantees that the final cell
+      values do not depend on the warp processing order)
 
   # --- Reciprocal-space pipeline: FFT ---
 

@@ -34,6 +34,7 @@ pub use kernels::{
     constraint_virial_scatter, increment_u64_device, rattle_velocities, scatter_atoms_into_cells,
     shake_positions, shake_positions_no_velocity, shake_snapshot,
     sort_cells_by_particle_id,
+    spme_atom_sort, spme_compute_bin_key,
     spme_spread_finish, spme_spread_fixed_point,
     spme_force_gather, spme_recip_apply_influence,
     spme_real_pair_force, spme_recip_compute_influence,

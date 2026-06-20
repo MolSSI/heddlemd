@@ -608,13 +608,16 @@ pub fn lj_spme_real_fused_pair_force(
     Ok(())
 }
 
-// Fixed-point charge spread. One warp per particle (8 warps per 256-
-// thread block, grid ceil(N / 8)). Each lane issues `ceil(p^3 / 32)`
-// `atomicAdd<i64>` operations into `rho_fixed`. The caller is
-// responsible for zeroing `rho_fixed` before this kernel runs (via
-// `memset_zeros` on the device).
+// Fixed-point charge spread. One warp per sorted slot (8 warps per
+// 256-thread block, grid ceil(N / 8)). Lane 0 reads
+// `i = sorted_atom_index[t]` to resolve its assigned atom index before
+// reading the atom's position and charge; each lane then issues
+// `ceil(p^3 / 32)` `atomicAdd<i64>` operations into `rho_fixed`. The
+// caller is responsible for zeroing `rho_fixed` before this kernel
+// runs (via `memset_zeros` on the device).
 pub fn spme_spread_fixed_point(
     particle_buffers: &ParticleBuffers,
+    sorted_atom_index: &CudaSlice<u32>,
     sim_box: &SimulationBox,
     grid: [u32; 3],
     spline_order: u32,
@@ -630,6 +633,7 @@ pub fn spme_spread_fixed_point(
     let m = n_a as usize * n_b as usize * n_c as usize;
     debug_assert_eq!(rho_fixed.len(), m);
     debug_assert_eq!(particle_buffers.charges.len(), n);
+    debug_assert_eq!(sorted_atom_index.len(), n);
 
     let n_u32 = n as u32;
     let cfg = LaunchConfig {
@@ -644,6 +648,7 @@ pub fn spme_spread_fixed_point(
         &particle_buffers.positions_y,
         &particle_buffers.positions_z,
         &particle_buffers.charges,
+        sorted_atom_index,
         lattice,
         n_a,
         n_b,
@@ -815,6 +820,7 @@ pub fn spme_recip_reduce_partials(
 #[allow(clippy::too_many_arguments)]
 pub fn spme_force_gather(
     particle_buffers: &ParticleBuffers,
+    sorted_atom_index: &CudaSlice<u32>,
     sim_box: &SimulationBox,
     v: &CudaSlice<Real>,
     u_self_per_particle: &CudaSlice<Real>,
@@ -837,6 +843,7 @@ pub fn spme_force_gather(
     debug_assert_eq!(w_per_particle_virial.len(), 1);
     debug_assert_eq!(particle_buffers.charges.len(), n);
     debug_assert_eq!(u_self_per_particle.len(), n);
+    debug_assert_eq!(sorted_atom_index.len(), n);
     debug_assert_eq!(slot_force_x.len(), n);
     debug_assert_eq!(slot_force_y.len(), n);
     debug_assert_eq!(slot_force_z.len(), n);
@@ -858,6 +865,7 @@ pub fn spme_force_gather(
                 v,
                 u_self_per_particle,
                 w_per_particle_virial,
+                sorted_atom_index,
                 lattice,
                 grid[0],
                 grid[1],
@@ -873,6 +881,145 @@ pub fn spme_force_gather(
         )
         .map_err(GpuError::from)?;
     }
+    Ok(())
+}
+
+// rq-06f1edf2 rq-7594b1fc
+//
+// Atom spatial pre-sort key computation. One thread per particle.
+// Each thread computes the SPME primary-bin index from the same
+// `spread_per_particle_setup` geometry the spread and gather kernels
+// use, writes the bin to `atom_bin_key[i]`, and atomically increments
+// `bin_atom_counts[bin]`. The caller is responsible for zeroing
+// `bin_atom_counts` (length M) via `memset_zeros` before launch.
+#[allow(clippy::too_many_arguments)]
+pub fn spme_compute_bin_key(
+    particle_buffers: &ParticleBuffers,
+    sim_box: &SimulationBox,
+    grid: [u32; 3],
+    atom_bin_key: &mut CudaSlice<u32>,
+    bin_atom_counts: &mut CudaSlice<u32>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let n_a = grid[0];
+    let n_b = grid[1];
+    let n_c = grid[2];
+    let m = n_a as usize * n_b as usize * n_c as usize;
+    debug_assert_eq!(atom_bin_key.len(), n);
+    debug_assert_eq!(bin_atom_counts.len(), m);
+
+    let n_u32 = n as u32;
+    let cfg = launch_config(n_u32);
+    let lattice = sim_box.lattice_device();
+    let func = particle_buffers.kernels.spme_recip.spme_compute_bin_key.clone();
+    let args = (
+        &particle_buffers.positions_x,
+        &particle_buffers.positions_y,
+        &particle_buffers.positions_z,
+        lattice,
+        n_a,
+        n_b,
+        n_c,
+        &mut *atom_bin_key,
+        &mut *bin_atom_counts,
+        n_u32,
+    );
+    unsafe {
+        func.launch(cfg, args).map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+// rq-a1b761fc
+//
+// Atom spatial pre-sort orchestrator. Runs the five-stage count-sort
+// pipeline on the default stream when the framework's neighbour-list
+// rebuild generation has advanced past the slot's cached value.
+//
+// Returns `Ok(())` immediately when the generation is unchanged — no
+// kernel launches.
+#[allow(clippy::too_many_arguments)]
+pub fn spme_atom_sort(
+    particle_buffers: &ParticleBuffers,
+    sim_box: &SimulationBox,
+    grid: [u32; 3],
+    atom_bin_key: &mut CudaSlice<u32>,
+    bin_atom_counts: &mut CudaSlice<u32>,
+    bin_atom_offsets: &mut CudaSlice<u32>,
+    bin_atom_cursor: &mut CudaSlice<u32>,
+    sorted_atom_index: &mut CudaSlice<u32>,
+    sort_scan_block_totals: &mut [CudaSlice<u32>],
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let device = particle_buffers.device.clone();
+    let kernels = particle_buffers.kernels.clone();
+    let n_a = grid[0];
+    let n_b = grid[1];
+    let n_c = grid[2];
+    let m = n_a as usize * n_b as usize * n_c as usize;
+    debug_assert_eq!(atom_bin_key.len(), n);
+    debug_assert_eq!(bin_atom_counts.len(), m);
+    debug_assert_eq!(bin_atom_offsets.len(), m + 1);
+    debug_assert_eq!(bin_atom_cursor.len(), m);
+    debug_assert_eq!(sorted_atom_index.len(), n);
+
+    // Stage 1: zero the histogram and the scatter cursor.
+    device.memset_zeros(bin_atom_counts).map_err(GpuError::from)?;
+    device.memset_zeros(bin_atom_cursor).map_err(GpuError::from)?;
+
+    // Stage 2: per-atom primary-bin computation + histogram.
+    spme_compute_bin_key(
+        particle_buffers,
+        sim_box,
+        grid,
+        atom_bin_key,
+        bin_atom_counts,
+    )?;
+
+    // Stage 3: exclusive prefix scan of the histogram into offsets.
+    prefix_scan_cell_counts(
+        &kernels,
+        bin_atom_counts,
+        bin_atom_offsets,
+        sort_scan_block_totals,
+        m,
+        n,
+    )?;
+
+    // Stage 4: scatter atoms into their sorted slots using a per-bin
+    // atomic cursor. The cursor was zeroed in stage 1; the scatter
+    // launcher does not re-zero it.
+    {
+        let n_u32 = n as u32;
+        let func = kernels.neighbor.scatter_atoms_into_cells.clone();
+        let cfg = launch_config(n_u32);
+        unsafe {
+            func.launch(
+                cfg,
+                (
+                    &*atom_bin_key,
+                    &*bin_atom_offsets,
+                    &mut *bin_atom_cursor,
+                    &mut *sorted_atom_index,
+                    n_u32,
+                ),
+            )
+            .map_err(GpuError::from)?;
+        }
+    }
+
+    // Stage 5: per-bin insertion sort over sorted_atom_index in
+    // strictly ascending atom-index order. After this pass, two runs
+    // with byte-identical positions produce a byte-identical
+    // sorted_atom_index regardless of the non-deterministic scatter
+    // cursor.
+    sort_cells_by_particle_id(&kernels, bin_atom_offsets, sorted_atom_index, m)?;
     Ok(())
 }
 

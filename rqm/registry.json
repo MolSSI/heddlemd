@@ -446,6 +446,13 @@
     "title": "File format precision selection",
     "type": "section"
   },
+  "rq-03cbd438": {
+    "decl": "Scenario: sorted_atom_index is a permutation of [0, N)",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "sorted_atom_index is a permutation of [0, N)",
+    "type": "scenario"
+  },
   "rq-03d70e2d": {
     "decl": "## Per-Step Kernel Sequence",
     "file": "integration/berendsen-barostat",
@@ -754,6 +761,19 @@
     ],
     "title": "Exclusion row with non-numeric scale",
     "type": "scenario"
+  },
+  "rq-06f1edf2": {
+    "decl": "### Atom spatial pre-sort",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Atom spatial pre-sort",
+    "type": "section"
   },
   "rq-0705e380": {
     "decl": "Scenario: Reject explicit images_y of wrong length",
@@ -1638,6 +1658,13 @@
     ],
     "title": "compute_total_virial",
     "type": "api-item"
+  },
+  "rq-0f592ab6": {
+    "decl": "Scenario: Sort fires on the first compute() call",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Sort fires on the first compute() call",
+    "type": "scenario"
   },
   "rq-0f5c9f99": {
     "decl": "Scenario: shake_positions restores constraint distances after a small uniform translation",
@@ -3082,6 +3109,13 @@
     ],
     "title": "cached_generation initialised from the construction-time box",
     "type": "scenario"
+  },
+  "rq-1b747c20": {
+    "decl": "- `sort_cells_by_particle_id` (reused): one thread per bin, block size",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "sort_cells_by_particle_id",
+    "type": "api-item"
   },
   "rq-1b7680ad": {
     "decl": "### RNG",
@@ -12223,6 +12257,18 @@
     "title": "MinimizationOutputConfig",
     "type": "api-item"
   },
+  "rq-7594b1fc": {
+    "decl": "- `spme_compute_bin_key`: one thread per particle, block size 256,",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "spme_compute_bin_key",
+    "type": "api-item"
+  },
   "rq-759d2445": {
     "decl": "### Top-level fields",
     "file": "analysis/framework",
@@ -15767,7 +15813,7 @@
     "type": "scenario"
   },
   "rq-996edcaf": {
-    "decl": "- `spme_spread_fixed_point`: one warp per particle, block size 256",
+    "decl": "- `spme_spread_fixed_point`: one warp per sorted slot, block size 256",
     "file": "forces/spme",
     "refs": [],
     "title": "spme_spread_fixed_point",
@@ -15792,6 +15838,13 @@
     "refs": [],
     "title": "Reproducibility",
     "type": "section"
+  },
+  "rq-99cb2bd3": {
+    "decl": "Scenario: Two runs of the sort pipeline produce byte-identical sorted_atom_index",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Two runs of the sort pipeline produce byte-identical sorted_atom_index",
+    "type": "scenario"
   },
   "rq-99d3d796": {
     "decl": "- `spme_recip_compute_influence(kernels, b_factors_a, b_factors_b, b_factors_c, influence_g, virial_factor, sim_box, grid, alpha, k_coulomb, m_complex) -> Result<(), GpuError>`",
@@ -16609,6 +16662,13 @@
     "title": "Reject upload when host particle count differs from buffers",
     "type": "scenario"
   },
+  "rq-9ffb2eb3": {
+    "decl": "Scenario: Sort fires when the neighbour-list rebuild generation advances",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Sort fires when the neighbour-list rebuild generation advances",
+    "type": "scenario"
+  },
   "rq-a003ec43": {
     "decl": "Scenario: Reject non-positive tau_t",
     "file": "integration/mtk-npt",
@@ -16782,6 +16842,18 @@
     "file": "forces/spme",
     "refs": [],
     "title": "spme_spread_charges",
+    "type": "api-item"
+  },
+  "rq-a1b761fc": {
+    "decl": "- `spme_atom_sort(particle_buffers, sim_box, spme_state) -> Result<(), GpuError>`",
+    "file": "forces/spme",
+    "refs": [
+      {
+        "file": "src/gpu/kernels.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "spme_atom_sort",
     "type": "api-item"
   },
   "rq-a1d555ec": {
@@ -17663,6 +17735,13 @@
     ],
     "title": "vv_kick_drift wraps in the negative-x direction",
     "type": "scenario"
+  },
+  "rq-ab1063b3": {
+    "decl": "- `scatter_atoms_into_cells` (reused): one thread per particle, block",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "scatter_atoms_into_cells",
+    "type": "api-item"
   },
   "rq-ab21511c": {
     "decl": "# Each row declares one rigid constraint group of k atoms.",
@@ -19497,6 +19576,13 @@
     "title": "ForceField",
     "type": "api-item"
   },
+  "rq-be54d0f6": {
+    "decl": "Scenario: Sort does not fire when generation is unchanged",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Sort does not fire when generation is unchanged",
+    "type": "scenario"
+  },
   "rq-be551127": {
     "decl": "## CSVR conserved quantity",
     "file": "integration/csvr",
@@ -20256,6 +20342,13 @@
     "title": "Harmonic angle_type rejects extra fields",
     "type": "scenario"
   },
+  "rq-c60c1d5f": {
+    "decl": "Scenario: Spread output is independent of sorted_atom_index permutation",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Spread output is independent of sorted_atom_index permutation",
+    "type": "scenario"
+  },
   "rq-c623013e": {
     "decl": "- `ShakeBuilder` — implements `ConstraintBuilder` (see",
     "file": "integration/shake",
@@ -20449,6 +20542,13 @@
       }
     ],
     "title": "Reject too many data rows",
+    "type": "scenario"
+  },
+  "rq-c88ec28e": {
+    "decl": "Scenario: In-bin order is canonical (strictly ascending atom index)",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "In-bin order is canonical (strictly ascending atom index)",
     "type": "scenario"
   },
   "rq-c8954d3e": {
@@ -21716,6 +21816,13 @@
     "file": "forces/spme",
     "refs": [],
     "title": "apply_influence writes one virial partial per block",
+    "type": "scenario"
+  },
+  "rq-d4d66d02": {
+    "decl": "Scenario: Initial sorted_atom_index is the identity permutation",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Initial sorted_atom_index is the identity permutation",
     "type": "scenario"
   },
   "rq-d5085350": {
@@ -23474,6 +23581,13 @@
     "refs": [],
     "title": "Header and rows",
     "type": "section"
+  },
+  "rq-e59ee965": {
+    "decl": "Scenario: sorted_atom_index orders atoms by primary bin",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "sorted_atom_index orders atoms by primary bin",
+    "type": "scenario"
   },
   "rq-e5b63a73": {
     "decl": "Scenario: Reject non-positive temperature",

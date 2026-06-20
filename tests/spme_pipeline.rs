@@ -119,7 +119,7 @@ fn spme_pipeline_matches_explicit_ewald_two_charge_pair() {
     };
     let mut spme = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    spme.compute(&sim_box, &buffers, &mut timings).unwrap();
+    spme.compute(&sim_box, &buffers, 1, &mut timings).unwrap();
     spme.sync_recip().unwrap();
 
     let energy_spme = spme_energy_from_pipeline(&spme);
@@ -167,7 +167,7 @@ fn spme_pipeline_matches_explicit_ewald_four_charges() {
     let mut spme =
         SpmeReciprocalGrid::new(&gpu, &sim_box, positions.len(), params).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    spme.compute(&sim_box, &buffers, &mut timings).unwrap();
+    spme.compute(&sim_box, &buffers, 1, &mut timings).unwrap();
     spme.sync_recip().unwrap();
 
     let energy_spme = spme_energy_from_pipeline(&spme);
@@ -215,7 +215,7 @@ fn spread_conserves_total_charge() {
     let mut spme =
         SpmeReciprocalGrid::new(&gpu, &sim_box, positions.len(), params).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    spme.compute(&sim_box, &buffers, &mut timings).unwrap();
+    spme.compute(&sim_box, &buffers, 1, &mut timings).unwrap();
     spme.sync_recip().unwrap();
 
     let rho: Vec<Real> = gpu.device.dtoh_sync_copy(&spme.rho).unwrap();
@@ -271,8 +271,8 @@ fn identical_inputs_produce_byte_identical_grids() {
     let mut spme1 = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
     let mut spme2 = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
-    spme1.compute(&sim_box, &buffers, &mut timings).unwrap();
-    spme2.compute(&sim_box, &buffers, &mut timings).unwrap();
+    spme1.compute(&sim_box, &buffers, 1, &mut timings).unwrap();
+    spme2.compute(&sim_box, &buffers, 1, &mut timings).unwrap();
     spme1.sync_recip().unwrap();
     spme2.sync_recip().unwrap();
 
@@ -338,7 +338,7 @@ fn spread_for_one_isolated_particle_matches_b_spline_weights() {
     };
     let mut grid = SpmeReciprocalGrid::new(&gpu, &sim_box, 1, params).unwrap();
     let mut t = Timings::new(&gpu).unwrap();
-    grid.compute(&sim_box, &buffers, &mut t).unwrap();
+    grid.compute(&sim_box, &buffers, 1, &mut t).unwrap();
     grid.sync_recip().unwrap();
     let rho: Vec<Real> = gpu.device.dtoh_sync_copy(&grid.rho).unwrap();
     // The kernel maps each particle to fractional coords s_a, computes
@@ -402,7 +402,7 @@ fn spread_is_zero_at_a_grid_point_with_no_particle_support() {
     };
     let mut grid = SpmeReciprocalGrid::new(&gpu, &sim_box, 1, params).unwrap();
     let mut t = Timings::new(&gpu).unwrap();
-    grid.compute(&sim_box, &buffers, &mut t).unwrap();
+    grid.compute(&sim_box, &buffers, 1, &mut t).unwrap();
     grid.sync_recip().unwrap();
     let rho: Vec<Real> = gpu.device.dtoh_sync_copy(&grid.rho).unwrap();
     assert_eq!(rho[0], 0.0, "rho at unsupported grid point must be exactly zero");
@@ -433,8 +433,8 @@ fn spread_is_byte_identical_under_two_input_orderings_in_same_bin() {
     let mut grid_a = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
     let mut grid_b = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
     let mut t = Timings::new(&gpu).unwrap();
-    grid_a.compute(&sim_box, &buffers_a, &mut t).unwrap();
-    grid_b.compute(&sim_box, &buffers_b, &mut t).unwrap();
+    grid_a.compute(&sim_box, &buffers_a, 1, &mut t).unwrap();
+    grid_b.compute(&sim_box, &buffers_b, 1, &mut t).unwrap();
     grid_a.sync_recip().unwrap();
     grid_b.sync_recip().unwrap();
     let rho_a: Vec<Real> = gpu.device.dtoh_sync_copy(&grid_a.rho).unwrap();
@@ -539,8 +539,8 @@ fn spread_pipeline_does_not_launch_neighbor_list_kernels() {
     };
     let mut grid = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
     let mut t = Timings::new(&gpu).unwrap();
-    grid.compute(&sim_box, &buffers, &mut t).unwrap();
-    grid.compute(&sim_box, &buffers, &mut t).unwrap();
+    grid.compute(&sim_box, &buffers, 1, &mut t).unwrap();
+    grid.compute(&sim_box, &buffers, 1, &mut t).unwrap();
     grid.sync_recip().unwrap();
     let report = t.finalize().unwrap();
     // SpmeReciprocalGrid no longer owns a NeighborListState; the four
@@ -618,8 +618,8 @@ fn apply_influence_two_runs_byte_identical_v_hat_and_virial_partials() {
     let mut a = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
     let mut b = SpmeReciprocalGrid::new(&gpu, &sim_box, 2, params).unwrap();
     let mut t = Timings::new(&gpu).unwrap();
-    a.compute(&sim_box, &buffers, &mut t).unwrap();
-    b.compute(&sim_box, &buffers, &mut t).unwrap();
+    a.compute(&sim_box, &buffers, 1, &mut t).unwrap();
+    b.compute(&sim_box, &buffers, 1, &mut t).unwrap();
     a.sync_recip().unwrap();
     b.sync_recip().unwrap();
     let rho_hat_a: Vec<Real> = gpu.device.dtoh_sync_copy(&a.rho_hat_interleaved).unwrap();
@@ -698,7 +698,7 @@ fn sum_of_virial_partials_equals_hermitian_weighted_sum_of_virial_factor_times_r
     // the device-side reduction up to associativity differences).
     let (gpu, buffers, sim_box, mut grid) = small_charged_pair_grid();
     let mut t = Timings::new(&gpu).unwrap();
-    grid.compute(&sim_box, &buffers, &mut t).unwrap();
+    grid.compute(&sim_box, &buffers, 1, &mut t).unwrap();
     grid.sync_recip().unwrap();
     let partials: Vec<Real> = gpu.device.dtoh_sync_copy(&grid.virial_partials).unwrap();
     let host_sum: f64 = partials.iter().map(|&x| x as f64).sum();

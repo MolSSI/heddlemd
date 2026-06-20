@@ -251,21 +251,22 @@ __device__ static inline void spread_per_particle_setup(
 // and each lane handles ceil(p^3 / 32) of the p^3 contributions,
 // issuing atomicAdd<i64> into the fixed-point grid.
 extern "C" __global__ void spme_spread_fixed_point(
-    const Real   *positions_x,
-    const Real   *positions_y,
-    const Real   *positions_z,
-    const Real   *charges,
-    const Real   *lattice,
-    unsigned int  n_a, unsigned int n_b, unsigned int n_c,
-    unsigned int  spline_order,
-    long long    *rho_fixed,            // length M (i64)
-    unsigned int  n)
+    const Real         *positions_x,
+    const Real         *positions_y,
+    const Real         *positions_z,
+    const Real         *charges,
+    const unsigned int *sorted_atom_index, // length n
+    const Real         *lattice,
+    unsigned int        n_a, unsigned int n_b, unsigned int n_c,
+    unsigned int        spline_order,
+    long long          *rho_fixed,         // length M (i64)
+    unsigned int        n)
 {
   // 8 warps per block, 32 lanes per warp.
   unsigned int warp_id_in_block = threadIdx.x >> 5;
   unsigned int lane = threadIdx.x & 31u;
-  unsigned int i = blockIdx.x * 8u + warp_id_in_block;
-  if (i >= n) {
+  unsigned int t = blockIdx.x * 8u + warp_id_in_block;
+  if (t >= n) {
     return;
   }
 
@@ -276,12 +277,14 @@ extern "C" __global__ void spme_spread_fixed_point(
   unsigned int p2 = p_u * p_u;
   unsigned int p3 = p2 * p_u;
 
-  // Lane 0 computes the per-particle weights and primary bin; the
-  // values are then broadcast to every lane via warp shuffles.
+  // Lane 0 resolves the sorted-slot to its original atom index, then
+  // computes the per-particle weights and primary bin; the values are
+  // broadcast to every lane via warp shuffles.
   Real ta = R(0.0), tb = R(0.0), tc = R(0.0);
   unsigned int g_a = 0u, g_b = 0u, g_c = 0u;
   Real qi = R(0.0);
   if (lane == 0u) {
+    unsigned int i = sorted_atom_index[t];
     Real px = positions_x[i];
     Real py = positions_y[i];
     Real pz = positions_z[i];
@@ -328,6 +331,48 @@ extern "C" __global__ void spme_spread_fixed_point(
     atomicAdd((unsigned long long *) &rho_fixed[g],
               (unsigned long long) v_fixed);
   }
+}
+
+// rq-06f1edf2 rq-7594b1fc rq-a1b761fc
+//
+// Atom spatial pre-sort key computation. One thread per particle.
+// Each thread runs the same `spread_per_particle_setup` geometry as
+// the spread / gather kernels, takes the primary bin `(g_a, g_b, g_c)`,
+// flattens it to the row-major key
+// `b = g_a · n_b · n_c + g_b · n_c + g_c`, writes it to
+// `atom_bin_key[i]`, and atomically increments `bin_atom_counts[b]`.
+//
+// The histogram atomicAdd reduces to integer addition of `+1`s and is
+// independent of completion order, so the per-bin atom count is
+// deterministic across runs. The caller is responsible for zeroing
+// `bin_atom_counts` (length M) before this kernel launches.
+extern "C" __global__ void spme_compute_bin_key(
+    const Real   *positions_x,
+    const Real   *positions_y,
+    const Real   *positions_z,
+    const Real   *lattice,
+    unsigned int  n_a, unsigned int n_b, unsigned int n_c,
+    unsigned int *atom_bin_key,
+    unsigned int *bin_atom_counts,
+    unsigned int  n)
+{
+  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+  if (i >= n) {
+    return;
+  }
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
+  Real px = positions_x[i];
+  Real py = positions_y[i];
+  Real pz = positions_z[i];
+  Real ta, tb, tc;
+  unsigned int g_a, g_b, g_c;
+  spread_per_particle_setup(
+      px, py, pz, n_a, n_b, n_c, lx, ly, lz, xy, xz, yz,
+      ta, tb, tc, g_a, g_b, g_c);
+  unsigned int b = (g_a * n_b + g_b) * n_c + g_c;
+  atom_bin_key[i] = b;
+  atomicAdd(&bin_atom_counts[b], 1u);
 }
 
 // Fixed-point -> f32 conversion. One thread per real grid cell.
@@ -523,16 +568,17 @@ extern "C" __global__ void spme_recip_reduce_partials(
 }
 
 extern "C" __global__ void spme_force_gather(
-    const Real *positions_x,
-    const Real *positions_y,
-    const Real *positions_z,
-    const Real *charges,
-    const Real *V,
-    const Real *u_self_per_particle,
-    const Real *w_per_particle_virial,   // length 1
-    const Real *lattice,
-    unsigned int n_a, unsigned int n_b, unsigned int n_c,
-    unsigned int spline_order,
+    const Real         *positions_x,
+    const Real         *positions_y,
+    const Real         *positions_z,
+    const Real         *charges,
+    const Real         *V,
+    const Real         *u_self_per_particle,
+    const Real         *w_per_particle_virial,   // length 1
+    const unsigned int *sorted_atom_index,       // length n
+    const Real         *lattice,
+    unsigned int        n_a, unsigned int n_b, unsigned int n_c,
+    unsigned int        spline_order,
     Real *slot_force_x,
     Real *slot_force_y,
     Real *slot_force_z,
@@ -543,10 +589,16 @@ extern "C" __global__ void spme_force_gather(
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
   Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
   Real w_per_particle_virial_val = w_per_particle_virial[0];
-  unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i >= n) {
+  unsigned int t = blockIdx.x * blockDim.x + threadIdx.x;
+  if (t >= n) {
     return;
   }
+  // Sorted-slot indirection: consecutive threads address atoms with
+  // nearby primary bins so the per-thread reads of V[g] cluster on
+  // neighbouring cache lines. Per-particle outputs are written to the
+  // canonical particle-index positions slot_*[i], preserving the
+  // slot-output layout regardless of the sort permutation.
+  unsigned int i = sorted_atom_index[t];
   Real qi = charges[i];
   Real px = positions_x[i];
   Real py = positions_y[i];
