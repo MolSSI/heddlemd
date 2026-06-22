@@ -36,8 +36,9 @@ impl KernelStage {
     pub const COULOMB_PAIR_FORCE: KernelStage = KernelStage::new("coulomb_pair_force");
     pub const SPME_REAL_PAIR_FORCE: KernelStage =
         KernelStage::new("spme_real_pair_force");
-    pub const LJ_SPME_REAL_FUSED_PAIR_FORCE: KernelStage =
-        KernelStage::new("lj_spme_real_fused_pair_force");
+    /// rq-9f309378
+    pub const JIT_COMPOSED_PAIR_FORCE: KernelStage =
+        KernelStage::new("jit_composed_pair_force");
     pub const SPME_RECIP_PIPELINE: KernelStage =
         KernelStage::new("spme_recip_pipeline");
     pub const SPME_FORCE_GATHER: KernelStage = KernelStage::new("spme_force_gather");
@@ -111,7 +112,7 @@ impl KernelStage {
         Self::LJ_PAIR_FORCE,
         Self::COULOMB_PAIR_FORCE,
         Self::SPME_REAL_PAIR_FORCE,
-        Self::LJ_SPME_REAL_FUSED_PAIR_FORCE,
+        Self::JIT_COMPOSED_PAIR_FORCE,
         Self::SPME_RECIP_PIPELINE,
         Self::SPME_FORCE_GATHER,
         Self::MORSE_BOND_FORCE,

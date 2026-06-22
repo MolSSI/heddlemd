@@ -2,17 +2,23 @@
 
 Lennard-Jones is the non-bonded pairwise potential slot in the pluggable
 potential framework (`framework.md`). The slot is present when the config
-declares at least one `[[pair_interactions]]` entry *and* the LJ +
-SPME-real fused composite slot (`lj-spme-real-fused.md`) is inactive.
-When SPME is also configured, the fused composite displaces this slot
-through the framework's displacement mechanism, and the standalone LJ
-kernel does not run for the lifetime of that `ForceField`. Its
-parameters come from the per-pair-type table built from the full
-`[[pair_interactions]]` array (see `io/config-schema.md`).
+declares at least one `[[pair_interactions]]` entry. Its parameters come
+from the per-pair-type table built from the full `[[pair_interactions]]`
+array (see `io/config-schema.md`).
 
-The slot evaluates pair forces with two fused warp-per-particle
-kernels (forces only and forces + energy + virial) that read the
-shared `NeighborListState` owned by `ForceField` (see
+The slot exposes a CUDA source fragment via
+`LennardJonesBuilder::pair_force_fragment` for participation in the
+JIT-composed pair-force kernel (see `jit-composed-pair-force.md`),
+where its per-pair contribution is summed with every other active
+fast-class pair-force slot's contribution into one register
+accumulator per particle. The slot also exposes two standalone
+`lj_pair_force_{f,fev}` kernels for unit-test fixtures that drive the
+per-pair functional form in isolation; the framework's per-step
+pipeline does not dispatch the standalone kernels.
+
+The standalone kernels evaluate pair forces with two fused
+warp-per-particle kernels (forces only and forces + energy + virial)
+that read the shared `NeighborListState` owned by `ForceField` (see
 `neighbor-list.md`). Each warp handles one particle: the warp walks
 the particle's neighbour list, accumulates the per-pair LJ
 contribution in register accumulators across all 32 lanes, and writes

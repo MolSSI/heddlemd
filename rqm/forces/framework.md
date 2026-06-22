@@ -37,7 +37,7 @@ forces (e.g. short-range pair).
 
 ## Slots <!-- rq-cc73f184 -->
 
-`PotentialRegistry::with_builtins()` registers seven built-in `PotentialBuilder`s,
+`PotentialRegistry::with_builtins()` registers six built-in `PotentialBuilder`s,
 each of which contributes at most one slot to the `ForceField` when its activation
 condition is met. The registry's registration order is the slot evaluation
 order; the registry is the single canonical source of slot ordering, and
@@ -48,7 +48,6 @@ order; the registry is the single canonical source of slot ordering, and
 | `LennardJonesBuilder` | `"lennard_jones"` | `cx.pair_interactions` is non-empty | `Fast` | `&[]` | `lj-pair-force.md` |
 | `CoulombBuilder` | `"coulomb"` | `cx.coulomb_config.is_some()` | `Fast` | `&[]` | `coulomb-pair-force.md` |
 | `SpmeRealBuilder` | `"spme_real"` | `cx.spme_config.is_some()` | `Fast` | `&[]` | `spme.md` |
-| `LjSpmeRealFusedBuilder` | `"lj_spme_real_fused"` | `cx.pair_interactions` is non-empty AND `cx.spme_config.is_some()` | `Fast` | `&["lennard_jones", "spme_real"]` | `lj-spme-real-fused.md` |
 | `SpmeReciprocalBuilder` | `"spme_reciprocal"` | `cx.spme_config.is_some()` | `Slow` | `&[]` | `spme.md` |
 | `MorseBondedBuilder` | `"morse_bonded"` | `!cx.bond_list.is_empty()` | `Fast` | `&[]` | `morse-bonded.md` |
 | `HarmonicAngleBuilder` | `"harmonic_angle"` | `!cx.angle_list.is_empty()` | `Fast` | `&[]` | `harmonic-angle.md` |
@@ -59,55 +58,49 @@ are evaluated. The `[coulomb]` and `[spme]` tables are mutually exclusive
 at config load (see `io/config-schema.md`); a `ForceField` therefore
 contains at most one electrostatics path.
 
-`LjSpmeRealFusedBuilder` is a composite slot that walks the shared
-neighbour list once and computes both the Lennard-Jones 12-6 and the
-SPME real-space Coulomb contribution per pair visit. Its `displaces()`
-list names the two single-potential slots whose work it absorbs; when
-the composite builds, `ForceField::new`'s resolution pass (see
-*Feature API*) suppresses those constituent slots so neither runs at
-evaluation time. When either constituent's activation condition is
-not met, the composite returns `Ok(None)` and the lone constituent's
-standalone slot runs unchanged.
-
 A `ForceField` with zero slots is a valid configuration. `step()` writes
 zeros into `particle_buffers.forces_*` and returns without launching any
 slot kernels.
 
 When multiple slots are present, they appear in the `ForceField`'s slot
 list in the order their builders are registered (after displacement
-resolution removes any constituents claimed by an active composite).
-The canonical built-in order is the order of the seven rows above:
+resolution suppresses any constituents claimed by another active
+builder). The canonical built-in order is the order of the six rows
+above:
 
 1. `LennardJones`
 2. `Coulomb`
 3. `SpmeRealSpace`
-4. `LjSpmeRealFused`
-5. `SpmeReciprocal`
-6. `MorseBonded`
-7. `HarmonicAngle`
-
-In a configuration where `LjSpmeRealFused` is active, the surviving
-slot list is `[Coulomb (only if separately configured),
-LjSpmeRealFused, SpmeReciprocal, MorseBonded, HarmonicAngle]` — the
-`LennardJones` and `SpmeRealSpace` entries are absent. Because the
-composite's position in the registry differs from the standalone
-slots it replaces, the fused configuration's accumulation order
-differs from the standalone configuration's. Two runs in *one*
-configuration agree bit-for-bit; runs across the two configurations
-agree only within f32 round-off.
+4. `SpmeReciprocal`
+5. `MorseBonded`
+6. `HarmonicAngle`
 
 A built-in potential is added by writing a `PotentialBuilder` and inserting
 it at the appropriate position in `PotentialRegistry::with_builtins()`.
 The `ForceField::new` body does not change.
 
-A composite slot is added the same way, additionally overriding
-`PotentialBuilder::displaces()` to name the constituent slot labels it
-replaces. The registry resolution pass (see *Feature API*) suppresses
-the named slots when the composite has built. The composite's
-`build()` must inspect the same activation inputs as each constituent
-and return `Ok(None)` whenever any constituent's own activation
-condition is not met; the constituents' standalone slots then run
-unchanged, as if no composite were registered.
+Every fast-class pair-force slot (a slot whose `frequency_class()` is
+`Fast` AND whose `max_cutoff()` is `Some(_)`) participates in the
+JIT-composed pair-force kernel (see `jit-composed-pair-force.md`).
+Its builder additionally exposes a CUDA source fragment via
+`PotentialBuilder::pair_force_fragment(cx)`; the framework collects
+the active fragments at `ForceField::new` time, compiles a single
+composed kernel via nvrtc, and launches that one composed kernel in
+place of one kernel per fast-class pair-force slot at step time.
+Slots whose `frequency_class()` is `Slow` or whose `max_cutoff()` is
+`None` are not consulted for a fragment and continue to dispatch via
+their own `Potential::compute` kernel call at step time.
+
+A composite fragment is built as a regular pair-force builder whose
+`displaces()` list names the constituent slot labels whose fragments
+it absorbs. The framework's resolution pass (see *Feature API*)
+suppresses the named constituents' fragments from the composed
+kernel and substitutes the composite's fragment in their place. The
+composite's `build()` must inspect the same activation inputs as
+each constituent and return `Ok(None)` whenever any constituent's
+own activation condition is not met; the constituents' standalone
+fragments then participate in the composed kernel unchanged, as if
+no composite were registered.
 
 ## Force Classes <!-- rq-df6d79a1 -->
 
@@ -358,6 +351,10 @@ the additive identity. The rest of the pipeline runs normally.
           timings: &mut Timings,
           level: AggregateLevel,
       ) -> Result<(), ForceFieldError>;
+
+      fn bind_pair_force_args(&self, builder: &mut PairForceLaunchBuilder) {
+          panic!("bind_pair_force_args must be overridden for fast-class pair-force slots");
+      }
   }
   ```
 
@@ -408,6 +405,54 @@ the additive identity. The rest of the pipeline runs normally.
 
   Implementations are responsible for emitting their own
   `KernelStage` start/stop events through `timings`.
+
+  For slots whose `frequency_class()` is `Fast` AND whose
+  `max_cutoff()` is `Some(_)`, the framework bypasses `compute` at
+  step time and dispatches the JIT-composed pair-force kernel
+  instead (see `jit-composed-pair-force.md`). `compute` on such
+  slots is reserved for standalone testing (e.g. test fixtures
+  that drive the per-potential kernel directly without going
+  through the framework's composed-kernel pipeline).
+
+  `bind_pair_force_args` pushes the slot's parameter buffers and
+  scalars onto a `PairForceLaunchBuilder` in the order the slot's
+  source fragment expects them. The framework calls this method on
+  every active fast-class pair-force slot, in canonical slot order,
+  once per composed-kernel launch. The default implementation
+  panics so that a slot which omits an override surfaces a
+  programmer error rather than silently producing bad launches.
+  See `jit-composed-pair-force.md` for the full contract.
+
+- `PairForceFragment` — self-contained CUDA C++ source fragment plus <!-- rq-aa6efe11 -->
+  identifying metadata, returned by
+  `PotentialBuilder::pair_force_fragment(cx)`. Fields:
+
+  ```rust
+  pub struct PairForceFragment {
+      pub label: &'static str,
+      pub functor_struct_name: &'static str,
+      pub source: &'static str,
+  }
+  ```
+
+  The full contract on what a fragment must contain (functor
+  struct shape, precision-shim usage, helper-name namespacing) is
+  in `jit-composed-pair-force.md`.
+
+- `PairForceLaunchBuilder` — opaque argument-builder threaded <!-- rq-3aa5f5b8 -->
+  through every active fast-class pair-force slot's
+  `bind_pair_force_args(...)` call. Constructed by the framework
+  once per composed-kernel launch and pre-populated with the
+  launch's common arguments. Slots push their own arguments via:
+
+  ```rust
+  impl PairForceLaunchBuilder {
+      pub fn push_device_buffer<T>(&mut self, buf: &CudaSlice<T>);
+      pub fn push_scalar<T: Copy>(&mut self, value: T);
+  }
+  ```
+
+  See `jit-composed-pair-force.md` for the per-launch contract.
 
 - `ForceFieldContext<'a>` — bundle of shared services that the framework <!-- inline --> <!-- rq-559783fe -->
   exposes to every `compute` call. Constructed by `ForceField::step`
@@ -525,6 +570,20 @@ the additive identity. The rest of the pipeline runs normally.
     among the built slots. `by` names the labels of the claimers (in
     registration order). Reported from `ForceField::new`'s
     displacement-resolution pass.
+  - `MissingPairForceFragment { label: &'static str }` — a slot whose
+    `frequency_class()` is `Fast` and whose `max_cutoff()` is
+    `Some(_)` was registered with a builder whose
+    `pair_force_fragment(cx)` returned `None`. Reported from
+    `ForceField::new` before the composed source is built. See
+    `jit-composed-pair-force.md`.
+  - `FragmentCompileFailed { log: String }` — nvrtc rejected the
+    JIT-composed pair-force kernel source. `log` carries the full
+    nvrtc compile log; the error's `Display` impl additionally
+    names every contributing fragment's slot label. See
+    `jit-composed-pair-force.md`.
+  - `FragmentLoadFailed(GpuError)` — `load_ptx` rejected the
+    compiled PTX of the JIT-composed pair-force kernel. See
+    `jit-composed-pair-force.md`.
 
 - `PotentialBuildContext<'a>` — bundle of borrowed references to every <!-- rq-d116af5f -->
   parsed-config and topology input a built-in `PotentialBuilder` might
@@ -567,6 +626,13 @@ the additive identity. The rest of the pipeline runs normally.
       fn displaces(&self) -> &'static [&'static str] {
           &[]
       }
+
+      fn pair_force_fragment(
+          &self,
+          cx: &PotentialBuildContext<'_>,
+      ) -> Result<Option<PairForceFragment>, ForceFieldError> {
+          Ok(None)
+      }
   }
   ```
 
@@ -581,17 +647,28 @@ the additive identity. The rest of the pipeline runs normally.
     this builder absorbs. The default implementation returns `&[]`,
     meaning the builder is a standalone potential that does not
     displace anything. A composite builder overrides this to name the
-    constituent labels it replaces (for example,
-    `LjSpmeRealFusedBuilder::displaces()` returns
-    `&["lennard_jones", "spme_real"]`). The names are matched against
+    constituent labels it replaces. The names are matched against
     `Potential::label()` of every built slot. Naming a label that no
     builder ends up producing is harmless — the displacement claim
     has no effect. Naming a label that *is* produced suppresses the
-    constituent slot from the final slot list. The composite is
-    responsible for inspecting `cx` and returning `Ok(None)` whenever
-    any of its constituents' activation conditions are not met, so
-    the lone constituent's standalone slot continues to run; the
-    framework does not silently fall back on the composite's behalf.
+    constituent slot from the final slot list, and additionally
+    suppresses the constituent's source fragment from the
+    JIT-composed pair-force kernel when both the composite and the
+    constituent are fast-class pair-force slots. The composite is
+    responsible for inspecting `cx` and returning `Ok(None)` from
+    `build()` whenever any of its constituents' activation
+    conditions are not met, so the lone constituent's standalone
+    slot continues to run; the framework does not silently fall back
+    on the composite's behalf.
+  - `pair_force_fragment` returns the slot's CUDA source fragment
+    for the JIT-composed pair-force kernel (see
+    `jit-composed-pair-force.md`). The default implementation
+    returns `Ok(None)`, meaning the builder does not participate in
+    the JIT-composed pair-force kernel. Every builder whose `build`
+    returns a slot with `frequency_class() == Fast` AND
+    `max_cutoff() == Some(_)` must override this method to return
+    `Ok(Some(fragment))`; a `None` return for such a slot is the
+    `MissingPairForceFragment` rejection at `ForceField::new`.
 
 - `PotentialRegistry` — open-extensible registry of `PotentialBuilder`s. <!-- rq-50f0a96a -->
   The registry's iteration order is the slot evaluation order. Fields:
@@ -605,10 +682,10 @@ the additive identity. The rest of the pipeline runs normally.
   Methods:
   - `PotentialRegistry::new() -> Self` — constructs an empty registry.
   - `PotentialRegistry::with_builtins() -> Self` — constructs a registry
-    pre-populated with the seven built-in `PotentialBuilder`s in the
+    pre-populated with the six built-in `PotentialBuilder`s in the
     canonical evaluation order: `LennardJonesBuilder`, `CoulombBuilder`,
-    `SpmeRealBuilder`, `LjSpmeRealFusedBuilder`,
-    `SpmeReciprocalBuilder`, `MorseBondedBuilder`, `HarmonicAngleBuilder`.
+    `SpmeRealBuilder`, `SpmeReciprocalBuilder`, `MorseBondedBuilder`,
+    `HarmonicAngleBuilder`.
   - `register(&mut self, builder: Box<dyn PotentialBuilder>)` — appends
     a builder to the end of the registry. `ForceField::new` calls this
     indirectly via `heddle_md::Registries::register_potential` when the
@@ -825,16 +902,19 @@ removed.
   evaluations is deterministic.
 - Two `ForceField` configurations that differ only in *which
   built-in builders are registered* — for example, one with
-  `LennardJonesBuilder` and `SpmeRealBuilder` standalone and another
-  with the same two builders plus `LjSpmeRealFusedBuilder` so that
-  the composite displaces them — produce per-particle results that
-  agree only within f32 round-off, not bit-for-bit. The composite
-  visits each pair once and accumulates LJ and SPME-real
-  contributions into the same register pair before the warp-tree
-  reduction, while the standalone configuration visits each pair
-  twice (one per slot kernel) and combines the two slots' per-particle
-  totals through the class accumulator. Both configurations
-  individually preserve run-to-run byte reproducibility on the same
+  `LennardJonesBuilder` and `SpmeRealBuilder` (which the framework
+  fuses into a single composed pair-force kernel via the
+  JIT-composition mechanism in `jit-composed-pair-force.md`) and
+  another containing the LJ builder alone followed by a custom
+  builder that produces SPME-real as a separate per-slot kernel
+  call — produce per-particle results that agree only within f32
+  round-off, not bit-for-bit. The composed configuration visits
+  each pair once and accumulates LJ and SPME-real contributions
+  into the same register pair before the warp-tree reduction,
+  while the per-slot-kernel configuration visits each pair twice
+  and combines the two slots' per-particle totals through the
+  class accumulator. Both configurations individually preserve
+  run-to-run byte reproducibility on the same
   GPU; only cross-configuration equality is sacrificed.
 
 ## Out of Scope <!-- rq-e448909a -->
@@ -1124,30 +1204,22 @@ Feature: Pluggable potential slot framework
     Then builder.displaces() returns &[]
 
   @rq-9e6a7b7e
-  Scenario: Active composite slot suppresses both constituent slots
+  Scenario: Active LJ + SPME-real configuration fuses both fragments into one composed kernel
     Given a ForceField config that activates both LennardJones and SpmeReal
       (one [[pair_interactions]] entry plus [spme] configured with non-zero charges)
-    And PotentialRegistry::with_builtins() (which includes LjSpmeRealFusedBuilder)
+    And PotentialRegistry::with_builtins()
     When ForceField::new(...) is called
-    Then no slot in force_field.slots has label() == "lennard_jones"
-    And no slot in force_field.slots has label() == "spme_real"
-    And exactly one slot has label() == "lj_spme_real_fused"
+    Then force_field.slots contains slots with label() == "lennard_jones" and label() == "spme_real"
+    And force_field exposes one JIT-composed pair-force kernel
+    And per-step force evaluation launches the composed kernel exactly once and does not launch any per-slot pair-force kernel
 
   @rq-fea21f61
-  Scenario: Inactive composite leaves both constituents in place when only LJ configured
-    Given a ForceField config with one [[pair_interactions]] entry and no [spme]
-    And PotentialRegistry::with_builtins()
+  Scenario: A custom composite-fragment builder with active constituents displaces both fragments
+    Given a custom builder C with displaces() == &["lennard_jones", "spme_real"] that produces a fragment fusing both contributions
+    And a config that activates LennardJones, SpmeReal, and C
     When ForceField::new(...) is called
-    Then force_field.slots contains a slot with label() == "lennard_jones"
-    And force_field.slots contains no slot with label() == "lj_spme_real_fused"
-
-  @rq-27d93a8f
-  Scenario: Inactive composite leaves both constituents in place when only SPME configured
-    Given a ForceField config with [spme] configured and no [[pair_interactions]] entries
-    And PotentialRegistry::with_builtins()
-    When ForceField::new(...) is called
-    Then force_field.slots contains a slot with label() == "spme_real"
-    And force_field.slots contains no slot with label() == "lj_spme_real_fused"
+    Then the JIT-composed source includes C's fragment exactly once
+    And the JIT-composed source includes neither LennardJonesBuilder's fragment nor SpmeRealBuilder's fragment
 
   @rq-83298c86
   Scenario: Composite displacement claim against unbuilt label is a no-op
@@ -1176,17 +1248,16 @@ Feature: Pluggable potential slot framework
     And force_field.slots contains both A's and B's slots
 
   @rq-e55779e2
-  Scenario: Composite slot evaluates at its own registration position
+  Scenario: Slot list is the surviving registration order
     Given PotentialRegistry::with_builtins() and a config activating LJ + SPME + Morse
     When ForceField::new(...) is called
     Then force_field.slots in order is:
-      [coulomb? (only if separately configured), lj_spme_real_fused, spme_reciprocal,
-       morse_bonded]
+      [lennard_jones, spme_real, spme_reciprocal, morse_bonded]
 
   @rq-c19ea1ca
-  Scenario: Two runs of the displaced-LJ composite configuration agree byte-for-byte
+  Scenario: Two runs of the LJ + SPME composed-kernel configuration agree byte-for-byte
     Given two independently-constructed ForceFields, each built from a config that
-      activates LJ and SPME so the composite displaces both constituents
+      activates LJ and SPME so the JIT-composed pair-force kernel covers both
     And two ParticleBuffers built from byte-identical ParticleStates of N=64
     When force_field.step(...) is called on each
     Then run A's forces_x, forces_y, forces_z agree byte-for-byte with run B's

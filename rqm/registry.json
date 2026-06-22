@@ -406,6 +406,13 @@
     "title": "apply_before_drift on empty state is a no-op",
     "type": "scenario"
   },
+  "rq-033fc52a": {
+    "decl": "Scenario: A slow-class slot (frequency_class == Slow) is not consulted for a fragment",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A slow-class slot (frequency_class == Slow) is not consulted for a fragment",
+    "type": "scenario"
+  },
   "rq-03423870": {
     "decl": "## Reproducibility",
     "file": "forces/coulomb-pair-force",
@@ -487,6 +494,13 @@
     "refs": [],
     "title": "__device__",
     "type": "api-item"
+  },
+  "rq-044f47ec": {
+    "decl": "Scenario: Composed kernel is not compiled when no fast-class pair-force slot is present",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Composed kernel is not compiled when no fast-class pair-force slot is present",
+    "type": "scenario"
   },
   "rq-0469400b": {
     "decl": "### CUDA Kernels",
@@ -921,13 +935,6 @@
     "title": "Reciprocal-space virial is distributed equally per particle",
     "type": "scenario"
   },
-  "rq-082659a0": {
-    "decl": "Scenario: _fev variant adds to all five slices",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "_fev variant adds to all five slices",
-    "type": "scenario"
-  },
   "rq-084ba25b": {
     "decl": "Scenario: Builder validate_params accepts a well-formed params object",
     "file": "integration/framework",
@@ -1290,6 +1297,13 @@
     "title": "MtkNptBuilder",
     "type": "api-item"
   },
+  "rq-0b8b0db9": {
+    "decl": "- `heddle_jit_composed_pair_force_f` — `AggregateLevel::ForcesOnly`",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "heddle_jit_composed_pair_force_f",
+    "type": "api-item"
+  },
   "rq-0bb735c9": {
     "decl": "## Empty State",
     "file": "integration/framework",
@@ -1297,18 +1311,6 @@
     "refs": [],
     "title": "Empty State",
     "type": "section"
-  },
-  "rq-0bda299c": {
-    "decl": "- `LjSpmeRealFusedState` — implements `Potential` with",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [
-      {
-        "file": "src/forces/lj_spme_real_fused.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "LjSpmeRealFusedState",
-    "type": "api-item"
   },
   "rq-0c2265eb": {
     "decl": "Scenario: Langevin kick_half count is 2 N_steps; drift_half is 2 N_steps; ou_step is N_steps",
@@ -2046,6 +2048,14 @@
     "title": "Reject positions past -L/2 along b (orthorhombic)",
     "type": "scenario"
   },
+  "rq-11f45908": {
+    "decl": "## displaces() Under JIT Composition",
+    "file": "forces/jit-composed-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "displaces() Under JIT Composition",
+    "type": "section"
+  },
   "rq-11f5dfd1": {
     "decl": "# Feature: Stochastic Cell-Rescaling (C-Rescale) Barostat",
     "file": "integration/c-rescale-barostat",
@@ -2215,6 +2225,14 @@
     ],
     "title": "sim_box.generation() advances after apply",
     "type": "scenario"
+  },
+  "rq-139a8a17": {
+    "decl": "### Trait methods",
+    "file": "forces/jit-composed-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Trait methods",
+    "type": "section"
   },
   "rq-13b931f8": {
     "decl": "Scenario: Bond row with non-integer index",
@@ -2554,6 +2572,13 @@
     "title": "SimulationBox API",
     "type": "section"
   },
+  "rq-16dc6d77": {
+    "decl": "Scenario: step(ForcesOnly) launches the _f variant; step(ForcesAndScalars) launches the _fev variant",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "step(ForcesOnly) launches the _f variant; step(ForcesAndScalars) launches the _fev variant",
+    "type": "scenario"
+  },
   "rq-1708fc0a": {
     "decl": "Scenario: Pair-force kernels declare no shared memory",
     "file": "forces/pair-force-kernel",
@@ -2719,6 +2744,14 @@
     ],
     "title": "pub",
     "type": "api-item"
+  },
+  "rq-18382cc2": {
+    "decl": "## Source-Fragment Contract",
+    "file": "forces/jit-composed-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Source-Fragment Contract",
+    "type": "section"
   },
   "rq-18411920": {
     "decl": "- `ParticleBuffers::particle_count(&self) -> usize`",
@@ -3164,6 +3197,13 @@
       }
     ],
     "title": "Reject configurations whose box admits fewer than 3 cells along any direction",
+    "type": "scenario"
+  },
+  "rq-1babd195": {
+    "decl": "Scenario: Per-pair contributions are summed in canonical slot order before the warp tree",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Per-pair contributions are summed in canonical slot order before the warp tree",
     "type": "scenario"
   },
   "rq-1bbcf3b7": {
@@ -3624,13 +3664,6 @@
     "title": "Four-column form sets LJ and Coulomb scales independently",
     "type": "scenario"
   },
-  "rq-1fe9fd90": {
-    "decl": "Scenario: _f variant adds to force slices only",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "_f variant adds to force slices only",
-    "type": "scenario"
-  },
   "rq-1feec66c": {
     "decl": "Scenario: KE is bit-identical across two host runs with identical f32 inputs",
     "file": "io/log-output",
@@ -3642,6 +3675,13 @@
     ],
     "title": "KE is bit-identical across two host runs with identical f32 inputs",
     "type": "scenario"
+  },
+  "rq-1ff4c7cb": {
+    "decl": "- `PairForceFragment` — self-contained CUDA C++ source fragment plus",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "PairForceFragment",
+    "type": "api-item"
   },
   "rq-202493a5": {
     "decl": "# Feature: Smooth Particle-Mesh Ewald (SPME)",
@@ -4064,13 +4104,6 @@
     "title": "LogWriter",
     "type": "api-item"
   },
-  "rq-2351322d": {
-    "decl": "Scenario: Pair inside both cutoffs receives sum of LJ and SPME-real contributions",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "Pair inside both cutoffs receives sum of LJ and SPME-real contributions",
-    "type": "scenario"
-  },
   "rq-2361f2b8": {
     "decl": "- `MorseBondedState` — implements `Potential` with `label() == \"morse_bonded\"` and `frequency_class() == ForceClass::Fast` (the trait default).",
     "file": "forces/framework",
@@ -4307,13 +4340,6 @@
     "file": "forces/coulomb-pair-force",
     "refs": [],
     "title": "Coulomb force is C¹ continuous at r_switch",
-    "type": "scenario"
-  },
-  "rq-2557e549": {
-    "decl": "Scenario: Standalone-LJ-only configuration emits the LJ stage as before",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "Standalone-LJ-only configuration emits the LJ stage as before",
     "type": "scenario"
   },
   "rq-256287cb": {
@@ -4564,13 +4590,6 @@
     "title": "ForcesOnly call preserves the energy and virial accumulator entries from the previous ForcesAndScalars call",
     "type": "scenario"
   },
-  "rq-27d93a8f": {
-    "decl": "Scenario: Inactive composite leaves both constituents in place when only SPME configured",
-    "file": "forces/framework",
-    "refs": [],
-    "title": "Inactive composite leaves both constituents in place when only SPME configured",
-    "type": "scenario"
-  },
   "rq-27efd6a0": {
     "decl": "Scenario: Atom appearing in one angle receives that angle's force",
     "file": "forces/harmonic-angle",
@@ -4615,6 +4634,13 @@
     ],
     "title": "Box Generation Tracking",
     "type": "section"
+  },
+  "rq-28445f4e": {
+    "decl": "Scenario: A composite-fragment builder that builds without its constituents falls back gracefully",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A composite-fragment builder that builds without its constituents falls back gracefully",
+    "type": "scenario"
   },
   "rq-284584c3": {
     "decl": "## Gherkin Scenarios",
@@ -4682,12 +4708,19 @@
     "title": "Types",
     "type": "section"
   },
-  "rq-28b7ed1d": {
-    "decl": "Scenario: LJ exclusion scales the LJ contribution but not the SPME contribution",
-    "file": "forces/lj-spme-real-fused",
+  "rq-28bf79fa": {
+    "decl": "Scenario: Two ForceFields constructed from the same config produce byte-identical composed PTX",
+    "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "LJ exclusion scales the LJ contribution but not the SPME contribution",
+    "title": "Two ForceFields constructed from the same config produce byte-identical composed PTX",
     "type": "scenario"
+  },
+  "rq-28ceccdf": {
+    "decl": "- `FragmentLoadFailed(GpuError)` — `load_ptx` rejected the compiled",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "FragmentLoadFailed",
+    "type": "api-item"
   },
   "rq-28d519b5": {
     "decl": "#### `[coulomb]` (optional table)",
@@ -4783,14 +4816,6 @@
     ],
     "title": "IntegratorBuilder",
     "type": "api-item"
-  },
-  "rq-29e21686": {
-    "decl": "## Feature API",
-    "file": "forces/lj-spme-real-fused",
-    "level": 2,
-    "refs": [],
-    "title": "Feature API",
-    "type": "section"
   },
   "rq-2a0e97f5": {
     "decl": "Scenario: Two independent lossless runs produce byte-identical results",
@@ -5778,6 +5803,13 @@
     "title": "SimulationSetup::new returns a populated struct on a valid config",
     "type": "scenario"
   },
+  "rq-33861244": {
+    "decl": "Scenario: LjSpmeRealFusedBuilder is not part of PotentialRegistry::with_builtins",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "LjSpmeRealFusedBuilder is not part of PotentialRegistry::with_builtins",
+    "type": "scenario"
+  },
   "rq-3396b95f": {
     "decl": "Scenario: Construct Andersen via the thermostat registry",
     "file": "integration/framework",
@@ -5840,13 +5872,6 @@
     "title": "A real-space exclusion entry on one pair does not attenuate other pairs",
     "type": "scenario"
   },
-  "rq-343f9e75": {
-    "decl": "- `gpu::lj_spme_real_fused_pair_force_f(...)` — Rust launcher around",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "gpu",
-    "type": "api-item"
-  },
   "rq-34446ef5": {
     "decl": "- `UnitSystem` — discriminated enum naming the two supported systems.",
     "file": "io/unit-system",
@@ -5889,6 +5914,13 @@
       }
     ],
     "title": "Two independent composed runs with identical configs are byte-identical",
+    "type": "scenario"
+  },
+  "rq-3460d807": {
+    "decl": "Scenario: Two independent runs of the composed kernel on identical inputs are byte-identical",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Two independent runs of the composed kernel on identical inputs are byte-identical",
     "type": "scenario"
   },
   "rq-34943524": {
@@ -6541,6 +6573,13 @@
     ],
     "title": "MTK-NPT emits ForceEval with ForcesAndScalars",
     "type": "scenario"
+  },
+  "rq-3aa5f5b8": {
+    "decl": "- `PairForceLaunchBuilder` — opaque argument-builder threaded",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "PairForceLaunchBuilder",
+    "type": "api-item"
   },
   "rq-3ace72b0": {
     "decl": "### `Thermostat` trait overrides",
@@ -7287,12 +7326,12 @@
     "title": "andersen_resample with p_collision = 1 resamples every particle",
     "type": "scenario"
   },
-  "rq-4255cb6e": {
-    "decl": "Scenario: Fused kernel and standalone kernels agree within f32 round-off",
-    "file": "forces/lj-spme-real-fused",
+  "rq-4289075c": {
+    "decl": "- `FragmentCompileFailed { log: String }` — nvrtc rejected the",
+    "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "Fused kernel and standalone kernels agree within f32 round-off",
-    "type": "scenario"
+    "title": "FragmentCompileFailed",
+    "type": "api-item"
   },
   "rq-4300cafc": {
     "decl": "Scenario: plan(dt) is pure; it does not launch kernels or touch buffers",
@@ -7913,6 +7952,14 @@
     "title": "Missing nvcc",
     "type": "section"
   },
+  "rq-4a49e804": {
+    "decl": "## Gherkin Scenarios",
+    "file": "forces/jit-composed-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-4a6969aa": {
     "decl": "### Number formatting",
     "file": "io/log-output",
@@ -8203,6 +8250,13 @@
     ],
     "title": "Feature: Radial Distribution Function Analysis (`rdf`)",
     "type": "file"
+  },
+  "rq-4d1fa71c": {
+    "decl": "- `MissingPairForceFragment { label: &'static str }` — a slot whose",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "MissingPairForceFragment",
+    "type": "api-item"
   },
   "rq-4d226dff": {
     "decl": "Scenario: Re-upload after host-side mutation",
@@ -8641,6 +8695,14 @@
     ],
     "title": "wrap_position is idempotent for a triclinic box",
     "type": "scenario"
+  },
+  "rq-52b69f09": {
+    "decl": "### Composed-kernel module name and entry points",
+    "file": "forces/jit-composed-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Composed-kernel module name and entry points",
+    "type": "section"
   },
   "rq-52b7d30e": {
     "decl": "Scenario: Construct BerendsenBarostat via the registry",
@@ -9098,6 +9160,13 @@
     "title": "Construct a ForceField with LennardJones only",
     "type": "scenario"
   },
+  "rq-56ddc98d": {
+    "decl": "- `heddle_jit_composed_pair_force_fev` —",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "heddle_jit_composed_pair_force_fev",
+    "type": "api-item"
+  },
   "rq-5711d6ce": {
     "decl": "Scenario: Empty integrator registry reports UnknownKind",
     "file": "integration/framework",
@@ -9380,13 +9449,6 @@
     "title": "vv_kick_drift_lossless on an empty state is a no-op",
     "type": "scenario"
   },
-  "rq-58e9adff": {
-    "decl": "Scenario: Composite builder declines when only SPME is configured",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "Composite builder declines when only SPME is configured",
-    "type": "scenario"
-  },
   "rq-5915b212": {
     "decl": "## Out of Scope",
     "file": "integration/c-rescale-barostat",
@@ -9546,14 +9608,6 @@
     "level": 2,
     "refs": [],
     "title": "Empty State and degenerate cases",
-    "type": "section"
-  },
-  "rq-5b048e60": {
-    "decl": "## Determinism",
-    "file": "forces/lj-spme-real-fused",
-    "level": 2,
-    "refs": [],
-    "title": "Determinism",
     "type": "section"
   },
   "rq-5b097ec0": {
@@ -10062,6 +10116,13 @@
       }
     ],
     "title": "Atom with no angles gets zero accumulator",
+    "type": "scenario"
+  },
+  "rq-5fd76c7f": {
+    "decl": "Scenario: FragmentCompileFailed surfaces the slot labels of every contributing fragment",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "FragmentCompileFailed surfaces the slot labels of every contributing fragment",
     "type": "scenario"
   },
   "rq-5fe22acb": {
@@ -10690,6 +10751,13 @@
     "title": "Missing [integrator] section is rejected",
     "type": "scenario"
   },
+  "rq-66c2bbe0": {
+    "decl": "Scenario: A fragment that references float directly is rejected at compile time",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A fragment that references float directly is rejected at compile time",
+    "type": "scenario"
+  },
   "rq-66d80d54": {
     "decl": "- `morse_bond_force(state: &mut MorseBondedState, particle_buffers: &ParticleBuffers, sim_box: &SimulationBox) -> Result<(), GpuError>`",
     "file": "forces/morse-bonded",
@@ -10939,6 +11007,14 @@
     "title": "Reject an unknown minimization algorithm kind",
     "type": "scenario"
   },
+  "rq-693544f8": {
+    "decl": "## Composed-Kernel Structure",
+    "file": "forces/jit-composed-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Composed-Kernel Structure",
+    "type": "section"
+  },
   "rq-693ce6fa": {
     "decl": "# Feature: Shared Neighbor List Service",
     "file": "forces/neighbor-list",
@@ -11054,13 +11130,6 @@
     "refs": [],
     "title": "Determinism",
     "type": "section"
-  },
-  "rq-6a16d777": {
-    "decl": "Scenario: Composite builder declines when only LJ is configured",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "Composite builder declines when only LJ is configured",
-    "type": "scenario"
   },
   "rq-6a4016ac": {
     "decl": "Scenario: COM momentum is preserved under NHC velocity rescaling",
@@ -11569,13 +11638,6 @@
     "title": "Plan walk on empty Langevin state is a no-op",
     "type": "scenario"
   },
-  "rq-6ea9e020": {
-    "decl": "- `gpu::lj_spme_real_fused_pair_force_fev(...)` — Rust launcher",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "gpu",
-    "type": "api-item"
-  },
   "rq-6eb18608": {
     "decl": "- `lint_analyses_with_registries(config_path: &Path, registries: &Registries) -> LintReport`",
     "file": "analysis/framework",
@@ -11614,6 +11676,13 @@
     "file": "forces/framework",
     "refs": [],
     "title": "Builder Err short-circuits ForceField::new",
+    "type": "scenario"
+  },
+  "rq-6ef2d116": {
+    "decl": "Scenario: Each participating slot's bind_pair_force_args is invoked once per launch in canonical order",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Each participating slot's bind_pair_force_args is invoked once per launch in canonical order",
     "type": "scenario"
   },
   "rq-6f09d7e3": {
@@ -11910,6 +11979,13 @@
     ],
     "title": "Config",
     "type": "api-item"
+  },
+  "rq-724a053c": {
+    "decl": "Scenario: Composed-kernel module name is \"heddle_jit_composed_pair_force\"",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Composed-kernel module name is \"heddle_jit_composed_pair_force\"",
+    "type": "scenario"
   },
   "rq-72a606e3": {
     "decl": "## Determinism",
@@ -12724,14 +12800,6 @@
     "title": "Reject when type_indices has the wrong length",
     "type": "scenario"
   },
-  "rq-790e0c6c": {
-    "decl": "## max_cutoff",
-    "file": "forces/lj-spme-real-fused",
-    "level": 2,
-    "refs": [],
-    "title": "max_cutoff",
-    "type": "section"
-  },
   "rq-7921e537": {
     "decl": "Scenario: Construct a constraint slot for a non-empty constraint list",
     "file": "integration/constraint-framework",
@@ -12743,22 +12811,6 @@
     ],
     "title": "Construct a constraint slot for a non-empty constraint list",
     "type": "scenario"
-  },
-  "rq-79282483": {
-    "decl": "# Feature: Fused LJ + SPME Real-Space Pair-Force Slot",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [
-      {
-        "file": "src/forces/lj_spme_real_fused.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "Feature: Fused LJ + SPME Real-Space Pair-Force Slot",
-    "type": "file"
   },
   "rq-79291197": {
     "decl": "Scenario: kernel_start followed by kernel_stop and finalize records one sample",
@@ -12857,6 +12909,13 @@
       }
     ],
     "title": "Unknown kind in a populated registry reports UnknownKind",
+    "type": "scenario"
+  },
+  "rq-79de753a": {
+    "decl": "Scenario: A pair contributes only to fragments whose cutoff_squared passes",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A pair contributes only to fragments whose cutoff_squared passes",
     "type": "scenario"
   },
   "rq-7a076bc9": {
@@ -13489,14 +13548,6 @@
     "title": "Angle list",
     "type": "section"
   },
-  "rq-7f96174d": {
-    "decl": "## Gherkin Scenarios",
-    "file": "forces/lj-spme-real-fused",
-    "level": 2,
-    "refs": [],
-    "title": "Gherkin Scenarios",
-    "type": "section"
-  },
   "rq-7fcfceac": {
     "decl": "Scenario: Construct with particle_count = 0",
     "file": "integration/mtk-npt",
@@ -13645,6 +13696,14 @@
     ],
     "title": "Different seeds produce different velocities",
     "type": "scenario"
+  },
+  "rq-81cc2f2b": {
+    "decl": "## Feature API",
+    "file": "forces/jit-composed-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-81ce46b3": {
     "decl": "## Group-Size Caps",
@@ -13882,6 +13941,13 @@
     "title": "Integrator",
     "type": "api-item"
   },
+  "rq-8443c065": {
+    "decl": "Scenario: step() with two fast-class pair-force slots launches the composed kernel once, not twice",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "step() with two fast-class pair-force slots launches the composed kernel once, not twice",
+    "type": "scenario"
+  },
   "rq-8464775b": {
     "decl": "- `Analysis` — per-run handle returned by an `AnalysisBuilder`.",
     "file": "analysis/framework",
@@ -13932,6 +13998,13 @@
       }
     ],
     "title": "constraint_virial_scatter additively writes per-atom virial into particle_virials",
+    "type": "scenario"
+  },
+  "rq-847450dd": {
+    "decl": "Scenario: Composed-kernel output equals standalone-kernel output within f32 round-off",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Composed-kernel output equals standalone-kernel output within f32 round-off",
     "type": "scenario"
   },
   "rq-84927a79": {
@@ -14026,6 +14099,13 @@
     ],
     "title": "Timings file is absent when run fails before the loop",
     "type": "scenario"
+  },
+  "rq-86691f43": {
+    "decl": "- `PairForceLaunchBuilder` — opaque argument-builder threaded",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "PairForceLaunchBuilder",
+    "type": "api-item"
   },
   "rq-866dcea2": {
     "decl": "### ConstraintCapableIntegrator marker",
@@ -14133,6 +14213,13 @@
     "file": "cuda-graphs",
     "refs": [],
     "title": "Replays advance the device counter once per step",
+    "type": "scenario"
+  },
+  "rq-87a8d51c": {
+    "decl": "Scenario: step_class(Slow) does not launch the composed kernel",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "step_class(Slow) does not launch the composed kernel",
     "type": "scenario"
   },
   "rq-880349c0": {
@@ -14352,6 +14439,13 @@
       }
     ],
     "title": "Reject extra fields (e.g., chain_length from NHC)",
+    "type": "scenario"
+  },
+  "rq-89d54dfc": {
+    "decl": "Scenario: LJ + SPME-real composition matches the hand-fused reference kernel within f32 round-off",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "LJ + SPME-real composition matches the hand-fused reference kernel within f32 round-off",
     "type": "scenario"
   },
   "rq-89d64ca3": {
@@ -15220,6 +15314,14 @@
     "title": "apply_pre is the trait default (no-op)",
     "type": "scenario"
   },
+  "rq-92fec152": {
+    "decl": "## Parameter Binding and Launch",
+    "file": "forces/jit-composed-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Parameter Binding and Launch",
+    "type": "section"
+  },
   "rq-930121d6": {
     "decl": "Scenario: Group order is determined by minimum particle index",
     "file": "integration/constraint-framework",
@@ -15284,13 +15386,6 @@
     "title": "Constraint row with repeated atom is rejected",
     "type": "scenario"
   },
-  "rq-93609d86": {
-    "decl": "Scenario: Two runs of the fused kernel are byte-identical",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "Two runs of the fused kernel are byte-identical",
-    "type": "scenario"
-  },
   "rq-93be622c": {
     "decl": "Scenario: Unknown attributes in the comment line are ignored",
     "file": "io/init-state-file",
@@ -15325,13 +15420,6 @@
       }
     ],
     "title": "NaN values are accepted at construction",
-    "type": "scenario"
-  },
-  "rq-9468f67a": {
-    "decl": "Scenario: Composite frequency_class is Fast",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "Composite frequency_class is Fast",
     "type": "scenario"
   },
   "rq-948431cf": {
@@ -15790,14 +15878,6 @@
     "level": 3,
     "refs": [],
     "title": "CUDA precision header",
-    "type": "section"
-  },
-  "rq-9938e4d6": {
-    "decl": "### Functions",
-    "file": "forces/lj-spme-real-fused",
-    "level": 3,
-    "refs": [],
-    "title": "Functions",
     "type": "section"
   },
   "rq-993ec182": {
@@ -16388,13 +16468,6 @@
     "title": "Bond row with wrong column count",
     "type": "scenario"
   },
-  "rq-9dfa7b39": {
-    "decl": "Scenario: Composite builder reports max_cutoff = max(r_cut_lj, r_cut_spme_real)",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "Composite builder reports max_cutoff = max(r_cut_lj, r_cut_spme_real)",
-    "type": "scenario"
-  },
   "rq-9e09673b": {
     "decl": "Scenario: Successive successful set_lattice calls increment generation monotonically",
     "file": "simulation-box",
@@ -16472,10 +16545,10 @@
     "type": "scenario"
   },
   "rq-9e6a7b7e": {
-    "decl": "Scenario: Active composite slot suppresses both constituent slots",
+    "decl": "Scenario: Active LJ + SPME-real configuration fuses both fragments into one composed kernel",
     "file": "forces/framework",
     "refs": [],
-    "title": "Active composite slot suppresses both constituent slots",
+    "title": "Active LJ + SPME-real configuration fuses both fragments into one composed kernel",
     "type": "scenario"
   },
   "rq-9eb167f0": {
@@ -16553,6 +16626,13 @@
     ],
     "title": "Construct MorseBondedState",
     "type": "scenario"
+  },
+  "rq-9f309378": {
+    "decl": "# Feature: JIT-Composed Pair-Force Kernel",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Feature: JIT-Composed Pair-Force Kernel",
+    "type": "file"
   },
   "rq-9f551521": {
     "decl": "Scenario: runner.resolve_level upgrades to ForcesAndScalars on a logging step",
@@ -16786,13 +16866,6 @@
     "title": "neighbor_list_build",
     "type": "api-item"
   },
-  "rq-a12e8fa8": {
-    "decl": "Scenario: Fused configuration's timings output omits the standalone stages",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "Fused configuration's timings output omits the standalone stages",
-    "type": "scenario"
-  },
   "rq-a16c37bd": {
     "decl": "Scenario: Log file header includes nhc_conserved when NHC is the thermostat",
     "file": "integration/nose-hoover-chain",
@@ -16905,14 +16978,6 @@
     "level": 4,
     "refs": [],
     "title": "`rescale_velocities`",
-    "type": "section"
-  },
-  "rq-a242e878": {
-    "decl": "## Algorithm",
-    "file": "forces/lj-spme-real-fused",
-    "level": 2,
-    "refs": [],
-    "title": "Algorithm",
     "type": "section"
   },
   "rq-a2454a72": {
@@ -17276,6 +17341,13 @@
     "title": "Construct CsvrThermostat via the registry (unconstrained system)",
     "type": "scenario"
   },
+  "rq-a704e8b4": {
+    "decl": "Scenario: step() with one fast-class pair-force slot launches the composed kernel once",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "step() with one fast-class pair-force slot launches the composed kernel once",
+    "type": "scenario"
+  },
   "rq-a71cef31": {
     "decl": "- `run_simulation_with_registries(config_path: &Path, registries: &Registries) -> Result<RunSummary, RunnerError>`",
     "file": "simulation-runner",
@@ -17425,6 +17497,13 @@
     ],
     "title": "ShakeConstraintsState::new rejects a duplicate constraint pair",
     "type": "scenario"
+  },
+  "rq-a8da1cf0": {
+    "decl": "- `bind_pair_force_args(&self, builder: &mut PairForceLaunchBuilder)`",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "bind_pair_force_args",
+    "type": "api-item"
   },
   "rq-a8da85cf": {
     "decl": "## Parameters",
@@ -17680,13 +17759,12 @@
     "title": "Integrator",
     "type": "api-item"
   },
-  "rq-aa7fd772": {
-    "decl": "### Types",
-    "file": "forces/lj-spme-real-fused",
-    "level": 3,
+  "rq-aa6efe11": {
+    "decl": "- `PairForceFragment` — self-contained CUDA C++ source fragment plus",
+    "file": "forces/framework",
     "refs": [],
-    "title": "Types",
-    "type": "section"
+    "title": "PairForceFragment",
+    "type": "api-item"
   },
   "rq-aa91623d": {
     "decl": "- `AnalysisConfig` — parsed `<root>.in.analysis`. All fields are",
@@ -18219,6 +18297,13 @@
     "title": "Launch Configuration",
     "type": "section"
   },
+  "rq-af254840": {
+    "decl": "Scenario: A bonded slot (max_cutoff == None) is not consulted for a fragment",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A bonded slot (max_cutoff == None) is not consulted for a fragment",
+    "type": "scenario"
+  },
   "rq-af2d1628": {
     "decl": "- `LennardJonesState` — implements `Potential` with `label() == \"lennard_jones\"` and `frequency_class() == ForceClass::Fast` (the trait default).",
     "file": "forces/framework",
@@ -18524,13 +18609,6 @@
     "title": "`reduce_bond_forces`",
     "type": "section"
   },
-  "rq-b264fa75": {
-    "decl": "Scenario: Coulomb exclusion scales the SPME contribution but not the LJ contribution",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "Coulomb exclusion scales the SPME contribution but not the LJ contribution",
-    "type": "scenario"
-  },
   "rq-b296ab12": {
     "decl": "Scenario: apply_post on empty state is a no-op",
     "file": "integration/berendsen",
@@ -18832,6 +18910,13 @@
     "title": "Skin-distance contract under batched replay",
     "type": "section"
   },
+  "rq-b5c52011": {
+    "decl": "- `pair_force_fragment(&self, cx: &PotentialBuildContext<'_>) ->",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "pair_force_fragment",
+    "type": "api-item"
+  },
   "rq-b5e263e1": {
     "decl": "Scenario: run_simulation defers to run_simulation_with_registries with built-ins",
     "file": "simulation-runner",
@@ -18863,6 +18948,14 @@
     ],
     "title": "log_column_names",
     "type": "api-item"
+  },
+  "rq-b67882f0": {
+    "decl": "### Framework integration",
+    "file": "forces/jit-composed-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Framework integration",
+    "type": "section"
   },
   "rq-b68761f1": {
     "decl": "Scenario: Top-level units = \"atomic\" is accepted and recorded on Config",
@@ -19333,14 +19426,6 @@
     "title": "Load a file with velocities",
     "type": "scenario"
   },
-  "rq-bb874433": {
-    "decl": "### Timings stage",
-    "file": "forces/lj-spme-real-fused",
-    "level": 3,
-    "refs": [],
-    "title": "Timings stage",
-    "type": "section"
-  },
   "rq-bb96fc2f": {
     "decl": "Scenario: Reject two analyses sharing the same explicit output_path",
     "file": "analysis/framework",
@@ -19448,13 +19533,6 @@
       }
     ],
     "title": "Reject an unknown field under [minimization.algorithm]",
-    "type": "scenario"
-  },
-  "rq-bce6480f": {
-    "decl": "Scenario: Pair outside both cutoffs contributes nothing",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "Pair outside both cutoffs contributes nothing",
     "type": "scenario"
   },
   "rq-bcf7e0eb": {
@@ -19790,6 +19868,14 @@
     "title": "Algorithm",
     "type": "section"
   },
+  "rq-c011e5e2": {
+    "decl": "### Error variants",
+    "file": "forces/jit-composed-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Error variants",
+    "type": "section"
+  },
   "rq-c02c6b45": {
     "decl": "## Lint flow",
     "file": "simulation-runner",
@@ -19837,13 +19923,6 @@
       }
     ],
     "title": "Cell counts are floor(w / (r_cut + r_skin)) for an orthorhombic box",
-    "type": "scenario"
-  },
-  "rq-c0e835ce": {
-    "decl": "Scenario: Pair inside SPME cutoff but outside LJ cutoff contributes SPME only",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "Pair inside SPME cutoff but outside LJ cutoff contributes SPME only",
     "type": "scenario"
   },
   "rq-c0f2daca": {
@@ -19934,10 +20013,10 @@
     "type": "scenario"
   },
   "rq-c19ea1ca": {
-    "decl": "Scenario: Two runs of the displaced-LJ composite configuration agree byte-for-byte",
+    "decl": "Scenario: Two runs of the LJ + SPME composed-kernel configuration agree byte-for-byte",
     "file": "forces/framework",
     "refs": [],
-    "title": "Two runs of the displaced-LJ composite configuration agree byte-for-byte",
+    "title": "Two runs of the LJ + SPME composed-kernel configuration agree byte-for-byte",
     "type": "scenario"
   },
   "rq-c1c9fe3a": {
@@ -20006,18 +20085,6 @@
     ],
     "title": "Construct an empty state",
     "type": "scenario"
-  },
-  "rq-c2a28bda": {
-    "decl": "- `LjSpmeRealFusedBuilder` — implements `PotentialBuilder`.",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [
-      {
-        "file": "src/forces/lj_spme_real_fused.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "LjSpmeRealFusedBuilder",
-    "type": "api-item"
   },
   "rq-c2bc2592": {
     "decl": "## Out of Scope",
@@ -20658,6 +20725,13 @@
     ],
     "title": "run_analyses_with_registries",
     "type": "api-item"
+  },
+  "rq-c9b26a08": {
+    "decl": "Scenario: Composed source is generated by concatenating fragments in canonical slot order",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Composed source is generated by concatenating fragments in canonical slot order",
+    "type": "scenario"
   },
   "rq-c9b62a3c": {
     "decl": "## Algorithm",
@@ -21888,12 +21962,12 @@
     "title": "MtkNpt missing tau_p is rejected",
     "type": "scenario"
   },
-  "rq-d58ba7f6": {
-    "decl": "## Out of Scope",
-    "file": "forces/lj-spme-real-fused",
+  "rq-d5a2f76a": {
+    "decl": "## Compilation",
+    "file": "forces/jit-composed-pair-force",
     "level": 2,
     "refs": [],
-    "title": "Out of Scope",
+    "title": "Compilation",
     "type": "section"
   },
   "rq-d5a4f220": {
@@ -21919,6 +21993,14 @@
     ],
     "title": "MinimizerRegistry",
     "type": "api-item"
+  },
+  "rq-d603cae5": {
+    "decl": "### Types",
+    "file": "forces/jit-composed-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
   },
   "rq-d617bf4a": {
     "decl": "Scenario: Reject [phase.barostat] alongside mtk-npt in any single phase",
@@ -22539,6 +22621,13 @@
     "title": "Bit-exact reproducibility across runs with switching active",
     "type": "scenario"
   },
+  "rq-dbe00ae4": {
+    "decl": "Scenario: step() with zero fast-class pair-force slots does not attempt a composed-kernel launch",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "step() with zero fast-class pair-force slots does not attempt a composed-kernel launch",
+    "type": "scenario"
+  },
   "rq-dbee9f45": {
     "decl": "Scenario: Construct HarmonicAngleState",
     "file": "forces/harmonic-angle",
@@ -22756,6 +22845,13 @@
     "title": "Per-Step Kernel Sequence",
     "type": "section"
   },
+  "rq-dd995812": {
+    "decl": "Scenario: Composed kernel is compiled at ForceField::new when at least one fast-class pair-force slot is present",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Composed kernel is compiled at ForceField::new when at least one fast-class pair-force slot is present",
+    "type": "scenario"
+  },
   "rq-dddb8e7a": {
     "decl": "- `MinimizerBuilder` — trait describing a registered minimizer",
     "file": "minimization/steepest-descent",
@@ -22840,13 +22936,12 @@
     "title": "write_timings_file refuses to overwrite an existing file",
     "type": "scenario"
   },
-  "rq-de5f642d": {
-    "decl": "### Kernels",
-    "file": "forces/lj-spme-real-fused",
-    "level": 3,
+  "rq-de8aef8c": {
+    "decl": "Scenario: A fast-class pair-force builder that returns None from pair_force_fragment is rejected",
+    "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "Kernels",
-    "type": "section"
+    "title": "A fast-class pair-force builder that returns None from pair_force_fragment is rejected",
+    "type": "scenario"
   },
   "rq-de8b9cd5": {
     "decl": "Scenario: Reject non-positive compressibility",
@@ -22885,13 +22980,6 @@
     ],
     "title": "load_config_raw",
     "type": "api-item"
-  },
-  "rq-dec77ff5": {
-    "decl": "Scenario: Composite builder activates when both LJ and SPME are configured",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "Composite builder activates when both LJ and SPME are configured",
-    "type": "scenario"
   },
   "rq-ded81a4a": {
     "decl": "Scenario: Log file header omits nhc_conserved when no thermostat is configured",
@@ -23481,6 +23569,13 @@
     "title": "Unknown bond type name rejected",
     "type": "scenario"
   },
+  "rq-e469657f": {
+    "decl": "Scenario: A composite-fragment builder displaces its constituents' fragments",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A composite-fragment builder displaces its constituents' fragments",
+    "type": "scenario"
+  },
   "rq-e49460ac": {
     "decl": "Scenario: Write a row with extra columns",
     "file": "io/log-output",
@@ -23561,10 +23656,10 @@
     "type": "scenario"
   },
   "rq-e55779e2": {
-    "decl": "Scenario: Composite slot evaluates at its own registration position",
+    "decl": "Scenario: Slot list is the surviving registration order",
     "file": "forces/framework",
     "refs": [],
-    "title": "Composite slot evaluates at its own registration position",
+    "title": "Slot list is the surviving registration order",
     "type": "scenario"
   },
   "rq-e564f8e2": {
@@ -23818,6 +23913,21 @@
     ],
     "title": "Flush is idempotent",
     "type": "scenario"
+  },
+  "rq-e7fc1920": {
+    "decl": "Scenario: Per-fragment exclusion tables apply independently to that fragment's contribution",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Per-fragment exclusion tables apply independently to that fragment's contribution",
+    "type": "scenario"
+  },
+  "rq-e7fd0804": {
+    "decl": "## Out of Scope",
+    "file": "forces/jit-composed-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-e80653f1": {
     "decl": "Scenario: Empty exclusion list leaves all pair forces unchanged",
@@ -24343,13 +24453,6 @@
     "title": "Morse bond_type rejects non-positive de",
     "type": "scenario"
   },
-  "rq-ecf4def9": {
-    "decl": "Scenario: Newton's third law per pair",
-    "file": "forces/lj-spme-real-fused",
-    "refs": [],
-    "title": "Newton's third law per pair",
-    "type": "scenario"
-  },
   "rq-ed048159": {
     "decl": "Scenario: All observables are finite after the 100-step lossless forward run",
     "file": "pipeline-reversibility",
@@ -24405,6 +24508,14 @@
     ],
     "title": "MinimizationConfig",
     "type": "api-item"
+  },
+  "rq-ed6e49c5": {
+    "decl": "## Slot Participation",
+    "file": "forces/jit-composed-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Slot Participation",
+    "type": "section"
   },
   "rq-ed8dcaee": {
     "decl": "Scenario: Round-trip preserves a representative Real value under f64",
@@ -25041,6 +25152,14 @@
     ],
     "title": "mtk_position_drift",
     "type": "api-item"
+  },
+  "rq-f1cced93": {
+    "decl": "## Determinism",
+    "file": "forces/jit-composed-pair-force",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
   },
   "rq-f1dffc21": {
     "decl": "Scenario: Pair with Coulomb exclusion scale 1.0 reproduces the un-excluded value",
@@ -25865,6 +25984,13 @@
     "title": "PTX Module Loading",
     "type": "section"
   },
+  "rq-fa17b283": {
+    "decl": "Scenario: A malformed fragment surfaces FragmentCompileFailed with the nvrtc log",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A malformed fragment surfaces FragmentCompileFailed with the nvrtc log",
+    "type": "scenario"
+  },
   "rq-fa24a8d1": {
     "decl": "Scenario: timings_path can be overridden in [output]",
     "file": "io/config-schema",
@@ -26365,10 +26491,10 @@
     "type": "scenario"
   },
   "rq-fea21f61": {
-    "decl": "Scenario: Inactive composite leaves both constituents in place when only LJ configured",
+    "decl": "Scenario: A custom composite-fragment builder with active constituents displaces both fragments",
     "file": "forces/framework",
     "refs": [],
-    "title": "Inactive composite leaves both constituents in place when only LJ configured",
+    "title": "A custom composite-fragment builder with active constituents displaces both fragments",
     "type": "scenario"
   },
   "rq-feb0501c": {

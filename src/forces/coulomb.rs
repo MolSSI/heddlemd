@@ -16,9 +16,11 @@ use crate::timings::{KernelStage, Timings};
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::NeighborListError;
 use super::{
-    AggregateLevel, ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext,
+    AggregateLevel, ForceFieldContext, ForceFieldError, PairForceBindContext,
+    PairForceFragment, PairForceLaunchBuilder, Potential, PotentialBuildContext,
     PotentialBuilder, SlotOutputView,
 };
+use crate::gpu::K_COULOMB_F32;
 use crate::precision::Real;
 
 // CoulombParameters carries the runtime real-space parameters: the
@@ -117,6 +119,20 @@ impl Potential for CoulombState {
         timings.kernel_stop(KernelStage::COULOMB_PAIR_FORCE)?;
         Ok(())
     }
+
+    fn bind_pair_force_args(
+        &self,
+        ctx: &PairForceBindContext<'_>,
+        builder: &mut PairForceLaunchBuilder,
+    ) {
+        builder.push_device_buffer(&ctx.buffers.charges);
+        builder.push_scalar(K_COULOMB_F32);
+        builder.push_scalar(self.params.cutoff);
+        builder.push_scalar(self.params.r_switch);
+        builder.push_device_buffer(&self.exclusions.atom_excl_offsets);
+        builder.push_device_buffer(&self.exclusions.atom_excl_partners);
+        builder.push_device_buffer(&self.exclusions.atom_excl_coul_scales);
+    }
 }
 
 // rq-e8550f96
@@ -145,6 +161,89 @@ impl PotentialBuilder for CoulombBuilder {
 
     fn box_clone(&self) -> Box<dyn PotentialBuilder> {
         Box::new(self.clone())
+    }
+
+    fn pair_force_fragment(
+        &self,
+        cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<PairForceFragment>, ForceFieldError> {
+        if cx.coulomb_config.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(coulomb_pair_force_fragment()))
+    }
+}
+
+/// Truncated Coulomb with CHARMM C¹ switching fragment for the
+/// JIT-composed pair-force kernel.
+pub fn coulomb_pair_force_fragment() -> PairForceFragment {
+    let functor_source = r#"
+struct CoulombPairFunctor {
+    const Real *charges;
+    Real k_coulomb;
+    Real cutoff;
+    Real r_switch;
+    const unsigned int *excl_offsets;
+    const unsigned int *excl_partners;
+    const Real *excl_scales;
+
+    __device__ inline Real cutoff_squared(unsigned int, unsigned int) const {
+        return cutoff * cutoff;
+    }
+
+    __device__ inline void evaluate(
+        Real r2, unsigned int i, unsigned int j,
+        Real &factor, Real &energy, Real &virial) const
+    {
+        Real qi = charges[i];
+        Real qj = charges[j];
+        Real qq = qi * qj;
+        Real inv_r2 = R(1.0) / r2;
+        Real inv_r  = Real_sqrt(inv_r2);
+        energy = k_coulomb * qq * inv_r;
+        factor = k_coulomb * qq * inv_r * inv_r2;
+        Real r_s2 = r_switch * r_switch;
+        if (r2 > r_s2) {
+            Real r_c2 = cutoff * cutoff;
+            Real delta = r_c2 - r_s2;
+            Real inv_delta = R(1.0) / delta;
+            Real tau = (r2 - r_s2) * inv_delta;
+            Real one_minus_tau = R(1.0) - tau;
+            Real s = one_minus_tau * one_minus_tau * (R(1.0) + R(2.0) * tau);
+            Real chain_coeff = R(12.0) * tau * one_minus_tau * inv_delta;
+            factor = s * factor + chain_coeff * energy;
+            energy = s * energy;
+        }
+        virial = factor * r2;
+    }
+
+    __device__ inline Real exclusion_scale(unsigned int i, unsigned int j) const {
+        return heddle_jit_exclusion_scale(i, j, excl_offsets, excl_partners, excl_scales);
+    }
+};
+"#;
+    let entry_point_args = r#"    const Real *coul_charges,
+    Real coul_k_coulomb,
+    Real coul_cutoff,
+    Real coul_r_switch,
+    const unsigned int *coul_excl_offsets,
+    const unsigned int *coul_excl_partners,
+    const Real *coul_excl_scales,
+"#;
+    let functor_init_source = r#"    composite.functor_coulomb.charges = coul_charges;
+    composite.functor_coulomb.k_coulomb = coul_k_coulomb;
+    composite.functor_coulomb.cutoff = coul_cutoff;
+    composite.functor_coulomb.r_switch = coul_r_switch;
+    composite.functor_coulomb.excl_offsets = coul_excl_offsets;
+    composite.functor_coulomb.excl_partners = coul_excl_partners;
+    composite.functor_coulomb.excl_scales = coul_excl_scales;
+"#;
+    PairForceFragment {
+        label: "coulomb",
+        functor_struct_name: "CoulombPairFunctor",
+        functor_source: functor_source.to_string(),
+        entry_point_args: entry_point_args.to_string(),
+        functor_init_source: functor_init_source.to_string(),
     }
 }
 

@@ -326,7 +326,7 @@ fn empty_n_zero_omits_kernel_rows() {
     let path = write_pair(&dir, 3, 0, 0, 0.0, false, false, 1, 0);
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
-    assert!(stage_row(&body, "lj_pair_force").is_none());
+    assert!(stage_row(&body, "jit_composed_pair_force").is_none());
     assert!(stage_row(&body, "vv_kick_drift").is_none());
     assert!(stage_row(&body, "vv_kick").is_none());
     assert!(stage_row(&body, "gpu_init").is_some());
@@ -363,11 +363,11 @@ fn kernel_counts_match_runner_launches() {
     let path = write_pair(&dir, 10, 0, 0, 0.0, true, false, 1, 2);
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
-    assert_eq!(stage_count(&body, "lj_pair_force"), Some(11));
+    assert_eq!(stage_count(&body, "jit_composed_pair_force"), Some(11));
     assert_eq!(stage_count(&body, "vv_kick_drift"), Some(10));
     assert_eq!(stage_count(&body, "vv_kick"), Some(10));
-    // rq-62300a18: all-pairs records lj_pair_force and omits every
-    // neighbor-list-related row.
+    // rq-62300a18: all-pairs records jit_composed_pair_force and
+    // omits every neighbor-list-related row.
     assert!(stage_row(&body, "lj_pair_force_neighbor").is_none());
     assert!(stage_row(&body, "neighbor_displacement_squared").is_none());
     assert!(stage_row(&body, "neighbor_list_build").is_none());
@@ -552,7 +552,7 @@ fn rows_appear_in_documented_order() {
     let expected = vec![
         "vv_kick_drift",
         "class_accumulator_memset",
-        "lj_pair_force",
+        "jit_composed_pair_force",
         "combine_class_totals",
         "vv_kick",
         "host_to_device_upload",
@@ -1071,8 +1071,8 @@ fn cell_list_records_neighbor_stages() {
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
     // rq-ef918dc6: cell-list adds the four neighbor-list host stages on
-    // top of the regular lj_pair_force kernel stage.
-    assert!(stage_row(&body, "lj_pair_force").is_some());
+    // top of the regular jit_composed_pair_force kernel stage.
+    assert!(stage_row(&body, "jit_composed_pair_force").is_some());
     assert!(stage_row(&body, "neighbor_displacement_squared").is_some());
     assert!(stage_row(&body, "neighbor_list_build").is_some());
     assert!(stage_row(&body, "copy_positions_into_reference").is_some());

@@ -27,7 +27,8 @@ use crate::timings::{KernelStage, Timings};
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::{alloc_scan_block_totals, NeighborListError};
 use super::{
-    AggregateLevel, ForceFieldContext, ForceFieldError, Potential, PotentialBuildContext,
+    AggregateLevel, ForceFieldContext, ForceFieldError, PairForceBindContext,
+    PairForceFragment, PairForceLaunchBuilder, Potential, PotentialBuildContext,
     PotentialBuilder, SlotOutputView,
 };
 use crate::precision::Real;
@@ -562,6 +563,87 @@ impl Potential for SpmeRealSpaceState {
         timings.kernel_stop(KernelStage::SPME_REAL_PAIR_FORCE)?;
         Ok(())
     }
+
+    fn bind_pair_force_args(
+        &self,
+        ctx: &PairForceBindContext<'_>,
+        builder: &mut PairForceLaunchBuilder,
+    ) {
+        builder.push_device_buffer(&ctx.buffers.charges);
+        builder.push_scalar(K_COULOMB_F32);
+        builder.push_scalar(self.alpha);
+        builder.push_scalar(self.r_cut_real);
+        builder.push_device_buffer(&self.exclusions.atom_excl_offsets);
+        builder.push_device_buffer(&self.exclusions.atom_excl_partners);
+        builder.push_device_buffer(&self.exclusions.atom_excl_coul_scales);
+    }
+}
+
+/// SPME real-space `erfc`-screened pair force fragment for the
+/// JIT-composed pair-force kernel.
+pub fn spme_real_pair_force_fragment() -> PairForceFragment {
+    let functor_source = r#"
+struct SpmeRealPairFunctor {
+    const Real *charges;
+    Real k_coulomb;
+    Real alpha;
+    Real r_cut_real;
+    const unsigned int *excl_offsets;
+    const unsigned int *excl_partners;
+    const Real *excl_scales;
+
+    __device__ inline Real cutoff_squared(unsigned int, unsigned int) const {
+        return r_cut_real * r_cut_real;
+    }
+
+    __device__ inline void evaluate(
+        Real r2, unsigned int i, unsigned int j,
+        Real &factor, Real &energy, Real &virial) const
+    {
+        Real qi = charges[i];
+        Real qj = charges[j];
+        Real qq = qi * qj;
+        Real inv_r2 = R(1.0) / r2;
+        Real inv_r  = Real_sqrt(inv_r2);
+        Real r      = R(1.0) / inv_r;
+        Real ar = alpha * r;
+        Real erfc_ar = Real_erfc(ar);
+        Real gauss = Real_exp(-(ar * ar));
+        Real one_over_sqrt_pi = R(0.5641895835477563);
+        energy = k_coulomb * qq * erfc_ar * inv_r;
+        factor = k_coulomb * qq * inv_r2
+                 * (erfc_ar * inv_r + R(2.0) * alpha * one_over_sqrt_pi * gauss);
+        virial = factor * r2;
+    }
+
+    __device__ inline Real exclusion_scale(unsigned int i, unsigned int j) const {
+        return heddle_jit_exclusion_scale(i, j, excl_offsets, excl_partners, excl_scales);
+    }
+};
+"#;
+    let entry_point_args = r#"    const Real *spme_real_charges,
+    Real spme_real_k_coulomb,
+    Real spme_real_alpha,
+    Real spme_real_r_cut,
+    const unsigned int *spme_real_excl_offsets,
+    const unsigned int *spme_real_excl_partners,
+    const Real *spme_real_excl_scales,
+"#;
+    let functor_init_source = r#"    composite.functor_spme_real.charges = spme_real_charges;
+    composite.functor_spme_real.k_coulomb = spme_real_k_coulomb;
+    composite.functor_spme_real.alpha = spme_real_alpha;
+    composite.functor_spme_real.r_cut_real = spme_real_r_cut;
+    composite.functor_spme_real.excl_offsets = spme_real_excl_offsets;
+    composite.functor_spme_real.excl_partners = spme_real_excl_partners;
+    composite.functor_spme_real.excl_scales = spme_real_excl_scales;
+"#;
+    PairForceFragment {
+        label: "spme_real",
+        functor_struct_name: "SpmeRealPairFunctor",
+        functor_source: functor_source.to_string(),
+        entry_point_args: entry_point_args.to_string(),
+        functor_init_source: functor_init_source.to_string(),
+    }
 }
 
 // rq-202493a5 rq-9ca00d25
@@ -745,6 +827,16 @@ impl PotentialBuilder for SpmeRealBuilder {
 
     fn box_clone(&self) -> Box<dyn PotentialBuilder> {
         Box::new(self.clone())
+    }
+
+    fn pair_force_fragment(
+        &self,
+        cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<PairForceFragment>, ForceFieldError> {
+        if cx.spme_config.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(spme_real_pair_force_fragment()))
     }
 }
 

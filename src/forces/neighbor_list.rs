@@ -133,7 +133,11 @@ impl NeighborListState {
         let device = gpu.device.clone();
         let kernels = gpu.kernels.clone();
         debug_assert!(r_cut > 0.0);
-        debug_assert!(r_skin > 0.0);
+        // r_skin == 0 is permitted (degenerate but valid: every
+        // step's displacement check triggers a rebuild because
+        // max_disp > r_skin * 0.5 = 0 unless the system is fully
+        // stationary). Negative is malformed.
+        debug_assert!(r_skin >= 0.0);
         debug_assert!(max_neighbors > 0);
         let r_search = r_cut + r_skin;
         let r_search_sq = r_search * r_search;

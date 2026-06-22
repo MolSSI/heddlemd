@@ -25,7 +25,6 @@ pub use kernels::{
     copy_positions_into_reference,
     coulomb_pair_force, csvr_sample_and_factor,
     harmonic_angle_force, lan_drift_half, lan_ou_step, lj_pair_force,
-    lj_spme_real_fused_pair_force,
     morse_bond_force, mtk_position_drift, mtk_velocity_half_kick,
     neighbor_displacement_squared, neighbor_list_build,
     prefix_scan_cell_counts, reduce_angle_forces, reduce_bond_forces,

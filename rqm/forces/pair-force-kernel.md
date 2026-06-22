@@ -192,6 +192,18 @@ writing a new `PerPotentialPairFunc` device functor and two thin
 with it. The helper holds the universal reduction protocol invariant
 across every such addition.
 
+The per-potential `<potential>_pair_force_{f,fev}` kernels described
+in this file are the standalone-testing entry points: every unit
+test of a per-pair functional form launches the matching
+per-potential kernel directly. The framework's per-step force
+evaluation does *not* dispatch the per-potential kernels — fast-class
+pair-force slots participate in the JIT-composed pair-force kernel
+described in `jit-composed-pair-force.md`, which walks the neighbour
+list once and accumulates every active slot's per-pair contribution
+in registers before the warp-tree reduction. Both paths use the same
+sweep order and the same reduction shape, so a per-potential kernel's
+output equals one-slot composed-kernel output bit-for-bit.
+
 ## Kernel Variants <!-- rq-7b27c75b -->
 
 Each pair-force potential exposes two `extern "C"` kernel entry

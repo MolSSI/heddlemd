@@ -337,7 +337,7 @@ fn integrator_owns_force_evaluation_inside_step() {
             .map(|s| s.count)
             .unwrap_or(0)
     };
-    assert_eq!(count("lj_pair_force"), 1);
+    assert_eq!(count("jit_composed_pair_force"), 1);
     assert_eq!(count("combine_class_totals"), 1);
 }
 
@@ -1266,7 +1266,7 @@ fn force_eval_some_fast_class_dispatches_to_step_class_fast() {
         report.stages.iter().find(|s| s.name == name).map(|s| s.count).unwrap_or(0)
     };
     // The Fast LJ slot's kernel fires; the accumulator fires once.
-    assert_eq!(count_of("lj_pair_force"), 1);
+    assert_eq!(count_of("jit_composed_pair_force"), 1);
     assert_eq!(count_of("combine_class_totals"), 1);
 }
 
@@ -1382,7 +1382,7 @@ fn force_eval_none_class_continues_to_dispatch_to_step() {
         report.stages.iter().find(|s| s.name == name).map(|s| s.count).unwrap_or(0)
     };
     assert_eq!(count_of("combine_class_totals"), 1);
-    assert_eq!(count_of("lj_pair_force"), 1);
+    assert_eq!(count_of("jit_composed_pair_force"), 1);
 }
 
 // --- resolve_aggregate_level + integrator-plan level preferences -------

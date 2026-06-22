@@ -327,6 +327,41 @@ impl PotentialBuilder for StubBuilder {
     fn displaces(&self) -> &'static [&'static str] {
         self.displaces
     }
+
+    fn pair_force_fragment(
+        &self,
+        _cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<heddle_md::forces::PairForceFragment>, ForceFieldError> {
+        // A fast-class slot with a cutoff must expose a fragment under
+        // J1's strict rejection rule; supply a no-op fragment so the
+        // stub can stand in as a pair-force slot in tests. The label
+        // is `Box::leak`-ed to satisfy the fragment's 'static lifetime.
+        if self.class != ForceClass::Fast || self.cutoff.is_none() {
+            return Ok(None);
+        }
+        let functor_struct_name: &'static str =
+            Box::leak(format!("StubFunctor_{}", self.label).into_boxed_str());
+        let functor_source = format!(
+            r#"
+struct {n} {{
+    __device__ inline Real cutoff_squared(unsigned int, unsigned int) const {{ return R(0.0); }}
+    __device__ inline void evaluate(Real, unsigned int, unsigned int,
+                                     Real &factor, Real &energy, Real &virial) const {{
+        factor = R(0.0); energy = R(0.0); virial = R(0.0);
+    }}
+    __device__ inline Real exclusion_scale(unsigned int, unsigned int) const {{ return R(1.0); }}
+}};
+"#,
+            n = functor_struct_name
+        );
+        Ok(Some(heddle_md::forces::PairForceFragment {
+            label: self.label,
+            functor_struct_name,
+            functor_source,
+            entry_point_args: String::new(),
+            functor_init_source: String::new(),
+        }))
+    }
 }
 
 fn build_with(
@@ -482,7 +517,7 @@ fn step_lennardjones_only_writes_nonzero_forces() {
     downloaded.download_from(&buffers).unwrap();
     assert!(downloaded.forces_x[0].abs() > 0.0);
     assert!((downloaded.forces_x[0] + downloaded.forces_x[1]).abs() < 1e-5);
-    assert!(stage_count(&report, "lj_pair_force") >= 1);
+    assert!(stage_count(&report, "jit_composed_pair_force") >= 1);
     assert_eq!(stage_count(&report, KernelStage::COMBINE_CLASS_TOTALS.name()), 1);
 }
 
@@ -670,17 +705,14 @@ fn adding_a_new_potential_implementation_does_not_require_framework_edits() {
 #[test]
 fn registry_with_builtins_exposes_seven_builders_in_evaluation_order() {
     let r = PotentialRegistry::with_builtins();
-    assert_eq!(r.builders.len(), 7);
+    assert_eq!(r.builders.len(), 6);
     let names: Vec<String> = r.builders.iter().map(|b| format!("{:?}", b)).collect();
-    assert!(names[0].contains("LennardJones") && !names[0].contains("Fused"),
-        "builder 0 = {}", names[0]);
+    assert!(names[0].contains("LennardJones"), "builder 0 = {}", names[0]);
     assert!(names[1].contains("Coulomb"), "builder 1 = {}", names[1]);
-    assert!(names[2].contains("SpmeReal") && !names[2].contains("Fused"),
-        "builder 2 = {}", names[2]);
-    assert!(names[3].contains("LjSpmeRealFused"), "builder 3 = {}", names[3]);
-    assert!(names[4].contains("SpmeReciprocal"), "builder 4 = {}", names[4]);
-    assert!(names[5].contains("MorseBonded"), "builder 5 = {}", names[5]);
-    assert!(names[6].contains("HarmonicAngle"), "builder 6 = {}", names[6]);
+    assert!(names[2].contains("SpmeReal"), "builder 2 = {}", names[2]);
+    assert!(names[3].contains("SpmeReciprocal"), "builder 3 = {}", names[3]);
+    assert!(names[4].contains("MorseBonded"), "builder 4 = {}", names[4]);
+    assert!(names[5].contains("HarmonicAngle"), "builder 5 = {}", names[5]);
 }
 
 // rq-78ad9477
@@ -695,8 +727,8 @@ fn registry_new_starts_empty() {
 fn register_appends_a_builder_at_the_end() {
     let mut r = PotentialRegistry::with_builtins();
     r.register(Box::new(StubBuilder::new("custom")));
-    assert_eq!(r.builders.len(), 8);
-    let last = format!("{:?}", r.builders[7]);
+    assert_eq!(r.builders.len(), 7);
+    let last = format!("{:?}", r.builders[6]);
     assert!(last.contains("custom"), "last builder = {}", last);
 }
 
@@ -1211,24 +1243,25 @@ impl Potential for CutoffInspectingPotential {
     }
     fn compute(
         &mut self,
-        buffers: &ParticleBuffers,
+        _buffers: &ParticleBuffers,
         _sim_box: &SimulationBox,
-        mut output: SlotOutputView<'_>,
-        cx: &ForceFieldContext<'_>,
+        _output: SlotOutputView<'_>,
+        _cx: &ForceFieldContext<'_>,
         _timings: &mut Timings,
         _level: AggregateLevel,
     ) -> Result<(), ForceFieldError> {
-        if cx.neighbor_list.is_some() {
-            self.saw_neighbor_list.store(1, Ordering::SeqCst);
-        }
-        let n = buffers.particle_count();
-        let zeros = vec![0.0 as Real; n];
-        buffers.device.htod_sync_copy_into(&zeros, &mut output.force_x).unwrap();
-        buffers.device.htod_sync_copy_into(&zeros, &mut output.force_y).unwrap();
-        buffers.device.htod_sync_copy_into(&zeros, &mut output.force_z).unwrap();
-        buffers.device.htod_sync_copy_into(&zeros, &mut output.energy).unwrap();
-        buffers.device.htod_sync_copy_into(&zeros, &mut output.virial).unwrap();
+        // The framework bypasses compute() for fast-class pair-force
+        // slots (they participate in the JIT-composed kernel instead).
+        // Kept as a no-op for the trait contract.
         Ok(())
+    }
+
+    fn bind_pair_force_args(
+        &self,
+        _ctx: &heddle_md::forces::PairForceBindContext<'_>,
+        _builder: &mut heddle_md::forces::PairForceLaunchBuilder,
+    ) {
+        // No-op functor takes no parameters.
     }
 }
 
@@ -1245,10 +1278,36 @@ impl PotentialBuilder for CutoffInspectingBuilder {
     fn box_clone(&self) -> Box<dyn PotentialBuilder> {
         Box::new(self.clone())
     }
+    fn pair_force_fragment(
+        &self,
+        _cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<heddle_md::forces::PairForceFragment>, ForceFieldError> {
+        // A minimal no-op fragment that contributes zero force / energy /
+        // virial. Exposed so the slot satisfies J1's strict requirement
+        // that every fast-class pair-force slot expose a fragment, while
+        // still letting the test observe the framework's neighbor-list
+        // and JIT-composed-kernel state.
+        Ok(Some(heddle_md::forces::PairForceFragment {
+            label: "cutoff_inspector",
+            functor_struct_name: "CutoffInspectorFunctor",
+            functor_source: r#"
+struct CutoffInspectorFunctor {
+    __device__ inline Real cutoff_squared(unsigned int, unsigned int) const { return R(0.0); }
+    __device__ inline void evaluate(Real, unsigned int, unsigned int,
+                                     Real &factor, Real &energy, Real &virial) const {
+        factor = R(0.0); energy = R(0.0); virial = R(0.0);
+    }
+    __device__ inline Real exclusion_scale(unsigned int, unsigned int) const { return R(1.0); }
+};
+"#.to_string(),
+            entry_point_args: String::new(),
+            functor_init_source: String::new(),
+        }))
+    }
 }
 
 #[test]
-fn force_field_context_exposes_shared_neighbor_list_to_compute() {
+fn force_field_with_pair_force_slot_owns_shared_neighbor_list_and_jit_kernel() {
     let gpu = init_device().unwrap();
     let saw = Arc::new(AtomicU32::new(0));
     let mut registry = PotentialRegistry::new();
@@ -1256,11 +1315,12 @@ fn force_field_context_exposes_shared_neighbor_list_to_compute() {
         cutoff: 5.0,
         saw_neighbor_list: saw.clone(),
     }));
-    let mut ff = build_with(&gpu, 4, &registry).unwrap();
-    let mut buffers = ParticleBuffers::new(&gpu, &state_n(4)).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
-    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    assert_eq!(saw.load(Ordering::SeqCst), 1);
+    let ff = build_with(&gpu, 4, &registry).unwrap();
+    // A fast-class pair-force slot is registered, so the framework
+    // builds both the shared neighbour list and the JIT-composed
+    // pair-force kernel.
+    assert!(ff.neighbor_list.is_some(), "shared neighbor list built");
+    assert!(ff.jit_composed.is_some(), "JIT-composed kernel built");
 }
 
 #[test]
@@ -1645,7 +1705,7 @@ fn potential_builder_displaces_default_returns_empty_slice() {
 }
 
 #[test]
-fn composite_activates_and_displaces_constituents_when_both_lj_and_spme_configured() {
+fn lj_and_spme_real_both_in_slot_list_and_jit_composed_when_both_configured() {
     let gpu = init_device().unwrap();
     let n = 4;
     let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
@@ -1659,15 +1719,16 @@ fn composite_activates_and_displaces_constituents_when_both_lj_and_spme_configur
     )
     .unwrap();
     let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
-    assert!(labels.contains(&"lj_spme_real_fused"), "labels = {labels:?}");
-    assert!(!labels.contains(&"lennard_jones"), "labels = {labels:?}");
-    assert!(!labels.contains(&"spme_real"), "labels = {labels:?}");
-    // Reciprocal slot is unaffected by displacement.
+    // Under JIT composition both standalone slots are present; their
+    // pair-force kernels are fused into the JIT-composed kernel.
+    assert!(labels.contains(&"lennard_jones"), "labels = {labels:?}");
+    assert!(labels.contains(&"spme_real"), "labels = {labels:?}");
     assert!(labels.contains(&"spme_reciprocal"), "labels = {labels:?}");
+    assert!(ff.jit_composed.is_some(), "JIT composed kernel built");
 }
 
 #[test]
-fn composite_inactive_when_only_lj_configured() {
+fn lj_only_configuration_jit_composes_a_single_fragment() {
     let gpu = init_device().unwrap();
     let n = 4;
     let ff = build_with_spme(
@@ -1681,11 +1742,11 @@ fn composite_inactive_when_only_lj_configured() {
     .unwrap();
     let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
     assert!(labels.contains(&"lennard_jones"), "labels = {labels:?}");
-    assert!(!labels.contains(&"lj_spme_real_fused"), "labels = {labels:?}");
+    assert!(ff.jit_composed.is_some(), "JIT composed kernel built");
 }
 
 #[test]
-fn composite_inactive_when_only_spme_configured() {
+fn spme_real_only_configuration_jit_composes_a_single_fragment() {
     let gpu = init_device().unwrap();
     let n = 4;
     let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
@@ -1700,7 +1761,7 @@ fn composite_inactive_when_only_spme_configured() {
     .unwrap();
     let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
     assert!(labels.contains(&"spme_real"), "labels = {labels:?}");
-    assert!(!labels.contains(&"lj_spme_real_fused"), "labels = {labels:?}");
+    assert!(ff.jit_composed.is_some(), "JIT composed kernel built");
 }
 
 #[test]
@@ -1760,7 +1821,7 @@ fn two_builders_both_claiming_unbuilt_label_do_not_error() {
 }
 
 #[test]
-fn composite_slot_appears_at_its_own_registration_position() {
+fn slot_list_has_lj_then_spme_real_then_spme_reciprocal_under_lj_plus_spme() {
     let gpu = init_device().unwrap();
     let n = 4;
     let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
@@ -1773,23 +1834,18 @@ fn composite_slot_appears_at_its_own_registration_position() {
         &charges,
     )
     .unwrap();
-    // The composite sits at registry position 4 (0-indexed: LJ=0,
-    // Coulomb=1, SpmeReal=2, LjSpmeRealFused=3, SpmeRecip=4, ...). With
-    // LJ and SpmeReal displaced, the surviving slot order is
-    // [LjSpmeRealFused, SpmeReciprocal].
     let labels: Vec<&str> = ff.slots.iter().map(|s| s.label()).collect();
-    assert_eq!(labels, vec!["lj_spme_real_fused", "spme_reciprocal"]);
+    assert_eq!(labels, vec!["lennard_jones", "spme_real", "spme_reciprocal"]);
 }
 
 #[test]
-fn composite_max_cutoff_is_max_of_constituents() {
+fn neighbor_list_radius_is_max_of_active_pair_force_cutoffs() {
     let gpu = init_device().unwrap();
     let n = 4;
     let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
     let mut spme_cfg = spme_config_default();
     spme_cfg.r_cut_real = 7.0;
     let lj_cfg = lj_pair_config();
-    // lj_pair_config's cutoff is 5.0 (see helper); spme r_cut_real now 7.0.
     let ff = build_with_spme(
         &gpu,
         n,
@@ -1799,17 +1855,19 @@ fn composite_max_cutoff_is_max_of_constituents() {
         &charges,
     )
     .unwrap();
-    let fused = ff
+    // The framework picks max(slot.max_cutoff()) for the neighbor
+    // list; the wider cutoff (SPME-real r_cut_real = 7.0) wins.
+    let spme_real = ff
         .slots
         .iter()
-        .find(|s| s.label() == "lj_spme_real_fused")
-        .expect("composite present");
-    let mc = fused.max_cutoff().expect("composite reports a cutoff");
+        .find(|s| s.label() == "spme_real")
+        .expect("spme_real slot present");
+    let mc = spme_real.max_cutoff().expect("spme_real reports a cutoff");
     assert!((mc - 7.0 as Real).abs() < 1e-6, "max_cutoff = {mc}");
 }
 
 #[test]
-fn fused_configuration_step_byte_identical_run_to_run() {
+fn jit_composed_configuration_step_byte_identical_run_to_run() {
     let gpu = init_device().unwrap();
     let n = 4;
     let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
@@ -1845,71 +1903,7 @@ fn fused_configuration_step_byte_identical_run_to_run() {
 }
 
 #[test]
-fn fused_and_standalone_agree_within_relative_tolerance() {
-    let gpu = init_device().unwrap();
-    let n = 4;
-    let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
-
-    // Standalone configuration: empty registry plus only LJ and SPME-real
-    // builders. The composite is absent so it cannot displace them. The
-    // SPME-reciprocal builder is also omitted to isolate the short-range
-    // contribution — both configurations evaluate identical short-range
-    // physics, only the kernel-decomposition shape differs.
-    let mut standalone_registry = PotentialRegistry::new();
-    standalone_registry.register(Box::new(heddle_md::forces::LennardJonesBuilder));
-    standalone_registry.register(Box::new(heddle_md::forces::SpmeRealBuilder));
-
-    // Fused configuration: only the composite builder is registered, so
-    // it does not need displacement resolution (nothing to displace).
-    let mut fused_registry = PotentialRegistry::new();
-    fused_registry.register(Box::new(heddle_md::forces::LjSpmeRealFusedBuilder));
-
-    let run_with = |reg: &PotentialRegistry| -> (Vec<Real>, Vec<Real>, Vec<Real>) {
-        let mut ff = build_with_spme(
-            &gpu,
-            n,
-            reg,
-            &[lj_pair_config()],
-            Some(&spme_config_default()),
-            &charges,
-        )
-        .unwrap();
-        let mut state = state_n(n);
-        state.charges = charges.clone();
-        let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-        let mut timings = Timings::new(&gpu).unwrap();
-        ff.step(
-            &mut buffers,
-            &box_10(&gpu),
-            &mut timings,
-            AggregateLevel::ForcesAndScalars,
-        )
-        .unwrap();
-        let fx = gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap();
-        let e = gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap();
-        let v = gpu.device.dtoh_sync_copy(&buffers.virials).unwrap();
-        (fx, e, v)
-    };
-    let (fx_std, e_std, v_std) = run_with(&standalone_registry);
-    let (fx_fus, e_fus, v_fus) = run_with(&fused_registry);
-
-    let rel_eq = |a: Real, b: Real, tol: Real| -> bool {
-        let denom = a.abs().max(b.abs()).max(1e-6 as Real);
-        ((a - b).abs() / denom) < tol
-    };
-    let tol: Real = 1.0e-4;
-    for i in 0..n {
-        assert!(rel_eq(fx_std[i], fx_fus[i], tol),
-            "forces_x[{i}]: standalone={} fused={}", fx_std[i], fx_fus[i]);
-        assert!(rel_eq(e_std[i], e_fus[i], tol),
-            "energy[{i}]: standalone={} fused={}", e_std[i], e_fus[i]);
-        assert!(rel_eq(v_std[i], v_fus[i], tol),
-            "virial[{i}]: standalone={} fused={}", v_std[i], v_fus[i]);
-    }
-}
-
-#[test]
-fn fused_configuration_emits_fused_timings_stage_and_omits_constituents() {
+fn jit_composed_step_emits_one_pair_force_launch_and_zero_per_potential_launches() {
     let gpu = init_device().unwrap();
     let n = 4;
     let charges = vec![1.0 as Real, -1.0, 1.0, -1.0];
@@ -1935,7 +1929,7 @@ fn fused_configuration_emits_fused_timings_stage_and_omits_constituents() {
     .unwrap();
     let report = timings.finalize().unwrap();
     assert_eq!(
-        stage_count(&report, KernelStage::LJ_SPME_REAL_FUSED_PAIR_FORCE.name()),
+        stage_count(&report, KernelStage::JIT_COMPOSED_PAIR_FORCE.name()),
         1
     );
     assert_eq!(stage_count(&report, KernelStage::LJ_PAIR_FORCE.name()), 0);

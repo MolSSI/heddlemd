@@ -38,8 +38,6 @@ pub struct Kernels {
     pub lj: crate::forces::lj::LjKernels,
     pub coulomb: crate::forces::coulomb::CoulombKernels,
     pub spme_real: crate::forces::spme::SpmeRealKernels,
-    pub lj_spme_real_fused:
-        crate::forces::lj_spme_real_fused::LjSpmeRealFusedKernels,
     pub spme_recip: crate::forces::spme::SpmeRecipKernels,
     pub langevin: crate::integrator::langevin_baoab::LangevinKernels,
     pub morse: crate::forces::morse::MorseKernels,
@@ -65,8 +63,6 @@ impl Kernels {
             lj: crate::forces::lj::LjKernels::load(device)?,
             coulomb: crate::forces::coulomb::CoulombKernels::load(device)?,
             spme_real: crate::forces::spme::SpmeRealKernels::load(device)?,
-            lj_spme_real_fused:
-                crate::forces::lj_spme_real_fused::LjSpmeRealFusedKernels::load(device)?,
             spme_recip: crate::forces::spme::SpmeRecipKernels::load(device)?,
             langevin: crate::integrator::langevin_baoab::LangevinKernels::load(device)?,
             morse: crate::forces::morse::MorseKernels::load(device)?,
