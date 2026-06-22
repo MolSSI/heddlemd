@@ -190,6 +190,12 @@ pub struct NoseHooverChainThermostat {
     pub p_xi: Vec<f64>,
     yoshida: &'static [f64],
     ke_scratch: CudaSlice<Real>,
+    /// Single-element device buffer holding the cumulative rescale
+    /// factor produced by `apply_post`'s host-side Yoshida × n_resp
+    /// integration. The JIT-composed post-force per-particle kernel
+    /// reads `factor_device[0]` in NHC's fragment body and multiplies
+    /// velocities by it.
+    factor_device: CudaSlice<Real>,
     most_recent_ke: f64,
 }
 
@@ -218,6 +224,7 @@ impl NoseHooverChainThermostat {
             }
         }
         let ke_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
+        let factor_device = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
         Ok(NoseHooverChainThermostat {
             temperature,
             tau,
@@ -231,21 +238,30 @@ impl NoseHooverChainThermostat {
             p_xi: vec![0.0_f64; m],
             yoshida: yoshida_weights(yoshida_order),
             ke_scratch,
+            factor_device,
             most_recent_ke: 0.0,
         })
     }
 
-    fn thermostat_half_step(
+    /// Yoshida × `n_resp` chain integration, accumulating the
+    /// per-iteration rescale factors into a single cumulative
+    /// scalar. The cumulative factor is returned alongside the
+    /// updated kinetic energy. No `rescale_velocities` launches
+    /// happen inside this function; the caller is responsible for
+    /// applying the cumulative factor (via `rescale_velocities` on
+    /// the pre-force path, or by writing to `factor_device` for
+    /// the JIT-composed post-force per-particle kernel on the
+    /// post-force path).
+    fn thermostat_half_step_cumulative(
         &mut self,
         dt: Real,
-        buffers: &mut ParticleBuffers,
         mut k: f64,
-        timings: &mut Timings,
-    ) -> Result<f64, ThermostatError> {
+    ) -> (f64, f64) {
         let dt = dt as f64;
         let n_resp = self.n_resp as f64;
         let g_dof = self.g_dof as f64;
         let kt = self.kt;
+        let mut cumulative: f64 = 1.0;
         for w in self.yoshida.to_vec() {
             for _ in 0..self.n_resp {
                 let delta_t = w * dt / (2.0 * n_resp);
@@ -258,15 +274,11 @@ impl NoseHooverChainThermostat {
                     g_dof,
                     kt,
                 );
-                let factor = factor as Real;
-                timings.kernel_start(KernelStage::NHC_RESCALE_VELOCITIES)?;
-                rescale_velocities(buffers, factor)?;
-                timings.kernel_stop(KernelStage::NHC_RESCALE_VELOCITIES)?;
-                let factor_f64 = factor as f64;
-                k *= factor_f64 * factor_f64;
+                cumulative *= factor;
+                k *= factor * factor;
             }
         }
-        Ok(k)
+        (cumulative, k)
     }
 }
 
@@ -284,7 +296,10 @@ impl Thermostat for NoseHooverChainThermostat {
         timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
         let k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        self.thermostat_half_step(dt, buffers, k, timings)?;
+        let (cumulative, _k_final) = self.thermostat_half_step_cumulative(dt, k);
+        timings.kernel_start(KernelStage::NHC_RESCALE_VELOCITIES)?;
+        rescale_velocities(buffers, cumulative as Real)?;
+        timings.kernel_stop(KernelStage::NHC_RESCALE_VELOCITIES)?;
         Ok(())
     }
 
@@ -301,9 +316,41 @@ impl Thermostat for NoseHooverChainThermostat {
         timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
         let k = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        let k = self.thermostat_half_step(dt, buffers, k, timings)?;
-        self.most_recent_ke = k;
+        let (cumulative, k_final) = self.thermostat_half_step_cumulative(dt, k);
+        // Write the cumulative rescale factor to `factor_device`; the
+        // JIT-composed post-force per-particle kernel reads it.
+        buffers
+            .device
+            .htod_sync_copy_into(&[cumulative as Real], &mut self.factor_device)
+            .map_err(GpuError::from)?;
+        self.most_recent_ke = k_final;
         Ok(())
+    }
+
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> Option<crate::forces::PerParticleFragment> {
+        Some(crate::forces::PerParticleFragment {
+            label: "nose_hoover_chain",
+            helper_source: String::new(),
+            entry_point_args: String::from(
+                "    const Real *nhc_factor_device,\n",
+            ),
+            per_thread_body: String::from(
+                "        Real nhc_factor = nhc_factor_device[0];\n\
+                 \x20       velocities_x[i] *= nhc_factor;\n\
+                 \x20       velocities_y[i] *= nhc_factor;\n\
+                 \x20       velocities_z[i] *= nhc_factor;",
+            ),
+        })
+    }
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        _ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        builder.push_device_buffer(&self.factor_device);
     }
 
     // rq-8a571737
@@ -410,6 +457,7 @@ pub struct NoseHooverKernels {
     pub rescale_velocities: CudaFunction,
     pub rescale_velocities_device_factor: CudaFunction,
     pub csvr_sample_and_factor: CudaFunction,
+    pub berendsen_compute_factor: CudaFunction,
     pub increment_u64: CudaFunction,
 }
 
@@ -423,6 +471,7 @@ impl NoseHooverKernels {
                 "rescale_velocities",
                 "rescale_velocities_device_factor",
                 "csvr_sample_and_factor",
+                "berendsen_compute_factor",
                 "increment_u64",
             ],
         )?;
@@ -435,6 +484,11 @@ impl NoseHooverKernels {
                 "rescale_velocities_device_factor",
             )?,
             csvr_sample_and_factor: get_func(device, "nose_hoover", "csvr_sample_and_factor")?,
+            berendsen_compute_factor: get_func(
+                device,
+                "nose_hoover",
+                "berendsen_compute_factor",
+            )?,
             increment_u64: get_func(device, "nose_hoover", "increment_u64")?,
         })
     }

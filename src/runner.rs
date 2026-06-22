@@ -1214,13 +1214,85 @@ pub(crate) fn run_md_phase_inner(
         )
         .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
 
-    // JIT-composed post-force per-particle kernel setup is deferred
-    // until after the CUDA-graph eligibility check so it activates
-    // only when the non-graph step loop is taken. The CUDA-graph
-    // capture path retains its standalone per-slot kernel sequence.
+    // rq-8ac9773d — JIT-composed post-force per-particle kernel setup
+    // runs once per phase, before the CUDA-graph eligibility check.
+    // Both the graph-capture path and the per-step launch path
+    // dispatch the same composed kernel. Built-in slots always
+    // expose a post-force fragment; a slot returning `None` raises
+    // `MissingPostForcePerParticleFragment` before either path runs.
     let mut composed_post_force: Option<crate::forces::JitComposedPostForcePerParticle> =
         None;
     let mut post_force_substep_index: Option<usize> = None;
+    {
+        let int_frag = integrator.post_force_per_particle_fragment();
+        let therm_active = thermostat.is_some();
+        let baro_active = barostat.is_some();
+        let therm_frag = thermostat
+            .as_ref()
+            .and_then(|t| t.post_force_per_particle_fragment());
+        let baro_frag = barostat
+            .as_ref()
+            .and_then(|b| b.post_force_per_particle_fragment());
+        if int_frag.is_none() {
+            return Err((
+                RunnerError::MissingPostForcePerParticleFragment {
+                    kind: "integrator",
+                    label: "<integrator>",
+                },
+                ExitPhase::Setup,
+            ));
+        }
+        if therm_active && therm_frag.is_none() {
+            return Err((
+                RunnerError::MissingPostForcePerParticleFragment {
+                    kind: "thermostat",
+                    label: "<thermostat>",
+                },
+                ExitPhase::Setup,
+            ));
+        }
+        if baro_active && baro_frag.is_none() {
+            return Err((
+                RunnerError::MissingPostForcePerParticleFragment {
+                    kind: "barostat",
+                    label: "<barostat>",
+                },
+                ExitPhase::Setup,
+            ));
+        }
+        let mut fragments: Vec<crate::forces::PerParticleFragment> = Vec::new();
+        fragments.push(int_frag.unwrap());
+        if let Some(f) = therm_frag {
+            fragments.push(f);
+        }
+        if let Some(f) = baro_frag {
+            fragments.push(f);
+        }
+        match crate::forces::JitComposedPostForcePerParticle::compile_and_load(
+            &setup.gpu.device,
+            &fragments,
+        ) {
+            Ok(k) => {
+                composed_post_force = Some(k);
+                post_force_substep_index =
+                    integrator.post_force_substep_index(phase.dt as Real);
+            }
+            Err(e) => {
+                return Err((
+                    match e {
+                        crate::forces::ForceFieldError::FragmentCompileFailed { log } => {
+                            RunnerError::PostForceFragmentCompileFailed { log }
+                        }
+                        crate::forces::ForceFieldError::FragmentLoadFailed(g) => {
+                            RunnerError::PostForceFragmentLoadFailed(g)
+                        }
+                        other => RunnerError::ForceField(other),
+                    },
+                    ExitPhase::Setup,
+                ));
+            }
+        }
+    }
 
     // Open per-phase output writers.
     let mut traj_writer: Option<TrajectoryWriter> = if phase.output.trajectory_every > 0 {
@@ -1380,6 +1452,8 @@ pub(crate) fn run_md_phase_inner(
             dt,
             &mut timings,
             &setup.gpu.device,
+            composed_post_force.as_ref(),
+            post_force_substep_index,
         ) {
             Ok(exec) => Some(exec),
             Err(e) => {
@@ -1418,66 +1492,6 @@ pub(crate) fn run_md_phase_inner(
             &mut log_rows_written,
         )?;
     } else {
-
-    // rq-8ac9773d — JIT-composed post-force per-particle kernel
-    // activation. Only the non-graph step loop dispatches this
-    // composed kernel; the graph capture path keeps its standalone
-    // per-slot kernels and skips JIT entirely.
-    {
-        let int_frag = integrator.post_force_per_particle_fragment();
-        let therm_active = thermostat.is_some();
-        let baro_active = barostat.is_some();
-        let therm_frag = thermostat
-            .as_ref()
-            .and_then(|t| t.post_force_per_particle_fragment());
-        let baro_frag = barostat
-            .as_ref()
-            .and_then(|b| b.post_force_per_particle_fragment());
-        let all_present = int_frag.is_some()
-            && (!therm_active || therm_frag.is_some())
-            && (!baro_active || baro_frag.is_some());
-        if all_present {
-            let mut fragments: Vec<crate::forces::PerParticleFragment> = Vec::new();
-            fragments.push(int_frag.unwrap());
-            if let Some(f) = therm_frag {
-                fragments.push(f);
-            }
-            if let Some(f) = baro_frag {
-                fragments.push(f);
-            }
-            match crate::forces::JitComposedPostForcePerParticle::compile_and_load(
-                &setup.gpu.device,
-                &fragments,
-            ) {
-                Ok(k) => {
-                    composed_post_force = Some(k);
-                    post_force_substep_index =
-                        integrator.post_force_substep_index(phase.dt as Real);
-                    integrator.set_jit_composed_post_force_active(true);
-                    if let Some(t) = thermostat.as_mut() {
-                        t.set_jit_composed_post_force_active(true);
-                    }
-                    if let Some(b) = barostat.as_mut() {
-                        b.set_jit_composed_post_force_active(true);
-                    }
-                }
-                Err(e) => {
-                    return Err((
-                        match e {
-                            crate::forces::ForceFieldError::FragmentCompileFailed { log } => {
-                                RunnerError::PostForceFragmentCompileFailed { log }
-                            }
-                            crate::forces::ForceFieldError::FragmentLoadFailed(g) => {
-                                RunnerError::PostForceFragmentLoadFailed(g)
-                            }
-                            other => RunnerError::ForceField(other),
-                        },
-                        ExitPhase::Loop,
-                    ));
-                }
-            }
-        }
-    }
 
     for step in 1..=n_steps {
         if let Some(t) = thermostat.as_mut() {
@@ -1550,49 +1564,18 @@ pub(crate) fn run_md_phase_inner(
             b.apply(&mut setup.buffers, &mut setup.sim_box, dt, &mut timings)
                 .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
         }
-        if let Some(ref composed) = composed_post_force
-            && setup.buffers.particle_count() > 0
-        {
-            let mut builder = crate::forces::ForceLaunchBuilder::new();
-            builder.push_device_buffer(&setup.buffers.positions_x);
-            builder.push_device_buffer(&setup.buffers.positions_y);
-            builder.push_device_buffer(&setup.buffers.positions_z);
-            builder.push_device_buffer(&setup.buffers.images_x);
-            builder.push_device_buffer(&setup.buffers.images_y);
-            builder.push_device_buffer(&setup.buffers.images_z);
-            builder.push_device_buffer(&setup.buffers.velocities_x);
-            builder.push_device_buffer(&setup.buffers.velocities_y);
-            builder.push_device_buffer(&setup.buffers.velocities_z);
-            builder.push_device_buffer(&setup.buffers.forces_x);
-            builder.push_device_buffer(&setup.buffers.forces_y);
-            builder.push_device_buffer(&setup.buffers.forces_z);
-            builder.push_device_buffer(&setup.buffers.masses);
-            builder.push_device_buffer(setup.sim_box.lattice_device());
-            let bind_ctx = crate::forces::PostForceBindContext {
-                buffers: &setup.buffers,
-                sim_box: &setup.sim_box,
+        if let Some(ref composed) = composed_post_force {
+            launch_composed_post_force(
+                composed,
+                &setup.buffers,
+                &setup.sim_box,
+                integrator.as_ref(),
+                &thermostat,
+                &barostat,
                 dt,
-            };
-            integrator.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
-            if let Some(t) = thermostat.as_ref() {
-                t.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
-            }
-            if let Some(b) = barostat.as_ref() {
-                b.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
-            }
-            let n_particles = setup.buffers.particle_count() as u32;
-            builder.push_scalar::<u32>(n_particles);
-            timings
-                .kernel_start(crate::timings::KernelStage::JIT_COMPOSED_POST_FORCE)
-                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
-            unsafe {
-                composed
-                    .launch(n_particles, builder)
-                    .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Loop))?;
-            }
-            timings
-                .kernel_stop(crate::timings::KernelStage::JIT_COMPOSED_POST_FORCE)
-                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+                &mut timings,
+            )
+            .map_err(|e| (e, ExitPhase::Loop))?;
         }
 
         let want_traj =
@@ -2157,6 +2140,70 @@ fn phase_slots_graph_compatible(
 ///
 /// The captured iteration counts as physical step 1: the device state
 /// is left advanced by exactly one step after this call returns.
+/// Launches the JIT-composed post-force per-particle kernel for one
+/// physical step. Used both inside `capture_phase_graph` (where the
+/// launch becomes a node in the captured graph) and inside the
+/// per-step launch loop. Pre-populates the launch builder with the
+/// common args, invokes each active slot's `bind_post_force_per_particle_args`
+/// in canonical order, pushes the trailing `n` arg, then issues
+/// `cuLaunchKernel`. Returns any timing or launch error to the
+/// caller.
+fn launch_composed_post_force(
+    composed: &crate::forces::JitComposedPostForcePerParticle,
+    buffers: &crate::gpu::ParticleBuffers,
+    sim_box: &crate::pbc::SimulationBox,
+    integrator: &dyn crate::integrator::Integrator,
+    thermostat: &Option<Box<dyn crate::integrator::Thermostat>>,
+    barostat: &Option<Box<dyn crate::integrator::Barostat>>,
+    dt: Real,
+    timings: &mut Timings,
+) -> Result<(), RunnerError> {
+    if buffers.particle_count() == 0 {
+        return Ok(());
+    }
+    let mut builder = crate::forces::ForceLaunchBuilder::new();
+    builder.push_device_buffer(&buffers.positions_x);
+    builder.push_device_buffer(&buffers.positions_y);
+    builder.push_device_buffer(&buffers.positions_z);
+    builder.push_device_buffer(&buffers.images_x);
+    builder.push_device_buffer(&buffers.images_y);
+    builder.push_device_buffer(&buffers.images_z);
+    builder.push_device_buffer(&buffers.velocities_x);
+    builder.push_device_buffer(&buffers.velocities_y);
+    builder.push_device_buffer(&buffers.velocities_z);
+    builder.push_device_buffer(&buffers.forces_x);
+    builder.push_device_buffer(&buffers.forces_y);
+    builder.push_device_buffer(&buffers.forces_z);
+    builder.push_device_buffer(&buffers.masses);
+    builder.push_device_buffer(sim_box.lattice_device());
+    let bind_ctx = crate::forces::PostForceBindContext {
+        buffers,
+        sim_box,
+        dt,
+    };
+    integrator.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+    if let Some(t) = thermostat.as_ref() {
+        t.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+    }
+    if let Some(b) = barostat.as_ref() {
+        b.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+    }
+    let n_particles = buffers.particle_count() as u32;
+    builder.push_scalar::<u32>(n_particles);
+    timings
+        .kernel_start(crate::timings::KernelStage::JIT_COMPOSED_POST_FORCE)
+        .map_err(RunnerError::Timings)?;
+    unsafe {
+        composed
+            .launch(n_particles, builder)
+            .map_err(RunnerError::Gpu)?;
+    }
+    timings
+        .kernel_stop(crate::timings::KernelStage::JIT_COMPOSED_POST_FORCE)
+        .map_err(RunnerError::Timings)?;
+    Ok(())
+}
+
 /// See `cuda-graphs.md` for the capture lifecycle.
 #[allow(clippy::too_many_arguments)]
 fn capture_phase_graph(
@@ -2171,6 +2218,8 @@ fn capture_phase_graph(
     dt: Real,
     timings: &mut Timings,
     device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    composed_post_force: Option<&crate::forces::JitComposedPostForcePerParticle>,
+    post_force_substep_index: Option<usize>,
 ) -> Result<crate::gpu::CudaGraphExec, crate::gpu::GraphError> {
     use crate::gpu::{CaptureMode, begin_stream_capture, end_stream_capture};
     // Settle any outstanding `Timings` event pairs from the warm-up
@@ -2205,17 +2254,35 @@ fn capture_phase_graph(
             Some(c) => Some(c.as_mut()),
             None => None,
         };
-        if let Err(e) = crate::integrator::run_step_no_neighbor_check(
-            integrator,
-            buffers,
-            sim_box,
-            force_field,
-            constraint_arg,
-            supports_constraints,
-            dt,
-            timings,
-            barostat.is_some(),
-        ) {
+        let result = if let (Some(_), Some(skip_idx)) =
+            (composed_post_force, post_force_substep_index)
+        {
+            crate::integrator::run_step_with_skipped_substep_no_neighbor_check(
+                integrator,
+                buffers,
+                sim_box,
+                force_field,
+                constraint_arg,
+                supports_constraints,
+                dt,
+                timings,
+                barostat.is_some(),
+                skip_idx,
+            )
+        } else {
+            crate::integrator::run_step_no_neighbor_check(
+                integrator,
+                buffers,
+                sim_box,
+                force_field,
+                constraint_arg,
+                supports_constraints,
+                dt,
+                timings,
+                barostat.is_some(),
+            )
+        };
+        if let Err(e) = result {
             inner_failure = Some(format!("run_step: {e:?}"));
         }
     }
@@ -2230,6 +2297,22 @@ fn capture_phase_graph(
         if let Some(b) = barostat.as_mut() {
             if let Err(e) = b.apply(buffers, sim_box, dt, timings) {
                 inner_failure = Some(format!("barostat.apply: {e}"));
+            }
+        }
+    }
+    if inner_failure.is_none() {
+        if let Some(composed) = composed_post_force {
+            if let Err(e) = launch_composed_post_force(
+                composed,
+                buffers,
+                sim_box,
+                integrator,
+                thermostat,
+                barostat,
+                dt,
+                timings,
+            ) {
+                inner_failure = Some(format!("composed post-force launch: {e:?}"));
             }
         }
     }

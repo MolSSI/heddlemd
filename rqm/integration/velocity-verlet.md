@@ -11,13 +11,22 @@ makes no thermostat or barostat decisions and does not own its
 thermostat (the `"velocity-verlet"` builder's
 `IntegratorBuilder::owns_thermostat(&params)` returns `false`).
 
-The per-particle arithmetic is split across two CUDA kernels: `vv_kick_drift`
-performs the first half-velocity update followed by the position update, and
-`vv_kick` performs the second half-velocity update. The integrator declares a
-three-element `StepPlan` (`KickDrift`, `ForceEval`, `KickHalf`) and the runner
-walks it, dispatching `KickDrift` and `KickHalf` to `execute()` (which launches
-the corresponding kernel) and `ForceEval` directly to `force_field.step(...)`
-(see `framework.md`).
+The per-particle arithmetic is split across the pre-force `vv_kick_drift`
+CUDA kernel and a post-force half-kick. The pre-force kernel performs the
+first half-velocity update followed by the position update. The post-force
+half-kick is contributed by the integrator's
+`post_force_per_particle_fragment()` and is dispatched by the
+JIT-composed post-force per-particle kernel
+(`heddle_jit_composed_post_force_per_particle`); see
+`rqm/integration/jit-composed-post-force.md`. The integrator declares a
+three-element `StepPlan` (`KickDrift`, `ForceEval`, `KickHalf`). The runner
+dispatches `KickDrift` to `execute()` (which launches `vv_kick_drift`),
+dispatches `ForceEval` to `force_field.step(...)` (see `framework.md`),
+and skips the trailing `KickHalf` `execute()` call because the composed
+kernel handles the trailing half-kick.
+
+No standalone `vv_kick` or `vv_kick_lossless` kernel is declared. The
+trailing half-kick lives only in the integrator's source fragment.
 
 The integrator ships in two modes:
 
@@ -149,7 +158,8 @@ positions so they do not require their own residuals.
 
 ### CUDA Kernels <!-- rq-10cc8ddf -->
 
-`kernels/integrate.cu` declares four `extern "C"` kernels:
+`kernels/integrate.cu` declares two `extern "C"` kernels (the
+pre-force drift variants only):
 
 ```c
 extern "C" __global__ void vv_kick_drift(
@@ -159,13 +169,6 @@ extern "C" __global__ void vv_kick_drift(
     const float *forces_x, const float *forces_y, const float *forces_z,
     const float *masses,
     const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
-    float dt,
-    unsigned int n);
-
-extern "C" __global__ void vv_kick(
-    float *velocities_x, float *velocities_y, float *velocities_z,
-    const float *forces_x, const float *forces_y, const float *forces_z,
-    const float *masses,
     float dt,
     unsigned int n);
 
@@ -180,21 +183,22 @@ extern "C" __global__ void vv_kick_drift_lossless(
     const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
     float dt,
     unsigned int n);
-
-extern "C" __global__ void vv_kick_lossless(
-    float *velocities_x, float *velocities_y, float *velocities_z,
-    double *velocities_x_lo, double *velocities_y_lo, double *velocities_z_lo,
-    const float *forces_x, const float *forces_y, const float *forces_z,
-    const float *masses,
-    float dt,
-    unsigned int n);
 ```
 
-`vv_kick` and `vv_kick_lossless` update only velocities and so do not
-touch `images_*` or take any lattice parameters. `vv_kick_drift` and
-`vv_kick_drift_lossless` are the drift-bearing kernels that wrap
-positions (via the triclinic *Wrap Algorithm* defined in
-`simulation-box.md`) and advance image counts.
+The post-force half-kick is **not** a standalone kernel. It is the
+integrator's `post_force_per_particle_fragment` body, composed into the
+JIT post-force per-particle kernel
+(`heddle_jit_composed_post_force_per_particle`) at phase setup. The
+lossy fragment performs `v += (F / m) · (dt / 2)`. The lossless
+fragment carries the same compensated-sum extended-precision update
+documented below for the drift variant, applied to velocities only;
+it reads and writes the `velocities_{x,y,z}_lo` buffers as additional
+fragment kernel parameters bound by
+`VelocityVerletState::bind_post_force_per_particle_args`.
+
+`vv_kick_drift` and `vv_kick_drift_lossless` are the drift-bearing
+kernels that wrap positions (via the triclinic *Wrap Algorithm*
+defined in `simulation-box.md`) and advance image counts.
 
 Each thread computes its global index as `blockIdx.x * blockDim.x + threadIdx.x`.
 If the index is `>= n` the thread returns without touching any buffer.

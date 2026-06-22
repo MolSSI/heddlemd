@@ -139,29 +139,53 @@ Each Yoshida sub-step of length `δt` consists of:
 Steps 1–6 are the standard MKT symmetric sub-step (Tuckerman, *Statistical
 Mechanics: Theory and Molecular Simulation*, §4.10). The full half-step
 applies this sub-step `n_yoshida × n_resp` times. The kinetic energy `K`
-is updated host-side after each velocity rescale by multiplying by
-`factor²`; the host therefore does not re-launch the kinetic-energy
-reduction within a single half-step.
+is updated host-side after each rescale by multiplying by `factor²`;
+the host therefore does not re-launch the kinetic-energy reduction
+within a single half-step.
+
+The host-side chain integration accumulates the per-iteration rescale
+factors `f_1, …, f_{N_sub}` (with `N_sub = n_yoshida × n_resp`) into
+a single cumulative scalar `α = ∏_i f_i`. The cumulative scalar is
+the only physical effect of the chain math on particle velocities;
+the per-iteration `k *= f_i²` host update reads the running product
+and never triggers a kernel launch.
 
 ## Per-Step Kernel Sequence <!-- rq-f45cdfb6 -->
 
 Per timestep the NHC thermostat fires two half-steps around the
-integrator's `step()`. Both halves have the same shape:
+integrator's `step()`. The pre-force half (`apply_pre`) and the
+post-force half (`apply_post`) have slightly different shapes because
+the post-force per-particle velocity rescale is dispatched by the
+JIT-composed post-force per-particle kernel rather than a standalone
+NHC kernel.
 
-| Hook        | Step          | Kernel / call                             | Operation                                                  | Stage label              |
-| ----------- | ------------- | ----------------------------------------- | ---------------------------------------------------------- | ------------------------ |
-| `apply_pre` | KE reduce     | `kinetic_energy_reduce`                   | one f32 scalar of `K = ½ Σ m_i \|v_i\|²`                   | `KineticEnergyReduce`    |
-| `apply_pre` | Thermostat ½  | host chain + `rescale_velocities` × N_sub | NHC half-step, `N_sub = n_yoshida · n_resp` rescales       | `NhcRescaleVelocities`   |
-| `apply_post`| KE reduce     | `kinetic_energy_reduce`                   | refresh `K` after the integrator's VV step                 | `KineticEnergyReduce`    |
-| `apply_post`| Thermostat ½  | host chain + `rescale_velocities` × N_sub | NHC half-step (mirror of `apply_pre`)                      | `NhcRescaleVelocities`   |
+| Hook        | Step               | Kernel / call                                          | Operation                                                       | Stage label              |
+| ----------- | ------------------ | ------------------------------------------------------ | --------------------------------------------------------------- | ------------------------ |
+| `apply_pre` | KE reduce          | `kinetic_energy_reduce`                                | one f32 scalar of `K = ½ Σ m_i \|v_i\|²`                        | `KineticEnergyReduce`    |
+| `apply_pre` | Thermostat ½ rescale | one `rescale_velocities` device launch                | host accumulates `α_pre = ∏ f_i` over `N_sub` chain iters; one device launch rescales `v ← α_pre · v` | `NhcRescaleVelocities`   |
+| `apply_post`| KE reduce          | `kinetic_energy_reduce`                                | refresh `K` after the integrator's VV step                      | `KineticEnergyReduce`    |
+| `apply_post`| Thermostat ½ factor | host chain math; `htod_sync_copy_into(factor_device)`  | host accumulates `α_post = ∏ f_i` over `N_sub` chain iters; one host-to-device copy writes `α_post` to `factor_device` | (no kernel)              |
+| post-force composed | Velocity rescale | JIT-composed post-force per-particle kernel      | `v ← α_post · v` per particle                                   | `JitComposedPostForce`   |
 
-The integrator's own kernels (`vv_kick_drift`, `vv_kick`, the force
-pipeline) are launched separately by `integrator.step()` and are not
-part of this slot's per-step sequence.
+`apply_pre` applies its cumulative factor through a single device
+launch of `nhc_apply_cumulative_factor` because the pre-force phase
+has no participating composed kernel. `apply_post` skips its own
+device launch because the JIT-composed post-force per-particle
+kernel applies `α_post` as part of its composed body. The
+thermostat's source fragment, declared via
+`post_force_per_particle_fragment()`, reads `factor_device[0]` and
+multiplies velocities by it.
 
-The total per-step launch count owned by this thermostat is
-`2 + 2 · N_sub`. For the recommended defaults `M = 3, n_yoshida = 3,
-n_resp = 1`, that is `2 + 6 = 8` thermostat-related launches per step.
+The integrator's own kernels (`vv_kick_drift`, the force pipeline)
+are launched separately by `integrator.step()` and are not part of
+this slot's per-step sequence.
+
+The total per-step launch count owned by this thermostat is `3`:
+two `kinetic_energy_reduce` calls and one `rescale_velocities`
+call (the `apply_pre` cumulative rescale). The `apply_post`
+rescale is part of the composed kernel and is not counted as an
+NHC launch. The Yoshida × `n_resp` sub-iterations contribute zero
+additional launches.
 
 ## Parameters <!-- rq-d6cf8e86 -->
 

@@ -80,6 +80,25 @@ fn unbox_berendsen(boxed: Box<dyn Thermostat>) -> BerendsenThermostat {
     unsafe { *Box::from_raw(Box::into_raw(boxed) as *mut BerendsenThermostat) }
 }
 
+/// Runs Berendsen's `apply_post` and then dispatches the standalone
+/// `rescale_velocities_device_factor` against the slot's
+/// `factor_device`, mirroring what the JIT-composed post-force
+/// per-particle kernel does in production. Tests that exercise the
+/// thermostat in isolation use this helper to keep the velocity
+/// update reachable.
+fn berendsen_apply_post_with_rescale(
+    therm: &mut BerendsenThermostat,
+    buffers: &mut ParticleBuffers,
+    dt: Real,
+    timings: &mut Timings,
+) -> Result<(), heddle_md::integrator::ThermostatError> {
+    use heddle_md::gpu::rescale_velocities_device_factor;
+    therm.apply_post(buffers, dt, timings)?;
+    rescale_velocities_device_factor(buffers, &therm.factor_device)
+        .map_err(heddle_md::integrator::ThermostatError::Gpu)?;
+    Ok(())
+}
+
 fn symmetric_state(n: usize, mass_si: Real, v_mag_si: Real) -> ParticleState {
     assert!(n.is_multiple_of(2));
     // Convert SI inputs (kg, m/s) to atomic units (m_e, Bohr/au-time).
@@ -170,7 +189,10 @@ fn berendsen_apply_post_launches_expected_kernels() {
             .unwrap_or(0)
     };
     assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 1);
-    assert_eq!(count_for(KernelStage::BERENDSEN_RESCALE_VELOCITIES), 1);
+    // The per-particle velocity rescale is dispatched by the
+    // JIT-composed post-force per-particle kernel; the standalone
+    // `BERENDSEN_RESCALE_VELOCITIES` stage is not recorded.
+    assert_eq!(count_for(KernelStage::BERENDSEN_RESCALE_VELOCITIES), 0);
     // The thermostat does NOT launch the VV kernels (those belong to the
     // integrator).
     assert_eq!(count_for(KernelStage::VV_KICK_DRIFT), 0);
@@ -264,10 +286,10 @@ fn berendsen_lambda_squared_matches_analytical_when_cooling() {
     let mut timings = Timings::new(&gpu).unwrap();
     let dt = (1.0e-14 / TIME_F) as Real;
     let tau = 1.0e-13_f64;
-    let mut therm = build_berendsen(&gpu, n, &berendsen_kind(temperature, tau));
+    let mut therm = unbox_berendsen(build_berendsen(&gpu, n, &berendsen_kind(temperature, tau)));
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let k_before = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
-    therm.apply_post(&mut buffers, dt, &mut timings).unwrap();
+    berendsen_apply_post_with_rescale(&mut therm, &mut buffers, dt, &mut timings).unwrap();
     let k_after = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
     // dt is in atomic time; tau supplied as SI seconds → convert.
     let expected_lambda_sq =
@@ -297,8 +319,8 @@ fn berendsen_lambda_squared_clamped_to_zero_when_runaway() {
     let mut timings = Timings::new(&gpu).unwrap();
     let dt = (2.0e-13 / TIME_F) as Real; // dt/τ = 2.0 in SI
     let tau = 1.0e-13_f64;
-    let mut therm = build_berendsen(&gpu, n, &berendsen_kind(temperature, tau));
-    therm.apply_post(&mut buffers, dt, &mut timings).unwrap();
+    let mut therm = unbox_berendsen(build_berendsen(&gpu, n, &berendsen_kind(temperature, tau)));
+    berendsen_apply_post_with_rescale(&mut therm, &mut buffers, dt, &mut timings).unwrap();
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     for v in &vx {
         assert_eq!(*v, 0.0, "all velocities should be quenched to zero, got {v}");
@@ -466,7 +488,7 @@ fn berendsen_temperature_relaxes_toward_target() {
             &gpu,
             n, 0)
         .unwrap();
-    let mut therm = build_berendsen(&gpu, n, &berendsen_kind(temperature, tau));
+    let mut therm = unbox_berendsen(build_berendsen(&gpu, n, &berendsen_kind(temperature, tau)));
 
     ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let n_steps = 500usize;
@@ -474,9 +496,7 @@ fn berendsen_temperature_relaxes_toward_target() {
         integrator
             .step(&mut buffers, &mut sim_box, &mut ff, dt, &mut timings)
             .unwrap();
-        therm
-            .apply_post(&mut buffers, dt, &mut timings)
-            .unwrap();
+        berendsen_apply_post_with_rescale(&mut therm, &mut buffers, dt, &mut timings).unwrap();
     }
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     let k_final = compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;

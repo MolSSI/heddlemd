@@ -66,9 +66,13 @@ the post-step velocities. For each invocation with timestep `dt`, let
    `K_new = K` (no rescale this invocation). This guard keeps the
    thermostat robust for tiny systems.
 
-5. Apply the rescale with the shared `rescale_velocities` helper
-   (documented in `nose-hoover-chain.md`):
-   `v_i ← α · v_i` for every particle `i` and axis.
+5. Apply the rescale via the JIT-composed post-force per-particle
+   kernel (see `jit-composed-post-force.md` and the *Per-Step
+   Kernel Sequence* section below): `v_i ← α · v_i` for every
+   particle `i` and axis. `apply_post` itself does not launch a
+   per-particle rescale; CSVR's source fragment carries the
+   `v *= csvr_factor_device[0]` body that the composed kernel
+   inlines per thread.
 
 The CSVR Markov kernel is exact in the sense that repeated
 application from any non-zero initial `K` converges to the canonical

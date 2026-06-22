@@ -1349,6 +1349,13 @@
     "title": "heddle_jit_composed_pair_force_f",
     "type": "api-item"
   },
+  "rq-0b8e5852": {
+    "decl": "Scenario: Composed post-force kernel is compiled before capture begins",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Composed post-force kernel is compiled before capture begins",
+    "type": "scenario"
+  },
   "rq-0bb735c9": {
     "decl": "## Empty State",
     "file": "integration/framework",
@@ -1356,6 +1363,13 @@
     "refs": [],
     "title": "Empty State",
     "type": "section"
+  },
+  "rq-0bc3a66e": {
+    "decl": "Scenario: Graph mode and per-step mode use the same composed kernel",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Graph mode and per-step mode use the same composed kernel",
+    "type": "scenario"
   },
   "rq-0c2265eb": {
     "decl": "Scenario: Langevin kick_half count is 2 N_steps; drift_half is 2 N_steps; ou_step is N_steps",
@@ -3478,6 +3492,14 @@
     ],
     "title": "Accept r_switch equal to cutoff (hard-cutoff degenerate case)",
     "type": "scenario"
+  },
+  "rq-1db7cf2a": {
+    "decl": "## JIT-Composed Post-Force Kernel in the Captured Sequence",
+    "file": "cuda-graphs",
+    "level": 2,
+    "refs": [],
+    "title": "JIT-Composed Post-Force Kernel in the Captured Sequence",
+    "type": "section"
   },
   "rq-1ddf84f1": {
     "decl": "## File Format",
@@ -7011,6 +7033,13 @@
     "title": "Cargo feature",
     "type": "section"
   },
+  "rq-3d84a5b8": {
+    "decl": "Scenario: Built-in slot returning None is rejected at phase setup",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Built-in slot returning None is rejected at phase setup",
+    "type": "scenario"
+  },
   "rq-3db027c2": {
     "decl": "## Parameters",
     "file": "integration/berendsen-barostat",
@@ -9221,7 +9250,12 @@
   "rq-56044cc3": {
     "decl": "Scenario: Barostat's apply runs scalar prep but not per-particle rescale",
     "file": "integration/jit-composed-post-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/c_rescale_barostat.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Barostat's apply runs scalar prep but not per-particle rescale",
     "type": "scenario"
   },
@@ -11434,6 +11468,13 @@
     "title": "ConstraintBuilder",
     "type": "api-item"
   },
+  "rq-6bd00f49": {
+    "decl": "Scenario: Berendsen thermostat apply_post writes factor_device via on-device compute",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Berendsen thermostat apply_post writes factor_device via on-device compute",
+    "type": "scenario"
+  },
   "rq-6bd0b42f": {
     "decl": "## NHC conserved Hamiltonian",
     "file": "integration/nose-hoover-chain",
@@ -11721,6 +11762,13 @@
       }
     ],
     "title": "Reject yoshida_order outside {1, 3, 5, 7}",
+    "type": "scenario"
+  },
+  "rq-6dc9fc6d": {
+    "decl": "Scenario: Andersen fragment is self-contained for Philox draw",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Andersen fragment is self-contained for Philox draw",
     "type": "scenario"
   },
   "rq-6dfec7f4": {
@@ -12834,6 +12882,14 @@
     ],
     "title": "Reject ParticleBuffers::new when a host array length is inconsistent",
     "type": "scenario"
+  },
+  "rq-781966e6": {
+    "decl": "### Slot apply-method contract",
+    "file": "cuda-graphs",
+    "level": 3,
+    "refs": [],
+    "title": "Slot apply-method contract",
+    "type": "section"
   },
   "rq-781ce8fc": {
     "decl": "- `__device__ __forceinline__ Real Real_pow(Real x, Real y);`",
@@ -14356,7 +14412,12 @@
   "rq-86dea9a1": {
     "decl": "Scenario: Thermostat's apply_post runs the scalar prep but not the rescale",
     "file": "integration/jit-composed-post-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/csvr.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Thermostat's apply_post runs the scalar prep but not the rescale",
     "type": "scenario"
   },
@@ -14754,6 +14815,13 @@
     "title": "log_column_names",
     "type": "api-item"
   },
+  "rq-8a66232e": {
+    "decl": "Scenario: Slot apply methods perform scalar prep only",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Slot apply methods perform scalar prep only",
+    "type": "scenario"
+  },
   "rq-8a7ef593": {
     "decl": "Scenario: Composed kernel is not compiled when no integrator is active",
     "file": "integration/jit-composed-post-force",
@@ -14812,7 +14880,16 @@
   "rq-8ac9773d": {
     "decl": "# Feature: JIT-Composed Post-Force Per-Particle Kernel",
     "file": "integration/jit-composed-post-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: JIT-Composed Post-Force Per-Particle Kernel",
     "type": "file"
   },
@@ -14855,6 +14932,13 @@
     ],
     "title": "Functions and methods",
     "type": "section"
+  },
+  "rq-8b964ce3": {
+    "decl": "Scenario: Captured graph contains exactly one composed post-force launch per step",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Captured graph contains exactly one composed post-force launch per step",
+    "type": "scenario"
   },
   "rq-8bf40375": {
     "decl": "## Parameter Binding and Launch",
@@ -15423,6 +15507,13 @@
       }
     ],
     "title": "Valid harmonic angle_type is accepted",
+    "type": "scenario"
+  },
+  "rq-91c02dd8": {
+    "decl": "Scenario: NHC phase falls back to per-step launches but still uses the composed kernel",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "NHC phase falls back to per-step launches but still uses the composed kernel",
     "type": "scenario"
   },
   "rq-91c4727a": {
@@ -16511,7 +16602,20 @@
   "rq-9c5226e5": {
     "decl": "Scenario: Integrator kick runs before thermostat rescale (canonical order)",
     "file": "integration/jit-composed-post-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/integrator/langevin_baoab.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/mtk_npt.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/integrator/velocity_verlet.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Integrator kick runs before thermostat rescale (canonical order)",
     "type": "scenario"
   },
@@ -17114,6 +17218,14 @@
     "title": "Cell List Construction",
     "type": "section"
   },
+  "rq-a060db3f": {
+    "decl": "### Source Fragment",
+    "file": "integration/andersen",
+    "level": 3,
+    "refs": [],
+    "title": "Source Fragment",
+    "type": "section"
+  },
   "rq-a097b162": {
     "decl": "### Step Plan",
     "file": "integration/velocity-verlet",
@@ -17529,6 +17641,13 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Pair beyond cutoff yields zero per-particle energy and virial",
+    "type": "scenario"
+  },
+  "rq-a50d8a1f": {
+    "decl": "Scenario: Berendsen barostat apply writes mu_device via on-device compute",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Berendsen barostat apply writes mu_device via on-device compute",
     "type": "scenario"
   },
   "rq-a54cc657": {
@@ -18852,6 +18971,13 @@
     "refs": [],
     "title": "Thermostat",
     "type": "api-item"
+  },
+  "rq-b154f270": {
+    "decl": "Scenario: NHC apply_post writes a single cumulative factor to factor_device",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "NHC apply_post writes a single cumulative factor to factor_device",
+    "type": "scenario"
   },
   "rq-b17e6de6": {
     "decl": "- `Timings::kernel_stop(&mut self, stage: KernelStage) -> Result<(), TimingsError>`",
@@ -20297,6 +20423,13 @@
     "refs": [],
     "title": "Runner Integration",
     "type": "section"
+  },
+  "rq-c0548f4c": {
+    "decl": "Scenario: MTK-NPT phase falls back to per-step launches but still uses the composed kernel",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "MTK-NPT phase falls back to per-step launches but still uses the composed kernel",
+    "type": "scenario"
   },
   "rq-c0668cb7": {
     "decl": "## Gherkin Scenarios",
@@ -22489,6 +22622,13 @@
       }
     ],
     "title": "C-rescale barostat missing temperature is rejected",
+    "type": "scenario"
+  },
+  "rq-d638d799": {
+    "decl": "Scenario: No set_jit_composed_post_force_active trait method exists",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "No set_jit_composed_post_force_active trait method exists",
     "type": "scenario"
   },
   "rq-d65bcc90": {
@@ -26394,6 +26534,13 @@
       }
     ],
     "title": "Velocity generation is deterministic in the seed",
+    "type": "scenario"
+  },
+  "rq-f917104b": {
+    "decl": "Scenario: Standalone post-force per-particle kernels are not declared",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Standalone post-force per-particle kernels are not declared",
     "type": "scenario"
   },
   "rq-f93d278e": {

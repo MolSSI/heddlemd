@@ -204,6 +204,37 @@ extern "C" __global__ void csvr_sample_and_factor(
   }
 }
 
+// Reads the kinetic-energy scalar from `k_old` (length 1; written by
+// `kinetic_energy_reduce`), computes the Berendsen rescale factor
+// λ = sqrt(max(0, 1 + (dt/τ) · (K_target/K_old − 1))) on the device,
+// writes it to `factor_out[0]`, and accumulates the per-step
+// injection delta `K_old · (λ² − 1)` into
+// `cumulative_injection_delta[0]`. Single-thread launch: 1 block of 1
+// thread. Stays graph-capturable (no dtoh, no host arithmetic between
+// launches). When `k_old <= 0` (degenerate freshly-initialised state)
+// the kernel writes `factor_out[0] = 1` and a zero injection delta.
+extern "C" __global__ void berendsen_compute_factor(
+    const Real *k_old,                       // length 1
+    Real *factor_out,                        // length 1
+    double *cumulative_injection_delta,      // length 1
+    double k_target,                         // (g_dof / 2) · kT_target
+    double dt_over_tau)                      // dt / τ
+{
+  if (threadIdx.x != 0u || blockIdx.x != 0u) return;
+  double k_old_val = (double)k_old[0];
+  if (!(k_old_val > 0.0)) {
+    factor_out[0] = R(1.0);
+    return;
+  }
+  double lambda_sq = 1.0 + dt_over_tau * (k_target / k_old_val - 1.0);
+  if (!(lambda_sq > 0.0)) {
+    lambda_sq = 0.0;
+  }
+  double lambda = sqrt(lambda_sq);
+  factor_out[0] = (Real)lambda;
+  cumulative_injection_delta[0] += k_old_val * (lambda_sq - 1.0);
+}
+
 // Increments a single u64 device counter by 1. Used by multi-block
 // Philox kernels (where read+increment cannot safely happen in the
 // same kernel because blocks have no synchronisation order) — the

@@ -7,7 +7,6 @@ use serde::Deserialize;
 use crate::gpu::{
     GpuContext, GpuError, ParticleBuffers, berendsen_compute_mu,
     compute_kinetic_energy_on_device, compute_total_virial_on_device,
-    rescale_positions_device_factor,
 };
 use crate::io::config::ConfigError;
 use crate::pbc::SimulationBox;
@@ -157,10 +156,9 @@ impl Barostat for BerendsenBarostat {
             dt_f64,
             MU_MIN * MU_MIN * MU_MIN,
         )?;
-
-        timings.kernel_start(KernelStage::BERENDSEN_BAROSTAT_RESCALE_POSITIONS)?;
-        rescale_positions_device_factor(buffers, &self.mu_device)?;
-        timings.kernel_stop(KernelStage::BERENDSEN_BAROSTAT_RESCALE_POSITIONS)?;
+        // The per-particle position rescale `x ← μ · x` is dispatched
+        // by the JIT-composed post-force per-particle kernel via this
+        // slot's source fragment.
 
         Ok(())
     }
@@ -170,6 +168,32 @@ impl Barostat for BerendsenBarostat {
         device: &std::sync::Arc<cudarc::driver::CudaDevice>,
     ) -> Result<(), BarostatError> {
         BerendsenBarostat::flush_pending_injection(self, device).map_err(BarostatError::from)
+    }
+
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> Option<crate::forces::PerParticleFragment> {
+        Some(crate::forces::PerParticleFragment {
+            label: "berendsen_barostat",
+            helper_source: String::new(),
+            entry_point_args: String::from(
+                "    const Real *berendsen_baro_mu_device,\n",
+            ),
+            per_thread_body: String::from(
+                "        Real berendsen_baro_mu = berendsen_baro_mu_device[0];\n\
+                 \x20       positions_x[i] *= berendsen_baro_mu;\n\
+                 \x20       positions_y[i] *= berendsen_baro_mu;\n\
+                 \x20       positions_z[i] *= berendsen_baro_mu;",
+            ),
+        })
+    }
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        _ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        builder.push_device_buffer(&self.mu_device);
     }
 
     // rq-62b44dc9 rq-b6728f3c

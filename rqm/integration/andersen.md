@@ -46,9 +46,15 @@ the post-step velocities. For each invocation with timestep `dt`:
    `cumulative_injection += K_new − K_old`. Used by the
    `andersen_conserved` log column.
 
-The per-particle resampling is a single GPU kernel launch
-(`andersen_resample`). The two surrounding kinetic-energy reductions
-each launch the shared `kinetic_energy_reduce` kernel.
+The per-particle resampling runs as part of the JIT-composed
+post-force per-particle kernel
+(`heddle_jit_composed_post_force_per_particle`); the standalone
+`andersen_resample` kernel is not declared. The Andersen slot's
+`post_force_per_particle_fragment()` carries the per-thread body
+that performs the Bernoulli draw, conditional Maxwell-Boltzmann
+draw, and velocity write. The two surrounding kinetic-energy
+reductions each launch the shared `kinetic_energy_reduce` kernel
+from inside `apply_post`.
 
 The collision probability is clamped to `[0, 1]` so any
 `collision_rate · dt ≥ 1` reduces to "always resample" (massive
@@ -66,14 +72,41 @@ following in fixed order:
 | Order | Step      | Kernel / call           | Operation                                            | Stage label           |
 | ----- | --------- | ----------------------- | ---------------------------------------------------- | --------------------- |
 | 1     | KE reduce | `kinetic_energy_reduce` | one f32 scalar of `K_old`                            | `KineticEnergyReduce` |
-| 2     | Resample  | `andersen_resample`     | per-particle Bernoulli + Maxwell-Boltzmann draw      | `AndersenResample`    |
+| 2     | Resample  | composed post-force per-particle kernel | per-particle Bernoulli + Maxwell-Boltzmann draw      | `JitComposedPostForce` |
 | 3     | KE reduce | `kinetic_energy_reduce` | one f32 scalar of `K_new`                            | `KineticEnergyReduce` |
 
-`kinetic_energy_reduce` is reused from `nose-hoover-chain.md`.
-`andersen_resample` is the only CUDA kernel owned by this slot. The
-integrator's own kernels (`vv_kick_drift`, `vv_kick`, the force
-pipeline) are launched separately by `integrator.step()` and are not
-part of this slot's per-step sequence.
+Steps 1 and 3 run inside `apply_post`. Step 2 runs from the
+JIT-composed post-force per-particle kernel via Andersen's source
+fragment. `kinetic_energy_reduce` is reused from
+`nose-hoover-chain.md`. The integrator's own kernels
+(`vv_kick_drift`, the force pipeline) are launched separately by
+`integrator.step()` and are not part of this slot's per-step
+sequence.
+
+### Source Fragment <!-- rq-a060db3f -->
+
+Andersen's fragment differs from the simpler velocity-rescale
+fragments in that it performs a per-particle Philox draw rather
+than reading a slot-scalar. The fragment exposes the following
+contributions to the composed kernel:
+
+- `helper_source` declares a slot-prefixed `__device__` Philox
+  draw routine (`andersen_philox_draw_u32`,
+  `andersen_philox_draw_gaussian`) that mirrors the standalone
+  Andersen draw logic.
+- `entry_point_args` declares `unsigned long long
+  *andersen_draw_counter_device`, `unsigned long long
+  andersen_seed`, `Real andersen_p_collision`, `Real andersen_kT`.
+- `per_thread_body` performs a Bernoulli draw against
+  `andersen_p_collision`; if the particle is selected, draws three
+  Gaussian samples scaled by `sqrt(andersen_kT / masses[i])`, and
+  writes the new velocity components. The fragment increments the
+  device draw counter exactly once per kernel launch (via a single
+  thread in the first block).
+
+The bind method pushes the slot's `draw_counter_device` buffer,
+`seed`, `p_collision` (clamped to `[0, 1]`), and `kT` onto the
+launch builder in that order.
 
 ## Parameters <!-- rq-eb0bc993 -->
 

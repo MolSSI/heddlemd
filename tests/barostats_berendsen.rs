@@ -380,9 +380,12 @@ fn apply_launches_expected_kernel_set() {
     };
     assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 1);
     assert_eq!(count_for(KernelStage::VIRIAL_SUM_REDUCE), 1);
+    // The per-particle position rescale is dispatched by the
+    // JIT-composed post-force per-particle kernel; the standalone
+    // stage is not recorded.
     assert_eq!(
         count_for(KernelStage::BERENDSEN_BAROSTAT_RESCALE_POSITIONS),
-        1
+        0
     );
     // The barostat does not launch the integrator's VV kernels.
     assert_eq!(count_for(KernelStage::VV_KICK_DRIFT), 0);

@@ -275,11 +275,6 @@ pub trait Integrator: std::fmt::Debug + Send {
         })
     }
 
-    /// Notify the integrator that the JIT-composed post-force
-    /// per-particle kernel is active. Default no-op; integrators
-    /// whose `execute` does host-side bookkeeping tied to the
-    /// post-force SubStep may override.
-    fn set_jit_composed_post_force_active(&mut self, _active: bool) {}
 }
 
 /// Walk an integrator's plan for one timestep.
@@ -350,6 +345,39 @@ pub fn run_step_with_skipped_substep(
         timings,
         runner_needs_scalars,
         true,
+        Some(skip_substep_index),
+    )
+}
+
+/// As `run_step_with_skipped_substep`, but uses the
+/// `force_field.step_no_neighbor_check` variant inside every
+/// `ForceEval` SubStep. Used during CUDA graph capture, where the
+/// neighbor-list pre-step is host-side and runs at batch boundaries
+/// rather than inside the captured graph.
+#[allow(clippy::too_many_arguments)]
+pub fn run_step_with_skipped_substep_no_neighbor_check(
+    integrator: &mut dyn Integrator,
+    buffers: &mut ParticleBuffers,
+    sim_box: &mut SimulationBox,
+    force_field: &mut ForceField,
+    constraint: Option<&mut dyn Constraint>,
+    install_constraint_hooks: bool,
+    dt: Real,
+    timings: &mut Timings,
+    runner_needs_scalars: bool,
+    skip_substep_index: usize,
+) -> Result<(), StepError> {
+    run_step_inner(
+        integrator,
+        buffers,
+        sim_box,
+        force_field,
+        constraint,
+        install_constraint_hooks,
+        dt,
+        timings,
+        runner_needs_scalars,
+        false,
         Some(skip_substep_index),
     )
 }
@@ -860,13 +888,6 @@ pub trait Thermostat: std::fmt::Debug + Send {
         );
     }
 
-    /// Notify the slot that the JIT-composed post-force per-particle
-    /// kernel is active for the current run. Slots that perform a
-    /// per-particle velocity rescale should observe this flag and
-    /// skip their standalone rescale launch in `apply_post`; the
-    /// composed kernel handles it. Default no-op for slots whose
-    /// `apply_post` does not contain a per-particle rescale.
-    fn set_jit_composed_post_force_active(&mut self, _active: bool) {}
 }
 
 // rq-29e08cb5
@@ -1026,11 +1047,6 @@ pub trait Barostat: std::fmt::Debug + Send {
         );
     }
 
-    /// Notify the slot that the JIT-composed post-force per-particle
-    /// kernel is active. Slots whose `apply` includes a per-particle
-    /// rescale should observe this flag and skip the standalone
-    /// rescale launch when active. Default no-op.
-    fn set_jit_composed_post_force_active(&mut self, _active: bool) {}
 }
 
 // rq-29e08cb5

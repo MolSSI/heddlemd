@@ -64,6 +64,39 @@ fn empty_force_field(gpu: &GpuContext, n: usize) -> ForceField {
     .unwrap()
 }
 
+/// Runs Andersen's `apply_post` followed by the standalone
+/// `andersen_resample` kernel — the equivalent of what the JIT-composed
+/// post-force per-particle kernel does in production when Andersen's
+/// fragment is composed in. Tests that exercise Andersen in isolation
+/// (without building the composed kernel) use this helper.
+fn andersen_apply_post_with_resample(
+    therm: &mut AndersenThermostat,
+    buffers: &mut ParticleBuffers,
+    dt: Real,
+    timings: &mut Timings,
+) -> Result<(), heddle_md::integrator::ThermostatError> {
+    therm.apply_post(buffers, dt, timings)?;
+    let p_collision = ((therm.collision_rate as f64) * (dt as f64))
+        .clamp(0.0, 1.0) as Real;
+    let kt = therm.kt as Real;
+    timings
+        .kernel_start(KernelStage::ANDERSEN_RESAMPLE)
+        .map_err(heddle_md::integrator::ThermostatError::Timings)?;
+    andersen_resample(
+        buffers,
+        &mut therm.draw_counter_device,
+        therm.seed,
+        p_collision,
+        kt,
+    )
+    .map_err(heddle_md::integrator::ThermostatError::Gpu)?;
+    timings
+        .kernel_stop(KernelStage::ANDERSEN_RESAMPLE)
+        .map_err(heddle_md::integrator::ThermostatError::Timings)?;
+    therm.draw_counter += 1;
+    Ok(())
+}
+
 fn andersen_kind(temperature: f64, collision_rate: f64, seed: u64) -> SlotConfig {
     // Convert SI inputs (K, 1/s) to atomic units.
     let temperature = temperature / TEMP_F;
@@ -303,8 +336,11 @@ fn andersen_apply_post_launches_expected_kernels() {
             .map(|r| r.count)
             .unwrap_or(0)
     };
-    assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 2);
-    assert_eq!(count_for(KernelStage::ANDERSEN_RESAMPLE), 1);
+    // Andersen's apply_post does no per-particle work; the
+    // Bernoulli + Maxwell-Boltzmann resample lives in the JIT-composed
+    // post-force per-particle kernel via Andersen's source fragment.
+    assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 0);
+    assert_eq!(count_for(KernelStage::ANDERSEN_RESAMPLE), 0);
     assert_eq!(count_for(KernelStage::VV_KICK_DRIFT), 0);
     assert_eq!(count_for(KernelStage::VV_KICK), 0);
 }
@@ -355,13 +391,21 @@ fn andersen_draw_counter_increments_per_apply_post() {
     let mut timings = Timings::new(&gpu).unwrap();
     let mut therm = unbox_andersen(build_andersen(&gpu, n, &andersen_kind(300.0, 1.0e12, 1)));
     assert_eq!(therm.draw_counter, 0);
-    therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
-        .unwrap();
+    andersen_apply_post_with_resample(
+        &mut therm,
+        &mut buffers,
+        (1.0e-15 / TIME_F) as Real,
+        &mut timings,
+    )
+    .unwrap();
     assert_eq!(therm.draw_counter, 1);
-    therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
-        .unwrap();
+    andersen_apply_post_with_resample(
+        &mut therm,
+        &mut buffers,
+        (1.0e-15 / TIME_F) as Real,
+        &mut timings,
+    )
+    .unwrap();
     assert_eq!(therm.draw_counter, 2);
 }
 
@@ -399,13 +443,17 @@ fn andersen_log_column_names_returns_andersen_conserved() {
 
 // rq-26ff4aea
 #[test]
-fn andersen_log_column_values_subtracts_cumulative_injection() {
+fn andersen_log_column_values_returns_kinetic_plus_potential() {
+    // The cumulative-injection correction the historical standalone
+    // path tracked is not reproduced by the JIT-composed post-force
+    // per-particle path; Andersen's conserved log column reports
+    // `K + U` without the injection correction. See `andersen.md`
+    // *Source Fragment* for the rationale.
     let gpu = init_device().unwrap();
-    let mut therm = unbox_andersen(build_andersen(&gpu, 4, &andersen_kind(300.0, 1.0e12, 1)));
-    therm.cumulative_injection = 1.0e-20;
+    let therm = unbox_andersen(build_andersen(&gpu, 4, &andersen_kind(300.0, 1.0e12, 1)));
     let extras = therm.log_column_values(2.5e-20, 3.0e-20);
     assert_eq!(extras.len(), 1);
-    let expected: f64 = 2.5e-20 + 3.0e-20 - 1.0e-20;
+    let expected: f64 = 2.5e-20 + 3.0e-20;
     assert!((extras[0] - expected).abs() < 1.0e-30);
 }
 
@@ -421,10 +469,14 @@ fn andersen_collision_rate_above_one_clamped_to_full_resample() {
     let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let mut timings = Timings::new(&gpu).unwrap();
     // collision_rate · dt = 10
-    let mut therm = build_andersen(&gpu, n, &andersen_kind(300.0, 1.0e16, 1));
-    therm
-        .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
-        .unwrap();
+    let mut therm = unbox_andersen(build_andersen(&gpu, n, &andersen_kind(300.0, 1.0e16, 1)));
+    andersen_apply_post_with_resample(
+        &mut therm,
+        &mut buffers,
+        (1.0e-15 / TIME_F) as Real,
+        &mut timings,
+    )
+    .unwrap();
     let vx = gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap();
     for (i, (a, b)) in vx.iter().zip(snap_vx.iter()).enumerate() {
         assert_ne!(a, b, "vx[{i}] unchanged ({a})");
@@ -487,11 +539,15 @@ fn andersen_different_seeds_diverge() {
         let n = state.particle_count();
         let mut buffers = ParticleBuffers::new(gpu, state).unwrap();
         let mut timings = Timings::new(gpu).unwrap();
-        let mut therm = build_andersen(gpu, n, &andersen_kind(300.0, 1.0e16, seed));
+        let mut therm = unbox_andersen(build_andersen(gpu, n, &andersen_kind(300.0, 1.0e16, seed)));
         for _ in 0..3 {
-            therm
-                .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
-                .unwrap();
+            andersen_apply_post_with_resample(
+                &mut therm,
+                &mut buffers,
+                (1.0e-15 / TIME_F) as Real,
+                &mut timings,
+            )
+            .unwrap();
         }
         gpu.device.dtoh_sync_copy(&buffers.velocities_x).unwrap()
     }
@@ -536,16 +592,20 @@ fn andersen_time_averaged_ke_tracks_target() {
             &gpu,
             n, 0)
         .unwrap();
-    let mut therm = build_andersen(&gpu, n, &andersen_kind(temperature, 5.0e14, 11));
+    let mut therm = unbox_andersen(build_andersen(&gpu, n, &andersen_kind(temperature, 5.0e14, 11)));
     ff.step(&mut buffers, &sim_box, &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let mut scratch = gpu.device.alloc_zeros::<Real>(1).unwrap();
     for _ in 0..200 {
         integ
             .step(&mut buffers, &mut sim_box, &mut ff, (1.0e-15 / TIME_F) as Real, &mut timings)
             .unwrap();
-        therm
-            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
-            .unwrap();
+        andersen_apply_post_with_resample(
+            &mut therm,
+            &mut buffers,
+            (1.0e-15 / TIME_F) as Real,
+            &mut timings,
+        )
+        .unwrap();
     }
     let mut sum = 0.0_f64;
     let n_samples = 500;
@@ -553,9 +613,13 @@ fn andersen_time_averaged_ke_tracks_target() {
         integ
             .step(&mut buffers, &mut sim_box, &mut ff, (1.0e-15 / TIME_F) as Real, &mut timings)
             .unwrap();
-        therm
-            .apply_post(&mut buffers, (1.0e-15 / TIME_F) as Real, &mut timings)
-            .unwrap();
+        andersen_apply_post_with_resample(
+            &mut therm,
+            &mut buffers,
+            (1.0e-15 / TIME_F) as Real,
+            &mut timings,
+        )
+        .unwrap();
         sum += compute_kinetic_energy(&buffers, &mut scratch).unwrap() as f64;
     }
     let k_avg = sum / n_samples as f64;

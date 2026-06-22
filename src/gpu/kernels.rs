@@ -1146,6 +1146,48 @@ pub fn rescale_velocities_device_factor(
     Ok(())
 }
 
+/// Launches `berendsen_compute_factor`: reads the kinetic-energy
+/// scalar from `k_old`, computes λ on the device, writes
+/// `factor_out[0]`, and accumulates the per-step injection delta
+/// `K_old · (λ² − 1)` into `cumulative_injection_delta[0]`. Single
+/// 1-thread launch. Stays graph-capturable.
+pub fn berendsen_compute_factor(
+    particle_buffers: &ParticleBuffers,
+    k_old: &CudaSlice<Real>,
+    factor_out: &mut CudaSlice<Real>,
+    cumulative_injection_delta: &mut CudaSlice<f64>,
+    k_target: f64,
+    dt_over_tau: f64,
+) -> Result<(), GpuError> {
+    debug_assert_eq!(k_old.len(), 1);
+    debug_assert_eq!(factor_out.len(), 1);
+    debug_assert_eq!(cumulative_injection_delta.len(), 1);
+    let func = particle_buffers
+        .kernels
+        .nose_hoover
+        .berendsen_compute_factor
+        .clone();
+    let cfg = LaunchConfig {
+        grid_dim: (1, 1, 1),
+        block_dim: (1, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                k_old,
+                &mut *factor_out,
+                &mut *cumulative_injection_delta,
+                k_target,
+                dt_over_tau,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 /// Launches `csvr_sample_and_factor`: reads `k_old` from device,
 /// generates `g_dof` Philox samples in parallel, evaluates the CSVR
 /// chain, and writes `factor_out[0] = sqrt(k_new/k_old)` plus accumulates

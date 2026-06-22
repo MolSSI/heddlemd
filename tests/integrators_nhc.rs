@@ -328,8 +328,13 @@ fn nhc_apply_pre_and_apply_post_launch_expected_kernels() {
     };
     // Two KE reductions per step (one per half-step).
     assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 2);
-    // Yoshida 3 × n_resp 1 × 2 halves = 6 rescale launches per step.
-    assert_eq!(count_for(KernelStage::NHC_RESCALE_VELOCITIES), 6);
+    // apply_pre's cumulative-factor refactor collapses Yoshida × n_resp
+    // per-iteration rescales into one `rescale_velocities` launch.
+    // apply_post's rescale is dispatched by the JIT-composed post-force
+    // per-particle kernel via NHC's source fragment, not by a
+    // standalone rescale; the standalone `NHC_RESCALE_VELOCITIES`
+    // stage records the one apply_pre launch only.
+    assert_eq!(count_for(KernelStage::NHC_RESCALE_VELOCITIES), 1);
     // The thermostat does NOT launch VV kernels.
     assert_eq!(count_for(KernelStage::VV_KICK_DRIFT), 0);
     assert_eq!(count_for(KernelStage::VV_KICK), 0);

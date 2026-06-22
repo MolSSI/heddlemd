@@ -5,7 +5,8 @@ use cudarc::driver::CudaSlice;
 use serde::Deserialize;
 
 use crate::gpu::{
-    GpuContext, GpuError, ParticleBuffers, compute_kinetic_energy, rescale_velocities,
+    GpuContext, GpuError, ParticleBuffers, berendsen_compute_factor,
+    compute_kinetic_energy_on_device,
 };
 use crate::io::config::ConfigError;
 use crate::timings::{KernelStage, Timings};
@@ -47,6 +48,16 @@ pub struct BerendsenThermostat {
     pub kt_target: f64,
     pub cumulative_injection: f64,
     ke_scratch: CudaSlice<Real>,
+    /// Single-element device buffer holding the per-step rescale
+    /// factor λ written by `berendsen_compute_factor`. The
+    /// JIT-composed post-force per-particle kernel reads it.
+    /// Public so tests that bypass the composed kernel can dispatch
+    /// the standalone `rescale_velocities_device_factor` against it.
+    pub factor_device: CudaSlice<Real>,
+    /// Single-element device buffer accumulating
+    /// `K_old · (λ² − 1)` per step. `flush_pending_injection`
+    /// drains and zeroes it before each log row.
+    cumulative_injection_delta: CudaSlice<f64>,
     most_recent_ke: f64,
 }
 
@@ -63,6 +74,9 @@ impl BerendsenThermostat {
         // k_B = 1 in atomic units; temperature is already k_B · T.
         let kt_target = temperature;
         let ke_scratch = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
+        let factor_device = gpu.device.alloc_zeros::<Real>(1).map_err(GpuError::from)?;
+        let cumulative_injection_delta =
+            gpu.device.alloc_zeros::<f64>(1).map_err(GpuError::from)?;
         Ok(BerendsenThermostat {
             temperature,
             tau,
@@ -70,8 +84,26 @@ impl BerendsenThermostat {
             kt_target,
             cumulative_injection: 0.0,
             ke_scratch,
+            factor_device,
+            cumulative_injection_delta,
             most_recent_ke: 0.0,
         })
+    }
+
+    pub fn flush_pending_injection(
+        &mut self,
+        device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    ) -> Result<(), GpuError> {
+        let mut host_delta = [0.0_f64; 1];
+        device
+            .dtoh_sync_copy_into(&self.cumulative_injection_delta, &mut host_delta)
+            .map_err(GpuError::from)?;
+        self.cumulative_injection += host_delta[0];
+        let zero = [0.0_f64; 1];
+        device
+            .htod_sync_copy_into(&zero, &mut self.cumulative_injection_delta)
+            .map_err(GpuError::from)?;
+        Ok(())
     }
 }
 
@@ -88,28 +120,57 @@ impl Thermostat for BerendsenThermostat {
         }
 
         timings.kernel_start(KernelStage::KINETIC_ENERGY_REDUCE)?;
-        let k_old = compute_kinetic_energy(buffers, &mut self.ke_scratch)? as f64;
+        compute_kinetic_energy_on_device(buffers, &mut self.ke_scratch)?;
         timings.kernel_stop(KernelStage::KINETIC_ENERGY_REDUCE)?;
-
-        if k_old <= 0.0 {
-            self.most_recent_ke = 0.0;
-            return Ok(());
-        }
 
         let nf = self.g_dof as f64;
         let k_target = (nf / 2.0) * self.kt_target;
-        let lambda_sq = (1.0 + ((dt as f64) / self.tau) * (k_target / k_old - 1.0)).max(0.0);
-        let lambda = lambda_sq.sqrt();
-        let factor = lambda as Real;
-
-        timings.kernel_start(KernelStage::BERENDSEN_RESCALE_VELOCITIES)?;
-        rescale_velocities(buffers, factor)?;
-        timings.kernel_stop(KernelStage::BERENDSEN_RESCALE_VELOCITIES)?;
-
-        let k_new = lambda_sq * k_old;
-        self.cumulative_injection += k_new - k_old;
-        self.most_recent_ke = k_new;
+        let dt_over_tau = (dt as f64) / self.tau;
+        berendsen_compute_factor(
+            buffers,
+            &self.ke_scratch,
+            &mut self.factor_device,
+            &mut self.cumulative_injection_delta,
+            k_target,
+            dt_over_tau,
+        )?;
+        // The composed post-force per-particle kernel applies the
+        // rescale via this slot's source fragment.
         Ok(())
+    }
+
+    fn flush_pending_injection(
+        &mut self,
+        device: &std::sync::Arc<cudarc::driver::CudaDevice>,
+    ) -> Result<(), ThermostatError> {
+        BerendsenThermostat::flush_pending_injection(self, device)
+            .map_err(ThermostatError::from)
+    }
+
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> Option<crate::forces::PerParticleFragment> {
+        Some(crate::forces::PerParticleFragment {
+            label: "berendsen",
+            helper_source: String::new(),
+            entry_point_args: String::from(
+                "    const Real *berendsen_factor_device,\n",
+            ),
+            per_thread_body: String::from(
+                "        Real berendsen_factor = berendsen_factor_device[0];\n\
+                 \x20       velocities_x[i] *= berendsen_factor;\n\
+                 \x20       velocities_y[i] *= berendsen_factor;\n\
+                 \x20       velocities_z[i] *= berendsen_factor;",
+            ),
+        })
+    }
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        _ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        builder.push_device_buffer(&self.factor_device);
     }
 
     // rq-c908bbf1

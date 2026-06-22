@@ -95,10 +95,13 @@ For each invocation with timestep `dt`:
    inside the call (via `lattice_device_mut`); the host fields
    become stale until the next `sim_box.flush_from_device()`.
 
-4. Launch `rescale_positions_device_factor` (shared with C-rescale
-   — see `c-rescale-barostat.md`) to update particle positions by
-   reading `mu_device[0]` and scaling each position component by it.
-   The rescale is applied about the box origin; fractional
+4. The per-particle position rescale `x_i ← μ · x_i` is dispatched
+   by the JIT-composed post-force per-particle kernel, not by
+   `apply`. Berendsen barostat's
+   `post_force_per_particle_fragment()` carries the `x *=
+   berendsen_mu_device[0]` body that the composed kernel inlines
+   per thread. `apply` itself does not launch a per-particle
+   rescale. The rescale is applied about the box origin; fractional
    coordinates relative to the new box are unchanged. No host
    involvement; no per-step dtoh of `μ`.
 
@@ -121,7 +124,11 @@ in fixed order:
 | 1     | KE reduce         | `kinetic_energy_reduce`                    | f32 scalar of `K` into `ke_scratch`                                                                                | `KineticEnergyReduce`                  |
 | 2     | Virial reduce     | `virial_sum_reduce`                        | f32 scalar of `W` into `virial_scratch`                                                                            | `VirialSumReduce`                      |
 | 3     | µ + lattice + diag | `berendsen_compute_mu_and_rescale_lattice` | reads `K`, `W`, lattice; computes µ + P in f64; mutates lattice; writes µ + diagnostics device buffers              | `BerendsenComputeMuAndRescaleLattice`  |
-| 4     | Position rescale  | `rescale_positions_device_factor`          | reads `mu_device[0]`, scales every particle position by it                                                          | `BerendsenBarostatRescalePositions`    |
+| 4     | Position rescale  | composed post-force per-particle kernel    | reads `mu_device[0]`, scales every particle position by it                                                          | `JitComposedPostForce`                 |
+
+Steps 1–3 run inside `apply`. Step 4 runs from the JIT-composed
+post-force per-particle kernel via Berendsen barostat's source
+fragment.
 
 No per-step host download occurs. The host `sim_box`'s lattice
 mirror, `most_recent_pressure`, and `most_recent_volume` host

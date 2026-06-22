@@ -61,9 +61,12 @@ pub struct CsvrThermostat {
     /// host on the per-step path.
     ke_scratch: CudaSlice<Real>,
     /// Single-element device buffer holding the rescale factor
-    /// computed by `csvr_sample_and_factor`. Consumed by
-    /// `rescale_velocities_device_factor` on the same stream.
-    factor_device: CudaSlice<Real>,
+    /// computed by `csvr_sample_and_factor`. The JIT-composed
+    /// post-force per-particle kernel reads `factor_device[0]` in
+    /// CSVR's fragment body. Public so tests that bypass the
+    /// composed kernel can dispatch `rescale_velocities_device_factor`
+    /// against it.
+    pub factor_device: CudaSlice<Real>,
     /// Single-element device buffer accumulating `(k_new - k_old)`
     /// across CSVR steps since the last `flush_pending_injection`.
     /// `f64` to preserve precision across many steps before a host
@@ -76,11 +79,6 @@ pub struct CsvrThermostat {
     /// observes the post-increment counter from the previous replay
     /// and draws a distinct Philox sequence.
     draw_counter_device: CudaSlice<u64>,
-    /// True when the runner is dispatching the JIT-composed
-    /// post-force per-particle kernel; `apply_post` must skip the
-    /// standalone per-particle rescale launch because the composed
-    /// kernel handles it. See `rqm/integration/jit-composed-post-force.md`.
-    jit_composed_post_force_active: bool,
 }
 
 impl CsvrThermostat {
@@ -115,7 +113,6 @@ impl CsvrThermostat {
             factor_device,
             cumulative_injection_delta,
             draw_counter_device,
-            jit_composed_post_force_active: false,
         })
     }
 
@@ -192,22 +189,13 @@ impl Thermostat for CsvrThermostat {
             k_target_over_nf,
         )?;
 
-        // 3. Apply the rescale. Reads `factor_device[0]` on the same
-        //    stream; no host involvement. Skipped when the
-        //    JIT-composed post-force per-particle kernel is active —
-        //    the composed kernel rescales velocities by
-        //    `factor_device[0]` in its CSVR fragment body.
-        if !self.jit_composed_post_force_active {
-            timings.kernel_start(KernelStage::CSVR_RESCALE_VELOCITIES)?;
-            rescale_velocities_device_factor(buffers, &self.factor_device)?;
-            timings.kernel_stop(KernelStage::CSVR_RESCALE_VELOCITIES)?;
-        }
+        // The per-particle rescale `v ← α · v` is dispatched by the
+        // JIT-composed post-force per-particle kernel via this slot's
+        // source fragment (see `rqm/integration/jit-composed-post-force.md`).
+        // `apply_post` produces the device-resident `factor_device`
+        // scalar; the composed kernel reads it.
 
         Ok(())
-    }
-
-    fn set_jit_composed_post_force_active(&mut self, active: bool) {
-        self.jit_composed_post_force_active = active;
     }
 
     // rq-86dea9a1 — CSVR's per-particle rescale fragment for the

@@ -224,9 +224,14 @@ fn apply_launches_expected_kernel_set() {
     };
     assert_eq!(count_for(KernelStage::KINETIC_ENERGY_REDUCE), 1);
     assert_eq!(count_for(KernelStage::VIRIAL_SUM_REDUCE), 1);
+    // The per-particle position rescale is dispatched by the
+    // JIT-composed post-force per-particle kernel via c-rescale's
+    // source fragment, not by `apply`. The standalone
+    // `C_RESCALE_BAROSTAT_RESCALE_POSITIONS` stage is never
+    // recorded.
     assert_eq!(
         count_for(KernelStage::C_RESCALE_BAROSTAT_RESCALE_POSITIONS),
-        1
+        0
     );
     // The Berendsen-barostat label must not be touched.
     assert_eq!(
@@ -406,6 +411,7 @@ fn temperature_zero_limit_matches_berendsen_barostat() {
 // rq-3b9e9550
 #[test]
 fn fractional_coordinates_invariant_under_apply() {
+    use heddle_md::gpu::rescale_positions_device_factor;
     let gpu = init_device().unwrap();
     let p_target = 1.0e6_f64;
     let (px, vx, masses, virials) = system_with_pressure(p_target / 2.0);
@@ -415,9 +421,18 @@ fn fractional_coordinates_invariant_under_apply() {
     let mut sim_box = box_small(&gpu);
     let lx_pre = sim_box.lx();
     let mut timings = Timings::new(&gpu).unwrap();
-    let mut baro = build_c_rescale(&gpu, n, &c_rescale_kind(p_target, 85.0, 1.0e-12, 4.5e-10, 1));
+    let mut baro = unbox_c_rescale(build_c_rescale(
+        &gpu,
+        n,
+        &c_rescale_kind(p_target, 85.0, 1.0e-12, 4.5e-10, 1),
+    ));
     baro.apply(&mut buffers, &mut sim_box, (1.0e-13 / TIME_F as Real), &mut timings)
         .unwrap();
+    // The composed post-force per-particle kernel applies the
+    // position rescale in production. Tests that bypass the composed
+    // kernel dispatch the standalone equivalent against
+    // `mu_device` to keep the post-apply state covered.
+    rescale_positions_device_factor(&mut buffers, &baro.mu_device).unwrap();
     sim_box.flush_from_device().unwrap();
     let lx_post = sim_box.lx();
     let px_post = gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap();
@@ -633,6 +648,7 @@ fn different_seeds_produce_different_trajectories() {
         virials: &[Real],
         seed: u64,
     ) -> Vec<Real> {
+        use heddle_md::gpu::rescale_positions_device_factor;
         let n = px.len();
         let state = make_state(
             px.to_vec(),
@@ -643,10 +659,15 @@ fn different_seeds_produce_different_trajectories() {
         let mut buffers = ParticleBuffers::new(gpu, &state).unwrap();
         let mut sim_box = box_small(&gpu);
         let mut timings = Timings::new(gpu).unwrap();
-        let mut baro = build_c_rescale(gpu, n, &c_rescale_kind(1.0e6, 85.0, 1.0e-12, 4.5e-10, seed));
+        let mut baro = unbox_c_rescale(build_c_rescale(
+            gpu,
+            n,
+            &c_rescale_kind(1.0e6, 85.0, 1.0e-12, 4.5e-10, seed),
+        ));
         for _ in 0..5 {
             baro.apply(&mut buffers, &mut sim_box, (1.0e-15 / TIME_F as Real), &mut timings)
                 .unwrap();
+            rescale_positions_device_factor(&mut buffers, &baro.mu_device).unwrap();
         }
         gpu.device.dtoh_sync_copy(&buffers.positions_x).unwrap()
     }

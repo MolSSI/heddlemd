@@ -79,10 +79,12 @@ pub struct CRescaleBarostat {
     ke_scratch: CudaSlice<Real>,
     virial_scratch: CudaSlice<Real>,
     /// Single-element device buffer holding the latest rescale factor
-    /// µ. Written by `c_rescale_compute_mu` and consumed by
-    /// `rescale_positions_device_factor` on the same stream; never
-    /// downloaded to the host on the per-step path.
-    mu_device: CudaSlice<Real>,
+    /// µ. Written by `c_rescale_compute_mu`; the JIT-composed
+    /// post-force per-particle kernel reads `mu_device[0]` in
+    /// c-rescale's fragment body. Public so tests that bypass the
+    /// composed-kernel path can dispatch the standalone
+    /// `rescale_positions_device_factor` against it.
+    pub mu_device: CudaSlice<Real>,
     /// Three-element device buffer laid out as
     /// `[pressure_latest, volume_latest, injection_delta]`. Slots 0 and
     /// 1 are overwritten every step; slot 2 accumulates
@@ -95,11 +97,6 @@ pub struct CRescaleBarostat {
     /// `counter + 1` at exit; safe to capture in a CUDA graph because
     /// the kernel runs on a single thread.
     draw_counter_device: CudaSlice<u64>,
-    /// True when the runner is dispatching the JIT-composed
-    /// post-force per-particle kernel; `apply` must skip the
-    /// standalone per-particle rescale launch because the composed
-    /// kernel handles it.
-    jit_composed_post_force_active: bool,
 }
 
 impl CRescaleBarostat {
@@ -133,7 +130,6 @@ impl CRescaleBarostat {
             mu_device,
             diagnostics_device,
             draw_counter_device,
-            jit_composed_post_force_active: false,
         })
     }
 
@@ -220,22 +216,12 @@ impl Barostat for CRescaleBarostat {
         )?;
         self.draw_counter += 1;
 
-        // 3. Apply the position rescale. The kernel reads µ from
-        //    `mu_device[0]`; no scalar dtoh path. Skipped when the
-        //    JIT-composed post-force per-particle kernel is active —
-        //    the composed kernel applies the same rescale via its
-        //    c_rescale fragment body.
-        if !self.jit_composed_post_force_active {
-            timings.kernel_start(KernelStage::C_RESCALE_BAROSTAT_RESCALE_POSITIONS)?;
-            rescale_positions_device_factor(buffers, &self.mu_device)?;
-            timings.kernel_stop(KernelStage::C_RESCALE_BAROSTAT_RESCALE_POSITIONS)?;
-        }
+        // The per-particle position rescale `x ← μ · x` is dispatched
+        // by the JIT-composed post-force per-particle kernel via this
+        // slot's source fragment. `apply` produces the device-resident
+        // `mu_device` scalar; the composed kernel reads it.
 
         Ok(())
-    }
-
-    fn set_jit_composed_post_force_active(&mut self, active: bool) {
-        self.jit_composed_post_force_active = active;
     }
 
     // rq-56044cc3 — c-rescale's per-particle position rescale fragment
