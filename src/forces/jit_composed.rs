@@ -1,16 +1,22 @@
-// rq-9f309378
-//! JIT-composed pair-force kernel infrastructure.
+// rq-9f309378 rq-2d2eaf72
+//! JIT-composed kernel infrastructure.
 //!
-//! Every fast-class pair-force slot exposes a CUDA source fragment via
-//! `PotentialBuilder::pair_force_fragment`. The framework collects the
-//! active fragments at `ForceField::new` time, concatenates them with a
+//! Every fast-class slot exposes a CUDA source fragment via the
+//! appropriate `PotentialBuilder` method (`pair_force_fragment`,
+//! `bonded_force_fragment`, `angle_force_fragment`). The framework
+//! collects the active fragments at `ForceField::new` time, grouped by
+//! parallelism shape, concatenates each shape's fragments with a
 //! shared preamble and a generated outer-loop body, JIT-compiles the
 //! result via `cudarc::nvrtc::compile_ptx_with_opts`, and loads the
-//! resulting PTX as a CUDA module. At step time the framework launches
-//! one composed kernel per `ForceField::step` / `step_class(Fast, …)`
-//! invocation in place of one kernel per fast-class pair-force slot.
+//! resulting PTX as a CUDA module per shape. At step time the framework
+//! launches one composed kernel per active fast-class pair-force slot
+//! plus one composed entry point per active bonded / angle slot per
+//! `ForceField::step` / `step_class(Fast, …)` invocation in place of
+//! the per-slot standalone kernels.
 //!
-//! See `rqm/forces/jit-composed-pair-force.md`.
+//! See `rqm/forces/jit-composed-pair-force.md` (pair-force composer)
+//! and `rqm/forces/jit-composed-intramolecular.md` (bonded / angle
+//! composer).
 
 use std::ffi::c_void;
 use std::sync::Arc;
@@ -77,6 +83,78 @@ pub struct PairForceBindContext<'a> {
     pub sim_box: &'a SimulationBox,
     pub neighbor_list: &'a NeighborListState,
 }
+
+/// Self-contained CUDA C++ source fragment plus identifying metadata,
+/// returned by `PotentialBuilder::bonded_force_fragment(cx)`. Same
+/// field shape as `PairForceFragment`; the functor's contract differs
+/// (per-bond evaluation, not per-pair). See
+/// `rqm/forces/jit-composed-intramolecular.md`.
+#[derive(Debug, Clone)]
+pub struct BondedForceFragment {
+    pub label: &'static str,
+    pub functor_struct_name: &'static str,
+    pub functor_source: String,
+    pub entry_point_args: String,
+    pub functor_init_source: String,
+}
+
+/// Self-contained CUDA C++ source fragment plus identifying metadata,
+/// returned by `PotentialBuilder::angle_force_fragment(cx)`. Same
+/// field shape as `BondedForceFragment`; the functor's contract is
+/// the angle shape (per-angle evaluation taking displacements of
+/// `r_ij` and `r_kj`).
+#[derive(Debug, Clone)]
+pub struct AngleForceFragment {
+    pub label: &'static str,
+    pub functor_struct_name: &'static str,
+    pub functor_source: String,
+    pub entry_point_args: String,
+    pub functor_init_source: String,
+}
+
+/// Context passed to every active fast-class bonded slot's
+/// `Potential::bind_bonded_force_args(...)` call and every active
+/// fast-class angle slot's `Potential::bind_angle_force_args(...)`
+/// call. Exposes references to the per-step shared inputs the slot
+/// may need (positions / lattice are reached through `buffers` and
+/// `sim_box`; the slot's bond / angle list and scratch buffer are
+/// stored on the slot itself).
+pub struct ForceLaunchContext<'a> {
+    pub buffers: &'a ParticleBuffers,
+    pub sim_box: &'a SimulationBox,
+}
+
+/// Bonded slot's per-launch scratch buffers exposed to the framework
+/// so it can construct the composed-bonded-kernel argument list. The
+/// slot owns the bond list and the bond-pair scratch buffer; the
+/// framework needs read access to wire the common kernel args
+/// (`bonds`, `bond_pair_x/y/z[, _energy, _virial]`).
+pub struct BondedScratchView<'a> {
+    pub bonds: &'a CudaSlice<u32>,
+    pub bond_pair_x: &'a CudaSlice<crate::precision::Real>,
+    pub bond_pair_y: &'a CudaSlice<crate::precision::Real>,
+    pub bond_pair_z: &'a CudaSlice<crate::precision::Real>,
+    pub bond_pair_energy: &'a CudaSlice<crate::precision::Real>,
+    pub bond_pair_virial: &'a CudaSlice<crate::precision::Real>,
+    pub bond_count: usize,
+}
+
+/// Angle slot's per-launch scratch buffers exposed to the framework
+/// for the composed-angle-kernel argument list.
+pub struct AngleScratchView<'a> {
+    pub angles: &'a CudaSlice<u32>,
+    pub angle_triple_x: &'a CudaSlice<crate::precision::Real>,
+    pub angle_triple_y: &'a CudaSlice<crate::precision::Real>,
+    pub angle_triple_z: &'a CudaSlice<crate::precision::Real>,
+    pub angle_triple_energy: &'a CudaSlice<crate::precision::Real>,
+    pub angle_triple_virial: &'a CudaSlice<crate::precision::Real>,
+    pub angle_count: usize,
+}
+
+/// Shape-agnostic alias for `PairForceLaunchBuilder` — the binding
+/// mechanism is the same across the pair-force, bonded, and angle
+/// composers, so the launch builder is one type with multiple names.
+pub type ForceLaunchBuilder = PairForceLaunchBuilder;
 
 /// Argument-builder threaded through every active fast-class pair-force
 /// slot's `Potential::bind_pair_force_args(...)` call. Pre-populated by
@@ -437,6 +515,7 @@ __device__ __forceinline__ Real Real_log(Real x) { return log(x); }
 __device__ __forceinline__ Real Real_floor(Real x) { return floor(x); }
 __device__ __forceinline__ Real Real_fma(Real a, Real b, Real c) { return fma(a, b, c); }
 __device__ __forceinline__ Real Real_erfc(Real x) { return erfc(x); }
+__device__ __forceinline__ Real Real_atan2(Real y, Real x) { return atan2(y, x); }
 #else
 typedef float Real;
 #define R(x) ((Real)(x))
@@ -447,6 +526,7 @@ __device__ __forceinline__ Real Real_log(Real x) { return logf(x); }
 __device__ __forceinline__ Real Real_floor(Real x) { return floorf(x); }
 __device__ __forceinline__ Real Real_fma(Real a, Real b, Real c) { return fmaf(a, b, c); }
 __device__ __forceinline__ Real Real_erfc(Real x) { return erfcf(x); }
+__device__ __forceinline__ Real Real_atan2(Real y, Real x) { return atan2f(y, x); }
 #endif
 
 #define HEDDLE_JIT_WARP_SIZE 32
@@ -578,3 +658,486 @@ __device__ static inline void heddle_jit_outer_loop(
   }
 }
 "#;
+
+// ============================================================
+// Bonded composer
+// ============================================================
+
+const BONDED_MODULE_NAME: &str = "heddle_jit_composed_bonded";
+
+/// JIT-composed bonded contribution module + per-slot entry-point
+/// handles. Built by `ForceField::new` when at least one fast-class
+/// bonded slot is active; otherwise the `ForceField` carries `None`
+/// for this field and no composed-bonded launch is attempted at step
+/// time. Each active slot contributes one `_f` entry point and one
+/// `_fev` entry point, indexed by canonical slot order among active
+/// bonded slots.
+#[derive(Debug)]
+pub struct JitComposedBondedForce {
+    pub fragment_labels: Vec<&'static str>,
+    /// Per-slot `_f` entry points, indexed by canonical slot order
+    /// among active bonded slots (zero-based).
+    pub entry_points_f: Vec<CudaFunction>,
+    /// Per-slot `_fev` entry points, indexed identically to
+    /// `entry_points_f`.
+    pub entry_points_fev: Vec<CudaFunction>,
+}
+
+impl JitComposedBondedForce {
+    pub fn compile_and_load(
+        device: &Arc<CudaDevice>,
+        fragments: &[BondedForceFragment],
+    ) -> Result<Self, ForceFieldError> {
+        let source = compose_bonded_source(fragments);
+        let ptx = jit_compile(device, &source, |log| {
+            ForceFieldError::FragmentCompileFailed {
+                log: format_bonded_compile_failure(fragments, log, &source),
+            }
+        })?;
+
+        // cudarc's load_ptx requires `&[&'static str]`; the per-slot
+        // entry names are dynamic. Leak each name to satisfy the
+        // 'static bound. The leak is bounded by the slot count and
+        // is paid once per `ForceField::new`.
+        let mut entry_name_refs: Vec<&'static str> = Vec::with_capacity(2 * fragments.len());
+        for i in 0..fragments.len() {
+            entry_name_refs.push(Box::leak(
+                format!("heddle_jit_composed_bonded_{}_f", i).into_boxed_str(),
+            ));
+            entry_name_refs.push(Box::leak(
+                format!("heddle_jit_composed_bonded_{}_fev", i).into_boxed_str(),
+            ));
+        }
+
+        device
+            .load_ptx(ptx, BONDED_MODULE_NAME, &entry_name_refs)
+            .map_err(|e| ForceFieldError::FragmentLoadFailed(GpuError::from(e)))?;
+
+        let mut entry_points_f: Vec<CudaFunction> = Vec::with_capacity(fragments.len());
+        let mut entry_points_fev: Vec<CudaFunction> = Vec::with_capacity(fragments.len());
+        for i in 0..fragments.len() {
+            entry_points_f.push(
+                device
+                    .get_func(BONDED_MODULE_NAME, entry_name_refs[2 * i])
+                    .expect("composed bonded kernel _f entry was just loaded"),
+            );
+            entry_points_fev.push(
+                device
+                    .get_func(BONDED_MODULE_NAME, entry_name_refs[2 * i + 1])
+                    .expect("composed bonded kernel _fev entry was just loaded"),
+            );
+        }
+
+        Ok(JitComposedBondedForce {
+            fragment_labels: fragments.iter().map(|f| f.label).collect(),
+            entry_points_f,
+            entry_points_fev,
+        })
+    }
+
+    /// Launch one slot's composed bonded entry point.
+    ///
+    /// # Safety
+    /// `builder`'s argument list must match the entry point's
+    /// signature: common args (positions_x/y/z, bonds, lattice,
+    /// bond_pair_x/y/z[, bond_pair_energy, bond_pair_virial when
+    /// `use_fev`], per-fragment args, n_bonds). The framework's
+    /// per-step dispatch is responsible for that invariant.
+    pub unsafe fn launch_slot(
+        &self,
+        slot_index: usize,
+        n_bonds: u32,
+        use_fev: bool,
+        mut builder: ForceLaunchBuilder,
+    ) -> Result<(), GpuError> {
+        let cfg = LaunchConfig {
+            grid_dim: (n_bonds.div_ceil(256), 1, 1),
+            block_dim: (256, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        let func = if use_fev {
+            self.entry_points_fev[slot_index].clone()
+        } else {
+            self.entry_points_f[slot_index].clone()
+        };
+        unsafe {
+            func.launch(cfg, &mut builder.kernel_params)
+                .map_err(GpuError::from)?;
+        }
+        drop(builder.storage);
+        Ok(())
+    }
+}
+
+fn compose_bonded_source(fragments: &[BondedForceFragment]) -> String {
+    let mut s = String::with_capacity(
+        8192 + fragments.iter().map(|f| f.functor_source.len()).sum::<usize>(),
+    );
+    s.push_str(PREAMBLE);
+    for f in fragments {
+        s.push_str("// ---- bonded fragment functor source: ");
+        s.push_str(f.label);
+        s.push_str(" ----\n");
+        s.push_str(&f.functor_source);
+        s.push_str("\n// ---- end bonded fragment functor source: ");
+        s.push_str(f.label);
+        s.push_str(" ----\n");
+    }
+    for (i, f) in fragments.iter().enumerate() {
+        emit_bonded_entry_point(&mut s, f, i, false);
+        emit_bonded_entry_point(&mut s, f, i, true);
+    }
+    s
+}
+
+fn emit_bonded_entry_point(
+    s: &mut String,
+    fragment: &BondedForceFragment,
+    slot_index: usize,
+    write_ev: bool,
+) {
+    let entry_name = format!(
+        "heddle_jit_composed_bonded_{}_{}",
+        slot_index,
+        if write_ev { "fev" } else { "f" }
+    );
+    s.push_str("\nextern \"C\" __global__ void ");
+    s.push_str(&entry_name);
+    s.push_str("(\n");
+    s.push_str("    const Real *positions_x,\n");
+    s.push_str("    const Real *positions_y,\n");
+    s.push_str("    const Real *positions_z,\n");
+    s.push_str("    const unsigned int *bonds,\n");
+    s.push_str("    const Real *lattice,\n");
+    s.push_str("    Real *bond_pair_x,\n");
+    s.push_str("    Real *bond_pair_y,\n");
+    s.push_str("    Real *bond_pair_z,\n");
+    if write_ev {
+        s.push_str("    Real *bond_pair_energy,\n");
+        s.push_str("    Real *bond_pair_virial,\n");
+    }
+    s.push_str(&fragment.entry_point_args);
+    s.push_str("    unsigned int n_bonds)\n");
+    s.push_str("{\n");
+    s.push_str(&format!(
+        "    {} functor;\n",
+        fragment.functor_struct_name
+    ));
+    s.push_str(&fragment.functor_init_source);
+    s.push_str("    Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];\n");
+    s.push_str("    Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];\n");
+    s.push_str("    unsigned int k = blockIdx.x * blockDim.x + threadIdx.x;\n");
+    s.push_str("    if (k >= n_bonds) return;\n");
+    s.push_str("    unsigned int atom_i = bonds[3u * k + 0u];\n");
+    s.push_str("    unsigned int atom_j = bonds[3u * k + 1u];\n");
+    s.push_str("    unsigned int type_idx = bonds[3u * k + 2u];\n");
+    s.push_str("    Real dx = positions_x[atom_i] - positions_x[atom_j];\n");
+    s.push_str("    Real dy = positions_y[atom_i] - positions_y[atom_j];\n");
+    s.push_str("    Real dz = positions_z[atom_i] - positions_z[atom_j];\n");
+    s.push_str("    heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);\n");
+    s.push_str("    Real r2 = dx * dx + dy * dy + dz * dz;\n");
+    s.push_str("    if (r2 == R(0.0)) {\n");
+    s.push_str("        bond_pair_x[2u * k]      = R(0.0);\n");
+    s.push_str("        bond_pair_y[2u * k]      = R(0.0);\n");
+    s.push_str("        bond_pair_z[2u * k]      = R(0.0);\n");
+    s.push_str("        bond_pair_x[2u * k + 1u] = R(0.0);\n");
+    s.push_str("        bond_pair_y[2u * k + 1u] = R(0.0);\n");
+    s.push_str("        bond_pair_z[2u * k + 1u] = R(0.0);\n");
+    if write_ev {
+        s.push_str("        bond_pair_energy[2u * k]      = R(0.0);\n");
+        s.push_str("        bond_pair_energy[2u * k + 1u] = R(0.0);\n");
+        s.push_str("        bond_pair_virial[2u * k]      = R(0.0);\n");
+        s.push_str("        bond_pair_virial[2u * k + 1u] = R(0.0);\n");
+    }
+    s.push_str("        return;\n");
+    s.push_str("    }\n");
+    s.push_str("    Real r = Real_sqrt(r2);\n");
+    s.push_str("    Real fmag, u_k, w_k;\n");
+    s.push_str("    functor.evaluate(r2, r, type_idx, dx, dy, dz, fmag, u_k, w_k);\n");
+    s.push_str("    bond_pair_x[2u * k]      =  fmag * dx;\n");
+    s.push_str("    bond_pair_y[2u * k]      =  fmag * dy;\n");
+    s.push_str("    bond_pair_z[2u * k]      =  fmag * dz;\n");
+    s.push_str("    bond_pair_x[2u * k + 1u] = -fmag * dx;\n");
+    s.push_str("    bond_pair_y[2u * k + 1u] = -fmag * dy;\n");
+    s.push_str("    bond_pair_z[2u * k + 1u] = -fmag * dz;\n");
+    if write_ev {
+        s.push_str("    bond_pair_energy[2u * k]      = u_k * R(0.5);\n");
+        s.push_str("    bond_pair_energy[2u * k + 1u] = u_k * R(0.5);\n");
+        s.push_str("    bond_pair_virial[2u * k]      = w_k * R(0.5);\n");
+        s.push_str("    bond_pair_virial[2u * k + 1u] = w_k * R(0.5);\n");
+    }
+    s.push_str("}\n");
+}
+
+fn format_bonded_compile_failure(
+    fragments: &[BondedForceFragment],
+    log: &str,
+    source: &str,
+) -> String {
+    use std::fmt::Write;
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "nvrtc failed to compile the JIT-composed bonded kernel."
+    );
+    let _ = writeln!(s, "Active bonded fragments (canonical slot order):");
+    for f in fragments {
+        let _ = writeln!(s, "  - {} (functor: {})", f.label, f.functor_struct_name);
+    }
+    let _ = writeln!(s, "nvrtc compile log:");
+    let _ = writeln!(s, "{}", log);
+    let _ = writeln!(s, "Composed bonded source (line-numbered):");
+    for (i, line) in source.lines().enumerate() {
+        let _ = writeln!(s, "{:5}: {}", i + 1, line);
+    }
+    s
+}
+
+// ============================================================
+// Angle composer
+// ============================================================
+
+const ANGLE_MODULE_NAME: &str = "heddle_jit_composed_angle";
+
+/// JIT-composed angle contribution module + per-slot entry-point
+/// handles. Built by `ForceField::new` when at least one fast-class
+/// angle slot is active.
+#[derive(Debug)]
+pub struct JitComposedAngleForce {
+    pub fragment_labels: Vec<&'static str>,
+    pub entry_points_f: Vec<CudaFunction>,
+    pub entry_points_fev: Vec<CudaFunction>,
+}
+
+impl JitComposedAngleForce {
+    pub fn compile_and_load(
+        device: &Arc<CudaDevice>,
+        fragments: &[AngleForceFragment],
+    ) -> Result<Self, ForceFieldError> {
+        let source = compose_angle_source(fragments);
+        let ptx = jit_compile(device, &source, |log| {
+            ForceFieldError::FragmentCompileFailed {
+                log: format_angle_compile_failure(fragments, log, &source),
+            }
+        })?;
+
+        let mut entry_name_refs: Vec<&'static str> = Vec::with_capacity(2 * fragments.len());
+        for i in 0..fragments.len() {
+            entry_name_refs.push(Box::leak(
+                format!("heddle_jit_composed_angle_{}_f", i).into_boxed_str(),
+            ));
+            entry_name_refs.push(Box::leak(
+                format!("heddle_jit_composed_angle_{}_fev", i).into_boxed_str(),
+            ));
+        }
+
+        device
+            .load_ptx(ptx, ANGLE_MODULE_NAME, &entry_name_refs)
+            .map_err(|e| ForceFieldError::FragmentLoadFailed(GpuError::from(e)))?;
+
+        let mut entry_points_f: Vec<CudaFunction> = Vec::with_capacity(fragments.len());
+        let mut entry_points_fev: Vec<CudaFunction> = Vec::with_capacity(fragments.len());
+        for i in 0..fragments.len() {
+            entry_points_f.push(
+                device
+                    .get_func(ANGLE_MODULE_NAME, entry_name_refs[2 * i])
+                    .expect("composed angle kernel _f entry was just loaded"),
+            );
+            entry_points_fev.push(
+                device
+                    .get_func(ANGLE_MODULE_NAME, entry_name_refs[2 * i + 1])
+                    .expect("composed angle kernel _fev entry was just loaded"),
+            );
+        }
+
+        Ok(JitComposedAngleForce {
+            fragment_labels: fragments.iter().map(|f| f.label).collect(),
+            entry_points_f,
+            entry_points_fev,
+        })
+    }
+
+    /// Launch one slot's composed angle entry point.
+    pub unsafe fn launch_slot(
+        &self,
+        slot_index: usize,
+        n_angles: u32,
+        use_fev: bool,
+        mut builder: ForceLaunchBuilder,
+    ) -> Result<(), GpuError> {
+        let cfg = LaunchConfig {
+            grid_dim: (n_angles.div_ceil(256), 1, 1),
+            block_dim: (256, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        let func = if use_fev {
+            self.entry_points_fev[slot_index].clone()
+        } else {
+            self.entry_points_f[slot_index].clone()
+        };
+        unsafe {
+            func.launch(cfg, &mut builder.kernel_params)
+                .map_err(GpuError::from)?;
+        }
+        drop(builder.storage);
+        Ok(())
+    }
+}
+
+fn compose_angle_source(fragments: &[AngleForceFragment]) -> String {
+    let mut s = String::with_capacity(
+        8192 + fragments.iter().map(|f| f.functor_source.len()).sum::<usize>(),
+    );
+    s.push_str(PREAMBLE);
+    for f in fragments {
+        s.push_str("// ---- angle fragment functor source: ");
+        s.push_str(f.label);
+        s.push_str(" ----\n");
+        s.push_str(&f.functor_source);
+        s.push_str("\n// ---- end angle fragment functor source: ");
+        s.push_str(f.label);
+        s.push_str(" ----\n");
+    }
+    for (i, f) in fragments.iter().enumerate() {
+        emit_angle_entry_point(&mut s, f, i, false);
+        emit_angle_entry_point(&mut s, f, i, true);
+    }
+    s
+}
+
+fn emit_angle_entry_point(
+    s: &mut String,
+    fragment: &AngleForceFragment,
+    slot_index: usize,
+    write_ev: bool,
+) {
+    let entry_name = format!(
+        "heddle_jit_composed_angle_{}_{}",
+        slot_index,
+        if write_ev { "fev" } else { "f" }
+    );
+    s.push_str("\nextern \"C\" __global__ void ");
+    s.push_str(&entry_name);
+    s.push_str("(\n");
+    s.push_str("    const Real *positions_x,\n");
+    s.push_str("    const Real *positions_y,\n");
+    s.push_str("    const Real *positions_z,\n");
+    s.push_str("    const unsigned int *angles,\n");
+    s.push_str("    const Real *lattice,\n");
+    s.push_str("    Real *angle_triple_x,\n");
+    s.push_str("    Real *angle_triple_y,\n");
+    s.push_str("    Real *angle_triple_z,\n");
+    if write_ev {
+        s.push_str("    Real *angle_triple_energy,\n");
+        s.push_str("    Real *angle_triple_virial,\n");
+    }
+    s.push_str(&fragment.entry_point_args);
+    s.push_str("    unsigned int n_angles)\n");
+    s.push_str("{\n");
+    s.push_str(&format!(
+        "    {} functor;\n",
+        fragment.functor_struct_name
+    ));
+    s.push_str(&fragment.functor_init_source);
+    s.push_str("    Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];\n");
+    s.push_str("    Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];\n");
+    s.push_str("    unsigned int m = blockIdx.x * blockDim.x + threadIdx.x;\n");
+    s.push_str("    if (m >= n_angles) return;\n");
+    s.push_str("    unsigned int atom_i = angles[4u * m + 0u];\n");
+    s.push_str("    unsigned int atom_j = angles[4u * m + 1u];\n");
+    s.push_str("    unsigned int atom_k = angles[4u * m + 2u];\n");
+    s.push_str("    unsigned int type_idx = angles[4u * m + 3u];\n");
+    s.push_str("    Real dx_ij = positions_x[atom_i] - positions_x[atom_j];\n");
+    s.push_str("    Real dy_ij = positions_y[atom_i] - positions_y[atom_j];\n");
+    s.push_str("    Real dz_ij = positions_z[atom_i] - positions_z[atom_j];\n");
+    s.push_str("    Real dx_kj = positions_x[atom_k] - positions_x[atom_j];\n");
+    s.push_str("    Real dy_kj = positions_y[atom_k] - positions_y[atom_j];\n");
+    s.push_str("    Real dz_kj = positions_z[atom_k] - positions_z[atom_j];\n");
+    s.push_str("    heddle_jit_triclinic_min_image(dx_ij, dy_ij, dz_ij, lx, ly, lz, xy, xz, yz);\n");
+    s.push_str("    heddle_jit_triclinic_min_image(dx_kj, dy_kj, dz_kj, lx, ly, lz, xy, xz, yz);\n");
+    s.push_str("    Real fix, fiy, fiz, fkx, fky, fkz, u_m, w_m;\n");
+    s.push_str("    functor.evaluate(dx_ij, dy_ij, dz_ij, dx_kj, dy_kj, dz_kj, type_idx,\n");
+    s.push_str("                     fix, fiy, fiz, fkx, fky, fkz, u_m, w_m);\n");
+    s.push_str("    Real fjx = -(fix + fkx);\n");
+    s.push_str("    Real fjy = -(fiy + fky);\n");
+    s.push_str("    Real fjz = -(fiz + fkz);\n");
+    s.push_str("    angle_triple_x[3u * m + 0u] = fix;\n");
+    s.push_str("    angle_triple_y[3u * m + 0u] = fiy;\n");
+    s.push_str("    angle_triple_z[3u * m + 0u] = fiz;\n");
+    s.push_str("    angle_triple_x[3u * m + 1u] = fjx;\n");
+    s.push_str("    angle_triple_y[3u * m + 1u] = fjy;\n");
+    s.push_str("    angle_triple_z[3u * m + 1u] = fjz;\n");
+    s.push_str("    angle_triple_x[3u * m + 2u] = fkx;\n");
+    s.push_str("    angle_triple_y[3u * m + 2u] = fky;\n");
+    s.push_str("    angle_triple_z[3u * m + 2u] = fkz;\n");
+    if write_ev {
+        s.push_str("    Real e_share = u_m * (R(1.0) / R(3.0));\n");
+        s.push_str("    Real w_share = w_m * (R(1.0) / R(3.0));\n");
+        s.push_str("    angle_triple_energy[3u * m + 0u] = e_share;\n");
+        s.push_str("    angle_triple_energy[3u * m + 1u] = e_share;\n");
+        s.push_str("    angle_triple_energy[3u * m + 2u] = e_share;\n");
+        s.push_str("    angle_triple_virial[3u * m + 0u] = w_share;\n");
+        s.push_str("    angle_triple_virial[3u * m + 1u] = w_share;\n");
+        s.push_str("    angle_triple_virial[3u * m + 2u] = w_share;\n");
+    }
+    s.push_str("}\n");
+}
+
+fn format_angle_compile_failure(
+    fragments: &[AngleForceFragment],
+    log: &str,
+    source: &str,
+) -> String {
+    use std::fmt::Write;
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "nvrtc failed to compile the JIT-composed angle kernel."
+    );
+    let _ = writeln!(s, "Active angle fragments (canonical slot order):");
+    for f in fragments {
+        let _ = writeln!(s, "  - {} (functor: {})", f.label, f.functor_struct_name);
+    }
+    let _ = writeln!(s, "nvrtc compile log:");
+    let _ = writeln!(s, "{}", log);
+    let _ = writeln!(s, "Composed angle source (line-numbered):");
+    for (i, line) in source.lines().enumerate() {
+        let _ = writeln!(s, "{:5}: {}", i + 1, line);
+    }
+    s
+}
+
+// ============================================================
+// Shared compile helper
+// ============================================================
+
+fn jit_compile<F>(
+    device: &Arc<CudaDevice>,
+    source: &str,
+    on_fail: F,
+) -> Result<cudarc::nvrtc::Ptx, ForceFieldError>
+where
+    F: FnOnce(&str) -> ForceFieldError,
+{
+    let arch_arg = detect_arch_option(device);
+    let mut options = vec!["--std=c++17".to_string()];
+    if let Some(a) = arch_arg {
+        options.push(a);
+    }
+    #[cfg(feature = "f64")]
+    options.push("--define-macro=HEDDLE_REAL_F64".to_string());
+    let opts = CompileOptions {
+        options,
+        ..Default::default()
+    };
+    compile_ptx_with_opts(source, opts).map_err(|e| {
+        let log = match e {
+            cudarc::nvrtc::CompileError::CompileError { ref log, .. } => log
+                .to_str()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|_| format!("{e:?}")),
+            _ => format!("{e:?}"),
+        };
+        on_fail(&log)
+    })
+}

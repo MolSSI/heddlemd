@@ -896,56 +896,6 @@ pub fn spme_atom_sort(
     Ok(())
 }
 
-// rq-f00f729e rq-66d80d54 (morse_bond_force launcher mirroring the `gpu` convention)
-#[allow(clippy::too_many_arguments)]
-pub fn morse_bond_force(
-    particle_buffers: &ParticleBuffers,
-    bonds: &CudaSlice<u32>,
-    bond_de: &CudaSlice<Real>,
-    bond_a: &CudaSlice<Real>,
-    bond_re: &CudaSlice<Real>,
-    sim_box: &SimulationBox,
-    bond_pair_x: &mut CudaSlice<Real>,
-    bond_pair_y: &mut CudaSlice<Real>,
-    bond_pair_z: &mut CudaSlice<Real>,
-    bond_pair_energy: &mut CudaSlice<Real>,
-    bond_pair_virial: &mut CudaSlice<Real>,
-    n_bonds: usize,
-) -> Result<(), GpuError> {
-    if n_bonds == 0 {
-        return Ok(());
-    }
-    let n_u32 = n_bonds as u32;
-    let func = particle_buffers.kernels.morse.morse_bond_force.clone();
-    let cfg = launch_config(n_u32);
-    let lattice = sim_box.lattice_device();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                bonds,
-                bond_de,
-                bond_a,
-                bond_re,
-                lattice,
-                bond_pair_x,
-                bond_pair_y,
-                bond_pair_z,
-                bond_pair_energy,
-                bond_pair_virial,
-                n_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
-}
-
-// rq-6435723d (well, that was Langevin's id; this is the bond reduction —
-// using a fresh id-comment in the spec rqm-bond reduction declaration.)
 // rq-10adebc4
 #[allow(clippy::too_many_arguments)]
 pub fn reduce_bond_forces(
@@ -990,53 +940,6 @@ pub fn reduce_bond_forces(
                 slot_virial,
                 n_u32,
                 write_scalars_u32,
-            ),
-        )
-        .map_err(GpuError::from)?;
-    }
-    Ok(())
-}
-
-// Launch helper for the harmonic-angle kernel. One thread per angle.
-// rq-db5924d8
-#[allow(clippy::too_many_arguments)]
-pub fn harmonic_angle_force(
-    particle_buffers: &ParticleBuffers,
-    angles: &CudaSlice<u32>,
-    angle_k_theta: &CudaSlice<Real>,
-    angle_theta_0: &CudaSlice<Real>,
-    sim_box: &SimulationBox,
-    angle_triple_x: &mut CudaSlice<Real>,
-    angle_triple_y: &mut CudaSlice<Real>,
-    angle_triple_z: &mut CudaSlice<Real>,
-    angle_triple_energy: &mut CudaSlice<Real>,
-    angle_triple_virial: &mut CudaSlice<Real>,
-    n_angles: usize,
-) -> Result<(), GpuError> {
-    if n_angles == 0 {
-        return Ok(());
-    }
-    let n_u32 = n_angles as u32;
-    let func = particle_buffers.kernels.angle.harmonic_angle_force.clone();
-    let cfg = launch_config(n_u32);
-    let lattice = sim_box.lattice_device();
-    unsafe {
-        func.launch(
-            cfg,
-            (
-                &particle_buffers.positions_x,
-                &particle_buffers.positions_y,
-                &particle_buffers.positions_z,
-                angles,
-                angle_k_theta,
-                angle_theta_0,
-                lattice,
-                angle_triple_x,
-                angle_triple_y,
-                angle_triple_z,
-                angle_triple_energy,
-                angle_triple_virial,
-                n_u32,
             ),
         )
         .map_err(GpuError::from)?;

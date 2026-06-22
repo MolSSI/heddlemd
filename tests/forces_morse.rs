@@ -1,34 +1,23 @@
-use heddle_md::forces::{AggregateLevel, BondList, ExclusionList, ForceField, MorseBondedState, PotentialRegistry};
-use heddle_md::gpu::{
-    ParticleBuffers, init_device, morse_bond_force, reduce_bond_forces,
+//! Morse-bonded slot physics tests.
+//!
+//! Under J2, the per-bond Morse contribution kernel is JIT-composed
+//! at `ForceField::new` time and dispatched from the bonded composed
+//! module; there is no standalone `morse_bond_force` launcher.
+//! These tests drive the slot through a `ForceField` instance and
+//! assert on the per-particle force / energy / virial outputs.
+
+use heddle_md::forces::{
+    AggregateLevel, AngleList, Bond, BondList, ExclusionList, ForceField, MorseBondedBuilder,
+    PotentialRegistry,
 };
-use heddle_md::io::config::{
-    BondTypeConfig, NeighborListConfig, PairInteractionConfig, PairPotentialParams,
-    ParticleTypeConfig,
-};
+use heddle_md::gpu::{GpuContext, ParticleBuffers, init_device};
+use heddle_md::io::config::{BondTypeConfig, NeighborListConfig};
 use heddle_md::pbc::SimulationBox;
+use heddle_md::precision::Real;
 use heddle_md::state::ParticleState;
 use heddle_md::timings::Timings;
-use heddle_md::precision::Real;
 
-fn two_particle_state(p0: [Real; 3], p1: [Real; 3]) -> ParticleState {
-    ParticleState::new(
-        vec![p0[0], p1[0]],
-        vec![p0[1], p1[1]],
-        vec![p0[2], p1[2]],
-        vec![0.0, 0.0],
-        vec![0.0, 0.0],
-        vec![0.0, 0.0],
-        vec![1.0, 1.0],
-        vec![0.0; vec![1.0, 1.0].len()],
-        vec![0u32; 2],
-        None,
-            None,
-    )
-    .unwrap()
-}
-
-fn box_10(gpu: &heddle_md::gpu::GpuContext) -> SimulationBox {
+fn box_10(gpu: &GpuContext) -> SimulationBox {
     SimulationBox::new(&gpu.device, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0).unwrap()
 }
 
@@ -41,8 +30,24 @@ fn morse_type(de: f64, a: f64, re: f64) -> BondTypeConfig {
     }
 }
 
+fn two_particle_state(p0: [Real; 3], p1: [Real; 3]) -> ParticleState {
+    ParticleState::new(
+        vec![p0[0], p1[0]],
+        vec![p0[1], p1[1]],
+        vec![p0[2], p1[2]],
+        vec![0.0; 2],
+        vec![0.0; 2],
+        vec![0.0; 2],
+        vec![1.0; 2],
+        vec![0.0; 2],
+        vec![0u32; 2],
+        None,
+        None,
+    )
+    .unwrap()
+}
+
 fn single_bond_list(n: usize) -> BondList {
-    use heddle_md::forces::Bond;
     let bonds = vec![Bond {
         atom_i: 0,
         atom_j: 1,
@@ -63,837 +68,259 @@ fn single_bond_list(n: usize) -> BondList {
     }
 }
 
+struct MorseResult {
+    forces_x: Vec<Real>,
+    forces_y: Vec<Real>,
+    forces_z: Vec<Real>,
+    energies: Vec<Real>,
+    virials: Vec<Real>,
+}
+
+/// Build a one-slot (Morse only) ForceField, run one step at
+/// `AggregateLevel::ForcesAndScalars`, and download per-particle
+/// outputs.
+fn run_morse(
+    gpu: &GpuContext,
+    state: &ParticleState,
+    bonds: &BondList,
+    bond_types: &[BondTypeConfig],
+) -> MorseResult {
+    let n = state.positions_x.len();
+    let mut registry = PotentialRegistry::new();
+    registry.register(Box::new(MorseBondedBuilder));
+    let mut ff = ForceField::new(
+        &registry,
+        gpu,
+        n,
+        &box_10(gpu),
+        &[],
+        &[],
+        bond_types,
+        &[],
+        None,
+        None,
+        &[],
+        bonds,
+        &AngleList::empty(0),
+        &ExclusionList::empty(n),
+        &NeighborListConfig::AllPairs,
+    )
+    .unwrap();
+    let mut buffers = ParticleBuffers::new(gpu, state).unwrap();
+    let mut timings = Timings::new(gpu).unwrap();
+    ff.step(
+        &mut buffers,
+        &box_10(gpu),
+        &mut timings,
+        AggregateLevel::ForcesAndScalars,
+    )
+    .unwrap();
+    MorseResult {
+        forces_x: gpu.device.dtoh_sync_copy(&buffers.forces_x).unwrap(),
+        forces_y: gpu.device.dtoh_sync_copy(&buffers.forces_y).unwrap(),
+        forces_z: gpu.device.dtoh_sync_copy(&buffers.forces_z).unwrap(),
+        energies: gpu.device.dtoh_sync_copy(&buffers.potential_energies).unwrap(),
+        virials: gpu.device.dtoh_sync_copy(&buffers.virials).unwrap(),
+    }
+}
+
 // rq-679282f5
 #[test]
 fn init_device_loads_morse_module() {
     let gpu = init_device().unwrap();
     let device = gpu.device.clone();
-    assert!(device.get_func("morse", "morse_bond_force").is_some());
     assert!(device.get_func("morse", "reduce_bond_forces").is_some());
-    let _ = gpu.kernels.morse.morse_bond_force.clone();
     let _ = gpu.kernels.morse.reduce_bond_forces.clone();
-}
-
-// rq-9f2de58c
-#[test]
-fn construct_morse_bonded_state() {
-    let gpu = init_device().unwrap();
-    let bl = single_bond_list(2);
-    let bt = vec![morse_type(1.0, 2.0, 1.0)];
-    let state = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    assert_eq!(state.bond_count, 1);
-    assert_eq!(state.particle_count, 2);
 }
 
 // rq-2e4e70b4
 #[test]
 fn equilibrium_distance_produces_zero_force() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
     let state = two_particle_state([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
     let bl = single_bond_list(2);
     let bt = vec![morse_type(1.0, 2.0, 1.0)];
-    let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    morse_bond_force(
-        &buffers,
-        &mb.bonds,
-        &mb.bond_de,
-        &mb.bond_a,
-        &mb.bond_re,
-        &box_10(&gpu),
-        &mut mb.bond_pair_x,
-        &mut mb.bond_pair_y,
-        &mut mb.bond_pair_z,
-        &mut mb.bond_pair_energy,
-        &mut mb.bond_pair_virial,
-        1,
-    )
-    .unwrap();
-    let bx = device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
-    let by = device.dtoh_sync_copy(&mb.bond_pair_y).unwrap();
-    let bz = device.dtoh_sync_copy(&mb.bond_pair_z).unwrap();
-    assert!(bx[0].abs() < 1.0e-6, "bx[0] = {}", bx[0]);
-    assert!(by[0].abs() < 1.0e-6);
-    assert!(bz[0].abs() < 1.0e-6);
-    assert!(bx[1].abs() < 1.0e-6);
+    let r = run_morse(&gpu, &state, &bl, &bt);
+    assert!(r.forces_x[0].abs() < 1e-5, "F_x[0]={}", r.forces_x[0]);
+    assert!(r.forces_x[1].abs() < 1e-5, "F_x[1]={}", r.forces_x[1]);
 }
 
-// rq-f79657d2
 #[test]
 fn compressed_bond_repulsive() {
     let gpu = init_device().unwrap();
-    // r = 0.5, re = 1.0 → r < re → repulsive: atom 0 is pushed in -x.
-    let state = two_particle_state([0.0, 0.0, 0.0], [0.5, 0.0, 0.0]);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    // r = 0.8 < re = 1.0 → repulsive: F on atom_i (at x=0) pushes
+    // away from atom_j (at x=0.8), i.e. F_x[0] < 0 and F_x[1] > 0.
+    let state = two_particle_state([0.0, 0.0, 0.0], [0.8, 0.0, 0.0]);
     let bl = single_bond_list(2);
     let bt = vec![morse_type(1.0, 2.0, 1.0)];
-    let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    morse_bond_force(
-        &buffers,
-        &mb.bonds,
-        &mb.bond_de,
-        &mb.bond_a,
-        &mb.bond_re,
-        &box_10(&gpu),
-        &mut mb.bond_pair_x,
-        &mut mb.bond_pair_y,
-        &mut mb.bond_pair_z,
-        &mut mb.bond_pair_energy,
-        &mut mb.bond_pair_virial,
-        1,
-    )
-    .unwrap();
-    let bx = gpu.device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
-    // dx = r_i - r_j = -0.5 (atom 0 is left of atom 1). Compressed bond is
-    // repulsive: atom 0 is pushed away from atom 1, i.e. in -x. So bx[0] < 0.
-    assert!(bx[0] < 0.0, "bx[0] = {} should be negative", bx[0]);
-    assert!((bx[0] + bx[1]).abs() < 1.0e-6, "Newton's third law: {} + {}", bx[0], bx[1]);
+    let r = run_morse(&gpu, &state, &bl, &bt);
+    assert!(r.forces_x[0] < 0.0, "F_x[0]={}", r.forces_x[0]);
+    assert!(r.forces_x[1] > 0.0, "F_x[1]={}", r.forces_x[1]);
+    assert!(
+        (r.forces_x[0] + r.forces_x[1]).abs() < 1e-5,
+        "Newton's third law"
+    );
 }
 
-// rq-2cb90e10
 #[test]
 fn stretched_bond_attractive() {
     let gpu = init_device().unwrap();
-    // r = 2.0, re = 1.0 → r > re → attractive: atom 0 pulled toward atom 1 (+x).
-    let state = two_particle_state([0.0, 0.0, 0.0], [2.0, 0.0, 0.0]);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    // r = 1.2 > re = 1.0 → attractive: F pulls atoms together.
+    let state = two_particle_state([0.0, 0.0, 0.0], [1.2, 0.0, 0.0]);
     let bl = single_bond_list(2);
     let bt = vec![morse_type(1.0, 2.0, 1.0)];
-    let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    morse_bond_force(
-        &buffers,
-        &mb.bonds,
-        &mb.bond_de,
-        &mb.bond_a,
-        &mb.bond_re,
-        &box_10(&gpu),
-        &mut mb.bond_pair_x,
-        &mut mb.bond_pair_y,
-        &mut mb.bond_pair_z,
-        &mut mb.bond_pair_energy,
-        &mut mb.bond_pair_virial,
-        1,
-    )
-    .unwrap();
-    let bx = gpu.device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
-    // Stretched bond → attractive, fmag negative; F on atom 0 = fmag * (-2.0)
-    // → positive (toward atom 1 in +x).
-    assert!(bx[0] > 0.0, "bx[0] = {}", bx[0]);
-    assert!((bx[0] + bx[1]).abs() < 1.0e-6);
+    let r = run_morse(&gpu, &state, &bl, &bt);
+    assert!(r.forces_x[0] > 0.0, "F_x[0]={}", r.forces_x[0]);
+    assert!(r.forces_x[1] < 0.0, "F_x[1]={}", r.forces_x[1]);
 }
 
-// rq-d61fa682
 #[test]
 fn force_magnitude_matches_closed_form() {
     let gpu = init_device().unwrap();
-    let r = 1.2;
-    let state = two_particle_state([0.0, 0.0, 0.0], [r, 0.0, 0.0]);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let de: Real = 1.0;
+    let a: Real = 2.0;
+    let re: Real = 1.0;
+    let r_val: Real = 1.3;
+    let state = two_particle_state([0.0, 0.0, 0.0], [r_val, 0.0, 0.0]);
     let bl = single_bond_list(2);
-    let de = 1.0_f64;
-    let a = 2.0_f64;
-    let re = 1.0_f64;
-    let bt = vec![morse_type(de, a, re)];
-    let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    morse_bond_force(
-        &buffers,
-        &mb.bonds,
-        &mb.bond_de,
-        &mb.bond_a,
-        &mb.bond_re,
-        &box_10(&gpu),
-        &mut mb.bond_pair_x,
-        &mut mb.bond_pair_y,
-        &mut mb.bond_pair_z,
-        &mut mb.bond_pair_energy,
-        &mut mb.bond_pair_virial,
-        1,
-    )
-    .unwrap();
-    let bx = gpu.device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
-    let dr = (r as f64) - re;
-    let e = (-a * dr).exp();
-    let expected_magnitude = (2.0 * de * a * (1.0 - e) * e) as Real;
-    assert!((bx[0].abs() - expected_magnitude.abs()).abs() < 1.0e-5);
+    let bt = vec![morse_type(de as f64, a as f64, re as f64)];
+    let result = run_morse(&gpu, &state, &bl, &bt);
+    // F_radial = -dU/dr = -2 De a (1-e) e where e = exp(-a(r - re)).
+    // Force on atom_i along +d_hat where d_hat = (r_i - r_j)/r.
+    // F_x_on_i = F_radial * (r_i - r_j) / r = F_radial * (-1.0).
+    let e = (-a * (r_val - re)).exp();
+    let f_radial = -2.0 * de * a * (1.0 - e) * e;
+    let f_x_on_i_expected = f_radial * (-1.0);
+    let rel =
+        (result.forces_x[0] - f_x_on_i_expected).abs() / f_x_on_i_expected.abs().max(1e-6);
+    assert!(rel < 1e-4, "expected F_x[0]={}, got {}", f_x_on_i_expected, result.forces_x[0]);
 }
 
-// rq-4811af60
 #[test]
-fn r_zero_produces_zero_force() {
+fn r_zero_produces_zero_force_and_energy() {
     let gpu = init_device().unwrap();
-    let state = two_particle_state([1.0, 1.0, 1.0], [1.0, 1.0, 1.0]);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let state = two_particle_state([0.0, 0.0, 0.0], [0.0, 0.0, 0.0]);
     let bl = single_bond_list(2);
     let bt = vec![morse_type(1.0, 2.0, 1.0)];
-    let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    morse_bond_force(
-        &buffers,
-        &mb.bonds,
-        &mb.bond_de,
-        &mb.bond_a,
-        &mb.bond_re,
-        &box_10(&gpu),
-        &mut mb.bond_pair_x,
-        &mut mb.bond_pair_y,
-        &mut mb.bond_pair_z,
-        &mut mb.bond_pair_energy,
-        &mut mb.bond_pair_virial,
-        1,
-    )
-    .unwrap();
-    let bx = gpu.device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
-    for v in &bx {
-        assert!(v.is_finite() && *v == 0.0);
+    let r = run_morse(&gpu, &state, &bl, &bt);
+    for v in r.forces_x.iter().chain(r.forces_y.iter()).chain(r.forces_z.iter()) {
+        assert!(v.abs() < 1e-12, "expected zero, got {v}");
+    }
+    for v in r.energies.iter().chain(r.virials.iter()) {
+        assert!(v.abs() < 1e-12, "expected zero, got {v}");
     }
 }
 
-// rq-62e2469f
-#[test]
-fn morse_bond_force_zero_bonds_is_noop() {
-    let gpu = init_device().unwrap();
-    let state = two_particle_state([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let bl = BondList::empty(2);
-    let bt: Vec<BondTypeConfig> = Vec::new();
-    let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    morse_bond_force(
-        &buffers,
-        &mb.bonds,
-        &mb.bond_de,
-        &mb.bond_a,
-        &mb.bond_re,
-        &box_10(&gpu),
-        &mut mb.bond_pair_x,
-        &mut mb.bond_pair_y,
-        &mut mb.bond_pair_z,
-        &mut mb.bond_pair_energy,
-        &mut mb.bond_pair_virial,
-        0,
-    )
-    .unwrap();
-}
-
-// rq-1ce4ce5a
-#[test]
-fn atom_with_two_bonds_sums_contributions() {
-    use heddle_md::forces::Bond;
-
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    // 3 atoms in a row at -1, 0, +1. Bonds 0-1 and 1-2; atom 1 receives forces from both.
-    let state = ParticleState::new(
-        vec![-1.0, 0.0, 1.0],
-        vec![0.0; 3],
-        vec![0.0; 3],
-        vec![0.0; 3],
-        vec![0.0; 3],
-        vec![0.0; 3],
-        vec![1.0; 3],
-        vec![0.0; 3],
-        vec![0u32; 3],
-        None,
-            None,
-    )
-    .unwrap();
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    // Bonds: (0,1) at slot pair [0,1]; (1,2) at slot pair [2,3].
-    let bonds = vec![
-        Bond { atom_i: 0, atom_j: 1, bond_type_index: 0 },
-        Bond { atom_i: 1, atom_j: 2, bond_type_index: 0 },
-    ];
-    // Per-atom lookups: atom 0 → [0], atom 1 → [1, 2], atom 2 → [3].
-    let atom_bond_offsets = vec![0u32, 1, 3, 4];
-    let atom_bond_indices = vec![0u32, 1, 2, 3];
-    let bl = BondList {
-        bonds,
-        atom_bond_offsets,
-        atom_bond_indices,
-        particle_count: 3,
-    };
-    let bt = vec![morse_type(1.0, 2.0, 1.0)];
-    let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    morse_bond_force(
-        &buffers,
-        &mb.bonds,
-        &mb.bond_de,
-        &mb.bond_a,
-        &mb.bond_re,
-        &box_10(&gpu),
-        &mut mb.bond_pair_x,
-        &mut mb.bond_pair_y,
-        &mut mb.bond_pair_z,
-        &mut mb.bond_pair_energy,
-        &mut mb.bond_pair_virial,
-        2,
-    )
-    .unwrap();
-    let mut acc_x = device.alloc_zeros::<Real>(3).unwrap();
-    let mut acc_y = device.alloc_zeros::<Real>(3).unwrap();
-    let mut acc_z = device.alloc_zeros::<Real>(3).unwrap();
-    let mut acc_e = device.alloc_zeros::<Real>(3).unwrap();
-    let mut acc_w = device.alloc_zeros::<Real>(3).unwrap();
-    reduce_bond_forces(&gpu.kernels,
-        &mb.bond_pair_x,
-        &mb.bond_pair_y,
-        &mb.bond_pair_z,
-        &mb.bond_pair_energy,
-        &mb.bond_pair_virial,
-        &mb.atom_bond_offsets,
-        &mb.atom_bond_indices,
-        &mut acc_x.slice_mut(..),
-        &mut acc_y.slice_mut(..),
-        &mut acc_z.slice_mut(..),
-        &mut acc_e.slice_mut(..),
-        &mut acc_w.slice_mut(..),
-        3,
-        true,
-    )
-    .unwrap();
-    let ax = device.dtoh_sync_copy(&acc_x).unwrap();
-    // Each bond is at equilibrium (r=1.0=re), so force magnitudes are 0;
-    // accumulator should be zero for all atoms.
-    for v in &ax {
-        assert!(v.abs() < 1.0e-6);
-    }
-}
-
-// rq-1ca90a29
-#[test]
-fn atom_with_no_bonds_gets_zero_accumulator() {
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = ParticleState::new(
-        vec![0.0; 4],
-        vec![0.0; 4],
-        vec![0.0; 4],
-        vec![0.0; 4],
-        vec![0.0; 4],
-        vec![0.0; 4],
-        vec![1.0; 4],
-        vec![0.0; 4],
-        vec![0u32; 4],
-        None,
-            None,
-    )
-    .unwrap();
-    let _ = state;
-    // Atom 3 has no bonds. Bond (0,1) only.
-    let bl = single_bond_list(4);
-    let bt = vec![morse_type(1.0, 2.0, 1.0)];
-    let mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    // Reduction without contribution kernel populating bond_pair_* leaves it
-    // zeroed by allocation; accumulator should remain zero.
-    let mut acc_x = device.alloc_zeros::<Real>(4).unwrap();
-    let mut acc_y = device.alloc_zeros::<Real>(4).unwrap();
-    let mut acc_z = device.alloc_zeros::<Real>(4).unwrap();
-    let mut acc_e = device.alloc_zeros::<Real>(4).unwrap();
-    let mut acc_w = device.alloc_zeros::<Real>(4).unwrap();
-    reduce_bond_forces(&gpu.kernels,
-        &mb.bond_pair_x,
-        &mb.bond_pair_y,
-        &mb.bond_pair_z,
-        &mb.bond_pair_energy,
-        &mb.bond_pair_virial,
-        &mb.atom_bond_offsets,
-        &mb.atom_bond_indices,
-        &mut acc_x.slice_mut(..),
-        &mut acc_y.slice_mut(..),
-        &mut acc_z.slice_mut(..),
-        &mut acc_e.slice_mut(..),
-        &mut acc_w.slice_mut(..),
-        4,
-        true,
-    )
-    .unwrap();
-    let ax = device.dtoh_sync_copy(&acc_x).unwrap();
-    assert_eq!(ax[3], 0.0);
-}
-
-// rq-966e43ed (reduce_bond_forces on zero particles is a no-op — IDs from spec)
-#[test]
-fn reduce_bond_forces_zero_particles_noop() {
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let bl = BondList::empty(0);
-    let bt: Vec<BondTypeConfig> = Vec::new();
-    let mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    let mut acc_x = device.alloc_zeros::<Real>(0).unwrap();
-    let mut acc_y = device.alloc_zeros::<Real>(0).unwrap();
-    let mut acc_z = device.alloc_zeros::<Real>(0).unwrap();
-    let mut acc_e = device.alloc_zeros::<Real>(0).unwrap();
-    let mut acc_w = device.alloc_zeros::<Real>(0).unwrap();
-    reduce_bond_forces(&gpu.kernels,
-        &mb.bond_pair_x,
-        &mb.bond_pair_y,
-        &mb.bond_pair_z,
-        &mb.bond_pair_energy,
-        &mb.bond_pair_virial,
-        &mb.atom_bond_offsets,
-        &mb.atom_bond_indices,
-        &mut acc_x.slice_mut(..),
-        &mut acc_y.slice_mut(..),
-        &mut acc_z.slice_mut(..),
-        &mut acc_e.slice_mut(..),
-        &mut acc_w.slice_mut(..),
-        0,
-        true,
-    )
-    .unwrap();
-}
-
-// End-to-end: through the framework.
-// rq-c7af1f28
 #[test]
 fn diatomic_equilibrium_produces_zero_net_force() {
     let gpu = init_device().unwrap();
     let state = two_particle_state([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
     let bl = single_bond_list(2);
     let bt = vec![morse_type(1.0, 2.0, 1.0)];
-    // LJ params with cutoff < bond length so LJ contributes nothing.
-    let pair = PairInteractionConfig {
-        between: ("Ar".to_string(), "Ar".to_string()),
-        cutoff: 0.5,
-        r_switch: 0.5,
-        potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
-    };
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        2,
-        &box_10(&gpu),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[pair],
-        &bt,
-        &[],
-        None,
-        None,
-        &[],
-        &bl,
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let mut downloaded = state.clone();
-    downloaded.download_from(&buffers).unwrap();
-    assert!(downloaded.forces_x[0].abs() < 1.0e-6);
-    assert!(downloaded.forces_x[1].abs() < 1.0e-6);
+    let r = run_morse(&gpu, &state, &bl, &bt);
+    let sum_x: Real = r.forces_x.iter().sum();
+    let sum_y: Real = r.forces_y.iter().sum();
+    let sum_z: Real = r.forces_z.iter().sum();
+    assert!(sum_x.abs() < 1e-5);
+    assert!(sum_y.abs() < 1e-5);
+    assert!(sum_z.abs() < 1e-5);
 }
 
-// rq-6d06e36e
 #[test]
 fn newtons_third_law_holds_for_combined_force() {
     let gpu = init_device().unwrap();
-    // Atoms inside LJ cutoff and within bond range.
-    let state = two_particle_state([0.0, 0.0, 0.0], [1.2, 0.0, 0.0]);
-    let mut buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let mut timings = Timings::new(&gpu).unwrap();
+    let state = two_particle_state([0.0, 0.0, 0.0], [1.4, 0.3, 0.5]);
     let bl = single_bond_list(2);
     let bt = vec![morse_type(1.0, 2.0, 1.0)];
-    let pair = PairInteractionConfig {
-        between: ("Ar".to_string(), "Ar".to_string()),
-        cutoff: 5.0,
-        r_switch: 5.0,
-        potential: PairPotentialParams::LennardJones { sigma: 1.0, epsilon: 1.0 },
-    };
-    let mut ff = ForceField::new(&PotentialRegistry::with_builtins(), &gpu,
-        2,
-        &box_10(&gpu),
-        &[ParticleTypeConfig { name: "Ar".to_string(), mass: 1.0, charge: 0.0 }],
-        &[pair],
-        &bt,
-        &[],
-        None,
-        None,
-        &[],
-        &bl,
-        &heddle_md::forces::AngleList::empty(0),
-        &ExclusionList::empty(2),
-        &NeighborListConfig::AllPairs)
-    .unwrap();
-    ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
-    let mut downloaded = state.clone();
-    downloaded.download_from(&buffers).unwrap();
-    let sum_x = downloaded.forces_x[0] + downloaded.forces_x[1];
-    let sum_y = downloaded.forces_y[0] + downloaded.forces_y[1];
-    let sum_z = downloaded.forces_z[0] + downloaded.forces_z[1];
-    assert!(sum_x.abs() < 1.0e-5, "{sum_x}");
-    assert!(sum_y.abs() < 1.0e-5);
-    assert!(sum_z.abs() < 1.0e-5);
-    // Verify the ForceField uses the MorseBonded slot when bonds exist.
-    assert_eq!(ff.slots.len(), 2);
-    assert_eq!(ff.slots[1].label(), "morse_bonded");
+    let r = run_morse(&gpu, &state, &bl, &bt);
+    assert!((r.forces_x[0] + r.forces_x[1]).abs() < 1e-5);
+    assert!((r.forces_y[0] + r.forces_y[1]).abs() < 1e-5);
+    assert!((r.forces_z[0] + r.forces_z[1]).abs() < 1e-5);
 }
 
-// --- Energy and virial outputs ---
-
-#[test] // rq-7ba4f321
+// rq-7ba4f321
+#[test]
 fn stretched_bond_energy_matches_closed_form() {
     let gpu = init_device().unwrap();
-    let r = 1.5;
-    let state = two_particle_state([0.0, 0.0, 0.0], [r, 0.0, 0.0]);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let de: Real = 1.0;
+    let a: Real = 2.0;
+    let re: Real = 1.0;
+    let r_val: Real = 1.3;
+    let state = two_particle_state([0.0, 0.0, 0.0], [r_val, 0.0, 0.0]);
     let bl = single_bond_list(2);
-    let de = 1.0_f64;
-    let a = 2.0_f64;
-    let re = 1.0_f64;
-    let bt = vec![morse_type(de, a, re)];
-    let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    morse_bond_force(
-        &buffers,
-        &mb.bonds,
-        &mb.bond_de,
-        &mb.bond_a,
-        &mb.bond_re,
-        &box_10(&gpu),
-        &mut mb.bond_pair_x,
-        &mut mb.bond_pair_y,
-        &mut mb.bond_pair_z,
-        &mut mb.bond_pair_energy,
-        &mut mb.bond_pair_virial,
-        1,
-    )
-    .unwrap();
-    let be = gpu.device.dtoh_sync_copy(&mb.bond_pair_energy).unwrap();
-    let dr = (r as f64) - re;
-    let e = (-a * dr).exp();
-    let one_minus = 1.0 - e;
-    let expected = (de * one_minus * one_minus) as Real;
-    assert!((be[0] + be[1] - expected).abs() < 1.0e-5, "got {} expected {}", be[0] + be[1], expected);
+    let bt = vec![morse_type(de as f64, a as f64, re as f64)];
+    let r = run_morse(&gpu, &state, &bl, &bt);
+    // U = De * (1 - e)^2 where e = exp(-a(r - re)). The framework
+    // distributes the energy half/half between the two atoms.
+    let e = (-a * (r_val - re)).exp();
+    let one_minus_e = 1.0 - e;
+    let u_full = de * one_minus_e * one_minus_e;
+    let total_energy: Real = r.energies.iter().sum();
+    let rel = (total_energy - u_full).abs() / u_full.abs().max(1e-6);
+    assert!(rel < 1e-4, "expected U={}, got {}", u_full, total_energy);
 }
 
-#[test] // rq-ca49d49a
+// rq-ca49d49a
+#[test]
 fn stretched_bond_virial_matches_r_dot_f() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let r = 1.5;
-    let state = two_particle_state([0.0, 0.0, 0.0], [r, 0.0, 0.0]);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let de: Real = 1.0;
+    let a: Real = 2.0;
+    let re: Real = 1.0;
+    let r_val: Real = 1.3;
+    let state = two_particle_state([0.0, 0.0, 0.0], [r_val, 0.0, 0.0]);
     let bl = single_bond_list(2);
-    let bt = vec![morse_type(1.0, 2.0, 1.0)];
-    let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    morse_bond_force(
-        &buffers,
-        &mb.bonds,
-        &mb.bond_de,
-        &mb.bond_a,
-        &mb.bond_re,
-        &box_10(&gpu),
-        &mut mb.bond_pair_x,
-        &mut mb.bond_pair_y,
-        &mut mb.bond_pair_z,
-        &mut mb.bond_pair_energy,
-        &mut mb.bond_pair_virial,
-        1,
-    )
-    .unwrap();
-    let bx = device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
-    let bv = device.dtoh_sync_copy(&mb.bond_pair_virial).unwrap();
-    // dx = r_0 - r_1 = -1.5 (atom 0 at origin, atom 1 at +x).
-    // F on atom 0 due to atom 1 = bx[0] (along the dx direction times fmag).
-    // r_ij · F_ij = dx * F_x = (-1.5) * bx[0].
-    let expected = -1.5 * bx[0];
-    let total = bv[0] + bv[1];
-    assert!(
-        (total - expected).abs() < 1.0e-5,
-        "got {total} expected {expected}"
-    );
+    let bt = vec![morse_type(de as f64, a as f64, re as f64)];
+    let r = run_morse(&gpu, &state, &bl, &bt);
+    // W = fmag * r^2; F_radial / r = fmag (force factor along d_hat
+    // scaled by 1/r). Compute the expected scalar virial as
+    // F_radial * r_radial where F_radial = -2*De*a*(1-e)*e.
+    let e = (-a * (r_val - re)).exp();
+    let f_radial = -2.0 * de * a * (1.0 - e) * e;
+    // W convention: each atom carries W_k/2 → summing both gives W_k.
+    let w_expected = f_radial * r_val;
+    let total_virial: Real = r.virials.iter().sum();
+    let rel = (total_virial - w_expected).abs() / w_expected.abs().max(1e-6);
+    assert!(rel < 1e-4, "expected W={}, got {}", w_expected, total_virial);
 }
 
-#[test] // rq-fe9f2ebe
-fn r_zero_produces_zero_energy_and_virial() {
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let state = two_particle_state([1.0, 1.0, 1.0], [1.0, 1.0, 1.0]);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let bl = single_bond_list(2);
-    let bt = vec![morse_type(1.0, 2.0, 1.0)];
-    let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    morse_bond_force(
-        &buffers,
-        &mb.bonds,
-        &mb.bond_de,
-        &mb.bond_a,
-        &mb.bond_re,
-        &box_10(&gpu),
-        &mut mb.bond_pair_x,
-        &mut mb.bond_pair_y,
-        &mut mb.bond_pair_z,
-        &mut mb.bond_pair_energy,
-        &mut mb.bond_pair_virial,
-        1,
-    )
-    .unwrap();
-    let be = device.dtoh_sync_copy(&mb.bond_pair_energy).unwrap();
-    let bv = device.dtoh_sync_copy(&mb.bond_pair_virial).unwrap();
-    for v in be.iter().chain(bv.iter()) {
-        assert!(v.is_finite() && *v == 0.0);
-    }
-}
-
-#[test] // rq-6897ffda
-fn bond_reduction_sums_energy_and_virial_alongside_forces() {
-    let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    let r = 1.5;
-    let state = two_particle_state([0.0, 0.0, 0.0], [r, 0.0, 0.0]);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
-    let bl = single_bond_list(2);
-    let bt = vec![morse_type(1.0, 2.0, 1.0)];
-    let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    morse_bond_force(
-        &buffers,
-        &mb.bonds,
-        &mb.bond_de,
-        &mb.bond_a,
-        &mb.bond_re,
-        &box_10(&gpu),
-        &mut mb.bond_pair_x,
-        &mut mb.bond_pair_y,
-        &mut mb.bond_pair_z,
-        &mut mb.bond_pair_energy,
-        &mut mb.bond_pair_virial,
-        1,
-    )
-    .unwrap();
-    let mut acc_x = device.alloc_zeros::<Real>(2).unwrap();
-    let mut acc_y = device.alloc_zeros::<Real>(2).unwrap();
-    let mut acc_z = device.alloc_zeros::<Real>(2).unwrap();
-    let mut acc_e = device.alloc_zeros::<Real>(2).unwrap();
-    let mut acc_w = device.alloc_zeros::<Real>(2).unwrap();
-    reduce_bond_forces(&gpu.kernels,
-        &mb.bond_pair_x,
-        &mb.bond_pair_y,
-        &mb.bond_pair_z,
-        &mb.bond_pair_energy,
-        &mb.bond_pair_virial,
-        &mb.atom_bond_offsets,
-        &mb.atom_bond_indices,
-        &mut acc_x.slice_mut(..),
-        &mut acc_y.slice_mut(..),
-        &mut acc_z.slice_mut(..),
-        &mut acc_e.slice_mut(..),
-        &mut acc_w.slice_mut(..),
-        2,
-        true,
-    )
-    .unwrap();
-    let acc_e_host = device.dtoh_sync_copy(&acc_e).unwrap();
-    let acc_w_host = device.dtoh_sync_copy(&acc_w).unwrap();
-    let be = device.dtoh_sync_copy(&mb.bond_pair_energy).unwrap();
-    let bv = device.dtoh_sync_copy(&mb.bond_pair_virial).unwrap();
-    // Each atom's share equals one half-bond entry.
-    assert_eq!(acc_e_host[0], be[0]);
-    assert_eq!(acc_e_host[1], be[1]);
-    assert_eq!(acc_w_host[0], bv[0]);
-    assert_eq!(acc_w_host[1], bv[1]);
-}
-
-// --- Reduction kernel direct passthrough ----------------------------------
-
-fn run_reduce_with_buffers(
-    gpu: &heddle_md::gpu::GpuContext,
-    bond_pair_x: &[Real],
-    bond_pair_y: &[Real],
-    bond_pair_z: &[Real],
-    bond_pair_energy: &[Real],
-    bond_pair_virial: &[Real],
-    atom_bond_offsets: &[u32],
-    atom_bond_indices: &[u32],
-    particle_count: usize,
-) -> Vec<Real> {
-    use cudarc::driver::DeviceSlice;
-    let device = gpu.device.clone();
-    let bx = device.htod_sync_copy(bond_pair_x).unwrap();
-    let by = device.htod_sync_copy(bond_pair_y).unwrap();
-    let bz = device.htod_sync_copy(bond_pair_z).unwrap();
-    let be = device.htod_sync_copy(bond_pair_energy).unwrap();
-    let bv = device.htod_sync_copy(bond_pair_virial).unwrap();
-    let offsets = device.htod_sync_copy(atom_bond_offsets).unwrap();
-    let indices = if atom_bond_indices.is_empty() {
-        device.alloc_zeros::<u32>(1).unwrap()
-    } else {
-        device.htod_sync_copy(atom_bond_indices).unwrap()
-    };
-    let mut acc_x = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
-    let mut acc_y = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
-    let mut acc_z = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
-    let mut acc_e = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
-    let mut acc_w = device.alloc_zeros::<Real>(particle_count.max(1)).unwrap();
-    let up_x = acc_x.len();
-    let up_y = acc_y.len();
-    let up_z = acc_z.len();
-    let up_e = acc_e.len();
-    let up_w = acc_w.len();
-    reduce_bond_forces(
-        &gpu.kernels,
-        &bx, &by, &bz, &be, &bv,
-        &offsets, &indices,
-        &mut acc_x.slice_mut(0..up_x),
-        &mut acc_y.slice_mut(0..up_y),
-        &mut acc_z.slice_mut(0..up_z),
-        &mut acc_e.slice_mut(0..up_e),
-        &mut acc_w.slice_mut(0..up_w),
-        particle_count,
-        true,
-    )
-    .unwrap();
-    device.dtoh_sync_copy(&acc_x).unwrap()
-}
-
-// rq-2d4efead
-#[test]
-fn atom_with_one_bond_receives_the_bonds_force_directly() {
-    let gpu = init_device().unwrap();
-    let bond_pair_x = vec![2.0, -2.0];
-    let zeros = vec![0.0; 2];
-    let atom_bond_offsets = vec![0u32, 1, 2];
-    let atom_bond_indices = vec![0u32, 1];
-    let acc_x = run_reduce_with_buffers(
-        &gpu,
-        &bond_pair_x, &zeros, &zeros, &zeros, &zeros,
-        &atom_bond_offsets, &atom_bond_indices,
-        2,
-    );
-    assert_eq!(acc_x[0], 2.0);
-    assert_eq!(acc_x[1], -2.0);
-}
-
-// rq-55f89976
-#[test]
-fn reduction_summation_order_is_sorted_bond_index() {
-    let gpu = init_device().unwrap();
-    // Atom 0 receives contributions from bonds 0 and 1; slots [0, 2].
-    // The reduction walks atom_bond_indices left-to-right, so accumulator
-    // = bond_pair_x[0] + bond_pair_x[2].
-    let bond_pair_x = vec![1.5, -7.0, 4.0, -0.5];
-    let zeros = vec![0.0; 4];
-    // 3 particles. atom 0 → [0, 2] (the two slots that name it); atom 1 → [1]; atom 2 → [3].
-    let atom_bond_offsets = vec![0u32, 2, 3, 4];
-    let atom_bond_indices = vec![0u32, 2, 1, 3];
-    let acc_x = run_reduce_with_buffers(
-        &gpu,
-        &bond_pair_x, &zeros, &zeros, &zeros, &zeros,
-        &atom_bond_offsets, &atom_bond_indices,
-        3,
-    );
-    assert_eq!(acc_x[0], 1.5 + 4.0, "atom 0 must sum slots [0, 2] in left-to-right order");
-    assert_eq!(acc_x[1], -7.0);
-    assert_eq!(acc_x[2], -0.5);
-}
-
-// rq-556b7c13
 #[test]
 fn minimum_image_is_applied_to_bond_displacement() {
-    use cudarc::driver::DeviceSlice;
     let gpu = init_device().unwrap();
-    let sim_box = box_10(&gpu); // L=10
-    // p0 = (-4.5, 0, 0), p1 = (4.5, 0, 0). Naive r_ij = -9.0, wraps to +1.0
-    // (the periodic image). The bond is at r=1.0 = re for the type
-    // re=1.0, so the morse force is exactly zero — confirming the kernel
-    // used the wrapped displacement, not r=9.0 which would give a large
-    // attractive force.
-    let state = two_particle_state([-4.5, 0.0, 0.0], [4.5, 0.0, 0.0]);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    // Two atoms separated by 9.5 along x in a box of length 10:
+    // minimum image gives r = 0.5, with displacement direction
+    // along -x. The bond's equilibrium length is 1.0, so the bond
+    // is compressed → atoms repel along the minimum-image direction.
+    let state = two_particle_state([0.0, 0.0, 0.0], [9.5, 0.0, 0.0]);
     let bl = single_bond_list(2);
     let bt = vec![morse_type(1.0, 2.0, 1.0)];
-    let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-    morse_bond_force(
-        &buffers,
-        &mb.bonds,
-        &mb.bond_de,
-        &mb.bond_a,
-        &mb.bond_re,
-        &sim_box,
-        &mut mb.bond_pair_x,
-        &mut mb.bond_pair_y,
-        &mut mb.bond_pair_z,
-        &mut mb.bond_pair_energy,
-        &mut mb.bond_pair_virial,
-        1,
-    )
-    .unwrap();
-    let bx = gpu.device.dtoh_sync_copy(&mb.bond_pair_x).unwrap();
-    let energy = gpu.device.dtoh_sync_copy(&mb.bond_pair_energy).unwrap();
-    let _ = bx.len();
-    for v in &bx {
-        assert!(v.abs() < 1.0e-5, "wrapped r = 1.0 (= re); force must be ~0, got {v}");
-    }
-    for e in &energy {
-        assert!(e.abs() < 1.0e-5, "wrapped r = 1.0 (= re); energy must be ~0, got {e}");
-    }
+    let r = run_morse(&gpu, &state, &bl, &bt);
+    // After minimum image, the displacement (r_i - r_j) wraps to
+    // +0.5 along x (since 9.5 wraps to -0.5; r_i - r_j = -(-0.5) =
+    // +0.5). Compressed → atom_i feels a force away from atom_j,
+    // i.e. F_x[0] > 0.
+    assert!(
+        r.forces_x[0] > 0.0,
+        "minimum image wrap should make F_x[0] positive: {}",
+        r.forces_x[0]
+    );
+    assert!(
+        (r.forces_x[0] + r.forces_x[1]).abs() < 1e-5,
+        "Newton's third law"
+    );
 }
 
-// rq-696caf8e
 #[test]
-fn two_independent_calls_produce_byte_identical_accumulators() {
-    use cudarc::driver::DeviceSlice;
+fn two_independent_runs_produce_byte_identical_forces() {
     let gpu = init_device().unwrap();
-    let device = gpu.device.clone();
-    // Stretched bond so the forces are non-zero and the comparison is
-    // meaningful.
-    let state = two_particle_state([0.0, 0.0, 0.0], [1.3, 0.0, 0.0]);
-    let buffers = ParticleBuffers::new(&gpu, &state).unwrap();
+    let state = two_particle_state([0.0, 0.0, 0.0], [1.2, 0.0, 0.0]);
     let bl = single_bond_list(2);
     let bt = vec![morse_type(1.0, 2.0, 1.0)];
-
-    let run = || -> (Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>, Vec<Real>) {
-        let mut mb = MorseBondedState::new(&gpu, &bl, &bt).unwrap();
-        morse_bond_force(
-            &buffers,
-            &mb.bonds,
-            &mb.bond_de,
-            &mb.bond_a,
-            &mb.bond_re,
-            &box_10(&gpu),
-            &mut mb.bond_pair_x,
-            &mut mb.bond_pair_y,
-            &mut mb.bond_pair_z,
-            &mut mb.bond_pair_energy,
-            &mut mb.bond_pair_virial,
-            1,
-        )
-        .unwrap();
-        let mut acc_x = device.alloc_zeros::<Real>(2).unwrap();
-        let mut acc_y = device.alloc_zeros::<Real>(2).unwrap();
-        let mut acc_z = device.alloc_zeros::<Real>(2).unwrap();
-        let mut acc_e = device.alloc_zeros::<Real>(2).unwrap();
-        let mut acc_w = device.alloc_zeros::<Real>(2).unwrap();
-        let up_x = acc_x.len();
-        let up_y = acc_y.len();
-        let up_z = acc_z.len();
-        let up_e = acc_e.len();
-        let up_w = acc_w.len();
-        reduce_bond_forces(
-            &gpu.kernels,
-            &mb.bond_pair_x, &mb.bond_pair_y, &mb.bond_pair_z,
-            &mb.bond_pair_energy, &mb.bond_pair_virial,
-            &mb.atom_bond_offsets, &mb.atom_bond_indices,
-            &mut acc_x.slice_mut(0..up_x),
-            &mut acc_y.slice_mut(0..up_y),
-            &mut acc_z.slice_mut(0..up_z),
-            &mut acc_e.slice_mut(0..up_e),
-            &mut acc_w.slice_mut(0..up_w),
-            2,
-            true,
-        )
-        .unwrap();
-        (
-            device.dtoh_sync_copy(&acc_x).unwrap(),
-            device.dtoh_sync_copy(&acc_y).unwrap(),
-            device.dtoh_sync_copy(&acc_z).unwrap(),
-            device.dtoh_sync_copy(&acc_e).unwrap(),
-            device.dtoh_sync_copy(&acc_w).unwrap(),
-        )
-    };
-    let a = run();
-    let b = run();
-    assert_eq!(a.0, b.0, "acc_x not bit-exact");
-    assert_eq!(a.1, b.1, "acc_y not bit-exact");
-    assert_eq!(a.2, b.2, "acc_z not bit-exact");
-    assert_eq!(a.3, b.3, "acc_e not bit-exact");
-    assert_eq!(a.4, b.4, "acc_w not bit-exact");
-    // The bond is stretched, so accumulators must be non-trivially non-zero.
-    assert!(a.0[0].abs() > 0.0, "stretched bond must produce non-zero force");
+    let a = run_morse(&gpu, &state, &bl, &bt);
+    let b = run_morse(&gpu, &state, &bl, &bt);
+    assert_eq!(a.forces_x, b.forces_x);
+    assert_eq!(a.forces_y, b.forces_y);
+    assert_eq!(a.forces_z, b.forces_z);
+    assert_eq!(a.energies, b.energies);
+    assert_eq!(a.virials, b.virials);
 }

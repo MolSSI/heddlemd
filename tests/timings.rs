@@ -373,10 +373,10 @@ fn kernel_counts_match_runner_launches() {
     assert!(stage_row(&body, "neighbor_list_build").is_none());
     assert!(stage_row(&body, "copy_positions_into_reference").is_none());
     assert!(stage_row(&body, "neighbor_list_rebuild").is_none());
-    // rq-c7df5714: no topology → no morse_bond_force or reduce_bond_forces;
-    // accumulate_forces still runs because at least one pair-force slot is
-    // present.
-    assert!(stage_row(&body, "morse_bond_force").is_none());
+    // rq-c7df5714: no topology → no jit_composed_bonded_force or
+    // reduce_bond_forces; combine_class_totals still runs because at
+    // least one pair-force slot is present.
+    assert!(stage_row(&body, "jit_composed_bonded_force").is_none());
     assert!(stage_row(&body, "reduce_bond_forces").is_none());
     assert!(stage_row(&body, "combine_class_totals").is_some());
 }
@@ -1176,7 +1176,7 @@ fn morse_bonded_records_bond_force_and_reduction_rows() {
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
     // One warm-up + ten loop iterations = 11.
-    assert_eq!(stage_count(&body, "morse_bond_force"), Some(11));
+    assert_eq!(stage_count(&body, "jit_composed_bonded_force"), Some(11));
     assert_eq!(stage_count(&body, "reduce_bond_forces"), Some(11));
     assert_eq!(stage_count(&body, "combine_class_totals"), Some(11));
 }

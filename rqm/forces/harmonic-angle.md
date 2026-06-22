@@ -78,16 +78,28 @@ equivalent to `Σ_a r_aj · F_a` over the three atoms with `r_jj = 0`.
 
 ## Per-Step Kernel Sequence <!-- rq-7884e3ff -->
 
-The slot's contribution kernel and reduction kernel run once each per
-step:
+The slot's contribution and reduction run once each per step:
 
 | Step | Kernel | Operation | Stage label |
 | --- | --- | --- | --- |
-| 1 | `harmonic_angle_force` | compute forces per angle, write to angle-triple buffer | `HarmonicAngleForce` |
+| 1 | `heddle_jit_composed_angle_<i>_{f,fev}` | compute forces per angle, write to angle-triple buffer | `JitComposedAngleForce` |
 | 2 | `reduce_angle_forces` | per-atom sum of angle contributions, write to slot accumulator | `ReduceAngleForces` |
 
-The combiner (`AccumulateForces`) is run by the framework after every
-slot's reduction. See `framework.md` for the slot order.
+Step 1 is the JIT-composed angle module's entry point for this
+slot (slot index `<i>` is the slot's zero-based position among
+active angle slots in canonical slot order; the `_f` vs `_fev`
+suffix is selected by the per-step `AggregateLevel`). The
+JIT-composed module includes the slot's per-angle harmonic functor
+source described in *Source Fragment* below. See
+`jit-composed-intramolecular.md` for the composer's contract.
+
+Step 2 runs the standalone `reduce_angle_forces` kernel compiled at
+build time. The reduction is shape-universal across angle slots
+(any angle potential's per-angle contributions sum into per-atom
+forces the same way); it is not part of the JIT module.
+
+The class-combine kernel runs after every slot's reduction. See
+`framework.md` for the slot order.
 
 ## Force Accumulation <!-- rq-ff895387 -->
 
@@ -193,68 +205,75 @@ not constructed.
     - When `angle_list.is_empty()`, this method is not called by the
       `ForceField` — see *Empty State*.
 
-### CUDA Kernels <!-- rq-4c88ee0e -->
+### Source Fragment <!-- rq-4c88ee0e -->
 
-`kernels/angle.cu` declares two `extern "C"` kernels:
+`HarmonicAngleBuilder::angle_force_fragment(cx)` returns an
+`AngleForceFragment` whose functor implements the per-angle
+harmonic contribution. The fragment defines a `__device__` functor
+`HarmonicAngleFunctor` whose member function `evaluate(dx_ij,
+dy_ij, dz_ij, dx_kj, dy_kj, dz_kj, angle_type_index, fix, fiy, fiz,
+fkx, fky, fkz, u_m, w_m)` computes:
+
+1. Computes `d_ij²`, `d_kj²`, `d_ij`, `d_kj`, `cosθ`, `sinθ`, and
+   `θ` using `atan2(d_ij · d_kj · sinθ, r_ij · r_kj)`.
+2. Reads `k = angle_k_theta[angle_type_index]` and
+   `theta_0 = angle_theta_0[angle_type_index]` from device-buffer
+   pointers held as members of the functor.
+3. Computes `dθ = θ − theta_0`, `f = −k · dθ`, and `g = f / sinθ`.
+4. Computes the two force vectors `F_i` and `F_k` per the formulas
+   in *Algorithm* and writes them to `(fix, fiy, fiz)` and
+   `(fkx, fky, fkz)`.
+5. Writes the angle's full potential energy
+   `u_m = 0.5 · k · dθ²` and scalar virial
+   `w_m = r_ij · F_i + r_kj · F_k` (the outer-loop body
+   distributes the `1/3` symmetry factor when writing to the
+   scratch buffer).
+
+When the functor's defensive guards trigger (`d_ij == 0`,
+`d_kj == 0`, or `sinθ < 1e-7f`), it writes zero to every output
+field. The outer-loop body then writes zeros to the corresponding
+fifteen scratch-buffer entries (five quantities × three slots).
+
+The composed kernel's outer-loop body (in the JIT-composed angle
+module — see `jit-composed-intramolecular.md`) handles the
+common-args reading: reads the angle list `(atom_i, atom_j, atom_k,
+angle_type_index)`, computes the minimum-image displacements
+`r_ij = r_i − r_j` and `r_kj = r_k − r_j`, calls the functor's
+`evaluate`, then writes the three per-atom force triples (the
+functor returns `F_i` and `F_k`; the outer-loop body computes
+`F_j = -(F_i + F_k)`) along with `u_m / 3` and `w_m / 3` into the
+slot's angle-triple scratch buffer at indices `3·m`, `3·m + 1`,
+and `3·m + 2`. See `jit-composed-intramolecular.md`'s
+*Composed-Module Structure* for the full outer-loop body
+specification.
+
+The fragment's `entry_point_args` declares the per-angle-type
+parameter table pointers (`angle_k_theta`, `angle_theta_0`); the
+`functor_init_source` assigns them to the functor's members at
+the start of the entry-point body.
+
+### Reduction Kernel <!-- rq-9d9ca545 -->
+
+`kernels/angle.cu` declares the shape-universal reduction kernel:
 
 ```c
-extern "C" __global__ void harmonic_angle_force(
-    const float *positions_x, const float *positions_y, const float *positions_z,
-    const unsigned int *angles,
-    const float *angle_k_theta, const float *angle_theta_0,
-    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
-    float *angle_triple_x, float *angle_triple_y, float *angle_triple_z,
-    float *angle_triple_energy, float *angle_triple_virial,
-    unsigned int n_angles);
-
 extern "C" __global__ void reduce_angle_forces(
-    const float *angle_triple_x, const float *angle_triple_y, const float *angle_triple_z,
-    const float *angle_triple_energy, const float *angle_triple_virial,
+    const Real *angle_triple_x, const Real *angle_triple_y, const Real *angle_triple_z,
+    const Real *angle_triple_energy, const Real *angle_triple_virial,
     const unsigned int *atom_angle_offsets,
     const unsigned int *atom_angle_indices,
-    float *slot_force_x, float *slot_force_y, float *slot_force_z,
-    float *slot_energy, float *slot_virial,
+    Real *slot_force_x, Real *slot_force_y, Real *slot_force_z,
+    Real *slot_energy, Real *slot_virial,
     unsigned int n);
 ```
 
-#### `harmonic_angle_force` <!-- rq-312f30ee -->
-
-One thread per angle. Thread `m`:
-
-1. Reads `atom_i`, `atom_j`, `atom_k`, `type_idx` from
-   `angles[4·m .. 4·m + 4]`.
-2. Computes the minimum-image displacements
-   `r_ij = r_i − r_j` and `r_kj = r_k − r_j` wrapped against the six
-   lattice parameters `(lx, ly, lz, xy, xz, yz)` via the triclinic
-   tilt-subtraction algorithm defined in `simulation-box.md`.
-3. Computes `d_ij²`, `d_kj²`, `d_ij`, `d_kj`, `cosθ`, `sinθ`, and `θ`
-   using `atan2(d_ij · d_kj · sinθ, r_ij · r_kj)`.
-4. Reads `k = angle_k_theta[type_idx]` and
-   `theta_0 = angle_theta_0[type_idx]`.
-5. Computes `dθ = θ − theta_0`, `f = −k · dθ`, and
-   `g = f / sinθ`.
-6. Computes the three force vectors per the formulas in *Algorithm*.
-7. Computes the angle's potential energy `U_m = 0.5 · k · dθ²` and
-   scalar virial `W_m = r_ij · F_i + r_kj · F_k`.
-8. Writes `F_i`, `F_j`, `F_k` to `angle_triple_*[3·m]`,
-   `angle_triple_*[3·m + 1]`, `angle_triple_*[3·m + 2]`
-   respectively.
-9. Writes `U_m / 3` to each of the three `angle_triple_energy` slots
-   and `W_m / 3` to each of the three `angle_triple_virial` slots.
-
-When the kernel's defensive guards trigger (`d_ij == 0`, `d_kj == 0`,
-or `sinθ < 1e-7f`), it writes zero to all five quantities × three
-slots = fifteen output entries.
-
-#### `reduce_angle_forces` <!-- rq-9d9ca545 -->
-
-One thread per atom `a = blockIdx.x · blockDim.x + threadIdx.x` (block
-size 256, grid `ceil(n / 256)`). Thread `a`:
+One thread per atom `a = blockIdx.x · blockDim.x + threadIdx.x`
+(block size 256, grid `ceil(n / 256)`). Thread `a`:
 
 1. Reads `start = atom_angle_offsets[a]` and `end =
    atom_angle_offsets[a + 1]`.
-2. Initialises five running sums to zero: `sum_x`, `sum_y`, `sum_z`,
-   `sum_e`, `sum_w`.
+2. Initialises five running sums to zero: `sum_x`, `sum_y`,
+   `sum_z`, `sum_e`, `sum_w`.
 3. For each `i` in `start .. end`:
    `slot = atom_angle_indices[i];
     sum_x += angle_triple_x[slot]; (similarly y, z)
@@ -265,48 +284,55 @@ size 256, grid `ceil(n / 256)`). Thread `a`:
     slot_force_z[a] = sum_z; slot_energy[a] = sum_e;
     slot_virial[a] = sum_w`.
 
-The summation is left-to-right in `atom_angle_indices` order. Since
-the indices are sorted at load time, the order is deterministic.
+The summation is left-to-right in `atom_angle_indices` order.
+Since the indices are sorted at load time, the order is
+deterministic.
+
+The reduction kernel is universal across angle slots: any angle
+potential's angle-triple scratch buffer sums into per-atom forces
+the same way. It is compiled at build time via `nvcc` (not via
+nvrtc) and loaded as PTX module `"angle"`.
 
 ### PTX Module Loading <!-- rq-c07d7c28 -->
 
-`init_device()` loads the compiled `kernels/angle.cu` PTX as module
-`"angle"` and captures its `harmonic_angle_force` and
-`reduce_angle_forces` functions into the `Kernels` handle (see
-`build-pipeline.md`).
+`init_device()` loads the compiled `kernels/angle.cu` PTX as
+module `"angle"` and captures its `reduce_angle_forces` function
+into the `Kernels` handle. The angle JIT module
+(`"heddle_jit_composed_angle"`) is loaded separately by
+`ForceField::new` from the JIT-composed PTX; it is owned by the
+`ForceField` instance, not the global `Kernels` handle. See
+`build-pipeline.md` and `jit-composed-intramolecular.md`.
 
 ### Rust Launch Helpers <!-- rq-78f49cef -->
 
-Two free functions in `src/gpu/kernels.rs`, re-exported from
-`crate::gpu`:
+The framework's per-step dispatch (see
+`jit-composed-intramolecular.md`'s *Parameter Binding and Launch*)
+launches the slot's composed angle entry point and then the
+universal reduction kernel. Slots do not expose standalone
+launchers for the contribution kernel; participation in the
+JIT-composed module is the only path to dispatch the per-angle
+contribution.
 
-- `harmonic_angle_force(state: &mut HarmonicAngleState, particle_buffers: &ParticleBuffers, sim_box: &SimulationBox) -> Result<(), GpuError>` <!-- rq-db5924d8 -->
-  - Launches the `harmonic_angle_force` kernel, writing per-slot
-    force, third-energy, and third-virial into the state's
-    `angle_triple_*` fields.
-  - Block size 256; grid size `ceil(state.angle_count / 256)`.
-  - Returns `Ok(())` without launching when `state.angle_count == 0`.
-  - Invokes the kernel through the `Kernels` handle reached from its
-    arguments; it performs no string-keyed kernel lookup of its own (see
-    `build-pipeline.md`).
+The reduction is launched through the framework's
+`reduce_angle_forces` helper:
 
-- `reduce_angle_forces(state: &mut HarmonicAngleState, output_force_x: &mut CudaViewMut<'_, f32>, output_force_y: &mut CudaViewMut<'_, f32>, output_force_z: &mut CudaViewMut<'_, f32>, output_energy: &mut CudaViewMut<'_, f32>, output_virial: &mut CudaViewMut<'_, f32>) -> Result<(), GpuError>` <!-- rq-34bfe79a -->
+- `reduce_angle_forces(state: &mut HarmonicAngleState, output_force_x: &mut CudaViewMut<'_, Real>, output_force_y: &mut CudaViewMut<'_, Real>, output_force_z: &mut CudaViewMut<'_, Real>, output_energy: &mut CudaViewMut<'_, Real>, output_virial: &mut CudaViewMut<'_, Real>) -> Result<(), GpuError>` <!-- rq-34bfe79a -->
   - Launches the `reduce_angle_forces` kernel, summing each atom's
     angle contributions into the five caller-supplied output views.
     Output views have length `state.particle_count`.
   - Block size 256; grid size `ceil(state.particle_count / 256)`.
   - Returns `Ok(())` without launching when
     `state.particle_count == 0`.
-  - Invokes the kernel through the `Kernels` handle, like
-    `harmonic_angle_force`.
 
 ## Launch Configuration <!-- rq-e9b9f528 -->
 
-- Block size: 256 threads for both kernels.
-- Grid size: `ceil(angle_count / 256)` for the force kernel,
-  `ceil(particle_count / 256)` for the reduction.
-- Shared memory: zero bytes.
-- Stream: the default stream carried by `particle_buffers.device`.
+- Composed angle contribution kernel: block size 256, grid
+  `ceil(angle_count / 256)`, no shared memory. Dispatched by the
+  framework from the JIT-composed angle module.
+- Reduction kernel: block size 256, grid
+  `ceil(particle_count / 256)`, no shared memory.
+- Both run on the default stream carried by
+  `particle_buffers.device`.
 
 ## Determinism <!-- rq-69de20bd -->
 

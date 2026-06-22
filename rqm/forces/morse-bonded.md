@@ -36,16 +36,28 @@ Accumulation* below).
 
 ## Per-Step Kernel Sequence <!-- rq-100f8b5f -->
 
-The slot's contribution kernel and reduction kernel run once each per
-step:
+The slot's contribution and reduction run once each per step:
 
 | Step | Kernel | Operation | Stage label |
 | --- | --- | --- | --- |
-| 1 | `morse_bond_force` | compute force per bond, write to bond-pair buffer | `MorseBondForce` |
+| 1 | `heddle_jit_composed_bonded_<i>_{f,fev}` | compute force per bond, write to bond-pair buffer | `JitComposedBondedForce` |
 | 2 | `reduce_bond_forces` | per-atom sum of bond contributions, write to slot accumulator | `ReduceBondForces` |
 
-The combiner (`AccumulateForces`) is run by the framework after every
-slot's reduction. See `framework.md` for the slot order.
+Step 1 is the JIT-composed bonded module's entry point for this
+slot (slot index `<i>` is the slot's zero-based position among
+active bonded slots in canonical slot order; the `_f` vs `_fev`
+suffix is selected by the per-step `AggregateLevel`). The
+JIT-composed module includes the slot's per-bond Morse functor
+source described in *Source Fragment* below. See
+`jit-composed-intramolecular.md` for the composer's contract.
+
+Step 2 runs the standalone `reduce_bond_forces` kernel compiled at
+build time. The reduction is shape-universal across bonded slots
+(any bonded potential's per-bond contributions sum into per-atom
+forces the same way); it is not part of the JIT module.
+
+The class-combine kernel runs after every slot's reduction. See
+`framework.md` for the slot order.
 
 ## Force Accumulation <!-- rq-0c318e64 -->
 
@@ -156,73 +168,72 @@ constructed.
     - When `bond_list.is_empty()`, this method is not called by the
       `ForceField` — see *Empty State*.
 
-### CUDA Kernels <!-- rq-d28ad917 -->
+### Source Fragment <!-- rq-d28ad917 -->
 
-`kernels/morse.cu` declares two `extern "C"` kernels:
+`MorseBondedBuilder::bonded_force_fragment(cx)` returns a
+`BondedForceFragment` whose functor implements the per-bond Morse
+contribution. The fragment defines a `__device__` functor
+`MorsePairFunctor` whose member function `evaluate(r2, r,
+bond_type_index, dx, dy, dz, fmag, u_k, w_k)` computes:
+
+1. Reads `De = bond_de[bond_type_index]`,
+   `a = bond_a[bond_type_index]`, `re = bond_re[bond_type_index]`
+   from device-buffer pointers held as members of the functor.
+2. Computes `e = exp(-a * (r - re))` and the force magnitude
+   `fmag = 2 * De * a * (1 - e) * e / r` (the trailing `/ r`
+   produces the per-component factor when multiplied by
+   `(dx, dy, dz)` in the composed kernel's outer-loop body).
+3. Writes `u_k = De * (1 - e)^2` and
+   `w_k = fmag * r2` (the bond's full potential energy and scalar
+   virial; the outer-loop body distributes the `0.5` symmetry
+   factor when writing to the scratch buffer).
+
+When `r == 0` exactly (degenerate overlapping atoms), the functor
+writes `fmag = 0`, `u_k = 0`, `w_k = 0` rather than producing
+NaN. This is a defensive guard; physical Morse simulations never
+reach `r == 0` because the exponential blows up at small `r`. The
+outer-loop body then writes zeros to all ten scratch-buffer slots
+(five quantities × two slots).
+
+The composed kernel's outer-loop body (in the JIT-composed bonded
+module — see `jit-composed-intramolecular.md`) handles the
+common-args reading: reads the bond list `(atom_i, atom_j,
+bond_type_index)`, computes the minimum-image displacement
+`(dx, dy, dz) = (r_i - r_j)`, computes `r2` and `r`, calls the
+functor's `evaluate`, then writes the per-atom force triples
+`±fmag · (dx, dy, dz)` along with `u_k · 0.5` and `w_k · 0.5` into
+the slot's bond-pair scratch buffer at indices `2·k` and
+`2·k + 1`. See `jit-composed-intramolecular.md`'s
+*Composed-Module Structure* for the full outer-loop body
+specification.
+
+The fragment's `entry_point_args` declares the per-bond-type
+parameter table pointers (`bond_de`, `bond_a`, `bond_re`); the
+`functor_init_source` assigns them to the functor's members at
+the start of the entry-point body.
+
+### Reduction Kernel <!-- rq-b2559e09 -->
+
+`kernels/bonded.cu` declares the shape-universal reduction kernel:
 
 ```c
-extern "C" __global__ void morse_bond_force(
-    const float *positions_x, const float *positions_y, const float *positions_z,
-    const unsigned int *bonds,
-    const float *bond_de, const float *bond_a, const float *bond_re,
-    const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
-    float *bond_pair_x, float *bond_pair_y, float *bond_pair_z,
-    float *bond_pair_energy, float *bond_pair_virial,
-    unsigned int n_bonds);
-
 extern "C" __global__ void reduce_bond_forces(
-    const float *bond_pair_x, const float *bond_pair_y, const float *bond_pair_z,
-    const float *bond_pair_energy, const float *bond_pair_virial,
+    const Real *bond_pair_x, const Real *bond_pair_y, const Real *bond_pair_z,
+    const Real *bond_pair_energy, const Real *bond_pair_virial,
     const unsigned int *atom_bond_offsets,
     const unsigned int *atom_bond_indices,
-    float *slot_force_x, float *slot_force_y, float *slot_force_z,
-    float *slot_energy, float *slot_virial,
+    Real *slot_force_x, Real *slot_force_y, Real *slot_force_z,
+    Real *slot_energy, Real *slot_virial,
     unsigned int n);
 ```
 
-#### `morse_bond_force` <!-- rq-39cec761 -->
-
-One thread per bond. Thread `k`:
-
-1. Reads `atom_i`, `atom_j`, `type_idx` from `bonds[3*k .. 3*k + 3]`.
-2. Computes the minimum-image displacement
-   `(dx, dy, dz) = (r_i - r_j)` wrapped against the six lattice
-   parameters `(lx, ly, lz, xy, xz, yz)` via the triclinic tilt-
-   subtraction algorithm defined in `simulation-box.md`. For an
-   orthorhombic box this reduces to three independent per-axis wraps.
-3. Computes `r2 = dx² + dy² + dz²` and `r = sqrt(r2)`.
-4. Reads `De = bond_de[type_idx]`, `a = bond_a[type_idx]`,
-   `re = bond_re[type_idx]`.
-5. Computes `e = exp(-a * (r - re))` and the force magnitude
-   `Fmag = 2 * De * a * (1 - e) * e / r` (the trailing `/ r` produces
-   the per-component factor when multiplied by `(dx, dy, dz)`).
-6. Computes the bond's potential energy
-   `U_k = De * (1 - e)^2` and the bond's scalar virial
-   `W_k = Fmag * r2` (equivalent to `r · F` with `F` aligned along
-   `(dx, dy, dz)`).
-7. Writes the force on `atom_i` to `bond_pair_*[2 * k]` as
-   `Fmag * (dx, dy, dz)`.
-8. Writes the force on `atom_j` to `bond_pair_*[2 * k + 1]` as
-   `-Fmag * (dx, dy, dz)`.
-9. Writes `U_k * 0.5f` to both `bond_pair_energy[2 * k]` and
-   `bond_pair_energy[2 * k + 1]`.
-10. Writes `W_k * 0.5f` to both `bond_pair_virial[2 * k]` and
-    `bond_pair_virial[2 * k + 1]`.
-
-When `r == 0` exactly (degenerate overlapping atoms), the kernel writes
-`0` to all ten slots (five quantities × two slots) rather than producing
-NaN. This is a defensive guard; physical Morse simulations never reach
-`r == 0` because the exponential blows up at small `r`.
-
-#### `reduce_bond_forces` <!-- rq-b2559e09 -->
-
-One thread per atom `a = blockIdx.x * blockDim.x + threadIdx.x` (block
-size 256, grid `ceil(n / 256)`). Thread `a`:
+One thread per atom `a = blockIdx.x * blockDim.x + threadIdx.x`
+(block size 256, grid `ceil(n / 256)`). Thread `a`:
 
 1. Reads `start = atom_bond_offsets[a]` and `end =
    atom_bond_offsets[a + 1]`.
-2. Initialises five running sums to zero: `sum_x`, `sum_y`, `sum_z`,
-   `sum_e`, `sum_w`.
+2. Initialises five running sums to zero: `sum_x`, `sum_y`,
+   `sum_z`, `sum_e`, `sum_w`.
 3. For each `i` in `start .. end`:
    `slot = atom_bond_indices[i];
     sum_x += bond_pair_x[slot];  (similarly y, z)
@@ -233,47 +244,55 @@ size 256, grid `ceil(n / 256)`). Thread `a`:
     slot_force_z[a] = sum_z; slot_energy[a] = sum_e;
     slot_virial[a] = sum_w`.
 
-The summation is left-to-right in `atom_bond_indices` order. Since
-the indices are sorted at load time, the order is deterministic.
+The summation is left-to-right in `atom_bond_indices` order.
+Since the indices are sorted at load time, the order is
+deterministic.
+
+The reduction kernel is universal across bonded slots: any
+bonded potential's bond-pair scratch buffer sums into per-atom
+forces the same way. It is compiled at build time via `nvcc`
+(not via nvrtc) and loaded as PTX module `"bonded"`.
 
 ### PTX Module Loading <!-- rq-aa36ee0b -->
 
-`init_device()` loads the compiled `kernels/morse.cu` PTX as module
-`"morse"` and captures its `morse_bond_force` and `reduce_bond_forces`
-functions into the `Kernels` handle (see `build-pipeline.md`).
+`init_device()` loads the compiled `kernels/bonded.cu` PTX as
+module `"bonded"` and captures its `reduce_bond_forces` function
+into the `Kernels` handle. The bonded JIT module
+(`"heddle_jit_composed_bonded"`) is loaded separately by
+`ForceField::new` from the JIT-composed PTX; it is owned by the
+`ForceField` instance, not the global `Kernels` handle. See
+`build-pipeline.md` and `jit-composed-intramolecular.md`.
 
 ### Rust Launch Helpers <!-- rq-637c4fdd -->
 
-Two free functions in `src/gpu/kernels.rs`, re-exported from
-`crate::gpu`:
+The framework's per-step dispatch (see
+`jit-composed-intramolecular.md`'s *Parameter Binding and Launch*)
+launches the slot's composed bonded entry point and then the
+universal reduction kernel. Slots do not expose standalone
+launchers for the contribution kernel; participation in the
+JIT-composed module is the only path to dispatch the per-bond
+contribution.
 
-- `morse_bond_force(state: &mut MorseBondedState, particle_buffers: &ParticleBuffers, sim_box: &SimulationBox) -> Result<(), GpuError>` <!-- rq-66d80d54 -->
-  - Launches the `morse_bond_force` kernel, writing per-slot force,
-    half-energy, and half-virial into the state's `bond_pair_*` fields.
-  - Block size 256; grid size `ceil(state.bond_count / 256)`.
-  - Returns `Ok(())` without launching when `state.bond_count == 0`.
-  - Invokes the kernel through the `Kernels` handle reached from its
-    arguments; it performs no string-keyed kernel lookup of its own (see
-    `build-pipeline.md`).
+The reduction is launched through the framework's
+`reduce_bond_forces` helper:
 
-- `reduce_bond_forces(state: &mut MorseBondedState, output_force_x: &mut CudaViewMut<'_, f32>, output_force_y: &mut CudaViewMut<'_, f32>, output_force_z: &mut CudaViewMut<'_, f32>, output_energy: &mut CudaViewMut<'_, f32>, output_virial: &mut CudaViewMut<'_, f32>) -> Result<(), GpuError>` <!-- rq-10adebc4 -->
-  - Launches the `reduce_bond_forces` kernel, summing each atom's bond
-    contributions into the five caller-supplied output views (force x,
-    force y, force z, energy share, virial share). Output views have
-    length `state.particle_count`.
+- `reduce_bond_forces(state: &mut MorseBondedState, output_force_x: &mut CudaViewMut<'_, Real>, output_force_y: &mut CudaViewMut<'_, Real>, output_force_z: &mut CudaViewMut<'_, Real>, output_energy: &mut CudaViewMut<'_, Real>, output_virial: &mut CudaViewMut<'_, Real>) -> Result<(), GpuError>` <!-- rq-10adebc4 -->
+  - Launches the `reduce_bond_forces` kernel, summing each atom's
+    bond contributions into the five caller-supplied output views.
+    Output views have length `state.particle_count`.
   - Block size 256; grid size `ceil(state.particle_count / 256)`.
   - Returns `Ok(())` without launching when
     `state.particle_count == 0`.
-  - Invokes the kernel through the `Kernels` handle, like
-    `morse_bond_force`.
 
 ## Launch Configuration <!-- rq-c1678fe1 -->
 
-- Block size: 256 threads for both kernels.
-- Grid size: `ceil(bond_count / 256)` for the force kernel,
-  `ceil(particle_count / 256)` for the reduction.
-- Shared memory: zero bytes.
-- Stream: the default stream carried by `particle_buffers.device`.
+- Composed bonded contribution kernel: block size 256, grid
+  `ceil(bond_count / 256)`, no shared memory. Dispatched by the
+  framework from the JIT-composed bonded module.
+- Reduction kernel: block size 256, grid
+  `ceil(particle_count / 256)`, no shared memory.
+- Both run on the default stream carried by
+  `particle_buffers.device`.
 
 ## Determinism <!-- rq-e5ba2e00 -->
 

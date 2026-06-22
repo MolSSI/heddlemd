@@ -5,7 +5,7 @@ use cudarc::nvrtc::Ptx;
 
 use crate::gpu::device::get_func;
 use crate::gpu::{
-    GpuContext, GpuError, Kernels, ParticleBuffers, harmonic_angle_force, reduce_angle_forces,
+    GpuContext, GpuError, Kernels, ParticleBuffers, reduce_angle_forces,
 };
 use crate::kernels;
 use crate::io::config::AngleTypeConfig;
@@ -14,8 +14,8 @@ use crate::timings::{KernelStage, Timings};
 
 use super::topology::AngleList;
 use super::{
-    AggregateLevel, ForceFieldError, Potential, PotentialBuildContext, PotentialBuilder,
-    SlotOutputView,
+    AggregateLevel, AngleForceFragment, AngleScratchView, ForceFieldError, ForceLaunchBuilder,
+    ForceLaunchContext, Potential, PotentialBuildContext, PotentialBuilder, SlotOutputView,
 };
 use crate::precision::Real;
 
@@ -114,8 +114,8 @@ impl Potential for HarmonicAngleState {
 
     fn compute(
         &mut self,
-        buffers: &ParticleBuffers,
-        sim_box: &SimulationBox,
+        _buffers: &ParticleBuffers,
+        _sim_box: &SimulationBox,
         mut output: SlotOutputView<'_>,
         _cx: &crate::forces::ForceFieldContext<'_>,
         timings: &mut Timings,
@@ -126,21 +126,11 @@ impl Potential for HarmonicAngleState {
             // already prepared the class accumulator.
             return Ok(());
         }
-        timings.kernel_start(KernelStage::HARMONIC_ANGLE_FORCE)?;
-        harmonic_angle_force(
-            buffers,
-            &self.angles,
-            &self.angle_k_theta,
-            &self.angle_theta_0,
-            sim_box,
-            &mut self.angle_triple_x,
-            &mut self.angle_triple_y,
-            &mut self.angle_triple_z,
-            &mut self.angle_triple_energy,
-            &mut self.angle_triple_virial,
-            self.angle_count,
-        )?;
-        timings.kernel_stop(KernelStage::HARMONIC_ANGLE_FORCE)?;
+        // The per-angle contribution kernel runs from the framework's
+        // JIT-composed angle module dispatch *before* this method; by
+        // the time we get here, the slot's angle-triple scratch buffer
+        // holds the per-angle contributions. Only the per-atom
+        // reduction is the slot's responsibility.
         let write_scalars = matches!(level, AggregateLevel::ForcesAndScalars);
         timings.kernel_start(KernelStage::REDUCE_ANGLE_FORCES)?;
         reduce_angle_forces(
@@ -162,6 +152,27 @@ impl Potential for HarmonicAngleState {
         )?;
         timings.kernel_stop(KernelStage::REDUCE_ANGLE_FORCES)?;
         Ok(())
+    }
+
+    fn bind_angle_force_args(
+        &self,
+        _ctx: &ForceLaunchContext<'_>,
+        builder: &mut ForceLaunchBuilder,
+    ) {
+        builder.push_device_buffer(&self.angle_k_theta);
+        builder.push_device_buffer(&self.angle_theta_0);
+    }
+
+    fn angle_scratch(&self) -> Option<AngleScratchView<'_>> {
+        Some(AngleScratchView {
+            angles: &self.angles,
+            angle_triple_x: &self.angle_triple_x,
+            angle_triple_y: &self.angle_triple_y,
+            angle_triple_z: &self.angle_triple_z,
+            angle_triple_energy: &self.angle_triple_energy,
+            angle_triple_virial: &self.angle_triple_virial,
+            angle_count: self.angle_count,
+        })
     }
 }
 
@@ -206,12 +217,97 @@ impl PotentialBuilder for HarmonicAngleBuilder {
     fn box_clone(&self) -> Box<dyn PotentialBuilder> {
         Box::new(self.clone())
     }
+
+    fn angle_force_fragment(
+        &self,
+        cx: &PotentialBuildContext<'_>,
+    ) -> Result<Option<AngleForceFragment>, ForceFieldError> {
+        if cx.angle_list.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(harmonic_angle_force_fragment()))
+    }
+}
+
+/// Harmonic angle force fragment for the JIT-composed angle module.
+/// The functor exposes `evaluate(dx_ij, dy_ij, dz_ij, dx_kj, dy_kj,
+/// dz_kj, angle_type_index, fix, fiy, fiz, fkx, fky, fkz, u_m, w_m)`
+/// per the contract in `rqm/forces/jit-composed-intramolecular.md`.
+pub fn harmonic_angle_force_fragment() -> AngleForceFragment {
+    let functor_source = r#"
+struct HarmonicAngleFunctor {
+    const Real *angle_k_theta;
+    const Real *angle_theta_0;
+
+    __device__ inline void evaluate(
+        Real dx_ij, Real dy_ij, Real dz_ij,
+        Real dx_kj, Real dy_kj, Real dz_kj,
+        unsigned int angle_type_index,
+        Real &fix, Real &fiy, Real &fiz,
+        Real &fkx, Real &fky, Real &fkz,
+        Real &u_m,
+        Real &w_m) const
+    {
+        Real dij2 = dx_ij * dx_ij + dy_ij * dy_ij + dz_ij * dz_ij;
+        Real dkj2 = dx_kj * dx_kj + dy_kj * dy_kj + dz_kj * dz_kj;
+        if (dij2 == R(0.0) || dkj2 == R(0.0)) {
+            fix = R(0.0); fiy = R(0.0); fiz = R(0.0);
+            fkx = R(0.0); fky = R(0.0); fkz = R(0.0);
+            u_m = R(0.0); w_m = R(0.0);
+            return;
+        }
+        Real dij = Real_sqrt(dij2);
+        Real dkj = Real_sqrt(dkj2);
+        Real inv_dij_dkj = R(1.0) / (dij * dkj);
+        Real dot = dx_ij * dx_kj + dy_ij * dy_kj + dz_ij * dz_kj;
+        Real cos_theta = dot * inv_dij_dkj;
+        if (cos_theta >  R(1.0)) cos_theta =  R(1.0);
+        if (cos_theta < -R(1.0)) cos_theta = -R(1.0);
+        Real sin_sq = R(1.0) - cos_theta * cos_theta;
+        Real sin_theta = Real_sqrt(sin_sq > R(0.0) ? sin_sq : R(0.0));
+        if (sin_theta < R(1.0e-7)) {
+            fix = R(0.0); fiy = R(0.0); fiz = R(0.0);
+            fkx = R(0.0); fky = R(0.0); fkz = R(0.0);
+            u_m = R(0.0); w_m = R(0.0);
+            return;
+        }
+        Real theta = Real_atan2(dij * dkj * sin_theta, dot);
+        Real k = angle_k_theta[angle_type_index];
+        Real theta_0 = angle_theta_0[angle_type_index];
+        Real dtheta = theta - theta_0;
+        Real g = -k * dtheta / sin_theta;
+        Real inv_dij2 = R(1.0) / dij2;
+        Real inv_dkj2 = R(1.0) / dkj2;
+        fix = g * (cos_theta * inv_dij2 * dx_ij - inv_dij_dkj * dx_kj);
+        fiy = g * (cos_theta * inv_dij2 * dy_ij - inv_dij_dkj * dy_kj);
+        fiz = g * (cos_theta * inv_dij2 * dz_ij - inv_dij_dkj * dz_kj);
+        fkx = g * (cos_theta * inv_dkj2 * dx_kj - inv_dij_dkj * dx_ij);
+        fky = g * (cos_theta * inv_dkj2 * dy_kj - inv_dij_dkj * dy_ij);
+        fkz = g * (cos_theta * inv_dkj2 * dz_kj - inv_dij_dkj * dz_ij);
+        u_m = R(0.5) * k * dtheta * dtheta;
+        w_m = (dx_ij * fix + dy_ij * fiy + dz_ij * fiz)
+            + (dx_kj * fkx + dy_kj * fky + dz_kj * fkz);
+    }
+};
+"#;
+    let entry_point_args = r#"    const Real *harmonic_angle_k_theta,
+    const Real *harmonic_angle_theta_0,
+"#;
+    let functor_init_source = r#"    functor.angle_k_theta = harmonic_angle_k_theta;
+    functor.angle_theta_0 = harmonic_angle_theta_0;
+"#;
+    AngleForceFragment {
+        label: "harmonic_angle",
+        functor_struct_name: "HarmonicAngleFunctor",
+        functor_source: functor_source.to_string(),
+        entry_point_args: entry_point_args.to_string(),
+        functor_init_source: functor_init_source.to_string(),
+    }
 }
 
 // rq-2093594f
 #[derive(Debug, Clone)]
 pub struct AngleKernels {
-    pub harmonic_angle_force: CudaFunction,
     pub reduce_angle_forces: CudaFunction,
 }
 
@@ -220,10 +316,9 @@ impl AngleKernels {
         device.load_ptx(
             Ptx::from_src(kernels::ANGLE),
             "angle",
-            &["harmonic_angle_force", "reduce_angle_forces"],
+            &["reduce_angle_forces"],
         )?;
         Ok(AngleKernels {
-            harmonic_angle_force: get_func(device, "angle", "harmonic_angle_force")?,
             reduce_angle_forces: get_func(device, "angle", "reduce_angle_forces")?,
         })
     }

@@ -39,16 +39,19 @@ impl KernelStage {
     /// rq-9f309378
     pub const JIT_COMPOSED_PAIR_FORCE: KernelStage =
         KernelStage::new("jit_composed_pair_force");
+    /// rq-2d2eaf72
+    pub const JIT_COMPOSED_BONDED_FORCE: KernelStage =
+        KernelStage::new("jit_composed_bonded_force");
+    /// rq-2d2eaf72
+    pub const JIT_COMPOSED_ANGLE_FORCE: KernelStage =
+        KernelStage::new("jit_composed_angle_force");
     pub const SPME_RECIP_PIPELINE: KernelStage =
         KernelStage::new("spme_recip_pipeline");
     pub const SPME_FORCE_GATHER: KernelStage = KernelStage::new("spme_force_gather");
     pub const LANGEVIN_KICK_HALF: KernelStage = KernelStage::new("langevin_kick_half");
     pub const LANGEVIN_DRIFT_HALF: KernelStage = KernelStage::new("langevin_drift_half");
     pub const LANGEVIN_OU_STEP: KernelStage = KernelStage::new("langevin_ou_step");
-    pub const MORSE_BOND_FORCE: KernelStage = KernelStage::new("morse_bond_force");
     pub const REDUCE_BOND_FORCES: KernelStage = KernelStage::new("reduce_bond_forces");
-    pub const HARMONIC_ANGLE_FORCE: KernelStage =
-        KernelStage::new("harmonic_angle_force");
     pub const REDUCE_ANGLE_FORCES: KernelStage =
         KernelStage::new("reduce_angle_forces");
     pub const KINETIC_ENERGY_REDUCE: KernelStage =
@@ -113,11 +116,11 @@ impl KernelStage {
         Self::COULOMB_PAIR_FORCE,
         Self::SPME_REAL_PAIR_FORCE,
         Self::JIT_COMPOSED_PAIR_FORCE,
+        Self::JIT_COMPOSED_BONDED_FORCE,
+        Self::JIT_COMPOSED_ANGLE_FORCE,
         Self::SPME_RECIP_PIPELINE,
         Self::SPME_FORCE_GATHER,
-        Self::MORSE_BOND_FORCE,
         Self::REDUCE_BOND_FORCES,
-        Self::HARMONIC_ANGLE_FORCE,
         Self::REDUCE_ANGLE_FORCES,
         Self::KINETIC_ENERGY_REDUCE,
         Self::NHC_RESCALE_VELOCITIES,

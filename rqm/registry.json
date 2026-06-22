@@ -1242,6 +1242,14 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-0b1918e0": {
+    "decl": "### Trait methods",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 3,
+    "refs": [],
+    "title": "Trait methods",
+    "type": "section"
+  },
   "rq-0b4600e2": {
     "decl": "- `ShakeError` — error type returned by `ShakeConstraintsState::new`.",
     "file": "integration/shake",
@@ -1283,6 +1291,13 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "Two-particle pair virial matches r_ij · F_ij",
+    "type": "scenario"
+  },
+  "rq-0b75dd43": {
+    "decl": "Scenario: Two independent runs of the angle composed kernel on identical inputs are byte-identical",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "Two independent runs of the angle composed kernel on identical inputs are byte-identical",
     "type": "scenario"
   },
   "rq-0b7f7023": {
@@ -1696,6 +1711,14 @@
     "title": "Berendsen \"conserved quantity\"",
     "type": "section"
   },
+  "rq-0f8a60e2": {
+    "decl": "### Error variants",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 3,
+    "refs": [],
+    "title": "Error variants",
+    "type": "section"
+  },
   "rq-0fa3b49f": {
     "decl": "Scenario: check_min_perpendicular_width returns Ok when every width meets the threshold",
     "file": "simulation-box",
@@ -1808,6 +1831,14 @@
     "title": "Two independent composed runs with identical configs are byte-identical",
     "type": "scenario"
   },
+  "rq-10313445": {
+    "decl": "## Slot Participation",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 2,
+    "refs": [],
+    "title": "Slot Participation",
+    "type": "section"
+  },
   "rq-105afb1d": {
     "decl": "Scenario: min <= mean <= max for every row",
     "file": "performance-analysis",
@@ -1876,7 +1907,7 @@
     "type": "file"
   },
   "rq-10adebc4": {
-    "decl": "- `reduce_bond_forces(state: &mut MorseBondedState, output_force_x: &mut CudaViewMut<'_, f32>, output_force_y: &mut CudaViewMut<'_, f32>, output_force_z: &mut CudaViewMut<'_, f32>, output_energy: &mut CudaViewMut<'_, f32>, output_virial: &mut CudaViewMut<'_, f32>) -> Result<(), GpuError>`",
+    "decl": "- `reduce_bond_forces(state: &mut MorseBondedState, output_force_x: &mut CudaViewMut<'_, Real>, output_force_y: &mut CudaViewMut<'_, Real>, output_force_z: &mut CudaViewMut<'_, Real>, output_energy: &mut CudaViewMut<'_, Real>, output_virial: &mut CudaViewMut<'_, Real>) -> Result<(), GpuError>`",
     "file": "forces/morse-bonded",
     "refs": [
       {
@@ -1886,6 +1917,13 @@
     ],
     "title": "reduce_bond_forces",
     "type": "api-item"
+  },
+  "rq-10ae4fe6": {
+    "decl": "Scenario: step() with one angle slot launches the angle composed kernel once and the reduction once",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "step() with one angle slot launches the angle composed kernel once and the reduction once",
+    "type": "scenario"
   },
   "rq-10cc8ddf": {
     "decl": "### CUDA Kernels",
@@ -2579,6 +2617,13 @@
     "title": "step(ForcesOnly) launches the _f variant; step(ForcesAndScalars) launches the _fev variant",
     "type": "scenario"
   },
+  "rq-16ec7e24": {
+    "decl": "Scenario: step() with two bonded slots launches the bonded composed kernel twice",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "step() with two bonded slots launches the bonded composed kernel twice",
+    "type": "scenario"
+  },
   "rq-1708fc0a": {
     "decl": "Scenario: Pair-force kernels declare no shared memory",
     "file": "forces/pair-force-kernel",
@@ -2731,6 +2776,13 @@
       }
     ],
     "title": "Empty ConstraintRegistry on a non-empty list reports UnsupportedKind",
+    "type": "scenario"
+  },
+  "rq-182549b3": {
+    "decl": "Scenario: A builder that returns Some(_) from both pair_force_fragment and bonded_force_fragment is rejected",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "A builder that returns Some(_) from both pair_force_fragment and bonded_force_fragment is rejected",
     "type": "scenario"
   },
   "rq-182dd348": {
@@ -3434,6 +3486,13 @@
     "title": "Missing [[particle_types]] is rejected",
     "type": "scenario"
   },
+  "rq-1e1cd9c7": {
+    "decl": "- `ForceLaunchContext<'a>` — shape-specific per-launch context",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "ForceLaunchContext",
+    "type": "api-item"
+  },
   "rq-1e27ee47": {
     "decl": "Scenario: BarostatRegistry::with_builtins() exposes c-rescale alongside berendsen",
     "file": "integration/c-rescale-barostat",
@@ -3773,10 +3832,6 @@
       },
       {
         "file": "src/forces/lj.rs",
-        "kind": "code"
-      },
-      {
-        "file": "src/forces/lj_spme_real_fused.rs",
         "kind": "code"
       },
       {
@@ -4662,6 +4717,14 @@
     "title": "Bit-exact equality after a 100-step run",
     "type": "scenario"
   },
+  "rq-28611487": {
+    "decl": "### Types",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-28659fbe": {
     "decl": "- `TrajectoryWriter::open(path: &Path, units: UnitSystem, include_velocities: bool, include_images: bool, type_names: Vec<String>) -> Result<TrajectoryWriter, TrajectoryWriterError>`",
     "file": "io/trajectory-output",
@@ -5247,6 +5310,13 @@
     "title": "NaN per-pair contribution propagates to NaN per-particle output",
     "type": "scenario"
   },
+  "rq-2d2eaf72": {
+    "decl": "# Feature: JIT-Composed Intramolecular Kernels",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "Feature: JIT-Composed Intramolecular Kernels",
+    "type": "file"
+  },
   "rq-2d336703": {
     "decl": "### Iteration count and convergence",
     "file": "integration/shake",
@@ -5356,6 +5426,13 @@
     "refs": [],
     "title": "MTK conserved Hamiltonian",
     "type": "section"
+  },
+  "rq-2e3bda9a": {
+    "decl": "Scenario: Bonded composed module is not compiled when no bonded slot is active",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "Bonded composed module is not compiled when no bonded slot is active",
+    "type": "scenario"
   },
   "rq-2e4e70b4": {
     "decl": "Scenario: Two atoms at equilibrium distance produce zero force",
@@ -5605,6 +5682,13 @@
     "title": "ConfigError",
     "type": "api-item"
   },
+  "rq-311c9f01": {
+    "decl": "- `SlotMultipleShapes { label: &'static str }` — a builder whose",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "SlotMultipleShapes",
+    "type": "api-item"
+  },
   "rq-312906a6": {
     "decl": "### MKT Liouville splitting",
     "file": "integration/nose-hoover-chain",
@@ -5619,14 +5703,6 @@
     "level": 3,
     "refs": [],
     "title": "Kernel stages (CUDA-event timed)",
-    "type": "section"
-  },
-  "rq-312f30ee": {
-    "decl": "#### `harmonic_angle_force`",
-    "file": "forces/harmonic-angle",
-    "level": 4,
-    "refs": [],
-    "title": "`harmonic_angle_force`",
     "type": "section"
   },
   "rq-31430003": {
@@ -5948,7 +6024,7 @@
     "type": "scenario"
   },
   "rq-34bfe79a": {
-    "decl": "- `reduce_angle_forces(state: &mut HarmonicAngleState, output_force_x: &mut CudaViewMut<'_, f32>, output_force_y: &mut CudaViewMut<'_, f32>, output_force_z: &mut CudaViewMut<'_, f32>, output_energy: &mut CudaViewMut<'_, f32>, output_virial: &mut CudaViewMut<'_, f32>) -> Result<(), GpuError>`",
+    "decl": "- `reduce_angle_forces(state: &mut HarmonicAngleState, output_force_x: &mut CudaViewMut<'_, Real>, output_force_y: &mut CudaViewMut<'_, Real>, output_force_z: &mut CudaViewMut<'_, Real>, output_energy: &mut CudaViewMut<'_, Real>, output_virial: &mut CudaViewMut<'_, Real>) -> Result<(), GpuError>`",
     "file": "forces/harmonic-angle",
     "refs": [
       {
@@ -6532,14 +6608,6 @@
     "title": "Algorithm",
     "type": "section"
   },
-  "rq-39cec761": {
-    "decl": "#### `morse_bond_force`",
-    "file": "forces/morse-bonded",
-    "level": 4,
-    "refs": [],
-    "title": "`morse_bond_force`",
-    "type": "section"
-  },
   "rq-3a1eea58": {
     "decl": "Scenario: Scale = 1.0 is equivalent to no exclusion",
     "file": "forces/lj-pair-force",
@@ -6575,10 +6643,10 @@
     "type": "scenario"
   },
   "rq-3aa5f5b8": {
-    "decl": "- `PairForceLaunchBuilder` — opaque argument-builder threaded",
+    "decl": "- `ForceLaunchBuilder` — opaque argument-builder threaded through",
     "file": "forces/framework",
     "refs": [],
-    "title": "PairForceLaunchBuilder",
+    "title": "ForceLaunchBuilder",
     "type": "api-item"
   },
   "rq-3ace72b0": {
@@ -6588,6 +6656,13 @@
     "refs": [],
     "title": "`Thermostat` trait overrides",
     "type": "section"
+  },
+  "rq-3ad303e1": {
+    "decl": "Scenario: Two independent runs of the bonded composed kernel on identical inputs are byte-identical",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "Two independent runs of the bonded composed kernel on identical inputs are byte-identical",
+    "type": "scenario"
   },
   "rq-3adef71d": {
     "decl": "### Functions and methods",
@@ -6980,6 +7055,13 @@
       }
     ],
     "title": "apply launches the expected kernel set",
+    "type": "scenario"
+  },
+  "rq-3e69b82c": {
+    "decl": "Scenario: A bonded builder that returns None from bonded_force_fragment is rejected",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "A bonded builder that returns None from bonded_force_fragment is rejected",
     "type": "scenario"
   },
   "rq-3e744fed": {
@@ -7428,6 +7510,13 @@
       }
     ],
     "title": "Construct velocity-Verlet (lossy) via the integrator registry",
+    "type": "scenario"
+  },
+  "rq-44554f9c": {
+    "decl": "Scenario: kernels/angle.cu does not declare a harmonic_angle_force entry point",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "kernels/angle.cu does not declare a harmonic_angle_force entry point",
     "type": "scenario"
   },
   "rq-44ccc1cb": {
@@ -8195,11 +8284,11 @@
     "type": "section"
   },
   "rq-4c88ee0e": {
-    "decl": "### CUDA Kernels",
+    "decl": "### Source Fragment",
     "file": "forces/harmonic-angle",
     "level": 3,
     "refs": [],
-    "title": "CUDA Kernels",
+    "title": "Source Fragment",
     "type": "section"
   },
   "rq-4ca9b179": {
@@ -8696,6 +8785,14 @@
     "title": "wrap_position is idempotent for a triclinic box",
     "type": "scenario"
   },
+  "rq-529b2c5f": {
+    "decl": "### Composed-module name and entry points",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 3,
+    "refs": [],
+    "title": "Composed-module name and entry points",
+    "type": "section"
+  },
   "rq-52b69f09": {
     "decl": "### Composed-kernel module name and entry points",
     "file": "forces/jit-composed-pair-force",
@@ -8880,6 +8977,13 @@
     ],
     "title": "CUDA Kernels",
     "type": "section"
+  },
+  "rq-538707ad": {
+    "decl": "- `ForceLaunchContext<'a>` — shape-specific per-launch context",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "ForceLaunchContext",
+    "type": "api-item"
   },
   "rq-5395785a": {
     "decl": "Scenario: Image columns appear after pos (and after velo when present) in each data row",
@@ -9135,6 +9239,13 @@
     ],
     "title": "Output File Format",
     "type": "section"
+  },
+  "rq-565ffbcc": {
+    "decl": "- `AngleForceFragment` — same shape as `BondedForceFragment`,",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "AngleForceFragment",
+    "type": "api-item"
   },
   "rq-56ad97f1": {
     "decl": "Scenario: log_every > n_steps writes only the step-0 row",
@@ -10161,6 +10272,13 @@
     "title": "check_min_perpendicular_width flags direction \"c\" when only w_c fails",
     "type": "scenario"
   },
+  "rq-6024a35a": {
+    "decl": "- `AngleForceFragment` — same shape as `BondedForceFragment`,",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "AngleForceFragment",
+    "type": "api-item"
+  },
   "rq-60433fcd": {
     "decl": "Scenario: Lint reports a topology-load failure under the topology stage",
     "file": "simulation-runner",
@@ -10335,6 +10453,13 @@
     "title": "Missing temperature is rejected",
     "type": "scenario"
   },
+  "rq-61a784a9": {
+    "decl": "- `ForceLaunchBuilder` — opaque argument-builder threaded through",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "ForceLaunchBuilder",
+    "type": "api-item"
+  },
   "rq-61b646d2": {
     "decl": "## Construction and Lifetime",
     "file": "minimization/steepest-descent",
@@ -10373,6 +10498,14 @@
     ],
     "title": "All-pairs neighbor mode records lj_pair_force and omits neighbor-list rows",
     "type": "scenario"
+  },
+  "rq-627ed4b9": {
+    "decl": "## Determinism",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
+    "type": "section"
   },
   "rq-6289f344": {
     "decl": "### Example",
@@ -10758,18 +10891,6 @@
     "title": "A fragment that references float directly is rejected at compile time",
     "type": "scenario"
   },
-  "rq-66d80d54": {
-    "decl": "- `morse_bond_force(state: &mut MorseBondedState, particle_buffers: &ParticleBuffers, sim_box: &SimulationBox) -> Result<(), GpuError>`",
-    "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "morse_bond_force",
-    "type": "api-item"
-  },
   "rq-66dfc50f": {
     "decl": "Scenario: Reject a two-type config that omits a pair",
     "file": "io/config-schema",
@@ -10840,6 +10961,14 @@
     "refs": [],
     "title": "Switching interval r_switch == cutoff selects hard-cutoff",
     "type": "scenario"
+  },
+  "rq-6789ce57": {
+    "decl": "## Feature API",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
   },
   "rq-678c233d": {
     "decl": "- `ThermostatRegistry::build_optional(&self, slot: Option<&SlotConfig>, gpu: &GpuContext, particle_count: usize) -> Result<Option<Box<dyn Thermostat>>, ThermostatError>`",
@@ -11097,6 +11226,13 @@
       }
     ],
     "title": "Reject missing schema_version",
+    "type": "scenario"
+  },
+  "rq-69a69fef": {
+    "decl": "Scenario: Bonded composed module is compiled at ForceField::new when at least one bonded slot is active",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "Bonded composed module is compiled at ForceField::new when at least one bonded slot is active",
     "type": "scenario"
   },
   "rq-69bf814f": {
@@ -11412,6 +11548,13 @@
     "title": "Exclusion row with too few columns",
     "type": "scenario"
   },
+  "rq-6cd9aa19": {
+    "decl": "Scenario: Angle composed module is not compiled when no angle slot is active",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "Angle composed module is not compiled when no angle slot is active",
+    "type": "scenario"
+  },
   "rq-6cf916af": {
     "decl": "## Conversions and Source Chains",
     "file": "error-handling",
@@ -11492,6 +11635,13 @@
     "refs": [],
     "title": "Host / device synchronisation <!-- new -->",
     "type": "section"
+  },
+  "rq-6d6e3553": {
+    "decl": "Scenario: Bonded composed-kernel output matches the closed-form Morse force for a non-boundary bond",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "Bonded composed-kernel output matches the closed-form Morse force for a non-boundary bond",
+    "type": "scenario"
   },
   "rq-6d99f9c8": {
     "decl": "### Path resolution and overwrite policy",
@@ -12202,6 +12352,13 @@
     "title": "NaN z-displacement propagates through tilt coupling for a triclinic box",
     "type": "scenario"
   },
+  "rq-74fce41f": {
+    "decl": "- `heddle_jit_composed_bonded_<i>_fev` —",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "heddle_jit_composed_bonded_",
+    "type": "api-item"
+  },
   "rq-750b828f": {
     "decl": "- `CsvrBuilder` — implements `ThermostatBuilder` with",
     "file": "integration/csvr",
@@ -12508,6 +12665,13 @@
     ],
     "title": "Reject non-positive tau_p",
     "type": "scenario"
+  },
+  "rq-7773e9e8": {
+    "decl": "- `BondedForceFragment` — self-contained CUDA C++ source fragment",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "BondedForceFragment",
+    "type": "api-item"
   },
   "rq-779092ca": {
     "decl": "- `TimingsError` — error type. Variants:",
@@ -14380,6 +14544,14 @@
     "title": "AnalyzeSummary",
     "type": "api-item"
   },
+  "rq-892e8856": {
+    "decl": "## Source-Fragment Contract — Bonded Shape",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 2,
+    "refs": [],
+    "title": "Source-Fragment Contract — Bonded Shape",
+    "type": "section"
+  },
   "rq-894c16c4": {
     "decl": "Scenario: Defaults populate the output section when [output] is omitted",
     "file": "io/config-schema",
@@ -14606,6 +14778,14 @@
       }
     ],
     "title": "Functions and methods",
+    "type": "section"
+  },
+  "rq-8bf40375": {
+    "decl": "## Parameter Binding and Launch",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 2,
+    "refs": [],
+    "title": "Parameter Binding and Launch",
     "type": "section"
   },
   "rq-8c045718": {
@@ -15085,6 +15265,13 @@
     "title": "rescale_isotropic bumps the generation counter",
     "type": "scenario"
   },
+  "rq-911ec046": {
+    "decl": "Scenario: Angle composed module is compiled at ForceField::new when at least one angle slot is active",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "Angle composed module is compiled at ForceField::new when at least one angle slot is active",
+    "type": "scenario"
+  },
   "rq-9120ab3c": {
     "decl": "Scenario: Two independent calls produce byte-identical accumulators",
     "file": "forces/harmonic-angle",
@@ -15269,6 +15456,13 @@
     "refs": [],
     "title": "CudaGraphExec",
     "type": "api-item"
+  },
+  "rq-92b0af0b": {
+    "decl": "Scenario: step_class(Slow) does not launch the bonded or angle composed kernels",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "step_class(Slow) does not launch the bonded or angle composed kernels",
+    "type": "scenario"
   },
   "rq-92cecd28": {
     "decl": "Scenario: apply launches the expected kernel set",
@@ -16114,6 +16308,13 @@
     "title": "write_timings_file",
     "type": "api-item"
   },
+  "rq-9b913320": {
+    "decl": "Scenario: step() with one bonded slot launches the bonded composed kernel once and the reduction once",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "step() with one bonded slot launches the bonded composed kernel once and the reduction once",
+    "type": "scenario"
+  },
   "rq-9ba11e1e": {
     "decl": "Scenario: rescale_isotropic rejects non-finite factor",
     "file": "integration/berendsen-barostat",
@@ -16175,6 +16376,13 @@
     ],
     "title": "ShakeConstraintsState::new rejects constraints > MAX_GROUP_CONSTRAINTS",
     "type": "scenario"
+  },
+  "rq-9bd9ccd4": {
+    "decl": "- `bind_angle_force_args(&self, ctx, builder)` — angle analogue.",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "bind_angle_force_args",
+    "type": "api-item"
   },
   "rq-9be2f56a": {
     "decl": "## Slot Composition",
@@ -16429,11 +16637,11 @@
     "type": "scenario"
   },
   "rq-9d9ca545": {
-    "decl": "#### `reduce_angle_forces`",
+    "decl": "### Reduction Kernel",
     "file": "forces/harmonic-angle",
-    "level": 4,
+    "level": 3,
     "refs": [],
-    "title": "`reduce_angle_forces`",
+    "title": "Reduction Kernel",
     "type": "section"
   },
   "rq-9da14aa1": {
@@ -16630,7 +16838,16 @@
   "rq-9f309378": {
     "decl": "# Feature: JIT-Composed Pair-Force Kernel",
     "file": "forces/jit-composed-pair-force",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: JIT-Composed Pair-Force Kernel",
     "type": "file"
   },
@@ -17928,6 +18145,13 @@
     "title": "ParticleState",
     "type": "api-item"
   },
+  "rq-ac1403d3": {
+    "decl": "- `bonded_force_fragment(&self, cx: &PotentialBuildContext<'_>)",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "bonded_force_fragment",
+    "type": "api-item"
+  },
   "rq-ac1c8916": {
     "decl": "Scenario: Reject case-mismatched units value",
     "file": "io/unit-system",
@@ -18054,6 +18278,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-ad105510": {
+    "decl": "Scenario: FragmentCompileFailed surfaces the bonded slot labels of every contributing fragment",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "FragmentCompileFailed surfaces the bonded slot labels of every contributing fragment",
+    "type": "scenario"
   },
   "rq-ad2f7a73": {
     "decl": "Scenario: A group whose constraints list exceeds MAX_GROUP_CONSTRAINTS is rejected at config load",
@@ -18426,6 +18657,13 @@
     "title": "Pair inside the inner plateau is unsmoothed",
     "type": "scenario"
   },
+  "rq-b08937a3": {
+    "decl": "- `bind_bonded_force_args(&self, ctx: &ForceLaunchContext<'_>,",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "bind_bonded_force_args",
+    "type": "api-item"
+  },
   "rq-b09032cb": {
     "decl": "- `ParticleBuffers::new(device: Arc<CudaDevice>, state: &ParticleState) -> Result<ParticleBuffers, ParticleStateError>`",
     "file": "particle-state",
@@ -18602,11 +18840,11 @@
     "type": "scenario"
   },
   "rq-b2559e09": {
-    "decl": "#### `reduce_bond_forces`",
+    "decl": "### Reduction Kernel",
     "file": "forces/morse-bonded",
-    "level": 4,
+    "level": 3,
     "refs": [],
-    "title": "`reduce_bond_forces`",
+    "title": "Reduction Kernel",
     "type": "section"
   },
   "rq-b296ab12": {
@@ -18949,6 +19187,14 @@
     "title": "log_column_names",
     "type": "api-item"
   },
+  "rq-b677d7a4": {
+    "decl": "### Framework integration",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 3,
+    "refs": [],
+    "title": "Framework integration",
+    "type": "section"
+  },
   "rq-b67882f0": {
     "decl": "### Framework integration",
     "file": "forces/jit-composed-pair-force",
@@ -19114,6 +19360,13 @@
     "refs": [],
     "title": "PotentialBuildContext exposes every parsed-config input by reference",
     "type": "scenario"
+  },
+  "rq-b77f10a0": {
+    "decl": "- `BondedForceFragment` — self-contained CUDA C++ source fragment",
+    "file": "forces/framework",
+    "refs": [],
+    "title": "BondedForceFragment",
+    "type": "api-item"
   },
   "rq-b7bbabd0": {
     "decl": "### Newton's third law",
@@ -19461,6 +19714,14 @@
     ],
     "title": "Feature: Performance Analysis and Timings Output",
     "type": "file"
+  },
+  "rq-bbbcfdc3": {
+    "decl": "## Out of Scope",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-bc442f5b": {
     "decl": "### Particle IDs",
@@ -20475,6 +20736,13 @@
     "title": "λ > 1 when K_old < K_target (system needs heating)",
     "type": "scenario"
   },
+  "rq-c6e8020e": {
+    "decl": "- `MissingAngleFragment { label: &'static str }` — the angle",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "MissingAngleFragment",
+    "type": "api-item"
+  },
   "rq-c6f6a13c": {
     "decl": "- `spme_force_gather(particle_buffers, spme_state, slot_output) -> Result<(), GpuError>`",
     "file": "forces/spme",
@@ -20651,6 +20919,14 @@
     "title": "Column format: atom_i  atom_j  [scale_lj]  [scale_coul]",
     "type": "file"
   },
+  "rq-c8fb9600": {
+    "decl": "## Source-Fragment Contract — Angle Shape",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 2,
+    "refs": [],
+    "title": "Source-Fragment Contract — Angle Shape",
+    "type": "section"
+  },
   "rq-c9016748": {
     "decl": "## Feature API",
     "file": "particle-state",
@@ -20670,6 +20946,13 @@
     ],
     "title": "log_column_names",
     "type": "api-item"
+  },
+  "rq-c90f4105": {
+    "decl": "Scenario: step(ForcesOnly) launches the _f variant; step(ForcesAndScalars) launches the _fev variant",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "step(ForcesOnly) launches the _f variant; step(ForcesAndScalars) launches the _fev variant",
+    "type": "scenario"
   },
   "rq-c95dd6c9": {
     "decl": "Scenario: Exclusion scaling multiplies the switched force, energy, and virial",
@@ -20724,6 +21007,13 @@
       }
     ],
     "title": "run_analyses_with_registries",
+    "type": "api-item"
+  },
+  "rq-c9ac8000": {
+    "decl": "- `angle_force_fragment(&self, cx: &PotentialBuildContext<'_>)",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "angle_force_fragment",
     "type": "api-item"
   },
   "rq-c9b26a08": {
@@ -21650,11 +21940,11 @@
     "type": "scenario"
   },
   "rq-d28ad917": {
-    "decl": "### CUDA Kernels",
+    "decl": "### Source Fragment",
     "file": "forces/morse-bonded",
     "level": 3,
     "refs": [],
-    "title": "CUDA Kernels",
+    "title": "Source Fragment",
     "type": "section"
   },
   "rq-d29872e4": {
@@ -22305,6 +22595,14 @@
     "title": "SimulationSetup::new performs the initial-velocity constraint projection",
     "type": "scenario"
   },
+  "rq-d90f3107": {
+    "decl": "## Composed-Module Structure",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 2,
+    "refs": [],
+    "title": "Composed-Module Structure",
+    "type": "section"
+  },
   "rq-d920e446": {
     "decl": "Scenario: fill kernel does not write beyond the buffer",
     "file": "build-pipeline",
@@ -22553,18 +22851,6 @@
     "refs": [],
     "title": "Types",
     "type": "section"
-  },
-  "rq-db5924d8": {
-    "decl": "- `harmonic_angle_force(state: &mut HarmonicAngleState, particle_buffers: &ParticleBuffers, sim_box: &SimulationBox) -> Result<(), GpuError>`",
-    "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "src/gpu/kernels.rs",
-        "kind": "code"
-      }
-    ],
-    "title": "harmonic_angle_force",
-    "type": "api-item"
   },
   "rq-db6e7977": {
     "decl": "Scenario: mtk_position_drift with exp_b_dt=1.0, phi_x_dt=dt reduces to a plain VV drift",
@@ -23117,6 +23403,13 @@
     ],
     "title": "Reject NaN dt",
     "type": "scenario"
+  },
+  "rq-e045f2ef": {
+    "decl": "- `MissingBondedFragment { label: &'static str }` — a slot whose",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "MissingBondedFragment",
+    "type": "api-item"
   },
   "rq-e06bcfb0": {
     "decl": "### `Properties`",
@@ -23765,6 +24058,14 @@
     "title": "Top-level units with an unknown string is rejected",
     "type": "scenario"
   },
+  "rq-e5f8b6fc": {
+    "decl": "## Compilation",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 2,
+    "refs": [],
+    "title": "Compilation",
+    "type": "section"
+  },
   "rq-e60481e9": {
     "decl": "Scenario: apply_post on empty state is a no-op",
     "file": "integration/framework",
@@ -24285,6 +24586,13 @@
     "refs": [],
     "title": "Image flags do not widen under f64",
     "type": "scenario"
+  },
+  "rq-eb943277": {
+    "decl": "- `heddle_jit_composed_bonded_<i>_f` — `AggregateLevel::ForcesOnly`",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "heddle_jit_composed_bonded_",
+    "type": "api-item"
   },
   "rq-eb9e43e7": {
     "decl": "Scenario: run_simulation rejects a custom-kind config because its built-in registries do not match",
@@ -26027,6 +26335,13 @@
     "title": "KE of empty input is zero",
     "type": "scenario"
   },
+  "rq-fa85466d": {
+    "decl": "Scenario: kernels/morse.cu does not declare a morse_bond_force entry point",
+    "file": "forces/jit-composed-intramolecular",
+    "refs": [],
+    "title": "kernels/morse.cu does not declare a morse_bond_force entry point",
+    "type": "scenario"
+  },
   "rq-fa98ca13": {
     "decl": "Scenario: Copy of a SimulationBox carries the original's generation",
     "file": "simulation-box",
@@ -26346,6 +26661,14 @@
     "level": 2,
     "refs": [],
     "title": "Empty State and degenerate cases",
+    "type": "section"
+  },
+  "rq-fd955f5e": {
+    "decl": "## Gherkin Scenarios",
+    "file": "forces/jit-composed-intramolecular",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
     "type": "section"
   },
   "rq-fdac1afb": {

@@ -79,17 +79,34 @@ A built-in potential is added by writing a `PotentialBuilder` and inserting
 it at the appropriate position in `PotentialRegistry::with_builtins()`.
 The `ForceField::new` body does not change.
 
-Every fast-class pair-force slot (a slot whose `frequency_class()` is
-`Fast` AND whose `max_cutoff()` is `Some(_)`) participates in the
-JIT-composed pair-force kernel (see `jit-composed-pair-force.md`).
-Its builder additionally exposes a CUDA source fragment via
-`PotentialBuilder::pair_force_fragment(cx)`; the framework collects
-the active fragments at `ForceField::new` time, compiles a single
-composed kernel via nvrtc, and launches that one composed kernel in
-place of one kernel per fast-class pair-force slot at step time.
-Slots whose `frequency_class()` is `Slow` or whose `max_cutoff()` is
-`None` are not consulted for a fragment and continue to dispatch via
-their own `Potential::compute` kernel call at step time.
+Fast-class slots participate in one of three JIT-composed kernels
+selected by parallelism shape:
+
+- **Pair-force shape** (a slot whose `frequency_class()` is `Fast`
+  AND whose `max_cutoff()` is `Some(_)`) participates in the
+  JIT-composed pair-force kernel (see `jit-composed-pair-force.md`).
+  Its builder exposes a CUDA source fragment via
+  `PotentialBuilder::pair_force_fragment(cx)`.
+- **Bonded shape** (a slot whose `frequency_class()` is `Fast`,
+  whose `max_cutoff()` is `None`, and whose builder exposes
+  `bonded_force_fragment(cx)`) participates in the JIT-composed
+  bonded module (see `jit-composed-intramolecular.md`). One launch
+  per active bonded slot from the shared module per step.
+- **Angle shape** (analogous, via `angle_force_fragment(cx)`)
+  participates in the JIT-composed angle module (also
+  `jit-composed-intramolecular.md`). One launch per active angle
+  slot from the shared module per step.
+
+The framework collects each shape's active fragments at
+`ForceField::new` time, compiles a per-shape composed module via
+nvrtc, and dispatches the per-slot launches from the composed
+modules at step time. Slots whose `frequency_class()` is `Slow`,
+or whose builder returns `Ok(None)` from every fragment method,
+are not covered by any composer and continue to dispatch via their
+own `Potential::compute` kernel call at step time. A slot whose
+builder returns `Some(_)` from more than one fragment method is
+rejected at construction with
+`ForceFieldError::SlotMultipleShapes { label }`.
 
 A composite fragment is built as a regular pair-force builder whose
 `displaces()` list names the constituent slot labels whose fragments
@@ -352,8 +369,24 @@ the additive identity. The rest of the pipeline runs normally.
           level: AggregateLevel,
       ) -> Result<(), ForceFieldError>;
 
-      fn bind_pair_force_args(&self, builder: &mut PairForceLaunchBuilder) {
+      fn bind_pair_force_args(&self, builder: &mut ForceLaunchBuilder) {
           panic!("bind_pair_force_args must be overridden for fast-class pair-force slots");
+      }
+
+      fn bind_bonded_force_args(
+          &self,
+          ctx: &ForceLaunchContext<'_>,
+          builder: &mut ForceLaunchBuilder,
+      ) {
+          panic!("bind_bonded_force_args must be overridden for fast-class bonded slots");
+      }
+
+      fn bind_angle_force_args(
+          &self,
+          ctx: &ForceLaunchContext<'_>,
+          builder: &mut ForceLaunchBuilder,
+      ) {
+          panic!("bind_angle_force_args must be overridden for fast-class angle slots");
       }
   }
   ```
@@ -414,14 +447,16 @@ the additive identity. The rest of the pipeline runs normally.
   that drive the per-potential kernel directly without going
   through the framework's composed-kernel pipeline).
 
-  `bind_pair_force_args` pushes the slot's parameter buffers and
-  scalars onto a `PairForceLaunchBuilder` in the order the slot's
-  source fragment expects them. The framework calls this method on
-  every active fast-class pair-force slot, in canonical slot order,
-  once per composed-kernel launch. The default implementation
-  panics so that a slot which omits an override surfaces a
-  programmer error rather than silently producing bad launches.
-  See `jit-composed-pair-force.md` for the full contract.
+  `bind_pair_force_args`, `bind_bonded_force_args`, and
+  `bind_angle_force_args` push the slot's parameter buffers and
+  scalars onto a `ForceLaunchBuilder` in the order the slot's
+  source fragment expects them. The framework calls the
+  shape-appropriate method on every active fast-class slot of that
+  shape, in canonical slot order, once per composed-kernel
+  launch. Default implementations panic so a slot that omits the
+  required override surfaces a programmer error rather than
+  silently producing bad launches. See `jit-composed-pair-force.md`
+  and `jit-composed-intramolecular.md` for the per-shape contracts.
 
 - `PairForceFragment` — self-contained CUDA C++ source fragment plus <!-- rq-aa6efe11 -->
   identifying metadata, returned by
@@ -431,7 +466,9 @@ the additive identity. The rest of the pipeline runs normally.
   pub struct PairForceFragment {
       pub label: &'static str,
       pub functor_struct_name: &'static str,
-      pub source: &'static str,
+      pub functor_source: String,
+      pub entry_point_args: String,
+      pub functor_init_source: String,
   }
   ```
 
@@ -439,20 +476,41 @@ the additive identity. The rest of the pipeline runs normally.
   struct shape, precision-shim usage, helper-name namespacing) is
   in `jit-composed-pair-force.md`.
 
-- `PairForceLaunchBuilder` — opaque argument-builder threaded <!-- rq-3aa5f5b8 -->
-  through every active fast-class pair-force slot's
-  `bind_pair_force_args(...)` call. Constructed by the framework
-  once per composed-kernel launch and pre-populated with the
-  launch's common arguments. Slots push their own arguments via:
+- `BondedForceFragment` — self-contained CUDA C++ source fragment <!-- rq-b77f10a0 -->
+  plus identifying metadata, returned by
+  `PotentialBuilder::bonded_force_fragment(cx)`. Same field set as
+  `PairForceFragment`. The functor's contract differs (per-bond
+  evaluation vs per-pair); see `jit-composed-intramolecular.md`.
+
+- `AngleForceFragment` — same shape as `BondedForceFragment`, <!-- rq-6024a35a -->
+  returned by `PotentialBuilder::angle_force_fragment(cx)`. The
+  functor's contract is the angle shape from
+  `jit-composed-intramolecular.md`.
+
+- `ForceLaunchBuilder` — opaque argument-builder threaded through <!-- rq-3aa5f5b8 -->
+  every active fast-class slot's bind method
+  (`bind_pair_force_args`, `bind_bonded_force_args`,
+  `bind_angle_force_args`). Shape-agnostic — the binding mechanism
+  is the same across the pair-force, bonded, and angle composers.
+  Constructed by the framework once per composed-kernel launch and
+  pre-populated with the launch's common arguments. Slots push
+  their own arguments via:
 
   ```rust
-  impl PairForceLaunchBuilder {
+  impl ForceLaunchBuilder {
       pub fn push_device_buffer<T>(&mut self, buf: &CudaSlice<T>);
       pub fn push_scalar<T: Copy>(&mut self, value: T);
   }
   ```
 
-  See `jit-composed-pair-force.md` for the per-launch contract.
+  See `jit-composed-pair-force.md` and
+  `jit-composed-intramolecular.md` for the per-launch contracts.
+
+- `ForceLaunchContext<'a>` — shape-specific per-launch context <!-- rq-538707ad -->
+  passed to `bind_bonded_force_args` and `bind_angle_force_args`
+  (the pair-force bind method takes its context via the framework
+  directly without a separate type). Fields vary by shape; see the
+  per-shape composer files for the exact contract.
 
 - `ForceFieldContext<'a>` — bundle of shared services that the framework <!-- inline --> <!-- rq-559783fe -->
   exposes to every `compute` call. Constructed by `ForceField::step`
@@ -576,14 +634,25 @@ the additive identity. The rest of the pipeline runs normally.
     `pair_force_fragment(cx)` returned `None`. Reported from
     `ForceField::new` before the composed source is built. See
     `jit-composed-pair-force.md`.
-  - `FragmentCompileFailed { log: String }` — nvrtc rejected the
-    JIT-composed pair-force kernel source. `log` carries the full
-    nvrtc compile log; the error's `Display` impl additionally
-    names every contributing fragment's slot label. See
-    `jit-composed-pair-force.md`.
+  - `MissingBondedFragment { label: &'static str }` — a slot whose
+    builder names itself bonded but whose `bonded_force_fragment(cx)`
+    returned `None`. See `jit-composed-intramolecular.md`.
+  - `MissingAngleFragment { label: &'static str }` — a slot whose
+    builder names itself angle but whose `angle_force_fragment(cx)`
+    returned `None`. See `jit-composed-intramolecular.md`.
+  - `SlotMultipleShapes { label: &'static str }` — a builder whose
+    `pair_force_fragment(cx)`, `bonded_force_fragment(cx)`, and
+    `angle_force_fragment(cx)` together return `Some(_)` from more
+    than one method. A slot participates in at most one shape's
+    composer.
+  - `FragmentCompileFailed { log: String }` — nvrtc rejected one of
+    the JIT-composed module sources (pair-force, bonded, or angle).
+    `log` carries the full nvrtc compile log; the error's `Display`
+    impl additionally names every contributing fragment's slot
+    label so the caller can identify which fragment is the likely
+    culprit.
   - `FragmentLoadFailed(GpuError)` — `load_ptx` rejected the
-    compiled PTX of the JIT-composed pair-force kernel. See
-    `jit-composed-pair-force.md`.
+    compiled PTX of one of the JIT-composed modules.
 
 - `PotentialBuildContext<'a>` — bundle of borrowed references to every <!-- rq-d116af5f -->
   parsed-config and topology input a built-in `PotentialBuilder` might
@@ -633,6 +702,20 @@ the additive identity. The rest of the pipeline runs normally.
       ) -> Result<Option<PairForceFragment>, ForceFieldError> {
           Ok(None)
       }
+
+      fn bonded_force_fragment(
+          &self,
+          cx: &PotentialBuildContext<'_>,
+      ) -> Result<Option<BondedForceFragment>, ForceFieldError> {
+          Ok(None)
+      }
+
+      fn angle_force_fragment(
+          &self,
+          cx: &PotentialBuildContext<'_>,
+      ) -> Result<Option<AngleForceFragment>, ForceFieldError> {
+          Ok(None)
+      }
   }
   ```
 
@@ -669,6 +752,17 @@ the additive identity. The rest of the pipeline runs normally.
     `max_cutoff() == Some(_)` must override this method to return
     `Ok(Some(fragment))`; a `None` return for such a slot is the
     `MissingPairForceFragment` rejection at `ForceField::new`.
+  - `bonded_force_fragment` returns the slot's CUDA source
+    fragment for the JIT-composed bonded module (see
+    `jit-composed-intramolecular.md`). Default returns `Ok(None)`.
+    Built-in bonded builders override.
+  - `angle_force_fragment` returns the slot's CUDA source
+    fragment for the JIT-composed angle module (see
+    `jit-composed-intramolecular.md`). Default returns `Ok(None)`.
+    Built-in angle builders override.
+  - A builder may not return `Some(_)` from more than one fragment
+    method; doing so causes `ForceField::new` to return
+    `ForceFieldError::SlotMultipleShapes { label }`.
 
 - `PotentialRegistry` — open-extensible registry of `PotentialBuilder`s. <!-- rq-50f0a96a -->
   The registry's iteration order is the slot evaluation order. Fields:
