@@ -85,19 +85,24 @@ integrator runs.
 
 ## Per-Step Kernel Sequence <!-- rq-5f59fa80 -->
 
-Per timestep the CSVR thermostat's `apply_post` runs the following in
-fixed order:
+Per timestep the CSVR thermostat's `apply_post` runs the following
+two device-side steps; the third (the per-particle velocity
+rescale) is dispatched by the JIT-composed post-force per-particle
+kernel (see `jit-composed-post-force.md`).
 
-| Order | Step               | Kernel / call                   | Operation                                          | Stage label             |
-| ----- | ------------------ | ------------------------------- | -------------------------------------------------- | ----------------------- |
-| 1     | KE reduce          | `kinetic_energy_reduce`         | one f32 scalar of `K`                              | `KineticEnergyReduce`   |
-| 2     | Host RNG + rescale | `rescale_velocities` (1 launch) | sample `R`, `S`, compute `α`, scale velocities     | `CsvrRescaleVelocities` |
+| Order | Step               | Kernel / call                                    | Operation                                       | Stage label                  |
+| ----- | ------------------ | ------------------------------------------------ | ----------------------------------------------- | ---------------------------- |
+| 1     | KE reduce          | `kinetic_energy_reduce`                          | one f32 scalar of `K`                           | `KineticEnergyReduce`        |
+| 2     | Sample + factor    | `csvr_sample_and_factor`                         | device-side Philox draws + `α` to `factor_device` | `CsvrSampleAndFactor`        |
+| 3     | Velocity rescale   | composed post-force per-particle kernel          | `v ← α · v` per particle                        | `JitComposedPostForce`       |
 
-`kinetic_energy_reduce` and `rescale_velocities` are reused from
-`nose-hoover-chain.md`; the timings file labels CSVR's velocity-rescale
-call under `CsvrRescaleVelocities` to distinguish it from
-`NhcRescaleVelocities` and `BerendsenRescaleVelocities`. No new CUDA
-kernels.
+The first two kernels run inside `apply_post`; the third runs from
+the JIT-composed post-force per-particle kernel via CSVR's
+participation through its source fragment. The standalone
+`csvr_rescale_velocities` kernel and the corresponding
+`CsvrRescaleVelocities` timings stage no longer exist; the per-
+particle rescale body lives in CSVR's source fragment described
+below.
 
 The host-side work each invocation is `N_f` Philox-4×32-10
 invocations + a chi-squared sum + the `α` calculation; for `N_f` of
@@ -299,13 +304,42 @@ CSVR introduces no new CUDA kernels. It reuses
 
 ## Launch Configuration <!-- rq-cb0c9d24 -->
 
-Per-step launch counts (per `apply_post` invocation):
+Per-step launch counts (per `apply_post` invocation, excluding
+the per-particle velocity rescale which is dispatched from the
+composed kernel):
 
 - `kinetic_energy_reduce`: 1 launch (single block of 256 threads).
-- `rescale_velocities`: 1 launch (block 256, grid `ceil(n/256)`).
+- `csvr_sample_and_factor`: 1 launch (single block).
+
+The per-particle velocity rescale (`v ← α · v`) is dispatched once
+per step by the framework's JIT-composed post-force per-particle
+kernel; see *Post-Force Per-Particle Fragment* below.
 
 All launches go through the default stream of
 `ParticleBuffers::device`.
+
+## Post-Force Per-Particle Fragment <!-- rq-062d4d53 -->
+
+`CsvrThermostat::post_force_per_particle_fragment()` returns the
+per-particle velocity rescale as a `PerParticleFragment` (see
+`jit-composed-post-force.md`):
+
+- The per-thread body reads `Real factor = csvr_factor_device[0];`
+  once (the factor scalar is broadcast cheaply across threads via
+  L1 cache) and applies `velocities_x/y/z[i] *= factor`.
+
+- `entry_point_args` declares `const Real *csvr_factor_device`
+  (the device-resident factor scalar populated by
+  `csvr_sample_and_factor`).
+
+- `bind_post_force_per_particle_args` pushes
+  `&self.factor_device` onto the launch builder.
+
+The framework's composed kernel orders CSVR's body AFTER the
+integrator's post-force kick (velocity-Verlet's `KickHalf`), so
+the rescale reads the post-kick velocity and writes the rescaled
+velocity. A subsequent barostat fragment (when configured) reads
+the CSVR-rescaled velocity.
 
 ## Determinism <!-- rq-72a606e3 -->
 

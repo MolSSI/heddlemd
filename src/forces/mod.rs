@@ -30,7 +30,8 @@ pub use coulomb::{CoulombBuilder, CoulombParameters, CoulombState};
 pub use jit_composed::{
     AngleForceFragment, AngleScratchView, BondedForceFragment, BondedScratchView,
     ForceLaunchBuilder, ForceLaunchContext, JitComposedAngleForce, JitComposedBondedForce,
-    JitComposedPairForce, PairForceBindContext, PairForceFragment, PairForceLaunchBuilder,
+    JitComposedPairForce, JitComposedPostForcePerParticle, PairForceBindContext,
+    PairForceFragment, PairForceLaunchBuilder, PerParticleFragment, PostForceBindContext,
 };
 pub use spme::{
     SpmeError, SpmeParameters, SpmeReciprocalGrid, SpmeReciprocalState, SpmeRealSpaceState,

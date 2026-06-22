@@ -75,6 +75,18 @@ pub enum StepError {
     /// `reason` is the integrator's verbatim message.
     #[error("integrator rejected constraint hook installation: {reason}")]
     IntegratorRejectsConstraint { reason: &'static str },
+    #[error(
+        "built-in {kind} slot `{label}` did not expose a post-force per-particle \
+         source fragment via post_force_per_particle_fragment"
+    )]
+    MissingPostForcePerParticleFragment {
+        kind: &'static str,
+        label: &'static str,
+    },
+    #[error("JIT-composed post-force per-particle kernel failed to compile: {log}")]
+    PostForceFragmentCompileFailed { log: String },
+    #[error("JIT-composed post-force per-particle kernel failed to load: {0}")]
+    PostForceFragmentLoadFailed(GpuError),
 }
 
 // rq-2ccf40de
@@ -219,6 +231,55 @@ pub trait Integrator: std::fmt::Debug + Send {
     ) -> Vec<f64> {
         Vec::new()
     }
+
+    /// Return the integrator's post-force per-particle source fragment
+    /// for the JIT-composed post-force per-particle kernel (see
+    /// `rqm/integration/jit-composed-post-force.md`). Every built-in
+    /// integrator overrides; a built-in returning `None` is the
+    /// `StepError::MissingPostForcePerParticleFragment` rejection at
+    /// runner construction.
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> Option<crate::forces::PerParticleFragment> {
+        None
+    }
+
+    /// Push the integrator's per-fragment kernel arguments onto
+    /// `builder` in the order its fragment's `entry_point_args`
+    /// declares them. Default panics; integrators that expose a
+    /// fragment must override.
+    fn bind_post_force_per_particle_args(
+        &self,
+        _ctx: &crate::forces::PostForceBindContext<'_>,
+        _builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        panic!(
+            "Integrator::bind_post_force_per_particle_args must be overridden \
+             when post_force_per_particle_fragment returns Some(_)"
+        );
+    }
+
+    /// Returns the SubStep index in `plan(dt)` whose work is dispatched
+    /// by the composed post-force kernel rather than by `execute`. The
+    /// runner uses this to skip the integrator's per-step
+    /// `execute(<that SubStep>, …)` call when the composed-kernel path
+    /// is active. Default returns the index of the plan's last
+    /// `KickHalf` or `KickDrift` SubStep, which matches the contract
+    /// followed by every built-in integrator. Returns `None` if no
+    /// such SubStep exists.
+    fn post_force_substep_index(&self, dt: Real) -> Option<usize> {
+        let plan = self.plan(dt);
+        plan.steps.iter().enumerate().rev().find_map(|(idx, s)| {
+            matches!(s, SubStep::KickHalf { .. } | SubStep::KickDrift { .. })
+                .then_some(idx)
+        })
+    }
+
+    /// Notify the integrator that the JIT-composed post-force
+    /// per-particle kernel is active. Default no-op; integrators
+    /// whose `execute` does host-side bookkeeping tied to the
+    /// post-force SubStep may override.
+    fn set_jit_composed_post_force_active(&mut self, _active: bool) {}
 }
 
 /// Walk an integrator's plan for one timestep.
@@ -256,6 +317,40 @@ pub fn run_step(
         timings,
         runner_needs_scalars,
         true,
+        None,
+    )
+}
+
+/// Variant of `run_step` that skips the integrator's `execute` call
+/// at SubStep index `skip_substep_index`. Used when the
+/// JIT-composed post-force per-particle kernel is dispatched by the
+/// runner after `run_step` returns — the trailing per-particle
+/// SubStep is part of the composed kernel and must not run twice.
+#[allow(clippy::too_many_arguments)]
+pub fn run_step_with_skipped_substep(
+    integrator: &mut dyn Integrator,
+    buffers: &mut ParticleBuffers,
+    sim_box: &mut SimulationBox,
+    force_field: &mut ForceField,
+    constraint: Option<&mut dyn Constraint>,
+    install_constraint_hooks: bool,
+    dt: Real,
+    timings: &mut Timings,
+    runner_needs_scalars: bool,
+    skip_substep_index: usize,
+) -> Result<(), StepError> {
+    run_step_inner(
+        integrator,
+        buffers,
+        sim_box,
+        force_field,
+        constraint,
+        install_constraint_hooks,
+        dt,
+        timings,
+        runner_needs_scalars,
+        true,
+        Some(skip_substep_index),
     )
 }
 
@@ -287,9 +382,11 @@ pub fn run_step_no_neighbor_check(
         timings,
         runner_needs_scalars,
         false,
+        None,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_step_inner(
     integrator: &mut dyn Integrator,
     buffers: &mut ParticleBuffers,
@@ -301,10 +398,14 @@ fn run_step_inner(
     timings: &mut Timings,
     runner_needs_scalars: bool,
     run_neighbor_pre_step: bool,
+    skip_substep_index: Option<usize>,
 ) -> Result<(), StepError> {
     let plan = integrator.plan(dt);
     let install = install_constraint_hooks && constraint.is_some();
-    for sub in &plan.steps {
+    for (idx, sub) in plan.steps.iter().enumerate() {
+        if Some(idx) == skip_substep_index {
+            continue;
+        }
         let is_drift = sub.is_drift();
         if install && is_drift {
             if let Some(c) = constraint.as_mut() {
@@ -734,6 +835,38 @@ pub trait Thermostat: std::fmt::Debug + Send {
     ) -> Vec<f64> {
         Vec::new()
     }
+
+    /// Return the thermostat's post-force per-particle source fragment
+    /// for the JIT-composed post-force per-particle kernel (see
+    /// `rqm/integration/jit-composed-post-force.md`). Built-in
+    /// thermostats override.
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> Option<crate::forces::PerParticleFragment> {
+        None
+    }
+
+    /// Push the thermostat's per-fragment kernel arguments onto
+    /// `builder`. Default panics; thermostats that expose a fragment
+    /// must override.
+    fn bind_post_force_per_particle_args(
+        &self,
+        _ctx: &crate::forces::PostForceBindContext<'_>,
+        _builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        panic!(
+            "Thermostat::bind_post_force_per_particle_args must be overridden \
+             when post_force_per_particle_fragment returns Some(_)"
+        );
+    }
+
+    /// Notify the slot that the JIT-composed post-force per-particle
+    /// kernel is active for the current run. Slots that perform a
+    /// per-particle velocity rescale should observe this flag and
+    /// skip their standalone rescale launch in `apply_post`; the
+    /// composed kernel handles it. Default no-op for slots whose
+    /// `apply_post` does not contain a per-particle rescale.
+    fn set_jit_composed_post_force_active(&mut self, _active: bool) {}
 }
 
 // rq-29e08cb5
@@ -868,6 +1001,36 @@ pub trait Barostat: std::fmt::Debug + Send {
     ) -> Vec<f64> {
         Vec::new()
     }
+
+    /// Return the barostat's post-force per-particle source fragment
+    /// for the JIT-composed post-force per-particle kernel (see
+    /// `rqm/integration/jit-composed-post-force.md`). Built-in
+    /// barostats override.
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> Option<crate::forces::PerParticleFragment> {
+        None
+    }
+
+    /// Push the barostat's per-fragment kernel arguments onto
+    /// `builder`. Default panics; barostats that expose a fragment
+    /// must override.
+    fn bind_post_force_per_particle_args(
+        &self,
+        _ctx: &crate::forces::PostForceBindContext<'_>,
+        _builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        panic!(
+            "Barostat::bind_post_force_per_particle_args must be overridden \
+             when post_force_per_particle_fragment returns Some(_)"
+        );
+    }
+
+    /// Notify the slot that the JIT-composed post-force per-particle
+    /// kernel is active. Slots whose `apply` includes a per-particle
+    /// rescale should observe this flag and skip the standalone
+    /// rescale launch when active. Default no-op.
+    fn set_jit_composed_post_force_active(&mut self, _active: bool) {}
 }
 
 // rq-29e08cb5

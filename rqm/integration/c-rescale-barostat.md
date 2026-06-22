@@ -143,14 +143,24 @@ barostat reads only its own `temperature` field.
 ## Per-Step Kernel Sequence <!-- rq-46a60367 -->
 
 Per timestep, the C-rescale barostat's `apply` runs the following
-in fixed order:
+three device-side steps; the fourth (the per-particle position
+rescale) is dispatched by the JIT-composed post-force per-particle
+kernel (see `jit-composed-post-force.md`).
 
 | Order | Step              | Kernel / call                              | Operation                                                                                                          | Stage label                          |
 | ----- | ----------------- | ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------ |
 | 1     | KE reduce         | `kinetic_energy_reduce`                    | f32 scalar of `K` into `ke_scratch`                                                                                | `KineticEnergyReduce`                |
 | 2     | Virial reduce     | `virial_sum_reduce`                        | f32 scalar of `W` into `virial_scratch`                                                                            | `VirialSumReduce`                    |
 | 3     | µ + lattice + diag | `c_rescale_compute_mu_and_rescale_lattice` | reads `K`, `W`, lattice; draws `R`; computes µ + P in f64; mutates lattice; writes µ + diagnostics device buffers | `CRescaleComputeMuAndRescaleLattice` |
-| 4     | Position rescale  | `rescale_positions_device_factor`          | reads `mu_device[0]`, scales every particle position by it                                                          | `CRescaleBarostatRescalePositions`   |
+| 4     | Position rescale  | composed post-force per-particle kernel    | reads `mu_device[0]`, scales every particle position by it                                                          | `JitComposedPostForce`               |
+
+The first three kernels run inside `apply`; the fourth runs from
+the JIT-composed post-force per-particle kernel via c-rescale's
+participation through its source fragment. The standalone
+`rescale_positions_device_factor` kernel and the corresponding
+`CRescaleBarostatRescalePositions` timings stage no longer exist;
+the per-particle rescale body lives in c-rescale's source
+fragment described below.
 
 No per-step host download occurs. The host `sim_box`'s lattice
 mirror, `most_recent_pressure`, `most_recent_volume`, and
@@ -158,6 +168,30 @@ mirror, `most_recent_pressure`, `most_recent_volume`, and
 rows. The runner refreshes them at log-write cadence by calling
 `sim_box.flush_from_device()` and `barostat.flush_pending_injection(device)`
 (see *Diagnostic log columns* and `framework.md`'s flush pattern).
+
+## Post-Force Per-Particle Fragment <!-- rq-61f241f6 -->
+
+`CRescaleBarostatState::post_force_per_particle_fragment()` returns
+the per-particle position rescale as a `PerParticleFragment` (see
+`jit-composed-post-force.md`):
+
+- The per-thread body reads `Real mu = c_rescale_mu_device[0];`
+  once and applies
+  `positions_x/y/z[i] *= mu`. The position update happens AFTER
+  any integrator or thermostat fragment in the canonical
+  per-thread evaluation order, so the rescaled position reflects
+  the post-step velocity contributions.
+
+- `entry_point_args` declares
+  `const Real *c_rescale_mu_device` (the device-resident µ scalar
+  populated by `c_rescale_compute_mu_and_rescale_lattice`).
+
+- `bind_post_force_per_particle_args` pushes `&self.mu_device`
+  onto the launch builder.
+
+C-rescale operates only on positions; the velocity rescale that
+some c-rescale variants apply is not part of this barostat's
+fragment.
 
 The integrator's own kernels (`vv_kick_drift`, `vv_kick`, the force
 pipeline) and the thermostat's kernels are launched separately by

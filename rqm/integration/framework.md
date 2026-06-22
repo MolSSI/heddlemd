@@ -98,6 +98,7 @@ loop step in 1..=n_steps:
     let plan = integrator.plan(dt)
     let install_hooks = constraint.is_some()
         && integrator_builder.supports_constraints(&integrator_slot.params)
+    let post_force_sub_idx = plan.last_post_force_substep_index()
     for (i, sub) in plan.steps.iter().enumerate():
         let is_drift = matches!(sub, SubStep::Drift{..} | SubStep::KickDrift{..})
         if install_hooks && is_drift {
@@ -110,6 +111,9 @@ loop step in 1..=n_steps:
             SubStep::ForceEval { class: Some(c), level } =>
                 force_field.step_class(c, buffers, sim_box, timings,
                                        runner.resolve_level(level))
+            other if Some(i) == post_force_sub_idx
+                    && post_force_composed_kernel.is_some() =>
+                /* skip — composed kernel handles this SubStep */
             other =>
                 integrator.execute(other, buffers, sim_box, timings)
         if install_hooks && is_drift {
@@ -121,10 +125,22 @@ loop step in 1..=n_steps:
     if install_hooks && last_is_kick {
         constraint.apply_after_kick(buffers, sim_box, dt, timings)
     }
-    if let Some(t) = thermostat { t.apply_post(buffers, dt, timings) }
-    if let Some(b) = barostat   { b.apply(buffers, sim_box, dt, timings) }
+    if let Some(t) = thermostat { t.apply_post(buffers, dt, timings) }  /* scalar prep */
+    if let Some(b) = barostat   { b.apply(buffers, sim_box, dt, timings) }  /* scalar prep */
+    if let Some(k) = post_force_composed_kernel {
+        k.launch(buffers, integrator, thermostat.as_ref(), barostat.as_ref(),
+                 sim_box, dt, timings)
+    }
     ...trajectory / log output...
 ```
+
+When the runner's JIT-composed post-force per-particle kernel
+(`jit-composed-post-force.md`) is active, the post-force
+`KickHalf` / `KickDrift` SubStep is skipped from the plan-walk
+loop and the composed kernel is launched after every slot's
+scalar-prep work. When the composed kernel is absent (no active
+integrator), the loop walks the plan in full and no composed
+launch fires.
 
 The runner calls `integrator.plan(dt)` once per timestep. `plan(dt)` is
 a pure function of `dt` and the integrator's static configuration; it
@@ -753,6 +769,20 @@ successfully.
   call site is the runner's plan walk, not the integrator's
   `execute()`, so `IntegratorError` does not wrap `ForceFieldError`.
 
+  The runner's `StepError` carries additional variants for the
+  JIT-composed post-force per-particle kernel mechanism (see
+  `jit-composed-post-force.md`):
+  - `MissingPostForcePerParticleFragment { label: &'static str }`
+    — a slot in the runner's active configuration returned `None`
+    from `post_force_per_particle_fragment()` when its
+    corresponding configuration is present. Reported from runner
+    construction.
+  - `PostForceFragmentCompileFailed { log: String }` — nvrtc
+    rejected the composed post-force-per-particle kernel source.
+  - `PostForceFragmentLoadFailed(GpuError)` — `load_ptx` rejected
+    the compiled PTX of the composed post-force-per-particle
+    kernel.
+
   The runner's `RunnerError` wraps all three via
   `RunnerError::Integrator(IntegratorError)`,
   `RunnerError::Thermostat(ThermostatError)`, and
@@ -835,6 +865,28 @@ successfully.
     `IntegratorError::UnexpectedSubStep { variant: "ForceEval" }`.
   - Returns `Ok(())` without launching any kernel when
     `buffers.particle_count() == 0`.
+  - When the integrator exposes a post-force per-particle fragment
+    (see `jit-composed-post-force.md`), the post-force SubStep
+    (the final `KickHalf` or `KickDrift` after `ForceEval`) is
+    handled by the composed kernel rather than by `execute`.
+    Conforming runners detect the post-force SubStep and skip the
+    `execute` call for it; the integrator's `execute` must remain
+    correct when called on its other SubSteps regardless of
+    whether the composed-kernel path is active.
+
+- `Integrator::post_force_per_particle_fragment(&self) -> Option<PerParticleFragment>` <!-- inline --> <!-- rq-2e33e1b8 -->
+  - Returns the integrator's post-force per-particle source
+    fragment (see `jit-composed-post-force.md`). Default returns
+    `None` (the integrator does not participate). Every built-in
+    integrator overrides to return `Some(_)`; a built-in returning
+    `None` is the `StepError::MissingPostForcePerParticleFragment`
+    rejection at runner construction.
+
+- `Integrator::bind_post_force_per_particle_args(&self, ctx: &PostForceBindContext<'_>, builder: &mut ForceLaunchBuilder)` <!-- inline --> <!-- rq-4187d20f -->
+  - Pushes the integrator's per-fragment kernel arguments onto
+    `builder` in the order its fragment's `entry_point_args`
+    declares them. Default panics; integrators that expose a
+    fragment must override.
 
 - `Thermostat::apply_pre(&mut self, buffers: &mut ParticleBuffers, dt: f32, timings: &mut Timings) -> Result<(), ThermostatError>` <!-- rq-2fe47a86 -->
   - Default implementation returns `Ok(())` without launching any
@@ -847,11 +899,48 @@ successfully.
   - Every concrete `Thermostat` must implement this method.
   - Returns `Ok(())` without launching any kernel when
     `buffers.particle_count() == 0`.
+  - When the thermostat exposes a post-force per-particle fragment
+    (see `jit-composed-post-force.md`), `apply_post` runs every
+    part of its post-force work EXCEPT the per-particle rescale
+    or resample. For CSVR that means the kinetic-energy reduction
+    and the sample-and-factor kernel run; the per-particle
+    rescale runs from the composed kernel. For NHC the chain
+    integration runs but the per-particle rescale does not. For
+    Andersen any Philox-counter bookkeeping runs but the
+    per-particle Maxwell-Boltzmann draw + assignment runs from
+    the composed kernel.
+
+- `Thermostat::post_force_per_particle_fragment(&self) -> Option<PerParticleFragment>` <!-- inline --> <!-- rq-b14ac769 -->
+  - Returns the thermostat's post-force per-particle rescale /
+    resample fragment. Default returns `None`; built-in
+    thermostats override.
+
+- `Thermostat::bind_post_force_per_particle_args(&self, ctx: &PostForceBindContext<'_>, builder: &mut ForceLaunchBuilder)` <!-- inline --> <!-- rq-042872ac -->
+  - Pushes the thermostat's per-fragment kernel arguments.
+    Default panics.
 
 - `Barostat::apply(&mut self, buffers: &mut ParticleBuffers, sim_box: &mut SimulationBox, dt: f32, timings: &mut Timings) -> Result<(), BarostatError>` <!-- rq-1179e42f -->
   - Every concrete `Barostat` must implement this method.
   - Returns `Ok(())` without launching any kernel when
     `buffers.particle_count() == 0`.
+  - When the barostat exposes a post-force per-particle fragment
+    (see `jit-composed-post-force.md`), `apply` runs every part
+    of its work EXCEPT the per-particle rescale (velocities
+    and/or positions). For c-rescale that means the virial
+    reduction, the mu compute, the box mutation, and the
+    injection-accumulator bookkeeping all run; the per-particle
+    velocity and position rescales run from the composed kernel.
+    For Berendsen barostat, the mu compute and box mutation run
+    but the per-particle position rescale runs from the composed
+    kernel.
+
+- `Barostat::post_force_per_particle_fragment(&self) -> Option<PerParticleFragment>` <!-- inline --> <!-- rq-cb31286f -->
+  - Returns the barostat's post-force per-particle rescale
+    fragment. Default returns `None`; built-in barostats override.
+
+- `Barostat::bind_post_force_per_particle_args(&self, ctx: &PostForceBindContext<'_>, builder: &mut ForceLaunchBuilder)` <!-- inline --> <!-- rq-9d827201 -->
+  - Pushes the barostat's per-fragment kernel arguments. Default
+    panics.
 
 ## Determinism Guarantees <!-- rq-a93a8dc4 -->
 

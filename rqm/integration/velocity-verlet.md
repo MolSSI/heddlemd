@@ -385,14 +385,44 @@ dispatches:
   `*_LOSSLESS` stage names — see `performance-analysis.md`). Applies
   the first half-kick using the cached `F(t)` and drifts positions
   to `x(t+dt)`.
-- `SubStep::KickHalf { dt, .. }` → launches `vv_kick` (lossy) or
-  `vv_kick_lossless` (lossless) with matching timing bracketing.
-  Applies the second half-kick using `F(t+dt)`.
+- `SubStep::KickHalf { dt, .. }` → handled by the JIT-composed
+  post-force per-particle kernel (see `jit-composed-post-force.md`).
+  `execute()` is not invoked for this SubStep by a conforming
+  runner.
 - Any other variant → returns
   `IntegratorError::UnexpectedSubStep { variant: <name> }`. A
   conforming runner never produces this case: `ForceEval` is
   dispatched directly by the runner, and Velocity Verlet's plan
   contains no `Drift` or `Custom` sub-steps.
+
+### Post-Force Per-Particle Fragment <!-- rq-0034617f -->
+
+`VelocityVerletState::post_force_per_particle_fragment()` returns
+the `KickHalf` per-thread body as a `PerParticleFragment`:
+
+- The functor body reads
+  `velocities_x/y/z[i]`, `forces_x/y/z[i]`, `masses[i]`, computes
+  `v ← v + (F / m) · (dt / 2)`, and writes back to
+  `velocities_x/y/z[i]`. The `dt` value is read from a per-fragment
+  scalar argument.
+
+- The `lossless` variant's body additionally reads
+  `velocities_x/y/z_lo[i]` and applies the compensated-summation
+  update described in *Algorithm*. `VelocityVerletBuilder` selects
+  the lossy or lossless fragment based on the `lossless` config
+  flag; both fragments expose the same `velocity_verlet` label.
+
+- `entry_point_args` declares `Real vv_dt` plus (lossless variant
+  only) `double *vv_velocities_x_lo, *vv_velocities_y_lo,
+  *vv_velocities_z_lo`. The slot's
+  `bind_post_force_per_particle_args` pushes these onto the launch
+  builder.
+
+The per-particle-shape standalone kernels `vv_kick` and
+`vv_kick_lossless` no longer exist; their bodies live in the
+fragment. The pre-force-shape standalone kernels `vv_kick_drift`
+and `vv_kick_drift_lossless` remain — pre-force composition is out
+of J3's scope.
 
 ### Runner-Driven Constraint Hooks <!-- rq-9b03044f -->
 

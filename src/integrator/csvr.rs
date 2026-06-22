@@ -76,6 +76,11 @@ pub struct CsvrThermostat {
     /// observes the post-increment counter from the previous replay
     /// and draws a distinct Philox sequence.
     draw_counter_device: CudaSlice<u64>,
+    /// True when the runner is dispatching the JIT-composed
+    /// post-force per-particle kernel; `apply_post` must skip the
+    /// standalone per-particle rescale launch because the composed
+    /// kernel handles it. See `rqm/integration/jit-composed-post-force.md`.
+    jit_composed_post_force_active: bool,
 }
 
 impl CsvrThermostat {
@@ -110,6 +115,7 @@ impl CsvrThermostat {
             factor_device,
             cumulative_injection_delta,
             draw_counter_device,
+            jit_composed_post_force_active: false,
         })
     }
 
@@ -187,12 +193,52 @@ impl Thermostat for CsvrThermostat {
         )?;
 
         // 3. Apply the rescale. Reads `factor_device[0]` on the same
-        //    stream; no host involvement.
-        timings.kernel_start(KernelStage::CSVR_RESCALE_VELOCITIES)?;
-        rescale_velocities_device_factor(buffers, &self.factor_device)?;
-        timings.kernel_stop(KernelStage::CSVR_RESCALE_VELOCITIES)?;
+        //    stream; no host involvement. Skipped when the
+        //    JIT-composed post-force per-particle kernel is active —
+        //    the composed kernel rescales velocities by
+        //    `factor_device[0]` in its CSVR fragment body.
+        if !self.jit_composed_post_force_active {
+            timings.kernel_start(KernelStage::CSVR_RESCALE_VELOCITIES)?;
+            rescale_velocities_device_factor(buffers, &self.factor_device)?;
+            timings.kernel_stop(KernelStage::CSVR_RESCALE_VELOCITIES)?;
+        }
 
         Ok(())
+    }
+
+    fn set_jit_composed_post_force_active(&mut self, active: bool) {
+        self.jit_composed_post_force_active = active;
+    }
+
+    // rq-86dea9a1 — CSVR's per-particle rescale fragment for the
+    // JIT-composed post-force kernel. The chain math
+    // (`csvr_sample_and_factor`) still runs as part of `apply_post`
+    // and produces `factor_device`; the composed kernel reads that
+    // device-resident scalar in this fragment's per-thread body.
+    fn post_force_per_particle_fragment(
+        &self,
+    ) -> Option<crate::forces::PerParticleFragment> {
+        Some(crate::forces::PerParticleFragment {
+            label: "csvr",
+            helper_source: String::new(),
+            entry_point_args: String::from(
+                "    const Real *csvr_factor_device,\n",
+            ),
+            per_thread_body: String::from(
+                "        Real csvr_factor = csvr_factor_device[0];\n\
+                 \x20       velocities_x[i] *= csvr_factor;\n\
+                 \x20       velocities_y[i] *= csvr_factor;\n\
+                 \x20       velocities_z[i] *= csvr_factor;",
+            ),
+        })
+    }
+
+    fn bind_post_force_per_particle_args(
+        &self,
+        _ctx: &crate::forces::PostForceBindContext<'_>,
+        builder: &mut crate::forces::ForceLaunchBuilder,
+    ) {
+        builder.push_device_buffer(&self.factor_device);
     }
 
     fn flush_pending_injection(

@@ -1,4 +1,12 @@
 {
+  "rq-0034617f": {
+    "decl": "### Post-Force Per-Particle Fragment",
+    "file": "integration/velocity-verlet",
+    "level": 3,
+    "refs": [],
+    "title": "Post-Force Per-Particle Fragment",
+    "type": "section"
+  },
   "rq-0040baca": {
     "decl": "Scenario: validate_against enforces IncompatibleThermostat from the builder predicate",
     "file": "io/config-schema",
@@ -346,6 +354,13 @@
     "title": "Drop best-effort flushes",
     "type": "scenario"
   },
+  "rq-02d0e4f9": {
+    "decl": "- `heddle_jit_composed_post_force_per_particle` — the composed",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "heddle_jit_composed_post_force_per_particle",
+    "type": "api-item"
+  },
   "rq-02edd314": {
     "decl": "## Feature API",
     "file": "simulation-runner",
@@ -487,6 +502,13 @@
     ],
     "title": "Drop best-effort flushes",
     "type": "scenario"
+  },
+  "rq-042872ac": {
+    "decl": "- `Thermostat::bind_post_force_per_particle_args(&self, ctx: &PostForceBindContext<'_>, builder: &mut ForceLaunchBuilder)` <!-- inline -->",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Thermostat",
+    "type": "api-item"
   },
   "rq-043796fa": {
     "decl": "- `__device__ __forceinline__ Real Real_sin(Real x);`",
@@ -715,6 +737,14 @@
     ],
     "title": "Top-level units field defaults to SI when absent",
     "type": "scenario"
+  },
+  "rq-062d4d53": {
+    "decl": "## Post-Force Per-Particle Fragment",
+    "file": "integration/csvr",
+    "level": 2,
+    "refs": [],
+    "title": "Post-Force Per-Particle Fragment",
+    "type": "section"
   },
   "rq-062ea284": {
     "decl": "## Algorithm",
@@ -3378,27 +3408,25 @@
     "title": "nl.pre_step is called once per batch boundary",
     "type": "scenario"
   },
+  "rq-1c911e56": {
+    "decl": "## Gherkin Scenarios",
+    "file": "integration/jit-composed-post-force",
+    "level": 2,
+    "refs": [],
+    "title": "Gherkin Scenarios",
+    "type": "section"
+  },
   "rq-1ca90a29": {
     "decl": "Scenario: Atom with no bonds gets zero accumulator",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Atom with no bonds gets zero accumulator",
     "type": "scenario"
   },
   "rq-1ce4ce5a": {
     "decl": "Scenario: Atom with two bonds receives sum of contributions",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Atom with two bonds receives sum of contributions",
     "type": "scenario"
   },
@@ -3929,6 +3957,14 @@
     "refs": [],
     "title": "from_config populates r_switch from the parsed PairInteractionConfig",
     "type": "scenario"
+  },
+  "rq-215c2fd9": {
+    "decl": "## Composed-Kernel Structure",
+    "file": "integration/jit-composed-post-force",
+    "level": 2,
+    "refs": [],
+    "title": "Composed-Kernel Structure",
+    "type": "section"
   },
   "rq-2196fc45": {
     "decl": "### Types",
@@ -4648,12 +4684,7 @@
   "rq-27efd6a0": {
     "decl": "Scenario: Atom appearing in one angle receives that angle's force",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Atom appearing in one angle receives that angle's force",
     "type": "scenario"
   },
@@ -5234,12 +5265,7 @@
   "rq-2cb90e10": {
     "decl": "Scenario: Stretched bond produces an attractive force",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Stretched bond produces an attractive force",
     "type": "scenario"
   },
@@ -5313,7 +5339,16 @@
   "rq-2d2eaf72": {
     "decl": "# Feature: JIT-Composed Intramolecular Kernels",
     "file": "forces/jit-composed-intramolecular",
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/jit_composed.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/timings.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Feature: JIT-Composed Intramolecular Kernels",
     "type": "file"
   },
@@ -5347,12 +5382,7 @@
   "rq-2d4efead": {
     "decl": "Scenario: Atom with one bond receives the bond's force directly",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Atom with one bond receives the bond's force directly",
     "type": "scenario"
   },
@@ -5426,6 +5456,13 @@
     "refs": [],
     "title": "MTK conserved Hamiltonian",
     "type": "section"
+  },
+  "rq-2e33e1b8": {
+    "decl": "- `Integrator::post_force_per_particle_fragment(&self) -> Option<PerParticleFragment>` <!-- inline -->",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Integrator",
+    "type": "api-item"
   },
   "rq-2e3bda9a": {
     "decl": "Scenario: Bonded composed module is not compiled when no bonded slot is active",
@@ -5939,6 +5976,13 @@
     "file": "forces/framework",
     "refs": [],
     "title": "step_class(Slow) refreshes only Slow slots' contributions",
+    "type": "scenario"
+  },
+  "rq-33fa8597": {
+    "decl": "Scenario: c-rescale rescale_velocities and rescale_positions standalone kernels do not exist",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "c-rescale rescale_velocities and rescale_positions standalone kernels do not exist",
     "type": "scenario"
   },
   "rq-34329bda": {
@@ -7368,6 +7412,13 @@
     "title": "Reject topology = init",
     "type": "scenario"
   },
+  "rq-4187d20f": {
+    "decl": "- `Integrator::bind_post_force_per_particle_args(&self, ctx: &PostForceBindContext<'_>, builder: &mut ForceLaunchBuilder)` <!-- inline -->",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Integrator",
+    "type": "api-item"
+  },
   "rq-41eb5e02": {
     "decl": "#### Other attributes",
     "file": "io/init-state-file",
@@ -7844,12 +7895,7 @@
   "rq-4811af60": {
     "decl": "Scenario: r=0 produces zero force, not NaN",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "r=0 produces zero force, not NaN",
     "type": "scenario"
   },
@@ -8583,24 +8629,14 @@
   "rq-4ffdad62": {
     "decl": "Scenario: Degenerate geometry (atom_i overlaps atom_j) produces zero",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Degenerate geometry (atom_i overlaps atom_j) produces zero",
     "type": "scenario"
   },
   "rq-501bce66": {
     "decl": "Scenario: Single-step force evaluation on one SPC water molecule",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Single-step force evaluation on one SPC water molecule",
     "type": "scenario"
   },
@@ -8927,6 +8963,14 @@
     "title": "velocity-verlet (lossless) does not support constraints",
     "type": "scenario"
   },
+  "rq-532a9e35": {
+    "decl": "## Compilation",
+    "file": "integration/jit-composed-post-force",
+    "level": 2,
+    "refs": [],
+    "title": "Compilation",
+    "type": "section"
+  },
   "rq-5355f3f0": {
     "decl": "Scenario: wrap_position_with_image_count tracks per-direction image counts for a triclinic box",
     "file": "simulation-box",
@@ -9120,12 +9164,7 @@
   "rq-556b7c13": {
     "decl": "Scenario: Minimum image is applied",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Minimum image is applied",
     "type": "scenario"
   },
@@ -9163,12 +9202,7 @@
   "rq-55f89976": {
     "decl": "Scenario: Reduction summation order is sorted bond index",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Reduction summation order is sorted bond index",
     "type": "scenario"
   },
@@ -9182,6 +9216,13 @@
       }
     ],
     "title": "Repeated kernel_start/kernel_stop pairs accumulate",
+    "type": "scenario"
+  },
+  "rq-56044cc3": {
+    "decl": "Scenario: Barostat's apply runs scalar prep but not per-particle rescale",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "Barostat's apply runs scalar prep but not per-particle rescale",
     "type": "scenario"
   },
   "rq-560ce2e2": {
@@ -9245,6 +9286,13 @@
     "file": "forces/jit-composed-intramolecular",
     "refs": [],
     "title": "AngleForceFragment",
+    "type": "api-item"
+  },
+  "rq-56a36cba": {
+    "decl": "- `JitComposedPostForcePerParticle` — module + entry-point handle",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "JitComposedPostForcePerParticle",
     "type": "api-item"
   },
   "rq-56ad97f1": {
@@ -9842,6 +9890,13 @@
     "title": "set_lattice uploads the new lattice to the device buffer on success",
     "type": "scenario"
   },
+  "rq-5c607daa": {
+    "decl": "- `PostForceBindContext<'a>` — context passed to every active",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "PostForceBindContext",
+    "type": "api-item"
+  },
   "rq-5c716d48": {
     "decl": "Scenario: write_timings_file with an empty report writes only the header",
     "file": "performance-analysis",
@@ -10220,12 +10275,7 @@
   "rq-5fcdc437": {
     "decl": "Scenario: Atom with no angles gets zero accumulator",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Atom with no angles gets zero accumulator",
     "type": "scenario"
   },
@@ -10468,6 +10518,14 @@
     "title": "Construction and Lifetime",
     "type": "section"
   },
+  "rq-61f241f6": {
+    "decl": "## Post-Force Per-Particle Fragment",
+    "file": "integration/c-rescale-barostat",
+    "level": 2,
+    "refs": [],
+    "title": "Post-Force Per-Particle Fragment",
+    "type": "section"
+  },
   "rq-6211a82f": {
     "decl": "Scenario: Kernels is composed of per-subsystem sub-structs",
     "file": "build-pipeline",
@@ -10543,12 +10601,7 @@
   "rq-62e2469f": {
     "decl": "Scenario: morse_bond_force on zero bonds is a no-op",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "morse_bond_force on zero bonds is a no-op",
     "type": "scenario"
   },
@@ -11101,12 +11154,7 @@
   "rq-6897ffda": {
     "decl": "Scenario: Bond-force reduction sums energy and virial alongside forces",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Bond-force reduction sums energy and virial alongside forces",
     "type": "scenario"
   },
@@ -11183,24 +11231,14 @@
   "rq-696caf8e": {
     "decl": "Scenario: Two independent calls produce byte-identical accumulators",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two independent calls produce byte-identical accumulators",
     "type": "scenario"
   },
   "rq-699192b2": {
     "decl": "Scenario: Reduction summation order is sorted angle index",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Reduction summation order is sorted angle index",
     "type": "scenario"
   },
@@ -11367,6 +11405,14 @@
       }
     ],
     "title": "Velocity-Verlet Loop",
+    "type": "section"
+  },
+  "rq-6b628814": {
+    "decl": "## Determinism",
+    "file": "integration/jit-composed-post-force",
+    "level": 2,
+    "refs": [],
+    "title": "Determinism",
     "type": "section"
   },
   "rq-6b8e5397": {
@@ -11587,12 +11633,7 @@
   "rq-6d06e36e": {
     "decl": "Scenario: Newton's third law holds for the framework's combined force",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Newton's third law holds for the framework's combined force",
     "type": "scenario"
   },
@@ -13082,6 +13123,13 @@
     "title": "A pair contributes only to fragments whose cutoff_squared passes",
     "type": "scenario"
   },
+  "rq-7a000f0e": {
+    "decl": "- `ForceLaunchBuilder` — reused from",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "ForceLaunchBuilder",
+    "type": "api-item"
+  },
   "rq-7a076bc9": {
     "decl": "Scenario: Builder validate_params rejects an unknown field",
     "file": "integration/framework",
@@ -14305,6 +14353,13 @@
     "title": "Philox uniform consumes two lanes per call in the f64 build",
     "type": "scenario"
   },
+  "rq-86dea9a1": {
+    "decl": "Scenario: Thermostat's apply_post runs the scalar prep but not the rescale",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "Thermostat's apply_post runs the scalar prep but not the rescale",
+    "type": "scenario"
+  },
   "rq-86f01d20": {
     "decl": "- `AnalysisBuilder` — open-shaped builder trait. Mirrors",
     "file": "analysis/framework",
@@ -14478,6 +14533,13 @@
     "refs": [],
     "title": "CUDA Real typedef matches the build precision",
     "type": "scenario"
+  },
+  "rq-88b188d3": {
+    "decl": "- `MissingPostForcePerParticleFragment { label: &'static str }` —",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "MissingPostForcePerParticleFragment",
+    "type": "api-item"
   },
   "rq-88e3ac79": {
     "decl": "Scenario: Switching integrator.kind changes the trajectory",
@@ -14692,6 +14754,13 @@
     "title": "log_column_names",
     "type": "api-item"
   },
+  "rq-8a7ef593": {
+    "decl": "Scenario: Composed kernel is not compiled when no integrator is active",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "Composed kernel is not compiled when no integrator is active",
+    "type": "scenario"
+  },
   "rq-8a9c44f8": {
     "decl": "- `Timings::new(device: Arc<CudaDevice>) -> Result<Timings, TimingsError>`",
     "file": "performance-analysis",
@@ -14740,6 +14809,13 @@
     "title": "check_min_perpendicular_width on a triclinic box uses perpendicular widths, not edge lengths",
     "type": "scenario"
   },
+  "rq-8ac9773d": {
+    "decl": "# Feature: JIT-Composed Post-Force Per-Particle Kernel",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "Feature: JIT-Composed Post-Force Per-Particle Kernel",
+    "type": "file"
+  },
   "rq-8b1827a9": {
     "decl": "## Gherkin Scenarios",
     "file": "integration/nose-hoover-chain",
@@ -14787,6 +14863,13 @@
     "refs": [],
     "title": "Parameter Binding and Launch",
     "type": "section"
+  },
+  "rq-8bfffd42": {
+    "decl": "Scenario: One step launches the composed kernel exactly once",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "One step launches the composed kernel exactly once",
+    "type": "scenario"
   },
   "rq-8c045718": {
     "decl": "Scenario: minimum_image of the zero displacement is zero",
@@ -14877,12 +14960,7 @@
   "rq-8d5a8d9c": {
     "decl": "Scenario: reduce_angle_forces on zero particles is a no-op",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "reduce_angle_forces on zero particles is a no-op",
     "type": "scenario"
   },
@@ -15275,12 +15353,7 @@
   "rq-9120ab3c": {
     "decl": "Scenario: Two independent calls produce byte-identical accumulators",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two independent calls produce byte-identical accumulators",
     "type": "scenario"
   },
@@ -15390,12 +15463,7 @@
   "rq-922e1683": {
     "decl": "Scenario: Force magnitude matches closed-form expression for an",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Force magnitude matches closed-form expression for an",
     "type": "scenario"
   },
@@ -15812,14 +15880,16 @@
   "rq-966e43ed": {
     "decl": "Scenario: reduce_bond_forces on zero particles is a no-op",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "reduce_bond_forces on zero particles is a no-op",
     "type": "scenario"
+  },
+  "rq-96749659": {
+    "decl": "- `PostForceFragmentLoadFailed(GpuError)` — `load_ptx` rejected",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "PostForceFragmentLoadFailed",
+    "type": "api-item"
   },
   "rq-96d9c9df": {
     "decl": "Scenario: Reject phase dt <= 0",
@@ -16018,12 +16088,7 @@
   "rq-98fd2e40": {
     "decl": "Scenario: Stretched angle produces a torque that closes the angle",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Stretched angle produces a torque that closes the angle",
     "type": "scenario"
   },
@@ -16201,6 +16266,13 @@
     "title": "log_column_values",
     "type": "api-item"
   },
+  "rq-9a8a7dfa": {
+    "decl": "Scenario: Composed kernel is compiled with thermostat + barostat fragments",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "Composed kernel is compiled with thermostat + barostat fragments",
+    "type": "scenario"
+  },
   "rq-9a9523d9": {
     "decl": "Scenario: minimum_image at the +L/2 boundary maps to -L/2",
     "file": "simulation-box",
@@ -16349,12 +16421,7 @@
   "rq-9bb3094c": {
     "decl": "Scenario: Triatomic at equilibrium gives zero net force on all atoms",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Triatomic at equilibrium gives zero net force on all atoms",
     "type": "scenario"
   },
@@ -16439,6 +16506,13 @@
       }
     ],
     "title": "min_perpendicular_width of an xy-tilted box reflects the xy contribution",
+    "type": "scenario"
+  },
+  "rq-9c5226e5": {
+    "decl": "Scenario: Integrator kick runs before thermostat rescale (canonical order)",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "Integrator kick runs before thermostat rescale (canonical order)",
     "type": "scenario"
   },
   "rq-9c883334": {
@@ -16611,6 +16685,13 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-9d827201": {
+    "decl": "- `Barostat::bind_post_force_per_particle_args(&self, ctx: &PostForceBindContext<'_>, builder: &mut ForceLaunchBuilder)` <!-- inline -->",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Barostat",
+    "type": "api-item"
+  },
   "rq-9d8d96f1": {
     "decl": "## Perpendicular Widths",
     "file": "simulation-box",
@@ -16759,6 +16840,14 @@
     "title": "Active LJ + SPME-real configuration fuses both fragments into one composed kernel",
     "type": "scenario"
   },
+  "rq-9e9db6d9": {
+    "decl": "### Types",
+    "file": "integration/jit-composed-post-force",
+    "level": 3,
+    "refs": [],
+    "title": "Types",
+    "type": "section"
+  },
   "rq-9eb167f0": {
     "decl": "Scenario: Lossless mode selects the lossless integrator kernels",
     "file": "simulation-runner",
@@ -16770,6 +16859,13 @@
     ],
     "title": "Lossless mode selects the lossless integrator kernels",
     "type": "scenario"
+  },
+  "rq-9ebdaea4": {
+    "decl": "- `PostForceFragmentCompileFailed { log: String }` — nvrtc",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "PostForceFragmentCompileFailed",
+    "type": "api-item"
   },
   "rq-9ec19227": {
     "decl": "## `Timings` Interaction",
@@ -16826,12 +16922,7 @@
   "rq-9f2de58c": {
     "decl": "Scenario: Construct MorseBondedState",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Construct MorseBondedState",
     "type": "scenario"
   },
@@ -17474,24 +17565,21 @@
   "rq-a57bcebe": {
     "decl": "Scenario: Three atoms at equilibrium angle produce zero force on each",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Three atoms at equilibrium angle produce zero force on each",
+    "type": "scenario"
+  },
+  "rq-a57fd4d5": {
+    "decl": "Scenario: csvr_rescale_velocities standalone kernel does not exist",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "csvr_rescale_velocities standalone kernel does not exist",
     "type": "scenario"
   },
   "rq-a587753e": {
     "decl": "Scenario: Degenerate angle produces zero energy and virial in",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Degenerate angle produces zero energy and virial in",
     "type": "scenario"
   },
@@ -17620,6 +17708,14 @@
     ],
     "title": "UnitSystem",
     "type": "api-item"
+  },
+  "rq-a77e722d": {
+    "decl": "## Out of Scope",
+    "file": "integration/jit-composed-post-force",
+    "level": 2,
+    "refs": [],
+    "title": "Out of Scope",
+    "type": "section"
   },
   "rq-a783727a": {
     "decl": "- `lj_pair_force_f`, `lj_pair_force_fev` — see `lj-pair-force.md`.",
@@ -18417,6 +18513,13 @@
     "title": "Reject missing pair interaction",
     "type": "scenario"
   },
+  "rq-ae74d89b": {
+    "decl": "Scenario: Barostat rescale runs after integrator + thermostat (canonical order)",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "Barostat rescale runs after integrator + thermostat (canonical order)",
+    "type": "scenario"
+  },
   "rq-ae7f8045": {
     "decl": "Scenario: File does not exist",
     "file": "io/config-schema",
@@ -18743,6 +18846,13 @@
     "title": "Particles evolve independently with their own forces",
     "type": "scenario"
   },
+  "rq-b14ac769": {
+    "decl": "- `Thermostat::post_force_per_particle_fragment(&self) -> Option<PerParticleFragment>` <!-- inline -->",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Thermostat",
+    "type": "api-item"
+  },
   "rq-b17e6de6": {
     "decl": "- `Timings::kernel_stop(&mut self, stage: KernelStage) -> Result<(), TimingsError>`",
     "file": "performance-analysis",
@@ -18758,12 +18868,7 @@
   "rq-b19189c2": {
     "decl": "Scenario: Newton's third law holds for the framework's combined force",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Newton's third law holds for the framework's combined force",
     "type": "scenario"
   },
@@ -19009,6 +19114,13 @@
     "title": "Both new kernels on empty state are no-ops",
     "type": "scenario"
   },
+  "rq-b3c1def1": {
+    "decl": "Scenario: Composed kernel is compiled when an integrator is active",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "Composed kernel is compiled when an integrator is active",
+    "type": "scenario"
+  },
   "rq-b41d8d36": {
     "decl": "### Types",
     "file": "integration/langevin-baoab",
@@ -19048,6 +19160,13 @@
     "refs": [],
     "title": "`Thermostat` trait overrides",
     "type": "section"
+  },
+  "rq-b4788314": {
+    "decl": "Scenario: FragmentCompileFailed surfaces every active fragment's label",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "FragmentCompileFailed surfaces every active fragment's label",
+    "type": "scenario"
   },
   "rq-b4bb7096": {
     "decl": "Scenario: Reject upload when one host array drifts in length",
@@ -19437,6 +19556,14 @@
     "title": "Per-class accumulator buffers are zero-initialised at construction",
     "type": "scenario"
   },
+  "rq-b85a38d6": {
+    "decl": "## Slot Participation",
+    "file": "integration/jit-composed-post-force",
+    "level": 2,
+    "refs": [],
+    "title": "Slot Participation",
+    "type": "section"
+  },
   "rq-b87fd5e8": {
     "decl": "Scenario: Positions visibly evolve over the 100-step lossless forward run",
     "file": "pipeline-reversibility",
@@ -19492,6 +19619,14 @@
     ],
     "title": "Unwrapped displacement is preserved under wrap",
     "type": "scenario"
+  },
+  "rq-b929e7e0": {
+    "decl": "### Error variants",
+    "file": "integration/jit-composed-post-force",
+    "level": 3,
+    "refs": [],
+    "title": "Error variants",
+    "type": "section"
   },
   "rq-b96ce51d": {
     "decl": "Scenario: LosslessBuffers::new with particle_count = 0",
@@ -19583,6 +19718,14 @@
     ],
     "title": "sim_box.generation() advances every plan walk",
     "type": "scenario"
+  },
+  "rq-ba5e545b": {
+    "decl": "### Trait methods",
+    "file": "integration/jit-composed-post-force",
+    "level": 3,
+    "refs": [],
+    "title": "Trait methods",
+    "type": "section"
   },
   "rq-ba6d3eaa": {
     "decl": "Scenario: SD caps step at max_step",
@@ -19838,12 +19981,7 @@
   "rq-bd367201": {
     "decl": "Scenario: Near-collinear geometry (sin θ ≈ 0) produces zero force",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Near-collinear geometry (sin θ ≈ 0) produces zero force",
     "type": "scenario"
   },
@@ -20041,6 +20179,13 @@
     "title": "rescale_velocities on empty state is a no-op",
     "type": "scenario"
   },
+  "rq-bf2e99c3": {
+    "decl": "Scenario: A runner with no active integrator / thermostat / barostat skips the composed kernel",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "A runner with no active integrator / thermostat / barostat skips the composed kernel",
+    "type": "scenario"
+  },
   "rq-bf3ec42e": {
     "decl": "## Empty State and degenerate cases",
     "file": "integration/berendsen-barostat",
@@ -20143,6 +20288,14 @@
     "level": 2,
     "refs": [],
     "title": "Lint flow",
+    "type": "section"
+  },
+  "rq-c0384b03": {
+    "decl": "## Runner Integration",
+    "file": "integration/jit-composed-post-force",
+    "level": 2,
+    "refs": [],
+    "title": "Runner Integration",
     "type": "section"
   },
   "rq-c0668cb7": {
@@ -20779,6 +20932,14 @@
     "title": "Empty-bin g_r is exactly 0.0",
     "type": "scenario"
   },
+  "rq-c71470d0": {
+    "decl": "## Slot Behaviour Contract",
+    "file": "integration/jit-composed-post-force",
+    "level": 2,
+    "refs": [],
+    "title": "Slot Behaviour Contract",
+    "type": "section"
+  },
   "rq-c79a1408": {
     "decl": "Scenario: bond_type missing potential field",
     "file": "io/config-schema",
@@ -20802,12 +20963,7 @@
   "rq-c7af1f28": {
     "decl": "Scenario: Diatomic equilibrium gives zero net force on both atoms",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Diatomic equilibrium gives zero net force on both atoms",
     "type": "scenario"
   },
@@ -21166,12 +21322,7 @@
   "rq-ca76fc02": {
     "decl": "Scenario: Atom appearing as the centre of one angle and a wing of",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Atom appearing as the centre of one angle and a wing of",
     "type": "scenario"
   },
@@ -21201,6 +21352,13 @@
     "refs": [],
     "title": "Launch Configuration",
     "type": "section"
+  },
+  "rq-cb31286f": {
+    "decl": "- `Barostat::post_force_per_particle_fragment(&self) -> Option<PerParticleFragment>` <!-- inline -->",
+    "file": "integration/framework",
+    "refs": [],
+    "title": "Barostat",
+    "type": "api-item"
   },
   "rq-cb52dec0": {
     "decl": "Scenario: Builder validate_params rejects an out-of-domain field",
@@ -21461,6 +21619,14 @@
     "title": "Influence recompute under a C-rescale barostat fires every step",
     "type": "scenario"
   },
+  "rq-ce72fe43": {
+    "decl": "## Source-Fragment Contract",
+    "file": "integration/jit-composed-post-force",
+    "level": 2,
+    "refs": [],
+    "title": "Source-Fragment Contract",
+    "type": "section"
+  },
   "rq-ce89d4a4": {
     "decl": "Scenario: Reject when masses has the wrong length",
     "file": "particle-state",
@@ -21582,12 +21748,7 @@
   "rq-cf50db39": {
     "decl": "Scenario: harmonic_angle_force on zero angles is a no-op",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "harmonic_angle_force on zero angles is a no-op",
     "type": "scenario"
   },
@@ -22003,6 +22164,13 @@
     "title": "A pair-force slot honours ForcesOnly",
     "type": "scenario"
   },
+  "rq-d2cacf91": {
+    "decl": "- `PerParticleFragment` — see *Source-Fragment Contract* above.",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "PerParticleFragment",
+    "type": "api-item"
+  },
   "rq-d2d0fb5f": {
     "decl": "### `Integrator` trait overrides",
     "file": "integration/mtk-npt",
@@ -22307,12 +22475,7 @@
   "rq-d61fa682": {
     "decl": "Scenario: Force magnitude matches closed-form Morse expression",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Force magnitude matches closed-form Morse expression",
     "type": "scenario"
   },
@@ -22386,6 +22549,13 @@
     "refs": [],
     "title": "Parameters",
     "type": "section"
+  },
+  "rq-d6d4f598": {
+    "decl": "Scenario: Composed-kernel output matches the legacy launch sequence within f32 round-off",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "Composed-kernel output matches the legacy launch sequence within f32 round-off",
+    "type": "scenario"
   },
   "rq-d6e10419": {
     "decl": "Scenario: minimum_image after set_lattice reflects the new lattice parameters",
@@ -22698,12 +22868,7 @@
   "rq-d9adc4cb": {
     "decl": "# Feature: Harmonic Angle Bonded Potential",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Feature: Harmonic Angle Bonded Potential",
     "type": "file"
   },
@@ -22917,12 +23082,7 @@
   "rq-dbee9f45": {
     "decl": "Scenario: Construct HarmonicAngleState",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Construct HarmonicAngleState",
     "type": "scenario"
   },
@@ -23065,6 +23225,13 @@
     "title": "Implicit exclusion is added for a bond without explicit entry",
     "type": "scenario"
   },
+  "rq-dcd0d421": {
+    "decl": "Scenario: Construction is rejected when a built-in slot exposes no fragment",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "Construction is rejected when a built-in slot exposes no fragment",
+    "type": "scenario"
+  },
   "rq-dce96f48": {
     "decl": "Scenario: Sweep loop runs zero iterations when count == 0",
     "file": "forces/pair-force-kernel",
@@ -23098,6 +23265,14 @@
     "refs": [],
     "title": "ParticleState fields are Vec<Real>",
     "type": "scenario"
+  },
+  "rq-dd480027": {
+    "decl": "### Composed-module name and entry point",
+    "file": "integration/jit-composed-post-force",
+    "level": 3,
+    "refs": [],
+    "title": "Composed-module name and entry point",
+    "type": "section"
   },
   "rq-dd6fe266": {
     "decl": "Scenario: Reject n_resp = 0",
@@ -23486,6 +23661,13 @@
     "title": "Coulomb force decays toward zero just inside r_cut",
     "type": "scenario"
   },
+  "rq-e12c2668": {
+    "decl": "Scenario: Slot bind methods are invoked once each in canonical order",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "Slot bind methods are invoked once each in canonical order",
+    "type": "scenario"
+  },
   "rq-e1345339": {
     "decl": "## Feature API",
     "file": "forces/pair-force-kernel",
@@ -23615,6 +23797,13 @@
     ],
     "title": "PTX Module Loading",
     "type": "section"
+  },
+  "rq-e274d0d2": {
+    "decl": "Scenario: kernels/integrate.cu does not declare a vv_kick entry point",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "kernels/integrate.cu does not declare a vv_kick entry point",
+    "type": "scenario"
   },
   "rq-e2a31585": {
     "decl": "Scenario: Box-generation refresh handles tilt mutation",
@@ -24081,12 +24270,7 @@
   "rq-e60a2781": {
     "decl": "Scenario: Compressed angle produces a torque that opens the angle",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Compressed angle produces a torque that opens the angle",
     "type": "scenario"
   },
@@ -24761,6 +24945,14 @@
     "title": "Morse bond_type rejects non-positive de",
     "type": "scenario"
   },
+  "rq-ece2a1ec": {
+    "decl": "## Parameter Binding and Launch",
+    "file": "integration/jit-composed-post-force",
+    "level": 2,
+    "refs": [],
+    "title": "Parameter Binding and Launch",
+    "type": "section"
+  },
   "rq-ed048159": {
     "decl": "Scenario: All observables are finite after the 100-step lossless forward run",
     "file": "pipeline-reversibility",
@@ -24866,6 +25058,14 @@
     "title": "Reject stride = 0",
     "type": "scenario"
   },
+  "rq-edf9864f": {
+    "decl": "## Feature API",
+    "file": "integration/jit-composed-post-force",
+    "level": 2,
+    "refs": [],
+    "title": "Feature API",
+    "type": "section"
+  },
   "rq-ee10237d": {
     "decl": "#### `[phase.thermostat]` (optional)",
     "file": "io/config-schema",
@@ -24915,12 +25115,7 @@
   "rq-ee7566b4": {
     "decl": "Scenario: A bent angle's energy matches the closed-form expression",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "A bent angle's energy matches the closed-form expression",
     "type": "scenario"
   },
@@ -25592,6 +25787,13 @@
     "title": "Output convention",
     "type": "section"
   },
+  "rq-f3373134": {
+    "decl": "Scenario: Two independent runs of the composed-kernel path are byte-identical",
+    "file": "integration/jit-composed-post-force",
+    "refs": [],
+    "title": "Two independent runs of the composed-kernel path are byte-identical",
+    "type": "scenario"
+  },
   "rq-f33ca120": {
     "decl": "Scenario: Angle wings are canonicalised so atom_i < atom_k",
     "file": "forces/topology",
@@ -26037,12 +26239,7 @@
   "rq-f79657d2": {
     "decl": "Scenario: Compressed bond produces a repulsive force",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Compressed bond produces a repulsive force",
     "type": "scenario"
   },
@@ -26061,12 +26258,7 @@
   "rq-f7a71238": {
     "decl": "Scenario: init_device exposes the harmonic-angle kernels on the Kernels handle",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "init_device exposes the harmonic-angle kernels on the Kernels handle",
     "type": "scenario"
   },
@@ -26469,12 +26661,7 @@
   "rq-fbdf08ff": {
     "decl": "Scenario: Minimum image is applied",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Minimum image is applied",
     "type": "scenario"
   },
@@ -26792,24 +26979,14 @@
   "rq-fe95ff5f": {
     "decl": "Scenario: Angle virial equals r_ij · F_i + r_kj · F_k",
     "file": "forces/harmonic-angle",
-    "refs": [
-      {
-        "file": "tests/forces_angle.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Angle virial equals r_ij · F_i + r_kj · F_k",
     "type": "scenario"
   },
   "rq-fe9f2ebe": {
     "decl": "Scenario: r == 0 produces zero energy and virial in addition to zero force",
     "file": "forces/morse-bonded",
-    "refs": [
-      {
-        "file": "tests/forces_morse.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "r == 0 produces zero energy and virial in addition to zero force",
     "type": "scenario"
   },

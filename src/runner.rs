@@ -101,6 +101,17 @@ pub enum RunnerError {
         final_force: f64,
         final_step: f64,
     },
+    #[error(
+        "built-in {kind} slot `{label}` did not expose a post-force per-particle source fragment"
+    )]
+    MissingPostForcePerParticleFragment {
+        kind: &'static str,
+        label: &'static str,
+    },
+    #[error("JIT-composed post-force per-particle kernel failed to compile: {log}")]
+    PostForceFragmentCompileFailed { log: String },
+    #[error("JIT-composed post-force per-particle kernel failed to load: {0}")]
+    PostForceFragmentLoadFailed(crate::gpu::GpuError),
 }
 
 // rq-5c1cfc93 rq-b00170c6
@@ -1203,6 +1214,14 @@ pub(crate) fn run_md_phase_inner(
         )
         .map_err(|e| (RunnerError::Constraint(e), ExitPhase::Setup))?;
 
+    // JIT-composed post-force per-particle kernel setup is deferred
+    // until after the CUDA-graph eligibility check so it activates
+    // only when the non-graph step loop is taken. The CUDA-graph
+    // capture path retains its standalone per-slot kernel sequence.
+    let mut composed_post_force: Option<crate::forces::JitComposedPostForcePerParticle> =
+        None;
+    let mut post_force_substep_index: Option<usize> = None;
+
     // Open per-phase output writers.
     let mut traj_writer: Option<TrajectoryWriter> = if phase.output.trajectory_every > 0 {
         Some(
@@ -1400,6 +1419,66 @@ pub(crate) fn run_md_phase_inner(
         )?;
     } else {
 
+    // rq-8ac9773d — JIT-composed post-force per-particle kernel
+    // activation. Only the non-graph step loop dispatches this
+    // composed kernel; the graph capture path keeps its standalone
+    // per-slot kernels and skips JIT entirely.
+    {
+        let int_frag = integrator.post_force_per_particle_fragment();
+        let therm_active = thermostat.is_some();
+        let baro_active = barostat.is_some();
+        let therm_frag = thermostat
+            .as_ref()
+            .and_then(|t| t.post_force_per_particle_fragment());
+        let baro_frag = barostat
+            .as_ref()
+            .and_then(|b| b.post_force_per_particle_fragment());
+        let all_present = int_frag.is_some()
+            && (!therm_active || therm_frag.is_some())
+            && (!baro_active || baro_frag.is_some());
+        if all_present {
+            let mut fragments: Vec<crate::forces::PerParticleFragment> = Vec::new();
+            fragments.push(int_frag.unwrap());
+            if let Some(f) = therm_frag {
+                fragments.push(f);
+            }
+            if let Some(f) = baro_frag {
+                fragments.push(f);
+            }
+            match crate::forces::JitComposedPostForcePerParticle::compile_and_load(
+                &setup.gpu.device,
+                &fragments,
+            ) {
+                Ok(k) => {
+                    composed_post_force = Some(k);
+                    post_force_substep_index =
+                        integrator.post_force_substep_index(phase.dt as Real);
+                    integrator.set_jit_composed_post_force_active(true);
+                    if let Some(t) = thermostat.as_mut() {
+                        t.set_jit_composed_post_force_active(true);
+                    }
+                    if let Some(b) = barostat.as_mut() {
+                        b.set_jit_composed_post_force_active(true);
+                    }
+                }
+                Err(e) => {
+                    return Err((
+                        match e {
+                            crate::forces::ForceFieldError::FragmentCompileFailed { log } => {
+                                RunnerError::PostForceFragmentCompileFailed { log }
+                            }
+                            crate::forces::ForceFieldError::FragmentLoadFailed(g) => {
+                                RunnerError::PostForceFragmentLoadFailed(g)
+                            }
+                            other => RunnerError::ForceField(other),
+                        },
+                        ExitPhase::Loop,
+                    ));
+                }
+            }
+        }
+    }
+
     for step in 1..=n_steps {
         if let Some(t) = thermostat.as_mut() {
             t.apply_pre(&mut setup.buffers, dt, &mut timings)
@@ -1415,24 +1494,49 @@ pub(crate) fn run_md_phase_inner(
                 && step % phase.output.trajectory_every == 0;
             let log_due = phase.output.log_every > 0 && step % phase.output.log_every == 0;
             let runner_needs_scalars = trajectory_due || log_due || barostat.is_some();
-            crate::integrator::run_step(
-                integrator.as_mut(),
-                &mut setup.buffers,
-                &mut setup.sim_box,
-                &mut setup.force_field,
-                constraint_arg,
-                supports_constraints,
-                dt,
-                &mut timings,
-                runner_needs_scalars,
-            )
-            .map_err(|e| {
+            let result = if let Some(skip_idx) = post_force_substep_index {
+                crate::integrator::run_step_with_skipped_substep(
+                    integrator.as_mut(),
+                    &mut setup.buffers,
+                    &mut setup.sim_box,
+                    &mut setup.force_field,
+                    constraint_arg,
+                    supports_constraints,
+                    dt,
+                    &mut timings,
+                    runner_needs_scalars,
+                    skip_idx,
+                )
+            } else {
+                crate::integrator::run_step(
+                    integrator.as_mut(),
+                    &mut setup.buffers,
+                    &mut setup.sim_box,
+                    &mut setup.force_field,
+                    constraint_arg,
+                    supports_constraints,
+                    dt,
+                    &mut timings,
+                    runner_needs_scalars,
+                )
+            };
+            result.map_err(|e| {
                 let runner_err = match e {
                     crate::integrator::StepError::Integrator(e) => RunnerError::Integrator(e),
                     crate::integrator::StepError::ForceField(e) => RunnerError::ForceField(e),
                     crate::integrator::StepError::Constraint(e) => RunnerError::Constraint(e),
                     crate::integrator::StepError::IntegratorRejectsConstraint { reason } => {
                         unreachable!("run_step returned IntegratorRejectsConstraint ({reason})")
+                    }
+                    crate::integrator::StepError::MissingPostForcePerParticleFragment {
+                        kind,
+                        label,
+                    } => RunnerError::MissingPostForcePerParticleFragment { kind, label },
+                    crate::integrator::StepError::PostForceFragmentCompileFailed { log } => {
+                        RunnerError::PostForceFragmentCompileFailed { log }
+                    }
+                    crate::integrator::StepError::PostForceFragmentLoadFailed(e) => {
+                        RunnerError::PostForceFragmentLoadFailed(e)
                     }
                 };
                 (runner_err, ExitPhase::Loop)
@@ -1445,6 +1549,50 @@ pub(crate) fn run_md_phase_inner(
         if let Some(b) = barostat.as_mut() {
             b.apply(&mut setup.buffers, &mut setup.sim_box, dt, &mut timings)
                 .map_err(|e| (RunnerError::Barostat(e), ExitPhase::Loop))?;
+        }
+        if let Some(ref composed) = composed_post_force
+            && setup.buffers.particle_count() > 0
+        {
+            let mut builder = crate::forces::ForceLaunchBuilder::new();
+            builder.push_device_buffer(&setup.buffers.positions_x);
+            builder.push_device_buffer(&setup.buffers.positions_y);
+            builder.push_device_buffer(&setup.buffers.positions_z);
+            builder.push_device_buffer(&setup.buffers.images_x);
+            builder.push_device_buffer(&setup.buffers.images_y);
+            builder.push_device_buffer(&setup.buffers.images_z);
+            builder.push_device_buffer(&setup.buffers.velocities_x);
+            builder.push_device_buffer(&setup.buffers.velocities_y);
+            builder.push_device_buffer(&setup.buffers.velocities_z);
+            builder.push_device_buffer(&setup.buffers.forces_x);
+            builder.push_device_buffer(&setup.buffers.forces_y);
+            builder.push_device_buffer(&setup.buffers.forces_z);
+            builder.push_device_buffer(&setup.buffers.masses);
+            builder.push_device_buffer(setup.sim_box.lattice_device());
+            let bind_ctx = crate::forces::PostForceBindContext {
+                buffers: &setup.buffers,
+                sim_box: &setup.sim_box,
+                dt,
+            };
+            integrator.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+            if let Some(t) = thermostat.as_ref() {
+                t.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+            }
+            if let Some(b) = barostat.as_ref() {
+                b.bind_post_force_per_particle_args(&bind_ctx, &mut builder);
+            }
+            let n_particles = setup.buffers.particle_count() as u32;
+            builder.push_scalar::<u32>(n_particles);
+            timings
+                .kernel_start(crate::timings::KernelStage::JIT_COMPOSED_POST_FORCE)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
+            unsafe {
+                composed
+                    .launch(n_particles, builder)
+                    .map_err(|e| (RunnerError::Gpu(e), ExitPhase::Loop))?;
+            }
+            timings
+                .kernel_stop(crate::timings::KernelStage::JIT_COMPOSED_POST_FORCE)
+                .map_err(|e| (RunnerError::Timings(e), ExitPhase::Loop))?;
         }
 
         let want_traj =

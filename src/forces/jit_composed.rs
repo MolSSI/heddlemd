@@ -151,6 +151,196 @@ pub struct AngleScratchView<'a> {
     pub angle_count: usize,
 }
 
+/// Self-contained CUDA C++ source fragment plus identifying metadata,
+/// returned by `Integrator::post_force_per_particle_fragment(...)`,
+/// `Thermostat::post_force_per_particle_fragment(...)`, and
+/// `Barostat::post_force_per_particle_fragment(...)`. The composer
+/// concatenates each fragment's per-thread body into the composed
+/// post-force per-particle kernel in canonical slot order.
+///
+/// See `rqm/integration/jit-composed-post-force.md` for the contract
+/// each fragment must satisfy.
+#[derive(Debug, Clone)]
+pub struct PerParticleFragment {
+    pub label: &'static str,
+    /// CUDA C++ source declaring helper `__device__` functions,
+    /// structs, or constants the fragment's `per_thread_body` depends
+    /// on. Concatenated verbatim into the composed source above the
+    /// entry point. Empty for fragments that need no helpers.
+    pub helper_source: String,
+    /// CUDA C++ source declaring the fragment's contribution to the
+    /// composed entry point's argument list. Each line declares one
+    /// `extern "C"` kernel parameter, comma-terminated.
+    pub entry_point_args: String,
+    /// CUDA C++ source for the fragment's per-thread work. Variables
+    /// in scope at the inlining point: `unsigned int i` (particle
+    /// index, validated `i < n`), `Real lx, ly, lz, xy, xz, yz`
+    /// (the lattice).
+    pub per_thread_body: String,
+}
+
+/// Context passed to every active slot's
+/// `bind_post_force_per_particle_args(...)` call.
+pub struct PostForceBindContext<'a> {
+    pub buffers: &'a ParticleBuffers,
+    pub sim_box: &'a SimulationBox,
+    pub dt: crate::precision::Real,
+}
+
+const POST_FORCE_MODULE_NAME: &str = "heddle_jit_composed_post_force_per_particle";
+const POST_FORCE_ENTRY: &str = "heddle_jit_composed_post_force_per_particle";
+
+/// JIT-composed post-force per-particle kernel module + entry-point
+/// handle. Built by the runner when at least one integrator /
+/// thermostat / barostat slot exposes a post-force fragment;
+/// otherwise the runner carries `None` for this field and no
+/// composed-kernel launch is attempted at step time.
+///
+/// See `rqm/integration/jit-composed-post-force.md`.
+#[derive(Debug)]
+pub struct JitComposedPostForcePerParticle {
+    pub fragment_labels: Vec<&'static str>,
+    pub entry_point: CudaFunction,
+}
+
+impl JitComposedPostForcePerParticle {
+    pub fn compile_and_load(
+        device: &Arc<CudaDevice>,
+        fragments: &[PerParticleFragment],
+    ) -> Result<Self, super::ForceFieldError> {
+        let source = compose_post_force_source(fragments);
+        let ptx = jit_compile(device, &source, |log| {
+            super::ForceFieldError::FragmentCompileFailed {
+                log: format_post_force_compile_failure(fragments, log, &source),
+            }
+        })?;
+        device
+            .load_ptx(ptx, POST_FORCE_MODULE_NAME, &[POST_FORCE_ENTRY])
+            .map_err(|e| {
+                super::ForceFieldError::FragmentLoadFailed(GpuError::from(e))
+            })?;
+        let entry_point = device
+            .get_func(POST_FORCE_MODULE_NAME, POST_FORCE_ENTRY)
+            .expect("composed post-force kernel entry was just loaded");
+        Ok(JitComposedPostForcePerParticle {
+            fragment_labels: fragments.iter().map(|f| f.label).collect(),
+            entry_point,
+        })
+    }
+
+    /// Launch the composed post-force per-particle kernel. `builder`
+    /// must have been pre-populated with the common args (positions,
+    /// images, velocities, forces, masses, lattice) followed by each
+    /// active slot's per-fragment args in canonical slot order
+    /// (integrator → thermostat → barostat), followed by the trailing
+    /// `n` arg.
+    ///
+    /// # Safety
+    /// The argument list must match the composed entry-point signature
+    /// exactly. The runner is responsible for that invariant.
+    pub unsafe fn launch(
+        &self,
+        n: u32,
+        mut builder: PairForceLaunchBuilder,
+    ) -> Result<(), GpuError> {
+        let cfg = LaunchConfig {
+            grid_dim: (n.div_ceil(256), 1, 1),
+            block_dim: (256, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        let func = self.entry_point.clone();
+        unsafe {
+            func.launch(cfg, &mut builder.kernel_params)
+                .map_err(GpuError::from)?;
+        }
+        drop(builder.storage);
+        Ok(())
+    }
+}
+
+fn compose_post_force_source(fragments: &[PerParticleFragment]) -> String {
+    let mut s = String::with_capacity(
+        8192
+            + fragments
+                .iter()
+                .map(|f| f.helper_source.len() + f.per_thread_body.len())
+                .sum::<usize>(),
+    );
+    s.push_str(PREAMBLE);
+    // Each fragment's helper source above the entry point, with the
+    // slot's label noted so nvrtc compile errors can be traced.
+    for f in fragments {
+        s.push_str("// ---- post-force helper source: ");
+        s.push_str(f.label);
+        s.push_str(" ----\n");
+        s.push_str(&f.helper_source);
+        s.push_str("\n// ---- end post-force helper source: ");
+        s.push_str(f.label);
+        s.push_str(" ----\n");
+    }
+
+    // Entry-point signature: common args + per-fragment args + n.
+    s.push_str("\nextern \"C\" __global__ void ");
+    s.push_str(POST_FORCE_ENTRY);
+    s.push_str("(\n");
+    s.push_str("    Real *positions_x,\n");
+    s.push_str("    Real *positions_y,\n");
+    s.push_str("    Real *positions_z,\n");
+    s.push_str("    int *images_x,\n");
+    s.push_str("    int *images_y,\n");
+    s.push_str("    int *images_z,\n");
+    s.push_str("    Real *velocities_x,\n");
+    s.push_str("    Real *velocities_y,\n");
+    s.push_str("    Real *velocities_z,\n");
+    s.push_str("    const Real *forces_x,\n");
+    s.push_str("    const Real *forces_y,\n");
+    s.push_str("    const Real *forces_z,\n");
+    s.push_str("    const Real *masses,\n");
+    s.push_str("    const Real *lattice,\n");
+    for f in fragments {
+        s.push_str(&f.entry_point_args);
+    }
+    s.push_str("    unsigned int n)\n");
+    s.push_str("{\n");
+    s.push_str("    unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;\n");
+    s.push_str("    if (i >= n) return;\n");
+    s.push_str("    Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];\n");
+    s.push_str("    Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];\n");
+    for f in fragments {
+        s.push_str("    // ---- per-thread body: ");
+        s.push_str(f.label);
+        s.push_str(" ----\n    {\n");
+        s.push_str(&f.per_thread_body);
+        s.push_str("\n    }\n");
+    }
+    s.push_str("}\n");
+    s
+}
+
+fn format_post_force_compile_failure(
+    fragments: &[PerParticleFragment],
+    log: &str,
+    source: &str,
+) -> String {
+    use std::fmt::Write;
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "nvrtc failed to compile the JIT-composed post-force per-particle kernel."
+    );
+    let _ = writeln!(s, "Active fragments (canonical slot order):");
+    for f in fragments {
+        let _ = writeln!(s, "  - {}", f.label);
+    }
+    let _ = writeln!(s, "nvrtc compile log:");
+    let _ = writeln!(s, "{}", log);
+    let _ = writeln!(s, "Composed source (line-numbered):");
+    for (i, line) in source.lines().enumerate() {
+        let _ = writeln!(s, "{:5}: {}", i + 1, line);
+    }
+    s
+}
+
 /// Shape-agnostic alias for `PairForceLaunchBuilder` — the binding
 /// mechanism is the same across the pair-force, bonded, and angle
 /// composers, so the launch builder is one type with multiple names.

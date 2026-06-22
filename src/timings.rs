@@ -45,6 +45,12 @@ impl KernelStage {
     /// rq-2d2eaf72
     pub const JIT_COMPOSED_ANGLE_FORCE: KernelStage =
         KernelStage::new("jit_composed_angle_force");
+    /// rq-8ac9773d — JIT-composed post-force per-particle kernel
+    /// (integrator + thermostat + barostat per-particle work fused
+    /// into a single launch). See
+    /// `rqm/integration/jit-composed-post-force.md`.
+    pub const JIT_COMPOSED_POST_FORCE: KernelStage =
+        KernelStage::new("jit_composed_post_force");
     pub const SPME_RECIP_PIPELINE: KernelStage =
         KernelStage::new("spme_recip_pipeline");
     pub const SPME_FORCE_GATHER: KernelStage = KernelStage::new("spme_force_gather");
@@ -118,6 +124,7 @@ impl KernelStage {
         Self::JIT_COMPOSED_PAIR_FORCE,
         Self::JIT_COMPOSED_BONDED_FORCE,
         Self::JIT_COMPOSED_ANGLE_FORCE,
+        Self::JIT_COMPOSED_POST_FORCE,
         Self::SPME_RECIP_PIPELINE,
         Self::SPME_FORCE_GATHER,
         Self::REDUCE_BOND_FORCES,
