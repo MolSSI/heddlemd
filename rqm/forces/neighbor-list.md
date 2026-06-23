@@ -391,7 +391,7 @@ displacement-check kernel runs over the lifetime of the run.
 - `NeighborListConfig` — value of the parsed `[neighbor_list]` table. <!-- rq-060b1fab -->
   Variants:
   - `AllPairs`
-  - `CellList { max_neighbors: u32, r_skin: f64 }`
+  - `CellList { r_skin: f64 }`
 
 - `NeighborListState` — host-side wrapper carrying the device buffers <!-- rq-b2d68288 -->
   and parameters that make up the shared neighbor list. The state is in

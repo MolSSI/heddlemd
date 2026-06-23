@@ -94,12 +94,7 @@
   "rq-0099ef65": {
     "decl": "Scenario: Single-step lossless round trip restores observables bit-exactly",
     "file": "pipeline-reversibility",
-    "refs": [
-      {
-        "file": "tests/pipeline_reversibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Single-step lossless round trip restores observables bit-exactly",
     "type": "scenario"
   },
@@ -270,12 +265,7 @@
   "rq-0181787c": {
     "decl": "Scenario: Build kernel signals overflow when an atom exceeds max_neighbors",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Build kernel signals overflow when an atom exceeds max_neighbors",
     "type": "scenario"
   },
@@ -1092,12 +1082,7 @@
     "decl": "## Comparison Procedure",
     "file": "pipeline-reversibility",
     "level": 2,
-    "refs": [
-      {
-        "file": "tests/pipeline_reversibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Comparison Procedure",
     "type": "section"
   },
@@ -2576,12 +2561,7 @@
   "rq-151cb099": {
     "decl": "Scenario: Cell index of a position at the +1/2 fractional-coordinate boundary clamps inside the grid",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Cell index of a position at the +1/2 fractional-coordinate boundary clamps inside the grid",
     "type": "scenario"
   },
@@ -3049,12 +3029,7 @@
   "rq-19fd5b09": {
     "decl": "Scenario: cell_counts is the device-computed per-cell histogram",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "cell_counts is the device-computed per-cell histogram",
     "type": "scenario"
   },
@@ -3260,12 +3235,7 @@
   "rq-1b44b5da": {
     "decl": "Scenario: Lossy 100-step round trip does NOT restore observables",
     "file": "pipeline-reversibility",
-    "refs": [
-      {
-        "file": "tests/pipeline_reversibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Lossy 100-step round trip does NOT restore observables",
     "type": "scenario"
   },
@@ -3303,12 +3273,7 @@
   "rq-1b742a37": {
     "decl": "Scenario: cached_generation initialised from the construction-time box",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "cached_generation initialised from the construction-time box",
     "type": "scenario"
   },
@@ -3359,12 +3324,7 @@
   "rq-1b9c474c": {
     "decl": "Scenario: Reject configurations whose box admits fewer than 3 cells along any direction",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Reject configurations whose box admits fewer than 3 cells along any direction",
     "type": "scenario"
   },
@@ -3553,12 +3513,7 @@
     "decl": "## Reversal Protocol",
     "file": "pipeline-reversibility",
     "level": 2,
-    "refs": [
-      {
-        "file": "tests/pipeline_reversibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Reversal Protocol",
     "type": "section"
   },
@@ -4252,12 +4207,7 @@
   "rq-2303ee2e": {
     "decl": "Scenario: Per-cell sort yields ascending partner indices inside every cell",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Per-cell sort yields ascending partner indices inside every cell",
     "type": "scenario"
   },
@@ -4452,12 +4402,7 @@
     "decl": "## Comparison Procedure",
     "file": "pipeline-reproducibility",
     "level": 2,
-    "refs": [
-      {
-        "file": "tests/pipeline_reproducibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Comparison Procedure",
     "type": "section"
   },
@@ -4604,12 +4549,7 @@
   "rq-25faef11": {
     "decl": "Scenario: Neighbor list applies minimum-image PBC",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Neighbor list applies minimum-image PBC",
     "type": "scenario"
   },
@@ -4660,12 +4600,7 @@
   "rq-265f4da4": {
     "decl": "Scenario: scatter places each atom inside its cell's slice",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "scatter places each atom inside its cell's slice",
     "type": "scenario"
   },
@@ -4851,12 +4786,7 @@
   "rq-2846ee8b": {
     "decl": "Scenario: Bit-exact equality after a 100-step run",
     "file": "pipeline-reproducibility",
-    "refs": [
-      {
-        "file": "tests/pipeline_reproducibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Bit-exact equality after a 100-step run",
     "type": "scenario"
   },
@@ -5248,12 +5178,7 @@
   "rq-2bc559ec": {
     "decl": "Scenario: Each atom's neighbor list is emitted in cell-sweep order",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Each atom's neighbor list is emitted in cell-sweep order",
     "type": "scenario"
   },
@@ -5816,12 +5741,7 @@
   "rq-30f85829": {
     "decl": "Scenario: Trivial-mode state has no cell-list fields",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Trivial-mode state has no cell-list fields",
     "type": "scenario"
   },
@@ -5902,12 +5822,7 @@
   "rq-31a9e3bb": {
     "decl": "Scenario: r_search_sq is preserved across a generation refresh",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "r_search_sq is preserved across a generation refresh",
     "type": "scenario"
   },
@@ -5946,12 +5861,7 @@
   "rq-3288a78c": {
     "decl": "Scenario: NPT-style sequence of small barostat ticks rebuilds at the displacement-driven rate",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "NPT-style sequence of small barostat ticks rebuilds at the displacement-driven rate",
     "type": "scenario"
   },
@@ -6006,12 +5916,7 @@
   "rq-331b6e81": {
     "decl": "Scenario: cell_offsets is not reallocated when n_cells_total is unchanged",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "cell_offsets is not reallocated when n_cells_total is unchanged",
     "type": "scenario"
   },
@@ -6307,12 +6212,7 @@
   "rq-35981c27": {
     "decl": "Scenario: First displacement_check call always rebuilds (needs_rebuild starts true)",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "First displacement_check call always rebuilds (needs_rebuild starts true)",
     "type": "scenario"
   },
@@ -7355,12 +7255,7 @@
   "rq-3f46fb2e": {
     "decl": "Scenario: All output values are finite after the 100-step run",
     "file": "pipeline-reproducibility",
-    "refs": [
-      {
-        "file": "tests/pipeline_reproducibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "All output values are finite after the 100-step run",
     "type": "scenario"
   },
@@ -8406,12 +8301,7 @@
   "rq-4bc8028f": {
     "decl": "Scenario: NeighborListState with particle_count = 0 builds successfully",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "NeighborListState with particle_count = 0 builds successfully",
     "type": "scenario"
   },
@@ -9060,12 +8950,7 @@
   "rq-52f547fd": {
     "decl": "Scenario: NeighborListState with particle_count = 1 produces an empty neighbor list",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "NeighborListState with particle_count = 1 produces an empty neighbor list",
     "type": "scenario"
   },
@@ -9209,12 +9094,7 @@
   "rq-53ae77a4": {
     "decl": "Scenario: Displacement check on reference positions equal to current returns 0",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Displacement check on reference positions equal to current returns 0",
     "type": "scenario"
   },
@@ -10411,12 +10291,7 @@
   "rq-5f2c42be": {
     "decl": "Scenario: Prefix scan is correct for cell counts beyond a single block-totals pass",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Prefix scan is correct for cell counts beyond a single block-totals pass",
     "type": "scenario"
   },
@@ -11451,12 +11326,7 @@
   "rq-699cccff": {
     "decl": "Scenario: Two pre_steps after a single box mutation refresh only once",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two pre_steps after a single box mutation refresh only once",
     "type": "scenario"
   },
@@ -11604,12 +11474,7 @@
     "decl": "## Velocity-Verlet Loop",
     "file": "pipeline-reproducibility",
     "level": 2,
-    "refs": [
-      {
-        "file": "tests/pipeline_reproducibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Velocity-Verlet Loop",
     "type": "section"
   },
@@ -11670,12 +11535,7 @@
   "rq-6bf3709c": {
     "decl": "Scenario: Two independent rebuilds with identical positions produce identical lists",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Two independent rebuilds with identical positions produce identical lists",
     "type": "scenario"
   },
@@ -11742,12 +11602,7 @@
   "rq-6c8415f6": {
     "decl": "Scenario: NeighborListState rebuild performs no host-device particle transfers",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "NeighborListState rebuild performs no host-device particle transfers",
     "type": "scenario"
   },
@@ -12188,12 +12043,7 @@
   "rq-6fd5167a": {
     "decl": "Scenario: Configuration exceeding the u32 cell-addressing limit is rejected at construction",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Configuration exceeding the u32 cell-addressing limit is rejected at construction",
     "type": "scenario"
   },
@@ -12416,12 +12266,7 @@
   "rq-72aae589": {
     "decl": "Scenario: Generation tick with unchanged n_cells_total updates the cache without forcing rebuild",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Generation tick with unchanged n_cells_total updates the cache without forcing rebuild",
     "type": "scenario"
   },
@@ -12813,12 +12658,7 @@
     "decl": "## Test Fixture",
     "file": "pipeline-reversibility",
     "level": 2,
-    "refs": [
-      {
-        "file": "tests/pipeline_reversibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Test Fixture",
     "type": "section"
   },
@@ -13094,12 +12934,7 @@
   "rq-7822b88b": {
     "decl": "Scenario: 100-step lossless round trip restores observables bit-exactly",
     "file": "pipeline-reversibility",
-    "refs": [
-      {
-        "file": "tests/pipeline_reversibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "100-step lossless round trip restores observables bit-exactly",
     "type": "scenario"
   },
@@ -13161,12 +12996,7 @@
   "rq-789fcec9": {
     "decl": "Scenario: Trivial-mode contents",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Trivial-mode contents",
     "type": "scenario"
   },
@@ -13434,12 +13264,7 @@
   "rq-7a14d0d8": {
     "decl": "Scenario: per-cell sort canonicalises sorted_particle_ids",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "per-cell sort canonicalises sorted_particle_ids",
     "type": "scenario"
   },
@@ -13544,12 +13369,7 @@
     "decl": "## Lossless Velocity-Verlet Loop",
     "file": "pipeline-reversibility",
     "level": 2,
-    "refs": [
-      {
-        "file": "tests/pipeline_reversibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Lossless Velocity-Verlet Loop",
     "type": "section"
   },
@@ -14391,12 +14211,7 @@
   "rq-838acdee": {
     "decl": "Scenario: sorted_particle_ids sorts particles by (cell_index, particle_id)",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "sorted_particle_ids sorts particles by (cell_index, particle_id)",
     "type": "scenario"
   },
@@ -14771,12 +14586,7 @@
   "rq-882c9e86": {
     "decl": "Scenario: cached_generation initialised from a non-zero construction-time generation",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "cached_generation initialised from a non-zero construction-time generation",
     "type": "scenario"
   },
@@ -15350,12 +15160,7 @@
     "decl": "## Test Fixture",
     "file": "pipeline-reproducibility",
     "level": 2,
-    "refs": [
-      {
-        "file": "tests/pipeline_reproducibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Test Fixture",
     "type": "section"
   },
@@ -15604,12 +15409,7 @@
   "rq-90524f5d": {
     "decl": "Scenario: Sub-skin movement does not trigger a rebuild",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Sub-skin movement does not trigger a rebuild",
     "type": "scenario"
   },
@@ -17347,12 +17147,7 @@
   "rq-9f63a183": {
     "decl": "Scenario: Over-skin movement triggers a rebuild",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Over-skin movement triggers a rebuild",
     "type": "scenario"
   },
@@ -18156,12 +17951,7 @@
   "rq-a7aac794": {
     "decl": "Scenario: Cell counts reflect perpendicular widths for a tilted box",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Cell counts reflect perpendicular widths for a tilted box",
     "type": "scenario"
   },
@@ -18365,12 +18155,7 @@
   "rq-a99ca751": {
     "decl": "Scenario: Cell index of a position outside the primary cell wraps before binning",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Cell index of a position outside the primary cell wraps before binning",
     "type": "scenario"
   },
@@ -19364,12 +19149,7 @@
   "rq-b2314952": {
     "decl": "Scenario: Bit-exact equality after a single full velocity-Verlet step",
     "file": "pipeline-reproducibility",
-    "refs": [
-      {
-        "file": "tests/pipeline_reproducibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Bit-exact equality after a single full velocity-Verlet step",
     "type": "scenario"
   },
@@ -19537,12 +19317,7 @@
   "rq-b39d3be7": {
     "decl": "Scenario: Displacement check uses minimum-image displacement",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Displacement check uses minimum-image displacement",
     "type": "scenario"
   },
@@ -19682,12 +19457,7 @@
   "rq-b5289acc": {
     "decl": "Scenario: Neighbour list is not globally partner-ID sorted across cells",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Neighbour list is not globally partner-ID sorted across cells",
     "type": "scenario"
   },
@@ -20003,12 +19773,7 @@
   "rq-b87fd5e8": {
     "decl": "Scenario: Positions visibly evolve over the 100-step lossless forward run",
     "file": "pipeline-reversibility",
-    "refs": [
-      {
-        "file": "tests/pipeline_reversibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Positions visibly evolve over the 100-step lossless forward run",
     "type": "scenario"
   },
@@ -20237,12 +20002,7 @@
   "rq-bb3773aa": {
     "decl": "Scenario: Trivial-mode pre_step does no work",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Trivial-mode pre_step does no work",
     "type": "scenario"
   },
@@ -20781,12 +20541,7 @@
   "rq-c0cfc5d6": {
     "decl": "Scenario: Cell counts are floor(w / (r_cut + r_skin)) for an orthorhombic box",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Cell counts are floor(w / (r_cut + r_skin)) for an orthorhombic box",
     "type": "scenario"
   },
@@ -21045,12 +20800,7 @@
     "decl": "## Gherkin Scenarios",
     "file": "forces/neighbor-list",
     "level": 2,
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
   },
@@ -22010,12 +21760,7 @@
   "rq-cd50d861": {
     "decl": "Scenario: cell_offsets contains the prefix sum of cell occupancies",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "cell_offsets contains the prefix sum of cell occupancies",
     "type": "scenario"
   },
@@ -22265,12 +22010,7 @@
   "rq-cf847c1f": {
     "decl": "Scenario: Box generation tick that changes n_cells_total forces a rebuild",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Box generation tick that changes n_cells_total forces a rebuild",
     "type": "scenario"
   },
@@ -22372,12 +22112,7 @@
   "rq-d0a54b3c": {
     "decl": "Scenario: Positions visibly evolve over the 100-step run",
     "file": "pipeline-reproducibility",
-    "refs": [
-      {
-        "file": "tests/pipeline_reproducibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Positions visibly evolve over the 100-step run",
     "type": "scenario"
   },
@@ -22523,12 +22258,7 @@
   "rq-d22f105f": {
     "decl": "Scenario: cell_offsets is reallocated when n_cells_total changes",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "cell_offsets is reallocated when n_cells_total changes",
     "type": "scenario"
   },
@@ -23404,12 +23134,7 @@
   "rq-dacb071c": {
     "decl": "Scenario: Generation mismatch with new box too small returns BoxTooSmallForCells",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Generation mismatch with new box too small returns BoxTooSmallForCells",
     "type": "scenario"
   },
@@ -23533,12 +23258,7 @@
   "rq-db8b171d": {
     "decl": "Scenario: pre_step with unchanged box does not refresh the cell-layout cache",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "pre_step with unchanged box does not refresh the cell-layout cache",
     "type": "scenario"
   },
@@ -24311,12 +24031,7 @@
   "rq-e2a31585": {
     "decl": "Scenario: Box-generation refresh handles tilt mutation",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Box-generation refresh handles tilt mutation",
     "type": "scenario"
   },
@@ -24863,12 +24578,7 @@
   "rq-e75b24e7": {
     "decl": "Scenario: Neighbor list excludes the self atom",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Neighbor list excludes the self atom",
     "type": "scenario"
   },
@@ -24957,12 +24667,7 @@
   "rq-e84d3bac": {
     "decl": "Scenario: Reject a tilted box whose perpendicular width drops below 3*(r_cut+r_skin)",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Reject a tilted box whose perpendicular width drops below 3*(r_cut+r_skin)",
     "type": "scenario"
   },
@@ -25229,12 +24934,7 @@
   "rq-ea0ee5ef": {
     "decl": "Scenario: Neighbor list contains every particle within r_cut + r_skin",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Neighbor list contains every particle within r_cut + r_skin",
     "type": "scenario"
   },
@@ -25443,12 +25143,7 @@
   "rq-ecad9802": {
     "decl": "Scenario: write_cursors is reset to zero before each rebuild",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "write_cursors is reset to zero before each rebuild",
     "type": "scenario"
   },
@@ -25495,12 +25190,7 @@
   "rq-ed048159": {
     "decl": "Scenario: All observables are finite after the 100-step lossless forward run",
     "file": "pipeline-reversibility",
-    "refs": [
-      {
-        "file": "tests/pipeline_reversibility.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "All observables are finite after the 100-step lossless forward run",
     "type": "scenario"
   },
@@ -26121,12 +25811,7 @@
   "rq-f164bf76": {
     "decl": "Scenario: cell_indices is populated by the device pipeline",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "cell_indices is populated by the device pipeline",
     "type": "scenario"
   },
@@ -26311,12 +25996,7 @@
   "rq-f2e4b0b8": {
     "decl": "Scenario: Cell-list scratch is reallocated alongside cell_offsets on box generation refresh",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Cell-list scratch is reallocated alongside cell_offsets on box generation refresh",
     "type": "scenario"
   },
@@ -26799,12 +26479,7 @@
   "rq-f79d1ac5": {
     "decl": "Scenario: Generation tick with unchanged n_cells_total still triggers rebuild when displacement exceeds threshold",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Generation tick with unchanged n_cells_total still triggers rebuild when displacement exceeds threshold",
     "type": "scenario"
   },
@@ -26920,12 +26595,7 @@
   "rq-f8ad62d4": {
     "decl": "Scenario: cell_offsets is the exclusive prefix sum and ends at particle_count",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "cell_offsets is the exclusive prefix sum and ends at particle_count",
     "type": "scenario"
   },
@@ -26971,12 +26641,7 @@
   "rq-f94ee5cd": {
     "decl": "Scenario: Displacement check returns the maximum across all particles",
     "file": "forces/neighbor-list",
-    "refs": [
-      {
-        "file": "tests/neighbor_list.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "Displacement check returns the maximum across all particles",
     "type": "scenario"
   },

@@ -436,7 +436,7 @@ impl AngleTypeConfig {
 #[derive(Debug, Clone, PartialEq)]
 pub enum NeighborListConfig {
     AllPairs,
-    CellList { max_neighbors: u32, r_skin: f64 },
+    CellList { r_skin: f64 },
 }
 
 // CoulombConfig — parsed `[coulomb]` table; rq-846bdb8b
@@ -680,8 +680,6 @@ enum RawNeighborList {
     // skip the deny check.
     AllPairs {},
     CellList {
-        #[serde(default = "default_max_neighbors")]
-        max_neighbors: u32,
         #[serde(default)]
         r_skin: Option<f64>,
     },
@@ -1039,15 +1037,10 @@ fn build_config(
 
     let neighbor_list = match raw.neighbor_list {
         None => NeighborListConfig::CellList {
-            max_neighbors: default_max_neighbors(),
             r_skin: 0.3 * max_cutoff,
         },
         Some(RawNeighborList::AllPairs {}) => NeighborListConfig::AllPairs,
-        Some(RawNeighborList::CellList {
-            max_neighbors,
-            r_skin,
-        }) => NeighborListConfig::CellList {
-            max_neighbors,
+        Some(RawNeighborList::CellList { r_skin }) => NeighborListConfig::CellList {
             r_skin: r_skin.map(to_au_length).unwrap_or(0.3 * max_cutoff),
         },
     };
@@ -1807,16 +1800,7 @@ fn validate_spme(s: &SpmeConfig) -> Result<(), ConfigError> {
 fn validate_neighbor_list(n: &NeighborListConfig) -> Result<(), ConfigError> {
     match n {
         NeighborListConfig::AllPairs => Ok(()),
-        NeighborListConfig::CellList {
-            max_neighbors,
-            r_skin,
-        } => {
-            if *max_neighbors == 0 {
-                return Err(invalid(
-                    "neighbor_list.max_neighbors",
-                    "max_neighbors must be strictly positive",
-                ));
-            }
+        NeighborListConfig::CellList { r_skin } => {
             require_finite_positive("neighbor_list.r_skin", *r_skin)?;
             Ok(())
         }

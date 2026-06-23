@@ -1355,10 +1355,7 @@ fn max_cutoff_aggregation_determines_neighbor_list_radius() {
         &BondList::empty(n),
         &AngleList::empty(0),
         &ExclusionList::empty(n),
-        &NeighborListConfig::CellList {
-            max_neighbors: 16,
-            r_skin: 0.0,
-        },
+        &NeighborListConfig::CellList { r_skin: 0.0 },
     )
     .unwrap();
     let nl = ff.neighbor_list.as_ref().expect("expected a neighbor list");

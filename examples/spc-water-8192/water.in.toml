@@ -153,6 +153,4 @@ constraints = [
 
 [neighbor_list]
 mode = "cell-list"
-max_neighbors = 1024        # liquid water at ~100 atoms/nm³ + r_cut+r_skin = 1.1 nm
-                            # shell volume gives ~560 neighbours per atom
-r_skin = 1.0e-10            # 1 Å
+r_skin = 3.0e-10            # 3 Å (= 0.3 · r_cut, typical MD value)

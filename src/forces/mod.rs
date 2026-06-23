@@ -345,11 +345,20 @@ impl Default for PotentialRegistry {
 }
 
 pub(crate) fn max_neighbors_from(cfg: &NeighborListConfig, particle_count: usize) -> u32 {
+    // The packed-neighbour pair-force pipeline (see
+    // `rqm/forces/packed-neighbour-pair-force.md`) sizes its entry
+    // list at runtime via overflow-driven growth, so no user-supplied
+    // per-atom cap exists for cell-list mode. Per-particle padded
+    // structures kept around for legacy callers fall back to a fixed
+    // default in cell-list mode and to the all-pairs upper bound in
+    // trivial mode.
     match cfg {
         NeighborListConfig::AllPairs => particle_count as u32,
-        NeighborListConfig::CellList { max_neighbors, .. } => *max_neighbors,
+        NeighborListConfig::CellList { .. } => LEGACY_FALLBACK_MAX_NEIGHBORS,
     }
 }
+
+pub(crate) const LEGACY_FALLBACK_MAX_NEIGHBORS: u32 = 1024;
 
 // rq-684a29f1
 #[derive(Debug)]
@@ -584,13 +593,13 @@ impl ForceField {
             .fold(None::<Real>, |acc, c| Some(acc.map_or(c, |a| a.max(c))));
         let neighbor_list = if let Some(r_cut) = aggregated_cutoff {
             match neighbor_list_config {
-                NeighborListConfig::CellList { max_neighbors, r_skin } => Some(
+                NeighborListConfig::CellList { r_skin } => Some(
                     NeighborListState::new_cell_list(
                         gpu,
                         sim_box,
                         particle_count,
                         r_cut,
-                        *max_neighbors,
+                        LEGACY_FALLBACK_MAX_NEIGHBORS,
                         *r_skin as Real,
                     )?,
                 ),
