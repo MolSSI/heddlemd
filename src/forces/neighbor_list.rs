@@ -113,6 +113,28 @@ pub struct PackedNeighborData {
     pub interacting_tiles_count: u32,
     /// Multiplier applied to the capacity on overflow.
     pub tile_pair_growth_factor: f64,
+    /// Per-i-block count of entries belonging to that i-block.
+    /// Length `n_blocks`. Filled by `histogram_entries_by_iblock` at
+    /// each rebuild from the live `interacting_tiles` array.
+    pub iblock_count: CudaSlice<u32>,
+    /// Prefix-scan of `iblock_count`. Length `n_blocks + 1`. Slot
+    /// `iblock_offset[b]` is the start of i-block `b`'s entries inside
+    /// the sorted view; `iblock_offset[n_blocks]` is the total entry
+    /// count.
+    pub iblock_offset: CudaSlice<u32>,
+    /// Per-rebuild scratch used by `scatter_entries_by_iblock` to
+    /// claim destination slots inside each i-block's contiguous range
+    /// via `atomicAdd`. Zeroed before every scatter call.
+    pub iblock_cursor: CudaSlice<u32>,
+    /// Prefix-scan ladder for `iblock_count → iblock_offset`. Same
+    /// shape as `CellListData::scan_block_totals`.
+    pub iblock_scan_block_totals: Vec<CudaSlice<u32>>,
+    /// `interacting_atoms` re-arranged so that all entries for i-block
+    /// `b` lie contiguously in `[iblock_offset[b], iblock_offset[b+1])`.
+    /// Length `interacting_tiles_capacity * 32`. Produced by the
+    /// scatter pass at every rebuild; consumed by the JIT pair-force
+    /// kernel in place of `interacting_atoms`.
+    pub sorted_interacting_atoms: CudaSlice<u32>,
 }
 
 // rq-b2d68288
@@ -212,6 +234,19 @@ fn alloc_packed_neighbor_data(
         .map_err(GpuError::from)?;
     let interaction_count = device.alloc_zeros::<u32>(2).map_err(GpuError::from)?;
     let overflow_flag = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
+    let iblock_count = device
+        .alloc_zeros::<u32>(n_blocks_alloc)
+        .map_err(GpuError::from)?;
+    let iblock_offset = device
+        .alloc_zeros::<u32>(n_blocks_alloc + 1)
+        .map_err(GpuError::from)?;
+    let iblock_cursor = device
+        .alloc_zeros::<u32>(n_blocks_alloc)
+        .map_err(GpuError::from)?;
+    let iblock_scan_block_totals = alloc_scan_block_totals(&device, n_blocks_alloc)?;
+    let sorted_interacting_atoms = device
+        .alloc_zeros::<u32>(cap_alloc * 32)
+        .map_err(GpuError::from)?;
 
     Ok(PackedNeighborData {
         n_blocks,
@@ -230,6 +265,11 @@ fn alloc_packed_neighbor_data(
         interacting_tiles_capacity: cap,
         interacting_tiles_count: 0,
         tile_pair_growth_factor,
+        iblock_count,
+        iblock_offset,
+        iblock_cursor,
+        iblock_scan_block_totals,
+        sorted_interacting_atoms,
     })
 }
 
@@ -245,6 +285,7 @@ impl PackedNeighborData {
         let new_alloc = new_cap as usize;
         self.interacting_tiles = device.alloc_zeros::<u32>(new_alloc)?;
         self.interacting_atoms = device.alloc_zeros::<u32>(new_alloc * 32)?;
+        self.sorted_interacting_atoms = device.alloc_zeros::<u32>(new_alloc * 32)?;
         self.interacting_tiles_capacity = new_cap;
         Ok(())
     }
@@ -560,6 +601,12 @@ impl NeighborListState {
                 device
                     .htod_sync_copy_into(&atoms_host, &mut packed.interacting_atoms)
                     .map_err(GpuError::from)?;
+                // The all-pairs enumeration above already emits entries
+                // in i-block-sorted order, so `sorted_interacting_atoms`
+                // is the same content as `interacting_atoms`.
+                device
+                    .htod_sync_copy_into(&atoms_host, &mut packed.sorted_interacting_atoms)
+                    .map_err(GpuError::from)?;
             }
             // The JIT pair-force kernel reads the entry count from device
             // memory (so a captured CUDA graph picks up the live value);
@@ -568,6 +615,28 @@ impl NeighborListState {
             device
                 .htod_sync_copy_into(&count_host, &mut packed.interaction_count)
                 .map_err(GpuError::from)?;
+            // Populate per-i-block count + prefix-scan offsets from the
+            // host-built sorted layout: each i-block emits `(n_blocks - b)`
+            // entries (the j_block ∈ [b, n_blocks) range).
+            let mut iblock_count_host: Vec<u32> = vec![0u32; n_blocks as usize];
+            for &t in &tiles_host {
+                iblock_count_host[t as usize] += 1;
+            }
+            let mut iblock_offset_host: Vec<u32> = vec![0u32; (n_blocks as usize) + 1];
+            let mut acc: u32 = 0;
+            for b in 0..n_blocks as usize {
+                iblock_offset_host[b] = acc;
+                acc += iblock_count_host[b];
+            }
+            iblock_offset_host[n_blocks as usize] = acc;
+            if n_blocks > 0 {
+                device
+                    .htod_sync_copy_into(&iblock_count_host, &mut packed.iblock_count)
+                    .map_err(GpuError::from)?;
+                device
+                    .htod_sync_copy_into(&iblock_offset_host, &mut packed.iblock_offset)
+                    .map_err(GpuError::from)?;
+            }
 
             // Populate the tile-sorted positions view's padding lanes
             // with +inf so the force kernel treats them as inactive.
@@ -933,6 +1002,43 @@ impl NeighborListState {
             packed.grow_to(&device, required).map_err(NeighborListError::Gpu)?;
         }
 
+        // 5. Sort entries by i-block so the force kernel can process
+        //    consecutive same-i-block entries with register carryover
+        //    on the i-side accumulator.
+        device
+            .memset_zeros(&mut packed.iblock_count)
+            .map_err(GpuError::from)?;
+        crate::gpu::histogram_entries_by_iblock(
+            &kernels,
+            &packed.interacting_tiles,
+            &packed.interaction_count,
+            &mut packed.iblock_count,
+            n_blocks,
+            packed.interacting_tiles_capacity,
+        )?;
+        crate::gpu::prefix_scan_cell_counts(
+            &kernels,
+            &packed.iblock_count,
+            &mut packed.iblock_offset,
+            &mut packed.iblock_scan_block_totals,
+            n_blocks as usize,
+            packed.interacting_tiles_count as usize,
+        )?;
+        device
+            .memset_zeros(&mut packed.iblock_cursor)
+            .map_err(GpuError::from)?;
+        crate::gpu::scatter_entries_by_iblock(
+            &kernels,
+            &packed.interacting_tiles,
+            &packed.interacting_atoms,
+            &packed.interaction_count,
+            &packed.iblock_offset,
+            &mut packed.iblock_cursor,
+            &mut packed.sorted_interacting_atoms,
+            n_blocks,
+            packed.interacting_tiles_capacity,
+        )?;
+
         Ok(())
     }
 
@@ -1088,6 +1194,8 @@ pub struct NeighborKernels {
     pub compute_block_bbox: CudaFunction,
     pub find_blocks_with_interactions: CudaFunction,
     pub finalize_packed_forces: CudaFunction,
+    pub histogram_entries_by_iblock: CudaFunction,
+    pub scatter_entries_by_iblock: CudaFunction,
 }
 
 impl NeighborKernels {
@@ -1110,6 +1218,8 @@ impl NeighborKernels {
                 "compute_block_bbox",
                 "find_blocks_with_interactions",
                 "finalize_packed_forces",
+                "histogram_entries_by_iblock",
+                "scatter_entries_by_iblock",
             ],
         )?;
         Ok(NeighborKernels {
@@ -1159,6 +1269,16 @@ impl NeighborKernels {
                 "find_blocks_with_interactions",
             )?,
             finalize_packed_forces: get_func(device, "neighbor", "finalize_packed_forces")?,
+            histogram_entries_by_iblock: get_func(
+                device,
+                "neighbor",
+                "histogram_entries_by_iblock",
+            )?,
+            scatter_entries_by_iblock: get_func(
+                device,
+                "neighbor",
+                "scatter_entries_by_iblock",
+            )?,
         })
     }
 }

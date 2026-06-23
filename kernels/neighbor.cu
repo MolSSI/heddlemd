@@ -722,6 +722,58 @@ extern "C" __global__ void find_blocks_with_interactions(
   }
 }
 
+// Histogram entries by i-block. For each entry e in 0..entry_count,
+// reads interacting_tiles[e] and increments the corresponding
+// counter via atomicAdd. One thread per entry; the work is small but
+// embarrassingly parallel.
+extern "C" __global__ void histogram_entries_by_iblock(
+    const unsigned int *interacting_tiles,      // length = entry_count
+    const unsigned int *entry_count_ptr,        // length 1; read once
+    unsigned int *iblock_count,                 // length = n_blocks
+    unsigned int n_blocks)
+{
+  unsigned int e = blockIdx.x * blockDim.x + threadIdx.x;
+  unsigned int entry_count = *entry_count_ptr;
+  if (e >= entry_count) return;
+  unsigned int b = interacting_tiles[e];
+  if (b < n_blocks) {
+    atomicAdd(&iblock_count[b], 1u);
+  }
+}
+
+// Scatter entries from the unordered (interacting_tiles,
+// interacting_atoms) layout into the i-block-sorted layout. For each
+// entry e, claims a destination slot inside its i-block's contiguous
+// range via `atomicAdd(&iblock_cursor[b], 1) + iblock_offset[b]`, then
+// copies the 32 packed j-atom IDs into sorted_interacting_atoms.
+// One warp per entry: lane k copies interacting_atoms[e*32+k] into
+// the destination row. The sort is unstable; force-kernel
+// determinism is preserved by exact integer fixed-point summation,
+// which is associative regardless of the within-i-block ordering.
+extern "C" __global__ void scatter_entries_by_iblock(
+    const unsigned int *interacting_tiles,      // length = entry_count
+    const unsigned int *interacting_atoms,      // length = entry_count * 32
+    const unsigned int *entry_count_ptr,        // length 1
+    const unsigned int *iblock_offset,          // length = n_blocks + 1
+    unsigned int *iblock_cursor,                // length = n_blocks; init zero
+    unsigned int *sorted_interacting_atoms,     // length = entry_count * 32
+    unsigned int n_blocks)
+{
+  unsigned int e = blockIdx.x * (blockDim.x / 32u) + (threadIdx.x / 32u);
+  unsigned int lane = threadIdx.x & 31u;
+  unsigned int entry_count = *entry_count_ptr;
+  if (e >= entry_count) return;
+  unsigned int b = interacting_tiles[e];
+  if (b >= n_blocks) return;
+  unsigned int slot;
+  if (lane == 0u) {
+    slot = atomicAdd(&iblock_cursor[b], 1u) + iblock_offset[b];
+  }
+  slot = __shfl_sync(0xFFFFFFFFu, slot, 0);
+  sorted_interacting_atoms[slot * 32u + lane] =
+      interacting_atoms[e * 32u + lane];
+}
+
 // Converts a fixed-point sum back to Real and writes it into a slot
 // of an output buffer. One thread per atom.
 extern "C" __global__ void finalize_packed_forces(

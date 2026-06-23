@@ -29,6 +29,8 @@ pub use kernels::{
     fill_tile_position_padding,
     finalize_packed_forces,
     find_blocks_with_interactions,
+    histogram_entries_by_iblock,
+    scatter_entries_by_iblock,
     lan_drift_half, lan_ou_step, lj_pair_force,
     mtk_position_drift, mtk_velocity_half_kick,
     neighbor_displacement_squared, neighbor_list_build,

@@ -2276,6 +2276,78 @@ pub fn find_blocks_with_interactions(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub fn histogram_entries_by_iblock(
+    kernels: &Kernels,
+    interacting_tiles: &CudaSlice<u32>,
+    entry_count_ptr: &CudaSlice<u32>,
+    iblock_count: &mut CudaSlice<u32>,
+    n_blocks: u32,
+    max_entry_count: u32,
+) -> Result<(), GpuError> {
+    if max_entry_count == 0 || n_blocks == 0 {
+        return Ok(());
+    }
+    let cfg = launch_config(max_entry_count);
+    let func = kernels.neighbor.histogram_entries_by_iblock.clone();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                interacting_tiles,
+                entry_count_ptr,
+                &mut *iblock_count,
+                n_blocks,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn scatter_entries_by_iblock(
+    kernels: &Kernels,
+    interacting_tiles: &CudaSlice<u32>,
+    interacting_atoms: &CudaSlice<u32>,
+    entry_count_ptr: &CudaSlice<u32>,
+    iblock_offset: &CudaSlice<u32>,
+    iblock_cursor: &mut CudaSlice<u32>,
+    sorted_interacting_atoms: &mut CudaSlice<u32>,
+    n_blocks: u32,
+    max_entry_count: u32,
+) -> Result<(), GpuError> {
+    if max_entry_count == 0 || n_blocks == 0 {
+        return Ok(());
+    }
+    // One warp per entry; 8 warps per block = 256 threads.
+    let warps_per_block: u32 = 8;
+    let block_dim: u32 = warps_per_block * 32;
+    let grid_x = max_entry_count.div_ceil(warps_per_block).max(1);
+    let cfg = LaunchConfig {
+        grid_dim: (grid_x, 1, 1),
+        block_dim: (block_dim, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let func = kernels.neighbor.scatter_entries_by_iblock.clone();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                interacting_tiles,
+                interacting_atoms,
+                entry_count_ptr,
+                iblock_offset,
+                &mut *iblock_cursor,
+                &mut *sorted_interacting_atoms,
+                n_blocks,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn finalize_packed_forces(
     kernels: &Kernels,
     fp_fx: &CudaSlice<u64>,
