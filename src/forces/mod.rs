@@ -954,7 +954,7 @@ impl ForceField {
                 .sorted_particle_ids_for_packed()
                 .expect("packed-neighbour dispatch requires sorted_particle_ids");
             let packed = nl.packed.as_ref().expect("packed data present");
-            let entries_count = packed.interacting_tiles_count;
+            let entries_capacity = packed.interacting_tiles_capacity;
             let bind_ctx = PairForceBindContext {
                 buffers: &*buffers,
                 sim_box,
@@ -971,7 +971,7 @@ impl ForceField {
             launch_builder.push_device_buffer(sorted_view);
             launch_builder.push_device_buffer(&packed.interacting_tiles);
             launch_builder.push_device_buffer(&packed.interacting_atoms);
-            launch_builder.push_scalar(entries_count);
+            launch_builder.push_device_buffer(&packed.interaction_count);
             launch_builder.push_device_buffer(sim_box.lattice_device());
             launch_builder.push_device_buffer(&self.fast_total_forces_fp_x);
             launch_builder.push_device_buffer(&self.fast_total_forces_fp_y);
@@ -990,7 +990,7 @@ impl ForceField {
                 .as_ref()
                 .expect("dispatch_jit implies jit_composed.is_some()");
             unsafe {
-                jit.launch(entries_count, write_scalars, launch_builder)?;
+                jit.launch(entries_capacity, write_scalars, launch_builder)?;
             }
             timings.kernel_stop(KernelStage::JIT_COMPOSED_PAIR_FORCE)?;
 

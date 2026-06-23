@@ -473,16 +473,16 @@ impl JitComposedPairForce {
     /// entry-point signature exactly.
     pub unsafe fn launch(
         &self,
-        interacting_tiles_count: u32,
+        interacting_tiles_capacity: u32,
         use_fev: bool,
         mut builder: PairForceLaunchBuilder,
     ) -> Result<(), GpuError> {
-        if interacting_tiles_count == 0 {
+        if interacting_tiles_capacity == 0 {
             drop(builder.storage);
             return Ok(());
         }
         let cfg = LaunchConfig {
-            grid_dim: (interacting_tiles_count.div_ceil(WARPS_PER_BLOCK), 1, 1),
+            grid_dim: (interacting_tiles_capacity.div_ceil(WARPS_PER_BLOCK), 1, 1),
             block_dim: (BLOCK_SIZE, 1, 1),
             shared_mem_bytes: 0,
         };
@@ -656,7 +656,7 @@ fn emit_entry_point(
     s.push_str("    const unsigned int *sorted_particle_ids,\n");
     s.push_str("    const unsigned int *interacting_tiles,\n");
     s.push_str("    const unsigned int *interacting_atoms,\n");
-    s.push_str("    unsigned int interacting_tiles_count,\n");
+    s.push_str("    const unsigned int *interacting_tiles_count_ptr,\n");
     s.push_str("    const Real *lattice,\n");
     s.push_str("    unsigned long long *fast_force_x_fp,\n");
     s.push_str("    unsigned long long *fast_force_y_fp,\n");
@@ -675,7 +675,7 @@ fn emit_entry_point(
     s.push_str("    heddle_jit_outer_loop<");
     s.push_str(if write_ev { "true" } else { "false" });
     s.push_str(">(\n");
-    s.push_str("        composite, interacting_tiles_count,\n");
+    s.push_str("        composite, interacting_tiles_count_ptr,\n");
     s.push_str("        positions_x, positions_y, positions_z,\n");
     s.push_str(
         "        tile_sorted_positions_x, tile_sorted_positions_y, tile_sorted_positions_z,\n",
@@ -821,7 +821,7 @@ const OUTER_LOOP_TEMPLATE: &str = r#"
 template <bool WriteEv>
 __device__ static inline void heddle_jit_outer_loop(
     const HeddleJitComposedPairFunc &composite,
-    unsigned int interacting_tiles_count,
+    const unsigned int *interacting_tiles_count_ptr,
     const Real *positions_x,
     const Real *positions_y,
     const Real *positions_z,
@@ -845,7 +845,7 @@ __device__ static inline void heddle_jit_outer_loop(
   unsigned int warp_id_in_block = threadIdx.x / HEDDLE_JIT_WARP_SIZE;
   unsigned int lane = threadIdx.x & (HEDDLE_JIT_WARP_SIZE - 1u);
   unsigned int pos = blockIdx.x * HEDDLE_JIT_WARPS_PER_BLOCK + warp_id_in_block;
-  if (pos >= interacting_tiles_count) return;
+  if (pos >= *interacting_tiles_count_ptr) return;
 
   unsigned int i_block = interacting_tiles[pos];
 

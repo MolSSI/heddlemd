@@ -561,6 +561,13 @@ impl NeighborListState {
                     .htod_sync_copy_into(&atoms_host, &mut packed.interacting_atoms)
                     .map_err(GpuError::from)?;
             }
+            // The JIT pair-force kernel reads the entry count from device
+            // memory (so a captured CUDA graph picks up the live value);
+            // mirror the host-side count to interaction_count[0].
+            let count_host = [packed.interacting_tiles_count, 0u32];
+            device
+                .htod_sync_copy_into(&count_host, &mut packed.interaction_count)
+                .map_err(GpuError::from)?;
 
             // Populate the tile-sorted positions view's padding lanes
             // with +inf so the force kernel treats them as inactive.
