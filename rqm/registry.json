@@ -7054,10 +7054,10 @@
     "type": "section"
   },
   "rq-3dc94856": {
-    "decl": "Scenario: spme_spread_fixed_point issues exactly N · p³ atomicAdd<i64> operations",
+    "decl": "Scenario: spme_spread_fixed_point issues at most N · p³ atomicAdd<i64> operations",
     "file": "forces/spme",
     "refs": [],
-    "title": "spme_spread_fixed_point issues exactly N · p³ atomicAdd<i64> operations",
+    "title": "spme_spread_fixed_point issues at most N · p³ atomicAdd<i64> operations",
     "type": "scenario"
   },
   "rq-3ddf259b": {
@@ -15040,6 +15040,13 @@
     "refs": [],
     "title": "Gherkin Scenarios",
     "type": "section"
+  },
+  "rq-8c630ad6": {
+    "decl": "Scenario: Charge-zero atoms issue no atomicAdd<i64> against rho_fixed",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "Charge-zero atoms issue no atomicAdd<i64> against rho_fixed",
+    "type": "scenario"
   },
   "rq-8c786f79": {
     "decl": "Scenario: Exclusion only applies to the listed pair",
@@ -24495,12 +24502,7 @@
   "rq-e643b070": {
     "decl": "Scenario: neighbor_list cell-list mode omitting max_neighbors uses default 256",
     "file": "io/config-schema",
-    "refs": [
-      {
-        "file": "tests/io_config.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "neighbor_list cell-list mode omitting max_neighbors uses default 256",
     "type": "scenario"
   },
@@ -27296,12 +27298,7 @@
   "rq-fedef74d": {
     "decl": "Scenario: neighbor_list rejects zero max_neighbors",
     "file": "io/config-schema",
-    "refs": [
-      {
-        "file": "tests/io_config.rs",
-        "kind": "code"
-      }
-    ],
+    "refs": [],
     "title": "neighbor_list rejects zero max_neighbors",
     "type": "scenario"
   },

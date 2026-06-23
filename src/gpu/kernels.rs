@@ -509,8 +509,14 @@ pub fn spme_spread_fixed_point(
     debug_assert_eq!(sorted_atom_index.len(), n);
 
     let n_u32 = n as u32;
+    // PME_ORDER (= spline_order) threads per atom, each owning one
+    // z-slice of the p^3 spline support and looping over the
+    // p^2 (d_a, d_b) cells in that slice.
+    let n_threads = n_u32.checked_mul(spline_order).expect(
+        "n * spline_order overflows u32 — particle_count too large for this kernel",
+    );
     let cfg = LaunchConfig {
-        grid_dim: (n_u32.div_ceil(8), 1, 1),
+        grid_dim: (n_threads.div_ceil(256), 1, 1),
         block_dim: (256, 1, 1),
         shared_mem_bytes: 0,
     };

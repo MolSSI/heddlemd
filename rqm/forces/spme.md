@@ -404,40 +404,55 @@ The two stages:
    ordering supplies the read-after-write guarantee with no explicit
    synchronisation.
 
-2. **Per-particle fixed-point scatter.** `spme_spread_fixed_point`
-   runs one warp per sorted slot with 8 warps per block (256 threads)
-   and grid `ceil(N / 8)`. Lane 0 of each warp reads
-   `i = sorted_atom_index[t]` where `t` is the sorted slot for this
-   warp (`t = blockIdx.x · 8 + warp_id_in_block`), then reads
-   particle `i`'s wrapped position and charge `q_i`, computes the
-   fractional coordinates `(s_a, s_b, s_c)`, the primary bin
-   `(g_a, g_b, g_c)`, the fractional offsets `(t_a, t_b, t_c)`, and
-   the per-axis 1D B-spline weights `wa[0..p]`, `wb[0..p]`,
-   `wc[0..p]`; the per-axis weights, primary bin, and `q_i` are
-   broadcast to every lane via `__shfl_sync`. Consecutive sorted
-   slots address atoms with nearby primary bins, so the lane-stride
-   `atomicAdd<i64>` writes from consecutive warps cluster on
-   neighbouring `rho_fixed` cache lines.
+2. **Per-z-slice fixed-point scatter.** `spme_spread_fixed_point`
+   runs `p` threads per atom — one thread per z-slice of the
+   particle's `p × p × p` spline-support cube — with 256 threads
+   per block and grid `ceil(N · p / 256)`. Thread `gid =
+   blockIdx.x · 256 + threadIdx.x` handles z-slice
+   `iz = gid mod p` of sorted-slot `atom_slot = gid / p`. Each
+   thread is independent: no `__shfl_sync` broadcasts, no
+   `__syncwarp`, no per-warp coordination.
 
-   Each of the 32 lanes handles `⌈p³ / 32⌉` of the `p³` grid
-   contributions. Lane `l` iterates the contribution index
-   `k = l, l + 32, l + 64, …` while `k < p³`. For its assigned
-   `k = d_a · p² + d_b · p + d_c`, the lane:
-   - Computes the wrapped grid-cell index
-     `g = ((g_a + d_a) mod n_a · n_b + (g_b + d_b) mod n_b) · n_c
-          + (g_c + d_c) mod n_c`.
-   - Computes the f32 contribution value
-     `v = q_i · wa[d_a] · wb[d_b] · wc[d_c]`.
-   - Converts to fixed-point
-     `v_fixed = (i64) rintf(v · 2^32)` and issues
-     `atomicAdd(&rho_fixed[g], v_fixed)`.
+   For its assigned atom, the thread reads `i =
+   sorted_atom_index[atom_slot]`, then reads particle `i`'s charge
+   `q_i`. **Charge-zero skip:** if `q_i == 0`, the thread returns
+   immediately. Otherwise the thread reads `i`'s wrapped position,
+   computes the fractional coordinates `(s_a, s_b, s_c)`, the
+   primary bin `(g_a, g_b, g_c)`, the fractional offsets
+   `(t_a, t_b, t_c)`, the per-axis 1D B-spline weights `wa[0..p)`
+   and `wb[0..p)`, and the single z-slice weight
+   `wc_iz = M_p(iz + t_c)`. It then iterates the
+   `p · p` cells in this z-slice:
+
+   ```
+   gc = (g_c + n_c - iz) mod n_c
+   dz = q_i · wc_iz
+   for d_a in [0, p):
+     ga = (g_a + n_a - d_a) mod n_a
+     dz_da = dz · wa[d_a]
+     for d_b in [0, p):
+       v = dz_da · wb[d_b]
+       v_fixed = (i64) rintf(v · 2^32)
+       if v_fixed != 0:
+         gb = (g_b + n_b - d_b) mod n_b
+         g  = (ga · n_b + gb) · n_c + gc
+         atomicAdd(&rho_fixed[g], v_fixed)
+   ```
+
+   **Zero-skip guard.** The `v_fixed != 0` check elides the atomic
+   add for contributions whose round-to-nearest fixed-point value
+   is zero. At the edges of the spline support (where the per-axis
+   B-spline weight goes to zero) a meaningful fraction of the
+   `p^3` contributions per atom round to zero in `i64` fixed-point
+   and contribute nothing. The skip is bit-exact: zero is the
+   additive identity in the integer accumulator.
 
    Round-to-nearest in the f32 → i64 conversion (CUDA's
    `__float2ll_rn` or `rintf` + cast) keeps the per-contribution
    rounding direction deterministic. The atomic-completion order of
-   the `N · p³` adds is non-deterministic, but i64 addition is
-   associative, so the final `rho_fixed` is byte-identical across
-   runs.
+   the remaining (non-skipped) adds is non-deterministic, but `i64`
+   addition is associative, so the final `rho_fixed` is
+   byte-identical across runs with byte-identical inputs.
 
 3. **Fixed-point → f32 conversion.** `spme_spread_finish` runs one
    thread per grid cell with block size 256 and grid `ceil(M / 256)`.
@@ -820,11 +835,16 @@ only inside the `SpmeReciprocalState` construction path.
   default stream:
   1. Device-side `memset_zeros` on `spme_state.rho_fixed` (length
      `M`, i64) to clear the previous step's accumulation.
-  2. `spme_spread_fixed_point` — one warp per sorted slot. Lane 0
-     reads `i = sorted_atom_index[t]` to resolve the atom index
-     before reading the atom's position and charge; each lane
-     issues `⌈p³ / 32⌉` `atomicAdd<i64>` operations into
-     `rho_fixed`, totalling `N · p³` atomic adds per step.
+  2. `spme_spread_fixed_point` — `spline_order` threads per atom,
+     256 threads per block, grid `ceil(N · spline_order / 256)`.
+     Each thread owns one z-slice of its atom's `p³` spline
+     support and issues up to `p²` `atomicAdd<i64>` operations
+     against `rho_fixed`. Atoms with `charge == 0` are skipped
+     entirely; per-contribution `v_fixed != 0` guards elide
+     atomic-adds whose fixed-point conversion would round to
+     zero. The total upper-bound contribution count is
+     `N · p³`; the realised atomic-add count is the same minus
+     the zero-skipped contributions.
   3. `spme_spread_finish` — one thread per grid cell; converts
      `rho_fixed[c]` to `rho[c] = (f32) rho_fixed[c] · 2^-32`.
 
@@ -1416,11 +1436,22 @@ Feature: Smooth particle-mesh Ewald (SPME)
       `atomicAdd<i64>`
 
   @rq-3dc94856
-  Scenario: spme_spread_fixed_point issues exactly N · p³ atomicAdd<i64> operations
+  Scenario: spme_spread_fixed_point issues at most N · p³ atomicAdd<i64> operations
     Given N particles, spline order p, and an instrumented atomic counter
     When `spme_spread_fixed_point` runs
-    Then the device-side counter records exactly `N · p³` `atomicAdd<i64>`
-      invocations on `rho_fixed`
+    Then the device-side counter records at most `N · p³`
+      `atomicAdd<i64>` invocations on `rho_fixed`
+    And the count equals `N · p³` minus the number of contributions
+      whose round-to-nearest fixed-point value is zero (which the
+      kernel's `v_fixed != 0` guard elides)
+
+  @rq-8c630ad6
+  Scenario: Charge-zero atoms issue no atomicAdd<i64> against rho_fixed
+    Given N particles, one of which carries `charge == 0`
+    When `spme_spread_fixed_point` runs
+    Then the charge-zero atom's `spline_order` threads return
+      immediately and issue zero `atomicAdd<i64>` invocations on
+      `rho_fixed`
 
   @rq-6098e0c1
   Scenario: One particle's contribution at a single cell matches the fixed-point B-spline value
