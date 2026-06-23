@@ -568,7 +568,9 @@ fn rows_appear_in_documented_order() {
     let expected = vec![
         "vv_kick_drift",
         "class_accumulator_memset",
+        "scatter_positions_to_tile_order",
         "jit_composed_pair_force",
+        "finalize_packed_forces",
         "jit_composed_post_force",
         "combine_class_totals",
         "host_to_device_upload",
@@ -1086,11 +1088,17 @@ fn cell_list_records_neighbor_stages() {
     let path = write_cell_list_pair(&dir, 10, 3.0e-10, 1, 4, true);
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
-    // rq-ef918dc6: cell-list adds the four neighbor-list host stages on
-    // top of the regular jit_composed_pair_force kernel stage.
+    // rq-ef918dc6: cell-list adds the displacement-check kernel and the
+    // rebuild-driven `copy_positions_into_reference` host stage on top
+    // of the per-step jit_composed_pair_force + finalize_packed_forces
+    // kernel stages. (The packed-neighbour rebuild path replaces the
+    // old `neighbor_list_build` kernel stage with a host-side
+    // multi-kernel pipeline whose individual kernels are not
+    // separately timed.)
     assert!(stage_row(&body, "jit_composed_pair_force").is_some());
+    assert!(stage_row(&body, "finalize_packed_forces").is_some());
+    assert!(stage_row(&body, "scatter_positions_to_tile_order").is_some());
     assert!(stage_row(&body, "neighbor_displacement_squared").is_some());
-    assert!(stage_row(&body, "neighbor_list_build").is_some());
     assert!(stage_row(&body, "copy_positions_into_reference").is_some());
     assert!(stage_row(&body, "neighbor_list_rebuild").is_some());
     // rq-75746f64: with n_steps=10, neighbor_displacement_squared runs
@@ -1102,23 +1110,20 @@ fn cell_list_records_neighbor_stages() {
 #[test]
 fn neighbor_list_build_and_reference_copy_counts_match_rebuilds() {
     // Whatever r_skin we choose, the runner emits one host-stage event
-    // for `neighbor_list_build`, `copy_positions_into_reference`, and
-    // `neighbor_list_rebuild` per rebuild (including the warm-up
-    // build). The architectural contract is that the three counts are
-    // equal — that is the invariant this test exercises. We do not
-    // try to engineer "exactly K rebuilds" via a tuned r_skin; doing so
-    // would couple the test to particle dynamics that aren't part of the
-    // contract.
+    // for `copy_positions_into_reference` and `neighbor_list_rebuild`
+    // per rebuild (including the warm-up build). The architectural
+    // contract is that the two counts are equal — that is the invariant
+    // this test exercises. We do not try to engineer "exactly K rebuilds"
+    // via a tuned r_skin; doing so would couple the test to particle
+    // dynamics that aren't part of the contract.
     let dir = tmp_path("nl_rebuild_counts");
     let path = write_cell_list_pair(&dir, 10, 3.0e-10, 1, 4, true);
     run_simulation(&path).unwrap();
     let body = read_timings(&dir);
-    let build = stage_count(&body, "neighbor_list_build").unwrap();
     let copy = stage_count(&body, "copy_positions_into_reference").unwrap();
     let rebuild = stage_count(&body, "neighbor_list_rebuild").unwrap();
-    assert!(build >= 1, "expected at least the warm-up build, got {build}");
-    assert_eq!(build, copy, "neighbor_list_build vs copy_positions_into_reference");
-    assert_eq!(build, rebuild, "neighbor_list_build vs neighbor_list_rebuild");
+    assert!(copy >= 1, "expected at least the warm-up build, got {copy}");
+    assert_eq!(copy, rebuild, "copy_positions_into_reference vs neighbor_list_rebuild");
 }
 
 fn write_morse_bonded(
