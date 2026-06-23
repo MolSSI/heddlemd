@@ -345,7 +345,7 @@ impl PotentialBuilder for StubBuilder {
             r#"
 struct {n} {{
     __device__ inline Real cutoff_squared(unsigned int, unsigned int) const {{ return R(0.0); }}
-    __device__ inline void evaluate(Real, unsigned int, unsigned int,
+    __device__ inline void evaluate(Real, Real, Real, unsigned int, unsigned int,
                                      Real &factor, Real &energy, Real &virial) const {{
         factor = R(0.0); energy = R(0.0); virial = R(0.0);
     }}
@@ -360,6 +360,7 @@ struct {n} {{
             functor_source,
             entry_point_args: String::new(),
             functor_init_source: String::new(),
+            cutoff: heddle_md::forces::CutoffHandling::PerPair,
         }))
     }
 }
@@ -1293,7 +1294,7 @@ impl PotentialBuilder for CutoffInspectingBuilder {
             functor_source: r#"
 struct CutoffInspectorFunctor {
     __device__ inline Real cutoff_squared(unsigned int, unsigned int) const { return R(0.0); }
-    __device__ inline void evaluate(Real, unsigned int, unsigned int,
+    __device__ inline void evaluate(Real, Real, Real, unsigned int, unsigned int,
                                      Real &factor, Real &energy, Real &virial) const {
         factor = R(0.0); energy = R(0.0); virial = R(0.0);
     }
@@ -1302,6 +1303,7 @@ struct CutoffInspectorFunctor {
 "#.to_string(),
             entry_point_args: String::new(),
             functor_init_source: String::new(),
+            cutoff: heddle_md::forces::CutoffHandling::PerPair,
         }))
     }
 }

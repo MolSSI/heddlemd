@@ -28,7 +28,7 @@ use crate::precision::Real;
 pub use angle::{HarmonicAngleBuilder, HarmonicAngleState};
 pub use coulomb::{CoulombBuilder, CoulombParameters, CoulombState};
 pub use jit_composed::{
-    AngleForceFragment, AngleScratchView, BondedForceFragment, BondedScratchView,
+    AngleForceFragment, AngleScratchView, BondedForceFragment, BondedScratchView, CutoffHandling,
     ForceLaunchBuilder, ForceLaunchContext, JitComposedAngleForce, JitComposedBondedForce,
     JitComposedPairForce, JitComposedPostForcePerParticle, PairForceBindContext,
     PairForceFragment, PairForceLaunchBuilder, PerParticleFragment, PostForceBindContext,
@@ -640,7 +640,17 @@ impl ForceField {
         let jit_composed = if jit_fragments.is_empty() {
             None
         } else {
-            Some(JitComposedPairForce::compile_and_load(&device, &jit_fragments)?)
+            // Every slot that contributed a fragment had
+            // `max_cutoff().is_some()`, so `aggregated_cutoff` is Some
+            // on this branch by construction. The JIT embeds the value
+            // as `HEDDLE_JIT_MAX_CUTOFF_SQUARED` for the per-pair prune.
+            let jit_max_cutoff = aggregated_cutoff
+                .expect("aggregated_cutoff is Some when jit_fragments is non-empty");
+            Some(JitComposedPairForce::compile_and_load(
+                &device,
+                &jit_fragments,
+                jit_max_cutoff,
+            )?)
         };
         // All fast-class pair-force slots in this codebase resolve
         // their `max_neighbors` from `NeighborListConfig` via

@@ -145,6 +145,65 @@ factor decays rapidly enough that a hard cutoff is acceptable when
 `α · r_cut_real >= 3.5` (the loader does not enforce this; it is a
 user-tuning concern documented in `io/config-schema.md`).
 
+### JIT fragment behaviour <!-- rq-27525d3c -->
+
+When `SpmeRealBuilder::pair_force_fragment(cx)` participates in the
+JIT-composed pair-force kernel (see `jit-composed-pair-force.md`),
+the fragment differs from the standalone kernel above in three
+ways:
+
+1. **Shared `(inv_r, r)` inputs.** The fragment's `evaluate`
+   signature is
+   `evaluate(Real r2, Real inv_r, Real r, unsigned int i,
+   unsigned int j, Real &factor, Real &energy, Real &virial)`.
+   `inv_r = rsqrtf(r²)` and `r = r² · inv_r` are computed once
+   per pair by the composer's outer loop and threaded into every
+   active fragment. The SPME-real fragment does not call
+   `Real_sqrt(r2)`, `1.0 / r2`, or `1.0 / inv_r`; it consumes the
+   composer-supplied scalars directly and derives `inv_r2 = inv_r
+   · inv_r` from them.
+
+2. **Hastings polynomial for `erfc` in single precision.** Under
+   the f32 precision feature (the default), the fragment computes
+   `erfc(α · r)` inline via the 5-coefficient
+   Abramowitz–Stegun (1964) polynomial — the same form OpenMM
+   uses in `coulombLennardJones.cc`:
+
+   ```text
+   t           = 1.0 / (1.0 + 0.3275911 · α · r)
+   erfcAlphaR  = (0.254829592
+                 + (-0.284496736
+                    + (1.421413741
+                       + (-1.453152027
+                          + 1.061405429 · t) · t) · t) · t)
+                · t · expf(-(α · r)²)
+   ```
+
+   The polynomial has a maximum error of 1.5 × 10⁻⁷ over all real
+   `α · r`, which is below `f32` round-off and adequate for the
+   simulation's force/energy targets. Under the `--features f64`
+   build the fragment calls `Real_erfc(α · r)` (the precision-shim
+   dispatch to hardware `erfc`) instead, because the polynomial's
+   error floor is well above `f64` round-off and would inject
+   bias into double-precision runs.
+
+3. **CutoffHandling::Uniform.** The fragment reports
+   `cutoff: CutoffHandling::Uniform(r_cut_real)` to the composer.
+   The composer omits the per-fragment
+   `r² <= cutoff_squared(i, j)` guard for this fragment (the
+   outer max-cutoff mask described in
+   `jit-composed-pair-force.md` covers it). `evaluate` is invoked
+   unconditionally for every pair the outer loop visits; the
+   outer mask zeroes the contribution for `r² >
+   HEDDLE_JIT_MAX_CUTOFF_SQUARED`. The fragment is safe to call at
+   any positive `r²` because every intermediate (`α · r`,
+   `expf(-(α · r)²)`, the polynomial in `t`) is well-defined and
+   finite for any non-negative `r`.
+
+The standalone `spme_real_pair_force_*` kernels documented below
+keep the per-pair recipe in *Algorithm*; the JIT-fragment changes
+are scoped to the JIT path.
+
 ### Real-space CUDA kernels <!-- rq-9a512ed1 -->
 
 `kernels/spme_real.cu` declares two `extern "C"` kernels (forces-only
@@ -1321,6 +1380,49 @@ Feature: Smooth particle-mesh Ewald (SPME)
     Given two particles at non-boundary separation
     When the _f variant of spme_real_pair_force is called
     Then slot_force_x[0] equals -slot_force_x[1] bit-exactly (Newton's third law for an isolated pair)
+
+  # --- JIT fragment behaviour ---
+
+  @rq-0f761603
+  Scenario: SPME-real JIT fragment uses the composer-supplied inv_r and r
+    Given a ForceField with [spme] configured and the JIT-composed kernel active
+    And the composed kernel source captured for inspection
+    Then the SPME-real fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
+    And the SPME-real fragment body does not contain any of: `Real_sqrt(`, `sqrt(r2)`, `sqrtf(r2)`, `1.0 / r2`, `1.0 / inv_r`
+
+  @rq-2a1f2043
+  Scenario: SPME-real JIT fragment evaluates erfc via the Hastings polynomial under f32
+    Given a heddle-md build with default features (precision = f32)
+    And a ForceField with [spme] configured and the JIT-composed kernel active
+    And the composed kernel source captured for inspection
+    Then the SPME-real fragment body contains the literal coefficient `0.254829592`
+    And the SPME-real fragment body contains the literal coefficient `0.3275911`
+    And the SPME-real fragment body does not contain `Real_erfc`
+
+  @rq-299ea1de
+  Scenario: SPME-real JIT fragment evaluates erfc via Real_erfc under f64
+    Given a heddle-md build with --features f64 (precision = f64)
+    And a ForceField with [spme] configured and the JIT-composed kernel active
+    And the composed kernel source captured for inspection
+    Then the SPME-real fragment body contains `Real_erfc(`
+    And the SPME-real fragment body does not contain the literal coefficient `0.254829592`
+
+  @rq-e4bd99f7
+  Scenario: SPME-real JIT fragment reports CutoffHandling::Uniform(r_cut_real)
+    Given any [spme] configuration with r_cut_real = c
+    When SpmeRealBuilder::pair_force_fragment(cx) is called
+    Then it returns Ok(Some(fragment)) with `fragment.cutoff == CutoffHandling::Uniform(c)`
+
+  @rq-0fb4e752
+  Scenario: SPME-real JIT fragment force matches the closed-form within 1e-5 under f32 (Hastings is accurate enough)
+    Given two unit-charge particles at separation r = 4.0e-10 inside the cutoff
+    And alpha = 2.0e10
+    And a ForceField with [spme] configured and the JIT-composed kernel active
+    When ForceField::step(...) is called
+    Then the per-particle force on particle 0 agrees with the closed-form
+      k_C · q_i · q_j · (erfc(α r) · inv_r2 + (2 α / √π) · exp(-α² r²) · inv_r2) · dx · inv_r
+      to within 1e-5 relative tolerance
+    And two runs of the same configuration produce byte-identical results on the same GPU
 
   # --- Reciprocal-space pipeline: atom spatial pre-sort ---
 

@@ -26,8 +26,30 @@ use cudarc::nvrtc::{CompileOptions, compile_ptx_with_opts};
 
 use crate::gpu::{GpuError, ParticleBuffers};
 use crate::pbc::SimulationBox;
+use crate::precision::Real;
 
 use super::{ForceFieldError, NeighborListState};
+
+/// Declares whether a pair-force fragment uses a single cutoff for
+/// every pair (and what that cutoff is) or a per-pair cutoff. The
+/// composer uses this to elide the per-fragment
+/// `r² <= cutoff_squared(i, j)` guard when the fragment's cutoff
+/// matches the outer max-cutoff mask, and to emit a JIT-compile-time
+/// constant guard when the fragment's cutoff is strictly less than
+/// the outer max.
+///
+/// See `rqm/forces/jit-composed-pair-force.md` *Feature API*.
+#[derive(Debug, Clone, Copy)]
+pub enum CutoffHandling {
+    /// Every pair this fragment evaluates uses the same cutoff `c`.
+    /// The fragment must implement `cutoff_squared(i, j) == c²` for
+    /// every `(i, j)`.
+    Uniform(Real),
+    /// The fragment's `cutoff_squared(i, j)` may vary per pair; the
+    /// composer emits the runtime guard around the fragment's
+    /// `evaluate` call.
+    PerPair,
+}
 
 const MODULE_NAME: &str = "heddle_jit_composed_pair_force";
 const F_ENTRY: &str = "heddle_jit_composed_pair_force_f";
@@ -70,6 +92,12 @@ pub struct PairForceFragment {
     /// member of its functor instance from the entry-point args
     /// declared in `entry_point_args`.
     pub functor_init_source: String,
+    /// Per-pair cutoff structure. Drives the composer's
+    /// cutoff-collapse optimisation (omit the per-fragment guard
+    /// when `Uniform(c)` matches the outer max-cutoff mask; emit a
+    /// compile-time-constant guard when `Uniform(c)` is strictly
+    /// less; emit the runtime guard when `PerPair`).
+    pub cutoff: CutoffHandling,
 }
 
 /// Context passed to every active fast-class pair-force slot's
@@ -417,8 +445,9 @@ impl JitComposedPairForce {
     pub fn compile_and_load(
         device: &Arc<CudaDevice>,
         fragments: &[PairForceFragment],
+        max_cutoff: crate::precision::Real,
     ) -> Result<Self, ForceFieldError> {
-        let source = compose_source(fragments);
+        let source = compose_source(fragments, max_cutoff);
 
         let arch_arg = detect_arch_option(device);
         let mut options = vec!["--std=c++17".to_string()];
@@ -575,11 +604,24 @@ fn functor_field_name(label: &str) -> String {
     out
 }
 
-fn compose_source(fragments: &[PairForceFragment]) -> String {
+fn compose_source(
+    fragments: &[PairForceFragment],
+    max_cutoff: Real,
+) -> String {
     let mut s = String::with_capacity(
         8192 + fragments.iter().map(|f| f.functor_source.len()).sum::<usize>(),
     );
     s.push_str(PREAMBLE);
+    // Per-pair early-exit threshold. The composer embeds the maximum
+    // squared cutoff across all active fast-class pair-force slots as
+    // a `#define` constant in the JIT source. The outer loop applies
+    // this as a branchless mask: pair math runs unconditionally and
+    // the mask zeroes contributions for pairs past this threshold.
+    let max_cutoff_squared = (max_cutoff as f64) * (max_cutoff as f64);
+    s.push_str(&format!(
+        "\n#define HEDDLE_JIT_MAX_CUTOFF_SQUARED R({:.17e})\n\n",
+        max_cutoff_squared
+    ));
     for f in fragments {
         s.push_str("// ---- fragment functor source: ");
         s.push_str(f.label);
@@ -603,28 +645,59 @@ fn compose_source(fragments: &[PairForceFragment]) -> String {
     s.push_str("};\n");
 
     // Per-pair functor sum: returns the SUM of (factor, energy, virial)
-    // across every active slot at pair (i, j). The outer loop multiplies
-    // factor by (dx, dy, dz) to get the per-component force and applies
-    // the 0.5 split for energy/virial across the i and j sides.
+    // across every active slot at pair (i, j). The outer loop computes
+    // `inv_r` and `r` once per pair and passes them in so every
+    // fragment reuses them. The outer-loop max-cutoff mask is applied
+    // after this function returns; per-fragment cutoff guards are
+    // emitted here according to each fragment's CutoffHandling.
     s.push_str("\ntemplate <bool WriteEv>\n");
     s.push_str("__device__ static inline void heddle_jit_eval_pair_sum(\n");
     s.push_str("    const HeddleJitComposedPairFunc &composite,\n");
-    s.push_str("    Real r2, unsigned int i, unsigned int j,\n");
+    s.push_str(
+        "    Real r2, Real inv_r, Real r, unsigned int i, unsigned int j,\n",
+    );
     s.push_str("    Real &factor, Real &energy, Real &virial)\n");
     s.push_str("{\n");
     s.push_str("    factor = R(0.0); energy = R(0.0); virial = R(0.0);\n");
     for f in fragments {
         let field = functor_field_name(f.label);
-        s.push_str(&format!(
-            "    {{\n        Real cut2 = composite.{f}.cutoff_squared(i, j);\n        \
-             if (r2 <= cut2) {{\n            Real s_factor, s_energy, s_virial;\n            \
-             composite.{f}.evaluate(r2, i, j, s_factor, s_energy, s_virial);\n            \
+        let body = format!(
+            "Real s_factor, s_energy, s_virial;\n            \
+             composite.{f}.evaluate(r2, inv_r, r, i, j, s_factor, s_energy, s_virial);\n            \
              Real scale = composite.{f}.exclusion_scale(i, j);\n            \
              factor += s_factor * scale;\n            \
-             if (WriteEv) {{ energy += s_energy * scale; virial += s_virial * scale; }}\n        \
-             }}\n    }}\n",
+             if (WriteEv) {{ energy += s_energy * scale; virial += s_virial * scale; }}",
             f = field
-        ));
+        );
+        match f.cutoff {
+            // Uniform cutoff matching the outer max: the outer mask
+            // already covers it; omit the per-fragment guard.
+            CutoffHandling::Uniform(c) if c == max_cutoff => {
+                s.push_str(&format!("    {{\n        {body}\n    }}\n", body = body));
+            }
+            // Uniform cutoff strictly less than the outer max: emit a
+            // compile-time-constant guard against c² (no per-pair load
+            // of `cutoff_squared(i, j)`).
+            CutoffHandling::Uniform(c) => {
+                let c_sq = (c as f64) * (c as f64);
+                s.push_str(&format!(
+                    "    {{\n        if (r2 <= R({c_sq:.17e})) {{\n            \
+                     {body}\n        }}\n    }}\n",
+                    c_sq = c_sq,
+                    body = body,
+                ));
+            }
+            // Per-pair cutoff: emit the runtime guard around the
+            // fragment's evaluate.
+            CutoffHandling::PerPair => {
+                s.push_str(&format!(
+                    "    {{\n        Real cut2 = composite.{f}.cutoff_squared(i, j);\n        \
+                     if (r2 <= cut2) {{\n            {body}\n        }}\n    }}\n",
+                    f = field,
+                    body = body,
+                ));
+            }
+        }
     }
     s.push_str("}\n");
 
@@ -931,9 +1004,29 @@ __device__ static inline void heddle_jit_outer_loop(
         heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
         Real r2 = dx * dx + dy * dy + dz * dz;
 
+        // Shared scalar intermediates: one rsqrt + one multiply
+        // computes `1/r` and `r` for the warp once per pair. Every
+        // fragment's `evaluate` consumes these instead of recomputing
+        // `1/r²`, `sqrt(1/r²)`, or `1/r` from `r²` itself.
+        Real inv_r = Real_rsqrt(r2);
+        Real r = r2 * inv_r;
+
+        // Branchless max-cutoff mask. Fragment math runs
+        // unconditionally; the mask zeroes contributions for pairs
+        // past HEDDLE_JIT_MAX_CUTOFF_SQUARED. Multiplying a finite
+        // value by +0.0f yields +0.0f in IEEE-754, so accumulators
+        // are bit-exact zero for out-of-cutoff pairs.
+        Real cutoff_mask = (r2 <= HEDDLE_JIT_MAX_CUTOFF_SQUARED) ? R(1.0) : R(0.0);
+
         Real factor = R(0.0), energy = R(0.0), virial = R(0.0);
-        heddle_jit_eval_pair_sum<WriteEv>(composite, r2, i_atom_id, j_atom_id,
+        heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r,
+                                           i_atom_id, j_atom_id,
                                            factor, energy, virial);
+        factor *= cutoff_mask;
+        if (WriteEv) {
+          energy *= cutoff_mask;
+          virial *= cutoff_mask;
+        }
         Real fx = factor * dx;
         Real fy = factor * dy;
         Real fz = factor * dz;

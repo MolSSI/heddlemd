@@ -664,6 +664,13 @@
     "title": "init_device succeeds on a machine with a CUDA GPU",
     "type": "scenario"
   },
+  "rq-059aff56": {
+    "decl": "Scenario: LJ with mixed cutoffs across pair types reports CutoffHandling::PerPair",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "LJ with mixed cutoffs across pair types reports CutoffHandling::PerPair",
+    "type": "scenario"
+  },
   "rq-05b4c988": {
     "decl": "Scenario: Log file header includes berendsen_conserved when Berendsen is the thermostat",
     "file": "integration/berendsen",
@@ -1769,6 +1776,13 @@
     "title": "Thermostat slot",
     "type": "section"
   },
+  "rq-0f761603": {
+    "decl": "Scenario: SPME-real JIT fragment uses the composer-supplied inv_r and r",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SPME-real JIT fragment uses the composer-supplied inv_r and r",
+    "type": "scenario"
+  },
   "rq-0f81f83f": {
     "decl": "## Berendsen \"conserved quantity\"",
     "file": "integration/berendsen",
@@ -1808,6 +1822,13 @@
     ],
     "title": "ConstraintGroup",
     "type": "api-item"
+  },
+  "rq-0fb4e752": {
+    "decl": "Scenario: SPME-real JIT fragment force matches the closed-form within 1e-5 under f32 (Hastings is accurate enough)",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SPME-real JIT fragment force matches the closed-form within 1e-5 under f32 (Hastings is accurate enough)",
+    "type": "scenario"
   },
   "rq-0fbfc03f": {
     "decl": "Scenario: Force result is invariant under construction-write-order",
@@ -2108,6 +2129,13 @@
     ],
     "title": "Barostat",
     "type": "api-item"
+  },
+  "rq-118a47d5": {
+    "decl": "Scenario: LJ with a uniform type_cutoff table reports CutoffHandling::Uniform",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "LJ with a uniform type_cutoff table reports CutoffHandling::Uniform",
+    "type": "scenario"
   },
   "rq-119cbe46": {
     "decl": "### `.minlog` format",
@@ -2601,6 +2629,13 @@
     ],
     "title": "Per-Step Kernel Sequence",
     "type": "section"
+  },
+  "rq-15a42b50": {
+    "decl": "Scenario: SPME-real and LJ in-cutoff pair force matches the closed form within f32 round-off",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "SPME-real and LJ in-cutoff pair force matches the closed form within f32 round-off",
+    "type": "scenario"
   },
   "rq-15b050fb": {
     "decl": "## Out of Scope",
@@ -4721,6 +4756,14 @@
     "title": "SI-mode .xyz velocities are converted to atomic-unit velocity",
     "type": "scenario"
   },
+  "rq-27525d3c": {
+    "decl": "### JIT fragment behaviour",
+    "file": "forces/spme",
+    "level": 3,
+    "refs": [],
+    "title": "JIT fragment behaviour",
+    "type": "section"
+  },
   "rq-27c19b67": {
     "decl": "Scenario: ForcesOnly call preserves the energy and virial accumulator entries from the previous ForcesAndScalars call",
     "file": "forces/framework",
@@ -4914,6 +4957,13 @@
     "title": "init_device fails when no GPU is available",
     "type": "scenario"
   },
+  "rq-299ea1de": {
+    "decl": "Scenario: SPME-real JIT fragment evaluates erfc via Real_erfc under f64",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SPME-real JIT fragment evaluates erfc via Real_erfc under f64",
+    "type": "scenario"
+  },
   "rq-29bdf2b2": {
     "decl": "### Self-energy",
     "file": "forces/spme",
@@ -4960,6 +5010,13 @@
       }
     ],
     "title": "Two independent lossless runs produce byte-identical results",
+    "type": "scenario"
+  },
+  "rq-2a1f2043": {
+    "decl": "Scenario: SPME-real JIT fragment evaluates erfc via the Hastings polynomial under f32",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SPME-real JIT fragment evaluates erfc via the Hastings polynomial under f32",
     "type": "scenario"
   },
   "rq-2a30cf81": {
@@ -6369,6 +6426,13 @@
     ],
     "title": "Lint reports a pre-existing output file under the output paths stage",
     "type": "scenario"
+  },
+  "rq-37c40c51": {
+    "decl": "- `CutoffHandling` — declares whether a fragment uses one cutoff <!-- rq-cuthand -->",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "CutoffHandling",
+    "type": "api-item"
   },
   "rq-37ccfc1f": {
     "decl": "## Gherkin Scenarios",
@@ -9948,6 +10012,13 @@
     "title": "RunSummary",
     "type": "api-item"
   },
+  "rq-5c26c1ff": {
+    "decl": "Scenario: LJ JIT fragment elides the switching code when every pair-type sets r_switch = cutoff",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "LJ JIT fragment elides the switching code when every pair-type sets r_switch = cutoff",
+    "type": "scenario"
+  },
   "rq-5c28eee0": {
     "decl": "Scenario: [thermostat] kind = \"csvr\" requires a seed",
     "file": "io/config-schema",
@@ -10413,6 +10484,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-6060a744": {
+    "decl": "Scenario: LJ JIT fragment with uniform cutoff reports CutoffHandling::Uniform",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "LJ JIT fragment with uniform cutoff reports CutoffHandling::Uniform",
+    "type": "scenario"
   },
   "rq-606197d5": {
     "decl": "### Cadence",
@@ -11975,6 +12053,13 @@
       }
     ],
     "title": "Default r_switch to 0.9 * cutoff when omitted",
+    "type": "scenario"
+  },
+  "rq-6f6fe328": {
+    "decl": "Scenario: LJ JIT fragment with mixed cutoffs reports CutoffHandling::PerPair",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "LJ JIT fragment with mixed cutoffs reports CutoffHandling::PerPair",
     "type": "scenario"
   },
   "rq-6f7ad4ad": {
@@ -13678,6 +13763,13 @@
     "title": "rattle_velocities preserves the centre-of-mass velocity",
     "type": "scenario"
   },
+  "rq-7e0df64f": {
+    "decl": "Scenario: LJ JIT fragment uses the composer-supplied inv_r and r",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "LJ JIT fragment uses the composer-supplied inv_r and r",
+    "type": "scenario"
+  },
   "rq-7e2c482a": {
     "decl": "# atom is the oxygen and the next two are the hydrogens).",
     "file": "forces/topology",
@@ -14085,6 +14177,13 @@
     "refs": [],
     "title": "`analyze` subcommand",
     "type": "section"
+  },
+  "rq-828e1ea2": {
+    "decl": "Scenario: LJ JIT fragment with uniform cutoff produces the closed-form LJ force within f32 round-off",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "LJ JIT fragment with uniform cutoff produces the closed-form LJ force within f32 round-off",
+    "type": "scenario"
   },
   "rq-82acb52f": {
     "decl": "Scenario: combine_class_totals is a single-threaded write per output element",
@@ -16757,6 +16856,14 @@
     "title": "vv_kick does not modify image flags",
     "type": "scenario"
   },
+  "rq-9cd4085e": {
+    "decl": "### JIT fragment behaviour <!-- rq-lj-jit-frag -->",
+    "file": "forces/lj-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "JIT fragment behaviour <!-- rq-lj-jit-frag -->",
+    "type": "section"
+  },
   "rq-9ce1bd52": {
     "decl": "Scenario: validate_against accepts a well-formed config",
     "file": "io/config-schema",
@@ -17559,6 +17666,13 @@
     "refs": [],
     "title": "Fixed-Point Force Buffers",
     "type": "section"
+  },
+  "rq-a304e8cb": {
+    "decl": "Scenario: A pair past the maximum slot cutoff contributes zero by bit-exact equality",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A pair past the maximum slot cutoff contributes zero by bit-exact equality",
+    "type": "scenario"
   },
   "rq-a30ac09f": {
     "decl": "Scenario: Reject empty type name",
@@ -19093,6 +19207,13 @@
     "title": "Newton's third law holds for the framework's combined force",
     "type": "scenario"
   },
+  "rq-b19d4365": {
+    "decl": "Scenario: A Uniform-cutoff fragment whose c² equals HEDDLE_JIT_MAX_CUTOFF_SQUARED has its per-fragment guard omitted",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A Uniform-cutoff fragment whose c² equals HEDDLE_JIT_MAX_CUTOFF_SQUARED has its per-fragment guard omitted",
+    "type": "scenario"
+  },
   "rq-b1a132b5": {
     "decl": "Scenario: ForceField::new iterates the registry in registration order",
     "file": "forces/framework",
@@ -19326,6 +19447,13 @@
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Displacement check uses minimum-image displacement",
+    "type": "scenario"
+  },
+  "rq-b3b12764": {
+    "decl": "Scenario: A PerPair-cutoff fragment has its runtime cutoff_squared guard emitted",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A PerPair-cutoff fragment has its runtime cutoff_squared guard emitted",
     "type": "scenario"
   },
   "rq-b3b19b01": {
@@ -19726,6 +19854,13 @@
       }
     ],
     "title": "[thermostat] kind = \"berendsen\" is accepted",
+    "type": "scenario"
+  },
+  "rq-b7ed60ff": {
+    "decl": "Scenario: SPME-real always reports CutoffHandling::Uniform",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "SPME-real always reports CutoffHandling::Uniform",
     "type": "scenario"
   },
   "rq-b8070abb": {
@@ -24276,6 +24411,13 @@
     "title": "Unknown bond type name rejected",
     "type": "scenario"
   },
+  "rq-e4628324": {
+    "decl": "Scenario: LJ JIT fragment emits the switching code when at least one pair-type has r_switch < cutoff",
+    "file": "forces/lj-pair-force",
+    "refs": [],
+    "title": "LJ JIT fragment emits the switching code when at least one pair-type has r_switch < cutoff",
+    "type": "scenario"
+  },
   "rq-e469657f": {
     "decl": "Scenario: A composite-fragment builder displaces its constituents' fragments",
     "file": "forces/jit-composed-pair-force",
@@ -24310,6 +24452,13 @@
     "refs": [],
     "title": "Out of Scope",
     "type": "section"
+  },
+  "rq-e4bd99f7": {
+    "decl": "Scenario: SPME-real JIT fragment reports CutoffHandling::Uniform(r_cut_real)",
+    "file": "forces/spme",
+    "refs": [],
+    "title": "SPME-real JIT fragment reports CutoffHandling::Uniform(r_cut_real)",
+    "type": "scenario"
   },
   "rq-e4c2141e": {
     "decl": "Scenario: Kinetic energy reduction produces a Real in both builds",
@@ -24718,6 +24867,13 @@
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
     "title": "Sparse contributions go to single_pairs",
+    "type": "scenario"
+  },
+  "rq-e8699851": {
+    "decl": "Scenario: A Uniform-cutoff fragment whose c² is strictly less than HEDDLE_JIT_MAX_CUTOFF_SQUARED gets a compile-time-constant guard",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "A Uniform-cutoff fragment whose c² is strictly less than HEDDLE_JIT_MAX_CUTOFF_SQUARED gets a compile-time-constant guard",
     "type": "scenario"
   },
   "rq-e8adaa9c": {
@@ -25160,6 +25316,13 @@
     ],
     "title": "slot_kind_field_dims",
     "type": "api-item"
+  },
+  "rq-ecc1241f": {
+    "decl": "Scenario: inv_r and r are computed once per pair and threaded into every fragment's evaluate",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "inv_r and r are computed once per pair and threaded into every fragment's evaluate",
+    "type": "scenario"
   },
   "rq-ecc664ff": {
     "decl": "### Example",

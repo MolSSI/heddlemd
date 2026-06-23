@@ -164,6 +164,67 @@ This degenerate case is the hard-cutoff behaviour: `S = 1` over
 `[0, r_cut]` and step 3 produces the cliff at `r_cut`. No division by
 zero ever occurs.
 
+### JIT fragment behaviour <!-- rq-lj-jit-frag --> <!-- rq-9cd4085e -->
+
+When `LennardJonesBuilder::pair_force_fragment(cx)` participates in
+the JIT-composed pair-force kernel (see
+`jit-composed-pair-force.md`), the fragment differs from the
+standalone kernel above in three ways:
+
+1. **Shared `(inv_r, r)` inputs.** The fragment's `evaluate`
+   signature is
+   `evaluate(Real r2, Real inv_r, Real r, unsigned int i,
+   unsigned int j, Real &factor, Real &energy, Real &virial)`.
+   `inv_r = rsqrtf(r²)` and `r = r² · inv_r` are computed once
+   per pair by the composer's outer loop and threaded into every
+   active fragment. The LJ fragment does not compute `1.0 / r2`;
+   it derives `inv_r2 = inv_r · inv_r` from `inv_r` directly.
+
+2. **Compile-time elision of the degenerate switch.** At fragment
+   construction the builder inspects the
+   `LennardJonesParameterTable`'s `switch` and `cutoff` arrays. If
+   every `switch[p]` equals the corresponding `cutoff[p]` for
+   every pair-type slot `p` (equivalently, every configured
+   `[[pair_interactions]]` entry sets `r_switch == cutoff`,
+   including the loader's `0.9 * cutoff` default when no entry
+   sets it that way), the builder emits a *no-switch* fragment
+   source whose `evaluate` body is exactly the unmodified
+   Lennard-Jones recipe of step 4 in *Algorithm* (no `r_s2 =
+   r_switch · r_switch`, no `r² > r_s²` test, no chain-rule
+   correction). The switching code is not emitted into the
+   generated PTX. If any `switch[p] != cutoff[p]`, the builder
+   emits the full switch-aware fragment source covering the
+   C¹ polynomial of step 5.
+
+3. **CutoffHandling.** The fragment reports its cutoff structure
+   to the composer based on the same parameter table:
+
+   - When every `cutoff[p]` for `p ∈ [0, n_types²)` equals the
+     same value `c`, the fragment reports
+     `cutoff: CutoffHandling::Uniform(c)`. The composer omits the
+     per-fragment `r² <= cutoff_squared(i, j)` guard when
+     `c² == HEDDLE_JIT_MAX_CUTOFF_SQUARED`; otherwise it emits a
+     single `if (r² <= c²)` guard with `c²` as a JIT-compile-time
+     constant.
+   - When at least two `cutoff[p]` entries differ, the fragment
+     reports `cutoff: CutoffHandling::PerPair` and the composer
+     emits the runtime
+     `if (r² <= functor.cutoff_squared(i, j))` guard. The
+     functor's `cutoff_squared(i, j)` indexes
+     `type_cutoff[slot(i, j)]` and squares it.
+
+   `evaluate` is invoked unconditionally for every pair the outer
+   loop visits; the outer max-cutoff mask described in
+   `jit-composed-pair-force.md` zeroes the contribution for
+   `r² > HEDDLE_JIT_MAX_CUTOFF_SQUARED`. The fragment is safe to
+   call at any positive `r²` because `inv_r` and `r` are
+   well-defined for all positive `r²` and the LJ functional form
+   `(σ·inv_r)¹² − (σ·inv_r)⁶` is finite for all positive `r²`.
+
+The standalone `lj_pair_force_*` kernels documented below keep
+the per-pair recipe in *Algorithm*; the JIT-fragment changes are
+scoped to the JIT path.
+
 ### Parameter-table symmetry <!-- rq-7d92b551 -->
 
 The kernel reads `type_sigma`, `type_epsilon`, `type_cutoff`, and
@@ -943,4 +1004,50 @@ Feature: Lennard-Jones O(N²) pair force kernel
     Then slot_energy[0] equals 0.5 * (un-excluded LJ energy / 2) within f32 round-off
       (the 0.5 is the exclusion scale; the 1/2 is the half-sum convention; the slot accumulates one pair contribution)
     And slot_virial[0] equals 0.5 * (un-excluded virial / 2) within f32 round-off
+
+  # --- JIT fragment behaviour ---
+
+  @rq-7e0df64f
+  Scenario: LJ JIT fragment uses the composer-supplied inv_r and r
+    Given a ForceField with at least one [[pair_interactions]] entry and the JIT-composed kernel active
+    And the composed kernel source captured for inspection
+    Then the LJ fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
+    And the LJ fragment body does not contain `1.0 / r2`, `1.0f / r2`, `R(1.0) / r2`, or any other expression that computes inv_r2 from r2
+
+  @rq-6060a744
+  Scenario: LJ JIT fragment with uniform cutoff reports CutoffHandling::Uniform
+    Given a config with three [[pair_interactions]] entries all setting cutoff = 1.0e-9
+    When LennardJonesBuilder::pair_force_fragment(cx) is called
+    Then it returns Ok(Some(fragment)) with `fragment.cutoff == CutoffHandling::Uniform(1.0e-9)`
+
+  @rq-6f6fe328
+  Scenario: LJ JIT fragment with mixed cutoffs reports CutoffHandling::PerPair
+    Given a config with two [[pair_interactions]] entries setting cutoff = 1.0e-9 and one setting cutoff = 8.0e-10
+    When LennardJonesBuilder::pair_force_fragment(cx) is called
+    Then it returns Ok(Some(fragment)) with `fragment.cutoff == CutoffHandling::PerPair`
+
+  @rq-5c26c1ff
+  Scenario: LJ JIT fragment elides the switching code when every pair-type sets r_switch = cutoff
+    Given a config whose every [[pair_interactions]] entry sets r_switch = cutoff (the loader's input or the explicit user value)
+    When LennardJonesBuilder::pair_force_fragment(cx) is called
+    And the composed kernel source is captured for inspection
+    Then the LJ fragment body does not contain the literal substring `r_switch`
+    And the LJ fragment body does not contain the literal substring `if (r2 > r_s2)`
+    And the LJ fragment body does not contain the chain-rule coefficient `12.0`
+
+  @rq-e4628324
+  Scenario: LJ JIT fragment emits the switching code when at least one pair-type has r_switch < cutoff
+    Given a config with two [[pair_interactions]] entries where one has r_switch = 0.9 * cutoff and the other has r_switch = cutoff
+    When LennardJonesBuilder::pair_force_fragment(cx) is called
+    And the composed kernel source is captured for inspection
+    Then the LJ fragment body contains the C¹ switching polynomial of step 5 (the `r_s2`, `tau`, `S = one_minus * one_minus * (1.0 + 2.0 * tau)`, and chain-rule terms)
+
+  @rq-828e1ea2
+  Scenario: LJ JIT fragment with uniform cutoff produces the closed-form LJ force within f32 round-off
+    Given a config with one [[pair_interactions]] entry between Ar-Ar with sigma=1.0, epsilon=1.0, cutoff=5.0, r_switch=5.0
+    And a ParticleState of N=2 with positions p0=(0,0,0) and p1=(1.5,0,0)
+    And the JIT-composed kernel active
+    When ForceField::step(...) is called
+    Then the per-particle force on particle 0 equals the closed-form LJ force at r=1.5 within 1e-5 relative tolerance
+    And two runs of the same configuration produce byte-identical per-particle forces
 ```

@@ -16,7 +16,7 @@ use crate::timings::{KernelStage, Timings};
 use super::topology::{DeviceExclusionList, ExclusionList};
 use super::neighbor_list::NeighborListError;
 use super::{
-    AggregateLevel, ForceFieldContext, ForceFieldError, PairForceBindContext,
+    AggregateLevel, CutoffHandling, ForceFieldContext, ForceFieldError, PairForceBindContext,
     PairForceFragment, PairForceLaunchBuilder, Potential, PotentialBuildContext,
     PotentialBuilder, SlotOutputView,
 };
@@ -167,16 +167,17 @@ impl PotentialBuilder for CoulombBuilder {
         &self,
         cx: &PotentialBuildContext<'_>,
     ) -> Result<Option<PairForceFragment>, ForceFieldError> {
-        if cx.coulomb_config.is_none() {
+        let Some(coul_cfg) = cx.coulomb_config else {
             return Ok(None);
-        }
-        Ok(Some(coulomb_pair_force_fragment()))
+        };
+        let cutoff = coul_cfg.cutoff as Real;
+        Ok(Some(coulomb_pair_force_fragment(cutoff)))
     }
 }
 
 /// Truncated Coulomb with CHARMM C¹ switching fragment for the
 /// JIT-composed pair-force kernel.
-pub fn coulomb_pair_force_fragment() -> PairForceFragment {
+pub fn coulomb_pair_force_fragment(cutoff: Real) -> PairForceFragment {
     let functor_source = r#"
 struct CoulombPairFunctor {
     const Real *charges;
@@ -192,14 +193,14 @@ struct CoulombPairFunctor {
     }
 
     __device__ inline void evaluate(
-        Real r2, unsigned int i, unsigned int j,
+        Real r2, Real inv_r, Real r,
+        unsigned int i, unsigned int j,
         Real &factor, Real &energy, Real &virial) const
     {
         Real qi = charges[i];
         Real qj = charges[j];
         Real qq = qi * qj;
-        Real inv_r2 = R(1.0) / r2;
-        Real inv_r  = Real_sqrt(inv_r2);
+        Real inv_r2 = inv_r * inv_r;
         energy = k_coulomb * qq * inv_r;
         factor = k_coulomb * qq * inv_r * inv_r2;
         Real r_s2 = r_switch * r_switch;
@@ -244,6 +245,7 @@ struct CoulombPairFunctor {
         functor_source: functor_source.to_string(),
         entry_point_args: entry_point_args.to_string(),
         functor_init_source: functor_init_source.to_string(),
+        cutoff: CutoffHandling::Uniform(cutoff),
     }
 }
 

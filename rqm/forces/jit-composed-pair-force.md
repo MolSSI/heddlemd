@@ -60,19 +60,24 @@ A `PairForceFragment` carries a self-contained CUDA C++ snippet plus
 identifying metadata. The snippet:
 
 1. Defines a stateless `__device__` functor whose name is given by
-   the fragment's `functor_struct_name`. The functor exposes two
+   the fragment's `functor_struct_name`. The functor exposes three
    member functions:
 
    ```c
    struct <functor_struct_name> {
        // Per-pair cutoff^2 test. The composed kernel calls this
-       // before evaluate(); evaluate() is invoked only when
-       // r2 <= cutoff_squared(i, j).
+       // only for fragments whose cutoff is declared
+       // CutoffHandling::PerPair; Uniform fragments never have
+       // this function called from the composed kernel (the outer
+       // loop's max-cutoff mask covers them).
        __device__ inline Real cutoff_squared(unsigned int i, unsigned int j) const;
 
        // Per-pair functional form. Writes the three pair outputs.
+       // `r2`, `inv_r = 1/r`, and `r` are computed once per pair
+       // by the outer loop and threaded into every fragment's
+       // evaluate so they share work across fragments.
        __device__ inline void evaluate(
-           Real r2,
+           Real r2, Real inv_r, Real r,
            unsigned int i, unsigned int j,
            Real &factor, Real &energy, Real &virial) const;
 
@@ -87,6 +92,17 @@ identifying metadata. The snippet:
        // slot's bind_args() method (see below).
    };
    ```
+
+   `evaluate` is invoked unconditionally for every pair the outer
+   loop visits, including pairs whose `r²` exceeds
+   `HEDDLE_JIT_MAX_CUTOFF_SQUARED`. The outer loop multiplies the
+   fragment's `(factor, energy, virial)` by a max-cutoff mask
+   before accumulating, so out-of-cutoff pairs contribute exactly
+   zero by bit-exact equality. Fragments must therefore tolerate
+   any `r² > 0` without dividing by zero, taking the square root of
+   a negative number, or otherwise faulting; `inv_r` and `r` come
+   from `rsqrtf(r²)` and `r² · inv_r`, which are well-defined for
+   all positive `r²`.
 
    The fragment is free to declare helper `__device__` functions
    above the functor struct (the LJ-12-6 implementation today
@@ -139,17 +155,53 @@ specified in `packed-neighbour-pair-force.md` *Force Kernel*:
   inner loop — construction has already removed excluded pairs from
   this list.
 
-Inside each inner iteration the per-pair scaffolding follows the
-existing per-slot fragment contract:
+Inside each inner iteration the per-pair scaffolding runs
+unconditionally — there is no warp-divergent branch on the cutoff.
+The lane:
 
-1. The lane computes `(dx, dy, dz, r2)` once and (for exclusion-tile
-   entries) the per-pair exclusion scale once.
-2. The lane initialises a per-pair accumulator
+1. Computes `(dx, dy, dz, r²)` once via the minimum-image
+   displacement, and (for exclusion-tile entries) the per-pair
+   exclusion scale once.
+2. Computes the shared scalar intermediates once:
+   ```
+   inv_r = rsqrtf(r²)
+   r     = r² · inv_r
+   ```
+   `inv_r` and `r` are threaded into every fragment's `evaluate`,
+   so each fragment reuses them instead of recomputing `1/r²`,
+   `sqrt(1/r²)`, or `1/r` from `r²` itself. `rsqrtf` is the
+   hardware reciprocal-square-root intrinsic.
+3. Computes the max-cutoff mask once:
+   ```
+   mask = (r² <= HEDDLE_JIT_MAX_CUTOFF_SQUARED) ? R(1.0) : R(0.0)
+   ```
+   The composer embeds `HEDDLE_JIT_MAX_CUTOFF_SQUARED` as a
+   `#define` constant in the generated source at JIT-composition
+   time; its value is the maximum squared cutoff across all active
+   fast-class pair-force slots (`max_slot s.max_cutoff()² over
+   active s`). The mask is computed branchlessly so every lane in
+   the warp keeps full SM utilization through the fragment math
+   regardless of which pairs are in cutoff.
+4. Initialises a per-pair accumulator
    `factor = 0`, `energy = 0`, `virial = 0`.
-3. For each active fragment, in canonical slot order, when
-   `r2 <= functor.cutoff_squared(i, j)`:
-   - The functor's `evaluate` produces its
-     `(factor_slot, energy_slot, virial_slot)`.
+5. For each active fragment, in canonical slot order:
+   - The functor's `evaluate(r², inv_r, r, i, j, …)` produces its
+     `(factor_slot, energy_slot, virial_slot)`. `evaluate` is
+     called unconditionally for every pair; out-of-cutoff
+     contributions are zeroed by the mask at step 7.
+   - When the fragment's cutoff handling
+     (`CutoffHandling`, see *Feature API*) is
+     `CutoffHandling::Uniform(c)` and `c² ==
+     HEDDLE_JIT_MAX_CUTOFF_SQUARED`, the composer omits the
+     per-fragment `r² <= cutoff_squared(i, j)` guard entirely —
+     the outer max-cutoff mask covers it. When the handling is
+     `CutoffHandling::Uniform(c)` and `c² <
+     HEDDLE_JIT_MAX_CUTOFF_SQUARED`, the composer emits the
+     guard once as `if (r² <= c²)` with `c²` as a JIT-compile-time
+     constant (no per-pair load). When the handling is
+     `CutoffHandling::PerPair`, the composer emits
+     `if (r² <= functor.cutoff_squared(i, j))` and only adds the
+     fragment's contribution when the test passes.
    - The functor's `exclusion_scale(i, j)` produces `scale_slot`
      (for cutoff entries the framework's exclusion table is unused
      because excluded pairs are not in the cutoff list; for
@@ -159,7 +211,12 @@ existing per-slot fragment contract:
      scale_slot * 0.5, virial_slot * scale_slot * 0.5)` to the pair
      accumulator. The `0.5` distributes each unordered pair's
      energy and virial across the two ordered slots.
-4. The lane forms `(fx, fy, fz) = factor * (dx, dy, dz)` and adds
+6. The lane multiplies the pair accumulator's `(factor, energy,
+   virial)` by the max-cutoff `mask`. Pairs with `r² >
+   HEDDLE_JIT_MAX_CUTOFF_SQUARED` contribute zero by bit-exact
+   equality (multiplying any finite value by `0.0f` yields `+0.0f`
+   in IEEE-754, and subsequent adds with `+0.0f` are identity).
+7. The lane forms `(fx, fy, fz) = factor * (dx, dy, dz)` and adds
    to per-lane `i_*` accumulators; it also subtracts `(fx, fy, fz)`
    from per-lane `j_*` accumulators (Newton's 3rd, both directions
    computed inside the same iteration). The `_fev` variant
@@ -387,6 +444,7 @@ standalone case.
       pub label: &'static str,
       pub functor_struct_name: &'static str,
       pub source: &'static str,
+      pub cutoff: CutoffHandling,
   }
   ```
 
@@ -397,6 +455,45 @@ standalone case.
   - `source` is the CUDA C++ text of the fragment: zero or more
     helper `__device__` functions plus exactly one `struct
     <functor_struct_name>` definition.
+  - `cutoff` declares the fragment's per-pair cutoff structure for
+    the composer's cutoff-collapse optimisation; see
+    `CutoffHandling` below.
+
+- `CutoffHandling` — declares whether a fragment uses one cutoff <!-- rq-cuthand --> <!-- rq-37c40c51 -->
+  for every pair (and what that cutoff is) or a per-pair cutoff.
+  The composer uses this to decide whether to emit a per-fragment
+  `r² <= cutoff_squared(i, j)` guard in the inner loop, and to
+  compute the global `HEDDLE_JIT_MAX_CUTOFF_SQUARED` constant.
+
+  ```rust
+  pub enum CutoffHandling {
+      Uniform(Real),
+      PerPair,
+  }
+  ```
+
+  - `Uniform(c)` — every pair this fragment evaluates uses the
+    same cutoff `c`. The composer reads `c` to set
+    `HEDDLE_JIT_MAX_CUTOFF_SQUARED = max_fragment c²`. When `c² ==
+    HEDDLE_JIT_MAX_CUTOFF_SQUARED` the composer omits the
+    per-fragment cutoff guard entirely; the outer max-cutoff mask
+    covers it. When `c² < HEDDLE_JIT_MAX_CUTOFF_SQUARED` the
+    composer emits a single `if (r² <= c²)` guard with `c²` as a
+    JIT-compile-time constant — no per-pair load.
+  - `PerPair` — the fragment's `cutoff_squared(i, j)` may vary per
+    pair. The composer emits `if (r² <= functor.cutoff_squared(i,
+    j))` in the inner loop and the fragment evaluates only when
+    the test passes. The composer uses the fragment's
+    `max_cutoff()` (reported by its `Potential::max_cutoff()`) to
+    contribute to `HEDDLE_JIT_MAX_CUTOFF_SQUARED`.
+
+  A fragment that reports `Uniform(c)` MUST have `cutoff_squared(i,
+  j) == c²` for every `(i, j)`; the composer trusts the
+  declaration and skips the per-pair guard. A fragment whose
+  per-pair-type cutoff table happens to have every entry equal
+  reports `Uniform(c)`; a table with mixed entries reports
+  `PerPair`. The decision is made once at fragment construction
+  time.
 
 - `PairForceLaunchBuilder` — opaque argument-builder threaded <!-- rq-86691f43 -->
   through every active slot's `bind_pair_force_args(...)` call. The
@@ -751,6 +848,14 @@ Feature: JIT-composed pair-force kernel
     Then the per-particle force on the pair equals the SPME-real-only contribution within f32 round-off
     And the LJ contribution to that pair is zero by bit-exact equality
 
+  @rq-a304e8cb
+  Scenario: A pair past the maximum slot cutoff contributes zero by bit-exact equality
+    Given a ForceField with LJ (r_cut = 1.0) and SPME-real (r_cut = 1.5) both active
+    And a pair at separation r = 1.7 (outside both cutoffs and outside HEDDLE_JIT_MAX_CUTOFF_SQUARED = 1.5²)
+    When force_field.step(...) is called
+    Then the per-particle force / energy / virial contribution from this pair is zero by bit-exact equality
+    And both fragments' evaluate() are invoked (the kernel runs unconditionally and the outer mask zeroes the contribution; calls are an implementation detail)
+
   @rq-1babd195
   Scenario: Per-pair contributions are summed in canonical slot order before the warp tree
     Given a ForceField with LJ (slot order index 0) and SPME-real (slot order index 1) both active
@@ -766,6 +871,65 @@ Feature: JIT-composed pair-force kernel
     When force_field.step(...) is called
     Then the LJ contribution to the pair force is 0.5 * the unscaled LJ pair force
     And the SPME-real contribution to the pair force is zero by bit-exact equality
+
+  # --- Shared per-pair intermediates ---
+
+  @rq-ecc1241f
+  Scenario: inv_r and r are computed once per pair and threaded into every fragment's evaluate
+    Given a ForceField with LJ and SPME-real both active
+    And the composed kernel source captured for inspection
+    Then the inner loop computes inv_r = rsqrtf(r2) and r = r2 * inv_r exactly once per pair
+    And every fragment's evaluate signature is `evaluate(Real r2, Real inv_r, Real r, unsigned int i, unsigned int j, Real &factor, Real &energy, Real &virial)`
+    And no fragment's evaluate body contains a call to Real_sqrt(r2) or computes 1.0 / r2
+
+  @rq-15a42b50
+  Scenario: SPME-real and LJ in-cutoff pair force matches the closed form within f32 round-off
+    Given a ForceField with LJ and SPME-real both active
+    And a pair (i, j) at separation r = 0.4 (inside both cutoffs)
+    When force_field.step(...) is called
+    Then the per-particle force on i agrees within 1e-5 relative tolerance with the sum of (a) the closed-form LJ pair force using sigma/epsilon for the pair's types and (b) the closed-form erfc-screened Coulomb pair force using k_C, q_i, q_j, alpha, r
+    And the result is byte-identical to a second run of the same kernel on the same inputs
+
+  # --- Cutoff-handling and collapse ---
+
+  @rq-b19d4365
+  Scenario: A Uniform-cutoff fragment whose c² equals HEDDLE_JIT_MAX_CUTOFF_SQUARED has its per-fragment guard omitted
+    Given a ForceField with one fragment whose builder reports CutoffHandling::Uniform(c) with c² == max_cutoff² across all active fragments
+    And the composed kernel source captured for inspection
+    Then the composed source does not contain a call to that fragment's `cutoff_squared(i, j)`
+    And the composed source does not contain an `if (r2 <= …)` guard around that fragment's evaluate
+
+  @rq-e8699851
+  Scenario: A Uniform-cutoff fragment whose c² is strictly less than HEDDLE_JIT_MAX_CUTOFF_SQUARED gets a compile-time-constant guard
+    Given two fragments F1 with CutoffHandling::Uniform(1.0) and F2 with CutoffHandling::Uniform(1.5)
+    And the composed kernel source captured for inspection
+    Then HEDDLE_JIT_MAX_CUTOFF_SQUARED equals 1.5² (= 2.25) at JIT compile time
+    And the inner loop guards F1's evaluate with `if (r2 <= 1.0)` as a literal compile-time constant
+    And the inner loop does not call F1's `cutoff_squared(i, j)` at runtime
+
+  @rq-b3b12764
+  Scenario: A PerPair-cutoff fragment has its runtime cutoff_squared guard emitted
+    Given a fragment F with CutoffHandling::PerPair (e.g., LJ with mixed type_cutoff entries)
+    And the composed kernel source captured for inspection
+    Then the inner loop guards F's evaluate with `if (r2 <= functor.cutoff_squared(i, j))` and F's `cutoff_squared` is invoked at runtime
+
+  @rq-118a47d5
+  Scenario: LJ with a uniform type_cutoff table reports CutoffHandling::Uniform
+    Given a config whose [[pair_interactions]] entries all have the same cutoff
+    When LennardJonesBuilder::pair_force_fragment(cx) is called
+    Then it returns Ok(Some(fragment)) with `fragment.cutoff == CutoffHandling::Uniform(c)` where c is the common cutoff
+
+  @rq-059aff56
+  Scenario: LJ with mixed cutoffs across pair types reports CutoffHandling::PerPair
+    Given a config whose [[pair_interactions]] entries have at least two distinct cutoff values
+    When LennardJonesBuilder::pair_force_fragment(cx) is called
+    Then it returns Ok(Some(fragment)) with `fragment.cutoff == CutoffHandling::PerPair`
+
+  @rq-b7ed60ff
+  Scenario: SPME-real always reports CutoffHandling::Uniform
+    Given any [spme] configuration with r_cut_real = c
+    When SpmeRealBuilder::pair_force_fragment(cx) is called
+    Then it returns Ok(Some(fragment)) with `fragment.cutoff == CutoffHandling::Uniform(c)`
 
   # --- displaces() under JIT composition ---
 
