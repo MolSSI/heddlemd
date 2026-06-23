@@ -184,8 +184,7 @@ extern "C" __global__ void spme_recip_compute_influence(
 // GPU regardless of atomic-completion order, so the accumulated
 // rho_fixed grid is byte-identical across runs with byte-identical
 // inputs. The f32 conversion is per-cell with no inter-thread
-// communication, also deterministic. The scale factor 2^32 matches
-// OpenMM's gridSpreadCharge convention.
+// communication, also deterministic.
 
 // Compute fractional offsets t_a, t_b, t_c and primary bin
 // (g_a, g_b, g_c) for one particle. Replicates the geometry of the
@@ -239,11 +238,10 @@ __device__ static inline void spread_per_particle_setup(
 }
 
 // Fixed-point scale factor: maps a real value `v` to the i64 integer
-// (i64) rintf(v * SPREAD_FIXED_POINT_SCALE). Matches OpenMM's
-// `gridSpreadCharge` convention. With charges bounded by O(1 e) and
-// B-spline weights bounded by 1, a single contribution maps to a
-// value of magnitude <= a few * 10^9; the worst-case accumulated
-// cell sum stays well under i64::MAX ~ 9.2 * 10^18.
+// (i64) rintf(v * SPREAD_FIXED_POINT_SCALE). With charges bounded by
+// O(1 e) and B-spline weights bounded by 1, a single contribution
+// maps to a value of magnitude <= a few * 10^9; the worst-case
+// accumulated cell sum stays well under i64::MAX ~ 9.2 * 10^18.
 #define SPREAD_FIXED_POINT_SCALE 4294967296.0f  // 2^32 as f32
 
 // Per-particle fixed-point spread. One warp per particle. Lane 0

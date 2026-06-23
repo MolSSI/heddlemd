@@ -2110,6 +2110,216 @@ pub fn sort_cells_by_particle_id(
     Ok(())
 }
 
+// =====================================================================
+// Packed-neighbour pair-force pipeline launchers
+// (rqm/forces/packed-neighbour-pair-force.md)
+// =====================================================================
+
+const PACKED_NL_WARPS_PER_BLOCK: u32 = 4;
+const PACKED_NL_BLOCK_SIZE: u32 = PACKED_NL_WARPS_PER_BLOCK * 32;
+const PACKED_BBOX_WARPS_PER_BLOCK: u32 = 8;
+const PACKED_BBOX_BLOCK_SIZE: u32 = PACKED_BBOX_WARPS_PER_BLOCK * 32;
+
+pub fn scatter_positions_to_tile_order(
+    kernels: &Kernels,
+    particle_buffers: &ParticleBuffers,
+    sorted_particle_ids: &CudaSlice<u32>,
+    tile_sorted_positions_x: &mut CudaSlice<Real>,
+    tile_sorted_positions_y: &mut CudaSlice<Real>,
+    tile_sorted_positions_z: &mut CudaSlice<Real>,
+) -> Result<(), GpuError> {
+    let n = particle_buffers.particle_count();
+    if n == 0 {
+        return Ok(());
+    }
+    let n_u32 = n as u32;
+    let func = kernels.neighbor.scatter_positions_to_tile_order.clone();
+    let cfg = launch_config(n_u32);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &particle_buffers.positions_x,
+                &particle_buffers.positions_y,
+                &particle_buffers.positions_z,
+                sorted_particle_ids,
+                &mut *tile_sorted_positions_x,
+                &mut *tile_sorted_positions_y,
+                &mut *tile_sorted_positions_z,
+                n_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+pub fn fill_tile_position_padding(
+    kernels: &Kernels,
+    tile_sorted_positions_x: &mut CudaSlice<Real>,
+    tile_sorted_positions_y: &mut CudaSlice<Real>,
+    tile_sorted_positions_z: &mut CudaSlice<Real>,
+    n: u32,
+    padded_n: u32,
+) -> Result<(), GpuError> {
+    if padded_n <= n {
+        return Ok(());
+    }
+    let padding = padded_n - n;
+    let func = kernels.neighbor.fill_tile_position_padding.clone();
+    let cfg = launch_config(padding);
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                &mut *tile_sorted_positions_x,
+                &mut *tile_sorted_positions_y,
+                &mut *tile_sorted_positions_z,
+                n,
+                padded_n,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+pub fn compute_block_bbox(
+    kernels: &Kernels,
+    tile_sorted_positions_x: &CudaSlice<Real>,
+    tile_sorted_positions_y: &CudaSlice<Real>,
+    tile_sorted_positions_z: &CudaSlice<Real>,
+    tile_atom_count: &CudaSlice<u32>,
+    block_centre: &mut CudaSlice<Real>,
+    block_bbox: &mut CudaSlice<Real>,
+    n_blocks: u32,
+) -> Result<(), GpuError> {
+    if n_blocks == 0 {
+        return Ok(());
+    }
+    let cfg = LaunchConfig {
+        grid_dim: (n_blocks.div_ceil(PACKED_BBOX_WARPS_PER_BLOCK).max(1), 1, 1),
+        block_dim: (PACKED_BBOX_BLOCK_SIZE, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let func = kernels.neighbor.compute_block_bbox.clone();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                tile_sorted_positions_x,
+                tile_sorted_positions_y,
+                tile_sorted_positions_z,
+                tile_atom_count,
+                &mut *block_centre,
+                &mut *block_bbox,
+                n_blocks,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn find_blocks_with_interactions(
+    kernels: &Kernels,
+    tile_sorted_positions_x: &CudaSlice<Real>,
+    tile_sorted_positions_y: &CudaSlice<Real>,
+    tile_sorted_positions_z: &CudaSlice<Real>,
+    sorted_particle_ids: &CudaSlice<u32>,
+    block_centre: &CudaSlice<Real>,
+    block_bbox: &CudaSlice<Real>,
+    sim_box: &SimulationBox,
+    r_search_sq: Real,
+    n_blocks: u32,
+    n_atoms: u32,
+    max_entries: u32,
+    interacting_tiles: &mut CudaSlice<u32>,
+    interacting_atoms: &mut CudaSlice<u32>,
+    interaction_count: &mut CudaSlice<u32>,
+    overflow_flag: &mut CudaSlice<u32>,
+) -> Result<(), GpuError> {
+    if n_blocks == 0 {
+        return Ok(());
+    }
+    let cfg = LaunchConfig {
+        grid_dim: (n_blocks.div_ceil(PACKED_NL_WARPS_PER_BLOCK).max(1), 1, 1),
+        block_dim: (PACKED_NL_BLOCK_SIZE, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    let func = kernels.neighbor.find_blocks_with_interactions.clone();
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                tile_sorted_positions_x,
+                tile_sorted_positions_y,
+                tile_sorted_positions_z,
+                sorted_particle_ids,
+                block_centre,
+                block_bbox,
+                sim_box.lattice_device(),
+                r_search_sq,
+                n_blocks,
+                n_atoms,
+                max_entries,
+                &mut *interacting_tiles,
+                &mut *interacting_atoms,
+                &mut *interaction_count,
+                &mut *overflow_flag,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn finalize_packed_forces(
+    kernels: &Kernels,
+    fp_fx: &CudaSlice<u64>,
+    fp_fy: &CudaSlice<u64>,
+    fp_fz: &CudaSlice<u64>,
+    fp_e: &CudaSlice<u64>,
+    fp_w: &CudaSlice<u64>,
+    out_fx: &mut cudarc::driver::CudaViewMut<'_, Real>,
+    out_fy: &mut cudarc::driver::CudaViewMut<'_, Real>,
+    out_fz: &mut cudarc::driver::CudaViewMut<'_, Real>,
+    out_e: &mut cudarc::driver::CudaViewMut<'_, Real>,
+    out_w: &mut cudarc::driver::CudaViewMut<'_, Real>,
+    n: u32,
+    write_ev: bool,
+) -> Result<(), GpuError> {
+    if n == 0 {
+        return Ok(());
+    }
+    let cfg = launch_config(n);
+    let func = kernels.neighbor.finalize_packed_forces.clone();
+    let ev_u32: u32 = if write_ev { 1 } else { 0 };
+    unsafe {
+        func.launch(
+            cfg,
+            (
+                fp_fx,
+                fp_fy,
+                fp_fz,
+                fp_e,
+                fp_w,
+                &mut *out_fx,
+                &mut *out_fy,
+                &mut *out_fz,
+                &mut *out_e,
+                &mut *out_w,
+                n,
+                ev_u32,
+            ),
+        )
+        .map_err(GpuError::from)?;
+    }
+    Ok(())
+}
+
 // rq-7d5e87ee
 #[cfg(not(feature = "f64"))]
 pub fn vv_kick_drift_lossless(

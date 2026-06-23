@@ -461,24 +461,28 @@ impl JitComposedPairForce {
         })
     }
 
-    /// Launch the composed kernel for `n` particles. `use_fev`
-    /// selects the `_fev` entry point when true and the `_f` entry
-    /// point when false. `builder` must have been pre-populated with
-    /// the common args, the per-fragment args (in canonical slot
-    /// order), and the final `n` arg.
+    /// Launch the composed pair-force kernel over the interacting
+    /// tiles list. `interacting_tiles_count` is the number of entries
+    /// (one warp per entry). `use_fev` selects between the `_f` and
+    /// `_fev` entry points. `builder` must have been pre-populated
+    /// with the common args, per-fragment args (in canonical slot
+    /// order), and the trailing `n` arg.
     ///
     /// # Safety
     /// `builder`'s argument list must match the composed kernel's
-    /// entry-point signature exactly. The framework's per-step
-    /// dispatch is responsible for that invariant.
+    /// entry-point signature exactly.
     pub unsafe fn launch(
         &self,
-        n: u32,
+        interacting_tiles_count: u32,
         use_fev: bool,
         mut builder: PairForceLaunchBuilder,
     ) -> Result<(), GpuError> {
+        if interacting_tiles_count == 0 {
+            drop(builder.storage);
+            return Ok(());
+        }
         let cfg = LaunchConfig {
-            grid_dim: (n.div_ceil(WARPS_PER_BLOCK), 1, 1),
+            grid_dim: (interacting_tiles_count.div_ceil(WARPS_PER_BLOCK), 1, 1),
             block_dim: (BLOCK_SIZE, 1, 1),
             shared_mem_bytes: 0,
         };
@@ -598,17 +602,17 @@ fn compose_source(fragments: &[PairForceFragment]) -> String {
     }
     s.push_str("};\n");
 
-    // Per-pair inner-loop body (called from the outer loop, splice in
-    // each fragment's evaluation in canonical slot order).
+    // Per-pair functor sum: returns the SUM of (factor, energy, virial)
+    // across every active slot at pair (i, j). The outer loop multiplies
+    // factor by (dx, dy, dz) to get the per-component force and applies
+    // the 0.5 split for energy/virial across the i and j sides.
     s.push_str("\ntemplate <bool WriteEv>\n");
-    s.push_str("__device__ static inline void heddle_jit_eval_pair(\n");
+    s.push_str("__device__ static inline void heddle_jit_eval_pair_sum(\n");
     s.push_str("    const HeddleJitComposedPairFunc &composite,\n");
     s.push_str("    Real r2, unsigned int i, unsigned int j,\n");
-    s.push_str("    Real dx, Real dy, Real dz,\n");
-    s.push_str("    Real &p_x, Real &p_y, Real &p_z,\n");
-    s.push_str("    Real &p_e, Real &p_w)\n");
+    s.push_str("    Real &factor, Real &energy, Real &virial)\n");
     s.push_str("{\n");
-    s.push_str("    Real factor = R(0.0), energy = R(0.0), virial = R(0.0);\n");
+    s.push_str("    factor = R(0.0); energy = R(0.0); virial = R(0.0);\n");
     for f in fragments {
         let field = functor_field_name(f.label);
         s.push_str(&format!(
@@ -622,13 +626,6 @@ fn compose_source(fragments: &[PairForceFragment]) -> String {
             f = field
         ));
     }
-    s.push_str("    p_x += factor * dx;\n");
-    s.push_str("    p_y += factor * dy;\n");
-    s.push_str("    p_z += factor * dz;\n");
-    s.push_str("    if (WriteEv) {\n");
-    s.push_str("        p_e += energy * R(0.5);\n");
-    s.push_str("        p_w += virial * R(0.5);\n");
-    s.push_str("    }\n");
     s.push_str("}\n");
 
     s.push_str(OUTER_LOOP_TEMPLATE);
@@ -653,17 +650,19 @@ fn emit_entry_point(
     s.push_str("    const Real *positions_x,\n");
     s.push_str("    const Real *positions_y,\n");
     s.push_str("    const Real *positions_z,\n");
-    s.push_str("    const unsigned int *neighbor_list,\n");
-    s.push_str("    const unsigned int *neighbor_counts,\n");
-    s.push_str("    unsigned int max_neighbors,\n");
+    s.push_str("    const Real *tile_sorted_positions_x,\n");
+    s.push_str("    const Real *tile_sorted_positions_y,\n");
+    s.push_str("    const Real *tile_sorted_positions_z,\n");
+    s.push_str("    const unsigned int *sorted_particle_ids,\n");
+    s.push_str("    const unsigned int *interacting_tiles,\n");
+    s.push_str("    const unsigned int *interacting_atoms,\n");
+    s.push_str("    unsigned int interacting_tiles_count,\n");
     s.push_str("    const Real *lattice,\n");
-    s.push_str("    Real *slot_force_x,\n");
-    s.push_str("    Real *slot_force_y,\n");
-    s.push_str("    Real *slot_force_z,\n");
-    if write_ev {
-        s.push_str("    Real *slot_energy,\n");
-        s.push_str("    Real *slot_virial,\n");
-    }
+    s.push_str("    unsigned long long *fast_force_x_fp,\n");
+    s.push_str("    unsigned long long *fast_force_y_fp,\n");
+    s.push_str("    unsigned long long *fast_force_z_fp,\n");
+    s.push_str("    unsigned long long *fast_energy_fp,\n");
+    s.push_str("    unsigned long long *fast_virial_fp,\n");
     for f in fragments {
         s.push_str(&f.entry_point_args);
     }
@@ -676,16 +675,19 @@ fn emit_entry_point(
     s.push_str("    heddle_jit_outer_loop<");
     s.push_str(if write_ev { "true" } else { "false" });
     s.push_str(">(\n");
-    s.push_str("        composite, n, max_neighbors,\n");
+    s.push_str("        composite, interacting_tiles_count,\n");
     s.push_str("        positions_x, positions_y, positions_z,\n");
-    s.push_str("        neighbor_list, neighbor_counts,\n");
+    s.push_str(
+        "        tile_sorted_positions_x, tile_sorted_positions_y, tile_sorted_positions_z,\n",
+    );
+    s.push_str("        sorted_particle_ids,\n");
+    s.push_str("        interacting_tiles, interacting_atoms,\n");
     s.push_str("        lattice,\n");
-    s.push_str("        slot_force_x, slot_force_y, slot_force_z,\n");
-    if write_ev {
-        s.push_str("        slot_energy, slot_virial);\n");
-    } else {
-        s.push_str("        nullptr, nullptr);\n");
-    }
+    s.push_str(
+        "        fast_force_x_fp, fast_force_y_fp, fast_force_z_fp,\n",
+    );
+    s.push_str("        fast_energy_fp, fast_virial_fp,\n");
+    s.push_str("        n);\n");
     s.push_str("}\n");
 }
 
@@ -773,77 +775,197 @@ __device__ static inline Real heddle_jit_exclusion_scale(
   }
   return R(1.0);
 }
+
+// Fixed-point conversion for atomic force/energy/virial accumulation.
+// Integer addition is associative regardless of arrival order, so the
+// per-atom sum is bit-exact across runs. Scale 2^48 gives ~3.6e-15
+// precision in atomic units — adequate for SD convergence to typical
+// 1e-10 Ha/Bohr force tolerances and well below f32's quantization
+// for typical MD value ranges. Max representable: ~2^15 in atomic
+// units, large enough for any reasonable per-atom force.
+__device__ static inline long long heddle_jit_real_to_fixed(Real f) {
+  // Multiply by 2^24 twice to apply scale 2^48 without overflowing
+  // the f32 intermediate for moderately-sized inputs.
+  Real scaled = f * (Real) (1u << 24);
+  scaled *= (Real) (1u << 24);
+  return (long long) scaled;
+}
+
+// AtomicAdd in fixed-point. `buf` is the per-atom fixed-point buffer
+// reinterpreted as `unsigned long long`. The 64-bit atomic preserves
+// the two's-complement integer interpretation.
+__device__ static inline void heddle_jit_atomic_add_fp(
+    unsigned long long *buf, unsigned int atom, Real f)
+{
+  if (f != R(0.0)) {
+    unsigned long long delta = (unsigned long long) heddle_jit_real_to_fixed(f);
+    atomicAdd(&buf[atom], delta);
+  }
+}
 "#;
 
 const OUTER_LOOP_TEMPLATE: &str = r#"
+// Packed-neighbour pair-force outer loop. One warp per
+// interacting_tiles entry. Each lane owns one i-atom of the entry's
+// i-block; j-atoms come from interacting_atoms[pos*32 + lane], one
+// individual j-atom ID per lane (pre-filtered real neighbours from
+// possibly different j-blocks).
+//
+// Inner loop runs 32 lock-step iterations with a diagonal shuffle:
+// at iteration t, lane k pairs with j_lane (k + t) mod 32 via warp
+// shuffles of the j-side state. Each lane accumulates the force on
+// BOTH its i-atom and the current j-atom in per-lane registers
+// (Newton's 3rd). At the end the per-lane (i_*, j_*) accumulators
+// are atomicAdded — in fixed-point — to the per-class accumulator
+// buffer.
 template <bool WriteEv>
 __device__ static inline void heddle_jit_outer_loop(
     const HeddleJitComposedPairFunc &composite,
-    unsigned int n,
-    unsigned int max_neighbors,
+    unsigned int interacting_tiles_count,
     const Real *positions_x,
     const Real *positions_y,
     const Real *positions_z,
-    const unsigned int *neighbor_list,
-    const unsigned int *neighbor_counts,
+    const Real *tile_sorted_positions_x,
+    const Real *tile_sorted_positions_y,
+    const Real *tile_sorted_positions_z,
+    const unsigned int *sorted_particle_ids,
+    const unsigned int *interacting_tiles,
+    const unsigned int *interacting_atoms,
     const Real *lattice,
-    Real *slot_force_x,
-    Real *slot_force_y,
-    Real *slot_force_z,
-    Real *slot_energy,
-    Real *slot_virial)
+    unsigned long long *fast_force_x_fp,
+    unsigned long long *fast_force_y_fp,
+    unsigned long long *fast_force_z_fp,
+    unsigned long long *fast_energy_fp,
+    unsigned long long *fast_virial_fp,
+    unsigned int n)
 {
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
   Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
 
   unsigned int warp_id_in_block = threadIdx.x / HEDDLE_JIT_WARP_SIZE;
   unsigned int lane = threadIdx.x & (HEDDLE_JIT_WARP_SIZE - 1u);
-  unsigned int i = blockIdx.x * HEDDLE_JIT_WARPS_PER_BLOCK + warp_id_in_block;
-  if (i >= n) return;
+  unsigned int pos = blockIdx.x * HEDDLE_JIT_WARPS_PER_BLOCK + warp_id_in_block;
+  if (pos >= interacting_tiles_count) return;
 
-  unsigned int count = neighbor_counts[i];
-  unsigned int row_base = i * max_neighbors;
-  unsigned int sweep_end =
-      ((count + HEDDLE_JIT_WARP_SIZE - 1u) / HEDDLE_JIT_WARP_SIZE) * HEDDLE_JIT_WARP_SIZE;
+  unsigned int i_block = interacting_tiles[pos];
 
-  Real p_x = R(0.0), p_y = R(0.0), p_z = R(0.0);
-  Real p_e = R(0.0), p_w = R(0.0);
+  // Each lane owns one i-atom of i_block. Read its original atom ID
+  // and position from the tile-sorted view (coalesced). Lanes whose
+  // block position is past the global atom count are inactive; we
+  // gate the sorted_particle_ids read to avoid OOB.
+  unsigned int i_slot = i_block * 32u + lane;
+  bool i_valid = i_slot < n;
+  unsigned int i_atom_id = i_valid ? sorted_particle_ids[i_slot] : n;
+  Real pi_x = tile_sorted_positions_x[i_slot];
+  Real pi_y = tile_sorted_positions_y[i_slot];
+  Real pi_z = tile_sorted_positions_z[i_slot];
 
-  Real pi_x = positions_x[i];
-  Real pi_y = positions_y[i];
-  Real pi_z = positions_z[i];
+  // Each lane reads its j-atom ID (one per lane) and j-position from
+  // the canonical particle-id-ordered positions array.
+  unsigned int j_atom_id = interacting_atoms[pos * 32u + lane];
+  bool j_valid = j_atom_id < n;
+  Real pj_x = j_valid ? positions_x[j_atom_id] : R(0.0);
+  Real pj_y = j_valid ? positions_y[j_atom_id] : R(0.0);
+  Real pj_z = j_valid ? positions_z[j_atom_id] : R(0.0);
 
-  for (unsigned int s = 0u; s < sweep_end; s += HEDDLE_JIT_WARP_SIZE) {
-    unsigned int k = s + lane;
-    if (k < count) {
-      unsigned int j = neighbor_list[row_base + k];
-      if (i != j) {
-        Real dx = pi_x - positions_x[j];
-        Real dy = pi_y - positions_y[j];
-        Real dz = pi_z - positions_z[j];
-        heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
-        Real r2 = dx * dx + dy * dy + dz * dz;
-        heddle_jit_eval_pair<WriteEv>(composite, r2, i, j, dx, dy, dz,
-                                       p_x, p_y, p_z, p_e, p_w);
+  // Self-block detection. For self-block entries, the j-atoms ARE
+  // the i-block's atoms in the same lane order, so j_atom_id ==
+  // i_atom_id on every active lane. We detect this with a warp
+  // reduction. In self-block, each unordered pair (k, l) with k != l
+  // is evaluated twice by the diagonal shuffle (once at iter (l-k),
+  // once at iter (k-l+32) by a different lane). Newton's 3rd
+  // accumulation would double-count, so we disable j-side
+  // accumulation for self-block — each evaluation contributes to one
+  // atom's i-side only, and Newton's 3rd is satisfied by the two
+  // evaluations being symmetric.
+  bool self_per_lane = i_valid && j_valid && (i_atom_id == j_atom_id);
+  bool self_block = (__all_sync(0xFFFFFFFFu,
+                                 (self_per_lane || !i_valid || !j_valid) ? 1 : 0) != 0)
+                    && (__any_sync(0xFFFFFFFFu, self_per_lane ? 1 : 0) != 0);
+
+  // Per-lane accumulators: i_* for the i-atom (constant lane), j_*
+  // for the j-atom currently held in this lane (rotates each
+  // iteration via shuffle).
+  Real i_fx = R(0.0), i_fy = R(0.0), i_fz = R(0.0);
+  Real i_e  = R(0.0), i_w  = R(0.0);
+  Real j_fx = R(0.0), j_fy = R(0.0), j_fz = R(0.0);
+  Real j_e  = R(0.0), j_w  = R(0.0);
+
+  for (unsigned int t = 0u; t < 32u; ++t) {
+    if (i_valid && j_valid && i_atom_id != j_atom_id) {
+      Real dx = pi_x - pj_x;
+      Real dy = pi_y - pj_y;
+      Real dz = pi_z - pj_z;
+      heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
+      Real r2 = dx * dx + dy * dy + dz * dz;
+
+      // Build per-pair (factor, energy, virial) summed across slots.
+      Real factor = R(0.0), energy = R(0.0), virial = R(0.0);
+      heddle_jit_eval_pair_sum<WriteEv>(composite, r2, i_atom_id, j_atom_id,
+                                         factor, energy, virial);
+      Real fx = factor * dx;
+      Real fy = factor * dy;
+      Real fz = factor * dz;
+      i_fx += fx;  i_fy += fy;  i_fz += fz;
+      // Self-block: each pair is evaluated twice (by two different
+      // lanes); skip j-side to avoid double-counting. Non-self block:
+      // each pair evaluated once; apply Newton's 3rd to j-side.
+      if (!self_block) {
+        j_fx -= fx;  j_fy -= fy;  j_fz -= fz;
       }
+      if (WriteEv) {
+        // Self-block: each pair evaluated twice → halve the energy
+        // contribution so total energy across both evals is correct.
+        // Non-self block: split energy 50/50 between i-side and j-side.
+        Real he, hw;
+        if (self_block) {
+          he = energy * R(0.5);
+          hw = virial * R(0.5);
+          i_e += he;  i_w += hw;
+        } else {
+          he = energy * R(0.5);
+          hw = virial * R(0.5);
+          i_e += he;  j_e += he;
+          i_w += hw;  j_w += hw;
+        }
+      }
+    }
+    // Rotate j-side state by one lane: lane k now sees what lane k+1
+    // saw. After 32 iterations data is back at its starting lane.
+    unsigned int src_lane = (lane + 1u) & 31u;
+    pj_x = __shfl_sync(0xFFFFFFFFu, pj_x, src_lane);
+    pj_y = __shfl_sync(0xFFFFFFFFu, pj_y, src_lane);
+    pj_z = __shfl_sync(0xFFFFFFFFu, pj_z, src_lane);
+    j_atom_id = __shfl_sync(0xFFFFFFFFu, j_atom_id, src_lane);
+    j_valid = j_atom_id < n;
+    j_fx = __shfl_sync(0xFFFFFFFFu, j_fx, src_lane);
+    j_fy = __shfl_sync(0xFFFFFFFFu, j_fy, src_lane);
+    j_fz = __shfl_sync(0xFFFFFFFFu, j_fz, src_lane);
+    if (WriteEv) {
+      j_e = __shfl_sync(0xFFFFFFFFu, j_e, src_lane);
+      j_w = __shfl_sync(0xFFFFFFFFu, j_w, src_lane);
     }
   }
 
-  p_x = heddle_jit_warp_reduce_sum(p_x);
-  p_y = heddle_jit_warp_reduce_sum(p_y);
-  p_z = heddle_jit_warp_reduce_sum(p_z);
-  if (WriteEv) {
-    p_e = heddle_jit_warp_reduce_sum(p_e);
-    p_w = heddle_jit_warp_reduce_sum(p_w);
-  }
-
-  if (lane == 0u) {
-    slot_force_x[i] += p_x;
-    slot_force_y[i] += p_y;
-    slot_force_z[i] += p_z;
+  // AtomicAdd per-lane (i_*) to the i-atom's fixed-point slot.
+  if (i_valid) {
+    heddle_jit_atomic_add_fp(fast_force_x_fp, i_atom_id, i_fx);
+    heddle_jit_atomic_add_fp(fast_force_y_fp, i_atom_id, i_fy);
+    heddle_jit_atomic_add_fp(fast_force_z_fp, i_atom_id, i_fz);
     if (WriteEv) {
-      slot_energy[i] += p_e;
-      slot_virial[i] += p_w;
+      heddle_jit_atomic_add_fp(fast_energy_fp, i_atom_id, i_e);
+      heddle_jit_atomic_add_fp(fast_virial_fp, i_atom_id, i_w);
+    }
+  }
+  // AtomicAdd per-lane (j_*) to the j-atom currently in this lane.
+  // After 32 shuffle rotations j_atom_id is back at its starting lane.
+  if (j_valid) {
+    heddle_jit_atomic_add_fp(fast_force_x_fp, j_atom_id, j_fx);
+    heddle_jit_atomic_add_fp(fast_force_y_fp, j_atom_id, j_fy);
+    heddle_jit_atomic_add_fp(fast_force_z_fp, j_atom_id, j_fz);
+    if (WriteEv) {
+      heddle_jit_atomic_add_fp(fast_energy_fp, j_atom_id, j_e);
+      heddle_jit_atomic_add_fp(fast_virial_fp, j_atom_id, j_w);
     }
   }
 }

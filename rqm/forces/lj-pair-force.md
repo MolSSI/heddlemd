@@ -1,4 +1,4 @@
-# Feature: Lennard-Jones Pair Force Kernel <!-- rq-13c02457 -->
+# Feature: Lennard-Jones Pair Force <!-- rq-13c02457 -->
 
 Lennard-Jones is the non-bonded pairwise potential slot in the pluggable
 potential framework (`framework.md`). The slot is present when the config
@@ -6,27 +6,23 @@ declares at least one `[[pair_interactions]]` entry. Its parameters come
 from the per-pair-type table built from the full `[[pair_interactions]]`
 array (see `io/config-schema.md`).
 
-The slot exposes a CUDA source fragment via
-`LennardJonesBuilder::pair_force_fragment` for participation in the
-JIT-composed pair-force kernel (see `jit-composed-pair-force.md`),
-where its per-pair contribution is summed with every other active
-fast-class pair-force slot's contribution into one register
-accumulator per particle. The slot also exposes two standalone
-`lj_pair_force_{f,fev}` kernels for unit-test fixtures that drive the
-per-pair functional form in isolation; the framework's per-step
-pipeline does not dispatch the standalone kernels.
+The slot contributes its per-pair functional form to the JIT-composed
+pair-force pipeline as a `PairForceFragment` (see
+`jit-composed-pair-force.md`). The composed kernel runs the
+packed-neighbour data model and force-accumulation pattern specified
+in `packed-neighbour-pair-force.md`: the inner loop evaluates only
+real neighbours; per-particle contributions accumulate via
+`atomicAdd` on the class's fixed-point force buffer. The slot does
+not launch its own per-potential kernel.
 
-The standalone kernels evaluate pair forces with two fused
-warp-per-particle kernels (forces only and forces + energy + virial)
-that read the shared `NeighborListState` owned by `ForceField` (see
-`neighbor-list.md`). Each warp handles one particle: the warp walks
-the particle's neighbour list, accumulates the per-pair LJ
-contribution in register accumulators across all 32 lanes, and writes
-the per-particle net force into its class accumulator (see
-`framework.md`'s *Class Output Accumulators*) via a warp-tree butterfly
-reduction followed by a lane-0 read-modify-write add. The common
-kernel pattern is specified in `pair-force-kernel.md`; this file
-specifies the LJ functional form, parameter tables, and launcher.
+This file specifies the Lennard-Jones functional form (with optional
+inner-switching radius), the per-pair-type parameter tables the slot
+exposes (`type_sigma`, `type_epsilon`, `type_cutoff`, `type_switch`,
+`type_indices`), and the per-pair `evaluate(r², i, j) -> (factor,
+energy, virial)` contract its fragment implements. The kernel
+topology, launch configuration, neighbour-list contract, and
+reproducibility mechanism are specified in
+`packed-neighbour-pair-force.md` and not restated here.
 
 Work is O(N · average neighbour count) when the shared list is in
 cell-list mode and O(N²) when it is in trivial mode (every particle's

@@ -241,36 +241,77 @@ and `virials` at the steps where they diverge, exactly as expected.
 
 ## Class Output Accumulators <!-- rq-cd28340e -->
 
-`ForceField` owns five per-class accumulator buffers per `ForceClass`:
+`ForceField` owns two parallel sets of per-class accumulator buffers
+per `ForceClass`, one for slots that write `Real` values via
+read-modify-write and one for slots that write integer atomics in
+fixed-point:
+
+**Real accumulators** (consumed by bonded reduce kernels and any
+slot whose contribution is naturally additive in `Real`):
 
 - `Fast`: `fast_total_forces_x`, `fast_total_forces_y`,
   `fast_total_forces_z`, `fast_total_potential_energies`,
-  `fast_total_virials` — each a `CudaSlice<f32>` of length
+  `fast_total_virials` — each a `CudaSlice<Real>` of length
   `particle_count`.
 - `Slow`: `slow_total_forces_x`, `slow_total_forces_y`,
   `slow_total_forces_z`, `slow_total_potential_energies`,
-  `slow_total_virials` — each a `CudaSlice<f32>` of length
+  `slow_total_virials` — each a `CudaSlice<Real>` of length
   `particle_count`.
 
-Each accumulator holds the per-particle sum across every slot in its
-class, as written by the most recent evaluation entry point that
-refreshed it. Slots in a class don't have private per-slot rows; they
-add their per-particle contribution directly into their class's
-accumulator. The `SlotOutputView` passed to a slot's `compute(...)`
-points to the slot's class's accumulator buffers (the
-`{class}_total_forces_x/y/z` slices, plus `potential_energies` and
-`virials` slices). The slot kernel reads the existing value at each
+**Fixed-point accumulators** (consumed by the packed-neighbour
+JIT-composed pair-force kernel via `atomicAdd`; see
+`packed-neighbour-pair-force.md` *Fixed-Point Force Buffers*):
+
+- `Fast`: `fast_total_forces_fp_x`, `fast_total_forces_fp_y`,
+  `fast_total_forces_fp_z`, `fast_total_potential_energies_fp`,
+  `fast_total_virials_fp` — each a `CudaSlice<u64>` of length
+  `particle_count`. Interpreted as two's-complement `i64` with
+  scale `2^32`.
+- `Slow`: analogous, for slow-class slots that opt into the
+  fixed-point accumulator (e.g. an SPME-real slot in slow mode).
+  SPME-recip continues to use the `Real` accumulator because its
+  output is not pair-force shaped.
+
+Each `Real` accumulator holds the per-particle sum across every
+slot in its class that writes via `Real` read-modify-write, as
+written by the most recent evaluation entry point that refreshed
+it. The `SlotOutputView` passed to such a slot's `compute(...)`
+points to the slot's class's `Real` accumulator slices (the
+`{class}_total_forces_x/y/z`, plus `potential_energies` and
+`virials`). The slot kernel reads the existing value at each
 particle, adds its own contribution, and writes the sum back.
+
+Each fixed-point accumulator holds the per-particle sum across
+every pair-force slot in its class. Pair-force slots do not receive
+a `SlotOutputView`; they are bound into the JIT-composed
+pair-force kernel (see `packed-neighbour-pair-force.md` *JIT
+Composer Integration*), which `atomicAdd`s into the class's
+fixed-point buffers directly. Integer addition is associative so
+the per-atom sum is bit-exact across runs regardless of how many
+warps contributed.
 
 The framework zeroes the accumulator buffers being refreshed before
 the first slot in a class adds to them (see step 3 of the *Force
-Evaluation Pipeline*), so the per-class accumulator after step 4
-contains exactly the sum of just-evaluated slot contributions for
-that class, in canonical slot order.
+Evaluation Pipeline*). The `Real` accumulator is zeroed via
+`cudaMemsetAsync(0)`; the fixed-point accumulator is zeroed via
+`cudaMemsetAsync(0)` (an all-zero `u64` value is the integer
+representation of fixed-point `0.0`). The per-class accumulator
+after step 4 contains exactly the sum of just-evaluated slot
+contributions for that class, partitioned across the two parallel
+sets.
 
-Memory cost: `10 * particle_count * 4` bytes, independent of slot
-count. For `particle_count = 10⁴` this is ~400 KB; for
-`particle_count = 10⁵`, ~4 MB.
+The class-combine step reads BOTH sets of accumulators, converts
+the fixed-point sum to `Real` via the
+`packed-neighbour-pair-force.md` *Fixed-Point Force Buffers*
+conversion (`fixed_to_real(s) = ((i64) s) / 2^32`), and writes the
+combined `Real` total into `ParticleBuffers.forces_*`,
+`ParticleBuffers.potential_energies`, and `ParticleBuffers.virials`.
+
+Memory cost: `10 · particle_count · 4` bytes for the `Real` set
+plus `10 · particle_count · 8` bytes for the fixed-point set =
+`120 · particle_count` bytes, independent of slot count. For
+`particle_count = 10⁴` this is ~1.2 MB; for `particle_count = 10⁵`,
+~12 MB.
 
 When `particle_count == 0` every accumulator buffer has length zero.
 Accumulator buffers are zero-initialised at construction so that the
@@ -553,20 +594,23 @@ the additive identity. The rest of the pipeline runs normally.
 
 - `LennardJonesState` — implements `Potential` with `label() == "lennard_jones"` and `frequency_class() == ForceClass::Fast` (the trait default). <!-- rq-af2d1628 -->
   Owns the slot's `LennardJonesParameters` and the
-  `DeviceExclusionList` (see `topology.md`). Its internal state is one
-  of two variants determined at construction time by the parsed
-  `NeighborListConfig`:
-  - `AllPairs` — additionally carries a `neighbor_counts` device slice
-    with every entry equal to `N`. `max_neighbors == N`.
-  - `CellList` — additionally carries a `NeighborListState` (see
-    `neighbor-list.md`) that owns the cell list, neighbor list,
-    reference positions, and overflow flag. `max_neighbors` comes from
-    the config; `neighbor_counts` is populated per-rebuild by the
-    neighbor-list build kernel.
+  `DeviceExclusionList` (see `topology.md`). The slot consumes the
+  shared `NeighborListState` (see `neighbor-list.md`); its on-host
+  state carries only the parameter tables. The packed-neighbour
+  data structures (`interacting_tiles`, `interacting_atoms`,
+  `single_pairs`, fixed-point accumulators) are owned by
+  `NeighborListState` / `ForceField` and shared across every
+  fast-class pair-force slot — see
+  `packed-neighbour-pair-force.md`.
 
-  In either variant, the slot's `compute` runs the fused
-  `lj_pair_force_f` or `lj_pair_force_fev` kernel (depending on the
-  call's `AggregateLevel`) and writes its per-particle output
+  The slot does not launch its own pair-force kernel. It contributes
+  a `PairForceFragment` to the JIT-composed pair-force pipeline
+  (see `jit-composed-pair-force.md`), which evaluates every active
+  fast-class pair-force slot's contribution per pair in a single
+  composed kernel launch and atomicAdds the result to the class's
+  fixed-point accumulator. The slot's `compute` method is therefore
+  a no-op at step time; the per-step force-evaluation work happens
+  in the composed kernel.
   directly into the `SlotOutputView` it receives. See
   `pair-force-kernel.md` for the warp-per-particle pattern and
   `lj-pair-force.md` for the per-pair functional form.
@@ -844,10 +888,10 @@ the additive identity. The rest of the pipeline runs normally.
       `neighbor_list` is set to `None` and the framework launches no
       neighbor-list kernels for the lifetime of the run.
     - Otherwise consults `neighbor_list_config`:
-      - `CellList { max_neighbors, r_skin }`: calls
+      - `CellList { r_skin, tile_pair_capacity }`: calls
         `NeighborListState::new_cell_list(gpu, sim_box,
-        particle_count, r_cut, max_neighbors, r_skin as f32)`. May
-        return `ForceFieldError::NeighborList(_)` (e.g.
+        particle_count, r_cut, r_skin as f32, tile_pair_capacity)`.
+        May return `ForceFieldError::NeighborList(_)` (e.g.
         `BoxTooSmallForCells`).
       - `AllPairs`: calls `NeighborListState::new_trivial(gpu,
         sim_box, particle_count)`.
@@ -1512,7 +1556,8 @@ Feature: Pluggable potential slot framework
     Given a ForceField with one LennardJones slot in CellList mode
     When ForceField::new completes
     Then ForceField::neighbor_list is Some(_)
-    And the shared NeighborListState's max_neighbors equals the config value
+    And the shared NeighborListState's tile-pair buffers are allocated
+      with capacity at least tile_pair_capacity from the config
 
   @rq-433c972f
   Scenario: ForceField with only a bonded potential owns no neighbor list
@@ -1530,7 +1575,7 @@ Feature: Pluggable potential slot framework
   @rq-e39d0ed8
   Scenario: max_cutoff aggregation determines the neighbor-list radius
     Given two short-range Potential implementations reporting max_cutoff() = Some(2.0) and Some(5.0)
-    And NeighborListConfig::CellList { max_neighbors, r_skin }
+    And NeighborListConfig::CellList { r_skin, tile_pair_capacity }
     When ForceField::new constructs the shared neighbor list
     Then the neighbor list's r_search equals 5.0 + r_skin
 

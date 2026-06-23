@@ -42,7 +42,7 @@ fn two_argon_offset_init() -> &'static str {
 
 fn argon_min_config() -> String {
     r#"schema_version = 1
-units = "atomic"
+units = "si"
 init = "argon.in.xyz"
 
 [simulation]
@@ -56,6 +56,11 @@ name = "min"
 kind = "steepest-descent"
 initial_step = 1.0e-13
 max_step = 1.0e-11
+# Just above the f32 catastrophic-cancellation floor of the LJ
+# functor near the LJ minimum (~7.5e-15 N for this Ar–Ar system).
+# Lower thresholds are unreachable in single-precision regardless of
+# accumulator type.
+force_tolerance = 1.0e-13
 max_iterations = 200
 
 [minimization.output]

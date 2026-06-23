@@ -107,6 +107,10 @@ impl KernelStage {
     pub const NEIGHBOR_LIST_BUILD: KernelStage = KernelStage::new("neighbor_list_build");
     pub const COPY_POSITIONS_INTO_REFERENCE: KernelStage =
         KernelStage::new("copy_positions_into_reference");
+    pub const SCATTER_POSITIONS_TO_TILE_ORDER: KernelStage =
+        KernelStage::new("scatter_positions_to_tile_order");
+    pub const FINALIZE_PACKED_FORCES: KernelStage =
+        KernelStage::new("finalize_packed_forces");
 
     pub const ORDER: &'static [KernelStage] = &[
         Self::VV_KICK_DRIFT,
@@ -118,10 +122,12 @@ impl KernelStage {
         Self::COPY_POSITIONS_INTO_REFERENCE,
         Self::NEIGHBOR_LIST_BUILD,
         Self::CLASS_ACCUMULATOR_MEMSET,
+        Self::SCATTER_POSITIONS_TO_TILE_ORDER,
         Self::LJ_PAIR_FORCE,
         Self::COULOMB_PAIR_FORCE,
         Self::SPME_REAL_PAIR_FORCE,
         Self::JIT_COMPOSED_PAIR_FORCE,
+        Self::FINALIZE_PACKED_FORCES,
         Self::JIT_COMPOSED_BONDED_FORCE,
         Self::JIT_COMPOSED_ANGLE_FORCE,
         Self::JIT_COMPOSED_POST_FORCE,

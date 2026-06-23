@@ -11,7 +11,9 @@
       "Bash(python3 run.py)",
       "Bash(nvcc --ptx -std=c++17 --expt-relaxed-constexpr -arch=sm_86 -I/usr/local/lib/python3.10/dist-packages/nvidia/mathdx/include -I/usr/local/lib/python3.10/dist-packages/nvidia/mathdx/external/cutlass/include -o /tmp/spme_fft.ptx /work/kernels/spme_fft.cu)",
       "Bash(cp /work/examples/spc-water-8192/water.in.toml /tmp/water_jit.toml)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(rm -f /work/examples/spc-water-8192/water_nograph.out.*)",
+      "Bash(timeout 60 /work/target/release/heddlemd run /work/examples/spc-water-8192/water_nograph.in.toml)"
     ]
   }
 }

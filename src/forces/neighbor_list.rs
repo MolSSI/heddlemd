@@ -71,6 +71,50 @@ pub struct CellListData {
     pub needs_rebuild: bool,
 }
 
+/// Packed-neighbour data held by `NeighborListState`. See
+/// `rqm/forces/packed-neighbour-pair-force.md`.
+#[derive(Debug)]
+pub struct PackedNeighborData {
+    /// Number of 32-atom blocks: `ceil(particle_count / 32)`.
+    pub n_blocks: u32,
+    /// Per-block real-atom count (`32` except possibly for the last
+    /// block).
+    pub tile_atom_count: CudaSlice<u32>,
+    /// Per-block active-lane bitmask.
+    pub tile_lane_mask: CudaSlice<u32>,
+    /// Block-order positions (refreshed every step by
+    /// `scatter_positions_to_tile_order`). Length `n_blocks * 32`.
+    pub tile_sorted_positions_x: CudaSlice<Real>,
+    pub tile_sorted_positions_y: CudaSlice<Real>,
+    pub tile_sorted_positions_z: CudaSlice<Real>,
+    /// Per-block centre `(x, y, z, max_disp_sq)` packed as 4 `Real`.
+    pub block_centre: CudaSlice<Real>,
+    /// Per-block bbox half-extents `(dx, dy, dz)` packed as 3 `Real`.
+    pub block_bbox: CudaSlice<Real>,
+    /// Sorted-particle-ids view used by the construction kernel.
+    /// In CellList mode this aliases `CellListData::sorted_particle_ids`
+    /// via `Option::None` here (the construction kernel reads the
+    /// cell-list buffer directly); in Trivial mode this carries an
+    /// identity permutation.
+    pub trivial_sorted_particle_ids: Option<CudaSlice<u32>>,
+    /// Per-entry i-block index. Length `interacting_tiles_capacity`.
+    pub interacting_tiles: CudaSlice<u32>,
+    /// Per-entry packed 32 individual j-atom IDs. Length
+    /// `interacting_tiles_capacity * 32`.
+    pub interacting_atoms: CudaSlice<u32>,
+    /// Live interaction counts: `[interacting_tiles_count,
+    /// single_pairs_count]`.
+    pub interaction_count: CudaSlice<u32>,
+    /// Set non-zero by the construction kernel when capacity overflows.
+    pub overflow_flag: CudaSlice<u32>,
+    /// Current allocated capacity.
+    pub interacting_tiles_capacity: u32,
+    /// Live entry count after the most recent rebuild.
+    pub interacting_tiles_count: u32,
+    /// Multiplier applied to the capacity on overflow.
+    pub tile_pair_growth_factor: f64,
+}
+
 // rq-b2d68288
 #[derive(Debug)]
 pub struct NeighborListState {
@@ -81,12 +125,129 @@ pub struct NeighborListState {
     pub neighbor_list: CudaSlice<u32>,
     pub neighbor_counts: CudaSlice<u32>,
     pub mode: NeighborListMode,
+    /// Packed-neighbour data populated in `CellList` and `Trivial`
+    /// modes; `None` for `CellListOnly` (SPME bin-only mode).
+    pub packed: Option<PackedNeighborData>,
     // Monotonically-increasing counter incremented at the end of every
     // successful `rebuild_impl`. Downstream consumers (e.g. the SPME
     // reciprocal-space slot's atom spatial pre-sort) cache the last
     // observed value and re-run their per-rebuild work when the
     // generation advances.
     rebuild_generation: u64,
+}
+
+/// Default initial capacity for `interacting_tiles`. Sized to the
+/// all-pairs upper bound `n_blocks^2`, so a first rebuild never needs
+/// to grow the buffer. Memory cost at N=24576: 768^2 = 589,824 entries
+/// = ~2.4 MB for tiles, 75 MB for atoms — acceptable.
+pub fn default_interacting_tiles_capacity(n_blocks: u32) -> u32 {
+    if n_blocks == 0 {
+        return 1;
+    }
+    let sq = (n_blocks as u64).saturating_mul(n_blocks as u64);
+    sq.min(u32::MAX as u64) as u32
+}
+
+fn alloc_packed_neighbor_data(
+    device: &Arc<CudaDevice>,
+    particle_count: usize,
+    interacting_tiles_capacity: u32,
+    tile_pair_growth_factor: f64,
+    trivial_mode: bool,
+) -> Result<PackedNeighborData, NeighborListError> {
+    let n_blocks = ((particle_count as u32) + 31) / 32;
+    let n_blocks_alloc = (n_blocks.max(1)) as usize;
+    let padded_n = (n_blocks_alloc * 32).max(1);
+    let cap = interacting_tiles_capacity.max(1);
+    let cap_alloc = cap as usize;
+
+    let mut atom_count_host = vec![32u32; n_blocks_alloc];
+    let mut lane_mask_host = vec![0xFFFF_FFFFu32; n_blocks_alloc];
+    if n_blocks > 0 && (particle_count as u32) % 32 != 0 {
+        let last = (n_blocks - 1) as usize;
+        let r = (particle_count as u32) % 32;
+        atom_count_host[last] = r;
+        lane_mask_host[last] = (1u32 << r) - 1;
+    }
+    if n_blocks == 0 {
+        atom_count_host[0] = 0;
+        lane_mask_host[0] = 0;
+    }
+    let tile_atom_count = device
+        .htod_sync_copy(&atom_count_host)
+        .map_err(GpuError::from)?;
+    let tile_lane_mask = device
+        .htod_sync_copy(&lane_mask_host)
+        .map_err(GpuError::from)?;
+    let tile_sorted_positions_x = device
+        .alloc_zeros::<Real>(padded_n)
+        .map_err(GpuError::from)?;
+    let tile_sorted_positions_y = device
+        .alloc_zeros::<Real>(padded_n)
+        .map_err(GpuError::from)?;
+    let tile_sorted_positions_z = device
+        .alloc_zeros::<Real>(padded_n)
+        .map_err(GpuError::from)?;
+    let block_centre = device
+        .alloc_zeros::<Real>(n_blocks_alloc * 4)
+        .map_err(GpuError::from)?;
+    let block_bbox = device
+        .alloc_zeros::<Real>(n_blocks_alloc * 3)
+        .map_err(GpuError::from)?;
+    let trivial_sorted_particle_ids = if trivial_mode {
+        let identity: Vec<u32> = (0..particle_count as u32).collect();
+        if identity.is_empty() {
+            Some(device.alloc_zeros::<u32>(1).map_err(GpuError::from)?)
+        } else {
+            Some(device.htod_sync_copy(&identity).map_err(GpuError::from)?)
+        }
+    } else {
+        None
+    };
+    let interacting_tiles = device
+        .alloc_zeros::<u32>(cap_alloc)
+        .map_err(GpuError::from)?;
+    let interacting_atoms = device
+        .alloc_zeros::<u32>(cap_alloc * 32)
+        .map_err(GpuError::from)?;
+    let interaction_count = device.alloc_zeros::<u32>(2).map_err(GpuError::from)?;
+    let overflow_flag = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
+
+    Ok(PackedNeighborData {
+        n_blocks,
+        tile_atom_count,
+        tile_lane_mask,
+        tile_sorted_positions_x,
+        tile_sorted_positions_y,
+        tile_sorted_positions_z,
+        block_centre,
+        block_bbox,
+        trivial_sorted_particle_ids,
+        interacting_tiles,
+        interacting_atoms,
+        interaction_count,
+        overflow_flag,
+        interacting_tiles_capacity: cap,
+        interacting_tiles_count: 0,
+        tile_pair_growth_factor,
+    })
+}
+
+impl PackedNeighborData {
+    /// Grow the entry-list buffers to at least `required` entries.
+    pub fn grow_to(
+        &mut self,
+        device: &Arc<CudaDevice>,
+        required: u32,
+    ) -> Result<(), GpuError> {
+        let new_cap_f = (required as f64) * self.tile_pair_growth_factor;
+        let new_cap = (new_cap_f.ceil() as u32).max(required).max(1);
+        let new_alloc = new_cap as usize;
+        self.interacting_tiles = device.alloc_zeros::<u32>(new_alloc)?;
+        self.interacting_atoms = device.alloc_zeros::<u32>(new_alloc * 32)?;
+        self.interacting_tiles_capacity = new_cap;
+        Ok(())
+    }
 }
 
 impl NeighborListState {
@@ -183,6 +344,16 @@ impl NeighborListState {
             .map_err(GpuError::from)?;
         let overflow_flag = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
 
+        let n_blocks = ((particle_count as u32) + 31) / 32;
+        let initial_cap = default_interacting_tiles_capacity(n_blocks);
+        let packed = alloc_packed_neighbor_data(
+            &device,
+            particle_count,
+            initial_cap,
+            1.5,
+            false, // CellList mode uses cell-list's sorted_particle_ids
+        )?;
+
         Ok(NeighborListState {
             device,
             kernels,
@@ -190,6 +361,7 @@ impl NeighborListState {
             max_neighbors,
             neighbor_list,
             neighbor_counts,
+            packed: Some(packed),
             mode: NeighborListMode::CellList(CellListData {
                 n_cells,
                 n_cells_total,
@@ -280,6 +452,7 @@ impl NeighborListState {
             max_neighbors: 0,
             neighbor_list,
             neighbor_counts,
+            packed: None,
             mode: NeighborListMode::CellListOnly(CellListData {
                 n_cells,
                 n_cells_total,
@@ -338,6 +511,76 @@ impl NeighborListState {
             device.htod_sync_copy(&counts_host).map_err(GpuError::from)?
         };
 
+        let packed = if particle_count == 0 {
+            None
+        } else {
+            let n_blocks = ((particle_count as u32) + 31) / 32;
+            // Trivial mode: every i-block is interacting with every
+            // j-block (including itself). Each i-block sees ceil(N/32)
+            // packed entries, each containing up to 32 j-atoms drawn
+            // from j-blocks j_block = (entry / 1) (one j-block per
+            // entry; we just pack atom IDs sequentially).
+            let entries_per_block = n_blocks;
+            let total_entries = (entries_per_block as u64) * (n_blocks as u64);
+            let cap = total_entries.min(u32::MAX as u64).max(1) as u32;
+            let mut packed = alloc_packed_neighbor_data(
+                &device,
+                particle_count,
+                cap,
+                1.5,
+                true,
+            )?;
+
+            // Populate `interacting_tiles` and `interacting_atoms` for
+            // all-pairs enumeration. For each i_block and each j_block
+            // with j_block >= i_block, emit one entry with 32 packed
+            // j-atom IDs (drawn from j_block * 32 .. j_block * 32 + 32,
+            // sentinel-padded if past N).
+            let mut tiles_host: Vec<u32> = Vec::with_capacity(cap as usize);
+            let mut atoms_host: Vec<u32> = Vec::with_capacity((cap as usize) * 32);
+            let sentinel = particle_count as u32;
+            for i_block in 0..n_blocks {
+                for j_block in i_block..n_blocks {
+                    tiles_host.push(i_block);
+                    for lane in 0..32u32 {
+                        let atom = j_block * 32 + lane;
+                        if atom < sentinel {
+                            atoms_host.push(atom);
+                        } else {
+                            atoms_host.push(sentinel);
+                        }
+                    }
+                }
+            }
+            packed.interacting_tiles_count = tiles_host.len() as u32;
+            if !tiles_host.is_empty() {
+                device
+                    .htod_sync_copy_into(&tiles_host, &mut packed.interacting_tiles)
+                    .map_err(GpuError::from)?;
+                device
+                    .htod_sync_copy_into(&atoms_host, &mut packed.interacting_atoms)
+                    .map_err(GpuError::from)?;
+            }
+
+            // Populate the tile-sorted positions view's padding lanes
+            // with +inf so the force kernel treats them as inactive.
+            let pos_inf = (3.4e38 as Real, 3.4e38 as Real, 3.4e38 as Real);
+            let padded_n = (n_blocks as usize) * 32;
+            if padded_n > particle_count {
+                let pad_count = padded_n - particle_count;
+                let pad_x = vec![pos_inf.0; pad_count];
+                let pad_y = vec![pos_inf.1; pad_count];
+                let pad_z = vec![pos_inf.2; pad_count];
+                let mut view_x = packed.tile_sorted_positions_x.slice_mut(particle_count..);
+                let mut view_y = packed.tile_sorted_positions_y.slice_mut(particle_count..);
+                let mut view_z = packed.tile_sorted_positions_z.slice_mut(particle_count..);
+                device.htod_sync_copy_into(&pad_x, &mut view_x).map_err(GpuError::from)?;
+                device.htod_sync_copy_into(&pad_y, &mut view_y).map_err(GpuError::from)?;
+                device.htod_sync_copy_into(&pad_z, &mut view_z).map_err(GpuError::from)?;
+            }
+            Some(packed)
+        };
+
         Ok(NeighborListState {
             device,
             kernels,
@@ -345,9 +588,22 @@ impl NeighborListState {
             max_neighbors,
             neighbor_list,
             neighbor_counts,
+            packed,
             mode: NeighborListMode::Trivial,
             rebuild_generation: 0,
         })
+    }
+
+    /// Returns the sorted-particle-ids buffer the packed-neighbour
+    /// pipeline should read for block-to-atom-ID translation. CellList
+    /// mode uses the cell-list's sort; Trivial mode uses the identity
+    /// permutation owned by `PackedNeighborData`.
+    pub fn sorted_particle_ids_for_packed(&self) -> Option<&CudaSlice<u32>> {
+        match (&self.mode, &self.packed) {
+            (NeighborListMode::CellList(cl), Some(_)) => Some(&cl.sorted_particle_ids),
+            (NeighborListMode::Trivial, Some(p)) => p.trivial_sorted_particle_ids.as_ref(),
+            _ => None,
+        }
     }
 
     // rq-282af621
@@ -481,103 +737,195 @@ impl NeighborListState {
     ) -> Result<(), NeighborListError> {
         let device = self.device.clone();
         let kernels = self.kernels.clone();
-        let max_neighbors = self.max_neighbors;
         let particle_count = self.particle_count;
         let bin_only = matches!(self.mode, NeighborListMode::CellListOnly(_));
 
-        let cl = match &mut self.mode {
+        // Pull out parameters we need outside the cell-list borrow.
+        let r_search_sq = match &self.mode {
             NeighborListMode::Trivial => return Ok(()),
-            NeighborListMode::CellList(cl) | NeighborListMode::CellListOnly(cl) => cl,
+            NeighborListMode::CellList(cl) | NeighborListMode::CellListOnly(cl) => cl.r_search_sq,
         };
 
-        compute_cell_indices_and_histogram(
-            buffers,
-            sim_box,
-            cl.n_cells,
-            &mut cl.cell_indices,
-            &mut cl.cell_counts,
-        )?;
+        // Cell-list pre-step.
+        {
+            let cl = self.cell_list_data_mut().expect("non-Trivial mode");
+            compute_cell_indices_and_histogram(
+                buffers,
+                sim_box,
+                cl.n_cells,
+                &mut cl.cell_indices,
+                &mut cl.cell_counts,
+            )?;
 
-        prefix_scan_cell_counts(
-            &kernels,
-            &cl.cell_counts,
-            &mut cl.cell_offsets,
-            &mut cl.scan_block_totals,
-            cl.n_cells_total,
-            particle_count,
-        )?;
+            prefix_scan_cell_counts(
+                &kernels,
+                &cl.cell_counts,
+                &mut cl.cell_offsets,
+                &mut cl.scan_block_totals,
+                cl.n_cells_total,
+                particle_count,
+            )?;
 
-        scatter_atoms_into_cells(
-            &device,
-            &kernels,
-            &cl.cell_indices,
-            &cl.cell_offsets,
-            &mut cl.write_cursors,
-            &mut cl.sorted_particle_ids,
-            particle_count,
-        )?;
+            scatter_atoms_into_cells(
+                &device,
+                &kernels,
+                &cl.cell_indices,
+                &cl.cell_offsets,
+                &mut cl.write_cursors,
+                &mut cl.sorted_particle_ids,
+                particle_count,
+            )?;
 
-        sort_cells_by_particle_id(
-            &kernels,
-            &cl.cell_offsets,
-            &mut cl.sorted_particle_ids,
-            cl.n_cells_total,
-        )?;
+            sort_cells_by_particle_id(
+                &kernels,
+                &cl.cell_offsets,
+                &mut cl.sorted_particle_ids,
+                cl.n_cells_total,
+            )?;
+        }
 
         if bin_only {
+            let cl = self.cell_list_data_mut().expect("CellListOnly");
             cl.needs_rebuild = false;
             self.rebuild_generation = self.rebuild_generation.wrapping_add(1);
             return Ok(());
         }
 
-        device
-            .memset_zeros(&mut cl.overflow_flag)
-            .map_err(GpuError::from)?;
+        // Packed-neighbour construction.
+        self.rebuild_packed_neighbour(buffers, sim_box, r_search_sq)?;
 
-        timings
-            .kernel_start(KernelStage::NEIGHBOR_LIST_BUILD)
-            .map_err(map_timings_err)?;
-        neighbor_list_build(
-            buffers,
-            &cl.sorted_particle_ids,
-            &cl.cell_offsets,
-            sim_box,
-            cl.n_cells,
-            cl.r_search_sq,
-            max_neighbors,
-            &mut self.neighbor_list,
-            &mut self.neighbor_counts,
-            &mut cl.overflow_flag,
-        )?;
-        timings
-            .kernel_stop(KernelStage::NEIGHBOR_LIST_BUILD)
-            .map_err(map_timings_err)?;
+        {
+            let cl = self.cell_list_data_mut().expect("non-Trivial mode");
+            timings
+                .kernel_start(KernelStage::COPY_POSITIONS_INTO_REFERENCE)
+                .map_err(map_timings_err)?;
+            copy_positions_into_reference(
+                buffers,
+                &mut cl.reference_positions_x,
+                &mut cl.reference_positions_y,
+                &mut cl.reference_positions_z,
+            )?;
+            timings
+                .kernel_stop(KernelStage::COPY_POSITIONS_INTO_REFERENCE)
+                .map_err(map_timings_err)?;
 
-        let flag: Vec<u32> = self
-            .device
-            .dtoh_sync_copy(&cl.overflow_flag)
-            .map_err(GpuError::from)?;
-        if flag[0] != 0 {
-            return Err(NeighborListError::NeighborListOverflow {
-                max: max_neighbors,
-            });
+            cl.needs_rebuild = false;
+        }
+        self.rebuild_generation = self.rebuild_generation.wrapping_add(1);
+        Ok(())
+    }
+
+    /// Packed-neighbour construction pipeline (see
+    /// `rqm/forces/packed-neighbour-pair-force.md`). Called from
+    /// `rebuild_impl` after the cell-list sort completes.
+    fn rebuild_packed_neighbour(
+        &mut self,
+        buffers: &ParticleBuffers,
+        sim_box: &SimulationBox,
+        r_search_sq: Real,
+    ) -> Result<(), NeighborListError> {
+        let device = self.device.clone();
+        let kernels = self.kernels.clone();
+        let particle_count = self.particle_count;
+        if particle_count == 0 {
+            return Ok(());
+        }
+        let n_blocks = self
+            .packed
+            .as_ref()
+            .map(|p| p.n_blocks)
+            .unwrap_or(0);
+        if n_blocks == 0 {
+            return Ok(());
         }
 
-        timings
-            .kernel_start(KernelStage::COPY_POSITIONS_INTO_REFERENCE)
-            .map_err(map_timings_err)?;
-        copy_positions_into_reference(
-            buffers,
-            &mut cl.reference_positions_x,
-            &mut cl.reference_positions_y,
-            &mut cl.reference_positions_z,
-        )?;
-        timings
-            .kernel_stop(KernelStage::COPY_POSITIONS_INTO_REFERENCE)
-            .map_err(map_timings_err)?;
+        // Split borrow: cell-list's sorted_particle_ids (immutable) and
+        // self.packed (mutable) live on disjoint fields of self.
+        let sorted_view: *const CudaSlice<u32> = match &self.mode {
+            NeighborListMode::CellList(cl) => &cl.sorted_particle_ids,
+            _ => unreachable!("rebuild_packed_neighbour is for CellList only"),
+        };
+        let packed = self.packed.as_mut().expect("packed data present");
 
-        cl.needs_rebuild = false;
-        self.rebuild_generation = self.rebuild_generation.wrapping_add(1);
+        // 1. Scatter positions into tile-sorted view (block order).
+        crate::gpu::scatter_positions_to_tile_order(
+            &kernels,
+            buffers,
+            unsafe { &*sorted_view },
+            &mut packed.tile_sorted_positions_x,
+            &mut packed.tile_sorted_positions_y,
+            &mut packed.tile_sorted_positions_z,
+        )?;
+
+        // 2. Fill partial-block padding lanes with +infinity so they
+        //    trivially fail every distance check.
+        let padded_n = n_blocks * 32;
+        crate::gpu::fill_tile_position_padding(
+            &kernels,
+            &mut packed.tile_sorted_positions_x,
+            &mut packed.tile_sorted_positions_y,
+            &mut packed.tile_sorted_positions_z,
+            particle_count as u32,
+            padded_n,
+        )?;
+
+        // 3. Per-block bounding boxes.
+        crate::gpu::compute_block_bbox(
+            &kernels,
+            &packed.tile_sorted_positions_x,
+            &packed.tile_sorted_positions_y,
+            &packed.tile_sorted_positions_z,
+            &packed.tile_atom_count,
+            &mut packed.block_centre,
+            &mut packed.block_bbox,
+            n_blocks,
+        )?;
+
+        // 4. Find blocks with interactions (with grow+retry on overflow).
+        loop {
+            // Zero counters and overflow flag.
+            device
+                .memset_zeros(&mut packed.interaction_count)
+                .map_err(GpuError::from)?;
+            device
+                .memset_zeros(&mut packed.overflow_flag)
+                .map_err(GpuError::from)?;
+
+            let max_entries = packed.interacting_tiles_capacity;
+            crate::gpu::find_blocks_with_interactions(
+                &kernels,
+                &packed.tile_sorted_positions_x,
+                &packed.tile_sorted_positions_y,
+                &packed.tile_sorted_positions_z,
+                unsafe { &*sorted_view },
+                &packed.block_centre,
+                &packed.block_bbox,
+                sim_box,
+                r_search_sq,
+                n_blocks,
+                particle_count as u32,
+                max_entries,
+                &mut packed.interacting_tiles,
+                &mut packed.interacting_atoms,
+                &mut packed.interaction_count,
+                &mut packed.overflow_flag,
+            )?;
+
+            let flag: Vec<u32> = device
+                .dtoh_sync_copy(&packed.overflow_flag)
+                .map_err(GpuError::from)?;
+            let counts: Vec<u32> = device
+                .dtoh_sync_copy(&packed.interaction_count)
+                .map_err(GpuError::from)?;
+            if flag[0] == 0 {
+                packed.interacting_tiles_count = counts[0];
+                break;
+            }
+            // Grow capacity and retry.
+            let required = counts[0].max(packed.interacting_tiles_capacity + 1);
+            packed.grow_to(&device, required).map_err(NeighborListError::Gpu)?;
+        }
+
         Ok(())
     }
 
@@ -728,6 +1076,11 @@ pub struct NeighborKernels {
     pub prefix_scan_finalize_offsets: CudaFunction,
     pub scatter_atoms_into_cells: CudaFunction,
     pub sort_cells_by_particle_id: CudaFunction,
+    pub scatter_positions_to_tile_order: CudaFunction,
+    pub fill_tile_position_padding: CudaFunction,
+    pub compute_block_bbox: CudaFunction,
+    pub find_blocks_with_interactions: CudaFunction,
+    pub finalize_packed_forces: CudaFunction,
 }
 
 impl NeighborKernels {
@@ -745,6 +1098,11 @@ impl NeighborKernels {
                 "prefix_scan_finalize_offsets",
                 "scatter_atoms_into_cells",
                 "sort_cells_by_particle_id",
+                "scatter_positions_to_tile_order",
+                "fill_tile_position_padding",
+                "compute_block_bbox",
+                "find_blocks_with_interactions",
+                "finalize_packed_forces",
             ],
         )?;
         Ok(NeighborKernels {
@@ -777,6 +1135,23 @@ impl NeighborKernels {
             )?,
             scatter_atoms_into_cells: get_func(device, "neighbor", "scatter_atoms_into_cells")?,
             sort_cells_by_particle_id: get_func(device, "neighbor", "sort_cells_by_particle_id")?,
+            scatter_positions_to_tile_order: get_func(
+                device,
+                "neighbor",
+                "scatter_positions_to_tile_order",
+            )?,
+            fill_tile_position_padding: get_func(
+                device,
+                "neighbor",
+                "fill_tile_position_padding",
+            )?,
+            compute_block_bbox: get_func(device, "neighbor", "compute_block_bbox")?,
+            find_blocks_with_interactions: get_func(
+                device,
+                "neighbor",
+                "find_blocks_with_interactions",
+            )?,
+            finalize_packed_forces: get_func(device, "neighbor", "finalize_packed_forces")?,
         })
     }
 }

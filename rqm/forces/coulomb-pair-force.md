@@ -1,4 +1,4 @@
-# Feature: Truncated Coulomb Pair Force Kernel <!-- rq-846bdb8b -->
+# Feature: Truncated Coulomb Pair Force <!-- rq-846bdb8b -->
 
 Truncated Coulomb is the non-bonded electrostatic pairwise potential slot
 in the pluggable potential framework (`framework.md`). The slot is present
@@ -7,18 +7,24 @@ real-space cutoff and a single inner-switching radius; pair magnitudes are
 constructed at kernel time from the per-particle charges carried by
 `ParticleBuffers` (see `particle-state.md`).
 
-The slot evaluates pair forces with two fused warp-per-particle kernels
-(forces only and forces + energy + virial) that read the shared
-`NeighborListState` owned by `ForceField` (see `neighbor-list.md`). Each
-warp handles one particle: the warp walks the particle's neighbour list,
-accumulates the per-pair Coulomb contribution in register accumulators
-across all 32 lanes, and adds the per-particle net force into its
-class accumulator through a warp-tree butterfly reduction followed by
-a lane-0 read-modify-write add (see `framework.md`'s *Class Output
-Accumulators*).
-The common kernel pattern is specified in `pair-force-kernel.md`; this
-file specifies the truncated-Coulomb functional form, parameter inputs,
-and launcher.
+The slot contributes its per-pair functional form to the JIT-composed
+pair-force pipeline as a `PairForceFragment` (see
+`jit-composed-pair-force.md`). The composed kernel runs the
+packed-neighbour data model and force-accumulation pattern specified
+in `packed-neighbour-pair-force.md`: the inner loop evaluates only
+real neighbours (no per-pair cutoff masking against the neighbour
+list itself), and per-particle contributions accumulate via
+`atomicAdd` on the class's fixed-point force buffer. The slot does
+not launch its own per-potential kernel.
+
+This file specifies the truncated-Coulomb functional form
+(`U(r) = k_e · q_i · q_j / r` with a smooth switching function
+between `r_switch` and `r_cut`), the parameter inputs the slot
+exposes, and the per-pair `evaluate(r², i, j) -> (factor, energy,
+virial)` contract its fragment implements. The kernel topology,
+launch configuration, neighbour-list contract, and reproducibility
+mechanism are specified in `packed-neighbour-pair-force.md` and not
+restated here.
 
 Work is O(N · average neighbour count) when the shared list is in
 cell-list mode and O(N²) when it is in trivial mode (every particle's

@@ -367,6 +367,14 @@ pub struct ForceField {
     pub slow_total_forces_z: CudaSlice<Real>,
     pub slow_total_potential_energies: CudaSlice<Real>,
     pub slow_total_virials: CudaSlice<Real>,
+    /// Fixed-point per-particle accumulators for fast-class pair-force
+    /// slots (see `rqm/forces/packed-neighbour-pair-force.md`). Scale
+    /// `2^32`; interpreted as `i64` two's-complement.
+    pub fast_total_forces_fp_x: CudaSlice<u64>,
+    pub fast_total_forces_fp_y: CudaSlice<u64>,
+    pub fast_total_forces_fp_z: CudaSlice<u64>,
+    pub fast_total_potential_energies_fp: CudaSlice<u64>,
+    pub fast_total_virials_fp: CudaSlice<u64>,
     pub neighbor_list: Option<NeighborListState>,
     /// JIT-composed pair-force kernel, built when at least one
     /// fast-class pair-force slot is active. `None` when no
@@ -561,6 +569,14 @@ impl ForceField {
             device.alloc_zeros::<Real>(n).map_err(GpuError::from)?;
         let slow_total_virials = device.alloc_zeros::<Real>(n).map_err(GpuError::from)?;
 
+        // Fixed-point accumulators for the packed-neighbour pair-force path.
+        let fast_total_forces_fp_x = device.alloc_zeros::<u64>(n).map_err(GpuError::from)?;
+        let fast_total_forces_fp_y = device.alloc_zeros::<u64>(n).map_err(GpuError::from)?;
+        let fast_total_forces_fp_z = device.alloc_zeros::<u64>(n).map_err(GpuError::from)?;
+        let fast_total_potential_energies_fp =
+            device.alloc_zeros::<u64>(n).map_err(GpuError::from)?;
+        let fast_total_virials_fp = device.alloc_zeros::<u64>(n).map_err(GpuError::from)?;
+
         // Build the shared NeighborListState when any slot reports a cutoff.
         let aggregated_cutoff: Option<Real> = slots
             .iter()
@@ -682,6 +698,11 @@ impl ForceField {
             slow_total_forces_z,
             slow_total_potential_energies,
             slow_total_virials,
+            fast_total_forces_fp_x,
+            fast_total_forces_fp_y,
+            fast_total_forces_fp_z,
+            fast_total_potential_energies_fp,
+            fast_total_virials_fp,
             neighbor_list,
             jit_composed,
             jit_slot_indices,
@@ -862,45 +883,101 @@ impl ForceField {
         }
         timings.kernel_stop(KernelStage::CLASS_ACCUMULATOR_MEMSET)?;
 
-        let nl_ref = self.neighbor_list.as_ref();
         // Launch the JIT-composed pair-force kernel once for the
         // fast-class pair-force slots when (a) the framework has a
         // composed kernel built, (b) we're evaluating the Fast class,
-        // and (c) the participating slot list is non-empty. The
-        // composed kernel handles every fast-class pair-force slot in
-        // a single launch; their `Potential::compute` is bypassed at
-        // step time.
+        // and (c) the participating slot list is non-empty.
         let dispatch_jit = evaluating_fast
             && self.jit_composed.is_some()
             && !self.jit_slot_indices.is_empty();
         if dispatch_jit {
+            // Zero the fixed-point Fast-class accumulators.
+            self.device
+                .memset_zeros(&mut self.fast_total_forces_fp_x)
+                .map_err(GpuError::from)?;
+            self.device
+                .memset_zeros(&mut self.fast_total_forces_fp_y)
+                .map_err(GpuError::from)?;
+            self.device
+                .memset_zeros(&mut self.fast_total_forces_fp_z)
+                .map_err(GpuError::from)?;
+            self.device
+                .memset_zeros(&mut self.fast_total_potential_energies_fp)
+                .map_err(GpuError::from)?;
+            self.device
+                .memset_zeros(&mut self.fast_total_virials_fp)
+                .map_err(GpuError::from)?;
+
+            // Refresh the tile-sorted position view for the current
+            // step's positions.
+            timings.kernel_start(KernelStage::SCATTER_POSITIONS_TO_TILE_ORDER)?;
+            {
+                let kernels = self.kernels.clone();
+                let nl = self
+                    .neighbor_list
+                    .as_mut()
+                    .expect("JIT pair-force kernel requires a shared neighbor list");
+                // Split borrow: sorted_particle_ids and packed live on
+                // disjoint fields of NeighborListState.
+                let sorted_ptr: *const cudarc::driver::CudaSlice<u32> = nl
+                    .sorted_particle_ids_for_packed()
+                    .expect("packed-neighbour dispatch requires sorted_particle_ids");
+                let packed = nl.packed.as_mut().expect("packed data present");
+                let sorted_view = unsafe { &*sorted_ptr };
+                let n_blocks = packed.n_blocks;
+                crate::gpu::scatter_positions_to_tile_order(
+                    &kernels,
+                    buffers,
+                    sorted_view,
+                    &mut packed.tile_sorted_positions_x,
+                    &mut packed.tile_sorted_positions_y,
+                    &mut packed.tile_sorted_positions_z,
+                )?;
+                // Refill +∞ padding for partial last block.
+                crate::gpu::fill_tile_position_padding(
+                    &kernels,
+                    &mut packed.tile_sorted_positions_x,
+                    &mut packed.tile_sorted_positions_y,
+                    &mut packed.tile_sorted_positions_z,
+                    n as u32,
+                    n_blocks * 32,
+                )?;
+            }
+            timings.kernel_stop(KernelStage::SCATTER_POSITIONS_TO_TILE_ORDER)?;
+
             timings.kernel_start(KernelStage::JIT_COMPOSED_PAIR_FORCE)?;
             let nl = self
                 .neighbor_list
                 .as_ref()
                 .expect("JIT pair-force kernel requires a shared neighbor list");
+            let sorted_view = nl
+                .sorted_particle_ids_for_packed()
+                .expect("packed-neighbour dispatch requires sorted_particle_ids");
+            let packed = nl.packed.as_ref().expect("packed data present");
+            let entries_count = packed.interacting_tiles_count;
             let bind_ctx = PairForceBindContext {
                 buffers: &*buffers,
                 sim_box,
                 neighbor_list: nl,
             };
             let mut launch_builder = PairForceLaunchBuilder::new();
-            // Common args, in the order the composer's entry-point
-            // signature declares them.
+            // Common args, in the order the composer declares them.
             launch_builder.push_device_buffer(&buffers.positions_x);
             launch_builder.push_device_buffer(&buffers.positions_y);
             launch_builder.push_device_buffer(&buffers.positions_z);
-            launch_builder.push_device_buffer(&nl.neighbor_list);
-            launch_builder.push_device_buffer(&nl.neighbor_counts);
-            launch_builder.push_scalar(self.jit_max_neighbors);
+            launch_builder.push_device_buffer(&packed.tile_sorted_positions_x);
+            launch_builder.push_device_buffer(&packed.tile_sorted_positions_y);
+            launch_builder.push_device_buffer(&packed.tile_sorted_positions_z);
+            launch_builder.push_device_buffer(sorted_view);
+            launch_builder.push_device_buffer(&packed.interacting_tiles);
+            launch_builder.push_device_buffer(&packed.interacting_atoms);
+            launch_builder.push_scalar(entries_count);
             launch_builder.push_device_buffer(sim_box.lattice_device());
-            launch_builder.push_device_buffer(&self.fast_total_forces_x);
-            launch_builder.push_device_buffer(&self.fast_total_forces_y);
-            launch_builder.push_device_buffer(&self.fast_total_forces_z);
-            if write_scalars {
-                launch_builder.push_device_buffer(&self.fast_total_potential_energies);
-                launch_builder.push_device_buffer(&self.fast_total_virials);
-            }
+            launch_builder.push_device_buffer(&self.fast_total_forces_fp_x);
+            launch_builder.push_device_buffer(&self.fast_total_forces_fp_y);
+            launch_builder.push_device_buffer(&self.fast_total_forces_fp_z);
+            launch_builder.push_device_buffer(&self.fast_total_potential_energies_fp);
+            launch_builder.push_device_buffer(&self.fast_total_virials_fp);
             // Per-fragment args in canonical slot order.
             for &slot_idx in &self.jit_slot_indices {
                 self.slots[slot_idx].bind_pair_force_args(&bind_ctx, &mut launch_builder);
@@ -913,10 +990,40 @@ impl ForceField {
                 .as_ref()
                 .expect("dispatch_jit implies jit_composed.is_some()");
             unsafe {
-                jit.launch(n as u32, write_scalars, launch_builder)?;
+                jit.launch(entries_count, write_scalars, launch_builder)?;
             }
             timings.kernel_stop(KernelStage::JIT_COMPOSED_PAIR_FORCE)?;
+
+            // Finalize: convert fixed-point sums to Real and add into
+            // the existing fast-class Real accumulator buffers.
+            timings.kernel_start(KernelStage::FINALIZE_PACKED_FORCES)?;
+            {
+                let kernels = self.kernels.clone();
+                let mut fx = self.fast_total_forces_x.slice_mut(..);
+                let mut fy = self.fast_total_forces_y.slice_mut(..);
+                let mut fz = self.fast_total_forces_z.slice_mut(..);
+                let mut fe = self.fast_total_potential_energies.slice_mut(..);
+                let mut fw = self.fast_total_virials.slice_mut(..);
+                crate::gpu::finalize_packed_forces(
+                    &kernels,
+                    &self.fast_total_forces_fp_x,
+                    &self.fast_total_forces_fp_y,
+                    &self.fast_total_forces_fp_z,
+                    &self.fast_total_potential_energies_fp,
+                    &self.fast_total_virials_fp,
+                    &mut fx,
+                    &mut fy,
+                    &mut fz,
+                    &mut fe,
+                    &mut fw,
+                    n as u32,
+                    write_scalars,
+                )?;
+            }
+            timings.kernel_stop(KernelStage::FINALIZE_PACKED_FORCES)?;
         }
+
+        let nl_ref = self.neighbor_list.as_ref();
 
         // Launch the JIT-composed bonded module's per-slot entry
         // points. The composed kernel writes the per-bond contributions
