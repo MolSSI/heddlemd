@@ -366,15 +366,38 @@ either overflowed, the host grows the respective buffer to
 `required * tile_pair_growth_factor` and re-runs the construction
 from step 6. Steps 1–5 are not repeated.
 
-Initial capacities are set at `NeighborListState` construction
-time from the configuration (see *Configuration* below). When a
-phase begins, an explicit one-shot rebuild runs before any
-CUDA-graph capture so the captured graph holds the post-grow
-device pointers; subsequent rebuilds within the captured loop
-must therefore not grow. Implementation must guarantee this
-either by tuning the initial capacity from the configuration or
-by pre-running a probe rebuild whose result is used to size the
-buffers before capture begins.
+The buffers are sized to the *actual* interaction count, never to
+the `O(n_blocks²)` all-pairs upper bound. At `NeighborListState`
+construction the buffers are allocated at a small seed length; the
+first rebuild — a probe rebuild the runner performs before any
+CUDA-graph capture (see `cuda-graphs.md` *Capture Lifecycle*) —
+grows them to that build's true count × `tile_pair_growth_factor`.
+For a cutoff system this is `O(N)`: the live entry count is
+proportional to the number of interacting atom pairs, not to
+`n_blocks²`. There is no configuration knob for the initial
+capacity; the probe rebuild always determines it.
+
+Growth is permitted at *any* rebuild, including a rebuild that runs
+at a batch boundary inside a CUDA-graph-captured phase. When a
+rebuild grows (and therefore reallocates) `interacting_tiles`,
+`interacting_atoms`, or `single_pair_atoms`, the rebuild reports the
+reallocation through its `pre_step` outcome (see
+`forces/neighbor-list.md` *Displacement Check*). The runner responds
+by re-capturing the phase graph so the captured nodes record the new
+device pointers and the single-pair launch's new grid dimensions
+(see `cuda-graphs.md` *Neighbor-List Pre-Step Decomposition*). A
+captured graph's buffer pointers and launch dimensions must be
+stable only for the lifetime of one graph instance, not for the
+whole phase — the buffer-sizing strategy is therefore decoupled from
+the capture lifetime.
+
+The initial seed is `O(N)` — a small multiple of `n_blocks`, clamped
+down to the all-pairs reference `n_blocks²` for tiny systems where the
+density heuristic would otherwise exceed it. Growth on overflow is
+driven by the build's deterministic interaction count: the buffers
+grow to `count × tile_pair_growth_factor` and the construction retries
+until the build fits, converging after one or two retries. No
+`O(n_blocks²)` capacity is ever pre-allocated.
 
 ## Fixed-Point Force Buffers <!-- rq-a2f419db -->
 
@@ -810,18 +833,11 @@ The `[neighbor_list]` section of the simulation config carries:
 - `tile_pair_growth_factor: f64` — multiplier applied to the
   `interacting_tiles` and `single_pair_atoms` capacities on
   overflow. Must be greater than 1.0. Default 1.5.
-- `interacting_tiles_initial_capacity: u32` (optional) — initial
-  allocated entry count for the cutoff list. Default
-  `⌈n_blocks² / 16⌉ + n_blocks` (a generous starting point that
-  rarely requires growth on the first build). May be overridden
-  to a smaller value for systems where the natural neighbour
-  count is known.
-- `single_pairs_initial_capacity: u32` (optional) — initial
-  allocated entry count for `single_pair_atoms` (i.e., the buffer
-  is sized `2 · capacity` u32 slots). Default `n_blocks · 32` (one
-  single pair per i-block on average for a uniform liquid; sparse-
-  tile boundaries push this higher and the grow-on-overflow path
-  picks up the slack).
+
+The `interacting_tiles` and `single_pair_atoms` capacities are not
+configurable. They are sized automatically from the first rebuild's
+true interaction count (see *Capacity*) and grown on demand, so
+there is no initial-capacity field to tune.
 
 The field `max_neighbors` is **not** part of `NeighborListConfig`.
 Specifying it in the configuration file is a load-time error with
@@ -1304,12 +1320,47 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Then a configuration error is reported indicating the growth factor
       must be greater than 1.0
 
-  @rq-043c6862
-  Scenario: Default initial capacity sized to avoid first-build growth
+  @rq-ea8640f5
+  Scenario: Probe rebuild sizes capacity to the true interaction count
     Given a SPC water benchmark with 24,576 atoms
-    When NeighborListState::new_cell_list constructs with default config
-    Then interacting_tiles_capacity is at least the count produced by the
-      first rebuild
+    When NeighborListState::new_cell_list constructs and the runner runs the
+      pre-capture probe rebuild
+    Then interacting_tiles_capacity is at least the count produced by that
+      rebuild
+    And interacting_tiles_capacity is at most that count times
+      tile_pair_growth_factor
+
+  @rq-8d7e376d
+  Scenario: Buffer footprint scales linearly with N, not quadratically
+    Given two SPC water systems A with N_A atoms and B with N_B = 8 * N_A atoms
+      at the same density
+    When the pre-capture probe rebuild completes for each
+    Then interacting_tiles_capacity for B is within a small constant factor of
+      8 times interacting_tiles_capacity for A
+    And no buffer is allocated with a length proportional to n_blocks squared
+
+  @rq-36026b97
+  Scenario: Capacity never preallocates the all-pairs upper bound
+    Given a system with n_blocks atom-blocks
+    When NeighborListState::new_cell_list constructs
+    Then the seed length of interacting_tiles is far below
+      n_blocks * n_blocks
+
+  @rq-8b6d0c41
+  Scenario: A rebuild grows the buffers when the interaction count rises
+    Given a phase whose density increases under a barostat
+    And a rebuild whose true entry count exceeds the current
+      interacting_tiles_capacity
+    When NeighborListState::rebuild runs
+    Then interacting_tiles is reallocated to required * tile_pair_growth_factor
+    And the rebuild's pre_step outcome reports reallocated = true
+
+  @rq-25f8dd1d
+  Scenario: Seed capacity is clamped to the all-pairs reference for tiny systems
+    Given a system with n_blocks = 4 atom-blocks
+    When NeighborListState::new_cell_list constructs
+    Then default_interacting_tiles_capacity(4) equals 16 (= 4 * 4)
+    And the seed is not the 128 * n_blocks density heuristic
 
   # --- Determinism of the excluded-pair list ---
 

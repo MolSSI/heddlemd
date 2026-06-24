@@ -245,6 +245,10 @@ sequence:
    `pre_step` downloads the single-word
    `disp_rebuild_flag` and rebuilds the neighbor list when the flag
    is non-zero (see `forces/neighbor-list.md` *Displacement Check*).
+   Because `needs_rebuild` starts `true`, this first call always
+   rebuilds; that probe rebuild sizes the packed-neighbour buffers to
+   the system's true interaction count before any device pointer is
+   captured (see `forces/packed-neighbour-pair-force.md` *Capacity*).
    The call happens outside any graph capture and is not recorded.
 3. The runner calls
    `device.begin_stream_capture(CaptureMode::ThreadLocal)` on the
@@ -318,7 +322,9 @@ while remaining > 0:
     step      += batch
     remaining -= batch
 
-    nl.pre_step(sim_box, buffers, timings)              // 4-byte dtoh of disp_rebuild_flag; rebuild iff non-zero
+    outcome = nl.pre_step(sim_box, buffers, timings)    // 4-byte dtoh of disp_rebuild_flag; rebuild iff non-zero
+    if outcome.reallocated and remaining > 0:           // a rebuild grew (reallocated) a packed-neighbour buffer
+        graph_loop = capture_phase_graph(...)           // re-capture against new pointers / grid dims; records, does not execute
     if step % traj_every == 0:
         sim_box.flush_from_device()
         download positions (and velocities when configured)
@@ -344,6 +350,13 @@ When the flag is non-zero, the rebuild pipeline runs synchronously,
 the reference positions are refreshed, and `disp_rebuild_flag` is
 zeroed via a single `memset_zeros` before the next batch's first
 graph launch.
+
+When that synchronous rebuild grows a packed-neighbour buffer,
+`nl.pre_step` returns `reallocated = true` and the runner re-captures
+the phase graph before the next batch (see *Neighbor-List Pre-Step
+Decomposition*). Stream capture records the kernel sequence without
+executing it, so the re-capture consumes no physical step: the step
+counter is unchanged and the phase still runs exactly `n_steps` steps.
 
 ### Skin-distance contract under batched replay <!-- rq-b57700e0 -->
 
@@ -387,18 +400,42 @@ for calling `nl.pre_step` at every batch boundary instead.
 phases (graph-ineligible), and the warm-up force evaluation continue
 to use the un-prefixed variant.
 
-A rebuild triggered by `nl.pre_step` updates the cell-list buffers in
-place. The captured graph references those buffers by device pointer
-only; their contents change but the pointers do not. The captured
-graph remains valid across rebuilds without re-capture.
+A rebuild triggered by `nl.pre_step` that does not change any buffer
+length updates the cell-list and packed-neighbour buffers in place.
+The captured graph references those buffers by device pointer only;
+their contents change but the pointers do not, so the captured graph
+remains valid across such rebuilds without re-capture.
 
-If a buffer that the graph references is reallocated (currently this
-happens only when `max_neighbors` overflows, which halts the
-simulation), the existing `CudaGraphExec` is dropped and the phase
-falls back to per-step launches for its remaining steps. The
-per-step path runs the same kernel sequence with the same
-determinism guarantee; the only loss is the driver-overhead
-elimination for the rest of that phase.
+A rebuild that grows a packed-neighbour buffer (`interacting_tiles`,
+`interacting_atoms`, or `single_pair_atoms`) reallocates it,
+invalidating both the device pointers the captured nodes hold and
+the single-pair launch's captured grid dimensions. `nl.pre_step`
+reports this through its outcome's `reallocated` flag (see
+`forces/neighbor-list.md` *Displacement Check* and
+`forces/packed-neighbour-pair-force.md` *Capacity*). When the flag is
+set, the runner re-captures the phase graph at that batch boundary:
+it drops the current `GraphLoop`, runs `capture_phase_graph` again to
+record a fresh one-step graph against the new pointers and grid
+dimensions, and continues replaying in graph mode. Stream capture
+records the kernel sequence without executing it, so the re-capture
+consumes no physical step. Because growth is monotonic and each step
+multiplies capacity by `tile_pair_growth_factor`, a phase incurs at
+most a handful of re-captures, so the amortised cost is negligible.
+
+This decouples the captured graph's buffer pointers and launch
+dimensions — which need to be stable only for the lifetime of one
+graph instance — from the phase lifetime. Buffers are therefore sized
+to the actual `O(N)` interaction count rather than to the
+`O(n_blocks²)` all-pairs bound that whole-phase pointer stability
+would otherwise force.
+
+If the re-capture itself fails with a CUDA driver error, the runner
+logs the same `warning: cuda graph capture failed for phase
+`<name>`: <reason>; falling back to per-step launches` line described
+under *Capture Lifecycle* and finishes the phase on the per-step
+launch loop with full `Timings`. The per-step path runs the same
+kernel sequence with the same determinism guarantee; the only loss is
+driver-overhead elimination for the rest of that phase.
 
 ## `Timings` Interaction <!-- rq-9ec19227 -->
 
@@ -467,6 +504,12 @@ rejected as `ConfigError::InvalidValue { field:
   - `launch(&self, stream: &CudaStream) -> Result<(), GraphError>` —
     forwards to `exec.launch(stream)`.
 
+  The runner holds the phase's `GraphLoop` in a mutable binding so it
+  can replace it mid-phase: when `nl.pre_step` reports a
+  packed-neighbour reallocation, the runner runs `capture_phase_graph`
+  again and stores the new `GraphLoop`, dropping the old one (whose
+  `CudaGraphExec` releases the stale graph on `Drop`).
+
 - `GraphError` — error type for graph capture / instantiate / launch. <!-- rq-5026f499 -->
   Variants:
   - `BeginCaptureFailed(DriverError)` — `cuStreamBeginCapture_v2`
@@ -497,7 +540,11 @@ rejected as `ConfigError::InvalidValue { field:
   when any of the supplied slots reports `graph_compatible = false`
   or when `[simulation].cuda_graphs_disable = true`. Returns
   `Err(...)` only when a CUDA driver call fails during capture or
-  instantiate.
+  instantiate. The runner invokes it both at phase start and, in the
+  batched replay loop, whenever a packed-neighbour buffer is
+  reallocated mid-phase (see *Neighbor-List Pre-Step Decomposition*).
+  Stream capture records the kernel sequence without executing it, so a
+  re-capture consumes no physical step.
 
 ### Slot Eligibility Hooks <!-- rq-b2e5e90c -->
 
@@ -637,10 +684,46 @@ Feature: CUDA graph capture and replay
   @rq-813b7e0f
   Scenario: Rebuild without buffer reallocation does not invalidate the graph
     Given an eligible phase running in graph mode
-    When nl.pre_step rebuilds the neighbor list without changing max_neighbors
-    Then the existing CudaGraphExec is reused without re-capture
+    When nl.pre_step rebuilds the neighbor list without growing any
+      packed-neighbour buffer
+    Then nl.pre_step returns reallocated = false
+    And the existing CudaGraphExec is reused without re-capture
     And subsequent step replays produce the same kernel sequence in the same order
     And subsequent step replays produce bit-identical results to a non-rebuild reference
+
+  @rq-d5e451eb
+  Scenario: Rebuild that grows a packed-neighbour buffer triggers re-capture
+    Given an eligible phase running in graph mode
+    When nl.pre_step rebuilds and grows interacting_tiles at a batch boundary
+    Then nl.pre_step returns reallocated = true
+    And the runner drops the current GraphLoop and calls capture_phase_graph again
+    And the new GraphLoop's captured nodes reference the reallocated buffers
+    And the phase continues replaying in graph mode
+
+  @rq-c5116f45
+  Scenario: Re-capture consumes no physical step
+    Given an eligible phase of n_steps = 100 running in graph mode
+    And exactly one batch boundary triggers a packed-neighbour reallocation
+    When the timestep loop runs to completion
+    Then the total number of physical steps executed is exactly 100
+    And the re-capture replaces the GraphLoop without advancing the step counter
+
+  @rq-f986ba18
+  Scenario: Graph-mode run with a mid-phase re-capture is byte-identical to per-step
+    Given a config with seed S whose phase grows a packed-neighbour buffer mid-phase
+    When run A executes the phase in graph mode (with the re-capture)
+    And run B executes the same phase with cuda_graphs_disable = true
+    Then run A and run B produce byte-identical phase log files
+    And run A and run B produce byte-identical phase trajectory files
+
+  @rq-65c0327d
+  Scenario: Failed re-capture falls back to per-step launches
+    Given an eligible phase running in graph mode
+    And a mid-phase reallocation whose capture_phase_graph call returns a CUDA driver error
+    When the runner attempts the re-capture
+    Then the runner logs "warning: cuda graph capture failed for phase `<name>`: <reason>; falling back to per-step launches"
+    And the remaining steps of the phase run on the per-step launch loop with full Timings
+    And the run completes with exit code 0
 
   @rq-3c62b49b
   Scenario: graph_batch_size = 1 is valid and runs every step under graph mode

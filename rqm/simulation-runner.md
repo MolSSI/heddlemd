@@ -461,7 +461,13 @@ the simulation box.
     step index aligns with a log or trajectory cadence, calls
     `sim_box.flush_from_device()`, drains any per-slot
     `flush_pending_injection`, and performs the output write as
-    above.
+    above. When `nl.pre_step` reports that a rebuild reallocated a
+    packed-neighbour buffer, the runner re-captures the phase
+    `GraphLoop` before the next batch (see `cuda-graphs.md`'s
+    *Neighbor-List Pre-Step Decomposition*); stream capture records
+    without executing, so the re-capture consumes no physical step. If
+    the re-capture itself fails, the remaining steps run on the
+    per-step launch loop.
 
     `force_field.step_no_neighbor_check` is the variant used inside
     the captured graph and inside the batched-replay code path; it

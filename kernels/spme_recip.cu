@@ -250,9 +250,8 @@ __device__ static inline void spread_per_particle_setup(
 // PME_ORDER * PME_ORDER = p^2 (d_a, d_b) cells in that slice. Each
 // (d_a, d_b, iz) contribution issues one atomicAdd<i64> into
 // rho_fixed, with a v_fixed != 0 zero-skip guard to elide the
-// contribution when the fixed-point quantisation rounds to zero
-// (matching OpenMM's gridSpreadCharge pattern). Grid:
-// ceil(N * spline_order / 256) blocks of 256 threads each.
+// contribution when the fixed-point quantisation rounds to zero.
+// Grid: ceil(N * spline_order / 256) blocks of 256 threads each.
 extern "C" __global__ void spme_spread_fixed_point(
     const Real4        *posq,
     const unsigned int *sorted_atom_index, // length n
@@ -277,7 +276,7 @@ extern "C" __global__ void spme_spread_fixed_point(
   Real4 pq = posq[atom];
   Real qi = pq.w;
 
-  // Charge-zero skip — matches OpenMM. Atoms with q == 0 contribute
+  // Charge-zero skip. Atoms with q == 0 contribute
   // nothing to the grid.
   if (qi == R(0.0)) return;
 

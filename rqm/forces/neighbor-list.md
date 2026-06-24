@@ -222,7 +222,10 @@ flag as follows:
    plus packed-neighbour construction), writes the current positions
    into `reference_positions_*`, and zeros `disp_rebuild_flag` via
    `device.memset_zeros(&mut cl.disp_rebuild_flag)` on the same
-   default stream.
+   default stream. When that rebuild grows a packed-neighbour buffer,
+   `pre_step` returns `PreStepOutcome.reallocated = true` so the
+   batched graph-replay loop re-captures the phase graph (see
+   `cuda-graphs.md` *Neighbor-List Pre-Step Decomposition*).
 
 Inside a `pre_step` that does not rebuild, the flag is left in
 whatever state the kernel wrote it (it is a sticky boolean across
@@ -440,6 +443,17 @@ displacement-check kernel runs over the lifetime of the run.
   - `AllPairs`
   - `CellList { r_skin: f64 }`
 
+- `PreStepOutcome` — value returned by `NeighborListState::pre_step`. <!-- rq-b22e871e -->
+  Fields:
+  - `rebuilt: bool` — `true` when the call ran a rebuild.
+  - `reallocated: bool` — `true` when that rebuild grew (reallocated)
+    a packed-neighbour buffer (`interacting_tiles`,
+    `interacting_atoms`, or `single_pair_atoms`). The batched
+    graph-replay loop re-captures the phase graph when this is `true`
+    (see `cuda-graphs.md` *Neighbor-List Pre-Step Decomposition*).
+    Both fields are `false` in `Trivial` mode and on a `pre_step`
+    that performs no rebuild.
+
 - `NeighborListState` — host-side wrapper carrying the device buffers <!-- rq-b2d68288 -->
   and parameters that make up the shared neighbor list. The state is in
   one of two modes, fixed at construction.
@@ -554,6 +568,12 @@ displacement-check kernel runs over the lifetime of the run.
     largest cutoff across every consumer of the shared list; the framework
     computes this as the maximum of every `Potential::max_cutoff()` value
     it observes.
+  - `tile_pair_config: TilePairCapacityConfig` carries
+    `tile_pair_growth_factor` only. The packed-neighbour buffers are
+    allocated at a small seed length here; their working capacity is
+    set by the first (probe) rebuild and grown on demand, so there is
+    no initial-capacity argument (see
+    `forces/packed-neighbour-pair-force.md` *Capacity*).
   - Records `cached_generation = sim_box.generation()`.
 
 - `NeighborListState::new_cell_list_only(device: Arc<CudaDevice>, sim_box: &SimulationBox, particle_count: usize, n_cells_per_direction: [u32; 3]) -> Result<NeighborListState, NeighborListError>` <!-- rq-d47caa3d -->
@@ -611,12 +631,17 @@ displacement-check kernel runs over the lifetime of the run.
   - Performs no host-device transfers of particle data; all
     intermediates (`cell_indices`, `cell_counts`, `cell_offsets`,
     `write_cursors`, `sorted_particle_ids`) are populated on the device.
-  - Returns `NeighborListOverflow` when the build kernel set the
-    overflow flag.
+  - Grows the packed-neighbour buffers and re-runs the construction
+    when the build kernel reports an overflow, as described in
+    `forces/packed-neighbour-pair-force.md` *Capacity*, retrying until
+    the build fits.
+  - Records whether any packed-neighbour buffer was reallocated during
+    the rebuild so the caller (`pre_step`) can surface it through
+    `PreStepOutcome.reallocated`.
   - Returns `Ok(())` immediately when `particle_count == 0` or when the
     state is in `Trivial` mode.
 
-- `NeighborListState::pre_step(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>` <!-- rq-1217c816 -->
+- `NeighborListState::pre_step(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<PreStepOutcome, NeighborListError>` <!-- rq-1217c816 -->
   - Called by `ForceField::step` once per timestep before any slot's
     `contribute` runs. In `CellList` mode:
     1. Compares `sim_box.generation()` against `cached_generation`. On
@@ -633,6 +658,15 @@ displacement-check kernel runs over the lifetime of the run.
     3. If `needs_rebuild`, runs the rebuild, refreshes the reference
        positions, and zeros `disp_rebuild_flag`.
     In `Trivial` mode this is a no-op.
+  - Returns a `PreStepOutcome { rebuilt: bool, reallocated: bool }`.
+    `rebuilt` is `true` when step 3 ran. `reallocated` is `true` when
+    that rebuild grew (and therefore reallocated) any packed-neighbour
+    buffer (`interacting_tiles`, `interacting_atoms`, or
+    `single_pair_atoms`); the batched graph-replay loop consumes this
+    flag to decide whether to re-capture the phase graph (see
+    `cuda-graphs.md` *Neighbor-List Pre-Step Decomposition*). Both
+    fields are `false` in `Trivial` mode and on a `pre_step` that does
+    not rebuild.
 
 ### CUDA Kernels <!-- rq-0469400b -->
 
@@ -1100,6 +1134,27 @@ Feature: Cell-list neighbor list
     When pre_step is called
     Then exactly one dtoh_sync_copy of length 1 (u32) is issued against disp_rebuild_flag
     And no other host-device particle transfer is issued by pre_step
+
+  @rq-75f86ce3
+  Scenario: pre_step reports no reallocation when a rebuild reuses the buffers
+    Given a NeighborListState in CellList mode whose rebuild fits the current
+      packed-neighbour capacity
+    When pre_step runs a rebuild
+    Then pre_step returns PreStepOutcome { rebuilt: true, reallocated: false }
+
+  @rq-1ca7df49
+  Scenario: pre_step reports reallocation when a rebuild grows a buffer
+    Given a NeighborListState in CellList mode whose rebuild exceeds the current
+      interacting_tiles_capacity
+    When pre_step runs the rebuild and grows interacting_tiles
+    Then pre_step returns PreStepOutcome { rebuilt: true, reallocated: true }
+
+  @rq-623447db
+  Scenario: pre_step that performs no rebuild reports neither flag
+    Given a NeighborListState in CellList mode with no box-generation change
+      and disp_rebuild_flag holding 0u
+    When pre_step is called
+    Then pre_step returns PreStepOutcome { rebuilt: false, reallocated: false }
 
   # --- Rebuild policy ---
 

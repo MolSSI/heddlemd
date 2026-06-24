@@ -545,13 +545,6 @@
     "title": "__device__",
     "type": "api-item"
   },
-  "rq-043c6862": {
-    "decl": "Scenario: Default initial capacity sized to avoid first-build growth",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "Default initial capacity sized to avoid first-build growth",
-    "type": "scenario"
-  },
   "rq-044f47ec": {
     "decl": "Scenario: Composed kernel is not compiled when no fast-class pair-force slot is present",
     "file": "forces/jit-composed-pair-force",
@@ -2253,11 +2246,19 @@
     "type": "file"
   },
   "rq-1217c816": {
-    "decl": "- `NeighborListState::pre_step(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<(), NeighborListError>`",
+    "decl": "- `NeighborListState::pre_step(&mut self, sim_box: &SimulationBox, buffers: &ParticleBuffers, timings: &mut Timings) -> Result<PreStepOutcome, NeighborListError>`",
     "file": "forces/neighbor-list",
     "refs": [
       {
+        "file": "src/forces/mod.rs",
+        "kind": "code"
+      },
+      {
         "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
         "kind": "code"
       }
     ],
@@ -3548,6 +3549,18 @@
     "title": "Gherkin Scenarios",
     "type": "section"
   },
+  "rq-1ca7df49": {
+    "decl": "Scenario: pre_step reports reallocation when a rebuild grows a buffer",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "pre_step reports reallocation when a rebuild grows a buffer",
+    "type": "scenario"
+  },
   "rq-1ca90a29": {
     "decl": "Scenario: Atom with no bonds gets zero accumulator",
     "file": "forces/morse-bonded",
@@ -4642,6 +4655,18 @@
     ],
     "title": "Feature: Berendsen Weak-Coupling Thermostat",
     "type": "file"
+  },
+  "rq-25f8dd1d": {
+    "decl": "Scenario: Seed capacity is clamped to the all-pairs reference for tiny systems",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Seed capacity is clamped to the all-pairs reference for tiny systems",
+    "type": "scenario"
   },
   "rq-25faef11": {
     "decl": "Scenario: Neighbor list applies minimum-image PBC",
@@ -6346,6 +6371,18 @@
     ],
     "title": "spme_force_gather",
     "type": "api-item"
+  },
+  "rq-36026b97": {
+    "decl": "Scenario: Capacity never preallocates the all-pairs upper bound",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Capacity never preallocates the all-pairs upper bound",
+    "type": "scenario"
   },
   "rq-36105526": {
     "decl": "### Host stages (Instant-timed)",
@@ -10851,6 +10888,18 @@
     "title": "All-pairs neighbor mode records lj_pair_force and omits neighbor-list rows",
     "type": "scenario"
   },
+  "rq-623447db": {
+    "decl": "Scenario: pre_step that performs no rebuild reports neither flag",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "pre_step that performs no rebuild reports neither flag",
+    "type": "scenario"
+  },
   "rq-627ed4b9": {
     "decl": "## Determinism",
     "file": "forces/jit-composed-intramolecular",
@@ -11156,6 +11205,13 @@
     "title": "End-to-end recip-virial reduction equals (0.5 / N) · Σ_k virial_factor[k] · |rho_hat[k]|²",
     "type": "scenario"
   },
+  "rq-65c0327d": {
+    "decl": "Scenario: Failed re-capture falls back to per-step launches",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Failed re-capture falls back to per-step launches",
+    "type": "scenario"
+  },
   "rq-65d18162": {
     "decl": "- `Config::integrator` rejects `lossless = true` at config-load time with",
     "file": "precision",
@@ -11345,7 +11401,16 @@
     "decl": "### Capacity",
     "file": "forces/packed-neighbour-pair-force",
     "level": 3,
-    "refs": [],
+    "refs": [
+      {
+        "file": "src/forces/neighbor_list.rs",
+        "kind": "code"
+      },
+      {
+        "file": "src/runner.rs",
+        "kind": "code"
+      }
+    ],
     "title": "Capacity",
     "type": "section"
   },
@@ -12911,6 +12976,18 @@
       }
     ],
     "title": "Constraint groups are sorted by minimum particle index",
+    "type": "scenario"
+  },
+  "rq-75f86ce3": {
+    "decl": "Scenario: pre_step reports no reallocation when a rebuild reuses the buffers",
+    "file": "forces/neighbor-list",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "pre_step reports no reallocation when a rebuild reuses the buffers",
     "type": "scenario"
   },
   "rq-7600786b": {
@@ -15272,6 +15349,18 @@
     "title": "Functions and methods",
     "type": "section"
   },
+  "rq-8b6d0c41": {
+    "decl": "Scenario: A rebuild grows the buffers when the interaction count rises",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "A rebuild grows the buffers when the interaction count rises",
+    "type": "scenario"
+  },
   "rq-8b964ce3": {
     "decl": "Scenario: Captured graph contains exactly one composed post-force launch per step",
     "file": "cuda-graphs",
@@ -15392,6 +15481,18 @@
     "file": "forces/harmonic-angle",
     "refs": [],
     "title": "reduce_angle_forces on zero particles is a no-op",
+    "type": "scenario"
+  },
+  "rq-8d7e376d": {
+    "decl": "Scenario: Buffer footprint scales linearly with N, not quadratically",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Buffer footprint scales linearly with N, not quadratically",
     "type": "scenario"
   },
   "rq-8d86bfa6": {
@@ -19487,6 +19588,13 @@
     "title": "neighbor_list cell-list with explicit parameters is accepted",
     "type": "scenario"
   },
+  "rq-b22e871e": {
+    "decl": "- `PreStepOutcome` — value returned by `NeighborListState::pre_step`.",
+    "file": "forces/neighbor-list",
+    "refs": [],
+    "title": "PreStepOutcome",
+    "type": "api-item"
+  },
   "rq-b2314952": {
     "decl": "Scenario: Bit-exact equality after a single full velocity-Verlet step",
     "file": "pipeline-reproducibility",
@@ -21331,6 +21439,13 @@
     "title": "Log file header includes andersen_conserved when Andersen is the thermostat",
     "type": "scenario"
   },
+  "rq-c5116f45": {
+    "decl": "Scenario: Re-capture consumes no physical step",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Re-capture consumes no physical step",
+    "type": "scenario"
+  },
   "rq-c525ee79": {
     "decl": "Scenario: Construct an empty (N=0) ForceField with potentials configured",
     "file": "forces/framework",
@@ -23080,6 +23195,13 @@
     ],
     "title": "MinimizerRegistry",
     "type": "api-item"
+  },
+  "rq-d5e451eb": {
+    "decl": "Scenario: Rebuild that grows a packed-neighbour buffer triggers re-capture",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Rebuild that grows a packed-neighbour buffer triggers re-capture",
+    "type": "scenario"
   },
   "rq-d603cae5": {
     "decl": "### Types",
@@ -25433,6 +25555,18 @@
     "title": "Doubling all charges quadruples the reciprocal-space energy and forces scale linearly",
     "type": "scenario"
   },
+  "rq-ea8640f5": {
+    "decl": "Scenario: Probe rebuild sizes capacity to the true interaction count",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [
+      {
+        "file": "tests/packed_neighbour_capacity.rs",
+        "kind": "code"
+      }
+    ],
+    "title": "Probe rebuild sizes capacity to the true interaction count",
+    "type": "scenario"
+  },
   "rq-ea8ebebd": {
     "decl": "Scenario: Explicit 1-3 exclusion overrides the angle's implicit default",
     "file": "forces/topology",
@@ -27169,6 +27303,13 @@
       }
     ],
     "title": "SI-mode trajectory frame converts positions to metres",
+    "type": "scenario"
+  },
+  "rq-f986ba18": {
+    "decl": "Scenario: Graph-mode run with a mid-phase re-capture is byte-identical to per-step",
+    "file": "cuda-graphs",
+    "refs": [],
+    "title": "Graph-mode run with a mid-phase re-capture is byte-identical to per-step",
     "type": "scenario"
   },
   "rq-f9a9c569": {

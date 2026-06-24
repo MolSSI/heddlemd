@@ -45,7 +45,8 @@ pub use topology::{
     load_topology_file,
 };
 pub use neighbor_list::{
-    CellListData, NeighborListError, NeighborListMode, NeighborListState,
+    CellListData, NeighborListError, NeighborListMode, NeighborListState, PreStepOutcome,
+    all_pairs_tile_capacity, default_interacting_tiles_capacity,
 };
 
 // rq-df6d79a1 rq-c4861786
@@ -801,16 +802,21 @@ impl ForceField {
     /// CUDA graph batched-replay loop, which moves the per-step
     /// displacement check / rebuild out of `force_field.step` and
     /// into the host loop between graph launches.
+    ///
+    /// Returns `true` when the rebuild reallocated a packed-neighbour
+    /// buffer; the batched-replay loop re-captures the phase graph in
+    /// that case (see `rqm/cuda-graphs.md`). rq-1217c816
     pub fn run_neighbor_pre_step(
         &mut self,
         buffers: &mut ParticleBuffers,
         sim_box: &SimulationBox,
         timings: &mut Timings,
-    ) -> Result<(), ForceFieldError> {
+    ) -> Result<bool, ForceFieldError> {
         if let Some(nl) = self.neighbor_list.as_mut() {
-            nl.pre_step(sim_box, buffers, timings)?;
+            let outcome = nl.pre_step(sim_box, buffers, timings)?;
+            return Ok(outcome.reallocated);
         }
-        Ok(())
+        Ok(false)
     }
 
     /// `true` iff every potential slot configured in this force

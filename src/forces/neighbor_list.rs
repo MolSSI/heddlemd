@@ -161,6 +161,20 @@ pub struct PackedNeighborData {
     pub single_pairs_count: u32,
 }
 
+/// Outcome of a `NeighborListState::pre_step` call. `rebuilt` is `true`
+/// when the call ran a rebuild; `reallocated` is `true` when that
+/// rebuild grew (and therefore reallocated) a packed-neighbour buffer
+/// (`interacting_tiles`, `interacting_atoms`, or `single_pair_atoms`).
+/// The batched graph-replay loop re-captures the phase graph when
+/// `reallocated` is set (see `rqm/cuda-graphs.md`).
+///
+/// rq-1217c816
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PreStepOutcome {
+    pub rebuilt: bool,
+    pub reallocated: bool,
+}
+
 // rq-b2d68288
 #[derive(Debug)]
 pub struct NeighborListState {
@@ -182,16 +196,40 @@ pub struct NeighborListState {
     rebuild_generation: u64,
 }
 
-/// Default initial capacity for `interacting_tiles`. Sized to the
-/// all-pairs upper bound `n_blocks^2`, so a first rebuild never needs
-/// to grow the buffer. Memory cost at N=24576: 768^2 = 589,824 entries
-/// = ~2.4 MB for tiles, 75 MB for atoms — acceptable.
+/// O(N) seed capacity for `interacting_tiles`. The buffers are sized
+/// to the *actual* interaction count, never to the `O(n_blocks^2)`
+/// all-pairs bound: this seed is just a reasonable starting point, and
+/// the first (probe) rebuild grows it to the true count via
+/// overflow-driven growth. For a cutoff system the working capacity is
+/// `O(N)`. Clamped down to the all-pairs maximum for tiny systems where
+/// that is smaller than the seed.
+///
+/// rq-67a09135
 pub fn default_interacting_tiles_capacity(n_blocks: u32) -> u32 {
     if n_blocks == 0 {
         return 1;
     }
-    let sq = (n_blocks as u64).saturating_mul(n_blocks as u64);
-    sq.min(u32::MAX as u64) as u32
+    // ~TILES_PER_BLOCK_SEED packed entries per i-block. A dense liquid
+    // i-block sees on the order of this many 32-j-atom entries; an
+    // under- or over-estimate only changes how many times the probe
+    // rebuild grows, never correctness.
+    const TILES_PER_BLOCK_SEED: u64 = 128;
+    let seed = (n_blocks as u64).saturating_mul(TILES_PER_BLOCK_SEED);
+    let ceiling = all_pairs_tile_capacity(n_blocks) as u64;
+    seed.min(ceiling).max(1).min(u32::MAX as u64) as u32
+}
+
+/// All-pairs maximum number of packed `interacting_tiles` entries:
+/// every one of the `n_blocks` i-blocks can pack at most `N` j-atoms,
+/// i.e. `n_blocks` entries of 32, giving `n_blocks^2` entries total.
+/// Growth never exceeds this ceiling; a build whose true count would
+/// exceed it is a pathology and surfaces as `NeighborListOverflow`.
+/// Saturated to `u32::MAX`.
+///
+/// rq-67a09135
+pub fn all_pairs_tile_capacity(n_blocks: u32) -> u32 {
+    let nb = n_blocks as u64;
+    nb.saturating_mul(nb).max(1).min(u32::MAX as u64) as u32
 }
 
 fn alloc_packed_neighbor_data(
@@ -265,13 +303,14 @@ fn alloc_packed_neighbor_data(
     let sorted_interacting_atoms = device
         .alloc_zeros::<u32>(cap_alloc * 32)
         .map_err(GpuError::from)?;
-    // Single-pair initial capacity. Sized to the same all-pairs
-    // upper bound the interacting_tiles list uses (`n_blocks²`),
-    // ensuring the first rebuild's sparse-tile output fits without
-    // growth. Growth during a CUDA-graph captured loop would
-    // invalidate the captured device pointer for `single_pair_atoms`
-    // and silently corrupt every subsequent replay; pre-sizing
-    // avoids the issue.
+    // Single-pair initial capacity. An O(N) seed sharing the same
+    // density heuristic as the tile list; the probe rebuild grows it to
+    // the true sparse-pair count via overflow-driven growth. A mid-phase
+    // growth that reallocates this buffer inside a captured graph is
+    // handled by re-capturing the phase graph (see
+    // `rqm/forces/packed-neighbour-pair-force.md` *Capacity* and
+    // `rqm/cuda-graphs.md`), so pre-sizing to the all-pairs bound is no
+    // longer required.
     let single_pairs_capacity = default_interacting_tiles_capacity(n_blocks).max(1);
     let single_pair_atoms = device
         .alloc_zeros::<u32>(2 * single_pairs_capacity as usize)
@@ -304,7 +343,12 @@ fn alloc_packed_neighbor_data(
 }
 
 impl PackedNeighborData {
-    /// Grow the entry-list buffers to at least `required` entries.
+    /// Grow the entry-list buffers to at least `required` entries. The
+    /// new capacity is `required * tile_pair_growth_factor`. Growth is
+    /// driven by the build's deterministic interaction count, so it
+    /// converges after one or two retries.
+    ///
+    /// rq-67a09135
     pub fn grow_to(
         &mut self,
         device: &Arc<CudaDevice>,
@@ -321,6 +365,8 @@ impl PackedNeighborData {
     }
 
     /// Grow `single_pair_atoms` to at least `required` pairs.
+    ///
+    /// rq-67a09135
     pub fn grow_single_pairs_to(
         &mut self,
         device: &Arc<CudaDevice>,
@@ -854,12 +900,15 @@ impl NeighborListState {
     }
 
     // rq-7db97132
+    // Returns `true` when a packed-neighbour buffer was reallocated
+    // during the rebuild (so a captured CUDA graph holding stale device
+    // pointers must be re-captured). rq-7db97132
     pub fn rebuild(
         &mut self,
         sim_box: &SimulationBox,
         buffers: &ParticleBuffers,
         timings: &mut Timings,
-    ) -> Result<(), NeighborListError> {
+    ) -> Result<bool, NeighborListError> {
         if self.particle_count == 0 {
             match &mut self.mode {
                 NeighborListMode::CellList(cl) | NeighborListMode::CellListOnly(cl) => {
@@ -867,10 +916,10 @@ impl NeighborListState {
                 }
                 NeighborListMode::Trivial => {}
             }
-            return Ok(());
+            return Ok(false);
         }
         if matches!(self.mode, NeighborListMode::Trivial) {
-            return Ok(());
+            return Ok(false);
         }
         let started = Instant::now();
         let result = self.rebuild_impl(sim_box, buffers, timings);
@@ -883,7 +932,7 @@ impl NeighborListState {
         sim_box: &SimulationBox,
         buffers: &ParticleBuffers,
         timings: &mut Timings,
-    ) -> Result<(), NeighborListError> {
+    ) -> Result<bool, NeighborListError> {
         let device = self.device.clone();
         let kernels = self.kernels.clone();
         let particle_count = self.particle_count;
@@ -891,7 +940,7 @@ impl NeighborListState {
 
         // Pull out parameters we need outside the cell-list borrow.
         let r_search_sq = match &self.mode {
-            NeighborListMode::Trivial => return Ok(()),
+            NeighborListMode::Trivial => return Ok(false),
             NeighborListMode::CellList(cl) | NeighborListMode::CellListOnly(cl) => cl.r_search_sq,
         };
 
@@ -937,11 +986,12 @@ impl NeighborListState {
             let cl = self.cell_list_data_mut().expect("CellListOnly");
             cl.needs_rebuild = false;
             self.rebuild_generation = self.rebuild_generation.wrapping_add(1);
-            return Ok(());
+            return Ok(false);
         }
 
-        // Packed-neighbour construction.
-        self.rebuild_packed_neighbour(buffers, sim_box, r_search_sq)?;
+        // Packed-neighbour construction. `reallocated` is `true` when a
+        // packed buffer grew during this rebuild. rq-67a09135
+        let reallocated = self.rebuild_packed_neighbour(buffers, sim_box, r_search_sq)?;
 
         {
             let device = self.device.clone();
@@ -974,7 +1024,7 @@ impl NeighborListState {
             cl.needs_rebuild = false;
         }
         self.rebuild_generation = self.rebuild_generation.wrapping_add(1);
-        Ok(())
+        Ok(reallocated)
     }
 
     /// Packed-neighbour construction pipeline (see
@@ -985,12 +1035,12 @@ impl NeighborListState {
         buffers: &ParticleBuffers,
         sim_box: &SimulationBox,
         r_search_sq: Real,
-    ) -> Result<(), NeighborListError> {
+    ) -> Result<bool, NeighborListError> {
         let device = self.device.clone();
         let kernels = self.kernels.clone();
         let particle_count = self.particle_count;
         if particle_count == 0 {
-            return Ok(());
+            return Ok(false);
         }
         let n_blocks = self
             .packed
@@ -998,7 +1048,7 @@ impl NeighborListState {
             .map(|p| p.n_blocks)
             .unwrap_or(0);
         if n_blocks == 0 {
-            return Ok(());
+            return Ok(false);
         }
 
         // Split borrow: cell-list's sorted_particle_ids (immutable) and
@@ -1038,6 +1088,11 @@ impl NeighborListState {
         )?;
 
         // 4. Find blocks with interactions (with grow+retry on overflow).
+        //    `reallocated` records whether any packed buffer grew during
+        //    this rebuild so the caller can re-capture a CUDA graph that
+        //    holds now-stale device pointers (see `cuda-graphs.md`).
+        //    rq-67a09135
+        let mut reallocated = false;
         loop {
             // Zero counters and overflow flag.
             device
@@ -1080,15 +1135,21 @@ impl NeighborListState {
                 packed.single_pairs_count = counts[1];
                 break;
             }
+            // Grow on overflow until the build fits. The interaction
+            // count is deterministic, so this converges after one or two
+            // retries; the seed is O(N) and growth tracks the true count,
+            // never the O(n_blocks^2) all-pairs pre-allocation. rq-67a09135
             if (flag[0] & 1) != 0 {
                 let required = counts[0].max(packed.interacting_tiles_capacity + 1);
                 packed.grow_to(&device, required).map_err(NeighborListError::Gpu)?;
+                reallocated = true;
             }
             if (flag[0] & 2) != 0 {
                 let required = counts[1].max(packed.single_pairs_capacity + 1);
                 packed
                     .grow_single_pairs_to(&device, required)
                     .map_err(NeighborListError::Gpu)?;
+                reallocated = true;
             }
         }
 
@@ -1129,7 +1190,7 @@ impl NeighborListState {
             packed.interacting_tiles_capacity,
         )?;
 
-        Ok(())
+        Ok(reallocated)
     }
 
     // rq-1217c816
@@ -1138,12 +1199,12 @@ impl NeighborListState {
         sim_box: &SimulationBox,
         buffers: &ParticleBuffers,
         timings: &mut Timings,
-    ) -> Result<(), NeighborListError> {
+    ) -> Result<PreStepOutcome, NeighborListError> {
         if self.particle_count == 0 {
-            return Ok(());
+            return Ok(PreStepOutcome::default());
         }
         if matches!(self.mode, NeighborListMode::Trivial) {
-            return Ok(());
+            return Ok(PreStepOutcome::default());
         }
 
         // CellListOnly mode rebuilds every step unconditionally; the
@@ -1152,7 +1213,11 @@ impl NeighborListState {
             if let NeighborListMode::CellListOnly(cl) = &mut self.mode {
                 cl.needs_rebuild = true;
             }
-            return self.rebuild(sim_box, buffers, timings);
+            let reallocated = self.rebuild(sim_box, buffers, timings)?;
+            return Ok(PreStepOutcome {
+                rebuilt: true,
+                reallocated,
+            });
         }
 
         let refreshed = self.refresh_cell_layout_if_box_changed(sim_box)?;
@@ -1180,9 +1245,13 @@ impl NeighborListState {
             if let NeighborListMode::CellList(cl) = &mut self.mode {
                 cl.needs_rebuild = true;
             }
-            self.rebuild(sim_box, buffers, timings)?;
+            let reallocated = self.rebuild(sim_box, buffers, timings)?;
+            return Ok(PreStepOutcome {
+                rebuilt: true,
+                reallocated,
+            });
         }
-        Ok(())
+        Ok(PreStepOutcome::default())
     }
 }
 
