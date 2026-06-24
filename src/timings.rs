@@ -103,7 +103,7 @@ impl KernelStage {
     pub const CLASS_ACCUMULATOR_MEMSET: KernelStage =
         KernelStage::new("class_accumulator_memset");
     pub const NEIGHBOR_DISPLACEMENT_SQUARED: KernelStage =
-        KernelStage::new("neighbor_displacement_squared");
+        KernelStage::new("neighbor_displacement_check_flag");
     pub const NEIGHBOR_LIST_BUILD: KernelStage = KernelStage::new("neighbor_list_build");
     pub const COPY_POSITIONS_INTO_REFERENCE: KernelStage =
         KernelStage::new("copy_positions_into_reference");

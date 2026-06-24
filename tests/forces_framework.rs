@@ -1374,7 +1374,7 @@ fn bonded_only_step_launches_no_neighbor_list_kernels() {
     let mut timings = Timings::new(&gpu).unwrap();
     ff.step(&mut buffers, &box_10(&gpu), &mut timings, AggregateLevel::ForcesAndScalars).unwrap();
     let report = timings.finalize().unwrap();
-    assert_eq!(stage_count(&report, "neighbor_displacement_squared"), 0);
+    assert_eq!(stage_count(&report, "neighbor_displacement_check_flag"), 0);
     assert_eq!(stage_count(&report, "neighbor_list_build"), 0);
 }
 

@@ -1727,13 +1727,14 @@ pub fn combine_class_totals(
 }
 
 // rq-884b5cd6
-pub fn neighbor_displacement_squared(
+pub fn neighbor_displacement_check_flag(
     particle_buffers: &ParticleBuffers,
     reference_x: &CudaSlice<Real>,
     reference_y: &CudaSlice<Real>,
     reference_z: &CudaSlice<Real>,
     sim_box: &SimulationBox,
-    disp_sq: &mut CudaSlice<Real>,
+    threshold_sq: Real,
+    disp_rebuild_flag: &mut CudaSlice<u32>,
 ) -> Result<(), GpuError> {
     let n = particle_buffers.particle_count();
     if n == 0 {
@@ -1742,9 +1743,13 @@ pub fn neighbor_displacement_squared(
     debug_assert_eq!(reference_x.len(), n);
     debug_assert_eq!(reference_y.len(), n);
     debug_assert_eq!(reference_z.len(), n);
-    debug_assert_eq!(disp_sq.len(), n);
+    debug_assert!(disp_rebuild_flag.len() >= 1);
     let n_u32 = n as u32;
-    let func = particle_buffers.kernels.neighbor.neighbor_displacement_squared.clone();
+    let func = particle_buffers
+        .kernels
+        .neighbor
+        .neighbor_displacement_check_flag
+        .clone();
     let cfg = launch_config(n_u32);
     let lattice = sim_box.lattice_device();
     unsafe {
@@ -1756,7 +1761,8 @@ pub fn neighbor_displacement_squared(
                 reference_y,
                 reference_z,
                 lattice,
-                disp_sq,
+                threshold_sq,
+                disp_rebuild_flag,
                 n_u32,
             ),
         )

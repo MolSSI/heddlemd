@@ -36,11 +36,23 @@ __device__ static inline void parallelepiped_cell_indices(
 }
 
 // rq-884b5cd6
-extern "C" __global__ void neighbor_displacement_squared(
+//
+// Device-side displacement check. One thread per atom computes the
+// minimum-image displacement from the atom's last-rebuild reference
+// position, squares it, and (only when the squared length exceeds the
+// host-supplied `threshold_sq = (r_skin / 2)²`) issues
+// `atomicOr(disp_rebuild_flag, 1u)`. The flag is therefore set to `1u`
+// as soon as any atom on any call exceeds the threshold and stays set
+// until the host explicitly clears it via `cudaMemset`. No per-atom
+// output buffer is written, so the kernel scales to N threads with a
+// single one-word output. See
+// `rqm/forces/neighbor-list.md` *Displacement Check*.
+extern "C" __global__ void neighbor_displacement_check_flag(
     const Real4 *posq,
     const Real *reference_x, const Real *reference_y, const Real *reference_z,
     const Real *lattice,
-    Real *disp_sq,
+    Real threshold_sq,
+    unsigned int *disp_rebuild_flag,
     unsigned int n)
 {
   Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
@@ -54,7 +66,10 @@ extern "C" __global__ void neighbor_displacement_squared(
   Real dy = pq.y - reference_y[i];
   Real dz = pq.z - reference_z[i];
   triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
-  disp_sq[i] = dx * dx + dy * dy + dz * dz;
+  Real d2 = dx * dx + dy * dy + dz * dz;
+  if (d2 > threshold_sq) {
+    atomicOr(disp_rebuild_flag, 1u);
+  }
 }
 
 // rq-a1262872

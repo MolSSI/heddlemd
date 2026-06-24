@@ -125,9 +125,13 @@ pub enum ConfigError {
 pub struct SimulationConfig {
     pub seed: u64,
     pub temperature: f64,
-    /// Number of step replays between displacement checks and
+    /// Number of step replays between displacement-flag downloads and
     /// output-cadence re-evaluations when an MD phase runs under CUDA
-    /// graph mode. Default 5. Must be `>= 1`. See `cuda-graphs.md`.
+    /// graph mode. Default 50. Must be `>= 1`. The displacement-check
+    /// kernel runs every step inside the captured graph regardless of
+    /// this value; raising the batch size lowers the per-batch
+    /// flag-download rate without changing the per-step displacement
+    /// bookkeeping. See `cuda-graphs.md`.
     #[serde(default = "default_graph_batch_size")]
     pub graph_batch_size: u32,
     /// When `true`, every MD phase runs the per-step launch loop with
@@ -142,7 +146,7 @@ pub struct SimulationConfig {
 }
 
 fn default_graph_batch_size() -> u32 {
-    5
+    50
 }
 
 // rq-18441e33 — parsed `[[phase]]` entry. The runner walks

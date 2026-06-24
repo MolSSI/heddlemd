@@ -9,7 +9,7 @@ use crate::gpu::device::get_func;
 use crate::gpu::{
     GpuContext, GpuError, Kernels, ParticleBuffers, SPATIAL_HASH_SCAN_BLOCK_SIZE,
     compute_cell_indices_and_histogram, copy_positions_into_reference,
-    neighbor_displacement_squared, neighbor_list_build, prefix_scan_cell_counts,
+    neighbor_displacement_check_flag, neighbor_list_build, prefix_scan_cell_counts,
     scatter_atoms_into_cells, sort_cells_by_particle_id,
 };
 use crate::kernels;
@@ -66,7 +66,19 @@ pub struct CellListData {
     pub reference_positions_x: CudaSlice<Real>,
     pub reference_positions_y: CudaSlice<Real>,
     pub reference_positions_z: CudaSlice<Real>,
-    pub disp_sq: CudaSlice<Real>,
+    /// Single-word device flag that the per-step displacement-check
+    /// kernel sets via `atomicOr` when any atom's minimum-image
+    /// displacement from its reference position exceeds
+    /// `sqrt(threshold_sq)`. Sticky across captured-graph replays;
+    /// zeroed by `memset_zeros` after every rebuild. See
+    /// `rqm/forces/neighbor-list.md` *Displacement Check*.
+    pub disp_rebuild_flag: CudaSlice<u32>,
+    /// `(r_skin / 2)²` cached as a host-side scalar so it can be
+    /// passed by value to the displacement-check kernel without an
+    /// extra device read. Set once at construction and again only
+    /// when `r_skin` itself changes (it does not change across a
+    /// phase).
+    pub threshold_sq: Real,
     pub overflow_flag: CudaSlice<u32>,
     pub needs_rebuild: bool,
 }
@@ -412,9 +424,9 @@ impl NeighborListState {
         let reference_positions_z = device
             .alloc_zeros::<Real>(particle_count.max(1))
             .map_err(GpuError::from)?;
-        let disp_sq = device
-            .alloc_zeros::<Real>(particle_count.max(1))
-            .map_err(GpuError::from)?;
+        let disp_rebuild_flag = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
+        let half_skin = (r_skin as f64) * 0.5;
+        let threshold_sq: Real = (half_skin * half_skin) as Real;
         let overflow_flag = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
 
         let n_blocks = ((particle_count as u32) + 31) / 32;
@@ -451,7 +463,8 @@ impl NeighborListState {
                 reference_positions_x,
                 reference_positions_y,
                 reference_positions_z,
-                disp_sq,
+                disp_rebuild_flag,
+                threshold_sq,
                 overflow_flag,
                 needs_rebuild: true,
             }),
@@ -515,7 +528,11 @@ impl NeighborListState {
         let reference_positions_x = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
         let reference_positions_y = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
         let reference_positions_z = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
-        let disp_sq = device.alloc_zeros::<Real>(0).map_err(GpuError::from)?;
+        // CellListOnly mode has no displacement check; the flag is
+        // never consulted but the field shape is shared with CellList,
+        // so allocate a length-1 device slot to keep the CudaSlice
+        // handle valid.
+        let disp_rebuild_flag = device.alloc_zeros::<u32>(1).map_err(GpuError::from)?;
         let overflow_flag = device.alloc_zeros::<u32>(0).map_err(GpuError::from)?;
 
         Ok(NeighborListState {
@@ -542,7 +559,8 @@ impl NeighborListState {
                 reference_positions_x,
                 reference_positions_y,
                 reference_positions_z,
-                disp_sq,
+                disp_rebuild_flag,
+                threshold_sq: 0.0,
                 overflow_flag,
                 needs_rebuild: true,
             }),
@@ -764,49 +782,75 @@ impl NeighborListState {
         Ok(n_cells_total_changed)
     }
 
-    // rq-c49b2fe6
-    pub fn displacement_check(
+    // rq-1f38d78a
+    /// Queue the per-step displacement-check kernel on the device's
+    /// default stream. One thread per atom computes the min-image
+    /// displacement from the rebuild-time reference position and sets
+    /// `disp_rebuild_flag = 1u` via `atomicOr` when the squared length
+    /// exceeds `threshold_sq = (r_skin / 2)²`. The flag is sticky:
+    /// it is otherwise cleared only by `pre_step` after a rebuild.
+    /// Called as the last device-visible action of every physical
+    /// step from `ForceField::step` and
+    /// `ForceField::step_no_neighbor_check`, so the launch sits inside
+    /// any captured graph that includes the per-step force sequence.
+    pub fn enqueue_displacement_check(
         &mut self,
         sim_box: &SimulationBox,
         buffers: &ParticleBuffers,
         timings: &mut Timings,
-    ) -> Result<Real, NeighborListError> {
+    ) -> Result<(), NeighborListError> {
         if self.particle_count == 0 {
-            return Ok(0.0);
+            return Ok(());
         }
         let cl = match &mut self.mode {
-            NeighborListMode::Trivial => return Ok(0.0),
-            // Bin-only mode has no displacement check; rebuild every step.
-            NeighborListMode::CellListOnly(_) => return Ok(0.0),
+            NeighborListMode::Trivial => return Ok(()),
+            // Bin-only mode rebuilds unconditionally each pre_step; no
+            // displacement check is queued.
+            NeighborListMode::CellListOnly(_) => return Ok(()),
             NeighborListMode::CellList(cl) => cl,
         };
         timings
             .kernel_start(KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED)
             .map_err(map_timings_err)?;
-        neighbor_displacement_squared(
+        neighbor_displacement_check_flag(
             buffers,
             &cl.reference_positions_x,
             &cl.reference_positions_y,
             &cl.reference_positions_z,
             sim_box,
-            &mut cl.disp_sq,
+            cl.threshold_sq,
+            &mut cl.disp_rebuild_flag,
         )?;
         timings
             .kernel_stop(KernelStage::NEIGHBOR_DISPLACEMENT_SQUARED)
             .map_err(map_timings_err)?;
+        Ok(())
+    }
 
-        let host: Vec<Real> = self
-            .device
-            .dtoh_sync_copy(&cl.disp_sq)
-            .map_err(GpuError::from)?;
-        let mut max_sq: f64 = 0.0;
-        for &v in host[..self.particle_count].iter() {
-            let v64 = v as f64;
-            if v64 > max_sq {
-                max_sq = v64;
-            }
+    // rq-c49b2fe6
+    /// Host-side consumer of `disp_rebuild_flag`: issues a single
+    /// 4-byte `dtoh_sync_copy` against the flag, returning `true` if
+    /// the kernel has signalled at any captured step since the last
+    /// rebuild that an atom's displacement exceeded `r_skin / 2`.
+    pub fn displacement_check(
+        &mut self,
+        _sim_box: &SimulationBox,
+        _buffers: &ParticleBuffers,
+        _timings: &mut Timings,
+    ) -> Result<bool, NeighborListError> {
+        if self.particle_count == 0 {
+            return Ok(false);
         }
-        Ok(max_sq.sqrt() as Real)
+        let cl = match &mut self.mode {
+            NeighborListMode::Trivial => return Ok(false),
+            NeighborListMode::CellListOnly(_) => return Ok(false),
+            NeighborListMode::CellList(cl) => cl,
+        };
+        let host: Vec<u32> = self
+            .device
+            .dtoh_sync_copy(&cl.disp_rebuild_flag)
+            .map_err(GpuError::from)?;
+        Ok(host[0] != 0)
     }
 
     // rq-7db97132
@@ -900,6 +944,7 @@ impl NeighborListState {
         self.rebuild_packed_neighbour(buffers, sim_box, r_search_sq)?;
 
         {
+            let device = self.device.clone();
             let cl = self.cell_list_data_mut().expect("non-Trivial mode");
             timings
                 .kernel_start(KernelStage::COPY_POSITIONS_INTO_REFERENCE)
@@ -913,6 +958,18 @@ impl NeighborListState {
             timings
                 .kernel_stop(KernelStage::COPY_POSITIONS_INTO_REFERENCE)
                 .map_err(map_timings_err)?;
+
+            // rq-1f38d78a
+            // Clear the device-side displacement-trip flag the rebuild
+            // just consumed. Without this reset the flag would remain
+            // sticky-`1u` and every subsequent `pre_step` download
+            // would observe a trip and trigger another rebuild. The
+            // memset queues on the default stream after the reference
+            // refresh, so subsequent step launches observe the cleared
+            // flag against the freshly written reference positions.
+            device
+                .memset_zeros(&mut cl.disp_rebuild_flag)
+                .map_err(GpuError::from)?;
 
             cl.needs_rebuild = false;
         }
@@ -1100,14 +1157,22 @@ impl NeighborListState {
 
         let refreshed = self.refresh_cell_layout_if_box_changed(sim_box)?;
 
-        let (mut rebuild_required, r_skin) = match &self.mode {
+        let mut rebuild_required = match &self.mode {
             NeighborListMode::Trivial | NeighborListMode::CellListOnly(_) => unreachable!(),
-            NeighborListMode::CellList(cl) => (cl.needs_rebuild, cl.r_skin),
+            NeighborListMode::CellList(cl) => cl.needs_rebuild,
         };
 
         if !refreshed && !rebuild_required {
-            let max_disp = self.displacement_check(sim_box, buffers, timings)?;
-            if max_disp > r_skin * 0.5 {
+            // rq-c49b2fe6
+            // Single-word `dtoh_sync_copy` of the device-resident
+            // displacement-trip flag. The flag was set by the per-step
+            // displacement-check kernel queued at the end of every
+            // captured force evaluation; a non-zero value means at
+            // least one captured step since the last rebuild observed
+            // an atom whose minimum-image displacement exceeded
+            // `r_skin / 2`.
+            let tripped = self.displacement_check(sim_box, buffers, timings)?;
+            if tripped {
                 rebuild_required = true;
             }
         }
@@ -1213,7 +1278,7 @@ fn map_timings_err(e: crate::timings::TimingsError) -> NeighborListError {
 // rq-2093594f rq-0469400b
 #[derive(Debug, Clone)]
 pub struct NeighborKernels {
-    pub neighbor_displacement_squared: CudaFunction,
+    pub neighbor_displacement_check_flag: CudaFunction,
     pub neighbor_list_build: CudaFunction,
     pub copy_positions_into_reference: CudaFunction,
     pub compute_cell_indices_and_histogram: CudaFunction,
@@ -1237,7 +1302,7 @@ impl NeighborKernels {
             Ptx::from_src(kernels::NEIGHBOR),
             "neighbor",
             &[
-                "neighbor_displacement_squared",
+                "neighbor_displacement_check_flag",
                 "neighbor_list_build",
                 "copy_positions_into_reference",
                 "compute_cell_indices_and_histogram",
@@ -1256,10 +1321,10 @@ impl NeighborKernels {
             ],
         )?;
         Ok(NeighborKernels {
-            neighbor_displacement_squared: get_func(
+            neighbor_displacement_check_flag: get_func(
                 device,
                 "neighbor",
-                "neighbor_displacement_squared",
+                "neighbor_displacement_check_flag",
             )?,
             neighbor_list_build: get_func(device, "neighbor", "neighbor_list_build")?,
             copy_positions_into_reference: get_func(

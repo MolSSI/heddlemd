@@ -385,7 +385,7 @@ fn kernel_counts_match_runner_launches() {
     // rq-62300a18: all-pairs records jit_composed_pair_force and
     // omits every neighbor-list-related row.
     assert!(stage_row(&body, "lj_pair_force_neighbor").is_none());
-    assert!(stage_row(&body, "neighbor_displacement_squared").is_none());
+    assert!(stage_row(&body, "neighbor_displacement_check_flag").is_none());
     assert!(stage_row(&body, "neighbor_list_build").is_none());
     assert!(stage_row(&body, "copy_positions_into_reference").is_none());
     assert!(stage_row(&body, "neighbor_list_rebuild").is_none());
@@ -1098,12 +1098,14 @@ fn cell_list_records_neighbor_stages() {
     assert!(stage_row(&body, "jit_composed_pair_force").is_some());
     assert!(stage_row(&body, "finalize_packed_forces").is_some());
     assert!(stage_row(&body, "scatter_positions_to_tile_order").is_some());
-    assert!(stage_row(&body, "neighbor_displacement_squared").is_some());
+    assert!(stage_row(&body, "neighbor_displacement_check_flag").is_some());
     assert!(stage_row(&body, "copy_positions_into_reference").is_some());
     assert!(stage_row(&body, "neighbor_list_rebuild").is_some());
-    // rq-75746f64: with n_steps=10, neighbor_displacement_squared runs
-    // once per loop step (no warm-up displacement check before step 1).
-    assert_eq!(stage_count(&body, "neighbor_displacement_squared"), Some(10));
+    // rq-75746f64: with n_steps=10, neighbor_displacement_check_flag runs
+    // once per `ForceField::step` call. The runner issues one warm-up
+    // step at phase entry plus one step per loop iteration, so the
+    // kernel records 11 launches for an n_steps=10 phase.
+    assert_eq!(stage_count(&body, "neighbor_displacement_check_flag"), Some(11));
 }
 
 // rq-7f2310ac

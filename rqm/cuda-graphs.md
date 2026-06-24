@@ -242,10 +242,10 @@ sequence:
    phase setup; this is a programmer error rather than a runtime
    fallback.
 2. The runner calls `nl.pre_step(sim_box, buffers, timings)` once.
-   This runs the displacement check (a host dtoh of `disp_sq` followed
-   by a host max + comparison) and rebuilds the neighbor list if
-   triggered. The call happens outside any graph capture and is not
-   recorded.
+   `pre_step` downloads the single-word
+   `disp_rebuild_flag` and rebuilds the neighbor list when the flag
+   is non-zero (see `forces/neighbor-list.md` *Displacement Check*).
+   The call happens outside any graph capture and is not recorded.
 3. The runner calls
    `device.begin_stream_capture(CaptureMode::ThreadLocal)` on the
    default stream.
@@ -274,6 +274,15 @@ sequence:
      `bind_post_force_per_particle_args(...)` in canonical order
      (integrator → thermostat → barostat), then pushes the
      trailing `n` arg, then issues one `cuLaunchKernel`.
+   - The displacement-check kernel
+     `neighbor_displacement_check_flag` launched by
+     `force_field.step_no_neighbor_check` after the post-force
+     per-particle kernel. The kernel reads the now-updated positions
+     against `reference_positions_*` and sets
+     `cl.disp_rebuild_flag` to `1u` via `atomicOr` if any atom's
+     minimum-image displacement exceeds `r_skin / 2`. The flag is
+     sticky across replays of the captured graph until cleared by
+     the host between batches.
 5. The runner calls `device.end_stream_capture()` to obtain a
    `CudaGraph`.
 6. The runner instantiates the executable graph via
@@ -309,7 +318,7 @@ while remaining > 0:
     step      += batch
     remaining -= batch
 
-    nl.pre_step(sim_box, buffers, timings)              // displacement check
+    nl.pre_step(sim_box, buffers, timings)              // 4-byte dtoh of disp_rebuild_flag; rebuild iff non-zero
     if step % traj_every == 0:
         sim_box.flush_from_device()
         download positions (and velocities when configured)
@@ -327,23 +336,38 @@ cadences (`log_every`, `trajectory_every`) shrink the effective batch
 when they are not multiples of `graph_batch_size`. The captured graph
 itself is always one physical step.
 
+Every per-batch `nl.pre_step` synchronises against the device only
+via a single 4-byte `dtoh_sync_copy` of `disp_rebuild_flag`. When the
+flag is zero (the common case at typical liquid-MD displacement
+rates and the default `K = 50` cadence) no further host work happens.
+When the flag is non-zero, the rebuild pipeline runs synchronously,
+the reference positions are refreshed, and `disp_rebuild_flag` is
+zeroed via a single `memset_zeros` before the next batch's first
+graph launch.
+
 ### Skin-distance contract under batched replay <!-- rq-b57700e0 -->
 
 The neighbor-list rebuild trigger fires when any particle's
-displacement from its last-reference position exceeds `r_skin / 2`.
-With `graph_batch_size = K` the displacement check is invoked once
-per K steps; in the worst case a particle covers `K *
-max_step_displacement` before the next check. The skin-distance
-contract holds when
+displacement from its last-reference position exceeds `r_skin / 2`
+*at any captured step inside the batch*. The displacement-check
+kernel runs every step inside the captured graph and writes
+`disp_rebuild_flag = 1u` via `atomicOr` the first time a step's
+particle exceeds the threshold; the flag is sticky until the host
+clears it. With `graph_batch_size = K` the host consults the flag
+once per K steps; in the worst case a particle covers
+`K * max_step_displacement` before the host acts on the trigger and
+runs a rebuild on the next batch boundary. The skin-distance
+contract therefore holds when
 
 ```
 K * max_step_displacement < r_skin / 2.
 ```
 
-At the typical setting `r_skin = 0.3 * r_cut` and `K = 5`, the
-per-step displacement bound is `0.03 * r_cut`. Liquid MD at room
+At the typical setting `r_skin = 0.3 * r_cut` and `K = 50`, the
+per-step displacement bound is `0.003 * r_cut`. Liquid MD at room
 temperature with `r_cut ≈ 9 Å` and `dt = 1 fs` rarely exceeds
-`0.01 * r_cut` per step, leaving a 3× safety margin.
+`0.001 * r_cut` per step, leaving a 3× safety margin at the default
+batch size.
 
 If users tune `K` or `r_skin` outside the safe regime the skin
 contract degrades silently: particles may drift past `r_skin / 2`
@@ -402,13 +426,15 @@ launch loop produces per-step samples for every `KernelStage`.
 
 `[simulation]` schema fields:
 
-- `graph_batch_size: u32` (optional, default `5`) — number of step
-  replays between displacement checks and output-cadence
-  re-evaluations. Must be `>= 1`. Setting `graph_batch_size = 1`
-  retains the per-step displacement-check cadence and adds one
-  `cuGraphLaunch` per step on top of the existing kernel sequence;
-  it is slower than non-graph mode and is intended for diagnostic
-  use only.
+- `graph_batch_size: u32` (optional, default `50`) — number of step
+  replays between displacement-flag downloads and output-cadence
+  re-evaluations. Must be `>= 1`. The displacement-check *kernel*
+  runs every step inside the captured graph regardless of this
+  value; raising the batch size lowers the per-batch flag-download
+  rate without changing the per-step displacement bookkeeping.
+  Setting `graph_batch_size = 1` adds one `cuGraphLaunch` per step on
+  top of the existing kernel sequence; it is slower than non-graph
+  mode and is intended for diagnostic use only.
 - `cuda_graphs_disable: bool` (optional, default `false`) — when
   `true`, every MD phase runs the per-step launch loop with full
   per-kernel `Timings`. Provided as a diagnostic escape hatch for
@@ -517,7 +543,7 @@ Feature: CUDA graph capture and replay
   Background:
     Given a CUDA driver that supports stream capture
     And [simulation].cuda_graphs_disable = false
-    And [simulation].graph_batch_size = 5
+    And [simulation].graph_batch_size = 50
 
   @rq-acc595b8
   Scenario: Eligible phase captures a graph at phase start
@@ -627,6 +653,53 @@ Feature: CUDA graph capture and replay
   Scenario: graph_batch_size = 0 rejected at config load
     When a config sets graph_batch_size = 0
     Then config load returns ConfigError::InvalidValue with field "simulation.graph_batch_size" and reason "value must be >= 1, got 0"
+
+  # --- Device-side displacement check ---
+
+  @rq-59bbfa07
+  Scenario: Captured graph includes the displacement-check kernel
+    Given an eligible MD phase enters graph capture
+    When the captured kernel sequence is enumerated
+    Then neighbor_displacement_check_flag appears exactly once per captured step
+    And its launch is recorded after the post-force per-particle kernel
+
+  @rq-faf1dd2e
+  Scenario: Per-batch host work is a single 4-byte download
+    Given an eligible phase running in graph mode with graph_batch_size = 50
+    And no log_every or traj_every output is due at this batch boundary
+    When the batch completes its 50 graph launches
+    Then nl.pre_step issues exactly one dtoh_sync_copy of length 1 (u32) against disp_rebuild_flag
+    And no host-device particle transfer is performed at this batch boundary
+
+  @rq-c4cc1d99
+  Scenario: Quiescent batch incurs no rebuild
+    Given an eligible phase in which no particle exceeds r_skin / 2 across any of the 50 captured replays
+    When the batch completes
+    Then disp_rebuild_flag downloaded by nl.pre_step is 0u
+    And nl.pre_step performs no cell-list rebuild
+    And reference_positions_{x,y,z} are unchanged
+
+  @rq-f4069c16
+  Scenario: Triggered batch rebuilds exactly once
+    Given an eligible phase in which at least one particle exceeds r_skin / 2 on some captured replay inside the batch
+    When the batch completes
+    Then disp_rebuild_flag downloaded by nl.pre_step is 1u
+    And nl.pre_step performs exactly one cell-list rebuild
+    And disp_rebuild_flag is zeroed via memset_zeros before the next batch's first graph launch
+
+  @rq-151a7e82
+  Scenario: Default graph_batch_size is 50
+    Given a config without [simulation].graph_batch_size
+    When config load completes
+    Then simulation.graph_batch_size resolves to 50
+
+  @rq-6caca2f6
+  Scenario: Skin contract holds for default K and typical liquid MD displacement rates
+    Given graph_batch_size = 50
+    And r_skin = 0.3 * r_cut
+    And max_step_displacement <= 0.001 * r_cut
+    When the timestep loop runs
+    Then K * max_step_displacement <= 0.05 * r_cut < r_skin / 2 = 0.15 * r_cut
 
   @rq-2333f6af
   Scenario: cuda_graphs_disable overrides slot eligibility

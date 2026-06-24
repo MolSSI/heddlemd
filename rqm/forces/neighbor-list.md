@@ -178,35 +178,71 @@ list and does not run a per-particle neighbour-build kernel. The
 
 ## Displacement Check <!-- rq-1f38d78a -->
 
-Every timestep (after the integrator's pre-force step has updated
-positions), the runner runs a *displacement-check* kernel:
+`CellListData` carries a one-element device buffer
+`disp_rebuild_flag: CudaSlice<u32>` and three reference-position
+buffers `reference_positions_{x,y,z}: CudaSlice<Real>` of length `N`.
+The reference positions are written immediately after every rebuild,
+recording the positions used during that rebuild. The flag is reset
+to `0` immediately after every rebuild and is otherwise written only
+by the displacement-check kernel.
 
-1. Per atom `i`, compute `disp² = (x_i - x_i_ref)² + (y_i - y_i_ref)² +
-   (z_i - z_i_ref)²` using the minimum-image-wrapped displacement (so an
-   atom that moved through a PBC boundary still reports a small
-   displacement rather than `L - epsilon`).
-2. Write `disp²` to a per-atom buffer of length `N`.
+The displacement-check kernel `neighbor_displacement_check_flag(posq,
+reference_x, reference_y, reference_z, lattice, threshold_sq,
+disp_rebuild_flag, n)` runs once per physical timestep as the last
+device-visible action in the per-step force-evaluation pipeline. One
+thread per atom:
 
-The host downloads the per-atom buffer (one f32 each), computes
-`max_disp = sqrt(max_i disp²_i)` in f64, and compares against
-`r_skin / 2`. If `max_disp > r_skin / 2`, the host sets a
-`needs_rebuild` flag.
+1. Computes `disp² = dx² + dy² + dz²` from
+   `(posq[i].xyz − reference_*[i])` with the minimum-image wrap
+   applied to the displacement vector (so an atom that crossed a PBC
+   boundary still reports a small `disp²` rather than ≈ `L²`).
+2. When `disp² > threshold_sq`, issues `atomicOr(disp_rebuild_flag, 1u)`.
 
-`x_i_ref` / `y_i_ref` / `z_i_ref` are reference positions captured at
-the time of the last rebuild and held in three device buffers of
-length `N`. They are updated immediately after each rebuild to the
-positions used during that rebuild.
+`threshold_sq` is `(r_skin / 2)²`, a per-`NeighborListState` scalar set
+once at construction time and re-derived only if `r_skin` changes (it
+does not change across the lifetime of a phase). The kernel is
+launched on the device's default stream from
+`ForceField::step` and `ForceField::step_no_neighbor_check` so the
+launch sits in the same default-stream sequence as the force kernels
+and is recorded into the captured graph when capture is active.
 
-Host-side max instead of a device max-reduction keeps the implementation
-small for v1; the per-step download is one f32 per particle (40 KB at
-N = 10000, ~4 µs over PCIe), well below the rebuild interval cost the
-displacement check is amortising.
+`NeighborListState::pre_step(sim_box, buffers, timings)` consumes the
+flag as follows:
 
-When a phase runs under CUDA graph mode (`cuda-graphs.md`), the runner
-moves the `NeighborListState::pre_step` call out of `ForceField::step`
-and into the batched-replay outer loop. The displacement check is then
-invoked once per `graph_batch_size` physical steps rather than every
-step; the skin-distance contract holds as long as
+1. If the cell-layout cache reports a box-generation mismatch (see
+   *Box Generation Tracking*) and the refresh changes `n_cells_total`,
+   the displacement check is skipped and a rebuild is forced.
+2. Otherwise, the host issues `dtoh_sync_copy(&disp_rebuild_flag)` —
+   a single-word blocking download on the default stream. The download
+   ordering against earlier kernel writes is guaranteed by the
+   default-stream sequence.
+3. If the downloaded `u32` is non-zero, the host sets
+   `needs_rebuild = true`.
+4. If `needs_rebuild`, the host runs the rebuild (cell-list pipeline
+   plus packed-neighbour construction), writes the current positions
+   into `reference_positions_*`, and zeros `disp_rebuild_flag` via
+   `device.memset_zeros(&mut cl.disp_rebuild_flag)` on the same
+   default stream.
+
+Inside a `pre_step` that does not rebuild, the flag is left in
+whatever state the kernel wrote it (it is a sticky boolean across
+multiple captured steps; only a rebuild clears it).
+
+Because the flag is written every step but cleared only on rebuild,
+the value the host reads at the end of a batched replay reflects "any
+step in the batch tripped `r_skin / 2`" rather than "the current
+state at the end of the last step". This is the conservative
+direction: a rebuild fires whenever at least one step inside the
+window saw an over-threshold particle, even if subsequent particle
+motion would have brought the maximum back under the threshold.
+
+When a phase runs under CUDA graph mode (`cuda-graphs.md`), the
+runner moves the `NeighborListState::pre_step` call out of
+`ForceField::step` and into the batched-replay outer loop. The
+displacement-check *kernel* still runs every step (it is part of the
+captured graph), but the host's per-batch consumption of the flag
+runs once per `graph_batch_size` physical steps rather than every
+step. The skin-distance contract holds as long as
 `graph_batch_size * max_step_displacement < r_skin / 2`. See
 `cuda-graphs.md`'s *Skin-distance contract under batched replay* for
 the analysis.
@@ -239,9 +275,9 @@ state:
    `n_cells_total`) if `n_cells_total` differs from the previous value,
    and rebuilds the prefix scan's block-totals stack to match the new
    `n_cells_total`. Other device buffers (`neighbor_list`,
-   `neighbor_counts`, `reference_positions_*`, `disp_sq`,
-   `overflow_flag`, `cell_indices`) are sized by `particle_count` or are
-   scalar and are not reallocated.
+   `neighbor_counts`, `reference_positions_*`, `disp_rebuild_flag`,
+   `overflow_flag`, `cell_indices`) are sized by `particle_count` or
+   are scalar and are not reallocated.
 5. Stores the new `n_cells`, `n_cells_total`, and the cached lattice
    parameters used by the spatial-hash and build kernels, and replaces
    `cached_generation` with `sim_box.generation()`.
@@ -280,31 +316,42 @@ The runner holds one host-side `bool` flag `needs_rebuild`. Its initial
 value is `true` so the warm-up force evaluation triggers the first
 rebuild.
 
-Per timestep, after the integrator's pre-force step:
+Per `pre_step` call (every timestep in non-graph mode; once per
+`graph_batch_size` physical steps in graph mode):
 
 1. If `sim_box.generation() != cached_generation`, refresh the cell-layout
    cache (see *Box Generation Tracking*). The refresh sets
-   `needs_rebuild = true` and skips the displacement-check kernel for
-   this step only when the refreshed `n_cells_total` differs from the
-   prior cached value. When `n_cells_total` is unchanged the refresh
-   updates the cached lattice parameters and `cached_generation` only
-   and falls through to the displacement-check step below. The refresh
-   may return `BoxTooSmallForCells`, in which case `pre_step` aborts and
-   the error propagates.
-2. Run the displacement-check kernel, download the per-atom
-   buffer, compute `max_disp`, and set `needs_rebuild = true` if
-   `max_disp > r_skin / 2`. The displacement check is skipped when
+   `needs_rebuild = true` and bypasses the displacement-flag download
+   for this call only when the refreshed `n_cells_total` differs from
+   the prior cached value. When `n_cells_total` is unchanged the
+   refresh updates the cached lattice parameters and
+   `cached_generation` only and falls through to the flag-download step
+   below. The refresh may return `BoxTooSmallForCells`, in which case
+   `pre_step` aborts and the error propagates.
+2. Download `disp_rebuild_flag` (a single `u32`) via
+   `dtoh_sync_copy`. If the value is non-zero, set
+   `needs_rebuild = true`. The download is skipped when
    `needs_rebuild` is already true.
 3. If `needs_rebuild`:
    a. Run the on-device cell-list pipeline (see *Cell List Construction*)
       to repopulate `cell_indices`, `cell_counts`, `cell_offsets`, and
       `sorted_particle_ids` from the current positions.
-   b. Run the neighbor-list-build kernel.
+   b. Run the packed-neighbour construction (see
+      `packed-neighbour-pair-force.md`).
    c. Check the overflow flag; fail-loud if set.
-   d. Copy current positions into the reference-positions buffers.
-   e. Set `needs_rebuild = false`.
+   d. Copy current positions into the reference-position buffers.
+   e. Zero `disp_rebuild_flag` via `device.memset_zeros(&mut
+      cl.disp_rebuild_flag)`.
+   f. Set `needs_rebuild = false`.
 4. Run downstream contribution kernels (see `framework.md`), which read
    the neighbor list.
+
+The displacement-check *kernel* itself runs every physical timestep
+(it is queued by `ForceField::step` and `ForceField::step_no_neighbor_check`
+as the last device-visible action of the step). The flag it writes
+is sticky across steps until a rebuild clears it, so the value read
+in step 2 above reflects "any timestep since the last rebuild tripped
+`r_skin / 2`".
 
 In `CellListOnly` mode, `pre_step` skips the displacement check
 entirely and runs the cell-list pipeline (cell indexing, prefix scan,
@@ -441,8 +488,11 @@ displacement-check kernel runs over the lifetime of the run.
     `n_cells_total` changes.
   - `sorted_particle_ids: CudaSlice<u32>` (length `N`)
   - `reference_positions_x/y/z: CudaSlice<f32>` (length `N`)
-  - `disp_sq: CudaSlice<f32>` (length `N`) — scratch for the
-    displacement-check kernel.
+  - `disp_rebuild_flag: CudaSlice<u32>` (length `1`) — single-word
+    rebuild flag written by the displacement-check kernel and read by
+    `pre_step`. See *Displacement Check*.
+  - `threshold_sq: f32` — host-side cache of `(r_skin / 2)²`, passed
+    as a kernel argument by the displacement-check kernel launch.
   - `needs_rebuild: bool` — initial value `true`.
 
   The packed-neighbour buffers (`tile_sorted_positions_*`,
@@ -519,8 +569,8 @@ displacement-check kernel runs over the lifetime of the run.
     `cell_counts`, `write_cursors`, `scan_block_totals`,
     `sorted_particle_ids`, `cell_offsets`) sized to `n_cells_total`.
     Does **not** allocate `neighbor_list`, `neighbor_counts`,
-    `reference_positions_*`, `disp_sq`, or `overflow_flag` (these
-    fields are absent from `CellListOnly`-mode states).
+    `reference_positions_*`, `disp_rebuild_flag`, or `overflow_flag`
+    (these fields are absent from `CellListOnly`-mode states).
   - `r_cut`, `r_skin`, `r_search_sq` are not stored.
   - The state's `pre_step` rebuilds the cell list on every call,
     unconditionally; the displacement-check kernel is never launched
@@ -577,9 +627,11 @@ displacement-check kernel runs over the lifetime of the run.
        refresh updates `cached_generation` and the cached lattice
        parameters and falls through to step 2. May return
        `BoxTooSmallForCells`.
-    2. If `!needs_rebuild`, runs the displacement check and sets
-       `needs_rebuild = true` if `max_disp > r_skin / 2`.
-    3. If `needs_rebuild`, runs the rebuild and clears the flag.
+    2. If `!needs_rebuild`, downloads `disp_rebuild_flag` (a single
+       `u32`) and sets `needs_rebuild = true` when the value is
+       non-zero.
+    3. If `needs_rebuild`, runs the rebuild, refreshes the reference
+       positions, and zeros `disp_rebuild_flag`.
     In `Trivial` mode this is a no-op.
 
 ### CUDA Kernels <!-- rq-0469400b -->
@@ -589,11 +641,13 @@ displacement-check kernel runs over the lifetime of the run.
 Neighbor-list-build pipeline:
 
 ```c
-extern "C" __global__ void neighbor_displacement_squared(
+extern "C" __global__ void neighbor_displacement_check_flag(
     const float4 *posq,
     const float *reference_x, const float *reference_y, const float *reference_z,
     const float *lattice,           // length 6: [lx, ly, lz, xy, xz, yz]
-    float *disp_sq,
+    float threshold_sq,             // (r_skin / 2)²
+    unsigned int *disp_rebuild_flag,// length 1; set to 1 via atomicOr on first
+                                    //   atom that exceeds threshold
     unsigned int n);
 
 extern "C" __global__ void neighbor_list_build(
@@ -623,14 +677,21 @@ x/y/z. `copy_positions_into_reference` splits `posq.xyz` into
 the three scalar reference buffers at every neighbour-list
 rebuild.
 
+`neighbor_displacement_check_flag` writes nothing when every atom is
+within `r_skin / 2` of its reference position. When at least one
+atom exceeds the threshold, the first such thread issues
+`atomicOr(disp_rebuild_flag, 1u)` and the flag becomes `1u`. The
+flag is otherwise mutated only by host-side `memset_zeros` immediately
+after a rebuild.
+
 The six lattice parameters `(lx, ly, lz, xy, xz, yz)` carry the box's
 lower-triangular form (see `simulation-box.md`). Both
-`neighbor_displacement_squared` and `neighbor_list_build` compute their
-minimum-image displacements via the triclinic *Wrap Algorithm* defined in
-`simulation-box.md`. The neighbor-list-build kernel also computes its
-own and its neighbor-cell indices in fractional coordinates from these
-six values (no separate `cell_size_x/y/z` argument; `1.0f / n_cells_d` is
-computed on the fly).
+`neighbor_displacement_check_flag` and `neighbor_list_build` compute
+their minimum-image displacements via the triclinic *Wrap Algorithm*
+defined in `simulation-box.md`. The neighbor-list-build kernel also
+computes its own and its neighbor-cell indices in fractional
+coordinates from these six values (no separate `cell_size_x/y/z`
+argument; `1.0f / n_cells_d` is computed on the fly).
 
 Spatial-hash pipeline (cell-list construction):
 
@@ -700,7 +761,13 @@ Each is a no-op when `particle_count == 0`.
 
 Neighbor-list-build pipeline:
 
-- `neighbor_displacement_squared(particle_buffers, reference_x, reference_y, reference_z, sim_box, disp_sq) -> Result<(), GpuError>` <!-- rq-884b5cd6 -->
+- `neighbor_displacement_check_flag(particle_buffers, reference_x, reference_y, reference_z, sim_box, threshold_sq, disp_rebuild_flag) -> Result<(), GpuError>` <!-- rq-884b5cd6 -->
+  — launches the per-atom displacement-check kernel; sets
+  `disp_rebuild_flag` to `1u` if any atom's minimum-image displacement
+  from its reference position exceeds `sqrt(threshold_sq)`. Called
+  once per physical timestep from `ForceField::step` /
+  `ForceField::step_no_neighbor_check` so the launch sits inside the
+  captured graph when capture is active.
 - `neighbor_list_build(particle_buffers, sorted_particle_ids, cell_offsets, sim_box, n_cells, r_search_sq, max_neighbors, neighbor_list, neighbor_counts, overflow_flag) -> Result<(), GpuError>` <!-- rq-a1262872 -->
 - `copy_positions_into_reference(particle_buffers, reference_x, reference_y, reference_z) -> Result<(), GpuError>` <!-- rq-344f7af0 -->
 
@@ -992,24 +1059,47 @@ Feature: Cell-list neighbor list
 
   # --- Displacement check ---
 
-  @rq-53ae77a4
-  Scenario: Displacement check on reference positions equal to current returns 0
+  @rq-837c85d3
+  Scenario: Displacement-check kernel on reference positions equal to current leaves the flag clear
     Given a NeighborListState immediately after a rebuild
-    When displacement_check is called
-    Then it returns 0.0 (to within f32 round-off)
+    When neighbor_displacement_check_flag runs
+    Then disp_rebuild_flag remains 0u
 
-  @rq-b39d3be7
-  Scenario: Displacement check uses minimum-image displacement
+  @rq-6e1f04f3
+  Scenario: Displacement-check kernel uses minimum-image displacement
     Given a particle whose reference position is x = lx/2 - 0.05
     And whose current position is x = -lx/2 + 0.05 (wrapped across the boundary)
-    When displacement_check is called
-    Then the reported max displacement is approximately 0.1, not lx - 0.1
+    And threshold_sq = 0.15² (i.e., r_skin / 2 = 0.15)
+    When neighbor_displacement_check_flag runs
+    Then disp_rebuild_flag remains 0u (the wrapped displacement is ≈ 0.1, below threshold)
 
-  @rq-f94ee5cd
-  Scenario: Displacement check returns the maximum across all particles
-    Given particle 7 has moved 0.5 from its reference and all others have moved less
-    When displacement_check is called
-    Then the result equals 0.5
+  @rq-c43dd1ab
+  Scenario: Displacement-check kernel sets the flag when any particle exceeds threshold
+    Given particle 7 has moved 0.5 from its reference and all other particles have moved less than r_skin / 2
+    When neighbor_displacement_check_flag runs
+    Then disp_rebuild_flag equals 1u
+
+  @rq-c9f970fe
+  Scenario: Displacement-check kernel is sticky across captured replays
+    Given a captured graph that runs neighbor_displacement_check_flag every step
+    And the graph is replayed for K = 50 steps in a single batch
+    And on the third replay particle 7 exceeds threshold but on the fiftieth replay every particle is back within threshold
+    When the host downloads disp_rebuild_flag at the batch boundary
+    Then the downloaded value equals 1u
+
+  @rq-46d72444
+  Scenario: A rebuild clears the displacement flag
+    Given disp_rebuild_flag holds 1u and pre_step decides to rebuild
+    When the rebuild completes
+    Then reference_positions_{x,y,z} equal the current posq.xyz componentwise
+    And disp_rebuild_flag has been zeroed via memset_zeros before pre_step returns
+
+  @rq-5d2e8748
+  Scenario: pre_step downloads exactly one u32 per call
+    Given a NeighborListState in CellList mode with N = 24576 particles
+    When pre_step is called
+    Then exactly one dtoh_sync_copy of length 1 (u32) is issued against disp_rebuild_flag
+    And no other host-device particle transfer is issued by pre_step
 
   # --- Rebuild policy ---
 
@@ -1080,7 +1170,7 @@ Feature: Cell-list neighbor list
     Given a NeighborListState built via new_trivial
     Then state.mode equals NeighborListMode::Trivial
     And the cell-list-specific buffers (sorted_particle_ids, cell_offsets,
-      reference_positions_*, disp_sq, overflow_flag) are absent
+      reference_positions_*, disp_rebuild_flag, overflow_flag) are absent
 
   # --- Shared-service ownership ---
 
@@ -1205,8 +1295,7 @@ Feature: Cell-list neighbor list
     When box.set_lattice is called bumping the generation, with the new lattice
       yielding the same n_cells_total as before
     And pre_step is called with the updated box
-    Then the displacement-check kernel was launched
-    And max_disp > 0.5
+    Then pre_step downloads disp_rebuild_flag and observes 1u
     And state.needs_rebuild was set to true and a rebuild was performed
     And state.cached_generation equals the new box generation after the call
 
@@ -1219,9 +1308,9 @@ Feature: Cell-list neighbor list
       that ticks the generation and scales the box by 1.0e-4 (so n_cells_total
       stays constant) and a small physical-coord atom drift
     Then the number of rebuilds performed across the K pre_step calls equals
-      the number of pre_step calls on which max_disp first crossed r_skin / 2
-      (the same set that would have triggered in a no-barostat NVT run with
-      the same atom drifts)
+      the number of pre_step calls on which the downloaded disp_rebuild_flag
+      first reads 1u (the same set that would have triggered in a no-barostat
+      NVT run with the same atom drifts)
     And no pre_step call triggers a rebuild solely from the generation tick
 
   @rq-72aae589

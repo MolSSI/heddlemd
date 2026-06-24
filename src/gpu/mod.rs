@@ -33,7 +33,7 @@ pub use kernels::{
     scatter_entries_by_iblock,
     lan_drift_half, lan_ou_step, lj_pair_force,
     mtk_position_drift, mtk_velocity_half_kick,
-    neighbor_displacement_squared, neighbor_list_build,
+    neighbor_displacement_check_flag, neighbor_list_build,
     prefix_scan_cell_counts, reduce_angle_forces, reduce_bond_forces,
     rescale_positions, rescale_positions_device_factor, rescale_velocities,
     rescale_velocities_device_factor,

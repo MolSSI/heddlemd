@@ -1322,6 +1322,18 @@ impl ForceField {
             &self.slow_total_virials,
         )?;
         timings.kernel_stop(KernelStage::COMBINE_CLASS_TOTALS)?;
+
+        // Step 6: device-side displacement-check kernel. Sets the
+        // cell-list's `disp_rebuild_flag` to `1u` if any atom's
+        // min-image displacement from its reference position exceeds
+        // `r_skin / 2`. The flag is sticky across replays and is
+        // cleared on rebuild. Queued here as the last per-step launch
+        // so it lands inside any captured CUDA graph that includes
+        // the force-evaluation sequence. See
+        // `rqm/forces/neighbor-list.md` *Displacement Check*.
+        if let Some(nl) = self.neighbor_list.as_mut() {
+            nl.enqueue_displacement_check(sim_box, buffers, timings)?;
+        }
         Ok(())
     }
 }

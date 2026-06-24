@@ -1149,7 +1149,7 @@ Feature: Packed-Neighbour Pair-Force Architecture
   @rq-b1060817
   Scenario: MAX_BITS_FOR_PAIRS equals 3
     Given the construction kernel's compiled source
-    Then `MAX_BITS_FOR_PAIRS` resolves to the literal 3 (matching OpenMM's compute-capability-8.0+ value)
+    Then `MAX_BITS_FOR_PAIRS` resolves to the literal 3
 
   @rq-7646dd13
   Scenario: interacting_tiles overflow grows the buffer and re-runs construction
