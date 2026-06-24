@@ -537,6 +537,17 @@ __device__ static inline Real packed_block_bbox_dist_sq(
 #define PACKED_NL_BLOCK_SIZE (PACKED_NL_WARPS_PER_BLOCK * 32)
 #define PACKED_NL_BUFFER_SIZE 64
 
+// rq-bce26a14
+// Compile-time threshold for sparse-tile single-pair extraction.
+// Matches OpenMM's MAX_BITS_FOR_PAIRS on compute capability 8.0+
+// (CudaNonbondedUtilities.cpp:523). When a candidate (i-block,
+// j-block) pair produces <= MAX_BITS_FOR_PAIRS j-atom hits, every
+// (i_atom, j_atom) hit is written individually to single_pair_atoms
+// instead of being merged into the packed-neighbour buffer.
+#ifndef MAX_BITS_FOR_PAIRS
+#define MAX_BITS_FOR_PAIRS 3
+#endif
+
 extern "C" __global__ void find_blocks_with_interactions(
     const Real *tile_sorted_positions_x,
     const Real *tile_sorted_positions_y,
@@ -549,8 +560,10 @@ extern "C" __global__ void find_blocks_with_interactions(
     unsigned int n_blocks,
     unsigned int n_atoms,
     unsigned int max_entries,
+    unsigned int max_single_pairs,
     unsigned int *interacting_tiles,
     unsigned int *interacting_atoms,
+    unsigned int *single_pair_atoms,
     unsigned int *interaction_count,
     unsigned int *overflow_flag)
 {
@@ -630,9 +643,11 @@ extern "C" __global__ void find_blocks_with_interactions(
       unsigned int jid = j_in_range ? sorted_particle_ids[j_slot] : n_atoms;
 
       // Test j-atom (this lane's) against all 32 i-atoms via lane sweep.
+      // Per lane: bit `m` of `i_hit_mask` is set when i-atom `m` is in
+      // range of this lane's j-atom (and is a distinct atom).
       Real lx_ = lattice[0]; Real ly_ = lattice[1]; Real lz_ = lattice[2];
       Real xy_ = lattice[3]; Real xz_ = lattice[4]; Real yz_ = lattice[5];
-      bool any_hit = false;
+      unsigned int i_hit_mask = 0u;
       for (unsigned int m = 0u; m < TILE_SIZE; ++m) {
         Real ax = warp_ix[warp_in_block][m];
         Real ay = warp_iy[warp_in_block][m];
@@ -645,22 +660,46 @@ extern "C" __global__ void find_blocks_with_interactions(
         // Skip self-pair (same original atom ID).
         unsigned int aid = warp_iid[warp_in_block][m];
         if (aid != jid && r2 <= r_search_sq) {
-          any_hit = true;
+          i_hit_mask |= (1u << m);
         }
       }
+      bool any_hit = (i_hit_mask != 0u);
       unsigned int hit_ballot = __ballot_sync(0xFFFFFFFFu, any_hit ? 1u : 0u);
-
-      // Pack hits into the warp buffer.
-      if (any_hit) {
-        unsigned int prefix = __popc(hit_ballot & ((1u << lane) - 1u));
-        unsigned int buf_pos = warp_buf_len[warp_in_block] + prefix;
-        if (buf_pos < PACKED_NL_BUFFER_SIZE) {
-          warp_buffer[warp_in_block][buf_pos] = jid;
-        }
-      }
       unsigned int hits = __popc(hit_ballot);
-      if (lane == 0u) {
-        warp_buf_len[warp_in_block] += hits;
+
+      if (hits > 0u && hits <= MAX_BITS_FOR_PAIRS) {
+        // Sparse-tile path: emit one entry per (i_atom, j_atom) hit to
+        // single_pair_atoms. Each lane with any_hit iterates the set
+        // bits of its i_hit_mask; for each set bit, atomically claim a
+        // slot and write the canonical (i, j) atom IDs.
+        if (any_hit) {
+          unsigned int local_mask = i_hit_mask;
+          while (local_mask != 0u) {
+            unsigned int m = (unsigned int) __ffs((int) local_mask) - 1u;
+            local_mask &= local_mask - 1u;
+            unsigned int aid = warp_iid[warp_in_block][m];
+            unsigned int slot = atomicAdd(&interaction_count[1], 1u);
+            if (slot < max_single_pairs) {
+              single_pair_atoms[2u * slot] = aid;
+              single_pair_atoms[2u * slot + 1u] = jid;
+            } else {
+              atomicOr(overflow_flag, 2u);
+            }
+          }
+        }
+      } else if (hits > MAX_BITS_FOR_PAIRS) {
+        // Dense-tile path: compact j-atoms with any_hit into the
+        // per-warp staging buffer; flushed in 32-atom chunks below.
+        if (any_hit) {
+          unsigned int prefix = __popc(hit_ballot & ((1u << lane) - 1u));
+          unsigned int buf_pos = warp_buf_len[warp_in_block] + prefix;
+          if (buf_pos < PACKED_NL_BUFFER_SIZE) {
+            warp_buffer[warp_in_block][buf_pos] = jid;
+          }
+        }
+        if (lane == 0u) {
+          warp_buf_len[warp_in_block] += hits;
+        }
       }
       __syncwarp(0xFFFFFFFFu);
 
@@ -678,7 +717,7 @@ extern "C" __global__ void find_blocks_with_interactions(
           interacting_atoms[slot * TILE_SIZE + lane] = warp_buffer[warp_in_block][lane];
         } else {
           if (lane == 0u) {
-            atomicExch(overflow_flag, 1u);
+            atomicOr(overflow_flag, 1u);
           }
         }
         // Shift remaining buffer down by 32.
@@ -716,11 +755,12 @@ extern "C" __global__ void find_blocks_with_interactions(
       interacting_atoms[slot * TILE_SIZE + lane] = v;
     } else {
       if (lane == 0u) {
-        atomicExch(overflow_flag, 1u);
+        atomicOr(overflow_flag, 1u);
       }
     }
   }
 }
+#undef MAX_BITS_FOR_PAIRS
 
 // Histogram entries by i-block. For each entry e in 0..entry_count,
 // reads interacting_tiles[e] and increments the corresponding

@@ -20,11 +20,25 @@ reduction stage. A single conversion kernel translates the
 fixed-point sum to `Real` at the end of each step's force
 evaluation.
 
-Pairs that include any exclusion go through a separate, smaller
-list of (i-block, j-block) **exclusion tiles** processed with the
-same diagonal shuffle and explicit per-pair exclusion-scale lookup.
-The neighbour list itself never contains entries that involve
-excluded pairs.
+The pipeline has three pair-evaluation passes, each contributing to
+the same fixed-point accumulators:
+
+- The **packed-neighbour pass** (the main pair-force kernel) walks
+  every entry of `interacting_tiles` / `interacting_atoms` and
+  evaluates each pair as scale 1.0. Excluded pairs are treated like
+  any other in this pass.
+- The **single-pair pass** walks `single_pairs` — individual
+  (atom_i, atom_j) pairs extracted at neighbour-list build time
+  from sparse (i-block, j-block) candidates. One thread per pair
+  evaluates the pair as scale 1.0. Same accumulator, same fixed-
+  point semantics.
+- The **exclusion-correction pass** walks the topology's canonical
+  excluded-pair list (`excluded_pair_atoms` on `ForceField`,
+  documented in `jit-composed-pair-force.md`) and adds
+  `(exclusion_scale(i, j) − 1.0) × evaluate(i, j)` to each
+  excluded pair's contribution. Summing the three passes yields
+  `scale × evaluate` per excluded pair and `1.0 × evaluate` per
+  non-excluded pair.
 
 This file specifies the data model, the block layout, the
 neighbour-list construction pipeline, the force kernel, the
@@ -187,64 +201,63 @@ past the largest valid atom ID) to indicate "no atom" in the tail
 of the final partial entry. The kernel skips slots with value
 `>= N`.
 
-When the population of interacting atoms for an i-block X is less
-than a threshold (`MAX_BITS_FOR_PAIRS`, default 4 j-atoms across
-the same y-block), the surviving atoms are written to a
-**single-pair list** instead of `interacting_atoms`:
+When a candidate (i-block, j-block) pair produces no more than
+`MAX_BITS_FOR_PAIRS` surviving j-atom hits, the construction
+kernel writes the individual `(i_atom, j_atom)` pairs to a
+**single-pair list** instead of merging the j-atoms into the
+packed-neighbour buffer:
 
-- `single_pairs: CudaSlice<Int2>` of length `single_pairs_capacity`
-  — `single_pairs[k]` is `(atom_i, atom_j)`, two **original atom
-  IDs**, exactly one pair per entry. This avoids spending a 32-slot
-  packed entry on a sparse contribution.
+- `single_pair_atoms: CudaSlice<u32>` of length
+  `2 · single_pairs_capacity` — interleaved
+  `[i_atom_0, j_atom_0, i_atom_1, j_atom_1, …]` original atom IDs.
+  Adjacent pairs `(single_pair_atoms[2k], single_pair_atoms[2k+1])`
+  are the two ends of one extracted pair. The construction kernel
+  emits one entry per surviving `(i_lane, j_lane)` pair within a
+  sparse (i-block, j-block) candidate; a single sparse candidate
+  with three j-atom hits, each hitting two i-atoms, produces six
+  entries.
+
+`MAX_BITS_FOR_PAIRS` is a compile-time `#define` in
+`kernels/neighbor.cu` set to `3`, matching OpenMM's value on
+compute capability ≥ 8.0 (Ampere/Hopper). Below this threshold the
+single-pair pass amortises a full 32×32 = 1024-pair tile loop over
+just a handful of true interactions; above it the packed-
+neighbour pass is cheaper.
 
 The interaction counts are held on a small device counter array:
 
 - `interaction_count: CudaSlice<u32>` of length 2 —
   `interaction_count[0]` is the live entry count of
   `interacting_tiles` / `interacting_atoms`;
-  `interaction_count[1]` is the live entry count of `single_pairs`.
+  `interaction_count[1]` is the live entry count of
+  `single_pair_atoms` (i.e., one less than twice the slot index
+  available for the next pair).
 
 `interaction_count` is reset to `(0, 0)` at the start of every
 rebuild.
 
-## Exclusion Tiles <!-- rq-03faaf24 -->
+## Exclusion Handling <!-- rq-03faaf24 -->
 
-Exclusion handling is split off from the cutoff neighbour list:
+The packed-neighbour data model carries no exclusion-tile, bitmask,
+or per-pair scale table. Excluded pairs flow through every pair
+pass as scale 1.0 and are corrected to the per-fragment scale by
+the exclusion-correction kernel documented in
+`jit-composed-pair-force.md` (*Correction-Pass Design*).
 
-- `exclusion_tiles: CudaSlice<Int2>` of length `n_exclusion_tiles`
-  — `(x_block, y_block)` pairs. Every pair-of-blocks whose 32×32
-  cross-product contains at least one excluded pair-of-atoms (from
-  topology) is enumerated in this list **once**, at
-  `ForceField::new` time. The list is sorted by `(x_block,
-  y_block)` lex and is constant across the simulation (it changes
-  only if the exclusion topology changes).
-- `exclusion_tiles_count: u32` — number of live entries; equals
-  `exclusion_tiles.len()`.
+The construction kernel does not filter excluded pairs out of
+`interacting_atoms`; doing so would require per-pair partner-list
+memory traffic at build time. Instead, the correction pass adds
+`(exclusion_scale(i, j) − 1.0) × evaluate(i, j)` once per
+canonical excluded pair, leaving `scale × evaluate` on the
+fixed-point accumulators after the main pair-force kernel has
+already added `1.0 × evaluate`.
 
-The construction kernel for the cutoff neighbour list explicitly
-**skips** any candidate j-atom whose original atom ID appears in
-the i-block's exclusion table. Cutoff neighbour-list entries
-therefore never contain excluded pairs; the force kernel can
-process them without any per-pair exclusion check.
-
-The exclusion-tile table is built once at `ForceField::new` and
-held immutable. Its size grows linearly with the topology
-exclusion count, not with `N`.
-
-Per-pair exclusion scaling for pairs visited inside an exclusion
-tile is the responsibility of each pair-force fragment, through
-its `exclusion_scale(i, j)` functor method (see
-`jit-composed-pair-force.md`'s *Source-Fragment Contract*). Each
-fragment carries its own per-atom `excl_offsets` / `excl_partners`
-/ `excl_scales` arrays (built from the topology's `ExclusionList`)
-and looks up the scale per pair by atom ID, not by lane index.
-This preserves per-fragment scales — for example, an OPLS-style
-1-4 exclusion where the Lennard-Jones contribution scales by
-`0.5` while the Coulomb contribution scales by `0.833` — without
-the packed-neighbour data model holding any centralised scale
-table. Fragments that have no per-pair scaling (`exclusion_scale`
-always returns `1.0`) pay only the call cost in Loop 1; in Loop 2
-they pay nothing.
+Per-fragment exclusion scales are preserved end-to-end — an
+OPLS-style 1-4 exclusion where the Lennard-Jones contribution
+scales by `0.5` while the Coulomb contribution scales by `0.833`
+flows through the correction kernel naturally because each
+fragment's `exclusion_scale(i, j)` functor method returns its own
+per-pair value.
 
 ## Construction Pipeline <!-- rq-dbffee81 -->
 
@@ -285,24 +298,38 @@ produced `sorted_particle_ids`:
      `sorted_block_centre` and `sorted_block_bbox`.
    - For surviving candidates, loads the j-block's 32 atoms and
      tests each j-atom against all 32 i-atoms (via warp-shuffled
-     i-positions). Records per-j-atom interaction bits.
-   - Excludes any j-atom that is on the i-block's exclusion list
-     (those pairs go through `exclusion_tiles`, not the cutoff
-     list).
-   - Compacts surviving j-atoms (whose interaction bit is set)
-     into a per-warp staging buffer of size `BUFFER_SIZE` (default
-     256). When the buffer reaches 32, the warp flushes 32
-     j-atoms into the global `interacting_tiles[pos]` /
-     `interacting_atoms[pos·32 + ℓ]` arrays, advancing
+     i-positions). Each lane computes a 32-bit
+     `i_hit_mask` for its j-atom: bit `m` is set when i-atom `m`
+     is within `r_search` of this j-atom (and is not the same
+     atom). The lane records `any_hit = (i_hit_mask != 0)`.
+   - Computes `hit_ballot = __ballot_sync(any_hit)` and
+     `n_hits = __popc(hit_ballot)` — the count of j-atoms in
+     this (i-block, j-block) candidate that hit at least one
+     i-atom.
+   - **Sparse-tile path.** When `n_hits <= MAX_BITS_FOR_PAIRS`,
+     the warp emits one entry per `(i_atom, j_atom)` hit to
+     `single_pair_atoms`. Each lane with `any_hit` iterates the
+     set bits of its `i_hit_mask`; for each set bit `m`, the
+     lane atomically claims a slot via
+     `atomicAdd(&interaction_count[1], 1u)` and writes
+     `(warp_iid[m], jid)` to
+     `single_pair_atoms[2 · slot]` and
+     `single_pair_atoms[2 · slot + 1]`. The hits do NOT enter the
+     packed-neighbour staging buffer.
+   - **Dense-tile path.** When `n_hits > MAX_BITS_FOR_PAIRS`,
+     the j-atoms with `any_hit` are compacted into a per-warp
+     staging buffer of size `BUFFER_SIZE` (default 256). When the
+     buffer reaches 32, the warp flushes 32 j-atoms into the
+     global `interacting_tiles[pos]` /
+     `interacting_atoms[pos · 32 + ℓ]` arrays, advancing
      `interaction_count[0]` via `atomicAdd`.
-   - If a candidate j-block contributes fewer than
-     `MAX_BITS_FOR_PAIRS` surviving j-atoms (default 4), the
-     warp diverts the contribution to `single_pairs`, advancing
-     `interaction_count[1]` via `atomicAdd`.
    - At the end of the i-block sweep, the partial tail of the
-     staging buffer is flushed; the final entry pads unused
-     slots with `N` (the sentinel "no atom" value) so the force
-     kernel's bounds check skips them.
+     dense-path staging buffer is flushed; the final entry pads
+     unused slots with `N` (the sentinel "no atom" value) so the
+     force kernel's bounds check skips them.
+
+   `MAX_BITS_FOR_PAIRS` is `3` (compile-time constant in
+   `kernels/neighbor.cu`).
 
 The kernel observes a `force_rebuild` flag from the displacement
 check (see *Per-Step Pipeline*) and returns immediately if no
@@ -322,7 +349,8 @@ mechanism).
   of `interacting_tiles` and `interacting_atoms` (the latter is
   sized `interacting_tiles_capacity · 32`).
 - `single_pairs_capacity: u32` — current allocated capacity of
-  `single_pairs`.
+  `single_pair_atoms` measured in pairs (the `CudaSlice<u32>` has
+  `2 · single_pairs_capacity` slots).
 - `tile_pair_growth_factor: f64` — multiplier applied on overflow.
   Must be greater than 1.0. Default 1.5.
 
@@ -417,78 +445,69 @@ class-zero kernel does that).
 
 ## Force Kernel <!-- rq-6083409b -->
 
-The JIT-composed pair-force kernel has two top-level loops, each
-matching one neighbour-list source:
+The fast-class pair-force pipeline has three JIT-composed kernels.
+Each pass writes into the same per-particle fixed-point
+accumulators (`fast_total_forces_fp_*`,
+`fast_total_potential_energies_fp`, `fast_total_virials_fp`); the
+finaliser converts to `Real` after all three have run.
 
-### Loop 1: Exclusion Tiles <!-- rq-a177c7ee -->
-
-For every entry `t` in `exclusion_tiles`:
-
-- `x = exclusion_tiles[t].x_block`, `y = exclusion_tiles[t].y_block`.
-- Load the 32 i-atoms of `x` (positions from
-  `tile_sorted_positions_*[x·32 + lane]`, original atom IDs from
-  `sorted_particle_ids[x·32 + lane]`).
-- Load the 32 j-atoms of `y` similarly.
-- Run the 32-iteration diagonal shuffle (described in *Diagonal
-  Shuffle* below). For each `(i, j)` pair, the composer invokes
-  the with-exclusions variant of the per-pair evaluator (see
-  `jit-composed-pair-force.md`): each active fragment's
-  `evaluate` produces its raw `(factor, energy, virial)`, the
-  fragment's `exclusion_scale(i, j)` produces its per-fragment
-  scale, and the lane's pair accumulator adds `(factor·scale,
-  energy·scale·0.5, virial·scale·0.5)` for that fragment.
-  Fragments with no exclusion partners for atom `i` see
-  `exclusion_scale(i, j) == 1.0` and contribute their full pair
-  value; fragments where `(i, j)` is fully excluded see
-  `exclusion_scale(i, j) == 0.0` and contribute zero.
-- AtomicAdd per-lane `i_*` and `j_*` accumulators to the
-  fixed-point buffer using i-atom and j-atom original IDs.
-
-For the diagonal case `x == y`, the lane `i_lane == j_lane` is
-the self-pair; the inner loop skips it explicitly via `if
-(i_lane == j_lane) continue`.
-
-### Loop 2: Cutoff Entries <!-- rq-a4b9e702 -->
+### Packed-Neighbour Pass <!-- rq-a4b9e702 -->
 
 For every entry `pos` in `[0, interaction_count[0])`:
 
 - `x = interacting_tiles[pos]`.
-- Load 32 i-atoms of `x` as above.
-- Load 32 j-atoms from `interacting_atoms[pos·32 + lane]`. Each
+- Load 32 i-atoms of `x` (positions from
+  `tile_sorted_positions_*[x · 32 + lane]`, original atom IDs from
+  `sorted_particle_ids[x · 32 + lane]`).
+- Load 32 j-atoms from `interacting_atoms[pos · 32 + lane]`. Each
   is an original atom ID; load its position from
   `positions_*[j_atom_id]`. If `j_atom_id >= N`, the slot is the
   partial-tail padding; treat as inactive.
-- Run the 32-iteration diagonal shuffle. The composer invokes
-  the without-exclusions variant of the per-pair evaluator:
-  each active fragment's `evaluate` produces `(factor, energy,
-  virial)` which the lane adds directly into the pair
-  accumulator (no `exclusion_scale` call, no per-pair
-  partner-list memory load). The construction kernel has already
-  removed excluded pairs from `interacting_atoms`, so every pair
-  visited here is implicitly scale `1.0`.
-- AtomicAdd per-lane accumulators to the fixed-point buffer.
+- Run the 32-iteration diagonal shuffle (described in *Diagonal
+  Shuffle* below). For each pair the lane invokes the composer's
+  per-pair evaluator (`heddle_jit_eval_pair_sum`, see
+  `jit-composed-pair-force.md`), which sums each fragment's
+  `evaluate(r², inv_r, r, i, j, …)` with no `exclusion_scale`
+  call. Every pair is implicitly scale 1.0 in this pass;
+  per-fragment exclusion scales are applied by the correction
+  pass.
+- AtomicAdd per-lane accumulators to the fixed-point buffer using
+  i-atom and j-atom original IDs.
 
-### Loop 3: Single Pairs <!-- rq-b28a6d96 -->
+### Single-Pair Pass <!-- rq-b28a6d96 -->
 
 For every entry `k` in `[0, interaction_count[1])`:
 
-- `(atom_i, atom_j) = single_pairs[k]`.
-- One thread per pair; load i-position, j-position, compute the
-  pair contribution.
-- AtomicAdd directly to the fixed-point buffer for both atoms.
+- `atom_i = single_pair_atoms[2k]`,
+  `atom_j = single_pair_atoms[2k + 1]`.
+- One thread per pair. The thread loads both positions, computes
+  `(dx, dy, dz, r², inv_r, r)`, invokes the same
+  `heddle_jit_eval_pair_sum` evaluator (no `exclusion_scale`
+  call; implicit scale 1.0), and atomicAdds the per-fragment
+  contribution to both atoms' fixed-point slots. Newton's 3rd is
+  observed by adding `+(factor · d)` to atom `i` and
+  `−(factor · d)` to atom `j` per component.
+
+### Exclusion-Correction Pass <!-- rq-04fdeac5 -->
+
+The correction pass walks `ForceField.excluded_pair_atoms` and
+adds `(exclusion_scale(i, j) − 1.0) × evaluate(i, j)` to each
+excluded pair's fixed-point slots. It is documented under
+*Correction-Pass Design* in `jit-composed-pair-force.md` and is
+not described further here; it shares the fixed-point accumulator
+and atom-ID conventions of the two passes above.
 
 ### Diagonal Shuffle <!-- rq-18847c46 -->
 
-The 32-iteration inner loop pattern:
+The packed-neighbour pass's 32-iteration inner loop pattern:
 
 ```text
 // initial j-side state per lane: lane ℓ holds j-atom ℓ
 i_lane = lane
 tj = lane
 for t in 0..32:
-    if (x == y && tj == i_lane) {
-        // self pair on a diagonal exclusion tile; skip
-    } else if (j_atom_id_at(tj) < N) {
+    if (i_atom_id_at(i_lane) != j_atom_id_at(tj)
+        && j_atom_id_at(tj) < N) {
         // evaluate pair (i_atom = lane, j_atom_lane = tj):
         compute delta, factor, energy, virial
         i_fx += factor * dx;   i_fy += factor * dy;   i_fz += factor * dz
@@ -502,6 +521,12 @@ for t in 0..32:
     tj = (tj + 1) & 31
 ```
 
+The pair-skip predicate `i_atom_id != j_atom_id` covers the
+self-pair case when an i-block's atoms happen to appear in the
+same entry's j-atom list (e.g., when a sparse-tile boundary
+straddles the i-block); the single-pair pass uses the same
+predicate at the per-thread level.
+
 After 32 iterations the j-side accumulators have rotated 32 times
 and are back at their starting lane. Lane ℓ's `j_*` accumulators
 hold the total contribution to the j-atom that started in lane ℓ
@@ -514,21 +539,28 @@ gating is by `j_atom_id < N` (and by the optional
 
 ### Launch Configuration <!-- rq-8db4fbff -->
 
-Loops 1 and 2 launch as a single CUDA kernel. The grid covers
-both loops by total warp count, partitioned at host-side:
+Each pass launches as a separate CUDA kernel on the
+`particle_buffers.device`'s default stream:
 
-- `n_warps_loop1 = exclusion_tiles_count`
-- `n_warps_loop2 = interaction_count[0]` (read once at launch time)
-- `total_warps = n_warps_loop1 + n_warps_loop2`
-- `grid_dim = ⌈total_warps / WARPS_PER_BLOCK⌉` with
-  `WARPS_PER_BLOCK = 8`, `BLOCK_SIZE = 256`.
+- **Packed-neighbour pass.** Grid
+  `⌈n_iblocks / WARPS_PER_BLOCK⌉ × WARPS_PER_BLOCK = n_iblocks`
+  blocks of `BLOCK_SIZE = 256` threads (`WARPS_PER_BLOCK = 8`).
+  One block per i-block; warps within a block share that
+  i-block's i-side accumulators via shared memory. Launched
+  unconditionally when at least one fast-class pair-force slot
+  is active.
+- **Single-pair pass.** Grid
+  `⌈interaction_count[1] / 256⌉` blocks of `256` threads, one
+  thread per single-pair entry. Launched only when
+  `interaction_count[1] > 0`.
+- **Exclusion-correction pass.** Grid
+  `⌈excluded_pair_count / 256⌉` blocks of `256` threads, one
+  thread per excluded pair. Launched only when
+  `excluded_pair_count > 0`.
 
-Each warp determines from its global warp index whether it
-processes an exclusion tile (index `< n_warps_loop1`) or a
-cutoff entry (index `≥ n_warps_loop1`).
-
-Loop 3 launches as a separate kernel with grid `⌈n_single_pairs /
-256⌉` blocks of 256 threads, one thread per pair.
+The three launches run in this order so the single-pair and
+correction passes observe the packed-neighbour pass's writes via
+the per-stream ordering of the default stream.
 
 ## JIT Composer Integration <!-- rq-ffbee244 -->
 
@@ -538,26 +570,26 @@ The per-slot `PairForceFragment` source contract is documented in
 `functor_init_source`, and a `cutoff: CutoffHandling`
 declaration. The functor's interface is `cutoff_squared(i, j) ->
 Real`, `evaluate(r2, inv_r, r, i, j, factor, energy, virial)`,
-and `exclusion_scale(i, j) -> Real`. The composer's per-pair
-evaluator has two variants:
+and `exclusion_scale(i, j) -> Real`. The composer emits two
+per-pair evaluators:
 
-- `heddle_jit_eval_pair_sum_excl<WriteEv>(composite, r2, inv_r,
-  r, i, j, factor, energy, virial)` — sums each fragment's
-  contribution multiplied by that fragment's
-  `exclusion_scale(i, j)`. Used by Loop 1's diagonal-shuffle
-  inner loop.
 - `heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r, i,
-  j, factor, energy, virial)` — sums each fragment's contribution
-  with no `exclusion_scale` call. Used by Loop 2's diagonal-
-  shuffle inner loop. Loop 2 never sees an excluded pair, so the
-  scale is implicitly `1.0`.
+  j, factor, energy, virial)` — sums each fragment's
+  contribution with no `exclusion_scale` call. Used by the
+  packed-neighbour pass's diagonal-shuffle inner loop and by the
+  single-pair pass's per-thread evaluation.
+- `heddle_jit_eval_pair_correction<WriteEv>(composite, r2,
+  inv_r, r, i, j, factor, energy, virial)` — sums each
+  fragment's contribution scaled by
+  `(exclusion_scale(i, j) − 1.0)`. Used by the exclusion-
+  correction pass.
 
-Both variants apply the cutoff handling described in
+Both apply the cutoff handling described in
 `jit-composed-pair-force.md` (the per-fragment cutoff guard,
 collapsed when `CutoffHandling::Uniform(c)` matches the outer
 max-cutoff mask).
 
-### Common Entry-Point Arguments <!-- rq-e8ba1aff -->
+### Packed-Neighbour Entry-Point Arguments <!-- rq-e8ba1aff -->
 
 The composer emits the following common arguments for both
 `heddle_jit_composed_pair_force_f` and
@@ -571,44 +603,54 @@ const Real *tile_sorted_positions_x,
 const Real *tile_sorted_positions_y,
 const Real *tile_sorted_positions_z,
 const unsigned int *sorted_particle_ids,
-const Int2 *exclusion_tiles,
-unsigned int exclusion_tiles_count,
-const unsigned int *interacting_tiles,
-const unsigned int *interacting_atoms,
-const unsigned int *interaction_count,
+const unsigned int *iblock_offset,
+const unsigned int *sorted_interacting_atoms,
+unsigned int n_iblocks,
 const Real *lattice,
 unsigned long long *fast_force_x_fp,
 unsigned long long *fast_force_y_fp,
 unsigned long long *fast_force_z_fp,
 unsigned long long *fast_energy_fp,
 unsigned long long *fast_virial_fp,
-unsigned int n,
 ```
 
-The `_fev` entry point uses the same argument list (energy and
-virial buffers are always passed; the `_f` entry point's emitted
-inner loop simply does not increment `fast_energy_fp` /
-`fast_virial_fp`).
+Per-fragment arguments are appended after the common arguments in
+canonical slot order. The trailing `unsigned int n` is the final
+argument.
 
-Per-fragment arguments (per-slot parameter tables, including each
-fragment's `excl_offsets` / `excl_partners` / `excl_scales`
-arrays consumed by its `exclusion_scale(i, j)` method) are
-appended after the common arguments in canonical slot order. The
-trailing `unsigned int n` is the final argument.
+The `_fev` entry point uses the same argument list; the `_f`
+entry point's emitted inner loop simply does not increment
+`fast_energy_fp` / `fast_virial_fp`.
 
-### Single-Pairs Kernel <!-- rq-f119bc11 -->
+### Single-Pair Entry-Point Arguments <!-- rq-f119bc11 -->
 
-A second JIT-composed entry point covers Loop 3:
+The single-pair pass has its own pair of entry points:
 
 ```text
-extern "C" __global__ void heddle_jit_composed_pair_force_f_single(...)
-extern "C" __global__ void heddle_jit_composed_pair_force_fev_single(...)
+extern "C" __global__ void heddle_jit_composed_pair_force_single_f(...)
+extern "C" __global__ void heddle_jit_composed_pair_force_single_fev(...)
 ```
 
-Its common arguments add `const Int2 *single_pairs` and
-`unsigned int n_single_pairs` in place of `interacting_tiles` /
-`interacting_atoms` / `interaction_count`. Per-fragment arguments
-are identical to the main kernel.
+Common arguments, in order:
+
+```text
+const Real *positions_x,
+const Real *positions_y,
+const Real *positions_z,
+const unsigned int *single_pair_atoms,
+unsigned int single_pair_count,
+const Real *lattice,
+unsigned long long *fast_force_x_fp,
+unsigned long long *fast_force_y_fp,
+unsigned long long *fast_force_z_fp,
+unsigned long long *fast_energy_fp,
+unsigned long long *fast_virial_fp,
+```
+
+Per-fragment arguments are appended in canonical slot order
+followed by the trailing `unsigned int n`. The per-fragment list
+is identical to the packed-neighbour entry point's per-fragment
+list (the same `bind_pair_force_args` invocations populate it).
 
 ## Per-Step Pipeline <!-- rq-0acba2a0 -->
 
@@ -620,9 +662,10 @@ every step:
 | 1 | `scatter_positions_to_tile_order` | Every step |
 | 2 | Pre-step neighbour-list check | Every step; rebuild may run if displacement exceeds `r_skin / 2` |
 | 3 | `cudaMemsetAsync` zeroing fast fixed-point buffers | Every step (or only when re-evaluating the Fast class) |
-| 4 | `heddle_jit_composed_pair_force_{f,fev}` | Once per step |
-| 5 | `heddle_jit_composed_pair_force_{f,fev}_single` | Once per step (only if `n_single_pairs > 0`) |
-| 6 | `finalize_fast_class_forces` | Once per step; converts fixed-point to Real and adds into `ParticleBuffers.forces_*` |
+| 4 | `heddle_jit_composed_pair_force_{f,fev}` (packed-neighbour pass) | Once per step |
+| 5 | `heddle_jit_composed_pair_force_single_{f,fev}` (single-pair pass) | Once per step (only if `interaction_count[1] > 0`) |
+| 6 | `heddle_jit_composed_pair_force_correct_{f,fev}` (exclusion-correction pass) | Once per step (only if `excluded_pair_count > 0`) |
+| 7 | `finalize_fast_class_forces` | Once per step; converts fixed-point to Real and adds into `ParticleBuffers.forces_*` |
 
 When step 2 triggers a rebuild, the rebuild pipeline (steps 1–6 of
 *Construction Pipeline*, including the second `scatter` since
@@ -637,8 +680,8 @@ The `[neighbor_list]` section of the simulation config carries:
 - `r_skin: f64` (length, in active unit system) — unchanged from
   the existing `NeighborListConfig`.
 - `tile_pair_growth_factor: f64` — multiplier applied to the
-  `interacting_tiles` and `single_pairs` capacities on overflow.
-  Must be greater than 1.0. Default 1.5.
+  `interacting_tiles` and `single_pair_atoms` capacities on
+  overflow. Must be greater than 1.0. Default 1.5.
 - `interacting_tiles_initial_capacity: u32` (optional) — initial
   allocated entry count for the cutoff list. Default
   `⌈n_blocks² / 16⌉ + n_blocks` (a generous starting point that
@@ -646,8 +689,11 @@ The `[neighbor_list]` section of the simulation config carries:
   to a smaller value for systems where the natural neighbour
   count is known.
 - `single_pairs_initial_capacity: u32` (optional) — initial
-  allocated entry count for the single-pair list. Default
-  `⌈n_blocks · 32⌉` (one single pair per i-block on average).
+  allocated entry count for `single_pair_atoms` (i.e., the buffer
+  is sized `2 · capacity` u32 slots). Default `n_blocks · 32` (one
+  single pair per i-block on average for a uniform liquid; sparse-
+  tile boundaries push this higher and the grow-on-overflow path
+  picks up the slack).
 
 The field `max_neighbors` is **not** part of `NeighborListConfig`.
 Specifying it in the configuration file is a load-time error with
@@ -678,9 +724,13 @@ supporting this:
    force kernel processes entries via the fixed-point atomic
    accumulator, whose final per-particle sum is invariant under
    permutation of entries.**
-5. **Deterministic exclusion-tile enumeration.** `exclusion_tiles`
-   is enumerated at `ForceField::new` time in lex order of
-   `(x_block, y_block)` and is constant across the simulation.
+5. **Deterministic excluded-pair enumeration.** The exclusion-
+   correction pass's pair list (`ForceField.excluded_pair_atoms`)
+   is enumerated at `ForceField::new` time in the canonical order
+   of `ExclusionList.entries` and is constant across the
+   simulation. Each excluded pair contributes its correction
+   exactly once regardless of which warp first claimed the slot
+   in the packed-neighbour pass.
 6. **Bit-exact accumulation via integer atomics.** Per-particle
    force, energy, and virial accumulators are 64-bit unsigned
    integers interpreted as two's-complement signed integers.
@@ -738,20 +788,26 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
   thread per block.
 - `find_blocks_with_interactions(sorted_blocks, <!-- rq-169e1d84 -->
   sorted_block_centre, sorted_block_bbox, tile_sorted_positions_*,
-  exclusion_indices, exclusion_row_indices,
-  interacting_tiles, interacting_atoms, single_pairs,
+  interacting_tiles, interacting_atoms, single_pair_atoms,
   interaction_count, interacting_tiles_capacity,
-  single_pairs_capacity, max_bits_for_pairs, r_search_sq,
-  lattice, force_rebuild_flag, n_blocks, n_atoms,
-  overflow_flag)` — main construction kernel. One warp per
-  i-block, iterating through `sorted_blocks`.
+  single_pairs_capacity, r_search_sq, lattice,
+  force_rebuild_flag, n_blocks, n_atoms, overflow_flag)` — main
+  construction kernel. One warp per i-block iterating through
+  `sorted_blocks`. The `MAX_BITS_FOR_PAIRS = 3` threshold is a
+  compile-time `#define`.
 - `heddle_jit_composed_pair_force_f` / <!-- rq-42e29605 -->
-  `heddle_jit_composed_pair_force_fev` — JIT-composed force
-  kernels; argument list documented under *JIT Composer
-  Integration*.
-- `heddle_jit_composed_pair_force_f_single` / <!-- rq-3ddf259b -->
-  `heddle_jit_composed_pair_force_fev_single` — JIT-composed
-  single-pair kernels.
+  `heddle_jit_composed_pair_force_fev` — JIT-composed packed-
+  neighbour entry points; argument list documented under
+  *Packed-Neighbour Entry-Point Arguments*.
+- `heddle_jit_composed_pair_force_single_f` / <!-- rq-3ddf259b -->
+  `heddle_jit_composed_pair_force_single_fev` — JIT-composed
+  single-pair entry points; argument list documented under
+  *Single-Pair Entry-Point Arguments*.
+- `heddle_jit_composed_pair_force_correct_f` / <!-- rq-41ba5dca -->
+  `heddle_jit_composed_pair_force_correct_fev` — JIT-composed
+  exclusion-correction entry points; argument list documented
+  under *Correction-Pass Design* in
+  `jit-composed-pair-force.md`.
 - `finalize_fast_class_forces(fast_force_*_fp, fast_energy_fp, <!-- rq-9c80a966 -->
   fast_virial_fp, particle_forces_x, particle_forces_y,
   particle_forces_z, particle_potential_energies,
@@ -938,29 +994,43 @@ Feature: Packed-Neighbour Pair-Force Architecture
       sorted_particle_ids[interacting_tiles[pos] * 32 .. (interacting_tiles[pos]+1) * 32]
       under minimum image
 
-  @rq-351b2539
-  Scenario: Excluded pairs never appear in interacting_atoms
-    Given atoms i, j with an exclusion entry in the topology
-    When NeighborListState::rebuild completes
-    Then there is no entry pos and lane L such that
-      interacting_atoms[pos*32 + L] == j AND
-      i is in sorted_particle_ids[interacting_tiles[pos] * 32 .. (...)+32]
-
   @rq-e8667000
-  Scenario: Sparse contributions go to single_pairs
-    Given a candidate j-block that contributes 3 interacting atoms
-      with the same i-block (max_bits_for_pairs default 4)
+  Scenario: Sparse (i-block, j-block) candidate routes its pairs to single_pair_atoms
+    Given a candidate (i-block, j-block) pair that produces n_hits j-atoms with any_hit
+    And n_hits <= MAX_BITS_FOR_PAIRS (= 3)
     When the construction kernel processes this candidate
-    Then 3 entries are written to single_pairs (one per surviving atom)
+    Then for every j-atom with any_hit and every i-atom in its i_hit_mask, one (atom_i, atom_j) entry is written to single_pair_atoms (advancing interaction_count[1] by one per (i, j) hit)
     And no entry is written to interacting_atoms for this candidate
 
+  @rq-560d3be9
+  Scenario: Dense (i-block, j-block) candidate routes its hits to interacting_atoms
+    Given a candidate (i-block, j-block) pair that produces n_hits j-atoms with any_hit
+    And n_hits > MAX_BITS_FOR_PAIRS (= 3)
+    When the construction kernel processes this candidate
+    Then the surviving j-atoms enter the per-warp staging buffer and contribute to interacting_tiles / interacting_atoms when the buffer reaches 32
+    And no entry is written to single_pair_atoms for this candidate
+
+  @rq-b1060817
+  Scenario: MAX_BITS_FOR_PAIRS equals 3
+    Given the construction kernel's compiled source
+    Then `MAX_BITS_FOR_PAIRS` resolves to the literal 3 (matching OpenMM's compute-capability-8.0+ value)
+
   @rq-7646dd13
-  Scenario: Construction returns overflow when capacity exceeded
+  Scenario: interacting_tiles overflow grows the buffer and re-runs construction
     Given interacting_tiles_capacity = 100
     And a system that produces 150 packed entries
     When find_blocks_with_interactions runs
     Then the overflow_flag indicates "interacting_tiles overflow"
     And NeighborListState::rebuild reallocates the buffer to >= 150 * 1.5
+    And the construction is re-run from find_blocks_with_interactions
+
+  @rq-e7839cee
+  Scenario: single_pair_atoms overflow grows the buffer and re-runs construction
+    Given single_pairs_capacity = 50
+    And a system that produces 80 single-pair entries
+    When find_blocks_with_interactions runs
+    Then the overflow_flag indicates "single_pair_atoms overflow"
+    And NeighborListState::rebuild reallocates single_pair_atoms to >= 2 * 80 * 1.5 u32 slots
     And the construction is re-run from find_blocks_with_interactions
 
   @rq-8253d3c4
@@ -972,69 +1042,57 @@ Feature: Packed-Neighbour Pair-Force Architecture
 
   # --- Force kernel ---
 
-  @rq-00d11a87
-  Scenario: Force kernel processes both exclusion tiles and cutoff entries
-    Given exclusion_tiles_count = 10 and interaction_count[0] = 100
+  @rq-a786df3a
+  Scenario: Packed-neighbour pass runs one block per i-block
+    Given n_iblocks i-blocks with any fast-class pair-force slot active
     When the JIT-composed pair-force kernel launches
-    Then 10 warps process exclusion tiles
-    And 100 warps process cutoff entries
+    Then the grid has n_iblocks blocks of BLOCK_SIZE = 256 threads each
 
   @rq-a6ecc598
-  Scenario: Cutoff entries skip the no-atom sentinel
-    Given an entry pos with interacting_atoms[pos*32 + lane] == N for some
-      lane
-    When the force kernel processes entry pos
+  Scenario: Packed-neighbour pass skips the no-atom sentinel
+    Given an entry pos with interacting_atoms[pos*32 + lane] == N for some lane
+    When the packed-neighbour kernel processes entry pos
     Then no pair contribution is accumulated for that lane
 
-  @rq-0606e887
-  Scenario: Self-pair on diagonal exclusion tile is skipped
-    Given an exclusion tile with x_block == y_block
-    When the force kernel processes the tile
-    Then no pair contribution is accumulated for the iteration where
-      i_lane == j_lane
+  @rq-b49bfdff
+  Scenario: Packed-neighbour pass treats every pair as scale 1.0
+    Given a ForceField with at least one fast-class pair-force fragment
+    And the JIT-composed packed-neighbour kernel source captured for inspection
+    Then the packed-neighbour pass's inner loop dispatches to heddle_jit_eval_pair_sum (no exclusion_scale calls)
+    And the source contains zero calls to composite.<any>.exclusion_scale inside the packed-neighbour outer loop
 
   @rq-80c6a964
-  Scenario: Fully-excluded pair contributes zero
-    Given a pair (i, j) inside an exclusion tile where every active
-      fragment's exclusion_scale(i, j) returns 0.0 (full exclusion)
-    When the force kernel processes the tile
-    Then no contribution from (i, j) is accumulated to either atom's
-      fixed-point slot
+  Scenario: Fully-excluded pair nets to zero on the fixed-point accumulator
+    Given a pair (i, j) where every active fragment's exclusion_scale(i, j) returns 0.0
+    And the pair is within HEDDLE_JIT_MAX_CUTOFF_SQUARED
+    When the packed-neighbour and exclusion-correction passes both run
+    Then the packed-neighbour pass adds +1.0 × evaluate(i, j) to atom i and -1.0 × evaluate(i, j) to atom j (Newton's 3rd)
+    And the exclusion-correction pass adds (0.0 - 1.0) × evaluate(i, j) = -evaluate(i, j) to atom i and +evaluate(i, j) to atom j
+    And the per-atom fixed-point slots sum to zero after both passes
 
   @rq-8840662f
-  Scenario: Per-fragment exclusion scale multiplies that fragment's contribution
-    Given a pair (i, j) inside an exclusion tile where the LJ fragment's
-      exclusion_scale(i, j) returns 0.5 and the Coulomb fragment's
-      exclusion_scale(i, j) returns 0.833
-    When the force kernel processes the tile
-    Then the LJ contribution to atoms i and j is exactly half of an
-      otherwise-identical unexcluded LJ pair
-    And the Coulomb contribution to atoms i and j is 0.833 times an
-      otherwise-identical unexcluded Coulomb pair
+  Scenario: Per-fragment exclusion scale yields per-fragment net contribution
+    Given a pair (i, j) where the LJ fragment's exclusion_scale(i, j) returns 0.5
+    And the Coulomb fragment's exclusion_scale(i, j) returns 0.833
+    When the packed-neighbour and exclusion-correction passes both run
+    Then the LJ contribution to atoms i and j is exactly 0.5 × the unexcluded LJ pair value
+    And the Coulomb contribution to atoms i and j is exactly 0.833 × the unexcluded Coulomb pair value
 
-  @rq-a7c08202
-  Scenario: Loop 2 never calls exclusion_scale
-    Given a ForceField with at least one fast-class pair-force fragment
-    And the JIT-composed kernel source captured for inspection
-    Then the Loop 2 inner-loop body (the cutoff-entries path) contains
-      no call to `composite.<any>.exclusion_scale`
-    And the Loop 1 inner-loop body (the exclusion-tiles path) calls
-      every active fragment's `exclusion_scale` exactly once per pair
-
-  # --- Single-pair kernel ---
+  # --- Single-pair pass ---
 
   @rq-86cc8e5d
-  Scenario: Single-pair kernel runs only when single_pair count is nonzero
+  Scenario: Single-pair pass is skipped when its count is zero
     Given interaction_count[1] == 0
     When the force-evaluation pipeline runs
-    Then heddle_jit_composed_pair_force_f_single is not launched
+    Then heddle_jit_composed_pair_force_single_f is not launched
 
   @rq-8d86bfa6
-  Scenario: Single-pair kernel accumulates to both atoms
-    Given single_pairs[k] = (i, j)
-    When the single-pair kernel processes k
-    Then the contribution is atomicAdded to the fixed-point slot of i
-    And the opposite-sign contribution is atomicAdded to the fixed-point slot of j
+  Scenario: Single-pair pass accumulates Newton's-3rd pair forces
+    Given single_pair_atoms[2k] = i and single_pair_atoms[2k+1] = j with the pair inside cutoff
+    When the single-pair kernel processes pair index k
+    Then the contribution to atom i is `+factor·(dx, dy, dz)` in fixed point
+    And the contribution to atom j is `-factor·(dx, dy, dz)` in fixed point
+    And both contributions are atomicAdded to the same fixed-point accumulator the packed-neighbour pass writes
 
   # --- Fixed-point accumulation ---
 
@@ -1117,19 +1175,21 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Then interacting_tiles_capacity is at least the count produced by the
       first rebuild
 
-  # --- Determinism of exclusion tiles ---
+  # --- Determinism of the excluded-pair list ---
 
   @rq-c123c82c
-  Scenario: exclusion_tiles is enumerated in lex order of (x_block, y_block)
-    Given the topology contains exclusions
-    When ForceField::new constructs the exclusion-tile table
-    Then exclusion_tiles is sorted by (x_block, y_block) ascending
+  Scenario: excluded_pair_atoms preserves canonical ExclusionList order
+    Given the topology contains exclusions in canonical (atom_i < atom_j) order
+    When ForceField::new constructs excluded_pair_atoms
+    Then excluded_pair_atoms[2k] = ExclusionList.entries[k].atom_i for every k
+    And excluded_pair_atoms[2k+1] = ExclusionList.entries[k].atom_j for every k
+    And excluded_pair_count = ExclusionList.entries.len()
 
   @rq-30a85bc9
-  Scenario: exclusion_tiles is constant across the simulation
+  Scenario: excluded_pair_atoms is constant across the simulation
     Given the topology does not change during the simulation
     When 1000 steps run
-    Then exclusion_tiles is not modified after ForceField::new
+    Then excluded_pair_atoms is not modified after ForceField::new
 
   # --- Out of scope ---
 

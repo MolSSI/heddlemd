@@ -56,6 +56,8 @@ const F_ENTRY: &str = "heddle_jit_composed_pair_force_f";
 const FEV_ENTRY: &str = "heddle_jit_composed_pair_force_fev";
 const F_CORRECT_ENTRY: &str = "heddle_jit_composed_pair_force_correct_f";
 const FEV_CORRECT_ENTRY: &str = "heddle_jit_composed_pair_force_correct_fev";
+const F_SINGLE_ENTRY: &str = "heddle_jit_composed_pair_force_single_f";
+const FEV_SINGLE_ENTRY: &str = "heddle_jit_composed_pair_force_single_fev";
 
 const WARPS_PER_BLOCK: u32 = 8;
 const BLOCK_SIZE: u32 = WARPS_PER_BLOCK * 32;
@@ -446,6 +448,14 @@ pub struct JitComposedPairForce {
     pub correction_f: CudaFunction,
     /// `AggregateLevel::ForcesAndScalars` variant of `correction_f`.
     pub correction_fev: CudaFunction,
+    /// Per-pair single-pair entry point (`AggregateLevel::ForcesOnly`).
+    /// Launched after the main pair-force kernel when the neighbour
+    /// list's `single_pairs_count` is non-zero; each thread handles
+    /// one sparse-tile-extracted pair and contributes `+1 × evaluate`
+    /// to both atoms' fixed-point slots (Newton's 3rd via `±`).
+    pub single_pair_f: CudaFunction,
+    /// `AggregateLevel::ForcesAndScalars` variant of `single_pair_f`.
+    pub single_pair_fev: CudaFunction,
 }
 
 impl JitComposedPairForce {
@@ -487,7 +497,14 @@ impl JitComposedPairForce {
             .load_ptx(
                 ptx,
                 MODULE_NAME,
-                &[F_ENTRY, FEV_ENTRY, F_CORRECT_ENTRY, FEV_CORRECT_ENTRY],
+                &[
+                    F_ENTRY,
+                    FEV_ENTRY,
+                    F_CORRECT_ENTRY,
+                    FEV_CORRECT_ENTRY,
+                    F_SINGLE_ENTRY,
+                    FEV_SINGLE_ENTRY,
+                ],
             )
             .map_err(|e| ForceFieldError::FragmentLoadFailed(GpuError::from(e)))?;
         let pair_force_f = device
@@ -502,6 +519,12 @@ impl JitComposedPairForce {
         let correction_fev = device
             .get_func(MODULE_NAME, FEV_CORRECT_ENTRY)
             .expect("composed pair-force correction _fev entry was just loaded");
+        let single_pair_f = device
+            .get_func(MODULE_NAME, F_SINGLE_ENTRY)
+            .expect("composed pair-force single-pair _f entry was just loaded");
+        let single_pair_fev = device
+            .get_func(MODULE_NAME, FEV_SINGLE_ENTRY)
+            .expect("composed pair-force single-pair _fev entry was just loaded");
 
         Ok(JitComposedPairForce {
             fragment_labels: fragments.iter().map(|f| f.label).collect(),
@@ -509,6 +532,8 @@ impl JitComposedPairForce {
             pair_force_fev,
             correction_f,
             correction_fev,
+            single_pair_f,
+            single_pair_fev,
         })
     }
 
@@ -584,6 +609,48 @@ impl JitComposedPairForce {
             self.correction_fev.clone()
         } else {
             self.correction_f.clone()
+        };
+        unsafe {
+            func.launch(cfg, &mut builder.kernel_params)
+                .map_err(GpuError::from)?;
+        }
+        drop(builder.storage);
+        Ok(())
+    }
+
+    /// Launch the per-pair single-pair kernel. The grid is sized to
+    /// `single_pairs_capacity` so the captured kernel covers any
+    /// post-rebuild count; each thread reads the live count from
+    /// device memory (via the `interaction_count` pointer in the
+    /// builder) and returns early past the live boundary. `builder`
+    /// must be pre-populated with the single-pair kernel's common
+    /// args (positions, single_pair_atoms, interaction_count_ptr,
+    /// lattice, fixed-point accumulators), the per-fragment args in
+    /// canonical slot order, and the trailing `n` arg.
+    ///
+    /// # Safety
+    /// `builder`'s argument list must match the single-pair kernel's
+    /// entry-point signature exactly.
+    pub unsafe fn launch_single_pair(
+        &self,
+        single_pairs_capacity: u32,
+        use_fev: bool,
+        mut builder: PairForceLaunchBuilder,
+    ) -> Result<(), GpuError> {
+        if single_pairs_capacity == 0 {
+            drop(builder.storage);
+            return Ok(());
+        }
+        let block_size: u32 = 256;
+        let cfg = LaunchConfig {
+            grid_dim: (single_pairs_capacity.div_ceil(block_size), 1, 1),
+            block_dim: (block_size, 1, 1),
+            shared_mem_bytes: 0,
+        };
+        let func = if use_fev {
+            self.single_pair_fev.clone()
+        } else {
+            self.single_pair_f.clone()
         };
         unsafe {
             func.launch(cfg, &mut builder.kernel_params)
@@ -821,6 +888,7 @@ fn compose_source(
 
     s.push_str(OUTER_LOOP_TEMPLATE);
     s.push_str(CORRECTION_LOOP_TEMPLATE);
+    s.push_str(SINGLE_PAIR_LOOP_TEMPLATE);
 
     // _f entry point
     emit_entry_point(&mut s, fragments, F_ENTRY, false);
@@ -829,6 +897,9 @@ fn compose_source(
     // Per-pair correction entry points
     emit_correction_entry_point(&mut s, fragments, F_CORRECT_ENTRY, false);
     emit_correction_entry_point(&mut s, fragments, FEV_CORRECT_ENTRY, true);
+    // Per-pair single-pair entry points
+    emit_single_pair_entry_point(&mut s, fragments, F_SINGLE_ENTRY, false);
+    emit_single_pair_entry_point(&mut s, fragments, FEV_SINGLE_ENTRY, true);
 
     s
 }
@@ -870,6 +941,51 @@ fn emit_correction_entry_point(
     s.push_str(if write_ev { "true" } else { "false" });
     s.push_str(">(\n");
     s.push_str("        composite, excluded_pair_atoms, excluded_pair_count,\n");
+    s.push_str("        positions_x, positions_y, positions_z,\n");
+    s.push_str("        lattice,\n");
+    s.push_str("        fast_force_x_fp, fast_force_y_fp, fast_force_z_fp,\n");
+    s.push_str("        fast_energy_fp, fast_virial_fp,\n");
+    s.push_str("        n);\n");
+    s.push_str("}\n");
+}
+
+/// Emit the per-pair single-pair entry point. Common args take the
+/// `single_pair_atoms` / `single_pair_count` pair (in place of the
+/// packed-neighbour list inputs the main entry point uses) and
+/// dispatch `heddle_jit_single_pair_loop`.
+fn emit_single_pair_entry_point(
+    s: &mut String,
+    fragments: &[PairForceFragment],
+    entry_name: &str,
+    write_ev: bool,
+) {
+    s.push_str("\nextern \"C\" __global__ void ");
+    s.push_str(entry_name);
+    s.push_str("(\n");
+    s.push_str("    const Real *positions_x,\n");
+    s.push_str("    const Real *positions_y,\n");
+    s.push_str("    const Real *positions_z,\n");
+    s.push_str("    const unsigned int *single_pair_atoms,\n");
+    s.push_str("    const unsigned int *interaction_count_ptr,\n");
+    s.push_str("    const Real *lattice,\n");
+    s.push_str("    unsigned long long *fast_force_x_fp,\n");
+    s.push_str("    unsigned long long *fast_force_y_fp,\n");
+    s.push_str("    unsigned long long *fast_force_z_fp,\n");
+    s.push_str("    unsigned long long *fast_energy_fp,\n");
+    s.push_str("    unsigned long long *fast_virial_fp,\n");
+    for f in fragments {
+        s.push_str(&f.entry_point_args);
+    }
+    s.push_str("    unsigned int n)\n");
+    s.push_str("{\n");
+    s.push_str("    HeddleJitComposedPairFunc composite;\n");
+    for f in fragments {
+        s.push_str(&f.functor_init_source);
+    }
+    s.push_str("    heddle_jit_single_pair_loop<");
+    s.push_str(if write_ev { "true" } else { "false" });
+    s.push_str(">(\n");
+    s.push_str("        composite, single_pair_atoms, interaction_count_ptr,\n");
     s.push_str("        positions_x, positions_y, positions_z,\n");
     s.push_str("        lattice,\n");
     s.push_str("        fast_force_x_fp, fast_force_y_fp, fast_force_z_fp,\n");
@@ -1357,6 +1473,99 @@ __device__ static inline void heddle_jit_correction_loop(
   heddle_jit_atomic_add_fp(fast_force_y_fp, atom_i,  fy);
   heddle_jit_atomic_add_fp(fast_force_z_fp, atom_i,  fz);
   // j-side: − (correction factor) × displacement (Newton's 3rd).
+  heddle_jit_atomic_add_fp(fast_force_x_fp, atom_j, -fx);
+  heddle_jit_atomic_add_fp(fast_force_y_fp, atom_j, -fy);
+  heddle_jit_atomic_add_fp(fast_force_z_fp, atom_j, -fz);
+
+  if (WriteEv) {
+    Real he = energy * R(0.5);
+    Real hw = virial * R(0.5);
+    heddle_jit_atomic_add_fp(fast_energy_fp, atom_i, he);
+    heddle_jit_atomic_add_fp(fast_energy_fp, atom_j, he);
+    heddle_jit_atomic_add_fp(fast_virial_fp, atom_i, hw);
+    heddle_jit_atomic_add_fp(fast_virial_fp, atom_j, hw);
+  }
+}
+"#;
+
+// Per-pair sparse-tile outer loop. One thread per entry in
+// `single_pair_atoms`. Reads the canonical (i, j) atom IDs, computes
+// (dx, dy, dz, r2, inv_r, r), invokes the no-exclusion evaluator
+// (heddle_jit_eval_pair_sum), applies the branchless max-cutoff
+// mask, and atomic-adds the per-fragment Newton's-3rd-law pair
+// contribution to both atoms' fixed-point slots.
+//
+// Treats every visited pair as scale 1.0 — same semantics as the
+// packed-neighbour pass. Excluded pairs that happen to land in
+// `single_pair_atoms` are corrected by the exclusion-correction
+// pass, which sees `(scale − 1.0) × evaluate`. Sum of all three
+// passes: `scale × evaluate` per excluded pair, `1.0 × evaluate`
+// per non-excluded pair.
+const SINGLE_PAIR_LOOP_TEMPLATE: &str = r#"
+template <bool WriteEv>
+__device__ static inline void heddle_jit_single_pair_loop(
+    const HeddleJitComposedPairFunc &composite,
+    const unsigned int *single_pair_atoms,
+    const unsigned int *interaction_count_ptr,
+    const Real *positions_x,
+    const Real *positions_y,
+    const Real *positions_z,
+    const Real *lattice,
+    unsigned long long *fast_force_x_fp,
+    unsigned long long *fast_force_y_fp,
+    unsigned long long *fast_force_z_fp,
+    unsigned long long *fast_energy_fp,
+    unsigned long long *fast_virial_fp,
+    unsigned int n)
+{
+  // Read the live single-pair count from device memory at kernel
+  // entry. Passing a device pointer (rather than a scalar value) is
+  // load-bearing under CUDA graph capture: every neighbour-list
+  // rebuild updates `interaction_count[1]` in place, and the
+  // captured kernel reads the fresh value at each replay.
+  unsigned int single_pair_count = interaction_count_ptr[1];
+  unsigned int pair_idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (pair_idx >= single_pair_count) return;
+  unsigned int atom_i = single_pair_atoms[2u * pair_idx];
+  unsigned int atom_j = single_pair_atoms[2u * pair_idx + 1u];
+  if (atom_i >= n || atom_j >= n) return;
+
+  Real lx = lattice[0]; Real ly = lattice[1]; Real lz = lattice[2];
+  Real xy = lattice[3]; Real xz = lattice[4]; Real yz = lattice[5];
+
+  Real pi_x = positions_x[atom_i];
+  Real pi_y = positions_y[atom_i];
+  Real pi_z = positions_z[atom_i];
+  Real pj_x = positions_x[atom_j];
+  Real pj_y = positions_y[atom_j];
+  Real pj_z = positions_z[atom_j];
+
+  Real dx = pi_x - pj_x;
+  Real dy = pi_y - pj_y;
+  Real dz = pi_z - pj_z;
+  heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
+  Real r2 = dx * dx + dy * dy + dz * dz;
+  Real inv_r = Real_rsqrt(r2);
+  Real r = r2 * inv_r;
+
+  Real cutoff_mask = (r2 <= HEDDLE_JIT_MAX_CUTOFF_SQUARED) ? R(1.0) : R(0.0);
+
+  Real factor = R(0.0), energy = R(0.0), virial = R(0.0);
+  heddle_jit_eval_pair_sum<WriteEv>(
+      composite, r2, inv_r, r, atom_i, atom_j, factor, energy, virial);
+  factor *= cutoff_mask;
+  if (WriteEv) {
+    energy *= cutoff_mask;
+    virial *= cutoff_mask;
+  }
+
+  Real fx = factor * dx;
+  Real fy = factor * dy;
+  Real fz = factor * dz;
+
+  heddle_jit_atomic_add_fp(fast_force_x_fp, atom_i,  fx);
+  heddle_jit_atomic_add_fp(fast_force_y_fp, atom_i,  fy);
+  heddle_jit_atomic_add_fp(fast_force_z_fp, atom_i,  fz);
   heddle_jit_atomic_add_fp(fast_force_x_fp, atom_j, -fx);
   heddle_jit_atomic_add_fp(fast_force_y_fp, atom_j, -fy);
   heddle_jit_atomic_add_fp(fast_force_z_fp, atom_j, -fz);

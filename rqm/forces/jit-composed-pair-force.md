@@ -139,30 +139,39 @@ specifies the per-pair physics for one potential.
 
 ## Composed-Kernel Structure <!-- rq-693544f8 -->
 
-The composed kernel runs the two-loop packed-neighbour structure
-specified in `packed-neighbour-pair-force.md` *Force Kernel*:
+The composed kernel ships three JIT-compiled passes that all write
+into the same per-particle fixed-point accumulators (see
+`packed-neighbour-pair-force.md` *Fixed-Point Force Buffers*):
 
-- **Loop 1 — exclusion tiles.** One warp per entry in
-  `exclusion_tiles`. The 32 lanes own the 32 i-atoms of `x_block`;
-  the diagonal-shuffle iteration walks the 32 j-atoms of `y_block`.
-  The composer's with-exclusions per-pair evaluator is invoked: for
-  each active fragment, the lane multiplies the fragment's
-  `(factor, energy, virial)` by the fragment's
-  `exclusion_scale(i, j)` before adding to the pair accumulator.
-  Fully-excluded pairs receive `exclusion_scale == 0` and
-  contribute nothing; per-fragment fractional scales (e.g.
-  OPLS-style 1-4 LJ vs. Coulomb) flow through unchanged.
-- **Loop 2 — cutoff entries.** One warp per entry in
-  `[0, interaction_count[0])`. The 32 lanes own 32 i-atoms of
-  `interacting_tiles[pos]`; j-atoms come from
-  `interacting_atoms[pos·32 + lane]` (original atom IDs of
-  individually-confirmed neighbours). The composer's
-  without-exclusions per-pair evaluator is invoked: no fragment's
-  `exclusion_scale(i, j)` is called, and the lane adds each
-  fragment's `(factor, energy, virial)` directly into the pair
-  accumulator. The neighbour-list construction has already removed
-  excluded pairs from `interacting_atoms`, so every pair visited
-  here is implicitly scale `1.0`.
+- **Packed-neighbour pass** (`heddle_jit_composed_pair_force_f` /
+  `_fev`). One block per i-block, eight warps per block. Each
+  warp iterates the entries assigned to its i-block from
+  `interacting_tiles` / `sorted_interacting_atoms`, runs the
+  32-iteration diagonal shuffle, and invokes the composer's
+  `heddle_jit_eval_pair_sum` evaluator (no `exclusion_scale`
+  call) for each pair. Treats every pair as scale 1.0.
+- **Single-pair pass**
+  (`heddle_jit_composed_pair_force_single_f` / `_single_fev`).
+  One thread per `single_pair_atoms` entry. Loads the pair's
+  positions, invokes the same `heddle_jit_eval_pair_sum`
+  evaluator, atomicAdds the per-pair `±factor·(dx, dy, dz)` to
+  both atoms' fixed-point slots. Same implicit scale-1.0
+  semantics as the packed-neighbour pass.
+- **Exclusion-correction pass**
+  (`heddle_jit_composed_pair_force_correct_f` / `_correct_fev`).
+  One thread per `ForceField.excluded_pair_atoms` entry. Loads
+  the pair's positions, invokes the composer's
+  `heddle_jit_eval_pair_correction` evaluator (which multiplies
+  each fragment's `(factor, energy, virial)` by
+  `(exclusion_scale(i, j) − 1.0)` and sums), atomicAdds the
+  result with `±` on j-side. Net per excluded pair after all
+  three passes: `scale × evaluate`. Full exclusion (`scale = 0`)
+  nets to zero; OPLS-style fractional (`scale = 0.5`) nets to half.
+
+The packed-neighbour pass is launched unconditionally when at
+least one fast-class pair-force slot is active. The single-pair
+and exclusion-correction passes are launched only when their
+respective pair counts are non-zero.
 
 Inside each inner iteration the per-pair scaffolding runs
 unconditionally — there is no warp-divergent branch on the cutoff.
@@ -211,18 +220,22 @@ The lane:
      `CutoffHandling::PerPair`, the composer emits
      `if (r² <= functor.cutoff_squared(i, j))` and only adds the
      fragment's contribution when the test passes.
-   - In Loop 1 (exclusion tiles) the functor's
-     `exclusion_scale(i, j)` produces `scale_slot` and the lane
-     adds `(factor_slot · scale_slot, energy_slot · scale_slot ·
-     0.5, virial_slot · scale_slot · 0.5)` to the pair
-     accumulator. The `0.5` distributes each unordered pair's
-     energy and virial across the two ordered slots.
-   - In Loop 2 (cutoff entries) the functor's
-     `exclusion_scale(i, j)` is NOT called; the lane adds
+   - The packed-neighbour pass and the single-pair pass add
      `(factor_slot, energy_slot · 0.5, virial_slot · 0.5)`
-     directly. Every pair visited in Loop 2 is implicitly scale
-     `1.0` because the neighbour-list construction excluded those
-     pairs from `interacting_atoms`.
+     directly to the pair accumulator. They never call
+     `exclusion_scale`; every pair is implicitly scale `1.0`.
+     The `0.5` distributes each unordered pair's energy and
+     virial across the two ordered slots.
+   - The exclusion-correction pass multiplies the lane's per-
+     fragment contribution by
+     `(exclusion_scale(i, j) − 1.0)` and adds
+     `((factor_slot − factor_slot) · scale_correction,
+     energy_slot · scale_correction · 0.5,
+     virial_slot · scale_correction · 0.5)` (where
+     `scale_correction = exclusion_scale(i, j) − 1.0`) to the
+     pair accumulator. Summed with the corresponding +1.0 ×
+     evaluate contribution from the packed-neighbour or single-
+     pair pass, the net is `scale × evaluate`.
 6. The lane multiplies the pair accumulator's `(factor, energy,
    virial)` by the max-cutoff `mask`. Pairs with `r² >
    HEDDLE_JIT_MAX_CUTOFF_SQUARED` contribute zero by bit-exact
@@ -251,41 +264,62 @@ not compose or load a composed kernel and does not launch one at
 step time. The Fast-class fixed-point accumulator stays at its
 post-`cudaMemsetAsync` zero state.
 
-The composed kernel exposes two `extern "C"` entry points, both
-generated by the composer:
+The composed kernel exposes six `extern "C"` entry points
+generated by the composer — three passes, each with an `_f` /
+`_fev` pair:
 
 ```c
-extern "C" __global__ void heddle_jit_composed_pair_force_f(
-    /* common args: positions, tile-sorted positions,
-       sorted_particle_ids, exclusion-tile arrays, interacting_tiles,
-       interacting_atoms, interaction_count, lattice, fixed-point
-       fast_total_* buffers, n */
-    /* per-fragment args in canonical slot order */);
+// Packed-neighbour pass.
+extern "C" __global__ void heddle_jit_composed_pair_force_f(...);
+extern "C" __global__ void heddle_jit_composed_pair_force_fev(...);
 
-extern "C" __global__ void heddle_jit_composed_pair_force_fev(
-    /* same common args + per-fragment args */);
+// Single-pair pass.
+extern "C" __global__ void heddle_jit_composed_pair_force_single_f(...);
+extern "C" __global__ void heddle_jit_composed_pair_force_single_fev(...);
+
+// Exclusion-correction pass.
+extern "C" __global__ void heddle_jit_composed_pair_force_correct_f(...);
+extern "C" __global__ void heddle_jit_composed_pair_force_correct_fev(...);
 ```
 
-A second pair of entry points handles the `single_pairs` overflow
-list:
+The argument lists are documented in
+`packed-neighbour-pair-force.md` (*Packed-Neighbour Entry-Point
+Arguments* and *Single-Pair Entry-Point Arguments*) and in
+*Correction-Pass Design* below. Grid sizing per pass is in
+`packed-neighbour-pair-force.md` *Launch Configuration*. All
+three passes run on the calling `particle_buffers.device`'s
+default stream so per-stream ordering serialises their writes
+into the fixed-point accumulators.
 
-```c
-extern "C" __global__ void heddle_jit_composed_pair_force_f_single(
-    /* common args: positions, single_pairs, n_single_pairs, lattice,
-       fixed-point fast_total_* buffers, n */
-    /* per-fragment args in canonical slot order */);
+### Correction-Pass Design <!-- rq-dbf9c9cf -->
 
-extern "C" __global__ void heddle_jit_composed_pair_force_fev_single(
-    /* same common args + per-fragment args */);
+The exclusion-correction pass takes the following common
+arguments before the per-fragment args:
+
+```text
+const Real *positions_x,
+const Real *positions_y,
+const Real *positions_z,
+const unsigned int *excluded_pair_atoms,
+unsigned int excluded_pair_count,
+const Real *lattice,
+unsigned long long *fast_force_x_fp,
+unsigned long long *fast_force_y_fp,
+unsigned long long *fast_force_z_fp,
+unsigned long long *fast_energy_fp,
+unsigned long long *fast_virial_fp,
 ```
 
-Both kernels are launched with `WARPS_PER_BLOCK = 8`,
-`BLOCK_SIZE = 256`. The main kernel's grid sizes to
-`⌈(exclusion_tiles_count + interaction_count[0]) / 8⌉` blocks (each
-warp determines from its global index whether it is in Loop 1 or
-Loop 2). The single-pairs kernel's grid sizes to
-`⌈n_single_pairs / 256⌉` blocks with one thread per pair. Both run
-on the calling `particle_buffers.device`'s default stream.
+Per-fragment arguments are appended in canonical slot order
+followed by the trailing `unsigned int n`. The per-fragment list
+is identical to the packed-neighbour and single-pair entry
+points'.
+
+`excluded_pair_atoms` is interleaved
+`[i0, j0, i1, j1, …]`. Pair index `k` reads `i = excluded_pair_atoms[2k]`,
+`j = excluded_pair_atoms[2k + 1]`. The list is canonical
+(`i < j`) so each excluded pair contributes its correction
+exactly once.
 
 ## displaces() Under JIT Composition <!-- rq-11f45908 -->
 
@@ -943,36 +977,47 @@ Feature: JIT-composed pair-force kernel
     When SpmeRealBuilder::pair_force_fragment(cx) is called
     Then it returns Ok(Some(fragment)) with `fragment.cutoff == CutoffHandling::Uniform(c)`
 
-  # --- Exclusion-tile / cutoff-entry split ---
+  # --- Three-pass structure ---
 
   @rq-b099ff28
-  Scenario: Composer emits two per-pair evaluator variants
+  Scenario: Composer emits a no-exclusion evaluator and a correction evaluator
     Given a ForceField with at least one fast-class pair-force fragment
     And the composed kernel source captured for inspection
-    Then the source contains a function `heddle_jit_eval_pair_sum_excl` whose body calls every fragment's `exclusion_scale(i, j)` once per pair
-    And the source contains a function `heddle_jit_eval_pair_sum` whose body contains zero calls to `exclusion_scale`
+    Then the source contains a function `heddle_jit_eval_pair_sum` whose body contains zero calls to `composite.<any>.exclusion_scale`
+    And the source contains a function `heddle_jit_eval_pair_correction` whose body calls every fragment's `exclusion_scale(i, j)` once per pair
 
   @rq-54aec894
-  Scenario: Loop 2 inner loop calls the without-exclusions evaluator
+  Scenario: Packed-neighbour pass dispatches to the no-exclusion evaluator
     Given a ForceField with at least one fast-class pair-force fragment
     And the composed kernel source captured for inspection
-    Then Loop 2's diagonal-shuffle inner loop dispatches to `heddle_jit_eval_pair_sum<WriteEv>`
-    And Loop 2's inner loop does not dispatch to `heddle_jit_eval_pair_sum_excl<WriteEv>`
+    Then the packed-neighbour outer loop's inner body dispatches to `heddle_jit_eval_pair_sum<WriteEv>`
+    And the packed-neighbour outer loop's inner body contains no `composite.<any>.exclusion_scale` calls
+
+  @rq-95f0812c
+  Scenario: Single-pair pass dispatches to the no-exclusion evaluator
+    Given a ForceField with at least one fast-class pair-force fragment
+    And the composed kernel source captured for inspection
+    Then the single-pair kernel's per-thread body dispatches to `heddle_jit_eval_pair_sum<WriteEv>`
+    And the single-pair kernel's per-thread body contains no `composite.<any>.exclusion_scale` calls
 
   @rq-0dc4e38e
-  Scenario: Loop 1 inner loop calls the with-exclusions evaluator
+  Scenario: Exclusion-correction pass dispatches to the correction evaluator
     Given a ForceField with at least one fast-class pair-force fragment
     And the composed kernel source captured for inspection
-    Then Loop 1's diagonal-shuffle inner loop dispatches to `heddle_jit_eval_pair_sum_excl<WriteEv>`
-    And Loop 1's inner loop does not dispatch to `heddle_jit_eval_pair_sum<WriteEv>`
+    Then the correction kernel's per-thread body dispatches to `heddle_jit_eval_pair_correction<WriteEv>`
+    And the correction kernel's per-thread body calls every active fragment's `exclusion_scale` exactly once per pair
+
+  @rq-f1a44df1
+  Scenario: Single-pair pass and packed-neighbour pass produce bit-exact results for the same pair routed either way
+    Given a ForceField configuration with one (i-block, j-block) pair just below the MAX_BITS_FOR_PAIRS threshold and an otherwise-identical run with the same pair just above the threshold
+    When ForceField::step(...) is called on each
+    Then the per-particle forces, energies, and virials are byte-identical between the two runs
 
   @rq-c156295f
-  Scenario: Cutoff-entries pass produces identical forces to the with-exclusions pass when no exclusion is involved
-    Given a ForceField with LJ and SPME-real active and no exclusions defined
-    And a particle configuration where every neighbour pair is non-excluded
-    When ForceField::step(...) is called
-    Then the per-particle forces, energies, and virials match a reference run on the same inputs where Loop 1 is empty (no exclusion tiles)
-    And the per-particle forces are byte-identical across two independent runs of the same configuration
+  Scenario: Three-pass composition is run-to-run byte-identical
+    Given a ForceField configuration with LJ + SPME-real + topology exclusions + sparse-tile candidates
+    When ForceField::step(...) is called on two independent ForceField instances built from byte-identical inputs
+    Then run A's per-particle forces, energies, and virials are byte-identical to run B's
 
   # --- displaces() under JIT composition ---
 

@@ -1047,6 +1047,49 @@ impl ForceField {
             }
             timings.kernel_stop(KernelStage::JIT_COMPOSED_PAIR_FORCE)?;
 
+            // Sparse-tile single-pair pass. The neighbour-list builder
+            // routes (i-block, j-block) candidates with
+            // `n_hits <= MAX_BITS_FOR_PAIRS = 3` into
+            // `single_pair_atoms` instead of the packed buffer. The
+            // launch covers `single_pairs_capacity` threads
+            // unconditionally (so the kernel is captured into the
+            // CUDA graph even when the post-capture count is zero);
+            // each thread reads the live count from
+            // `interaction_count[1]` via a device pointer and returns
+            // early past the live boundary. The captured kernel thus
+            // tolerates per-rebuild changes to the live count without
+            // graph re-capture.
+            let packed_opt = self
+                .neighbor_list
+                .as_ref()
+                .and_then(|nl| nl.packed.as_ref());
+            if let Some(packed) = packed_opt {
+                if packed.single_pairs_capacity > 0 {
+                    let mut single_pair_builder = PairForceLaunchBuilder::new();
+                    single_pair_builder.push_device_buffer(&buffers.positions_x);
+                    single_pair_builder.push_device_buffer(&buffers.positions_y);
+                    single_pair_builder.push_device_buffer(&buffers.positions_z);
+                    single_pair_builder.push_device_buffer(&packed.single_pair_atoms);
+                    single_pair_builder.push_device_buffer(&packed.interaction_count);
+                    single_pair_builder.push_device_buffer(sim_box.lattice_device());
+                    single_pair_builder.push_device_buffer(&self.fast_total_forces_fp_x);
+                    single_pair_builder.push_device_buffer(&self.fast_total_forces_fp_y);
+                    single_pair_builder.push_device_buffer(&self.fast_total_forces_fp_z);
+                    single_pair_builder
+                        .push_device_buffer(&self.fast_total_potential_energies_fp);
+                    single_pair_builder.push_device_buffer(&self.fast_total_virials_fp);
+                    for &slot_idx in &self.jit_slot_indices {
+                        self.slots[slot_idx]
+                            .bind_pair_force_args(&bind_ctx, &mut single_pair_builder);
+                    }
+                    single_pair_builder.push_scalar(n as u32);
+                    let cap = packed.single_pairs_capacity;
+                    unsafe {
+                        jit.launch_single_pair(cap, write_scalars, single_pair_builder)?;
+                    }
+                }
+            }
+
             // Per-pair exclusion correction. The main pair-force kernel
             // above added `+1 × evaluate` for every pair (excluded or
             // not). For each excluded pair the correction kernel adds

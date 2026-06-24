@@ -147,13 +147,6 @@
     "title": "Langevin BAOAB runs end-to-end through the runner",
     "type": "scenario"
   },
-  "rq-00d11a87": {
-    "decl": "Scenario: Force kernel processes both exclusion tiles and cutoff entries",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "Force kernel processes both exclusion tiles and cutoff entries",
-    "type": "scenario"
-  },
   "rq-00e98375": {
     "decl": "Scenario: rescale_positions does not modify velocities, forces, masses, or images",
     "file": "integration/berendsen-barostat",
@@ -497,11 +490,11 @@
     "type": "section"
   },
   "rq-03faaf24": {
-    "decl": "## Exclusion Tiles",
+    "decl": "## Exclusion Handling",
     "file": "forces/packed-neighbour-pair-force",
     "level": 2,
     "refs": [],
-    "title": "Exclusion Tiles",
+    "title": "Exclusion Handling",
     "type": "section"
   },
   "rq-03ff6434": {
@@ -600,6 +593,14 @@
     ],
     "title": "Explicit init velocities override sampled velocities",
     "type": "scenario"
+  },
+  "rq-04fdeac5": {
+    "decl": "### Exclusion-Correction Pass",
+    "file": "forces/packed-neighbour-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Exclusion-Correction Pass",
+    "type": "section"
   },
   "rq-0519e35c": {
     "decl": "Scenario: New state has zero-initialised potential_energies and virials",
@@ -719,13 +720,6 @@
     "file": "forces/lj-pair-force",
     "refs": [],
     "title": "init_device exposes the LJ kernel on the Kernels handle",
-    "type": "scenario"
-  },
-  "rq-0606e887": {
-    "decl": "Scenario: Self-pair on diagonal exclusion tile is skipped",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "Self-pair on diagonal exclusion tile is skipped",
     "type": "scenario"
   },
   "rq-060b1fab": {
@@ -1621,10 +1615,10 @@
     "type": "api-item"
   },
   "rq-0dc4e38e": {
-    "decl": "Scenario: Loop 1 inner loop calls the with-exclusions evaluator",
+    "decl": "Scenario: Exclusion-correction pass dispatches to the correction evaluator",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "Loop 1 inner loop calls the with-exclusions evaluator",
+    "title": "Exclusion-correction pass dispatches to the correction evaluator",
     "type": "scenario"
   },
   "rq-0dc50ce0": {
@@ -5772,10 +5766,10 @@
     "type": "scenario"
   },
   "rq-30a85bc9": {
-    "decl": "Scenario: exclusion_tiles is constant across the simulation",
+    "decl": "Scenario: excluded_pair_atoms is constant across the simulation",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "exclusion_tiles is constant across the simulation",
+    "title": "excluded_pair_atoms is constant across the simulation",
     "type": "scenario"
   },
   "rq-30c21c70": {
@@ -6176,13 +6170,6 @@
       }
     ],
     "title": "Refuse to run with multiple types",
-    "type": "scenario"
-  },
-  "rq-351b2539": {
-    "decl": "Scenario: Excluded pairs never appear in interacting_atoms",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "Excluded pairs never appear in interacting_atoms",
     "type": "scenario"
   },
   "rq-3533e8a9": {
@@ -7132,10 +7119,10 @@
     "type": "scenario"
   },
   "rq-3ddf259b": {
-    "decl": "- `heddle_jit_composed_pair_force_f_single` /",
+    "decl": "- `heddle_jit_composed_pair_force_single_f` /",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "heddle_jit_composed_pair_force_f_single",
+    "title": "heddle_jit_composed_pair_force_single_f",
     "type": "api-item"
   },
   "rq-3de16ce0": {
@@ -7531,6 +7518,13 @@
     "file": "integration/framework",
     "refs": [],
     "title": "Integrator",
+    "type": "api-item"
+  },
+  "rq-41ba5dca": {
+    "decl": "- `heddle_jit_composed_pair_force_correct_f` /",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "heddle_jit_composed_pair_force_correct_f",
     "type": "api-item"
   },
   "rq-41eb5e02": {
@@ -9224,10 +9218,10 @@
     "type": "section"
   },
   "rq-54aec894": {
-    "decl": "Scenario: Loop 2 inner loop calls the without-exclusions evaluator",
+    "decl": "Scenario: Packed-neighbour pass dispatches to the no-exclusion evaluator",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "Loop 2 inner loop calls the without-exclusions evaluator",
+    "title": "Packed-neighbour pass dispatches to the no-exclusion evaluator",
     "type": "scenario"
   },
   "rq-54b99519": {
@@ -9351,6 +9345,13 @@
     "file": "simulation-runner",
     "refs": [],
     "title": "SimulationSetup::new and lint --with-gpu invoke the same step helpers",
+    "type": "scenario"
+  },
+  "rq-560d3be9": {
+    "decl": "Scenario: Dense (i-block, j-block) candidate routes its hits to interacting_atoms",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Dense (i-block, j-block) candidate routes its hits to interacting_atoms",
     "type": "scenario"
   },
   "rq-560dffb8": {
@@ -12798,10 +12799,10 @@
     "type": "scenario"
   },
   "rq-7646dd13": {
-    "decl": "Scenario: Construction returns overflow when capacity exceeded",
+    "decl": "Scenario: interacting_tiles overflow grows the buffer and re-runs construction",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "Construction returns overflow when capacity exceeded",
+    "title": "interacting_tiles overflow grows the buffer and re-runs construction",
     "type": "scenario"
   },
   "rq-765c96c5": {
@@ -14011,10 +14012,10 @@
     "type": "scenario"
   },
   "rq-80c6a964": {
-    "decl": "Scenario: Fully-excluded pair contributes zero",
+    "decl": "Scenario: Fully-excluded pair nets to zero on the fixed-point accumulator",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "Fully-excluded pair contributes zero",
+    "title": "Fully-excluded pair nets to zero on the fixed-point accumulator",
     "type": "scenario"
   },
   "rq-80dcfa97": {
@@ -14553,10 +14554,10 @@
     "type": "scenario"
   },
   "rq-86cc8e5d": {
-    "decl": "Scenario: Single-pair kernel runs only when single_pair count is nonzero",
+    "decl": "Scenario: Single-pair pass is skipped when its count is zero",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "Single-pair kernel runs only when single_pair count is nonzero",
+    "title": "Single-pair pass is skipped when its count is zero",
     "type": "scenario"
   },
   "rq-86dea9a1": {
@@ -14711,10 +14712,10 @@
     "type": "scenario"
   },
   "rq-8840662f": {
-    "decl": "Scenario: Per-fragment exclusion scale multiplies that fragment's contribution",
+    "decl": "Scenario: Per-fragment exclusion scale yields per-fragment net contribution",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "Per-fragment exclusion scale multiplies that fragment's contribution",
+    "title": "Per-fragment exclusion scale yields per-fragment net contribution",
     "type": "scenario"
   },
   "rq-884b5cd6": {
@@ -15223,10 +15224,10 @@
     "type": "scenario"
   },
   "rq-8d86bfa6": {
-    "decl": "Scenario: Single-pair kernel accumulates to both atoms",
+    "decl": "Scenario: Single-pair pass accumulates Newton's-3rd pair forces",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "Single-pair kernel accumulates to both atoms",
+    "title": "Single-pair pass accumulates Newton's-3rd pair forces",
     "type": "scenario"
   },
   "rq-8d904561": {
@@ -16123,6 +16124,13 @@
     "file": "forces/framework",
     "refs": [],
     "title": "step_class(Fast, ForcesAndScalars) does not touch slow_total_* accumulators",
+    "type": "scenario"
+  },
+  "rq-95f0812c": {
+    "decl": "Scenario: Single-pair pass dispatches to the no-exclusion evaluator",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Single-pair pass dispatches to the no-exclusion evaluator",
     "type": "scenario"
   },
   "rq-963604a4": {
@@ -17531,14 +17539,6 @@
     "title": "Reject an analysis filename that does not end in `.in.analysis`",
     "type": "scenario"
   },
-  "rq-a177c7ee": {
-    "decl": "### Loop 1: Exclusion Tiles",
-    "file": "forces/packed-neighbour-pair-force",
-    "level": 3,
-    "refs": [],
-    "title": "Loop 1: Exclusion Tiles",
-    "type": "section"
-  },
   "rq-a1abedca": {
     "decl": "### Reproducibility",
     "file": "forces/lj-pair-force",
@@ -17837,11 +17837,11 @@
     "type": "scenario"
   },
   "rq-a4b9e702": {
-    "decl": "### Loop 2: Cutoff Entries",
+    "decl": "### Packed-Neighbour Pass",
     "file": "forces/packed-neighbour-pair-force",
     "level": 3,
     "refs": [],
-    "title": "Loop 2: Cutoff Entries",
+    "title": "Packed-Neighbour Pass",
     "type": "section"
   },
   "rq-a4d5e711": {
@@ -18006,10 +18006,10 @@
     "type": "scenario"
   },
   "rq-a6ecc598": {
-    "decl": "Scenario: Cutoff entries skip the no-atom sentinel",
+    "decl": "Scenario: Packed-neighbour pass skips the no-atom sentinel",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "Cutoff entries skip the no-atom sentinel",
+    "title": "Packed-neighbour pass skips the no-atom sentinel",
     "type": "scenario"
   },
   "rq-a704e8b4": {
@@ -18083,18 +18083,18 @@
     "title": "Out of Scope",
     "type": "section"
   },
+  "rq-a786df3a": {
+    "decl": "Scenario: Packed-neighbour pass runs one block per i-block",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Packed-neighbour pass runs one block per i-block",
+    "type": "scenario"
+  },
   "rq-a7aac794": {
     "decl": "Scenario: Cell counts reflect perpendicular widths for a tilted box",
     "file": "forces/neighbor-list",
     "refs": [],
     "title": "Cell counts reflect perpendicular widths for a tilted box",
-    "type": "scenario"
-  },
-  "rq-a7c08202": {
-    "decl": "Scenario: Loop 2 never calls exclusion_scale",
-    "file": "forces/packed-neighbour-pair-force",
-    "refs": [],
-    "title": "Loop 2 never calls exclusion_scale",
     "type": "scenario"
   },
   "rq-a7fdf81f": {
@@ -19129,10 +19129,10 @@
     "type": "api-item"
   },
   "rq-b099ff28": {
-    "decl": "Scenario: Composer emits two per-pair evaluator variants",
+    "decl": "Scenario: Composer emits a no-exclusion evaluator and a correction evaluator",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "Composer emits two per-pair evaluator variants",
+    "title": "Composer emits a no-exclusion evaluator and a correction evaluator",
     "type": "scenario"
   },
   "rq-b0b4c220": {
@@ -19157,6 +19157,13 @@
       }
     ],
     "title": "Empty topology file is valid",
+    "type": "scenario"
+  },
+  "rq-b1060817": {
+    "decl": "Scenario: MAX_BITS_FOR_PAIRS equals 3",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "MAX_BITS_FOR_PAIRS equals 3",
     "type": "scenario"
   },
   "rq-b10ed5ec": {
@@ -19325,11 +19332,11 @@
     "type": "scenario"
   },
   "rq-b28a6d96": {
-    "decl": "### Loop 3: Single Pairs",
+    "decl": "### Single-Pair Pass",
     "file": "forces/packed-neighbour-pair-force",
     "level": 3,
     "refs": [],
-    "title": "Loop 3: Single Pairs",
+    "title": "Single-Pair Pass",
     "type": "section"
   },
   "rq-b296ab12": {
@@ -19548,6 +19555,13 @@
     "file": "integration/jit-composed-post-force",
     "refs": [],
     "title": "FragmentCompileFailed surfaces every active fragment's label",
+    "type": "scenario"
+  },
+  "rq-b49bfdff": {
+    "decl": "Scenario: Packed-neighbour pass treats every pair as scale 1.0",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Packed-neighbour pass treats every pair as scale 1.0",
     "type": "scenario"
   },
   "rq-b4bb7096": {
@@ -20736,10 +20750,10 @@
     "type": "section"
   },
   "rq-c123c82c": {
-    "decl": "Scenario: exclusion_tiles is enumerated in lex order of (x_block, y_block)",
+    "decl": "Scenario: excluded_pair_atoms preserves canonical ExclusionList order",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "exclusion_tiles is enumerated in lex order of (x_block, y_block)",
+    "title": "excluded_pair_atoms preserves canonical ExclusionList order",
     "type": "scenario"
   },
   "rq-c1308495": {
@@ -20751,10 +20765,10 @@
     "type": "section"
   },
   "rq-c156295f": {
-    "decl": "Scenario: Cutoff-entries pass produces identical forces to the with-exclusions pass when no exclusion is involved",
+    "decl": "Scenario: Three-pass composition is run-to-run byte-identical",
     "file": "forces/jit-composed-pair-force",
     "refs": [],
-    "title": "Cutoff-entries pass produces identical forces to the with-exclusions pass when no exclusion is involved",
+    "title": "Three-pass composition is run-to-run byte-identical",
     "type": "scenario"
   },
   "rq-c15b187c": {
@@ -23492,6 +23506,14 @@
     "title": "Construct HarmonicAngleState",
     "type": "scenario"
   },
+  "rq-dbf9c9cf": {
+    "decl": "### Correction-Pass Design",
+    "file": "forces/jit-composed-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Correction-Pass Design",
+    "type": "section"
+  },
   "rq-dbffee81": {
     "decl": "## Construction Pipeline",
     "file": "forces/packed-neighbour-pair-force",
@@ -24780,6 +24802,13 @@
     "title": "Load a topology file containing an angle",
     "type": "scenario"
   },
+  "rq-e7839cee": {
+    "decl": "Scenario: single_pair_atoms overflow grows the buffer and re-runs construction",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "single_pair_atoms overflow grows the buffer and re-runs construction",
+    "type": "scenario"
+  },
   "rq-e794b794": {
     "decl": "Scenario: File with velo:R:3:image:I:3 parses both blocks in order",
     "file": "io/init-state-file",
@@ -24898,10 +24927,10 @@
     "type": "section"
   },
   "rq-e8667000": {
-    "decl": "Scenario: Sparse contributions go to single_pairs",
+    "decl": "Scenario: Sparse (i-block, j-block) candidate routes its pairs to single_pair_atoms",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "Sparse contributions go to single_pairs",
+    "title": "Sparse (i-block, j-block) candidate routes its pairs to single_pair_atoms",
     "type": "scenario"
   },
   "rq-e8699851": {
@@ -24924,11 +24953,11 @@
     "type": "scenario"
   },
   "rq-e8ba1aff": {
-    "decl": "### Common Entry-Point Arguments",
+    "decl": "### Packed-Neighbour Entry-Point Arguments",
     "file": "forces/packed-neighbour-pair-force",
     "level": 3,
     "refs": [],
-    "title": "Common Entry-Point Arguments",
+    "title": "Packed-Neighbour Entry-Point Arguments",
     "type": "section"
   },
   "rq-e8be1a1c": {
@@ -25981,11 +26010,11 @@
     "type": "scenario"
   },
   "rq-f119bc11": {
-    "decl": "### Single-Pairs Kernel",
+    "decl": "### Single-Pair Entry-Point Arguments",
     "file": "forces/packed-neighbour-pair-force",
     "level": 3,
     "refs": [],
-    "title": "Single-Pairs Kernel",
+    "title": "Single-Pair Entry-Point Arguments",
     "type": "section"
   },
   "rq-f11e9d4c": {
@@ -26037,6 +26066,13 @@
       }
     ],
     "title": "Header line has the documented column names in the documented order",
+    "type": "scenario"
+  },
+  "rq-f1a44df1": {
+    "decl": "Scenario: Single-pair pass and packed-neighbour pass produce bit-exact results for the same pair routed either way",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Single-pair pass and packed-neighbour pass produce bit-exact results for the same pair routed either way",
     "type": "scenario"
   },
   "rq-f1b57184": {

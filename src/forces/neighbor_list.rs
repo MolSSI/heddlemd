@@ -135,6 +135,19 @@ pub struct PackedNeighborData {
     /// scatter pass at every rebuild; consumed by the JIT pair-force
     /// kernel in place of `interacting_atoms`.
     pub sorted_interacting_atoms: CudaSlice<u32>,
+    /// Sparse-tile (i_atom, j_atom) pairs extracted at neighbour-list
+    /// build time. Length `2 * single_pairs_capacity`. Interleaved
+    /// `[i0, j0, i1, j1, …]` of original atom IDs. Consumed by the
+    /// JIT single-pair entry point (one thread per pair). See
+    /// `rqm/forces/packed-neighbour-pair-force.md` *Neighbour List*.
+    pub single_pair_atoms: CudaSlice<u32>,
+    /// Allocated capacity of `single_pair_atoms` measured in pairs.
+    /// The underlying `CudaSlice<u32>` has `2 * single_pairs_capacity`
+    /// slots.
+    pub single_pairs_capacity: u32,
+    /// Live single-pair count after the most recent rebuild
+    /// (`interaction_count[1]` on the device).
+    pub single_pairs_count: u32,
 }
 
 // rq-b2d68288
@@ -247,6 +260,17 @@ fn alloc_packed_neighbor_data(
     let sorted_interacting_atoms = device
         .alloc_zeros::<u32>(cap_alloc * 32)
         .map_err(GpuError::from)?;
+    // Single-pair initial capacity. Sized to the same all-pairs
+    // upper bound the interacting_tiles list uses (`n_blocks²`),
+    // ensuring the first rebuild's sparse-tile output fits without
+    // growth. Growth during a CUDA-graph captured loop would
+    // invalidate the captured device pointer for `single_pair_atoms`
+    // and silently corrupt every subsequent replay; pre-sizing
+    // avoids the issue.
+    let single_pairs_capacity = default_interacting_tiles_capacity(n_blocks).max(1);
+    let single_pair_atoms = device
+        .alloc_zeros::<u32>(2 * single_pairs_capacity as usize)
+        .map_err(GpuError::from)?;
 
     Ok(PackedNeighborData {
         n_blocks,
@@ -270,6 +294,9 @@ fn alloc_packed_neighbor_data(
         iblock_cursor,
         iblock_scan_block_totals,
         sorted_interacting_atoms,
+        single_pair_atoms,
+        single_pairs_capacity,
+        single_pairs_count: 0,
     })
 }
 
@@ -287,6 +314,20 @@ impl PackedNeighborData {
         self.interacting_atoms = device.alloc_zeros::<u32>(new_alloc * 32)?;
         self.sorted_interacting_atoms = device.alloc_zeros::<u32>(new_alloc * 32)?;
         self.interacting_tiles_capacity = new_cap;
+        Ok(())
+    }
+
+    /// Grow `single_pair_atoms` to at least `required` pairs.
+    pub fn grow_single_pairs_to(
+        &mut self,
+        device: &Arc<CudaDevice>,
+        required: u32,
+    ) -> Result<(), GpuError> {
+        let new_cap_f = (required as f64) * self.tile_pair_growth_factor;
+        let new_cap = (new_cap_f.ceil() as u32).max(required).max(1);
+        self.single_pair_atoms =
+            device.alloc_zeros::<u32>(2 * new_cap as usize)?;
+        self.single_pairs_capacity = new_cap;
         Ok(())
     }
 }
@@ -968,6 +1009,7 @@ impl NeighborListState {
                 .map_err(GpuError::from)?;
 
             let max_entries = packed.interacting_tiles_capacity;
+            let max_single_pairs = packed.single_pairs_capacity;
             crate::gpu::find_blocks_with_interactions(
                 &kernels,
                 &packed.tile_sorted_positions_x,
@@ -981,8 +1023,10 @@ impl NeighborListState {
                 n_blocks,
                 particle_count as u32,
                 max_entries,
+                max_single_pairs,
                 &mut packed.interacting_tiles,
                 &mut packed.interacting_atoms,
+                &mut packed.single_pair_atoms,
                 &mut packed.interaction_count,
                 &mut packed.overflow_flag,
             )?;
@@ -993,13 +1037,22 @@ impl NeighborListState {
             let counts: Vec<u32> = device
                 .dtoh_sync_copy(&packed.interaction_count)
                 .map_err(GpuError::from)?;
+            // bit 0 = interacting_tiles overflow; bit 1 = single_pair_atoms overflow.
             if flag[0] == 0 {
                 packed.interacting_tiles_count = counts[0];
+                packed.single_pairs_count = counts[1];
                 break;
             }
-            // Grow capacity and retry.
-            let required = counts[0].max(packed.interacting_tiles_capacity + 1);
-            packed.grow_to(&device, required).map_err(NeighborListError::Gpu)?;
+            if (flag[0] & 1) != 0 {
+                let required = counts[0].max(packed.interacting_tiles_capacity + 1);
+                packed.grow_to(&device, required).map_err(NeighborListError::Gpu)?;
+            }
+            if (flag[0] & 2) != 0 {
+                let required = counts[1].max(packed.single_pairs_capacity + 1);
+                packed
+                    .grow_single_pairs_to(&device, required)
+                    .map_err(NeighborListError::Gpu)?;
+            }
         }
 
         // 5. Sort entries by i-block so the force kernel can process
