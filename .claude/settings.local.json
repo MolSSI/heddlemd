@@ -13,7 +13,12 @@
       "Bash(cp /work/examples/spc-water-8192/water.in.toml /tmp/water_jit.toml)",
       "Read(//tmp/**)",
       "Bash(rm -f /work/examples/spc-water-8192/water_nograph.out.*)",
-      "Bash(timeout 60 /work/target/release/heddlemd run /work/examples/spc-water-8192/water_nograph.in.toml)"
+      "Bash(timeout 60 /work/target/release/heddlemd run /work/examples/spc-water-8192/water_nograph.in.toml)",
+      "Bash(rm -f water.out.*)",
+      "Bash(/work/target/release/heddlemd run *)",
+      "Bash(rm -f water.out.*.log water.out.*.timings water.out.*.minlog)",
+      "Bash(timeout 600 ../../target/release/heddlemd run water.in.toml)",
+      "Bash(timeout 200 ../../target/release/heddlemd run water.in.toml)"
     ]
   }
 }

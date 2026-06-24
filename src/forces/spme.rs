@@ -585,7 +585,7 @@ pub fn spme_real_pair_force_fragment(r_cut_real: Real) -> PairForceFragment {
     // selected at JIT-compile time via `HEDDLE_REAL_F64`:
     //   - f32: 5-coefficient Hastings (Abramowitz & Stegun, 1964)
     //     polynomial. Max error 1.5e-7 over all real α·r, below f32
-    //     round-off. Mirrors OpenMM's coulombLennardJones.cc.
+    //     round-off.
     //   - f64: hardware `erfc` via the precision shim. The polynomial
     //     would inject a 1.5e-7 bias well above f64 round-off.
     let functor_source = r#"

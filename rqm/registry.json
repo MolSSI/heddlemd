@@ -347,6 +347,14 @@
     "title": "Mixed charge magnitudes scale linearly",
     "type": "scenario"
   },
+  "rq-02abafdd": {
+    "decl": "#### Single-Pair and Exclusion-Correction Passes",
+    "file": "forces/packed-neighbour-pair-force",
+    "level": 4,
+    "refs": [],
+    "title": "Single-Pair and Exclusion-Correction Passes",
+    "type": "section"
+  },
   "rq-02bde767": {
     "decl": "Scenario: Drop best-effort flushes",
     "file": "io/log-output",
@@ -696,6 +704,13 @@
       }
     ],
     "title": "Log file header includes berendsen_conserved when Berendsen is the thermostat",
+    "type": "scenario"
+  },
+  "rq-05b5b488": {
+    "decl": "Scenario: A box where every i-block qualifies matches the all-min-image run bit-for-bit",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "A box where every i-block qualifies matches the all-min-image run bit-for-bit",
     "type": "scenario"
   },
   "rq-05d55351": {
@@ -3528,6 +3543,14 @@
     "title": "Atom with no bonds gets zero accumulator",
     "type": "scenario"
   },
+  "rq-1ccb6e53": {
+    "decl": "#### Box-Geometry Transitions",
+    "file": "forces/packed-neighbour-pair-force",
+    "level": 4,
+    "refs": [],
+    "title": "Box-Geometry Transitions",
+    "type": "section"
+  },
   "rq-1ce4ce5a": {
     "decl": "Scenario: Atom with two bonds receives sum of contributions",
     "file": "forces/morse-bonded",
@@ -4531,6 +4554,13 @@
     "refs": [],
     "title": "Coulomb force is C¹ continuous at r_switch",
     "type": "scenario"
+  },
+  "rq-25515b9a": {
+    "decl": "- `__device__ static inline void",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "__device__",
+    "type": "api-item"
   },
   "rq-256287cb": {
     "decl": "Scenario: SubStep::ForceEval { class: Some(Fast) } dispatches to step_class(Fast)",
@@ -7467,6 +7497,14 @@
     "title": "RNG",
     "type": "section"
   },
+  "rq-412fea28": {
+    "decl": "#### Triclinic Boxes",
+    "file": "forces/packed-neighbour-pair-force",
+    "level": 4,
+    "refs": [],
+    "title": "Triclinic Boxes",
+    "type": "section"
+  },
   "rq-41389685": {
     "decl": "Scenario: lan_ou_step with friction = 0 (alpha = 1) is identity on velocities (sanity)",
     "file": "integration/langevin-baoab",
@@ -7605,6 +7643,13 @@
       }
     ],
     "title": "plan(dt) is pure; it does not launch kernels or touch buffers",
+    "type": "scenario"
+  },
+  "rq-432c52f5": {
+    "decl": "Scenario: Triclinic boxes are SPC-ineligible regardless of bbox extent",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Triclinic boxes are SPC-ineligible regardless of bbox extent",
     "type": "scenario"
   },
   "rq-433c972f": {
@@ -8298,6 +8343,14 @@
     "title": "Exclusion entries",
     "type": "section"
   },
+  "rq-4b20b449": {
+    "decl": "#### Per-Block Eligibility Predicate",
+    "file": "forces/packed-neighbour-pair-force",
+    "level": 4,
+    "refs": [],
+    "title": "Per-Block Eligibility Predicate",
+    "type": "section"
+  },
   "rq-4b38148c": {
     "decl": "Scenario: Reject duplicate explicit IDs",
     "file": "particle-state",
@@ -8953,6 +9006,13 @@
       }
     ],
     "title": "wrap_position is idempotent for a triclinic box",
+    "type": "scenario"
+  },
+  "rq-527d3e7c": {
+    "decl": "Scenario: Per-block SPC predicate is false when any axis margin drops below MAX_CUTOFF",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Per-block SPC predicate is false when any axis margin drops below MAX_CUTOFF",
     "type": "scenario"
   },
   "rq-529b2c5f": {
@@ -10129,6 +10189,14 @@
     ],
     "title": "Reject a thermostat under [[minimization]]",
     "type": "scenario"
+  },
+  "rq-5ce17997": {
+    "decl": "### Single-Periodic-Copy Fast Path",
+    "file": "forces/packed-neighbour-pair-force",
+    "level": 3,
+    "refs": [],
+    "title": "Single-Periodic-Copy Fast Path",
+    "type": "section"
   },
   "rq-5d18fa01": {
     "decl": "Scenario: shake_positions updates half-step velocities consistently with the position correction",
@@ -12429,6 +12497,13 @@
       }
     ],
     "title": "Construct with particle_count = 1 (N_f = 1)",
+    "type": "scenario"
+  },
+  "rq-7369ded0": {
+    "decl": "Scenario: Per-block SPC predicate is true when every axis margin exceeds MAX_CUTOFF",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Per-block SPC predicate is true when every axis margin exceeds MAX_CUTOFF",
     "type": "scenario"
   },
   "rq-73a3b802": {
@@ -17085,6 +17160,13 @@
     "title": "Bond row with wrong column count",
     "type": "scenario"
   },
+  "rq-9e08c8b0": {
+    "decl": "Scenario: Single-pair and exclusion-correction passes unaffected by SPC",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Single-pair and exclusion-correction passes unaffected by SPC",
+    "type": "scenario"
+  },
   "rq-9e09673b": {
     "decl": "Scenario: Successive successful set_lattice calls increment generation monotonically",
     "file": "simulation-box",
@@ -21017,6 +21099,13 @@
     "title": "PTX Module Loading",
     "type": "section"
   },
+  "rq-c469b2e8": {
+    "decl": "Scenario: NPT box transition flips SPC eligibility without graph re-capture",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "NPT box transition flips SPC eligibility without graph re-capture",
+    "type": "scenario"
+  },
   "rq-c4845f90": {
     "decl": "- `Timings::finalize(&mut self) -> Result<TimingsReport, TimingsError>`",
     "file": "performance-analysis",
@@ -23974,6 +24063,13 @@
     "title": "Force Classes",
     "type": "section"
   },
+  "rq-df787c57": {
+    "decl": "Scenario: SPC fast path wraps pi and pj against the i-block centre",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "SPC fast path wraps pi and pj against the i-block centre",
+    "type": "scenario"
+  },
   "rq-df8766ae": {
     "decl": "### Force gather",
     "file": "forces/spme",
@@ -24134,6 +24230,13 @@
     "refs": [],
     "title": "Sample bookkeeping",
     "type": "section"
+  },
+  "rq-e1717060": {
+    "decl": "Scenario: Min-image branch is taken when the predicate is false",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Min-image branch is taken when the predicate is false",
+    "type": "scenario"
   },
   "rq-e17a3af9": {
     "decl": "### `Barostat` trait overrides",
@@ -24389,6 +24492,13 @@
       }
     ],
     "title": "Harmonic angle_type rejects theta_0 outside [0, π]",
+    "type": "scenario"
+  },
+  "rq-e39a87c1": {
+    "decl": "Scenario: SPC fast path inner loop skips triclinic_min_image",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "SPC fast path inner loop skips triclinic_min_image",
     "type": "scenario"
   },
   "rq-e39d0ed8": {
@@ -27042,6 +27152,13 @@
     "title": "Copy of a SimulationBox carries the original's generation",
     "type": "scenario"
   },
+  "rq-fb310fbe": {
+    "decl": "Scenario: Per-block SPC predicate is boundary-true at exactly MAX_CUTOFF margin",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Per-block SPC predicate is boundary-true at exactly MAX_CUTOFF margin",
+    "type": "scenario"
+  },
   "rq-fb3f2189": {
     "decl": "Scenario: build_optional with None returns Ok(None)",
     "file": "integration/framework",
@@ -27463,6 +27580,13 @@
       }
     ],
     "title": "Load a topology file with one rigid-water constraint",
+    "type": "scenario"
+  },
+  "rq-fe6b054a": {
+    "decl": "Scenario: SPC predicate is uniform across the warp",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "SPC predicate is uniform across the warp",
     "type": "scenario"
   },
   "rq-fe7f35cd": {

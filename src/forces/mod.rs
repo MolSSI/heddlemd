@@ -770,6 +770,7 @@ impl ForceField {
         })
     }
 
+
     // rq-3579df3b
     pub fn step(
         &mut self,
@@ -1011,8 +1012,17 @@ impl ForceField {
             };
             let mut launch_builder = PairForceLaunchBuilder::new();
             // Common args, in the order the composer declares them.
+            // `block_centre` and `block_bbox` are consumed by the
+            // per-block single-periodic-copy fast-path check at the
+            // top of the outer loop; the kernel decides per-block at
+            // runtime whether to apply `triclinic_wrap_against_center`
+            // to pi and pj and skip the per-pair `triclinic_min_image`
+            // call. See `rqm/forces/packed-neighbour-pair-force.md`
+            // *Single-Periodic-Copy Fast Path*.
             launch_builder.push_device_buffer(&buffers.posq);
             launch_builder.push_device_buffer(&packed.tile_sorted_posq);
+            launch_builder.push_device_buffer(&packed.block_centre);
+            launch_builder.push_device_buffer(&packed.block_bbox);
             launch_builder.push_device_buffer(sorted_view);
             launch_builder.push_device_buffer(&packed.iblock_offset);
             launch_builder.push_device_buffer(&packed.sorted_interacting_atoms);

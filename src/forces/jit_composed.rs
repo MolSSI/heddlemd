@@ -539,8 +539,9 @@ impl JitComposedPairForce {
     /// tiles list. `interacting_tiles_count` is the number of entries
     /// (one warp per entry). `use_fev` selects between the `_f` and
     /// `_fev` entry points. `builder` must have been pre-populated
-    /// with the common args, per-fragment args (in canonical slot
-    /// order), and the trailing `n` arg.
+    /// with the common args (including `block_centre` and
+    /// `block_bbox`), per-fragment args (in canonical slot order),
+    /// and the trailing `n` arg.
     ///
     /// # Safety
     /// `builder`'s argument list must match the composed kernel's
@@ -746,6 +747,10 @@ fn compose_source(
     // the mask zeroes contributions for pairs past this threshold.
     let max_cutoff_squared = (max_cutoff as f64) * (max_cutoff as f64);
     s.push_str(&format!(
+        "\n#define HEDDLE_JIT_MAX_CUTOFF R({:.17e})\n\n",
+        max_cutoff as f64
+    ));
+    s.push_str(&format!(
         "\n#define HEDDLE_JIT_MAX_CUTOFF_SQUARED R({:.17e})\n\n",
         max_cutoff_squared
     ));
@@ -888,9 +893,13 @@ fn compose_source(
     s.push_str(CORRECTION_LOOP_TEMPLATE);
     s.push_str(SINGLE_PAIR_LOOP_TEMPLATE);
 
-    // _f entry point
+    // _f / _fev entry points. Each evaluates the single-periodic-copy
+    // eligibility once per i-block at runtime and branches inside the
+    // outer loop; the branch is uniform across the warp, so there is
+    // no per-pair warp divergence. See
+    // `rqm/forces/packed-neighbour-pair-force.md` *Single-Periodic-
+    // Copy Fast Path*.
     emit_entry_point(&mut s, fragments, F_ENTRY, false);
-    // _fev entry point
     emit_entry_point(&mut s, fragments, FEV_ENTRY, true);
     // Per-pair correction entry points
     emit_correction_entry_point(&mut s, fragments, F_CORRECT_ENTRY, false);
@@ -999,6 +1008,8 @@ fn emit_entry_point(
     s.push_str("(\n");
     s.push_str("    const Real4 *posq,\n");
     s.push_str("    const Real4 *tile_sorted_posq,\n");
+    s.push_str("    const Real *block_centre,\n");
+    s.push_str("    const Real *block_bbox,\n");
     s.push_str("    const unsigned int *sorted_particle_ids,\n");
     s.push_str("    const unsigned int *iblock_offset,\n");
     s.push_str("    const unsigned int *sorted_interacting_atoms,\n");
@@ -1024,6 +1035,8 @@ fn emit_entry_point(
     s.push_str("        composite, iblock_offset, n_iblocks,\n");
     s.push_str("        posq,\n");
     s.push_str("        tile_sorted_posq,\n");
+    s.push_str("        block_centre,\n");
+    s.push_str("        block_bbox,\n");
     s.push_str("        sorted_particle_ids,\n");
     s.push_str("        sorted_interacting_atoms,\n");
     s.push_str("        lattice,\n");
@@ -1105,6 +1118,32 @@ __device__ static inline void heddle_jit_triclinic_min_image(
   dz -= kc * lz;
 }
 
+// In-place shift of (x, y, z) to the periodic image closest to
+// (cx, cy, cz). Mirror of `triclinic_wrap_against_center` in
+// `kernels/pbc.cuh`; redeclared in the JIT preamble because the JIT
+// translation unit does not include the project headers. Used by the
+// SPC fast-path entry points to wrap pi and pj against the i-block
+// centre once outside the inner loop, so the per-pair dx = pi - pj
+// is the canonical min-image displacement without further wrapping.
+__device__ static inline void triclinic_wrap_against_center(
+    Real &x, Real &y, Real &z,
+    Real cx, Real cy, Real cz,
+    Real lx, Real ly, Real lz,
+    Real xy, Real xz, Real yz)
+{
+  Real dx = x - cx;
+  Real dy = y - cy;
+  Real dz = z - cz;
+  Real s_a, s_b, s_c;
+  heddle_jit_triclinic_cart_to_frac(dx, dy, dz, lx, ly, lz, xy, xz, yz, s_a, s_b, s_c);
+  Real ka = Real_floor(s_a + R(0.5));
+  Real kb = Real_floor(s_b + R(0.5));
+  Real kc = Real_floor(s_c + R(0.5));
+  x -= ka * lx + kb * xy + kc * xz;
+  y -= kb * ly + kc * yz;
+  z -= kc * lz;
+}
+
 // Generic exclusion-scale lookup used by every fragment's
 // `exclusion_scale(i, j)` method when it indexes into a per-pair
 // scale table.
@@ -1183,6 +1222,8 @@ __device__ static inline void heddle_jit_outer_loop(
     unsigned int n_iblocks,
     const Real4 *posq,
     const Real4 *tile_sorted_posq,
+    const Real *block_centre,
+    const Real *block_bbox,
     const unsigned int *sorted_particle_ids,
     const unsigned int *sorted_interacting_atoms,
     const Real *lattice,
@@ -1221,6 +1262,35 @@ __device__ static inline void heddle_jit_outer_loop(
     }
   }
 
+  // Single-periodic-copy fast-path eligibility, decided per-block at
+  // runtime from the block's own bounding box. The check is
+  //   0.5 * L_axis - bbox_axis >= MAX_CUTOFF
+  // for every axis. When this holds, the periodic image of every
+  // in-cutoff j-atom relative to the i-block centre is the same as
+  // its min-image relative to any i-atom in the block — so wrapping
+  // both pi and pj against the centre once outside the inner loop
+  // makes the per-pair `dx = pi - pj` already the canonical min-image
+  // displacement. The branch is uniform across the warp (all 32 lanes
+  // compute the same predicate from i_block, the lattice constants
+  // and `MAX_CUTOFF`), so there is no per-pair warp divergence.
+  // Triclinic boxes (any of xy, xz, yz non-zero) are conservatively
+  // ineligible; they fall through to the per-pair min-image branch.
+  Real bbox_x = block_bbox[i_block * 3u + 0u];
+  Real bbox_y = block_bbox[i_block * 3u + 1u];
+  Real bbox_z = block_bbox[i_block * 3u + 2u];
+  bool orthorhombic = (xy == R(0.0)) && (xz == R(0.0)) && (yz == R(0.0));
+  bool spc = orthorhombic
+          && (R(0.5) * lx - bbox_x >= HEDDLE_JIT_MAX_CUTOFF)
+          && (R(0.5) * ly - bbox_y >= HEDDLE_JIT_MAX_CUTOFF)
+          && (R(0.5) * lz - bbox_z >= HEDDLE_JIT_MAX_CUTOFF);
+
+  Real cx = R(0.0), cy = R(0.0), cz = R(0.0);
+  if (spc) {
+    cx = block_centre[i_block * 4u + 0u];
+    cy = block_centre[i_block * 4u + 1u];
+    cz = block_centre[i_block * 4u + 2u];
+  }
+
   // Each lane owns one i-atom of i_block. Load its original atom ID
   // and position from the tile-sorted view (coalesced). Lanes past
   // n_atoms are inactive sentinels — gated by `i_valid`.
@@ -1231,6 +1301,11 @@ __device__ static inline void heddle_jit_outer_loop(
   Real pi_x = pq_i_load.x;
   Real pi_y = pq_i_load.y;
   Real pi_z = pq_i_load.z;
+  if (spc && i_valid) {
+    triclinic_wrap_against_center(pi_x, pi_y, pi_z,
+                                  cx, cy, cz,
+                                  lx, ly, lz, xy, xz, yz);
+  }
   Real qi   = pq_i_load.w;
 
   // Per-warp register accumulator persists across every entry this
@@ -1258,6 +1333,11 @@ __device__ static inline void heddle_jit_outer_loop(
     Real pj_x = pq_j_load.x;
     Real pj_y = pq_j_load.y;
     Real pj_z = pq_j_load.z;
+    if (spc && j_valid) {
+      triclinic_wrap_against_center(pj_x, pj_y, pj_z,
+                                    cx, cy, cz,
+                                    lx, ly, lz, xy, xz, yz);
+    }
     Real qj   = pq_j_load.w;
 
     // Self-block detection. For self-block entries, the j-atoms ARE
@@ -1279,7 +1359,9 @@ __device__ static inline void heddle_jit_outer_loop(
         Real dx = pi_x - pj_x;
         Real dy = pi_y - pj_y;
         Real dz = pi_z - pj_z;
-        heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
+        if (!spc) {
+          heddle_jit_triclinic_min_image(dx, dy, dz, lx, ly, lz, xy, xz, yz);
+        }
         Real r2 = dx * dx + dy * dy + dz * dz;
 
         // Shared scalar intermediates: one rsqrt + one multiply

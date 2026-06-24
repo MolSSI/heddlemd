@@ -220,8 +220,7 @@ packed-neighbour buffer:
   entries.
 
 `MAX_BITS_FOR_PAIRS` is a compile-time `#define` in
-`kernels/neighbor.cu` set to `3`, matching OpenMM's value on
-compute capability ≥ 8.0 (Ampere/Hopper). Below this threshold the
+`kernels/neighbor.cu` set to `3`. Below this threshold the
 single-pair pass amortises a full 32×32 = 1024-pair tile loop over
 just a handful of true interactions; above it the packed-
 neighbour pass is cheaper.
@@ -543,6 +542,117 @@ gating is by `j_atom_id < N` (and by the optional
 `r2 <= cutoff_squared` check inside each per-slot fragment's
 `evaluate`).
 
+### Single-Periodic-Copy Fast Path <!-- rq-5ce17997 -->
+
+The packed-neighbour pass evaluates a per-i-block
+single-periodic-copy (SPC) predicate at the top of the outer loop
+and branches on the result. The predicate is uniform across the
+warp (all 32 lanes processing one i-block compute the same value
+from `i_block`, the lattice constants, and the compile-time max
+cutoff), so there is no per-pair warp divergence and only one
+warp-wide control flow path executes per i-block per launch.
+
+The two code paths are:
+
+- **Min-image path.** For every pair the inner loop calls
+  `heddle_jit_triclinic_min_image(dx, dy, dz, lattice…)` to wrap
+  `dx = pi - pj` into the canonical `[-L/2, L/2)` displacement
+  per lattice direction before the `r²` evaluation.
+- **SPC path.** Before entering the inner loop, each lane wraps
+  its own `pi` (loaded from `tile_sorted_posq`) and its own `pj`
+  (loaded from `posq`) into the periodic image closest to the
+  i-block centre `block_centre[i_block]`, using
+  `triclinic_wrap_against_center(pos, centre, lattice)`. After
+  both wraps, the inner loop computes `dx = pi - pj` and **does
+  not call** `heddle_jit_triclinic_min_image` — `dx` is already
+  the canonical min-image displacement.
+
+The wrap helper `triclinic_wrap_against_center(pos, centre,
+lattice)` shifts `pos` to the periodic image closest to `centre`:
+
+```text
+delta = pos - centre
+(s_a, s_b, s_c) = triclinic_cart_to_frac(delta, lattice)
+(k_a, k_b, k_c) = (-round(s_a), -round(s_b), -round(s_c))
+pos += k_a · a + k_b · b + k_c · c
+```
+
+where `(a, b, c)` are the lattice vectors. The result satisfies
+`|pos − centre|_axis ≤ L_axis / 2` in each lattice direction.
+
+#### Per-Block Eligibility Predicate <!-- rq-4b20b449 -->
+
+The SPC predicate is
+
+```text
+spc =     orthorhombic
+      AND (0.5 · L_x − block_bbox[i_block].x ≥ MAX_CUTOFF)
+      AND (0.5 · L_y − block_bbox[i_block].y ≥ MAX_CUTOFF)
+      AND (0.5 · L_z − block_bbox[i_block].z ≥ MAX_CUTOFF)
+```
+
+where:
+
+- `orthorhombic` is `(xy == 0 AND xz == 0 AND yz == 0)`, read
+  from the lattice constants the kernel already loads at entry.
+- `block_bbox[i_block].{x, y, z}` are the i-block's per-axis bbox
+  half-extents in Cartesian coordinates, populated by
+  `compute_block_bbox` at every rebuild.
+- `MAX_CUTOFF` is the aggregated maximum interaction cutoff
+  across all active fast-class pair-force slots. The composer
+  embeds it as a `#define HEDDLE_JIT_MAX_CUTOFF R(…)` in the
+  generated source alongside `HEDDLE_JIT_MAX_CUTOFF_SQUARED`.
+
+Correctness rationale. For an i-block whose bbox half-extent
+along axis `d` is `B_d`, every i-atom is within `B_d` of the
+centre along that axis. After wrapping `pj` against the centre,
+`|pj − centre|_d ≤ L_d / 2`. The candidate j-atom passes the
+construction-kernel distance test against some i-atom, so under
+min-image relative to that i-atom its position is within
+`MAX_CUTOFF + B_d` of the centre. When
+`0.5 · L_d − B_d ≥ MAX_CUTOFF`, the centre-image wrap and the
+min-image wrap select the same periodic copy, so `pi − pj` is
+already the canonical min-image displacement. Out-of-cutoff
+candidates (the small fraction that the bbox-prune lets through
+even though no real interaction survives) are zeroed by the
+existing `cutoff_mask` whether the wrap matched min-image or
+not, so the predicate only needs to be safe for in-cutoff pairs.
+
+#### Triclinic Boxes <!-- rq-412fea28 -->
+
+The predicate gates SPC on `orthorhombic`. Triclinic boxes (any
+of `xy`, `xz`, `yz` non-zero) take the min-image path on every
+i-block regardless of bbox extent. Extending SPC to triclinic
+boxes is future work that would replace the per-axis box-length
+check with a projection of the i-block bbox onto each face
+normal; the kernel helper `triclinic_wrap_against_center` already
+handles arbitrary lattice geometry, so the change would be
+confined to the eligibility predicate.
+
+#### Box-Geometry Transitions <!-- rq-1ccb6e53 -->
+
+Under NPT or NPH the box and the per-block bbox both change
+across a step. The predicate is evaluated freshly at every
+i-block of every launch, reading the current lattice constants
+(passed as a kernel argument) and the current `block_bbox` (one
+of the buffers populated by the per-rebuild
+`compute_block_bbox`). No host-side cache or CUDA-graph
+re-capture is required when eligibility flips. The kernel
+arguments and the `block_centre` / `block_bbox` device pointers
+remain valid across a captured graph replay; their contents are
+read at every invocation.
+
+#### Single-Pair and Exclusion-Correction Passes <!-- rq-02abafdd -->
+
+The single-pair pass and the exclusion-correction pass continue
+to call `heddle_jit_triclinic_min_image` inside their per-pair
+evaluation. They do not partition atoms into blocks (each
+launches one thread per pair), so there is no per-block centre to
+wrap against. The marginal cost of the per-pair min-image call in
+these passes is small because each handles at most a few thousand
+pairs per step, compared with millions in the packed-neighbour
+pass.
+
 ### Launch Configuration <!-- rq-8db4fbff -->
 
 Each pass launches as a separate CUDA kernel on the
@@ -554,7 +664,10 @@ Each pass launches as a separate CUDA kernel on the
   One block per i-block; warps within a block share that
   i-block's i-side accumulators via shared memory. Launched
   unconditionally when at least one fast-class pair-force slot
-  is active.
+  is active. The SPC fast-path predicate is evaluated inside the
+  kernel at every i-block; the host always passes
+  `block_centre` and `block_bbox` and dispatches a single entry
+  point per write-EV variant.
 - **Single-pair pass.** Grid
   `⌈interaction_count[1] / 256⌉` blocks of `256` threads, one
   thread per single-pair entry. Launched only when
@@ -597,13 +710,19 @@ max-cutoff mask).
 
 ### Packed-Neighbour Entry-Point Arguments <!-- rq-e8ba1aff -->
 
-The composer emits the following common arguments for both
-`heddle_jit_composed_pair_force_f` and
-`heddle_jit_composed_pair_force_fev`, in this order:
+The composer emits two packed-neighbour entry points per
+JIT-composed module:
+
+- `heddle_jit_composed_pair_force_f`
+- `heddle_jit_composed_pair_force_fev`
+
+Both share the same argument list, in this order:
 
 ```text
 const Real4 *posq,
 const Real4 *tile_sorted_posq,
+const Real *block_centre,
+const Real *block_bbox,
 const unsigned int *sorted_particle_ids,
 const unsigned int *iblock_offset,
 const unsigned int *sorted_interacting_atoms,
@@ -616,12 +735,21 @@ unsigned long long *fast_energy_fp,
 unsigned long long *fast_virial_fp,
 ```
 
+`block_centre` is the per-block centre buffer populated by
+`compute_block_bbox` (`Real` array of length `4 · n_blocks`,
+packed as `(cx, cy, cz, max_disp_sq)`; the SPC wrap reads
+`.xyz`). `block_bbox` is the per-block bbox half-extent buffer
+populated by the same kernel (`Real` array of length
+`3 · n_blocks`, packed as `(dx, dy, dz)`; the SPC predicate reads
+all three). Both pointers are always present regardless of
+whether any i-block actually takes the SPC path.
+
 Per-fragment arguments are appended after the common arguments in
 canonical slot order. The trailing `unsigned int n` is the final
 argument.
 
-The `_fev` entry point uses the same argument list; the `_f`
-entry point's emitted inner loop simply does not increment
+The `_fev` entry point uses the same argument list as `_f`; the
+`_f` entry point's emitted inner loop simply does not increment
 `fast_energy_fp` / `fast_virial_fp`.
 
 ### Single-Pair Entry-Point Arguments <!-- rq-f119bc11 -->
@@ -662,7 +790,7 @@ every step:
 | 1 | `scatter_positions_to_tile_order` | Every step |
 | 2 | Pre-step neighbour-list check | Every step; rebuild may run if displacement exceeds `r_skin / 2` |
 | 3 | `cudaMemsetAsync` zeroing fast fixed-point buffers | Every step (or only when re-evaluating the Fast class) |
-| 4 | `heddle_jit_composed_pair_force_{f,fev}` (packed-neighbour pass) | Once per step |
+| 4 | `heddle_jit_composed_pair_force_{f,fev}` (packed-neighbour pass) | Once per step; per-i-block SPC predicate inside the kernel selects between the min-image branch and the centre-wrap branch |
 | 5 | `heddle_jit_composed_pair_force_single_{f,fev}` (single-pair pass) | Once per step (only if `interaction_count[1] > 0`) |
 | 6 | `heddle_jit_composed_pair_force_correct_{f,fev}` (exclusion-correction pass) | Once per step (only if `excluded_pair_count > 0`) |
 | 7 | `finalize_fast_class_forces` | Once per step; converts fixed-point to Real and adds into `ParticleBuffers.forces_*` |
@@ -798,7 +926,10 @@ matching `architecture.md`. CPU-vs-GPU is not promised.
 - `heddle_jit_composed_pair_force_f` / <!-- rq-42e29605 -->
   `heddle_jit_composed_pair_force_fev` — JIT-composed packed-
   neighbour entry points; argument list documented under
-  *Packed-Neighbour Entry-Point Arguments*.
+  *Packed-Neighbour Entry-Point Arguments*. Each evaluates the
+  per-i-block SPC predicate at runtime and branches between the
+  centre-wrap fast path and the per-pair min-image path; the
+  branch is uniform across the warp.
 - `heddle_jit_composed_pair_force_single_f` / <!-- rq-3ddf259b -->
   `heddle_jit_composed_pair_force_single_fev` — JIT-composed
   single-pair entry points; argument list documented under
@@ -851,6 +982,19 @@ and the per-slot helpers):
 - A 32-iteration diagonal-shuffle macro `HEDDLE_JIT_SHUFFLE_PAIR_LOOP`
   that emits the inner loop including the per-lane `i_*` / `j_*`
   accumulators and the trailing `__shfl_sync` rotation.
+- `__device__ static inline void <!-- rq-25515b9a -->
+  triclinic_wrap_against_center(Real &x, Real &y, Real &z,
+  Real cx, Real cy, Real cz, Real lx, Real ly, Real lz,
+  Real xy, Real xz, Real yz)` — shifts `(x, y, z)` to the
+  periodic image of itself that is closest to `(cx, cy, cz)`.
+  Computes the fractional displacement `(δx, δy, δz) =
+  (x - cx, y - cy, z - cz)` via `triclinic_cart_to_frac`, rounds
+  each component to the nearest integer to obtain
+  `(k_a, k_b, k_c)`, and subtracts `k_a · a + k_b · b + k_c · c`
+  from `(x, y, z)`. After the call,
+  `|x − cx|_axis ≤ L_axis / 2`. Lives in `kernels/pbc.cuh`
+  alongside `triclinic_min_image` and is reused by both SPC
+  entry-point variants.
 
 ## Out of Scope <!-- rq-ee43a3fe -->
 
@@ -875,12 +1019,6 @@ and the per-slot helpers):
   is deferred; it requires moving every per-atom parameter table
   (charges, type indices, exclusion offsets, etc.) into block
   order at every rebuild.
-- **The `singlePeriodicCopy` fast-path.** Consider checking
-  whether the box is large enough relative to the cutoff that all
-  positions can be wrapped into one periodic image, allowing the
-  inner loop to skip the per-pair minimum-image wrap. The
-  optimisation is omitted from this architecture; the existing
-  triclinic min-image helper runs on every pair.
 - **Mixed-precision energy/virial accumulation.** Energy and
   virial use the same `2^32` fixed-point scale as forces. The
   shared scale is adequate for typical MD energy ranges but may
@@ -1188,6 +1326,95 @@ Feature: Packed-Neighbour Pair-Force Architecture
     Given the topology does not change during the simulation
     When 1000 steps run
     Then excluded_pair_atoms is not modified after ForceField::new
+
+  # --- Single-periodic-copy fast path ---
+
+  @rq-7369ded0
+  Scenario: Per-block SPC predicate is true when every axis margin exceeds MAX_CUTOFF
+    Given an orthorhombic box with lattice lengths (L_x, L_y, L_z) = (100, 100, 100)
+    And MAX_CUTOFF = 10
+    And an i-block whose bbox half-extents (block_bbox[b]) are (5, 5, 5)
+    When the packed-neighbour kernel processes i-block b
+    Then the SPC predicate evaluates to true
+    And the warp takes the centre-wrap fast path
+
+  @rq-527d3e7c
+  Scenario: Per-block SPC predicate is false when any axis margin drops below MAX_CUTOFF
+    Given an orthorhombic box with lattice lengths (L_x, L_y, L_z) = (100, 100, 100)
+    And MAX_CUTOFF = 10
+    And an i-block whose bbox half-extents (block_bbox[b]) are (5, 45, 5)
+      so 0.5*L_y - block_bbox.y = 5 < MAX_CUTOFF
+    When the packed-neighbour kernel processes i-block b
+    Then the SPC predicate evaluates to false
+    And the warp takes the per-pair min-image path
+
+  @rq-fb310fbe
+  Scenario: Per-block SPC predicate is boundary-true at exactly MAX_CUTOFF margin
+    Given an orthorhombic box with lattice lengths (L_x, L_y, L_z) = (100, 100, 100)
+    And MAX_CUTOFF = 10
+    And an i-block whose bbox half-extents are (40, 40, 40)
+      so 0.5*L_d - block_bbox.d = 10 = MAX_CUTOFF for every axis
+    When the packed-neighbour kernel processes i-block b
+    Then the SPC predicate evaluates to true
+
+  @rq-432c52f5
+  Scenario: Triclinic boxes are SPC-ineligible regardless of bbox extent
+    Given a SimulationBox whose lattice has any of xy, xz, yz non-zero
+    When the packed-neighbour kernel processes any i-block
+    Then the SPC predicate evaluates to false
+    And the warp takes the per-pair min-image path
+
+  @rq-fe6b054a
+  Scenario: SPC predicate is uniform across the warp
+    Given the packed-neighbour kernel processes any i-block
+    When all 32 lanes of the warp evaluate the SPC predicate
+    Then every lane observes the same boolean value
+    And the kernel branches once warp-wide without per-lane divergence
+
+  @rq-df787c57
+  Scenario: SPC fast path wraps pi and pj against the i-block centre
+    Given the SPC predicate is true for i-block b with centre c = block_centre[b]
+    When the warp loads pi for any lane from tile_sorted_posq
+    Then pi is shifted in-register to the periodic image satisfying |pi - c|_axis <= L_axis / 2
+    And every per-entry j-atom's pj loaded from posq is shifted to satisfy |pj - c|_axis <= L_axis / 2
+    And no further shift is applied to pi or pj during the 32-iteration inner loop
+
+  @rq-e39a87c1
+  Scenario: SPC fast path inner loop skips triclinic_min_image
+    Given the SPC predicate is true for the i-block currently being processed
+    When the inner loop iteration evaluates dx = pi - pj
+    Then heddle_jit_triclinic_min_image is not invoked for this iteration
+    And r2 = dx*dx + dy*dy + dz*dz is computed from dx, dy, dz directly
+
+  @rq-e1717060
+  Scenario: Min-image branch is taken when the predicate is false
+    Given the SPC predicate is false for the i-block currently being processed
+    When the inner loop iteration evaluates dx = pi - pj
+    Then heddle_jit_triclinic_min_image is invoked once for this iteration before r2 is computed
+    And neither pi nor pj is centre-wrapped
+
+  @rq-05b5b488
+  Scenario: A box where every i-block qualifies matches the all-min-image run bit-for-bit
+    Given a simulation in which the SPC predicate is true for every i-block of every step
+    And a comparator run on the same hardware that disables the SPC branch and always takes min-image
+    When both runs perform one ForceField::step(Fast)
+    Then ParticleBuffers.forces_x, forces_y, forces_z compare byte-identical across the two runs after finalize_fast_class_forces
+
+  @rq-c469b2e8
+  Scenario: NPT box transition flips SPC eligibility without graph re-capture
+    Given a CUDA-graph-captured phase in which every i-block had SPC true at capture time
+    And a subsequent step in which the box shrinks so 0.5*L_d - block_bbox.d < MAX_CUTOFF for some block on some axis
+    When the captured graph replays the same packed-neighbour kernel call
+    Then the kernel evaluates the SPC predicate from the current lattice and block_bbox values at every i-block
+    And every affected i-block takes the per-pair min-image path on this replay
+    And no graph invalidation or re-capture is triggered
+
+  @rq-9e08c8b0
+  Scenario: Single-pair and exclusion-correction passes unaffected by SPC
+    Given any simulation step
+    When the single-pair pass and the exclusion-correction pass run
+    Then both passes invoke heddle_jit_triclinic_min_image for every pair they evaluate
+    And neither pass reads block_centre or block_bbox
 
   # --- Out of scope ---
 

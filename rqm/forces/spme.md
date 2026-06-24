@@ -170,8 +170,7 @@ ways:
 2. **Hastings polynomial for `erfc` in single precision.** Under
    the f32 precision feature (the default), the fragment computes
    `erfc(α · r)` inline via the 5-coefficient
-   Abramowitz–Stegun (1964) polynomial — the same form OpenMM
-   uses in `coulombLennardJones.cc`:
+   Abramowitz–Stegun (1964) polynomial:
 
    ```text
    t           = 1.0 / (1.0 + 0.3275911 · α · r)
