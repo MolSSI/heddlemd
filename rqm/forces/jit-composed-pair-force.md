@@ -145,15 +145,24 @@ specified in `packed-neighbour-pair-force.md` *Force Kernel*:
 - **Loop 1 — exclusion tiles.** One warp per entry in
   `exclusion_tiles`. The 32 lanes own the 32 i-atoms of `x_block`;
   the diagonal-shuffle iteration walks the 32 j-atoms of `y_block`.
-  Each per-pair iteration consults the exclusion bit and (if not
-  fully excluded) the fractional scale.
+  The composer's with-exclusions per-pair evaluator is invoked: for
+  each active fragment, the lane multiplies the fragment's
+  `(factor, energy, virial)` by the fragment's
+  `exclusion_scale(i, j)` before adding to the pair accumulator.
+  Fully-excluded pairs receive `exclusion_scale == 0` and
+  contribute nothing; per-fragment fractional scales (e.g.
+  OPLS-style 1-4 LJ vs. Coulomb) flow through unchanged.
 - **Loop 2 — cutoff entries.** One warp per entry in
   `[0, interaction_count[0])`. The 32 lanes own 32 i-atoms of
   `interacting_tiles[pos]`; j-atoms come from
   `interacting_atoms[pos·32 + lane]` (original atom IDs of
-  individually-confirmed neighbours). No exclusion check inside the
-  inner loop — construction has already removed excluded pairs from
-  this list.
+  individually-confirmed neighbours). The composer's
+  without-exclusions per-pair evaluator is invoked: no fragment's
+  `exclusion_scale(i, j)` is called, and the lane adds each
+  fragment's `(factor, energy, virial)` directly into the pair
+  accumulator. The neighbour-list construction has already removed
+  excluded pairs from `interacting_atoms`, so every pair visited
+  here is implicitly scale `1.0`.
 
 Inside each inner iteration the per-pair scaffolding runs
 unconditionally — there is no warp-divergent branch on the cutoff.
@@ -202,15 +211,18 @@ The lane:
      `CutoffHandling::PerPair`, the composer emits
      `if (r² <= functor.cutoff_squared(i, j))` and only adds the
      fragment's contribution when the test passes.
-   - The functor's `exclusion_scale(i, j)` produces `scale_slot`
-     (for cutoff entries the framework's exclusion table is unused
-     because excluded pairs are not in the cutoff list; for
-     exclusion-tile entries the lane multiplies by the tile-level
-     exclusion scale instead).
-   - The lane adds `(factor_slot * scale_slot, energy_slot *
-     scale_slot * 0.5, virial_slot * scale_slot * 0.5)` to the pair
+   - In Loop 1 (exclusion tiles) the functor's
+     `exclusion_scale(i, j)` produces `scale_slot` and the lane
+     adds `(factor_slot · scale_slot, energy_slot · scale_slot ·
+     0.5, virial_slot · scale_slot · 0.5)` to the pair
      accumulator. The `0.5` distributes each unordered pair's
      energy and virial across the two ordered slots.
+   - In Loop 2 (cutoff entries) the functor's
+     `exclusion_scale(i, j)` is NOT called; the lane adds
+     `(factor_slot, energy_slot · 0.5, virial_slot · 0.5)`
+     directly. Every pair visited in Loop 2 is implicitly scale
+     `1.0` because the neighbour-list construction excluded those
+     pairs from `interacting_atoms`.
 6. The lane multiplies the pair accumulator's `(factor, energy,
    virial)` by the max-cutoff `mask`. Pairs with `r² >
    HEDDLE_JIT_MAX_CUTOFF_SQUARED` contribute zero by bit-exact
@@ -930,6 +942,37 @@ Feature: JIT-composed pair-force kernel
     Given any [spme] configuration with r_cut_real = c
     When SpmeRealBuilder::pair_force_fragment(cx) is called
     Then it returns Ok(Some(fragment)) with `fragment.cutoff == CutoffHandling::Uniform(c)`
+
+  # --- Exclusion-tile / cutoff-entry split ---
+
+  @rq-b099ff28
+  Scenario: Composer emits two per-pair evaluator variants
+    Given a ForceField with at least one fast-class pair-force fragment
+    And the composed kernel source captured for inspection
+    Then the source contains a function `heddle_jit_eval_pair_sum_excl` whose body calls every fragment's `exclusion_scale(i, j)` once per pair
+    And the source contains a function `heddle_jit_eval_pair_sum` whose body contains zero calls to `exclusion_scale`
+
+  @rq-54aec894
+  Scenario: Loop 2 inner loop calls the without-exclusions evaluator
+    Given a ForceField with at least one fast-class pair-force fragment
+    And the composed kernel source captured for inspection
+    Then Loop 2's diagonal-shuffle inner loop dispatches to `heddle_jit_eval_pair_sum<WriteEv>`
+    And Loop 2's inner loop does not dispatch to `heddle_jit_eval_pair_sum_excl<WriteEv>`
+
+  @rq-0dc4e38e
+  Scenario: Loop 1 inner loop calls the with-exclusions evaluator
+    Given a ForceField with at least one fast-class pair-force fragment
+    And the composed kernel source captured for inspection
+    Then Loop 1's diagonal-shuffle inner loop dispatches to `heddle_jit_eval_pair_sum_excl<WriteEv>`
+    And Loop 1's inner loop does not dispatch to `heddle_jit_eval_pair_sum<WriteEv>`
+
+  @rq-c156295f
+  Scenario: Cutoff-entries pass produces identical forces to the with-exclusions pass when no exclusion is involved
+    Given a ForceField with LJ and SPME-real active and no exclusions defined
+    And a particle configuration where every neighbour pair is non-excluded
+    When ForceField::step(...) is called
+    Then the per-particle forces, energies, and virials match a reference run on the same inputs where Loop 1 is empty (no exclusion tiles)
+    And the per-particle forces are byte-identical across two independent runs of the same configuration
 
   # --- displaces() under JIT composition ---
 

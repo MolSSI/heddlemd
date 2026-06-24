@@ -220,20 +220,6 @@ Exclusion handling is split off from the cutoff neighbour list:
   only if the exclusion topology changes).
 - `exclusion_tiles_count: u32` — number of live entries; equals
   `exclusion_tiles.len()`.
-- `exclusion_bits: CudaSlice<u32>` of length `n_exclusion_tiles · 32`
-  — per-exclusion-tile bitmask. `exclusion_bits[t · 32 + i]`
-  encodes the excluded j-lanes for i-lane `i` of exclusion tile
-  `t`: bit `j` is `0` if the pair (i-lane `i`, j-lane `j`) is
-  excluded with scale `0.0`; otherwise `1`.
-- `exclusion_scales: CudaSlice<Real>` of length
-  `n_exclusion_tiles · 32 · 32` — per-pair fractional exclusion
-  scale (e.g., `0.5` for a 1-4 LJ exclusion).
-  `exclusion_scales[t · 1024 + i · 32 + j]` is the scale to apply
-  to the (i-lane, j-lane) pair contribution. `1.0` for
-  non-excluded pairs in the tile; `0.0` to skip entirely. The bit
-  in `exclusion_bits` is the common case "skip or not"; the scale
-  is consulted only when the bit indicates "not skip", since the
-  most common exclusion shape is "fully excluded, scale = 0".
 
 The construction kernel for the cutoff neighbour list explicitly
 **skips** any candidate j-atom whose original atom ID appears in
@@ -244,6 +230,21 @@ process them without any per-pair exclusion check.
 The exclusion-tile table is built once at `ForceField::new` and
 held immutable. Its size grows linearly with the topology
 exclusion count, not with `N`.
+
+Per-pair exclusion scaling for pairs visited inside an exclusion
+tile is the responsibility of each pair-force fragment, through
+its `exclusion_scale(i, j)` functor method (see
+`jit-composed-pair-force.md`'s *Source-Fragment Contract*). Each
+fragment carries its own per-atom `excl_offsets` / `excl_partners`
+/ `excl_scales` arrays (built from the topology's `ExclusionList`)
+and looks up the scale per pair by atom ID, not by lane index.
+This preserves per-fragment scales — for example, an OPLS-style
+1-4 exclusion where the Lennard-Jones contribution scales by
+`0.5` while the Coulomb contribution scales by `0.833` — without
+the packed-neighbour data model holding any centralised scale
+table. Fragments that have no per-pair scaling (`exclusion_scale`
+always returns `1.0`) pay only the call cost in Loop 1; in Loop 2
+they pay nothing.
 
 ## Construction Pipeline <!-- rq-dbffee81 -->
 
@@ -429,13 +430,17 @@ For every entry `t` in `exclusion_tiles`:
   `sorted_particle_ids[x·32 + lane]`).
 - Load the 32 j-atoms of `y` similarly.
 - Run the 32-iteration diagonal shuffle (described in *Diagonal
-  Shuffle* below). For each (i, j) pair:
-  - Read the exclusion bit `b = (exclusion_bits[t·32 + i_lane]
-    >> j_lane) & 1`. If `b == 0`, the pair is fully excluded;
-    skip.
-  - Read the scale `s = exclusion_scales[t·1024 + i_lane·32 +
-    j_lane]`. Multiply the per-slot contributions by `s` before
-    accumulating.
+  Shuffle* below). For each `(i, j)` pair, the composer invokes
+  the with-exclusions variant of the per-pair evaluator (see
+  `jit-composed-pair-force.md`): each active fragment's
+  `evaluate` produces its raw `(factor, energy, virial)`, the
+  fragment's `exclusion_scale(i, j)` produces its per-fragment
+  scale, and the lane's pair accumulator adds `(factor·scale,
+  energy·scale·0.5, virial·scale·0.5)` for that fragment.
+  Fragments with no exclusion partners for atom `i` see
+  `exclusion_scale(i, j) == 1.0` and contribute their full pair
+  value; fragments where `(i, j)` is fully excluded see
+  `exclusion_scale(i, j) == 0.0` and contribute zero.
 - AtomicAdd per-lane `i_*` and `j_*` accumulators to the
   fixed-point buffer using i-atom and j-atom original IDs.
 
@@ -453,9 +458,14 @@ For every entry `pos` in `[0, interaction_count[0])`:
   is an original atom ID; load its position from
   `positions_*[j_atom_id]`. If `j_atom_id >= N`, the slot is the
   partial-tail padding; treat as inactive.
-- Run the 32-iteration diagonal shuffle. No exclusion check
-  inside the loop — the construction kernel has already removed
-  excluded pairs from this list.
+- Run the 32-iteration diagonal shuffle. The composer invokes
+  the without-exclusions variant of the per-pair evaluator:
+  each active fragment's `evaluate` produces `(factor, energy,
+  virial)` which the lane adds directly into the pair
+  accumulator (no `exclusion_scale` call, no per-pair
+  partner-list memory load). The construction kernel has already
+  removed excluded pairs from `interacting_atoms`, so every pair
+  visited here is implicitly scale `1.0`.
 - AtomicAdd per-lane accumulators to the fixed-point buffer.
 
 ### Loop 3: Single Pairs <!-- rq-b28a6d96 -->
@@ -522,15 +532,30 @@ Loop 3 launches as a separate kernel with grid `⌈n_single_pairs /
 
 ## JIT Composer Integration <!-- rq-ffbee244 -->
 
-The per-slot `PairForceFragment` source contract is unchanged from
+The per-slot `PairForceFragment` source contract is documented in
 `rqm/forces/jit-composed-pair-force.md`: each fragment provides
-`functor_struct`, `functor_source`, `entry_point_args`, and
-`functor_init_source`. The functor's interface remains
-`cutoff_squared(i, j) -> Real`, `evaluate(r2, i, j, dx, dy, dz,
-factor, energy, virial)`, and `exclusion_scale(i, j) -> Real`.
+`functor_struct`, `functor_source`, `entry_point_args`,
+`functor_init_source`, and a `cutoff: CutoffHandling`
+declaration. The functor's interface is `cutoff_squared(i, j) ->
+Real`, `evaluate(r2, inv_r, r, i, j, factor, energy, virial)`,
+and `exclusion_scale(i, j) -> Real`. The composer's per-pair
+evaluator has two variants:
 
-What changes is the **outer-loop template** the composer emits and
-the **entry-point argument list**.
+- `heddle_jit_eval_pair_sum_excl<WriteEv>(composite, r2, inv_r,
+  r, i, j, factor, energy, virial)` — sums each fragment's
+  contribution multiplied by that fragment's
+  `exclusion_scale(i, j)`. Used by Loop 1's diagonal-shuffle
+  inner loop.
+- `heddle_jit_eval_pair_sum<WriteEv>(composite, r2, inv_r, r, i,
+  j, factor, energy, virial)` — sums each fragment's contribution
+  with no `exclusion_scale` call. Used by Loop 2's diagonal-
+  shuffle inner loop. Loop 2 never sees an excluded pair, so the
+  scale is implicitly `1.0`.
+
+Both variants apply the cutoff handling described in
+`jit-composed-pair-force.md` (the per-fragment cutoff guard,
+collapsed when `CutoffHandling::Uniform(c)` matches the outer
+max-cutoff mask).
 
 ### Common Entry-Point Arguments <!-- rq-e8ba1aff -->
 
@@ -547,8 +572,6 @@ const Real *tile_sorted_positions_y,
 const Real *tile_sorted_positions_z,
 const unsigned int *sorted_particle_ids,
 const Int2 *exclusion_tiles,
-const unsigned int *exclusion_bits,
-const Real *exclusion_scales,
 unsigned int exclusion_tiles_count,
 const unsigned int *interacting_tiles,
 const unsigned int *interacting_atoms,
@@ -567,11 +590,11 @@ virial buffers are always passed; the `_f` entry point's emitted
 inner loop simply does not increment `fast_energy_fp` /
 `fast_virial_fp`).
 
-Per-fragment arguments (per-slot parameter tables) are appended
-after the common arguments in canonical slot order, exactly as in
-the existing JIT composer. The trailing `unsigned int n` is the
-final argument and is used by per-slot fragments that bounds-check
-atom IDs.
+Per-fragment arguments (per-slot parameter tables, including each
+fragment's `excl_offsets` / `excl_partners` / `excl_scales`
+arrays consumed by its `exclusion_scale(i, j)` method) are
+appended after the common arguments in canonical slot order. The
+trailing `unsigned int n` is the final argument.
 
 ### Single-Pairs Kernel <!-- rq-f119bc11 -->
 
@@ -972,19 +995,31 @@ Feature: Packed-Neighbour Pair-Force Architecture
 
   @rq-80c6a964
   Scenario: Fully-excluded pair contributes zero
-    Given a pair (i, j) inside an exclusion tile with
-      (exclusion_bits[t*32 + i_lane] >> j_lane) & 1 == 0
+    Given a pair (i, j) inside an exclusion tile where every active
+      fragment's exclusion_scale(i, j) returns 0.0 (full exclusion)
     When the force kernel processes the tile
     Then no contribution from (i, j) is accumulated to either atom's
       fixed-point slot
 
   @rq-8840662f
-  Scenario: Fractional exclusion scale multiplies the contribution
-    Given a pair (i, j) inside an exclusion tile with the exclusion bit
-      set and exclusion_scales[t*1024 + i_lane*32 + j_lane] == 0.5
+  Scenario: Per-fragment exclusion scale multiplies that fragment's contribution
+    Given a pair (i, j) inside an exclusion tile where the LJ fragment's
+      exclusion_scale(i, j) returns 0.5 and the Coulomb fragment's
+      exclusion_scale(i, j) returns 0.833
     When the force kernel processes the tile
-    Then the contribution to atom i and atom j is exactly half of an
-      otherwise-identical unexcluded pair
+    Then the LJ contribution to atoms i and j is exactly half of an
+      otherwise-identical unexcluded LJ pair
+    And the Coulomb contribution to atoms i and j is 0.833 times an
+      otherwise-identical unexcluded Coulomb pair
+
+  @rq-a7c08202
+  Scenario: Loop 2 never calls exclusion_scale
+    Given a ForceField with at least one fast-class pair-force fragment
+    And the JIT-composed kernel source captured for inspection
+    Then the Loop 2 inner-loop body (the cutoff-entries path) contains
+      no call to `composite.<any>.exclusion_scale`
+    And the Loop 1 inner-loop body (the exclusion-tiles path) calls
+      every active fragment's `exclusion_scale` exactly once per pair
 
   # --- Single-pair kernel ---
 

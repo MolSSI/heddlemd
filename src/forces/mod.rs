@@ -390,6 +390,15 @@ pub struct ForceField {
     /// fast-class pair-force slot is configured (zero-slot ForceField,
     /// or ForceField with only bonded / angle / slow slots).
     pub jit_composed: Option<JitComposedPairForce>,
+    /// Flat `(atom_i, atom_j)` pairs for every canonical exclusion in
+    /// the topology, interleaved as `[i0, j0, i1, j1, …]`. Built once
+    /// at `ForceField::new` from `ExclusionList.entries`, never
+    /// re-uploaded. Consumed by the per-pair JIT correction kernel
+    /// (one thread per pair). Length `0` when the topology has no
+    /// exclusions. `excluded_pair_count == excluded_pair_atoms.len() / 2`.
+    pub excluded_pair_atoms: CudaSlice<u32>,
+    /// Number of canonical exclusion pairs.
+    pub excluded_pair_count: u32,
     /// Indices into `slots` of fast-class pair-force slots that
     /// participate in the JIT-composed kernel. The framework bypasses
     /// these slots' `Potential::compute` at step time and instead
@@ -703,6 +712,29 @@ impl ForceField {
             )?)
         };
 
+        // Build the per-pair exclusion correction list. ExclusionList
+        // stores canonical entries (atom_i < atom_j) with no
+        // duplicates; pack them as interleaved (atom_i, atom_j) so the
+        // JIT correction kernel reads one pair per thread.
+        let mut excluded_pair_flat: Vec<u32> =
+            Vec::with_capacity(2 * exclusion_list.entries.len());
+        for excl in &exclusion_list.entries {
+            excluded_pair_flat.push(excl.atom_i);
+            excluded_pair_flat.push(excl.atom_j);
+        }
+        let excluded_pair_count = exclusion_list.entries.len() as u32;
+        let excluded_pair_atoms = if excluded_pair_flat.is_empty() {
+            // cudarc's alloc_zeros requires len > 0; use a single
+            // zeroed slot so the kernel arg remains valid even with no
+            // exclusions (the correction kernel is not launched when
+            // count is 0, so the buffer contents are not read).
+            device.alloc_zeros::<u32>(1).map_err(GpuError::from)?
+        } else {
+            device
+                .htod_sync_copy(&excluded_pair_flat)
+                .map_err(GpuError::from)?
+        };
+
         Ok(ForceField {
             device,
             kernels,
@@ -724,6 +756,8 @@ impl ForceField {
             fast_total_virials_fp,
             neighbor_list,
             jit_composed,
+            excluded_pair_atoms,
+            excluded_pair_count,
             jit_slot_indices,
             jit_max_neighbors,
             jit_composed_bonded,
@@ -1012,6 +1046,42 @@ impl ForceField {
                 jit.launch(n_iblocks, write_scalars, launch_builder)?;
             }
             timings.kernel_stop(KernelStage::JIT_COMPOSED_PAIR_FORCE)?;
+
+            // Per-pair exclusion correction. The main pair-force kernel
+            // above added `+1 × evaluate` for every pair (excluded or
+            // not). For each excluded pair the correction kernel adds
+            // `(scale − 1) × evaluate`, leaving `scale × evaluate` on
+            // the fixed-point accumulators. When there are no
+            // exclusions, this launch is skipped entirely.
+            if self.excluded_pair_count > 0 {
+                let mut correction_builder = PairForceLaunchBuilder::new();
+                // Common args for the correction entry point (order
+                // must match emit_correction_entry_point).
+                correction_builder.push_device_buffer(&buffers.positions_x);
+                correction_builder.push_device_buffer(&buffers.positions_y);
+                correction_builder.push_device_buffer(&buffers.positions_z);
+                correction_builder.push_device_buffer(&self.excluded_pair_atoms);
+                correction_builder.push_scalar(self.excluded_pair_count);
+                correction_builder.push_device_buffer(sim_box.lattice_device());
+                correction_builder.push_device_buffer(&self.fast_total_forces_fp_x);
+                correction_builder.push_device_buffer(&self.fast_total_forces_fp_y);
+                correction_builder.push_device_buffer(&self.fast_total_forces_fp_z);
+                correction_builder.push_device_buffer(&self.fast_total_potential_energies_fp);
+                correction_builder.push_device_buffer(&self.fast_total_virials_fp);
+                // Per-fragment args in canonical slot order.
+                for &slot_idx in &self.jit_slot_indices {
+                    self.slots[slot_idx]
+                        .bind_pair_force_args(&bind_ctx, &mut correction_builder);
+                }
+                correction_builder.push_scalar(n as u32);
+                unsafe {
+                    jit.launch_correction(
+                        self.excluded_pair_count,
+                        write_scalars,
+                        correction_builder,
+                    )?;
+                }
+            }
 
             // Finalize: convert fixed-point sums to Real and add into
             // the existing fast-class Real accumulator buffers.

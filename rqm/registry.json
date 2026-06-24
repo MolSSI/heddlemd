@@ -1620,6 +1620,13 @@
     "title": "StageStats",
     "type": "api-item"
   },
+  "rq-0dc4e38e": {
+    "decl": "Scenario: Loop 1 inner loop calls the with-exclusions evaluator",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Loop 1 inner loop calls the with-exclusions evaluator",
+    "type": "scenario"
+  },
   "rq-0dc50ce0": {
     "decl": "Scenario: Reject a phase name containing non-ASCII characters",
     "file": "io/config-schema",
@@ -9216,6 +9223,13 @@
     "title": "Performance Notes",
     "type": "section"
   },
+  "rq-54aec894": {
+    "decl": "Scenario: Loop 2 inner loop calls the without-exclusions evaluator",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Loop 2 inner loop calls the without-exclusions evaluator",
+    "type": "scenario"
+  },
   "rq-54b99519": {
     "decl": "## RNG",
     "file": "integration/csvr",
@@ -14697,10 +14711,10 @@
     "type": "scenario"
   },
   "rq-8840662f": {
-    "decl": "Scenario: Fractional exclusion scale multiplies the contribution",
+    "decl": "Scenario: Per-fragment exclusion scale multiplies that fragment's contribution",
     "file": "forces/packed-neighbour-pair-force",
     "refs": [],
-    "title": "Fractional exclusion scale multiplies the contribution",
+    "title": "Per-fragment exclusion scale multiplies that fragment's contribution",
     "type": "scenario"
   },
   "rq-884b5cd6": {
@@ -18076,6 +18090,13 @@
     "title": "Cell counts reflect perpendicular widths for a tilted box",
     "type": "scenario"
   },
+  "rq-a7c08202": {
+    "decl": "Scenario: Loop 2 never calls exclusion_scale",
+    "file": "forces/packed-neighbour-pair-force",
+    "refs": [],
+    "title": "Loop 2 never calls exclusion_scale",
+    "type": "scenario"
+  },
   "rq-a7fdf81f": {
     "decl": "Scenario: Lossy run includes lossy kick rows and excludes lossless rows",
     "file": "performance-analysis",
@@ -19106,6 +19127,13 @@
     ],
     "title": "ParticleBuffers",
     "type": "api-item"
+  },
+  "rq-b099ff28": {
+    "decl": "Scenario: Composer emits two per-pair evaluator variants",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Composer emits two per-pair evaluator variants",
+    "type": "scenario"
   },
   "rq-b0b4c220": {
     "decl": "Scenario: rescale_isotropic rejects zero factor",
@@ -20721,6 +20749,13 @@
     "refs": [],
     "title": "Lattice Convention",
     "type": "section"
+  },
+  "rq-c156295f": {
+    "decl": "Scenario: Cutoff-entries pass produces identical forces to the with-exclusions pass when no exclusion is involved",
+    "file": "forces/jit-composed-pair-force",
+    "refs": [],
+    "title": "Cutoff-entries pass produces identical forces to the with-exclusions pass when no exclusion is involved",
+    "type": "scenario"
   },
   "rq-c15b187c": {
     "decl": "## Test Targets",
